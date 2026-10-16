@@ -61,3 +61,29 @@ func TestHostMonitorAlwaysReadOnly(t *testing.T) {
 		t.Fatal("host mutation accepted")
 	}
 }
+
+func TestNonActiveEnforcementRejectsMutation(t *testing.T) {
+	dir, err := os.MkdirTemp("../../.workspace/tmp", "health-api-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	e, _, _, _ := fixture()
+	e.Mode = "host-enforcement"
+	e.Enforcement = func() EnforcementStatus { return EnforcementStatus{State: "degraded"} }
+	path, _ := filepath.Abs(filepath.Join(dir, "s"))
+	l, err := Serve(path, e, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	r, err := Call(path, Request{Version: 1, Operation: "list"})
+	if err != nil || !r.ReadOnly || r.Enforcement.State != "degraded" {
+		t.Fatal(r, err)
+	}
+	for _, op := range []string{"decide", "rule"} {
+		if _, err = Call(path, Request{Version: 1, Operation: op, ID: "unused", Action: "allow", Scope: "persistent"}); err == nil {
+			t.Fatal("degraded mode accepted mutation", op)
+		}
+	}
+}

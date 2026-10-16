@@ -144,6 +144,29 @@ Window::Window(const QString &path, QWidget *parent) : QMainWindow(parent) {
   split->setStretchFactor(0, 3);
   split->setStretchFactor(1, 1);
   split->setSizes({830, 390});
+  auto *rulePage = new QWidget;
+  auto *ruleLayout = new QVBoxLayout(rulePage);
+  auto *ruleNote = new QLabel("Stored permissions · disabling/deleting affects new connections; existing approved TCP connections continue.");
+  ruleNote->setWordWrap(true);
+  ruleLayout->addWidget(ruleNote);
+  rules = table({"Rule", "Action", "State", "Expiry", "Executable and exact matching scope"}, "rules");
+  rules->setColumnWidth(0, 190); rules->setColumnWidth(4, 500);
+  ruleLayout->addWidget(rules);
+  auto *ruleActions = new QHBoxLayout;
+  disableRule = new QPushButton("Disable selected rule");
+  deleteRule = new QPushButton("Delete selected rule");
+  disableRule->setObjectName("disableRule"); deleteRule->setObjectName("deleteRule");
+  ruleActions->addWidget(disableRule); ruleActions->addWidget(deleteRule); ruleActions->addStretch();
+  ruleLayout->addLayout(ruleActions);
+  tabs->addTab(rulePage, "Rules"); tabs->setTabEnabled(2, false);
+  for (auto *b : {disableRule, deleteRule}) connect(b, &QPushButton::clicked, this, [this,b] {
+    int row=rules->currentRow();
+    if (!connected || readOnly || ruleSubmitting || row<0 || !rules->item(row,0)) return;
+    auto id=rules->item(row,0)->text();
+    ruleSubmitting=true;disableRule->setEnabled(false); deleteRule->setEnabled(false);
+    request({{"version",1},{"operation","rule"},{"id",id},{"action",b==disableRule ? "disable" : "delete"}},
+      [this](QJsonObject r, QString error){ruleSubmitting=false;feedback(error.isEmpty() ? (r["error"].toString().isEmpty() ? "Rule change acknowledged" : r["error"].toString()) : error); refresh();});
+  });
   result = new QLabel;
   result->setObjectName("result");
   result->setTextFormat(Qt::PlainText);
@@ -307,6 +330,7 @@ void Window::request(QJsonObject q,
   s->connectToServer(activeEndpoint);
 }
 void Window::reconnect() {
+ ruleSubmitting=false;
   activity->unavailable("Reconnecting");
   mode.clear();
   activeEndpoint = endpoint->text();
@@ -345,8 +369,9 @@ void Window::refresh() {
     listing = false;
     if (!error.isEmpty() || !r["error"].toString().isEmpty()) {
       connected = false;
+      disableRule->setEnabled(false); deleteRule->setEnabled(false);
       activity->unavailable("Backend disconnected");
-      status->setText("Disconnected · reconnecting — " +
+      status->setText("Disconnected · enforcement state unknown · reconnecting — " +
                       (error.isEmpty() ? r["error"].toString() : error));
       updateDetails();
       return;
@@ -401,6 +426,37 @@ void Window::consume(QJsonObject r) {
                          "normal network is unchanged"
                        : "Backend mode: " + value(r, "mode")));
   auto nextMode = r["mode"].toString();
+  const bool hostControl = nextMode == "host-enforcement";
+  tabs->setTabEnabled(2,hostControl);
+  if (hostControl) {
+    auto enforcement=r["enforcement"].toObject();
+    auto state=enforcement["state"].toString("unavailable");
+    status->setText("Host enforcement — " + state + " · Incoming-first; outgoing allowed · automatic stop " + enforcement["stops_at"].toString());
+    if (state!="active") readOnly=true;
+  }
+  for (auto *box : {scope,promptScope}) {
+    QSignalBlocker guard(box);
+    auto chosen=box->currentData().toString();
+    box->clear();box->addItem("Once","once");
+    box->addItem(hostControl ? "Remember · 1 hour (saved)" : "Remember · 1 hour (memory only)","application");
+    if(hostControl) box->addItem("Persistent · until disabled/deleted","persistent");
+    box->setCurrentIndex(qMax(0,box->findData(chosen)));
+  }
+  QString ruleSelection;
+  if(rules->currentRow()>=0 && rules->item(rules->currentRow(),0)) ruleSelection=rules->item(rules->currentRow(),0)->text();
+  rules->setSortingEnabled(false);rules->setRowCount(0);
+  for(auto entry:r["rules"].toArray()) {
+    if(rules->rowCount()>=256) break;
+    auto rule=entry.toObject();auto filter=rule["filter"].toObject();
+    auto expiry=rule["expires"].toString();if(expiry.startsWith("0001-"))expiry="Until disabled/deleted";
+    QStringList fields{rule["id"].toString(),rule["action"].toString(),rule["disabled"].toBool()?"Disabled":"Enabled",expiry,rule["executable"].toString()+" · "+QString::fromUtf8(QJsonDocument(filter).toJson(QJsonDocument::Compact))};
+    int row=rules->rowCount();rules->insertRow(row);
+    for(int col=0;col<fields.size();++col){auto *item=new QTableWidgetItem(fields[col]);item->setToolTip(fields[col]);rules->setItem(row,col,item);}
+    if(fields[0]==ruleSelection)rules->selectRow(row);
+  }
+  rules->setSortingEnabled(true);
+  disableRule->setEnabled(hostControl&&!readOnly&&!ruleSubmitting);deleteRule->setEnabled(hostControl&&!readOnly&&!ruleSubmitting);
+
   tabs->setTabEnabled(1, nextMode != "host-monitor");
   if (nextMode != mode) {
     mode = nextMode;
@@ -409,7 +465,7 @@ void Window::consume(QJsonObject r) {
   if (mode == "host-monitor") {
     readOnly = true;
     status->setText(
-        "Host monitor — read-only · observation only, no enforcement");
+        "Host monitor — read-only · observation only; enforcement state not queried");
     prompt->hide();
     current.clear();
     recent.clear();
@@ -428,7 +484,7 @@ void Window::consume(QJsonObject r) {
   tabs->setTabEnabled(1, true);
   poll.setInterval(500);
   activity->unavailable(
-      "Activity requires a host observer; lab decisions are shown separately");
+      "Activity uses a separate read-only observer; this connection shows firewall decisions");
   current.clear();
   for (auto v : r["events"].toArray()) {
     auto e = v.toObject();

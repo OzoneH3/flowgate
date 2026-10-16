@@ -1,6 +1,15 @@
 # Authoritative implementation plan
 
-## User priority: running desktop program now, game detection later
+## Current increment: explicit incoming-first host control
+
+- Implement dedicated opt-in foreground mode; read-only launcher unchanged.
+- Persist remembered rules transactionally in SQLite and expose real rule controls.
+- Own an isolated nft table/mark allocation, preflight conflicts, scoped Stop/recovery.
+- Use a bounded independent evaluation watchdog; never activate real-host enforcement during implementation.
+- Verify the actual host-mode path in veth namespaces and the unprivileged Qt journey.
+- Document reviewable activation commands and measured limitations. Game detection and further visual work remain deferred.
+
+## Accepted baseline: running desktop program
 
 1. **Complete:** Qt 6 Widgets client connected asynchronously to the real Unix API;
    persistent pending list, selected details, native non-modal prompt, exact
@@ -11,7 +20,7 @@
    read-only handling, rendered layout inspection and reproducible commands.
 4. **Complete:** live read-only host observer and Activity tree; preserve the user-accepted lab demo. Normal launch: `scripts/run-desktop.sh`.
 5. **Desktop layout:** use compact navigation, a dense activity tree, and an information panel with a chart. Display only supported actions.
-6. **Parallel ownership:** integration stream owns backend/API, launch scripts, functional tests and main docs. The separate design worktree owns frontend presentation (`desktop/activity.*`, `desktop/window.*`, `desktop/main.cpp`, `desktop/CMakeLists.txt`) and `docs/VISUAL.md`. Coordinate functional frontend changes explicitly. No competing frontend rewrites.
+6. **Historical parallel ownership (released):** integration stream owns backend/API, launch scripts, functional tests and main docs. The separate design worktree owns frontend presentation (`desktop/activity.*`, `desktop/window.*`, `desktop/main.cpp`, `desktop/CMakeLists.txt`) and `docs/VISUAL.md`. Coordinate functional frontend changes explicitly. No competing frontend rewrites.
 
 Keep the existing Wine/Proton adapter and its evidence. Resume broader game
 identification only after the running desktop workflow is useful. Do not reopen
@@ -25,4 +34,4 @@ The backend remains frontend-, desktop- and init-independent.
 STATUS.md records current capabilities; HISTORY.md indexes prior backend evidence;
 HANDOFF.md records reproducible continuation instructions.
 
-Integration outcome: both NetLimiter 5 design commits reviewed and integrated without conflicts. Actual Wayland live-monitor and isolated UI Allow smokes passed. Reuse broader recorded evidence. Next: user feedback; game detection and host enforcement remain deferred.
+Integration outcome: both NetLimiter 5 design commits reviewed and integrated without conflicts. Actual Wayland live-monitor and isolated UI Allow smokes passed. Reuse broader recorded evidence. Next: explicitly authorized host evaluation of the new bounded controller; game detection remains deferred.

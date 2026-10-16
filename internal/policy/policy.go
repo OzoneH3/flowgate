@@ -21,15 +21,21 @@ type Filter struct {
 	UID           uint32 `json:"uid"`
 }
 type Rule struct {
-	Schema   int       `json:"schema,omitempty"`
-	ID       string    `json:"id"`
-	Priority int       `json:"priority"`
-	Filter   Filter    `json:"filter"`
-	Action   string    `json:"action"`
-	Expires  time.Time `json:"expires"`
+	Executable string    `json:"executable,omitempty"`
+	Created    time.Time `json:"created"`
+	Disabled   bool      `json:"disabled"`
+	Schema     int       `json:"schema,omitempty"`
+	ID         string    `json:"id"`
+	Priority   int       `json:"priority"`
+	Filter     Filter    `json:"filter"`
+	Action     string    `json:"action"`
+	Expires    time.Time `json:"expires"`
 }
 
 func (r Rule) Validate() error {
+	if len(r.Executable) > 4096 {
+		return fmt.Errorf("executable display path too long")
+	}
 	if r.Schema != 0 && r.Schema != 1 && r.Schema != 2 {
 		return fmt.Errorf("unsupported rule schema")
 	}
@@ -72,6 +78,9 @@ func Evaluate(rules []Rule, f identity.Flow, a identity.Attribution, now time.Ti
 	var matches []Rule
 	for _, r := range rules {
 		x := r.Filter
+		if r.Disabled {
+			continue
+		}
 		if !r.Expires.IsZero() && !now.Before(r.Expires) {
 			continue
 		}

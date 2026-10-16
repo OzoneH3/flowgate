@@ -27,18 +27,21 @@ type Event struct {
 	Token            string               `json:"-"`
 }
 type Engine struct {
-	Activity   func() identity.ActivitySnapshot
-	Generation string
-	Mode       string
-	mu         sync.Mutex
-	events     map[string]*Event
-	rules      []policy.Rule
-	Resolve    func(identity.Flow) identity.Attribution
-	Now        func() time.Time
-	Timeout    time.Duration
-	Max        int
-	window     time.Time
-	created    int
+	SaveRules   func([]policy.Rule) error
+	Enforcement func() EnforcementStatus
+	APIUID      *uint32
+	Activity    func() identity.ActivitySnapshot
+	Generation  string
+	Mode        string
+	mu          sync.Mutex
+	events      map[string]*Event
+	rules       []policy.Rule
+	Resolve     func(identity.Flow) identity.Attribution
+	Now         func() time.Time
+	Timeout     time.Duration
+	Max         int
+	window      time.Time
+	created     int
 }
 
 func New(timeout time.Duration) *Engine {
@@ -76,7 +79,7 @@ func (e *Engine) Observe(f identity.Flow, token string) Event {
 	if old := e.events[key]; old != nil && now.Before(old.Deadline) && old.Attribution.Fingerprint == a.Fingerprint && a.Application != nil {
 		valid := old.Rule == "default-ask" || strings.HasPrefix(old.Rule, "once:")
 		for _, r := range e.rules {
-			if r.ID == old.Rule && (r.Expires.IsZero() || now.Before(r.Expires)) {
+			if !r.Disabled && r.ID == old.Rule && (r.Expires.IsZero() || now.Before(r.Expires)) {
 				valid = true
 			}
 		}
@@ -96,6 +99,10 @@ func (e *Engine) Observe(f identity.Flow, token string) Event {
 		v.ScopePreviews = map[string]string{
 			"once":        fmt.Sprintf("Once: %s %s, local %s, remote %s; this application/revision/user only. TCP: one connection (30 seconds to admit); UDP: fixed 30-second flow lease.", f.Direction, f.Protocol, f.Local, f.Remote),
 			"application": fmt.Sprintf("Remember for one hour (memory only): application %s; revision %s; user %d; %s %s; remote address %s; %s. Other local addresses may match. No permission for another application reusing this port.", filter.Application, filter.Revision, filter.UID, filter.Direction, filter.Protocol, filter.RemoteAddress, service),
+		}
+		if e.SaveRules != nil {
+			v.ScopePreviews["application"] = strings.Replace(v.ScopePreviews["application"], "memory only", "saved to disk; absolute expiry survives restart", 1)
+			v.ScopePreviews["persistent"] = strings.Replace(v.ScopePreviews["application"], "Remember for one hour (saved to disk; absolute expiry survives restart)", "Persistent until disabled/deleted (saved to disk)", 1)
 		}
 	}
 	switch action {
@@ -145,7 +152,7 @@ func (e *Engine) Decide(id, action, scope string, uid uint32, admin bool) (Event
 	if action != "allow" && action != "block" {
 		return Event{}, fmt.Errorf("action must be allow or block")
 	}
-	if scope != "once" && scope != "application" {
+	if scope != "once" && scope != "application" && !(scope == "persistent" && e.SaveRules != nil) {
 		return Event{}, fmt.Errorf("scope must be once or application")
 	}
 	for _, v := range e.events {
@@ -164,21 +171,32 @@ func (e *Engine) Decide(id, action, scope string, uid uint32, admin bool) (Event
 			v.Reason = "identity changed before decision"
 			return Event{}, fmt.Errorf("identity changed; retry required")
 		}
-		if scope == "application" && len(e.rules) >= 256 {
+		if scope != "once" && len(e.rules) >= 256 {
 			return Event{}, fmt.Errorf("rule capacity reached")
 		}
+		var remembered *policy.Rule
+		if scope != "once" {
+			r := policy.Rule{Executable: a.Application.Executable, Schema: 2, ID: "user:" + v.ID, Priority: 100, Action: action, Filter: policy.Remembered(v.Flow, a), Created: now, Expires: now.Add(time.Hour)}
+			if scope == "persistent" {
+				r.Expires = time.Time{}
+			}
+			next := append(append([]policy.Rule{}, e.rules...), r)
+			if e.SaveRules != nil {
+				if err := e.SaveRules(next); err != nil {
+					return Event{}, fmt.Errorf("rule persistence failed: %w", err)
+				}
+			}
+			e.rules = next
+			remembered = &r
+		}
 		v.State = map[string]string{"allow": "allowed", "block": "blocked"}[action]
-		v.Reason = "explicit client decision; retained packets undergo a final identity check"
+		v.Reason = "explicit client decision; FlowGate permission is not proof of network delivery"
 		v.Rule = "once:" + v.ID
 		v.Deadline = now.Add(30 * time.Second)
-		if scope == "application" {
-			if len(e.rules) >= 256 {
-				return Event{}, fmt.Errorf("rule capacity reached")
-			}
-			r := policy.Rule{Schema: 2, ID: "user:" + v.ID, Priority: 100, Action: action, Filter: policy.Remembered(v.Flow, a), Expires: now.Add(time.Hour)}
-			e.rules = append(e.rules, r)
-			v.Rule = r.ID
-			v.Permission = "one hour (memory only); application/revision/user/direction/protocol; see remembered_filter for explicit address and service-port scope"
+		if remembered != nil {
+			v.Rule = remembered.ID
+			v.Permission = v.ScopePreviews[scope]
+
 			for key, other := range e.events {
 				if other.ID == v.ID || other.State == "awaiting-decision" {
 					continue
@@ -255,4 +273,54 @@ func (e *Engine) RetainedState(id, fingerprint string) string {
 		return "allow"
 	}
 	return "drop"
+}
+
+// Rules returns only the authenticated user's policy unless explicitly admin.
+func (e *Engine) Rules(uid uint32, admin bool) []policy.Rule {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	out := []policy.Rule{}
+	for _, r := range e.rules {
+		if admin || r.Filter.UID == uid {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+func (e *Engine) ChangeRule(id, action string, uid uint32, admin bool) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.SaveRules == nil {
+		return fmt.Errorf("durable rules unavailable")
+	}
+	next := append([]policy.Rule{}, e.rules...)
+	found := false
+	for i, r := range next {
+		if r.ID != id {
+			continue
+		}
+		if !admin && r.Filter.UID != uid {
+			return fmt.Errorf("not authorized")
+		}
+		found = true
+		switch action {
+		case "disable":
+			next[i].Disabled = true
+		case "delete":
+			next = append(next[:i], next[i+1:]...)
+		default:
+			return fmt.Errorf("action must be disable or delete")
+		}
+		break
+	}
+	if !found {
+		return fmt.Errorf("unknown rule")
+	}
+	if err := e.SaveRules(next); err != nil {
+		return err
+	}
+	e.rules = next
+	// Invalidate pending as well as cached verdicts conservatively; retained packets drop.
+	e.events = map[string]*Event{}
+	return nil
 }

@@ -25,7 +25,7 @@ Filters are separate from actions. A startup rule is:
 
 Highest numerical priority wins; ties use lexicographically smallest unique rule ID. All matching rule IDs are returned in precedence order. Schema 2: `remote_address` is an IP, CIDR, or explicit `*`; omitted/empty means any address. `local_port` and `remote_port` are exact ports; omitted/zero means any port. CLI remembered incoming defaults to observed remote address + local service port, with unrestricted source port. Outgoing defaults to observed remote address + destination port, with unrestricted local port. A CIDR or advanced remote-port restriction can be selected in a startup rule. The `remembered_filter` output previews the scope. Identity/revision/UID/direction/protocol remain mandatory. Legacy schema omitted/0/1 keeps `remote` as an exact IP:port or empty for any endpoint; it cannot use the new fields. Mixing legacy `remote` with new address/remote-port fields is rejected. Unknown schema versions and startup JSON fields are rejected. The API remains v1 with additive output fields. No implicit Allow/Block priority or hidden specificity weights. No matching rule means Ask; unsafe attribution means Block even if a rule would otherwise match. Unknown users have no application permission. API authorization is independent of policy matching.
 
-Rules are bounded to 256 and held in memory. Startup loading and CLI answers are implemented; no durable rule store or live arbitrary rule editor. Loading/replacing rules clears userspace decisions. Expired rules are re-evaluated on subsequent queued packets. New application-scope answers invalidate decided userspace events whose effective policy changes, while retaining unaffected decisions and unrelated pending requests. This prevents an unrelated answer from discarding a just-approved one-shot packet before its verdict is sent. Replacing the complete rule set invalidates pending IDs too; their held packets drop. TCP connections already admitted keep their kernel decision until conntrack expires/closes; rule changes do **not** revoke these connections. UDP original-direction datagrams recheck ownership and rule/decision lifetime. New SYNs are always attributed even on marked tuples, and their sequence separates successive attempts using a tuple. This prevents a standing port-wide permission.
+Rules are bounded to 256. The lab retains memory-only rules; explicit host-control mode commits remembered rules to SQLite before publishing decisions. See HOST-CONTROL.md for durable expiry and Disable/Delete semantics. There is no arbitrary advanced rule editor. Loading/replacing rules clears userspace decisions. Expired rules are re-evaluated on subsequent queued packets. New application-scope answers invalidate decided userspace events whose effective policy changes, while retaining unaffected decisions and unrelated pending requests. This prevents an unrelated answer from discarding a just-approved one-shot packet before its verdict is sent. Replacing the complete rule set invalidates pending IDs too; their held packets drop. TCP connections already admitted keep their kernel decision until conntrack expires/closes; rule changes do **not** revoke these connections. UDP original-direction datagrams recheck ownership and rule/decision lifetime. New SYNs are always attributed even on marked tuples, and their sequence separates successive attempts using a tuple. This prevents a standing port-wide permission.
 
 ## Lifecycle, resources and failure
 
@@ -35,7 +35,7 @@ Pending timeout defaults to 15 seconds (configurable 1–60). Once decisions las
 
 NFQUEUE has neither queue-bypass nor fail-open. A missing consumer or full queue drops new traffic; a SIGKILL test verifies no receiver delivery. Already admitted TCP connections can continue using their conntrack mark after consumer failure. Graceful lab shutdown removes only `inet flowgate_lab`, ending enforcement deliberately. An unexpected queue error terminates the daemon and retains the table, so new traffic remains blocked. Graceful SIGINT/SIGTERM is an explicit lab teardown. No production service supervisor or host installer is provided.
 
-The table is created exclusively and cleanup only runs after successful creation. A pre-existing table causes startup failure. Recovery inside the lab is `nft delete table inet flowgate_lab`, or exit the namespace. There is no generic flush command. Conntrack mark 0x4647 is reserved only in the isolated lab. Host coexistence/mark allocation is unimplemented. Allowed means FlowGate's verdict, not proof of delivery through other firewall chains.
+The table is created exclusively and cleanup only runs after successful creation. A pre-existing table causes startup failure. Recovery inside the lab is `nft delete table inet flowgate_lab`, or exit the namespace. There is no generic flush command. Conntrack mark 0x4647 is reserved only in the isolated lab. The separate host-control mode uses its own allocation, preflight and recovery described in HOST-CONTROL.md; these lab marks are never used for host activation. Allowed means FlowGate's verdict, not proof of delivery through other firewall chains.
 
 ## Network scope
 
@@ -170,3 +170,18 @@ peer credentials remain. No root shortcut to another user's host snapshot.
 creates independent instances and stops only its observer when its GUI exits or
 supervisor receives Ctrl+C/SIGTERM. This differs from explicit lab teardown and
 from connecting a GUI to a separately managed observer.
+
+## Explicit host-control profile
+
+HOST-CONTROL.md defines the implemented optional host profile, privileged socket
+ownership, conntrack snapshot cutover, mark reservation, bootstrap exceptions,
+SQLite rule lifecycle and scoped watchdog/recovery. Lab and read-only observation
+semantics above are preserved. Host responses add `enforcement` (state, detail,
+absolute stops_at) and bounded `rules`. States are starting/active/degraded/stopped;
+missing interception is unavailable, and disconnected means unknown. Non-active
+host responses reject mutation. `rule` accepts disable/delete, with existing peer
+ownership checks. `persistent` is available only when durable storage is configured;
+`application` is one saved hour in that mode, one memory-only hour in the lab.
+Rule schema 2 gains display-only executable, created and disabled fields; older
+rules default enabled. Unknown/corrupt stored documents fail startup. Pending IDs
+and Once permissions remain ephemeral; a restart never replays a GUI answer.

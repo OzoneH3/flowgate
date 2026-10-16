@@ -1,4 +1,4 @@
-// Package queue connects bounded policy evaluation to NFQUEUE. No host rule installer is exposed.
+// Package queue connects bounded policy evaluation to NFQUEUE.
 package queue
 
 import (
@@ -73,15 +73,23 @@ func Parse(b []byte, direction string) (identity.Flow, string, error) {
 	return f, token, nil
 }
 func Run(ctx context.Context, e *daemon.Engine, direction string, ready func() error) error {
-	nf, err := nfqueue.Open(&nfqueue.Config{NfQueue: 100, MaxQueueLen: 128, MaxPacketLen: 65535, Copymode: nfqueue.NfQnlCopyPacket, Flags: nfqueue.NfQaCfgFlagConntrack, WriteTimeout: time.Second})
+	return RunConfigured(ctx, e, direction, 100, true, ready)
+}
+
+// Host mode leaves marks untouched; its post-queue nft chain applies a masked OR.
+func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, number uint16, labMark bool, ready func() error) error {
+	nf, err := nfqueue.Open(&nfqueue.Config{NfQueue: number, MaxQueueLen: 128, MaxPacketLen: 65535, Copymode: nfqueue.NfQnlCopyPacket, Flags: nfqueue.NfQaCfgFlagConntrack, WriteTimeout: time.Second})
 	if err != nil {
 		return err
 	}
 	defer nf.Close()
 	retained := &Retainer{}
 	verdictPacket := func(id uint32, allow bool) error {
-		if allow {
+		if allow && labMark {
 			return nf.SetVerdictWithOption(id, nfqueue.NfAccept, nfqueue.WithConnMark(Mark))
+		}
+		if allow {
+			return nf.SetVerdict(id, nfqueue.NfAccept)
 		}
 		return nf.SetVerdict(id, nfqueue.NfDrop)
 	}
@@ -117,7 +125,7 @@ func Run(ctx context.Context, e *daemon.Engine, direction string, ready func() e
 			}
 		}
 		var err error
-		if verdict == nfqueue.NfAccept {
+		if verdict == nfqueue.NfAccept && labMark {
 			err = nf.SetVerdictWithOption(*a.PacketID, verdict, nfqueue.WithConnMark(Mark))
 		} else {
 			err = nf.SetVerdict(*a.PacketID, verdict)

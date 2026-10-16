@@ -14,7 +14,8 @@ press Ctrl+C in its terminal to stop its observer. Duplicate launches are indepe
 A separately managed `flowgate observe --socket PATH` survives client closure.
 
 The user accepted the original prompt demo. Keep `scripts/demo-desktop.sh` separate:
-only it enforces isolated native test traffic. Its GUI can close while enforcement
+it enforces the original isolated native test traffic. The new host-control tests
+exercise a separate incoming-first profile in disposable veth namespaces. Its GUI can close while enforcement
 continues; q/Ctrl+C in its terminal tears down that lab.
 
 ## Sources and verification
@@ -57,10 +58,18 @@ toolbar/tabs, right Info/rules panel, lower chart region. Missing measurements a
 controls stay explicitly unavailable. Plain-text details, generic icons and other
 remaining differences are acknowledged in VISUAL.md; do not claim pixel identity.
 
-## Next scope
+## Current increment: host control ready for review
 
-Deliver the integrated running host monitor now, then collect user feedback.
-Game detection remains deferred. Host enforcement needs separate explicit scope,
-coexistence/recovery planning and controlled validation. No hidden enable-protection
-control. No host firewall/network/VPN/security/service/package changes, installed
-runtime/launcher/existing-prefix edits, real games, publishing or pushing.
+Read HOST-CONTROL.md before any activation. `scripts/evaluate-host.sh` is the exact
+opt-in five-minute foreground command; it has NOT been run on the real host.
+Normal `scripts/run-desktop.sh` remains read-only. Actual host-start receiver and
+Wayland button evidence is indexed in STATUS. Reproduce with
+`QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=wayland-0 scripts/check-host.sh`.
+Use the documented host-status/host-stop/host-recover commands independently of Qt.
+
+Remaining work: user-reviewed real-host evaluation, concrete coexistence issues,
+then service/desktop authorization integration. Existing mark/queue/VPN setups may
+be refused deliberately. No need to redo Wine or accepted native/lab matrices.
+No host firewall/network/VPN/security settings, installed runtime/launcher/prefix,
+services or system packages were changed. Do not activate host enforcement without
+separate explicit authorization or the user's own execution of the reviewed command.

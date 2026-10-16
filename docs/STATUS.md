@@ -12,6 +12,38 @@ launching terminal to stop that instance's observer. Independent launches have
 separate private sockets. A separately managed observer stays running when a client
 closes. Branch: `milestone/backend`; exact snapshot: `git rev-parse HEAD`.
 
+## New: explicit host-control evaluation
+
+Incoming-first host-mode code, saved one-hour/persistent SQLite rules, Rules
+Disable/Delete, enforcement health, scoped Stop/recovery and a detached five-minute
+evaluation watchdog are implemented. **Real host enforcement has not been activated.**
+Review `docs/HOST-CONTROL.md` before the explicit `scripts/evaluate-host.sh` command.
+The normal monitor command above remains read-only.
+
+Focused receiver checks use the actual host-start path on an isolated veth topology:
+IPv4/IPv6 TCP Allow/Block; one-shot UDP Allow/Block; outbound TCP/UDP replies;
+ICMP/ICMPv6; pre-existing TCP; persistence and absolute expiry across restart;
+disable/delete; bounded no-listener attempts; duplicate/conflicting startup;
+structural degradation; daemon SIGKILL; repeated recovery; scoped automatic stop,
+including the independent watchdog after daemon death. Unrelated nft objects survive.
+
+Actual Wayland Qt checks run as UID1000 outside that namespace: persistent Allow
+releases the held datagram, a new source port matches, Disable restores Ask, Block
+delivers nothing, Delete removes the rule, and disconnect disables mutations.
+Focused Go race tests and vet cover the changed policy/API/storage/queue paths.
+Evidence: `.workspace/host-verification-final.log`, `.workspace/host-suite-final.log`,
+`.workspace/host-final-ui.log`, `.workspace/host-go-tests.log`,
+`.workspace/host-bootstrap.log`, `.workspace/host-lab-regression.log`.
+Inspected Wayland captures: `.workspace/host-ui-1113497/host-prompt.png` and
+`.workspace/host-ui-1113497/host-rules.png`. Final test logs name their
+own isolated run and capture directories. Historical startup failures (unmapped
+namespace ancestors) were fixed without relaxing real-host privileged paths.
+
+Limits: conservative VPN/mark/queue conflict refusals; snapshot cutover window;
+queued extension headers/fragments unsupported; other-UID services can time out;
+Full DHCP lease negotiation and real-host coexistence unverified. API control mode shows decisions;
+Activity remains a separate read-only observer connection. Game detection unchanged.
+
 ## Available now
 
 - Existing Qt desktop with compact Activity tree, name/path/PID/endpoint search,
@@ -83,8 +115,8 @@ private per-thread FD census or packet history. Short-lived activity can be miss
 Snapshots are non-atomic; visible holders do not prove exclusive ownership or
 identify a remote program. Useful partial monitoring requires no root request.
 
-No measured rates/totals, persistent rules/history, production service or host
-protection. NetLimiter 5 is the authoritative visual target; remaining differences
+No measured rates/totals, persistent event history or production service. Normal
+monitoring provides no host protection; explicit bounded control is described above. NetLimiter 5 is the authoritative visual target; remaining differences
 are documented rather than claimed exact. Game detection remains deferred and its
 existing optional adapter preserved. Other distributions, arm64, real games,
 full launcher/container integration and VPN coexistence remain unverified.
@@ -98,6 +130,6 @@ Design worktree: `.workspace/worktrees/netlimiter-design`, branch
 `frontend/netlimiter-design`. Integration owns backend/API/scripts/tests; design
 owns presentation. The final report names the integrated commit.
 
-Next: user feedback on real Activity and documented visual gaps. Host enforcement
-needs a separately authorized coexistence/recovery/validation milestone. There is
-no hidden enable-protection action. Continue game detection later.
+Next: user review/execution of the explicit bounded host evaluation; then address
+observed coexistence issues before service integration. No hidden activation action.
+Continue game detection later.

@@ -36,10 +36,14 @@ func main() {
 	identity.WineBrokerExecutable = os.Getenv("FLOWGATE_WINE_BROKER")
 
 	if len(os.Args) < 2 {
-		fmt.Printf("%s: doctor | runtime-discover | sockets | process PID | attribute | pending | decide | observe | serve-lab\n", productName)
+		fmt.Printf("%s: doctor | runtime-discover | sockets | process PID | attribute | pending | decide | observe | serve-lab | host-start | host-status | host-stop | host-recover\n", productName)
 		return
 	}
 	switch os.Args[1] {
+	case "host-start", "host-stop", "host-status", "host-recover", "host-watch":
+		if err := hostCommand(); err != nil {
+			fatal(err)
+		}
 	case "runtime-discover":
 		fs := flag.NewFlagSet("runtime-discover", flag.ExitOnError)
 		bins := fs.String("runtime-bins", "/usr/bin", "comma-separated explicitly trusted runtime bin directories")

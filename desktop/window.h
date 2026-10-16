@@ -18,7 +18,8 @@ private:
   QString mode;
   QLineEdit *endpoint;
   QLabel *status, *result, *promptResult, *promptConnection;
-  QTableWidget *pending, *history;
+  QTableWidget *pending, *history, *rules;
+ QPushButton *disableRule, *deleteRule;
   QPlainTextEdit *details, *preview;
   QComboBox *scope;
   QPushButton *allow, *block;
@@ -33,6 +34,7 @@ private:
   QStringList recentOrder, notifiedOrder;
   QSet<QString> notified, submitting;
   QString generation, selected, promptID, activeEndpoint;
+  bool ruleSubmitting=false;
   bool connected = false, readOnly = true, listing = false;
   int epoch = 0;
   qint64 serverOffset = 0;

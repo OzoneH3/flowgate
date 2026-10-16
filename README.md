@@ -2,6 +2,23 @@
 
 A native Qt 6 desktop application with an independent Go backend. **Normal launch shows real host application/socket activity read-only.** No firewall rules, interception or host protection. The accepted prompt workflow remains a separate isolated lab.
 
+## Explicit host firewall evaluation (opt-in)
+
+The new incoming-first controller is implemented and verified in disposable
+namespaces. **It has not been activated on this host.** Review
+[the activation, Stop and recovery contract](docs/HOST-CONTROL.md) before running:
+
+```sh
+scripts/evaluate-host.sh  # explicit host activation; automatic stop after 5 minutes
+# In a second, ordinary-user terminal:
+.workspace/desktop/flowgate-desktop --socket /run/flowgate-api/control.sock
+```
+
+Saved one-hour and persistent permissions, a basic Rules list and Disable/Delete
+are available in this mode. Normal launch below remains read-only. No GUI sudo,
+service installation or implicit activation. Existing VPN/mark configurations can
+cause a deliberate preflight refusal.
+
 ## Launch the live host monitor
 
 ```sh
@@ -146,5 +163,5 @@ remain unverified. This desktop increment does not launch Wine or games.
 Desktop branding: CMake `-DFLOWGATE_PRODUCT_NAME=NewName`. CLI branding:
 `go build -ldflags '-X main.productName=NewName'`. Binaries use native shared
 libraries; no static/portable deployment claim. Other distributions and arm64
-remain unvalidated. Persistence, production enforcement, packaging, charts and
-bandwidth control are deferred.
+remain unvalidated. Durable rules and bounded manual host enforcement are now implemented; production
+service integration, wider coexistence, packaging, charts and bandwidth control remain deferred.
