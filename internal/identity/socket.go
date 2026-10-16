@@ -50,8 +50,11 @@ type Attribution struct {
 	Application        *Application   `json:"application,omitempty"`
 }
 
-func NetNS() string { return link("/proc/self/ns/net") }
-func Sockets() ([]Socket, error) {
+func NetNS() string              { return link("/proc/self/ns/net") }
+func Sockets() ([]Socket, error) { return SocketsLimited(0) }
+
+// SocketsLimited bounds retained rows; zero preserves the enforcement census.
+func SocketsLimited(limit int) ([]Socket, error) {
 	c, e := netlink.Dial(unix.NETLINK_SOCK_DIAG, nil)
 	if e != nil {
 		return nil, e
@@ -68,11 +71,20 @@ func Sockets() ([]Socket, error) {
 			for i := 48; i < 56; i++ {
 				req[i] = 255
 			}
-			msgs, e := c.Execute(netlink.Message{Header: netlink.Header{Type: 20, Flags: netlink.Request | netlink.Dump}, Data: req})
-			if e != nil {
-				return nil, e
+			var msgs []netlink.Message
+			if limit > 0 {
+				msgs, e = boundedDiag(req, limit-len(result))
+			} else {
+				msgs, e = c.Execute(netlink.Message{Header: netlink.Header{Type: 20, Flags: netlink.Request | netlink.Dump}, Data: req})
+			}
+			dumpErr := e
+			if e != nil && len(msgs) == 0 {
+				return result, e
 			}
 			for _, m := range msgs {
+				if limit > 0 && len(result) >= limit {
+					return result, fmt.Errorf("socket row limit reached")
+				}
 				b := m.Data
 				if len(b) < 72 {
 					return nil, fmt.Errorf("short inet_diag response")
@@ -101,6 +113,9 @@ func Sockets() ([]Socket, error) {
 					}
 				}
 				result = append(result, Socket{Family: family, V6Only: v6only, Protocol: name, Local: netip.AddrPortFrom(la.Unmap(), binary.BigEndian.Uint16(b[4:6])), Remote: netip.AddrPortFrom(ra.Unmap(), binary.BigEndian.Uint16(b[6:8])), State: b[1], Inode: binary.NativeEndian.Uint32(b[68:72]), UID: binary.NativeEndian.Uint32(b[64:68]), Cookie: fmt.Sprintf("%x", b[44:52]), NetNS: NetNS()})
+			}
+			if dumpErr != nil {
+				return result, dumpErr
 			}
 		}
 	}

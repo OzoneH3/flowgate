@@ -27,6 +27,7 @@ type Event struct {
 	Token            string               `json:"-"`
 }
 type Engine struct {
+	Activity   func() identity.ActivitySnapshot
 	Generation string
 	Mode       string
 	mu         sync.Mutex

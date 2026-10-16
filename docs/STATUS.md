@@ -1,5 +1,11 @@
 # Current status
 
+Host-monitor checkpoint: `scripts/run-desktop.sh` now launches a real unprivileged
+read-only observer and the existing Qt Activity tree. No synthetic traffic or
+firewall changes. Host fixture and Wayland Activity tests pass; accepted lab prompt
+evidence is reused with one Allow smoke check. Final integration notes follow
+after the separately owned NetLimiter 5 visual pass.
+
 Branch `milestone/backend`; use `git rev-parse HEAD` for the current snapshot.
 **A running native Qt 6 desktop client now controls the real isolated backend.**
 Launch from the repository root with `scripts/demo-desktop.sh`.

@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"flowgate/internal/identity"
 	"os"
 	"path/filepath"
 	"testing"
@@ -34,5 +35,29 @@ func TestReadOnlyAPI(t *testing.T) {
 	}
 	if _, err = Call(path, Request{Version: 2, Operation: "list"}); err == nil {
 		t.Fatal("unsupported API accepted")
+	}
+}
+
+func TestHostMonitorAlwaysReadOnly(t *testing.T) {
+	dir, err := os.MkdirTemp("../../.workspace/tmp", "host-api-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	path, _ := filepath.Abs(filepath.Join(dir, "s"))
+	e, _, _, _ := fixture()
+	e.Mode = "host-monitor"
+	e.Activity = func() identity.ActivitySnapshot { return identity.ActivitySnapshot{Sequence: 1, Complete: false} }
+	l, err := Serve(path, e, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	r, err := Call(path, Request{Version: 1, Operation: "list"})
+	if err != nil || !r.ReadOnly || r.Activity == nil || r.Activity.Sequence != 1 || len(r.Events) != 0 {
+		t.Fatalf("%+v %v", r, err)
+	}
+	if _, err = Call(path, Request{Version: 1, Operation: "decide", ID: "fake", Action: "allow", Scope: "once"}); err == nil {
+		t.Fatal("host mutation accepted")
 	}
 }

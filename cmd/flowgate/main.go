@@ -7,6 +7,7 @@ import (
 	"flowgate/internal/daemon"
 	"flowgate/internal/diagnostics"
 	"flowgate/internal/identity"
+	"flowgate/internal/monitor"
 	"flowgate/internal/policy"
 	"flowgate/internal/queue"
 	"fmt"
@@ -35,7 +36,7 @@ func main() {
 	identity.WineBrokerExecutable = os.Getenv("FLOWGATE_WINE_BROKER")
 
 	if len(os.Args) < 2 {
-		fmt.Printf("%s: doctor | runtime-discover | sockets | process PID | attribute | pending | decide | serve-lab\n", productName)
+		fmt.Printf("%s: doctor | runtime-discover | sockets | process PID | attribute | pending | decide | observe | serve-lab\n", productName)
 		return
 	}
 	switch os.Args[1] {
@@ -97,6 +98,10 @@ func main() {
 		output(r)
 		if e != nil {
 			fatal(e)
+		}
+	case "observe":
+		if err := observe(); err != nil {
+			fatal(err)
 		}
 	case "serve-lab":
 		if e := serve(); e != nil {
@@ -213,4 +218,34 @@ add rule inet flowgate_lab gate meta l4proto udp queue num 100
 		fmt.Fprintln(os.Stderr, "READY: disposable namespace enforcement; v1 API", p)
 		return nil
 	})
+}
+
+// Host observation has no queue, nftables, helper or namespace launch path.
+func observe() error {
+	fs := flag.NewFlagSet("observe", flag.ExitOnError)
+	socket := fs.String("socket", "", "private API socket path (required)")
+	interval := fs.Duration("interval", 2*time.Second, "collection delay after each snapshot (500ms..30s)")
+	fs.Parse(os.Args[2:])
+	if *socket == "" || *interval < 500*time.Millisecond || *interval > 30*time.Second {
+		return fmt.Errorf("socket required; interval must be 500ms..30s")
+	}
+	path, err := filepath.Abs(*socket)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer cancel()
+	observer := monitor.New(*interval)
+	e := daemon.New(15 * time.Second)
+	e.Mode = "host-monitor"
+	e.Activity = observer.Snapshot
+	listener, err := daemon.Serve(path, e, true)
+	if err != nil {
+		return err
+	}
+	defer listener.Close()
+	go observer.Run(ctx)
+	fmt.Fprintln(os.Stderr, "READY: host monitor — read-only", path)
+	<-ctx.Done()
+	return nil
 }

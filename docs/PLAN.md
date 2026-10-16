@@ -9,9 +9,9 @@
    existing peer authorization intact, no host networking changes.
 3. **Complete:** real Wayland Qt button-to-receiver checks, expiry/disconnect/
    read-only handling, rendered layout inspection and reproducible commands.
-4. **Next:** refine desktop usability from user feedback (notification/tray access
-   and saved socket preference are small candidates), retaining persistent pending
-   state in the daemon. No production host installation without explicit scope.
+4. **Current:** live read-only host observer and Activity tree; preserve the user-accepted lab demo. Normal launch: `scripts/run-desktop.sh`.
+5. **Desktop layout:** use compact navigation, a dense activity tree, and an information panel with a chart. Display only supported actions.
+6. **Parallel ownership:** integration stream owns backend/API, launch scripts, functional tests and main docs. The separate design worktree owns frontend presentation (`desktop/activity.*`, `desktop/window.*`, `desktop/main.cpp`, `desktop/CMakeLists.txt`) and `docs/VISUAL.md`. Coordinate functional frontend changes explicitly. No competing frontend rewrites.
 
 Keep the existing Wine/Proton adapter and its evidence. Resume broader game
 identification only after the running desktop workflow is useful. Do not reopen

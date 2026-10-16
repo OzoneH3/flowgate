@@ -3,6 +3,7 @@ package daemon
 import (
 	"bufio"
 	"encoding/json"
+	"flowgate/internal/identity"
 	"fmt"
 	"golang.org/x/sys/unix"
 	"net"
@@ -19,18 +20,20 @@ type Request struct {
 	Scope     string `json:"scope,omitempty"`
 }
 type Response struct {
-	Version    int       `json:"version"`
-	Generation string    `json:"generation"`
-	ReadOnly   bool      `json:"read_only"`
-	Mode       string    `json:"mode"`
-	ServerTime time.Time `json:"server_time"`
-	PeerUID    uint32    `json:"peer_uid"`
-	Events     []Event   `json:"events,omitempty"`
-	Decision   *Event    `json:"decision,omitempty"`
-	Error      string    `json:"error,omitempty"`
+	Activity   *identity.ActivitySnapshot `json:"activity,omitempty"`
+	Version    int                        `json:"version"`
+	Generation string                     `json:"generation"`
+	ReadOnly   bool                       `json:"read_only"`
+	Mode       string                     `json:"mode"`
+	ServerTime time.Time                  `json:"server_time"`
+	PeerUID    uint32                     `json:"peer_uid"`
+	Events     []Event                    `json:"events,omitempty"`
+	Decision   *Event                     `json:"decision,omitempty"`
+	Error      string                     `json:"error,omitempty"`
 }
 
 func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
+	readonly = readonly || e.Mode == "host-monitor"
 	// Parent must be owned and inaccessible to other users; never unlink an existing path.
 	parent := path[:len(path)-len(baseName(path))]
 	st, err := os.Stat(parent)
@@ -80,7 +83,18 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 					} else {
 						switch q.Operation {
 						case "list":
-							r.Events = e.List(cred.Uid, cred.Uid == 0)
+							if e.Mode == "host-monitor" {
+								if cred.Uid != uint32(os.Geteuid()) {
+									r.Error = "not authorized"
+								} else if e.Activity == nil {
+									r.Error = "observer unavailable"
+								} else {
+									snapshot := e.Activity()
+									r.Activity = &snapshot
+								}
+							} else {
+								r.Events = e.List(cred.Uid, cred.Uid == 0)
+							}
 						case "decide":
 							if readonly {
 								r.Error = "read-only API"

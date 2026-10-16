@@ -1,4 +1,5 @@
 #pragma once
+#include "activity.h"
 #include <QtNetwork/QLocalSocket>
 #include <QtWidgets>
 #include <functional>
@@ -12,6 +13,9 @@ public:
   void refresh();
 
 private:
+  QTabWidget *tabs;
+  ActivityView *activity;
+  QString mode;
   QLineEdit *endpoint;
   QLabel *status, *result, *promptResult;
   QTableWidget *pending, *history;

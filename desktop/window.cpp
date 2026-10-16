@@ -57,8 +57,14 @@ Window::Window(const QString &path, QWidget *parent) : QMainWindow(parent) {
   status->setTextFormat(Qt::PlainText);
   status->setWordWrap(true);
   layout->addWidget(status);
+  tabs = new QTabWidget;
+  tabs->setObjectName("views");
+  layout->addWidget(tabs, 1);
+  activity = new ActivityView;
+  tabs->addTab(activity, "Activity");
   auto *split = new QSplitter(Qt::Vertical);
-  layout->addWidget(split, 1);
+  tabs->addTab(split, "Pending & recent decisions");
+  tabs->setCurrentIndex(1);
   auto *upper = new QWidget;
   auto *up = new QVBoxLayout(upper);
   up->setContentsMargins(0, 0, 0, 0);
@@ -238,6 +244,8 @@ void Window::request(QJsonObject q,
   s->connectToServer(activeEndpoint);
 }
 void Window::reconnect() {
+  activity->unavailable("Reconnecting");
+  mode.clear();
   activeEndpoint = endpoint->text();
   ++epoch;
   const auto old = sockets;
@@ -274,6 +282,7 @@ void Window::refresh() {
     listing = false;
     if (!error.isEmpty() || !r["error"].toString().isEmpty()) {
       connected = false;
+      activity->unavailable("Backend disconnected");
       status->setText("Disconnected · reconnecting — " +
                       (error.isEmpty() ? r["error"].toString() : error));
       updateDetails();
@@ -324,9 +333,39 @@ void Window::consume(QJsonObject r) {
       QDateTime::fromString(r["server_time"].toString(), Qt::ISODateWithMs));
   status->setText((readOnly ? "Read-only" : "Connected") + QString(" · ") +
                   (r["mode"] == "isolated-lab"
-                       ? "ISOLATED LAB — only test traffic; your computer’s "
+                       ? "ISOLATED LAB — enforcement active for test traffic; "
+                         "your computer’s "
                          "normal network is unchanged"
                        : "Backend mode: " + value(r, "mode")));
+  auto nextMode = r["mode"].toString();
+  tabs->setTabEnabled(1, nextMode != "host-monitor");
+  if (nextMode != mode) {
+    mode = nextMode;
+    tabs->setCurrentIndex(mode == "host-monitor" ? 0 : 1);
+  }
+  if (mode == "host-monitor") {
+    readOnly = true;
+    status->setText(
+        "Host monitor — read-only · observation only, no enforcement");
+    prompt->hide();
+    current.clear();
+    recent.clear();
+    recentOrder.clear();
+    recentSizes.clear();
+    recentBytes = 0;
+    tabs->setTabEnabled(1, false);
+    poll.setInterval(1000);
+    if (r["activity"].isObject())
+      activity->consume(r["activity"].toObject(), generation);
+    else
+      activity->unavailable("Observer snapshot missing");
+    render();
+    return;
+  }
+  tabs->setTabEnabled(1, true);
+  poll.setInterval(500);
+  activity->unavailable(
+      "Activity requires a host observer; lab decisions are shown separately");
   current.clear();
   for (auto v : r["events"].toArray()) {
     auto e = v.toObject();
