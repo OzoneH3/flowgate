@@ -1,0 +1,36 @@
+#!/usr/bin/env python3
+"""Receiver-observed tests; must run via lab.sh in an isolated network/PID namespace."""
+import json, os, socket, subprocess, sys, time, pathlib, signal
+ROOT=pathlib.Path.cwd(); BIN=str(ROOT/'.workspace/flowgate'); RUN=ROOT/'.workspace/run'
+SOCK=str(RUN/'control.sock')
+def cli(*args):
+    p=subprocess.run([BIN,*args],capture_output=True,text=True)
+    if p.returncode: raise RuntimeError(p.stderr+p.stdout)
+    return json.loads(p.stdout)
+def wait(fn,timeout=5):
+    until=time.monotonic()+timeout
+    while time.monotonic()<until:
+        v=fn()
+        if v:return v
+        time.sleep(.04)
+    raise AssertionError('timed out')
+def events():return cli('pending','--socket',SOCK).get('events',[])
+def pending(port):return next((v for v in events() if v['flow']['local'].endswith(':'+str(port)) and v['state']=='awaiting-decision'),None)
+def decide(v,action,scope='once'):return cli('decide','--socket',SOCK,'--id',v['id'],'--action',action,'--scope',scope)
+def delivered(path):return path.exists() and 'RECEIVED' in path.read_text()
+servercode='''import socket,sys
+s=socket.socket(int(sys.argv[1]),int(sys.argv[2]));s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);s.bind((sys.argv[3],int(sys.argv[4])))
+if int(sys.argv[2])==1:s.listen()
+print("READY",flush=True)
+while True:
+ if int(sys.argv[2])==1:
+  c,a=s.accept();b=c.recv(1024);c.close()
+ else:b,a=s.recvfrom(1024)
+ if b:print("RECEIVED",flush=True)
+'''
+children=[]
+def server(port,udp=False,v6=False):
+    path=RUN/f'receiver-{port}.log';f=path.open('w');p=subprocess.Popen([sys.executable,'-c',servercode,'10' if v6 else '2','2' if udp else '1','::1' if v6 else '127.0.0.1',str(port)],stdout=f,stderr=f);children.append(p);wait(lambda:path.exists() and 'READY' in path.read_text());return p,path
+def client(port,udp=False,v6=False):
+    code='import socket,sys;s=socket.socket(int(sys.argv[1]),int(sys.argv[2]));s.settimeout(4);s.connect((sys.argv[3],int(sys.argv[4])));s.send(b"test")'
+    p=subprocess.Popen([sys.executable,'-c',code,'10' if v6 else '2','2' if udp else '1','::1' if v6 else '127.0.0.1',str(port)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);children.append(p);return p
