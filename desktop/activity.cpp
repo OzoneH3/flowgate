@@ -92,7 +92,7 @@ ActivityView::ActivityView(QWidget *parent) : QWidget(parent) {
   auto *ruleTitle = new QLabel("Rules");
   ruleTitle->setObjectName("panelTitle");
   sideLayout->addWidget(ruleTitle);
-  auto *ruleInfo = new QLabel("Read-only observation\nNo firewall decision or rule is applied.");
+  auto *ruleInfo = new QLabel("Observed socket activity\nPolicy is shown in Rules and pending decisions. Observation alone does not establish a firewall verdict.");
   ruleInfo->setWordWrap(true);
   ruleInfo->setContentsMargins(7, 3, 7, 6);
   sideLayout->addWidget(ruleInfo);

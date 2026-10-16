@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 )
@@ -20,9 +22,48 @@ func hostCommand() error {
 	uid := fs.Int("uid", -1, "explicit GUI user UID; grants control only over that user's applications")
 	duration := fs.Duration("duration", 5*time.Minute, "automatic deliberate stop (10s–30m)")
 	timeout := fs.Duration("timeout", 30*time.Second, "pending decision timeout (1s–60s)")
+	action := fs.String("action", "", "session start/status/stop/recover")
 	token := fs.String("token", "", "internal watchdog generation")
 	if err := fs.Parse(os.Args[2:]); err != nil {
 		return err
+	}
+	if op == "host-session" {
+		if os.Geteuid() != 0 {
+			return fmt.Errorf("session commands require terminal sudo; never elevate Qt")
+		}
+		if *state == "" {
+			*state = "/run/flowgate"
+		}
+		if *socket == "" {
+			*socket = "/run/flowgate-api/control.sock"
+		}
+		if *database == "" {
+			*database = "/var/lib/flowgate/rules.db"
+		}
+		switch *action {
+		case "start":
+			if *uid < 0 || uint64(*uid) > uint64(^uint32(0)) {
+				return fmt.Errorf("explicit GUI UID required")
+			}
+			target, err := hostfirewall.PrepareSession(*state, filepath.Dir(*socket), *database)
+			if err != nil {
+				return err
+			}
+			args := []string{target, "host-start", "--state", *state, "--socket", *socket, "--database", *database, "--uid", strconv.Itoa(*uid), "--duration", duration.String(), "--timeout", timeout.String()}
+			return syscall.Exec(target, args, []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C.UTF-8"})
+		case "status":
+			v, err := hostfirewall.Status(*state)
+			if err == nil {
+				output(v)
+			}
+			return err
+		case "stop":
+			return hostfirewall.StopGeneration(*state, *token)
+		case "recover":
+			return hostfirewall.Recover(*state, *token)
+		default:
+			return fmt.Errorf("session action must be start, status, stop or recover")
+		}
 	}
 	if *state == "" {
 		return fmt.Errorf("--state is required")
@@ -36,7 +77,7 @@ func hostCommand() error {
 		defer cancel()
 		return hostfirewall.Run(ctx, *state, *socket, *database, uint32(*uid), *duration, *timeout)
 	case "host-stop":
-		return hostfirewall.Stop(*state)
+		return hostfirewall.StopGeneration(*state, *token)
 	case "host-recover":
 		return hostfirewall.Recover(*state, "")
 	case "host-watch":

@@ -1,5 +1,7 @@
 #pragma once
 #include "activity.h"
+#include "evaluation.h"
+#include "observation.h"
 #include <QtNetwork/QLocalSocket>
 #include <QtWidgets>
 #include <functional>
@@ -11,6 +13,33 @@ public:
   explicit Window(const QString &socket, QWidget *parent = nullptr);
   ~Window() override;
   void refresh();
+  void setObservationSocket(const QString &path);
+  void setEvaluationLauncherForTest(Evaluation::Launcher f) {
+    testEvaluation = true;
+    evaluation->setLauncherForTest(std::move(f));
+  }
+  Q_INVOKABLE void openPendingNotification();
+signals:
+  void pendingNotification(QString id);
+
+private:
+  Observation *observation;
+  Evaluation *evaluation;
+  QLabel *monitorStatus, *pendingCount;
+  QPushButton *startEvaluation, *stopEvaluation, *recoverEvaluation,
+      *cancelEvaluation, *enableRule;
+  QSystemTrayIcon *tray;
+  QString enforcementState, workflowMessage, expectedGeneration, notificationID,
+      notificationGeneration;
+  QDateTime stopsAt;
+  qint64 lastNotification = 0;
+  QHash<QString, qint64> notificationGroups;
+  bool separateObservation = false, confirmedStopped = false,
+       testEvaluation = false;
+  void updateEnforcement();
+  void evaluationOutcome(QString action, QString phase, QString message,
+                         QString token);
+  void renderRules(const QJsonArray &entries);
 
 private:
   QTabWidget *tabs;
@@ -19,7 +48,7 @@ private:
   QLineEdit *endpoint;
   QLabel *status, *result, *promptResult, *promptConnection;
   QTableWidget *pending, *history, *rules;
- QPushButton *disableRule, *deleteRule;
+  QPushButton *disableRule, *deleteRule;
   QPlainTextEdit *details, *preview;
   QComboBox *scope;
   QPushButton *allow, *block;
@@ -34,7 +63,7 @@ private:
   QStringList recentOrder, notifiedOrder;
   QSet<QString> notified, submitting;
   QString generation, selected, promptID, activeEndpoint;
-  bool ruleSubmitting=false;
+  bool ruleSubmitting = false;
   bool connected = false, readOnly = true, listing = false;
   int epoch = 0;
   qint64 serverOffset = 0;

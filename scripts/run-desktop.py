@@ -34,7 +34,7 @@ try:
     print('FlowGate host monitor — read-only. No firewall rules or synthetic traffic.',flush=True)
     print('Private session:',run,flush=True)
     print('Close the window or press Ctrl+C here to stop this observer. Other instances are independent.',flush=True)
-    gui=subprocess.Popen([str(ROOT/'.workspace/desktop/flowgate-desktop'),'--socket',str(run/'control.sock')],env=env)
+    gui=subprocess.Popen([str(ROOT/'.workspace/desktop/flowgate-desktop'),'--monitor-socket',str(run/'control.sock'),'--control-socket','/run/flowgate-api/control.sock'],env=env)
     gui.wait()
 except KeyboardInterrupt:
     pass

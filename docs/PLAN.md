@@ -1,13 +1,13 @@
 # Authoritative implementation plan
 
-## Current increment: explicit incoming-first host control
+## Complete: one coherent desktop application
 
-- Implement dedicated opt-in foreground mode; read-only launcher unchanged.
-- Persist remembered rules transactionally in SQLite and expose real rule controls.
-- Own an isolated nft table/mark allocation, preflight conflicts, scoped Stop/recovery.
-- Use a bounded independent evaluation watchdog; never activate real-host enforcement during implementation.
-- Verify the actual host-mode path in veth namespaces and the unprivileged Qt journey.
-- Document reviewable activation commands and measured limitations. Game detection and further visual work remain deferred.
+1. Independent asynchronous Activity and control connections in one window.
+2. Explicit five-minute evaluation through terminal sudo; verified readiness, scoped Stop/recovery and independent countdown.
+3. Safe root-owned executable snapshot; no live activation during development.
+4. Useful saved-rule columns, stable selection, Enable/Disable/Delete without expiry changes.
+5. Bounded native notifications/tray with a persistent pending count and no focus stealing.
+6. Focused actual-controller namespace/UI evidence; reuse the prior protocol matrix.
 
 ## Accepted baseline: running desktop program
 

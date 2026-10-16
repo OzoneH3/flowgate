@@ -12,7 +12,11 @@ assert RUN.is_relative_to(ROOT/'.workspace')
 assert os.environ['FLOWGATE_PARENT_NETNS']!=os.readlink('/proc/self/ns/net')
 RUN.mkdir(mode=0o700,parents=True,exist_ok=True)
 STATE=RUN/'state';STATE.mkdir(mode=0o700,exist_ok=True)
-API=RUN/'control.sock'
+WORKFLOW="--desktop-workflow" in sys.argv
+API=RUN/'api/control.sock' if WORKFLOW else RUN/'control.sock'
+observer=None
+active_job=None
+job_sequence=0
 BIN=str(ROOT/'.workspace/flowgate')
 counts={};backend=None;stopping=False
 signal.signal(signal.SIGTERM,lambda *_:globals().update(stopping=True))
@@ -55,7 +59,9 @@ def remote(op,**kw):
 def start(duration='120s'):
     global backend
     with (RUN/'backend.log').open('a') as f:
-        backend=subprocess.Popen([BIN,'host-start','--state',str(STATE),'--socket',str(API),'--uid','0','--duration',duration,'--timeout','4s'],stdout=f,stderr=f)
+        args=[BIN,'host-start','--state',str(STATE),'--socket',str(API),'--uid','0','--duration',duration,'--timeout','8s']
+        if WORKFLOW:args=[BIN,'host-session','--action','start','--state',str(STATE),'--database',str(RUN/'data/rules.db'),'--socket',str(API),'--uid','0','--duration',duration,'--timeout','8s']
+        backend=subprocess.Popen(args,stdout=f,stderr=f)
     def ready():
         if backend.poll() is not None:raise RuntimeError((RUN/'backend.log').read_text())
         try:return api().get('enforcement',{}).get('state')=='active'
@@ -87,8 +93,11 @@ try:
         s=socket.socket(socket.AF_INET6 if v6 else socket.AF_INET,socket.SOCK_DGRAM);s.bind(('fd79::1' if v6 else '10.79.0.1',port));counts[port]=0;threading.Thread(target=receive,args=(s,port,False),daemon=True).start()
     remote('tcp',port=44000);wait(lambda:counts[44000]==1)
     remote('tcp',port=44100,v6=True);wait(lambda:counts[44100]==1)
-    start()
-    if '--bootstrap-only' in sys.argv:
+    if not WORKFLOW:start()
+    else:
+        with (RUN/'observer.log').open('a') as f:observer=subprocess.Popen([BIN,'observe','--socket',str(RUN/'observer.sock'),'--interval','500ms'],stdout=f,stderr=f)
+        wait(lambda:(RUN/'observer.sock').exists())
+    if '--bootstrap-only'  in sys.argv:
         for v6,port in [(False,44000),(True,44100)]:remote('again',port=port,v6=v6);wait(lambda:counts[port]==2)
         for v6,port in [(False,68),(True,546)]:remote('udp',port=port,v6=v6,dhcp=True);wait(lambda:counts[port]==1);assert not pending(port)
         print('PASS pre-existing TCP IPv4/IPv6 and DHCP client-port bootstrap datagrams',flush=True)
@@ -133,21 +142,50 @@ try:
         failed=subprocess.run([BIN,'host-start','--state',str(STATE),'--socket',str(API),'--uid','0','--duration','10s'],capture_output=True);assert failed.returncode!=0;assert 'unrelated_fixture' in cmd('nft','list','tables');assert 'flowgate_host' not in cmd('nft','list','tables');print('PASS conflicting-mark startup refuses without unrelated mutations',flush=True)
     else:
         ctl=socket.socket(socket.AF_UNIX);ctl.bind(str(RUN/'demo.sock'));os.chmod(RUN/'demo.sock',0o600);ctl.listen(4);ctl.settimeout(.2);(RUN/'ready').write_text('isolated host-mode veth profile\n')
+        def publish(job,phase,message='',token=''):
+            global job_sequence
+            job=Path(job);assert job.is_relative_to(ROOT/'.workspace') and job.is_dir();job_sequence+=1
+            result={'version':1,'sequence':job_sequence,'phase':phase,'message':message,'generation':token}
+            (job/'result.new').write_text(json.dumps(result));(job/'result.new').replace(job/'result.json')
         while not stopping:
+            if active_job and backend and backend.poll() is not None:
+                info=json.loads(cmd(BIN,'host-status','--state',str(STATE)))
+                publish(active_job,'stopped' if info['state']=='stopped' and not info['table_present'] else 'unknown','Isolated controller exited; no automatic restart.',info['record']['Token']);active_job=None
             try:c,_=ctl.accept()
             except socket.timeout:continue
             with c:
                 c.settimeout(1);pid,uid,gid=struct.unpack('3i',c.getsockopt(socket.SOL_SOCKET,socket.SO_PEERCRED,12))
                 if uid!=os.getuid():continue
                 q=json.loads(c.recv(1024));op=q['operation'];r={}
-                if op=='send':remote('udp',port=q.get('port',44001));r={'sent_once':True}
+                if op=='send':remote('udp',port=q.get('port',44001),source_port=q.get('source_port',0));r={'sent_once':True}
                 elif op=='stopbackend':stop_backend();r={'ok':True}
+                elif op=='start':
+                    job=q['job']
+                    try:start('20s');active_job=job;publish(job,'ready','Namespace controller ready',api()['generation']);r={'ok':True}
+                    except Exception as e:publish(job,'failed',str(e));r={'ok':False}
+                elif op=='stop':
+                    try:cmd(BIN,'host-stop','--state',str(STATE),'--token',q['token']);backend.wait(6);publish(q['job'],'stopped','Scoped stop confirmed',q['token']);r={'ok':True}
+                    except Exception as e:publish(q['job'],'failed',str(e));r={'ok':False}
+                elif op=='cancel':publish(q['job'],'cancelled','Simulated authentication cancellation');r={'ok':True}
+                elif op=='refuse':
+                    cmd('nft','add','rule','inet','unrelated_fixture','track','ct','mark','set','0x1')
+                    data=json.loads(cmd('nft','-j','-a','list','chain','inet','unrelated_fixture','track'));handle=[x['rule']['handle'] for x in data['nftables'] if 'rule'in x][-1]
+                    try:start('20s');raise AssertionError('expected preflight refusal')
+                    except RuntimeError as e:publish(q['job'],'failed',str(e));r={'ok':True}
+                    finally:cmd('nft','delete','rule','inet','unrelated_fixture','track','handle',str(handle))
+                elif op=='status':
+                    try:r=json.loads(cmd(BIN,'host-status','--state',str(STATE)))
+                    except Exception:r={'state':'unavailable'}
+                    r['tables']=cmd('nft','list','tables')
+                elif op=='kill':backend.kill();backend.wait();r={'ok':True}
+                elif op=='recover':cmd(BIN,'host-recover','--state',str(STATE));publish(q['job'],'stopped','Scoped recovery confirmed',q.get('token',''));r={'ok':True}
                 elif op=='quit':stopping=True;r={'ok':True}
                 c.sendall(json.dumps(r).encode())
 finally:
     stopping=True
     try:stop_backend()
     except Exception:pass
+    if observer:observer.terminate();observer.wait(4)
     peer.terminate()
     try:peer.wait(3)
     except subprocess.TimeoutExpired:peer.kill();peer.wait()

@@ -40,7 +40,7 @@ func main() {
 		return
 	}
 	switch os.Args[1] {
-	case "host-start", "host-stop", "host-status", "host-recover", "host-watch":
+	case "host-session", "host-start", "host-stop", "host-status", "host-recover", "host-watch":
 		if err := hostCommand(); err != nil {
 			fatal(err)
 		}

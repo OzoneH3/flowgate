@@ -185,3 +185,16 @@ ownership checks. `persistent` is available only when durable storage is configu
 Rule schema 2 gains display-only executable, created and disabled fields; older
 rules default enabled. Unknown/corrupt stored documents fail startup. Pending IDs
 and Once permissions remain ephemeral; a restart never replays a GUI answer.
+
+## Unified desktop control
+
+The normal frontend holds independent observation/control connections. Observation
+never changes control health or policy authority. Each has bounded serial polling;
+control retains existing generation/epoch and stale-decision guards. Root activation
+and Stop remain explicit terminal-sudo commands, outside the selected-user policy API.
+Readiness requires matching generation and active health, not a successful preflight
+or live monitor. No failed or reconnected command is automatically replayed.
+Stored-rule `enable` uses existing ownership checks and preserves all scope/expiry
+fields. Offline rules are labelled last received. Minimized notifications are
+bounded and open current pending state; they contain no approval action. Dismissal
+or a stale callback never grants permission.

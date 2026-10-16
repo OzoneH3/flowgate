@@ -4,46 +4,62 @@
 Normal `scripts/run-desktop.sh` remains read-only. This is a manual, incoming-first
 prototype, not an installed service or a claim of universal firewall/VPN compatibility.
 
-## Review, then explicitly activate
+## Desktop workflow (explicit opt-in)
 
-From the repository root, as the ordinary desktop user:
+Run `scripts/run-desktop.sh` as your desktop user. Activity is live and read-only.
+Click **Start 5-minute evaluation** and accept its explanation. Konsole opens
+system sudo authentication; Qt has no password field. After authentication, the
+terminal bridge starts the controller and the same window verifies its generation,
+mode and active health before enabling decisions. The countdown uses the backend
+clock and original deadline. There is no automatic renewal or restart.
+
+Activity and control are independent sockets. Stop, controller loss and cancelled
+or failed authentication leave Activity usable. A read-only endpoint cannot stand
+in for failed control. **Stop evaluation** uses terminal sudo because the selected
+user's policy API permission does not include machine-wide Stop. **Status / recovery…**
+uses the same explicit privileged path. Confirmed Stop leaves saved rules on disk;
+the window labels the retained Rules snapshot as last received and disables edits
+until the controller is available. Disconnected without cleanup confirmation means
+actual enforcement state unknown. A status check can confirm cleanup later.
+
+The evaluation lasts **five minutes**, with **30-second** pending deadlines.
+Closing Qt does not stop it. Its independent detached watchdog remains responsible
+for the original deadline. Authentication cancellation is bounded to 60 seconds;
+startup has a 30-second bound after authentication. Cancel startup requests a
+cancel/foreground Stop, but the UI requires cleanup acknowledgement before saying
+stopped. If the terminal disappears without a result, the UI reports unknown and
+provides status/recovery. No failed operation is automatically replayed.
+
+The launcher needs Konsole, Python 3 and an existing sudo policy permitting these
+commands. Nothing installs an authorization framework, sudoers rule or service.
+Restricted sudo policies can refuse a command; the concrete error is shown.
+Konsole remains the authentication owner. Direct live sudo/host activation was
+not exercised in development; simulated authentication is distinguished below.
+
+Terminal alternative:
 
 ```sh
 scripts/evaluate-host.sh
+# Optional separately launched GUI; normal run-desktop.sh already combines both:
+.workspace/desktop/flowgate-desktop \
+  --monitor-socket /absolute/private/observer.sock \
+  --control-socket /run/flowgate-api/control.sock
 ```
 
-This builds the programs, then uses terminal sudo to create root-owned state/API
-and database directories and start the foreground daemon. It does not elevate Qt.
-It deliberately changes the live host firewall **only when you execute it**.
-The default evaluation lasts **five minutes**, with **30-second** prompt deadlines.
-The independent, session-detached watchdog also removes this instance at that
-same deadline if the daemon dies. No service, autostart or runtime helper is installed.
+The evaluator now calls `sudo .workspace/flowgate host-session --action start
+--uid "$(id -u)" --duration 5m --timeout 30s`. It creates/validates root-owned runtime,
+API and database directories without following symlinks or taking ownership of an
+unsafe existing directory. It snapshots `/proc/self/exe` into mode0700
+`/run/flowgate/controller`, then executes that snapshot. The watchdog and later
+controls use it, so rebuilding a writable workspace binary cannot replace an
+active controller's executable. This is a per-run executable, not an installed
+service. Root never writes results into a GUI-provided job directory: the
+unprivileged terminal bridge writes bounded private files under `.workspace`.
+All executable arguments are structured; observed metadata supplies no commands.
 
-In another ordinary-user terminal:
-
-```sh
-.workspace/desktop/flowgate-desktop --socket /run/flowgate-api/control.sock
-```
-
-Use Pending & recent decisions for Allow/Block. Once is the default. One-hour
-permissions are saved with absolute expiry; Persistent means until disabled/deleted,
-subject to the executable revision guard. The Rules tab lists actual stored rules
-and supports Disable/Delete. Scope previews come from the backend. The control
-connection shows decisions; the existing Activity monitor remains available through
-`scripts/run-desktop.sh` as a separate read-only connection.
-
-Exact foreground command prepared by the script (after its directory setup):
-
-```sh
-sudo .workspace/flowgate host-start \
-  --state /run/flowgate --database /var/lib/flowgate/rules.db \
-  --socket /run/flowgate-api/control.sock --uid "$(id -u)" \
-  --duration 5m --timeout 30s
-```
-
-The duration is mandatory-bounded: 10 seconds–30 minutes. There is deliberately
-no unlimited production activation option in this milestone. Closing Qt does not
-stop enforcement. Ctrl+C in the foreground daemon terminal deliberately stops it.
+The lower-level `host-start` remains available for controlled custom deployments
+and namespace tests. Duration is bounded to 10 seconds–30 minutes; the desktop
+always requests five minutes. Qt remains unprivileged throughout.
 
 ## Inspect, stop, recover
 
@@ -131,7 +147,10 @@ absolute expiry or no expiry, disabled state and an informational executable pat
 Matching continues to use application/revision/UID/direction/protocol/address/ports.
 One transaction commits before policy publishes a remembered verdict. Pending IDs,
 packets and Once grants never persist. Unsupported/corrupt storage refuses startup;
-a write error cannot publish an Allow. A disabled/deleted rule invalidates pending
+a write error cannot publish an Allow. Enable preserves the exact scope, creation time and absolute expiry; it does not
+revive an expired lease. Once decisions never appear as stored rules. Rule columns
+show application, action, direction, protocol, endpoints, absolute expiry and state.
+A changed rule invalidates pending
 and userspace cached decisions conservatively; a new connection must retry.
 `/var/lib/flowgate/rules.db` survives daemon restart/reboot; `/run` control state does
 not. Direct CLI calls can choose separate private paths with `--database`.
@@ -167,3 +186,22 @@ No Wine matrix is rerun. Separate bootstrap tests verify pre-existing IPv4/IPv6 
 and UDP datagrams on the DHCP client-port exceptions without prompting. Full DHCP
 lease negotiation, other distributions and real-host coexistence remain unverified;
 the IPv6 tests exercise ordinary NDP on the veth link.
+
+## Unified desktop evidence
+
+`QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=wayland-0 scripts/check-unified.sh`
+exercises the real controller, private root-in-namespace snapshot, receiver and
+read-only observer together. The C++ test replaces only terminal authentication
+with a private test launcher. `check-control-bridge.py` separately runs the real
+terminal bridge with a simulated sudo executable inside a disposable namespace.
+These checks do not authenticate or activate on the real host.
+
+Qt tests verify a minimized pending request invokes the installed native tray
+facility, throttles repeated attempts, and opens the current request without an
+Allow action. Clicking an expired notification grants nothing. Native notifications
+can be suppressed by desktop settings; the pending count/list remain authoritative.
+Dialog prompts are shown automatically only while the main window is active, not
+over inactive/fullscreen applications. The tray contains no Allow action.
+Notification callbacks are tested through Qt; no claim is made that desktop Do Not
+Disturb settings or every shell delivers a visible popup. No pixel-identical
+NetLimiter claim or new game support is made.

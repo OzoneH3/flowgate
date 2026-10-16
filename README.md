@@ -2,22 +2,31 @@
 
 A native Qt 6 desktop application with an independent Go backend. **Normal launch shows real host application/socket activity read-only.** No firewall rules, interception or host protection. The accepted prompt workflow remains a separate isolated lab.
 
-## Explicit host firewall evaluation (opt-in)
-
-The new incoming-first controller is implemented and verified in disposable
-namespaces. **It has not been activated on this host.** Review
-[the activation, Stop and recovery contract](docs/HOST-CONTROL.md) before running:
+## One window: Activity and optional five-minute control
 
 ```sh
-scripts/evaluate-host.sh  # explicit host activation; automatic stop after 5 minutes
-# In a second, ordinary-user terminal:
-.workspace/desktop/flowgate-desktop --socket /run/flowgate-api/control.sock
+scripts/run-desktop.sh
 ```
 
-Saved one-hour and persistent permissions, a basic Rules list and Disable/Delete
-are available in this mode. Normal launch below remains read-only. No GUI sudo,
-service installation or implicit activation. Existing VPN/mark configurations can
-cause a deliberate preflight refusal.
+Activity opens read-only. Click **Start 5-minute evaluation**, read the short
+explanation, then authenticate with system sudo in the launched Konsole terminal.
+The same window attaches only after the controller's generation and active API
+state are verified. Activity continues through a separate read-only connection.
+
+Use Pending & recent decisions for Allow/Block and Rules for saved permissions,
+**Enable**, Disable and Delete. **Stop evaluation** opens terminal authentication
+and reports stopped only after confirmed cleanup. Closing the window leaves an
+active evaluation running under its original deadline. **Status / recovery…**
+provides the independent privileged check/recovery path; disconnect means unknown.
+
+**Normal launch activates nothing. Live host evaluation was not run during
+implementation.** Start requires installed Konsole, Python 3 and an existing sudo
+policy permitting the controller command. Qt never collects a password. Refusals
+and cancelled authentication leave Activity available. See
+[the exact activation, Stop and recovery contract](docs/HOST-CONTROL.md).
+
+The terminal alternative remains `scripts/evaluate-host.sh`. There is no service,
+sudoers change, autostart or background automatic activation.
 
 ## Launch the live host monitor
 
@@ -27,7 +36,8 @@ scripts/run-desktop.sh
 scripts/run-desktop.sh --interval 3s
 ```
 
-No synthetic traffic is generated. Expand applications into processes and sockets;
+No synthetic traffic is generated. Observation and control have independent status
+indicators. Expand applications into processes and sockets;
 search names, paths, PIDs or endpoints; sort/filter; select full details and copy
 fields. Shared sockets appear once; unidentified sockets remain individual entries.
 UDP is labelled bound or connected. Initiation direction is **Unknown**.
@@ -36,11 +46,13 @@ UDP is labelled bound or connected. Initiation direction is **Unknown**.
 launcher stops only its observer and removes its private socket. Every launch uses
 an independent mode-0700 `.workspace/host-monitor-*` directory; duplicate launches
 never unlink another socket. Logs remain. No service, autostart or root is needed.
-This differs from the lab, which keeps enforcing after its GUI closes.
+An explicitly started evaluation also keeps enforcing after the GUI closes, until
+Stop or its original five-minute deadline. The observer alone belongs to this launcher.
 
 Visibility is limited by the current user, proc access and current network namespace.
 Owners can be inaccessible or gone. The UI reports partial coverage and collection
-errors; observation never produces Allowed events or enables policy actions. No Wine
+errors; observation never produces Allowed events. Decision controls require an
+authenticated, active control connection. No Wine
 helper starts or attaches to a game prefix. Rates and domain/location data are not
 invented. See [visual references and differences](docs/VISUAL.md) for the NetLimiter 5
 layout target, recreated with our Qt components and FlowGate branding.
@@ -105,6 +117,19 @@ The socket field plus **Connect** changes the selected endpoint. A disconnected
 client disables decisions and refreshes state on reconnect, without replaying
 answers. Recent decisions are bounded **client-observed, current-backend-session**
 history, not an audit log. The backend remains authoritative.
+
+## Focused integrated workflow checks
+
+```sh
+QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=wayland-0 scripts/check-unified.sh
+```
+
+The real controller runs only in disposable veth namespaces. Qt exercises the
+same-window Activity/control workflow, receiver delivery, saved-rule expiry and
+re-enable, Stop, timeout, loss, notifications and closure. Authentication is a
+narrow simulated seam; a separate terminal-bridge check uses a simulated sudo
+command with the real namespace controller. Actual host sudo activation remains
+for explicit user evaluation. Existing protocol and Wine evidence is reused.
 
 ## Focused host-monitor checks
 

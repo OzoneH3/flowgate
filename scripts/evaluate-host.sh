@@ -14,9 +14,5 @@ printf '%s\n' 'Explicit incoming-first HOST enforcement evaluation, automatic st
  '.workspace/desktop/flowgate-desktop --socket /run/flowgate-api/control.sock' \
  'Stop: sudo .workspace/flowgate host-stop --state /run/flowgate' \
  'Recovery after daemon loss: sudo .workspace/flowgate host-recover --state /run/flowgate'
-sudo install -d -o root -g root -m 0700 /run/flowgate /var/lib/flowgate
-sudo install -d -o root -g root -m 0711 /run/flowgate-api
-exec sudo "$PWD/.workspace/flowgate" host-start \
-  --state /run/flowgate --database /var/lib/flowgate/rules.db \
-  --socket /run/flowgate-api/control.sock --uid "$(id -u)" \
-  --duration 5m --timeout 30s
+exec sudo "$PWD/.workspace/flowgate" host-session --action start \
+  --uid "$(id -u)" --duration 5m --timeout 30s

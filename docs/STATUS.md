@@ -12,7 +12,39 @@ launching terminal to stop that instance's observer. Independent launches have
 separate private sockets. A separately managed observer stays running when a client
 closes. Branch: `milestone/backend`; exact snapshot: `git rev-parse HEAD`.
 
-## New: explicit host-control evaluation
+## Current: one coherent desktop workflow
+
+`scripts/run-desktop.sh` opens one native window with separate Activity and control
+connections. Normal launch is read-only. Start 5-minute evaluation launches terminal
+sudo, waits for matching-generation active health, and enables existing prompts
+and rules in the same window. Stop/status/recovery use authenticated terminal
+commands; selected-user policy permissions were not widened. Activity continues
+when control fails, stops or times out. Closing Qt leaves the evaluation deadline
+intact. No host activation was performed during this increment.
+
+Saved rules now show application/action/direction/protocol/endpoints/absolute
+expiry/state. Enable/Disable/Delete preserve selection, scope and expiry. Offline
+rule rows are explicitly a last-received snapshot. Pending count, native tray and
+bounded notifications support minimized use; notifications never Allow traffic.
+
+The evaluator uses a private root-owned executable snapshot for controller and
+watchdog, with safe existing-directory validation. The unprivileged terminal bridge
+uses bounded private result files; it never collects credentials or adds sudoers.
+See HOST-CONTROL.md for the user journey and independent commands.
+
+Actual Wayland tests: `.workspace/unified-final-3.log`; terminal bridge:
+`.workspace/unified-bridge-final.log`; focused Go/race/vet:
+`.workspace/unified-go-final.log`; host-monitor smoke:
+`.workspace/unified-monitor-smoke.log`; normal launch: `.workspace/unified-launch.log`.
+Inspected captures: `.workspace/unified-1150425/unified-activity.png` and
+`.workspace/unified-1150425/unified-rules.png`. The UI logs print exact screenshot paths.
+Authentication is simulated in a narrow seam; controller start/Stop, UDP receiver
+Allow/Block, rule re-enable/unchanged expiry, real preflight refusal, timeout/loss,
+and closure under the original deadline use the real namespace backend. Native tray
+and message support were available; OS notification click dispatch is tested via Qt.
+Real sudo authentication and live-host coexistence remain untested intentionally.
+
+## Previous host-control milestone (reusable evidence)
 
 Incoming-first host-mode code, saved one-hour/persistent SQLite rules, Rules
 Disable/Delete, enforcement health, scoped Stop/recovery and a detached five-minute
@@ -42,7 +74,7 @@ namespace ancestors) were fixed without relaxing real-host privileged paths.
 Limits: conservative VPN/mark/queue conflict refusals; snapshot cutover window;
 queued extension headers/fragments unsupported; other-UID services can time out;
 Full DHCP lease negotiation and real-host coexistence unverified. API control mode shows decisions;
-Activity remains a separate read-only observer connection. Game detection unchanged.
+Activity now shares the same window through an independent read-only connection. Game detection unchanged.
 
 ## Available now
 
@@ -55,8 +87,8 @@ Activity remains a separate read-only observer connection. Game detection unchan
   remains Unknown, not inferred from port numbers.
 - Partial visibility, timestamps and collection cost; errors/overdue collection
   and disconnect never present a previous successful snapshot as live.
-- Host API always read-only, including direct mutation attempts. Host GUI omits
-  policy controls. Observation creates no Allow/Block decision events.
+- Observation API always read-only, including direct mutation attempts. Policy
+  controls require the separate authenticated controller. Observation creates no Allow/Block decision events.
 - Serial periodic snapshots, default two-second delay after completion; bounded
   result/cache sizes, no GUI-triggered collection, Wine helpers or host hooks.
 - Unprivileged launcher with private per-instance paths and scoped cleanup; no
@@ -130,6 +162,6 @@ Design worktree: `.workspace/worktrees/netlimiter-design`, branch
 `frontend/netlimiter-design`. Integration owns backend/API/scripts/tests; design
 owns presentation. The final report names the integrated commit.
 
-Next: user review/execution of the explicit bounded host evaluation; then address
+Next: user review/execution of the desktop evaluation workflow; then address
 observed coexistence issues before service integration. No hidden activation action.
 Continue game detection later.

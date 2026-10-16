@@ -404,7 +404,8 @@ func Run(ctx context.Context, dir, socket, database string, uid uint32, duration
 	}
 	return err
 }
-func Stop(dir string) error { return stopInstance(dir, "") }
+func Stop(dir string) error                  { return stopInstance(dir, "") }
+func StopGeneration(dir, token string) error { return stopInstance(dir, token) }
 func stopInstance(dir, token string) error {
 	r, err := Read(dir)
 	if err != nil {

@@ -58,18 +58,28 @@ toolbar/tabs, right Info/rules panel, lower chart region. Missing measurements a
 controls stay explicitly unavailable. Plain-text details, generic icons and other
 remaining differences are acknowledged in VISUAL.md; do not claim pixel identity.
 
-## Current increment: host control ready for review
+## Current increment: coherent desktop evaluation
 
-Read HOST-CONTROL.md before any activation. `scripts/evaluate-host.sh` is the exact
-opt-in five-minute foreground command; it has NOT been run on the real host.
-Normal `scripts/run-desktop.sh` remains read-only. Actual host-start receiver and
-Wayland button evidence is indexed in STATUS. Reproduce with
-`QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=wayland-0 scripts/check-host.sh`.
-Use the documented host-status/host-stop/host-recover commands independently of Qt.
+Normal command remains `scripts/run-desktop.sh`: one window, Activity read-only by
+default, independent control endpoint. Start 5-minute evaluation explains the profile,
+opens Konsole/system sudo and attaches only after authenticated matching-generation
+readiness. Stop and Status/recovery also use terminal sudo. GUI policy authorization
+was not extended to global Stop. No live evaluator was run during development.
 
-Remaining work: user-reviewed real-host evaluation, concrete coexistence issues,
-then service/desktop authorization integration. Existing mark/queue/VPN setups may
-be refused deliberately. No need to redo Wine or accepted native/lab matrices.
-No host firewall/network/VPN/security settings, installed runtime/launcher/prefix,
-services or system packages were changed. Do not activate host enforcement without
-separate explicit authorization or the user's own execution of the reviewed command.
+New code: desktop/observation.* and evaluation.* keep the small connection/terminal
+bridges separate; Window owns the current state, stored rules and notifications.
+The terminal bridge is scripts/desktop-control.py. Root host-session safely snapshots
+the executing binary under /run/flowgate; the watchdog uses that snapshot. Existing
+host-start/status/stop/recover commands remain available without Qt.
+
+Reproduce focused evidence with
+`QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=wayland-0 scripts/check-unified.sh`.
+It uses real namespace enforcement/receiver traffic and read-only observation,
+with an explicit authentication test seam. The separate bridge check simulates sudo
+in that namespace. Reuse the accepted broader native/Wine evidence. STATUS indexes
+logs and the Qt log prints the current controlled-fixture capture directory.
+
+Remaining validation: explicit user-run real-host terminal authentication and
+coexistence; notifications depend on desktop settings. No sudoers/service/autostart
+installation, host firewall/network/VPN/security change, game/runtime/prefix or
+launcher changes. Do not activate live enforcement during further development.

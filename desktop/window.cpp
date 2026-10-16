@@ -72,13 +72,99 @@ Window::Window(const QString &path, QWidget *parent) : QMainWindow(parent) {
   status->setTextFormat(Qt::PlainText);
   status->setWordWrap(true);
   statusBar()->setSizeGripEnabled(true);
+  monitorStatus = new QLabel;
+  monitorStatus->setObjectName("monitorStatus");
+  monitorStatus->setTextFormat(Qt::PlainText);
+  monitorStatus->hide();
+  statusBar()->addWidget(monitorStatus);
   statusBar()->addWidget(status, 1);
+  auto *controlActions = new QHBoxLayout;
+  startEvaluation = new QPushButton("Start 5-minute evaluation");
+  startEvaluation->setObjectName("startEvaluation");
+  stopEvaluation = new QPushButton("Stop evaluation");
+  stopEvaluation->setObjectName("stopEvaluation");
+  recoverEvaluation = new QPushButton("Status / recovery…");
+  recoverEvaluation->setObjectName("recoverEvaluation");
+  cancelEvaluation = new QPushButton("Cancel startup");
+  cancelEvaluation->setObjectName("cancelEvaluation");
+  pendingCount = new QLabel("Pending: 0");
+  pendingCount->setObjectName("pendingCount");
+  for (auto *button :
+       {startEvaluation, stopEvaluation, recoverEvaluation, cancelEvaluation})
+    controlActions->addWidget(button);
+  controlActions->addStretch();
+  controlActions->addWidget(pendingCount);
+  layout->addLayout(controlActions);
+  evaluation = new Evaluation(this);
+  connect(evaluation, &Evaluation::outcome, this, &Window::evaluationOutcome);
+  connect(startEvaluation, &QPushButton::clicked, this, [this] {
+    QMessageBox explanation(
+        QMessageBox::Question, "Start FlowGate evaluation",
+        "Control new incoming application TCP/UDP connections for five "
+        "minutes. Outgoing traffic remains allowed. Authentication opens in a "
+        "terminal. Closing this window leaves the evaluation running until "
+        "Stop or its deadline.",
+        QMessageBox::Ok | QMessageBox::Cancel, this);
+    explanation.setObjectName("evaluationExplanation");
+    explanation.setTextFormat(Qt::PlainText);
+    if (explanation.exec() == QMessageBox::Ok) {
+      if (!testEvaluation) {
+        if (mode == "host-monitor" && !separateObservation)
+          setObservationSocket(activeEndpoint);
+        endpoint->setText("/run/flowgate-api/control.sock");
+        reconnect();
+      }
+      confirmedStopped = false;
+      expectedGeneration.clear();
+      evaluation->launch("start");
+    }
+  });
+  connect(stopEvaluation, &QPushButton::clicked, this, [this] {
+    evaluation->launch(
+        "stop", expectedGeneration.isEmpty() ? generation : expectedGeneration);
+  });
+  connect(cancelEvaluation, &QPushButton::clicked, evaluation,
+          &Evaluation::cancelStart);
+  connect(recoverEvaluation, &QPushButton::clicked, this, [this] {
+    QMessageBox box(
+        QMessageBox::Question, "Enforcement status / recovery",
+        "Control is checked through terminal sudo. Recovery removes only the "
+        "recorded FlowGate objects after the daemon exits. It cannot override "
+        "an active instance.\nIndependent command: sudo "
+        "/run/flowgate/controller host-recover --state /run/flowgate",
+        QMessageBox::Cancel, this);
+    box.setTextFormat(Qt::PlainText);
+    auto *check = box.addButton("Check status", QMessageBox::ActionRole);
+    auto *recover =
+        box.addButton("Recover owned objects", QMessageBox::DestructiveRole);
+    box.exec();
+    if (box.clickedButton() == check)
+      evaluation->launch("status", generation);
+    if (box.clickedButton() == recover)
+      evaluation->launch("recover", generation);
+  });
   tabs = new QTabWidget;
   tabs->setObjectName("views");
   tabs->setDocumentMode(true);
   layout->addWidget(tabs, 1);
   activity = new ActivityView;
   tabs->addTab(activity, "Activity");
+  observation = new Observation(this);
+  connect(observation, &Observation::snapshot, this,
+          [this](QJsonObject data, QString gen) {
+            monitorStatus->setText(
+                data["error"].toString().isEmpty()
+                    ? (data["complete"].toBool()
+                           ? "Activity: read-only · live"
+                           : "Activity: read-only · live, partial visibility")
+                    : "Activity: unavailable");
+            activity->consume(data, gen);
+          });
+  connect(observation, &Observation::unavailable, this, [this](QString error) {
+    monitorStatus->setText("Activity: unavailable");
+    monitorStatus->setToolTip(error.toHtmlEscaped());
+    activity->unavailable(error);
+  });
   auto *split = new QSplitter(Qt::Horizontal);
   split->setChildrenCollapsible(false);
   auto *lists = new QSplitter(Qt::Vertical);
@@ -146,27 +232,70 @@ Window::Window(const QString &path, QWidget *parent) : QMainWindow(parent) {
   split->setSizes({830, 390});
   auto *rulePage = new QWidget;
   auto *ruleLayout = new QVBoxLayout(rulePage);
-  auto *ruleNote = new QLabel("Stored permissions · disabling/deleting affects new connections; existing approved TCP connections continue.");
+  auto *ruleNote =
+      new QLabel("Stored permissions · disabling/deleting affects new "
+                 "connections; existing approved TCP connections continue.");
   ruleNote->setWordWrap(true);
+  ruleNote->setObjectName("rulesNote");
   ruleLayout->addWidget(ruleNote);
-  rules = table({"Rule", "Action", "State", "Expiry", "Executable and exact matching scope"}, "rules");
-  rules->setColumnWidth(0, 190); rules->setColumnWidth(4, 500);
+  rules = table({"Application", "Action", "Direction", "Protocol",
+                 "Endpoint scope", "Expiry (absolute)", "State", "Rule ID"},
+                "rules");
+  rules->setColumnWidth(0, 190);
+  rules->setColumnWidth(4, 300);
+  rules->setColumnWidth(5, 210);
+  rules->setColumnHidden(7, true);
   ruleLayout->addWidget(rules);
   auto *ruleActions = new QHBoxLayout;
+  enableRule = new QPushButton("Enable selected rule");
+  enableRule->setObjectName("enableRule");
   disableRule = new QPushButton("Disable selected rule");
   deleteRule = new QPushButton("Delete selected rule");
-  disableRule->setObjectName("disableRule"); deleteRule->setObjectName("deleteRule");
-  ruleActions->addWidget(disableRule); ruleActions->addWidget(deleteRule); ruleActions->addStretch();
+  disableRule->setObjectName("disableRule");
+  deleteRule->setObjectName("deleteRule");
+  ruleActions->addWidget(enableRule);
+  ruleActions->addWidget(disableRule);
+  ruleActions->addWidget(deleteRule);
+  ruleActions->addStretch();
   ruleLayout->addLayout(ruleActions);
-  tabs->addTab(rulePage, "Rules"); tabs->setTabEnabled(2, false);
-  for (auto *b : {disableRule, deleteRule}) connect(b, &QPushButton::clicked, this, [this,b] {
-    int row=rules->currentRow();
-    if (!connected || readOnly || ruleSubmitting || row<0 || !rules->item(row,0)) return;
-    auto id=rules->item(row,0)->text();
-    ruleSubmitting=true;disableRule->setEnabled(false); deleteRule->setEnabled(false);
-    request({{"version",1},{"operation","rule"},{"id",id},{"action",b==disableRule ? "disable" : "delete"}},
-      [this](QJsonObject r, QString error){ruleSubmitting=false;feedback(error.isEmpty() ? (r["error"].toString().isEmpty() ? "Rule change acknowledged" : r["error"].toString()) : error); refresh();});
-  });
+  tabs->addTab(rulePage, "Rules");
+  tabs->setTabEnabled(2, false);
+  for (auto *b : {enableRule, disableRule, deleteRule})
+    connect(b, &QPushButton::clicked, this, [this, b] {
+      int row = rules->currentRow();
+      if (!connected || readOnly || ruleSubmitting || row < 0 ||
+          !rules->item(row, 0))
+        return;
+      auto id = rules->item(row, 0)->data(Qt::UserRole).toString();
+      ruleSubmitting = true;
+      enableRule->setEnabled(false);
+      disableRule->setEnabled(false);
+      deleteRule->setEnabled(false);
+      const auto submittedGeneration = generation;
+      request(
+          {{"version", 1},
+           {"operation", "rule"},
+           {"id", id},
+           {"action", b == enableRule
+                          ? "enable"
+                          : (b == disableRule ? "disable" : "delete")}},
+          [this, submittedGeneration](QJsonObject r, QString error) {
+            ruleSubmitting = false;
+            if (error.isEmpty() &&
+                (generation != submittedGeneration ||
+                 r["generation"].toString() != submittedGeneration)) {
+              feedback(
+                  "Backend generation changed; rule acknowledgement rejected.");
+              refresh();
+              return;
+            }
+            feedback(error.isEmpty() ? (r["error"].toString().isEmpty()
+                                            ? "Rule change acknowledged"
+                                            : r["error"].toString())
+                                     : error);
+            refresh();
+          });
+    });
   result = new QLabel;
   result->setObjectName("result");
   result->setTextFormat(Qt::PlainText);
@@ -182,7 +311,8 @@ Window::Window(const QString &path, QWidget *parent) : QMainWindow(parent) {
   auto *pl = new QVBoxLayout(prompt);
   pl->setContentsMargins(3, 3, 3, 7);
   pl->setSpacing(5);
-  auto *promptHeading = new QLabel(QCoreApplication::applicationName() + " Blocker");
+  auto *promptHeading =
+      new QLabel(QCoreApplication::applicationName() + " Blocker");
   promptHeading->setObjectName("promptHeading");
   promptHeading->setTextFormat(Qt::PlainText);
   pl->addWidget(promptHeading);
@@ -224,21 +354,26 @@ Window::Window(const QString &path, QWidget *parent) : QMainWindow(parent) {
   connect(later, &QPushButton::clicked, prompt, &QDialog::hide);
   fileMenu->addAction("Reconnect backend", this, &Window::reconnect);
   fileMenu->addSeparator();
-  fileMenu->addAction("Close window", QKeySequence::Quit, this, &QWidget::close);
+  fileMenu->addAction("Close window", QKeySequence::Quit, this,
+                      &QWidget::close);
   viewMenu->addAction("Activity", this, [this] { tabs->setCurrentIndex(0); });
   viewMenu->addAction("Pending and recent decisions", this, [this] {
-    if (tabs->isTabEnabled(1)) tabs->setCurrentIndex(1);
+    if (tabs->isTabEnabled(1))
+      tabs->setCurrentIndex(1);
   });
   viewMenu->addAction("Refresh", QKeySequence::Refresh, this, &Window::refresh);
-  helpMenu->addAction("About " + QCoreApplication::applicationName(), this, [this] {
-    QMessageBox box(this);
-    box.setWindowTitle("About " + QCoreApplication::applicationName());
-    box.setTextFormat(Qt::PlainText);
-    box.setText(QCoreApplication::applicationName() +
-      "\nHost monitoring is read-only. Enforcement is available only in the isolated lab.\n"
-      "Traffic rates, persistent rules and production host enforcement are not implemented.");
-    box.exec();
-  });
+  helpMenu->addAction(
+      "About " + QCoreApplication::applicationName(), this, [this] {
+        QMessageBox box(this);
+        box.setWindowTitle("About " + QCoreApplication::applicationName());
+        box.setTextFormat(Qt::PlainText);
+        box.setText(QCoreApplication::applicationName() +
+                    "\nRead-only Activity and explicit five-minute "
+                    "incoming-first control.\nSaved rules persist; closing Qt "
+                    "does not stop enforcement.\nTraffic rates and production "
+                    "service installation are not implemented.");
+        box.exec();
+      });
   connect(connectButton, &QPushButton::clicked, this, &Window::reconnect);
   connect(endpoint, &QLineEdit::returnPressed, this, &Window::reconnect);
   connect(pending, &QTableWidget::itemSelectionChanged, this, [this] {
@@ -267,7 +402,30 @@ Window::Window(const QString &path, QWidget *parent) : QMainWindow(parent) {
   });
   connect(&poll, &QTimer::timeout, this, &Window::refresh);
   poll.start(500);
-  connect(&clock, &QTimer::timeout, this, &Window::updateDetails);
+  tray = new QSystemTrayIcon(windowIcon(), this);
+  tray->setObjectName("tray");
+  auto *trayMenu = new QMenu(this);
+  trayMenu->addAction("Open pending requests", this,
+                      &Window::openPendingNotification);
+  trayMenu->addAction("Show Activity", this, [this] {
+    showNormal();
+    raise();
+    activateWindow();
+    tabs->setCurrentIndex(0);
+  });
+  tray->setContextMenu(trayMenu);
+  if (QSystemTrayIcon::isSystemTrayAvailable())
+    tray->show();
+  connect(tray, &QSystemTrayIcon::messageClicked, this,
+          &Window::openPendingNotification);
+  connect(tray, &QSystemTrayIcon::activated, this, [this](auto reason) {
+    if (reason == QSystemTrayIcon::Trigger)
+      openPendingNotification();
+  });
+  connect(&clock, &QTimer::timeout, this, [this] {
+    updateDetails();
+    updateEnforcement();
+  });
   clock.start(250);
   reconnect();
 }
@@ -330,8 +488,9 @@ void Window::request(QJsonObject q,
   s->connectToServer(activeEndpoint);
 }
 void Window::reconnect() {
- ruleSubmitting=false;
-  activity->unavailable("Reconnecting");
+  ruleSubmitting = false;
+  if (!separateObservation)
+    activity->unavailable("Reconnecting");
   mode.clear();
   activeEndpoint = endpoint->text();
   ++epoch;
@@ -364,20 +523,27 @@ void Window::refresh() {
   if (listing)
     return;
   listing = true;
-  request({{"version", 1}, {"operation", "list"}}, [this](QJsonObject r,
-                                                          QString error) {
-    listing = false;
-    if (!error.isEmpty() || !r["error"].toString().isEmpty()) {
-      connected = false;
-      disableRule->setEnabled(false); deleteRule->setEnabled(false);
-      activity->unavailable("Backend disconnected");
-      status->setText("Disconnected · enforcement state unknown · reconnecting — " +
-                      (error.isEmpty() ? r["error"].toString() : error));
-      updateDetails();
-      return;
-    }
-    consume(r);
-  });
+  request({{"version", 1}, {"operation", "list"}},
+          [this](QJsonObject r, QString error) {
+            listing = false;
+            if (!error.isEmpty() || !r["error"].toString().isEmpty()) {
+              connected = false;
+              enableRule->setEnabled(false);
+              disableRule->setEnabled(false);
+              deleteRule->setEnabled(false);
+              if (!separateObservation)
+                activity->unavailable("Backend disconnected");
+              enforcementState = "unknown";
+              pendingCount->setText("Pending: unknown");
+              status->setText(
+                  "Disconnected · enforcement state unknown · reconnecting — " +
+                  (error.isEmpty() ? r["error"].toString() : error));
+              updateDetails();
+              updateEnforcement();
+              return;
+            }
+            consume(r);
+          });
 }
 void Window::remember(const QJsonObject &e) {
   QString id = e["id"].toString();
@@ -410,6 +576,7 @@ void Window::consume(QJsonObject r) {
     recentBytes = 0;
     recentOrder.clear();
     notified.clear();
+    notificationGroups.clear();
     notifiedOrder.clear();
     submitting.clear();
     prompt->hide();
@@ -427,45 +594,66 @@ void Window::consume(QJsonObject r) {
                        : "Backend mode: " + value(r, "mode")));
   auto nextMode = r["mode"].toString();
   const bool hostControl = nextMode == "host-enforcement";
-  tabs->setTabEnabled(2,hostControl);
+  if (separateObservation && nextMode == "host-monitor") {
+    connected = false;
+    readOnly = true;
+    enforcementState = "unknown";
+    current.clear();
+    render();
+    updateEnforcement();
+    feedback("Control endpoint is read-only monitoring, not an enforcement "
+             "controller. Activity remains independent.");
+    return;
+  }
+  tabs->setTabEnabled(2, hostControl);
   if (hostControl) {
-    auto enforcement=r["enforcement"].toObject();
-    auto state=enforcement["state"].toString("unavailable");
-    status->setText("Host enforcement — " + state + " · Incoming-first; outgoing allowed · automatic stop " + enforcement["stops_at"].toString());
-    if (state!="active") readOnly=true;
+    auto enforcement = r["enforcement"].toObject();
+    auto state = enforcement["state"].toString("unavailable");
+    enforcementState = state;
+    stopsAt = QDateTime::fromString(enforcement["stops_at"].toString(),
+                                    Qt::ISODateWithMs);
+    if (state == "active")
+      confirmedStopped = false;
+    if (!expectedGeneration.isEmpty() && generation != expectedGeneration) {
+      readOnly = true;
+      enforcementState = "unknown";
+      workflowMessage = "Controller generation differs from the started "
+                        "evaluation; verify status.";
+    } else if (state == "active")
+      expectedGeneration.clear();
+    status->setText("Host enforcement — " + state +
+                    " · Incoming-first; outgoing allowed · automatic stop " +
+                    enforcement["stops_at"].toString());
+    if (state != "active")
+      readOnly = true;
   }
-  for (auto *box : {scope,promptScope}) {
+  for (auto *box : {scope, promptScope}) {
     QSignalBlocker guard(box);
-    auto chosen=box->currentData().toString();
-    box->clear();box->addItem("Once","once");
-    box->addItem(hostControl ? "Remember · 1 hour (saved)" : "Remember · 1 hour (memory only)","application");
-    if(hostControl) box->addItem("Persistent · until disabled/deleted","persistent");
-    box->setCurrentIndex(qMax(0,box->findData(chosen)));
+    auto chosen = box->currentData().toString();
+    box->clear();
+    box->addItem("Once", "once");
+    box->addItem(hostControl ? "Remember · 1 hour (saved)"
+                             : "Remember · 1 hour (memory only)",
+                 "application");
+    if (hostControl)
+      box->addItem("Persistent · until disabled/deleted", "persistent");
+    box->setCurrentIndex(qMax(0, box->findData(chosen)));
   }
-  QString ruleSelection;
-  if(rules->currentRow()>=0 && rules->item(rules->currentRow(),0)) ruleSelection=rules->item(rules->currentRow(),0)->text();
-  rules->setSortingEnabled(false);rules->setRowCount(0);
-  for(auto entry:r["rules"].toArray()) {
-    if(rules->rowCount()>=256) break;
-    auto rule=entry.toObject();auto filter=rule["filter"].toObject();
-    auto expiry=rule["expires"].toString();if(expiry.startsWith("0001-"))expiry="Until disabled/deleted";
-    QStringList fields{rule["id"].toString(),rule["action"].toString(),rule["disabled"].toBool()?"Disabled":"Enabled",expiry,rule["executable"].toString()+" · "+QString::fromUtf8(QJsonDocument(filter).toJson(QJsonDocument::Compact))};
-    int row=rules->rowCount();rules->insertRow(row);
-    for(int col=0;col<fields.size();++col){auto *item=new QTableWidgetItem(fields[col]);item->setToolTip(fields[col]);rules->setItem(row,col,item);}
-    if(fields[0]==ruleSelection)rules->selectRow(row);
-  }
-  rules->setSortingEnabled(true);
-  disableRule->setEnabled(hostControl&&!readOnly&&!ruleSubmitting);deleteRule->setEnabled(hostControl&&!readOnly&&!ruleSubmitting);
+  renderRules(r["rules"].toArray());
+  enableRule->setEnabled(hostControl && !readOnly && !ruleSubmitting);
+  disableRule->setEnabled(hostControl && !readOnly && !ruleSubmitting);
+  deleteRule->setEnabled(hostControl && !readOnly && !ruleSubmitting);
 
   tabs->setTabEnabled(1, nextMode != "host-monitor");
   if (nextMode != mode) {
     mode = nextMode;
-    tabs->setCurrentIndex(mode == "host-monitor" ? 0 : 1);
+    if (!separateObservation)
+      tabs->setCurrentIndex(mode == "host-monitor" ? 0 : 1);
   }
   if (mode == "host-monitor") {
     readOnly = true;
-    status->setText(
-        "Host monitor — read-only · observation only; enforcement state not queried");
+    status->setText("Host monitor — read-only · observation only; enforcement "
+                    "state not queried");
     prompt->hide();
     current.clear();
     recent.clear();
@@ -483,8 +671,9 @@ void Window::consume(QJsonObject r) {
   }
   tabs->setTabEnabled(1, true);
   poll.setInterval(500);
-  activity->unavailable(
-      "Activity uses a separate read-only observer; this connection shows firewall decisions");
+  if (!separateObservation)
+    activity->unavailable("Activity uses a separate read-only observer; this "
+                          "connection shows firewall decisions");
   current.clear();
   for (auto v : r["events"].toArray()) {
     auto e = v.toObject();
@@ -493,6 +682,7 @@ void Window::consume(QJsonObject r) {
       remember(e);
   }
   render();
+  updateEnforcement();
   choosePrompt();
 }
 bool Window::actionable(const QString &id) const {
@@ -583,6 +773,10 @@ void Window::render() {
     pending->selectRow(0);
     scope->setCurrentIndex(0);
   }
+  pendingCount->setText(QString("Pending: %1").arg(events.size()));
+  setWindowTitle(QCoreApplication::applicationName() +
+                 QString(" · %1 pending").arg(events.size()));
+  tray->setToolTip(QString("FlowGate · %1 pending").arg(events.size()));
   history->setRowCount(0);
   for (auto it = recentOrder.crbegin(); it != recentOrder.crend(); ++it) {
     auto e = recent[*it];
@@ -619,7 +813,8 @@ void Window::updateDetails() {
     auto event = current.value(promptID);
     auto flow = event["flow"].toObject();
     promptConnection->setText(value(flow, "direction") + " connection · " +
-                              value(flow, "protocol").toUpper() + " · " + appName(event));
+                              value(flow, "protocol").toUpper() + " · " +
+                              appName(event));
     set(promptDetails, describe(event));
     set(promptPreview, scopeText(current.value(promptID),
                                  promptScope->currentData().toString()));
@@ -638,20 +833,77 @@ void Window::choosePrompt() {
   if (prompt->isVisible())
     return;
   for (int row = 0; row < pending->rowCount(); ++row) {
-    auto id = pending->item(row, 0)->data(Qt::UserRole).toString();
+    QString id = pending->item(row, 0)->data(Qt::UserRole).toString();
     if (!actionable(id) || notified.contains(id))
       continue;
+    // Inactive/fullscreen contexts get a tray notification and persistent
+    // count, never an unsolicited dialog raised over another application.
+    if (!isActiveWindow() || isMinimized()) {
+      qint64 now = QDateTime::currentMSecsSinceEpoch();
+      auto flow = current[id]["flow"].toObject();
+      QString group =
+          generation + "|" + application(current[id])["key"].toString() + "|" +
+          flow["direction"].toString() + "|" + flow["protocol"].toString() +
+          "|" + flow["local"].toString() + "|" +
+          flow["remote"].toString().section(':', 0, -2);
+      if (now - lastNotification < 5000 ||
+          (notificationGroups.contains(group) &&
+           now - notificationGroups[group] < 30000))
+        return;
+      if (notificationGroups.size() >= 128)
+        notificationGroups.erase(notificationGroups.begin());
+      notificationGroups[group] = now;
+      lastNotification = now;
+      notificationID = id;
+      notificationGeneration = generation;
+      if (tray->isVisible() && QSystemTrayIcon::supportsMessages())
+        tray->showMessage(
+            "FlowGate · connection decision",
+            appName(current[id]) + " · " +
+                value(current[id]["flow"].toObject(), "direction") +
+                " · open FlowGate to decide",
+            QSystemTrayIcon::Information, 5000);
+      QApplication::alert(this, 5000);
+      emit pendingNotification(id);
+    } else {
+      promptID = id;
+      promptResult->clear();
+      promptScope->setCurrentIndex(0);
+      updateDetails();
+      prompt->setAttribute(Qt::WA_ShowWithoutActivating);
+      prompt->show();
+    }
     notified.insert(id);
     notifiedOrder.append(id);
     while (notifiedOrder.size() > 512)
       notified.remove(notifiedOrder.takeFirst());
-    promptID = id;
-    promptResult->clear();
+    return;
+  }
+}
+void Window::openPendingNotification() {
+  showNormal();
+  raise();
+  activateWindow();
+  tabs->setCurrentIndex(1);
+  if (!notificationID.isEmpty() &&
+      (notificationGeneration != generation || !actionable(notificationID))) {
+    feedback("Notification expired or replaced; open the persistent pending "
+             "list. No permission was granted.");
+    return;
+  }
+  if (notificationGeneration == generation && actionable(notificationID))
+    selected = notificationID;
+  else if (!actionable(selected))
+    selected.clear();
+  render();
+  if (actionable(selected)) {
+    promptID = selected;
     promptScope->setCurrentIndex(0);
     updateDetails();
     prompt->show();
-    return;
-  }
+  } else
+    feedback("No actionable request remains. Expired notifications grant no "
+             "permission.");
 }
 void Window::feedback(const QString &text) {
   result->setText(text);
@@ -700,4 +952,159 @@ void Window::submit(const QString &id, const QString &action,
             render();
             refresh();
           });
+}
+
+void Window::setObservationSocket(const QString &path) {
+  separateObservation = true;
+  monitorStatus->show();
+  monitorStatus->setText("Activity: connecting · read-only");
+  tabs->setTabEnabled(0, true);
+  tabs->setTabEnabled(1, true);
+  tabs->setCurrentIndex(0);
+  endpoint->setAccessibleName("Control API socket");
+  observation->attach(path);
+  updateEnforcement();
+}
+void Window::updateEnforcement() {
+  bool active = connected && mode == "host-enforcement" &&
+                enforcementState == "active" && !readOnly;
+  bool lab = connected && mode == "isolated-lab";
+  bool editRules =
+      connected && mode == "host-enforcement" && !readOnly && !ruleSubmitting;
+  for (auto *b : {enableRule, disableRule, deleteRule})
+    b->setEnabled(editRules);
+  if (rules->rowCount() > 0 && !connected) {
+    tabs->setTabText(2, "Rules · last received");
+    findChild<QLabel *>("rulesNote")
+        ->setText("Last received rule snapshot. Control is disconnected; saved "
+                  "rules remain on disk. Reconnect to change them.");
+  } else {
+    tabs->setTabText(2, "Rules");
+    findChild<QLabel *>("rulesNote")
+        ->setText("Stored permissions · changes affect new connections; "
+                  "existing approved TCP connections continue.");
+  }
+  startEvaluation->setEnabled(!active && !lab && !evaluation->starting() &&
+                              expectedGeneration.isEmpty() &&
+                              !evaluation->working());
+  stopEvaluation->setEnabled((active || !expectedGeneration.isEmpty()) &&
+                             !evaluation->working());
+  cancelEvaluation->setEnabled(evaluation->starting());
+  recoverEvaluation->setEnabled(!lab);
+  if (active) {
+    qint64 seconds = qMax<qint64>(0, (stopsAt.toMSecsSinceEpoch() -
+                                      QDateTime::currentMSecsSinceEpoch() -
+                                      serverOffset + 999) /
+                                         1000);
+    status->setText(
+        QString("Host enforcement — active · incoming-first · %1:%2 remaining "
+                "· closing this window keeps enforcement running")
+            .arg(seconds / 60)
+            .arg(seconds % 60, 2, 10, QChar('0')));
+  } else if (separateObservation || mode == "host-enforcement") {
+    QString control =
+        confirmedStopped
+            ? "Stopped (confirmed) · FlowGate no longer controls traffic"
+            : (evaluation->starting()
+                   ? "Starting evaluation · awaiting authenticated readiness"
+                   : (connected ? "Enforcement " + enforcementState
+                                : "Control disconnected · enforcement state "
+                                  "unknown"));
+    status->setText(control + (workflowMessage.isEmpty()
+                                   ? QString()
+                                   : " · " + workflowMessage.left(240)));
+  }
+}
+void Window::evaluationOutcome(QString action, QString phase, QString message,
+                               QString token) {
+  workflowMessage = message;
+  if (phase == "ready") {
+    expectedGeneration = token;
+    confirmedStopped = false;
+    feedback("Controller reports ready; verifying control API…");
+    refresh();
+  } else if (phase == "stopped") {
+    if (!generation.isEmpty() && !token.isEmpty() && generation != token &&
+        expectedGeneration != token) {
+      feedback("Ignoring cleanup acknowledgement for another generation.");
+      return;
+    }
+    confirmedStopped = true;
+    expectedGeneration.clear();
+    enforcementState = "stopped";
+    connected = false;
+    readOnly = true;
+    current.clear();
+    prompt->hide();
+    render();
+    feedback(message);
+  } else if (phase == "failed" || phase == "cancelled" || phase == "unknown") {
+    feedback(message +
+             " Activity remains available. No decision was replayed.");
+  } else if (phase == "status") {
+    if (token == generation)
+      expectedGeneration.clear();
+    feedback(message);
+  }
+  updateEnforcement();
+}
+void Window::renderRules(const QJsonArray &entries) {
+  QString selectedRule;
+  if (rules->currentRow() >= 0 && rules->item(rules->currentRow(), 0))
+    selectedRule =
+        rules->item(rules->currentRow(), 0)->data(Qt::UserRole).toString();
+  QSignalBlocker guard(rules);
+  rules->setSortingEnabled(false);
+  rules->setRowCount(0);
+  for (auto entry : entries) {
+    if (rules->rowCount() >= 256)
+      break;
+    auto r = entry.toObject(), f = r["filter"].toObject();
+    QString id = r["id"].toString(), path = r["executable"].toString();
+    auto expiry = r["expires"].toString();
+    bool persistent = expiry.startsWith("0001-");
+    bool expired =
+        !persistent &&
+        QDateTime::fromString(expiry, Qt::ISODateWithMs).toMSecsSinceEpoch() <=
+            QDateTime::currentMSecsSinceEpoch() + serverOffset;
+    auto port = [](int value) {
+      return value ? QString::number(value) : QString("Any");
+    };
+    QString remote = f["remote_address"].toString();
+    if (remote.isEmpty())
+      remote = "Any";
+    QString scope = QString("Remote %1 · local port %2 · remote port %3")
+                        .arg(remote, port(f["local_port"].toInt()),
+                             port(f["remote_port"].toInt()));
+    QStringList fields{path.isEmpty() ? f["application"].toString()
+                                      : QFileInfo(path).fileName(),
+                       r["action"].toString(),
+                       f["direction"].toString(),
+                       f["protocol"].toString(),
+                       scope,
+                       persistent ? "Persistent · no expiry" : expiry,
+                       r["disabled"].toBool()
+                           ? "Disabled"
+                           : (expired ? "Enabled · expired" : "Enabled"),
+                       id};
+    int row = rules->rowCount();
+    rules->insertRow(row);
+    for (int col = 0; col < fields.size(); ++col) {
+      auto *item = new QTableWidgetItem(fields[col]);
+      item->setData(Qt::UserRole, id);
+      item->setToolTip(
+          (path + "\n" +
+           QString::fromUtf8(QJsonDocument(f).toJson(QJsonDocument::Compact)) +
+           "\nCreated: " + r["created"].toString() +
+           "\nAbsolute expiry: " + expiry)
+              .toHtmlEscaped());
+      rules->setItem(row, col, item);
+    }
+  }
+  rules->setSortingEnabled(true);
+  for (int row = 0; row < rules->rowCount(); ++row)
+    if (rules->item(row, 0)->data(Qt::UserRole).toString() == selectedRule) {
+      rules->selectRow(row);
+      break;
+    }
 }

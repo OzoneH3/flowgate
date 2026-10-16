@@ -43,3 +43,26 @@ func TestPersistenceBeforeVerdict(t *testing.T) {
 		t.Fatal("stale retained grant survived disable")
 	}
 }
+
+func TestEnablePreservesScopeAndExpiry(t *testing.T) {
+	e, f, _, _ := fixture()
+	e.SaveRules = func([]policy.Rule) error { return nil }
+	v := e.Observe(f, "udp")
+	if _, err := e.Decide(v.ID, "allow", "application", 1000, false); err != nil {
+		t.Fatal(err)
+	}
+	before := e.Rules(1000, false)[0]
+	if err := e.ChangeRule(before.ID, "disable", 1000, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.ChangeRule(before.ID, "enable", 1001, false); err == nil {
+		t.Fatal("cross-user enable")
+	}
+	if err := e.ChangeRule(before.ID, "enable", 1000, false); err != nil {
+		t.Fatal(err)
+	}
+	after := e.Rules(1000, false)[0]
+	if after.Disabled || after.Filter != before.Filter || !after.Expires.Equal(before.Expires) || !after.Created.Equal(before.Created) {
+		t.Fatal("enable changed scope or lifetime", before, after)
+	}
+}

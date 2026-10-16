@@ -304,12 +304,14 @@ func (e *Engine) ChangeRule(id, action string, uid uint32, admin bool) error {
 		}
 		found = true
 		switch action {
+		case "enable":
+			next[i].Disabled = false
 		case "disable":
 			next[i].Disabled = true
 		case "delete":
 			next = append(next[:i], next[i+1:]...)
 		default:
-			return fmt.Errorf("action must be disable or delete")
+			return fmt.Errorf("action must be enable, disable or delete")
 		}
 		break
 	}
