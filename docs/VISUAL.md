@@ -79,3 +79,7 @@ and long details scroll vertically. No host firewall/network configuration was
 changed. Rates, chart series, persistent rules, quotas, priorities, geo/domain
 metadata and the full reference rule editor remain unavailable and are not
 simulated. The integration agent owns final merge and backend validation.
+
+## Integration verification
+
+Both complete design commits were cherry-picked into milestone/backend without conflicts after backend hardening. Rebuilt native program passed one focused actual Wayland Activity smoke (3/3) and isolated prompt Allow-to-receiver smoke (3/3). Evidence: `.workspace/monitor-integration-build.log`, `.workspace/monitor-integration-smoke.log`, and `.workspace/host-monitor.png`. The integrated screenshot was inspected. Broader design suites above were reused, with no Wine retest or host enforcement.

@@ -60,6 +60,20 @@ under the `.workspace/monitor-test-*` path printed by the runner. Qt captures un
 process metadata. Final design integration evidence is recorded separately;
 VISUAL.md describes the desktop layout and its verification.
 
+## Integrated visual checkpoint
+
+Both design commits (77286d2 layout and 2f37503 refinement) were reviewed and
+cherry-picked after the runnable host checkpoint and backend hardening, without
+conflicts. The final rebuild passed an actual Wayland Activity smoke (3/3) and
+isolated prompt Allow-to-receiver smoke (3/3). Broader recorded Wayland design,
+monitor and decision suites were reused; no Wine tests were repeated.
+
+Evidence: `.workspace/monitor-integration-build.log`,
+`.workspace/monitor-integration-smoke.log`, `.workspace/host-monitor.png`.
+The inspected capture uses real controlled fixture activity, not fabricated data.
+See VISUAL.md for acknowledged plain-text details, generic icons, unavailable
+measurements/rule editor and other differences from the NetLimiter 5 reference.
+
 ## Visibility and scope limits
 
 About 340 process descriptor directories were inaccessible in the recorded run;
