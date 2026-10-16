@@ -59,7 +59,7 @@ private slots:
     QTRY_VERIFY(pending());
     QCOMPARE(count(), 0);
     auto *prompt = window->findChild<QDialog *>("prompt");
-    window->openPendingNotification();
+    window->showPendingRequests();
     QTRY_VERIFY(prompt->isVisible());
     auto *scope = window->findChild<QComboBox *>("promptScope");
     scope->setCurrentIndex(scope->findData("persistent"));
@@ -83,7 +83,7 @@ private slots:
     QTRY_VERIFY(rules->item(0, 6)->text() == "Disabled");
     QVERIFY(command("send")["sent_once"].toBool());
     QTRY_VERIFY(pending());
-    window->openPendingNotification();
+    window->showPendingRequests();
     QTRY_VERIFY(prompt->isVisible());
     QCOMPARE(count(), 2);
     QTest::mouseClick(button("promptBlock"), Qt::LeftButton);

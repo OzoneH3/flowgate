@@ -32,16 +32,18 @@ watchdog, with safe existing-directory validation. The unprivileged terminal bri
 uses bounded private result files; it never collects credentials or adds sudoers.
 See HOST-CONTROL.md for the user journey and independent commands.
 
-Actual Wayland tests: `.workspace/unified-final-3.log`; terminal bridge:
+Actual Wayland tests: `.workspace/unified-notification-final.log`; terminal bridge:
 `.workspace/unified-bridge-final.log`; focused Go/race/vet:
 `.workspace/unified-go-final.log`; host-monitor smoke:
 `.workspace/unified-monitor-smoke.log`; normal launch: `.workspace/unified-launch.log`.
-Inspected captures: `.workspace/unified-1150425/unified-activity.png` and
-`.workspace/unified-1150425/unified-rules.png`. The UI logs print exact screenshot paths.
+Inspected captures: `.workspace/unified-1160667/unified-activity.png` and
+`.workspace/unified-1160667/unified-rules.png`. The UI logs print exact screenshot paths.
 Authentication is simulated in a narrow seam; controller start/Stop, UDP receiver
 Allow/Block, rule re-enable/unchanged expiry, real preflight refusal, timeout/loss,
 and closure under the original deadline use the real namespace backend. Native tray
 and message support were available; OS notification click dispatch is tested via Qt.
+A final smoke caught stale-notification state interfering with the explicit tray
+Open action; those paths are now separate and were rechecked.
 Real sudo authentication and live-host coexistence remain untested intentionally.
 
 ## Previous host-control milestone (reusable evidence)

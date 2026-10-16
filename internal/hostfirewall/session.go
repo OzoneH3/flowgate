@@ -20,7 +20,13 @@ func PrepareSession(state, api, database string) (string, error) {
 		if err := daemon.SecureDirectory(filepath.Dir(d.path)); err != nil {
 			return "", err
 		}
-		if err := os.Mkdir(d.path, d.mode); err != nil && !os.IsExist(err) {
+		if err := os.Mkdir(d.path, d.mode); err == nil {
+			// Set the exact mode only on a directory this invocation created;
+			// a restrictive inherited umask must not prevent GUI traversal.
+			if err = os.Chmod(d.path, d.mode); err != nil {
+				return "", err
+			}
+		} else if !os.IsExist(err) {
 			return "", err
 		}
 		st, err := os.Lstat(d.path)

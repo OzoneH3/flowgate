@@ -5,6 +5,7 @@ No password/authentication mechanism or real-host activation is exercised.
 import json,os,subprocess,time,sys,tempfile
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
+os.umask(0o077)
 assert os.environ['FLOWGATE_PARENT_NETNS']!=os.readlink('/proc/self/ns/net')
 run=Path(tempfile.mkdtemp(prefix='bridge-',dir=ROOT/'.workspace'))
 bindir=run/'bin';bindir.mkdir()

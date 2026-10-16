@@ -53,7 +53,7 @@ class UnifiedTest : public QObject {
   bool pending() {
     return window->findChild<QTableWidget *>("pending")->rowCount() > 0;
   }
-  void open() { window->openPendingNotification(); }
+  void open() { window->showPendingRequests(); }
   void controlButton(const char *name) {
     window->findChild<QTabWidget *>("views")->setCurrentIndex(2);
     rules()->selectRow(0);
@@ -167,13 +167,13 @@ private slots:
       command("send", {{"port", 44005}, {"source_port", 45111}});
     QTest::qWait(500);
     QCOMPARE(notification.count(), 1);
-    open();
+    window->openPendingNotification();
     QTRY_VERIFY(window->findChild<QDialog *>("prompt")->isVisible());
     QTest::mouseClick(button("promptBlock"), Qt::LeftButton);
     QTRY_VERIFY(label("result")->text().contains("acknowledged blocked"));
     QCOMPARE(count(44005), 0);
     window->findChild<QDialog *>("prompt")->hide();
-    open();
+    window->openPendingNotification();
     QVERIFY(!button("promptAllow")->isEnabled());
     QVERIFY(command("kill")["ok"].toBool());
     QTRY_VERIFY(label("status")->text().contains("unknown"));

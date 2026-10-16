@@ -406,7 +406,7 @@ Window::Window(const QString &path, QWidget *parent) : QMainWindow(parent) {
   tray->setObjectName("tray");
   auto *trayMenu = new QMenu(this);
   trayMenu->addAction("Open pending requests", this,
-                      &Window::openPendingNotification);
+                      &Window::showPendingRequests);
   trayMenu->addAction("Show Activity", this, [this] {
     showNormal();
     raise();
@@ -420,7 +420,7 @@ Window::Window(const QString &path, QWidget *parent) : QMainWindow(parent) {
           &Window::openPendingNotification);
   connect(tray, &QSystemTrayIcon::activated, this, [this](auto reason) {
     if (reason == QSystemTrayIcon::Trigger)
-      openPendingNotification();
+      showPendingRequests();
   });
   connect(&clock, &QTimer::timeout, this, [this] {
     updateDetails();
@@ -880,20 +880,12 @@ void Window::choosePrompt() {
     return;
   }
 }
-void Window::openPendingNotification() {
+void Window::showPendingRequests() {
   showNormal();
   raise();
   activateWindow();
   tabs->setCurrentIndex(1);
-  if (!notificationID.isEmpty() &&
-      (notificationGeneration != generation || !actionable(notificationID))) {
-    feedback("Notification expired or replaced; open the persistent pending "
-             "list. No permission was granted.");
-    return;
-  }
-  if (notificationGeneration == generation && actionable(notificationID))
-    selected = notificationID;
-  else if (!actionable(selected))
+  if (!actionable(selected))
     selected.clear();
   render();
   if (actionable(selected)) {
@@ -902,8 +894,24 @@ void Window::openPendingNotification() {
     updateDetails();
     prompt->show();
   } else
-    feedback("No actionable request remains. Expired notifications grant no "
-             "permission.");
+    feedback(
+        "No actionable request remains. Expired requests grant no permission.");
+}
+void Window::openPendingNotification() {
+  if (notificationGeneration != generation || !actionable(notificationID)) {
+    showNormal();
+    raise();
+    activateWindow();
+    tabs->setCurrentIndex(1);
+    prompt->hide();
+    promptID.clear();
+    updateDetails();
+    feedback("Notification expired or replaced; use the current pending list. "
+             "No permission was granted.");
+    return;
+  }
+  selected = notificationID;
+  showPendingRequests();
 }
 void Window::feedback(const QString &text) {
   result->setText(text);

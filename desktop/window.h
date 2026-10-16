@@ -19,6 +19,7 @@ public:
     evaluation->setLauncherForTest(std::move(f));
   }
   Q_INVOKABLE void openPendingNotification();
+  Q_INVOKABLE void showPendingRequests();
 signals:
   void pendingNotification(QString id);
 
