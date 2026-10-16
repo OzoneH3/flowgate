@@ -1,4 +1,5 @@
 #include "window.h"
+#include "presentation.h"
 #include <algorithm>
 
 static QString value(const QJsonObject &o, const char *key) {
@@ -30,6 +31,8 @@ static QTableWidget *table(const QStringList &headers, const char *name) {
   t->setSelectionMode(QAbstractItemView::SingleSelection);
   t->setEditTriggers(QAbstractItemView::NoEditTriggers);
   t->verticalHeader()->hide();
+  t->verticalHeader()->setDefaultSectionSize(22);
+  t->verticalHeader()->setMinimumSectionSize(20);
   t->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
   t->horizontalHeader()->setStretchLastSection(true);
   t->setAlternatingRowColors(true);
@@ -37,18 +40,30 @@ static QTableWidget *table(const QStringList &headers, const char *name) {
 }
 Window::Window(const QString &path, QWidget *parent) : QMainWindow(parent) {
   setWindowTitle(QCoreApplication::applicationName());
-  resize(1040, 740);
+  resize(1280, 800);
+  setMinimumSize(860, 580);
+  setStyleSheet(desktopStyle());
   setWindowIcon(QIcon::fromTheme(
       "security-high", style()->standardIcon(QStyle::SP_ComputerIcon)));
   auto *body = new QWidget;
   auto *layout = new QVBoxLayout(body);
+  layout->setContentsMargins(3, 0, 3, 2);
+  layout->setSpacing(3);
   setCentralWidget(body);
+  auto *fileMenu = menuBar()->addMenu("&File");
+  auto *viewMenu = menuBar()->addMenu("&View");
+  auto *helpMenu = menuBar()->addMenu("&Help");
   auto *connection = new QHBoxLayout;
+  connection->setContentsMargins(2, 2, 2, 2);
+  connection->setSpacing(5);
+  auto *brand = new QLabel(QCoreApplication::applicationName());
+  brand->setObjectName("brand");
+  connection->addWidget(brand);
   endpoint = new QLineEdit(path);
   endpoint->setObjectName("socket");
   endpoint->setAccessibleName("Backend socket");
   auto *connectButton = new QPushButton("&Connect");
-  connection->addWidget(new QLabel("Local API socket"));
+  connection->addWidget(new QLabel("Backend"));
   connection->addWidget(endpoint);
   connection->addWidget(connectButton);
   layout->addLayout(connection);
@@ -56,13 +71,19 @@ Window::Window(const QString &path, QWidget *parent) : QMainWindow(parent) {
   status->setObjectName("status");
   status->setTextFormat(Qt::PlainText);
   status->setWordWrap(true);
-  layout->addWidget(status);
+  statusBar()->setSizeGripEnabled(true);
+  statusBar()->addWidget(status, 1);
   tabs = new QTabWidget;
   tabs->setObjectName("views");
+  tabs->setDocumentMode(true);
   layout->addWidget(tabs, 1);
   activity = new ActivityView;
   tabs->addTab(activity, "Activity");
-  auto *split = new QSplitter(Qt::Vertical);
+  auto *split = new QSplitter(Qt::Horizontal);
+  split->setChildrenCollapsible(false);
+  auto *lists = new QSplitter(Qt::Vertical);
+  lists->setChildrenCollapsible(false);
+  split->addWidget(lists);
   tabs->addTab(split, "Pending & recent decisions");
   tabs->setCurrentIndex(1);
   auto *upper = new QWidget;
@@ -77,14 +98,21 @@ Window::Window(const QString &path, QWidget *parent) : QMainWindow(parent) {
   pending->setColumnWidth(3, 210);
   pending->setColumnWidth(4, 210);
   up->addWidget(pending);
-  split->addWidget(upper);
+  lists->addWidget(upper);
   auto *middle = new QWidget;
   auto *mid = new QVBoxLayout(middle);
   mid->setContentsMargins(0, 0, 0, 0);
+  middle->setMinimumWidth(280);
+  auto *decisionInfo = new QLabel("Info View · connection permission");
+  decisionInfo->setObjectName("panelTitle");
+  mid->addWidget(decisionInfo);
   details = textBox("details");
   details->setPlaceholderText(
       "Select a request to inspect its application and connection.");
-  mid->addWidget(details);
+  mid->addWidget(details, 1);
+  auto *permissionTitle = new QLabel("Permission");
+  permissionTitle->setObjectName("panelTitle");
+  mid->addWidget(permissionTitle);
   auto *actions = new QHBoxLayout;
   scope = new QComboBox;
   scope->setObjectName("scope");
@@ -96,8 +124,8 @@ Window::Window(const QString &path, QWidget *parent) : QMainWindow(parent) {
   block = new QPushButton("&Block");
   allow->setObjectName("allow");
   block->setObjectName("block");
-  actions->addWidget(block);
   actions->addWidget(allow);
+  actions->addWidget(block);
   mid->addLayout(actions);
   preview = textBox("scopePreview");
   preview->setMaximumHeight(95);
@@ -112,8 +140,11 @@ Window::Window(const QString &path, QWidget *parent) : QMainWindow(parent) {
   history->setColumnWidth(0, 180);
   history->setColumnWidth(2, 220);
   bt->addWidget(history);
-  split->addWidget(bottom);
-  split->setSizes({210, 300, 150});
+  lists->addWidget(bottom);
+  lists->setSizes({440, 200});
+  split->setStretchFactor(0, 3);
+  split->setStretchFactor(1, 1);
+  split->setSizes({830, 390});
   result = new QLabel;
   result->setObjectName("result");
   result->setTextFormat(Qt::PlainText);
@@ -124,16 +155,27 @@ Window::Window(const QString &path, QWidget *parent) : QMainWindow(parent) {
   prompt->setWindowTitle(QCoreApplication::applicationName() +
                          " — connection permission");
   prompt->setModal(false);
-  prompt->resize(640, 510);
+  prompt->resize(600, 650);
   prompt->setObjectName("prompt");
   auto *pl = new QVBoxLayout(prompt);
+  pl->setContentsMargins(3, 3, 3, 7);
+  pl->setSpacing(5);
+  auto *promptHeading = new QLabel(QCoreApplication::applicationName() + " Blocker");
+  promptHeading->setObjectName("promptHeading");
+  promptHeading->setTextFormat(Qt::PlainText);
+  pl->addWidget(promptHeading);
+  promptConnection = new QLabel("Pending connection permission");
+  promptConnection->setObjectName("promptConnection");
+  promptConnection->setTextFormat(Qt::PlainText);
+  promptConnection->setWordWrap(true);
+  pl->addWidget(promptConnection);
   promptDetails = textBox("promptDetails");
   pl->addWidget(promptDetails);
   promptScope = new QComboBox;
   promptScope->setObjectName("promptScope");
   promptScope->addItem("Once", "once");
   promptScope->addItem("Remember · 1 hour (memory only)", "application");
-  pl->addWidget(promptScope);
+
   promptPreview = textBox("promptPreview");
   promptPreview->setMaximumHeight(130);
   pl->addWidget(promptPreview);
@@ -143,16 +185,36 @@ Window::Window(const QString &path, QWidget *parent) : QMainWindow(parent) {
   promptAllow = new QPushButton("&Allow");
   promptAllow->setObjectName("promptAllow");
   promptBlock->setObjectName("promptBlock");
-  for (auto *b : {later, promptBlock, promptAllow}) {
+  for (auto *b : {promptAllow, promptBlock}) {
     b->setAutoDefault(false);
     pa->addWidget(b);
   }
+  pa->addWidget(promptScope, 1);
   pl->addLayout(pa);
+  later->setAutoDefault(false);
+  pl->addWidget(later, 0, Qt::AlignRight);
   promptResult = new QLabel;
   promptResult->setTextFormat(Qt::PlainText);
   promptResult->setWordWrap(true);
   pl->addWidget(promptResult);
   connect(later, &QPushButton::clicked, prompt, &QDialog::hide);
+  fileMenu->addAction("Reconnect backend", this, &Window::reconnect);
+  fileMenu->addSeparator();
+  fileMenu->addAction("Close window", this, &QWidget::close, QKeySequence::Quit);
+  viewMenu->addAction("Activity", this, [this] { tabs->setCurrentIndex(0); });
+  viewMenu->addAction("Pending and recent decisions", this, [this] {
+    if (tabs->isTabEnabled(1)) tabs->setCurrentIndex(1);
+  });
+  viewMenu->addAction("Refresh", this, &Window::refresh, QKeySequence::Refresh);
+  helpMenu->addAction("About " + QCoreApplication::applicationName(), this, [this] {
+    QMessageBox box(this);
+    box.setWindowTitle("About " + QCoreApplication::applicationName());
+    box.setTextFormat(Qt::PlainText);
+    box.setText(QCoreApplication::applicationName() +
+      "\nHost monitoring is read-only. Enforcement is available only in the isolated lab.\n"
+      "Traffic rates, persistent rules and production host enforcement are not implemented.");
+    box.exec();
+  });
   connect(connectButton, &QPushButton::clicked, this, &Window::reconnect);
   connect(endpoint, &QLineEdit::returnPressed, this, &Window::reconnect);
   connect(pending, &QTableWidget::itemSelectionChanged, this, [this] {
@@ -497,7 +559,11 @@ void Window::updateDetails() {
   block->setEnabled(ok);
   scope->setEnabled(actionable(selected));
   if (!promptID.isEmpty()) {
-    set(promptDetails, describe(current.value(promptID)));
+    auto event = current.value(promptID);
+    auto flow = event["flow"].toObject();
+    promptConnection->setText(value(flow, "direction") + " connection · " +
+                              value(flow, "protocol").toUpper() + " · " + appName(event));
+    set(promptDetails, describe(event));
     set(promptPreview, scopeText(current.value(promptID),
                                  promptScope->currentData().toString()));
   }

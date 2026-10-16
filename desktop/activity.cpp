@@ -19,7 +19,11 @@ QString str(const QJsonObject &o, const char *k) {
 } // namespace
 ActivityView::ActivityView(QWidget *parent) : QWidget(parent) {
   auto *layout = new QVBoxLayout(this);
+  layout->setContentsMargins(0, 0, 0, 0);
+  layout->setSpacing(3);
   auto *tools = new QHBoxLayout;
+  tools->setContentsMargins(5, 3, 5, 2);
+  tools->setSpacing(4);
   search = new QLineEdit;
   search->setObjectName("activitySearch");
   search->setPlaceholderText("Search application, path, PID or endpoint");
@@ -40,7 +44,8 @@ ActivityView::ActivityView(QWidget *parent) : QWidget(parent) {
   summary->setTextFormat(Qt::PlainText);
   summary->setObjectName("activityStatus");
   layout->addWidget(summary);
-  auto *split = new QSplitter(Qt::Vertical);
+  auto *split = new QSplitter(Qt::Horizontal);
+  split->setChildrenCollapsible(false);
   layout->addWidget(split, 1);
   tree = new QTreeWidget;
   tree->setObjectName("activityTree");
@@ -48,11 +53,14 @@ ActivityView::ActivityView(QWidget *parent) : QWidget(parent) {
   tree->setHeaderLabels({"Application / process / socket", "PID", "Protocol",
                          "Local endpoint", "Remote endpoint", "Socket state",
                          "Initiation", "Sockets"});
-  tree->setColumnWidth(0, 250);
+  tree->setColumnWidth(0, 240);
+  tree->setIndentation(15);
+  tree->setIconSize(QSize(14, 14));
+  tree->header()->setMinimumSectionSize(45);
   tree->setColumnWidth(1, 60);
   tree->setColumnWidth(2, 60);
-  tree->setColumnWidth(3, 160);
-  tree->setColumnWidth(4, 160);
+  tree->setColumnWidth(3, 145);
+  tree->setColumnWidth(4, 145);
   tree->setColumnWidth(5, 155);
   tree->setColumnWidth(6, 80);
   tree->setColumnWidth(7, 55);
@@ -63,23 +71,59 @@ ActivityView::ActivityView(QWidget *parent) : QWidget(parent) {
   tree->setUniformRowHeights(true);
   tree->setSelectionMode(QAbstractItemView::SingleSelection);
   split->addWidget(tree);
+  auto *side = new QWidget;
+  side->setMinimumWidth(260);
+  auto *sideLayout = new QVBoxLayout(side);
+  sideLayout->setContentsMargins(0, 0, 0, 0);
+  sideLayout->setSpacing(4);
+  auto *infoTitle = new QLabel("Info View");
+  infoTitle->setObjectName("panelTitle");
+  sideLayout->addWidget(infoTitle);
   details = new QPlainTextEdit;
   details->setObjectName("activityDetails");
   details->setReadOnly(true);
-  split->addWidget(details);
-  split->setSizes({480, 180});
-  auto *copies = new QHBoxLayout;
+  details->setPlaceholderText("Select an application, process or socket to inspect its observed identity.");
+  sideLayout->addWidget(details, 1);
+  auto *ruleTitle = new QLabel("Rules");
+  ruleTitle->setObjectName("panelTitle");
+  sideLayout->addWidget(ruleTitle);
+  auto *ruleInfo = new QLabel("Read-only observation\nNo firewall decision or rule is applied.");
+  ruleInfo->setWordWrap(true);
+  ruleInfo->setContentsMargins(7, 3, 7, 6);
+  sideLayout->addWidget(ruleInfo);
+  auto *toolsTitle = new QLabel("Tools");
+  toolsTitle->setObjectName("panelTitle");
+  sideLayout->addWidget(toolsTitle);
+  auto *copies = new QGridLayout;
+  copies->setContentsMargins(5, 2, 5, 3);
+  copies->setSpacing(4);
+  int copyIndex = 0;
   for (auto pair : {qMakePair(QString("Copy local endpoint"), Local),
                     qMakePair(QString("Copy remote endpoint"), Remote),
                     qMakePair(QString("Copy PID"), PID),
                     qMakePair(QString("Copy executable"), Executable)}) {
     auto *b = new QPushButton(pair.first);
-    copies->addWidget(b);
+    copies->addWidget(b, copyIndex / 2, copyIndex % 2);
+    ++copyIndex;
     connect(b, &QPushButton::clicked, this,
             [this, pair] { copyField(pair.second); });
   }
-  copies->addStretch();
-  layout->addLayout(copies);
+  sideLayout->addLayout(copies);
+  auto *chartTitle = new QLabel("Traffic chart");
+  chartTitle->setObjectName("panelTitle");
+  sideLayout->addWidget(chartTitle);
+  auto *chart = new QLabel("Traffic rates are not measured.\nNo chart data is available.");
+  chart->setObjectName("unmeasuredChart");
+  chart->setAlignment(Qt::AlignCenter);
+  chart->setMinimumHeight(110);
+  chart->setWordWrap(true);
+  sideLayout->addWidget(chart);
+  split->addWidget(side);
+  split->setStretchFactor(0, 3);
+  split->setStretchFactor(1, 1);
+  split->setSizes({830, 330});
+  layout->removeWidget(summary);
+  layout->addWidget(summary);
   connect(search, &QLineEdit::textChanged, this, [this] { render(); });
   connect(filter, &QComboBox::currentIndexChanged, this, [this] { render(); });
   connect(expand, &QPushButton::clicked, tree, &QTreeWidget::expandAll);
@@ -140,6 +184,10 @@ void ActivityView::render() {
     else
       tree->addTopLevelItem(item);
     item->setText(0, name);
+    if (id.startsWith("app:"))
+      item->setIcon(0, style()->standardIcon(QStyle::SP_ComputerIcon));
+    else if (id.startsWith("proc:"))
+      item->setIcon(0, style()->standardIcon(QStyle::SP_FileIcon));
     item->setData(0, ID, id);
     item->setData(0, Detail, description);
     item->setData(0, Executable, path);
