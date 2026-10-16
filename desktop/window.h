@@ -17,7 +17,7 @@ private:
   ActivityView *activity;
   QString mode;
   QLineEdit *endpoint;
-  QLabel *status, *result, *promptResult;
+  QLabel *status, *result, *promptResult, *promptConnection;
   QTableWidget *pending, *history;
   QPlainTextEdit *details, *preview;
   QComboBox *scope;
