@@ -1,11 +1,49 @@
 # FlowGate
 
-A native Qt 6 desktop client and independent Go Linux application firewall backend.
-The current program controls **isolated lab traffic**, with real application
-attribution, pending requests, Allow/Block decisions and bounded packet retention.
-It does not install a service or protect your normal host network.
+A native Qt 6 desktop application with an independent Go backend. **Normal launch shows real host application/socket activity read-only.** No firewall rules, interception or host protection. The accepted prompt workflow remains a separate isolated lab.
 
-## Launch the desktop demo
+## Launch the live host monitor
+
+```sh
+scripts/run-desktop.sh
+# Optional collection delay (default 2s; range 500ms–30s):
+scripts/run-desktop.sh --interval 3s
+```
+
+No synthetic traffic is generated. Expand applications into processes and sockets;
+search names, paths, PIDs or endpoints; sort/filter; select full details and copy
+fields. Shared sockets appear once; unidentified sockets remain individual entries.
+UDP is labelled bound or connected. Initiation direction is **Unknown**.
+
+**Stop:** close the window, or press **Ctrl+C in its launching terminal**. The
+launcher stops only its observer and removes its private socket. Every launch uses
+an independent mode-0700 `.workspace/host-monitor-*` directory; duplicate launches
+never unlink another socket. Logs remain. No service, autostart or root is needed.
+This differs from the lab, which keeps enforcing after its GUI closes.
+
+Visibility is limited by the current user, proc access and current network namespace.
+Owners can be inaccessible or gone. The UI reports partial coverage and collection
+errors; observation never produces Allowed events or enables policy actions. No Wine
+helper starts or attaches to a game prefix. Rates and domain/location data are not
+invented. See [visual references and differences](docs/VISUAL.md) for the NetLimiter 5
+layout target, recreated with our Qt components and FlowGate branding.
+
+For a separately managed observer (stop with Ctrl+C):
+
+```sh
+. scripts/go-env.sh
+mkdir -p .workspace/my-monitor
+chmod 700 .workspace/my-monitor
+.workspace/flowgate observe --socket "$PWD/.workspace/my-monitor/control.sock" --interval 2s
+# Another terminal:
+.workspace/desktop/flowgate-desktop --socket "$PWD/.workspace/my-monitor/control.sock"
+```
+
+An existing socket is refused. Use another private directory rather than deleting
+another process's socket. Closing a separately connected client leaves that observer running.
+
+## Launch the desktop demo (explicit enforcement lab)
+
 
 From the repository root:
 
@@ -14,7 +52,8 @@ scripts/demo-desktop.sh
 ```
 
 Requires Qt 6 Widgets/Network/Test development files, CMake, a C++17 compiler,
-Go >=1.24, nftables, util-linux `unshare`, iproute2 and Python 3. These dependencies
+Go >=1.24 and Python 3. The **lab only** also requires nftables, util-linux `unshare`
+and iproute2. These dependencies
 are available on the tested CachyOS x86-64 host. No package installation is performed.
 A graphical session is required; the script uses the current display, or this
 user's existing `wayland-0` socket if display variables are absent.
@@ -49,6 +88,20 @@ The socket field plus **Connect** changes the selected endpoint. A disconnected
 client disables decisions and refreshes state on reconnect, without replaying
 answers. Recent decisions are bounded **client-observed, current-backend-session**
 history, not an audit log. The backend remains authoritative.
+
+## Focused host-monitor checks
+
+```sh
+QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=wayland-0 scripts/check-monitor.sh
+# Automated fallback, not a real display check:
+QT_QPA_PLATFORM=offscreen scripts/check-monitor.sh
+```
+
+Tests use workspace native loopback fixtures for TCP listening/connecting/established,
+IPv4/IPv6, UDP bound/connected, shared descriptors, process exit and path identities.
+They check mutation denial and Qt search/filter/sort/selection/copy/reconnect. Only
+one existing lab Allow smoke runs for shared UI/API changes; accepted Wine/native
+matrices are reused. Evidence remains in `.workspace`.
 
 ## Focused desktop checks
 

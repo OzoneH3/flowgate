@@ -14,16 +14,17 @@ import (
 )
 
 type Socket struct {
-	Family   uint8          `json:"family"`
-	V6Only   *bool          `json:"v6_only,omitempty"`
-	Protocol string         `json:"protocol"`
-	Local    netip.AddrPort `json:"local"`
-	Remote   netip.AddrPort `json:"remote"`
-	State    uint8          `json:"state"`
-	Inode    uint32         `json:"inode"`
-	Cookie   string         `json:"cookie"`
-	UID      uint32         `json:"uid"`
-	NetNS    string         `json:"netns"`
+	Interface uint32         `json:"interface_index,omitempty"`
+	Family    uint8          `json:"family"`
+	V6Only    *bool          `json:"v6_only,omitempty"`
+	Protocol  string         `json:"protocol"`
+	Local     netip.AddrPort `json:"local"`
+	Remote    netip.AddrPort `json:"remote"`
+	State     uint8          `json:"state"`
+	Inode     uint32         `json:"inode"`
+	Cookie    string         `json:"cookie"`
+	UID       uint32         `json:"uid"`
+	NetNS     string         `json:"netns"`
 }
 type Flow struct {
 	Protocol  string         `json:"protocol"`
@@ -97,6 +98,17 @@ func SocketsLimited(limit int) ([]Socket, error) {
 					la = netip.AddrFrom16([16]byte(b[8:24]))
 					ra = netip.AddrFrom16([16]byte(b[24:40]))
 				}
+				iface := binary.NativeEndian.Uint32(b[40:44])
+				// Scope identifiers are presentation for host snapshots only; the
+				// established enforcement matching path retains its exact behavior.
+				if limit > 0 && iface != 0 {
+					if la.IsLinkLocalUnicast() {
+						la = la.WithZone(strconv.FormatUint(uint64(iface), 10))
+					}
+					if ra.IsLinkLocalUnicast() {
+						ra = ra.WithZone(strconv.FormatUint(uint64(iface), 10))
+					}
+				}
 				name := "tcp"
 				if proto == unix.IPPROTO_UDP {
 					name = "udp"
@@ -112,7 +124,7 @@ func SocketsLimited(limit int) ([]Socket, error) {
 						v6only = &value
 					}
 				}
-				result = append(result, Socket{Family: family, V6Only: v6only, Protocol: name, Local: netip.AddrPortFrom(la.Unmap(), binary.BigEndian.Uint16(b[4:6])), Remote: netip.AddrPortFrom(ra.Unmap(), binary.BigEndian.Uint16(b[6:8])), State: b[1], Inode: binary.NativeEndian.Uint32(b[68:72]), UID: binary.NativeEndian.Uint32(b[64:68]), Cookie: fmt.Sprintf("%x", b[44:52]), NetNS: NetNS()})
+				result = append(result, Socket{Interface: iface, Family: family, V6Only: v6only, Protocol: name, Local: netip.AddrPortFrom(la.Unmap(), binary.BigEndian.Uint16(b[4:6])), Remote: netip.AddrPortFrom(ra.Unmap(), binary.BigEndian.Uint16(b[6:8])), State: b[1], Inode: binary.NativeEndian.Uint32(b[68:72]), UID: binary.NativeEndian.Uint32(b[64:68]), Cookie: fmt.Sprintf("%x", b[44:52]), NetNS: NetNS()})
 			}
 			if dumpErr != nil {
 				return result, dumpErr

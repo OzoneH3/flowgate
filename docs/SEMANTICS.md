@@ -114,3 +114,59 @@ and established TCP fast paths are unchanged. The GUI outside the single-user
 namespace retains host UID1000; SO_PEERCRED inside maps that same owner to UID0,
 which is the namespace administrator under the existing API contract. Socket
 permissions remain 0600 with a 0700 parent; no host-root GUI or policy bypass.
+
+## Host observation mode
+
+`flowgate observe --socket PATH --interval 2s` uses no nftables commands, NFQUEUE,
+packet interception, namespace manipulation or Wine helper. A single collector
+reads inet_diag TCP/UDP in its current network namespace and `/proc/PID/fd`.
+Sockets remain visible when holders cannot be inspected. UID is not proof of a
+current owner; kernel-owned/time-wait sockets and races also leave no visible holder.
+Shared sockets carry visible PID/start IDs and appear once, not once per FD.
+Visible descriptor ownership is not exclusive recipient identity or a firewall
+decision. Observation creates no policy events.
+
+The v1 `list` response adds `activity` in host mode: monotonic snapshot sequence
+within a backend generation, start/completion timestamps, elapsed milliseconds,
+completeness, issues/error, socket rows and an indexed process table. Socket IDs
+include namespace/family/protocol/inode/cookie/endpoints; process IDs use PID/start.
+Initiation is Unknown. Linux TCP states describe sockets; connected UDP means a
+non-unspecified peer/port, not a TCP-style established connection. Counts are
+unique socket rows in the selected filter, not traffic totals.
+
+Serial collection sleeps for the configured delay after completion (500 ms–30 s,
+default 2 s). GUI polls asynchronously every second with one list in flight and
+never initiates collection. Only the latest snapshot is retained. Errors replace
+successful data; an overdue snapshot (interval + five seconds since completion)
+returns an error without old rows. Initial collection reports unavailable until
+complete. Reconnect fetches current data; a new generation clears Activity state.
+
+Bounds: 2048 socket rows, 2048 process rows/cache entries, 32 visible holders per
+socket, 8192 process directories and 131072 descriptor entries per census. Descriptor
+iteration checks a two-second budget; scheduling/proc reads are not hard real-time.
+Host netlink dumping uses a 64 KiB buffer, finite receive/time budgets and bounded
+multipart accumulator (remaining row count and 3 MiB). Truncated/interrupted/error
+dumps cannot claim completeness. API snapshots cap at 3 MiB serialized; oversized
+results return an error. Metadata fields over 4096 bytes are unidentified instead
+of truncated into an identity. Cached strings are detached from raw proc buffers.
+Raw environments, command lines and payloads are not exposed or executed.
+
+Descriptors are scanned once per process per snapshot, not once per socket.
+Existing process inspection is cached at most five seconds, with PID/start,
+executable link and revision checked each cycle. Exit removes a process; reuse,
+exec and revision changes force inspection. Wine mapped-image metadata can lag by
+that TTL while its runtime executable is unchanged; this observation cache is never
+used for enforcement. No new Wine detection or helper attachment is performed.
+
+Complete means within bounded observation scope: current-namespace TCP/UDP and
+process-leader FD directories. Other namespaces, private per-thread tables, hidden
+proc mounts and transient sockets can be missed. Partial visibility is shown even
+when some holders are identified. Non-atomic snapshots are not attestations.
+
+The host API is forced read-only even if its setup caller requests otherwise.
+Only the observer UID reads host snapshots; private 0700 parent, 0600 socket and
+peer credentials remain. No root shortcut to another user's host snapshot.
+`decide` always rejects. No pretend rules or Protected status. Normal launcher
+creates independent instances and stops only its observer when its GUI exits or
+supervisor receives Ctrl+C/SIGTERM. This differs from explicit lab teardown and
+from connecting a GUI to a separately managed observer.

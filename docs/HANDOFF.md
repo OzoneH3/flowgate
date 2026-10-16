@@ -1,57 +1,66 @@
 # Continuation handoff
 
-Continue in `/home/flowgate-user/Apps/flowgate`, branch `milestone/backend`. Verify HEAD and
-preserve unrelated work. Read applicable AGENTS.md, README.md, PLAN.md, STATUS.md,
-SEMANTICS.md and this handoff; check `.workspace/coordination`. Source
-`scripts/go-env.sh` before Go commands. The final report names the commit; this
-file avoids a self-referential commit update.
+Continue in /home/flowgate-user/Apps/flowgate, branch milestone/backend. Verify HEAD and
+preserve unrelated work. Read applicable AGENTS.md, README, PLAN, STATUS, SEMANTICS
+and VISUAL. Source scripts/go-env.sh before Go commands. Scratch outputs belong
+under .workspace; check its coordination notes.
 
-## Current priority and runnable result
+## Running program
 
-**Desktop first; game detection later.** Run `scripts/demo-desktop.sh` in a terminal
-in the graphical session. It builds the Qt Widgets client and Go backend, launches
-a disposable native UDP lab and opens the GUI outside the namespace. An initial
-one-shot datagram prompts automatically. Enter sends another; 2–8 selects another
-service port; q/Ctrl+C tears down only this lab. Closing the GUI alone leaves
-traffic controlled. Logs remain in the printed `.workspace/desktop-demo-*` folder.
+Normal command: `scripts/run-desktop.sh`. This starts a private unprivileged host
+observer and the existing native Qt Activity view. No synthetic traffic, firewall
+hooks, Wine helpers, service installation or host protection. Close the window or
+press Ctrl+C in its terminal to stop its observer. Duplicate launches are independent.
+A separately managed `flowgate observe --socket PATH` survives client closure.
 
-The client can also connect with `.workspace/desktop/flowgate-desktop --socket PATH`.
-Use the `.monitor` endpoint for read-only mode. No host enforcement or service
-installation is implemented. Recent history is bounded, client-observed and
-session-local. Once is default; remembered permission is one hour in memory.
+The user accepted the original prompt demo. Keep `scripts/demo-desktop.sh` separate:
+only it enforces isolated native test traffic. Its GUI can close while enforcement
+continues; q/Ctrl+C in its terminal tears down that lab.
 
-## Reusable evidence and commands
+## Sources and verification
 
-`QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=wayland-0 scripts/check-desktop.sh`
-builds and runs the focused Qt UI-to-real-receiver tests, daemon/policy race tests
-and vet. Without graphical access use `QT_QPA_PLATFORM=offscreen`, explicitly
-reporting that limitation. The recorded Wayland run tested actual prompt Allow,
-keyboard Block, remembered new-source-port delivery, expiry/stale denial, monitor
-permissions, client closure and backend loss. Synthetic tests cover long paths,
-IPv6 presentation, plain text, error acknowledgement, dedup and reconnect without
-replay. See `.workspace/desktop-wayland.log`, `.workspace/desktop-go.log` and the
-run directory named in the Qt log for receiver evidence and screenshots.
+The bounded collector/cache/state evidence lives in internal/identity/activity*.go;
+internal/monitor owns one serial worker and latest snapshot. Host list API returns
+activity and always rejects decisions. Existing enforcement matching is preserved.
+The Activity widget is part of the existing frontend, not another application.
+Shared sockets appear once; Unknown initiation is never inferred from ports.
 
-Sources: `desktop/` (C++ Widgets/QLocalSocket), `scripts/{build,check,demo}-desktop.sh`,
-`demo-desktop.py` (outer supervisor), `desktop-lab.py` (namespace fixtures). Backend
-changes are additive response metadata and scope descriptions only; no queue,
-identity, policy-match or Wine adapter changes. Desktop name is a CMake cache
-variable `FLOWGATE_PRODUCT_NAME`; Go CLI uses its existing ldflags name variable.
+Focused runner: `QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=wayland-0 scripts/check-monitor.sh`.
+It checks host loopback TCP/UDP v4/v6, SYN-sent/established/listening states, shared
+holders, path identities, exit, API mutation denial, Qt interaction and one lab
+Allow smoke. Reuse existing accepted desktop and Wine evidence; no full matrix
+unless changed behavior warrants it. Offscreen runs must be labelled as such.
 
-Historical backend/runtime evidence is preserved in HISTORY.md and WINE.md.
-Do not rerun the full Wine/native matrix for presentation-only changes. Existing
-Wine 11.19/direct Proton tests are not full Steam/UMU or real-game validation.
+STATUS.md indexes host/go/launcher logs; VISUAL.md indexes design captures and
+Wayland evidence. Screenshots filter to workspace fixtures, avoiding unrelated
+host metadata. No rates, history completeness, real-game or host-protection claims.
 
-## Next smallest useful work
+## Design coordination and integration
 
-Get user feedback on the running prompt/list workflow. A small next increment is
-optional tray/desktop notification access and remembered socket preference, while
-preserving the authoritative persistent pending list. More game detection, full
-application tree, persistence, bandwidth, packaging and production host enforcement
-remain deferred. No missing dependency or additional authorization blocks the
-current demo.
+Runnable checkpoint before concurrent design:
+883db80dd457591e0fa12af49f4d9ab1e9332020.
+Design branch frontend/netlimiter-design at .workspace/worktrees/netlimiter-design.
+Complete design consists of 77286d286faa169a81f455426dac933ee13a8b81 followed by
+2f375035cb43b2210d8c64d9411d09085d0070d7; the tip alone is not the full design.
+The internal designer stopped at the first commit; external session
+01a1465b-dadc-7010-91ad-6230a47cda24 then exclusively refined and released ownership.
+Root reviews/cherry-picks both and runs focused integration smoke. Final report
+names the integrated SHA without a self-referential commit update.
 
-Authorization: local edits/builds/focused tests/commits and unprivileged GUI/native
-fixtures in disposable namespaces. No host firewall/network/VPN/security/service
-changes, package installs, runtime/launcher/existing-prefix edits, real games,
-publishing/pushing or additional agents. All generated files stay in `.workspace`.
+Backend/API/scripts/tests/main docs belong to integration. During concurrent work,
+desktop presentation and VISUAL.md belong to design. Coordinate functional changes
+explicitly and use the Yacwu relay for the external session. No competing rewrites.
+
+The desktop uses compact Activity and permission views.
+Use own Qt components/assets and FlowGate branding: dense tree, compact menus,
+toolbar/tabs, right Info/rules panel, lower chart region. Missing measurements and
+controls stay explicitly unavailable. Plain-text details, generic icons and other
+remaining differences are acknowledged in VISUAL.md; do not claim pixel identity.
+
+## Next scope
+
+Deliver the integrated running host monitor now, then collect user feedback.
+Game detection remains deferred. Host enforcement needs separate explicit scope,
+coexistence/recovery planning and controlled validation. No hidden enable-protection
+control. No host firewall/network/VPN/security/service/package changes, installed
+runtime/launcher/existing-prefix edits, real games, publishing or pushing.

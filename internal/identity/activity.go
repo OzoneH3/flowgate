@@ -4,6 +4,7 @@ package identity
 // and visible descriptor holders; it never grants an application permission.
 import (
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strconv"
@@ -73,6 +74,17 @@ func (c *ActivityCollector) inspect(pid int, now time.Time) (Process, error) {
 	}
 	p, err := Inspect(pid)
 	if err == nil {
+		// Detach retained values from bounded but potentially large proc buffers.
+		// Oversized metadata is unidentified, never silently shortened into an identity.
+		for _, field := range []*string{&p.Executable, &p.ExecutableRevision, &p.Start, &p.Cgroup, &p.NetNS, &p.MountNS, &p.Application.Key, &p.Application.Name, &p.Application.Executable, &p.Application.Revision, &p.Application.Runtime, &p.Application.Prefix, &p.Application.SteamAppID} {
+			if len(*field) > 4096 {
+				err = fmt.Errorf("process metadata field exceeds observation limit")
+				break
+			}
+			*field = strings.Clone(*field)
+		}
+	}
+	if err == nil {
 		c.cache[pid] = cachedActivityProcess{p, now}
 	} else {
 		delete(c.cache, pid)
@@ -118,6 +130,7 @@ func (c *ActivityCollector) Collect() ActivitySnapshot {
 	}
 	seen := map[int]bool{}
 	fdCount := 0
+	unreadableFDs := 0
 	processCount := 0
 	for _, entry := range entries {
 		pid, err := strconv.Atoi(entry.Name())
@@ -141,19 +154,31 @@ func (c *ActivityCollector) Collect() ActivitySnapshot {
 		}
 		start, _, statErr := processStat(base)
 		owned := map[int]bool{}
-		for fdCount < 131072 {
+		for fdCount < 131072 && time.Since(out.Started) < 2*time.Second {
 			fds, e := dir.ReadDir(256)
 			for _, fd := range fds {
 				fdCount++
-				for _, index := range wanted[link(base+"/fd/"+fd.Name())] {
+				target, linkErr := os.Readlink(base + "/fd/" + fd.Name())
+				if linkErr != nil && !os.IsNotExist(linkErr) {
+					unreadableFDs++
+					out.Complete = false
+				}
+				for _, index := range wanted[target] {
 					owned[index] = true
 				}
 			}
 			if e != nil {
+				if e != io.EOF && !os.IsNotExist(e) {
+					out.Complete = false
+					unreadableFDs++
+				}
 				break
 			}
 		}
 		dir.Close()
+		if fdCount >= 131072 || time.Since(out.Started) >= 2*time.Second {
+			out.Complete = false
+		}
 		if len(owned) == 0 {
 			continue
 		}
@@ -185,6 +210,9 @@ func (c *ActivityCollector) Collect() ActivitySnapshot {
 		if !seen[pid] {
 			delete(c.cache, pid)
 		}
+	}
+	if unreadableFDs > 0 {
+		out.Issues = append(out.Issues, fmt.Sprintf("%d descriptor reads inaccessible or interrupted", unreadableFDs))
 	}
 	if out.Inaccessible > 0 {
 		out.Complete = false

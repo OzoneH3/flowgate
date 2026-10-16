@@ -56,6 +56,12 @@ func boundedDiag(req []byte, limit int) ([]netlink.Message, error) {
 				return result, fmt.Errorf("socket diagnostic dump interrupted")
 			}
 			if m.Header.Type == unix.NLMSG_ERROR {
+				if len(m.Data) >= 4 {
+					code := int32(binary.NativeEndian.Uint32(m.Data[:4]))
+					if code < 0 {
+						return result, fmt.Errorf("socket diagnostics: %w", syscall.Errno(-code))
+					}
+				}
 				return result, fmt.Errorf("socket diagnostic netlink error")
 			}
 			if m.Header.Type == unix.NLMSG_DONE {

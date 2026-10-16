@@ -1,76 +1,89 @@
 # Current status
 
-Host-monitor checkpoint: `scripts/run-desktop.sh` now launches a real unprivileged
-read-only observer and the existing Qt Activity tree. No synthetic traffic or
-firewall changes. Host fixture and Wayland Activity tests pass; accepted lab prompt
-evidence is reused with one Allow smoke check. Final integration notes follow
-after the separately owned NetLimiter 5 visual pass.
+**Live host Activity monitoring is implemented and read-only.**
 
-Branch `milestone/backend`; use `git rev-parse HEAD` for the current snapshot.
-**A running native Qt 6 desktop client now controls the real isolated backend.**
-Launch from the repository root with `scripts/demo-desktop.sh`.
+```sh
+scripts/run-desktop.sh
+```
 
-## Desktop capabilities
+The application shows real visible applications/processes/TCP/UDP sockets, without
+synthetic traffic or host enforcement. Close its window or press Ctrl+C in the
+launching terminal to stop that instance's observer. Independent launches have
+separate private sockets. A separately managed observer stays running when a client
+closes. Branch: `milestone/backend`; exact snapshot: `git rev-parse HEAD`.
 
-- Async authenticated Unix API polling; explicit connected/disconnected/reconnecting,
-  read-only and isolated-lab status. Backend generation resets session history.
-- Persistent pending table, selectable plain-text details, resizable columns,
-  full executable/IPv6 endpoints, attribution/reason, countdown and backend scope.
-- One non-modal prompt, deduplicated notifications, default Once, Allow/Block and
-  accurate one-hour memory-only remembered permission. Backend acknowledgement
-  precedes success. Errors also appear in the prompt.
-- Stable request-ID selection, disabled duplicate/disconnected/read-only actions,
-  authoritative refresh and no automatic answer replay. Closing the client does
-  not affect enforcement.
-- Recent client-observed events bounded to 256/8 MiB; responses capped at 4 MiB,
-  eight concurrent decisions, one poll in flight, finite I/O deadlines. No durable
-  history, notification service, tray, full application tree or installed service.
-- One-command demo uses native one-shot UDP, private mode-0700 run directory and
-  mode-0600 sockets, a 60-second lab timeout, and scoped cleanup on terminal exit.
-  The ordinary host user is correctly mapped to the same user inside the lab's
-  user namespace; no authorization exception or display-access relaxation.
+## Available now
 
-## Direct verification this increment
+- Existing Qt desktop with compact Activity tree, name/path/PID/endpoint search,
+  sorting, active/listening filters, expand/collapse, copy actions and full details.
+- Applications grouped by supported key/revision; PID/start process identities;
+  shared sockets counted once, unknown sockets individually shown.
+- TCP listening/connecting/established/closing states, bound versus connected UDP,
+  bracketed IPv6 endpoints and diagnosed link-local interface scope. Initiation
+  remains Unknown, not inferred from port numbers.
+- Partial visibility, timestamps and collection cost; errors/overdue collection
+  and disconnect never present a previous successful snapshot as live.
+- Host API always read-only, including direct mutation attempts. Host GUI omits
+  policy controls. Observation creates no Allow/Block decision events.
+- Serial periodic snapshots, default two-second delay after completion; bounded
+  result/cache sizes, no GUI-triggered collection, Wine helpers or host hooks.
+- Unprivileged launcher with private per-instance paths and scoped cleanup; no
+  installed service, autostart or broad permission requirement.
 
-Qt 6.12.0/CachyOS x86-64, **actual Wayland platform**, ordinary UID 1000 client:
+The **user-accepted prompt demo** remains `scripts/demo-desktop.sh`. Enforcement is
+only inside its disposable namespace. Closing that window does not stop the lab;
+q/Ctrl+C in its terminal performs teardown. Existing native/Wine evidence is reused.
 
-- Real pending datagram reaches no receiver before approval; prompt Allow delivers
-  it without retry; main-window Block (keyboard activation) delivers nothing.
-- Remembered Allow admits a subsequent one-shot datagram with a different source
-  port. Separate local service ports still prompt.
-- Prompt dismissal/expiry delivers nothing; stale API answer rejected. Read-only
-  monitor disables mutation. Client closure retains pending traffic; reconnect
-  refreshes state; backend loss disables main and prompt buttons with no delivery.
-- Synthetic metadata/error tests: long selectable paths, literal untrusted markup,
-  full IPv6 endpoints, keyboard traversal, notification deduplication, unauthorized
-  response and reconnect/new generation without decision replay.
-- Rendered main window and prompt inspected via QWidget captures from the real
-  Wayland run. These are application captures, not compositor screenshots. The
-  long-path/IPv6 presentation check uses synthetic metadata; final window size
-  is also subject to the compositor. Inspected Wayland captures are 1040×740.
-- Focused daemon/policy race tests and `go vet ./...`; unchanged native matrix and
-  Wine/runtime evidence reused. No new Wine/game compatibility claims.
+## Focused evidence
 
-Evidence: `.workspace/desktop-final.log`, `.workspace/desktop-wayland.log`, `.workspace/desktop-go.log`,
-`.workspace/desktop-build.log`, `.workspace/desktop-demo-smoke.log`, and `.workspace/desktop-test-PID/` receiver logs
-and screenshots. Reproduce: `QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=wayland-0
-scripts/check-desktop.sh` (one shell line); offscreen fallback is explicitly labelled.
+CachyOS x86-64, Qt 6.12.0, actual Wayland:
 
-Convenience captures: `.workspace/desktop.png`, `.workspace/desktop-prompt.png`
-and `.workspace/desktop-long-ipv6.png`. The standalone demo command was also
-launched on Wayland, accepted terminal repeat-attempt input, and cleaned up on q.
+- Controlled IPv4/IPv6 listeners correctly identify executable/PID/local endpoint.
+  Real TCP exchange appears Established; SYN-sent is observed using an unaccepted
+  loopback backlog, without firewall changes. UDP bound/connected labels verified.
+- Same basename at different paths yields distinct keys. An inherited listener
+  reports both visible holders in one row. Process exit removes current ownership.
+  All initiation directions remain Unknown. Direct API Allow is rejected.
+- Qt checks passed search, filters, sorting, stable selection, copy, empty results,
+  process exit, backend loss and fresh reconnect. One existing prompt Allow-to-
+  receiver check passed after shared UI/API changes; no full matrix rerun.
+- Focused race tests and vet passed. Two normal launchers had distinct sockets and
+  generations; stopping one left the other live. GUI exit stopped its own observer.
+- In a local 500 ms interval test: approximately 9–10 ms per collection, 0.05 CPU
+  seconds over three wall seconds, 115 visible sockets in that sample. This is
+  measured local behavior, not a throughput or zero-overhead claim.
 
-## Preserved backend capabilities and limits
+Evidence: `.workspace/monitor-final.log`, `.workspace/monitor-host-final.log`,
+`.workspace/monitor-go-final.log`, `.workspace/monitor-launcher.log`; fixture JSON
+under the `.workspace/monitor-test-*` path printed by the runner. Qt captures under
+`.workspace/monitor-ui-*/host-monitor.png` filter to owned fixtures to avoid unrelated
+process metadata. Final design integration evidence is recorded separately;
+VISUAL.md describes the desktop layout and its verification.
 
-Native isolated TCP/UDP IPv4/IPv6 enforcement, incoming direction-aware remembered
-scope, bounded NFQUEUE retention and authenticated policy/monitor API remain.
-Optional Wine 11.19 and direct dwproton-11.0-4 adapters retain verified ordinary
-listeners, inheritance/duplication, restart recovery, two-prefix attachment and
-IPv6/dual-stack behavior. See WINE.md and [historical evidence](HISTORY.md).
+## Visibility and scope limits
 
-TCP permissions authorize initiation; existing accepted connections are not
-continuously reauthorized or disconnected by rule changes. Runtime snapshots
-retain their documented race/threat-model limits. Scoped link-local Wine policy,
-real games, full UMU/Steam/container behavior, VPN coexistence, other distributions
-and arm64 remain unverified. No host firewall/network/security/services, installed
-runtimes, existing prefixes or launcher settings were changed.
+About 340 process descriptor directories were inaccessible in the recorded run;
+partial visibility is reported. Current network namespace, TCP/UDP and process-
+leader descriptor directories only: no other namespace traversal, Unix sockets,
+private per-thread FD census or packet history. Short-lived activity can be missed.
+Snapshots are non-atomic; visible holders do not prove exclusive ownership or
+identify a remote program. Useful partial monitoring requires no root request.
+
+No measured rates/totals, persistent rules/history, production service or host
+protection. NetLimiter 5 is the authoritative visual target; remaining differences
+are documented rather than claimed exact. Game detection remains deferred and its
+existing optional adapter preserved. Other distributions, arm64, real games,
+full launcher/container integration and VPN coexistence remain unverified.
+No host firewall/network/VPN/security/service configuration, installed runtime,
+launcher or existing-prefix changes were made.
+
+## Checkpoints and next step
+
+Runnable pre-design checkpoint: `883db80dd457591e0fa12af49f4d9ab1e9332020`.
+Design worktree: `.workspace/worktrees/netlimiter-design`, branch
+`frontend/netlimiter-design`. Integration owns backend/API/scripts/tests; design
+owns presentation. The final report names the integrated commit.
+
+Next: user feedback on real Activity and documented visual gaps. Host enforcement
+needs a separately authorized coexistence/recovery/validation milestone. There is
+no hidden enable-protection action. Continue game detection later.
