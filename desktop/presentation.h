@@ -40,7 +40,7 @@ inline QString desktopStyle() {
     QLabel#status, QLabel#activityStatus { color: #b4b4b4; padding: 3px 5px; font-size: 11px; }
     QLabel#unmeasuredChart { color: #929292; border: 1px solid #414141; background: #242424; }
     QLabel#promptHeading { background: #00a5db; color: white; font-size: 18px; font-weight: bold; padding: 14px 12px; }
-    QLabel#promptConnection { background: #40535b; color: #eeeeee; padding: 7px 10px; }
+    QLabel#promptConnection { background: #659b34; color: white; padding: 7px 10px; }
     QDialog#prompt { border: 2px solid #00a5db; }
     QLabel#result { color: #b9dfe9; padding: 2px 5px; }
     QStatusBar { background: #303030; border-top: 1px solid #444444; }

@@ -18,10 +18,11 @@ The initial layout has the following limits.
   in-memory scope semantics, not unsupported duration toggles.
 - The backend socket selector is visible. The main menu has only working local
   actions. Linux window decorations and fonts may differ from the reference.
-- Narrow displays require horizontal tree scrolling. PID column width and the
-  relative placement of socket counts deserve the next refinement pass.
-- Pending permission controls could be stacked more compactly in a narrow right
-  sidebar. Exact typography, spacing and chart proportions remain to be matched.
+- Narrow displays require horizontal tree scrolling for endpoint/state columns.
+  PID width accommodates seven digits, and socket counts appear beside PID;
+  logical column indices and sorting semantics are preserved.
+- The sidebar scope selector sits above Allow/Block to fit narrow windows.
+  Exact typography and the selectable plain-text detail layout still differ.
 
 ## Evidence
 
@@ -39,3 +40,42 @@ before rebuilding it, since its generated cache contains the original path.
 
 Root integration owns the final button-to-API lab regression. The design stream
 has not rerun the accepted native/Wine enforcement matrices.
+
+## Refinement verification (session 01a1465b)
+
+Started from verified, clean handoff `77286d286faa169a81f455426dac933ee13a8b81`
+on `frontend/netlimiter-design`. Rebuilt with CMake in the worktree's
+`.workspace/build-netlimiter-design`. No API, backend, test source or scripts
+changed. Existing Qt object names, column indices, scope values and actions are
+preserved. There are no new backend integration dependencies.
+
+FlowGate uses an explicit dark content palette.
+
+Evidence below is relative to the **main repository**, not this worktree:
+
+- `.workspace/design-refine-monitor.log`: Wayland monitor suite, 4/4 passed.
+- `.workspace/monitor-ui-1084117/host-monitor.png`: main window at 1040×740,
+  showing real loopback fixture processes through the actual read-only observer.
+  Seven-digit PIDs, counts, IPv6 rows, focus and selection are visible. This is
+  controlled live fixture traffic, not invented rates or process identities.
+- `.workspace/design-refine-desktop-final.log`: Wayland decision suite, 8/8
+  passed, including actual isolated UDP Allow, keyboard Block, remember, expiry,
+  stale rejection, read-only mode, reconnect, and metadata/error coverage.
+- `.workspace/design-refine-prompt.log`: final prompt-height adjustment smoke,
+  3/3 passed (init, close/disconnect, cleanup).
+- `.workspace/desktop-test-1086564/prompt.png`: final 600×650 prompt, actual
+  pending isolated-lab UDP request with visible expiry and decision controls.
+- `.workspace/design-refine-small.log`: focused presentation checks, 3/3 passed.
+- `.workspace/desktop-test-1085999/long-ipv6.png`: 860×600 **synthetic metadata
+  fixture**, explicitly covering long executable paths and IPv6, not real
+  attribution or IPv6 enforcement evidence.
+- `.workspace/design-real-launch-joqsq61s/launch.log`: actual standalone desktop
+  executable launched on Wayland with a private read-only observer; both stayed
+  running until orderly cleanup.
+
+All
+controls remain accessible at the checked sizes; long tables scroll horizontally
+and long details scroll vertically. No host firewall/network configuration was
+changed. Rates, chart series, persistent rules, quotas, priorities, geo/domain
+metadata and the full reference rule editor remain unavailable and are not
+simulated. The integration agent owns final merge and backend validation.
