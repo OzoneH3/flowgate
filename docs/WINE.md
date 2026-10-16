@@ -33,3 +33,141 @@ Thus the supported threat model excludes cross-process dormant handle sharing, a
 The missing observation is the mapping from a server socket object to **every live Windows handle reference**, including creation, inheritance, duplication, close and client exit before FD-cache materialization. A syscall hook observing only socket creation or SCM_RIGHTS cannot reconstruct dormant Windows handles. Full Wine-protocol/lifecycle tracking would require matching-version protocol parsing or focused probes and explicit loss handling; a generic eBPF subsystem does not solve that automatically.
 
 The smallest optional alternative is a fresh network namespace and dedicated Wine server instance per opt-in launch, so the namespace can identify a launch even when the only visible descriptor belongs to its broker. A separate prefix (or a disposable prepared prefix copy) may be needed to avoid Wine's shared-server rendezvous; do not silently rewrite existing prefixes or launcher settings. This is proposed, not implemented or required by basic native operation. It does not separate helper processes within that launch or traffic already multiplexed by an external relay. Any implementation should remain explicit and validate receiver behavior before claiming coverage.
+
+## 2026-10-16: optional runtime-table adapter (result B)
+
+The earlier FD-only boundary is preserved; it is no longer the only available
+observation. `internal/identity/table.go` plus `experiments/wine-table/probe.c`
+implements an explicitly enabled **IPv4 incoming TCP-listener/UDP census**.
+It does not change the Windows target or installed runtime. The PE helper runs
+beside the fixtures in their prefix. This is a practical next product path;
+launch isolation is not required by these results.
+
+### Selected evidence and alternatives
+
+`GetExtendedTcpTable(OWNER_PID_LISTENER)` and `GetExtendedUdpTable(OWNER_PID)`
+expose endpoint/Windows-PID rows. In the inspected Wine 11.19 source,
+`enum_handles_of_type` visits each process handle table, and
+`get_tcp_connections`/`get_udp_endpoints` serialize each socket handle's owner.
+This includes inherited references before a Unix FD is materialized. The
+[iphlpapi implementation](https://github.com/wine-mirror/wine/blob/wine-11.19/dlls/iphlpapi/iphlpapi_main.c)
+and [NSI TCP implementation](https://github.com/wine-mirror/wine/blob/wine-11.19/dlls/nsiproxy.sys/tcp.c)
+carry those rows to the public API. No implementation source was copied.
+
+| Candidate | Concrete information / decision |
+| --- | --- |
+| Public runtime owner tables | Selected: current handle holders and endpoints, no tracing privilege or internal protocol layout. Requires a helper in that server session and functioning NSI services. |
+| `SystemExtendedHandleInformation` | PID/handle/type, but Wine's Object field is zero; cannot alone join a handle to the kernel socket. |
+| Server debug/protocol observation | Could follow handle operations; debug output is not established as a complete loss-detectable census. A protocol observer must decode version-specific requests, replies, inheritance and reuse. Not implemented. |
+| Syscall/eBPF socket hooks | See kernel sockets or FD transfers, not dormant Windows handles. Server handle-table probes would need internal symbols/layouts and separate privilege validation. Not needed or attempted here. |
+
+Creation, bind/listen, duplication, inheritance and close affect the server's
+current handle tables. Snapshots observe the resulting holder set, **not every
+intervening event**. An operation requester, a handle holder and an actual
+receiver remain distinct concepts. A shared socket yields multiple candidates,
+even before either recipient calls recv/accept. Repeated handles in one process
+are deduplicated; multiple processes are not merged by executable name.
+
+### Corroboration, generations, bounds and recovery
+
+The adapter preserves raw Unix FD holders. It adds separate Windows PID + process
+creation-time + full-image-path rows. It requires one kernel socket, complete
+visible FD coverage, the configured broker executable, matching namespace/user/
+prefix, and a reciprocal Unix peer channel from the uniquely mapped observer
+image to that broker. Windows paths must resolve to a currently corroborated
+mapped executable revision; deleted-image mappings are rejected. No fabricated
+Linux PID is assigned to a Windows owner; API authorization uses the broker's
+corroborated UID, while policy uses the Windows application's own key/revision.
+
+Two matching runtime snapshots bookend a second kernel-cookie/FD census.
+Fingerprints include the socket cookie, native process starts/revisions, Windows
+process generations, selected holder set, image revision and observer-instance
+generation. Delayed decisions and retained-packet release repeat the resolution.
+An observed listener replacement, holder change or observer failure cannot reuse
+the old pending/cached result. Unknown/multiple holders never receive a single-app
+Allow. The configured table path does not fall back to the weaker FD association
+for that runtime when its evidence fails.
+
+Limits: 256 KiB helper table buffer, 4096 rows, 1 MiB output/parser bound, one
+outstanding request, two-second response deadline per snapshot, no retained
+payload. Runtime APIs can allocate their own internal temporary tables; this is
+not a cap on the entire Wine runtime's memory. API errors, truncated output,
+EOF, overflow, version mismatch and deadlines disable the observer until explicit
+daemon restart. There is no event stream whose lost events could silently leave
+an old incremental model. Undetected runtime enumeration bugs remain outside the
+supported build assumptions.
+
+Late observer startup works: a current census reconstructs the holder set.
+Wine's prefix must finish initialization; an incomplete prefix initially returned
+error 2 from the owner-table API and was correctly rejected. A wineserver restart
+invalidates the peer/process evidence and normally terminates its helper. Recovery
+requires starting a new daemon/helper and new decisions; no old model is restored.
+Direct server-restart recovery has not been separately exercised.
+
+### Supported builds and exact results
+
+- Installed Wine `11.19`, broker SHA256
+  `b724233cd9e71f529c0ae30c090c862ac0d0ecfe760e604a2e1cdae160ab9fa6`.
+- Installed `dwproton-11.0-4`, version file `1781221333 dwproton-11.0-4`,
+  bundled `wine --version`: `wine-11.0 (CachyOS)`, helper reports `11.0`;
+  broker SHA256 `3f84ad1bc5116a82ec54ee15588f000dbc5d570c9c77c6007d82545d375fd792`.
+  [Upstream wine-11.0 server source](https://github.com/wine-mirror/wine/blob/wine-11.0/server/sock.c)
+  is a baseline, not a claim that vendor patches match it byte-for-byte.
+
+Both builds passed real alpha/beta ordinary TCP (no FIONREAD) and one-shot UDP
+Allow/Block, reversed, in one runtime/prefix. Both passed late census of dormant
+inherited TCP and UDP handles, parent exit leaving only the child's row, receiver
+delivery after child release, denial of a still-shared dormant TCP listener,
+listener replacement/stale approval rejection, and observer-loss rejection of a
+retained UDP datagram. The helper never duplicates or touches target socket handles.
+
+The ordinary same-user snapshot threat model excludes malicious runtime/helper
+changes, hidden external descriptor recipients, and adversarial transfer/ABA races
+between the final census and NFQUEUE verdict. A cookie identifies the kernel
+socket generation, not a Wine handle-object generation. Numeric handle reuse,
+WSADuplicateSocket, IPv6 Wine ownership and arbitrary other runtime builds still
+need dedicated tests. Close/process-exit and new-listener generations were tested;
+that is not complete event coverage. Existing allowed TCP connections retain the
+baseline conntrack fast path: this prototype controls initiation and does not
+continuously reauthorize accepted-socket transfers. UDP and new TCP attempts are
+rechecked. Do not advertise this as comprehensive hostile-process isolation.
+
+### `lwp` and reproduction
+
+Inspected `/home/flowgate-user/user_config/scripts/lwp` (resolved Bash script). It chooses
+the newest-by-directory-mtime `dwproton-*` under
+`$HOME/.steam/steam/compatibilitytools.d`, passes `PROTONPATH`, `WINEPREFIX` and
+`STEAM_COMPAT_DATA_PATH` to `umu-run`, and normally defaults to `$HOME/Games/pfx`.
+Its third argument accepts an absolute prefix override. Paths containing `#Hv`
+force its shared RenPy prefix; these fixtures do not contain that marker.
+Neither the original launcher nor its existing prefixes were modified/executed.
+
+`scripts/proton-fixture.sh` reproduces the selected Proton setup with a fixed
+workspace-only prefix. It calls Proton's `runinprefix` (direct Wine child) to keep
+helper stdin intact; Proton `run` goes through steam.exe and did not preserve this
+interactive probe channel. `--init` uses Proton getcompatpath/winepath to initialize the prefix without steam.exe. UMU's runtime
+installation/update layer and game-specific fixes are bypassed, Python bytecode
+writes disabled, and all caches redirected to `.workspace`. This validates the
+installed Proton runtime, not full UMU, pressure-vessel or Steam game integration.
+
+```sh
+. scripts/go-env.sh
+go build -o .workspace/flowgate ./cmd/flowgate
+scripts/build-windows.sh
+scripts/build-wine-table.sh
+# Complete Wine prefix setup once, in the disposable namespace:
+scripts/lab.sh sh -c 'export WINEPREFIX="$PWD/.workspace/wine-prefix" TMPDIR="$PWD/.workspace/tmp" XDG_CACHE_HOME="$PWD/.workspace/cache" XDG_CONFIG_HOME="$PWD/.workspace/config" WINEDEBUG=-all WINEDLLOVERRIDES="mscoree,mshtml=" DISPLAY= WAYLAND_DISPLAY=; wineboot -u; wineserver -w'
+scripts/lab.sh python3 scripts/wine-table-test.py
+scripts/lab.sh python3 scripts/wine-table-lifecycle.py
+export FLOWGATE_TEST_PROTON=/home/flowgate-user/.steam/steam/compatibilitytools.d/dwproton-11.0-4
+export FLOWGATE_TEST_STEAM=/home/flowgate-user/.steam/steam
+scripts/lab.sh scripts/proton-fixture.sh --init
+scripts/lab.sh python3 scripts/wine-table-test.py
+scripts/lab.sh python3 scripts/wine-table-lifecycle.py
+```
+
+Run these sequentially. Tests set `FLOWGATE_WINE_TABLE_RUNNER`,
+`FLOWGATE_WINE_TABLE_HELPER`, `FLOWGATE_WINE_TABLE_VERSION`, `WINEPREFIX` and
+`FLOWGATE_WINE_BROKER` explicitly for `serve-lab`. The normal CLI remains unchanged;
+the table adapter is not enabled by a broker variable alone. No real games,
+Heroic/Lutris/Flatpak, VPN or additional distribution support is implied.

@@ -1,15 +1,54 @@
 # Continuation handoff
 
-Continue in `/home/flowgate-user/Apps/flowgate`, branch `milestone/backend`. Verify actual HEAD and preserve unrelated changes; the final report names the snapshot, avoiding a self-referential hash in this document. Read applicable AGENTS.md, PLAN.md, STATUS.md, SEMANTICS.md, WINE.md and README.md; check `.workspace/coordination`. Source `scripts/go-env.sh` before Go commands. No agents without explicit authorization.
+Continue in `/home/flowgate-user/Apps/flowgate`, branch `milestone/backend`. Verify actual
+HEAD and preserve unrelated work; the final report names the commit. Read
+applicable AGENTS.md, PLAN.md, STATUS.md, SEMANTICS.md, WINE.md and README.md; check
+`.workspace/coordination`. Source `scripts/go-env.sh` before Go commands. No agents
+without explicit authorization. `.workspace/CONTINUE.txt` is historical.
 
-The completed bounded increment adds explicit Wine broker association, direction-aware incoming remembered permissions and bounded kernel retention. Reproduce with `scripts/check-increment.sh` (sequential tests sharing the private run socket). Reuse unchanged results named in STATUS.md instead of restarting the native matrix. The older `.workspace/CONTINUE.txt` is historical; this tracked document supersedes it.
+## Current result and reusable evidence
 
-Current boundary: reciprocal Unix peer evidence and a matching configured broker executable can corroborate one visible Windows client under a non-sharing assumption, but `/proc` cannot enumerate dormant Windows handles. `wine-boundary.py` proves this using inheritance, including server-only periods and later FD materialization. Plain TCP listen/accept may expose no client FD. Default attribution denies these cases. Opt-in mode via FLOWGATE_WINE_BROKER is explicitly conditional; it must not be described as universally reliable. WINE.md explains the matching Wine 11.19 source and minimal missing lifecycle evidence.
+Result **B**: optional `internal/identity/table.go` and the PE helper query public
+runtime TCP/UDP owner tables, corroborated with a pinned broker, reciprocal Unix
+peer relationship, kernel cookies, process generations and mapped image revisions.
+The target Windows application is unmodified. `FLOWGATE_WINE_BROKER` alone keeps its
+older conditional behavior; the new adapter additionally requires explicit table
+runner/helper/version configuration and is only wired into `serve-lab`.
 
-Useful next work: choose the smallest optional launch isolation prototype (fresh network namespace and dedicated wineserver, with a new disposable prefix if needed), or a narrowly scoped Wine handle-reference observation experiment. Demonstrate creation/duplication/inheritance/close/client-exit coverage and loss behavior before replacing conservative decisions. Do not merely ignore wineserver or infer a client from a port/prefix/name. External multiplexing relays and helpers remain separate limits. No specific privileged observation is presently required or requested.
+Installed Wine 11.19 and dwproton-11.0-4 / Wine 11.0 both passed plain TCP (no
+FIONREAD), one-shot UDP, alpha-Allow/beta-Block and reversal. Both see dormant
+inherited TCP/UDP handles; after parent exit the child remains attributed and
+receives after release. Shared dormant TCP is denied. Pending listener replacement
+and observer death reject Allow without receiver delivery. Evidence and exact
+commands are indexed in STATUS.md and WINE.md. Native incoming regression, race
+tests and vet passed; reuse unchanged scope/retention/outgoing results.
 
-Retain these verified behaviors: receiver-side independent alpha/beta Allow/Block in both directions for UDP and labelled polling-TCP; new incoming client source ports reuse remembered permission while app/revision/local-port/remote-address changes remain controlled; one-shot UDP held until timely Allow; Block, timeout, listener replacement, shared clients, shutdown and overload do not release undecided packets. Keep expiry/cache invalidation, peer authorization and legacy schema exact-endpoint semantics covered.
+The inspected Bash `lwp` has an absolute third-argument prefix override and selects
+installed dwproton by directory mtime. Tests reproduce its Proton selection through
+`scripts/proton-fixture.sh` with a workspace prefix/cache and disabled game fixes,
+without UMU installation/update machinery. `runinprefix` preserves helper pipes;
+`--init` prepares a fresh prefix using Proton getcompatpath/winepath. This is not real-game or
+complete Steam/UMU container integration validation.
 
-Authorization remains read-only host diagnostics, source inspection, local edits/builds/tests/commits, disposable namespaces and the workspace-only Wine prefix/fixtures. Do not change host firewall/network/VPN/services, install packages or privileged services, modify existing prefixes/launch settings, launch/download games, push, publish or deploy without new explicit user authorization. All scratch/logs stay under `.workspace`. Any necessary new privileged operation must be justified precisely after independently useful work is finished.
+## Smallest next useful work
 
-Report actual branch/SHA, focused evidence and remaining limits. Real games, Proton variants, Flatpak, VPN and other distributions remain unverified unless directly exercised. No Qt or production deployment work is part of the current backend objective.
+1. Add actual WSADuplicateSocket and numeric handle-close/reuse cases, including
+   repeated ownership changes while UDP packets or TCP SYNs are retained.
+2. Decide the accepted-TCP ownership contract. Current enforcement rechecks new
+   TCP attempts and UDP, but established allowed TCP retains the baseline kernel
+   fast path; subsequent accepted-socket transfer is not continuously observed.
+3. Test helper/server restart and build mismatch explicitly; retain sticky failure
+   until daemon restart. Do not broaden versions or enable by default prematurely.
+
+The census observes current holders, not every event. No Wine object ID is exposed;
+kernel cookies, Windows PID/creation time and observer generations prevent observed
+reuse mistakes but not adversarial ABA races between snapshots and verdicts.
+Late startup reconstructs current state. IPv6 Wine, hostile same-user transfers,
+hidden external FD recipients and arbitrary builds remain unsupported. Do not
+replace that limitation with blanket runtime permissions or mandatory wrappers.
+
+Authorization remains local edits/builds/tests/commits, read-only host diagnostics,
+source inspection and workspace-only fixtures/prefixes in disposable namespaces.
+No host firewall/network/service/security changes, packages, installed runtime or
+existing prefix edits, real games, pushes, publishing or deployment. No additional
+privilege is currently needed. All generated output stays under `.workspace`.

@@ -58,3 +58,11 @@ See [status and validation](docs/STATUS.md), [semantics and limitations](docs/SE
 No Qt, systemd, NetworkManager, cloud or package-manager dependency in the core. The test harness uses no init system. CachyOS x86-64 is directly tested; Debian/Ubuntu, Fedora, arm64, Flatpak, Proton games and VPN coexistence are unverified. The default build on this host links libc/libresolv; it is not claimed portable or static.
 
 Brand display is a build variable: `go build -ldflags '-X main.productName=NewName' -o .workspace/flowgate ./cmd/flowgate`. Module/API identifiers are deliberately separate from display branding. SQLite, desktop integration and packaging for a privileged service are deferred until attribution is strong enough for host deployment.
+
+### Experimental transparent Wine/Proton census
+
+The optional lab adapter now tests ordinary IPv4 TCP listeners and UDP without
+modifying the target application, including dormant inherited handle detection.
+It remains disabled by default. Supported builds, snapshot limitations, launcher
+inspection and reproducible commands are in [docs/WINE.md](docs/WINE.md); current
+evidence and remaining work are in [docs/STATUS.md](docs/STATUS.md).

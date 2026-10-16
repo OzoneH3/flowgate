@@ -122,6 +122,14 @@ func serve() error {
 		return err
 	}
 	e := daemon.New(*timeout)
+	if runner := os.Getenv("FLOWGATE_WINE_TABLE_RUNNER"); runner != "" {
+		observer, err := identity.NewWineTable(runner, os.Getenv("FLOWGATE_WINE_TABLE_HELPER"), os.Getenv("FLOWGATE_WINE_BROKER"), os.Getenv("WINEPREFIX"), os.Getenv("FLOWGATE_WINE_TABLE_VERSION"))
+		if err != nil {
+			return err
+		}
+		defer observer.Close()
+		e.Resolve = observer.Resolve
+	}
 	if *rulepath != "" {
 		b, err := os.ReadFile(*rulepath)
 		if err != nil {

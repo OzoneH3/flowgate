@@ -40,3 +40,16 @@ The table is created exclusively and cleanup only runs after successful creation
 ## Network scope
 
 The harness creates fresh user, network, mount and PID namespaces and private procfs; it enables loopback only. Incoming TCP SYN attribution examines listeners before accept. Outgoing SYN attribution examines the sender socket. UDP checks connected and unconnected sockets. Return traffic uses the explicit decision mark; bare established state is not permission. IPv4 and simple IPv6 packets are supported. Fragmented packets and IPv6 extension-header packets queued to userspace are rejected; ICMP and other protocols are outside this prototype's TCP/UDP policy. No forwarding/container protection, DNS/domain policy, bandwidth limiting or simultaneous incoming+outgoing ruleset is claimed.
+
+## Optional runtime census experiment
+
+`serve-lab` can explicitly select the Wine table adapter documented in WINE.md.
+Its authorization principal contains a UID, not an invented Linux PID. Raw FD
+holders and Windows handle holders are separate output. One current Windows
+holder plus corroborating broker/kernel/image evidence permits an application
+key; multiple holders deny single-app permission. Two snapshots and a kernel
+bookend are repeated at delayed release. Observer loss is sticky fail-closed for
+that runtime until daemon restart. New TCP attempts and UDP are rechecked;
+already allowed established TCP keeps the existing fast path and does not promise
+continuous detection of subsequent socket transfer. Defaults and rule schema
+remain unchanged.

@@ -127,20 +127,25 @@ func brokerAssociation(owners []Process) (*Association, *Process) {
 }
 
 // Principal returns the logical client for authorization, preserving all holders.
-func (a Attribution) Principal() *Process {
+type PrincipalIdentity struct{ UID uint32 }
+
+func (a Attribution) Principal() *PrincipalIdentity {
 	if a.Application == nil {
 		return nil
+	}
+	if a.Table != nil && len(a.Table.Owners) == 1 {
+		return &PrincipalIdentity{UID: a.Table.UID}
 	}
 	if a.Association != nil {
 		for i := range a.Owners {
 			if a.Owners[i].PID == a.Association.ClientPID {
-				return &a.Owners[i]
+				return &PrincipalIdentity{UID: a.Owners[i].UID}
 			}
 		}
 		return nil
 	}
 	if len(a.Owners) == 1 {
-		return &a.Owners[0]
+		return &PrincipalIdentity{UID: a.Owners[0].UID}
 	}
 	return nil
 }

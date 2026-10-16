@@ -37,13 +37,15 @@ func (f Flow) Key() string {
 }
 
 type Attribution struct {
-	Association *Association `json:"association,omitempty"`
-	Status      string       `json:"status"`
-	Reason      string       `json:"reason"`
-	Owners      []Process    `json:"owners"`
-	Sockets     []Socket     `json:"sockets"`
-	Fingerprint string       `json:"fingerprint"`
-	Application *Application `json:"application,omitempty"`
+	Table              *TableEvidence `json:"runtime_table,omitempty"`
+	VisibilityComplete bool           `json:"visibility_complete"`
+	Association        *Association   `json:"association,omitempty"`
+	Status             string         `json:"status"`
+	Reason             string         `json:"reason"`
+	Owners             []Process      `json:"owners"`
+	Sockets            []Socket       `json:"sockets"`
+	Fingerprint        string         `json:"fingerprint"`
+	Application        *Application   `json:"application,omitempty"`
 }
 
 func NetNS() string { return link("/proc/self/ns/net") }
@@ -190,6 +192,7 @@ func Resolve(f Flow) Attribution {
 		a.Reason = "listener changed during attribution"
 		return a
 	}
+	a.VisibilityComplete = !incomplete && len(covered) == len(wanted)
 	a.Fingerprint = fingerprint(a.Owners, a.Sockets)
 	if !incomplete && len(covered) == len(wanted) && len(a.Sockets) == 1 {
 		if association, client := brokerAssociation(a.Owners); association != nil {
