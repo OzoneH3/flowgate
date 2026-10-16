@@ -79,3 +79,38 @@ are pinned; replacement or helper/protocol failure requires explicit reattachmen
 A prefix is a runtime-session boundary, not a game-session assertion. IPv6 table
 rows preserve scope IDs; link-local permission remains unsupported without a
 validated interface mapping. See WINE.md for commands and tested family cases.
+
+## Native desktop client and additive API metadata
+
+The v1 response now includes an opaque random backend `generation`, `read_only`,
+`mode` (`isolated-lab` only when explicitly set by serve-lab), `server_time` and
+peer UID as seen by the backend namespace. Generation is independent of request
+IDs. Event `scope_previews` contains backend-generated descriptions keyed by the
+supported `once` and `application` scopes; UI controls require an available preview.
+Authorization and the existing decision validation are unchanged. UI and CLI
+answers both report an explicit client decision.
+
+The Qt client polls every 500 ms with at most one list request in flight. Decisions
+use separate asynchronous sockets, at most eight outstanding. Requests time out
+at 3.5 seconds, replies cap at 4 MiB and lists at 256 events. Displayed remaining
+time uses the backend clock offset, but only the daemon decides expiry. A failed
+or missing acknowledgement is not success; the client refreshes and never replays
+an answer. Changing socket invalidates outstanding callbacks and clears state.
+Read-only endpoints expose pending requests without prompts or mutation controls.
+All supplied metadata is plain text; nothing is evaluated as HTML or a command.
+
+Recent history contains at most 256 events/8 MiB observed by this client during
+the current backend session. It is not persistent or complete: backend events
+expire and disconnected clients can miss them. Reconnecting to the same generation
+refreshes authoritative pending state; a different generation clears old history.
+There is one non-modal prompt and bounded notification-ID deduplication. Dismissal
+leaves requests pending. Closing the frontend does not stop the backend or grant
+traffic. The demo supervisor separately owns lab teardown, triggered by q/Ctrl+C
+in its launching terminal; closing its GUI alone keeps the lab enforcing.
+
+The demo's 60-second pending timeout is explicit and lab-only; the daemon default
+remains 15 seconds. Kernel retention/queue limits, policy matching, runtime adapters
+and established TCP fast paths are unchanged. The GUI outside the single-user
+namespace retains host UID1000; SO_PEERCRED inside maps that same owner to UID0,
+which is the namespace administrator under the existing API contract. Socket
+permissions remain 0600 with a 0700 parent; no host-root GUI or policy bypass.

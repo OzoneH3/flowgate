@@ -1,63 +1,57 @@
 # Continuation handoff
 
 Continue in `/home/flowgate-user/Apps/flowgate`, branch `milestone/backend`. Verify HEAD and
-preserve unrelated work. Read applicable AGENTS.md, PLAN.md, STATUS.md, SEMANTICS.md,
-WINE.md and README.md; check `.workspace/coordination`. Source `scripts/go-env.sh`
-before Go commands. No additional agents without authorization. The final report
-names the commit; this file avoids a self-referential SHA update.
+preserve unrelated work. Read applicable AGENTS.md, README.md, PLAN.md, STATUS.md,
+SEMANTICS.md and this handoff; check `.workspace/coordination`. Source
+`scripts/go-env.sh` before Go commands. The final report names the commit; this
+file avoids a self-referential commit update.
 
-## Completed increment
+## Current priority and runnable result
 
-The existing public owner-table adapter now has read-only `runtime-discover` and
-explicit `serve-lab --attach-prefixes` integration. It attaches to already-running
-workspace prefixes using trusted runtime-bin selection, a broker-build allowlist,
-caller UID checks, pinned process generations and verified helper Unix peers.
-Server creation is disabled for attachment. Up to four separate observers are
-supported. No automatic retry, privileged-root helper or weaker fallback.
+**Desktop first; game detection later.** Run `scripts/demo-desktop.sh` in a terminal
+in the graphical session. It builds the Qt Widgets client and Go backend, launches
+a disposable native UDP lab and opens the GUI outside the namespace. An initial
+one-shot datagram prompts automatically. Enter sends another; 2–8 selects another
+service port; q/Ctrl+C tears down only this lab. Closing the GUI alone leaves
+traffic controlled. Logs remain in the printed `.workspace/desktop-demo-*` folder.
 
-Both Wine 11.19 and direct dwproton-11.0-4 / Wine 11.0 passed:
+The client can also connect with `.workspace/desktop/flowgate-desktop --socket PATH`.
+Use the `.monitor` endpoint for read-only mode. No host enforcement or service
+installation is implemented. Recent history is bounded, client-observed and
+session-local. Once is default; remembered permission is one hour in memory.
 
-- Actual WSADuplicateSocket preparation/construction/close lifecycle. The recipient
-  is visible already at preparation. Shared receivers get no data; stale retained
-  approvals are rejected before recipient construction.
-- Actual numeric handle reuse, with a changed kernel socket fingerprint.
-- Late attachment to two prefixes, including same executable and reused service
-  port not inheriting another prefix's permission.
-- Server death/restart, stale denial and explicit reattachment/new generation.
-- IPv6 ordinary TCP and one-shot UDP Allow/Block, reversed; dual-stack wildcard
-  over both families; mapped IPv6 binds; separate IPv6-only/IPv4 listeners.
-- Accepted TCP socket transfer continues the already-approved connection.
+## Reusable evidence and commands
 
-The product contract is **connection initiation**, not continuous TCP ownership
-reauthorization. Existing rule deletion/replacement/expiry does not disconnect
-established approved TCP. UDP retains ownership/flow checks. No revocation behavior
-was weakened or silently added. Scoped link-local Wine policy remains unsupported.
+`QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=wayland-0 scripts/check-desktop.sh`
+builds and runs the focused Qt UI-to-real-receiver tests, daemon/policy race tests
+and vet. Without graphical access use `QT_QPA_PLATFORM=offscreen`, explicitly
+reporting that limitation. The recorded Wayland run tested actual prompt Allow,
+keyboard Block, remembered new-source-port delivery, expiry/stale denial, monitor
+permissions, client closure and backend loss. Synthetic tests cover long paths,
+IPv6 presentation, plain text, error acknowledgement, dedup and reconnect without
+replay. See `.workspace/desktop-wayland.log`, `.workspace/desktop-go.log` and the
+run directory named in the Qt log for receiver evidence and screenshots.
 
-Reproduce with `scripts/check-runtime.sh` and repeat with FLOWGATE_TEST_PROTON and
-FLOWGATE_TEST_STEAM set as shown in WINE.md. The script builds and runs sequentially.
-Evidence is indexed in STATUS.md: runtime-final logs, structured duplication/
-attachment/IPv6 JSON, race/vet and native socket-matching regression. Reuse older
-unchanged incoming-scope, queue-retention and outgoing evidence. Attached-helper exit is directly exercised; protocol mismatch paths have focused tests.
+Sources: `desktop/` (C++ Widgets/QLocalSocket), `scripts/{build,check,demo}-desktop.sh`,
+`demo-desktop.py` (outer supervisor), `desktop-lab.py` (namespace fixtures). Backend
+changes are additive response metadata and scope descriptions only; no queue,
+identity, policy-match or Wine adapter changes. Desktop name is a CMake cache
+variable `FLOWGATE_PRODUCT_NAME`; Go CLI uses its existing ldflags name variable.
 
-## Next smallest step toward native prompts
+Historical backend/runtime evidence is preserved in HISTORY.md and WINE.md.
+Do not rerun the full Wine/native matrix for presentation-only changes. Existing
+Wine 11.19/direct Proton tests are not full Steam/UMU or real-game validation.
 
-Implement a minimal unprivileged desktop notification/prompt client using the
-existing peer-authenticated pending/decide Unix API, initially against the lab.
-Show application, endpoints, initiation direction, attribution limits and exact
-remembered scope; keep pending state/timeouts in the daemon. Preserve stale answer
-rejection and separate monitor versus decision permissions. Do not combine this
-with production host installation or broad rule editing.
+## Next smallest useful work
 
-Future integration work is explicit: dynamic session discovery/attachment outside
-workspace test prefixes, validation of further runtime builds, link-local interface
-mapping, full UMU/Steam/container integration and real games. `lwp` remains unchanged;
-its original prefix override and dwproton selection were reread. Direct runtime
-success is not full launcher integration. No need to restart attribution research
-or make per-game isolation wrappers mandatory.
+Get user feedback on the running prompt/list workflow. A small next increment is
+optional tray/desktop notification access and remembered socket preference, while
+preserving the authoritative persistent pending list. More game detection, full
+application tree, persistence, bandwidth, packaging and production host enforcement
+remain deferred. No missing dependency or additional authorization blocks the
+current demo.
 
-Authorization remains local edits/builds/tests/commits, read-only diagnostics and
-source inspection, and installed runtimes with workspace-only fixtures/prefixes in
-disposable namespaces. No host firewall/network/VPN/security/service/package
-changes, runtime updates, existing-prefix/launcher edits, real games, pushes or
-publishing. All generated output belongs under `.workspace`. No additional
-privileged operation is currently required.
+Authorization: local edits/builds/focused tests/commits and unprivileged GUI/native
+fixtures in disposable namespaces. No host firewall/network/VPN/security/service
+changes, package installs, runtime/launcher/existing-prefix edits, real games,
+publishing/pushing or additional agents. All generated files stay in `.workspace`.

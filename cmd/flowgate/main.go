@@ -135,6 +135,7 @@ func serve() error {
 		return err
 	}
 	e := daemon.New(*timeout)
+	e.Mode = "isolated-lab"
 	if *prefixes != "" {
 		if os.Getenv("FLOWGATE_WINE_TABLE_RUNNER") != "" {
 			return fmt.Errorf("choose explicit attachment or legacy environment, not both")

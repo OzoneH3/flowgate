@@ -19,10 +19,15 @@ type Request struct {
 	Scope     string `json:"scope,omitempty"`
 }
 type Response struct {
-	Version  int     `json:"version"`
-	Events   []Event `json:"events,omitempty"`
-	Decision *Event  `json:"decision,omitempty"`
-	Error    string  `json:"error,omitempty"`
+	Version    int       `json:"version"`
+	Generation string    `json:"generation"`
+	ReadOnly   bool      `json:"read_only"`
+	Mode       string    `json:"mode"`
+	ServerTime time.Time `json:"server_time"`
+	PeerUID    uint32    `json:"peer_uid"`
+	Events     []Event   `json:"events,omitempty"`
+	Decision   *Event    `json:"decision,omitempty"`
+	Error      string    `json:"error,omitempty"`
 }
 
 func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
@@ -63,7 +68,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 					if err != nil || cred == nil {
 						return
 					}
-					r := Response{Version: 1}
+					r := Response{Version: 1, Generation: e.Generation, ReadOnly: readonly, Mode: e.Mode, ServerTime: time.Now(), PeerUID: cred.Uid}
 					var q Request
 					scanner := bufio.NewScanner(c)
 					scanner.Buffer(make([]byte, 1024), 4096)

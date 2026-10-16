@@ -19,8 +19,15 @@ func TestReadOnlyAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer l.Close()
-	if _, err = Call(path, Request{Version: 1, Operation: "list"}); err != nil {
+	r, err := Call(path, Request{Version: 1, Operation: "list"})
+	if err != nil {
 		t.Fatal(err)
+	}
+	if !r.ReadOnly || r.Generation != e.Generation || r.ServerTime.IsZero() || r.PeerUID != uint32(os.Getuid()) {
+		t.Fatalf("missing session/authorization metadata: %+v", r)
+	}
+	if New(0).Generation == e.Generation {
+		t.Fatal("reused backend generation")
 	}
 	if _, err = Call(path, Request{Version: 1, Operation: "decide", ID: "fake", Action: "allow", Scope: "once"}); err == nil {
 		t.Fatal("read-only endpoint allowed mutation")

@@ -3,6 +3,7 @@ package daemon
 import (
 	"flowgate/internal/identity"
 	"flowgate/internal/policy"
+	"strings"
 	"testing"
 	"time"
 )
@@ -129,5 +130,18 @@ func TestUnrelatedRememberedDecisionPreservesRetainedAllow(t *testing.T) {
 	e.Decide(v2.ID, "block", "application", 1000, false)
 	if e.RetainedState(v.ID, v.Attribution.Fingerprint) != "allow" {
 		t.Fatal("unrelated decision discarded approved retained packet")
+	}
+}
+
+func TestScopePreviews(t *testing.T) {
+	e, f, _, _ := fixture()
+	v := e.Observe(f, "udp")
+	if len(v.ScopePreviews) != 2 || !strings.Contains(v.ScopePreviews["application"], "local service port 80; any remote source port") || !strings.Contains(v.ScopePreviews["application"], "one hour (memory only)") {
+		t.Fatal(v.ScopePreviews)
+	}
+	f.Direction = "outgoing"
+	v = e.Observe(f, "udp")
+	if !strings.Contains(v.ScopePreviews["application"], "remote service port 9000; any local source port") {
+		t.Fatal(v.ScopePreviews)
 	}
 }

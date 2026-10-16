@@ -22,23 +22,26 @@ type Event struct {
 	FirstSeen        time.Time            `json:"first_seen"`
 	Deadline         time.Time            `json:"deadline"`
 	RememberedFilter *policy.Filter       `json:"remembered_filter,omitempty"`
+	ScopePreviews    map[string]string    `json:"scope_previews,omitempty"`
 	Permission       string               `json:"permission"`
 	Token            string               `json:"-"`
 }
 type Engine struct {
-	mu      sync.Mutex
-	events  map[string]*Event
-	rules   []policy.Rule
-	Resolve func(identity.Flow) identity.Attribution
-	Now     func() time.Time
-	Timeout time.Duration
-	Max     int
-	window  time.Time
-	created int
+	Generation string
+	Mode       string
+	mu         sync.Mutex
+	events     map[string]*Event
+	rules      []policy.Rule
+	Resolve    func(identity.Flow) identity.Attribution
+	Now        func() time.Time
+	Timeout    time.Duration
+	Max        int
+	window     time.Time
+	created    int
 }
 
 func New(timeout time.Duration) *Engine {
-	return &Engine{events: map[string]*Event{}, Resolve: identity.Resolve, Now: time.Now, Timeout: timeout, Max: 256}
+	return &Engine{Generation: randomID(), events: map[string]*Event{}, Resolve: identity.Resolve, Now: time.Now, Timeout: timeout, Max: 256}
 }
 func randomID() string {
 	var b [16]byte
@@ -85,6 +88,14 @@ func (e *Engine) Observe(f identity.Flow, token string) Event {
 	if a.Principal() != nil {
 		filter := policy.Remembered(f, a)
 		v.RememberedFilter = &filter
+		service := fmt.Sprintf("local service port %d; any remote source port", filter.LocalPort)
+		if f.Direction == "outgoing" {
+			service = fmt.Sprintf("remote service port %d; any local source port", filter.RemotePort)
+		}
+		v.ScopePreviews = map[string]string{
+			"once":        fmt.Sprintf("Once: %s %s, local %s, remote %s; this application/revision/user only. TCP: one connection (30 seconds to admit); UDP: fixed 30-second flow lease.", f.Direction, f.Protocol, f.Local, f.Remote),
+			"application": fmt.Sprintf("Remember for one hour (memory only): application %s; revision %s; user %d; %s %s; remote address %s; %s. Other local addresses may match. No permission for another application reusing this port.", filter.Application, filter.Revision, filter.UID, filter.Direction, filter.Protocol, filter.RemoteAddress, service),
+		}
 	}
 	switch action {
 	case "allow":
@@ -156,7 +167,7 @@ func (e *Engine) Decide(id, action, scope string, uid uint32, admin bool) (Event
 			return Event{}, fmt.Errorf("rule capacity reached")
 		}
 		v.State = map[string]string{"allow": "allowed", "block": "blocked"}[action]
-		v.Reason = "explicit CLI decision; retained packets undergo a final identity check"
+		v.Reason = "explicit client decision; retained packets undergo a final identity check"
 		v.Rule = "once:" + v.ID
 		v.Deadline = now.Add(30 * time.Second)
 		if scope == "application" {
