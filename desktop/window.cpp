@@ -118,8 +118,7 @@ Window::Window(const QString &path, QWidget *parent) : QMainWindow(parent) {
   scope->setObjectName("scope");
   scope->addItem("Once", "once");
   scope->addItem("Remember · 1 hour (memory only)", "application");
-  actions->addWidget(scope);
-  actions->addStretch();
+  mid->addWidget(scope);
   allow = new QPushButton("&Allow");
   block = new QPushButton("&Block");
   allow->setObjectName("allow");
@@ -170,6 +169,7 @@ Window::Window(const QString &path, QWidget *parent) : QMainWindow(parent) {
   promptConnection->setWordWrap(true);
   pl->addWidget(promptConnection);
   promptDetails = textBox("promptDetails");
+  promptDetails->setFixedHeight(240);
   pl->addWidget(promptDetails);
   promptScope = new QComboBox;
   promptScope->setObjectName("promptScope");
@@ -177,7 +177,7 @@ Window::Window(const QString &path, QWidget *parent) : QMainWindow(parent) {
   promptScope->addItem("Remember · 1 hour (memory only)", "application");
 
   promptPreview = textBox("promptPreview");
-  promptPreview->setMaximumHeight(130);
+  promptPreview->setMaximumHeight(85);
   pl->addWidget(promptPreview);
   auto *pa = new QHBoxLayout;
   auto *later = new QPushButton("Decide &later");
@@ -191,6 +191,7 @@ Window::Window(const QString &path, QWidget *parent) : QMainWindow(parent) {
   }
   pa->addWidget(promptScope, 1);
   pl->addLayout(pa);
+  pl->addStretch(1);
   later->setAutoDefault(false);
   pl->addWidget(later, 0, Qt::AlignRight);
   promptResult = new QLabel;
@@ -200,12 +201,12 @@ Window::Window(const QString &path, QWidget *parent) : QMainWindow(parent) {
   connect(later, &QPushButton::clicked, prompt, &QDialog::hide);
   fileMenu->addAction("Reconnect backend", this, &Window::reconnect);
   fileMenu->addSeparator();
-  fileMenu->addAction("Close window", this, &QWidget::close, QKeySequence::Quit);
+  fileMenu->addAction("Close window", QKeySequence::Quit, this, &QWidget::close);
   viewMenu->addAction("Activity", this, [this] { tabs->setCurrentIndex(0); });
   viewMenu->addAction("Pending and recent decisions", this, [this] {
     if (tabs->isTabEnabled(1)) tabs->setCurrentIndex(1);
   });
-  viewMenu->addAction("Refresh", this, &Window::refresh, QKeySequence::Refresh);
+  viewMenu->addAction("Refresh", QKeySequence::Refresh, this, &Window::refresh);
   helpMenu->addAction("About " + QCoreApplication::applicationName(), this, [this] {
     QMessageBox box(this);
     box.setWindowTitle("About " + QCoreApplication::applicationName());

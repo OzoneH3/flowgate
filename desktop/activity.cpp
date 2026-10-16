@@ -57,13 +57,18 @@ ActivityView::ActivityView(QWidget *parent) : QWidget(parent) {
   tree->setIndentation(15);
   tree->setIconSize(QSize(14, 14));
   tree->header()->setMinimumSectionSize(45);
-  tree->setColumnWidth(1, 60);
+  // Leave room for Linux's seven-digit PIDs and the header sort indicator.
+  tree->setColumnWidth(1, qMax(82, tree->fontMetrics().horizontalAdvance("8888888") + 30));
   tree->setColumnWidth(2, 60);
   tree->setColumnWidth(3, 145);
   tree->setColumnWidth(4, 145);
   tree->setColumnWidth(5, 155);
   tree->setColumnWidth(6, 80);
-  tree->setColumnWidth(7, 55);
+  tree->setColumnWidth(7, 70);
+  // Keep the model indices stable; totals belong beside the identity columns.
+  tree->header()->setStretchLastSection(false);
+  tree->header()->moveSection(tree->header()->visualIndex(7), 2);
+  tree->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
   tree->setTextElideMode(Qt::ElideMiddle);
   tree->setSortingEnabled(true);
   tree->sortByColumn(0, Qt::AscendingOrder);
@@ -193,6 +198,8 @@ void ActivityView::render() {
     item->setData(0, Executable, path);
     item->setData(0, PID, pid);
     item->setText(1, pid);
+    item->setTextAlignment(1, Qt::AlignRight | Qt::AlignVCenter);
+    item->setTextAlignment(7, Qt::AlignRight | Qt::AlignVCenter);
     item->setData(1, SortValue, pid.toInt());
     return item;
   };
