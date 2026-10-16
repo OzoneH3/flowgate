@@ -9,3 +9,11 @@ Authoritative plan for milestone 1. Branding is a CLI build variable; core conce
 5. Verify receiver behavior for native and available Wine fixtures; document exact limitations and reproducible commands.
 
 Future: desktop prompts/pending queue; application/process/connection tree and quick controls; durable SQLite rules/history and editor; launcher adapters and games; distribution/service packaging; charts; bandwidth controls.
+
+## Current increment
+
+1. Reproduce Wine 11.19 and inspect matching FD/handle paths (done).
+2. Corroborate an explicitly selected broker executable with Unix peer evidence; preserve owners and demonstrate sharing visibility limits.
+3. Add compatible direction-aware remembered filters and scope previews.
+4. Bound kernel-retained initial packets; release only after fresh identity checks.
+5. Verify Wine independent TCP/UDP in both decision directions, new-client-port rules and one-shot UDP; update tracked handoff and status.

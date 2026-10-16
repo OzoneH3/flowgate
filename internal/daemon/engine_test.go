@@ -100,3 +100,34 @@ func TestSharedOwnerDenied(t *testing.T) {
 		t.Fatal("ambiguous owner prompted")
 	}
 }
+
+func TestRetainedIdentityAndRuleInvalidation(t *testing.T) {
+	e, f, a, _ := fixture()
+	v := e.Observe(f, "udp")
+	if e.RetainedState(v.ID, v.Attribution.Fingerprint) != "pending" {
+		t.Fatal("not pending")
+	}
+	e.Decide(v.ID, "allow", "once", 1000, false)
+	a.Fingerprint = "changed"
+	if e.RetainedState(v.ID, v.Attribution.Fingerprint) != "drop" {
+		t.Fatal("replacement released")
+	}
+	v = e.Observe(f, "new")
+	e.Decide(v.ID, "allow", "once", 1000, false)
+	e.SetRules(nil)
+	if e.RetainedState(v.ID, v.Attribution.Fingerprint) != "drop" {
+		t.Fatal("invalidated packet released")
+	}
+}
+
+func TestUnrelatedRememberedDecisionPreservesRetainedAllow(t *testing.T) {
+	e, f, _, _ := fixture()
+	v := e.Observe(f, "one")
+	e.Decide(v.ID, "allow", "application", 1000, false)
+	other, _ := identity.ParseFlow("udp", "incoming", "127.0.0.1:81", "127.0.0.1:9000")
+	v2 := e.Observe(other, "two")
+	e.Decide(v2.ID, "block", "application", 1000, false)
+	if e.RetainedState(v.ID, v.Attribution.Fingerprint) != "allow" {
+		t.Fatal("unrelated decision discarded approved retained packet")
+	}
+}

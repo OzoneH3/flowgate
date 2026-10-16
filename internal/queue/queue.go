@@ -78,6 +78,14 @@ func Run(ctx context.Context, e *daemon.Engine, direction string, ready func() e
 		return err
 	}
 	defer nf.Close()
+	retained := &Retainer{}
+	verdictPacket := func(id uint32, allow bool) error {
+		if allow {
+			return nf.SetVerdictWithOption(id, nfqueue.NfAccept, nfqueue.WithConnMark(Mark))
+		}
+		return nf.SetVerdict(id, nfqueue.NfDrop)
+	}
+	defer retained.Flush(time.Now(), e.RetainedState, verdictPacket, true)
 	errors := make(chan error, 1)
 	fail := func(err error) {
 		select {
@@ -100,6 +108,9 @@ func Run(ctx context.Context, e *daemon.Engine, direction string, ready func() e
 					f.Interface = *a.OutDev
 				}
 				v := e.Observe(f, token)
+				if v.State == "awaiting-decision" && retained.Add(*a.PacketID, len(*a.Payload), v) {
+					return 0
+				}
 				if v.State == "allowed" {
 					verdict = nfqueue.NfAccept
 				}
@@ -123,10 +134,18 @@ func Run(ctx context.Context, e *daemon.Engine, direction string, ready func() e
 	if err = ready(); err != nil {
 		return err
 	}
-	select {
-	case <-ctx.Done():
-		return nil
-	case err := <-errors:
-		return err
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case err := <-errors:
+			return err
+		case now := <-ticker.C:
+			if err := retained.Flush(now, e.RetainedState, verdictPacket, false); err != nil {
+				return err
+			}
+		}
 	}
 }

@@ -1,6 +1,6 @@
 # FlowGate — backend laboratory milestone
 
-A Go Linux application firewall prototype with structured attribution, Allow/Block/Ask policy and a CLI pending queue. **Native isolated enforcement works. Wine process identities are distinct, but shared wineserver descriptors currently prevent safe application-specific Allow. This is not a production host firewall or a completed Wine milestone.**
+A Go Linux application firewall prototype with structured attribution, Allow/Block/Ask policy and a CLI pending queue. **Native isolated enforcement works. An explicit Wine 11.19 broker mode controls independent applications with visible client socket FDs. Server-only listeners and dormant shared Windows handles remain observation boundaries; this is not universal Wine/game protection.**
 
 ## Build and verify
 
@@ -15,6 +15,8 @@ go build -o .workspace/flowgate ./cmd/flowgate
 scripts/check.sh
 # Optional actual Windows PE tests: Wine, Clang/lld and Wine development headers
 scripts/check.sh --wine
+# Current increment: broker-mode Wine, inheritance boundary, rule scope, one-shot UDP
+scripts/check-increment.sh
 ```
 
 The optional PE build script uses this host's `/usr/include/wine` and `/usr/lib/wine/x86_64-windows` layout. Adjust those paths on other distributions. It creates and uses only `.workspace/wine-prefix`; it never uses an existing prefix. No game downloads or launcher changes.
@@ -30,11 +32,13 @@ python3 -c 'import urllib.request; print(urllib.request.urlopen("http://127.0.0.
 .workspace/flowgate pending
 # Copy the pending ID, then:
 .workspace/flowgate decide --id REQUEST_ID --action allow --scope once
-# A TCP retransmission now completes. Exiting this shell destroys the namespace.
+# A retained initial packet is released after identity revalidation. Exiting this shell destroys the namespace.
 exit
 ```
 
-`--scope application` creates an in-memory one-hour permission for the exact application revision, user, initiation direction, protocol and remote IP:port. It is deliberately explicit; incoming remote scope includes the client's source port. `--scope once` permits that TCP connection (SYN sequence included) or that UDP tuple for 30 seconds. UDP must retry its dropped first datagram. `--action block` uses the same scopes.
+`--scope application` creates an in-memory one-hour permission for application revision, user, initiation direction and protocol. Incoming scope is the observed **remote address plus local service port**, with any client source port. Outgoing scope keeps the destination address and destination port. JSON `remembered_filter` previews the exact match. `--scope once` keeps the full TCP connection identity or UDP tuple (30 seconds). The first UDP datagrams can be retained until timely approval; no retry is required for packets within the retention bounds. Block/timeout drops them.
+
+Wine broker attribution is **disabled by default**. To exercise the documented non-sharing model, set `FLOWGATE_WINE_BROKER=/usr/bin/wineserver` for the daemon and attribution CLI. The path pins an actual executable identity, not a name exemption. Read [Wine evidence and assumptions](docs/WINE.md) before enabling it. The increment script opts in only for its dedicated fixtures.
 
 For outgoing tests use `serve-lab --direction outgoing`. The lab installs **one selected hook per run**, not simultaneous bidirectional host protection. `scripts/outgoing.py` demonstrates this. Keep all processes in the lab shell so `/proc` visibility is complete enough for the prototype.
 
@@ -45,7 +49,7 @@ Read-only attribution of an incoming listener:
   --local 127.0.0.1:8080 --remote 127.0.0.1:50000
 ```
 
-A JSON rule array can be supplied with `serve-lab --rules PATH`; see [semantics](docs/SEMANTICS.md) for schema and precedence. CLI JSON is the v1 presentation; no GUI, names from DNS, icons or traffic rates are fabricated. The monitor API at `control.sock.monitor` rejects mutations. Both sockets require a private directory and peer credentials; callers see/control their own attributed flows, with UID 0 as administrator inside the namespace.
+A JSON rule array can be supplied with `serve-lab --rules PATH`; see [semantics](docs/SEMANTICS.md) for schema and precedence. Rule schema 2 adds explicit address/port fields; legacy schema 0/1 exact `remote` endpoints retain their meaning. CLI JSON is the additive v1 presentation; no GUI, names from DNS, icons or traffic rates are fabricated. The monitor API at `control.sock.monitor` rejects mutations. Both sockets require a private directory and peer credentials; callers see/control their own attributed flows, with UID 0 as administrator inside the namespace.
 
 ## Scope and evidence
 

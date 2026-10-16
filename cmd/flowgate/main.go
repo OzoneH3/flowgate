@@ -31,6 +31,9 @@ func output(v any) {
 }
 func fatal(e error) { fmt.Fprintln(os.Stderr, e); os.Exit(1) }
 func main() {
+	// Explicit opt-in to the documented Wine 11.19 non-sharing handle model.
+	identity.WineBrokerExecutable = os.Getenv("FLOWGATE_WINE_BROKER")
+
 	if len(os.Args) < 2 {
 		fmt.Printf("%s: doctor | sockets | process PID | attribute | pending | decide | serve-lab\n", productName)
 		return
@@ -74,7 +77,7 @@ func main() {
 		s := fs.String("socket", ".workspace/run/control.sock", "v1 API socket")
 		id := fs.String("id", "", "request ID")
 		a := fs.String("action", "", "allow/block")
-		scope := fs.String("scope", "once", "once/application (one hour, exact remote)")
+		scope := fs.String("scope", "once", "once/application (one hour; incoming remote address + local port; outgoing destination)")
 		fs.Parse(os.Args[2:])
 		op := "list"
 		if os.Args[1] == "decide" {
@@ -125,7 +128,9 @@ func serve() error {
 			return err
 		}
 		var rules []policy.Rule
-		if err = json.Unmarshal(b, &rules); err != nil {
+		decoder := json.NewDecoder(strings.NewReader(string(b)))
+		decoder.DisallowUnknownFields()
+		if err = decoder.Decode(&rules); err != nil {
 			return err
 		}
 		if err = e.SetRules(rules); err != nil {

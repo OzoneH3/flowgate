@@ -26,15 +26,16 @@ type Application struct {
 	Evidence   []string `json:"evidence"`
 }
 type Process struct {
-	PID         int         `json:"pid"`
-	Start       string      `json:"start_ticks"`
-	UID         uint32      `json:"uid"`
-	NetNS       string      `json:"netns"`
-	MountNS     string      `json:"mountns"`
-	Parent      int         `json:"parent_pid"`
-	Executable  string      `json:"executable"`
-	Cgroup      string      `json:"cgroup,omitempty"`
-	Application Application `json:"application"`
+	ExecutableRevision string      `json:"executable_revision"`
+	PID                int         `json:"pid"`
+	Start              string      `json:"start_ticks"`
+	UID                uint32      `json:"uid"`
+	NetNS              string      `json:"netns"`
+	MountNS            string      `json:"mountns"`
+	Parent             int         `json:"parent_pid"`
+	Executable         string      `json:"executable"`
+	Cgroup             string      `json:"cgroup,omitempty"`
+	Application        Application `json:"application"`
 }
 
 func readBound(path string, n int64) []byte {
@@ -84,6 +85,7 @@ func Inspect(pid int) (Process, error) {
 		return p, e
 	}
 	p.UID = st.Sys().(*syscall.Stat_t).Uid
+	p.ExecutableRevision = stamp(base + "/exe")
 	p.Cgroup = strings.TrimSpace(string(readBound(base+"/cgroup", 4096)))
 	a := Application{Kind: "native", Name: filepath.Base(p.Executable), Executable: p.Executable, Revision: stamp(base + "/exe"), Evidence: []string{"proc exe; PID plus start time"}}
 	lower := strings.ToLower(p.Executable)
@@ -164,7 +166,7 @@ func Inspect(pid int) (Process, error) {
 func fingerprint(owners []Process, sockets []Socket) string {
 	var f []string
 	for _, p := range owners {
-		f = append(f, fmt.Sprintf("%d:%s:%s:%s", p.PID, p.Start, p.Application.Key, p.Application.Revision))
+		f = append(f, fmt.Sprintf("%d:%s:%s:%s", p.PID, p.Start, p.Application.Key, p.Application.Revision+":"+p.ExecutableRevision))
 	}
 	for _, s := range sockets {
 		f = append(f, fmt.Sprintf("%s:%d:%s", s.NetNS, s.Inode, s.Cookie))

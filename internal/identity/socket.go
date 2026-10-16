@@ -37,6 +37,7 @@ func (f Flow) Key() string {
 }
 
 type Attribution struct {
+	Association *Association `json:"association,omitempty"`
 	Status      string       `json:"status"`
 	Reason      string       `json:"reason"`
 	Owners      []Process    `json:"owners"`
@@ -190,6 +191,17 @@ func Resolve(f Flow) Attribution {
 		return a
 	}
 	a.Fingerprint = fingerprint(a.Owners, a.Sockets)
+	if !incomplete && len(covered) == len(wanted) && len(a.Sockets) == 1 {
+		if association, client := brokerAssociation(a.Owners); association != nil {
+			a.Association = association
+			app := client.Application
+			a.Application = &app
+			a.Status = "corroborated-broker-client"
+			a.Reason = "one visible Windows client and verified Wine broker; non-sharing handle assumption applies"
+			a.Fingerprint = digest(a.Fingerprint + fmt.Sprintf("|%d:%d", association.ClientChannel, association.BrokerChannel))
+			return a
+		}
+	}
 	if len(a.Sockets) != 1 || len(a.Owners) != 1 {
 		a.Status = "multiple-candidates"
 		a.Reason = "shared descriptor, shared listener, or hidden owner; application permission unavailable"

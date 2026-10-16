@@ -12,17 +12,18 @@ import (
 )
 
 type Event struct {
-	ID          string               `json:"id"`
-	Flow        identity.Flow        `json:"flow"`
-	Attribution identity.Attribution `json:"attribution"`
-	State       string               `json:"state"`
-	Reason      string               `json:"reason"`
-	Rule        string               `json:"rule"`
-	Conflicts   []string             `json:"matching_rules"`
-	FirstSeen   time.Time            `json:"first_seen"`
-	Deadline    time.Time            `json:"deadline"`
-	Permission  string               `json:"permission"`
-	Token       string               `json:"-"`
+	ID               string               `json:"id"`
+	Flow             identity.Flow        `json:"flow"`
+	Attribution      identity.Attribution `json:"attribution"`
+	State            string               `json:"state"`
+	Reason           string               `json:"reason"`
+	Rule             string               `json:"rule"`
+	Conflicts        []string             `json:"matching_rules"`
+	FirstSeen        time.Time            `json:"first_seen"`
+	Deadline         time.Time            `json:"deadline"`
+	RememberedFilter *policy.Filter       `json:"remembered_filter,omitempty"`
+	Permission       string               `json:"permission"`
+	Token            string               `json:"-"`
 }
 type Engine struct {
 	mu      sync.Mutex
@@ -81,6 +82,10 @@ func (e *Engine) Observe(f identity.Flow, token string) Event {
 	}
 	action, rule, conflicts := policy.Evaluate(e.rules, f, a, now)
 	v := Event{ID: randomID(), Flow: f, Attribution: a, FirstSeen: now, Deadline: now.Add(e.Timeout), Rule: rule, Conflicts: conflicts, Token: token, Permission: "once: this TCP connection or UDP tuple for 30 seconds; exact application and remote endpoint"}
+	if a.Principal() != nil {
+		filter := policy.Remembered(f, a)
+		v.RememberedFilter = &filter
+	}
 	switch action {
 	case "allow":
 		v.State = "allowed"
@@ -90,7 +95,7 @@ func (e *Engine) Observe(f identity.Flow, token string) Event {
 		v.Reason = "blocked by rule or unresolved ownership"
 	default:
 		v.State = "awaiting-decision"
-		v.Reason = "packet dropped pending approval; TCP retransmits, UDP sender must retry"
+		v.Reason = "initial packets retained within queue bounds until the decision deadline; excess packets drop"
 	}
 	if now.Sub(e.window) >= time.Second {
 		e.window = now
@@ -118,7 +123,7 @@ func (e *Engine) List(uid uint32, admin bool) []Event {
 	return out
 }
 func owned(a identity.Attribution, uid uint32) bool {
-	return len(a.Owners) == 1 && a.Owners[0].UID == uid
+	return a.Principal() != nil && a.Principal().UID == uid
 }
 func (e *Engine) Decide(id, action, scope string, uid uint32, admin bool) (Event, error) {
 	e.mu.Lock()
@@ -142,7 +147,7 @@ func (e *Engine) Decide(id, action, scope string, uid uint32, admin bool) (Event
 			return Event{}, fmt.Errorf("stale decision; retry required")
 		}
 		a := e.Resolve(v.Flow)
-		if a.Application == nil || a.Fingerprint != v.Attribution.Fingerprint {
+		if !e.Now().Before(v.Deadline) || a.Application == nil || a.Fingerprint != v.Attribution.Fingerprint {
 			v.State = "expired"
 			v.Reason = "identity changed before decision"
 			return Event{}, fmt.Errorf("identity changed; retry required")
@@ -151,21 +156,30 @@ func (e *Engine) Decide(id, action, scope string, uid uint32, admin bool) (Event
 			return Event{}, fmt.Errorf("rule capacity reached")
 		}
 		v.State = map[string]string{"allow": "allowed", "block": "blocked"}[action]
-		v.Reason = "explicit CLI decision; retry original attempt"
+		v.Reason = "explicit CLI decision; retained packets undergo a final identity check"
 		v.Rule = "once:" + v.ID
 		v.Deadline = now.Add(30 * time.Second)
 		if scope == "application" {
 			if len(e.rules) >= 256 {
 				return Event{}, fmt.Errorf("rule capacity reached")
 			}
-			r := policy.Rule{ID: "user:" + v.ID, Priority: 100, Action: action, Filter: policy.Filter{Application: a.Application.Key, Revision: a.Application.Revision, UID: a.Owners[0].UID, Direction: v.Flow.Direction, Protocol: v.Flow.Protocol, Remote: v.Flow.Remote.String()}, Expires: now.Add(time.Hour)}
+			r := policy.Rule{Schema: 2, ID: "user:" + v.ID, Priority: 100, Action: action, Filter: policy.Remembered(v.Flow, a), Expires: now.Add(time.Hour)}
 			e.rules = append(e.rules, r)
 			v.Rule = r.ID
-			v.Permission = "application + executable revision + user + direction + protocol + exact remote endpoint, one hour (memory only)"
+			v.Permission = "one hour (memory only); application/revision/user/direction/protocol; see remembered_filter for explicit address and service-port scope"
 			for key, other := range e.events {
-				if other.ID != v.ID {
-					delete(e.events, key)
+				if other.ID == v.ID || other.State == "awaiting-decision" {
+					continue
 				}
+				action, effective, _ := policy.Evaluate(e.rules, other.Flow, other.Attribution, now)
+				// Unrelated rules must not discard a just-approved one-shot packet.
+				if strings.HasPrefix(other.Rule, "once:") && effective == "default-ask" {
+					continue
+				}
+				if effective == other.Rule && ((other.State == "allowed" && action == "allow") || (other.State == "blocked" && action == "block")) {
+					continue
+				}
+				delete(e.events, key)
 			}
 		}
 		return *v, nil
@@ -191,4 +205,42 @@ func (e *Engine) SetRules(rules []policy.Rule) error {
 	e.rules = rules
 	e.events = map[string]*Event{}
 	return nil
+}
+
+// RetainedState is used only for already queued packets, never to create prompts.
+// Unknown/deleted/expired events drop. An Allow always rechecks the relationship.
+func (e *Engine) RetainedState(id, fingerprint string) string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	now := e.Now()
+	e.expire(now)
+	for _, v := range e.events {
+		if v.ID != id {
+			continue
+		}
+		if !now.Before(v.Deadline) || v.Attribution.Fingerprint != fingerprint {
+			return "drop"
+		}
+		if v.State == "awaiting-decision" {
+			return "pending"
+		}
+		if v.State != "allowed" {
+			return "drop"
+		}
+		a := e.Resolve(v.Flow)
+		if !e.Now().Before(v.Deadline) || a.Application == nil || a.Fingerprint != fingerprint {
+			v.State = "expired"
+			v.Reason = "identity changed before retained verdict"
+			return "drop"
+		}
+		// Once grants use the event lease; remembered grants must still be live.
+		if !strings.HasPrefix(v.Rule, "once:") {
+			act, rule, _ := policy.Evaluate(e.rules, v.Flow, a, e.Now())
+			if act != "allow" || rule != v.Rule {
+				return "drop"
+			}
+		}
+		return "allow"
+	}
+	return "drop"
 }
