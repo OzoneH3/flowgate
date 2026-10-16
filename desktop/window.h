@@ -1,7 +1,9 @@
 #pragma once
 #include "activity.h"
+#include "connectiondetails.h"
 #include "evaluation.h"
 #include "observation.h"
+#include "ruleeditor.h"
 #include <QtNetwork/QLocalSocket>
 #include <QtWidgets>
 #include <functional>
@@ -51,10 +53,16 @@ private:
   QTableWidget *pending, *history, *rules;
   QPushButton *disableRule, *deleteRule;
   QPlainTextEdit *details, *preview;
-  QComboBox *scope;
+  QComboBox *scope, *evaluationProfile;
+  QString activeProfile = "incoming";
+  QPushButton *createRule, *editRule, *promptCreateRule;
+  QHash<QString, QJsonObject> storedRules;
+  QPointer<RuleEditor> editor;
+  void openRuleEditor(bool fromPending);
   QPushButton *allow, *block;
   QDialog *prompt;
-  QPlainTextEdit *promptDetails, *promptPreview;
+  ConnectionDetails *promptDetails;
+  QPlainTextEdit *promptPreview;
   QComboBox *promptScope;
   QPushButton *promptAllow, *promptBlock;
   QTimer poll, clock;

@@ -13,16 +13,16 @@ The initial layout has the following limits.
   imitation editor controls.
 - FlowGate exposes only implemented Activity and pending/recent-decision tabs.
   It does not reproduce unsupported rules, quotas, priorities or scheduler tabs.
-- The prompt still uses selectable plain-text connection details rather than the
-  reference's full field layout. Its controls retain explicit Once and one-hour
-  in-memory scope semantics, not unsupported duration toggles.
+- The prompt now uses structured selectable fields and actual Once/one-hour/
+  persistent scopes. Create/Edit opens a functional compact Qt rule editor with
+  authoritative scope preview; it does not reproduce every reference control.
 - The backend socket selector is visible. The main menu has only working local
   actions. Linux window decorations and fonts may differ from the reference.
 - Narrow displays require horizontal tree scrolling for endpoint/state columns.
   PID width accommodates seven digits, and socket counts appear beside PID;
   logical column indices and sorting semantics are preserved.
 - The sidebar scope selector sits above Allow/Block to fit narrow windows.
-  Exact typography and the selectable plain-text detail layout still differ.
+  Exact typography and the main Info plain-text detail layout still differ.
 
 ## Evidence
 
@@ -77,9 +77,19 @@ All
 controls remain accessible at the checked sizes; long tables scroll horizontally
 and long details scroll vertically. No host firewall/network configuration was
 changed. Rates, chart series, persistent rules, quotas, priorities, geo/domain
-metadata and the full reference rule editor remain unavailable and are not
+metadata and unsupported reference editor features remain unavailable and are not
 simulated. The integration agent owns final merge and backend validation.
 
 ## Integration verification
 
 Both complete design commits were cherry-picked into milestone/backend without conflicts after backend hardening. Rebuilt native program passed one focused actual Wayland Activity smoke (3/3) and isolated prompt Allow-to-receiver smoke (3/3). Evidence: `.workspace/monitor-integration-build.log`, `.workspace/monitor-integration-smoke.log`, and `.workspace/host-monitor.png`. The integrated screenshot was inspected. Broader design suites above were reused, with no Wine retest or host enforcement.
+
+## Structured prompt/editor increment
+
+Actual Wayland real-traffic captures: `.workspace/outgoing-ui-1188339/`
+(`outgoing-real-prompt.png`, `outgoing-real-editor.png`, `incoming-real-prompt.png`).
+`synthetic-ipv6-long-path.png` is a presentation fixture, not IPv6 receiver evidence
+(the isolated receiver suite separately covers IPv6). Values are selectable,
+elided with full tooltips/copy; narrow editor content scrolls. Main Info remains
+plain text, icons generic, typography/proportions approximate. No pixel identity
+is claimed. The layout remains the integrated NetLimiter-style desktop.

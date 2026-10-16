@@ -1,5 +1,25 @@
 # Explicit host-control evaluation
 
+## Optional outgoing profile
+
+Before **Start 5-minute evaluation**, select **Incoming connections** (default) or
+**Incoming and outgoing connections**. Outgoing control may interrupt new
+application connections while awaiting decisions. Changing the selector never
+changes a running controller. Stop and start explicitly to change profile.
+The same five-minute deadline, watchdog and recovery apply to both profiles.
+
+The GUI terminal bridge carries `--profile both` for the latter choice. For a
+custom explicit terminal run, `flowgate host-session --action start --uid UID
+--duration 5m --timeout 30s --profile both` selects it; retain the existing
+root-owned runtime/IPC paths and sudo startup procedure below. The existing
+`scripts/evaluate-host.sh` shortcut remains incoming-only.
+
+Saved outgoing rules do not control outgoing traffic in incoming-only mode.
+Unknown or unobservable senders fail closed in both mode; other-UID services can
+therefore be affected. Neither profile is enabled by normal desktop startup.
+This increment was tested only in disposable namespaces, not the host network.
+
+
 **Implemented and tested in disposable namespaces; not activated on the real host.**
 Normal `scripts/run-desktop.sh` remains read-only. This is a manual, incoming-first
 prototype, not an installed service or a claim of universal firewall/VPN compatibility.

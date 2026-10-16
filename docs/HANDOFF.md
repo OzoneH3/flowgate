@@ -1,5 +1,22 @@
 # Continuation handoff
 
+## Latest increment: outgoing profile and atomic rule editing
+
+Actual starting checkout was `9235954c8e983bd5e31062ec79f3dcd97cff71e5`.
+Despite the task premise, it lacked the structured prompt and editor, so these
+were implemented alongside outgoing control. Final SHA is in the delivery report;
+verify HEAD rather than resetting. All changes are local, no host enforcement.
+
+Run `scripts/run-desktop.sh`. Choose the evaluation profile before Start; incoming
+is default. Create from a current pending request, edit stored rules, and use
+backend previews. See RULES.md for version/duplicate/overlap semantics.
+Focused runner and evidence are at the top of STATUS.md. Both profiles share the
+existing queue/retention and identity pipeline. No Wine work is needed next.
+
+Next smallest step: review the optional outgoing profile's fail-closed impact on
+other-UID services and short-lived UDP sockets before separately authorizing any
+live host evaluation. No new authorization is needed to run isolated checks.
+
 Continue in /home/flowgate-user/Apps/flowgate, branch milestone/backend. Verify HEAD and
 preserve unrelated work. Read applicable AGENTS.md, README, PLAN, STATUS, SEMANTICS
 and VISUAL. Source scripts/go-env.sh before Go commands. Scratch outputs belong

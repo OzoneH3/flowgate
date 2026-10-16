@@ -107,12 +107,27 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 		}
 		verdict := nfqueue.NfDrop
 		if a.Payload != nil {
-			f, token, err := Parse(*a.Payload, direction)
+			packetDirection := direction
+			if direction == "both" {
+				packetDirection = ""
+				if a.Hook != nil {
+					switch *a.Hook {
+					case 1:
+						packetDirection = "incoming"
+					case 3:
+						packetDirection = "outgoing"
+					}
+				}
+			}
+			f, token, err := Parse(*a.Payload, packetDirection)
+			if packetDirection != "incoming" && packetDirection != "outgoing" {
+				err = fmt.Errorf("unsupported queue hook")
+			}
 			if err == nil {
 				if a.InDev != nil {
 					f.Interface = *a.InDev
 				}
-				if direction == "outgoing" && a.OutDev != nil {
+				if packetDirection == "outgoing" && a.OutDev != nil {
 					f.Interface = *a.OutDev
 				}
 				v := e.Observe(f, token)

@@ -21,6 +21,7 @@ type Filter struct {
 	UID           uint32 `json:"uid"`
 }
 type Rule struct {
+	Version    uint64    `json:"version,omitempty"`
 	Executable string    `json:"executable,omitempty"`
 	Created    time.Time `json:"created"`
 	Disabled   bool      `json:"disabled"`

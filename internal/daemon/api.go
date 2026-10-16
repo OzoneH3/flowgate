@@ -16,30 +16,37 @@ import (
 )
 
 type Request struct {
-	Version   int    `json:"version"`
-	Operation string `json:"operation"`
-	ID        string `json:"id,omitempty"`
-	Action    string `json:"action,omitempty"`
-	Scope     string `json:"scope,omitempty"`
+	Generation      string       `json:"generation,omitempty"`
+	EventID         string       `json:"event_id,omitempty"`
+	ExpectedVersion *uint64      `json:"expected_version,omitempty"`
+	Rule            *policy.Rule `json:"rule,omitempty"`
+	Version         int          `json:"version"`
+	Operation       string       `json:"operation"`
+	ID              string       `json:"id,omitempty"`
+	Action          string       `json:"action,omitempty"`
+	Scope           string       `json:"scope,omitempty"`
 }
 type EnforcementStatus struct {
+	Profile string    `json:"profile"`
 	State   string    `json:"state"`
 	Detail  string    `json:"detail"`
 	StopsAt time.Time `json:"stops_at"`
 }
 type Response struct {
-	Enforcement *EnforcementStatus         `json:"enforcement,omitempty"`
-	Rules       []policy.Rule              `json:"rules,omitempty"`
-	Activity    *identity.ActivitySnapshot `json:"activity,omitempty"`
-	Version     int                        `json:"version"`
-	Generation  string                     `json:"generation"`
-	ReadOnly    bool                       `json:"read_only"`
-	Mode        string                     `json:"mode"`
-	ServerTime  time.Time                  `json:"server_time"`
-	PeerUID     uint32                     `json:"peer_uid"`
-	Events      []Event                    `json:"events,omitempty"`
-	Decision    *Event                     `json:"decision,omitempty"`
-	Error       string                     `json:"error,omitempty"`
+	SavedRule    *policy.Rule               `json:"saved_rule,omitempty"`
+	ScopePreview string                     `json:"scope_preview,omitempty"`
+	Enforcement  *EnforcementStatus         `json:"enforcement,omitempty"`
+	Rules        []policy.Rule              `json:"rules,omitempty"`
+	Activity     *identity.ActivitySnapshot `json:"activity,omitempty"`
+	Version      int                        `json:"version"`
+	Generation   string                     `json:"generation"`
+	ReadOnly     bool                       `json:"read_only"`
+	Mode         string                     `json:"mode"`
+	ServerTime   time.Time                  `json:"server_time"`
+	PeerUID      uint32                     `json:"peer_uid"`
+	Events       []Event                    `json:"events,omitempty"`
+	Decision     *Event                     `json:"decision,omitempty"`
+	Error        string                     `json:"error,omitempty"`
 }
 
 func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
@@ -114,7 +121,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 					}
 					var q Request
 					scanner := bufio.NewScanner(c)
-					scanner.Buffer(make([]byte, 1024), 4096)
+					scanner.Buffer(make([]byte, 1024), 16384)
 					if !scanner.Scan() {
 						return
 					}
@@ -135,6 +142,22 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 							} else {
 								r.Events = e.List(cred.Uid, cred.Uid == 0)
 								r.Rules = e.Rules(cred.Uid, cred.Uid == 0)
+							}
+						case "rule-preview", "rule-save":
+							if r.ReadOnly {
+								r.Error = "read-only API"
+							} else if q.Generation != e.Generation {
+								r.Error = "backend generation changed; reload"
+							} else if q.Rule == nil {
+								r.Error = "rule document required"
+							} else {
+								rule, preview, err := e.EditRule(q.ID, q.EventID, q.ExpectedVersion, *q.Rule, cred.Uid, cred.Uid == 0, q.Operation == "rule-save")
+								if err != nil {
+									r.Error = err.Error()
+								} else {
+									r.SavedRule = &rule
+									r.ScopePreview = preview
+								}
 							}
 						case "rule":
 							if r.ReadOnly {

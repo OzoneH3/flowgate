@@ -44,7 +44,9 @@ def result(path):return json.loads((path/'result.json').read_text())
 start=job('start');controller=None
 try:
     (run/'auth-fail').touch();cancel=job('cancel');p=launch('start',cancel);p.wait(5);assert result(cancel)['phase']=='cancelled';assert not (run/'api/control.sock').exists();(run/'auth-fail').unlink()
+    (start/'request.json').write_text(json.dumps({'profile':'both'}))
     controller=launch('start',start);wait(lambda:result(start)['phase']=='ready');token=result(start)['generation'];assert len(token)==32
+    active=json.loads(subprocess.check_output([str(run/'state/controller'),'host-status','--state',str(run/'state')],text=True));assert active['record']['Profile']=='both'
     # Snapshot is private and root-in-namespace-owned; later control survives a
     # change in the source pathname. We only inspect, never modify that source.
     assert (run/'state/controller').stat().st_mode&0o777==0o700

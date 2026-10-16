@@ -14,6 +14,8 @@ RUN.mkdir(mode=0o700,parents=True,exist_ok=True)
 STATE=RUN/'state';STATE.mkdir(mode=0o700,exist_ok=True)
 WORKFLOW="--desktop-workflow" in sys.argv
 API=RUN/'api/control.sock' if WORKFLOW else RUN/'control.sock'
+PROFILE="both" if "--both" in sys.argv else "incoming"
+clients=[]
 observer=None
 active_job=None
 job_sequence=0
@@ -49,10 +51,10 @@ def receive(s,port,tcp):
                             with (RUN/f'receiver-{port}.log').open('a') as f:f.write('RECEIVED\n')
                 threading.Thread(target=read,args=(c,),daemon=True).start()
             else:
-                s.recvfrom(1024);counts[port]=counts.get(port,0)+1
+                data,peer=s.recvfrom(1024);s.sendto(b'reply',peer);counts[port]=counts.get(port,0)+1
                 with (RUN/f'receiver-{port}.log').open('a') as f:f.write('RECEIVED\n')
         except OSError:break
-peer=subprocess.Popen(['unshare','--net','python3',str(ROOT/'scripts/host-peer.py')],stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True)
+peer=subprocess.Popen(['unshare','--net','python3',str(ROOT/'scripts/host-peer.py'),str(RUN)],stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True)
 def remote(op,**kw):
     peer.stdin.write(json.dumps(dict(op=op,**kw))+'\n');peer.stdin.flush();r=json.loads(peer.stdout.readline());assert 'error' not in r,r;return r
 
@@ -61,6 +63,7 @@ def start(duration='120s'):
     with (RUN/'backend.log').open('a') as f:
         args=[BIN,'host-start','--state',str(STATE),'--socket',str(API),'--uid','0','--duration',duration,'--timeout','8s']
         if WORKFLOW:args=[BIN,'host-session','--action','start','--state',str(STATE),'--database',str(RUN/'data/rules.db'),'--socket',str(API),'--uid','0','--duration',duration,'--timeout','8s']
+        args += ["--profile",PROFILE]
         backend=subprocess.Popen(args,stdout=f,stderr=f)
     def ready():
         if backend.poll() is not None:raise RuntimeError((RUN/'backend.log').read_text())
@@ -93,6 +96,12 @@ try:
         s=socket.socket(socket.AF_INET6 if v6 else socket.AF_INET,socket.SOCK_DGRAM);s.bind(('fd79::1' if v6 else '10.79.0.1',port));counts[port]=0;threading.Thread(target=receive,args=(s,port,False),daemon=True).start()
     remote('tcp',port=44000);wait(lambda:counts[44000]==1)
     remote('tcp',port=44100,v6=True);wait(lambda:counts[44100]==1)
+    preexisting=[]
+    if '--outgoing-suite' in sys.argv:
+        for proto in ['tcp4','tcp6']:
+            log=RUN/('preserved-'+proto+'.log')
+            with log.open('w') as f:p=subprocess.Popen([str(ROOT/'.workspace/clients/alpha'),proto,'fd79::2' if '6'in proto else '10.79.0.2','43000','fd79::1' if '6'in proto else '10.79.0.1'],stdin=subprocess.PIPE,stdout=f,stderr=f,env=dict(os.environ,FLOWGATE_CLIENT_REPEAT='1'))
+            clients.append(p);preexisting.append((p,log));wait(lambda:'REPLY' in log.read_text())
     if not WORKFLOW:start()
     else:
         with (RUN/'observer.log').open('a') as f:observer=subprocess.Popen([BIN,'observe','--socket',str(RUN/'observer.sock'),'--interval','500ms'],stdout=f,stderr=f)
@@ -102,7 +111,10 @@ try:
         for v6,port in [(False,68),(True,546)]:remote('udp',port=port,v6=v6,dhcp=True);wait(lambda:counts[port]==1);assert not pending(port)
         print('PASS pre-existing TCP IPv4/IPv6 and DHCP client-port bootstrap datagrams',flush=True)
         stop_backend();sys.exit(0)
-    if '--suite' in sys.argv:
+    if '--outgoing-suite' in sys.argv:
+        from outgoing_cases import exercise
+        exercise(globals())
+    elif '--suite' in sys.argv:
         remote('again',port=44000);wait(lambda:counts[44000]==2);print('PASS pre-existing incoming TCP survives activation',flush=True)
         for v6,base in [(False,44000),(True,44100)]:
             for n,act in [(2,'allow'),(4,'block'),(1,'allow'),(3,'block')]:
@@ -161,8 +173,13 @@ try:
                 elif op=='stopbackend':stop_backend();r={'ok':True}
                 elif op=='start':
                     job=q['job']
-                    try:start('20s');active_job=job;publish(job,'ready','Namespace controller ready',api()['generation']);r={'ok':True}
+                    PROFILE=json.loads((Path(job)/'request.json').read_text()).get('profile','incoming') if (Path(job)/'request.json').exists() else 'incoming'
+                    try:start('30s');active_job=job;publish(job,'ready','Namespace controller ready',api()['generation']);r={'ok':True}
                     except Exception as e:publish(job,'failed',str(e));r={'ok':False}
+                elif op=='outgoing':
+                    proto=q.get('protocol','udp4');assert proto in ['udp4','udp6','tcp4','tcp6']
+                    app=q.get('app','alpha');assert app in ['alpha','beta']
+                    log=RUN/'client.log';f=log.open('a');p=subprocess.Popen([str(ROOT/'.workspace/clients'/app),proto,'fd79::2' if '6' in proto else '10.79.0.2','43000' if proto.startswith('tcp') else '43001','fd79::1' if '6'in proto else '10.79.0.1'],stdout=f,stderr=f);f.close();clients.append(p);r={'ok':True}
                 elif op=='stop':
                     try:cmd(BIN,'host-stop','--state',str(STATE),'--token',q['token']);backend.wait(6);publish(q['job'],'stopped','Scoped stop confirmed',q['token']);r={'ok':True}
                     except Exception as e:publish(q['job'],'failed',str(e));r={'ok':False}
@@ -185,6 +202,8 @@ finally:
     stopping=True
     try:stop_backend()
     except Exception:pass
+    for p in clients:
+        if p.poll() is None:p.terminate();p.wait(3)
     if observer:observer.terminate();observer.wait(4)
     peer.terminate()
     try:peer.wait(3)

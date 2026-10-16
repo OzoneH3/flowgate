@@ -58,6 +58,14 @@ bool Evaluation::launch(const QString &action, const QString &token) {
     return false;
   }
   dir.setAutoRemove(false);
+  QFile request(dir.path() + "/request.json");
+  if (!request.open(QIODevice::WriteOnly)) {
+    emit outcome(action, "failed", "Cannot record evaluation profile", token);
+    return false;
+  }
+  request.write(QJsonDocument(QJsonObject{{"profile", profile}})
+                    .toJson(QJsonDocument::Compact));
+  request.close();
   QString error;
   if (!launcher(action, dir.path(), token, &error)) {
     emit outcome(action, "failed",

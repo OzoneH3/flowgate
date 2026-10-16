@@ -8,13 +8,17 @@ A native Qt 6 desktop application with an independent Go backend. **Normal launc
 scripts/run-desktop.sh
 ```
 
-Activity opens read-only. Click **Start 5-minute evaluation**, read the short
+Activity opens read-only. Select **Incoming connections** (default) or **Incoming and outgoing connections**,
+then click **Start 5-minute evaluation**, read the short
 explanation, then authenticate with system sudo in the launched Konsole terminal.
 The same window attaches only after the controller's generation and active API
 state are verified. Activity continues through a separate read-only connection.
 
 Use Pending & recent decisions for Allow/Block and Rules for saved permissions,
-**Enable**, Disable and Delete. **Stop evaluation** opens terminal authentication
+**Create rule…** from a pending request, then **Edit**, Enable, Disable and Delete.
+The structured prompt separates source/destination ports; the editor previews exact
+application/revision/UID scope and expiry before saving. See [rule semantics](docs/RULES.md).
+Outgoing control holds new native TCP/UDP while awaiting approval; it is opt-in. **Stop evaluation** opens terminal authentication
 and reports stopped only after confirmed cleanup. Closing the window leaves an
 active evaluation running under its original deadline. **Status / recovery…**
 provides the independent privileged check/recovery path; disconnect means unknown.

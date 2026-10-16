@@ -28,6 +28,7 @@ const Table = "flowgate_host"
 const Queue = 101
 
 type Record struct {
+	Profile      string
 	MarksOwned   bool
 	TableDigest  string
 	SocketInodes map[string]uint64
@@ -234,11 +235,12 @@ func preflight() error {
 			return fmt.Errorf("queue 101 occupied")
 		}
 	}
-	fmt.Fprintf(os.Stderr, "Preflight: existing nft rules retained (%d bytes). Local input TCP/UDP only; queue 101; connmark mask 0x30000000; input/output priority 10. Other firewall chains/VPNs may deny delivery. No forwarding coverage.\n", len(b))
+	fmt.Fprintf(os.Stderr, "Preflight: existing nft rules retained (%d bytes). Local TCP/UDP (input and optional output); queue 101; connmark mask 0x30000000; input/output priority 10. Other firewall chains/VPNs may deny delivery. No forwarding coverage.\n", len(b))
 	return nil
 }
-func rules(token string) string {
-	return fmt.Sprintf(`add table inet %s { comment "flowgate:%s"; }
+func rules(token string) string { return profileRules(token, "incoming") }
+func profileRules(token, profile string) string {
+	r := fmt.Sprintf(`add table inet %s { comment "flowgate:%s"; }
 add chain inet %s input { type filter hook input priority 10; policy accept; }
 add chain inet %s output { type filter hook output priority 10; policy accept; }
 add chain inet %s inspect
@@ -257,9 +259,32 @@ add rule inet %s input meta l4proto tcp ct mark & 0x10000000 != 0 ct state estab
 add rule inet %s input meta l4proto udp jump inspect
 add rule inet %s input counter drop
 `, Table, token, Table, Table, Table, Table, Table, Table, Table, Table, Table, Table, Table, Table, Table, Table, Table, Table)
+	if profile == "both" {
+		r = strings.Replace(r, "add rule inet flowgate_host output meta l4proto { tcp, udp } ct direction original ct mark set ct mark | 0x20000000\n", "", 1)
+		r += `add chain inet flowgate_host admit_output { type filter hook output priority 11; policy accept; }
+add rule inet flowgate_host admit_output meta l4proto { tcp, udp } ct mark set ct mark | 0x10000000
+add rule inet flowgate_host output meta l4proto != { tcp, udp } accept
+add rule inet flowgate_host output meta nfproto ipv4 udp sport 68 udp dport 67 accept
+add rule inet flowgate_host output ip6 daddr { fe80::/10, ff02::1:2 } udp sport 546 udp dport 547 accept
+add rule inet flowgate_host output ct state invalid counter drop
+add rule inet flowgate_host output ct direction reply ct mark & 0x30000000 != 0 accept
+add rule inet flowgate_host output meta l4proto tcp tcp flags & (syn | ack) == syn jump inspect
+add rule inet flowgate_host output ct mark & 0x20000000 != 0 accept
+add rule inet flowgate_host output meta l4proto tcp ct mark & 0x10000000 != 0 ct state established accept
+add rule inet flowgate_host output meta l4proto udp jump inspect
+add rule inet flowgate_host output counter drop
+`
+	}
+	return r
 }
 
 func Run(ctx context.Context, dir, socket, database string, uid uint32, duration, timeout time.Duration) error {
+	return RunProfile(ctx, dir, socket, database, uid, duration, timeout, "incoming")
+}
+func RunProfile(ctx context.Context, dir, socket, database string, uid uint32, duration, timeout time.Duration, profile string) error {
+	if profile != "incoming" && profile != "both" {
+		return fmt.Errorf("profile must be incoming or both")
+	}
 	if os.Geteuid() != 0 {
 		return fmt.Errorf("host-start requires CAP_NET_ADMIN and root in its namespace; GUI must remain unprivileged")
 	}
@@ -305,7 +330,7 @@ func Run(ctx context.Context, dir, socket, database string, uid uint32, duration
 		return err
 	}
 	inodes := map[string]uint64{}
-	r := Record{SocketInodes: inodes, Token: e.Generation, PID: os.Getpid(), Start: startID(os.Getpid()), NetNS: identity.NetNS(), State: "starting", StopsAt: time.Now().Add(duration), UID: uid, Socket: socket}
+	r := Record{Profile: profile, SocketInodes: inodes, Token: e.Generation, PID: os.Getpid(), Start: startID(os.Getpid()), NetNS: identity.NetNS(), State: "starting", StopsAt: time.Now().Add(duration), UID: uid, Socket: socket}
 	var mu sync.Mutex
 	e.Enforcement = func() daemon.EnforcementStatus {
 		mu.Lock()
@@ -318,7 +343,7 @@ func Run(ctx context.Context, dir, socket, database string, uid uint32, duration
 				state = "degraded"
 			}
 		}
-		return daemon.EnforcementStatus{State: state, Detail: "Incoming-first: new incoming TCP/UDP prompt; outgoing allowed; existing connections preserved. FlowGate Allow does not guarantee delivery.", StopsAt: r.StopsAt}
+		return daemon.EnforcementStatus{Profile: profile, State: state, Detail: "Profile " + profile + ": selected new TCP/UDP connections require policy/decision; startup flows preserved. FlowGate Allow does not guarantee delivery.", StopsAt: r.StopsAt}
 	}
 	api, err := daemon.Serve(socket, e, false)
 	if err != nil {
@@ -361,11 +386,11 @@ func Run(ctx context.Context, dir, socket, database string, uid uint32, duration
 	installed := false
 	runctx, cancel := context.WithDeadline(ctx, r.StopsAt)
 	defer cancel()
-	err = queue.RunConfigured(runctx, e, "incoming", Queue, false, func() error {
+	err = queue.RunConfigured(runctx, e, profile, Queue, false, func() error {
 		if er := bootstrap(func() error { r.MarksOwned = true; return save(dir, r) }); er != nil {
 			return er
 		}
-		if er := batch(rules(r.Token)); er != nil {
+		if er := batch(profileRules(r.Token, profile)); er != nil {
 			clearMarks()
 			return er
 		}

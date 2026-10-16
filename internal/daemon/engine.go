@@ -176,9 +176,12 @@ func (e *Engine) Decide(id, action, scope string, uid uint32, admin bool) (Event
 		}
 		var remembered *policy.Rule
 		if scope != "once" {
-			r := policy.Rule{Executable: a.Application.Executable, Schema: 2, ID: "user:" + v.ID, Priority: 100, Action: action, Filter: policy.Remembered(v.Flow, a), Created: now, Expires: now.Add(time.Hour)}
+			r := policy.Rule{Version: 1, Executable: a.Application.Executable, Schema: 2, ID: "user:" + v.ID, Priority: 100, Action: action, Filter: policy.Remembered(v.Flow, a), Created: now, Expires: now.Add(time.Hour)}
 			if scope == "persistent" {
 				r.Expires = time.Time{}
+			}
+			if other := duplicate(e.rules, r); other != "" {
+				return Event{}, fmt.Errorf("duplicate scope exists as %s; edit the existing rule", other)
 			}
 			next := append(append([]policy.Rule{}, e.rules...), r)
 			if e.SaveRules != nil {
@@ -303,6 +306,7 @@ func (e *Engine) ChangeRule(id, action string, uid uint32, admin bool) error {
 			return fmt.Errorf("not authorized")
 		}
 		found = true
+		next[i].Version++
 		switch action {
 		case "enable":
 			next[i].Disabled = false

@@ -22,6 +22,10 @@ assert job.is_absolute() and job.is_relative_to(ROOT/'.workspace')
 st=job.lstat()
 assert job.is_dir() and not job.is_symlink() and st.st_uid==os.getuid() and st.st_mode&0o077==0
 assert not a.token or (len(a.token)==32 and all(c in '0123456789abcdef' for c in a.token))
+profile='incoming'
+if (job/'request.json').exists():
+    request=json.loads((job/'request.json').read_text());profile=request.get('profile','incoming')
+assert profile in ['incoming','both']
 sequence=0
 generation=a.token
 
@@ -57,7 +61,7 @@ try:
     binary=ROOT/'.workspace/flowgate' if a.action=='start' else Path('/run/flowgate/controller')
     if not binary.exists():binary=ROOT/'.workspace/flowgate'
     args=['sudo','-n',str(binary),'host-session','--action',a.action]
-    if a.action=='start':args+=['--uid',str(os.getuid()),'--duration','5m','--timeout','30s']
+    if a.action=='start':args+=['--uid',str(os.getuid()),'--duration','5m','--timeout','30s','--profile',profile]
     if a.token:args+=['--token',a.token]
     if cancelled():publish('cancelled','Cancelled before activation.');sys.exit(1)
     publish('starting' if a.action=='start' else 'working')

@@ -1,5 +1,47 @@
 # Current status
 
+## Current: optional outgoing control and editable saved rules
+
+Normal launch remains `scripts/run-desktop.sh` (read-only). Before starting an
+explicit five-minute evaluation choose **Incoming connections** (default) or
+**Incoming and outgoing connections**. The active profile is fixed for that run.
+No live host enforcement was activated in development.
+
+Prompts now use selectable structured application/executable/PID, direction,
+protocol, remote/local address and port, attribution and lifetime fields.
+**Create rule…** opens a real editor with backend scope preview. Saved rules support
+**Edit**, Enable/Disable/Delete, absolute expiry and persistence. Edits use version
+checks, backend validation and SQLite commit before policy publication. Exact
+scope duplicates are rejected; overlapping rules use highest priority then
+lexicographically smallest ID, without implicit Allow/Block preference.
+
+Both profile queues new native outgoing TCP/UDP and retains initial packets;
+unknown/ambiguous ownership fails closed. UDP senders must retain an observable
+socket until approval. Approved replies and startup-preserved connections do not
+prompt again. Incoming-only leaves outgoing traffic exempt, including saved
+outgoing Block rules (shown inactive). See SEMANTICS.md and RULES.md.
+
+Focused evidence: `.workspace/outgoing-check-final.log` (Go race/vet, isolated
+receiver suite, actual Wayland Qt 5/5); `.workspace/outgoing-unified-smoke.log`
+(existing unified UI 4/4). Receiver checks include TCP/UDP v4/v6 Allow/Block,
+one-shot UDP, both-direction replies, startup preservation, remembered new source
+ports, executable/destination separation, edit-to-Block, stale/failed edits,
+restart and daemon death/recovery. Final receiver rerun: `.workspace/outgoing-receiver-final.log` (fresh per-attempt
+reply logs). Additional final evidence: `.workspace/outgoing-last-ui.log` (5/5, corrected
+narrow field labels), `.workspace/outgoing-last-editor.log` (expired editing and
+read-only API), `.workspace/outgoing-last-bridge.log` (both-profile handoff with
+simulated authentication), `.workspace/outgoing-normal-launch.log` (actual read-only
+Wayland launch). Actual UI tests cover outgoing and default
+incoming creation/editing. Reproduce with `QT_QPA_PLATFORM=wayland
+WAYLAND_DISPLAY=wayland-0 scripts/check-outgoing.sh`.
+
+Real-traffic captures: `.workspace/outgoing-ui-1188339/outgoing-real-prompt.png`,
+`outgoing-real-editor.png`, `incoming-real-prompt.png`. The adjacent
+`synthetic-ipv6-long-path.png` is explicitly a presentation fixture.
+Wine/Proton was not changed or retested. Live sudo and host coexistence remain
+unverified. No dependencies or SQLite table migration were added; rule documents
+now contain an optional edit version (old documents load as version zero).
+
 **Live host Activity monitoring is implemented and read-only.**
 
 ```sh

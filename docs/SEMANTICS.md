@@ -1,5 +1,41 @@
 # Milestone semantics and safety boundaries
 
+## Optional incoming + outgoing profile
+
+The default host profile remains `incoming`. `--profile both` is an explicit
+startup-only choice; the desktop carries that choice through the authenticated
+terminal bridge. New original-direction local TCP SYNs and UDP datagrams queue
+in the output hook (priority 10). Hook 1/3 on the single NFQUEUE 101 selects
+incoming/outgoing attribution; invalid or missing hooks drop. Output admission
+priority 11 sets the same approved conntrack bit used by input. Queue occupancy
+and retained-packet/byte bounds are shared, not multiplied by direction.
+
+Both directions preserve the startup snapshot bit and accept reply-direction
+traffic only with an approved or preserved mark. New SYNs precede mark fast paths.
+An approved TCP connection continues without continuous accepted-socket ownership
+checks; edits do not terminate it. UDP keeps current ownership/lease checks.
+Both profile does not exempt generic DNS, interpreters, Wine or common ports.
+TCP/UDP DHCP exceptions remain IPv4 client68→server67 and IPv6 client546→server547
+only to fe80::/10 or ff02::1:2. ICMP/ICMPv6 and non-TCP/UDP remain outside this
+application policy. No forwarding coverage is claimed.
+
+Unknown/ambiguous ownership, timeout and overload drop. A one-shot UDP datagram
+can be held and released without retry, but its socket must remain observable:
+if a sender closes before delayed revalidation it fails closed. Local loopback
+between different applications may require sender and receiver decisions; there
+is no blanket local exemption. Other-UID application traffic can be blocked
+without becoming actionable for the selected user's policy client.
+
+Remembered outgoing defaults: application/revision/UID, outgoing, protocol,
+remote destination address and service port; local source port zero (any).
+Incoming defaults remain remote client address, local service port, remote
+source port zero. Existing incoming rules never migrate to both directions.
+Incoming-only output exemption intentionally takes precedence over any stored
+outgoing rules. A FlowGate Allow does not imply delivery through other firewalls.
+
+Editor semantics, atomicity and conflict rules are specified in RULES.md.
+
+
 ## Identity and evidence
 
 Socket discovery uses NETLINK_SOCK_DIAG TCP/UDP IPv4/IPv6 dumps, including inode, cookie, state and endpoints. `/proc/*/fd` finds **all visible owners**, including processes whose current network namespace differs from their retained socket. Socket snapshots are checked again after the scan. Processes carry PID plus start ticks, UID, current network/mount namespaces, actual executable, parent and cgroup. PID reuse or listener/cookie changes invalidate delayed answers.
@@ -25,13 +61,13 @@ Filters are separate from actions. A startup rule is:
 
 Highest numerical priority wins; ties use lexicographically smallest unique rule ID. All matching rule IDs are returned in precedence order. Schema 2: `remote_address` is an IP, CIDR, or explicit `*`; omitted/empty means any address. `local_port` and `remote_port` are exact ports; omitted/zero means any port. CLI remembered incoming defaults to observed remote address + local service port, with unrestricted source port. Outgoing defaults to observed remote address + destination port, with unrestricted local port. A CIDR or advanced remote-port restriction can be selected in a startup rule. The `remembered_filter` output previews the scope. Identity/revision/UID/direction/protocol remain mandatory. Legacy schema omitted/0/1 keeps `remote` as an exact IP:port or empty for any endpoint; it cannot use the new fields. Mixing legacy `remote` with new address/remote-port fields is rejected. Unknown schema versions and startup JSON fields are rejected. The API remains v1 with additive output fields. No implicit Allow/Block priority or hidden specificity weights. No matching rule means Ask; unsafe attribution means Block even if a rule would otherwise match. Unknown users have no application permission. API authorization is independent of policy matching.
 
-Rules are bounded to 256. The lab retains memory-only rules; explicit host-control mode commits remembered rules to SQLite before publishing decisions. See HOST-CONTROL.md for durable expiry and Disable/Delete semantics. There is no arbitrary advanced rule editor. Loading/replacing rules clears userspace decisions. Expired rules are re-evaluated on subsequent queued packets. New application-scope answers invalidate decided userspace events whose effective policy changes, while retaining unaffected decisions and unrelated pending requests. This prevents an unrelated answer from discarding a just-approved one-shot packet before its verdict is sent. Replacing the complete rule set invalidates pending IDs too; their held packets drop. TCP connections already admitted keep their kernel decision until conntrack expires/closes; rule changes do **not** revoke these connections. UDP original-direction datagrams recheck ownership and rule/decision lifetime. New SYNs are always attributed even on marked tuples, and their sequence separates successive attempts using a tuple. This prevents a standing port-wide permission.
+Rules are bounded to 256. The lab retains memory-only rules; explicit host-control mode commits remembered rules to SQLite before publishing decisions. See HOST-CONTROL.md for durable expiry and Disable/Delete semantics. The bounded saved-rule editor is described in RULES.md. Loading/replacing rules clears userspace decisions. Expired rules are re-evaluated on subsequent queued packets. New application-scope answers invalidate decided userspace events whose effective policy changes, while retaining unaffected decisions and unrelated pending requests. This prevents an unrelated answer from discarding a just-approved one-shot packet before its verdict is sent. Replacing the complete rule set invalidates pending IDs too; their held packets drop. TCP connections already admitted keep their kernel decision until conntrack expires/closes; rule changes do **not** revoke these connections. UDP original-direction datagrams recheck ownership and rule/decision lifetime. New SYNs are always attributed even on marked tuples, and their sequence separates successive attempts using a tuple. This prevents a standing port-wide permission.
 
 ## Lifecycle, resources and failure
 
 Observed/awaiting-attribution are synchronous transient stages. Stored events are awaiting-decision, allowed, blocked or expired. Initial undecided packets remain in the kernel NFQUEUE within explicit bounds. The callback records only packet ID, length, event identity and deadline, then returns. A separate 20 ms verdict loop processes CLI decisions and timeouts. No packet is manually reinjected. A timely Allow rechecks current application/listener/broker relationship and rule validity immediately before issuing a normal verdict; otherwise it drops. The kernel still owns payload storage; no payload is logged or retained in Go. Answers re-resolve ownership and reject changes, stale IDs, unauthorized users and expired requests. CLI disconnect leaves the daemon and pending state running.
 
-Pending timeout defaults to 15 seconds (configurable 1–60). Once decisions last 30 seconds in userspace; an admitted TCP connection then uses conntrack for its lifetime. UDP once is a fixed 30-second lease, not an idle sliding window. Expired event history is removed after five seconds on the next access. Max 256 events, 20 new events per second, 128 kernel queue packets, 16 simultaneous API clients, 4096-byte API requests and three-second server request deadlines. Retained packets are additionally limited to 64 globally, 1 MiB of IP packet bytes globally, 64 KiB per full flow, and four UDP datagrams or one TCP SYN per flow. TCP retransmitted SYNs are dropped while the initial one waits. UDP packets retain arrival order up to the cap; duplicate UDP datagrams are not inferred from payload equality. Excess packets drop without an Allow. Byte accounting describes packet lengths, not allocator/skb overhead. Queue processing can add scheduling latency to timeout handling; no Allow is issued after the original retention deadline even if the decision lease was renewed. Scanning on every queued packet is intentionally simple and can be CPU-expensive; no throughput or zero-overhead claim. No custom replay buffer. CLI disconnect leaves held packets pending; Block, timeout, invalidation, shutdown or queue errors drain/drop them. If verdict delivery fails, the queue closes, dropping remaining kernel packets. Bounded retention cannot prevent application-side timeouts or buffer unlimited UDP.
+Pending timeout defaults to 15 seconds (configurable 1–60). Once decisions last 30 seconds in userspace; an admitted TCP connection then uses conntrack for its lifetime. UDP once is a fixed 30-second lease, not an idle sliding window. Expired event history is removed after five seconds on the next access. Max 256 events, 20 new events per second, 128 kernel queue packets, 16 simultaneous API clients, 16384-byte API requests and three-second server request deadlines. Retained packets are additionally limited to 64 globally, 1 MiB of IP packet bytes globally, 64 KiB per full flow, and four UDP datagrams or one TCP SYN per flow. TCP retransmitted SYNs are dropped while the initial one waits. UDP packets retain arrival order up to the cap; duplicate UDP datagrams are not inferred from payload equality. Excess packets drop without an Allow. Byte accounting describes packet lengths, not allocator/skb overhead. Queue processing can add scheduling latency to timeout handling; no Allow is issued after the original retention deadline even if the decision lease was renewed. Scanning on every queued packet is intentionally simple and can be CPU-expensive; no throughput or zero-overhead claim. No custom replay buffer. CLI disconnect leaves held packets pending; Block, timeout, invalidation, shutdown or queue errors drain/drop them. If verdict delivery fails, the queue closes, dropping remaining kernel packets. Bounded retention cannot prevent application-side timeouts or buffer unlimited UDP.
 
 NFQUEUE has neither queue-bypass nor fail-open. A missing consumer or full queue drops new traffic; a SIGKILL test verifies no receiver delivery. Already admitted TCP connections can continue using their conntrack mark after consumer failure. Graceful lab shutdown removes only `inet flowgate_lab`, ending enforcement deliberately. An unexpected queue error terminates the daemon and retains the table, so new traffic remains blocked. Graceful SIGINT/SIGTERM is an explicit lab teardown. No production service supervisor or host installer is provided.
 
@@ -39,7 +75,7 @@ The table is created exclusively and cleanup only runs after successful creation
 
 ## Network scope
 
-The harness creates fresh user, network, mount and PID namespaces and private procfs; it enables loopback only. Incoming TCP SYN attribution examines listeners before accept. Outgoing SYN attribution examines the sender socket. UDP checks connected and unconnected sockets. Return traffic uses the explicit decision mark; bare established state is not permission. IPv4 and simple IPv6 packets are supported. Fragmented packets and IPv6 extension-header packets queued to userspace are rejected; ICMP and other protocols are outside this prototype's TCP/UDP policy. No forwarding/container protection, DNS/domain policy, bandwidth limiting or simultaneous incoming+outgoing ruleset is claimed.
+The harness creates fresh user, network, mount and PID namespaces and private procfs; it enables loopback only. Incoming TCP SYN attribution examines listeners before accept. Outgoing SYN attribution examines the sender socket. UDP checks connected and unconnected sockets. Return traffic uses the explicit decision mark; bare established state is not permission. IPv4 and simple IPv6 packets are supported. Fragmented packets and IPv6 extension-header packets queued to userspace are rejected; ICMP and other protocols are outside this prototype's TCP/UDP policy. No forwarding/container protection, DNS/domain policy, bandwidth limiting is claimed; the optional host `both` profile is described above.
 
 ## Optional runtime census experiment
 

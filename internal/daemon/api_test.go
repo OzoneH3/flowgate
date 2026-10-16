@@ -33,6 +33,11 @@ func TestReadOnlyAPI(t *testing.T) {
 	if _, err = Call(path, Request{Version: 1, Operation: "decide", ID: "fake", Action: "allow", Scope: "once"}); err == nil {
 		t.Fatal("read-only endpoint allowed mutation")
 	}
+	for _, op := range []string{"rule-preview", "rule-save"} {
+		if _, err := Call(path, Request{Version: 1, Operation: op, Generation: e.Generation}); err == nil {
+			t.Fatal("read-only endpoint accepted editor", op)
+		}
+	}
 	if _, err = Call(path, Request{Version: 2, Operation: "list"}); err == nil {
 		t.Fatal("unsupported API accepted")
 	}

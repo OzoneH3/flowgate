@@ -12,6 +12,7 @@ public:
   void setLauncherForTest(Launcher f) { launcher = std::move(f); }
   bool launch(const QString &action, const QString &token = {});
   void cancelStart();
+  void setProfile(QString value) { profile = value; }
   bool starting() const;
   bool working() const;
 signals:
@@ -28,5 +29,6 @@ private:
   QList<Job> jobs;
   QTimer poll;
   Launcher launcher;
+  QString profile = "incoming";
   void refresh();
 };

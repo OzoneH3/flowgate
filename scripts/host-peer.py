@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """Remote endpoint, started only inside host-lab's nested network namespace."""
 import json, socket, subprocess, sys, threading
+from pathlib import Path
+LOG=Path(sys.argv[1]) if len(sys.argv)>1 else None
+def record(proto,s):
+    if LOG:
+        with (LOG/"peer-received.log").open("a") as f:f.write(proto+" "+str(s.getsockname())+"\n")
 connections={}
 def exchange(s):
     try:
         while True:
             b=s.recv(1024)
             if not b:break
-            s.sendall(b)
+            record("tcp",s);s.sendall(b)
     except OSError:pass
     finally:s.close()
 def listen(s):
@@ -24,7 +29,7 @@ for raw in sys.stdin:
                         
             def udp_echo(s):
                 while True:
-                    try:b,addr=s.recvfrom(1024);s.sendto(b,addr)
+                    try:b,addr=s.recvfrom(1024);record("udp",s);s.sendto(b,addr)
                     except OSError:break
             for fam,addr in [(socket.AF_INET,'10.79.0.2'),(socket.AF_INET6,'fd79::2')]:
                 u=socket.socket(fam,socket.SOCK_DGRAM);u.bind((addr,43001));threading.Thread(target=udp_echo,args=(u,),daemon=True).start()
@@ -35,7 +40,12 @@ for raw in sys.stdin:
             s=socket.socket(family,socket.SOCK_DGRAM)
             if q.get('source_port'):s.bind(('fd79::2' if v6 else '10.79.0.2',q['source_port']))
             if q.get('dhcp'):s.bind(('fe80::2',547,0,socket.if_nametoindex('fgpeer')) if v6 else ('10.79.0.2',67))
-            s.sendto(b'fixture',('fd79::1' if v6 else '10.79.0.1',q['port']));s.close();answer={'ok':True}
+            s.sendto(b'fixture',('fd79::1' if v6 else '10.79.0.1',q['port']));
+            if q.get('wait_reply'):connections['udp'+str(q['port'])+str(v6)]=s
+            else:s.close()
+            answer={'ok':True}
+        elif op=='udp-reply':
+            s=connections['udp'+str(q['port'])+str(v6)];s.settimeout(2);answer={'reply':s.recv(128).decode()};s.close()
         elif op=='tcp':
             s=socket.socket(family,socket.SOCK_STREAM);s.settimeout(10);key=str(q['port'])+str(v6);connections[key]=s
             def send(s=s,q=q,v6=v6):

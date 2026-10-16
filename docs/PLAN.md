@@ -1,5 +1,13 @@
 # Authoritative implementation plan
 
+## Complete: structured decisions, atomic editor and opt-in outgoing profile
+
+1. Reuse shared NFQUEUE with verified hook direction; preserve replies/startup flows.
+2. Keep incoming-only default; carry explicit incoming-and-outgoing profile through terminal startup, health and UI.
+3. Add structured prompt and revision-checked atomic persistent rule editing (missing at actual start 9235954).
+4. Test native outgoing TCP/UDP v4/v6 at receivers, scoped remembered/edit/restart behavior and Wayland prompt/editor.
+5. Update current semantics and commit; no host activation or Wine work.
+
 ## Complete: one coherent desktop application
 
 1. Independent asynchronous Activity and control connections in one window.

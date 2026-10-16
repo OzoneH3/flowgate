@@ -92,6 +92,11 @@ Window::Window(const QString &path, QWidget *parent) : QMainWindow(parent) {
   for (auto *button :
        {startEvaluation, stopEvaluation, recoverEvaluation, cancelEvaluation})
     controlActions->addWidget(button);
+  evaluationProfile = new QComboBox;
+  evaluationProfile->setObjectName("evaluationProfile");
+  evaluationProfile->addItem("Incoming connections", "incoming");
+  evaluationProfile->addItem("Incoming and outgoing connections", "both");
+  controlActions->insertWidget(0, evaluationProfile);
   controlActions->addStretch();
   controlActions->addWidget(pendingCount);
   layout->addLayout(controlActions);
@@ -100,10 +105,14 @@ Window::Window(const QString &path, QWidget *parent) : QMainWindow(parent) {
   connect(startEvaluation, &QPushButton::clicked, this, [this] {
     QMessageBox explanation(
         QMessageBox::Question, "Start FlowGate evaluation",
-        "Control new incoming application TCP/UDP connections for five "
-        "minutes. Outgoing traffic remains allowed. Authentication opens in a "
-        "terminal. Closing this window leaves the evaluation running until "
-        "Stop or its deadline.",
+        evaluationProfile->currentData() == "both"
+            ? "Control new incoming AND outgoing application TCP/UDP "
+              "connections for five minutes. New outgoing connections can wait "
+              "or be blocked. Authentication opens in a terminal. Closing this "
+              "window keeps the original evaluation deadline."
+            : "Control new incoming TCP/UDP connections for five minutes. "
+              "Outgoing remains allowed. Authentication opens in a terminal. "
+              "Closing this window keeps the original evaluation deadline.",
         QMessageBox::Ok | QMessageBox::Cancel, this);
     explanation.setObjectName("evaluationExplanation");
     explanation.setTextFormat(Qt::PlainText);
@@ -116,6 +125,7 @@ Window::Window(const QString &path, QWidget *parent) : QMainWindow(parent) {
       }
       confirmedStopped = false;
       expectedGeneration.clear();
+      evaluation->setProfile(evaluationProfile->currentData().toString());
       evaluation->launch("start");
     }
   });
@@ -215,6 +225,11 @@ Window::Window(const QString &path, QWidget *parent) : QMainWindow(parent) {
   preview = textBox("scopePreview");
   preview->setMaximumHeight(95);
   mid->addWidget(preview);
+  createRule = new QPushButton("Create rule from request…");
+  createRule->setObjectName("createRule");
+  mid->addWidget(createRule);
+  connect(createRule, &QPushButton::clicked, this,
+          [this] { openRuleEditor(true); });
   split->addWidget(middle);
   auto *bottom = new QWidget;
   auto *bt = new QVBoxLayout(bottom);
@@ -253,6 +268,11 @@ Window::Window(const QString &path, QWidget *parent) : QMainWindow(parent) {
   deleteRule = new QPushButton("Delete selected rule");
   disableRule->setObjectName("disableRule");
   deleteRule->setObjectName("deleteRule");
+  editRule = new QPushButton("Edit selected rule…");
+  editRule->setObjectName("editRule");
+  ruleActions->addWidget(editRule);
+  connect(editRule, &QPushButton::clicked, this,
+          [this] { openRuleEditor(false); });
   ruleActions->addWidget(enableRule);
   ruleActions->addWidget(disableRule);
   ruleActions->addWidget(deleteRule);
@@ -321,8 +341,8 @@ Window::Window(const QString &path, QWidget *parent) : QMainWindow(parent) {
   promptConnection->setTextFormat(Qt::PlainText);
   promptConnection->setWordWrap(true);
   pl->addWidget(promptConnection);
-  promptDetails = textBox("promptDetails");
-  promptDetails->setFixedHeight(240);
+  promptDetails = new ConnectionDetails;
+  promptDetails->setObjectName("promptDetails");
   pl->addWidget(promptDetails);
   promptScope = new QComboBox;
   promptScope->setObjectName("promptScope");
@@ -346,6 +366,13 @@ Window::Window(const QString &path, QWidget *parent) : QMainWindow(parent) {
   pl->addLayout(pa);
   pl->addStretch(1);
   later->setAutoDefault(false);
+  promptCreateRule = new QPushButton("Create / edit rule…");
+  promptCreateRule->setObjectName("promptCreateRule");
+  pl->addWidget(promptCreateRule);
+  connect(promptCreateRule, &QPushButton::clicked, this, [this] {
+    selected = promptID;
+    openRuleEditor(true);
+  });
   pl->addWidget(later, 0, Qt::AlignRight);
   promptResult = new QLabel;
   promptResult->setTextFormat(Qt::PlainText);
@@ -610,6 +637,7 @@ void Window::consume(QJsonObject r) {
     auto enforcement = r["enforcement"].toObject();
     auto state = enforcement["state"].toString("unavailable");
     enforcementState = state;
+    activeProfile = enforcement["profile"].toString("incoming");
     stopsAt = QDateTime::fromString(enforcement["stops_at"].toString(),
                                     Qt::ISODateWithMs);
     if (state == "active")
@@ -638,6 +666,11 @@ void Window::consume(QJsonObject r) {
     if (hostControl)
       box->addItem("Persistent · until disabled/deleted", "persistent");
     box->setCurrentIndex(qMax(0, box->findData(chosen)));
+  }
+  storedRules.clear();
+  for (auto v : r["rules"].toArray()) {
+    auto rule = v.toObject();
+    storedRules[rule["id"].toString()] = rule;
   }
   renderRules(r["rules"].toArray());
   enableRule->setEnabled(hostControl && !readOnly && !ruleSubmitting);
@@ -807,15 +840,18 @@ void Window::updateDetails() {
             current.value(selected)["scope_previews"].toObject().contains(
                 scope->currentData().toString());
   allow->setEnabled(ok);
+  createRule->setEnabled(actionable(selected) && mode == "host-enforcement");
   block->setEnabled(ok);
   scope->setEnabled(actionable(selected));
+  if (editor)
+    editor->setConnectionUsable(connected && !readOnly);
   if (!promptID.isEmpty()) {
     auto event = current.value(promptID);
     auto flow = event["flow"].toObject();
     promptConnection->setText(value(flow, "direction") + " connection · " +
                               value(flow, "protocol").toUpper() + " · " +
                               appName(event));
-    set(promptDetails, describe(event));
+    promptDetails->showEventData(event, serverOffset);
     set(promptPreview, scopeText(current.value(promptID),
                                  promptScope->currentData().toString()));
   }
@@ -823,6 +859,8 @@ void Window::updateDetails() {
              current.value(promptID)["scope_previews"].toObject().contains(
                  promptScope->currentData().toString());
   promptAllow->setEnabled(pok);
+  promptCreateRule->setEnabled(actionable(promptID) &&
+                               mode == "host-enforcement");
   promptBlock->setEnabled(pok);
   promptScope->setEnabled(actionable(promptID));
   if (connected && (!current.contains(promptID) ||
@@ -977,9 +1015,14 @@ void Window::updateEnforcement() {
   bool active = connected && mode == "host-enforcement" &&
                 enforcementState == "active" && !readOnly;
   bool lab = connected && mode == "isolated-lab";
+  evaluationProfile->setEnabled(!active && !lab && !evaluation->starting());
+  if (active) {
+    QSignalBlocker guard(evaluationProfile);
+    evaluationProfile->setCurrentIndex(activeProfile == "both" ? 1 : 0);
+  }
   bool editRules =
       connected && mode == "host-enforcement" && !readOnly && !ruleSubmitting;
-  for (auto *b : {enableRule, disableRule, deleteRule})
+  for (auto *b : {enableRule, disableRule, deleteRule, editRule})
     b->setEnabled(editRules);
   if (rules->rowCount() > 0 && !connected) {
     tabs->setTabText(2, "Rules · last received");
@@ -1005,7 +1048,10 @@ void Window::updateEnforcement() {
                                       serverOffset + 999) /
                                          1000);
     status->setText(
-        QString("Host enforcement — active · incoming-first · %1:%2 remaining "
+        QString("Host enforcement — active · " +
+                QString(activeProfile == "both" ? "incoming + outgoing"
+                                                : "incoming only") +
+                " · %1:%2 remaining "
                 "· closing this window keeps enforcement running")
             .arg(seconds / 60)
             .arg(seconds % 60, 2, 10, QChar('0')));
@@ -1093,7 +1139,13 @@ void Window::renderRules(const QJsonArray &entries) {
                        persistent ? "Persistent · no expiry" : expiry,
                        r["disabled"].toBool()
                            ? "Disabled"
-                           : (expired ? "Enabled · expired" : "Enabled"),
+                           : (expired
+                                  ? "Enabled · expired"
+                                  : ((activeProfile == "incoming" &&
+                                      f["direction"] == "outgoing" &&
+                                      mode == "host-enforcement")
+                                         ? "Enabled · outgoing profile inactive"
+                                         : "Enabled")),
                        id};
     int row = rules->rowCount();
     rules->insertRow(row);
@@ -1115,4 +1167,90 @@ void Window::renderRules(const QJsonArray &entries) {
       rules->selectRow(row);
       break;
     }
+}
+
+void Window::openRuleEditor(bool fromPending) {
+  if (!connected || readOnly || mode != "host-enforcement")
+    return;
+  if (editor) {
+    editor->show();
+    editor->raise();
+    return;
+  }
+  QJsonObject seed;
+  QString id, eventID;
+  QJsonValue version;
+  if (fromPending) {
+    if (!actionable(selected))
+      return;
+    auto e = current[selected];
+    eventID = selected;
+    seed = QJsonObject{{"filter", e["remembered_filter"]},
+                       {"action", "allow"},
+                       {"priority", 100},
+                       {"disabled", false},
+                       {"executable", application(e)["executable"]},
+                       {"expires", QDateTime::currentDateTimeUtc()
+                                       .addMSecs(serverOffset)
+                                       .addSecs(3600)
+                                       .toString(Qt::ISODateWithMs)}};
+  } else {
+    int row = rules->currentRow();
+    if (row < 0 || !rules->item(row, 0))
+      return;
+    id = rules->item(row, 0)->data(Qt::UserRole).toString();
+    seed = storedRules.value(id);
+    if (seed.isEmpty())
+      return;
+    version = seed.contains("version") ? seed["version"] : QJsonValue(0);
+    auto filter = seed["filter"].toObject();
+    if (!filter["remote"].toString().isEmpty()) {
+      auto endpoint = filter["remote"].toString();
+      int pos = endpoint.lastIndexOf(':');
+      QString host = endpoint.left(pos);
+      if (host.startsWith('[') && host.endsWith(']'))
+        host = host.mid(1, host.size() - 2);
+      filter.remove("remote");
+      filter["remote_address"] = host;
+      filter["remote_port"] = endpoint.mid(pos + 1).toInt();
+      seed["filter"] = filter;
+    }
+  }
+  const auto editingGeneration = generation;
+  const int editingEpoch = epoch;
+  editor = new RuleEditor(
+      seed,
+      [this, id, eventID, version, editingGeneration,
+       editingEpoch](QJsonObject rule, bool commit,
+                     std::function<void(QJsonObject, QString)> done) {
+        if (!connected || readOnly || generation != editingGeneration ||
+            epoch != editingEpoch) {
+          done({}, "Disconnected or backend changed; reopen this editor. No "
+                   "save was replayed.");
+          return;
+        }
+        QJsonObject q{{"version", 1},
+                      {"operation", commit ? "rule-save" : "rule-preview"},
+                      {"generation", editingGeneration},
+                      {"id", id},
+                      {"event_id", eventID},
+                      {"rule", rule}};
+        if (!id.isEmpty())
+          q["expected_version"] = version;
+        request(q, [this, done, commit, editingGeneration](QJsonObject r,
+                                                           QString error) {
+          if (error.isEmpty() &&
+              (generation != editingGeneration ||
+               r["generation"].toString() != editingGeneration))
+            error = "Backend changed; acknowledgement rejected";
+          done(r, error);
+          if (commit && error.isEmpty() && r["error"].toString().isEmpty()) {
+            feedback("Rule save acknowledged · " +
+                     r["scope_preview"].toString());
+            refresh();
+          }
+        });
+      },
+      this);
+  editor->show();
 }
