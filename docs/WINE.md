@@ -1,4 +1,8 @@
-# Wine broker association: supported path and observation boundary
+# Wine runtime attribution
+
+Current integration is described in the final section. Earlier sections preserve
+the FD-only boundary and the initial experiment; their unverified cases are
+superseded only by the explicit new evidence below.
 
 ## Evidence and supported model
 
@@ -28,7 +32,7 @@ Default mode remains conservative. Other versions/runtimes, missing peer/FD evid
 
 Thus the supported threat model excludes cross-process dormant handle sharing, arbitrary same-user descriptor manipulation, runtime tampering and external multiplexing proxies. The opt-in mode is useful for ordinary independently owned fixture sockets under those assumptions; it is not reliable transparent enforcement for every Windows application. Default mode does not take this assumption. No game/Proton validation is implied.
 
-## Smallest next step
+## Historical next step before runtime-table observation
 
 The missing observation is the mapping from a server socket object to **every live Windows handle reference**, including creation, inheritance, duplication, close and client exit before FD-cache materialization. A syscall hook observing only socket creation or SCM_RIGHTS cannot reconstruct dormant Windows handles. Full Wine-protocol/lifecycle tracking would require matching-version protocol parsing or focused probes and explicit loss handling; a generic eBPF subsystem does not solve that automatically.
 
@@ -171,3 +175,120 @@ Run these sequentially. Tests set `FLOWGATE_WINE_TABLE_RUNNER`,
 `FLOWGATE_WINE_BROKER` explicitly for `serve-lab`. The normal CLI remains unchanged;
 the table adapter is not enabled by a broker variable alone. No real games,
 Heroic/Lutris/Flatpak, VPN or additional distribution support is implied.
+
+## Current integration: lifecycle, attachment and IPv6
+
+### Lifecycle evidence and contract
+
+`fixtures/windows-lifecycle.c` uses actual WSADuplicateSocketW and recipient
+WSASocketW, without target injection or runtime changes. Both tested builds expose
+the recipient in the public table at duplication preparation, before construction.
+The tests record original/prepared/constructed/original-closed/final-closed rows,
+recipient delivery, and actual reuse of a numeric Windows socket handle. Kernel
+socket cookies change on close/rebind even when the process and numeric handle do
+not. A retained UDP decision becomes stale at duplication preparation or reuse.
+After the recipient constructs the socket, shared ownership is denied at an active
+receiver. A transient FD-materialization change can first produce conservative
+“ownership changed during census”; the stable shared census remains ambiguous.
+
+An accepted TCP socket is also duplicated to beta. The already-approved connection
+continues after alpha closes its accepted reference. This passes the **connection
+initiation** product contract; it is not a bypass of a promised continuous-ownership
+check. Rule replacement/deletion/expiry still affects new decisions and UDP,
+without clearing marks on already-approved TCP. See SEMANTICS.md.
+
+### Discovery and explicit attachment
+
+`runtime-discover --runtime-bins DIR[,DIR]` reads `/proc`, broker executable identity,
+SHA256, prefix, UID, namespaces, process start and helper peer count. It never
+launches Wine or interprets a command from application metadata. Runtime bin
+directories are explicitly trusted user input, not inferred executable commands.
+The two broker hashes above are the supported build allowlist; another build is
+reported unsupported until validated. No claim of general Wine-version support.
+
+`serve-lab --attach-prefixes PREFIX[,PREFIX] --runtime-bins DIR[,DIR]` uses the same
+observation pipeline, without per-prefix environment assembly. Each selected
+prefix must already have exactly one live supported broker, be canonicalized
+inside this checkout's `.workspace`, and have a workspace TMPDIR. The PE helper
+must also resolve inside `.workspace`. Symlink escapes are rejected. The helper
+runs as the caller, whose UID must equal the runtime's; host privileged-root
+attachment is refused. UID zero mapped to the unprivileged lab user is permitted.
+Foreign network/mount namespaces are not silently entered.
+
+The child receives a small explicit environment and structured executable/argument
+values. `WINESERVER=/usr/bin/false` prevents creating a replacement server if the
+intended server disappears. Successful attachment requires the original broker
+generation still to exist and the uniquely mapped helper to have reciprocal Unix
+peer evidence to it. Cleanup kills only the helper process launched by FlowGate.
+At most four runtime directories, four selected observers and 32 discovered
+sessions are allowed. Discovery checks a five-second deadline; attachment checks
+a ten-second total deadline with a two-second helper-response deadline. Ordinary
+filesystem/proc reads are bounded in size, not hard real-time operations. There
+is one attachment attempt, no automatic retries, and failure never selects the
+weaker broker model. A separate observer/fingerprint belongs to each prefix.
+
+Server death is sticky failure. A replacement server with the same prefix/path
+cannot reuse the previous session generation. Explicit daemon restart/attachment
+creates a new observer and new pending IDs. Both tested builds passed this case
+and cross-prefix same-executable/service-port permission isolation. During forced
+wineserver SIGKILL tests, ntsync clients sometimes remained alive and held their
+sockets. The **test harness** cleans up only that disposable prefix's PE processes
+before restarting; FlowGate does not kill application clients. Proton environment
+paths can have trailing slashes, so the harness canonicalizes them. Earlier
+relative-path discovery and broad IPv6 scope checks were corrected; final evidence
+comes from the sequential runner, not intermediate failed runs.
+
+Helper pipe schema is now explicitly `1`, with runtime version and requested
+family in each response. Requests are `t4`, `u4`, `t6`, or `u6` followed by newline.
+Unknown schema/version/family, malformed/incomplete data, EOF or deadline disables
+the observer; unit tests exercise mismatches and sticky rejection. Existing helper
+exit receiver tests are retained; new receiver tests cover server loss/recovery.
+This is a snapshot census, not a complete handle-event stream or protection
+against hostile same-user ABA transfers between observation and verdict.
+
+### IPv6 matching
+
+The helper uses the IPv6 OWNER_PID TCP/UDP table variants and emits address,
+port, family and scope ID. Kernel diagnostics preserve AF_INET/AF_INET6 and read
+INET_DIAG_SKV6ONLY. Known v6-only sockets cannot claim IPv4 flows; unknown v6-only
+state stays a plausible candidate and cannot justify a v4-to-v6 table Allow.
+Multiple plausible kernel sockets remain ambiguous, without guessed precedence.
+IPv4-mapped addresses compare canonically but retain their observed family.
+
+Both builds passed ordinary `::1` TCP/UDP Allow/Block and reversal, dual-stack `::`
+wildcard reception over IPv4 and IPv6, mapped IPv6 binds, and a v6-only wildcard
+beside a separate IPv4 application on the same port. Wine reports scope ID 1 for
+loopback too; it is preserved, but does not make `::1` a link-local address.
+Link-local/zone-sensitive policy is rejected until Windows-to-kernel interface
+mapping is implemented. Non-loopback IPv6 and additional runtime builds are not
+claimed validated. IPv6 was neither disabled nor broadly allowed.
+
+### Reproduce this increment
+
+Use the initialized workspace prefixes from the earlier commands. New tests clone
+only the workspace prefix (preserving symlinks) for their second test session.
+The original `lwp` was read again and is unchanged. Direct helper attachment uses
+the selected runtime's Wine binary, and fixture setup uses `runinprefix`; neither
+is full UMU/Steam/container integration or permission to touch game prefixes.
+
+```sh
+# Builds and runs all new tests sequentially in disposable namespaces:
+scripts/check-runtime.sh
+FLOWGATE_TEST_PROTON=/home/flowgate-user/.steam/steam/compatibilitytools.d/dwproton-11.0-4 \
+FLOWGATE_TEST_STEAM=/home/flowgate-user/.steam/steam scripts/check-runtime.sh
+
+# Inside an existing scripts/lab.sh shell, after fixtures are listening:
+.workspace/flowgate runtime-discover --runtime-bins /usr/bin
+.workspace/flowgate serve-lab --parent-netns "$FLOWGATE_PARENT_NETNS" \
+  --attach-prefixes "$PWD/.workspace/wine-prefix,$PWD/.workspace/wine-session-second" \
+  --runtime-bins /usr/bin
+# For direct Proton sessions, select its .../files/bin directory and actual pfx paths.
+# Another terminal in that same lab can use the existing pending/decide CLI/API.
+```
+
+`--wine-helper` optionally selects the built workspace helper; its default is
+`.workspace/windows/table-probe.exe`. Legacy explicit environment configuration
+remains for old tests, but cannot be combined with `--attach-prefixes`. Source
+`scripts/go-env.sh` before manual Go commands. No additional privileges or runtime
+updates were required. Existing game prefixes and launcher configuration remain
+untouched.

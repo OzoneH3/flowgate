@@ -10,7 +10,7 @@ Wine identification requires a Wine runtime indication, explicit WINEPREFIX or S
 
 The prototype does not infer a child's identity from its parent, a prefix, basename or SteamAppId. Runtime version, launcher installation databases and tracked multi-process launch sessions are not yet implemented. Missing explicit prefix, a launcher changing argv, inaccessible mappings or multiple mapped image candidates may prevent attribution.
 
-One matching socket and one visible owner are required by default. The explicit Wine broker mode additionally accepts one mapped Windows client plus a configured broker with reciprocal Unix peer evidence, same UID/namespaces/prefix. Both holders are preserved; the client is the authorization principal. Its evidence, roles and non-sharing assumptions are serialized under `association`. See WINE.md for the demonstrated dormant-handle boundary. Two visible Windows clients, SO_REUSEPORT candidates, socket activation with shared owners and relays remain ambiguous. A v6 wildcard is conservatively a candidate for IPv4 because v6-only state is not queried. Specific and wildcard listeners are not ranked by guessed kernel selection. Hidden processes or inaccessible FDs reduce capability. `/proc` scanning is not atomic: FD transfers, bind/close and image mutation can race even a second snapshot. This baseline is a lab prototype, not protection against a hostile local process. Passing data through a shared proxy cannot be reliably attributed back to an original game by this method.
+One matching socket and one visible owner are required by default. The explicit Wine broker mode additionally accepts one mapped Windows client plus a configured broker with reciprocal Unix peer evidence, same UID/namespaces/prefix. Both holders are preserved; the client is the authorization principal. Its evidence, roles and non-sharing assumptions are serialized under `association`. See WINE.md for the demonstrated dormant-handle boundary. Two visible Windows clients, SO_REUSEPORT candidates, socket activation with shared owners and relays remain ambiguous. A v6 wildcard remains a candidate for IPv4 when v6-only state is unknown; observed INET_DIAG_SKV6ONLY excludes known v6-only sockets. Runtime-table permission for IPv4 on an IPv6 socket requires observed dual-stack mode. Specific and wildcard listeners are not ranked by guessed kernel selection. Hidden processes or inaccessible FDs reduce capability. `/proc` scanning is not atomic: FD transfers, bind/close and image mutation can race even a second snapshot. This baseline is a lab prototype, not protection against a hostile local process. Passing data through a shared proxy cannot be reliably attributed back to an original game by this method.
 
 ## Policy
 
@@ -53,3 +53,29 @@ that runtime until daemon restart. New TCP attempts and UDP are rechecked;
 already allowed established TCP keeps the existing fast path and does not promise
 continuous detection of subsequent socket transfer. Defaults and rule schema
 remain unchanged.
+
+## Connection-initiation product contract
+
+This milestone authorizes **new TCP connections**. Once approved, a connection
+may continue on its kernel fast path, including after an accepted-socket transfer
+to another process. This is intentional initiation control, not continuous
+ownership enforcement. The actual WSADuplicateSocket fixture demonstrates that
+beta can receive on alpha's already-approved connection after alpha closes its
+reference. A new SYN still needs current policy and attribution. Remembered rules
+remain application/revision/user/endpoint filters, never runtime or port grants.
+
+Rule replacement, deletion through replacement, expiry, or a new Block decision
+invalidates relevant userspace decisions as previously documented; none currently
+disconnects an already-admitted TCP connection or clears its conntrack mark.
+There is no separate disconnect operation yet. UDP retains the existing per-flow
+lease and per-datagram ownership/rule checks. Continuous ownership tracking and
+explicit disconnect are separate future capabilities, not prerequisites for
+native prompts under this contract.
+
+
+Runtime attachment is explicit for already-running workspace test prefixes.
+Discovery is read-only. Broker PID/start/revision/namespaces and observer generation
+are pinned; replacement or helper/protocol failure requires explicit reattachment.
+A prefix is a runtime-session boundary, not a game-session assertion. IPv6 table
+rows preserve scope IDs; link-local permission remains unsupported without a
+validated interface mapping. See WINE.md for commands and tested family cases.

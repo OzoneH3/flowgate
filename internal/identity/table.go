@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +20,8 @@ import (
 )
 
 type WindowsOwner struct {
+	Family  int    `json:"family"`
+	Scope   uint32 `json:"scope_id"`
 	PID     uint32 `json:"pid"`
 	Created uint64 `json:"created"`
 	Image   string `json:"image"`
@@ -34,6 +37,8 @@ type TableEvidence struct {
 	Method    string         `json:"method"`
 }
 type tableSnapshot struct {
+	Family   int            `json:"family"`
+	Schema   int            `json:"schema"`
 	Version  string         `json:"version"`
 	Rows     []WindowsOwner `json:"rows"`
 	Complete bool           `json:"complete"`
@@ -49,11 +54,16 @@ type WineTable struct {
 	broker, prefix, version string
 	helper                  string
 	generation              string
+	session                 *RuntimeSession
+	startupDeadline         time.Time
 }
 
 // NewWineTable is lab-only. runner and helper are explicitly trusted executable
 // paths; runtime version and broker image are pinned by the operator.
 func NewWineTable(runner, helper, broker, prefix, version string) (*WineTable, error) {
+	return newWineTable(runner, helper, broker, prefix, version, nil)
+}
+func newWineTable(runner, helper, broker, prefix, version string, env []string) (*WineTable, error) {
 	if version != "11.19" && version != "11.0" {
 		return nil, fmt.Errorf("unsupported experimental runtime version")
 	}
@@ -69,7 +79,11 @@ func NewWineTable(runner, helper, broker, prefix, version string) (*WineTable, e
 		return nil, err
 	}
 	cmd := exec.Command(runner, helper)
-	cmd.Env = append(os.Environ(), "WINEPREFIX="+prefix)
+	if env == nil {
+		cmd.Env = append(os.Environ(), "WINEPREFIX="+prefix)
+	} else {
+		cmd.Env = env
+	}
 	in, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -112,6 +126,9 @@ func (w *WineTable) stop() {
 	}
 }
 func (w *WineTable) snapshot(proto string) (tableSnapshot, error) {
+	return w.snapshotFamily(proto, 4)
+}
+func (w *WineTable) snapshotFamily(proto string, family int) (tableSnapshot, error) {
 	var s tableSnapshot
 	if proto != "tcp" && proto != "udp" {
 		return s, fmt.Errorf("unsupported census protocol")
@@ -119,13 +136,13 @@ func (w *WineTable) snapshot(proto string) (tableSnapshot, error) {
 	if w.dead {
 		return s, fmt.Errorf("observer stopped; explicit restart required")
 	}
-	if _, err := io.WriteString(w.input, proto[:1]+"\n"); err != nil {
+	if _, err := io.WriteString(w.input, fmt.Sprintf("%s%d\n", proto[:1], family)); err != nil {
 		w.stop()
 		return s, err
 	}
 	select {
 	case b, ok := <-w.output:
-		if w.lost.Load() || !ok || json.Unmarshal(b, &s) != nil || !s.Complete || s.Error != 0 || s.Version != w.version || len(s.Rows) > 4096 {
+		if w.lost.Load() || !ok || json.Unmarshal(b, &s) != nil || !s.Complete || s.Family != family || s.Schema != 1 || s.Error != 0 || s.Version != w.version || len(s.Rows) > 4096 {
 			w.stop()
 			return s, fmt.Errorf("incomplete or unsupported runtime census")
 		}
@@ -138,7 +155,20 @@ func (w *WineTable) snapshot(proto string) (tableSnapshot, error) {
 func selectTableRows(s tableSnapshot, f Flow) ([]WindowsOwner, error) {
 	var rows []WindowsOwner
 	for _, r := range s.Rows {
-		if r.Port != f.Local.Port() || (r.Address != f.Local.Addr().String() && r.Address != "0.0.0.0") {
+		addr, err := netip.ParseAddr(r.Address)
+		if err != nil {
+			return nil, fmt.Errorf("malformed runtime address")
+		}
+		if r.Port != f.Local.Port() || (addr.Unmap() != f.Local.Addr().Unmap() && !addr.IsUnspecified()) {
+			continue
+		}
+		if addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() || f.Local.Addr().IsLinkLocalUnicast() || (addr.Is4() && r.Scope != 0) {
+			return nil, fmt.Errorf("scoped runtime endpoint requires a proven Windows-to-Linux interface mapping")
+		}
+		if addr.Is6() && f.Local.Addr().Is4() && !addr.IsUnspecified() && !addr.Is4In6() {
+			continue
+		}
+		if addr.Is4() && f.Local.Addr().Is6() && !f.Local.Addr().Is4In6() {
 			continue
 		}
 		if (f.Protocol == "tcp" && r.State != 2) || r.PID == 0 || r.Created == 0 || r.Image == "" {
@@ -165,6 +195,13 @@ func (w *WineTable) Resolve(f Flow) Attribution {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	a := Resolve(f)
+	if w.session != nil && !w.session.current() {
+		a.Application = nil
+		a.Association = nil
+		a.Reason = "attached runtime session replaced; explicit reattachment required"
+		w.stop()
+		return a
+	}
 	// This adapter must never fall back to the weaker broker/client assumption.
 	trusted, err := os.Stat(w.broker)
 	if err != nil {
@@ -195,7 +232,7 @@ func (w *WineTable) Resolve(f Flow) Attribution {
 	a.Association = nil
 	a.Status = "unidentified"
 	a.Reason = "Wine census relationship incomplete"
-	if !a.VisibilityComplete || len(a.Sockets) != 1 || broker.Application.Prefix != w.prefix || f.Direction != "incoming" || !f.Local.Addr().Is4() {
+	if !a.VisibilityComplete || len(a.Sockets) != 1 || broker.Application.Prefix != w.prefix || f.Direction != "incoming" {
 		return a
 	}
 	for _, p := range a.Owners {
@@ -203,7 +240,15 @@ func (w *WineTable) Resolve(f Flow) Attribution {
 			return a
 		}
 	}
-	first, err := w.snapshot(f.Protocol)
+	family := 4
+	if a.Sockets[0].Family == 10 {
+		family = 6
+	}
+	if family == 6 && f.Local.Addr().Is4() && (a.Sockets[0].V6Only == nil || *a.Sockets[0].V6Only) {
+		a.Reason = "IPv4 delivery to IPv6 socket requires observed dual-stack mode"
+		return a
+	}
+	first, err := w.snapshotFamily(f.Protocol, family)
 	if err != nil {
 		a.Reason = err.Error()
 		return a
@@ -220,7 +265,7 @@ func (w *WineTable) Resolve(f Flow) Attribution {
 	// Bookend with fresh kernel cookies and FD-holder identities, then another
 	// runtime census. This detects observed changes, not adversarial ABA races.
 	again := Resolve(f)
-	second, err := w.snapshot(f.Protocol)
+	second, err := w.snapshotFamily(f.Protocol, family)
 	if err != nil {
 		a.Reason = err.Error()
 		return a
@@ -235,7 +280,7 @@ func (w *WineTable) Resolve(f Flow) Attribution {
 		a.Reason = "ownership changed during runtime census"
 		return a
 	}
-	a.Table = &TableEvidence{Runtime: first.Version, BrokerPID: broker.PID, UID: broker.UID, Owners: rows, Method: "two IPv4 runtime owner-table snapshots bookending kernel cookie/FD census; ordinary same-user non-adversarial snapshot model"}
+	a.Table = &TableEvidence{Runtime: first.Version, BrokerPID: broker.PID, UID: broker.UID, Owners: rows, Method: "two family-specific runtime owner-table snapshots bookending kernel cookie/FD census; ordinary same-user non-adversarial snapshot model"}
 	a.Fingerprint = digest(a.Fingerprint + w.generation + string(b))
 	if len(rows) != 1 {
 		a.Status = "multiple-candidates"
@@ -265,21 +310,25 @@ func (w *WineTable) Resolve(f Flow) Attribution {
 
 // Prove that the observer's mapped PE image uses this broker, not another
 // server with a coincident endpoint. A name or prefix alone is insufficient.
-func (w *WineTable) sameServer(broker *Process) bool {
+func (w *WineTable) sameServer(broker *Process) bool { return w.helperPeers(broker) == 1 }
+func (w *WineTable) helperPeers(broker *Process) int {
 	bf, err := socketFDs(broker.PID)
 	if err != nil {
-		return false
+		return -1
 	}
 	peers, err := unixPeers()
 	if err != nil {
-		return false
+		return -1
 	}
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
-		return false
+		return -1
 	}
 	matches := 0
 	for _, e := range entries {
+		if !w.startupDeadline.IsZero() && time.Now().After(w.startupDeadline) {
+			return -1
+		}
 		pid, err := strconv.Atoi(e.Name())
 		if err != nil {
 			continue
@@ -300,7 +349,7 @@ func (w *WineTable) sameServer(broker *Process) bool {
 			}
 		}
 	}
-	return matches == 1
+	return matches
 }
 
 // Public Windows process paths identify the application, but filesystem paths

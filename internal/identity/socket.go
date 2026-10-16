@@ -14,6 +14,8 @@ import (
 )
 
 type Socket struct {
+	Family   uint8          `json:"family"`
+	V6Only   *bool          `json:"v6_only,omitempty"`
 	Protocol string         `json:"protocol"`
 	Local    netip.AddrPort `json:"local"`
 	Remote   netip.AddrPort `json:"remote"`
@@ -87,7 +89,18 @@ func Sockets() ([]Socket, error) {
 				if proto == unix.IPPROTO_UDP {
 					name = "udp"
 				}
-				result = append(result, Socket{Protocol: name, Local: netip.AddrPortFrom(la.Unmap(), binary.BigEndian.Uint16(b[4:6])), Remote: netip.AddrPortFrom(ra.Unmap(), binary.BigEndian.Uint16(b[6:8])), State: b[1], Inode: binary.NativeEndian.Uint32(b[68:72]), UID: binary.NativeEndian.Uint32(b[64:68]), Cookie: fmt.Sprintf("%x", b[44:52]), NetNS: NetNS()})
+				var v6only *bool
+				attrs, err := netlink.UnmarshalAttributes(b[72:])
+				if err != nil {
+					return nil, err
+				}
+				for _, attr := range attrs {
+					if attr.Type == 11 && len(attr.Data) == 1 {
+						value := attr.Data[0] != 0
+						v6only = &value
+					}
+				}
+				result = append(result, Socket{Family: family, V6Only: v6only, Protocol: name, Local: netip.AddrPortFrom(la.Unmap(), binary.BigEndian.Uint16(b[4:6])), Remote: netip.AddrPortFrom(ra.Unmap(), binary.BigEndian.Uint16(b[6:8])), State: b[1], Inode: binary.NativeEndian.Uint32(b[68:72]), UID: binary.NativeEndian.Uint32(b[64:68]), Cookie: fmt.Sprintf("%x", b[44:52]), NetNS: NetNS()})
 			}
 		}
 	}
@@ -97,7 +110,13 @@ func matches(s Socket, f Flow) bool {
 	if s.Protocol != f.Protocol || s.Local.Port() != f.Local.Port() {
 		return false
 	}
-	// Include IPv6 wildcard as a candidate for IPv4; v6-only is not known in this baseline.
+	// Unknown v6-only state remains a candidate; known v6-only cannot receive IPv4.
+	if f.Local.Addr().Is4() && s.Family == unix.AF_INET6 && s.V6Only != nil && *s.V6Only {
+		return false
+	}
+	if f.Local.Addr().Is6() && !f.Local.Addr().Is4In6() && s.Family == unix.AF_INET {
+		return false
+	}
 	if s.Local.Addr() != f.Local.Addr() && !s.Local.Addr().IsUnspecified() {
 		return false
 	}

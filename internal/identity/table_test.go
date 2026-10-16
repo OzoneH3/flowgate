@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"net/netip"
 	"os"
 	"path/filepath"
 	"testing"
@@ -37,7 +38,7 @@ func TestTableObserverLoss(t *testing.T) {
 }
 
 func TestTableRejectsBrokenResponses(t *testing.T) {
-	for _, response := range []string{`not-json`, `{"version":"11.19","complete":false}`, `{"version":"unexpected","complete":true}`, `{"version":"11.19","complete":true,"error":2}`} {
+	for _, response := range []string{`not-json`, `{"version":"11.19","complete":false}`, `{"version":"unexpected","complete":true}`, `{"version":"11.19","complete":true,"error":2}`, `{"schema":99,"family":4,"version":"11.19","complete":true}`, `{"schema":1,"family":6,"version":"11.19","complete":true}`} {
 		t.Run(response, func(t *testing.T) {
 			dir := t.TempDir()
 			helper := filepath.Join(dir, "helper.sh")
@@ -56,5 +57,40 @@ func TestTableRejectsBrokenResponses(t *testing.T) {
 				t.Fatal("failed observer revived")
 			}
 		})
+	}
+}
+
+func TestIPv6TableScopeAndFamilies(t *testing.T) {
+	f, _ := ParseFlow("tcp", "incoming", "[::1]:1234", "[::1]:50000")
+	r := WindowsOwner{PID: 1, Created: 1, Image: "Z:\\alpha.exe", Address: "0000:0000:0000:0000:0000:0000:0000:0001", Port: 1234, State: 2, Family: 6, Scope: 1}
+	if rows, err := selectTableRows(tableSnapshot{Rows: []WindowsOwner{r}}, f); err != nil || len(rows) != 1 {
+		t.Fatalf("loopback scope is not link-local: %v", err)
+	}
+	f.Local = netip.MustParseAddrPort("[fe80::1]:1234")
+	r.Address = "fe80::1"
+	if _, err := selectTableRows(tableSnapshot{Rows: []WindowsOwner{r}}, f); err == nil {
+		t.Fatal("unmapped link-local scope accepted")
+	}
+	f.Local = netip.MustParseAddrPort("127.0.0.1:1234")
+	r.Address = "::ffff:127.0.0.1"
+	r.Scope = 0
+	if rows, err := selectTableRows(tableSnapshot{Rows: []WindowsOwner{r}}, f); err != nil || len(rows) != 1 {
+		t.Fatal("mapped address not matched")
+	}
+}
+func TestKernelFamilyCandidates(t *testing.T) {
+	f, _ := ParseFlow("tcp", "incoming", "127.0.0.1:1234", "127.0.0.1:50000")
+	yes, no := true, false
+	s := Socket{Family: 10, V6Only: &yes, Local: netip.MustParseAddrPort("[::]:1234"), Protocol: "tcp", State: 10}
+	if matches(s, f) {
+		t.Fatal("v6-only socket claimed v4")
+	}
+	s.V6Only = &no
+	if !matches(s, f) {
+		t.Fatal("dual-stack candidate omitted")
+	}
+	s.V6Only = nil
+	if !matches(s, f) {
+		t.Fatal("unknown must remain ambiguous candidate")
 	}
 }

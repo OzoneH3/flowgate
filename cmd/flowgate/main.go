@@ -35,10 +35,20 @@ func main() {
 	identity.WineBrokerExecutable = os.Getenv("FLOWGATE_WINE_BROKER")
 
 	if len(os.Args) < 2 {
-		fmt.Printf("%s: doctor | sockets | process PID | attribute | pending | decide | serve-lab\n", productName)
+		fmt.Printf("%s: doctor | runtime-discover | sockets | process PID | attribute | pending | decide | serve-lab\n", productName)
 		return
 	}
 	switch os.Args[1] {
+	case "runtime-discover":
+		fs := flag.NewFlagSet("runtime-discover", flag.ExitOnError)
+		bins := fs.String("runtime-bins", "/usr/bin", "comma-separated explicitly trusted runtime bin directories")
+		helper := fs.String("helper", ".workspace/windows/table-probe.exe", "observer image to detect")
+		fs.Parse(os.Args[2:])
+		sessions, err := identity.DiscoverRuntimes(strings.Split(*bins, ","), *helper)
+		if err != nil {
+			fatal(err)
+		}
+		output(sessions)
 	case "doctor":
 		output(diagnostics.Report())
 	case "sockets":
@@ -102,6 +112,9 @@ func serve() error {
 	parent := fs.String("parent-netns", "", "original namespace identity (required)")
 	direction := fs.String("direction", "incoming", "incoming/outgoing")
 	timeout := fs.Duration("timeout", 15*time.Second, "pending timeout")
+	prefixes := fs.String("attach-prefixes", "", "comma-separated already-running workspace prefixes")
+	bins := fs.String("runtime-bins", "/usr/bin", "comma-separated trusted runtime bin directories")
+	helper := fs.String("wine-helper", ".workspace/windows/table-probe.exe", "workspace PE census helper")
 	rulepath := fs.String("rules", "", "JSON rule array")
 	fs.Parse(os.Args[2:])
 	if *parent == "" || *parent == identity.NetNS() {
@@ -122,7 +135,19 @@ func serve() error {
 		return err
 	}
 	e := daemon.New(*timeout)
-	if runner := os.Getenv("FLOWGATE_WINE_TABLE_RUNNER"); runner != "" {
+	if *prefixes != "" {
+		if os.Getenv("FLOWGATE_WINE_TABLE_RUNNER") != "" {
+			return fmt.Errorf("choose explicit attachment or legacy environment, not both")
+		}
+		observers, err := identity.AttachRuntimes(strings.Split(*prefixes, ","), strings.Split(*bins, ","), *helper)
+		if err != nil {
+			return err
+		}
+		defer observers.Close()
+		e.Resolve = observers.Resolve
+		b, _ := json.Marshal(observers.Sessions())
+		fmt.Fprintln(os.Stderr, "ATTACHED", string(b))
+	} else if runner := os.Getenv("FLOWGATE_WINE_TABLE_RUNNER"); runner != "" {
 		observer, err := identity.NewWineTable(runner, os.Getenv("FLOWGATE_WINE_TABLE_HELPER"), os.Getenv("FLOWGATE_WINE_BROKER"), os.Getenv("WINEPREFIX"), os.Getenv("FLOWGATE_WINE_TABLE_VERSION"))
 		if err != nil {
 			return err

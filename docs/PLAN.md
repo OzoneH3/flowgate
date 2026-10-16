@@ -22,3 +22,18 @@ Outcome: steps 1–5 complete. Result B: explicitly configured public-runtime ce
 passes ordinary IPv4 TCP and UDP receiver tests on Wine 11.19 and dwproton-11.0-4,
 including dormant inheritance and stale/lost observation checks. See STATUS.md
 for evidence and HANDOFF.md for the bounded remaining lifecycle work.
+
+## Current increment: usable runtime integration
+
+1. Exercise WSADuplicateSocket preparation/construction, final close, numeric reuse,
+   helper/server loss and explicit recovery; fix demonstrated defects.
+2. Adopt connection-initiation semantics; preserve existing rule-change behavior.
+3. Discover sessions read-only; attach only to explicitly selected workspace
+   sessions with pinned process generations and bounded helpers.
+4. Extend runtime tables to IPv6 and test v6/dual-stack conservatively.
+5. Run focused receiver/race tests and update tracked handoff/evidence.
+
+Current increment outcome: lifecycle and initiation-contract coverage, explicit
+multi-session attachment and IPv6 integration implemented. Final sequential
+receiver evidence is indexed in STATUS.md. Remaining scope is documented in
+HANDOFF.md; no GUI or host enforcement was added.

@@ -61,8 +61,14 @@ Brand display is a build variable: `go build -ldflags '-X main.productName=NewNa
 
 ### Experimental transparent Wine/Proton census
 
-The optional lab adapter now tests ordinary IPv4 TCP listeners and UDP without
+The optional lab adapter now tests ordinary IPv4/IPv6 TCP listeners and UDP without
 modifying the target application, including dormant inherited handle detection.
 It remains disabled by default. Supported builds, snapshot limitations, launcher
 inspection and reproducible commands are in [docs/WINE.md](docs/WINE.md); current
 evidence and remaining work are in [docs/STATUS.md](docs/STATUS.md).
+
+For already-running workspace test sessions, use `runtime-discover` and
+`serve-lab --attach-prefixes PREFIX[,PREFIX] --runtime-bins DIR[,DIR]`. No manual
+per-prefix helper environment is required. `scripts/check-runtime.sh` reproduces
+the lifecycle, two-session attachment and IPv6 checks sequentially. See WINE.md
+for Wine/Proton setup and the explicit connection-initiation contract.

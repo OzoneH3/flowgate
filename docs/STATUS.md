@@ -1,8 +1,60 @@
 # Current status
 
-Worktree `/home/flowgate-user/Apps/flowgate`, branch `milestone/backend`. The current experiment started at `276d9041792c2cdf0133acbf3fe26c1ce79824fe`; use `git rev-parse HEAD` for the current snapshot. PLAN.md is the authoritative plan; HANDOFF.md contains the tracked continuation.
+Worktree `/home/flowgate-user/Apps/flowgate`, branch `milestone/backend`. The current experiment started at `8783ff6add4fa73691e4bb2367d6aa2a523e5f8e`; use `git rev-parse HEAD` for the current snapshot. PLAN.md is the authoritative plan; HANDOFF.md contains the tracked continuation.
 
-## Current experiment: result B, optional runtime census
+## Current increment: runtime attachment and IPv6
+
+Implemented read-only `runtime-discover` and explicit `serve-lab --attach-prefixes`
+for up to four already-running workspace runtime sessions. Runtime bin directories
+are caller-selected; supported broker builds are hash-pinned. Attachment requires
+the caller's UID/namespaces, an initialized workspace prefix/TMPDIR, live broker
+generation and reciprocal helper peer evidence. It disables server creation,
+executes no metadata commands, and performs no automatic retry/recovery. Each
+prefix has a separate observer; prefix identity is not a game-session identity.
+
+On both Wine 11.19 and direct dwproton-11.0-4 / Wine 11.0:
+
+- Actual WSADuplicateSocket: one original holder; two at preparation **before**
+  recipient WSASocket; two after construction; one after original close; zero
+  after final close. Recipient receives after original close.
+- Preparation invalidates retained UDP approval. Constructed shared receivers get
+  no data. Actual numeric handle reuse was observed (52 Wine / 60 Proton in the
+  recorded focused runs); a new kernel socket generation rejects the old packet.
+- Approved TCP continues after accepted-socket transfer, as required by the new
+  explicit connection-initiation contract. Rule changes do not disconnect existing
+  approved TCP; no revocation behavior was changed.
+- Late attachment to two concurrent prefixes; same executable and reused service
+  port in the second prefix do not inherit the first prefix's permission.
+- Wineserver death/restart invalidates pending/session evidence; explicit daemon
+  restart/reattachment creates new observer generations and rejects old IDs.
+- Ordinary IPv6 TCP and one-shot UDP independent Allow/Block and reversal;
+  dual-stack wildcard over both wire families; IPv4-mapped IPv6 binds; separate
+  IPv6-only/IPv4 applications sharing a service port.
+
+Final reproducible runner: `scripts/check-runtime.sh`, once without Proton env and
+once with the two runtime-selection variables shown in WINE.md. Latest evidence:
+
+- `.workspace/runtime-final-{wine,proton}.log`: sequential builds, race tests, vet,
+  duplication, attachment/restart and IPv6 receiver checks.
+- `.workspace/run/{wine,proton}-{duplication,attachment,ipv6}.json`: structured
+  evidence, including generations, ownership stages and distinct application keys.
+- `.workspace/attachment-{wine,proton}.log`: final attachment-path helper-exit
+  extension, explicit recovery, cross-prefix port reuse and server restart.
+- `.workspace/runtime-native-regression.log`: native incoming regression after
+  changes to shared socket-family matching; unchanged scope/retention/outgoing
+  evidence below remains reusable.
+- `.workspace/runtime-unit.log`: malformed/schema/family/build responses, sticky
+  failure, scoped-address rejection, v6-only candidates and workspace boundaries.
+  Actual attached-helper exit and server-loss/recovery are both exercised.
+
+Limits: link-local Wine policy needs an explicit interface-index mapping and stays
+unsupported. These are loopback namespace tests, not full UMU/Steam/container or
+real-game validation. Discovery does not attach or initialize anything; attachment
+is explicit and restricted to workspace test sessions. There is no production host
+enforcement, general cross-user helper launcher, GUI or continuous TCP ownership
+reauthorization. See HANDOFF.md for the next prompt-client step.
+
+## Previous snapshot: optional runtime census
 
 Implemented a lab-only public Wine owner-table helper/adapter. Ordinary TCP and
 one-shot UDP independently Allow/Block alpha/beta, reversed, on installed Wine
@@ -61,8 +113,7 @@ No real-game, Heroic/Lutris/Bottles, Flatpak, VPN, arm64 or other-distribution c
 
 No host firewall rules, network configuration, services, launcher settings or existing prefixes were changed. Tests used disposable namespaces and `.workspace/wine-prefix` / `.workspace/proton-prefix`; namespace feature use can autoload kernel modules. No additional privileges were requested.
 
-Next smallest step: test direct WSADuplicateSocket and numeric handle reuse against
-the optional census, then decide whether initiation-only TCP authorization meets
-the product requirement or needs accepted-socket lifecycle observation. Transparent
-observation is now demonstrated for a bounded subset; do not default to launch
-isolation or claim universal game support.
+Next smallest step: implement a minimal unprivileged native prompt client over the
+existing authenticated pending/decide API, first against these isolated sessions.
+Keep daemon-owned pending state, scope previews, stale rejection and separate
+monitor/policy permissions. Production host enforcement remains a separate task.
