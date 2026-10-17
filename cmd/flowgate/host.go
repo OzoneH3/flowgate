@@ -89,6 +89,8 @@ func hostCommand() error {
 		return hostfirewall.StopGeneration(*state, *token)
 	case "host-recover":
 		return hostfirewall.Recover(*state, "")
+	case "host-embedded-watch":
+		return hostfirewall.WatchEmbedded(*state, *token)
 	case "host-watch":
 		return hostfirewall.Watch(*state, *token)
 	case "host-status":

@@ -5,8 +5,9 @@ import "flowgate/internal/identity"
 // AdministratorUID is configured by a privileged daemon before serving, never
 // supplied in a request. Each endpoint still authenticates SO_PEERCRED and 0600.
 type Permissions struct {
-	CanViewMeasurements bool `json:"can_view_measurements"`
-	CanControlTraffic   bool `json:"can_control_traffic"`
+	CanViewMeasurements  bool `json:"can_view_measurements"`
+	CanControlTraffic    bool `json:"can_control_traffic"`
+	CanControlEvaluation bool `json:"can_control_evaluation"`
 
 	Role             string `json:"role"`
 	ObservationScope string `json:"observation_scope"`
@@ -20,6 +21,10 @@ func (e *Engine) administrator(uid uint32) bool {
 }
 func (e *Engine) permissions(uid uint32, readonly bool) Permissions {
 	p := Permissions{Role: "user", ObservationScope: "self", PolicyScope: "self", CanManageRules: !readonly && e.SaveRules != nil, CanDecide: !readonly && e.Mode != "daemon-monitor"}
+	if e.Evaluation != nil {
+		p.CanDecide = !readonly && e.Evaluation.Status().State == "active"
+		p.CanControlEvaluation = !readonly && (uid == 0 || (e.EvaluationControlUID != nil && uid == *e.EvaluationControlUID && e.administrator(uid)))
+	}
 	p.CanViewMeasurements = e.Activity != nil
 	p.CanControlTraffic = !readonly && e.Traffic != nil && (uid == 0 || (e.TrafficControlUID != nil && uid == *e.TrafficControlUID && e.administrator(uid)))
 	if e.APIUID == nil && e.Mode == "host-monitor" {

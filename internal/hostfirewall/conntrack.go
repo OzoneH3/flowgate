@@ -1,6 +1,7 @@
 package hostfirewall
 
 import (
+	"context"
 	"errors"
 	"flowgate/internal/identity"
 	"fmt"
@@ -70,12 +71,16 @@ func setMark(f ct.Flow, value uint32) error {
 	}
 	return err
 }
-func bootstrap(claim func() error) error {
+func bootstrap(claim func() error) error { return bootstrapContext(context.Background(), claim) }
+func bootstrapContext(ctx context.Context, claim func() error) error {
 	fs, err := flows()
 	if err != nil {
 		return err
 	}
 	for _, f := range fs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if f.Mark&mask != 0 {
 			return fmt.Errorf("reserved conntrack bits already occupied; recover previous owned run first")
 		}
@@ -88,6 +93,9 @@ func bootstrap(claim func() error) error {
 	}
 	known := map[string]bool{}
 	for _, f := range fs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		for _, t := range []ct.Tuple{f.TupleOrig, f.TupleReply} {
 			if t.Proto.Protocol == 6 {
 				a := netip.AddrPortFrom(t.IP.SourceAddress.Unmap(), t.Proto.SourcePort)
@@ -105,6 +113,9 @@ func bootstrap(claim func() error) error {
 		return err
 	}
 	for _, f := range fs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		p := f.TupleOrig.Proto.Protocol
 		if (p == 6 || p == 17) && f.Status.Confirmed() {
 			if err = setMark(f, preserved); err != nil {
@@ -115,11 +126,16 @@ func bootstrap(claim func() error) error {
 	return nil
 }
 func clearMarks() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	fs, err := flows()
 	if err != nil {
 		return err
 	}
 	for _, f := range fs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if f.Mark&mask != 0 {
 			if err = setMark(f, 0); err != nil {
 				return err

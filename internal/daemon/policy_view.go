@@ -132,7 +132,7 @@ func evaluatorDefault(direction string) PolicyDefault {
 func coverage(mode, direction string, h *EnforcementStatus) (PolicyCoverage, PolicyDefault) {
 	c := PolicyCoverage{State: "unknown", Reason: "No interception health/profile evidence"}
 	d := PolicyDefault{Reason: "No active profile default is established"}
-	if mode == "daemon-monitor" || mode == "host-monitor" {
+	if mode == "host-monitor" || (mode == "daemon-monitor" && (h == nil || h.State != "active")) {
 		c.State = "stopped"
 		c.Reason = "Observation/stored policy only; no application enforcement"
 		return c, d
@@ -145,7 +145,7 @@ func coverage(mode, direction string, h *EnforcementStatus) (PolicyCoverage, Pol
 		c.Reason = "Interception is not confirmed active; configured rules are not an effective verdict"
 		return c, d
 	}
-	if mode != "host-enforcement" {
+	if mode != "host-enforcement" && mode != "daemon-monitor" {
 		return c, d
 	}
 	if h.Profile != "incoming" && h.Profile != "both" {

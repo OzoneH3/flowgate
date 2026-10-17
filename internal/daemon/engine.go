@@ -48,8 +48,10 @@ type Engine struct {
 	Decisions      *decisionlog.Log
 	capacityLogged map[string]*capacityAggregate
 
-	Traffic           TrafficManager
-	TrafficControlUID *uint32 // explicit root configuration, independent of rules/decisions
+	Evaluation           EvaluationManager
+	EvaluationControlUID *uint32
+	Traffic              TrafficManager
+	TrafficControlUID    *uint32 // explicit root configuration, independent of rules/decisions
 
 	creationMu       sync.Mutex // serializes bounded preview/replay lifecycle, never packet processing
 	creationPreviews map[string]*creationPreview

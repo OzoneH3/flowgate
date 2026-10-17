@@ -87,6 +87,7 @@ type Aggregation struct {
 	WindowMS     int       `json:"window_ms"`
 }
 type Record struct {
+	EvaluationID string       `json:"evaluation_id,omitempty"`
 	Aggregation  *Aggregation `json:"aggregation,omitempty"`
 	ID           string       `json:"id"`
 	Sequence     string       `json:"sequence"`

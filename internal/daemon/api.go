@@ -20,6 +20,9 @@ import (
 )
 
 type Request struct {
+	EvaluationID        string          `json:"evaluation_id,omitempty"`
+	RequestID           string          `json:"request_id,omitempty"`
+	Profile             string          `json:"profile,omitempty"`
 	DecisionQuery       json.RawMessage `json:"decision_query,omitempty"`
 	DecisionID          string          `json:"decision_id,omitempty"`
 	CollectorGeneration string          `json:"collector_generation,omitempty"`
@@ -46,6 +49,7 @@ type EnforcementStatus struct {
 	StopsAt time.Time `json:"stops_at"`
 }
 type Response struct {
+	Evaluation      *EvaluationStatus   `json:"evaluation,omitempty"`
 	DecisionLog     *decisionlog.Page   `json:"decision_log,omitempty"`
 	DecisionRecord  *decisionlog.Record `json:"decision_record,omitempty"`
 	TrafficMonitor  *udpaccount.Status  `json:"traffic_monitor,omitempty"`
@@ -155,6 +159,10 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 					if !readonly && e.Mode != "host-monitor" {
 						r.Capabilities = append(r.Capabilities, PolicyExplanationCapability, ObservedRuleCapability)
 					}
+					if e.Evaluation != nil {
+						r.Capabilities = append(r.Capabilities, EvaluationCapability)
+
+					}
 					if e.Traffic != nil {
 						r.Capabilities = append(r.Capabilities, "daemon-udp-monitor-v1")
 					}
@@ -166,7 +174,14 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						continueResponse(c, r)
 						return
 					}
-					if e.Enforcement != nil {
+					if e.Evaluation != nil {
+						v := e.Evaluation.Status()
+						r.Evaluation = &v
+					}
+					if r.Evaluation != nil {
+						state := EnforcementStatus{State: r.Evaluation.State, Profile: r.Evaluation.Profile, StopsAt: r.Evaluation.StopsAt, Detail: r.Evaluation.Reason}
+						r.Enforcement = &state
+					} else if e.Enforcement != nil {
 						state := e.Enforcement()
 						r.Enforcement = &state
 						if state.State != "active" && e.Mode != "daemon-monitor" {
@@ -175,6 +190,9 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 					}
 					admin := e.administrator(cred.Uid)
 					permissions := e.permissions(cred.Uid, r.ReadOnly)
+					if r.Evaluation != nil {
+						permissions.CanDecide = !readonly && r.Evaluation.State == "active"
+					}
 					r.Permissions = &permissions
 					if e.Traffic != nil {
 						s := trafficStatusFor(e.Traffic.Status(), admin)
@@ -191,6 +209,40 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						r.ErrorCode = "invalid_request"
 					} else {
 						switch q.Operation {
+						case "evaluation-readiness", "evaluation-start", "evaluation-stop":
+							if e.Evaluation == nil {
+								r.ErrorCode, r.Error = "unavailable", "Daemon evaluation unavailable"
+							} else if q.Operation != "evaluation-readiness" && !permissions.CanControlEvaluation {
+								r.ErrorCode, r.Error = "forbidden", "Explicit evaluation permission on primary endpoint required"
+							} else if q.Generation != e.Generation {
+								r.ErrorCode, r.Error = "generation_conflict", "Daemon generation changed; refresh authoritative state"
+							} else if q.Operation != "evaluation-stop" && q.Profile != "incoming" {
+								r.ErrorCode, r.Error = "invalid_request", "Only explicit incoming profile is supported"
+							} else {
+								v := e.Evaluation.Status()
+								var err error
+								switch q.Operation {
+								case "evaluation-readiness":
+									v = e.Evaluation.Readiness()
+								case "evaluation-start":
+									v, err = e.Evaluation.Start(q.EvaluationID, q.RequestID)
+								case "evaluation-stop":
+									v, err = e.Evaluation.Stop(q.EvaluationID)
+								}
+								r.Evaluation = &v
+								state := EnforcementStatus{State: v.State, Profile: v.Profile, StopsAt: v.StopsAt, Detail: v.Reason}
+								r.Enforcement = &state
+								permissions.CanDecide = !readonly && v.State == "active"
+								r.Permissions = &permissions
+								if err != nil {
+									r.Error = err.Error()
+									r.ErrorCode = "evaluation_conflict"
+									var typed *RuleMutationError
+									if errors.As(err, &typed) {
+										r.ErrorCode = typed.Code
+									}
+								}
+							}
 						case "decision-log", "decision-log-get":
 							// Read-only history on either endpoint; no mutation, deletion or
 							// administration exists. Visibility follows observation scope.

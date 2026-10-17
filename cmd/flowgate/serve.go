@@ -5,6 +5,7 @@ import (
 	"flag"
 	"flowgate/internal/daemon"
 	"flowgate/internal/decisionlog"
+	"flowgate/internal/hostfirewall"
 	"flowgate/internal/monitor"
 	"flowgate/internal/readiness"
 	"flowgate/internal/store"
@@ -37,12 +38,20 @@ func serveCommand(args []string) error {
 	uid := fs.Int("uid", -1, "explicit desktop peer UID")
 	administrator := fs.Bool("administrator", false, "root grants that selected UID machine-wide visibility and rule authority")
 	helper := fs.String("udp-helper", "", "reviewed UDP native helper; pinned at startup but never implicitly attached")
+	allowEvaluation := fs.Bool("allow-evaluation", false, "explicit selected administrator authority to start/stop incoming five-minute evaluation")
+	evaluationState := fs.String("evaluation-state", "/run/flowgate-evaluation", "root-owned evaluation state; prepared only on explicit Start")
 	allowTraffic := fs.Bool("allow-traffic-control", false, "explicitly allow the selected administrator to start/stop machine UDP collection")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if os.Geteuid() != 0 {
 		return readiness.Fail("permission_required", "serve requires a root Go daemon; Electron remains unprivileged", "Use read-only ordinary launch; privileged manual start is a separate explicit action")
+	}
+	if *allowEvaluation && !*administrator {
+		return fmt.Errorf("--allow-evaluation requires --administrator")
+	}
+	if !filepath.IsAbs(*evaluationState) {
+		return fmt.Errorf("--evaluation-state must be absolute")
 	}
 	if *allowTraffic && !*administrator {
 		return fmt.Errorf("--allow-traffic-control requires --administrator")
@@ -103,6 +112,16 @@ func serveCommand(args []string) error {
 	e.Activity = observer.Snapshot
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
+	evaluation := hostfirewall.NewEvaluation(ctx, e, *evaluationState, *socket, *database)
+	e.Evaluation = evaluation
+	if *allowEvaluation {
+		e.EvaluationControlUID = &peer
+	}
+	e.Enforcement = func() daemon.EnforcementStatus {
+		s := evaluation.Status()
+		return daemon.EnforcementStatus{State: s.State, Profile: s.Profile, StopsAt: s.StopsAt, Detail: s.Reason}
+	}
+	defer evaluation.Close()
 	e.StopMonitoring = cancel
 	api, err := daemon.Serve(*socket, e, false)
 	if err != nil {

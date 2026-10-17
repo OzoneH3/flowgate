@@ -1,5 +1,17 @@
 # Continuation handoff
 
+## New backend: daemon-owned incoming evaluation (not deployed)
+
+Implemented `daemon-evaluation-v1` on the existing root daemon: asynchronous
+readiness/Start/Stop, explicit independent activation grant, five-minute/session
+CAS, pinned watchdog, owned cleanup, Activity/rules/Decision Log/UDP independence.
+No second policy daemon or database owner. Real isolated receiver/Stop and actual
+300s disconnected expiry passed; Tailscale-shaped component/refusal and partial
+activation cleanup passed. See [DAEMON-EVALUATION.md](DAEMON-EVALUATION.md) for
+exact API, reproducible fixtures, evidence and future host procedure.
+The running host monitor and active UDP collector are untouched; no host activation
+or rollout occurred. Frontend consumer is owned by the separate UI session.
+
 ## Current: Decision Log integrated and running in non-enforcing root monitor
 
 Running source **1732584b7ba181ceeffb06fb92cdbbd8aa10b078**, full released UI

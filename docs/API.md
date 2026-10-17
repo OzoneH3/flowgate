@@ -1,5 +1,17 @@
 # Local API additions: conditional rule deletion
 
+## Daemon-owned incoming evaluation (new, isolated verification only)
+
+`daemon-evaluation-v1` adds asynchronous readiness/Start/Stop to the existing root
+`serve` daemon without another database/API owner. Selected administrator control
+requires explicit `--allow-evaluation`; ordinary startup remains non-enforcing.
+Fixed300s deadline, session/generation guards, cleanup acknowledgement, independent
+watchdog; Activity, stored rules, Decision Log and UDP ownership survive Stop.
+Exact contract, limitations, evidence and future deployment:
+[DAEMON-EVALUATION.md](DAEMON-EVALUATION.md). **The running host daemon was not
+restarted, granted this permission, or used for enforcement in this increment.**
+
+
 ## Decision log
 
 Additive `decision-log-v1` (`decision-log`, `decision-log-get`); exact request,

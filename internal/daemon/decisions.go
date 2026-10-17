@@ -41,6 +41,10 @@ func clip(s string, n int) string {
 // decision time. Unknown values stay absent; direction comes only from the hook.
 func (e *Engine) baseRecord(v *Event, kind string) decisionlog.Record {
 	r := decisionlog.Record{ID: decisionlog.NewRecordID(), Time: e.Now(), Generation: e.Generation, Mode: e.Mode, Kind: kind, RequestID: v.ID, Delivery: "not_observed"}
+	if e.Evaluation != nil {
+		r.Mode = "host-enforcement"
+		r.EvaluationID = e.Evaluation.Status().ID
+	}
 	if v.logAttemptID != "" {
 		r.RequestID = v.logAttemptID
 	}

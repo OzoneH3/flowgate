@@ -184,6 +184,15 @@ func newID() string {
 }
 func uitoa(v uint64) string { return strconv.FormatUint(v, 10) }
 
+// SetRecording updates lifecycle health; recording itself is only invoked by the queue.
+func (l *Log) SetRecording(v bool) {
+	if l != nil {
+		l.mu.Lock()
+		l.recording = v
+		l.mu.Unlock()
+	}
+}
+
 // NewRecordID is exported so callers can link pending/final records.
 func NewRecordID() string { return newID() }
 
@@ -419,8 +428,9 @@ func (l *Log) Health(admin bool) Health {
 		l.mu.Unlock()
 		return withhold(h, admin)
 	}
-	h.LogID, h.Recording, h.Buffered = l.id, l.recording, len(l.ch)
+	h.LogID, h.Buffered = l.id, len(l.ch)
 	l.mu.Lock()
+	h.Recording = l.recording
 	h.Dropped, h.WriteFailures, h.LostInFailures, h.LastError, h.LastWrite = l.dropped, l.writeFailures, l.lost, l.lastErr, l.lastWrite
 	failing := l.failing
 	l.mu.Unlock()

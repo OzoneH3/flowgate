@@ -85,6 +85,6 @@ func monitorStopCommand(args []string) error {
 	if r.Generation != *generation || !r.Stopping {
 		return fmt.Errorf("stop not acknowledged; inspect authoritative status, do not retry blindly")
 	}
-	fmt.Println("Monitor shutdown acknowledged for generation", r.Generation, "; no firewall resources were installed by this mode")
+	fmt.Println("Monitor shutdown acknowledged for generation", r.Generation, "; daemon-owned evaluation and collection, if active, are shutting down; verify cleanup before recovery")
 	return nil
 }
