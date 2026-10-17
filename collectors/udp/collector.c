@@ -9,9 +9,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <stddef.h>
 #include <unistd.h>
 const char flowgate_udp_helper_protocol[] __attribute__((used)) =
     "FLOWGATE_UDP_HELPER_PROTOCOL=1";
+const char flowgate_udp_machine_protocol[] __attribute__((used)) = "FLOWGATE_UDP_MACHINE=1";
 struct counter {
   uint64_t up, down;
 };
@@ -28,12 +32,48 @@ int main(int argc, char **argv) {
     fprintf(stderr, "usage: udp-collector UID NETNS_INODE\n");
     return 2;
   }
+  // Abstract AF_UNIX names are local to the current network namespace. Every
+  // rebuilt prototype/daemon helper participates; no pins or filesystem locks.
+  int ownership = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  struct sockaddr_un owner = {.sun_family = AF_UNIX};
+  const char *name = "flowgate.udp.accounting.v1";
+  memcpy(owner.sun_path + 1, name, strlen(name));
+  if (ownership < 0 || bind(ownership, (struct sockaddr *)&owner,
+      offsetof(struct sockaddr_un, sun_path) + 1 + strlen(name))) {
+    fprintf(stderr, "collector_conflict: another collector owns this network namespace\n");
+    if (ownership >= 0) close(ownership);
+    return 1;
+  }
+  // Detect an already-loaded older pre-lock collector too. No programs removed.
+  uint32_t id = 0;
+  while (bpf_prog_get_next_id(id, &id) == 0) {
+    int existing = bpf_prog_get_fd_by_id(id);
+    if (existing < 0) {
+      if (errno == ENOENT) continue; // Program disappeared during read-only inspection.
+      fprintf(stderr, "collector_inspection_denied: cannot inspect existing tracing program: %s\n", strerror(errno));
+      close(ownership); return 1;
+    }
+    struct bpf_prog_info info = {0}; uint32_t length = sizeof(info);
+    if (bpf_obj_get_info_by_fd(existing, &info, &length)) {
+      fprintf(stderr, "collector_inspection_denied: existing program info unavailable: %s\n", strerror(errno));
+      close(existing); close(ownership); return 1;
+    }
+    int conflict = info.type == BPF_PROG_TYPE_TRACING &&
+      (!strcmp(info.name, "sent") || !strcmp(info.name, "received"));
+    close(existing);
+    if (conflict) { fprintf(stderr, "collector_conflict: existing UDP-named tracing program; inspect ownership before starting\n"); close(ownership); return 1; }
+  }
+  if (errno != ENOENT) {
+    fprintf(stderr, "collector_inspection_denied: cannot exclude an older tracing collector: %s\n", strerror(errno));
+    close(ownership); return 1;
+  }
   struct udp_bpf *s = udp_bpf__open();
   if (!s) {
     perror("BPF open");
     return 1;
   }
-  s->rodata->target_uid = strtoul(argv[1], NULL, 10);
+  s->rodata->target_all_uids = !strcmp(argv[1], "all");
+  s->rodata->target_uid = s->rodata->target_all_uids ? 0 : strtoul(argv[1], NULL, 10);
   s->rodata->target_netns = strtoul(argv[2], NULL, 10);
   if (udp_bpf__load(s) || udp_bpf__attach(s)) {
     fprintf(stderr,

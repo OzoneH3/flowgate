@@ -24,6 +24,7 @@ struct {
 } misses SEC(".maps");
 const volatile __u32 target_netns;
 const volatile __u32 target_uid;
+const volatile __u32 target_all_uids;
 static __always_inline int account(struct sock *sk, int ret, int flags,
                                    int receive) {
   if (ret < 0 ||
@@ -35,7 +36,7 @@ static __always_inline int account(struct sock *sk, int ret, int flags,
   if (family != 2 && family != 10)
     return 0;
   if (BPF_CORE_READ(sk, __sk_common.skc_net.net, ns.inum) != target_netns ||
-      BPF_CORE_READ(sk, sk_uid.val) != target_uid)
+      (!target_all_uids && BPF_CORE_READ(sk, sk_uid.val) != target_uid))
     return 0;
   struct udp_key k = {.cookie =
                           BPF_CORE_READ(sk, __sk_common.skc_cookie.counter)};
@@ -54,11 +55,11 @@ static __always_inline int account(struct sock *sk, int ret, int flags,
   return 0;
 }
 SEC("tp_btf/sock_send_length")
-int BPF_PROG(sent, struct sock *sk, int ret, int flags) {
+int BPF_PROG(fg_udp_sent, struct sock *sk, int ret, int flags) {
   return account(sk, ret, flags, 0);
 }
 SEC("tp_btf/sock_recv_length")
-int BPF_PROG(received, struct sock *sk, int ret, int flags) {
+int BPF_PROG(fg_udp_received, struct sock *sk, int ret, int flags) {
   return account(sk, ret, flags, 1);
 }
 char LICENSE[] SEC("license") = "GPL";

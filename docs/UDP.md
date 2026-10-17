@@ -1,5 +1,21 @@
 # Optional UDP accounting — verified in isolation
 
+## Daemon-owned optional UDP accounting
+
+The root `serve` daemon now supports explicit optional UDP helper ownership and
+measurement delivery via existing Activity. Capability `daemon-udp-monitor-v1`
+adds traffic-status/start/stop, explicit `can_control_traffic`, and daemon+collector
+generation guards. Root-configured selected administrator delegation requires
+`--allow-traffic-control`; rule/decision permissions do not grant it. Startup is
+still non-enforcing and collection-disabled; TCP/rules survive collector failure.
+See [DAEMON-UDP.md](DAEMON-UDP.md) for exact API, privacy, semantics, compatibility
+and test commands. Build `.workspace/flowgate-udp-daemon` is separate; the running
+host monitor is unchanged. Authenticated isolated kernel acceptance passed
+(`.workspace/daemon-udp-1792270674-2133903`): receiver-backed UDP4/UDP6 bytes,
+lifecycle/restart/crash, privacy projection, continuous TCP, unchanged firewall/
+routes. Consolidated UDP display in the UI still needs its isolated Wayland check.
+
+
 Use `.workspace/flowgate doctor` / `--json` before explicit startup. It inspects
 helper ELF/protocol marker, library names and BTF hook names without executing
 the helper or loading/attaching BPF. Rebuild older helpers with `scripts/build-udp.sh`

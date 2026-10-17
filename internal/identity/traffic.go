@@ -38,6 +38,7 @@ type trafficSample struct {
 	base, previous TCPBytes
 	since, at      time.Time
 	owners         string
+	udpGeneration  string
 	udpSample      int64
 }
 
@@ -66,7 +67,7 @@ func (c *ActivityCollector) measure(out *ActivitySnapshot, now time.Time) {
 				if out.UDP.State == "active" {
 					t.State = "warming-up"
 					t.Reason = "UDP cookie registration warming up; no registered counters yet"
-					if out.UDP.UID != s.UID {
+					if !out.UDP.Machine && out.UDP.UID != s.UID {
 						t.State = "unavailable"
 						t.Reason = "UDP socket UID is outside this collector's selected-user scope"
 					}
@@ -88,7 +89,7 @@ func (c *ActivityCollector) measure(out *ActivitySnapshot, now time.Time) {
 			if udp {
 				dt = float64(out.UDP.SampleNS-old.udpSample) / 1e9
 			}
-			continuous := ok && raw.Uploaded >= old.previous.Uploaded && raw.Downloaded >= old.previous.Downloaded && (dt > 0 || (udp && dt == 0)) && dt <= 60 && (udpSince.IsZero() || old.since.Equal(udpSince))
+			continuous := ok && (!udp || old.udpGeneration == out.UDP.Generation) && raw.Uploaded >= old.previous.Uploaded && raw.Downloaded >= old.previous.Downloaded && (dt > 0 || (udp && dt == 0)) && dt <= 60 && (udpSince.IsZero() || old.since.Equal(udpSince))
 			if !continuous {
 				old = trafficSample{base: raw, previous: raw, since: now, at: now, owners: owners}
 			}
@@ -114,6 +115,7 @@ func (c *ActivityCollector) measure(out *ActivitySnapshot, now time.Time) {
 				t.DownloadRate = &down
 			}
 			if udp {
+				old.udpGeneration = out.UDP.Generation
 				old.udpSample = out.UDP.SampleNS
 			}
 			old.owners = owners

@@ -7,6 +7,7 @@ import (
 	"flowgate/internal/monitor"
 	"flowgate/internal/readiness"
 	"flowgate/internal/store"
+	"flowgate/internal/udpaccount"
 	"fmt"
 	"os"
 	"os/signal"
@@ -23,11 +24,19 @@ func serveCommand(args []string) error {
 	database := fs.String("database", "", "SQLite file in an existing secure root-owned directory")
 	uid := fs.Int("uid", -1, "explicit desktop peer UID")
 	administrator := fs.Bool("administrator", false, "root grants that selected UID machine-wide visibility and rule authority")
+	helper := fs.String("udp-helper", "", "reviewed UDP native helper; pinned at startup but never implicitly attached")
+	allowTraffic := fs.Bool("allow-traffic-control", false, "explicitly allow the selected administrator to start/stop machine UDP collection")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if os.Geteuid() != 0 {
 		return readiness.Fail("permission_required", "serve requires a root Go daemon; Electron remains unprivileged", "Use read-only ordinary launch; privileged manual start is a separate explicit action")
+	}
+	if *allowTraffic && !*administrator {
+		return fmt.Errorf("--allow-traffic-control requires --administrator")
+	}
+	if *helper != "" && !filepath.IsAbs(*helper) {
+		return fmt.Errorf("--udp-helper must be absolute")
 	}
 	if *uid < 0 || uint64(*uid) > uint64(^uint32(0)) || !filepath.IsAbs(*socket) || !filepath.IsAbs(*database) {
 		return fmt.Errorf("explicit --uid, absolute --socket and --database required")
@@ -53,12 +62,29 @@ func serveCommand(args []string) error {
 	e.Mode = "daemon-monitor"
 	e.SaveRules = db.Replace
 	e.Enforcement = func() daemon.EnforcementStatus {
-		return daemon.EnforcementStatus{State: "stopped", Detail: "Non-enforcing root daemon: observation and stored policy only; no queue, rules or collector attachments"}
+		return daemon.EnforcementStatus{State: "stopped", Detail: "Non-enforcing root daemon: observation and stored policy only; no queue or firewall rules; optional UDP accounting is separately controlled"}
 	}
 	if err = e.SetRules(rules); err != nil {
 		return err
 	}
+	if err = daemon.SecureDirectory(filepath.Dir(*socket)); err != nil {
+		return err
+	}
+	if *helper == "" {
+		exe, er := os.Executable()
+		if er != nil {
+			return er
+		}
+		*helper = filepath.Join(filepath.Dir(exe), "udp-collector")
+	}
+	traffic := udpaccount.NewManager(*helper, filepath.Dir(*socket))
+	defer traffic.Close()
+	e.Traffic = traffic
+	if *allowTraffic {
+		e.TrafficControlUID = &peer
+	}
 	observer := monitor.New(time.Second)
+	observer.UDP = traffic.Snapshot
 	e.Activity = observer.Snapshot
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()

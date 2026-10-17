@@ -139,3 +139,23 @@ func TestOptionalUDPAndMixedSourceLifetimes(t *testing.T) {
 		t.Fatal("stale counter displayed")
 	}
 }
+
+func TestUDPGenerationChangesSuppressRatesWithoutResettingTCP(t *testing.T) {
+	c := ActivityCollector{}
+	now := time.Now()
+	since := now
+	s := ActivitySnapshot{UDP: &UDPSnapshot{State: "active", Machine: true, Generation: "first", Collected: now, SampleNS: 1e9, Rows: map[string]UDPCount{"u": {Since: since, Uploaded: 100}}}, Rows: []ActivityRow{{ID: "udp", Socket: Socket{Protocol: "udp", UID: 1000, Cookie: "u"}}, {ID: "tcp", Socket: Socket{Protocol: "tcp", Cookie: "t", State: 1, Counters: &TCPBytes{Uploaded: 100}}}}}
+	c.measure(&s, now)
+	now = now.Add(time.Second)
+	s.UDP.SampleNS += 1e9
+	s.UDP.Generation = "replacement"
+	s.UDP.Rows["u"] = UDPCount{Since: since, Uploaded: 500}
+	s.Rows[1].Socket.Counters.Uploaded = 200
+	c.measure(&s, now)
+	if !s.Rows[0].Traffic.Available || s.Rows[0].Traffic.UploadRate != nil || s.Rows[0].Traffic.Uploaded != 500 {
+		t.Fatal("UDP reset spike", s.Rows[0].Traffic)
+	}
+	if s.Rows[1].Traffic.UploadRate == nil || *s.Rows[1].Traffic.UploadRate != 100 {
+		t.Fatal("UDP restart disturbed TCP", s.Rows[1].Traffic)
+	}
+}

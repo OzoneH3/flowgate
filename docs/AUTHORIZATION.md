@@ -1,5 +1,21 @@
 # Root daemon and explicit administration
 
+## Daemon-owned optional UDP accounting
+
+The root `serve` daemon now supports explicit optional UDP helper ownership and
+measurement delivery via existing Activity. Capability `daemon-udp-monitor-v1`
+adds traffic-status/start/stop, explicit `can_control_traffic`, and daemon+collector
+generation guards. Root-configured selected administrator delegation requires
+`--allow-traffic-control`; rule/decision permissions do not grant it. Startup is
+still non-enforcing and collection-disabled; TCP/rules survive collector failure.
+See [DAEMON-UDP.md](DAEMON-UDP.md) for exact API, privacy, semantics, compatibility
+and test commands. Build `.workspace/flowgate-udp-daemon` is separate; the running
+host monitor is unchanged. Authenticated isolated kernel acceptance passed
+(`.workspace/daemon-udp-1792270674-2133903`): receiver-backed UDP4/UDP6 bytes,
+lifecycle/restart/crash, privacy projection, continuous TCP, unchanged firewall/
+routes. Consolidated UDP display in the UI still needs its isolated Wayland check.
+
+
 Production target: **one privileged Go daemon** owns observation, accounting and
 optional enforcement. Electron/Qt stay unprivileged. Root is an observation
 capability, **not an instruction to install firewall rules**. Ordinary launchers

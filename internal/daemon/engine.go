@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"flowgate/internal/identity"
 	"flowgate/internal/policy"
+	"flowgate/internal/udpaccount"
 	"fmt"
 	"strings"
 	"sync"
@@ -26,7 +27,15 @@ type Event struct {
 	Permission       string               `json:"permission"`
 	Token            string               `json:"-"`
 }
+type TrafficManager interface {
+	Status() udpaccount.Status
+	Start(...string) (udpaccount.Status, error)
+	Stop(...string) (udpaccount.Status, error)
+}
 type Engine struct {
+	Traffic           TrafficManager
+	TrafficControlUID *uint32 // explicit root configuration, independent of rules/decisions
+
 	creationMu       sync.Mutex // serializes bounded preview/replay lifecycle, never packet processing
 	creationPreviews map[string]*creationPreview
 	verifyObserved   func(string, identity.ActivityProcess) (identity.Process, error) // tests only; production uses identity verifier

@@ -55,6 +55,38 @@ func Helper(path string) Check {
 	c.Next = "Use doctor library and tracing checks; successful BPF load is still untested"
 	return c
 }
+
+const MachineHelperMarker = "FLOWGATE_UDP_MACHINE=1"
+
+// MachineHelper inspects the additive all-UID/namespace coordination contract.
+func MachineHelper(path string) Check {
+	c := Helper(path)
+	if c.Status != Ready {
+		return c
+	}
+	f, err := elf.Open(path)
+	if err != nil {
+		c.Status = Optional
+		c.Code = "helper_incompatible"
+		return c
+	}
+	defer f.Close()
+	section := f.Section(".rodata")
+	if section == nil || section.Size > 16*1024*1024 {
+		c.Status = Optional
+		c.Code = "helper_incompatible"
+		c.Detail = "Machine helper marker section missing/oversized"
+		return c
+	}
+	b, err := section.Data()
+	if err != nil || !bytes.Contains(b, append([]byte(MachineHelperMarker), 0)) {
+		c.Status = Optional
+		c.Code = "helper_incompatible"
+		c.Detail = "Rebuild helper for machine-scope/namespace coordination protocol"
+	}
+	return c
+}
+
 func Libraries(path string) ([]string, string, error) {
 	f, e := elf.Open(path)
 	if e != nil {

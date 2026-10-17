@@ -9,6 +9,7 @@ type UDPCount struct {
 	Since      time.Time `json:"since"`
 }
 type UDPSnapshot struct {
+	Machine    bool                `json:"machine_scope,omitempty"`
 	SampleNS   int64               `json:"sample_ns"`
 	Version    int                 `json:"version"`
 	UID        uint32              `json:"uid"`

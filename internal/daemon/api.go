@@ -7,6 +7,7 @@ import (
 	"flowgate/internal/identity"
 	"flowgate/internal/policy"
 	"flowgate/internal/readiness"
+	"flowgate/internal/udpaccount"
 	"fmt"
 	"golang.org/x/sys/unix"
 	"net"
@@ -18,9 +19,10 @@ import (
 )
 
 type Request struct {
-	ObservedTarget *ObservedTarget `json:"observed_target,omitempty"`
-	ObservedDraft  *ObservedDraft  `json:"observed_draft,omitempty"`
-	PreviewToken   string          `json:"preview_token,omitempty"`
+	CollectorGeneration string          `json:"collector_generation,omitempty"`
+	ObservedTarget      *ObservedTarget `json:"observed_target,omitempty"`
+	ObservedDraft       *ObservedDraft  `json:"observed_draft,omitempty"`
+	PreviewToken        string          `json:"preview_token,omitempty"`
 
 	ExpectedPolicyToken string       `json:"expected_policy_token,omitempty"`
 	EventIDs            []string     `json:"event_ids,omitempty"`
@@ -41,8 +43,9 @@ type EnforcementStatus struct {
 	StopsAt time.Time `json:"stops_at"`
 }
 type Response struct {
-	ObservedPreview *ObservedPreview `json:"observed_preview,omitempty"`
-	Replayed        bool             `json:"replayed,omitempty"`
+	TrafficMonitor  *udpaccount.Status `json:"traffic_monitor,omitempty"`
+	ObservedPreview *ObservedPreview   `json:"observed_preview,omitempty"`
+	Replayed        bool               `json:"replayed,omitempty"`
 
 	PolicyView         *PolicyView                `json:"policy_view,omitempty"`
 	PolicyExplanations *PolicyExplanations        `json:"policy_explanations,omitempty"`
@@ -147,6 +150,9 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 					if !readonly && e.Mode != "host-monitor" {
 						r.Capabilities = append(r.Capabilities, PolicyExplanationCapability, ObservedRuleCapability)
 					}
+					if e.Traffic != nil {
+						r.Capabilities = append(r.Capabilities, "daemon-udp-monitor-v1")
+					}
 					stopAfterResponse := false
 					if e.APIUID != nil && cred.Uid != *e.APIUID && cred.Uid != 0 {
 						continueResponse(c, r)
@@ -162,6 +168,10 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 					admin := e.administrator(cred.Uid)
 					permissions := e.permissions(cred.Uid, r.ReadOnly)
 					r.Permissions = &permissions
+					if e.Traffic != nil {
+						s := trafficStatusFor(e.Traffic.Status(), admin)
+						r.TrafficMonitor = &s
+					}
 					var q Request
 					scanner := bufio.NewScanner(c)
 					scanner.Buffer(make([]byte, 1024), 16384)
@@ -173,6 +183,33 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						r.ErrorCode = "invalid_request"
 					} else {
 						switch q.Operation {
+						case "traffic-status", "traffic-start", "traffic-stop":
+							if e.Traffic == nil {
+								r.ErrorCode, r.Error = "unavailable", "Daemon-owned UDP collector unavailable"
+							} else if q.Operation != "traffic-status" && (readonly || !permissions.CanControlTraffic) {
+								r.ErrorCode, r.Error = "forbidden", "Explicit collector lifecycle permission on primary endpoint required"
+							} else if q.Operation != "traffic-status" && q.Generation != e.Generation {
+								r.ErrorCode, r.Error = "generation_conflict", "Backend generation changed; refresh collector state"
+							} else {
+								var s udpaccount.Status
+								var err error
+								switch q.Operation {
+								case "traffic-start":
+									s, err = e.Traffic.Start(q.CollectorGeneration)
+								case "traffic-stop":
+									s, err = e.Traffic.Stop(q.CollectorGeneration)
+								default:
+									s = e.Traffic.Status()
+								}
+								s = trafficStatusFor(s, admin)
+								r.TrafficMonitor = &s
+								if err != nil {
+									r.ErrorCode, r.Error = "collector_unavailable", err.Error()
+									if errors.Is(err, udpaccount.ErrCollectorGeneration) {
+										r.ErrorCode = "collector_conflict"
+									}
+								}
+							}
 						case "observed-rule-preview", "observed-rule-save":
 							if readonly || r.ReadOnly || !permissions.CanManageRules || e.Mode == "host-monitor" {
 								r.ErrorCode, r.Error = "read_only", "Rule management unavailable on this endpoint"
@@ -436,4 +473,14 @@ func trustedDirectoryOwner(uid uint32) bool {
 	}
 	f := strings.Fields(string(b))
 	return uid == 65534 && len(f) == 3 && f[0] == "0" && f[2] == "1"
+}
+
+func trafficStatusFor(s udpaccount.Status, admin bool) udpaccount.Status {
+	if !admin {
+		s.Scope = "self"
+		s.Missed = 0
+		s.Partial = true
+		s.Reason = "User-scoped measurements only; collector lifecycle/global telemetry require explicit administration"
+	}
+	return s
 }
