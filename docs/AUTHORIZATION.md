@@ -40,26 +40,25 @@ running on frontend exit:
 
 ```
 cd /home/flowgate-user/Apps/flowgate
-scripts/run-electron.sh --observer /run/flowgate-api/daemon.sock.monitor
+scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock
 ```
 
 The companion returns `mode=host-monitor`, `backend_mode=daemon-monitor`,
 `read_only=true`, with the same authenticated administrator observation scope.
-All mutations are rejected. The main endpoint still uses `mode=daemon-monitor`;
-**current Electron does not yet support its permission-aware control/rule view**.
-Do not pass it as `--control` or mistake the absent control connection for an
-active firewall. The backend remains enforcement-stopped; the existing frontend
-can display Activity but cannot currently display this daemon's policy controls
-or independently confirm its enforcement state. No UI visual files were changed.
+All companion mutations are rejected. The integrated client uses the primary
+`mode=daemon-monitor` endpoint for permission-aware summaries and stored-rule
+management, separately from Activity. Its header accurately reports enforcement
+stopped; stored Allow/Block is never a delivery/enforcement claim. Current rollout,
+identity and bounded verification are in [INTEGRATION.md](INTEGRATION.md).
 
 Stop only the intended monitor generation as root (not ordinary delegated admin):
 
 ```
 sudo -n /home/flowgate-user/Apps/flowgate/.workspace/flowgate monitor-stop \
-  --generation 5a559274aa006090cdc4bb5cd8faed47
+  --generation a0109011f97dad19dd723e7e483d7860
 ```
 
-That token identifies the daemon started in this task, PID 1973082. After a future
+That token identifies the updated non-enforcing daemon, PID2095594. After a future
 restart, inspect `flowgate pending --socket /run/flowgate-api/daemon.sock` for the
 new generation and confirm it before stopping. `monitor-stop` has a fixed socket,
 requires the exact generation and root SO_PEERCRED, never signals arbitrary PIDs

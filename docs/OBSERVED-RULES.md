@@ -1,5 +1,11 @@
 # Create a rule from Activity
 
+**Rollout update:** the integrated root monitor now exposes this capability after
+the explicitly authorized restart. See [INTEGRATION.md](INTEGRATION.md) for current
+generation/launch/Stop and host preview-only evidence. Earlier no-restart statements
+below record the original implementation increment, not the current daemon state.
+
+
 Primary Unix API v1 capability: **`observed-rule-create-v1`**. This is separate
 from `policy-explanations-v1`: its row/application associations have no creation
 authority. No new socket, storage schema or policy engine is introduced.

@@ -1,5 +1,21 @@
 # Current status
 
+## Current: integrated Electron and updated root monitor
+
+Full released frontend history through02554da757942887f3dff8b4c633bcd0f824a1b9
+is merged with backend8ef90cd (mergee2ef7f7, no conflicts). Actual isolated
+sandboxed Wayland creation/edit/conditional-delete/policy refresh passed. Controlled
+non-enforcing monitor restart is complete: PID2095594, generation
+ a0109011f97dad19dd723e7e483d7860, same database, UID1000 administrator, unchanged
+empty rule inventory, enforcement stopped. Host Wayland Activity + native preview
+only passed; GUI exit leaves daemon running. No host test rules were saved.
+
+Launch `scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock`.
+[INTEGRATION.md](INTEGRATION.md) records full included commits, exact Stop,
+rollback/evidence and remaining live-enforcement limits. Earlier no-restart/old-API
+entries below describe their original increment; this rollout supersedes them.
+Qt/default read-only launchers remain available. Frontend polish remains UI-owned.
+
 ## Current: first rule directly from native Activity
 
 Primary capability `observed-rule-create-v1` adds generation/principal/draft-bound

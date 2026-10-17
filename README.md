@@ -13,14 +13,16 @@ Combined incoming/outgoing Tailscale evaluation remains unsupported.
 ## Use the authorized root Activity monitor
 
 ```
-scripts/run-electron.sh --observer /run/flowgate-api/daemon.sock.monitor
+scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock
 ```
 
 The independent root monitor is running with enforcement **stopped**. Electron
-stays unprivileged; closing it leaves the monitor running. Current Electron can
-use its read-only Activity companion; permission-aware service-rule management
-through the primary endpoint remains a frontend follow-up. Setup, manual root
-startup and generation-checked Stop: [AUTHORIZATION.md](docs/AUTHORIZATION.md).
+stays unprivileged; closing it leaves the monitor running. The integrated client
+loads live Activity, authoritative In/Out summaries and authorized stored-rule
+creation/edit/conditional Delete through the primary endpoint. Stored rules do not
+control traffic while enforcement is stopped. Rollout evidence/current Stop:
+[INTEGRATION.md](docs/INTEGRATION.md). Setup/manual root startup:
+[AUTHORIZATION.md](docs/AUTHORIZATION.md).
 Ordinary launch without this argument remains the original unprivileged observer.
 
 

@@ -1,5 +1,11 @@
 # Activity policy summaries and current-policy explanations
 
+**Rollout update:** the integrated root monitor now exposes this capability after
+the explicitly authorized restart. See [INTEGRATION.md](INTEGRATION.md) for current
+generation/launch/Stop and host preview-only evidence. Earlier no-restart statements
+below record the original implementation increment, not the current daemon state.
+
+
 Additive Unix API v1 capability: **`policy-explanations-v1`**, advertised on the
 primary policy endpoint only. No new socket, rule schema, storage migration or
 policy precedence. Companion/observer requests return `primary_required`; their
