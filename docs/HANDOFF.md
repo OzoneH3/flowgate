@@ -1,23 +1,39 @@
 # Continuation handoff
 
-## Current: persistent firewall decision log (backend; not rolled out)
+## Current: integrated Decision Log (not deployed to the host)
 
-Capability `decision-log-v1`: decision-time records (pending/final/gap) from enforcing
-host and isolated-lab daemons, stored in a separate `decisions.db` beside the rule
-database (rules.db unchanged), 1 s nominal flush interval (no crash-loss bound), 20,000 records/30 days, cursor
-API `decision-log`/`decision-log-get` with admin/self visibility. See
-[DECISION-LOG.md](DECISION-LOG.md). Real isolated demo
-`scripts/decision-log-isolated.py` (run `.workspace/decision-log-1792272647`).
-Separate test binary `.workspace/decisionlog-build/flowgate-decisionlog`; host
-monitor, its database and collector state untouched. UI presentation is UI-owned.
+Backend foundation `028ca809`, correctness fix `ef1d237`, released Electron
+`18ca65a452b867cf5eec3bf9a5579778effc7d36`, integrated by merge `0b8056d`.
+Capability `decision-log-v1`: separate private SQLite history, cursor reads and
+UID/admin visibility. Attempt/lease dedup now preserves fresh evaluations;
+capacity refusals carry explicit observation counts/time ranges. Durability begins
+at commit; the nominal 1 s schedule is not a crash-loss bound. See
+[DECISION-LOG.md](DECISION-LOG.md) for loss semantics and fixture commands.
 
-## Current: host monitor runs daemon-owned UDP (collector disabled)
+Main-checkout build, 9 focused store tests, race/vet and actual sandboxed Wayland
+fixture passed (284-record paging/filter/detail/live/restart; fixture cleaned up).
+Evidence `.workspace/decision-log-ui-VYyAPS`; labelled synthetic outcome/history
+checks `.workspace/synlog-8KeqNT`.
+
+Electron has recorded reason/scope/rule snapshots, detail lookup, filters, pagination,
+live follow and restart persistence. Pending without a loaded final says **Outcome
+not loaded**. Rule snapshot edit/delete immutability is backend unit coverage;
+historical-versus-current UI comparisons remain labelled synthetic evidence.
+
+Build used `.workspace/decisionlog-build/flowgate-decisionlog-fixed`, never the
+running executable. Normal launch:
+`scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock`.
+The host daemon has **not** been upgraded to the Decision Log build, so it does
+not expose this capability yet. No host enforcement or collector changes.
+
+## Host runtime: existing monitor and user-enabled UDP preserved
 
 Root monitor PID 2152405, generation 4e18ec0723edb676c156a6b0ae4e9db9, source
 ea13560 (executable SHA256 f9c446c1..., helper 118a8877...), same database and
 UID1000 administrator plus `--udp-helper .../.workspace/udp-collector
---allow-traffic-control`. Collector **disabled** until the user Enables UDP in
-Activity; enforcement stopped; rules unchanged (empty). Launch
+--allow-traffic-control`. Read-only verification during Decision Log integration found collector **active**,
+generation `8936d03cf0ff1e320ffba001c59b159b`, with partial coverage; enforcement
+stopped. This task did not start/stop it or mutate rules. Launch
 `scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock`. Exact launch,
 Stop, rollback and evidence: INTEGRATION.md "Daemon-owned UDP rollout". UI agent
 owns the brief desktop acceptance. No host BPF, firewall or service changes.

@@ -229,3 +229,14 @@ administrator_required and policy_database_owned. Doctor's planned profile/admin
 flags only inspect; they neither grant roles nor activate policy. Existing API
 Enforcement.profile remains incoming/both; this profile accepts incoming only.
 See COEXISTENCE.md for the finite configuration and activation boundary.
+
+### Decision Log integration correction
+
+`decision-log-v1` remains additive. Health now includes `flush_interval_ms`,
+`durable_after:"sqlite_transaction_commit"`, `crash_loss_bound_ms:null`.
+Legacy `durability_window_ms` is a deprecated nominal interval, never a bound on
+crash loss. Capacity final records have no individual `request_id`; additive
+`aggregation:{observations,first_seen,last_seen,window_ms}` and the reason text
+identify counted initiation observations, not unique connections. Read the full
+[deduplication and durability contract](DECISION-LOG.md). A final missing from a
+loaded page/filter must be labelled **Outcome not loaded**, not presumed absent.

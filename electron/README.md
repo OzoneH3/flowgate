@@ -871,7 +871,7 @@ primary controller when it advertises the capability, otherwise the read-only co
   deciding UID, kernel verdict, recorded application identity and attribution, rule
   snapshot (ID/version/filter). **Allow is a policy decision plus verdict submission;
   delivery is always "Not observed by FlowGate".** A pending record links only to a
-  loaded final record with the same request ID, otherwise "outcome not recorded".
+  loaded final record with the same request ID, otherwise "Outcome not loaded" (a page/filter is not the complete history).
 - The current rule is shown separately (same version / changed since / no longer
   exists, plus "View current rule…" through the versioned editor). Deletion is only
   claimed on a rule-managing connection; elsewhere current state is "not available".
@@ -914,11 +914,25 @@ immutability is covered by the backend's unit tests; the UI's "changed since" an
 filtered-empty, degraded health with a gap row). Store logic: 9 synthetic unit tests
 in `test/decision-log.test.cjs`.
 
-Backend limitations, as documented (not strengthened here): records within the ~1 s
-durability window are lost on a daemon crash; overflow/storage failures produce gap
-records and degraded health; identical re-decisions of the same flow after lease
-expiry collapse to one per minute and repeated capacity refusals per 5 s; datagrams,
-fragments, IPv6 extension headers and non-SYN TCP are not individually logged;
+Backend limitations (corrected at integration): one second is a nominal flush
+interval, not a crash-loss bound. Records become durable after a successful SQLite
+transaction commit; storage stalls/failures can extend loss indefinitely. The bounded
+queue drops new records when full. Known overflow/failed-batch counts are volatile;
+a later committed gap persists known loss, but cannot reconstruct abrupt-crash loss.
+`buffered` excludes the writer batch and engine capacity aggregates.
+
+Deduplication follows the engine admission attempt/lease: retransmissions and UDP
+datagrams within that lease share a decision; a new source port/TCP initial sequence
+or fresh evaluation after expiry is recorded separately, even with identical policy.
+UDP is not logged per datagram. Capacity refusals are explicit counted five-second
+observation aggregates (not unique connections); the reason includes the count and
+`aggregation` carries the time range. The current UI displays that backend reason.
+Such a Block can override a matched Allow when the existing admission limits are
+full; it is not a Block-rule result. Details: [Decision Log](../docs/DECISION-LOG.md).
+
+Fragments, IPv6 extension headers and non-SYN TCP are not individually logged;
 held-packet verdicts after a decision are not individually logged; delivery is never
-observed; host enforcement was not run. This is a firewall decision log, not a
-connection census; monitoring-only daemons record nothing.
+observed. Monitoring-only daemons invent no decisions. Historical-versus-current
+edited/deleted rule presentation remains synthetic UI coverage; backend snapshot
+immutability is unit-tested. The real isolated fixture covers actual decisions,
+lookup, filtering, paging and restart, not durable rule-editor operations.

@@ -368,7 +368,7 @@ async function showDetail(id: string) {
           'p',
           final
             ? `Outcome recorded in sequence ${final.sequence}: ${outcomeLabel(final)} (${sourceLabel(final.decision?.source || '')}).`
-            : 'No final record with this request ID is loaded. If none exists, the outcome was not recorded (e.g. daemon crash).',
+            : 'Outcome not loaded. No final record with this request ID is present in the loaded page/filter; this does not establish whether a final was recorded.',
           'hint',
         ),
       );

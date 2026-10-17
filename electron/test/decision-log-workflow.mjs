@@ -158,7 +158,7 @@ try {
     await new Promise((r) => setTimeout(r, 1500));
     const b = await allIds();
     return a.length === b.length && b;
-  }, 'records settled (durability window)');
+  }, 'records committed (nominal batching interval)');
   await wait(async () => (await shown())[0] === settled[0], 'live view caught up');
   for (let i = 0; i < 20 && (await state()).hasOlder; i++) {
     await page.click('#logOlder');
@@ -185,7 +185,12 @@ try {
     log(`filter ${key}=${value}: ${want.length} records, equals daemon query`);
     await page.selectOption(select, '');
   }
-  await wait(async () => (await shown())[0] === settled[0], 'unfiltered again');
+  // Capacity buckets can commit after the earlier paging snapshot. Compare
+  // with current authoritative state, not a frozen pre-filter newest ID.
+  await wait(async () => {
+    const latest = (await query({ limit: 1 })).decision_log.records[0];
+    return latest && (await shown())[0] === latest.id;
+  }, 'unfiltered again');
 
   // 6. Restart with the same database: history persists and the view continues.
   const before = await shown(),

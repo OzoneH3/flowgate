@@ -104,6 +104,7 @@ const page = () => ({
             gap: { dropped: 4, reason: 'SYNTHETIC buffer overflow' },
           },
           record(10, 'allow', 'user'),
+          { ...record(7, 'pending', 'default_ask'), kind: 'pending' },
           record(9, 'allow', 'rule', {
             id: 'syn-rule-a',
             version: '2',
@@ -210,7 +211,7 @@ try {
   await p.screenshot({ path: path.join(dir, 'empty.png') });
   variant = 'degraded';
   await p.selectOption('#logDirection', 'outgoing');
-  await until(async () => (await p.locator('#logRows tr').count()) === 5, 'records');
+  await until(async () => (await p.locator('#logRows tr').count()) === 6, 'records');
   assert.match(await p.locator('#logRows tr.log-gap').innerText(), /Records lost: 4/);
   assert.match(await p.locator('#logStatus').innerText(), /Logging degraded · 4 records dropped/);
   await p.click('#logRows tr[data-id="syn-12"]');
@@ -221,6 +222,10 @@ try {
   const details = await p.locator('#logDetails').innerText();
   assert.match(details, /Delivery\s+Not observed by FlowGate/);
   assert.doesNotMatch(details, /Delivered/);
+  // A missing final in a loaded page must not become evidence of absent history.
+  await p.click('#logRows tr[data-id="syn-7"]');
+  await until(async () => /Outcome not loaded/.test(await p.locator('#logDetails').innerText()), 'unloaded outcome');
+  assert.doesNotMatch(await p.locator('#logDetails').innerText(), /outcome was not recorded/i);
   // Decision-time snapshot vs current inventory (edit/delete are not in the lab fixture).
   await p.click('#logRows tr[data-id="syn-9"]');
   await until(

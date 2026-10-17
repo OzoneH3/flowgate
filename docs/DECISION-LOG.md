@@ -187,3 +187,40 @@ dropped without a record; held-packet verdicts after a decision are not individu
 logged; receiver delivery is never observed; abrupt-crash loss has no time bound or reconstructible exact count.
 The running host monitor is unchanged; a later deliberate rollout creates
 `/var/lib/flowgate/decisions.db` (empty history, recording off in monitor mode).
+
+### Corrected integration evidence
+
+Backend correction `ef1d237`, full released UI `18ca65a` merged as `0b8056d`.
+Focused race tests and vet passed for decisionlog, daemon, queue, hostfirewall and
+cmd/flowgate (`.workspace/dlog-race.log`, `.workspace/dlog-vet.log`). New deterministic
+writer gate proves that a stalled/failing transaction does not block enqueue:
+1024 queued records, seven overflow drops, one failed 256-record batch; recovery
+persists a gap for 263 known losses. Restart resets volatile counters, retains the
+gap and successful records. Attempt tests distinguish source ports, SYN sequences
+and expired leases, while repeated observations inside a lease remain deduplicated.
+Capacity tests verify both event-capacity and rate refusal despite matching Allow.
+
+Main-checkout Electron build and 9 focused store tests passed. Actual sandboxed
+Wayland run `.workspace/decision-log-ui-VYyAPS` used the corrected binary against
+`.workspace/dlog-integrated2`: real user/rule details, live selection, **284 records**
+equal to full daemon paging without duplicate rows, direction/action/source filters,
+detail lookup, same-database restart, old loaded rows retained and new-generation
+records appended. Receiver evidence: retained Allow delivered, remembered Block and
+UDP timeout did not. This does not turn the UI's verdict labels into delivery proof.
+The runner alone drove fixture commands until completion; then `quit` completed
+`HOLD ended`, with no fixture daemon remaining.
+
+Historical failure/resolution: the first corrected run exposed the old fixture's
+assertion of one record across a two-second lease; a late SYN legitimately causes
+another evaluation. The assertion now checks distinct attempt IDs and consistent
+rule evidence, not a physical-connection count. The first UI run also used a frozen
+newest ID after filtering; a later capacity aggregate could supersede it. The check
+now compares against the current authoritative newest record; the repeat passed.
+Synthetic `.workspace/synlog-8KeqNT` additionally verifies **Outcome not loaded**,
+unsupported/forbidden/empty/degraded states and historical/current rule differences.
+These synthetic cases do not establish receiver or kernel behavior.
+
+The existing host monitor generation `4e18ec0723edb676c156a6b0ae4e9db9` and active
+UDP collector generation `8936d03cf0ff1e320ffba001c59b159b` were unchanged before/
+after. Enforcement remains stopped. No host executable, database, collector,
+networking or firewall was upgraded or modified in this task.

@@ -73,8 +73,9 @@ try:
     time.sleep(.3); before = path2.read_text().count('RECEIVED'); c = tcp(24602); c.wait(); time.sleep(.3)
     assert path2.read_text().count('RECEIVED') == before == 0
     fresh = wait(lambda: [x for x in records(source='rule')['records'] if x['flow']['local'].endswith(':24602')], 5)
-    assert len(fresh) == 1 and fresh[0]['decision']['action'] == 'block' and fresh[0]['decision']['rule']['id'] == rule_id and fresh[0]['decision']['rule']['version'] == '1' and fresh[0]['verdict']['state'] == 'drop_submitted', fresh
-    log(f'PASS fresh TCP attempt blocked by stored rule {rule_id} v1 (SYN retransmissions collapsed to one record); receiver got nothing')
+    assert fresh and len({x['request_id'] for x in fresh}) == len(fresh), fresh
+    assert all(x['decision']['action'] == 'block' and x['decision']['rule']['id'] == rule_id and x['decision']['rule']['version'] == '1' and x['verdict']['state'] == 'drop_submitted' for x in fresh), fresh
+    log(f'PASS fresh TCP attempt blocked by stored rule {rule_id} v1; {len(fresh)} distinct lease evaluations (late retransmission after expiry may re-evaluate); receiver got nothing')
     # 3. UDP request left unanswered expires.
     p, path3 = lablib.server(24603, True); udp(24603).close(); v3 = wait(lambda: lablib.pending(24603)); time.sleep(2.4); lablib.events()
     r = by_request(v3['id']); assert [x['decision']['source'] for x in r] == ['default_ask', 'timeout'] and not delivered(path3), r
