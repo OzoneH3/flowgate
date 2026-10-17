@@ -1,5 +1,16 @@
 # Authoritative implementation plan
 
+## Current: optional UDP accounting experiment
+
+1. Implement namespace/UID-filtered sock length BTF probes and bounded cookie maps.
+2. Keep collection-only IPC, authentication and Stop independent of enforcement.
+3. Integrate explicit activation and compatible table semantics, preserve TCP.
+4. Complete build, synthetic API/lifetime/UI tests and real UDP fixtures (done).
+5. Blocker: obtain initial-namespace BPF/perf load permission for the exact
+   disposable-network-namespace test in UDP.md. No live-host attachment substitute.
+6. After verifier/receiver evidence, finish shared/reuseport/loss/restart and real
+   unprivileged UDP-rate screenshot checks. Do not claim these already passed.
+
 ## Complete: truthful Activity TCP measurements and Unidentified grouping
 
 1. Request bounded TCP_INFO counters via read-only inet_diag; validate response lengths.

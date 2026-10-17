@@ -23,3 +23,5 @@ target_link_libraries(outgoing-test PRIVATE flowgate-ui Qt6::Test)
 
 add_executable(traffic-test traffic-test.cpp)
 target_link_libraries(traffic-test PRIVATE flowgate-ui Qt6::Test)
+add_executable(udp-test udp-test.cpp)
+target_link_libraries(udp-test PRIVATE flowgate-ui Qt6::Test)

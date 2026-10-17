@@ -31,6 +31,7 @@ type ActivityRow struct {
 	Evidence  string   `json:"evidence"`
 }
 type ActivitySnapshot struct {
+	UDP          *UDPSnapshot               `json:"udp,omitempty"`
 	Sequence     uint64                     `json:"sequence"`
 	Started      time.Time                  `json:"started"`
 	Collected    time.Time                  `json:"collected"`
@@ -47,6 +48,7 @@ type cachedActivityProcess struct {
 	checked time.Time
 }
 type ActivityCollector struct {
+	UDP      func() UDPSnapshot
 	cache    map[int]cachedActivityProcess
 	sequence uint64
 	traffic  map[string]trafficSample
@@ -98,7 +100,12 @@ func (c *ActivityCollector) Collect() ActivitySnapshot {
 	c.sequence++
 	out := ActivitySnapshot{Sequence: c.sequence, Started: time.Now(), Complete: true, Rows: []ActivityRow{}, Processes: map[string]ActivityProcess{}}
 	finish := func() ActivitySnapshot {
+		if c.UDP != nil {
+			u := c.UDP()
+			out.UDP = &u
+		}
 		c.measure(&out, out.Started)
+        if out.UDP!=nil {out.UDP.Rows=nil} // expose health, not a duplicate cookie map
 		out.Collected = time.Now()
 		out.DurationMS = time.Since(out.Started).Milliseconds()
 		return out

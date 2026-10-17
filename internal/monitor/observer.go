@@ -10,6 +10,7 @@ import (
 )
 
 type Observer struct {
+	UDP      func() identity.UDPSnapshot
 	mu       sync.RWMutex
 	snapshot identity.ActivitySnapshot
 	interval time.Duration
@@ -19,7 +20,7 @@ func New(interval time.Duration) *Observer {
 	return &Observer{interval: interval, snapshot: identity.ActivitySnapshot{Error: "Initial collection in progress", Complete: false}}
 }
 func (o *Observer) Run(ctx context.Context) {
-	collector := identity.ActivityCollector{}
+	collector := identity.ActivityCollector{UDP: o.UDP}
 	for {
 		snapshot := collector.Collect()
 		// Cap serialized API retention as well as row/process counts. Never return an

@@ -10,6 +10,7 @@ import (
 	"flowgate/internal/monitor"
 	"flowgate/internal/policy"
 	"flowgate/internal/queue"
+	"flowgate/internal/udpaccount"
 	"fmt"
 	"os"
 	"os/exec"
@@ -102,6 +103,10 @@ func main() {
 		output(r)
 		if e != nil {
 			fatal(e)
+		}
+	case "udp-start", "udp-stop":
+		if err := udpCommand(); err != nil {
+			fatal(err)
 		}
 	case "observe":
 		if err := observe(); err != nil {
@@ -228,6 +233,7 @@ add rule inet flowgate_lab gate meta l4proto udp queue num 100
 func observe() error {
 	fs := flag.NewFlagSet("observe", flag.ExitOnError)
 	socket := fs.String("socket", "", "private API socket path (required)")
+	udpSocket := fs.String("udp-socket", fmt.Sprintf("/run/flowgate-traffic/%d/api.sock", os.Getuid()), "optional collection-only UDP socket (empty disables)")
 	interval := fs.Duration("interval", time.Second, "collection delay after each snapshot (500ms..30s)")
 	fs.Parse(os.Args[2:])
 	if *socket == "" || *interval < 500*time.Millisecond || *interval > 30*time.Second {
@@ -240,6 +246,10 @@ func observe() error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 	observer := monitor.New(*interval)
+	if *udpSocket != "" {
+		client := &udpaccount.Client{Path: *udpSocket}
+		observer.UDP = client.Snapshot
+	}
 	e := daemon.New(15 * time.Second)
 	e.Mode = "host-monitor"
 	e.Activity = observer.Snapshot

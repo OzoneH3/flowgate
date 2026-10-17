@@ -1,5 +1,18 @@
 # Milestone semantics and safety boundaries
 
+## Optional UDP accounting adapter (not yet kernel-verified)
+
+See UDP.md. The optional BPF path counts successful send return bytes and non-peek,
+non-error-queue receive return bytes, keyed by registered UDP socket cookie in the
+selected namespace/UID. Truncation follows the return value, not wire length.
+UDP API-byte and TCP transport-byte aggregates are never silently summed.
+UDPSnapshot v1 has generation, monotonic sample_ns, namespace, collection time and
+missed-operation count. A repeated sample has no new rate, not a synthetic zero;
+restart/registration reset has a new observed interval. The collection-only socket
+accepts authenticated list/Stop, never policy changes. Normal monitoring starts
+neither BPF nor enforcement. Real BPF validation is blocked by available privileges.
+
+
 ## Activity byte counters
 
 Read-only Activity now uses length-checked Linux INET_DIAG_INFO TCP payload counters

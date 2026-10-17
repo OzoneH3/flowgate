@@ -1,5 +1,31 @@
 # Current status
 
+## Current: optional UDP adapter implemented; privileged validation blocked
+
+Normal `scripts/run-desktop.sh` remains unprivileged, read-only and preserves TCP
+metrics and the single Unidentified group. An optional CO-RE/libbpf collector,
+private collection-only API, Activity Enable/Stop actions and UDP socket-counter
+integration are implemented. **Real kernel-backed UDP accounting is not verified**:
+BPF load returns EPERM in the disposable user namespace; scoped noninteractive
+sudo requires authentication. Do not call this a completed UDP coverage milestone.
+
+See UDP.md for byte semantics, requirements, exact opt-in commands and the isolated
+continuation. UDP counts API-reported send/receive payload, not TCP transport bytes;
+mixed aggregates say Mixed sources. No peer split, no packet capture, firewall
+mutation or live-host BPF attachment was performed. No packages were installed.
+
+Evidence: `.workspace/udp-build-final.log` (C/BPF build),
+`.workspace/udp-isolated-denied.log` (exact permission blocker),
+`.workspace/udp-api-final.log` (actual authenticated API with synthetic helper),
+`.workspace/udp-go-final.log` (race/vet), `.workspace/udp-wayland-final.log` (4/4),
+`.workspace/udp-tcp-regression.log` (4/4), `.workspace/udp-fixtures.log` (real UDP
+return/receiver semantics only). The UDP screenshot shows unavailable counters,
+not invented rates: `.workspace/udp-ui-1753846/udp-unavailable-real-traffic.png`.
+TCP receiver regression: `.workspace/udp-tcp-receiver-regression.log`, observer
+0.86% of one CPU, 17584KiB RSS, 9ms census in a 5.82s bounded run. This measures the
+basic observer with unavailable UDP, not BPF overhead. UDP event-loss, receiver-
+accurate accounting and collector CPU/RSS remain unmeasured because loading failed.
+
 ## Current: real TCP traffic and grouped unidentified sockets
 
 `scripts/run-desktop.sh` remains unprivileged/read-only. Activity now includes

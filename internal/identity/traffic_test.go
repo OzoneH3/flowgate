@@ -79,3 +79,63 @@ func TestTrafficLifetimes(t *testing.T) {
 		t.Fatal(a)
 	}
 }
+
+func TestOptionalUDPAndMixedSourceLifetimes(t *testing.T) {
+	c := ActivityCollector{}
+	now := time.Now()
+	since := now
+	s := ActivitySnapshot{UDP: &UDPSnapshot{State: "active", Generation: "one", Collected: now, SampleNS: 1e9, Rows: map[string]UDPCount{"cookie": {Since: since}}}, Rows: []ActivityRow{{ID: "udp-cookie", Socket: Socket{Protocol: "udp", State: 7, Cookie: "cookie"}}}, Processes: map[string]ActivityProcess{}}
+	c.measure(&s, now)
+	a := s.Rows[0].Traffic
+	if !a.Available || a.UploadRate != nil || a.Definition != "udp-api-reported" {
+		t.Fatal(a)
+	}
+	now = now.Add(time.Second)
+	s.UDP.Collected = now
+	s.UDP.SampleNS += 1e9
+	s.UDP.Rows["cookie"] = UDPCount{Uploaded: 100, Downloaded: 200, Since: since}
+	c.measure(&s, now)
+	a = s.Rows[0].Traffic
+	if a.Uploaded != 100 || a.Downloaded != 200 || *a.UploadRate != 100 || *a.DownloadRate != 200 {
+		t.Fatal(a)
+	}
+	c.measure(&s, now.Add(100*time.Millisecond))
+	if s.Rows[0].Traffic.UploadRate != nil || s.Rows[0].Traffic.Uploaded != 100 {
+		t.Fatal("duplicate collector sample became zero rate or reset")
+	}
+
+	now = now.Add(time.Second)
+	s.UDP.Collected = now
+	s.UDP.SampleNS += 1e9
+	s.Rows[0].Owners = []string{"new-owner"}
+	c.measure(&s, now)
+	a = s.Rows[0].Traffic
+	if a.Uploaded != 100 || a.UploadRate != nil {
+		t.Fatal("owner transition", a)
+	}
+	now = now.Add(time.Second)
+	s.UDP.Collected = now
+	s.UDP.SampleNS += 1e9
+	s.UDP.Missed = 1
+	c.measure(&s, now)
+	if !s.Rows[0].Traffic.Partial {
+		t.Fatal("missed operation hidden")
+	}
+	s.UDP.State = "unavailable"
+	c.measure(&s, now)
+	if s.Rows[0].Traffic.Available {
+		t.Fatal("collector failure became zero")
+	}
+	now = now.Add(time.Second)
+	s.UDP = &UDPSnapshot{State: "active", Generation: "new", Collected: now, SampleNS: 1e9, Rows: map[string]UDPCount{"cookie": {Since: now, Uploaded: 7}}}
+	c.measure(&s, now)
+	a = s.Rows[0].Traffic
+	if a.Uploaded != 7 || a.UploadRate != nil || !a.Since.Equal(now) {
+		t.Fatal("restart spike", a)
+	}
+	s.UDP.Collected = now.Add(-10 * time.Second)
+	c.measure(&s, now)
+	if s.Rows[0].Traffic.Available {
+		t.Fatal("stale counter displayed")
+	}
+}

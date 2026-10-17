@@ -1,5 +1,22 @@
 # Continuation handoff
 
+## Latest: optional UDP experiment, exact remaining blocker
+
+Started clean at1c3b1b23b62af30332a063d9ac2ea59dbe076761 on milestone/backend.
+The BPF source/helper, collection-only authenticated API, normal observer adapter,
+monotonic UDP rates and explicit Activity Enable/Stop are implemented, but no BPF
+program could be loaded in the available user namespace (EPERM). sudo requires
+interactive authentication. Basic TCP/Unidentified regressions and real Wayland
+failure states passed. This is not receiver-verified UDP support.
+
+Read UDP.md before further work. Next action is `scripts/check-udp-isolated.sh`
+after reviewing/authorizing its exact sudo/unshare operation; build prerequisites
+are listed there and already present. It loads only namespace/UID-filtered probes
+inside a fresh test namespace, without host firewall/route/security changes.
+After obtaining verifier/receiver evidence, fix any demonstrated issue and finish
+shared/reuseport/restart/loss and real unprivileged Wayland UDP-rate checks. Do not
+activate host collection to substitute for isolated verification. No game work.
+
 ## Latest: TCP Activity metrics and Unidentified presentation group
 
 Started from clean 3634fdadba706cd48bb560092176112a703116ba on milestone/backend.

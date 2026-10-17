@@ -106,3 +106,12 @@ Actual Wayland captures for this increment: `.workspace/traffic-ui-1485300/real-
 (1500×850) and `real-traffic-narrow.png` (860×600), real unprivileged loopback
 traffic, not fabricated presentation rates. The Qt regrouping fixture is separately
 labelled synthetic in `.workspace/traffic-ui-final.log`.
+
+## UDP experiment
+
+Activity adds explicit extended-monitoring Enable/Stop controls without changing
+the tree layout. UDP source health is independent of enforcement. UDP API bytes
+are labelled separately; incompatible aggregates show Mixed sources. The current
+Wayland capture (directory in `.workspace/udp-wayland-final.log`) shows real UDP
+datagrams with counters unavailable because no BPF load succeeded. No screenshot
+of measured UDP rates is claimed; the mixed-source UI fixture is synthetic.

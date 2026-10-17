@@ -28,6 +28,8 @@ QString amount(double n, bool rate) {
          (rate ? "/s" : "");
 }
 struct Aggregate {
+  bool partial = false;
+  QSet<QString> definitions;
   double sums[4]{};
   int known[4]{};
   int count = 0;
@@ -55,6 +57,61 @@ ActivityView::ActivityView(QWidget *parent) : QWidget(parent) {
   tools->addWidget(expand);
   tools->addWidget(collapse);
   layout->addLayout(tools);
+  auto *extendedTools = new QHBoxLayout;
+  auto *enableExtended = new QPushButton("Enable extended traffic monitoring");
+  auto *stopExtended = new QPushButton("Stop extended monitoring");
+  enableExtended->setObjectName("enableExtendedTraffic");
+  stopExtended->setObjectName("stopExtendedTraffic");
+  extendedTools->addWidget(enableExtended);
+  extendedTools->addWidget(stopExtended);
+  extendedTools->addStretch();
+  layout->addLayout(extendedTools);
+  connect(enableExtended, &QPushButton::clicked, this, [this] {
+    if (QMessageBox::question(
+            this, "Extended UDP monitoring",
+            "Start experimental privileged UDP byte collection? This does not "
+            "enable firewall enforcement. The terminal handles system "
+            "authentication. UDP counts API-reported successful send/non-peek "
+            "receive bytes, separately from TCP transport payload. This "
+            "adapter still requires privileged isolated validation.") !=
+        QMessageBox::Yes)
+      return;
+    QString terminal = QStandardPaths::findExecutable("konsole"),
+            python = QStandardPaths::findExecutable("python3");
+    QString script = QFileInfo(QCoreApplication::applicationDirPath() +
+                               "/../../scripts/traffic-control.py")
+                         .canonicalFilePath();
+    QString helper =
+        QCoreApplication::applicationDirPath() + "/../udp-collector";
+    if (terminal.isEmpty() || python.isEmpty() || script.isEmpty() ||
+        !QFileInfo::exists(helper)) {
+      QMessageBox::warning(
+          this, "Extended monitoring unavailable",
+          "Build the optional collector first: scripts/build-udp.sh. Konsole, "
+          "Python 3 and existing sudo authentication are required. TCP remains "
+          "available.");
+      return;
+    }
+    if (!QProcess::startDetached(
+            terminal, {"--separate", "--hold", "-e", python, script}))
+      QMessageBox::warning(
+          this, "Monitoring unavailable",
+          "Could not launch authentication terminal. TCP remains available.");
+  });
+  connect(stopExtended, &QPushButton::clicked, this, [this] {
+    auto *p = new QProcess(this);
+    connect(p, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
+            [this, p](int code, QProcess::ExitStatus) {
+              QMessageBox::information(
+                  this, "UDP collector Stop",
+                  code == 0 ? "Collector acknowledged Stop. TCP monitoring and "
+                              "firewall state are unchanged."
+                            : QString::fromUtf8(p->readAllStandardError()));
+              p->deleteLater();
+            });
+    p->start(QCoreApplication::applicationDirPath() + "/../flowgate",
+             {"udp-stop"});
+  });
   summary = new QLabel("Activity is available with the host observer.");
   summary->setWordWrap(true);
   summary->setTextFormat(Qt::PlainText);
@@ -74,7 +131,8 @@ ActivityView::ActivityView(QWidget *parent) : QWidget(parent) {
       8, "TCP transmitted payload per second, including retransmissions. — "
          "means unavailable.");
   tree->headerItem()->setToolTip(
-      9, "TCP accepted payload per second. — means unavailable.");
+      9, "TCP accepted payload / UDP non-peek API-reported bytes per second; "
+         "see row source. — means unavailable.");
   tree->headerItem()->setToolTip(
       10, "TCP payload uploaded since this socket first appeared in the "
           "observer; not lifetime totals. * means partial aggregate.");
@@ -162,8 +220,8 @@ ActivityView::ActivityView(QWidget *parent) : QWidget(parent) {
   chartTitle->setObjectName("panelTitle");
   sideLayout->addWidget(chartTitle);
   auto *chart = new QLabel(
-      "TCP payload rates and observed totals are shown in the table.\nUDP "
-      "counters unavailable. No chart history is collected.");
+      "TCP transport and optional UDP API bytes are shown in the table.\n"
+      "No chart history is collected.");
   chart->setObjectName("unmeasuredChart");
   chart->setAlignment(Qt::AlignCenter);
   chart->setMinimumHeight(110);
@@ -335,7 +393,8 @@ void ActivityView::render() {
       description +=
           "\n\n" + procDetails(processes[owner.toString()].toObject());
     auto traffic = row["traffic"].toObject();
-    description += "\n\nAccounting: " + str(traffic, "reason");
+    description += "\n\nMeasurement state: " + str(traffic, "state") +
+                   "\nAccounting: " + str(traffic, "reason");
     if (traffic["available"].toBool())
       description +=
           "\nSource: " + str(traffic, "source") +
@@ -357,12 +416,19 @@ void ActivityView::render() {
       bool known = traffic["available"].toBool() && traffic.contains(keys[m]) &&
                    traffic[keys[m]].isDouble();
       double number = known ? traffic[keys[m]].toDouble() : -1;
-      item->setText(8 + m, known ? amount(number, m < 2) : "—");
+      item->setText(8 + m, known ? amount(number, m < 2) +
+                                       (traffic["partial"].toBool() ? " *" : "")
+                                 : "—");
       item->setData(8 + m, SortValue, number);
       item->setTextAlignment(8 + m, Qt::AlignRight | Qt::AlignVCenter);
       QSet<QTreeWidgetItem *> unique{group, parent};
       for (auto *ancestor : unique) {
         auto &ag = aggregates[ancestor];
+        if (traffic["partial"].toBool())
+          ag.partial = true;
+        if (known)
+          ag.definitions.insert(
+              traffic["definition"].toString("tcp-transport-payload"));
         if (m == 0)
           ++ag.count;
         if (known) {
@@ -396,11 +462,13 @@ void ActivityView::render() {
     auto *item = it.key();
     auto ag = it.value();
     for (int m = 0; m < 4; ++m) {
-      bool partial = ag.known[m] < ag.count;
-      item->setText(8 + m, ag.known[m] ? amount(ag.sums[m], m < 2) +
-                                             (partial ? " *" : "")
-                                       : "—");
-      item->setData(8 + m, SortValue, ag.known[m] ? ag.sums[m] : -1);
+      bool partial = ag.known[m] < ag.count || ag.partial;
+      bool mixed = ag.definitions.size() > 1;
+      item->setText(8 + m, mixed         ? "Mixed sources"
+                           : ag.known[m] ? amount(ag.sums[m], m < 2) +
+                                               (partial ? " *" : "")
+                                         : "—");
+      item->setData(8 + m, SortValue, !mixed && ag.known[m] ? ag.sums[m] : -1);
       item->setTextAlignment(8 + m, Qt::AlignRight | Qt::AlignVCenter);
     }
     item->setData(
@@ -410,7 +478,8 @@ void ActivityView::render() {
                     "partial coverage; missing counters are not zero. "
                     "Aggregates describe current visible sockets' observed "
                     "intervals; closed sockets are not retained. Socket totals "
-                    "are not owner-lifetime totals.")
+                    "are not owner-lifetime totals. Mixed TCP transport and "
+                    "UDP API bytes are not summed.")
                 .arg(ag.known[2])
                 .arg(ag.count));
   }
@@ -440,11 +509,14 @@ void ActivityView::render() {
   if (snapshot.isEmpty())
     return;
   QStringList issues;
+  auto udp = snapshot["udp"].toObject();
+  if (!udp.isEmpty())
+    issues << "UDP " + str(udp, "state") + ": " + str(udp, "reason");
   for (auto issue : snapshot["issues"].toArray())
     issues.append(issue.toString());
   summary->setText(
       QString("%1 · %2 / %3 sockets shown · collected %4 · %5 ms "
-              "· TCP observed totals; UDP unavailable; * partial · %6")
+              "· TCP transport / optional UDP API bytes; * partial · %6")
           .arg(snapshot["complete"].toBool()
                    ? "Complete within observation scope"
                    : "Partial visibility",

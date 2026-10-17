@@ -5,8 +5,8 @@
 Normal `scripts/run-desktop.sh` collects real **TCP IPv4/IPv6** upload/download
 rates and observed transferred bytes without root, packet capture, nftables,
 NFQUEUE, eBPF, services or Wine helpers. No activation is necessary. The existing
-five-minute evaluation is independent and remains explicit. No privileged traffic
-collector is implemented or automatically started by this increment.
+five-minute evaluation is independent and remains explicit. An optional experimental UDP collector is now implemented but privileged
+verification is blocked; it is never automatically started. See UDP.md.
 
 The bounded socket census requests `INET_DIAG_INFO` and reads Linux `TCP_INFO`
 `tcpi_bytes_sent` and `tcpi_bytes_received`. Responses shorter than the fields are
@@ -25,9 +25,10 @@ The same shared socket is displayed/counted once, not once per descriptor holder
 
 **UDP is unavailable**, for connected as well as unconnected sockets, IPv4/IPv6.
 The inspected UDP diagnostic interface does not supply transferred-byte counters.
-No per-peer UDP totals or application UDP estimates are claimed. Adding UDP needs
-an independently authorized accounting source (e.g. a narrowly scoped privileged
-collector); that work is deferred. There is no fake Enable monitoring button.
+No per-peer UDP totals or application UDP estimates are claimed. The optional UDP.md adapter supplies API-reported payload counts when explicitly
+loaded, but its kernel operation remains unverified here. The Enable action is
+explicit, collection-only and marked experimental; basic UDP remains unavailable
+without that collector.
 
 Kernel source references inspected (public UAPI, no implementation code copied):
 [tcp.h](https://github.com/torvalds/linux/blob/master/include/uapi/linux/tcp.h),
