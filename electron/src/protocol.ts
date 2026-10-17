@@ -1,3 +1,4 @@
+import { parsePolicyView, type PolicyView } from './policy';
 // Additive v1 API projection. Backend values are data, never renderer markup.
 export interface Application {
   key: string;
@@ -93,6 +94,7 @@ export interface Permissions {
   can_decide: boolean;
 }
 export interface Reply {
+  policy_view?: PolicyView;
   permissions?: Permissions;
   backend_mode?: string;
   version: 1;
@@ -135,6 +137,8 @@ export interface ClientState {
     rules?: Rule[];
     capabilities?: string[];
     serverNow?: number;
+    policy?: PolicyView;
+    policyError?: string;
   };
 }
 export interface Decision {
@@ -286,6 +290,7 @@ export function parseReply(raw: unknown): Reply {
     } as Permissions;
   }
   result.backend_mode = string(r.backend_mode);
+  if (r.policy_view) result.policy_view = parsePolicyView(r.policy_view);
   if (r.decision) result.decision = event(r.decision);
   if (r.enforcement) {
     const e = object(r.enforcement);

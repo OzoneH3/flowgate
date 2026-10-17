@@ -27,6 +27,7 @@ await build({
 await build({
   entryPoints: [
     'src/model.ts',
+    'src/policy.ts',
     'src/icons.ts',
     'src/rule-status.ts',
     'src/backend.ts',

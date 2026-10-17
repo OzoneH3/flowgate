@@ -888,7 +888,7 @@ td.up { color: #c7daa8; background: #344b20; }
 .policy-cell:hover,.policy-cell:focus-visible { border-color: var(--fg-selected); outline-offset: -1px; }
 .policy-allow::before { content: '✓ '; color: var(--fg-allow); }.policy-block::before { content: '× '; color: var(--fg-block); }
 .policy-disabled::before { content: '○ '; }.policy-expired::before { content: '◷ '; }
-.policy-list { position: absolute; z-index: 15; top: 110px; left: min(450px,calc(100vw - 530px)); width: min(510px,calc(100vw - 24px)); max-height: calc(100vh - 135px); background: var(--fg-content); border: 1px solid #555; box-shadow: 0 4px 16px #111; font-size: 12px; overflow: auto; }
+.policy-list { position: absolute; z-index: 15; top: 110px; right: 8px; width: min(510px,calc(100vw - 24px)); max-height: calc(100vh - 135px); background: var(--fg-content); border: 1px solid #555; box-shadow: 0 4px 16px #111; font-size: 12px; overflow: auto; }
 .policy-list header { display: flex; align-items: center; justify-content: space-between; padding: 5px 8px; background: var(--fg-section); }
 .policy-list header strong { font-weight: 400; }.policy-list button { font-size: 11px; }
 .policy-list-content { padding: 5px 10px; }.policy-list p { margin: 6px 0; overflow-wrap: anywhere; user-select: text; }

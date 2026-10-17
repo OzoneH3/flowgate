@@ -573,3 +573,68 @@ Focused checks with existing local dependencies:
 synthetic UI edge states, without enforcement. `VISUAL_STAGE=target-final node
 electron/test/visual.mjs` uses the existing disposable controller for the actual
 inventory check, preserving independent host controllers and collectors.
+
+### Authoritative Activity policy batches
+
+A primary daemon advertising `policy-explanations-v1` supplies Activity's In/Out
+summaries through one bounded `policy-view` batch, driven by the existing main-process
+control loop (at most once per second; no per-row requests or new timer). Columns say
+**Backend policy**. Clicking shows the backend's configured class, exact rule refs,
+configured/runtime defaults and direction-specific enforcement coverage. Stored Block
+while stopped is not protection; incoming-only coverage does not imply outgoing
+protection. Initiation direction differs from upload/download byte flow. These are
+current policy explanations, never evidence of a past connection outcome.
+
+Older daemons—including the independently running root monitor—show **Listed · legacy**
+and an explicitly labelled compatibility inventory. New metadata failures never fall
+back silently. Generation changes, disconnect, policy expiry, mismatched observation
+identity and out-of-order replies clear authoritative results. Decimal response sequences
+and rule-ref versions stay exact strings; sequence ordering uses BigInt. Existing
+numeric mutation APIs still refuse unsafe uint64 values instead of rounding them.
+
+Policy details offer Edit and conditional Delete using existing preview/version and
+frozen-confirmation safeguards. Unfinished editor fields survive metadata refreshes.
+The new read-only API explicitly supplies **no creation authority**: first-rule creation
+from Activity is still unavailable. It needs a backend-authorized observed-identity
+creation draft/preview and token-bound save; summary association is not that token.
+The existing pending-request creation workflow is unchanged. No stored Ask action,
+new precedence, filter semantics or accounting exclusion is introduced.
+
+`--daemon /run/flowgate-api/daemon.sock` continues to reuse primary/companion endpoints
+without owning the daemon. For an independently started evaluation controller use
+`--daemon /run/flowgate-api/control.sock`. The toolbar reports actual profile/state;
+new evaluation selection offers incoming-only, with both directions disabled because
+support is not advertised by the present contract. No daemon transition starts on launch.
+
+Focused reproduction with already-installed dependencies:
+`npm --prefix electron run build && node --test electron/test/policy.test.cjs`.
+For a compatible released backend binary, the isolated seeded-rule workflow is
+`FLOWGATE_TEST_POLICY=1 FLOWGATE_TEST_DAEMON=/absolute/path/to/flowgate node electron/test/policy-workflow.mjs`.
+It checks the authoritative batch, Activity→details→editor→save, exact expiry/version,
+read-only denial, narrow layout and preserved editor focus. It never activates enforcement.
+
+Current icon audit: 4/15 distinct live executables had reliable installed desktop/icon
+associations and all four resolved (Firefox, KDE Connect, KRDC, KRDP). The remaining
+nine services and two CLI/runtime executables had no matching application metadata;
+related settings/discovery utilities are not substitutes. No demonstrated resolver
+failure justified weakening executable matching. The actual UI capture also contains
+transient test/CLI processes and Unidentified; its visible-row denominator is separate.
+Neutral fallbacks, bounded caches and the existing narrow asset protocol remain intact.
+
+Verification for this increment: backend **0aca36145adc857bdb59d52f1862a420bbdac9cf**,
+`.workspace/flowgate-policy` SHA256
+`556e49b5747b012b3882e93bd633cc55569885c6673b0b74045d593ca7b55ca2`.
+No backend commits were merged into the UI branch. Build and 22 focused checks passed;
+synthetic generation/order/expiry cases are not enforcement evidence. Actual sandboxed
+Wayland + real isolated daemon/seeded rule passed in `.workspace/policy-ui-upGpIo`
+(policy list, editor/save, narrow and companion read-only screenshots). First-rule
+creation was **not** tested or implemented: the released API does not support it.
+
+Real host fallback screenshot with installed icons and policy details:
+`.workspace/policy-authoritative/root-fallback.png`; narrow: `after-narrow.png` in the
+same directory. That final capture has 18 visible rows including Unidentified and transient
+frontend/test processes, with four resolved installed icons. `icon-audit.json` records
+the separate 15-executable pre-launch audit. `tests.log`, `isolated.log`, `root.log`,
+`synthetic.log` and `final-lifecycle.json` distinguish evidence and confirm fixture
+cleanup plus unchanged root peer PID/generation/stopped state/zero rules. No host
+mutation, activation, collection, daemon restart or unrelated suite was performed.

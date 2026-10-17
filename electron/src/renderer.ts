@@ -1,8 +1,14 @@
+import {
+  POLICY_CAPABILITY,
+  authoritativePolicy,
+  policyLabel,
+  policyRuleDescription,
+} from './policy';
 import { ruleStatus, ruleState, ruleDescription, configuredPolicy } from './rule-status';
 import { canDecide, canManageRules } from './protocol';
 import type { Application } from './protocol';
 import { TrafficGraph } from './graph';
-import { setupWorkflows, updateWorkflows, openRule } from './workflows';
+import { setupWorkflows, updateWorkflows, openRule, confirmRuleDelete } from './workflows';
 import type { ClientState, ViewEvent, Scope } from './protocol';
 import {
   hierarchy,
@@ -128,15 +134,41 @@ function policyCell(r: Row, direction: PolicyDirection) {
   const status = ruleStatus(r, state),
     cell = element('td', '', 'rule-status');
   const rules = status[direction];
-  const label = status.available ? configuredPolicy(rules, status.now) : 'Unavailable';
+  const authoritative = state.control.capabilities?.includes(POLICY_CAPABILITY);
+  const result = authoritative ? authoritativePolicy(r, state) : undefined;
+  const summary = result?.application?.[direction];
+  const label = authoritative
+    ? summary
+      ? policyLabel(summary)
+      : 'Unavailable'
+    : status.available
+      ? configuredPolicy(rules, status.now)
+      : 'Unavailable';
   const button = element('button', label, 'policy-cell');
   button.dataset.direction = direction;
   button.title =
     `${direction}: configured policy. ${status.reason}\n${state.control.enforcement?.state === 'stopped' ? 'Stored only; enforcement stopped.\n' : ''}` +
     rules.map((rule) => ruleDescription(rule, status.now)).join('\n');
+  if (authoritative)
+    button.title = summary
+      ? `Backend summary · ${summary.reason}\nEnforcement: ${summary.enforcement.state} · ${summary.enforcement.reason}\nCurrent policy, not a historical verdict.`
+      : result!.reason;
+  else
+    button.title =
+      'Compatibility inventory (locally grouped listed rules; not a backend summary).\n' +
+      button.title;
   button.setAttribute('aria-label', `${r.label} · ${direction} · ${label} · configured policy`);
-  if (!status.available) button.classList.add('rule-unavailable');
-  else if (rules.length === 1) button.classList.add('policy-' + ruleState(rules[0], status.now));
+  if (authoritative ? !summary : !status.available) button.classList.add('rule-unavailable');
+  else if (authoritative && summary?.configured === 'uniform')
+    button.classList.add('policy-' + summary.action);
+  else if (authoritative && summary?.rules.length === 1) {
+    const ref = summary.rules[0];
+    button.classList.add(
+      'policy-' +
+        (ref.expired ? 'expired' : ref.disabled ? 'disabled' : ref.active ? ref.action : 'unknown'),
+    );
+  } else if (!authoritative && rules.length === 1)
+    button.classList.add('policy-' + ruleState(rules[0], status.now));
   button.onclick = (event) => {
     event.stopPropagation();
     selected = r.id;
@@ -165,8 +197,15 @@ function renderPolicyList() {
   const row = allRows(roots).find((r) => r.id === policySelection!.id);
   const inventory = row ? ruleStatus(row, state) : undefined;
   const rules = inventory?.[policySelection.direction] || [];
+  const authoritative = !!state.control.capabilities?.includes(POLICY_CAPABILITY);
+  const result = row && authoritative ? authoritativePolicy(row, state) : undefined;
+  const summary = result?.application?.[policySelection.direction];
   const signature = JSON.stringify([
     policySelection,
+    authoritative,
+    summary,
+    result?.reason,
+    state.control.generation,
     inventory?.available,
     inventory?.reason,
     row?.label,
@@ -219,16 +258,76 @@ function renderPolicyList() {
         'hint',
       ),
     );
-  if (!inventory?.available)
-    content.append(element('p', inventory?.reason || 'No current observation identity.'));
-  else if (!rules.length)
+  if (authoritative) {
     content.append(
       element(
         'p',
-        'No explicit rule listed. No default action is inferred. Creating a new rule currently requires an attributable pending request.',
+        'Backend-authoritative configured policy · current explanation, not a historical verdict.',
+        'hint',
       ),
     );
-  else {
+    if (state.control.policy && !state.control.policy.complete)
+      content.append(
+        element(
+          'p',
+          'Partial policy batch · ' +
+            (state.control.policy.reason || 'Activity visibility is partial.'),
+          'hint',
+        ),
+      );
+    if (summary) {
+      content.append(element('p', policyLabel(summary) + ' · ' + summary.reason));
+      content.append(
+        element(
+          'p',
+          `Enforcement: ${summary.enforcement.state} · ${summary.enforcement.covered ? 'direction covered' : 'direction not confirmed covered'} · ${summary.enforcement.reason}`,
+        ),
+      );
+      for (const [label, d] of [
+        ['Configured default', summary.configured_default],
+        ['Runtime default', summary.runtime_default],
+      ] as const)
+        content.append(
+          element('p', `${label}: ${d.known ? d.action : 'unknown'} · ${d.reason}`, 'hint'),
+        );
+      if (summary.potential_overlapping_actions)
+        content.append(
+          element(
+            'p',
+            'Potentially overlapping actions; Go resolves precedence for a concrete context.',
+          ),
+        );
+      for (const ref of summary.rules) {
+        const item = element('section', '', 'policy-rule');
+        item.append(element('p', policyRuleDescription(ref)));
+        const rule = state.control.rules?.find(
+          (r) => r.id === ref.id && String(r.version) === ref.version,
+        );
+        if (canManageRules(state.control) && rule) appendPolicyActions(item, rule);
+        else if (canManageRules(state.control))
+          item.append(
+            element(
+              'p',
+              'Refresh required before editing: listed version differs or is not losslessly representable.',
+              'hint',
+            ),
+          );
+        content.append(item);
+      }
+    } else content.append(element('p', result?.reason || 'No supported observation identity.'));
+  } else
+    content.append(
+      element(
+        'p',
+        'Compatibility inventory · locally grouped listed rules, not a backend-authoritative summary. Enforcement coverage and defaults are not inferred.',
+        'hint',
+      ),
+    );
+  if (!authoritative && !inventory?.available)
+    content.append(element('p', inventory?.reason || 'No current observation identity.'));
+  else if (!authoritative && !rules.length)
+    content.append(element('p', 'No explicit rule listed. No default action is inferred.'));
+  else if (!authoritative) {
     content.append(
       element(
         'p',
@@ -240,24 +339,47 @@ function renderPolicyList() {
     );
     for (const rule of rules) {
       const item = element('section', '', 'policy-rule');
-      item.append(element('p', ruleDescription(rule, inventory.now)));
-      if (canManageRules(state.control)) {
-        const edit = element('button', 'Edit rule');
-        edit.dataset.ruleId = rule.id;
-        edit.onclick = () => {
-          closePolicyList();
-          void openRule({ id: rule.id });
-        };
-        item.append(edit);
-      }
+      item.append(element('p', ruleDescription(rule, inventory!.now)));
+      if (canManageRules(state.control)) appendPolicyActions(item, rule);
       content.append(item);
     }
   }
+  const create = element('button', 'New rule…');
+  create.id = 'newActivityRule';
+  create.disabled = true;
+  const creationReason = !canManageRules(state.control)
+    ? 'Rule management is read-only or unavailable.'
+    : 'This daemon cannot create rules from Activity yet. New rules require an attributable pending request; an observed application is not a permission target.';
+  create.title = creationReason;
+  content.append(create, element('p', creationReason, 'hint'));
+  content.append(
+    element(
+      'p',
+      'Incoming/outgoing refers to connection initiation, not download/upload. Rule changes may not disconnect existing approved TCP sessions.',
+      'hint',
+    ),
+  );
   if (!canManageRules(state.control))
     content.append(element('p', 'Rule management is unavailable or read-only.', 'hint'));
   panel.replaceChildren(heading, content);
 }
 
+function appendPolicyActions(item: HTMLElement, rule: import('./protocol').Rule) {
+  const edit = element('button', 'Edit rule');
+  edit.dataset.ruleId = rule.id;
+  edit.onclick = () => {
+    closePolicyList();
+    void openRule({ id: rule.id });
+  };
+  const remove = element('button', 'Delete…');
+  remove.disabled = !state.control.capabilities?.includes('conditional-rule-delete-v1');
+  remove.title = remove.disabled
+    ? 'Safe conditional deletion unsupported by this daemon.'
+    : 'Review frozen version before deleting';
+  const generation = state.control.generation;
+  remove.onclick = () => confirmRuleDelete(rule, generation);
+  item.append(edit, remove);
+}
 function field(container: HTMLElement, label: string, value: string) {
   container.append(element('dt', label), element('dd', value || 'Unknown'));
 }
@@ -547,20 +669,34 @@ function renderInfo() {
     return;
   }
   const inventory = ruleStatus(r, state);
-  field(info, 'Rule inventory', inventory.reason);
+  field(
+    info,
+    'Rule inventory',
+    state.control.capabilities?.includes(POLICY_CAPABILITY)
+      ? authoritativePolicy(r, state).reason
+      : 'Compatibility inventory · ' + inventory.reason,
+  );
   for (const direction of ['incoming', 'outgoing'] as const) {
     const rules = inventory[direction];
+    const authoritative = state.control.capabilities?.includes(POLICY_CAPABILITY);
+    const summary = authoritative
+      ? authoritativePolicy(r, state).application?.[direction]
+      : undefined;
     field(
       info,
       direction === 'incoming' ? 'Rules · In' : 'Rules · Out',
-      !inventory.available
-        ? 'Unavailable'
-        : ['allow', 'block', 'disabled', 'expired']
-            .map(
-              (type) =>
-                `${rules.filter((rule) => ruleState(rule, inventory.now) === type).length} ${type}`,
-            )
-            .join(' · '),
+      authoritative
+        ? summary
+          ? `${policyLabel(summary)} · ${summary.enforcement.state}`
+          : 'Unavailable'
+        : !inventory.available
+          ? 'Unavailable'
+          : ['allow', 'block', 'disabled', 'expired']
+              .map(
+                (type) =>
+                  `${rules.filter((rule) => ruleState(rule, inventory.now) === type).length} ${type}`,
+              )
+              .join(' · '),
     );
     const value = info.lastElementChild as HTMLElement;
     const link = element('button', value.textContent || '', 'sidebar-policy');
@@ -573,12 +709,12 @@ function renderInfo() {
     };
     value.replaceChildren(link);
   }
-  if (inventory.available)
+  if (inventory.available && !state.control.capabilities?.includes(POLICY_CAPABILITY))
     for (const direction of ['incoming', 'outgoing'] as const)
       field(
         info,
         direction === 'incoming' ? 'Incoming rule scopes' : 'Outgoing rule scopes',
-        inventory[direction].map((rule) => ruleDescription(rule, inventory.now)).join('\n') ||
+        inventory[direction].map((rule) => ruleDescription(rule, inventory!.now)).join('\n') ||
           'No listed rules; not a connection verdict.',
       );
   if (r.displayApplication) {
@@ -905,6 +1041,12 @@ function consume(next: ClientState) {
     .filter(Boolean)
     .join('\n');
   if (!promptID) {
+    for (const label of document.querySelectorAll<HTMLElement>(
+      '.col-incoming_policy small,.col-outgoing_policy small',
+    ))
+      label.textContent = state.control.capabilities?.includes(POLICY_CAPABILITY)
+        ? 'Backend policy'
+        : 'Listed · legacy';
     $('observerStatus').textContent = state.observation.message;
     $('observerStatus').title = state.observation.message;
     $('pendingCount').textContent = String(
@@ -928,6 +1070,13 @@ function consume(next: ClientState) {
       state.control.permissions,
       state.control.enforcement?.state,
       state.control.rules,
+      state.control.policy
+        ? [
+            state.control.policy.snapshot.token,
+            state.control.policy.applications.map((a) => [a.ref, a.process_ids]),
+            state.control.policy.rows,
+          ]
+        : state.control.policyError,
       (state.control.rules || []).map((r) => ruleState(r, state.control.serverNow ?? NaN)),
     ]);
     if (ruleSignature !== rulesStamp) {

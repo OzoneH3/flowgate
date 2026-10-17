@@ -18,6 +18,7 @@ let state: ClientState,
   unresolved = false;
 const status = (s: string) => {
   $('ruleFeedback').textContent = s;
+  if ($('feedback')) $('feedback').textContent = s;
 };
 function editorMessage(s: string) {
   $('editorFeedback').textContent = s;
@@ -114,7 +115,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
     });
   const evaluation = node('section', '');
   evaluation.className = 'evaluationbar';
-  evaluation.innerHTML = `<select id="evalProfile" aria-label="Evaluation profile"><option value="incoming">Incoming only</option><option value="both">Incoming and outgoing</option></select><button id="evalStart">Start 5-minute evaluation…</button><button id="evalStop">Stop evaluation</button><button id="evalCancel" hidden>Cancel authentication</button><button id="evalStatus">Status</button><button id="evalRecover">Recovery…</button><span id="evaluationStatus" role="status"></span>`;
+  evaluation.innerHTML = `<select id="evalProfile" aria-label="Evaluation profile"><option value="incoming">Incoming only</option><option value="both" disabled>Both directions · support not advertised</option></select><button id="evalStart">Start 5-minute evaluation…</button><button id="evalStop">Stop evaluation</button><button id="evalCancel" hidden>Cancel authentication</button><button id="evalStatus">Status</button><button id="evalRecover">Recovery…</button><span id="evaluationStatus" role="status"></span>`;
   document.querySelector('#controlMenu .menu-panel')!.append(evaluation);
   const confirmation = node('dialog', '');
   confirmation.id = 'confirmation';
@@ -229,20 +230,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
   };
   $('deleteRule').onclick = () => {
     const r = state.control.rules?.find((r) => r.id === selected);
-    if (!r || !state.control.capabilities?.includes('conditional-rule-delete-v1')) return;
-    // Freeze exactly the snapshot displayed in this confirmation, including its generation.
-    const snapshot = { id: r.id, generation: state.control.generation, version: r.version ?? 0 };
-    confirmAction(
-      'Delete rule',
-      `Delete ${r.executable || r.filter.application}? Action: ${r.action}; ${r.filter.direction} ${r.filter.protocol}; remote ${r.filter.remote_address || r.filter.remote || '*'}; ports ${r.filter.local_port || '*'} → ${r.filter.remote_port || '*'}; expiry ${r.expires}; ${r.disabled ? 'disabled' : 'enabled'}. Rule ${snapshot.id}, version ${snapshot.version}, generation ${snapshot.generation}. Existing approved TCP sessions may continue.`,
-      async () => {
-        try {
-          status((await window.flowgate.ruleDelete(snapshot)).message);
-        } catch (e) {
-          status(String(e));
-        }
-      },
-    );
+    if (r) confirmRuleDelete(r, state.control.generation);
   };
   $('evalStart').onclick = () =>
     confirmAction(
@@ -593,4 +581,21 @@ async function setupSizing() {
     };
   }
   resizeTable();
+}
+
+export function confirmRuleDelete(r: Rule, generation: string) {
+  if (!writable() || !state.control.capabilities?.includes('conditional-rule-delete-v1')) return;
+  // Freeze exactly the snapshot displayed in this confirmation, including its generation.
+  const snapshot = { id: r.id, generation: generation, version: r.version ?? 0 };
+  confirmAction(
+    'Delete rule',
+    `Delete ${r.executable || r.filter.application}? Action: ${r.action}; ${r.filter.direction} ${r.filter.protocol}; remote ${r.filter.remote_address || r.filter.remote || '*'}; ports ${r.filter.local_port || '*'} → ${r.filter.remote_port || '*'}; expiry ${r.expires}; ${r.disabled ? 'disabled' : 'enabled'}. Rule ${snapshot.id}, version ${snapshot.version}, generation ${snapshot.generation}. Existing approved TCP sessions may continue.`,
+    async () => {
+      try {
+        status((await window.flowgate.ruleDelete(snapshot)).message);
+      } catch (e) {
+        status(String(e));
+      }
+    },
+  );
 }
