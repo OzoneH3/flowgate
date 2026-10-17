@@ -179,3 +179,38 @@ and use privileged `host-recover --state /run/flowgate-evaluation` only for that
 recorded session; it refuses an active owner lock. **Do not use legacy host-stop
 against embedded state: it is a whole-controller signal path.** No existing
 terminal evaluator/second database owner is needed or automatically launched.
+
+## Released backend and UI handoff
+
+Backend release **bfa93b6a695fb1928b0f7d55b4aff5cd1d71f626**, clean source build
+`.workspace/flowgate-evaluation-release`, SHA256
+`3e717df8790683c5222dc47c9426f843825fd309c6224b483e6963193608eb77`.
+Later evidence-only documentation commits do not change the running test source.
+The root host executable `.workspace/flowgate` was never replaced.
+
+Exact-release real component repeat `.workspace/eval-released-ts.log`: dropped Start
+acknowledgement reconciled via status/nonce without replay, supported TUN/TS-shaped
+preflight, actual veth UDP4/6 Allow+reply delivery, TCP4/6 Block, startup TCP
+preservation, Stop keeps the same daemon/rules/collector generation, Decision Log,
+read-only/stale denial and full-write conflict refusal. No encrypted Tailscale claim.
+Exact-release kernel fault fixture `.workspace/eval-exact-release-kernel.log` passed
+post-install rollback, owned-rule mutation cleanup and private shortened expiry
+with a model active collector left untouched. Full **production300s** expiry ran
+on the earlier candidate using the same fixed deadline/watchdog path
+(`eval-suite2-output.log`); final expiry handling was additionally rechecked at the
+private short-duration seam, not by repeating another five-minute wait.
+
+UI-owned exact-release sandboxed Wayland journey passed against the held
+`.workspace/eval-ui-released` instance: review/readiness, Start, UDP44001 AllowOnce
+receiver1, UDP44003 BlockOnce receiver0, actual Decision Log, read-only Start denial,
+**closing GUI while active preserves session/original deadline**, reconnect and
+confirmed Stop, same daemon/rules/Activity afterwards. Screenshots/evidence in UI
+worktree `.workspace/evaluation-ui-S42wAW/` (active-normal, active-narrow,
+review-real, decisions-real). UI owner sent DONE; backend then sent quit and the
+fixture confirmed CLEANED. Earlier candidate UI evidence `.workspace/evaluation-ui-
+fNpKcs` is separate. No UI source files or unreleased frontend commits were merged.
+
+Host read-only final check: daemon generation **0840f7c256126f1708702f27c5b26551**,
+collector **43a091abb81a09901be2c9b460080ee1** still active, enforcement stopped,
+rules unchanged. It still lacks daemon-evaluation-v1. No host restart, collector
+interruption or enforcement was performed.

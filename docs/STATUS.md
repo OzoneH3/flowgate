@@ -2,7 +2,9 @@
 
 ## New backend: daemon-owned incoming evaluation (not deployed)
 
-Implemented `daemon-evaluation-v1` on the existing root daemon: asynchronous
+Backend release **bfa93b6a695fb1928b0f7d55b4aff5cd1d71f626**; separate clean
+binary `.workspace/flowgate-evaluation-release`. Implemented `daemon-evaluation-v1`
+on the existing root daemon: asynchronous
 readiness/Start/Stop, explicit independent activation grant, five-minute/session
 CAS, pinned watchdog, owned cleanup, Activity/rules/Decision Log/UDP independence.
 No second policy daemon or database owner. Real isolated receiver/Stop and actual
@@ -10,7 +12,10 @@ No second policy daemon or database owner. Real isolated receiver/Stop and actua
 activation cleanup passed. See [DAEMON-EVALUATION.md](DAEMON-EVALUATION.md) for
 exact API, reproducible fixtures, evidence and future host procedure.
 The running host monitor and active UDP collector are untouched; no host activation
-or rollout occurred. Frontend consumer is owned by the separate UI session.
+or rollout occurred. Frontend consumer is owned by the separate UI session (not merged here). Its
+exact-release sandboxed Wayland Start/Allow/Block/log/active-GUI-exit/reconnect/Stop
+journey passed; fixture CLEANED after DONE. Details and binary hash in
+[DAEMON-EVALUATION.md](DAEMON-EVALUATION.md).
 
 ## Current: Decision Log integrated and running in non-enforcing root monitor
 
