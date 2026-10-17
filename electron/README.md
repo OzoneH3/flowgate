@@ -850,3 +850,75 @@ Old-capability host fallback was inspected read-only in `.workspace/daemon-udp-e
 real Activity/icons, sorting and normal/narrow layout, no host mutation or restart.
 Logs: `.workspace/daemon-udp-{build,tests,wayland,display}.log`. Backend fixture owner
 handles its namespace/helper cleanup; Electron owns neither.
+
+## Decision Log (`decision-log-v1`)
+
+The **Decision log** tab (Ctrl+4) presents the daemon's persistent firewall decision
+log: what tried to connect, what FlowGate decided, and why. The backend owns capture,
+persistence, authorization and history (`docs/DECISION-LOG.md`); Electron only presents
+it (`src/decision-log.ts` parsing/paging, `src/decision-log-client.ts` main-process
+queries, `src/decision-log-view.ts` tab). It uses the existing connection: the
+primary controller when it advertises the capability, otherwise the read-only companion.
+
+- Newest-first cursor paging (100/page, ≤1000 retained rows with an explicit limit),
+  `log_id`-scoped cursors (`invalid_cursor` or a new `log_id` restarts at newest),
+  stable-ID deduplication, one request in flight, stale filter responses dropped.
+- Server-side filters only: time range, direction, outcome, source, and "Only this
+  application" from a selected record (key matches all revisions).
+- Live follow / Pause. Inserts keep the selection and scroll position; "↑ N new" or
+  "New records — show" indicates arrivals. Polling runs only while the tab is visible.
+- Details show decision-time evidence only: outcome, source, scope, recorded reason,
+  deciding UID, kernel verdict, recorded application identity and attribution, rule
+  snapshot (ID/version/filter). **Allow is a policy decision plus verdict submission;
+  delivery is always "Not observed by FlowGate".** A pending record links only to a
+  loaded final record with the same request ID, otherwise "outcome not recorded".
+- The current rule is shown separately (same version / changed since / no longer
+  exists, plus "View current rule…" through the versioned editor). Deletion is only
+  claimed on a rule-managing connection; elsewhere current state is "not available".
+- Explicit states: disconnected, capability missing, permission denied, loading, no
+  matching records, no decisions yet (with enforcement-stopped note), health
+  (degraded/dropped/write losses/retention removed), gap rows, self/machine scope.
+
+### Verification
+
+Backend `028ca809386d8d4ee616dd4dce1b0b9190d88f82` (test binary
+`.workspace/decisionlog-build/flowgate-decisionlog`, `vcs.revision` = that commit,
+`vcs.modified=false`), integrated `142da8d28b8589f36b47fc4ecd23a314763ddc64`.
+
+Real isolated enforcement (no sudo; own `decisions.db`; never the host daemon):
+
+```sh
+R=$PWD/.workspace/decision-log-ui-fixture-<n>; mkdir -m 700 "$R"
+scripts/lab.sh python3 scripts/decision-log-isolated.py \
+  --binary .workspace/decisionlog-build/flowgate-decisionlog --run "$R" --hold </dev/null &
+FLOWGATE_LOG_UI_RUN=$R node electron/test/decision-log-workflow.mjs
+echo quit > "$R/command"
+```
+
+Two sandboxed Wayland runs passed (`.workspace/decision-log-ui-X31d4e/`,
+`.workspace/decision-log-ui-leVPx2/` in this worktree), each compared with the same
+daemon's API: newest page equality; real user (scope application) and rule decisions
+with recorded source/reason and verdict/delivery separation; live arrivals
+(`decide-allow`) without losing the selection; `rule-traffic 130` then full paging of
+145 / 285 records equal to daemon paging without duplicates; server-side direction,
+action and source filters equal to daemon queries; `restart` (same database, new
+generation) keeps all earlier rows and appends new ones. Screenshots `log-details.png`
+(normal) and `log-narrow.png`. The burst included one real `capacity` block among
+rule allows. The lab's `list` carries no rule inventory, which exposed and fixed a
+false "rule no longer exists" claim.
+
+Stored-rule edit/delete is not available in the lab (memory rules): snapshot
+immutability is covered by the backend's unit tests; the UI's "changed since" and
+"no longer exists" presentation is covered by the **synthetic** display check
+`node electron/test/decision-log-display.mjs` (also unsupported, forbidden, empty,
+filtered-empty, degraded health with a gap row). Store logic: 9 synthetic unit tests
+in `test/decision-log.test.cjs`.
+
+Backend limitations, as documented (not strengthened here): records within the ~1 s
+durability window are lost on a daemon crash; overflow/storage failures produce gap
+records and degraded health; identical re-decisions of the same flow after lease
+expiry collapse to one per minute and repeated capacity refusals per 5 s; datagrams,
+fragments, IPv6 extension headers and non-SYN TCP are not individually logged;
+held-packet verdicts after a decision are not individually logged; delivery is never
+observed; host enforcement was not run. This is a firewall decision log, not a
+connection census; monitoring-only daemons record nothing.

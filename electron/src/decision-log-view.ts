@@ -358,14 +358,21 @@ async function showDetail(id: string) {
       'Record type',
       r.kind === 'pending' ? 'Request awaiting an answer' : 'Final disposition',
     );
-    if (r.kind === 'pending')
+    if (r.kind === 'pending') {
+      // Link only to a final record actually present; never infer an outcome.
+      const final = current?.records.find(
+        (x) => x.kind === 'final' && x.request_id === r.request_id,
+      );
       parts.push(
         el(
           'p',
-          'A later record with the same request ID holds the outcome, if one was recorded.',
+          final
+            ? `Outcome recorded in sequence ${final.sequence}: ${outcomeLabel(final)} (${sourceLabel(final.decision?.source || '')}).`
+            : 'No final record with this request ID is loaded. If none exists, the outcome was not recorded (e.g. daemon crash).',
           'hint',
         ),
       );
+    }
     const v = section('Kernel verdict');
     field(v, 'Verdict', verdictLabel(r.verdict?.state));
     field(v, 'Detail', r.verdict?.detail);
@@ -445,8 +452,10 @@ function renderRuleComparison(record?: LogRecord) {
   const snapshot = r?.decision?.rule;
   if (!snapshot) return;
   const c = client?.control;
-  if (!c?.connected || !c.rules) {
-    box.replaceChildren(el('p', 'Current rules are unavailable on this connection.', 'hint'));
+  // Only a rule-managing connection returns the full inventory; elsewhere an absent rule
+  // proves nothing (e.g. lab memory rules, read-only peers).
+  if (!c?.connected || !c.rules || !canManageRules(c)) {
+    box.replaceChildren(el('p', 'Current rule state is not available on this connection.', 'hint'));
     return;
   }
   const now = c.rules.find((x) => x.id === snapshot.id);

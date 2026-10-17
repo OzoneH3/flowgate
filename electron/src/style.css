@@ -956,7 +956,7 @@ td.up { color: #c7daa8; background: #344b20; }
 #logTable th:nth-child(3) { width: 72px; }
 #logTable th:nth-child(4) { width: 52px; }
 #logTable th:nth-child(5), #logTable th:nth-child(6) { width: 15%; }
-#logTable th:nth-child(7) { width: 90px; }
+#logTable th:nth-child(7) { width: 120px; }
 #decisionLogView .filterbar { flex-wrap: wrap; }
 .log-details dl { align-items: baseline; }
 #logTable .application-icon { margin-right: 5px; }

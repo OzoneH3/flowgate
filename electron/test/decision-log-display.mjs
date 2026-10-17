@@ -28,7 +28,23 @@ const base = (readonly) => ({
     can_decide: false,
   },
   enforcement: { state: 'stopped', profile: '', detail: 'Synthetic fixture' },
-  rules: [],
+  // Rule-managing primary returns the current inventory: syn-rule-a is now version 4.
+  rules: readonly
+    ? []
+    : [
+        {
+          id: 'syn-rule-a',
+          version: 4,
+          created: '2026-01-01T00:00:00Z',
+          expires: '0001-01-01T00:00:00Z',
+          schema: 2,
+          executable: '/synthetic/app',
+          filter: { application: 'synthetic', direction: 'outgoing', protocol: 'tcp' },
+          priority: 0,
+          action: 'block',
+          disabled: false,
+        },
+      ],
   activity: {
     sequence: 1,
     collected: new Date().toISOString(),
@@ -37,7 +53,7 @@ const base = (readonly) => ({
     processes: {},
   },
 });
-const record = (seq, action, source) => ({
+const record = (seq, action, source, rule = null) => ({
   id: 'syn-' + seq,
   sequence: String(seq),
   time: new Date(Date.now() - (40 - seq) * 60e3).toISOString(),
@@ -67,7 +83,8 @@ const record = (seq, action, source) => ({
     source,
     scope: source === 'user' ? 'once' : '',
     reason: 'SYNTHETIC record',
-    matching_rules: [],
+    rule,
+    matching_rules: rule ? [rule.id] : [],
     decided_by_uid: source === 'user' ? 1000 : null,
   },
   verdict: { state: action === 'allow' ? 'accept_submitted' : 'drop_submitted', detail: '' },
@@ -87,6 +104,24 @@ const page = () => ({
             gap: { dropped: 4, reason: 'SYNTHETIC buffer overflow' },
           },
           record(10, 'allow', 'user'),
+          record(9, 'allow', 'rule', {
+            id: 'syn-rule-a',
+            version: '2',
+            action: 'allow',
+            priority: 0,
+            expires: '0001-01-01T00:00:00Z',
+            disabled: false,
+            filter: { application: 'synthetic' },
+          }),
+          record(8, 'block', 'rule', {
+            id: 'syn-rule-gone',
+            version: '1',
+            action: 'block',
+            priority: 0,
+            expires: '0001-01-01T00:00:00Z',
+            disabled: false,
+            filter: { application: 'synthetic' },
+          }),
         ],
   has_more: false,
   next_before: '',
@@ -175,7 +210,7 @@ try {
   await p.screenshot({ path: path.join(dir, 'empty.png') });
   variant = 'degraded';
   await p.selectOption('#logDirection', 'outgoing');
-  await until(async () => (await p.locator('#logRows tr').count()) === 3, 'records');
+  await until(async () => (await p.locator('#logRows tr').count()) === 5, 'records');
   assert.match(await p.locator('#logRows tr.log-gap').innerText(), /Records lost: 4/);
   assert.match(await p.locator('#logStatus').innerText(), /Logging degraded · 4 records dropped/);
   await p.click('#logRows tr[data-id="syn-12"]');
@@ -186,12 +221,31 @@ try {
   const details = await p.locator('#logDetails').innerText();
   assert.match(details, /Delivery\s+Not observed by FlowGate/);
   assert.doesNotMatch(details, /Delivered/);
+  // Decision-time snapshot vs current inventory (edit/delete are not in the lab fixture).
+  await p.click('#logRows tr[data-id="syn-9"]');
+  await until(
+    async () => /current version 4/.test(await p.locator('#logDetails').innerText()),
+    'edited rule',
+  );
+  const edited = await p.locator('#logDetails').innerText();
+  assert.match(edited, /Version\s+2/);
+  assert.match(edited, /View current rule/);
+  await p.click('#logRows tr[data-id="syn-8"]');
+  await until(
+    async () => /no longer exists/.test(await p.locator('#logDetails').innerText()),
+    'deleted rule',
+  );
+  await p.click('#logRows tr[data-id="syn-12"]');
+  await until(
+    async () => /User decision/.test(await p.locator('#logDetails').innerText()),
+    'reselect',
+  );
   await p.screenshot({ path: path.join(dir, 'degraded.png') });
   await p.setViewportSize({ width: 860, height: 600 });
   await p.waitForTimeout(500);
   await p.screenshot({ path: path.join(dir, 'degraded-narrow.png') });
   console.log(
-    'PASS SYNTHETIC decision-log states (unsupported, forbidden, empty, filtered, degraded+gap) ' +
+    'PASS SYNTHETIC decision-log states (unsupported, forbidden, empty, filtered, degraded+gap, rule edited/deleted since decision) ' +
       dir,
   );
 } finally {

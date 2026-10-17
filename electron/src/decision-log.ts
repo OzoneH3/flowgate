@@ -244,6 +244,8 @@ export const LOG_SOURCES = [
   'policy_change',
   'identity_changed',
   'default_ask',
+  'rule_edit',
+  'shutdown',
 ];
 export function validateFilter(v: unknown): LogFilter {
   const f = obj(v),
@@ -530,6 +532,8 @@ const SOURCE_LABELS: Record<string, string> = {
   policy_change: 'Policy change',
   identity_changed: 'Identity changed',
   default_ask: 'Default: ask',
+  rule_edit: 'Rule saved while pending',
+  shutdown: 'Daemon stopped while pending',
 };
 export const sourceLabel = (s: string) => SOURCE_LABELS[s] || s || '—';
 export function outcomeLabel(r: LogRecord) {

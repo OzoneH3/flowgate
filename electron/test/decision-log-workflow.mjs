@@ -7,11 +7,18 @@ import path from 'node:path';
 import net from 'node:net';
 import assert from 'node:assert/strict';
 const root = path.resolve(import.meta.dirname, '../..');
-const endpoint = process.env.FLOWGATE_LOG_UI_ENDPOINT;
-// Fixture operations: a JSON line appended to this file per operation (owner-defined).
-const opsFile = process.env.FLOWGATE_LOG_UI_OPS;
-if (!endpoint?.startsWith(path.join(root, '.workspace') + '/'))
-  throw Error('Isolated .workspace endpoint required; host endpoints refused');
+// Fixture run directory from scripts/decision-log-isolated.py --hold (fixture owns it).
+const fixture = process.env.FLOWGATE_LOG_UI_RUN;
+// Project or worktree .workspace only; never /run host endpoints.
+if (
+  !fixture ||
+  !path.isAbsolute(fixture) ||
+  !fixture.includes('/.workspace/') ||
+  fixture.startsWith('/run/')
+)
+  throw Error('Isolated .workspace fixture run directory required; host endpoints refused');
+const endpoint = JSON.parse(fs.readFileSync(path.join(fixture, 'ready.json'), 'utf8')).socket;
+if (!endpoint.startsWith(fixture + '/')) throw Error('Fixture socket outside its run directory');
 const run = fs.mkdtempSync(path.join(root, '.workspace/decision-log-ui-'));
 const log = (s) => (console.log(s), fs.appendFileSync(path.join(run, 'result.log'), s + '\n'));
 const api = (q) =>
@@ -39,9 +46,20 @@ async function allIds(filter = {}) {
   }
   throw Error('paging did not terminate');
 }
-async function op(name, extra = {}) {
-  if (!opsFile) throw Error('FLOWGATE_LOG_UI_OPS required for fixture operation ' + name);
-  fs.appendFileSync(opsFile, JSON.stringify({ operation: name, ...extra }) + '\n');
+// One plain command at a time via <run>/command; completion is 'DONE <cmd>' or 'FAILED'.
+async function op(cmd) {
+  const logFile = path.join(fixture, 'verification.log');
+  const offset = fs.statSync(logFile).size;
+  fs.writeFileSync(path.join(fixture, 'command'), cmd + '\n');
+  const word = cmd.split(' ')[0];
+  for (let i = 0; i < 600; i++) {
+    const tail = fs.readFileSync(logFile, 'utf8').slice(offset);
+    if (tail.includes('FAILED ' + cmd) || tail.includes('UNKNOWN ' + cmd))
+      throw Error('Fixture command failed: ' + tail.trim());
+    if (tail.includes('DONE ' + word)) return tail.trim();
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw Error('Fixture command timed out: ' + cmd);
 }
 const wait = async (fn, what, tries = 300) => {
   for (let i = 0; i < tries; i++) {
@@ -106,31 +124,57 @@ try {
       const t = await page.locator('#logDetails').innerText();
       return t.includes(r.sequence) && t;
     }, 'details for ' + r.id);
-    assert.match(text, source === 'user' ? /User decision/ : /Rule at decision time/);
+    assert.match(text, source === 'user' ? /User decision/i : /Rule at decision time/i);
     if (r.decision.reason) assert(text.includes(r.decision.reason), 'recorded reason missing');
     if (r.decision.scope) assert.match(text, /Scope/);
-    assert.doesNotMatch(text, /Delivered/);
+    assert.doesNotMatch(text, /Delivered/i);
+    assert.match(text, /Not observed by FlowGate/);
+    assert.doesNotMatch(text, /no longer exists/, 'deletion claimed without rule inventory');
     log(
       `${source} decision ${r.id}: source/reason${r.decision.scope ? '/scope ' + r.decision.scope : ''} shown`,
     );
   }
   await page.screenshot({ path: path.join(run, 'log-details.png') });
 
-  // 3. Full paging without duplicates or gaps at page boundaries.
-  const expected = await allIds();
+  // 3. Live arrivals do not steal the selection.
+  const inspect = newest[Math.min(3, newest.length - 1)];
+  await page.click(`#logRows tr[data-id="${inspect.id}"]`);
+  const top0 = (await query({ limit: 1 })).decision_log.records[0].sequence;
+  log('fixture: ' + (await op('decide-allow')));
+  await wait(async () => (await state()).records[0].sequence !== top0, 'new decision in UI');
+  assert.equal(
+    await page.locator('#logRows tr[aria-selected="true"]').getAttribute('data-id'),
+    inspect.id,
+  );
+  const arrived = (await state()).records.filter((r) => BigInt(r.sequence) > BigInt(top0));
+  log(
+    `live: ${arrived.length} new records (${arrived.map((r) => r.kind + '/' + (r.decision?.source || '')).join(', ')}); selection kept on ${inspect.id}`,
+  );
+
+  // 4. More than one page of real rule decisions, then full paging.
+  log('fixture: ' + (await op('rule-traffic 130')));
+  const settled = await wait(async () => {
+    const a = await allIds();
+    await new Promise((r) => setTimeout(r, 1500));
+    const b = await allIds();
+    return a.length === b.length && b;
+  }, 'records settled (durability window)');
+  await wait(async () => (await shown())[0] === settled[0], 'live view caught up');
   for (let i = 0; i < 20 && (await state()).hasOlder; i++) {
     await page.click('#logOlder');
-    await page.waitForTimeout(150);
+    await wait(async () => !(await state()).busy, 'older page');
   }
   const ids = await shown();
   assert.equal(new Set(ids).size, ids.length, 'duplicate rows');
-  assert.deepEqual(ids.slice(0, expected.length), expected.slice(0, ids.length));
-  log(`paged ${ids.length}/${expected.length} records; no duplicates, boundaries contiguous`);
+  assert.deepEqual(ids, settled, 'UI rows differ from daemon paging');
+  assert(ids.length > 100, 'fixture produced a single page only');
+  log(`paging: ${ids.length} records equal the daemon's full newest-first paging; no duplicates`);
 
-  // 4. Server-side filter equals the daemon's filtered result.
+  // 5. Server-side filters equal the daemon's filtered results.
   for (const [select, value, key] of [
     ['#logDirection', 'incoming', 'direction'],
     ['#logAction', 'block', 'action'],
+    ['#logSource', 'user', 'source'],
   ]) {
     await page.selectOption(select, value);
     const want = (await query({ limit: 100, [key]: value })).decision_log.records.map((r) => r.id);
@@ -138,81 +182,48 @@ try {
       async () => JSON.stringify((await shown()).slice(0, want.length)) === JSON.stringify(want),
       `${key} filter`,
     );
-    log(`${key}=${value}: ${want.length} records, equals daemon query`);
+    log(`filter ${key}=${value}: ${want.length} records, equals daemon query`);
     await page.selectOption(select, '');
   }
-  await wait(async () => (await shown())[0] === newest[0].id, 'unfiltered again');
+  await wait(async () => (await shown())[0] === settled[0], 'unfiltered again');
 
-  if (opsFile) {
-    // 5. New decisions do not steal selection or move the inspected row.
-    const inspect = newest[Math.min(5, newest.length - 1)];
-    await page.click(`#logRows tr[data-id="${inspect.id}"]`);
-    const y0 = await page.locator(`#logRows tr[data-id="${inspect.id}"]`).boundingBox();
-    const top0 = (await query({ limit: 1 })).decision_log.records[0].sequence;
-    await op('decide');
+  // 6. Restart with the same database: history persists and the view continues.
+  const before = await shown(),
+    gen0 = (await api({ operation: 'list' })).generation;
+  log('fixture: ' + (await op('restart')));
+  await wait(
+    async () =>
+      (await state()).status === 'ready' &&
+      (await state()).generation &&
+      (await state()).generation !== gen0,
+    'reconnected to new generation',
+    600,
+  );
+  log('fixture: ' + (await op('decide-block')));
+  await wait(async () => {
+    const v = await state();
+    return v.records[0]?.generation === v.generation;
+  }, 'post-restart record');
+  const after = await shown();
+  assert(
+    before.every((id) => after.includes(id)),
+    'persisted records missing after restart',
+  );
+  assert.equal(new Set(after).size, after.length, 'duplicates after restart');
+  log(
+    `restart: generation ${(await state()).generation}; all ${before.length} earlier records still shown, new records appended`,
+  );
+  const blocked = (await state()).records.find(
+    (r) => r.kind === 'final' && r.decision?.action === 'block' && r.decision.source === 'user',
+  );
+  if (blocked) {
+    await page.click(`#logRows tr[data-id="${blocked.id}"]`);
     await wait(
-      async () => (await query({ limit: 1 })).decision_log.records[0].sequence !== top0,
-      'new decision recorded',
+      async () => (await page.locator('#logDetails').innerText()).includes(blocked.sequence),
+      'blocked details',
     );
-    await wait(async () => (await state()).records[0].sequence !== top0, 'new decision in UI');
-    assert.equal(
-      await page.locator('#logRows tr[aria-selected="true"]').getAttribute('data-id'),
-      inspect.id,
-    );
-    log(
-      `selection preserved across new records (row moved ${Math.round((await page.locator(`#logRows tr[data-id="${inspect.id}"]`).boundingBox()).y - y0.y)}px)`,
-    );
-
-    // 6. Historical rule snapshot after the rule changes and is deleted.
-    const ruled = (await allIds({ source: 'rule' }))[0];
-    if (ruled) {
-      const rec = (await api({ operation: 'decision-log-get', decision_id: ruled }))
-        .decision_record;
-      await op('edit-rule', { rule_id: rec.decision.rule.id });
-      await page.click(`#logRows tr[data-id="${ruled}"]`).catch(() => {});
-      const edited = await wait(async () => {
-        const t = await page.locator('#logDetails').innerText();
-        return /rule has changed since/.test(t) && t;
-      }, 'edited rule comparison');
-      assert(
-        edited.includes(`Version\n${rec.decision.rule.version}`) ||
-          edited.includes(rec.decision.rule.version),
-      );
-      await page.screenshot({ path: path.join(run, 'rule-edited.png') });
-      await op('delete-rule', { rule_id: rec.decision.rule.id });
-      await page.click('#logRows tr:first-child');
-      await page.click(`#logRows tr[data-id="${ruled}"]`);
-      await wait(
-        async () => /no longer exists/.test(await page.locator('#logDetails').innerText()),
-        'deleted rule',
-      );
-      log('decision-time rule snapshot kept after edit and delete; current rule shown separately');
-    }
-
-    // 7. Daemon restart (same database): records persist, view continues.
-    const before = await shown();
-    await op('restart');
-    await wait(
-      async () =>
-        (await state()).status === 'disconnected' ||
-        (await state()).generation !== first.generation,
-      'restart observed',
-      600,
-    );
-    await wait(
-      async () =>
-        (await state()).status === 'ready' &&
-        (await api({ operation: 'list' })).generation !== first.generation,
-      'reconnected',
-      600,
-    );
-    const after = await shown();
-    assert(
-      before.every((id) => after.includes(id)),
-      'persisted records missing after restart',
-    );
-    log(`restart: ${before.length} previously shown records still present`);
-  } else log('fixture operations unavailable: live/rule-change/restart checks skipped');
+  }
+  await page.screenshot({ path: path.join(run, 'log-after-restart.png') });
 
   await page.setViewportSize({ width: 860, height: 600 });
   await page.waitForTimeout(500);
