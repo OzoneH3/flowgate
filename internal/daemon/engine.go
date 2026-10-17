@@ -27,6 +27,10 @@ type Event struct {
 	Token            string               `json:"-"`
 }
 type Engine struct {
+	creationMu       sync.Mutex // serializes bounded preview/replay lifecycle, never packet processing
+	creationPreviews map[string]*creationPreview
+	verifyObserved   func(string, identity.ActivityProcess) (identity.Process, error) // tests only; production uses identity verifier
+
 	policyQueryMu      sync.Mutex // serializes metadata health sampling with response ordering
 	policyReadSequence uint64     // read-response ordering only, protected by mu
 	StopMonitoring     func()     // configured only for non-enforcing root daemon; API requires root peer

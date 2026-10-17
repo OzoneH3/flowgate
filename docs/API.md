@@ -1,5 +1,20 @@
 # Local API additions: conditional rule deletion
 
+## Observed-application rule creation
+
+Primary capability `observed-rule-create-v1` adds generation/principal/draft-bound
+30-second preview and save from a freshly verified single-holder native Activity
+context. Explicit protocol/direction/address/ports/absolute expiry; identity comes
+only from backend inspection. Stored-only monitoring, existing authorization,
+SQLite atomic publication and precedence remain. Creation never approves pending
+packets; repeated same-token saves are bounded acknowledgements, not duplicate
+rules. See [OBSERVED-RULES.md](OBSERVED-RULES.md) for schema, examples, errors,
+reconciliation and native/namespace limitations. New `.workspace/flowgate-creation`
+build leaves the root monitor/executable untouched; eventual restart unexecuted.
+Focused race/vet/API/shared-FD/SQLite checks and isolated receiver Allow->Block
+passed. No frontend integration or broader matrix rerun.
+
+
 ## Current: backend-authoritative Activity policy metadata
 
 Capability `policy-explanations-v1` adds primary-only, generation-bound read-only

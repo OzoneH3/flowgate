@@ -18,6 +18,10 @@ import (
 )
 
 type Request struct {
+	ObservedTarget *ObservedTarget `json:"observed_target,omitempty"`
+	ObservedDraft  *ObservedDraft  `json:"observed_draft,omitempty"`
+	PreviewToken   string          `json:"preview_token,omitempty"`
+
 	ExpectedPolicyToken string       `json:"expected_policy_token,omitempty"`
 	EventIDs            []string     `json:"event_ids,omitempty"`
 	Generation          string       `json:"generation,omitempty"`
@@ -37,6 +41,9 @@ type EnforcementStatus struct {
 	StopsAt time.Time `json:"stops_at"`
 }
 type Response struct {
+	ObservedPreview *ObservedPreview `json:"observed_preview,omitempty"`
+	Replayed        bool             `json:"replayed,omitempty"`
+
 	PolicyView         *PolicyView                `json:"policy_view,omitempty"`
 	PolicyExplanations *PolicyExplanations        `json:"policy_explanations,omitempty"`
 	BackendMode        string                     `json:"backend_mode,omitempty"`
@@ -138,7 +145,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						}
 					}
 					if !readonly && e.Mode != "host-monitor" {
-						r.Capabilities = append(r.Capabilities, PolicyExplanationCapability)
+						r.Capabilities = append(r.Capabilities, PolicyExplanationCapability, ObservedRuleCapability)
 					}
 					stopAfterResponse := false
 					if e.APIUID != nil && cred.Uid != *e.APIUID && cred.Uid != 0 {
@@ -166,6 +173,41 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						r.ErrorCode = "invalid_request"
 					} else {
 						switch q.Operation {
+						case "observed-rule-preview", "observed-rule-save":
+							if readonly || r.ReadOnly || !permissions.CanManageRules || e.Mode == "host-monitor" {
+								r.ErrorCode, r.Error = "read_only", "Rule management unavailable on this endpoint"
+							} else if q.ObservedDraft == nil || (q.Operation == "observed-rule-preview" && q.ObservedTarget == nil) || (q.Operation == "observed-rule-save" && (q.PreviewToken == "" || len(q.PreviewToken) > 128)) {
+								r.ErrorCode, r.Error = "invalid_request", "Explicit observed draft and target/preview token required"
+							} else {
+								var err error
+								if q.Operation == "observed-rule-preview" {
+									var v ObservedPreview
+									v, err = e.PreviewObservedRule(q.Generation, *q.ObservedTarget, *q.ObservedDraft, cred.Uid, admin, r.Enforcement)
+									if err == nil {
+										// Collection may take time: report freshly sampled health,
+										// separately from the verified executable's storage authority.
+										if e.Enforcement != nil {
+											health := e.Enforcement()
+											r.Enforcement = &health
+											v.Enforcement, _ = coverage(e.Mode, v.Rule.Filter.Direction, &health)
+										}
+										r.ObservedPreview = &v
+									}
+								} else {
+									var saved policy.Rule
+									saved, r.ScopePreview, r.Replayed, err = e.SaveObservedRule(q.Generation, q.PreviewToken, *q.ObservedDraft, cred.Uid, admin)
+									if err == nil {
+										r.SavedRule = &saved
+									}
+								}
+								if err != nil {
+									r.ErrorCode, r.Error = "invalid_request", err.Error()
+									var typed *RuleMutationError
+									if errors.As(err, &typed) {
+										r.ErrorCode = typed.Code
+									}
+								}
+							}
 						case "policy-view", "policy-explain":
 							if readonly || e.Mode == "host-monitor" {
 								r.Error = "Policy metadata requires the authenticated primary endpoint"

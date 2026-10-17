@@ -19,7 +19,7 @@ clients=[]
 observer=None
 active_job=None
 job_sequence=0
-BIN=str(ROOT/'.workspace/flowgate')
+BIN=os.environ.get('FLOWGATE_TEST_BINARY',str(ROOT/'.workspace/flowgate'))
 counts={};backend=None;stopping=False
 signal.signal(signal.SIGTERM,lambda *_:globals().update(stopping=True))
 signal.signal(signal.SIGINT,lambda *_:globals().update(stopping=True))
@@ -111,7 +111,10 @@ try:
         for v6,port in [(False,68),(True,546)]:remote('udp',port=port,v6=v6,dhcp=True);wait(lambda:counts[port]==1);assert not pending(port)
         print('PASS pre-existing TCP IPv4/IPv6 and DHCP client-port bootstrap datagrams',flush=True)
         stop_backend();sys.exit(0)
-    if '--delete-suite' in sys.argv:
+    if '--observed-creation-suite' in sys.argv:
+        from observed_rule_cases import exercise
+        exercise(globals())
+    elif '--delete-suite' in sys.argv:
         from delete_cases import exercise
         exercise(globals())
     elif '--outgoing-suite' in sys.argv:

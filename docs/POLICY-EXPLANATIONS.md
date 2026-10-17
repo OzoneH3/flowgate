@@ -149,7 +149,9 @@ executable path untouched. PID1973082 / generation5a559274aa006090cdc4bb5cd8faed
 is still running the old API. It must eventually be deliberately stopped and
 restarted with the new code to expose this capability; **no restart was performed**.
 No frontend files/branches were edited/integrated. First-rule creation from an
-observed app without pending context remains a separate authorized backend task.
+observed app now uses the separate `observed-rule-create-v1` workflow described
+in [OBSERVED-RULES.md](OBSERVED-RULES.md). These read associations still confer
+no rule-creation authority.
 
 ## Captured API examples (field excerpts, fixture session only)
 

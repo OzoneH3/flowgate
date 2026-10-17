@@ -1,12 +1,27 @@
 # Authoritative implementation plan
 
+## Completed: direct Activity rule creation
+
+Primary capability `observed-rule-create-v1` adds generation/principal/draft-bound
+30-second preview and save from a freshly verified single-holder native Activity
+context. Explicit protocol/direction/address/ports/absolute expiry; identity comes
+only from backend inspection. Stored-only monitoring, existing authorization,
+SQLite atomic publication and precedence remain. Creation never approves pending
+packets; repeated same-token saves are bounded acknowledgements, not duplicate
+rules. See [OBSERVED-RULES.md](OBSERVED-RULES.md) for schema, examples, errors,
+reconciliation and native/namespace limitations. New `.workspace/flowgate-creation`
+build leaves the root monitor/executable untouched; eventual restart unexecuted.
+Focused race/vet/API/shared-FD/SQLite checks and isolated receiver Allow->Block
+passed. No frontend integration or broader matrix rerun.
+
 ## Complete: Activity policy explanation contract
 
 Read-only generation/token/ordered-sequence batches expose configured scopes,
 defaults and direction coverage without inventing historical verdicts or permission
 targets. Recorded-event explanations reuse policy.Evaluate directly. Preserve the
 unchanged mutation/verdict engine. UI consumption and eventual authorized monitor
-restart are separate; observed-app first-rule creation is a later backend task.
+restart are separate; observed-app creation now has its own explicit token API
+(OBSERVED-RULES.md), never authority inferred from this read response.
 
 ## Complete: bounded Tailscale coexistence increment
 

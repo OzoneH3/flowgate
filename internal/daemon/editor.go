@@ -141,6 +141,49 @@ func (e *Engine) EditRule(id, eventID string, expected *uint64, candidate policy
 			return policy.Rule{}, "", fmt.Errorf("expiry must be in the future")
 		}
 	}
+	candidate, sentence, err := e.reviewRuleLocked(candidate, now, expiryUnchanged)
+	if err != nil {
+		return policy.Rule{}, "", err
+	}
+	if !commit {
+		return candidate, sentence, nil
+	}
+	next := append([]policy.Rule{}, e.rules...)
+	if index < 0 {
+		next = append(next, candidate)
+	} else {
+		next[index] = candidate
+	}
+	if err := e.publishRulesLocked(next); err != nil {
+		return policy.Rule{}, "", err
+	}
+	// Keep pending IDs so a newly created scoped rule can release the selected
+	// retained packet. Re-evaluate each pending attempt under current identity;
+	// final release still revalidates the fingerprint and original deadline.
+	for key, v := range e.events {
+		if v.State != "awaiting-decision" {
+			delete(e.events, key)
+			continue
+		}
+		a := e.Resolve(v.Flow)
+		if a.Fingerprint != v.Attribution.Fingerprint || a.Application == nil {
+			delete(e.events, key)
+			continue
+		}
+		action, effective, conflicts := policy.Evaluate(e.rules, v.Flow, a, e.Now())
+		v.Conflicts = conflicts
+		if action == "allow" || action == "block" {
+			v.Rule = effective
+			v.Reason = "decided by committed rule edit; FlowGate permission is not proof of delivery"
+			v.State = map[string]string{"allow": "allowed", "block": "blocked"}[action]
+		}
+	}
+	return candidate, sentence, nil
+}
+
+// reviewRuleLocked is shared by pending/editor and observed-application creation.
+// The caller supplies independently verified immutable identity and holds e.mu.
+func (e *Engine) reviewRuleLocked(candidate policy.Rule, now time.Time, expiryUnchanged bool) (policy.Rule, string, error) {
 	if candidate.Action != "allow" && candidate.Action != "block" {
 		return policy.Rule{}, "", fmt.Errorf("editor action must be allow or block")
 	}
@@ -180,40 +223,6 @@ func (e *Engine) EditRule(id, eventID string, expected *uint64, candidate policy
 	if count > 8 {
 		sentence += fmt.Sprintf(" And %d more overlapping rules.", count-8)
 	}
-	if !commit {
-		return candidate, sentence, nil
-	}
-	next := append([]policy.Rule{}, e.rules...)
-	if index < 0 {
-		next = append(next, candidate)
-	} else {
-		next[index] = candidate
-	}
-	if err := e.SaveRules(next); err != nil {
-		return policy.Rule{}, "", mutationError("persistence_failed", fmt.Sprintf("transaction failed; old policy retained: %v", err))
-	}
-	e.rules = next
-	// Keep pending IDs so a newly created scoped rule can release the selected
-	// retained packet. Re-evaluate each pending attempt under current identity;
-	// final release still revalidates the fingerprint and original deadline.
-	for key, v := range e.events {
-		if v.State != "awaiting-decision" {
-			delete(e.events, key)
-			continue
-		}
-		a := e.Resolve(v.Flow)
-		if a.Fingerprint != v.Attribution.Fingerprint || a.Application == nil {
-			delete(e.events, key)
-			continue
-		}
-		action, effective, conflicts := policy.Evaluate(e.rules, v.Flow, a, e.Now())
-		v.Conflicts = conflicts
-		if action == "allow" || action == "block" {
-			v.Rule = effective
-			v.Reason = "decided by committed rule edit; FlowGate permission is not proof of delivery"
-			v.State = map[string]string{"allow": "allowed", "block": "blocked"}[action]
-		}
-	}
 	return candidate, sentence, nil
 }
 
@@ -244,4 +253,13 @@ func filtersOverlap(a, b policy.Filter) bool {
 	}
 	pa, pb := prefix(a.RemoteAddress), prefix(b.RemoteAddress)
 	return pa.IsValid() && pb.IsValid() && (pa.Contains(pb.Addr()) || pb.Contains(pa.Addr()))
+}
+
+// Caller holds e.mu: durable transaction completes before policy publication.
+func (e *Engine) publishRulesLocked(next []policy.Rule) error {
+	if err := e.SaveRules(next); err != nil {
+		return mutationError("persistence_failed", fmt.Sprintf("transaction failed; old policy retained: %v", err))
+	}
+	e.rules = next
+	return nil
 }

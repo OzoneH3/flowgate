@@ -1,5 +1,19 @@
 # Continuation handoff
 
+## Observed-application creation increment
+
+Primary capability `observed-rule-create-v1` adds generation/principal/draft-bound
+30-second preview and save from a freshly verified single-holder native Activity
+context. Explicit protocol/direction/address/ports/absolute expiry; identity comes
+only from backend inspection. Stored-only monitoring, existing authorization,
+SQLite atomic publication and precedence remain. Creation never approves pending
+packets; repeated same-token saves are bounded acknowledgements, not duplicate
+rules. See [OBSERVED-RULES.md](OBSERVED-RULES.md) for schema, examples, errors,
+reconciliation and native/namespace limitations. New `.workspace/flowgate-creation`
+build leaves the root monitor/executable untouched; eventual restart unexecuted.
+Focused race/vet/API/shared-FD/SQLite checks and isolated receiver Allow->Block
+passed. No frontend integration or broader matrix rerun.
+
 ## Policy summaries/explanations increment
 
 Started5b66323, backend/API/tests/docs only; no frontend integration. Capability
@@ -13,7 +27,8 @@ no restart or executable-path replacement. New build .workspace/flowgate-policy.
 An eventual deliberate restart is needed to expose the API. Tests reproduce with
 scripts/check-policy-view.sh; reuse settled receiver/accounting/coexistence/UI
 results because no verdict path changed. UI agent owns consumer independently;
-its request for observed-app rule creation is a separate backend follow-up.
+observed-app creation is now supplied by the separate observed-rule-create-v1
+workflow above, never by the read-only associations.
 
 ## Tailscale coexistence increment
 
