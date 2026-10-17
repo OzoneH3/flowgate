@@ -16,20 +16,56 @@ The database and API directories must already exist and pass root ownership,
 ancestor and permission validation. It never repairs/chowns an unsafe path.
 The API directory may be 0711; sockets are 0600 and owned by the selected peer.
 
-Prepared manual command (not a service installation):
+## Running host monitor (explicitly authorized)
+
+The fixed paths are now prepared/validated. Existing directories and contents
+were preserved: `/run/flowgate-api` root:root 0711, `/var/lib/flowgate` root:root
+0700. The idempotent command accepts no path arguments, refuses unsafe ownership,
+symlinks or unexpected modes, and does not repair existing paths:
+
+```
+sudo -n /home/flowgate-user/Apps/flowgate/.workspace/flowgate monitor-setup
+```
+
+Manual non-enforcing startup (do not run a second instance while one is active):
 
 ```
 sudo -n /home/flowgate-user/Apps/flowgate/.workspace/flowgate serve \
   --socket /run/flowgate-api/daemon.sock \
-  --database /var/lib/flowgate/rules.db --uid "$(id -u)" --administrator
+  --database /var/lib/flowgate/rules.db --uid 1000 --administrator
 ```
 
-This requires deliberately prepared root-owned storage and runtime directories;
-it is not runnable until those exist. This task writes files only inside the
-repository, so it does not create `/var/lib/flowgate` or host runtime endpoints.
-Do not substitute a user-writable repository database/directory: startup refuses
-that privileged configuration. Passwordless permission for the executable does
-not make unsafe storage acceptable.
+Connect the unprivileged Electron Activity view, leaving this independent daemon
+running on frontend exit:
+
+```
+cd /home/flowgate-user/Apps/flowgate
+scripts/run-electron.sh --observer /run/flowgate-api/daemon.sock.monitor
+```
+
+The companion returns `mode=host-monitor`, `backend_mode=daemon-monitor`,
+`read_only=true`, with the same authenticated administrator observation scope.
+All mutations are rejected. The main endpoint still uses `mode=daemon-monitor`;
+**current Electron does not yet support its permission-aware control/rule view**.
+Do not pass it as `--control` or mistake the absent control connection for an
+active firewall. The backend remains enforcement-stopped; the existing frontend
+can display Activity but cannot currently display this daemon's policy controls
+or independently confirm its enforcement state. No UI visual files were changed.
+
+Stop only the intended monitor generation as root (not ordinary delegated admin):
+
+```
+sudo -n /home/flowgate-user/Apps/flowgate/.workspace/flowgate monitor-stop \
+  --generation 5a559274aa006090cdc4bb5cd8faed47
+```
+
+That token identifies the daemon started in this task, PID 1973082. After a future
+restart, inspect `flowgate pending --socket /run/flowgate-api/daemon.sock` for the
+new generation and confirm it before stopping. `monitor-stop` has a fixed socket,
+requires the exact generation and root SO_PEERCRED, never signals arbitrary PIDs
+or stops enforcement instances. Its acknowledgement confirms shutdown requested;
+check process/socket disappearance if the response is lost, without blind retry.
+The database is retained and only that listener's sockets are cleaned up.
 
 For a root read-only probe requiring no runtime files:
 
@@ -94,11 +130,20 @@ that refusal. No workaround disables Tailscale or weakens security.
 self-grant rejection, SQLite exclusive writer test, race/vet, and isolated root
 namespace non-enforcing daemon with actual UID0 listener and service rule edit/
 conditional delete. Stored Block does not prevent delivery; nft state unchanged.
-The isolated peer is UID0 in a user namespace; delegation to a different real
-host UID is configuration/unit tested, not demonstrated by that fixture.
+The isolated peer is UID0 in a user namespace. Subsequent authorized host verification
+used a real UID1000 peer and root server, demonstrating machine-visible Activity
+including other-UID system processes. The `.monitor` endpoint rejected rule
+save/delete/legacy mutation, packet decisions and shutdown; primary rejected
+UID1000 shutdown despite its administrative rule authority.
 
 Authorized root host doctor saw UID0, 95 sockets/17 tasks, no inaccessible process
 directories, 18 ms census. It reported tailscale0 and existing marks as blockers.
-No NFQUEUE bind, BPF attach, root host endpoint, root service or host enforcement
-was started. Raw local evidence is under `.workspace/root-doctor.json`,
+After that diagnostic, root monitor PID1973082 was explicitly authorized and
+started with enforcement stopped. No NFQUEUE bind, BPF attach, root service or
+host enforcement was started. Actual sandboxed UID1000 Electron Wayland connection
+showed machine Activity; the test GUI exited while the independent daemon stayed
+running. Evidence `.workspace/root-monitor-live-verification.json`,
+`.workspace/root-monitor-ui.log`, `.workspace/root-monitor-ui-header.png`,
+`.workspace/root-monitor-isolated.log`. Older diagnostic evidence:
+`.workspace/root-doctor.json`,
 `.workspace/root-sockets.json` and `.workspace/administrator-isolated.log`.

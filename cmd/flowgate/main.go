@@ -36,7 +36,7 @@ func main() {
 	identity.WineBrokerExecutable = os.Getenv("FLOWGATE_WINE_BROKER")
 
 	if len(os.Args) < 2 {
-		fmt.Printf("%s: doctor | runtime-discover | sockets | process PID | attribute | pending | decide | rule-delete | serve | observe | serve-lab | host-start | host-status | host-stop | host-recover\n", productName)
+		fmt.Printf("%s: doctor | runtime-discover | sockets | process PID | attribute | pending | decide | rule-delete | monitor-setup | monitor-stop | serve | observe | serve-lab | host-start | host-status | host-stop | host-recover\n", productName)
 		return
 	}
 	switch os.Args[1] {
@@ -111,6 +111,14 @@ func main() {
 		}
 	case "udp-start", "udp-stop":
 		if err := udpCommand(); err != nil {
+			fatal(err)
+		}
+	case "monitor-setup":
+		if err := monitorSetupCommand(os.Args[2:]); err != nil {
+			fatal(err)
+		}
+	case "monitor-stop":
+		if err := monitorStopCommand(os.Args[2:]); err != nil {
 			fatal(err)
 		}
 	case "serve":

@@ -1,5 +1,22 @@
 # Current status
 
+## Current: authorized root monitor running
+
+Root native monitor was actually started, PID **1973082**, socket
+`/run/flowgate-api/daemon.sock`, UID1000 explicitly delegated administrator.
+Enforcement remains **stopped**. Fixed root paths validated without modifying
+existing data. Actual UID1000 authenticated requests saw machine Activity,
+including root services; the read-only companion rejected all tested mutations.
+Generation-scoped root-only Stop passed in isolation. See AUTHORIZATION.md for
+exact launch/Stop commands and actual live-generation token.
+
+Sandboxed UID1000 Wayland Electron connected to `.monitor` and showed real rows;
+its test instance exited without stopping the daemon. Permission-aware primary
+control/rule connection remains a frontend follow-up. No live enforcement,
+BPF attachment, Tailscale/routing change, service installation or autostart.
+Evidence `.workspace/root-monitor-live-verification.json`, `root-monitor-ui.log`,
+`root-monitor-ui-header.png`, `root-monitor-isolated.log`.
+
 ## Current: root-daemon foundation and explicit administrator authorization
 
 Native Activity and stored policy can share a non-enforcing foreground root

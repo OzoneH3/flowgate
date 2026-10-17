@@ -152,3 +152,19 @@ Clients must not equate `read_only=false` with active enforcement; use enforceme
 health and separate can_manage_rules/can_decide. Old clients may need a permission-
 aware UI adaptation; current launchers do not select this new mode automatically.
 No new cross-user privilege exists on default prototype endpoints.
+
+## Root monitor lifecycle and observation compatibility
+
+The non-enforcing daemon companion reports `mode:host-monitor`,
+`backend_mode:daemon-monitor`, `read_only:true` so existing observation clients
+can attach unchanged. The primary retains daemon-monitor mode and permission
+metadata. This is one Go process; no collector or controller is started implicitly.
+
+`monitor-stop-v1` advertises lifecycle support in daemon-monitor only. Request:
+`{"version":1,"operation":"monitor-stop","generation":"EXACT_LISTED_GENERATION"}`.
+Only UID0 via SO_PEERCRED on the primary endpoint may stop it; the delegated
+administrator cannot. Errors: read_only, forbidden, unavailable,
+generation_conflict. Accepted response adds `stopping:true`; shutdown follows
+the response attempt even if the client lost it. Inspect authoritative process/
+endpoint state rather than replaying; never use an unconditional stop.
+This operation is not an enforcement Stop/recovery operation.

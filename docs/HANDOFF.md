@@ -1,5 +1,20 @@
 # Continuation handoff
 
+## Authorized live root monitoring setup
+
+Continued 08a4112. Fixed-path `monitor-setup` validates or creates only
+/run/flowgate-api (0711) and /var/lib/flowgate (0700). Both already existed and
+were preserved. Root `serve` actually running PID1973082, generation
+5a559274aa006090cdc4bb5cd8faed47, UID1000 admin, enforcement stopped. Keep it
+running as user requested. Exact commands/stop token in AUTHORIZATION.md.
+Actual UID1000 API and sandboxed Wayland Electron verified machine-visible
+Activity and readonly rejection. Root-only generation-checked monitor-stop is
+exposed by non-enforcing daemon only; the companion uses host-monitor mode plus
+backend_mode for compatibility. Main daemon-monitor permission-aware frontend
+integration remains UI-owned follow-up; no visual branch was integrated.
+Root service, live enforcement and BPF were not activated. The earlier root
+architecture handoff below describes its historical pre-activation snapshot.
+
 ## Root architecture increment
 
 Started 2752e1046cc36e2e9459453e5f49ab2070376551. Backend/CLI/fixtures/docs only;

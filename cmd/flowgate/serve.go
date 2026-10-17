@@ -62,6 +62,7 @@ func serveCommand(args []string) error {
 	e.Activity = observer.Snapshot
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
+	e.StopMonitoring = cancel
 	api, err := daemon.Serve(*socket, e, false)
 	if err != nil {
 		return err

@@ -107,3 +107,40 @@ func TestAdministratorCannotAllowAmbiguousApplication(t *testing.T) {
 		t.Fatal("administrator invented application authority")
 	}
 }
+
+func TestMonitorCompanionCompatibilityAndRootOnlyStop(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "s")
+	e := New(0)
+	e.Mode = "daemon-monitor"
+	stopped := false
+	e.StopMonitoring = func() { stopped = true }
+	e.Activity = func() identity.ActivitySnapshot { return identity.ActivitySnapshot{} }
+	l, err := Serve(path, e, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	r, err := Call(path, Request{Version: 1, Operation: "list"})
+	if err != nil || r.Mode != "host-monitor" || r.BackendMode != "daemon-monitor" || !r.ReadOnly {
+		t.Fatal(r, err)
+	}
+	r, err = Call(path, Request{Version: 1, Operation: "monitor-stop", Generation: e.Generation})
+	if err == nil || r.ErrorCode != "read_only" || stopped {
+		t.Fatal("read-only shutdown", r, err)
+	}
+	if os.Getuid() != 0 {
+		rw, err := Serve(filepath.Join(dir, "rw"), e, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rw.Close()
+		r, err = Call(filepath.Join(dir, "rw"), Request{Version: 1, Operation: "monitor-stop", Generation: e.Generation})
+		if err == nil || r.ErrorCode != "forbidden" || stopped {
+			t.Fatal("delegation became root shutdown", r, err)
+		}
+	}
+}

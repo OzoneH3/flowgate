@@ -1,5 +1,19 @@
 # FlowGate
 
+## Use the authorized root Activity monitor
+
+```
+scripts/run-electron.sh --observer /run/flowgate-api/daemon.sock.monitor
+```
+
+The independent root monitor is running with enforcement **stopped**. Electron
+stays unprivileged; closing it leaves the monitor running. Current Electron can
+use its read-only Activity companion; permission-aware service-rule management
+through the primary endpoint remains a frontend follow-up. Setup, manual root
+startup and generation-checked Stop: [AUTHORIZATION.md](docs/AUTHORIZATION.md).
+Ordinary launch without this argument remains the original unprivileged observer.
+
+
 ## Root daemon architecture
 
 Production targets one root Go daemon with an unprivileged desktop. New `serve`

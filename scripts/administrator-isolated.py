@@ -47,7 +47,14 @@ try:
  assert not (api/'other').exists()
  deleted=call('rule-delete',generation=state['generation'],id=rule['id'],expected_version=2);assert 'error' not in deleted,deleted
  assert nft()==before,'root monitoring startup changed firewall'
- print('PASS root namespace daemon: machine-visible real UID0 fixture, stored system-service edit/delete, conditional versions, read-only endpoint, no packet decisions, Block not enforced, 0600 socket, exclusive DB writer, nft unchanged',flush=True)
+ wrong=call('monitor-stop',generation='old');assert wrong['error_code']=='generation_conflict' and daemon.poll() is None
+ ro=call(suffix='.monitor');assert ro['mode']=='host-monitor' and ro['backend_mode']=='daemon-monitor' and ro['read_only']
+ denied=call('monitor-stop',suffix='.monitor',generation=state['generation']);assert denied['error_code']=='read_only'
+ stopped=call('monitor-stop',generation=state['generation']);assert stopped['stopping']
+ assert daemon.wait(6)==0
+ assert not (api/'s').exists() and not (api/'s.monitor').exists()
+ assert nft()==before,'monitor shutdown changed firewall'
+ print('PASS root namespace daemon: machine-visible real UID0 fixture, stored system-service edit/delete, conditional versions, read-only endpoint, no packet decisions, Block not enforced, 0600 socket, exclusive DB writer, generation-scoped root-only Stop, companion compatibility, clean socket shutdown, nft unchanged',flush=True)
  print('NOTE real peer is UID0 inside the user namespace. Delegation to a non-root desktop UID is role/config-unit tested, not initial-root multi-UID authentication.',flush=True)
  print('EVIDENCE',run,flush=True)
 finally:

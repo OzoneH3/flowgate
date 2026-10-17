@@ -27,6 +27,7 @@ type Event struct {
 	Token            string               `json:"-"`
 }
 type Engine struct {
+	StopMonitoring   func() // configured only for non-enforcing root daemon; API requires root peer
 	SaveRules        func([]policy.Rule) error
 	Enforcement      func() EnforcementStatus
 	AdministratorUID *uint32

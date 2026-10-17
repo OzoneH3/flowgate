@@ -35,6 +35,8 @@ type EnforcementStatus struct {
 	StopsAt time.Time `json:"stops_at"`
 }
 type Response struct {
+	BackendMode  string                     `json:"backend_mode,omitempty"`
+	Stopping     bool                       `json:"stopping,omitempty"`
 	Permissions  *Permissions               `json:"permissions,omitempty"`
 	Capabilities []string                   `json:"capabilities,omitempty"`
 	ErrorCode    string                     `json:"error_code,omitempty"`
@@ -120,6 +122,18 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						return
 					}
 					r := Response{Capabilities: []string{ConditionalDeleteCapability, "explicit-administrator-v1"}, Version: 1, Generation: e.Generation, ReadOnly: readonly, Mode: e.Mode, ServerTime: time.Now(), PeerUID: cred.Uid}
+					// The companion exposes the existing read-only observation contract while
+					// retaining the actual daemon mode for permission-aware clients.
+					if e.Mode == "daemon-monitor" {
+						r.BackendMode = e.Mode
+						if readonly {
+							r.Mode = "host-monitor"
+						}
+						if e.StopMonitoring != nil {
+							r.Capabilities = append(r.Capabilities, "monitor-stop-v1")
+						}
+					}
+					stopAfterResponse := false
 					if e.APIUID != nil && cred.Uid != *e.APIUID && cred.Uid != 0 {
 						continueResponse(c, r)
 						return
@@ -145,6 +159,24 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						r.ErrorCode = "invalid_request"
 					} else {
 						switch q.Operation {
+						case "monitor-stop":
+							if r.ReadOnly {
+								r.Error = "read-only API"
+								r.ErrorCode = "read_only"
+							} else if cred.Uid != 0 {
+								r.Error = "daemon shutdown requires root peer"
+								r.ErrorCode = "forbidden"
+							} else if e.Mode != "daemon-monitor" || e.StopMonitoring == nil {
+								r.Error = "non-enforcing monitor stop unavailable"
+								r.ErrorCode = "unavailable"
+							} else if q.Generation == "" || q.Generation != e.Generation {
+								r.Error = "backend generation changed; inspect current daemon"
+								r.ErrorCode = "generation_conflict"
+							} else {
+								r.Stopping = true
+								stopAfterResponse = true
+							}
+
 						case "list":
 							if e.Mode == "host-monitor" && e.APIUID == nil && cred.Uid != uint32(os.Geteuid()) {
 								r.Error = "not authorized"
@@ -232,6 +264,9 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						}
 					}
 					json.NewEncoder(c).Encode(r)
+					if stopAfterResponse {
+						e.StopMonitoring()
+					}
 				}()
 			default:
 				c.Close()
