@@ -1,5 +1,18 @@
 # Continuation handoff
 
+## Doctor increment
+
+Started ffa5c45; backend/CLI/check fixtures/docs only. No frontend integration or
+Electron/Qt presentation/auth-script changes. Read DIAGNOSTICS.md for schema 1,
+shared startup checks, reason codes, read-only guarantees, exact privileged
+inspection command and current tailscale0/tun refusal. Existing UDP helper needs
+metadata rebuild; no accounting event/byte semantics changed. Reuse kernel/GUI
+evidence; only focused diagnostics/race/vet/namespace checks ran.
+
+The frontend session owns graph/visual work on frontend/electron; its released
+cc9ce4e graph commit was not integrated in this task. Preserve that work separately.
+No privileged host operations or automatic activation were performed.
+
 ## Integrated runnable checkout
 
 Backend starting snapshot `1729c292e29e5feef73b286864aa44bf4d551fcb`; frontend final

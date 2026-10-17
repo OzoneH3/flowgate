@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flowgate/internal/identity"
 	"flowgate/internal/policy"
+	"flowgate/internal/readiness"
 	"fmt"
 	"golang.org/x/sys/unix"
 	"net"
@@ -59,24 +60,27 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 	parent := path[:len(path)-len(baseName(path))]
 	st, err := os.Lstat(filepath.Clean(parent))
 	if err != nil || !st.IsDir() {
-		return nil, fmt.Errorf("API parent must be a real directory")
+		return nil, readiness.Fail("runtime_path_invalid", "API parent must be a real directory", "Inspect configured runtime/socket paths with doctor")
 	}
 	if e.APIUID != nil {
 		// Host control sockets live in a daemon-owned directory. Only traversal is
 		// granted to the GUI; the socket itself is 0600 and owned by the selected UID.
 		if st.Mode().Perm()&0066 != 0 {
-			return nil, fmt.Errorf("host API directory may grant traversal only (0711), not group/other read/write")
+			return nil, readiness.Fail("runtime_path_invalid", "host API directory may grant traversal only (0711), not group/other read/write", "Inspect host-control path ownership; do not widen socket permissions")
 		}
 		if err = SecureDirectory(parent); err != nil {
 			return nil, err
 		}
 	} else if st.Mode().Perm()&0077 != 0 || st.Sys().(*syscall.Stat_t).Uid != uint32(os.Geteuid()) {
-		return nil, fmt.Errorf("API socket parent must exist with mode 0700")
+		return nil, readiness.Fail("runtime_path_invalid", "API socket parent must exist with mode 0700", "Use a private observer directory; doctor does not repair permissions")
 	}
 
 	l, err := net.Listen("unix", path)
 	if err != nil {
-		return nil, err
+		if os.IsPermission(err) {
+			return nil, readiness.Fail("permission_required", "API socket creation denied", "Inspect the intended runtime directory and peer user")
+		}
+		return nil, readiness.Fail("runtime_path_invalid", "API socket could not be created; path may be occupied", "Inspect existing instance/socket; never unlink another running instance")
 	}
 	if e.APIUID != nil {
 		if err = os.Chown(path, int(*e.APIUID), -1); err != nil {

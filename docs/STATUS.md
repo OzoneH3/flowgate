@@ -1,5 +1,21 @@
 # Current status
 
+## Current: read-only doctor and actionable startup diagnostics
+
+`.workspace/flowgate doctor` is human-readable; `--json` produces schema 1 checks.
+Read-only firewall inspection is shared with startup. Static prerequisites, actual
+read-only probes, blockers, optional absence and unattempted privileged operations
+are separate; no overall readiness promise. Existing API/bridges remain compatible;
+known startup errors gain `[reason_code]` text. Optional helper metadata now needs
+a rebuild via `scripts/build-udp.sh`; counter/BPF event semantics are unchanged.
+
+Focused Go race/vet and namespace checks passed without doctor changing rules,
+interfaces or fixture state. One UID-1000 host run took 24 ms: visibility partial,
+UDP ELF/BTF prerequisites observed, privileged nft/private-state checks incomplete.
+**Current profile blocks on `tailscale0` (tun)** and needs reviewed coexistence.
+No privileged host collection/diagnostic or enforcement/configuration changes.
+See [DIAGNOSTICS.md](DIAGNOSTICS.md) for commands, bounds and exact evidence.
+
 ## Current: Electron integrated, Qt retained, conditional Delete in both
 
 Started from backend `1729c292e29e5feef73b286864aa44bf4d551fcb`. Integrated the full

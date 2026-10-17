@@ -3,7 +3,6 @@
 package hostfirewall
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -11,21 +10,22 @@ import (
 	"flowgate/internal/daemon"
 	"flowgate/internal/identity"
 	"flowgate/internal/queue"
+	"flowgate/internal/readiness"
 	"flowgate/internal/store"
 	"fmt"
 	"golang.org/x/sys/unix"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 )
 
-const Table = "flowgate_host"
-const Queue = 101
+const Table = readiness.Table
+const Queue = readiness.Queue
 
 type Record struct {
 	Profile      string
@@ -79,11 +79,11 @@ func startID(pid int) string {
 }
 func lock(dir string) (*os.File, error) {
 	if err := daemon.SecureDirectory(dir); err != nil {
-		return nil, err
+		return nil, readiness.Fail("runtime_path_invalid", err.Error(), "Inspect runtime paths with doctor; no automatic permission repair")
 	}
 	st, err := os.Lstat(dir)
 	if err != nil || !st.IsDir() || st.Mode().Perm() != 0700 || st.Sys().(*syscall.Stat_t).Uid != uint32(os.Geteuid()) {
-		return nil, fmt.Errorf("state directory must be owned by daemon user, mode 0700, not a symlink")
+		return nil, readiness.Fail("runtime_path_invalid", "state directory must be owned by daemon user, mode 0700, not a symlink", "Inspect paths with doctor; never blindly replace existing resources")
 	}
 	fd, err := unix.Open(filepath.Join(dir, "lock"), unix.O_CREAT|unix.O_RDWR|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0600)
 	if err != nil {
@@ -92,7 +92,7 @@ func lock(dir string) (*os.File, error) {
 	f := os.NewFile(uintptr(fd), "lock")
 	if err = unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB); err != nil {
 		f.Close()
-		return nil, fmt.Errorf("active instance holds state lock: %w", err)
+		return nil, readiness.Fail("instance_active", "active instance holds state lock", "Inspect host-status; Stop only the confirmed owned controller")
 	}
 	return f, nil
 }
@@ -118,7 +118,12 @@ func Read(dir string) (Record, error) {
 		return Record{}, err
 	}
 	var r Record
-	b, e := os.ReadFile(filepath.Join(dir, "instance.json"))
+	f, e := os.Open(filepath.Join(dir, "instance.json"))
+	if e != nil {
+		return r, e
+	}
+	defer f.Close()
+	b, e := io.ReadAll(io.LimitReader(f, 8193))
 	if e != nil {
 		return r, e
 	}
@@ -184,60 +189,18 @@ func remove(r Record) error {
 	return nil
 }
 func preflight() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	links, err := exec.CommandContext(ctx, "ip", "-j", "-d", "link", "show").Output()
-	if err != nil {
-		return fmt.Errorf("interface inspection: %w", err)
-	}
-	var interfaces []struct {
-		Ifname   string
-		Linkinfo struct {
-			Kind string `json:"info_kind"`
-		} `json:"linkinfo"`
-	}
-	if err = json.Unmarshal(links, &interfaces); err != nil {
-		return err
-	}
-	for _, i := range interfaces {
-		switch i.Linkinfo.Kind {
-		case "wireguard", "tun", "xfrm":
-			return fmt.Errorf("VPN/tunnel interface %s (%s): initial profile requires a separately reviewed integration", i.Ifname, i.Linkinfo.Kind)
+	checks := readiness.Firewall(context.Background(), readiness.Default())
+	for _, c := range checks {
+		// Preserve the original queue-census fallback: actual binding remains
+		// authoritative, but other incomplete prerequisite checks refuse startup.
+		if c.Status == readiness.Blocked || (c.Status == readiness.Unchecked && c.ID != "firewall.queue_census") {
+			return &readiness.Failure{Check: c}
 		}
 	}
-	for _, p := range []string{"/proc/net/ip_tables_names", "/proc/net/ip6_tables_names"} {
-		if b, e := os.ReadFile(p); e == nil && len(bytes.TrimSpace(b)) != 0 {
-			return fmt.Errorf("legacy iptables tables detected; coexistence unsupported")
-		}
-	}
-
-	b, err := nft("-j", "list", "ruleset")
-	if err != nil {
-		return err
-	}
-	if bytes.Contains(b, []byte(`"flowgate_host"`)) {
-		return fmt.Errorf("FlowGate table already exists; inspect status/recover first")
-	}
-	// Deliberately conservative first profile: any existing mark manipulation or
-	// queue rule needs a reviewed allocation, not a guessed unused bit.
-	for _, term := range []string{`"mark"`, `"queue"`, `"notrack"`, `"zone"`} {
-		if bytes.Contains(b, []byte(term)) {
-			return fmt.Errorf("existing rules use %s; initial profile cannot establish collision-free coexistence", term)
-		}
-	}
-	q, err := os.ReadFile("/proc/net/netfilter/nfnetlink_queue")
-	if err != nil && !os.IsNotExist(err) {
-		fmt.Fprintln(os.Stderr, "Queue census unavailable; exclusive NFQUEUE bind must succeed before activation:", err)
-	}
-	for _, line := range strings.Split(string(q), "\n") {
-		f := strings.Fields(line)
-		if len(f) > 0 && f[0] == strconv.Itoa(Queue) {
-			return fmt.Errorf("queue 101 occupied")
-		}
-	}
-	fmt.Fprintf(os.Stderr, "Preflight: existing nft rules retained (%d bytes). Local TCP/UDP (input and optional output); queue 101; connmark mask 0x30000000; input/output priority 10. Other firewall chains/VPNs may deny delivery. No forwarding coverage.\n", len(b))
+	fmt.Fprintln(os.Stderr, "Preflight: existing rules retained. Local host TCP/UDP; queue 101; connmark mask 0x30000000; input/output priority 10. Exclusive queue bind and startup checks still required; other firewalls may deny delivery.")
 	return nil
 }
+
 func rules(token string) string { return profileRules(token, "incoming") }
 func profileRules(token, profile string) string {
 	r := fmt.Sprintf(`add table inet %s { comment "flowgate:%s"; }
@@ -286,7 +249,7 @@ func RunProfile(ctx context.Context, dir, socket, database string, uid uint32, d
 		return fmt.Errorf("profile must be incoming or both")
 	}
 	if os.Geteuid() != 0 {
-		return fmt.Errorf("host-start requires CAP_NET_ADMIN and root in its namespace; GUI must remain unprivileged")
+		return readiness.Fail("permission_required", "host-start requires CAP_NET_ADMIN and root in its namespace; frontend must remain unprivileged", "Run doctor; use the explicit authenticated evaluation only when authorized")
 	}
 	if duration < 10*time.Second || duration > 30*time.Minute {
 		return fmt.Errorf("evaluation duration must be 10s–30m")
@@ -300,7 +263,7 @@ func RunProfile(ctx context.Context, dir, socket, database string, uid uint32, d
 	}
 	defer l.Close()
 	if previous, er := Read(dir); er == nil && previous.State != "stopped" {
-		return fmt.Errorf("previous instance not stopped; inspect/recover before restarting")
+		return readiness.Fail("instance_active", "previous instance not stopped", "Inspect host-status; use scoped Stop/recovery before restarting")
 	} else if er != nil && !os.IsNotExist(er) {
 		return er
 	}

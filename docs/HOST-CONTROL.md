@@ -1,5 +1,11 @@
 # Explicit host-control evaluation
 
+Before any explicit activation, use `.workspace/flowgate doctor` (or `--json`).
+It shares read-only preflight inspection but never binds queues, installs rules
+or starts a controller. See [DIAGNOSTICS.md](DIAGNOSTICS.md) for status meanings,
+startup reason codes and the optional privileged read-only command. The sampled
+host currently refuses tailscale0/tun; no bypass or live activation was tested.
+
 ## Optional outgoing profile
 
 Before **Start 5-minute evaluation**, select **Incoming connections** (default) or

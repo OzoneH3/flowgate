@@ -2,6 +2,22 @@
 
 A native Qt 6 desktop application with an independent Go backend. **Normal launch shows real host application/socket activity read-only.** No firewall rules, interception or host protection. The accepted prompt workflow remains a separate isolated lab.
 
+## Diagnose before explicit activation
+
+```sh
+. scripts/go-env.sh
+go build -o .workspace/flowgate ./cmd/flowgate
+.workspace/flowgate doctor
+.workspace/flowgate doctor --json
+```
+
+Doctor is read-only, never requests sudo or starts enforcement/collection.
+“Ready” applies only to the named completed check; “Not checked” includes privilege
+and intentionally unattempted queue/BPF attachment. On the sampled host the current
+profile refuses `tailscale0` (tun); retain monitoring until coexistence is reviewed.
+See [diagnostics and actionable startup errors](docs/DIAGNOSTICS.md) for the exact
+optional user-run privileged inspection command and existing Stop/recovery paths.
+
 ## Integrated Electron alternative
 
 From `/home/flowgate-user/Apps/flowgate`:

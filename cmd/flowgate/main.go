@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"flag"
 	"flowgate/internal/daemon"
-	"flowgate/internal/diagnostics"
 	"flowgate/internal/identity"
 	"flowgate/internal/monitor"
 	"flowgate/internal/policy"
@@ -56,7 +55,9 @@ func main() {
 		}
 		output(sessions)
 	case "doctor":
-		output(diagnostics.Report())
+		if err := doctorCommand(os.Args[2:]); err != nil {
+			fatal(err)
+		}
 	case "sockets":
 		s, e := identity.Sockets()
 		if e != nil {

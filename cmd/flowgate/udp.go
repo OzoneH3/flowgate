@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"flowgate/internal/daemon"
+	"flowgate/internal/readiness"
 	"flowgate/internal/udpaccount"
 	"fmt"
 	"io"
@@ -44,7 +45,7 @@ func udpCommand() error {
 		return fmt.Errorf("explicit --uid required for privileged collection")
 	}
 	if os.Geteuid() != 0 {
-		return fmt.Errorf("explicit sudo required to load UDP BPF collector")
+		return readiness.Fail("permission_required", "explicit authentication required to load UDP BPF collector", "Run doctor; then use explicit Enable extended monitoring only when authorized")
 	}
 	dir := filepath.Dir(*socket)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -60,11 +61,17 @@ func udpCommand() error {
 		}
 		*helper = filepath.Join(filepath.Dir(exe), "udp-collector")
 	}
+	if check := readiness.Helper(*helper); check.Status != readiness.Ready {
+		return &readiness.Failure{Check: check}
+	}
+	if check := readiness.BTFNames("/sys/kernel/btf/vmlinux"); check.Status != readiness.Ready {
+		return &readiness.Failure{Check: check}
+	}
 	// Explicit sudo initially trusts the reviewed built binary and helper. Pin a
 	// private executable copy so a later workspace rebuild cannot replace it.
 	source, e := os.Open(*helper)
 	if e != nil {
-		return e
+		return readiness.Fail("helper_missing", "UDP helper could not be opened", "Build scripts/build-udp.sh, then run doctor")
 	}
 	defer source.Close()
 	pinned, e := os.CreateTemp(dir, "collector-")

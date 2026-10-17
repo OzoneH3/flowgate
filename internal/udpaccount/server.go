@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"flowgate/internal/identity"
+	"flowgate/internal/readiness"
 	"fmt"
 	"golang.org/x/sys/unix"
 	"net"
@@ -24,10 +25,13 @@ import (
 // The helper/object is built into one executable (libbpf skeleton), with no pins.
 func Run(ctx context.Context, path, helper string, uid uint32) error {
 	if os.Geteuid() != 0 {
-		return fmt.Errorf("extended collector requires privileged BPF load; Qt must remain unprivileged")
+		return readiness.Fail("permission_required", "extended collector requires privileged BPF load; frontend must remain unprivileged", "Run doctor; use the explicit terminal authentication workflow only when authorized")
 	}
 	if _, err := os.Stat(path); err == nil {
-		return fmt.Errorf("collector socket already exists; refusing to replace it")
+		return readiness.Fail("instance_or_socket_exists", "collector socket already exists; refusing to replace it", "Inspect doctor and collector status; Stop the confirmed owned collector")
+	}
+	if check := readiness.Helper(helper); check.Status != readiness.Ready {
+		return &readiness.Failure{Check: check}
 	}
 	ns, err := os.Stat("/proc/self/ns/net")
 	if err != nil {
@@ -57,10 +61,10 @@ func Run(ctx context.Context, path, helper string, uid uint32) error {
 	select {
 	case ok := <-ready:
 		if !ok {
-			return fmt.Errorf("UDP helper unavailable; inspect BPF load error above")
+			return readiness.Fail("bpf_load_failed", "UDP helper unavailable; BPF load/attach did not complete", "Run doctor --json; inspect the helper load error above for verifier, hook or permission details")
 		}
 	case <-time.After(5 * time.Second):
-		return fmt.Errorf("BPF helper startup timeout")
+		return readiness.Fail("probe_timeout", "BPF helper startup timeout", "Run doctor; no automatic retry is performed")
 	case <-ctx.Done():
 		return ctx.Err()
 	}

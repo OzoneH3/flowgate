@@ -2,6 +2,7 @@ package hostfirewall
 
 import (
 	"flowgate/internal/daemon"
+	"flowgate/internal/readiness"
 	"fmt"
 	"io"
 	"os"
@@ -18,7 +19,7 @@ func PrepareSession(state, api, database string) (string, error) {
 		mode os.FileMode
 	}{{state, 0700}, {api, 0711}, {filepath.Dir(database), 0700}} {
 		if err := daemon.SecureDirectory(filepath.Dir(d.path)); err != nil {
-			return "", err
+			return "", readiness.Fail("runtime_path_invalid", err.Error(), "Inspect host-control runtime paths with doctor; no automatic permission repair")
 		}
 		if err := os.Mkdir(d.path, d.mode); err == nil {
 			// Set the exact mode only on a directory this invocation created;
@@ -31,7 +32,7 @@ func PrepareSession(state, api, database string) (string, error) {
 		}
 		st, err := os.Lstat(d.path)
 		if err != nil || !st.IsDir() || st.Sys().(*syscall.Stat_t).Uid != uint32(os.Geteuid()) || st.Mode().Perm() != d.mode {
-			return "", fmt.Errorf("unsafe existing session directory %s (expected daemon-owned mode %04o)", d.path, d.mode)
+			return "", readiness.Fail("runtime_path_invalid", fmt.Sprintf("unsafe existing session directory %s (expected daemon-owned mode %04o)", d.path, d.mode), "Inspect paths with doctor; do not overwrite another instance")
 		}
 	}
 	l, err := lock(state)
@@ -40,7 +41,7 @@ func PrepareSession(state, api, database string) (string, error) {
 	}
 	defer l.Close()
 	if old, err := Read(state); err == nil && old.State != "stopped" {
-		return "", fmt.Errorf("previous controller requires Stop/recovery before starting again")
+		return "", readiness.Fail("instance_active", "previous controller requires Stop/recovery before starting again", "Inspect host-status and use scoped recovery only for confirmed owned resources")
 	} else if err != nil && !os.IsNotExist(err) {
 		return "", err
 	}

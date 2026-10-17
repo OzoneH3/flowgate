@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"flowgate/internal/hostfirewall"
+	"flowgate/internal/readiness"
 	"fmt"
 	"os"
 	"os/signal"
@@ -30,7 +31,7 @@ func hostCommand() error {
 	}
 	if op == "host-session" {
 		if os.Geteuid() != 0 {
-			return fmt.Errorf("session commands require terminal sudo; never elevate Qt")
+			return readiness.Fail("permission_required", "session commands require terminal sudo; never elevate the frontend", "Run doctor; use the explicit evaluation workflow only after authorization")
 		}
 		if *state == "" {
 			*state = "/run/flowgate"

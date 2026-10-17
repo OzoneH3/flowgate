@@ -1,5 +1,13 @@
 # Authoritative implementation plan
 
+## Complete: practical read-only diagnostics
+
+Human/JSON doctor shares real firewall preflight, reports bounded visibility,
+helper/BTF metadata, existing authorized status and explicit unchecked activation
+steps. Startup refusal codes are additive; no UI or activation workflow change.
+Focused controlled/namespace tests and one unprivileged host sample recorded.
+Current host profile needs reviewed tailscale0/tun coexistence; do not bypass it.
+
 ## Complete: runnable frontend integration
 
 Full Electron series integrated from its released clean checkpoint; Qt retained

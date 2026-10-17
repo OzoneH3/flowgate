@@ -124,3 +124,12 @@ check admitted persistent UDP, matched another source port, conditionally delete
 then held the next attempt until Block; no third datagram reached the receiver.
 This is isolated enforcement evidence, not live-host testing. Settled frontend,
 UDP accounting, ownership and broader firewall suites were reused unchanged.
+
+## Read-only CLI diagnostics (separate from policy IPC)
+
+`flowgate doctor --json` now emits schema-version-1 check objects with stable
+`id/status/code/detail/next`, explicit namespace/credential context and completed
+privileged-check IDs. No policy API operation, field or authorization changed.
+Known startup errors are prefixed `[reason_code]` while preserving existing terminal
+bridge behavior. No frontend automatically invokes sudo or diagnostics. See
+[DIAGNOSTICS.md](DIAGNOSTICS.md) for the full bounded read-only contract and commands.

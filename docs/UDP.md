@@ -1,5 +1,11 @@
 # Optional UDP accounting — verified in isolation
 
+Use `.workspace/flowgate doctor` / `--json` before explicit startup. It inspects
+helper ELF/protocol marker, library names and BTF hook names without executing
+the helper or loading/attaching BPF. Rebuild older helpers with `scripts/build-udp.sh`
+to embed protocol marker 1; this changes metadata only, not counted operations.
+See [DIAGNOSTICS.md](DIAGNOSTICS.md) for permissions/unknowns and reason codes.
+
 The authenticated run `.workspace/udp-verified-o2oghdyo` passed the full native
 IPv4/IPv6 receiver and lifecycle suite on x86-64 CachyOS kernel 7.2.9-2-cachyos,
 plus actual unprivileged Wayland measured-rate checks (**3/3**, UID 1000).

@@ -10,6 +10,8 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+const char flowgate_udp_helper_protocol[] __attribute__((used)) =
+    "FLOWGATE_UDP_HELPER_PROTOCOL=1";
 struct counter {
   uint64_t up, down;
 };
