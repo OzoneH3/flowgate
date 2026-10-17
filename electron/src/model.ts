@@ -1,4 +1,4 @@
-import type { Activity, SocketRow, Process, Traffic } from './protocol';
+import type { Activity, SocketRow, Process, Traffic, Application } from './protocol';
 export type Metric = 'download_bps' | 'upload_bps' | 'downloaded' | 'uploaded';
 export interface Row {
   id: string;
@@ -9,6 +9,7 @@ export interface Row {
   rows: SocketRow[];
   children: Row[];
   process?: Process;
+  displayApplication?: Application;
   socket?: SocketRow;
 }
 export interface Sum {
@@ -72,7 +73,14 @@ export function hierarchy(activity: Activity, query = '', filter = 'all'): Row[]
       s.socket.remote,
       s.socket.protocol,
       s.state,
-      ...owners.flatMap((p) => [p.executable, p.application.name, String(p.pid)]),
+      s.display_application?.name || '',
+      s.display_application?.executable || '',
+      ...owners.flatMap((p) => [
+        p.executable,
+        p.application.name,
+        String(p.pid),
+        String(p.thread_group_pid || ''),
+      ]),
     ]
       .join(' ')
       .toLowerCase();
@@ -83,10 +91,29 @@ export function hierarchy(activity: Activity, query = '', filter = 'all'): Row[]
       s.socket.protocol === 'udp' ? !listening : [1, 2, 3, 12].includes(s.socket.state);
     if ((filter === 'active' && !active) || (filter === 'listening' && !listening)) continue;
     let parent: Row;
-    if (s.owners.length === 1 && owners.length === 1) {
+    if (s.display_application?.key && s.owners.length > 1 && owners.length === s.owners.length) {
+      // Trust only the explicit backend display association; never infer a policy identity.
+      const display = s.display_application,
+        key = `${display.key}|${display.revision}|uid:${owners[0].uid}`;
+      let a = apps.get(key);
+      if (!a) {
+        a = {
+          id: 'app:' + key,
+          kind: 'application',
+          label: display.name || display.executable,
+          children: [],
+          rows: [],
+          displayApplication: display,
+        };
+        apps.set(key, a);
+        roots.push(a);
+      }
+      a.rows.push(s);
+      parent = a;
+    } else if (s.owners.length === 1 && owners.length === 1) {
       const p = owners[0],
         key = p.application.key
-          ? `${p.application.key}|${p.application.revision}`
+          ? `${p.application.key}|${p.application.revision}|uid:${p.uid}`
           : `unresolved:${p.id}`;
       let a = apps.get(key);
       if (!a) {
@@ -108,7 +135,9 @@ export function hierarchy(activity: Activity, query = '', filter = 'all'): Row[]
           id: pk,
           parent: a.id,
           kind: 'process',
-          label: 'Process ' + p.pid,
+          label: p.thread_group_pid
+            ? `Worker TID ${p.pid} (process ${p.thread_group_pid})`
+            : 'Process ' + p.pid,
           pid: p.pid,
           children: [],
           rows: [],
@@ -138,7 +167,7 @@ export function hierarchy(activity: Activity, query = '', filter = 'all'): Row[]
       id: s.id,
       parent: parent.id,
       kind: 'socket',
-      label: s.socket.remote,
+      label: (s.display_application && s.owners.length > 1 ? 'Shared · ' : '') + s.socket.remote,
       children: [],
       rows: [s],
       socket: s,
@@ -205,4 +234,27 @@ export function trafficDetails(t: Traffic) {
   ]
     .filter(Boolean)
     .join('\n');
+}
+
+export function ownershipExplanation(category?: string) {
+  const descriptions: Record<string, string> = {
+    'visible-holder': 'A current userspace descriptor holder was observed.',
+    shared:
+      'Multiple descriptor holders were observed. The socket is counted once; a display association grants no firewall permission.',
+    'no-userspace-inode':
+      'No userspace inode (inode zero). These can be kernel-managed rows such as TIME_WAIT; no current userspace owner is inferred.',
+    'holder-changed':
+      'A holder was observed but its generation or descriptor changed during inspection.',
+    'holder-inaccessible': 'A matching descriptor was observed, but executable access was denied.',
+    'holder-metadata-unavailable':
+      'A holder was observed, but its executable identity could not be validated.',
+    'holders-truncated':
+      'The holder list reached its inspection limit; no complete common application association is available.',
+    unknown:
+      'No current descriptor association was established. A different socket creation UID or inaccessible directories elsewhere do not prove this socket was permission denied.',
+  };
+  return (
+    descriptions[category || ''] ||
+    'No categorized ownership evidence supplied; see the backend ownership and evidence fields.'
+  );
 }

@@ -8,6 +8,7 @@ import {
   metricLabel,
   endpoint,
   trafficDetails,
+  ownershipExplanation,
   type Row,
   type Metric,
 } from './model';
@@ -277,6 +278,14 @@ function renderInfo() {
     commit();
     return;
   }
+  if (r.displayApplication) {
+    field(info, 'Display application', r.displayApplication.executable);
+    field(
+      info,
+      'Observation only',
+      'Common application of shared holders. Not a firewall permission target.',
+    );
+  }
   if (r.process) {
     field(info, 'Executable', r.process.executable);
     field(
@@ -288,7 +297,7 @@ function renderInfo() {
       field(
         info,
         'Process',
-        `${r.process.pid} · start ${r.process.start_ticks} · UID ${r.process.uid}`,
+        `${r.process.thread_group_pid ? `Worker TID ${r.process.pid} · thread-group PID ${r.process.thread_group_pid}` : r.process.pid} · start ${r.process.start_ticks} · UID ${r.process.uid}`,
       );
   }
   if (r.socket) {
@@ -300,6 +309,16 @@ function renderInfo() {
       ['State', s.state],
       ['Initiation', s.direction || 'Unknown'],
       ['Ownership', s.ownership],
+      ['Ownership evidence category', ownershipExplanation(s.ownership_category)],
+      ['Socket creation UID', String(s.socket.uid)],
+      ...(s.display_application
+        ? [
+            [
+              'Display association',
+              `${s.display_application.name || s.display_application.executable} · observation only, not a permission target`,
+            ],
+          ]
+        : []),
       ['Evidence', s.evidence],
       ['Measurement', trafficDetails(s.traffic)],
       ['Socket identity', `${s.socket.netns} · ${s.socket.cookie}`],
@@ -307,7 +326,13 @@ function renderInfo() {
       field(info, label, value);
     for (const id of s.owners) {
       const p = state.observation.activity?.processes[id];
-      field(info, 'Visible holder', p ? `${p.pid} · ${p.executable}` : id);
+      field(
+        info,
+        'Visible holder',
+        p
+          ? `${p.thread_group_pid ? `Worker TID ${p.pid} · thread-group PID ${p.thread_group_pid}` : p.pid} · ${p.executable}`
+          : id,
+      );
     }
   } else {
     field(info, 'Visible sockets', String(r.rows.length));
@@ -326,7 +351,7 @@ function renderInfo() {
       field(
         info,
         'Ownership',
-        'Unknown and shared sockets, counted once. This group is not an application or permission target.',
+        'Unresolved and mixed-application shared sockets, counted once. This group is not an application or permission target.',
       );
   }
   commit();

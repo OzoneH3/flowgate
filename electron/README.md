@@ -23,7 +23,7 @@ is performed. Node 26.11.1/npm 12.2.0/Electron 44.9.0 were used here. Electron's
 sandbox must work; there is no `--no-sandbox` fallback.
 
 Default startup creates a private mode-0700 `.workspace/electron-run-*` directory
-and starts only its own read-only observer. Its observer stops when Electron closes
+and starts only its own read-only observer. Its observer stops when Electron quits
 or the launcher receives Ctrl+C. `--observer` reuses an existing observer and leaves
 it running. `--control` attaches to an existing authenticated Go API. Merely launching or closing Electron never starts, stops, or recovers its controller. Evaluation buttons require an explicit user action. Independent controllers/collectors
 survive client exit. Each launcher owns only its own children and socket. Logs and
@@ -38,8 +38,9 @@ XDG_CACHE_HOME="$PWD/.workspace/cache" TMPDIR="$PWD/.workspace/tmp" python3 elec
 
 `--interval 1s` configures an owned observer; accepted backend range is 500ms–30s.
 No startup enables host enforcement or privileged UDP collection. Fullscreen or
-inactive applications receive no automatic popup: pending requests appear in the
-main window, and **Open permission window** is an explicit user action. Closing
+inactive applications receive no automatic permission window: pending requests appear in the
+main window and bounded native notifications request review. **Open permission window**
+and notification activation are explicit user actions. Closing
 that window or choosing **Decide later** sends no verdict.
 
 ## Boundaries and backend semantics
@@ -68,7 +69,7 @@ that window or choosing **Decide later** sends no verdict.
   acknowledgement confirms permission, not delivery through other firewalls.
 - Activity uses backend socket IDs, application key/revision and PID/start IDs.
   Selection and expansion survive refresh and real owner reassociation. One
-  initially collapsed Unidentified group contains shared/unknown sockets, each
+  initially collapsed Unidentified group contains unresolved/mixed-application shared sockets, each
   counted once. Groups aggregate only their visible unique sockets; no ownership
   attribution is inferred from names, ports or labels.
 - Rates/totals follow [TRAFFIC.md](../docs/TRAFFIC.md) and [UDP.md](../docs/UDP.md).
@@ -248,13 +249,107 @@ figure was summed RSS with the test debugger, not private memory or PSS.
 Stay on `frontend/electron`, worktree `.workspace/worktrees/electron`. Integrate
 `electron/`, `scripts/build-electron.sh`, `scripts/run-electron.sh`,
 `scripts/check-electron.sh`, and `scripts/check-electron-workflows.sh`. No API or
-shared bridge change is required. Qt remains available. New backend attribution
-work underway on milestone/backend is intentionally not included beyond a48ee2b.
+shared bridge change is required. Qt remains available. This branch was rebased onto
+`dbe651f9cb6f2fd51ec416113faaf7f4d9ebf55d` to incorporate the additive attribution backend.
+Also integrate `scripts/check-electron-background.sh`.
 
 Remaining gaps: real system sudo authentication and privileged extended-monitoring
 Enable/Stop through Electron are unverified; their frontend boundary/status checks
 are simulated and existing Go kernel evidence is reused. Permission-window PSS
-cycle remains unmeasured. No charts, packaging, artwork or tray notifications.
+cycle remains unmeasured. No charts, packaging or application artwork beyond the original tray glyph.
 The dense dark presentation follows NetLimiter proportions without claiming a
 pixel-identical match; required identity/scope text makes the editor taller and
 scrollable, and endpoint columns scroll horizontally at narrow widths.
+
+## Tray, background requests and attribution increment
+
+Enable **Keep running in the tray when the window closes** at the bottom of the
+main window. It is off by default. Closing then hides the existing window and
+preserves selection, layout and unfinished rule input. The tray offers Open,
+current pending count/list, independent enforcement/extended-monitoring status,
+and Quit. Quit confirms that only Electron and its owned observer exit; independent
+controllers/collectors retain their lifetime, including the original evaluation
+deadline. Unknown/disconnected status is never described as stopped.
+
+The original cyan/white/black tray glyph targets light and dark panels. Linux tray
+availability is checked against the StatusNotifier host through fixed `dbus-send`
+operations. Missing support prevents invisible close-to-tray; losing the host
+restores a visible window without activating it. No services/autostart are installed.
+
+Native notifications request review only while inactive/minimized/hidden. They
+contain plain application/direction/endpoint text, no verdict buttons. Clicking
+checks generation, identity and current pending state again. Expired/resolved
+notifications cannot substitute a different request; the current pending list is
+still accessible. New notifications never replace unfinished rule input. Notification
+suppression/failure leaves the authoritative count/list usable; no Do Not Disturb
+setting is overridden and no window automatically takes focus.
+
+Main-process control polling continues while hidden. Hidden renderers receive no
+snapshot stream; showing refreshes the latest bounded snapshot without resetting
+traffic baselines. Notification state is bounded to 512 seen identities, 256 queued
+identities and three live notifications, at most one delivery per three seconds.
+Bursts become a summary. Repeated polls/reconnect do not automatically replay
+notifications or decisions. Generation changes distinguish reused request IDs.
+
+Attribution uses the backend's `ownership_category` explanation, distinguishes a
+recovered worker TID from `thread_group_pid`, and groups shared sockets only when
+Go explicitly provides `display_application`. Each socket is counted once. This
+association is **observation-only, never a permission target**. Unresolved sockets
+remain in one Unidentified group; inode-zero rows explicitly have no userspace
+inode. Creation UID/global visibility limitations alone do not prove permission
+denial. Socket selection and parent expansion follow the stable ID during regrouping.
+UDP API-byte/partial-coverage semantics and separate TCP aggregates are unchanged.
+
+### Focused evidence
+
+Run `scripts/check-electron-background.sh` on the existing KDE/Wayland session.
+This builds and runs 13 synthetic unit checks, the isolated real-controller
+background test and an explicitly synthetic attribution presentation fixture.
+No UDP kernel matrix, real sudo authentication or live-host enforcement is run.
+Existing backend ownership and UDP evidence is reused.
+
+Actual sandboxed Electron + real disposable controller passed:
+
+- Tray pending count, retained UDP delivery after explicit Allow, Block preventing
+  delivery, expiry and resolution by another client granting nothing.
+- Actual KDE notification `Notify` delivery and notification-daemon `InvokeAction`
+  activation opening the matching request without a verdict. This is **daemon API
+  activation, not a physical mouse click**; notification popup appearance and DND
+  behavior were not verified.
+- Twelve actual requests produced bounded summary notifications; repeated polling
+  did not continuously renotify. Four hide/reopen cycles retained editor input and
+  one native main window.
+- Explicit tray Quit exited Electron and its launcher-owned observer; independent
+  controller retained its exact deadline. The confirmation response was simulated.
+- Synthetic notification failure/unsupported tests preserve pending access. A
+  synthetic tray-host probe failure restored the visible recovery window.
+- Synthetic attribution checks cover same-app shared totals, unresolved/inode-zero
+  explanations, worker TID, and selection/expansion during regrouping. These are
+  presentation evidence, not new kernel ownership evidence.
+
+Artifacts (relative to this worktree): `.workspace/background-test.log`,
+`.workspace/background-unit.log`, `.workspace/attribution-ui.log`, and
+`.workspace/bg-Yp60r4/desktop-notifications.json`. Real UI screenshots:
+`.workspace/bg-Yp60r4/notification-prompt.png` and
+`.workspace/bg-Yp60r4/tray-preference-editor.png`. The attribution log identifies
+its separately labelled synthetic screenshot. Test-owned processes were cleaned up.
+
+### Production visible/background sample
+
+Unmodified production launcher, no debugger or test runner, real read-only host
+observer, no controller/privileged collector. All eight Electron processes had
+readable PSS/private memory. CPU is percent of one CPU over five seconds; this
+brief sample is not a benchmark or leak claim. Hidden Activity rendering was idle.
+
+| State | Electron PSS | Private | Summed RSS | CPU | Observer PSS / private / RSS / CPU |
+|---|---:|---:|---:|---:|---|
+| Visible | 360.5 MiB | 193.3 MiB | 871.2 MiB | 1.0% | 16.9 / 16.9 / 18.9 MiB / 1.4% |
+| Tray | 367.4 MiB | 200.3 MiB | 879.1 MiB | 0.0% | 17.3 / 17.3 / 19.1 MiB / 1.6% |
+
+Raw samples `.workspace/tray-measure/visible.json` and `tray.json`. Both contained
+eight Electron processes and one observer. Reopen-cycle/window-count evidence is
+from the isolated test above, not this debugger-free sample. No sandbox or GPU
+settings were weakened. Production launcher termination cleaned its observer.
+
+A later backend atomic conditional-delete API is under development separately;
+this branch still documents the existing non-atomic Delete limitation above.

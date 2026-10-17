@@ -6,6 +6,7 @@ export interface Application {
   executable: string;
 }
 export interface Process {
+  thread_group_pid?: number;
   id: string;
   pid: number;
   start_ticks: string;
@@ -26,6 +27,8 @@ export interface Traffic {
   download_bps?: number;
 }
 export interface SocketRow {
+  ownership_category?: string;
+  display_application?: Application;
   id: string;
   ownership: string;
   owners: string[];
@@ -176,6 +179,7 @@ function process(v: unknown): Process {
   return {
     id: string(p.id),
     pid: number(p.pid),
+    thread_group_pid: number(p.thread_group_pid) > 0 ? number(p.thread_group_pid) : undefined,
     start_ticks: string(p.start_ticks),
     uid: number(p.uid),
     executable: string(p.executable),
@@ -280,6 +284,10 @@ export function parseReply(raw: unknown): Reply {
         return {
           id: string(row.id),
           ownership: string(row.ownership),
+          ownership_category: string(row.ownership_category),
+          display_application: row.display_application
+            ? application(row.display_application)
+            : undefined,
           owners: array(row.owners, 2048).map(string),
           state: string(row.state),
           direction: string(row.direction),

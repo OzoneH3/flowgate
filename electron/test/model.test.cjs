@@ -56,3 +56,47 @@ test('reassociation preserves backend socket ID; groups use executable identity'
   r.owners = ['p'];
   assert.equal(hierarchy(a)[0].children[0].children[0].id, 'stable');
 });
+test('explicit display association groups shared sockets once; unresolved and inode-zero remain Unidentified', () => {
+  const application = {
+    key: 'native',
+    revision: 'r',
+    name: 'native app',
+    executable: '/long/native/app',
+  };
+  const processes = {
+    a: { id: 'a', pid: 11, uid: 1000, executable: application.executable, application },
+    b: {
+      id: 'b',
+      pid: 12,
+      uid: 1000,
+      thread_group_pid: 10,
+      executable: application.executable,
+      application,
+    },
+  };
+  const shared = {
+    ...row('shared', ['a', 'b']),
+    display_application: application,
+    ownership_category: 'shared',
+  };
+  const unknown = { ...row('unknown'), ownership_category: 'unknown' },
+    zero = { ...row('zero'), ownership_category: 'no-userspace-inode' };
+  const a = { rows: [shared, unknown, zero, shared], processes };
+  const roots = hierarchy(a);
+  assert.equal(roots.length, 2);
+  assert.equal(roots[0].children[0].id, 'shared');
+  assert.equal(roots[0].rows.length, 1);
+  assert.equal(sum(roots[0].rows, 'uploaded').value, 10);
+  assert.equal(roots[1].id, 'unidentified');
+  assert.equal(roots[1].rows.length, 2);
+  delete shared.display_application;
+  const regrouped = hierarchy(a);
+  assert.equal(regrouped.length, 1);
+  assert(regrouped[0].children.some((r) => r.id === 'shared'));
+  assert.equal(sum(regrouped[0].rows, 'uploaded').value, 30);
+  const worker = hierarchy({ rows: [row('worker', ['b'])], processes })[0].children[0];
+  assert.match(worker.label, /Worker TID 12 \(process 10\)/);
+  const { ownershipExplanation } = require('../dist/test/model.cjs');
+  assert.match(ownershipExplanation('no-userspace-inode'), /No userspace inode/);
+  assert.match(ownershipExplanation('unknown'), /do not prove/);
+});
