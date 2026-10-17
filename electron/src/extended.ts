@@ -1,3 +1,6 @@
+import { DaemonMonitoring } from './daemon-monitoring';
+import type { Backend } from './backend';
+import type { ExtendedState } from './protocol';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFile } from 'node:child_process';
@@ -7,12 +10,29 @@ export class ExtendedMonitoring {
     message: 'Extended monitoring is opt-in; no collector is started by this frontend.',
   };
   private pendingUntil = 0;
-  constructor(private root: string) {}
-  view(active: boolean) {
+  private daemon?: DaemonMonitoring;
+  constructor(
+    private root: string,
+    private backend?: Backend,
+  ) {
+    if (backend) this.daemon = new DaemonMonitoring(backend);
+  }
+  view(active: boolean): ExtendedState {
+    if (this.daemon?.supported()) return this.daemon.view();
     if (active || Date.now() > this.pendingUntil) this.state.busy = false;
-    return this.state;
+    return {
+      ...this.state,
+      mode: 'legacy',
+      state: active ? 'active' : 'unavailable',
+      canEnable: !this.state.busy && !active,
+      canStop: !this.state.busy,
+      canView: true,
+      canControl: true,
+      partial: this.backend?.view().observation.activity?.udp?.state === 'partial',
+    };
   }
   async action(value: unknown) {
+    if (this.daemon?.supported()) return this.daemon.action(value);
     if (value !== 'enable' && value !== 'stop') throw Error('Invalid extended monitoring action');
     if (this.state.busy)
       throw Error('A collector operation is pending; inspect its authentication terminal');

@@ -97,7 +97,8 @@ try {
     await p.click('#activityTab');
     await p.locator(`.policy-cell[data-direction="${direction}"]`).first().click();
     await wait(() => p.locator('#newActivityRule').isEnabled());
-    await p.click('#newActivityRule');
+    await p.locator('#newActivityRule').focus();
+    await p.keyboard.press('Enter');
     await p.waitForTimeout(100);
     if (!(await p.locator('#ruleEditor').isVisible()))
       console.log('OPEN FEEDBACK', await p.locator('#feedback').innerText());
@@ -113,6 +114,13 @@ try {
   await open('incoming');
   await p.selectOption('#editAction', 'allow');
   await preview();
+  assert.match(
+    await p.locator('#scopeSummary').innerText(),
+    /Allow incoming TCP connections.*any remote address/,
+  );
+  assert.match(await p.locator('#previewValidity').innerText(), /valid for \d+s/);
+  assert(await p.locator('#editAddress').isDisabled());
+  assert(await p.locator('#anyAddress').isChecked());
   await p.screenshot({ path: path.join(run, 'first-rule-preview.png') });
   await p.selectOption('#editAction', 'block');
   assert(await p.locator('#saveRule').isDisabled());
@@ -128,6 +136,10 @@ try {
   console.log('Waiting for actual 30-second preview expiry in isolated daemon…');
   await p.waitForTimeout(31000);
   assert(await p.locator('#saveRule').isDisabled());
+  assert.equal(await p.locator('#editAction').inputValue(), 'allow');
+  assert.equal(await p.locator('#createScope').inputValue(), 'application');
+  assert.equal(await p.locator('#previewRule').innerText(), 'Refresh preview');
+  assert.match(await p.locator('#previewValidity').innerText(), /draft kept/);
   await preview();
   await p.click('#saveRule');
   await wait(async () => (await snapshot()).control.rules.length === 1);
@@ -161,6 +173,7 @@ try {
   await open('outgoing');
   await p.selectOption('#createScope', 'custom');
   await p.fill('#editAddress', '127.0.0.1');
+  await p.uncheck('#anyRemote');
   await p.fill('#editRemote', '443');
   await preview();
   await p.click('#saveRule');
@@ -217,7 +230,8 @@ try {
       run,
   );
 } catch (error) {
-  if (app) {
+  console.error('Original workflow failure:', error);
+  if (app && app.windows().length) {
     const page = await app.firstWindow();
     console.log('UI failure:', await page.locator('body').innerText());
     await page.screenshot({ path: path.join(run, 'failure.png') });

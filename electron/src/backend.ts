@@ -131,11 +131,15 @@ export class Backend {
         message: `Activity · ${r.permissions?.observation_scope || 'user-visible'}${r.activity.complete ? '' : ' · partial'} · read-only`,
         generation: r.generation,
         activity: r.activity,
+        trafficMonitor: r.traffic_monitor,
+        permissions: r.permissions,
+        capabilities: r.capabilities,
       };
     } catch (e) {
       this.state.observation = {
         connected: false,
         message: 'Activity unavailable · ' + (e as Error).message,
+        capabilities: this.state.observation.capabilities,
         generation: this.state.observation.generation,
       };
     } finally {
@@ -146,6 +150,7 @@ export class Backend {
   async pollControl() {
     if (!this.controller || this.busy.control || this.stopped) return;
     this.busy.control = true;
+    const snapshotStarted = performance.now();
     try {
       const r = await call(this.controller, { operation: 'list' });
       if (
@@ -184,6 +189,8 @@ export class Backend {
       for (const id of this.attempts.keys())
         if (!r.events.some((e) => e.id === id)) this.attempts.delete(id);
       this.state.control = {
+        snapshotStarted,
+        trafficMonitor: r.traffic_monitor,
         connected: true,
         message:
           r.mode === 'isolated-lab'
@@ -211,6 +218,7 @@ export class Backend {
         message: 'Controller disconnected · enforcement state unknown · ' + (e as Error).message,
         policy: undefined,
         policyError: 'Controller disconnected; authoritative policy cleared.',
+        trafficMonitor: undefined,
       };
     } finally {
       this.busy.control = false;

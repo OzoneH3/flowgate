@@ -49,6 +49,8 @@ export class TrafficHistory {
   private stamp = '';
   private generation = '';
   private sequence = 0;
+  private udpGeneration = '';
+  private udpState = '';
   private last = 0;
   private sampleAt = 0;
   private collectedAt = 0;
@@ -120,6 +122,10 @@ export class TrafficHistory {
     this.connected = true;
     this.last = now;
     this.revision++;
+    const udpChanged =
+      this.udpGeneration !== (a.udp?.generation || '') || this.udpState !== (a.udp?.state || '');
+    this.udpGeneration = a.udp?.generation || '';
+    this.udpState = a.udp?.state || '';
     const next = new Map<string, Previous>(),
       measured = new Map<string, GraphPoint>();
     for (const s of a.rows.slice(0, 2048)) {
@@ -135,7 +141,10 @@ export class TrafficHistory {
           (t.downloaded !== undefined && old.down !== undefined && t.downloaded < old.down));
       const supported =
         t.definition === 'tcp-transport-payload' || t.definition === 'udp-api-reported';
-      const blocked = resume || reset || !t.available || !supported;
+      const collectorGap = source === 'udp' && udpChanged;
+      const collectorUnavailable = source === 'udp' && !!a.udp && a.udp.state !== 'active';
+      const blocked =
+        resume || reset || collectorGap || collectorUnavailable || !t.available || !supported;
       const rate = (v: number | undefined) =>
         !blocked && v !== undefined && Number.isFinite(v) && v >= 0 ? v : undefined;
       const up = rate(t.upload_bps),
@@ -146,24 +155,28 @@ export class TrafficHistory {
         up,
         down,
         partial: t.partial,
-        breakBefore: resume || reset || gap || !old,
+        breakBefore: resume || reset || collectorGap || collectorUnavailable || gap || !old,
         note: resume
           ? 'New observer baseline / reconnect'
-          : reset
-            ? 'Counter reset or source/baseline change'
-            : !t.available
-              ? t.reason || 'Measurement unavailable'
-              : up === undefined || down === undefined
-                ? t.state === 'warming-up'
-                  ? 'Warm-up / no fresh backend rate'
-                  : 'Missing rate'
-                : gap
-                  ? 'Missing observation interval'
-                  : t.partial
-                    ? 'Partial measurement coverage'
-                    : !a.complete
-                      ? 'Measured; census visibility partial'
-                      : 'Measured',
+          : collectorGap
+            ? 'UDP collector generation/state changed; new baseline'
+            : collectorUnavailable
+              ? 'UDP collector unavailable; preceding samples are historical'
+              : reset
+                ? 'Counter reset or source/baseline change'
+                : !t.available
+                  ? t.reason || 'Measurement unavailable'
+                  : up === undefined || down === undefined
+                    ? t.state === 'warming-up'
+                      ? 'Warm-up / no fresh backend rate'
+                      : 'Missing rate'
+                    : gap
+                      ? 'Missing observation interval'
+                      : t.partial
+                        ? 'Partial measurement coverage'
+                        : !a.complete
+                          ? 'Measured; census visibility partial'
+                          : 'Measured',
       });
       next.set(s.id, {
         since: t.since,

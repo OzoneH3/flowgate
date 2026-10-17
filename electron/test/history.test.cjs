@@ -28,6 +28,7 @@ function fixture(limits) {
   const h = new TrafficHistory(() => now, limits),
     send = (rows, options = {}) => {
       now += 1000;
+      const { activity: activityOptions, ...observationOptions } = options;
       const o = {
         connected: true,
         generation: 'g',
@@ -37,9 +38,9 @@ function fixture(limits) {
           complete: true,
           rows,
           processes: { p: proc, q: { ...proc, id: 'q', pid: 2 } },
-          ...options.activity,
+          ...activityOptions,
         },
-        ...options,
+        ...observationOptions,
       };
       h.observe(o);
       return o;
@@ -152,4 +153,21 @@ test('collection timestamps anchor to monotonic frontend time; wall-clock jumps 
   p = h.view({ id: 's', seconds: 60 }).points.at(-1);
   assert(p.breakBefore);
   assert.equal(p.up, 4);
+});
+test('UDP collector generation and Stop produce gaps while TCP continues', () => {
+  const f = fixture();
+  const rows = () => [row('tcp'), row('udp', 'udp')];
+  f.send(rows(), { activity: { udp: { state: 'active', generation: 'collector1' } } });
+  f.send(rows(), { activity: { udp: { state: 'active', generation: 'collector1' } } });
+  assert.equal(f.view('udp').points.at(-1).up, 4);
+  f.send(rows(), { activity: { udp: { state: 'active', generation: 'collector2' } } });
+  assert.equal(f.view('udp').points.at(-1).up, undefined);
+  assert(f.view('udp').points.at(-1).breakBefore);
+  assert.equal(f.view('tcp').points.at(-1).up, 4);
+  f.send(rows(), { activity: { udp: { state: 'active', generation: 'collector2' } } });
+  assert.equal(f.view('udp').points.at(-1).up, 4);
+  f.send(rows(), { activity: { udp: { state: 'disabled', generation: 'collector2' } } });
+  assert.equal(f.view('udp').points.at(-1).up, undefined);
+  assert.equal(f.view('tcp').points.at(-1).up, 4);
+  assert(f.view('udp').points.some((p) => p.up === 4));
 });

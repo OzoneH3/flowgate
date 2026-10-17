@@ -692,3 +692,161 @@ and descending-first rates passed with no host mutations; captures/logs are in
 stopped; adoption of the new API needs a separately authorized backend update.
 Test-owned namespace daemon/Electron processes exited. Existing accounting, icons,
 tray and receiver-enforcement evidence was reused, not rerun.
+
+## Activity/editor polish after integration c448cf1
+
+Base: `c448cf15c6e2c30621649f6d877f6f34b1bce567`, fast-forwarded only after
+integration released ownership. Backend/API/authentication/launcher are unchanged.
+
+Policy cells say Allow/Block only for backend uniform configured policy, otherwise
+Scoped, Mixed, Inactive rules, No explicit rule or Unavailable. Coverage and defaults
+remain in the policy view/tooltip; no default or historical verdict is inferred.
+New incoming/outgoing rule is near the top of the panel. Longer default/permission
+explanations are expandable. Overall enforcement remains visible in the toolbar;
+redundant per-direction sidebar status and idle footer warnings are removed.
+
+The editor exposes Any address/Any port checkboxes instead of requiring `*`/0.
+Unchecked fields require an explicit valid value; empty ports cannot silently become
+wildcards. Protocol-wide scope is still an explicit selection and covers only TCP
+or UDP, not all traffic. Expiry choices distinguish keeping the existing absolute
+expiry, one hour from preview, and persistent. Application/direction/UID remain visible.
+A readable summary uses the **structured reviewed backend rule**; full unmodified
+backend scope text is expandable. It is display formatting, not another evaluator.
+
+The existing polling update displays remaining preview seconds beside Save; no new
+timer or renewal loop was added. Expiry/session invalidation preserves fields and
+shows Refresh preview. Refresh obtains a new receipt for review, never saves. Stale
+identity errors explain reselection. Existing acknowledgement/reconciliation and
+conditional deletion safeguards remain unchanged.
+
+Focused evidence: build and 12 presentation/creation/policy/rules/delete tests;
+real sandboxed Wayland isolated first-rule runner against released backend
+`8ef90cde66c73c69bf8fd8b686e82d2298b98536`, including real preview expiry, preserved
+fields/focus, incoming/outgoing save, edit/delete, read-only denial and a labelled
+lost-ACK transport fault with no duplicate creation. Root monitor inspection was
+read-only and verified descending-first rate sorting, keyboard focus, policy details,
+real icons and normal/narrow layout. No host rule saves or daemon lifecycle changes.
+
+Creation captures: `.workspace/creation-ui-ZLz0Ct/first-rule-preview.png` and
+`first-rule-preview-narrow.png` (real isolated listener/database, explicitly labelled).
+Logs: `.workspace/activity-polish/{build,tests,after,isolated-final}.log`.
+Remaining differences: Linux font rasterization, supported policy instead of NetLimiter's
+limiter/priority controls, and sparse sidebar/table content for the actual host inventory.
+No overall similarity percentage is assigned.
+One intermediate repeat closed its Electron process unexpectedly; its screenshot-error
+handler obscured the original failure. The runner now logs the original exception
+before attempting a failure capture. The subsequent complete run passed; no cause
+for that intermediate closure was established.
+
+## Daemon-owned extended UDP monitoring
+
+The `daemon-udp-monitor-v1` capability selects the connected daemon's
+`traffic_monitor` status and fixed `traffic-start` / `traffic-stop` operations.
+Electron reuses its existing Activity/control connections and polling; it launches
+no helper/observer/second daemon and requests no sudo for this capability.
+The compact **UDP · state** Activity button opens the existing Control menu's
+Extended monitoring Enable/Stop controls. Enable is explicit and disabled by default.
+
+`can_view_measurements` and `can_control_traffic` are consumed separately from
+`can_manage_rules` and `can_decide`. A primary administrator needs the backend's
+explicit collector-control grant; writable rule storage alone is insufficient.
+Companion/read-only connections can display authorized data but cannot control it.
+Static `available` is not proof of attachment: starting remains starting until Go
+reports active. Failed/unsupported states retain their actual reason in details.
+TCP Activity, rules and enforcement status remain independent.
+
+Each lifecycle operation freezes daemon and collector generations. No duplicate
+operation is sent while a response is pending. Lost/mismatched responses remain
+uncertain until a **list request begun after the operation finished** returns;
+an earlier in-flight poll cannot unlock another Start. Reconciliation only reads
+status, never retries Start/Stop. Generation changes discard stale responses. After
+recognizing daemon ownership, metadata failure, disconnect or capability loss never
+falls back to the legacy privileged launcher. Invalid optional collector metadata
+disables lifecycle controls without dropping the ordinary TCP/rules API.
+
+Older daemons retain the clearly labelled **legacy monitoring** authentication path.
+The frontend never combines a legacy measurement stream with daemon-owned samples.
+Enable on the consolidated path requires Activity from the same daemon generation.
+No setting restores collection automatically after reconnect. Hiding/quitting Electron
+leaves independent collection running; explicit Stop only stops UDP collection,
+not the daemon or firewall. The tray displays the observer's collector status.
+
+Activity continues using existing UDP socket API-byte fields, counted once across
+peers/shared holders, independently from TCP transport payload. Partial coverage is
+`*` with detail, missing data is not zero, and mixed definitions are not summed.
+The bounded main-process graph store now explicitly breaks UDP traces on collector
+generation/state changes, suppressing the transition sample while retaining historical
+points; TCP samples continue. No new history timer, collector, or baseline calculation
+was introduced. These are application/socket observations, not deduplicated internet
+usage or VPN transport accounting.
+
+Focused reproduction (installed dependencies):
+
+```sh
+npm --prefix electron run build
+node --test electron/test/daemon-monitoring.test.cjs electron/test/history.test.cjs electron/test/extended.test.cjs electron/test/backend.test.cjs
+# Attach only to an externally owned, disposable fixture, initially disabled:
+FLOWGATE_UDP_UI_ENDPOINT=/absolute/project/.workspace/fixture/api/daemon.sock \
+FLOWGATE_UDP_UI_EXPECT=failed node electron/test/daemon-udp-workflow.mjs
+# Explicitly synthetic active rates/lifecycle; no Go daemon/BPF:
+node electron/test/daemon-udp-display.mjs
+# Ordinary launch remains non-enforcing; no collection starts automatically:
+./scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock
+```
+
+The Wayland runner refuses host `/run` endpoints. With `EXPECT=active`, the fixture
+owner must supply actual measured UDP transfers and independently clean up after
+GUI exit; it tests Stop then restart and leaves the collector active for that owner.
+With `EXPECT=failed`, it records the actual attachment error and tests Stop/TCP
+continuity. The runner logs Electron stderr, closure and renderer crashes; no
+unexplained window closure recurred in this increment.
+
+Evidence: 18 focused tests passed (synthetic lifecycle/fault replies and graph samples).
+Actual sandboxed Wayland against the production Go daemon in a disposable user/net
+namespace passed Enable→failed→Stop, TCP availability, read-only denial and daemon
+survival after frontend exit. `.workspace/daemon-udp-ui-JBH2BD/attachment-blocker.json`
+records `bpf_load_failed`: `collector_inspection_denied: cannot exclude an older
+tracing collector: Operation not permitted`. The backend owner's isolated initial-
+user-namespace attempt was refused with `sudo: a password is required`; it was not
+retried at that stage (superseded by the kernel-backed check below).
+
+### Kernel-backed consolidated UDP check
+
+Backend `15d6e1a9762092c86fdb3201ffb7d71c77303eb0` (`daemon-udp-monitor-v1`; fixture
+artifacts reported bit-exact to that source) with this UI. The user ran
+`scripts/check-daemon-udp.sh --kernel --reuse-build --hold --traffic`, a disposable
+initial-user-namespace net/pid/mount namespace with continuous native UDP4/6 + TCP.
+No host collector, rule, firewall or route change. Sandboxed Wayland Electron attached:
+
+```sh
+R=/absolute/project/.workspace/daemon-udp-<run>
+FLOWGATE_UDP_UI_ENDPOINT=$R/api/daemon.sock FLOWGATE_UDP_UI_RECEIVER=$R/receiver.json \
+FLOWGATE_UDP_UI_EXPECT=active node electron/test/daemon-udp-workflow.mjs
+```
+
+- **Real measurements** (`.workspace/daemon-udp-ui-bVpoWV/`): six fixture sockets
+  (UDP4/UDP6, connected/unconnected) shown as `udp-api-reported`; displayed bytes advanced
+  exactly with the fixture's receiver counts across a traffic tick (constant per-socket
+  offset, since receiver counts start at fixture creation and the collector at Enable).
+  `consolidated-udp.png` is labelled REAL ISOLATED UDP. Stop rendered `—` (not zero),
+  ended the UDP graph and kept TCP updating.
+- **Restart and GUI exit** (`.workspace/daemon-udp-ui-KKXSTR/`, separate fixture run):
+  each socket's UDP graph shows a two-sample break ("new baseline") and restarted rates
+  equal to prior rates (e.g. 1421.0 vs 1421.2 B/s; no spike). After Electron exit the
+  daemon generation, collector generation and active state were unchanged; enforcement
+  stopped. Read-only connection: view permitted, control denied.
+
+Two earlier fixture runs ended mid-check after an interrupt-like signal to the harness
+(backend verified graceful shutdown and clean namespaces); the signal's origin is
+unconfirmed. The runner sends no signals; in the second case the socket disappeared
+before Electron closed, and the final fixture survived two Electron exits.
+Shared-socket deduplication was not separately verified in this check.
+
+Actual failure normal/narrow captures and result are in `.workspace/daemon-udp-ui-JBH2BD/`.
+Explicitly **synthetic** active/partial UDP display, restart, Stop and read-only checks
+passed in `.workspace/daemon-udp-ui-xmH6ua/`; screenshots label synthetic data in the
+window. Unit graph tests also prove UDP generation gaps without losing TCP samples.
+Old-capability host fallback was inspected read-only in `.workspace/daemon-udp-evidence/`:
+real Activity/icons, sorting and normal/narrow layout, no host mutation or restart.
+Logs: `.workspace/daemon-udp-{build,tests,wayland,display}.log`. Backend fixture owner
+handles its namespace/helper cleanup; Electron owns neither.
