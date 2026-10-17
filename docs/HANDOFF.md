@@ -1,5 +1,17 @@
 # Continuation handoff
 
+## Integrated: daemon-owned UDP accounting + Electron consumer
+
+Backend `15d6e1a` (daemon-udp-monitor-v1) merged with released UI
+frontend/electron `66a0c02` as `611e221` (electron/ only, no conflicts). Build,
+focused 18/18 and full Electron 45/45 tests pass (`.workspace/integration-611e221.log`);
+Go unchanged. Kernel-backed isolated UI evidence (UI worktree `.workspace/
+daemon-udp-ui-bVpoWV`, `daemon-udp-ui-KKXSTR`): real UDP4/6 Activity matched
+receiver counts, Stop shows gaps with TCP continuing, restart gap without spike,
+GUI exit leaves daemon/collector intact. Fixtures cleaned up. The running host
+monitor PID2095594 lacks this capability (legacy path, no collection) until a
+deliberate generation-checked restart per INTEGRATION.md; none was performed.
+
 ## Daemon-owned optional UDP accounting
 
 The root `serve` daemon now supports explicit optional UDP helper ownership and
