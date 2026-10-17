@@ -1,16 +1,16 @@
-# Optional UDP accounting — implemented experiment, kernel verification blocked
+# Optional UDP accounting — verified in isolation
 
-The user authenticated `scripts/check-udp-isolated.sh` on kernel
-7.2.9-2-cachyos. **Kernel-backed IPv4 and IPv6 connected/unconnected, multi-peer,
-PEEK/truncation/failed-send checks passed.** User-provided output identifies
-`.workspace/udp-privileged-1792255664`; its local collector log confirms readiness.
-No verifier or attachment failure was demonstrated in that run.
+The authenticated run `.workspace/udp-verified-o2oghdyo` passed the full native
+IPv4/IPv6 receiver and lifecycle suite on x86-64 CachyOS kernel 7.2.9-2-cachyos,
+plus actual unprivileged Wayland measured-rate checks (**3/3**, UID 1000).
+`verification.log`, `wayland.log` and `result.json` preserve the evidence; the latter
+records binary hashes, namespace, kernel and UID. Actual captures are
+`udp-measured-wayland.png` and `udp-measured-narrow.png` in the same directory.
 
-The expanded native lifecycle and measured-Wayland suite is now implemented.
-A single noninteractive attempt in the agent session still requires authentication;
-those additional checks remain pending until the desktop user runs the command
-below. Do not treat the native fixture smoke or synthetic tests as BPF evidence.
-No live-host collection or firewall changes are requested.
+No verifier/attachment/accounting failure was demonstrated. Earlier EPERM was a
+permission limitation of the user namespace; the user authenticated the scoped
+initial-namespace privilege needed to load probes into the disposable test run.
+Live-host collection and host networking/firewall changes were not performed.
 
 ## Selected source and byte contract
 
@@ -60,8 +60,8 @@ used as the BPF key. UDP Activity row IDs now also omit changing endpoints, so
 connect/disconnect does not replace a still-live socket row; namespace, cookie,
 inode, protocol and family remain part of the key. TCP IDs are unchanged. Shared descriptors count once, and SO_REUSEPORT sockets have
 separate cookie keys; attribution stays with the existing conservative observer.
-The expanded native fixture suite exercises these lifecycle cases; its kernel
-results are pending the next authenticated run.
+The expanded native fixture suite verified shared FD handoff, closure/rebind,
+SO_REUSEPORT selection and controlled collector Stop/restart against actual counters.
 
 A socket may send/close before its first registration. Such events are not
 invented or assigned to a reused endpoint: `missed_operations` increases and
@@ -101,12 +101,13 @@ The helper dynamically links libbpf/libelf/libc and compression dependencies; it
 is not a static portable binary. Go's basic monitor does not link libbpf.
 
 The Activity action **Enable extended traffic monitoring** asks explicitly,
-launches Konsole/system sudo, and leaves Qt unprivileged. It remains experimental
-pending completion of the expanded isolated lifecycle/GUI matrix. The held terminal shows authentication or BPF errors.
+launches Konsole/system sudo, and leaves Qt unprivileged. The tested prototype
+remains opt-in; live-host coexistence and other kernels are not validated. The held terminal shows authentication or BPF errors.
 Cancellation/refusal leaves TCP and the Unidentified group available. There is no
 firewall activation, sudoers change, service, autostart or automatic retry.
 
-After isolated validation, the exact equivalent explicit terminal command is:
+The equivalent explicit collection-only terminal command is (not run on the host
+during development):
 
 ```sh
 sudo .workspace/flowgate udp-start --uid "$(id -u)"
@@ -170,11 +171,26 @@ Artifacts are retained under `.workspace/udp-verified-*/`: `verification.log`,
 `wayland.log`, result metadata and measured/narrow screenshots. Binary hashes and
 kernel identity are recorded with successful results.
 
-Current expanded-run state: `.workspace/udp-finish-attempt.log` records the single
-noninteractive authentication refusal. `.workspace/udp-native-smoke.log` verifies
-native fixture behavior only, `.workspace/udp-finish-go.log` and
-`udp-finish-vet.log` cover the identity change, and `udp-finish-ui-regression.log`
-reuses unavailable/mixed-definition behavior. Until an authenticated expanded run
-passes, shared/reuseport/restart accounting, UDP collector overhead and a measured
-Wayland screenshot remain unverified. The script is intended to gather exactly
-that remaining evidence; it does not substitute synthetic data.
+## Recorded outcome and remaining limits
+
+The expanded run passed all cases listed above. Actual steady-transfer collection
+used 3.52s elapsed, 0.010s collector+helper CPU (0.28% of one CPU), 14916KiB sum RSS,
+and 85/2048 registered rows. No capacity limit was reached and registered-transfer
+misses were 0. The run deliberately created one unregistered datagram: the final
+miss counter is 1 and the UI correctly marks partial coverage. No attempt is made
+to infer missing bytes. BPF execution time charged to fixture callers is not
+included in the collector process CPU measurement.
+
+The reuseport case uses two receiver sockets owned by one fixture; kernel-selected
+socket counts were independently compared. Distinct alpha/beta applications and
+cross-executable shared-FD handoff were separately exercised. PEEK, ordinary
+truncation, MSG_TRUNC, failed sends, multi-peer traffic and idle were checked over
+IPv4/IPv6. GRO/GSO, kernel-bypass paths, adversarial same-user FD changes, other
+kernels/distributions and live-host load/coexistence remain unverified. Ordinary
+collection still needs the initial BPF/perf privileges and supported tracepoints.
+
+The post-run `UDP fixture: Success` line was a teardown diagnostic: a dormant
+fixture child saw EOF when its parent was terminated before handoff. EOF now exits
+quietly; `.workspace/udp-cleanup-check.log` checks IPv4/IPv6 teardown. No measured
+operation or production counter path changed. Vulkan_INCLUDE_DIR was an optional
+Qt configure warning, not a failed build or a missing requirement for this utility.

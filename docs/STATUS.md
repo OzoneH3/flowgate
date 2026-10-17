@@ -1,33 +1,48 @@
 # Current status
 
-## Current: initial kernel UDP checks passed; expanded lifecycle/UI run prepared
+## Current: isolated UDP accounting and Wayland acceptance passed
 
-The user's authenticated isolated run passed UDP4/UDP6 connected/unconnected,
-multi-peer and PEEK/truncation/failed-send counter comparisons. Local evidence:
-`.workspace/udp-privileged-1792255664/collector.log` confirms READY; PASS lines were
-provided by the user. No verifier/attachment defect was demonstrated.
+The authenticated `.workspace/udp-verified-o2oghdyo` run passed on x86-64 CachyOS
+kernel 7.2.9-2-cachyos. Actual BPF counters matched native IPv4/IPv6 receiver/API
+return counts for connected/unconnected/wildcard sockets, multiple peers, repeated
+PEEK, truncation and failed sends. Shared FD/parent-exit handoff to beta preserved
+cookie totals; final close removed state. Same-port rebinding used a new cookie
+without inherited totals. SO_REUSEPORT selected receivers had separate cookies and
+receive totals counted once. Controlled Stop/disconnect/restart restored current
+sockets with a fresh generation/baseline and no rate spike; idle returned to zero.
 
-UDP Activity IDs are now namespace/cookie/lifetime based, independent of endpoint
-changes; connecting a live socket no longer replaces its row. TCP IDs and firewall
-behavior are unchanged. Native alpha/beta fixtures and an expanded one-command
-namespace/Wayland acceptance harness are implemented. Run as the desktop user:
-`scripts/check-udp-isolated.sh`. It builds locally, requests sudo only for the
-namespace, and keeps Qt unprivileged/outside it. See UDP.md.
+Actual unprivileged Wayland UI: **3/3**, UID 1000, outside the namespace, with measured
+UDP rates/totals, numeric sort, stable selection, shared Unidentified group and a
+narrow-window capture. See `verification.log`, `wayland.log`, `result.json` (kernel,
+namespace, UID and binary hashes), `udp-measured-wayland.png` and
+`udp-measured-narrow.png` in that directory. No synthetic rates are in these images.
 
-One noninteractive attempt still required authentication; no retries or host
-collection were performed. Expanded shared-FD/reuseport/closure/reuse/restart/loss
-kernel tests, collector overhead and measured UDP screenshot remain pending that
-run. Fixture smoke: `.workspace/udp-native-smoke.log` (not BPF proof); identity
-race tests: `.workspace/udp-finish-go.log`; vet: `udp-finish-vet.log`; unchanged UI
-behavior: `udp-finish-ui-regression.log`. Existing TCP/API/UI evidence is reused.
-The previous unavailable-counters image is not a measured-rate screenshot.
+Collector+helper: 3.52s, 0.010s CPU (0.28% one CPU), 14916KiB sum RSS, 85/2048 map rows,
+**zero registered-transfer misses**. The total missed-operation counter was 1 from
+an intentional pre-registration datagram; partial markers correctly remain visible.
+Process CPU excludes BPF probe time charged to callers. This is a short sanity
+check, not a throughput guarantee or cross-distribution validation.
+
+No accounting/verifier fix was required after that run. Expected fixture-barrier
+EOF during teardown now exits quietly instead of printing `UDP fixture: Success`;
+IPv4/IPv6 cleanup smoke passed (`.workspace/udp-cleanup-check.log`). Confirmation
+copy no longer incorrectly says isolated validation is pending. Kernel measurement
+paths are unchanged; existing TCP/API/UI evidence remains reusable.
+
+Normal launch remains `scripts/run-desktop.sh`; explicitly enable optional UDP
+collection from Activity after `scripts/build-udp.sh`, and use Stop extended
+monitoring or `.workspace/flowgate udp-stop`. See UDP.md for exact permissions,
+API-return byte definitions, socket-level peer scope and first-registration gaps.
+Only isolated collection was exercised; live-host authentication/coexistence,
+offload/bypass variants and other kernels/distributions remain unverified. Host
+firewall, networking, security settings and services were unchanged.
 
 ## Current: real TCP traffic and grouped unidentified sockets
 
 `scripts/run-desktop.sh` remains unprivileged/read-only. Activity now includes
 Upload, Download, Uploaded and Downloaded, with numeric sorting and selectable
 accounting details. TCP IPv4/IPv6 uses real kernel payload counters, observed since
-a baseline; upload includes retransmitted data. **UDP metrics are unavailable**.
+a baseline; upload includes retransmitted data. **Unprivileged UDP metrics remain unavailable unless the optional collector is explicitly enabled**.
 No privileged collector or new activation is required. See TRAFFIC.md for semantics.
 
 One initially collapsed Unidentified group holds unknown/shared sockets, preserves
@@ -152,7 +167,7 @@ disable/delete; bounded no-listener attempts; duplicate/conflicting startup;
 structural degradation; daemon SIGKILL; repeated recovery; scoped automatic stop,
 including the independent watchdog after daemon death. Unrelated nft objects survive.
 
-Actual Wayland Qt checks run as UID1000 outside that namespace: persistent Allow
+Actual Wayland Qt checks run as UID 1000 outside that namespace: persistent Allow
 releases the held datagram, a new source port matches, Disable restores Ask, Block
 delivers nothing, Delete removes the rule, and disconnect disables mutations.
 Focused Go race tests and vet cover the changed policy/API/storage/queue paths.

@@ -5,8 +5,8 @@
 Normal `scripts/run-desktop.sh` collects real **TCP IPv4/IPv6** upload/download
 rates and observed transferred bytes without root, packet capture, nftables,
 NFQUEUE, eBPF, services or Wine helpers. No activation is necessary. The existing
-five-minute evaluation is independent and remains explicit. An optional experimental UDP collector is now implemented but privileged
-verification is blocked; it is never automatically started. See UDP.md.
+five-minute evaluation is independent and remains explicit. The optional UDP collector passed isolated kernel/Wayland verification and is
+never automatically started. See UDP.md for activation and coverage.
 
 The bounded socket census requests `INET_DIAG_INFO` and reads Linux `TCP_INFO`
 `tcpi_bytes_sent` and `tcpi_bytes_received`. Responses shorter than the fields are
@@ -23,11 +23,11 @@ Loopback shows the sender's upload and receiver's download on their separate
 sockets: they are two application perspectives, not an interface-wide total.
 The same shared socket is displayed/counted once, not once per descriptor holder.
 
-**UDP is unavailable**, for connected as well as unconnected sockets, IPv4/IPv6.
+**Basic unprivileged UDP accounting is unavailable** for IPv4/IPv6.
 The inspected UDP diagnostic interface does not supply transferred-byte counters.
 No per-peer UDP totals or application UDP estimates are claimed. The optional UDP.md adapter supplies API-reported payload counts when explicitly
-loaded, but its kernel operation remains unverified here. The Enable action is
-explicit, collection-only and marked experimental; basic UDP remains unavailable
+loaded, and passed the isolated native lifecycle/Wayland suite. The Enable action is
+explicit and collection-only; basic UDP remains unavailable
 without that collector.
 
 Kernel source references inspected (public UAPI, no implementation code copied):

@@ -130,7 +130,11 @@ int main(int argc, char **argv) {
     for (int i = 0; i < 3; i++)
       fd[i] = atoi(argv[3 + i]);
     char b;
-    check(read(atoi(argv[6]), &b, 1) == 1);
+    ssize_t n = read(atoi(argv[6]), &b, 1);
+    // Parent teardown closes the barrier without handing off. EOF is expected.
+    if (n == 0)
+      return 0;
+    check(n == 1);
     close(atoi(argv[6]));
     state("handoff");
   } else {

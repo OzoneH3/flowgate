@@ -69,12 +69,12 @@ ActivityView::ActivityView(QWidget *parent) : QWidget(parent) {
   connect(enableExtended, &QPushButton::clicked, this, [this] {
     if (QMessageBox::question(
             this, "Extended UDP monitoring",
-            "Start experimental privileged UDP byte collection? This does not "
+            "Start privileged UDP byte collection? This does not "
             "enable firewall enforcement. The terminal handles system "
             "authentication. UDP counts API-reported successful send/non-peek "
             "receive bytes, separately from TCP transport payload. This "
-            "adapter still requires privileged isolated validation.") !=
-        QMessageBox::Yes)
+            "collector requires supported kernel BTF tracepoints and BPF "
+            "permissions.") != QMessageBox::Yes)
       return;
     QString terminal = QStandardPaths::findExecutable("konsole"),
             python = QStandardPaths::findExecutable("python3");

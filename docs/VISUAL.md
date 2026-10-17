@@ -111,7 +111,17 @@ labelled synthetic in `.workspace/traffic-ui-final.log`.
 
 Activity adds explicit extended-monitoring Enable/Stop controls without changing
 the tree layout. UDP source health is independent of enforcement. UDP API bytes
-are labelled separately; incompatible aggregates show Mixed sources. The current
+are labelled separately; incompatible aggregates show Mixed sources. The earlier
 Wayland capture (directory in `.workspace/udp-wayland-final.log`) shows real UDP
-datagrams with counters unavailable because no BPF load succeeded. No screenshot
-of measured UDP rates is claimed; the mixed-source UI fixture is synthetic.
+datagrams with counters unavailable before authenticated BPF validation. That
+capture is not measured-rate evidence; the mixed-source UI fixture is synthetic.
+The measured capture below supersedes this historical limitation.
+
+## Verified measured UDP capture
+
+`.workspace/udp-verified-o2oghdyo/udp-measured-wayland.png` and
+`udp-measured-narrow.png` show real kernel-backed IPv4/IPv6 UDP fixture rates and
+observed totals in an actual unprivileged Wayland window (3/3). Shared sockets
+remain once under Unidentified. Partial markers reflect the deliberate
+pre-registration miss; registered steady transfers had zero additional misses.
+These replace the earlier unavailable-state capture as UDP-rate evidence.

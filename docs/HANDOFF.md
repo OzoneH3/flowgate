@@ -1,6 +1,19 @@
 # Continuation handoff
 
-## Latest continuation: finish expanded UDP verification
+## Completed UDP acceptance
+
+The user-authenticated `.workspace/udp-verified-o2oghdyo` run passed the complete
+isolated native UDP4/6 accounting/lifecycle suite and unprivileged Wayland 3/3.
+Inspect its logs/result metadata and real measured-rate screenshots before doing
+more work. No privileged rerun is needed for documentation or fixture cleanup.
+Current STATUS and UDP.md state the exact coverage, byte definitions, overhead and
+remaining limits. Production counter/BPF code did not need a verifier fix.
+A small post-acceptance change makes a dormant fixture child exit quietly on
+barrier EOF; it does not change counted operations. Qt confirmation copy now
+reflects the completed isolated validation. Preserve these results and TCP/
+Unidentified behavior. Live-host collection remains separately opt-in/unverified.
+
+## Historical continuation before the successful expanded run
 
 Start was clean c631a70de97390966a2e83e159ebd5eb38adcc6f on milestone/backend.
 User's authenticated `.workspace/udp-privileged-1792255664` run passed real UDP4/6
@@ -20,7 +33,7 @@ disposable namespace and captures all receiver/Wayland/CPU/RSS/loss evidence in
 `.workspace/udp-verified-*`. Review any actual failure before broadening tests.
 Current passing native smoke is not BPF proof. No live-host collection was started.
 
-## Latest: optional UDP experiment, exact remaining blocker
+## Historical: optional UDP experiment and original privilege blocker
 
 Started clean at1c3b1b23b62af30332a063d9ac2ea59dbe076761 on milestone/backend.
 The BPF source/helper, collection-only authenticated API, normal observer adapter,

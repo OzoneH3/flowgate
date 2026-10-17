@@ -62,8 +62,9 @@ UDP metrics show unavailable; partial aggregates carry `*`. Unidentified sockets
 share one collapsible presentation group, with individual evidence in details.
 See [traffic accounting](docs/TRAFFIC.md). An optional
 [UDP collector experiment](docs/UDP.md) and explicit Activity Enable/Stop actions
-are implemented. Initial isolated UDP4/6 receiver comparisons passed; the expanded
-lifecycle/Wayland suite still awaits authentication via `scripts/check-udp-isolated.sh`.
+are implemented. Isolated UDP4/6 receiver, lifecycle and actual Wayland-rate checks passed.
+Build the optional collector with `scripts/build-udp.sh`, then explicitly enable
+extended monitoring in Activity; Stop affects collection only.
 Read UDP.md before host use. Domain/location data are not invented. See [visual references and differences](docs/VISUAL.md) for the NetLimiter 5
 layout target, recreated with our Qt components and FlowGate branding.
 

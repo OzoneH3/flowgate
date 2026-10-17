@@ -1,16 +1,16 @@
 # Authoritative implementation plan
 
-## Current: optional UDP accounting experiment
+## Complete: isolated UDP accounting milestone
 
 1. Implement namespace/UID-filtered sock length BTF probes and bounded cookie maps.
 2. Keep collection-only IPC, authentication and Stop independent of enforcement.
 3. Integrate explicit activation and compatible table semantics, preserve TCP.
 4. Complete build, synthetic API/lifetime/UI tests and real UDP fixtures (done).
-5. Initial authenticated kernel UDP4/6 tests passed (user evidence); loading is supported.
-6. Expanded native shared/reuseport/reuse/restart/loss + outside-namespace Wayland
-   runner is implemented. Await desktop authentication via scripts/check-udp-isolated.sh.
-7. Reuse original TCP/API/UI evidence; complete and record remaining kernel results,
-   never substitute native fixture or synthetic results for actual BPF comparisons.
+5. Authenticated kernel UDP4/6, shared/reuseport/reuse/restart/loss checks passed.
+6. Actual unprivileged Wayland measured-rate capture passed 3/3; evidence and CPU/RSS
+   are indexed in STATUS/UDP. Preserve it instead of repeating the matrix.
+7. Live-host collection, offload/bypass variants and other kernels remain unverified;
+   keep monitoring opt-in and firewall activation separate.
 
 ## Complete: truthful Activity TCP measurements and Unidentified grouping
 
