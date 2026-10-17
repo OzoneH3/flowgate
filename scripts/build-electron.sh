@@ -10,3 +10,5 @@ node electron/node_modules/electron/install.js
 (cd electron && npm run build)
 . ./scripts/go-env.sh
 go build -o .workspace/electron-observer ./cmd/flowgate
+
+go build -o .workspace/flowgate ./cmd/flowgate

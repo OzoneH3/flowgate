@@ -1,6 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { Bridge, ClientState, Decision } from './protocol';
 const api: Bridge = {
+  ruleDraft: (v) => ipcRenderer.invoke('rule:draft', v),
+  rulePreview: (v) => ipcRenderer.invoke('rule:preview', v),
+  ruleSave: (v) => ipcRenderer.invoke('rule:save', v),
+  ruleDelete: (v) => ipcRenderer.invoke('rule:delete', v),
+  evaluation: (a, p) => ipcRenderer.invoke('evaluation:action', a, p),
+  evaluationState: () => ipcRenderer.invoke('evaluation:state'),
+  preferences: (v) => ipcRenderer.invoke('preferences', v),
   snapshot: () => ipcRenderer.invoke('snapshot'),
   subscribe: (fn) => {
     const listener = (_event: unknown, state: ClientState) => fn(state);

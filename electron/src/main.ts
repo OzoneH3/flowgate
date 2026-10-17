@@ -1,6 +1,9 @@
 import { app, BrowserWindow, ipcMain, protocol, session, type IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
+import { Rules } from './rules';
+import { Evaluation } from './evaluation';
+import type { Preferences } from './protocol';
 import { Backend } from './backend';
 import { validateDecision } from './protocol';
 if (process.getuid?.() === 0) throw Error('FlowGate Electron must run unprivileged');
@@ -34,12 +37,29 @@ function dimension(name: string, fallback: number, min: number, max: number) {
   if (!Number.isInteger(n) || n < min || n > max) throw Error('Invalid window dimension');
   return n;
 }
-const width = dimension('--width', 1280, 800, 3840),
-  height = dimension('--height', 820, 550, 2160);
+let saved: { width?: number; height?: number; ui?: Preferences } = {};
+const prefsFile = path.join(workspace, 'electron-preferences.json');
+try {
+  saved = JSON.parse(fs.readFileSync(prefsFile, 'utf8'));
+} catch {}
+const persist = () => fs.writeFileSync(prefsFile, JSON.stringify(saved), { mode: 0o600 });
+const width = dimension(
+    '--width',
+    Math.max(800, Math.min(3840, Number(saved.width) || 1280)),
+    800,
+    3840,
+  ),
+  height = dimension(
+    '--height',
+    Math.max(550, Math.min(2160, Number(saved.height) || 820)),
+    550,
+    2160,
+  );
 let main: BrowserWindow;
 let prompt: BrowserWindow | undefined;
 const windows = new Set<BrowserWindow>();
 let backend: Backend;
+let evaluation: Evaluation;
 function trusted(e: IpcMainInvokeEvent) {
   if (
     ![...windows].some((w) => !w.isDestroyed() && w.webContents === e.sender) ||
@@ -111,6 +131,76 @@ app.whenReady().then(async () => {
   backend = new Backend(observer!, controller, (state) => {
     for (const w of windows) if (!w.isDestroyed()) w.webContents.send('state', state);
   });
+  const rules = new Rules(backend);
+  evaluation = new Evaluation(
+    path.resolve(__dirname, '../..'),
+    backend,
+    controller || '/run/flowgate-api/control.sock',
+  );
+  for (const [channel, handler] of Object.entries({
+    'rule:draft': (v: unknown) => rules.draft(v),
+    'rule:preview': (v: unknown) => rules.preview(v),
+    'rule:save': (v: unknown) => rules.save(v),
+    'rule:delete': (v: unknown) => rules.delete(v),
+  }))
+    ipcMain.handle(channel, (e, v) => {
+      trusted(e);
+      return handler(v);
+    });
+  ipcMain.handle('evaluation:action', (e, a, p) => {
+    trusted(e);
+    return evaluation.action(a, p);
+  });
+  ipcMain.handle('evaluation:state', (e) => {
+    trusted(e);
+    return evaluation.state;
+  });
+  ipcMain.handle('preferences', (e, v) => {
+    trusted(e);
+    if (v !== undefined) {
+      if (
+        !v ||
+        typeof v !== 'object' ||
+        Object.keys(v).some((k) => !['sidebar', 'columns'].includes(k))
+      )
+        throw Error('Invalid preferences');
+      if (
+        v.sidebar !== undefined &&
+        (!Number.isInteger(v.sidebar) || v.sidebar < 240 || v.sidebar > 600)
+      )
+        throw Error('Invalid sidebar');
+      const columns: Record<string, number> = {};
+      if (v.columns) {
+        if (typeof v.columns !== 'object' || Object.keys(v.columns).length > 16)
+          throw Error('Invalid columns');
+        for (const [k, n] of Object.entries(v.columns)) {
+          if (
+            ![
+              'name',
+              'download_bps',
+              'upload_bps',
+              'count',
+              'pid',
+              'downloaded',
+              'uploaded',
+              'protocol',
+              'local',
+              'remote',
+              'state',
+            ].includes(k) ||
+            !Number.isInteger(n) ||
+            Number(n) < 45 ||
+            Number(n) > 700
+          )
+            throw Error('Invalid column');
+          columns[k] = Number(n);
+        }
+      }
+      saved.ui = { sidebar: v.sidebar, columns };
+      persist();
+    }
+    return saved.ui || {};
+  });
   ipcMain.handle('snapshot', (e) => {
     trusted(e);
     return backend.view();
@@ -135,10 +225,19 @@ app.whenReady().then(async () => {
     if (prompt && !prompt.isDestroyed() && prompt.webContents === e.sender) prompt.close();
   });
   main = windowFor();
+  main.on('resize', () => {
+    const [w, h] = main.getSize();
+    saved.width = w;
+    saved.height = h;
+    persist();
+  });
   main.on('closed', () => app.quit());
   backend.start();
 });
-app.on('before-quit', () => backend?.stop());
+app.on('before-quit', () => {
+  backend?.stop();
+  evaluation?.close();
+});
 app.on('window-all-closed', () => app.quit());
 process.on('SIGTERM', () => app.quit());
 process.on('SIGINT', () => app.quit());

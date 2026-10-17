@@ -63,7 +63,7 @@ export class Backend {
   private stopped = false;
   constructor(
     readonly observer: string,
-    readonly controller: string | undefined,
+    public controller: string | undefined,
     private changed: (state: ClientState) => void,
   ) {}
   start() {
@@ -154,6 +154,7 @@ export class Backend {
           r.read_only || (r.mode === 'host-enforcement' && r.enforcement?.state !== 'active'),
         mode: r.mode,
         enforcement: r.enforcement,
+        rules: r.rules,
         events: [],
       };
     } catch (e) {

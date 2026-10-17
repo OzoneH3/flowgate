@@ -68,6 +68,7 @@ export interface RequestEvent {
     application?: Application;
     owners: Process[];
   };
+  remembered_filter?: RuleFilter;
   scope_previews: Partial<Record<Scope, string>>;
 }
 export type Scope = 'once' | 'application' | 'persistent';
@@ -82,6 +83,9 @@ export interface Reply {
   activity?: Activity;
   events: RequestEvent[];
   decision?: RequestEvent;
+  rules: Rule[];
+  saved_rule?: Rule;
+  scope_preview: string;
   enforcement?: { state: string; detail: string; profile: string; stops_at: string };
 }
 export interface Attempt {
@@ -102,6 +106,7 @@ export interface ClientState {
     mode: string;
     enforcement?: Reply['enforcement'];
     events: ViewEvent[];
+    rules?: Rule[];
   };
 }
 export interface Decision {
@@ -112,6 +117,13 @@ export interface Decision {
 }
 export interface Bridge {
   snapshot(): Promise<ClientState>;
+  ruleDraft(source: { id?: string; event?: string }): Promise<RuleDraft>;
+  rulePreview(value: RuleEdit): Promise<{ receipt: string; preview: string }>;
+  ruleSave(receipt: string): Promise<Attempt>;
+  ruleDelete(value: { id: string; generation: string; version: number }): Promise<Attempt>;
+  evaluation(action: EvaluationAction, profile?: 'incoming' | 'both'): Promise<void>;
+  evaluationState(): Promise<EvaluationState>;
+  preferences(value?: Preferences): Promise<Preferences>;
   subscribe(fn: (state: ClientState) => void): () => void;
   decide(value: Decision): Promise<Attempt>;
   openPrompt(id: string): Promise<void>;
@@ -187,6 +199,7 @@ function event(v: unknown): RequestEvent {
       owners: array(a.owners, 2048).map(process),
     },
     scope_previews: previews,
+    remembered_filter: e.remembered_filter ? ruleFilter(e.remembered_filter) : undefined,
   };
 }
 export function parseReply(raw: unknown): Reply {
@@ -206,6 +219,9 @@ export function parseReply(raw: unknown): Reply {
     server_time: string(r.server_time),
     error: string(r.error),
     events: array(r.events, 256).map(event),
+    rules: array(r.rules, 8192).map(parseRule),
+    saved_rule: r.saved_rule ? parseRule(r.saved_rule) : undefined,
+    scope_preview: string(r.scope_preview),
   };
   if (r.decision) result.decision = event(r.decision);
   if (r.enforcement) {
@@ -284,4 +300,108 @@ export function validateDecision(v: unknown): Decision {
   )
     throw Error('Invalid decision');
   return d as unknown as Decision;
+}
+
+export interface RuleFilter {
+  application: string;
+  revision: string;
+  direction: string;
+  protocol: string;
+  remote_address?: string;
+  local_port?: number;
+  remote_port?: number;
+  remote?: string;
+  uid: number;
+}
+export interface Rule {
+  version: number;
+  executable: string;
+  created: string;
+  disabled: boolean;
+  schema: number;
+  id: string;
+  priority: number;
+  filter: RuleFilter;
+  action: string;
+  expires: string;
+}
+export interface RuleDraft {
+  token: string;
+  generation: string;
+  rule: Rule;
+  source: string;
+}
+export interface RuleEdit {
+  token: string;
+  action: Action;
+  protocol: string;
+  remote_address: string;
+  local_port: number;
+  remote_port: number;
+  priority: number;
+  disabled: boolean;
+  expiry: 'preserve' | 'hour' | 'permanent';
+}
+export type EvaluationAction = 'start' | 'stop' | 'status' | 'recover' | 'cancel';
+export interface EvaluationState {
+  phase: string;
+  message: string;
+  generation: string;
+  busy: boolean;
+  starting: boolean;
+}
+export interface Preferences {
+  sidebar?: number;
+  columns?: Record<string, number>;
+}
+function ruleFilter(v: unknown): RuleFilter {
+  const f = object(v);
+  return {
+    application: string(f.application),
+    revision: string(f.revision),
+    direction: string(f.direction),
+    protocol: string(f.protocol),
+    remote_address: string(f.remote_address),
+    remote: string(f.remote),
+    local_port: number(f.local_port),
+    remote_port: number(f.remote_port),
+    uid: number(f.uid),
+  };
+}
+function parseRule(v: unknown): Rule {
+  const r = object(v);
+  return {
+    version: number(r.version),
+    executable: string(r.executable),
+    created: string(r.created),
+    disabled: r.disabled === true,
+    schema: number(r.schema),
+    id: string(r.id),
+    priority: number(r.priority),
+    filter: ruleFilter(r.filter),
+    action: string(r.action),
+    expires: string(r.expires),
+  };
+}
+export function validateEdit(v: unknown): RuleEdit {
+  const e = object(v);
+  if (
+    Object.keys(e).sort().join(',') !==
+      'action,disabled,expiry,local_port,priority,protocol,remote_address,remote_port,token' ||
+    typeof e.token !== 'string' ||
+    e.token.length > 128 ||
+    !['allow', 'block'].includes(String(e.action)) ||
+    !['tcp', 'udp', '*'].includes(String(e.protocol)) ||
+    typeof e.remote_address !== 'string' ||
+    e.remote_address.length > 256 ||
+    ![e.local_port, e.remote_port].every(
+      (n) => Number.isInteger(n) && Number(n) >= 0 && Number(n) <= 65535,
+    ) ||
+    !Number.isInteger(e.priority) ||
+    Math.abs(Number(e.priority)) > 1000 ||
+    typeof e.disabled !== 'boolean' ||
+    !['preserve', 'hour', 'permanent'].includes(String(e.expiry))
+  )
+    throw Error('Invalid rule edit');
+  return e as unknown as RuleEdit;
 }

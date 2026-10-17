@@ -12,10 +12,10 @@ p = argparse.ArgumentParser(description='FlowGate Electron: unprivileged Activit
 p.add_argument('--observer', help='Reuse an existing read-only observer Unix socket; leave it running on exit')
 p.add_argument('--control', help='Existing authenticated controller Unix socket; never start or stop its controller')
 p.add_argument('--interval', default='1s', help='Owned observer interval, 500ms–30s (default 1s)')
-p.add_argument('--width', type=int, default=1280, help='Initial main window width (800–3840)')
-p.add_argument('--height', type=int, default=820, help='Initial main window height (550–2160)')
+p.add_argument('--width', type=int, default=None, help='Initial main window width (800–3840)')
+p.add_argument('--height', type=int, default=None, help='Initial main window height (550–2160)')
 a = p.parse_args()
-if not 800 <= a.width <= 3840 or not 550 <= a.height <= 2160:
+if (a.width is not None and not 800 <= a.width <= 3840) or (a.height is not None and not 550 <= a.height <= 2160):
     p.error('Window size outside supported range')
 if os.geteuid() == 0:
     p.error('Electron must run as the desktop user, never root')
@@ -48,7 +48,9 @@ try:
         env = os.environ.copy()
         if not env.get('WAYLAND_DISPLAY') and Path('/run/user/'+str(os.getuid())+'/wayland-0').exists():
             env['WAYLAND_DISPLAY'] = 'wayland-0'
-        args = [str(ROOT/'electron/node_modules/.bin/electron'), str(ROOT/'electron'), '--observer', a.observer, '--width', str(a.width), '--height', str(a.height)]
+        args = [str(ROOT/'electron/node_modules/.bin/electron'), str(ROOT/'electron'), '--observer', a.observer]
+        if a.width is not None: args += ['--width',str(a.width)]
+        if a.height is not None: args += ['--height',str(a.height)]
         if env.get('WAYLAND_DISPLAY'):
             args.insert(1, '--ozone-platform=wayland')
         if a.control:
