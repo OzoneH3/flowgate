@@ -47,3 +47,17 @@ func TestActivityCacheInvalidation(t *testing.T) {
 		t.Fatal("executable cache", err)
 	}
 }
+
+func TestUDPSocketIdentitySurvivesEndpointChanges(t *testing.T) {
+	f, _ := ParseFlow("udp", "outgoing", "127.0.0.1:1234", "127.0.0.1:5678")
+	s := Socket{Protocol: "udp", Cookie: "unique-cookie", Inode: 42, NetNS: "test-netns", Family: 2, Local: f.Local}
+	old := activitySocketID(s)
+	s.Remote = f.Remote
+	if activitySocketID(s) != old {
+		t.Fatal("connect changed UDP row identity")
+	}
+	s.Cookie = "new-lifetime"
+	if activitySocketID(s) == old {
+		t.Fatal("endpoint reuse inherited row identity")
+	}
+}

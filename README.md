@@ -62,8 +62,9 @@ UDP metrics show unavailable; partial aggregates carry `*`. Unidentified sockets
 share one collapsible presentation group, with individual evidence in details.
 See [traffic accounting](docs/TRAFFIC.md). An optional
 [UDP collector experiment](docs/UDP.md) and explicit Activity Enable/Stop actions
-are implemented, but kernel-backed UDP validation is blocked by BPF permissions.
-Do not treat UDP as receiver-verified support yet. Domain/location data are not invented. See [visual references and differences](docs/VISUAL.md) for the NetLimiter 5
+are implemented. Initial isolated UDP4/6 receiver comparisons passed; the expanded
+lifecycle/Wayland suite still awaits authentication via `scripts/check-udp-isolated.sh`.
+Read UDP.md before host use. Domain/location data are not invented. See [visual references and differences](docs/VISUAL.md) for the NetLimiter 5
 layout target, recreated with our Qt components and FlowGate branding.
 
 For a separately managed observer (stop with Ctrl+C):

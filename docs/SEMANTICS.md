@@ -1,6 +1,6 @@
 # Milestone semantics and safety boundaries
 
-## Optional UDP accounting adapter (not yet kernel-verified)
+## Optional UDP accounting adapter (initial kernel verification passed)
 
 See UDP.md. The optional BPF path counts successful send return bytes and non-peek,
 non-error-queue receive return bytes, keyed by registered UDP socket cookie in the
@@ -10,7 +10,9 @@ UDPSnapshot v1 has generation, monotonic sample_ns, namespace, collection time a
 missed-operation count. A repeated sample has no new rate, not a synthetic zero;
 restart/registration reset has a new observed interval. The collection-only socket
 accepts authenticated list/Stop, never policy changes. Normal monitoring starts
-neither BPF nor enforcement. Real BPF validation is blocked by available privileges.
+neither BPF nor enforcement. Initial UDP4/6 BPF checks passed in the user-authenticated namespace; expanded
+lifecycle/GUI verification still requires that authentication. UDP Activity keys
+omit endpoints so a connect does not replace a still-live socket row.
 
 
 ## Activity byte counters

@@ -1,30 +1,26 @@
 # Current status
 
-## Current: optional UDP adapter implemented; privileged validation blocked
+## Current: initial kernel UDP checks passed; expanded lifecycle/UI run prepared
 
-Normal `scripts/run-desktop.sh` remains unprivileged, read-only and preserves TCP
-metrics and the single Unidentified group. An optional CO-RE/libbpf collector,
-private collection-only API, Activity Enable/Stop actions and UDP socket-counter
-integration are implemented. **Real kernel-backed UDP accounting is not verified**:
-BPF load returns EPERM in the disposable user namespace; scoped noninteractive
-sudo requires authentication. Do not call this a completed UDP coverage milestone.
+The user's authenticated isolated run passed UDP4/UDP6 connected/unconnected,
+multi-peer and PEEK/truncation/failed-send counter comparisons. Local evidence:
+`.workspace/udp-privileged-1792255664/collector.log` confirms READY; PASS lines were
+provided by the user. No verifier/attachment defect was demonstrated.
 
-See UDP.md for byte semantics, requirements, exact opt-in commands and the isolated
-continuation. UDP counts API-reported send/receive payload, not TCP transport bytes;
-mixed aggregates say Mixed sources. No peer split, no packet capture, firewall
-mutation or live-host BPF attachment was performed. No packages were installed.
+UDP Activity IDs are now namespace/cookie/lifetime based, independent of endpoint
+changes; connecting a live socket no longer replaces its row. TCP IDs and firewall
+behavior are unchanged. Native alpha/beta fixtures and an expanded one-command
+namespace/Wayland acceptance harness are implemented. Run as the desktop user:
+`scripts/check-udp-isolated.sh`. It builds locally, requests sudo only for the
+namespace, and keeps Qt unprivileged/outside it. See UDP.md.
 
-Evidence: `.workspace/udp-build-final.log` (C/BPF build),
-`.workspace/udp-isolated-denied.log` (exact permission blocker),
-`.workspace/udp-api-final.log` (actual authenticated API with synthetic helper),
-`.workspace/udp-go-final.log` (race/vet), `.workspace/udp-wayland-final.log` (4/4),
-`.workspace/udp-tcp-regression.log` (4/4), `.workspace/udp-fixtures.log` (real UDP
-return/receiver semantics only). The UDP screenshot shows unavailable counters,
-not invented rates: `.workspace/udp-ui-1753846/udp-unavailable-real-traffic.png`.
-TCP receiver regression: `.workspace/udp-tcp-receiver-regression.log`, observer
-0.86% of one CPU, 17584KiB RSS, 9ms census in a 5.82s bounded run. This measures the
-basic observer with unavailable UDP, not BPF overhead. UDP event-loss, receiver-
-accurate accounting and collector CPU/RSS remain unmeasured because loading failed.
+One noninteractive attempt still required authentication; no retries or host
+collection were performed. Expanded shared-FD/reuseport/closure/reuse/restart/loss
+kernel tests, collector overhead and measured UDP screenshot remain pending that
+run. Fixture smoke: `.workspace/udp-native-smoke.log` (not BPF proof); identity
+race tests: `.workspace/udp-finish-go.log`; vet: `udp-finish-vet.log`; unchanged UI
+behavior: `udp-finish-ui-regression.log`. Existing TCP/API/UI evidence is reused.
+The previous unavailable-counters image is not a measured-rate screenshot.
 
 ## Current: real TCP traffic and grouped unidentified sockets
 

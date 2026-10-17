@@ -105,7 +105,9 @@ func (c *ActivityCollector) Collect() ActivitySnapshot {
 			out.UDP = &u
 		}
 		c.measure(&out, out.Started)
-        if out.UDP!=nil {out.UDP.Rows=nil} // expose health, not a duplicate cookie map
+		if out.UDP != nil {
+			out.UDP.Rows = nil
+		} // expose health, not a duplicate cookie map
 		out.Collected = time.Now()
 		out.DurationMS = time.Since(out.Started).Milliseconds()
 		return out
@@ -125,7 +127,7 @@ func (c *ActivityCollector) Collect() ActivitySnapshot {
 	sort.Slice(sockets, func(i, j int) bool { return sockets[i].Cookie < sockets[j].Cookie })
 	wanted := map[string][]int{}
 	for _, s := range sockets {
-		id := fmt.Sprintf("%s:%d:%s:%d:%s:%s:%s", s.NetNS, s.Family, s.Protocol, s.Inode, s.Cookie, s.Local, s.Remote)
+		id := activitySocketID(s)
 		out.Rows = append(out.Rows, ActivityRow{ID: id, Socket: s, Owners: []string{}, State: SocketState(s), Direction: "Unknown", Ownership: "Unknown owner", Evidence: "Unknown owner: no descriptor holder found in this snapshot"})
 		if s.Inode != 0 {
 			key := fmt.Sprintf("socket:[%d]", s.Inode)
@@ -270,4 +272,12 @@ func (c *ActivityCollector) Collect() ActivitySnapshot {
 		out.Issues = append(out.Issues, "Some sockets have no visible owner or processes changed during collection")
 	}
 	return finish()
+}
+
+// UDP endpoints may change through connect/disconnect while the socket survives.
+func activitySocketID(s Socket) string {
+	if s.Protocol == "udp" {
+		return fmt.Sprintf("%s:%d:%s:%d:%s", s.NetNS, s.Family, s.Protocol, s.Inode, s.Cookie)
+	}
+	return fmt.Sprintf("%s:%d:%s:%d:%s:%s:%s", s.NetNS, s.Family, s.Protocol, s.Inode, s.Cookie, s.Local, s.Remote)
 }

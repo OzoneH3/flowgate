@@ -1,7 +1,13 @@
 #!/bin/sh
-# Deliberate privileged test command only, never run by the desktop launcher.
+# Desktop user builds/coordinates; only the disposable namespace uses sudo.
 set -eu
+if [ "$(id -u)" -eq 0 ]; then echo "Run as your desktop user; this script requests sudo only for the disposable namespace." >&2; exit 1; fi
 cd "$(dirname "$0")/.."
-parent=$(readlink /proc/self/ns/net)
-exec sudo unshare --net --pid --fork --mount-proc \
- env FLOWGATE_PARENT_NETNS="$parent" python3 scripts/udp-isolated-test.py --run "$PWD/.workspace/udp-privileged-$(date +%s)"
+. ./scripts/go-env.sh
+scripts/build-desktop.sh
+go build -o .workspace/udp-test-driver ./fixtures/udpdriver
+mkdir -p .workspace/udp-fixtures
+cc -Wall -Wextra -O2 fixtures/udp/fixture.c -o .workspace/udp-fixtures/alpha
+cp .workspace/udp-fixtures/alpha .workspace/udp-fixtures/beta
+if [ ! -x .workspace/udp-collector ]; then scripts/build-udp.sh; fi
+exec python3 scripts/udp-verification.py "$@"

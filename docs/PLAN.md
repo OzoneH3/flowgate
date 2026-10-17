@@ -6,10 +6,11 @@
 2. Keep collection-only IPC, authentication and Stop independent of enforcement.
 3. Integrate explicit activation and compatible table semantics, preserve TCP.
 4. Complete build, synthetic API/lifetime/UI tests and real UDP fixtures (done).
-5. Blocker: obtain initial-namespace BPF/perf load permission for the exact
-   disposable-network-namespace test in UDP.md. No live-host attachment substitute.
-6. After verifier/receiver evidence, finish shared/reuseport/loss/restart and real
-   unprivileged UDP-rate screenshot checks. Do not claim these already passed.
+5. Initial authenticated kernel UDP4/6 tests passed (user evidence); loading is supported.
+6. Expanded native shared/reuseport/reuse/restart/loss + outside-namespace Wayland
+   runner is implemented. Await desktop authentication via scripts/check-udp-isolated.sh.
+7. Reuse original TCP/API/UI evidence; complete and record remaining kernel results,
+   never substitute native fixture or synthetic results for actual BPF comparisons.
 
 ## Complete: truthful Activity TCP measurements and Unidentified grouping
 

@@ -1,5 +1,25 @@
 # Continuation handoff
 
+## Latest continuation: finish expanded UDP verification
+
+Start was clean c631a70de97390966a2e83e159ebd5eb38adcc6f on milestone/backend.
+User's authenticated `.workspace/udp-privileged-1792255664` run passed real UDP4/6
+baseline checks. The collector log confirms successful loading/attachment. Reuse
+that evidence; do not claim it covers all lifecycle/GUI cases.
+
+Implemented native alpha/beta wildcard/shared/reuseport/rebind fixtures, a broader
+root-namespace receiver harness with desktop-UID processes, and an outside-namespace
+unprivileged Wayland measured-rate test. Fixed UDP Activity identity changing on
+connect by omitting endpoints from the socket-lifetime key. Source counter logic
+and TCP/firewall behavior did not change.
+
+Still needs desktop authentication: `scripts/check-udp-isolated.sh` (one command,
+no outer sudo). The only agent noninteractive attempt refused authentication; do
+not retry it repeatedly. The script builds its prerequisites, then starts only a
+disposable namespace and captures all receiver/Wayland/CPU/RSS/loss evidence in
+`.workspace/udp-verified-*`. Review any actual failure before broadening tests.
+Current passing native smoke is not BPF proof. No live-host collection was started.
+
 ## Latest: optional UDP experiment, exact remaining blocker
 
 Started clean at1c3b1b23b62af30332a063d9ac2ea59dbe076761 on milestone/backend.
