@@ -35,6 +35,7 @@ type EnforcementStatus struct {
 	StopsAt time.Time `json:"stops_at"`
 }
 type Response struct {
+	Permissions  *Permissions               `json:"permissions,omitempty"`
 	Capabilities []string                   `json:"capabilities,omitempty"`
 	ErrorCode    string                     `json:"error_code,omitempty"`
 	DeletedRule  *DeletedRule               `json:"deleted_rule,omitempty"`
@@ -56,6 +57,9 @@ type Response struct {
 
 func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 	readonly = readonly || e.Mode == "host-monitor"
+	if e.AdministratorUID != nil && (os.Geteuid() != 0 || e.APIUID == nil || *e.AdministratorUID != *e.APIUID) {
+		return nil, readiness.Fail("permission_required", "administrator grant requires a root daemon and the explicitly selected API UID", "Use privileged configuration; client requests cannot grant administrative authority")
+	}
 	// Parent must be owned and inaccessible to other users; never unlink an existing path.
 	parent := path[:len(path)-len(baseName(path))]
 	st, err := os.Lstat(filepath.Clean(parent))
@@ -115,7 +119,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 					if err != nil || cred == nil {
 						return
 					}
-					r := Response{Capabilities: []string{ConditionalDeleteCapability}, Version: 1, Generation: e.Generation, ReadOnly: readonly, Mode: e.Mode, ServerTime: time.Now(), PeerUID: cred.Uid}
+					r := Response{Capabilities: []string{ConditionalDeleteCapability, "explicit-administrator-v1"}, Version: 1, Generation: e.Generation, ReadOnly: readonly, Mode: e.Mode, ServerTime: time.Now(), PeerUID: cred.Uid}
 					if e.APIUID != nil && cred.Uid != *e.APIUID && cred.Uid != 0 {
 						continueResponse(c, r)
 						return
@@ -123,10 +127,13 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 					if e.Enforcement != nil {
 						state := e.Enforcement()
 						r.Enforcement = &state
-						if state.State != "active" {
+						if state.State != "active" && e.Mode != "daemon-monitor" {
 							r.ReadOnly = true
 						}
 					}
+					admin := e.administrator(cred.Uid)
+					permissions := e.permissions(cred.Uid, r.ReadOnly)
+					r.Permissions = &permissions
 					var q Request
 					scanner := bufio.NewScanner(c)
 					scanner.Buffer(make([]byte, 1024), 16384)
@@ -139,18 +146,23 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 					} else {
 						switch q.Operation {
 						case "list":
-							if e.Mode == "host-monitor" {
-								if cred.Uid != uint32(os.Geteuid()) {
-									r.Error = "not authorized"
-								} else if e.Activity == nil {
-									r.Error = "observer unavailable"
-								} else {
+							if e.Mode == "host-monitor" && e.APIUID == nil && cred.Uid != uint32(os.Geteuid()) {
+								r.Error = "not authorized"
+								r.ErrorCode = "forbidden"
+							} else {
+								if e.Activity != nil {
 									snapshot := e.Activity()
+									if e.APIUID != nil {
+										snapshot = activityFor(snapshot, cred.Uid, admin)
+									}
 									r.Activity = &snapshot
 								}
-							} else {
-								r.Events = e.List(cred.Uid, cred.Uid == 0)
-								r.Rules = e.Rules(cred.Uid, cred.Uid == 0)
+								if e.Mode != "host-monitor" {
+									r.Events = e.List(cred.Uid, admin)
+									r.Rules = e.Rules(cred.Uid, admin)
+								} else if e.Activity == nil {
+									r.Error = "observer unavailable"
+								}
 							}
 						case "rule-preview", "rule-save":
 							if r.ReadOnly {
@@ -163,7 +175,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 								r.Error = "rule document required"
 								r.ErrorCode = "invalid_request"
 							} else {
-								rule, preview, err := e.EditRule(q.ID, q.EventID, q.ExpectedVersion, *q.Rule, cred.Uid, cred.Uid == 0, q.Operation == "rule-save")
+								rule, preview, err := e.EditRule(q.ID, q.EventID, q.ExpectedVersion, *q.Rule, cred.Uid, admin, q.Operation == "rule-save")
 								if err != nil {
 									r.Error = err.Error()
 									var typed *RuleMutationError
@@ -179,12 +191,12 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 							if r.ReadOnly {
 								r.Error = "read-only API"
 								r.ErrorCode = "read_only"
-								if r.Enforcement != nil && r.Enforcement.State != "active" {
+								if r.Enforcement != nil && r.Enforcement.State != "active" && e.Mode != "daemon-monitor" {
 									r.Error = "enforcement backend unavailable"
 									r.ErrorCode = "unavailable"
 								}
 							} else {
-								deleted, err := e.DeleteRule(q.Generation, q.ID, q.ExpectedVersion, cred.Uid, cred.Uid == 0)
+								deleted, err := e.DeleteRule(q.Generation, q.ID, q.ExpectedVersion, cred.Uid, admin)
 								if err != nil {
 									r.Error = err.Error()
 									var typed *RuleMutationError
@@ -198,14 +210,17 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						case "rule":
 							if r.ReadOnly {
 								r.Error = "read-only API"
-							} else if err := e.ChangeRule(q.ID, q.Action, cred.Uid, cred.Uid == 0); err != nil {
+							} else if err := e.ChangeRule(q.ID, q.Action, cred.Uid, admin); err != nil {
 								r.Error = err.Error()
 							}
 						case "decide":
-							if r.ReadOnly {
+							if !permissions.CanDecide {
+								r.Error = "decision unavailable in non-enforcing/read-only mode"
+								r.ErrorCode = "unavailable"
+							} else if r.ReadOnly {
 								r.Error = "read-only API"
 							} else {
-								v, err := e.Decide(q.ID, q.Action, q.Scope, cred.Uid, cred.Uid == 0)
+								v, err := e.Decide(q.ID, q.Action, q.Scope, cred.Uid, admin)
 								if err != nil {
 									r.Error = err.Error()
 								} else {

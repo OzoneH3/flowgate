@@ -1,5 +1,14 @@
 # Authoritative implementation plan
 
+## Current architecture direction: one root backend, unprivileged desktop
+
+Non-enforcing native root daemon, explicit administrator grants, privacy projection
+and combined Activity/policy API are implemented. Next: permission-aware frontend
+attachment, integrate accounting into that process, then deliberate service and
+mode-transition design. Preserve ordinary read-only startup. Tailscale coexistence
+needs actual allocation/routing/hook tests; root authority is insufficient.
+See AUTHORIZATION.md. No deployment or live enforcement is part of this task.
+
 ## Complete: practical read-only diagnostics
 
 Human/JSON doctor shares real firewall preflight, reports bounded visibility,

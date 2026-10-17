@@ -12,9 +12,13 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"syscall"
 )
 
-type Store struct{ db *sql.DB }
+type Store struct {
+	db    *sql.DB
+	owner *os.File
+}
 
 func Open(path string) (*Store, error) {
 	if st, err := os.Lstat(path); err == nil && (!st.Mode().IsRegular() || st.Mode().Perm()&0077 != 0 || st.Size() > 16<<20) {
@@ -56,13 +60,41 @@ func Open(path string) (*Store, error) {
 	if err = db.QueryRow("PRAGMA quick_check").Scan(&check); err != nil || check != "ok" {
 		return fail(fmt.Errorf("rule database integrity failure: %s: %v", check, err))
 	}
-	s := &Store{db}
+	s := &Store{db: db}
 	if _, err = s.Load(); err != nil {
 		return fail(err)
 	}
 	return s, nil
 }
-func (s *Store) Close() error { return s.db.Close() }
+
+// OpenExclusive is for authoritative privileged writers. Lock the database
+// inode, not an independently replaceable state path; Open remains for readers
+// and existing test tools. All daemon writer entrypoints use this method.
+func OpenExclusive(path string) (*Store, error) {
+	fd, err := syscall.Open(path, syscall.O_RDWR|syscall.O_CREAT|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0600)
+	if err != nil {
+		return nil, err
+	}
+	owner := os.NewFile(uintptr(fd), path)
+	if err = syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		owner.Close()
+		return nil, fmt.Errorf("another daemon owns this rule database: %w", err)
+	}
+	s, err := Open(path)
+	if err != nil {
+		owner.Close()
+		return nil, err
+	}
+	s.owner = owner
+	return s, nil
+}
+func (s *Store) Close() error {
+	err := s.db.Close()
+	if s.owner != nil {
+		s.owner.Close()
+	}
+	return err
+}
 func (s *Store) Load() ([]policy.Rule, error) {
 	rows, err := s.db.Query("SELECT id, document FROM rules ORDER BY id LIMIT 257")
 	if err != nil {

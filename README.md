@@ -1,5 +1,15 @@
 # FlowGate
 
+## Root daemon architecture
+
+Production targets one root Go daemon with an unprivileged desktop. New `serve`
+mode observes and manages stored rules without enforcement; root-configured
+`--administrator` grants one authenticated UID machine-wide native visibility and
+service-rule authority. Existing launchers remain unchanged/read-only normally.
+See [AUTHORIZATION.md](docs/AUTHORIZATION.md) for secure paths, commands, role
+limits and the remaining separate UDP prototype. No root service is installed.
+
+
 A native Qt 6 desktop application with an independent Go backend. **Normal launch shows real host application/socket activity read-only.** No firewall rules, interception or host protection. The accepted prompt workflow remains a separate isolated lab.
 
 ## Diagnose before explicit activation

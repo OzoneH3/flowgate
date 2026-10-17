@@ -27,21 +27,22 @@ type Event struct {
 	Token            string               `json:"-"`
 }
 type Engine struct {
-	SaveRules   func([]policy.Rule) error
-	Enforcement func() EnforcementStatus
-	APIUID      *uint32
-	Activity    func() identity.ActivitySnapshot
-	Generation  string
-	Mode        string
-	mu          sync.Mutex
-	events      map[string]*Event
-	rules       []policy.Rule
-	Resolve     func(identity.Flow) identity.Attribution
-	Now         func() time.Time
-	Timeout     time.Duration
-	Max         int
-	window      time.Time
-	created     int
+	SaveRules        func([]policy.Rule) error
+	Enforcement      func() EnforcementStatus
+	AdministratorUID *uint32
+	APIUID           *uint32
+	Activity         func() identity.ActivitySnapshot
+	Generation       string
+	Mode             string
+	mu               sync.Mutex
+	events           map[string]*Event
+	rules            []policy.Rule
+	Resolve          func(identity.Flow) identity.Attribution
+	Now              func() time.Time
+	Timeout          time.Duration
+	Max              int
+	window           time.Time
+	created          int
 }
 
 func New(timeout time.Duration) *Engine {

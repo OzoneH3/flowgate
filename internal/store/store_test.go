@@ -70,3 +70,21 @@ func TestDurableRules(t *testing.T) {
 		t.Fatal("unsupported database opened")
 	}
 }
+
+func TestAuthoritativeWriterExclusive(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rules.db")
+	a, err := OpenExclusive(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, err := OpenExclusive(path); err == nil {
+		b.Close()
+		t.Fatal("two authoritative writers")
+	}
+	a.Close()
+	b, err := OpenExclusive(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.Close()
+}

@@ -1,5 +1,16 @@
 # Explicit host-control evaluation
 
+## Production authorization direction
+
+Root backend and unprivileged desktop are the intended architecture. Selected-UID
+policy below describes the default prototype, not a permanent machine-wide limit.
+Explicit root-configured `--administrator` on host-start/host-session grants the
+selected peer administration of supported service identities. No existing launcher
+adds this flag. A separate non-enforcing root `serve` mode is documented in
+AUTHORIZATION.md; native Activity is now also supplied by the controller API.
+Tailscale/mark refusal checks are unchanged, irrespective of administrative role.
+
+
 Before any explicit activation, use `.workspace/flowgate doctor` (or `--json`).
 It shares read-only preflight inspection but never binds queues, installs rules
 or starts a controller. See [DIAGNOSTICS.md](DIAGNOSTICS.md) for status meanings,

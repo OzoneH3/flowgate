@@ -1,5 +1,15 @@
 # Milestone semantics and safety boundaries
 
+## Actor permissions and root monitoring
+
+An explicit root-configured administrator may manage supported application
+principals of other UIDs; ordinary privileged-endpoint peers remain self-scoped.
+The actor never replaces the rule application UID/revision or resolves ambiguous
+ownership. Non-enforcing `daemon-monitor` can edit durable rules but cannot decide
+packets; root execution alone never enables enforcement. See AUTHORIZATION.md.
+Existing TCP initiation, rule precedence, expiry and conditional versions are unchanged.
+
+
 ## Optional UDP accounting adapter (isolated kernel/Wayland verification passed)
 
 See UDP.md. The optional BPF path counts successful send return bytes and non-peek,

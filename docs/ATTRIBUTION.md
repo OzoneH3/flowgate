@@ -1,5 +1,16 @@
 # Native Activity ownership
 
+## Privileged visibility and administration
+
+The selected-UID limitation describes the ordinary prototype endpoint. A root
+`serve`/host controller now supports an explicit selected-peer administrator grant
+and machine-visible native Activity; ordinary privileged-endpoint peers receive a
+self projection. See AUTHORIZATION.md. Root can reduce proc visibility gaps but
+never converts shared, ownerless or namespace-invisible sockets into guessed
+applications. Accounting/socket IDs remain unchanged by API privacy projection.
+The separate UDP prototype remains selected-UID; no machine-wide BPF change is made.
+
+
 ## Current implementation
 
 The read-only observer associates current-network-namespace diagnostic sockets

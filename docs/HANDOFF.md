@@ -1,5 +1,16 @@
 # Continuation handoff
 
+## Root architecture increment
+
+Started 2752e1046cc36e2e9459453e5f49ab2070376551. Backend/CLI/fixtures/docs only;
+frontend graph/visual branch remains separate and unintegrated. Read
+AUTHORIZATION.md and API.md for explicit-administrator-v1, `serve` non-enforcing
+mode, secure path requirements, self projection and writer lock. Existing desktop
+launchers retain the selected-user prototype. UDP remains a separate prototype;
+do not claim one-daemon accounting is complete. User authorized sudo -n absolute
+backend for read-only host checks; doctor/sockets ran, no root host endpoint or
+collection/enforcement activated. Tailscale/marks still refuse activation.
+
 ## Doctor increment
 
 Started ffa5c45; backend/CLI/check fixtures/docs only. No frontend integration or

@@ -20,6 +20,7 @@ func hostCommand() error {
 	state := fs.String("state", "", "existing private daemon-owned state directory")
 	database := fs.String("database", "", "durable SQLite path; default STATE/rules.db")
 	socket := fs.String("socket", "", "GUI user's private API socket path")
+	administrator := fs.Bool("administrator", false, "explicitly grant selected GUI UID machine-wide observation and application rule authority")
 	uid := fs.Int("uid", -1, "explicit GUI user UID; grants control only over that user's applications")
 	duration := fs.Duration("duration", 5*time.Minute, "automatic deliberate stop (10s–30m)")
 	timeout := fs.Duration("timeout", 30*time.Second, "pending decision timeout (1s–60s)")
@@ -55,6 +56,9 @@ func hostCommand() error {
 				return err
 			}
 			args := []string{target, "host-start", "--state", *state, "--socket", *socket, "--database", *database, "--uid", strconv.Itoa(*uid), "--duration", duration.String(), "--timeout", timeout.String(), "--profile", *profile}
+			if *administrator {
+				args = append(args, "--administrator")
+			}
 			return syscall.Exec(target, args, []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C.UTF-8"})
 		case "status":
 			v, err := hostfirewall.Status(*state)
@@ -80,7 +84,7 @@ func hostCommand() error {
 		}
 		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer cancel()
-		return hostfirewall.RunProfile(ctx, *state, *socket, *database, uint32(*uid), *duration, *timeout, *profile)
+		return hostfirewall.RunProfileAuthorized(ctx, *state, *socket, *database, uint32(*uid), *duration, *timeout, *profile, *administrator)
 	case "host-stop":
 		return hostfirewall.StopGeneration(*state, *token)
 	case "host-recover":

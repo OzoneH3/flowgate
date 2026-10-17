@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"flowgate/internal/daemon"
 	"flowgate/internal/identity"
+	"flowgate/internal/monitor"
 	"flowgate/internal/queue"
 	"flowgate/internal/readiness"
 	"flowgate/internal/store"
@@ -245,6 +246,11 @@ func Run(ctx context.Context, dir, socket, database string, uid uint32, duration
 	return RunProfile(ctx, dir, socket, database, uid, duration, timeout, "incoming")
 }
 func RunProfile(ctx context.Context, dir, socket, database string, uid uint32, duration, timeout time.Duration, profile string) error {
+	return RunProfileAuthorized(ctx, dir, socket, database, uid, duration, timeout, profile, false)
+}
+
+// Administrative permission is a privileged configuration grant, not request data.
+func RunProfileAuthorized(ctx context.Context, dir, socket, database string, uid uint32, duration, timeout time.Duration, profile string, administrator bool) error {
 	if profile != "incoming" && profile != "both" {
 		return fmt.Errorf("profile must be incoming or both")
 	}
@@ -276,7 +282,7 @@ func RunProfile(ctx context.Context, dir, socket, database string, uid uint32, d
 	if err = daemon.SecureDirectory(filepath.Dir(database)); err != nil {
 		return err
 	}
-	db, err := store.Open(database)
+	db, err := store.OpenExclusive(database)
 	if err != nil {
 		return fmt.Errorf("storage unavailable: %w", err)
 	}
@@ -288,6 +294,14 @@ func RunProfile(ctx context.Context, dir, socket, database string, uid uint32, d
 	e := daemon.New(timeout)
 	e.Mode = "host-enforcement"
 	e.APIUID = &uid
+	if administrator {
+		e.AdministratorUID = &uid
+	}
+	observation := monitor.New(time.Second)
+	observationContext, stopObservation := context.WithCancel(ctx)
+	defer stopObservation()
+	go observation.Run(observationContext)
+	e.Activity = observation.Snapshot
 	e.SaveRules = db.Replace
 	if err = e.SetRules(rs); err != nil {
 		return err

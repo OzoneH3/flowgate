@@ -133,3 +133,22 @@ privileged-check IDs. No policy API operation, field or authorization changed.
 Known startup errors are prefixed `[reason_code]` while preserving existing terminal
 bridge behavior. No frontend automatically invokes sudo or diagnostics. See
 [DIAGNOSTICS.md](DIAGNOSTICS.md) for the full bounded read-only contract and commands.
+
+## Explicit administration (additive v1 capability)
+
+`explicit-administrator-v1` advertises response metadata, for example:
+
+```json
+{"permissions":{"role":"administrator","observation_scope":"machine","policy_scope":"machine","can_manage_rules":true,"can_decide":false},"mode":"daemon-monitor","enforcement":{"state":"stopped"}}
+```
+
+Roles: user/administrator. Observation scopes: self/machine/user-visible (legacy
+ordinary observer). Policy scopes: self/machine. Grant is root configuration only,
+not request data; private selected-UID SO_PEERCRED authentication remains required.
+`.monitor` sets both mutation permissions false. `daemon-monitor` permits durable
+rule CRUD with the existing generation/version tokens, never packet decisions.
+List can contain both Activity and rules/events. Existing modes/fields remain.
+Clients must not equate `read_only=false` with active enforcement; use enforcement
+health and separate can_manage_rules/can_decide. Old clients may need a permission-
+aware UI adaptation; current launchers do not select this new mode automatically.
+No new cross-user privilege exists on default prototype endpoints.

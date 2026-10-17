@@ -1,5 +1,23 @@
 # Current status
 
+## Current: root-daemon foundation and explicit administrator authorization
+
+Native Activity and stored policy can share a non-enforcing foreground root
+`serve` daemon; host controllers now also supply Activity. An explicit privileged
+`--administrator` grant to selected `--uid` permits machine-visible service policy;
+ordinary clients retain self scope on privileged endpoints. Permission metadata is
+additive; private socket/peer authentication is retained. Shared ownership remains
+conservative. SQLite authoritative writers exclude a second daemon.
+
+Focused role/privacy/real Unix peer/race/vet, isolated stored-service-rule checks
+and a controller conditional-delete receiver smoke
+passed; read AUTHORIZATION.md for evidence and the delegated-host-UID test limit.
+Authorized root host diagnostics observed 95 sockets, 0 inaccessible process dirs;
+Tailscale and existing mark use still block evaluation. No host enforcement, BPF
+attachment, runtime-directory creation or service installation. Machine-wide UDP
+and frontend recognition of the new mode/permissions remain future integration;
+existing launchers and the separate selected-UID UDP prototype remain available.
+
 ## Current: read-only doctor and actionable startup diagnostics
 
 `.workspace/flowgate doctor` is human-readable; `--json` produces schema 1 checks.
