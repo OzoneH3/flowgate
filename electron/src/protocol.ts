@@ -1,3 +1,5 @@
+import type { DecisionLogState } from './decision-log-client';
+import type { LogFilter, LogRecord } from './decision-log';
 import { parsePolicyView, type PolicyView } from './policy';
 // Additive v1 API projection. Backend values are data, never renderer markup.
 export interface Application {
@@ -120,6 +122,8 @@ export interface Permissions {
   can_decide: boolean;
 }
 export interface Reply {
+  decision_log?: unknown;
+  decision_record?: unknown;
   traffic_monitor?: TrafficMonitor;
   policy_view?: PolicyView;
   observed_preview?: ObservedPreview;
@@ -208,6 +212,13 @@ export interface Bridge {
   decide(value: Decision): Promise<Attempt>;
   openPrompt(id: string): Promise<void>;
   dismissPrompt(): Promise<void>;
+  decisionLog(): Promise<DecisionLogState>;
+  decisionLogVisible(visible: boolean): Promise<void>;
+  decisionLogFilter(filter: LogFilter): Promise<DecisionLogState>;
+  decisionLogOlder(): Promise<DecisionLogState>;
+  decisionLogLive(live: boolean): Promise<DecisionLogState>;
+  decisionLogDetail(id: string): Promise<{ record?: LogRecord; note: string }>;
+  decisionLogCopy(id: string): Promise<void>;
 }
 declare global {
   interface Window {
@@ -311,6 +322,9 @@ export function parseReply(raw: unknown): Reply {
     rules: array(r.rules, 8192).map(parseRule),
     saved_rule: r.saved_rule ? parseRule(r.saved_rule) : undefined,
     scope_preview: string(r.scope_preview),
+    // Validated by decision-log.ts, which owns the decision-log-v1 schema.
+    decision_log: r.decision_log,
+    decision_record: r.decision_record,
   };
   if (r.permissions !== undefined || result.capabilities.includes('explicit-administrator-v1')) {
     const p = object(r.permissions);

@@ -38,6 +38,7 @@ await build({
     'src/observed-rules.ts',
     'src/notifications.ts',
     'src/history.ts',
+    'src/decision-log.ts',
   ],
   bundle: true,
   platform: 'node',

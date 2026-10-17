@@ -29,5 +29,12 @@ const api: Bridge = {
   decide: (d: Decision) => ipcRenderer.invoke('decide', d),
   openPrompt: (id: string) => ipcRenderer.invoke('prompt:open', id),
   dismissPrompt: () => ipcRenderer.invoke('prompt:dismiss'),
+  decisionLog: () => ipcRenderer.invoke('log:state'),
+  decisionLogVisible: (v) => ipcRenderer.invoke('log:visible', v),
+  decisionLogFilter: (v) => ipcRenderer.invoke('log:filter', v),
+  decisionLogOlder: () => ipcRenderer.invoke('log:older'),
+  decisionLogLive: (v) => ipcRenderer.invoke('log:live', v),
+  decisionLogDetail: (id) => ipcRenderer.invoke('log:detail', id),
+  decisionLogCopy: (id) => ipcRenderer.invoke('log:copy', id),
 };
 contextBridge.exposeInMainWorld('flowgate', Object.freeze(api));
