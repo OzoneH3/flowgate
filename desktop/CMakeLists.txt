@@ -20,3 +20,6 @@ add_executable(unified-test unified-test.cpp)
 target_link_libraries(unified-test PRIVATE flowgate-ui Qt6::Test)
 add_executable(outgoing-test outgoing-test.cpp)
 target_link_libraries(outgoing-test PRIVATE flowgate-ui Qt6::Test)
+
+add_executable(traffic-test traffic-test.cpp)
+target_link_libraries(traffic-test PRIVATE flowgate-ui Qt6::Test)

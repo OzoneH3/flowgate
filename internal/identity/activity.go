@@ -22,6 +22,8 @@ type ActivityProcess struct {
 }
 type ActivityRow struct {
 	ID        string   `json:"id"`
+	Ownership string   `json:"ownership"`
+	Traffic   Traffic  `json:"traffic"`
 	Socket    Socket   `json:"socket"`
 	Owners    []string `json:"owners"`
 	State     string   `json:"state"`
@@ -47,6 +49,7 @@ type cachedActivityProcess struct {
 type ActivityCollector struct {
 	cache    map[int]cachedActivityProcess
 	sequence uint64
+	traffic  map[string]trafficSample
 }
 
 func SocketState(s Socket) string {
@@ -95,6 +98,7 @@ func (c *ActivityCollector) Collect() ActivitySnapshot {
 	c.sequence++
 	out := ActivitySnapshot{Sequence: c.sequence, Started: time.Now(), Complete: true, Rows: []ActivityRow{}, Processes: map[string]ActivityProcess{}}
 	finish := func() ActivitySnapshot {
+		c.measure(&out, out.Started)
 		out.Collected = time.Now()
 		out.DurationMS = time.Since(out.Started).Milliseconds()
 		return out
@@ -115,7 +119,7 @@ func (c *ActivityCollector) Collect() ActivitySnapshot {
 	wanted := map[string][]int{}
 	for _, s := range sockets {
 		id := fmt.Sprintf("%s:%d:%s:%d:%s:%s:%s", s.NetNS, s.Family, s.Protocol, s.Inode, s.Cookie, s.Local, s.Remote)
-		out.Rows = append(out.Rows, ActivityRow{ID: id, Socket: s, Owners: []string{}, State: SocketState(s), Direction: "Unknown", Evidence: "No visible descriptor owner; inaccessible, exited, or kernel-owned socket"})
+		out.Rows = append(out.Rows, ActivityRow{ID: id, Socket: s, Owners: []string{}, State: SocketState(s), Direction: "Unknown", Ownership: "Unknown owner", Evidence: "Unknown owner: no descriptor holder found in this snapshot"})
 		if s.Inode != 0 {
 			key := fmt.Sprintf("socket:[%d]", s.Inode)
 			wanted[key] = append(wanted[key], len(out.Rows)-1)
@@ -186,6 +190,20 @@ func (c *ActivityCollector) Collect() ActivitySnapshot {
 		end, _, endErr := processStat(base)
 		if statErr != nil || e != nil || endErr != nil || start != end || p.Start != start {
 			out.Complete = false
+			for index := range owned {
+				row := &out.Rows[index]
+				_, processErr := os.Stat(base)
+				if (statErr == nil && endErr == nil && start != end) || os.IsNotExist(processErr) {
+					row.Ownership = "Owner changed during inspection"
+					row.Evidence = "Descriptor holder was observed, but process start/exit checks changed; no PID identity retained"
+				} else if _, linkErr := os.Readlink(base + "/exe"); os.IsPermission(linkErr) {
+					row.Ownership = "Owner inaccessible"
+					row.Evidence = "Descriptor holder observed; executable access denied for this process"
+				} else {
+					row.Ownership = "Owner metadata unavailable"
+					row.Evidence = "Descriptor holder observed; process identity could not be validated"
+				}
+			}
 			continue
 		}
 		if len(out.Processes) >= 2048 {
@@ -222,14 +240,22 @@ func (c *ActivityCollector) Collect() ActivitySnapshot {
 		row := &out.Rows[i]
 		sort.Strings(row.Owners)
 		if len(row.Owners) == 0 {
+			if row.Socket.Inode == 0 {
+				row.Ownership = "No userspace socket inode"
+				row.Evidence = "Kernel diagnostic returned inode zero; no descriptor association is available (e.g. TCP TIME_WAIT)"
+			} else if row.Ownership == "Unknown owner" && out.Inaccessible > 0 {
+				row.Evidence += "; census includes inaccessible process directories, but this socket's owner cannot be identified"
+			}
 			out.Complete = false
 			continue
 		}
 		if strings.Contains(row.Evidence, "truncated") {
 			continue
 		}
+		row.Ownership = "Visible descriptor holder"
 		row.Evidence = "Visible /proc descriptor holder; PID/start and executable revision checked. Snapshot is not atomic; unseen holders may exist."
 		if len(row.Owners) > 1 {
+			row.Ownership = "Shared socket"
 			row.Evidence = "Shared socket: multiple visible descriptor holders; counted once, no exclusive application association"
 		}
 	}

@@ -8,7 +8,7 @@ The initial layout has the following limits.
 
 - Actual socket fields replace unavailable transfer-rate and priority columns.
   No rates, totals, domains, geographical flags or application icons are invented.
-- The chart region explicitly says rates are not measured; it has no fake axes or
+- The chart region explains TCP table metrics and unavailable UDP/chart history; it has no fake axes or
   plotted values. Read-only Rules explains that no rule is applied, with no inert
   imitation editor controls.
 - FlowGate exposes only implemented Activity and pending/recent-decision tabs.
@@ -93,3 +93,16 @@ Actual Wayland real-traffic captures: `.workspace/outgoing-ui-1188339/`
 elided with full tooltips/copy; narrow editor content scrolls. Main Info remains
 plain text, icons generic, typography/proportions approximate. No pixel identity
 is claimed. The layout remains the integrated NetLimiter-style desktop.
+
+## Traffic column increment
+
+Activity preserves the dense tree/right Info layout. Four functional TCP traffic
+columns now appear beside identity/socket count; endpoint columns remain reachable
+by horizontal scrolling at narrow widths. Numeric units and `*` partial coverage
+replace unavailable values truthfully; UDP remains `—`. No chart history or rates
+are fabricated. One collapsible Unidentified group is presentation only.
+
+Actual Wayland captures for this increment: `.workspace/traffic-ui-1485300/real-traffic.png`
+(1500×850) and `real-traffic-narrow.png` (860×600), real unprivileged loopback
+traffic, not fabricated presentation rates. The Qt regrouping fixture is separately
+labelled synthetic in `.workspace/traffic-ui-final.log`.

@@ -1,5 +1,17 @@
 # Milestone semantics and safety boundaries
 
+## Activity byte counters
+
+Read-only Activity now uses length-checked Linux INET_DIAG_INFO TCP payload counters
+for IPv4/IPv6. Upload includes retransmitted payload; download is accepted TCP
+payload. Rates use monotonic differences, totals are observed since baseline.
+UDP/listener/unsupported measurements remain unavailable. Unidentified/shared
+sockets retain their own counters under one presentation-only group. Partial
+aggregates do not treat missing values as zero. See TRAFFIC.md for complete
+lifetime, ownership, loopback, restart and coverage semantics. No enforcement
+logic changes accompany these measurements.
+
+
 ## Optional incoming + outgoing profile
 
 The default host profile remains `incoming`. `--profile both` is an explicit
@@ -171,7 +183,7 @@ non-unspecified peer/port, not a TCP-style established connection. Counts are
 unique socket rows in the selected filter, not traffic totals.
 
 Serial collection sleeps for the configured delay after completion (500 ms–30 s,
-default 2 s). GUI polls asynchronously every second with one list in flight and
+default 1 s). GUI polls asynchronously every second with one list in flight and
 never initiates collection. Only the latest snapshot is retained. Errors replace
 successful data; an overdue snapshot (interval + five seconds since completion)
 returns an error without old rows. Initial collection reports unavailable until

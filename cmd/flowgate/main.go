@@ -228,7 +228,7 @@ add rule inet flowgate_lab gate meta l4proto udp queue num 100
 func observe() error {
 	fs := flag.NewFlagSet("observe", flag.ExitOnError)
 	socket := fs.String("socket", "", "private API socket path (required)")
-	interval := fs.Duration("interval", 2*time.Second, "collection delay after each snapshot (500ms..30s)")
+	interval := fs.Duration("interval", time.Second, "collection delay after each snapshot (500ms..30s)")
 	fs.Parse(os.Args[2:])
 	if *socket == "" || *interval < 500*time.Millisecond || *interval > 30*time.Second {
 		return fmt.Errorf("socket required; interval must be 500ms..30s")

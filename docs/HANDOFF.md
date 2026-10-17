@@ -1,5 +1,18 @@
 # Continuation handoff
 
+## Latest: TCP Activity metrics and Unidentified presentation group
+
+Started from clean 3634fdadba706cd48bb560092176112a703116ba on milestone/backend.
+Read TRAFFIC.md for counter meaning, supported TCP4/6 and explicit UDP limitation.
+Normal launch `scripts/run-desktop.sh` requires no activation. Default refresh is
+now 1 second plus collection. No privileged collector/enforcement was started.
+
+Reproduce with `QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=wayland-0 scripts/check-traffic.sh`.
+Current evidence is at the top of STATUS.md. Remaining useful step: choose a narrow
+optional UDP accounting source, with explicit authentication/collection-only API,
+if UDP rates are required; do not repurpose NFQUEUE admission counters or queue
+occupancy. Keep existing firewall lifecycle and deferred game detection unchanged.
+
 ## Latest increment: outgoing profile and atomic rule editing
 
 Actual starting checkout was `9235954c8e983bd5e31062ec79f3dcd97cff71e5`.
@@ -51,7 +64,8 @@ unless changed behavior warrants it. Offscreen runs must be labelled as such.
 
 STATUS.md indexes host/go/launcher logs; VISUAL.md indexes design captures and
 Wayland evidence. Screenshots filter to workspace fixtures, avoiding unrelated
-host metadata. No rates, history completeness, real-game or host-protection claims.
+host metadata. TCP observed rates/totals now have bounded coverage (TRAFFIC.md); no history
+completeness, real-game or host-protection claims.
 
 ## Design coordination and integration
 

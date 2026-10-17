@@ -1,5 +1,32 @@
 # Current status
 
+## Current: real TCP traffic and grouped unidentified sockets
+
+`scripts/run-desktop.sh` remains unprivileged/read-only. Activity now includes
+Upload, Download, Uploaded and Downloaded, with numeric sorting and selectable
+accounting details. TCP IPv4/IPv6 uses real kernel payload counters, observed since
+a baseline; upload includes retransmitted data. **UDP metrics are unavailable**.
+No privileged collector or new activation is required. See TRAFFIC.md for semantics.
+
+One initially collapsed Unidentified group holds unknown/shared sockets, preserves
+per-socket measurements and selection on reassociation, and sums known counters
+once with partial-coverage markers. Ownership limitations now distinguish observed
+metadata/visibility failures and inode-zero kernel states without guessing owners.
+
+Focused evidence: `.workspace/traffic-receiver-final.log` (known TCP4/6 payload
+counts, idle, two executable paths, shared/hidden owners, visibility restoration,
+restart/closure and overhead); `.workspace/traffic-ui-final.log` (actual Wayland),
+`.workspace/traffic-go.log` (race/vet), `.workspace/traffic-monitor-api.log` and
+`.workspace/traffic-monitor-ui.log` (existing Activity/search/filter/reconnect).
+Measured bounded run: 5.82s, 0.070s observer CPU (1.20% of one core),
+15064KiB RSS, 10ms collection. This is not a general performance guarantee.
+Final race/vet evidence: `.workspace/traffic-go-final.log`; normal read-only
+Wayland launch: `.workspace/traffic-normal-launch.log`.
+Screenshots (actual controlled traffic): `.workspace/traffic-ui-1485300/real-traffic.png`
+and `real-traffic-narrow.png` in the same directory. The regrouping unit fixture
+is synthetic and is reported separately in the Qt log.
+No host firewall/network configuration, Wine, profiles or rules were changed.
+
 ## Current: optional outgoing control and editable saved rules
 
 Normal launch remains `scripts/run-desktop.sh` (read-only). Before starting an
@@ -180,7 +207,7 @@ Evidence: `.workspace/monitor-integration-build.log`,
 `.workspace/monitor-integration-smoke.log`, `.workspace/host-monitor.png`.
 The inspected capture uses real controlled fixture activity, not fabricated data.
 See VISUAL.md for acknowledged plain-text details, generic icons, unavailable
-measurements/rule editor and other differences from the NetLimiter 5 reference.
+unsupported measurements and other differences from the NetLimiter 5 reference.
 
 ## Visibility and scope limits
 
@@ -191,7 +218,8 @@ private per-thread FD census or packet history. Short-lived activity can be miss
 Snapshots are non-atomic; visible holders do not prove exclusive ownership or
 identify a remote program. Useful partial monitoring requires no root request.
 
-No measured rates/totals, persistent event history or production service. Normal
+TCP measured rates/observed totals are now available (TRAFFIC.md); UDP metrics,
+persistent event history and production service remain unavailable. Normal
 monitoring provides no host protection; explicit bounded control is described above. NetLimiter 5 is the authoritative visual target; remaining differences
 are documented rather than claimed exact. Game detection remains deferred and its
 existing optional adapter preserved. Other distributions, arm64, real games,

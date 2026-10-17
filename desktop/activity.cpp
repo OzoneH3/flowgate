@@ -7,8 +7,9 @@ public:
   using QTreeWidgetItem::QTreeWidgetItem;
   bool operator<(const QTreeWidgetItem &other) const override {
     int c = treeWidget()->sortColumn();
-    if (c == 1 || c == 7)
-      return data(c, SortValue).toInt() < other.data(c, SortValue).toInt();
+    if (c == 1 || c == 7 || c >= 8)
+      return data(c, SortValue).toDouble() <
+             other.data(c, SortValue).toDouble();
     return text(c).localeAwareCompare(other.text(c)) < 0;
   }
 };
@@ -16,6 +17,21 @@ QString str(const QJsonObject &o, const char *k) {
   auto s = o[k].toString();
   return s.isEmpty() ? "Unknown" : s;
 }
+QString amount(double n, bool rate) {
+  const QStringList units{"B", "KiB", "MiB", "GiB", "TiB"};
+  int u = 0;
+  while (n >= 1024 && u < units.size() - 1) {
+    n /= 1024;
+    ++u;
+  }
+  return QString::number(n, 'f', u == 0 ? 0 : 1) + " " + units[u] +
+         (rate ? "/s" : "");
+}
+struct Aggregate {
+  double sums[4]{};
+  int known[4]{};
+  int count = 0;
+};
 } // namespace
 ActivityView::ActivityView(QWidget *parent) : QWidget(parent) {
   auto *layout = new QVBoxLayout(this);
@@ -49,16 +65,29 @@ ActivityView::ActivityView(QWidget *parent) : QWidget(parent) {
   layout->addWidget(split, 1);
   tree = new QTreeWidget;
   tree->setObjectName("activityTree");
-  tree->setColumnCount(8);
+  tree->setColumnCount(12);
   tree->setHeaderLabels({"Application / process / socket", "PID", "Protocol",
                          "Local endpoint", "Remote endpoint", "Socket state",
-                         "Initiation", "Sockets"});
+                         "Initiation", "Sockets", "Upload", "Download",
+                         "Uploaded", "Downloaded"});
+  tree->headerItem()->setToolTip(
+      8, "TCP transmitted payload per second, including retransmissions. — "
+         "means unavailable.");
+  tree->headerItem()->setToolTip(
+      9, "TCP accepted payload per second. — means unavailable.");
+  tree->headerItem()->setToolTip(
+      10, "TCP payload uploaded since this socket first appeared in the "
+          "observer; not lifetime totals. * means partial aggregate.");
+  tree->headerItem()->setToolTip(
+      11, "TCP payload downloaded since this socket first appeared in the "
+          "observer; not lifetime totals. * means partial aggregate.");
   tree->setColumnWidth(0, 240);
   tree->setIndentation(15);
   tree->setIconSize(QSize(14, 14));
   tree->header()->setMinimumSectionSize(45);
   // Leave room for Linux's seven-digit PIDs and the header sort indicator.
-  tree->setColumnWidth(1, qMax(82, tree->fontMetrics().horizontalAdvance("8888888") + 30));
+  tree->setColumnWidth(
+      1, qMax(82, tree->fontMetrics().horizontalAdvance("8888888") + 30));
   tree->setColumnWidth(2, 60);
   tree->setColumnWidth(3, 145);
   tree->setColumnWidth(4, 145);
@@ -68,6 +97,18 @@ ActivityView::ActivityView(QWidget *parent) : QWidget(parent) {
   // Keep the model indices stable; totals belong beside the identity columns.
   tree->header()->setStretchLastSection(false);
   tree->header()->moveSection(tree->header()->visualIndex(7), 2);
+  for (int c = 8; c < 12; ++c) {
+    tree->setColumnWidth(c, 110);
+    tree->header()->moveSection(tree->header()->visualIndex(c), c - 5);
+  }
+  connect(tree, &QTreeWidget::itemExpanded, this, [this](QTreeWidgetItem *i) {
+    if (i->data(0, ID).toString() == "group:unidentified")
+      unidentifiedExpanded = true;
+  });
+  connect(tree, &QTreeWidget::itemCollapsed, this, [this](QTreeWidgetItem *i) {
+    if (i->data(0, ID).toString() == "group:unidentified")
+      unidentifiedExpanded = false;
+  });
   tree->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
   tree->setTextElideMode(Qt::ElideMiddle);
   tree->setSortingEnabled(true);
@@ -87,12 +128,15 @@ ActivityView::ActivityView(QWidget *parent) : QWidget(parent) {
   details = new QPlainTextEdit;
   details->setObjectName("activityDetails");
   details->setReadOnly(true);
-  details->setPlaceholderText("Select an application, process or socket to inspect its observed identity.");
+  details->setPlaceholderText("Select an application, process or socket to "
+                              "inspect its observed identity.");
   sideLayout->addWidget(details, 1);
   auto *ruleTitle = new QLabel("Rules");
   ruleTitle->setObjectName("panelTitle");
   sideLayout->addWidget(ruleTitle);
-  auto *ruleInfo = new QLabel("Observed socket activity\nPolicy is shown in Rules and pending decisions. Observation alone does not establish a firewall verdict.");
+  auto *ruleInfo = new QLabel(
+      "Observed socket activity\nPolicy is shown in Rules and pending "
+      "decisions. Observation alone does not establish a firewall verdict.");
   ruleInfo->setWordWrap(true);
   ruleInfo->setContentsMargins(7, 3, 7, 6);
   sideLayout->addWidget(ruleInfo);
@@ -117,7 +161,9 @@ ActivityView::ActivityView(QWidget *parent) : QWidget(parent) {
   auto *chartTitle = new QLabel("Traffic chart");
   chartTitle->setObjectName("panelTitle");
   sideLayout->addWidget(chartTitle);
-  auto *chart = new QLabel("Traffic rates are not measured.\nNo chart data is available.");
+  auto *chart = new QLabel(
+      "TCP payload rates and observed totals are shown in the table.\nUDP "
+      "counters unavailable. No chart history is collected.");
   chart->setObjectName("unmeasuredChart");
   chart->setAlignment(Qt::AlignCenter);
   chart->setMinimumHeight(110);
@@ -178,6 +224,8 @@ void ActivityView::render() {
   tree->setSortingEnabled(false);
   tree->clear();
   QHash<QString, QTreeWidgetItem *> groups, processItems;
+  QHash<QTreeWidgetItem *, Aggregate> aggregates;
+  QTreeWidgetItem *unidentified = nullptr;
   auto processes = snapshot["processes"].toObject();
   int shown = 0;
   auto make = [&](QTreeWidgetItem *parent, QString id, QString name,
@@ -264,20 +312,17 @@ void ActivityView::render() {
                                 procDetails(p), path, pid);
       parent = processItems[pk];
     } else {
-      QString title =
-          owners.isEmpty()
-              ? "Unidentified socket · UID " + QString::number(s["uid"].toInt())
-              : QString("Shared socket · %1 visible holders")
-                    .arg(owners.size());
-      group = make(nullptr, "group:" + id, title, str(row, "evidence"));
+      if (!unidentified)
+        unidentified =
+            make(nullptr, "group:unidentified", "Unidentified",
+                 "Presentation group only, not an application or permission "
+                 "scope. Includes unknown and shared ownership. Each socket is "
+                 "counted once; measurements remain attached to its kernel "
+                 "socket identity.");
+      group = unidentified;
       parent = group;
-      for (auto owner : owners) {
-        auto p = processes[owner.toString()].toObject();
-        make(group, "holder:" + id + owner.toString(),
-             "Holder — " + str(p, "executable"), procDetails(p),
-             p["executable"].toString(), QString::number(p["pid"].toInt()));
-      }
     }
+
     QString description =
         QString("%1\nProtocol: %2\nLocal: %3\nRemote: %4\nInitiation "
                 "direction: Unknown (not inferred from ports)\nSocket UID: "
@@ -289,7 +334,43 @@ void ActivityView::render() {
     for (auto owner : owners)
       description +=
           "\n\n" + procDetails(processes[owner.toString()].toObject());
-    auto *item = make(parent, "socket:" + id, "Socket", description, path, pid);
+    auto traffic = row["traffic"].toObject();
+    description += "\n\nAccounting: " + str(traffic, "reason");
+    if (traffic["available"].toBool())
+      description +=
+          "\nSource: " + str(traffic, "source") +
+          "\nObserved since: " + str(traffic, "since") + "\nUploaded: " +
+          QString::number(traffic["uploaded"].toDouble(), 'f', 0) + " B" +
+          "\nDownloaded: " +
+          QString::number(traffic["downloaded"].toDouble(), 'f', 0) + " B" +
+          "\nTotals belong to this socket's observed interval, not the "
+          "lifetime of its current owner.";
+    QString socketName =
+        owners.isEmpty() ? str(row, "ownership")
+        : owners.size() > 1
+            ? QString("Shared socket · %1 holders").arg(owners.size())
+            : "Socket";
+    auto *item =
+        make(parent, "socket:" + id, socketName, description, path, pid);
+    QString keys[]{"upload_bps", "download_bps", "uploaded", "downloaded"};
+    for (int m = 0; m < 4; ++m) {
+      bool known = traffic["available"].toBool() && traffic.contains(keys[m]) &&
+                   traffic[keys[m]].isDouble();
+      double number = known ? traffic[keys[m]].toDouble() : -1;
+      item->setText(8 + m, known ? amount(number, m < 2) : "—");
+      item->setData(8 + m, SortValue, number);
+      item->setTextAlignment(8 + m, Qt::AlignRight | Qt::AlignVCenter);
+      QSet<QTreeWidgetItem *> unique{group, parent};
+      for (auto *ancestor : unique) {
+        auto &ag = aggregates[ancestor];
+        if (m == 0)
+          ++ag.count;
+        if (known) {
+          ag.sums[m] += number;
+          ++ag.known[m];
+        }
+      }
+    }
     item->setText(2, str(s, "protocol"));
     item->setText(3, str(s, "local"));
     item->setText(4, str(s, "remote"));
@@ -311,13 +392,42 @@ void ActivityView::render() {
       group->setData(7, SortValue, 1);
     }
   }
+  for (auto it = aggregates.begin(); it != aggregates.end(); ++it) {
+    auto *item = it.key();
+    auto ag = it.value();
+    for (int m = 0; m < 4; ++m) {
+      bool partial = ag.known[m] < ag.count;
+      item->setText(8 + m, ag.known[m] ? amount(ag.sums[m], m < 2) +
+                                             (partial ? " *" : "")
+                                       : "—");
+      item->setData(8 + m, SortValue, ag.known[m] ? ag.sums[m] : -1);
+      item->setTextAlignment(8 + m, Qt::AlignRight | Qt::AlignVCenter);
+    }
+    item->setData(
+        0, Detail,
+        item->data(0, Detail).toString() +
+            QString("\n\nTraffic: %1/%2 sockets have byte totals. * marks "
+                    "partial coverage; missing counters are not zero. "
+                    "Aggregates describe current visible sockets' observed "
+                    "intervals; closed sockets are not retained. Socket totals "
+                    "are not owner-lifetime totals.")
+                .arg(ag.known[2])
+                .arg(ag.count));
+  }
+  if (unidentified) {
+    unidentified->setText(
+        0, QString("Unidentified (%1)").arg(aggregates[unidentified].count));
+    unidentified->setText(7, QString::number(aggregates[unidentified].count));
+    unidentified->setData(7, SortValue, aggregates[unidentified].count);
+    unidentified->setExpanded(unidentifiedExpanded);
+  }
   QTreeWidgetItem *selection = nullptr;
   for (QTreeWidgetItemIterator it(tree); *it; ++it) {
     auto *item = *it;
     QString id = item->data(0, ID).toString();
-    for (int col = 0; col < 8; ++col)
+    for (int col = 0; col < 12; ++col)
       item->setToolTip(col, "<qt>" + item->text(col).toHtmlEscaped() + "</qt>");
-    if (expanded.contains(id))
+    if (expanded.contains(id) && id != "group:unidentified")
       item->setExpanded(true);
     if (id == selected)
       selection = item;
@@ -333,7 +443,8 @@ void ActivityView::render() {
   for (auto issue : snapshot["issues"].toArray())
     issues.append(issue.toString());
   summary->setText(
-      QString("%1 · %2 / %3 sockets shown · collected %4 · %5 ms · %6")
+      QString("%1 · %2 / %3 sockets shown · collected %4 · %5 ms "
+              "· TCP observed totals; UDP unavailable; * partial · %6")
           .arg(snapshot["complete"].toBool()
                    ? "Complete within observation scope"
                    : "Partial visibility",

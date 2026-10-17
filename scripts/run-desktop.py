@@ -10,7 +10,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser(description='Run FlowGate read-only host monitor')
-parser.add_argument('--interval', default='2s', help='Observer refresh delay (500ms..30s)')
+parser.add_argument('--interval', default='1s', help='Observer refresh delay (500ms..30s)')
 args = parser.parse_args()
 run = Path(tempfile.mkdtemp(prefix='host-monitor-',dir=ROOT/'.workspace'))
 observer = None

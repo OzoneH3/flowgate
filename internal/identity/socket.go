@@ -14,6 +14,7 @@ import (
 )
 
 type Socket struct {
+	Counters  *TCPBytes      `json:"counters,omitempty"`
 	Interface uint32         `json:"interface_index,omitempty"`
 	Family    uint8          `json:"family"`
 	V6Only    *bool          `json:"v6_only,omitempty"`
@@ -68,6 +69,9 @@ func SocketsLimited(limit int) ([]Socket, error) {
 			req := make([]byte, 56)
 			req[0] = family
 			req[1] = proto
+			if limit > 0 && proto == unix.IPPROTO_TCP {
+				req[2] = 1 << (2 /* INET_DIAG_INFO */ - 1)
+			}
 			binary.NativeEndian.PutUint32(req[4:8], 0xffffffff)
 			for i := 48; i < 56; i++ {
 				req[i] = 255
@@ -114,17 +118,21 @@ func SocketsLimited(limit int) ([]Socket, error) {
 					name = "udp"
 				}
 				var v6only *bool
+				var counters *TCPBytes
 				attrs, err := netlink.UnmarshalAttributes(b[72:])
 				if err != nil {
 					return nil, err
 				}
 				for _, attr := range attrs {
+					if limit > 0 && proto == unix.IPPROTO_TCP && attr.Type == 2 /* INET_DIAG_INFO */ {
+						counters = parseTCPBytes(attr.Data)
+					}
 					if attr.Type == 11 && len(attr.Data) == 1 {
 						value := attr.Data[0] != 0
 						v6only = &value
 					}
 				}
-				result = append(result, Socket{Interface: iface, Family: family, V6Only: v6only, Protocol: name, Local: netip.AddrPortFrom(la.Unmap(), binary.BigEndian.Uint16(b[4:6])), Remote: netip.AddrPortFrom(ra.Unmap(), binary.BigEndian.Uint16(b[6:8])), State: b[1], Inode: binary.NativeEndian.Uint32(b[68:72]), UID: binary.NativeEndian.Uint32(b[64:68]), Cookie: fmt.Sprintf("%x", b[44:52]), NetNS: NetNS()})
+				result = append(result, Socket{Counters: counters, Interface: iface, Family: family, V6Only: v6only, Protocol: name, Local: netip.AddrPortFrom(la.Unmap(), binary.BigEndian.Uint16(b[4:6])), Remote: netip.AddrPortFrom(ra.Unmap(), binary.BigEndian.Uint16(b[6:8])), State: b[1], Inode: binary.NativeEndian.Uint32(b[68:72]), UID: binary.NativeEndian.Uint32(b[64:68]), Cookie: fmt.Sprintf("%x", b[44:52]), NetNS: NetNS()})
 			}
 			if dumpErr != nil {
 				return result, dumpErr

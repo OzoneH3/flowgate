@@ -17,6 +17,7 @@ private:
   QJsonObject snapshot;
   QString generation, detailsID;
   qint64 sequence = -1;
+  bool unidentifiedExpanded = false;
   void render();
   void selectionChanged();
   void copyField(int role);

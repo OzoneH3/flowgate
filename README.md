@@ -36,7 +36,7 @@ sudoers change, autostart or background automatic activation.
 
 ```sh
 scripts/run-desktop.sh
-# Optional collection delay (default 2s; range 500ms–30s):
+# Optional collection delay (default 1s; range 500ms–30s):
 scripts/run-desktop.sh --interval 3s
 ```
 
@@ -57,8 +57,10 @@ Visibility is limited by the current user, proc access and current network names
 Owners can be inaccessible or gone. The UI reports partial coverage and collection
 errors; observation never produces Allowed events. Decision controls require an
 authenticated, active control connection. No Wine
-helper starts or attaches to a game prefix. Rates and domain/location data are not
-invented. See [visual references and differences](docs/VISUAL.md) for the NetLimiter 5
+helper starts or attaches to a game prefix. Real TCP IPv4/IPv6 payload rates and observed-byte totals appear in Activity.
+UDP metrics show unavailable; partial aggregates carry `*`. Unidentified sockets
+share one collapsible presentation group, with individual evidence in details.
+See [traffic accounting](docs/TRAFFIC.md). Domain/location data are not invented. See [visual references and differences](docs/VISUAL.md) for the NetLimiter 5
 layout target, recreated with our Qt components and FlowGate branding.
 
 For a separately managed observer (stop with Ctrl+C):

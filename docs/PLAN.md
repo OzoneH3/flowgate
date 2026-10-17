@@ -1,5 +1,15 @@
 # Authoritative implementation plan
 
+## Complete: truthful Activity TCP measurements and Unidentified grouping
+
+1. Request bounded TCP_INFO counters via read-only inet_diag; validate response lengths.
+2. Track cookie/network-namespace keyed observed deltas and monotonic rates, no stale/reset spikes.
+3. Clarify owner evidence and preserve shared/unknown socket measurements.
+4. Add numeric traffic columns and partial aggregates in the existing Qt tree.
+5. Verify controlled TCP v4/v6, idle/reuse/restart/shared cases and actual Wayland UI.
+6. UDP byte metrics remain unavailable: this source has no UDP transferred-byte counters.
+   No privileged collector or host hooks are introduced. Document limitations and commit.
+
 ## Complete: structured decisions, atomic editor and opt-in outgoing profile
 
 1. Reuse shared NFQUEUE with verified hook direction; preserve replies/startup flows.
