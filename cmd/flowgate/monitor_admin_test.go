@@ -44,3 +44,17 @@ func TestMonitorSetupRejectsPathsAndOrdinaryUser(t *testing.T) {
 		}
 	}
 }
+
+func TestMonitorBackupRejectsOrdinaryUserAndExtraPaths(t *testing.T) {
+	if err := monitorBackupCommand([]string{"--generation", "test", "/proc/1/exe"}); err == nil {
+		t.Fatal("accepted arbitrary source")
+	}
+	if err := monitorBackupCommand(nil); err == nil {
+		t.Fatal("missing generation")
+	}
+	if os.Geteuid() != 0 {
+		if err := monitorBackupCommand([]string{"--generation", "test"}); err == nil {
+			t.Fatal("ordinary root executable export")
+		}
+	}
+}
