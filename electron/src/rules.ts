@@ -1,3 +1,5 @@
+import { ObservedRules } from './observed-rules';
+import { canManageRules } from './protocol';
 import { randomUUID } from 'node:crypto';
 import { Backend, call } from './backend';
 import { validateEdit, type Rule, type RuleDraft, type RuleEdit, type Attempt } from './protocol';
@@ -9,16 +11,24 @@ export class Rules {
     { draft: string; request: object; rule: Rule; generation: string; id?: string }
   >();
   private busy = false;
-  constructor(private backend: Backend) {}
+  private observed: ObservedRules;
+  constructor(private backend: Backend) {
+    this.observed = new ObservedRules(backend);
+  }
+  reconcile(value: unknown) {
+    return this.observed.reconcile(value);
+  }
   private authority() {
     const c = this.backend.view().control;
-    if (!c.connected || c.readOnly || !this.backend.controller)
+    if (!canManageRules(c) || !this.backend.controller)
       throw Error('Controller unavailable or read-only');
     return c;
   }
   async draft(source: unknown): Promise<RuleDraft> {
     if (!source || typeof source !== 'object' || Array.isArray(source))
       throw Error('Invalid source');
+    if (Object.keys(source).join(',') === 'observed')
+      return this.observed.draft((source as { observed: unknown }).observed);
     const s = source as { id?: string; event?: string };
     if (
       Object.keys(s).length !== 1 ||
@@ -74,6 +84,8 @@ export class Rules {
     return draft;
   }
   async preview(value: unknown) {
+    if (this.observed.ownsDraft((value as { token?: unknown })?.token))
+      return this.observed.preview(value);
     const e: RuleEdit = validateEdit(value),
       d = this.drafts.get(e.token),
       c = this.authority();
@@ -120,6 +132,7 @@ export class Rules {
     return { receipt, preview: r.scope_preview };
   }
   async save(receipt: unknown): Promise<Attempt> {
+    if (this.observed.ownsReceipt(receipt)) return this.observed.save(receipt);
     if (typeof receipt !== 'string' || receipt.length > 128) throw Error('Invalid preview receipt');
     const p = this.receipts.get(receipt);
     this.receipts.delete(receipt);

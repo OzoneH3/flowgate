@@ -2,7 +2,7 @@
 
 An additional unprivileged frontend; Qt and `scripts/run-desktop.sh` remain intact.
 Vanilla TypeScript, CSS and Electron, built by esbuild. No web development server,
-remote assets, frontend rule matching, packaging or charts. Explicit controls delegate privileged work to the existing terminal bridges.
+remote assets, frontend rule matching or packaging. Explicit controls delegate privileged work to the existing terminal bridges.
 
 ## Run
 
@@ -257,14 +257,14 @@ Also integrate `scripts/check-electron-background.sh`.
 Remaining gaps: real system sudo authentication and privileged extended-monitoring
 Enable/Stop through Electron are unverified; their frontend boundary/status checks
 are simulated and existing Go kernel evidence is reused. Permission-window PSS
-cycle remains unmeasured. No charts, packaging or application artwork beyond the original tray glyph.
+cycle remains unmeasured. No packaging or application artwork beyond the original tray glyph.
 The dense dark presentation follows NetLimiter proportions without claiming a
 pixel-identical match; required identity/scope text makes the editor taller and
 scrollable, and endpoint columns scroll horizontally at narrow widths.
 
 ## Tray, background requests and attribution increment
 
-Enable **Keep running in the tray when the window closes** at the bottom of the
+Enable **Keep running in the tray when the window closes** in the **Options** menu of the
 main window. It is off by default. Closing then hides the existing window and
 preserves selection, layout and unfinished rule input. The tray offers Open,
 current pending count/list, independent enforcement/extended-monitoring status,
@@ -407,3 +407,288 @@ Test-owned Electron and namespace supervisor processes exited. No real sudo
 workflow was exercised. Integration files for this increment: four frontend
 modules (`backend`, `protocol`, `rules`, `workflows`), two focused delete tests,
 this README and `scripts/check-electron-delete.sh`.
+
+## Live traffic graphs
+
+Based on exact integrated checkout `ffa5c45f99c393853e73e28af2b2be7c6e948371`.
+The lower Info View contains a lightweight canvas chart for the selected socket,
+process, application or Unidentified group. Choose **60 s / 5 min** and **TCP
+transport payload / UDP API-reported bytes**. Download is green/solid; upload is
+orange/dashed so equal rates remain distinguishable. Axes show B/s and elapsed
+time. Labels remain text; no remote assets or chart framework are loaded.
+
+Group charts include **all observed member sockets**, independent of table search
+and filters. Thus a filtered table can show a smaller subtotal than its graph;
+the chart states this scope. Membership is recorded at each sample, not calculated
+retroactively from current owners. Shared sockets are counted once. Discovery of a
+new owner keeps socket history, while earlier unidentified traffic stays in the
+historical Unidentified group. Display attribution remains observation-only.
+
+TCP/UDP definitions never share a sum or rate axis simultaneously: use the source
+selector to inspect each independently. Unsupported UDP has an explanatory empty
+graph, not fake zeroes. Collector availability, partial measurement coverage and
+census visibility limitations remain distinct. Partial sums use known measurements
+with `*`; missing components are not imputed. Rates come directly from Go (which
+uses monotonic intervals); Electron does not differentiate counters or infer bytes.
+
+Backend generation/sequence/collection time identify a sample. Duplicate/older
+poll deliveries add nothing. Collection times are anchored onto the frontend's
+monotonic timeline; wall-clock discontinuities break and re-anchor the trace.
+The first observation/reconnect warms up without a rate; known baseline/source
+changes and counter decreases produce gaps. Missing rates, absent sockets,
+collector loss and observer loss never become zero or connected line segments.
+Measured zero is plotted as zero. Sequence skips break the line rather than
+inventing the missing samples. New backend generations start a fresh history so
+reused IDs cannot inherit a previous observer's socket history.
+
+### Bounds and background operation
+
+One main-process in-memory store samples the **existing observer callback**. No
+new observer, timer or endpoint. No disk history, export or historical analytics.
+History begins when this frontend observes the socket/group; empty time before
+that is left blank. On-demand typed graph IPC returns only the selected history.
+
+- Up to five minutes and 1,202 source-points per entity (TCP/UDP points count
+  separately); 120,000 points across the entire store.
+- Up to 2,048 current socket measurements, matching the backend census; at most
+  8,192 total socket/process/application/group records.
+- At most 256 inactive records, including closed sockets/groups, for 60 seconds.
+- A proportional per-record budget shortens history under heavy socket counts;
+  **History shortened by memory bound** is explicit. Five minutes is a maximum,
+  not a guarantee. Evicted records return empty; identities never share buffers.
+
+Hidden/tray windows continue bounded sampling without canvas rendering or graph
+IPC polling. Showing them queries retained data. Rendering occurs only for fresh
+samples, selection/window/source changes or resizing; no animation timer. Existing
+selection, table filters/sorting/widths, sidebar sizing, rules, conditional Delete,
+authentication, tray notifications and firewall behavior are unchanged.
+
+### Focused verification
+
+`scripts/check-electron-graphs.sh` uses existing dependencies, builds the ordinary
+read-only observer/native loopback fixture, and runs only graph/model checks and
+actual sandboxed Electron on KDE/Wayland. No controller, live-host enforcement,
+privileged collection or UDP kernel suite. Existing UDP evidence is reused.
+
+Real TCP shared-FD fixture: correct upload/download series, exact agreement with
+socket table rates, idle measured zero, application graph agreement with unique
+socket sums, and three hide/reopen cycles retaining history with no duplicate
+sample times or windows. Normal 1280×820 and narrow 860×600 screenshots inspected.
+A process/application includes both ends of its own loopback exchange; that is
+not an interface-wide total. All fixture/observer/Electron processes clean up.
+
+Synthetic unit samples cover mixed sources, shared deduplication, partial coverage,
+unavailable samples, disconnect/reconnect, reset/source change, bounded eviction,
+new socket identities/reused endpoints, ownership reassociation, duplicate/older
+sample delivery, and backend wall-clock jumps. These are **not UDP/kernel evidence**.
+The focused model regression is reused in the same run. No synthetic screenshot is
+presented as real measured traffic.
+
+Evidence: `.workspace/graph-real.log`, `.workspace/graph-unit.log`; the real log
+identifies the capture directory containing `real-tcp-socket.png`,
+`real-tcp-application.png`, `real-tcp-narrow.png`, and `graphs.json`.
+
+The short visible/hidden resource comparison in that directory (`visible.json`,
+`hidden.json`) sums the Electron tree's PSS/private memory and RSS, with the Go
+observer separate; CPU is percent of one CPU over five seconds. **The external
+Playwright debugger is attached in both samples**, so these are comparable UI-test
+measurements, not production memory figures. No resource gate or extended benchmark.
+
+Latest graph run: `.workspace/gr-Vhk0fS/` (nine synthetic/model checks passed).
+
+| State | Electron PSS | Private | Summed RSS | CPU | Observer PSS / private / RSS / CPU |
+|---|---:|---:|---:|---:|---|
+| Graph visible | 430.6 MiB | 257.6 MiB | 961.5 MiB | 2.8% | 17.1 / 17.1 / 18.6 MiB / 1.4% |
+| Hidden | 431.2 MiB | 258.1 MiB | 962.1 MiB | 1.0% | 17.1 / 17.1 / 18.5 MiB / 1.4% |
+
+Eight Electron processes in both samples; same retained history and idle fixture.
+This bounded comparison does not establish a leak or a production resource budget.
+Integration adds `electron/src/{history,graph}.ts`, their typed bridge/render hooks,
+focused tests and `scripts/check-electron-graphs.sh`; no backend/Qt changes required.
+
+## Desktop controls and layout (2026-10-17)
+
+**Control** contains the existing evaluation profile/Start/Stop/status/recovery
+and independent extended-monitoring controls. **Options** contains the opt-in
+close-to-tray preference and Quit. Activity, enforcement status and pending-request
+access remain visible. Neither menu starts privileged work automatically.
+
+The sidebar defaults to 38% of the window; saved widths still take precedence.
+Drag its separator or use its arrow keys. Technical identity details expand in
+place. The live graph remains available, with TCP/UDP sources separated and gaps
+preserved. Upload/download headers now sort descending on their first selection,
+then toggle; unavailable measurements remain below measured values in either order.
+
+Prompt From/To follows incoming/outgoing direction. Full executable identity,
+attribution and exact backend deadline are selectable in the expandable details;
+endpoint, deadline, scope and decision controls remain visible. The modeless editor
+keeps its draft and offers pending-request access through Minimize/resume.
+
+See [VISUAL-REVIEW.md](VISUAL-REVIEW.md) for the desktop verification scope.
+Focused reproduction with already-installed dependencies: `scripts/check-electron-visual.sh`.
+It uses real unprivileged host TCP observation and the existing disposable namespace
+controller, never host enforcement or privileged host UDP collection.
+
+### Targeted palette, table, rule inventory and installed icons
+
+See [VISUAL-TARGET.md](VISUAL-TARGET.md) for rule indicators and installed icons. Activity uses installed Open Sans when available (Noto Sans
+fallback); no proprietary fonts are downloaded. Actual Linux application icons are
+resolved from matching desktop-entry executables and the installed theme in main,
+with a neutral fallback; icon association has no policy authority.
+
+**In Blocker / Out Blocker** follow the rate columns and explicitly describe
+**configured policy**, never an effective connection verdict. Cells distinguish
+application-wide, protocol/scoped, mixed, disabled/expired, no explicit rule and
+unavailable policy. Click either cell (or the sidebar direction count) for the
+relevant scopes and existing versioned editor. Shared observation-only identities
+never become permission targets. An empty inventory does not imply Allow or Ask.
+
+### Existing machine daemon
+
+```sh
+./scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock
+```
+
+This reuses the primary policy endpoint and its `.monitor` Activity companion;
+no additional observer starts. Electron remains unprivileged and closing it leaves
+the independent daemon running. The explicit backend permissions independently
+gate stored-rule editing and pending decisions. A non-enforcing daemon can permit
+rule editing while the toolbar correctly says **Enforcement stopped**. A read-only
+companion allows viewing policy but exposes no mutation controls. Invalid advertised
+permission metadata fails closed. Prototype evaluation controls are disabled for
+this independently managed non-enforcing daemon; this UI does not transition it.
+
+Creating the first rule from Activity requires `observed-rule-create-v1` on the
+primary endpoint. Older daemons retain pending-request creation only. Existing configured
+rules open the existing authoritative preview/versioned-save workflow; conditional
+deletion protections remain unchanged. Changing policy need not disconnect existing
+approved TCP sessions.
+
+See [ACTIVITY-POLICY.md](ACTIVITY-POLICY.md) for current root-monitor captures,
+measured dimensions, real versus seeded/synthetic evidence and focused checks.
+
+Focused checks with existing local dependencies:
+`cd electron && npm run build && node --test test/model.test.cjs test/presentation.test.cjs`.
+`node electron/test/presentation.mjs` from the worktree root exercises labelled
+synthetic UI edge states, without enforcement. `VISUAL_STAGE=target-final node
+electron/test/visual.mjs` uses the existing disposable controller for the actual
+inventory check, preserving independent host controllers and collectors.
+
+### Authoritative Activity policy batches
+
+A primary daemon advertising `policy-explanations-v1` supplies Activity's In/Out
+summaries through one bounded `policy-view` batch, driven by the existing main-process
+control loop (at most once per second; no per-row requests or new timer). Columns say
+**Backend policy**. Clicking shows the backend's configured class, exact rule refs,
+configured/runtime defaults and direction-specific enforcement coverage. Stored Block
+while stopped is not protection; incoming-only coverage does not imply outgoing
+protection. Initiation direction differs from upload/download byte flow. These are
+current policy explanations, never evidence of a past connection outcome.
+
+Older daemons—including the independently running root monitor—show **Listed · legacy**
+and an explicitly labelled compatibility inventory. New metadata failures never fall
+back silently. Generation changes, disconnect, policy expiry, mismatched observation
+identity and out-of-order replies clear authoritative results. Decimal response sequences
+and rule-ref versions stay exact strings; sequence ordering uses BigInt. Existing
+numeric mutation APIs still refuse unsafe uint64 values instead of rounding them.
+
+Policy details offer Edit and conditional Delete using existing preview/version and
+frozen-confirmation safeguards. Unfinished editor fields survive metadata refreshes.
+The read-only policy API supplies **no creation authority**. Activity creation uses
+the separate `observed-rule-create-v1` preview/save contract described below; a
+summary association is never used as a creation token.
+The existing pending-request creation workflow is unchanged. No stored Ask action,
+new precedence, filter semantics or accounting exclusion is introduced.
+
+`--daemon /run/flowgate-api/daemon.sock` continues to reuse primary/companion endpoints
+without owning the daemon. For an independently started evaluation controller use
+`--daemon /run/flowgate-api/control.sock`. The toolbar reports actual profile/state;
+new evaluation selection offers incoming-only, with both directions disabled because
+support is not advertised by the present contract. No daemon transition starts on launch.
+
+Focused reproduction with already-installed dependencies:
+`npm --prefix electron run build && node --test electron/test/policy.test.cjs`.
+For a compatible released backend binary, the isolated seeded-rule workflow is
+`FLOWGATE_TEST_POLICY=1 FLOWGATE_TEST_DAEMON=/absolute/path/to/flowgate node electron/test/policy-workflow.mjs`.
+It checks the authoritative batch, Activity→details→editor→save, exact expiry/version,
+read-only denial, narrow layout and preserved editor focus. It never activates enforcement.
+
+Current icon audit: 4/15 distinct live executables had reliable installed desktop/icon
+associations and all four resolved (Firefox, KDE Connect, KRDC, KRDP). The remaining
+nine services and two CLI/runtime executables had no matching application metadata;
+related settings/discovery utilities are not substitutes. No demonstrated resolver
+failure justified weakening executable matching. The actual UI capture also contains
+transient test/CLI processes and Unidentified; its visible-row denominator is separate.
+Neutral fallbacks, bounded caches and the existing narrow asset protocol remain intact.
+
+Verification for this increment: backend **0aca36145adc857bdb59d52f1862a420bbdac9cf**,
+`.workspace/flowgate-policy` SHA256
+`556e49b5747b012b3882e93bd633cc55569885c6673b0b74045d593ca7b55ca2`.
+No backend commits were merged into the UI branch. Build and 22 focused checks passed;
+synthetic generation/order/expiry cases are not enforcement evidence. Actual sandboxed
+Wayland + real isolated daemon/seeded rule passed in `.workspace/policy-ui-upGpIo`
+(policy list, editor/save, narrow and companion read-only screenshots). That earlier policy-summary increment did not include first-rule creation; see the
+subsequent creation evidence below.
+
+Real host fallback screenshot with installed icons and policy details:
+`.workspace/policy-authoritative/root-fallback.png`; narrow: `after-narrow.png` in the
+same directory. That final capture has 18 visible rows including Unidentified and transient
+frontend/test processes, with four resolved installed icons. `icon-audit.json` records
+the separate 15-executable pre-launch audit. `tests.log`, `isolated.log`, `root.log`,
+`synthetic.log` and `final-lifecycle.json` distinguish evidence and confirm fixture
+cleanup plus unchanged root peer PID/generation/stopped state/zero rules. No host
+mutation, activation, collection, daemon restart or unrelated suite was performed.
+
+## First rule from Activity (observed-rule-create-v1)
+
+Click an application's **In Blocker / Out Blocker** cell → **New incoming/outgoing
+rule…**. Direction means connection initiation, not download/upload. The primary
+must advertise `observed-rule-create-v1` and grant `can_manage_rules`; it need not
+grant `can_decide`. Older daemons show an update explanation, and read-only or
+unsupported selections cannot create. No pending connection is required.
+
+Choose an explicit address/port scope or **All addresses / ports for this protocol**,
+TCP or UDP, Allow or Block, enabled state and expiry. All-endpoint scope covers only
+the selected protocol. The initial expiry is one hour; preserving expiry retains
+that absolute time. Priority is backend-fixed at 100. Preview verifies the live native
+single-holder socket/process/executable/UID/namespaces and displays the backend scope.
+Shared/runtime/unsupported identities cannot use this operation. Policy-summary display
+associations alone never confer creation authority.
+
+Preview lasts 30 seconds. Changing fields invalidates Save; expiry, permissions or
+session changes require review again. Save sends the exact frozen draft and token,
+never invented identity or pending IDs. No automatic retry occurs. Lost/mismatched
+acknowledgements freeze the editor and offer **Check save result**, which only reads
+authoritative rules and compares the reserved rule ID and full reviewed contents.
+Absence is unresolved, not proof of failure; closing warns to inspect saved rules
+before creating again. Acknowledged/reconciled success selects the rule in Rules.
+Saving stored policy never activates enforcement or releases a pending packet.
+
+Verification backend: **8ef90cde66c73c69bf8fd8b686e82d2298b98536**; no backend
+commit merged here. Build and nine focused creation/rules/delete/policy tests passed.
+Synthetic tests cover generation/identity changes, capability denial, expiry and
+persistence failure. Actual sandboxed Wayland with a real non-enforcing isolated Go
+daemon, native Python listener and initially empty policy passed first incoming and
+outgoing creation with no pending events, authoritative policy appearance, edit,
+conditional delete, real 30-second expiry, focus preservation and read-only denial.
+A labelled proxy fault dropped one real save acknowledgement: reconciliation found
+the committed rule without a second save. This is not host enforcement evidence.
+
+Reproduce with installed dependencies:
+
+```sh
+npm --prefix electron run build
+node --test electron/test/observed-rules.test.cjs electron/test/rules.test.cjs electron/test/delete.test.cjs electron/test/policy.test.cjs
+FLOWGATE_TEST_DAEMON=/absolute/path/to/released/flowgate node electron/test/creation-workflow.mjs
+./scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock
+```
+
+Inspected captures (relative to this worktree):
+`.workspace/creation-ui-5tNt4G/first-rule-preview.png` (1280×896),
+`first-rule-preview-narrow.png` (860×600), and `created-rules.png` in that directory.
+They show a labelled real isolated fixture, not host rules. Older root-daemon fallback
+and descending-first rates passed with no host mutations; captures/logs are in
+`.workspace/observed-creation/`. Existing root daemon stayed running with enforcement
+stopped; adoption of the new API needs a separately authorized backend update.
+Test-owned namespace daemon/Electron processes exited. Existing accounting, icons,
+tray and receiver-enforcement evidence was reused, not rerun.

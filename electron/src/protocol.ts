@@ -1,3 +1,4 @@
+import { parsePolicyView, type PolicyView } from './policy';
 // Additive v1 API projection. Backend values are data, never renderer markup.
 export interface Application {
   key: string;
@@ -15,6 +16,7 @@ export interface Process {
   application: Application;
 }
 export interface Traffic {
+  state?: string;
   available: boolean;
   partial: boolean;
   definition: string;
@@ -84,7 +86,18 @@ export interface RequestEvent {
 }
 export type Scope = 'once' | 'application' | 'persistent';
 export type Action = 'allow' | 'block';
+export interface Permissions {
+  role: 'user' | 'administrator';
+  observation_scope: 'self' | 'machine' | 'user-visible';
+  policy_scope: 'self' | 'machine';
+  can_manage_rules: boolean;
+  can_decide: boolean;
+}
 export interface Reply {
+  policy_view?: PolicyView;
+  observed_preview?: ObservedPreview;
+  permissions?: Permissions;
+  backend_mode?: string;
   version: 1;
   generation: string;
   read_only: boolean;
@@ -105,6 +118,8 @@ export interface Reply {
 export interface Attempt {
   phase: 'submitting' | 'acknowledged' | 'rejected' | 'unknown';
   message: string;
+  rule?: Rule;
+  reconcile?: string;
 }
 export interface ViewEvent extends RequestEvent {
   remainingMs: number;
@@ -119,10 +134,14 @@ export interface ClientState {
     readOnly: boolean;
     mode: string;
     enforcement?: Reply['enforcement'];
+    permissions?: Permissions;
+    backendMode?: string;
     events: ViewEvent[];
     rules?: Rule[];
     capabilities?: string[];
     serverNow?: number;
+    policy?: PolicyView;
+    policyError?: string;
   };
 }
 export interface Decision {
@@ -132,14 +151,17 @@ export interface Decision {
   scope: Scope;
 }
 export interface Bridge {
+  applicationIcons(keys: string[]): Promise<Record<string, string | null>>;
+  graph(value: { id: string; seconds: number }): Promise<import('./history').GraphView>;
   snapshot(): Promise<ClientState>;
   backgroundStatus(): Promise<{ trayAvailable: boolean; notifications: string }>;
   quit(): Promise<void>;
   onNavigate(fn: (value: { tab: 'requests'; message: string }) => void): () => void;
   extended(action: 'enable' | 'stop'): Promise<void>;
   extendedState(): Promise<{ busy: boolean; message: string }>;
-  ruleDraft(source: { id?: string; event?: string }): Promise<RuleDraft>;
-  rulePreview(value: RuleEdit): Promise<{ receipt: string; preview: string }>;
+  ruleDraft(source: RuleSource): Promise<RuleDraft>;
+  ruleReconcile(receipt: string): Promise<Attempt>;
+  rulePreview(value: RuleEdit): Promise<RulePreview>;
   ruleSave(receipt: string): Promise<Attempt>;
   ruleDelete(value: { id: string; generation: string; version: number }): Promise<Attempt>;
   evaluation(action: EvaluationAction, profile?: 'incoming' | 'both'): Promise<void>;
@@ -253,6 +275,49 @@ export function parseReply(raw: unknown): Reply {
     saved_rule: r.saved_rule ? parseRule(r.saved_rule) : undefined,
     scope_preview: string(r.scope_preview),
   };
+  if (r.permissions !== undefined || result.capabilities.includes('explicit-administrator-v1')) {
+    const p = object(r.permissions);
+    if (
+      !['user', 'administrator'].includes(string(p.role)) ||
+      !['self', 'machine', 'user-visible'].includes(string(p.observation_scope)) ||
+      !['self', 'machine'].includes(string(p.policy_scope)) ||
+      typeof p.can_manage_rules !== 'boolean' ||
+      typeof p.can_decide !== 'boolean'
+    )
+      throw Error('Invalid explicit permission metadata');
+    result.permissions = {
+      role: p.role,
+      observation_scope: p.observation_scope,
+      policy_scope: p.policy_scope,
+      can_manage_rules: p.can_manage_rules,
+      can_decide: p.can_decide,
+    } as Permissions;
+  }
+  result.backend_mode = string(r.backend_mode);
+  if (r.policy_view) result.policy_view = parsePolicyView(r.policy_view);
+  if (r.observed_preview) {
+    const p = object(r.observed_preview),
+      e = object(p.enforcement);
+    if (
+      !string(p.token) ||
+      !string(p.process_id) ||
+      !string(p.scope_preview) ||
+      !Number.isFinite(Date.parse(string(p.expires_at))) ||
+      typeof e.covered !== 'boolean'
+    )
+      throw Error('Invalid observed preview');
+    result.observed_preview = {
+      token: string(p.token),
+      expires_at: string(p.expires_at),
+      rule: parseRule(p.rule),
+      application: application(p.application),
+      process_id: string(p.process_id),
+      pid: number(p.pid),
+      principal_uid: number(p.principal_uid),
+      scope_preview: string(p.scope_preview),
+      enforcement: { state: string(e.state), covered: e.covered, reason: string(e.reason) },
+    };
+  }
   if (r.decision) result.decision = event(r.decision);
   if (r.enforcement) {
     const e = object(r.enforcement);
@@ -314,6 +379,7 @@ export function parseReply(raw: unknown): Reply {
             state: number(s.state),
           },
           traffic: {
+            state: string(t.state),
             available: t.available === true,
             partial: t.partial === true,
             definition: string(t.definition),
@@ -374,6 +440,32 @@ export interface RuleDraft {
   generation: string;
   rule: Rule;
   source: string;
+  observed?: boolean;
+}
+export interface ObservedSource {
+  generation: string;
+  row_id: string;
+  process_id: string;
+  direction: 'incoming' | 'outgoing';
+}
+export type RuleSource = { id?: string; event?: string; observed?: ObservedSource };
+export interface ObservedPreview {
+  token: string;
+  expires_at: string;
+  rule: Rule;
+  application: Application;
+  process_id: string;
+  pid: number;
+  principal_uid: number;
+  scope_preview: string;
+  enforcement: { state: string; covered: boolean; reason: string };
+}
+export interface RulePreview {
+  receipt: string;
+  preview: string;
+  expiresAt?: string;
+  verifiedRule?: Rule;
+  processID?: string;
 }
 export interface RuleEdit {
   token: string;
@@ -385,6 +477,7 @@ export interface RuleEdit {
   priority: number;
   disabled: boolean;
   expiry: 'preserve' | 'hour' | 'permanent';
+  creation_scope?: 'application' | 'custom';
 }
 export type EvaluationAction = 'start' | 'stop' | 'status' | 'recover' | 'cancel';
 export interface EvaluationState {
@@ -439,8 +532,13 @@ function parseRule(v: unknown): Rule {
 export function validateEdit(v: unknown): RuleEdit {
   const e = object(v);
   if (
-    Object.keys(e).sort().join(',') !==
+    Object.keys(e)
+      .filter((k) => k !== 'creation_scope')
+      .sort()
+      .join(',') !==
       'action,disabled,expiry,local_port,priority,protocol,remote_address,remote_port,token' ||
+    (e.creation_scope !== undefined &&
+      !['application', 'custom'].includes(String(e.creation_scope))) ||
     typeof e.token !== 'string' ||
     e.token.length > 128 ||
     !['allow', 'block'].includes(String(e.action)) ||
@@ -457,4 +555,13 @@ export function validateEdit(v: unknown): RuleEdit {
   )
     throw Error('Invalid rule edit');
   return e as unknown as RuleEdit;
+}
+
+// Legacy control state already incorporates its enforcement/read-only restrictions.
+// Explicit grants are operation-specific; writable storage never authorizes a verdict.
+export function canManageRules(c: ClientState['control']) {
+  return c.connected && !c.readOnly && (c.permissions?.can_manage_rules ?? true);
+}
+export function canDecide(c: ClientState['control']) {
+  return c.connected && !c.readOnly && (c.permissions?.can_decide ?? true);
 }

@@ -203,6 +203,8 @@ export function flatten(
     for (const row of [...rows].sort((a, b) => {
       const av = value(a),
         bv = value(b);
+      if (['upload_bps', 'download_bps'].includes(key) && (av === -1 || bv === -1) && av !== bv)
+        return av === -1 ? 1 : -1;
       return (
         (typeof av === 'number' && typeof bv === 'number'
           ? av - bv

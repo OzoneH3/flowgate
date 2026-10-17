@@ -9,12 +9,17 @@ import tempfile
 import time
 ROOT = Path(__file__).resolve().parents[1]
 p = argparse.ArgumentParser(description='FlowGate Electron: unprivileged Activity and existing-controller decisions')
+p.add_argument('--daemon', help='Reuse one existing daemon: companion Activity and primary policy; never start/stop it')
 p.add_argument('--observer', help='Reuse an existing read-only observer Unix socket; leave it running on exit')
 p.add_argument('--control', help='Existing authenticated controller Unix socket; never start or stop its controller')
 p.add_argument('--interval', default='1s', help='Owned observer interval, 500ms–30s (default 1s)')
 p.add_argument('--width', type=int, default=None, help='Initial main window width (800–3840)')
 p.add_argument('--height', type=int, default=None, help='Initial main window height (550–2160)')
 a = p.parse_args()
+if a.daemon:
+    if a.observer or a.control: p.error('--daemon cannot be combined with --observer/--control')
+    a.control = a.daemon
+    a.observer = a.daemon + '.monitor'
 if (a.width is not None and not 800 <= a.width <= 3840) or (a.height is not None and not 550 <= a.height <= 2160):
     p.error('Window size outside supported range')
 if os.geteuid() == 0:

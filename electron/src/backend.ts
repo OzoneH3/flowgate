@@ -1,7 +1,9 @@
+import { POLICY_CAPABILITY } from './policy';
 import net from 'node:net';
 import { performance } from 'node:perf_hooks';
 import {
   parseReply,
+  canDecide,
   validateDecision,
   type Reply,
   type ClientState,
@@ -61,6 +63,12 @@ export class Backend {
   private busy = { observer: false, control: false };
   private timers: NodeJS.Timeout[] = [];
   private stopped = false;
+  private policyBusy = false;
+  private policyEpoch = 0;
+  private policySequence = -1n;
+  private policyStamp = '';
+  private policyEndpoint = '';
+  private policyLast = -Infinity;
   constructor(
     readonly observer: string,
     public controller: string | undefined,
@@ -90,6 +98,11 @@ export class Backend {
       control: {
         ...this.state.control,
         serverNow: this.now(),
+        policy:
+          this.state.control.policy?.snapshot.valid_until &&
+          Date.parse(this.state.control.policy.snapshot.valid_until) <= this.now()
+            ? undefined
+            : this.state.control.policy,
         events: (this.reply?.events ?? []).map((e) => ({
           ...e,
           remainingMs: Math.max(0, Date.parse(e.deadline) - this.now()),
@@ -115,9 +128,7 @@ export class Backend {
         throw Error('Observer snapshot is stale');
       this.state.observation = {
         connected: true,
-        message: r.activity.complete
-          ? 'Activity · read-only'
-          : 'Activity · partial visibility · read-only',
+        message: `Activity · ${r.permissions?.observation_scope || 'user-visible'}${r.activity.complete ? '' : ' · partial'} · read-only`,
         generation: r.generation,
         activity: r.activity,
       };
@@ -137,9 +148,37 @@ export class Backend {
     this.busy.control = true;
     try {
       const r = await call(this.controller, { operation: 'list' });
-      if (r.error || !['isolated-lab', 'host-enforcement'].includes(r.mode))
+      if (
+        r.error ||
+        !(
+          ['isolated-lab', 'host-enforcement'].includes(r.mode) ||
+          (r.permissions &&
+            r.capabilities.includes('explicit-administrator-v1') &&
+            (r.mode === 'daemon-monitor' ||
+              (r.mode === 'host-monitor' &&
+                r.read_only &&
+                ['daemon-monitor', 'host-enforcement'].includes(r.backend_mode || ''))))
+        )
+      )
         throw Error(r.error || 'Not a firewall controller');
-      if (this.reply?.generation !== r.generation) this.attempts.clear();
+      if (this.reply?.generation !== r.generation) {
+        this.attempts.clear();
+        this.policySequence = -1n;
+      }
+      const stamp = JSON.stringify([
+        this.controller,
+        r.generation,
+        r.rules,
+        r.permissions,
+        r.enforcement,
+        r.capabilities,
+      ]);
+      if (stamp !== this.policyStamp) {
+        this.policyStamp = stamp;
+        this.policyEpoch++;
+        this.state.control.policy = undefined;
+        this.policyLast = -Infinity;
+      }
       this.reply = r;
       this.received = performance.now();
       for (const id of this.attempts.keys())
@@ -149,10 +188,15 @@ export class Backend {
         message:
           r.mode === 'isolated-lab'
             ? 'Isolated lab controller'
-            : `Enforcement ${r.enforcement?.state ?? 'unknown'}`,
+            : `Enforcement ${r.enforcement?.state === 'active' ? (r.enforcement.profile === 'incoming' ? 'incoming active · outgoing not covered' : r.enforcement.profile === 'both' ? 'both directions active' : 'active · profile unknown') : (r.enforcement?.state ?? 'unknown')} · ${!r.read_only && (r.permissions?.can_manage_rules ?? (r.mode !== 'host-enforcement' || r.enforcement?.state === 'active')) ? 'stored rules editable' : 'policy read-only'}`,
+        policy: this.state.control.policy,
+        policyError: this.state.control.policyError,
+        permissions: r.permissions,
+        backendMode: r.backend_mode,
         generation: r.generation,
         readOnly:
-          r.read_only || (r.mode === 'host-enforcement' && r.enforcement?.state !== 'active'),
+          r.read_only ||
+          (!r.permissions && r.mode === 'host-enforcement' && r.enforcement?.state !== 'active'),
         mode: r.mode,
         enforcement: r.enforcement,
         rules: r.rules,
@@ -165,9 +209,67 @@ export class Backend {
         connected: false,
         readOnly: true,
         message: 'Controller disconnected · enforcement state unknown · ' + (e as Error).message,
+        policy: undefined,
+        policyError: 'Controller disconnected; authoritative policy cleared.',
       };
     } finally {
       this.busy.control = false;
+      this.emit();
+      if (!this.state.control.connected) this.policyEpoch++;
+      else void this.pollPolicy();
+    }
+  }
+  // One bounded batch, driven by the existing control loop. Pending requests do not
+  // wait for metadata; no per-row sockets, timers, or renderer polling are added.
+  async pollPolicy() {
+    const c = this.state.control,
+      endpoint = this.controller;
+    if (!endpoint || this.stopped || !c.connected || !c.capabilities?.includes(POLICY_CAPABILITY))
+      return;
+    if (this.policyBusy || performance.now() - this.policyLast < 1000) return;
+    this.policyBusy = true;
+    this.policyLast = performance.now();
+    const epoch = this.policyEpoch,
+      generation = c.generation;
+    if (this.policyEndpoint !== endpoint) {
+      this.policySequence = -1n;
+      this.policyEndpoint = endpoint;
+    }
+    const current = () =>
+      !this.stopped &&
+      this.controller === endpoint &&
+      this.state.control.connected &&
+      this.state.control.generation === generation &&
+      this.policyEpoch === epoch;
+    try {
+      const r = await call(endpoint, { operation: 'policy-view', generation });
+      if (!current()) return;
+      if (
+        r.error ||
+        r.generation !== generation ||
+        !r.policy_view ||
+        r.policy_view.snapshot.generation !== generation
+      )
+        throw Error(r.error || 'Policy generation or response mismatch');
+      const v = r.policy_view;
+      if (BigInt(v.snapshot.sequence) <= this.policySequence)
+        throw Error('Out-of-order policy response discarded');
+      if (
+        Date.parse(v.snapshot.evaluated_at) > this.now() + 5000 ||
+        this.now() - Date.parse(v.snapshot.evaluated_at) > 45000 ||
+        (v.snapshot.valid_until && Date.parse(v.snapshot.valid_until) <= this.now())
+      )
+        throw Error('Policy snapshot expired; refreshing');
+      this.policySequence = BigInt(v.snapshot.sequence);
+      this.state.control.policy = v;
+      this.state.control.policyError = '';
+    } catch (e) {
+      if (current()) {
+        this.state.control.policy = undefined;
+        this.state.control.policyError = String(e);
+      }
+    } finally {
+      this.policyBusy = false;
       this.emit();
     }
   }
@@ -178,7 +280,7 @@ export class Backend {
     if (
       !this.controller ||
       !c.connected ||
-      c.readOnly ||
+      !canDecide(c) ||
       c.generation !== d.generation ||
       !e ||
       e.state !== 'awaiting-decision' ||

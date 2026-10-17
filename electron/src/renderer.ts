@@ -1,4 +1,14 @@
-import { setupWorkflows, updateWorkflows } from './workflows';
+import {
+  POLICY_CAPABILITY,
+  authoritativePolicy,
+  policyLabel,
+  policyRuleDescription,
+} from './policy';
+import { ruleStatus, ruleState, ruleDescription, configuredPolicy } from './rule-status';
+import { canDecide, canManageRules } from './protocol';
+import type { Application } from './protocol';
+import { TrafficGraph } from './graph';
+import { setupWorkflows, updateWorkflows, openRule, confirmRuleDelete } from './workflows';
 import type { ClientState, ViewEvent, Scope } from './protocol';
 import {
   hierarchy,
@@ -17,6 +27,7 @@ const promptGeneration = new URL(location.href).searchParams.get('generation');
 const promptID = new URL(location.href).searchParams.get('request');
 let state: ClientState;
 let selected = '';
+let graph: TrafficGraph | undefined;
 let selectedRequest = promptID ?? '';
 let chosenScope: Scope = 'once';
 let tab = 'activity';
@@ -29,6 +40,7 @@ let sort = 'name',
   descending = false;
 const expanded = new Set<string>();
 const localSubmitted = new Set<string>();
+let ruleSignature = '';
 let lastGeneration = '';
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, text = '', className = '') {
@@ -36,6 +48,367 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, text = '', class
   e.textContent = text;
   e.className = className;
   return e;
+}
+function rowIcon(kind: Row['kind']) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('class', 'row-icon');
+  svg.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS(svg.namespaceURI, 'path');
+  path.setAttribute(
+    'd',
+    kind === 'application'
+      ? 'M2 2h12v9H2zM5 14h6M8 11v3M2 5h12'
+      : kind === 'process'
+        ? 'M5 3h6v10H5zM2 5h3m6 0h3M2 8h3m6 0h3M2 11h3m6 0h3'
+        : kind === 'socket'
+          ? 'M2 5h4v6H2zM10 5h4v6h-4zM6 8h4'
+          : 'M3 3h10v10H3zM6 6a2 2 0 1 1 3 2l-1 1M8 11v1',
+  );
+  svg.append(path);
+  return svg;
+}
+
+const iconCache = new Map<string, string | null>();
+const iconPending = new Set<string>();
+let iconScheduled = false;
+function installedIcon(app: Application | undefined, kind: Row['kind']) {
+  const span = element('span', '', 'application-icon');
+  span.append(rowIcon(kind));
+  if (!app?.key) return span;
+  const key = JSON.stringify([app.key, app.revision, app.executable]);
+  span.dataset.iconKey = key;
+  const paint = (node: HTMLElement, url: string) => {
+    const img = element('img');
+    img.src = url;
+    img.alt = '';
+    img.width = img.height = 14;
+    img.onerror = () => {
+      if (node.dataset.iconKey) iconCache.set(node.dataset.iconKey, null);
+      node.replaceChildren(rowIcon('application'));
+    };
+    node.replaceChildren(img);
+  };
+  const url = iconCache.get(key);
+  if (url) paint(span, url);
+  else if (!iconCache.has(key)) {
+    if (iconPending.size < 2048) iconPending.add(key);
+    if (!iconScheduled) {
+      iconScheduled = true;
+      queueMicrotask(async () => {
+        const keys = [...iconPending].slice(0, 128);
+        keys.forEach((k) => iconPending.delete(k));
+        try {
+          const result = await window.flowgate.applicationIcons(keys);
+          for (const [key, url] of Object.entries(result)) {
+            if (iconCache.size >= 2048) iconCache.delete(iconCache.keys().next().value!);
+            iconCache.set(key, url);
+            if (url)
+              for (const node of document.querySelectorAll<HTMLElement>('[data-icon-key]'))
+                if (node.dataset.iconKey === key) paint(node, url);
+          }
+        } catch {
+          for (const key of keys) iconCache.set(key, null);
+        } finally {
+          iconScheduled = false;
+        }
+      });
+    }
+  }
+  return span;
+}
+function rowApplication(r: Row) {
+  if (r.displayApplication || (r.socket && r.socket.owners.length > 1)) return undefined;
+  return (
+    r.process?.application ||
+    r.displayApplication ||
+    (r.socket?.owners.length === 1
+      ? state.observation.activity?.processes[r.socket.owners[0]]?.application
+      : r.socket?.display_application)
+  );
+}
+type PolicyDirection = 'incoming' | 'outgoing';
+let policySelection: { id: string; direction: PolicyDirection } | undefined;
+let policySignature = '';
+function policyCell(r: Row, direction: PolicyDirection) {
+  const status = ruleStatus(r, state),
+    cell = element('td', '', 'rule-status');
+  const rules = status[direction];
+  const authoritative = state.control.capabilities?.includes(POLICY_CAPABILITY);
+  const result = authoritative ? authoritativePolicy(r, state) : undefined;
+  const summary = result?.application?.[direction];
+  const label = authoritative
+    ? summary
+      ? policyLabel(summary)
+      : 'Unavailable'
+    : status.available
+      ? configuredPolicy(rules, status.now)
+      : 'Unavailable';
+  const button = element('button', label, 'policy-cell');
+  button.dataset.direction = direction;
+  button.title =
+    `${direction}: configured policy. ${status.reason}\n${state.control.enforcement?.state === 'stopped' ? 'Stored only; enforcement stopped.\n' : ''}` +
+    rules.map((rule) => ruleDescription(rule, status.now)).join('\n');
+  if (authoritative)
+    button.title = summary
+      ? `Backend summary · ${summary.reason}\nEnforcement: ${summary.enforcement.state} · ${summary.enforcement.reason}\nCurrent policy, not a historical verdict.`
+      : result!.reason;
+  else
+    button.title =
+      'Compatibility inventory (locally grouped listed rules; not a backend summary).\n' +
+      button.title;
+  button.setAttribute('aria-label', `${r.label} · ${direction} · ${label} · configured policy`);
+  if (authoritative ? !summary : !status.available) button.classList.add('rule-unavailable');
+  else if (authoritative && summary?.configured === 'uniform')
+    button.classList.add('policy-' + summary.action);
+  else if (authoritative && summary?.rules.length === 1) {
+    const ref = summary.rules[0];
+    button.classList.add(
+      'policy-' +
+        (ref.expired ? 'expired' : ref.disabled ? 'disabled' : ref.active ? ref.action : 'unknown'),
+    );
+  } else if (!authoritative && rules.length === 1)
+    button.classList.add('policy-' + ruleState(rules[0], status.now));
+  button.onclick = (event) => {
+    event.stopPropagation();
+    selected = r.id;
+    policySelection = { id: r.id, direction };
+    policySignature = '';
+    renderTree();
+    renderInfo();
+    renderPolicyList();
+    $('closePolicy').focus();
+  };
+  cell.append(button);
+  return cell;
+}
+function closePolicyList() {
+  const selection = policySelection;
+  policySelection = undefined;
+  $('policyList')?.remove();
+  for (const row of document.querySelectorAll<HTMLElement>('#rows tr'))
+    if (selection && row.dataset.id === selection.id)
+      row
+        .querySelector<HTMLButtonElement>(`.policy-cell[data-direction="${selection.direction}"]`)
+        ?.focus({ preventScroll: true });
+}
+function renderPolicyList() {
+  if (!policySelection || promptID) return;
+  const row = allRows(roots).find((r) => r.id === policySelection!.id);
+  const inventory = row ? ruleStatus(row, state) : undefined;
+  const rules = inventory?.[policySelection.direction] || [];
+  const authoritative = !!state.control.capabilities?.includes(POLICY_CAPABILITY);
+  const result = row && authoritative ? authoritativePolicy(row, state) : undefined;
+  const summary = result?.application?.[policySelection.direction];
+  const signature = JSON.stringify([
+    policySelection,
+    authoritative,
+    summary,
+    result?.reason,
+    state.control.generation,
+    inventory?.available,
+    inventory?.reason,
+    row?.label,
+    rules,
+    rules.map((r) => ruleState(r, inventory!.now)),
+    canManageRules(state.control),
+    state.control.enforcement?.state,
+  ]);
+  if (signature === policySignature) return;
+  policySignature = signature;
+  let panel = $('policyList');
+  if (!panel) {
+    panel = element('section', '', 'policy-list');
+    panel.id = 'policyList';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-label', 'Configured policy');
+    root.append(panel);
+    panel.onkeydown = (e) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        closePolicyList();
+      }
+    };
+  }
+  const heading = element('header'),
+    title = element(
+      'strong',
+      `${policySelection.direction === 'incoming' ? 'Incoming' : 'Outgoing'} configured policy`,
+    ),
+    close = element('button', 'Close');
+  close.id = 'closePolicy';
+  close.onclick = closePolicyList;
+  heading.append(title, close);
+  const content = element('div', '', 'policy-list-content');
+  content.append(element('p', row?.label || 'Selection no longer visible', 'policy-identity'));
+  content.append(
+    element(
+      'p',
+      state.control.enforcement?.state === 'stopped'
+        ? 'Stored policy only · enforcement stopped.'
+        : 'Configured inventory, not an effective connection verdict.',
+      'hint',
+    ),
+  );
+  if (state.control.permissions)
+    content.append(
+      element(
+        'p',
+        `${state.control.permissions.role} · ${state.control.permissions.policy_scope} policy · ${canManageRules(state.control) ? 'editing permitted' : 'read-only'}`,
+        'hint',
+      ),
+    );
+  if (authoritative) {
+    content.append(
+      element(
+        'p',
+        'Backend-authoritative configured policy · current explanation, not a historical verdict.',
+        'hint',
+      ),
+    );
+    if (state.control.policy && !state.control.policy.complete)
+      content.append(
+        element(
+          'p',
+          'Partial policy batch · ' +
+            (state.control.policy.reason || 'Activity visibility is partial.'),
+          'hint',
+        ),
+      );
+    if (summary) {
+      content.append(element('p', policyLabel(summary) + ' · ' + summary.reason));
+      content.append(
+        element(
+          'p',
+          `Enforcement: ${summary.enforcement.state} · ${summary.enforcement.covered ? 'direction covered' : 'direction not confirmed covered'} · ${summary.enforcement.reason}`,
+        ),
+      );
+      for (const [label, d] of [
+        ['Configured default', summary.configured_default],
+        ['Runtime default', summary.runtime_default],
+      ] as const)
+        content.append(
+          element('p', `${label}: ${d.known ? d.action : 'unknown'} · ${d.reason}`, 'hint'),
+        );
+      if (summary.potential_overlapping_actions)
+        content.append(
+          element(
+            'p',
+            'Potentially overlapping actions; Go resolves precedence for a concrete context.',
+          ),
+        );
+      for (const ref of summary.rules) {
+        const item = element('section', '', 'policy-rule');
+        item.append(element('p', policyRuleDescription(ref)));
+        const rule = state.control.rules?.find(
+          (r) => r.id === ref.id && String(r.version) === ref.version,
+        );
+        if (canManageRules(state.control) && rule) appendPolicyActions(item, rule);
+        else if (canManageRules(state.control))
+          item.append(
+            element(
+              'p',
+              'Refresh required before editing: listed version differs or is not losslessly representable.',
+              'hint',
+            ),
+          );
+        content.append(item);
+      }
+    } else content.append(element('p', result?.reason || 'No supported observation identity.'));
+  } else
+    content.append(
+      element(
+        'p',
+        'Compatibility inventory · locally grouped listed rules, not a backend-authoritative summary. Enforcement coverage and defaults are not inferred.',
+        'hint',
+      ),
+    );
+  if (!authoritative && !inventory?.available)
+    content.append(element('p', inventory?.reason || 'No current observation identity.'));
+  else if (!authoritative && !rules.length)
+    content.append(element('p', 'No explicit rule listed. No default action is inferred.'));
+  else if (!authoritative) {
+    content.append(
+      element(
+        'p',
+        rules.length > 1
+          ? 'Multiple scopes; precedence remains in Go.'
+          : 'Scope and expiry below are the stored backend values.',
+        'hint',
+      ),
+    );
+    for (const rule of rules) {
+      const item = element('section', '', 'policy-rule');
+      item.append(element('p', ruleDescription(rule, inventory!.now)));
+      if (canManageRules(state.control)) appendPolicyActions(item, rule);
+      content.append(item);
+    }
+  }
+  const create = element('button', `New ${policySelection.direction} rule…`);
+  create.id = 'newActivityRule';
+  const application = row ? authoritativePolicy(row, state).application : undefined;
+  const candidate = row?.rows.find(
+    (socket) =>
+      socket.owners.length === 1 &&
+      socket.ownership_category === 'visible-holder' &&
+      application?.process_ids.includes(socket.owners[0]) &&
+      (!row.process || row.kind === 'application' || row.process.id === socket.owners[0]),
+  );
+  const source = candidate
+    ? {
+        generation: state.control.generation,
+        row_id: candidate.id,
+        process_id: candidate.owners[0],
+        direction: policySelection.direction,
+      }
+    : undefined;
+  const creationReason = !canManageRules(state.control)
+    ? 'Rule management is read-only or unavailable.'
+    : !state.control.capabilities?.includes('observed-rule-create-v1')
+      ? 'Backend update required for creation from Activity (observed-rule-create-v1). Pending-request creation remains available.'
+      : !source
+        ? result?.reason ||
+          'A live supported single-holder native process is required; shared or unresolved observations cannot create rules.'
+        : 'Preview will verify this live process. Direction is connection initiation, not upload/download.';
+  create.disabled =
+    !source ||
+    !canManageRules(state.control) ||
+    !state.control.capabilities?.includes('observed-rule-create-v1');
+  create.title = creationReason;
+  create.onclick = () => {
+    if (source) {
+      closePolicyList();
+      void openRule({ observed: source });
+    }
+  };
+  content.append(create, element('p', creationReason, 'hint'));
+  content.append(
+    element(
+      'p',
+      'Incoming/outgoing refers to connection initiation, not download/upload. Rule changes may not disconnect existing approved TCP sessions.',
+      'hint',
+    ),
+  );
+  if (!canManageRules(state.control))
+    content.append(element('p', 'Rule management is unavailable or read-only.', 'hint'));
+  panel.replaceChildren(heading, content);
+}
+
+function appendPolicyActions(item: HTMLElement, rule: import('./protocol').Rule) {
+  const edit = element('button', 'Edit rule');
+  edit.dataset.ruleId = rule.id;
+  edit.onclick = () => {
+    closePolicyList();
+    void openRule({ id: rule.id });
+  };
+  const remove = element('button', 'Delete…');
+  remove.disabled = !state.control.capabilities?.includes('conditional-rule-delete-v1');
+  remove.title = remove.disabled
+    ? 'Safe conditional deletion unsupported by this daemon.'
+    : 'Review frozen version before deleting';
+  const generation = state.control.generation;
+  remove.onclick = () => confirmRuleDelete(rule, generation);
+  item.append(edit, remove);
 }
 function field(container: HTMLElement, label: string, value: string) {
   container.append(element('dt', label), element('dd', value || 'Unknown'));
@@ -49,14 +422,16 @@ const scopeLabels: Record<Scope, string> = {
   persistent: 'Persistent until disabled / deleted',
 };
 if (promptID) {
-  root.innerHTML = `<section class="prompt-shell"><header class="prompt-heading"><strong>FlowGate Blocker</strong><span>Connection permission</span></header><div id="promptBody"><div id="requestDetails"></div></div><footer><span id="controlStatus"></span><button id="dismiss">Decide later</button></footer><div id="feedback" role="status" aria-live="polite"></div></section>`;
+  root.innerHTML = `<section class="prompt-shell"><header class="prompt-heading"><strong>FlowGate Blocker</strong><span>Pending connection permission</span></header><div id="promptBody"><div id="requestDetails"></div></div><footer><span id="controlStatus"></span><button id="dismiss">Decide later</button></footer><div id="feedback" role="status" aria-live="polite"></div></section>`;
   $('dismiss').onclick = () => void window.flowgate.dismissPrompt();
 } else {
-  root.innerHTML = `<header class="toolbar"><strong class="brand">▣ FlowGate</strong><span id="observerStatus"></span><span class="separator"></span><span id="controlStatus"></span></header><nav class="tabs" aria-label="Views"><button id="activityTab" aria-selected="true">Activity</button><button id="requestsTab" aria-selected="false">Pending requests <span id="pendingCount">0</span></button></nav><main id="activityView"><section class="activity-main"><div class="filterbar"><input id="search" type="search" aria-label="Search Activity" placeholder="Search application, path, PID or endpoint"><select id="filter" aria-label="Socket filter"><option value="all">All sockets</option><option value="active">Active TCP / connected UDP</option><option value="listening">Listening TCP / bound UDP</option></select><button id="expand">Expand all</button><button id="collapse">Collapse all</button></div><div class="table-scroll"><table id="tree" role="treegrid" tabindex="0" aria-label="Application process socket activity"><thead><tr id="headers"></tr></thead><tbody id="rows"></tbody></table></div><div id="activitySummary" class="summary"></div></section><aside><h2>Info View</h2><h3 id="selectedName">FlowGate Activity</h3><dl id="info"></dl><section class="measurement-note"><h2>Measurements</h2><p>Observed bytes from currently visible sockets. TCP transport payload and optional UDP API bytes are separate sources.</p><p>— Unavailable &nbsp; * Partial coverage</p><p>Traffic charts are not available in this frontend.</p></section></aside></main><main id="requestsView" hidden><section class="request-list"><h2>Pending &amp; recent requests</h2><p class="hint">Select a request to decide. Dismissal grants nothing. Closing FlowGate leaves an independent controller running.</p><div class="table-scroll"><table id="requests"><thead><tr><th>Application</th><th>Direction</th><th>Protocol</th><th>Remote endpoint</th><th>State</th></tr></thead><tbody id="requestRows"></tbody></table></div></section><aside class="request-sidebar"><h2>Connection permission</h2><div id="requestDetails"></div></aside></main><footer><span>Activity and firewall control are independent.</span><span id="feedback" role="status" aria-live="polite"></span></footer>`;
+  root.innerHTML = `<header class="toolbar"><strong class="brand">▣ FlowGate</strong><span id="observerStatus"></span><span class="separator"></span><span id="controlStatus"></span></header><nav class="tabs" aria-label="Views"><button id="activityTab" aria-selected="true">Activity</button><button id="requestsTab" aria-selected="false">Pending requests <span id="pendingCount">0</span></button></nav><main id="activityView"><section class="activity-main"><div class="filterbar"><input id="search" type="search" aria-label="Search Activity" placeholder="Search application, path, PID or endpoint"><select id="filter" aria-label="Socket filter"><option value="all">All sockets</option><option value="active">Active TCP / connected UDP</option><option value="listening">Listening TCP / bound UDP</option></select><button id="expand">Expand all</button><button id="collapse">Collapse all</button></div><div class="table-scroll"><table id="tree" role="treegrid" tabindex="0" aria-label="Application process socket activity"><thead><tr id="headers"></tr></thead><tbody id="rows"></tbody></table></div><div id="activitySummary" class="summary"></div></section><aside><h2>Info View</h2><h3 id="selectedName">FlowGate Activity</h3><dl id="info"></dl><section id="trafficGraph"></section></aside></main><main id="requestsView" hidden><section class="request-list"><h2>Pending &amp; recent requests</h2><p class="hint">Select a request to decide. Dismissal grants nothing. Closing FlowGate leaves an independent controller running.</p><div class="table-scroll"><table id="requests"><thead><tr><th>Application</th><th>Direction</th><th>Protocol</th><th>Remote endpoint</th><th>State</th></tr></thead><tbody id="requestRows"></tbody></table></div></section><aside class="request-sidebar"><h2>Connection permission</h2><div id="requestDetails"></div></aside></main><footer><span>Activity and firewall control are independent.</span><span id="feedback" role="status" aria-live="polite"></span></footer>`;
   const columns = [
     ['name', 'Application / process / connection'],
     ['download_bps', 'DL rate'],
     ['upload_bps', 'UL rate'],
+    ['incoming_policy', 'In Blocker'],
+    ['outgoing_policy', 'Out Blocker'],
     ['count', 'Sockets'],
     ['pid', 'PID'],
     ['downloaded', 'Downloaded'],
@@ -70,8 +445,11 @@ if (promptID) {
     const th = element('th');
     th.className = 'col-' + key;
     const b = element('button', title);
+    if (key === 'download_bps' || key === 'upload_bps') b.append(element('small', 'Auto units'));
+    if (key.endsWith('_policy')) b.append(element('small', 'Configured policy'));
+    b.disabled = key.endsWith('_policy');
     b.onclick = () => {
-      descending = sort === key ? !descending : false;
+      descending = sort === key ? !descending : ['upload_bps', 'download_bps'].includes(key);
       sort = key;
       renderTree();
     };
@@ -86,10 +464,12 @@ if (promptID) {
     }
     $('activityView').hidden = next !== 'activity';
     $('requestsView').hidden = next !== 'requests';
+    if (next === 'activity') void graph?.update(selected, sequence + ':shown');
     $('activityTab').setAttribute('aria-selected', String(next === 'activity'));
     $('requestsTab').setAttribute('aria-selected', String(next === 'requests'));
   };
   setupWorkflows(chooseTab);
+  graph = new TrafficGraph($('trafficGraph'));
   window.flowgate.onNavigate((v) => {
     chooseTab('requests');
     message(v.message);
@@ -171,8 +551,13 @@ function buildTree() {
   $('activitySummary').textContent = a
     ? `${roots.reduce((n, r) => n + r.rows.length, 0)} / ${a.rows.length} sockets · ${a.complete ? 'Complete census' : 'Partial visibility'} · ${a.collected} · ${a.issues.join('; ')}`
     : state.observation.message;
+  $('activitySummary').title = $('activitySummary').textContent || '';
 }
 function renderTree() {
+  const focused = document.activeElement as HTMLElement;
+  const focusedPolicy = focused?.classList.contains('policy-cell')
+    ? { id: focused.closest('tr')?.dataset.id, direction: focused.dataset.direction }
+    : undefined;
   visible = flatten(roots, expanded, sort, descending);
   const body = $('rows');
   const fragment = document.createDocumentFragment();
@@ -209,17 +594,7 @@ function renderTree() {
     };
     name.append(
       toggle,
-      element(
-        'span',
-        r.kind === 'socket'
-          ? '◇'
-          : r.kind === 'unidentified'
-            ? '?'
-            : r.kind === 'application'
-              ? '▣'
-              : '▪',
-        'row-icon',
-      ),
+      installedIcon(r.kind === 'socket' ? undefined : rowApplication(r), r.kind),
       document.createTextNode(r.label),
     );
     name.title = r.process?.executable || r.socket?.socket.remote || r.label;
@@ -234,6 +609,7 @@ function renderTree() {
       td.title = `${s.known}/${s.count} measured sockets${s.mixed ? ' · incompatible measurement sources' : ''}`;
       tr.append(td);
     }
+    tr.append(policyCell(r, 'incoming'), policyCell(r, 'outgoing'));
     tr.append(
       element('td', String(r.rows.length), 'numeric'),
       element('td', r.pid === undefined ? '' : String(r.pid), 'numeric'),
@@ -253,20 +629,64 @@ function renderTree() {
     fragment.append(tr);
   }
   body.replaceChildren(fragment);
+  if (focusedPolicy)
+    for (const row of body.querySelectorAll<HTMLElement>('tr'))
+      if (row.dataset.id === focusedPolicy.id)
+        row
+          .querySelector<HTMLButtonElement>(
+            `.policy-cell[data-direction="${focusedPolicy.direction}"]`,
+          )
+          ?.focus({ preventScroll: true });
   for (const th of Array.from($('headers').children)) {
     const key = th.className.slice(4);
     th.setAttribute('aria-sort', key === sort ? (descending ? 'descending' : 'ascending') : 'none');
   }
 }
 function renderInfo() {
+  void graph?.update(selected, sequence);
   const live = $('info');
   const info = element('dl');
   const commit = () => {
-    // Preserve text selection and scroll while an unchanged observation refreshes.
+    const details = element('details', '', 'info-technical');
+    details.open = !!live.querySelector('details[open]');
+    details.append(element('summary', 'Identity and measurement details'));
+    const technical = element('dl');
+    for (const dt of Array.from(info.querySelectorAll('dt'))) {
+      if (
+        [
+          'Executable',
+          'Identity',
+          'Totals',
+          'Evidence',
+          'Socket identity',
+          'Ownership evidence category',
+          'Measurement',
+          'Rule inventory',
+          'Incoming rule scopes',
+          'Outgoing rule scopes',
+        ].includes(dt.textContent || '')
+      ) {
+        const dd = dt.nextElementSibling;
+        technical.append(dt);
+        if (dd) technical.append(dd);
+      }
+    }
+    if (technical.childElementCount) {
+      details.append(technical);
+      info.append(details);
+    }
+    // Preserve text selection and expanded details during unchanged polling.
     if (live.textContent !== info.textContent) live.replaceChildren(...Array.from(info.childNodes));
   };
   const r = allRows(roots).find((r) => r.id === selected);
-  $('selectedName').textContent = r?.label ?? 'FlowGate Activity';
+  const selectedName = $('selectedName');
+  if (selectedName.dataset.identity !== (r?.id || '')) {
+    selectedName.dataset.identity = r?.id || '';
+    selectedName.replaceChildren(
+      ...(r ? [installedIcon(rowApplication(r), r.kind)] : []),
+      document.createTextNode(r?.label ?? 'FlowGate Activity'),
+    );
+  }
   if (!r) {
     field(
       info,
@@ -278,6 +698,55 @@ function renderInfo() {
     commit();
     return;
   }
+  const inventory = ruleStatus(r, state);
+  field(
+    info,
+    'Rule inventory',
+    state.control.capabilities?.includes(POLICY_CAPABILITY)
+      ? authoritativePolicy(r, state).reason
+      : 'Compatibility inventory · ' + inventory.reason,
+  );
+  for (const direction of ['incoming', 'outgoing'] as const) {
+    const rules = inventory[direction];
+    const authoritative = state.control.capabilities?.includes(POLICY_CAPABILITY);
+    const summary = authoritative
+      ? authoritativePolicy(r, state).application?.[direction]
+      : undefined;
+    field(
+      info,
+      direction === 'incoming' ? 'Rules · In' : 'Rules · Out',
+      authoritative
+        ? summary
+          ? `${policyLabel(summary)} · ${summary.enforcement.state}`
+          : 'Unavailable'
+        : !inventory.available
+          ? 'Unavailable'
+          : ['allow', 'block', 'disabled', 'expired']
+              .map(
+                (type) =>
+                  `${rules.filter((rule) => ruleState(rule, inventory.now) === type).length} ${type}`,
+              )
+              .join(' · '),
+    );
+    const value = info.lastElementChild as HTMLElement;
+    const link = element('button', value.textContent || '', 'sidebar-policy');
+    link.title = `Open ${direction} configured policy`;
+    link.onclick = () => {
+      policySelection = { id: r.id, direction };
+      policySignature = '';
+      renderPolicyList();
+      $('closePolicy').focus();
+    };
+    value.replaceChildren(link);
+  }
+  if (inventory.available && !state.control.capabilities?.includes(POLICY_CAPABILITY))
+    for (const direction of ['incoming', 'outgoing'] as const)
+      field(
+        info,
+        direction === 'incoming' ? 'Incoming rule scopes' : 'Outgoing rule scopes',
+        inventory[direction].map((rule) => ruleDescription(rule, inventory!.now)).join('\n') ||
+          'No listed rules; not a connection verdict.',
+      );
   if (r.displayApplication) {
     field(info, 'Display application', r.displayApplication.executable);
     field(
@@ -371,7 +840,7 @@ function actionable(e: ViewEvent | undefined) {
   return (
     !!e &&
     state.control.connected &&
-    !state.control.readOnly &&
+    canDecide(state.control) &&
     e.state === 'awaiting-decision' &&
     e.remainingMs > 0 &&
     !e.attempt &&
@@ -386,6 +855,7 @@ function renderRequests() {
     state.control.generation,
     state.control.connected,
     state.control.readOnly,
+    state.control.permissions,
     events.map((e) => [e.id, e.state, e.attempt]),
   ]);
   if (!promptID && signature !== eventSignature) {
@@ -445,33 +915,61 @@ function renderRequests() {
         `${e.flow.direction} connection · ${e.flow.protocol.toUpperCase()}`,
         'connection-banner',
       ),
-      element('h3', eventName(e), 'application-name'),
     );
+    const route = element('dl', '', 'identity-route');
+    const incoming = e.flow.direction === 'incoming';
+    field(route, 'From', incoming ? e.flow.remote : eventName(e));
+    field(route, 'To', incoming ? eventName(e) : e.flow.remote);
+    const applicationRoute = route.querySelectorAll('dd')[incoming ? 1 : 0];
+    applicationRoute.classList.add('route-application');
+    applicationRoute.prepend(installedIcon(e.attribution.application, 'application'));
+    container.append(route);
     const fields = element('dl', '', 'connection-fields');
-    const [local, localPort] = endpoint(e.flow.local),
-      [remote, remotePort] = endpoint(e.flow.remote);
-    field(fields, 'Application', e.attribution.application?.executable ?? 'Unavailable');
     field(
       fields,
-      'Process',
+      'Application',
+      e.attribution.application?.executable.split('/').pop() || 'Unavailable',
+    );
+    field(
+      fields,
+      'Process ID',
+      e.attribution.owners.map((p) => String(p.pid)).join(', ') || 'Unavailable',
+    );
+    field(fields, 'Local endpoint', e.flow.local);
+    field(fields, 'Remote endpoint', e.flow.remote);
+    field(fields, 'Deadline', e.deadline.replace(/\.\d+/, ''));
+    container.append(fields);
+    const technical = element('details', '', 'identity-details');
+    technical.append(element('summary', 'Application identity and attribution details'));
+    const identity = element('dl', '', 'connection-fields');
+    field(identity, 'Exact backend deadline', e.deadline);
+    field(identity, 'Executable', e.attribution.application?.executable || 'Unavailable');
+    field(
+      identity,
+      'Process identity',
       e.attribution.owners
         .map((p) => `${p.pid} · start ${p.start_ticks} · UID ${p.uid}`)
         .join('\n') || 'Unavailable',
     );
-    field(fields, 'Local address', local);
-    field(fields, 'Local port', localPort);
-    field(fields, 'Remote address', remote);
-    field(fields, 'Remote port', remotePort);
-    field(fields, 'Attribution', `${e.attribution.status}\n${e.attribution.reason}`);
+    field(identity, 'Attribution', `${e.attribution.status}\n${e.attribution.reason}`);
     field(
-      fields,
+      identity,
       'Coverage',
       e.attribution.visibility_complete
         ? 'Backend reports complete visibility'
         : 'Limited observation; hidden owners or races may remain',
     );
-    field(fields, 'Deadline', e.deadline);
-    container.append(fields, element('p', '', 'expiry'));
+    technical.append(identity);
+    container.append(technical);
+    if (!e.attribution.visibility_complete || e.attribution.status !== 'directly-associated')
+      container.append(
+        element(
+          'p',
+          `Attribution: ${e.attribution.status}. ${e.attribution.reason}`,
+          'attribution-warning',
+        ),
+      );
+    container.append(element('p', '', 'expiry'));
     const preview = element('p', '', 'scope-preview');
     preview.id = 'scopePreview';
     container.append(preview);
@@ -517,7 +1015,7 @@ function renderRequests() {
       updateDecisions();
     };
     controls.append(scopes);
-    container.append(controls);
+    container.insertBefore(controls, preview);
     if (!promptID) {
       const open = element('button', 'Open permission window', 'open-prompt');
       open.onclick = () => void window.flowgate.openPrompt(e.id);
@@ -542,7 +1040,7 @@ function updateDecisions() {
       !!e.attempt ||
       localSubmitted.has(state.control.generation + ':' + e.id) ||
       !state.control.connected ||
-      state.control.readOnly ||
+      !canDecide(state.control) ||
       e.state !== 'awaiting-decision' ||
       e.remainingMs <= 0;
   if ($('scopePreview'))
@@ -563,8 +1061,24 @@ function consume(next: ClientState) {
   $('controlStatus').textContent =
     state.control.message +
     (state.control.connected && state.control.readOnly ? ' · read-only' : '');
+  $('controlStatus').title = [
+    $('controlStatus').textContent,
+    state.control.enforcement?.detail,
+    state.control.permissions
+      ? `${state.control.permissions.role} · ${state.control.permissions.policy_scope} policy · rule management ${state.control.permissions.can_manage_rules ? 'permitted' : 'denied'} · decisions ${state.control.permissions.can_decide ? 'permitted' : 'denied'}`
+      : 'Legacy permission contract',
+  ]
+    .filter(Boolean)
+    .join('\n');
   if (!promptID) {
+    for (const label of document.querySelectorAll<HTMLElement>(
+      '.col-incoming_policy small,.col-outgoing_policy small',
+    ))
+      label.textContent = state.control.capabilities?.includes(POLICY_CAPABILITY)
+        ? 'Backend policy'
+        : 'Listed · legacy';
     $('observerStatus').textContent = state.observation.message;
+    $('observerStatus').title = state.observation.message;
     $('pendingCount').textContent = String(
       state.control.events.filter((e) => e.state === 'awaiting-decision' && e.remainingMs > 0)
         .length,
@@ -580,12 +1094,33 @@ function consume(next: ClientState) {
       chosenScope = 'once';
     }
     lastGeneration = state.control.generation;
+    const rulesStamp = JSON.stringify([
+      state.control.connected,
+      state.control.generation,
+      state.control.permissions,
+      state.control.enforcement?.state,
+      state.control.rules,
+      state.control.policy
+        ? [
+            state.control.policy.snapshot.token,
+            state.control.policy.applications.map((a) => [a.ref, a.process_ids]),
+            state.control.policy.rows,
+          ]
+        : state.control.policyError,
+      (state.control.rules || []).map((r) => ruleState(r, state.control.serverNow ?? NaN)),
+    ]);
+    if (ruleSignature !== rulesStamp) {
+      ruleSignature = rulesStamp;
+      renderTree();
+      renderInfo();
+    }
   }
   renderRequests();
   if (!promptID) {
     const details = $('requestDetails');
     details.dataset.eventId = currentEvent()?.id || '';
     updateWorkflows(state);
+    renderPolicyList();
   }
 }
 window.flowgate.subscribe(consume);
@@ -597,5 +1132,8 @@ void window.flowgate
   });
 
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) void window.flowgate.snapshot().then(consume);
+  if (!document.hidden) {
+    void window.flowgate.snapshot().then(consume);
+    void graph?.update(selected, sequence + ':resume:' + performance.now());
+  }
 });
