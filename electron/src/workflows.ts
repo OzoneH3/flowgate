@@ -451,7 +451,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
     }
   };
   let extendedError = '';
-  const badge = node('button', 'Extended monitoring') as HTMLButtonElement;
+  const badge = node('button', 'UDP monitoring') as HTMLButtonElement;
   badge.id = 'extendedBadge';
   badge.title = 'Extended UDP monitoring; independent of firewall enforcement';
   document.querySelector('.toolbar')!.insertBefore(badge, $('observerStatus'));
@@ -478,7 +478,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
       const e = await window.flowgate.extendedState(),
         u = state?.observation.activity?.udp;
       const label = e.mode === 'daemon' ? e.state : u?.state || 'disabled';
-      badge.textContent = `UDP · ${label}${e.partial ? ' *' : ''}`;
+      badge.textContent = `UDP monitoring · ${label}${e.partial ? ' *' : ''}`;
       badge.title = `Extended monitoring (${e.mode === 'daemon' ? 'daemon-owned' : 'legacy'}) · ${e.message}`;
       $('extendedStatus').textContent =
         e.mode === 'daemon'
@@ -489,7 +489,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
       $<HTMLButtonElement>('extendedEnable').disabled = !e.canEnable;
       $<HTMLButtonElement>('extendedStop').disabled = !e.canStop;
     } catch (e) {
-      badge.textContent = 'UDP · unknown';
+      badge.textContent = 'UDP monitoring · unknown';
       $('extendedStatus').textContent = String(e);
       $<HTMLButtonElement>('extendedEnable').disabled = true;
       $<HTMLButtonElement>('extendedStop').disabled = true;
