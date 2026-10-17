@@ -1,3 +1,4 @@
+#include <QtNetwork/QLocalServer>
 #include "exactjson.h"
 #include "window.h"
 #include <QtTest>
