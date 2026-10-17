@@ -1,5 +1,16 @@
 # Continuation handoff
 
+## Current: persistent firewall decision log (backend; not rolled out)
+
+Capability `decision-log-v1`: decision-time records (pending/final/gap) from enforcing
+host and isolated-lab daemons, stored in a separate `decisions.db` beside the rule
+database (rules.db unchanged), 1 s durability window, 20,000 records/30 days, cursor
+API `decision-log`/`decision-log-get` with admin/self visibility. See
+[DECISION-LOG.md](DECISION-LOG.md). Real isolated demo
+`scripts/decision-log-isolated.py` (run `.workspace/decision-log-1792272647`).
+Separate test binary `.workspace/decisionlog-build/flowgate-decisionlog`; host
+monitor, its database and collector state untouched. UI presentation is UI-owned.
+
 ## Current: host monitor runs daemon-owned UDP (collector disabled)
 
 Root monitor PID 2152405, generation 4e18ec0723edb676c156a6b0ae4e9db9, source

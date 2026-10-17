@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"flowgate/internal/decisionlog"
 	"flowgate/internal/identity"
 	"flowgate/internal/policy"
 	"flowgate/internal/readiness"
@@ -19,6 +20,8 @@ import (
 )
 
 type Request struct {
+	DecisionQuery       json.RawMessage `json:"decision_query,omitempty"`
+	DecisionID          string          `json:"decision_id,omitempty"`
 	CollectorGeneration string          `json:"collector_generation,omitempty"`
 	ObservedTarget      *ObservedTarget `json:"observed_target,omitempty"`
 	ObservedDraft       *ObservedDraft  `json:"observed_draft,omitempty"`
@@ -43,9 +46,11 @@ type EnforcementStatus struct {
 	StopsAt time.Time `json:"stops_at"`
 }
 type Response struct {
-	TrafficMonitor  *udpaccount.Status `json:"traffic_monitor,omitempty"`
-	ObservedPreview *ObservedPreview   `json:"observed_preview,omitempty"`
-	Replayed        bool               `json:"replayed,omitempty"`
+	DecisionLog     *decisionlog.Page   `json:"decision_log,omitempty"`
+	DecisionRecord  *decisionlog.Record `json:"decision_record,omitempty"`
+	TrafficMonitor  *udpaccount.Status  `json:"traffic_monitor,omitempty"`
+	ObservedPreview *ObservedPreview    `json:"observed_preview,omitempty"`
+	Replayed        bool                `json:"replayed,omitempty"`
 
 	PolicyView         *PolicyView                `json:"policy_view,omitempty"`
 	PolicyExplanations *PolicyExplanations        `json:"policy_explanations,omitempty"`
@@ -153,6 +158,9 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 					if e.Traffic != nil {
 						r.Capabilities = append(r.Capabilities, "daemon-udp-monitor-v1")
 					}
+					if e.Decisions != nil {
+						r.Capabilities = append(r.Capabilities, DecisionLogCapability)
+					}
 					stopAfterResponse := false
 					if e.APIUID != nil && cred.Uid != *e.APIUID && cred.Uid != 0 {
 						continueResponse(c, r)
@@ -183,6 +191,28 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						r.ErrorCode = "invalid_request"
 					} else {
 						switch q.Operation {
+						case "decision-log", "decision-log-get":
+							// Read-only history on either endpoint; no mutation, deletion or
+							// administration exists. Visibility follows observation scope.
+							if e.Decisions == nil {
+								r.ErrorCode, r.Error = "unavailable", "Decision log not configured for this daemon"
+							} else if q.Operation == "decision-log" {
+								dq, err := decisionlog.DecodeQuery(q.DecisionQuery)
+								if err == nil {
+									var page decisionlog.Page
+									page, err = e.Decisions.Query(dq, cred.Uid, admin)
+									if err == nil {
+										r.DecisionLog = &page
+									}
+								}
+								decisionError(&r, err)
+							} else {
+								rec, err := e.Decisions.Get(q.DecisionID, cred.Uid, admin)
+								if err == nil {
+									r.DecisionRecord = &rec
+								}
+								decisionError(&r, err)
+							}
 						case "traffic-status", "traffic-start", "traffic-stop":
 							if e.Traffic == nil {
 								r.ErrorCode, r.Error = "unavailable", "Daemon-owned UDP collector unavailable"
@@ -434,6 +464,16 @@ func Call(path string, q Request) (Response, error) {
 	return r, e
 }
 
+func decisionError(r *Response, err error) {
+	if err == nil {
+		return
+	}
+	r.ErrorCode, r.Error = "invalid_request", err.Error()
+	var typed *decisionlog.QueryError
+	if errors.As(err, &typed) {
+		r.ErrorCode = typed.Code
+	}
+}
 func continueResponse(c net.Conn, r Response) {
 	r.Error = "not authorized"
 	r.ErrorCode = "forbidden"

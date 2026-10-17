@@ -106,6 +106,7 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 			return 0
 		}
 		verdict := nfqueue.NfDrop
+		var observed *daemon.Event
 		if a.Payload != nil {
 			packetDirection := direction
 			if direction == "both" {
@@ -132,11 +133,14 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 				}
 				v := e.Observe(f, token)
 				if v.State == "awaiting-decision" && retained.Add(*a.PacketID, len(*a.Payload), v) {
+					// Logging is a non-blocking enqueue; no log I/O on this path.
+					e.RecordPacketOutcome(v, daemon.VerdictHeld, nil)
 					return 0
 				}
 				if v.State == "allowed" {
 					verdict = nfqueue.NfAccept
 				}
+				observed = &v
 			}
 		}
 		var err error
@@ -144,6 +148,15 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 			err = nf.SetVerdictWithOption(*a.PacketID, verdict, nfqueue.WithConnMark(Mark))
 		} else {
 			err = nf.SetVerdict(*a.PacketID, verdict)
+		}
+		if observed != nil {
+			outcome := daemon.VerdictDropped
+			if err != nil {
+				outcome = daemon.VerdictFailed
+			} else if verdict == nfqueue.NfAccept {
+				outcome = daemon.VerdictAccepted
+			}
+			e.RecordPacketOutcome(*observed, outcome, err)
 		}
 		if err != nil {
 			fail(err)

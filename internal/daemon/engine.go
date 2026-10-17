@@ -3,6 +3,7 @@ package daemon
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"flowgate/internal/decisionlog"
 	"flowgate/internal/identity"
 	"flowgate/internal/policy"
 	"flowgate/internal/udpaccount"
@@ -26,6 +27,14 @@ type Event struct {
 	ScopePreviews    map[string]string    `json:"scope_previews,omitempty"`
 	Permission       string               `json:"permission"`
 	Token            string               `json:"-"`
+
+	// Decision-log bookkeeping (never serialized): the rule exactly as evaluated,
+	// whether this result was a capacity refusal, and record-once flags so packet
+	// retransmissions and repeated handling never produce duplicate records.
+	decided       *policy.Rule
+	capacity      bool
+	pendingLogged bool
+	finalLogged   bool
 }
 type TrafficManager interface {
 	Status() udpaccount.Status
@@ -33,6 +42,11 @@ type TrafficManager interface {
 	Stop(...string) (udpaccount.Status, error)
 }
 type Engine struct {
+	// Decisions records decision-time evidence; nil disables recording.
+	Decisions      *decisionlog.Log
+	capacityLogged map[string]time.Time
+	recentFinal    map[string]time.Time // identical re-decisions after cache lease expiry
+
 	Traffic           TrafficManager
 	TrafficControlUID *uint32 // explicit root configuration, independent of rules/decisions
 
@@ -78,6 +92,7 @@ func (e *Engine) expire(now time.Time) {
 			if v.State == "awaiting-decision" {
 				v.State = "expired"
 				v.Reason = "decision timed out; retry creates a new request"
+				e.recordFinal(v, "block", "timeout", "", "no decision before the deadline; held packets drop", nil, nil, "deferred", "")
 			}
 			if now.Sub(v.Deadline) > 5*time.Second {
 				delete(e.events, key)
@@ -106,6 +121,7 @@ func (e *Engine) Observe(f identity.Flow, token string) Event {
 	}
 	action, rule, conflicts := policy.Evaluate(e.rules, f, a, now)
 	v := Event{ID: randomID(), Flow: f, Attribution: a, FirstSeen: now, Deadline: now.Add(e.Timeout), Rule: rule, Conflicts: conflicts, Token: token, Permission: "once: this TCP connection or UDP tuple for 30 seconds; exact application and remote endpoint"}
+	v.decided = e.ruleLocked(rule)
 	if a.Principal() != nil {
 		filter := policy.Remembered(f, a)
 		v.RememberedFilter = &filter
@@ -140,6 +156,7 @@ func (e *Engine) Observe(f identity.Flow, token string) Event {
 	if len(e.events) >= e.Max || e.created >= 20 {
 		v.State = "blocked"
 		v.Reason = "pending/history capacity or prompt rate exceeded"
+		v.capacity = true
 		return v
 	}
 	e.created++
@@ -186,6 +203,7 @@ func (e *Engine) Decide(id, action, scope string, uid uint32, admin bool) (Event
 		if !e.Now().Before(v.Deadline) || a.Application == nil || a.Fingerprint != v.Attribution.Fingerprint {
 			v.State = "expired"
 			v.Reason = "identity changed before decision"
+			e.recordFinal(v, "block", "identity_changed", "", v.Reason+"; held packets drop", nil, &uid, "deferred", "")
 			return Event{}, fmt.Errorf("identity changed; retry required")
 		}
 		if scope != "once" && len(e.rules) >= 256 {
@@ -213,6 +231,7 @@ func (e *Engine) Decide(id, action, scope string, uid uint32, admin bool) (Event
 		v.Reason = "explicit client decision; FlowGate permission is not proof of network delivery"
 		v.Rule = "once:" + v.ID
 		v.Deadline = now.Add(30 * time.Second)
+		e.recordFinal(v, action, "user", scope, "explicit user decision", remembered, &uid, "deferred", "")
 		if remembered != nil {
 			v.Rule = remembered.ID
 			v.Permission = v.ScopePreviews[scope]
@@ -253,6 +272,7 @@ func (e *Engine) SetRules(rules []policy.Rule) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.rules = rules
+	e.discardPendingLocked("policy replaced; pending request discarded and held packets drop")
 	e.events = map[string]*Event{}
 	return nil
 }
@@ -281,6 +301,8 @@ func (e *Engine) RetainedState(id, fingerprint string) string {
 		if !e.Now().Before(v.Deadline) || a.Application == nil || a.Fingerprint != fingerprint {
 			v.State = "expired"
 			v.Reason = "identity changed before retained verdict"
+			v.finalLogged = false // a revised disposition of an earlier Allow
+			e.recordFinal(v, "block", "identity_changed", "", v.Reason+"; held packets drop", nil, nil, "deferred", "")
 			return "drop"
 		}
 		// Once grants use the event lease; remembered grants must still be live.
@@ -349,6 +371,7 @@ func (e *Engine) ChangeRule(id, action string, uid uint32, admin bool) error {
 	}
 	e.rules = next
 	// Invalidate pending as well as cached verdicts conservatively; retained packets drop.
+	e.discardPendingLocked("rule " + action + " invalidated pending requests; held packets drop")
 	e.events = map[string]*Event{}
 	return nil
 }

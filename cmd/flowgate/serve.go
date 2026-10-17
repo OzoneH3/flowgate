@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"flowgate/internal/daemon"
+	"flowgate/internal/decisionlog"
 	"flowgate/internal/monitor"
 	"flowgate/internal/readiness"
 	"flowgate/internal/store"
@@ -18,6 +19,17 @@ import (
 
 // Foreground root daemon foundation: observe and manage stored policy without
 // interception. There is intentionally no automatic/implicit firewall path here.
+// openDecisionLog never prevents startup: an unavailable log is reported
+// through health while policy and enforcement continue unchanged.
+func openDecisionLog(path, generation, mode string, recording bool) *decisionlog.Log {
+	l, err := decisionlog.Open(path, generation, mode, recording)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "WARNING: decision log unavailable:", err)
+		return decisionlog.Unavailable(err)
+	}
+	return l
+}
+
 func serveCommand(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	socket := fs.String("socket", "", "existing root-owned API directory + new private socket")
@@ -67,6 +79,9 @@ func serveCommand(args []string) error {
 	if err = e.SetRules(rules); err != nil {
 		return err
 	}
+	// History only: this non-enforcing daemon makes no connection decisions.
+	e.Decisions = openDecisionLog(filepath.Join(filepath.Dir(*database), "decisions.db"), e.Generation, e.Mode, false)
+	defer e.Decisions.Close()
 	if err = daemon.SecureDirectory(filepath.Dir(*socket)); err != nil {
 		return err
 	}

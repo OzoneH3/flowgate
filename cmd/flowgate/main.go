@@ -155,6 +155,7 @@ func serve() error {
 	bins := fs.String("runtime-bins", "/usr/bin", "comma-separated trusted runtime bin directories")
 	helper := fs.String("wine-helper", ".workspace/windows/table-probe.exe", "workspace PE census helper")
 	rulepath := fs.String("rules", "", "JSON rule array")
+	decisionPath := fs.String("decision-log", "", "optional absolute decision log path in a private 0700 directory")
 	fs.Parse(os.Args[2:])
 	if *parent == "" || *parent == identity.NetNS() {
 		return fmt.Errorf("refusing enforcement without a different parent network namespace; use scripts/lab.sh")
@@ -175,6 +176,16 @@ func serve() error {
 	}
 	e := daemon.New(*timeout)
 	e.Mode = "isolated-lab"
+	if *decisionPath != "" {
+		if !filepath.IsAbs(*decisionPath) {
+			return fmt.Errorf("--decision-log must be absolute")
+		}
+		if st, err := os.Lstat(filepath.Dir(*decisionPath)); err != nil || !st.IsDir() || st.Mode().Perm()&0077 != 0 {
+			return fmt.Errorf("--decision-log directory must be a private 0700 directory")
+		}
+		e.Decisions = openDecisionLog(*decisionPath, e.Generation, e.Mode, true)
+		defer func() { e.FinalizePending(); e.Decisions.Close() }()
+	}
 	if *prefixes != "" {
 		if os.Getenv("FLOWGATE_WINE_TABLE_RUNNER") != "" {
 			return fmt.Errorf("choose explicit attachment or legacy environment, not both")

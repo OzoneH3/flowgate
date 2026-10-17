@@ -167,6 +167,7 @@ func (e *Engine) EditRule(id, eventID string, expected *uint64, candidate policy
 		}
 		a := e.Resolve(v.Flow)
 		if a.Fingerprint != v.Attribution.Fingerprint || a.Application == nil {
+			e.recordFinal(v, "block", "identity_changed", "", "identity changed during rule edit; held packets drop", nil, nil, "deferred", "")
 			delete(e.events, key)
 			continue
 		}
@@ -176,6 +177,7 @@ func (e *Engine) EditRule(id, eventID string, expected *uint64, candidate policy
 			v.Rule = effective
 			v.Reason = "decided by committed rule edit; FlowGate permission is not proof of delivery"
 			v.State = map[string]string{"allow": "allowed", "block": "blocked"}[action]
+			e.recordFinal(v, action, "rule_edit", "", "pending request decided by a committed rule edit", e.ruleLocked(effective), nil, "deferred", "")
 		}
 	}
 	return candidate, sentence, nil

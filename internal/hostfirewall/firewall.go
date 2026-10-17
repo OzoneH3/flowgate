@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flowgate/internal/daemon"
+	"flowgate/internal/decisionlog"
 	"flowgate/internal/identity"
 	"flowgate/internal/monitor"
 	"flowgate/internal/queue"
@@ -300,6 +301,14 @@ func RunProfileAuthorized(ctx context.Context, dir, socket, database string, uid
 	}
 	e := daemon.New(timeout)
 	e.Mode = "host-enforcement"
+	decisions, derr := decisionlog.Open(filepath.Join(filepath.Dir(database), "decisions.db"), e.Generation, e.Mode, true)
+	if derr != nil {
+		fmt.Fprintln(os.Stderr, "WARNING: decision log unavailable; enforcement unaffected:", derr)
+		decisions = decisionlog.Unavailable(derr)
+	}
+	e.Decisions = decisions
+	// After the queue stops: record shutdown for pending requests, then flush.
+	defer func() { e.FinalizePending(); decisions.Close() }()
 	e.APIUID = &uid
 	if administrator {
 		e.AdministratorUID = &uid

@@ -1,5 +1,11 @@
 # Local API additions: conditional rule deletion
 
+## Decision log
+
+Additive `decision-log-v1` (`decision-log`, `decision-log-get`); exact request,
+record, health, cursor, visibility and error contract in [DECISION-LOG.md](DECISION-LOG.md).
+
+
 ## Daemon-owned optional UDP accounting
 
 The root `serve` daemon now supports explicit optional UDP helper ownership and
