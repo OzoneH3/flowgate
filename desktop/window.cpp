@@ -1,4 +1,5 @@
 #include "window.h"
+#include "exactjson.h"
 #include "presentation.h"
 #include <algorithm>
 
@@ -280,7 +281,8 @@ Window::Window(const QString &path, QWidget *parent) : QMainWindow(parent) {
   ruleLayout->addLayout(ruleActions);
   tabs->addTab(rulePage, "Rules");
   tabs->setTabEnabled(2, false);
-  for (auto *b : {enableRule, disableRule, deleteRule})
+  connect(deleteRule, &QPushButton::clicked, this, &Window::confirmDeleteRule);
+  for (auto *b : {enableRule, disableRule})
     connect(b, &QPushButton::clicked, this, [this, b] {
       int row = rules->currentRow();
       if (!connected || readOnly || ruleSubmitting || row < 0 ||
@@ -296,9 +298,7 @@ Window::Window(const QString &path, QWidget *parent) : QMainWindow(parent) {
           {{"version", 1},
            {"operation", "rule"},
            {"id", id},
-           {"action", b == enableRule
-                          ? "enable"
-                          : (b == disableRule ? "disable" : "delete")}},
+           {"action", b == enableRule ? "enable" : "disable"}},
           [this, submittedGeneration](QJsonObject r, QString error) {
             ruleSubmitting = false;
             if (error.isEmpty() &&
@@ -488,9 +488,8 @@ void Window::request(QJsonObject q,
           [finish] { finish({}, "Backend request timed out"); });
   connect(s, &QLocalSocket::errorOccurred, this,
           [s, finish](auto) { finish({}, s->errorString()); });
-  connect(s, &QLocalSocket::connected, this, [s, q] {
-    s->write(QJsonDocument(q).toJson(QJsonDocument::Compact) + '\n');
-  });
+  connect(s, &QLocalSocket::connected, this,
+          [s, q] { s->write(ExactJson::request(q) + '\n'); });
   connect(s, &QLocalSocket::readyRead, this, [s, buffer, finish] {
     buffer->append(s->readAll());
     if (buffer->size() > 4 * 1024 * 1024) {
@@ -500,8 +499,7 @@ void Window::request(QJsonObject q,
     if (!buffer->contains('\n'))
       return;
     QJsonParseError error;
-    auto doc =
-        QJsonDocument::fromJson(buffer->left(buffer->indexOf('\n')), &error);
+    auto doc = ExactJson::response(buffer->left(buffer->indexOf('\n')), &error);
     if (error.error != QJsonParseError::NoError || !doc.isObject() ||
         doc.object()["version"].toInt() != 1 ||
         doc.object()["generation"].toString().isEmpty()) {
@@ -595,6 +593,8 @@ void Window::consume(QJsonObject r) {
     updateDetails();
     return;
   }
+  conditionalDelete =
+      r["capabilities"].toArray().contains("conditional-rule-delete-v1");
   auto gen = r["generation"].toString();
   if (gen != generation) {
     generation = gen;
@@ -675,7 +675,8 @@ void Window::consume(QJsonObject r) {
   renderRules(r["rules"].toArray());
   enableRule->setEnabled(hostControl && !readOnly && !ruleSubmitting);
   disableRule->setEnabled(hostControl && !readOnly && !ruleSubmitting);
-  deleteRule->setEnabled(hostControl && !readOnly && !ruleSubmitting);
+  deleteRule->setEnabled(hostControl && !readOnly && !ruleSubmitting &&
+                         conditionalDelete);
 
   tabs->setTabEnabled(1, nextMode != "host-monitor");
   if (nextMode != mode) {
@@ -1022,8 +1023,13 @@ void Window::updateEnforcement() {
   }
   bool editRules =
       connected && mode == "host-enforcement" && !readOnly && !ruleSubmitting;
-  for (auto *b : {enableRule, disableRule, deleteRule, editRule})
+  for (auto *b : {enableRule, disableRule, editRule})
     b->setEnabled(editRules);
+  deleteRule->setEnabled(editRules && conditionalDelete);
+  deleteRule->setToolTip(conditionalDelete
+                             ? "Delete the confirmed rule version"
+                             : "Delete unavailable: backend requires "
+                               "conditional-rule-delete-v1 support");
   if (rules->rowCount() > 0 && !connected) {
     tabs->setTabText(2, "Rules · last received");
     findChild<QLabel *>("rulesNote")
@@ -1202,7 +1208,7 @@ void Window::openRuleEditor(bool fromPending) {
     seed = storedRules.value(id);
     if (seed.isEmpty())
       return;
-    version = seed.contains("version") ? seed["version"] : QJsonValue(0);
+    version = ExactJson::ruleVersion(seed);
     auto filter = seed["filter"].toObject();
     if (!filter["remote"].toString().isEmpty()) {
       auto endpoint = filter["remote"].toString();
@@ -1253,4 +1259,78 @@ void Window::openRuleEditor(bool fromPending) {
       },
       this);
   editor->show();
+}
+
+void Window::confirmDeleteRule() {
+  int row = rules->currentRow();
+  if (!connected || readOnly || ruleSubmitting || !conditionalDelete ||
+      row < 0 || !rules->item(row, 0))
+    return;
+  const auto id = rules->item(row, 0)->data(Qt::UserRole).toString();
+  const auto version = ExactJson::ruleVersion(storedRules.value(id));
+  const auto token = generation;
+  const auto requestEpoch = epoch;
+  if (!ExactJson::uint64Text(version)) {
+    feedback("Invalid exact rule version; reload before deleting.");
+    return;
+  }
+  ruleSubmitting = true;
+  updateEnforcement();
+  auto *box =
+      new QMessageBox(QMessageBox::Question, "Delete saved rule",
+                      "Delete rule " + id + " at version " + version +
+                          "? Already-approved TCP connections continue.",
+                      QMessageBox::Yes | QMessageBox::No, this);
+  box->setObjectName("deleteConfirmation");
+  box->setTextFormat(Qt::PlainText);
+  box->setDefaultButton(QMessageBox::No);
+  box->setAttribute(Qt::WA_DeleteOnClose);
+  connect(box, &QMessageBox::finished, this,
+          [this, id, version, token, requestEpoch](int answer) {
+            if (answer != QMessageBox::Yes) {
+              ruleSubmitting = false;
+              updateEnforcement();
+              return;
+            }
+            if (!connected || readOnly || generation != token ||
+                epoch != requestEpoch || !conditionalDelete) {
+              ruleSubmitting = false;
+              feedback("Backend changed or disconnected; reload and confirm "
+                       "again. Delete was not replayed.");
+              updateEnforcement();
+              return;
+            }
+            request({{"version", 1},
+                     {"operation", "rule-delete"},
+                     {"generation", token},
+                     {"id", id},
+                     {"expected_version", version}},
+                    [this, id, version, token](QJsonObject r, QString error) {
+                      ruleSubmitting = false;
+                      if (!error.isEmpty())
+                        feedback("Deletion outcome unknown: " + error +
+                                 ". Inspect refreshed rules before retrying; "
+                                 "no automatic retry.");
+                      else if (generation != token ||
+                               r["generation"].toString() != token)
+                        feedback("Backend generation changed; inspect "
+                                 "authoritative rules and confirm again.");
+                      else if (!r["error"].toString().isEmpty())
+                        feedback(r["error_code"].toString() + ": " +
+                                 r["error"].toString() +
+                                 ". Reload before confirming again.");
+                      else {
+                        auto deleted = r["deleted_rule"].toObject();
+                        if (deleted["id"].toString() == id &&
+                            ExactJson::ruleVersion(deleted) == version)
+                          feedback("Rule deletion acknowledged");
+                        else
+                          feedback("Deletion acknowledgement invalid; inspect "
+                                   "authoritative rules. No automatic retry.");
+                      }
+                      refresh();
+                      updateEnforcement();
+                    });
+          });
+  box->open();
 }

@@ -1,3 +1,4 @@
+#include "exactjson.h"
 #include "window.h"
 #include <QtTest>
 #include <unistd.h>
@@ -93,10 +94,53 @@ private slots:
     QCOMPARE(count(), 2);
     rules->selectRow(0);
     QTest::mouseClick(button("deleteRule"), Qt::LeftButton);
+    auto *confirmation = window->findChild<QMessageBox *>("deleteConfirmation");
+    QVERIFY(confirmation);
+    // A separate authenticated client edits after the Delete tokens are frozen.
+    auto call = [this](QJsonObject q) {
+      QLocalSocket s;
+      s.connectToServer(run + "/control.sock");
+      if (!s.waitForConnected(2000))
+        return QJsonObject{};
+      s.write(ExactJson::request(q) + '\n');
+      s.waitForBytesWritten();
+      QByteArray raw;
+      while (!raw.contains('\n')) {
+        if (!s.waitForReadyRead(3000))
+          return QJsonObject{};
+        raw += s.readAll();
+      }
+      return ExactJson::response(raw, nullptr).object();
+    };
+    auto snapshot = call({{"version", 1}, {"operation", "list"}});
+    auto saved = snapshot["rules"].toArray().first().toObject();
+    auto expected = ExactJson::ruleVersion(saved);
+    auto id = saved["id"];
+    saved.remove("version");
+    saved["action"] = "block";
+    auto edited = call({{"version", 1},
+                        {"operation", "rule-save"},
+                        {"generation", snapshot["generation"]},
+                        {"id", id},
+                        {"expected_version", expected},
+                        {"rule", saved}});
+    QVERIFY2(edited["error"].toString().isEmpty(),
+             qPrintable(edited["error"].toString()));
+    confirmation->done(QMessageBox::Yes);
+    QTRY_VERIFY(window->findChild<QLabel *>("result")->text().contains(
+        "version_conflict"));
+    QTRY_COMPARE(rules->item(0, 1)->text(), QString("block"));
+    QCOMPARE(rules->rowCount(), 1);
+    rules->selectRow(0);
+    QTest::mouseClick(button("deleteRule"), Qt::LeftButton);
+    confirmation = window->findChild<QMessageBox *>("deleteConfirmation");
+    QVERIFY(confirmation);
+    confirmation->done(QMessageBox::Yes);
     QTRY_COMPARE(rules->rowCount(), 0);
     qInfo()
         << "PASS host-mode GUI persistent Allow -> receiver, remembered new "
-           "source port, disable -> prompt, Block -> no receiver, delete";
+           "source port, disable -> prompt, Block -> no receiver, stale "
+           "confirmed delete rejected, fresh conditional delete";
   }
   void disconnect() {
     QVERIFY(command("stopbackend")["ok"].toBool());

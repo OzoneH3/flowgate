@@ -73,6 +73,8 @@ private:
   QSet<QString> notified, submitting;
   QString generation, selected, promptID, activeEndpoint;
   bool ruleSubmitting = false;
+  bool conditionalDelete = false;
+  void confirmDeleteRule();
   bool connected = false, readOnly = true, listing = false;
   int epoch = 0;
   qint64 serverOffset = 0;
