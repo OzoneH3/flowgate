@@ -54,7 +54,8 @@ An explicitly started evaluation also keeps enforcing after the GUI closes, unti
 Stop or its original five-minute deadline. The observer alone belongs to this launcher.
 
 Visibility is limited by the current user, proc access and current network namespace.
-Owners can be inaccessible or gone. The UI reports partial coverage and collection
+Owners can be inaccessible or gone. [Native ownership details](docs/ATTRIBUTION.md)
+explain categories and bounded recovery for sockets retained after main-thread exit. The UI reports partial coverage and collection
 errors; observation never produces Allowed events. Decision controls require an
 authenticated, active control connection. No Wine
 helper starts or attaches to a game prefix. Real TCP IPv4/IPv6 payload rates and observed-byte totals appear in Activity.

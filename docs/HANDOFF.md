@@ -1,5 +1,13 @@
 # Continuation handoff
 
+## Native ownership increment
+
+Started at a48ee2b; backend observation-only changes and native fixtures. Read
+ATTRIBUTION.md for additive API fields, worker/TGID identity, bounded sample counts
+and focused checks. Electron/Qt/shared authentication and enforcement are untouched.
+Do not integrate frontend/electron as part of this task. No privileged host
+collection was activated. Reuse settled UDP acceptance below.
+
 ## Completed UDP acceptance
 
 The user-authenticated `.workspace/udp-verified-o2oghdyo` run passed the complete

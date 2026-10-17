@@ -1,5 +1,20 @@
 # Current status
 
+## Current: native observation ownership improvements
+
+Leader-exit worker fallback now identifies real TCP/UDP IPv4/IPv6 sockets that
+were previously unknown. FD links are rechecked after inspection; cache checks
+include credentials/namespaces. Additive API ownership categories/counts and a
+strictly display-only same-native-application association retain every holder.
+Enforcement and frontend files are unchanged. See [native attribution](ATTRIBUTION.md)
+for supported cases, exact host sample counts, limits and focused evidence.
+
+`scripts/check-ownership.sh` passed native fixture/API checks, relevant race tests
+and vet. Before/after host samples each had 29 unresolved nonzero-inode sockets,
+all other creation UIDs; none justify exposing privileged other-user metadata.
+Basic monitoring remains unprivileged via `scripts/run-desktop.sh`. The one
+Unidentified group and settled TCP/UDP accounting behavior are preserved.
+
 ## Current: isolated UDP accounting and Wayland acceptance passed
 
 The authenticated `.workspace/udp-verified-o2oghdyo` run passed on x86-64 CachyOS

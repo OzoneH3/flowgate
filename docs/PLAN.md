@@ -1,5 +1,13 @@
 # Authoritative implementation plan
 
+## Complete: bounded native ownership improvement
+
+Read-only host categories sampled; native leader-exit gap reproduced and fixed.
+Current FD/generation rechecks, credential/namespace cache checks and display-only
+same-application evidence verified with focused fixtures/race tests. See ATTRIBUTION.md.
+Keep cross-user/namespace limitations explicit; no new privileged path or frontend
+integration is part of this increment.
+
 ## Complete: isolated UDP accounting milestone
 
 1. Implement namespace/UID-filtered sock length BTF probes and bounded cookie maps.

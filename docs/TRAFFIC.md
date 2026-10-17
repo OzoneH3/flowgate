@@ -74,7 +74,11 @@ measurements are not duplicated or reset by that presentation move.
 
 This is not an application identity or a permission target. Known executable groups
 continue to use application key/revision and PID/start identities. The observer
-reports only what it saw:
+reports only what it saw. See [native ownership improvements](ATTRIBUTION.md) for
+bounded live-worker fallback, FD rechecks and additive display-only association.
+Multiple holders remain visible; enforcement never uses that association.
+
+Ownership categories:
 
 - **Unknown owner:** no matching visible FD. Census-wide inaccessible directories
   are reported as a possible coverage limitation, not proof of this socket's owner.

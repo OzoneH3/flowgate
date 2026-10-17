@@ -186,6 +186,10 @@ reads inet_diag TCP/UDP in its current network namespace and `/proc/PID/fd`.
 Sockets remain visible when holders cannot be inspected. UID is not proof of a
 current owner; kernel-owned/time-wait sockets and races also leave no visible holder.
 Shared sockets carry visible PID/start IDs and appear once, not once per FD.
+The additive `display_application` can describe the common native application of
+all validated visible owners; it never changes enforcement authority. Worker
+fallback uses TID/start IDs and adds `thread_group_pid`. FD links are rechecked
+after inspection. Expected inode-zero rows alone are not incomplete coverage.
 Visible descriptor ownership is not exclusive recipient identity or a firewall
 decision. Observation creates no policy events.
 
@@ -216,13 +220,15 @@ Raw environments, command lines and payloads are not exposed or executed.
 
 Descriptors are scanned once per process per snapshot, not once per socket.
 Existing process inspection is cached at most five seconds, with PID/start,
-executable link and revision checked each cycle. Exit removes a process; reuse,
+executable link, revision, proc UID and network/mount namespace links checked each cycle. Exit removes a process; reuse,
 exec and revision changes force inspection. Wine mapped-image metadata can lag by
 that TTL while its runtime executable is unchanged; this observation cache is never
 used for enforcement. No new Wine detection or helper attachment is performed.
 
 Complete means within bounded observation scope: current-namespace TCP/UDP and
-process-leader FD directories. Other namespaces, private per-thread tables, hidden
+process-leader FD directories plus bounded live-worker fallback after leader exit
+(see ATTRIBUTION.md). Other namespaces, private FD tables of workers with a live
+leader, hidden
 proc mounts and transient sockets can be missed. Partial visibility is shown even
 when some holders are identified. Non-atomic snapshots are not attestations.
 
