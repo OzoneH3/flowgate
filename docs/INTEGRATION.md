@@ -13,19 +13,51 @@ leaves the daemon running. Ordinary `scripts/run-electron.sh` and Qt
 `scripts/run-desktop.sh` remain available; neither implicitly enables enforcement.
 
 The authorized monitor update retains `/var/lib/flowgate/rules.db` and root-owned
-path validation. Current PID **2095594**, generation
-**a0109011f97dad19dd723e7e483d7860**, selected UID1000 explicitly administrator.
+path validation. Current PID **2152405**, generation
+**4e18ec0723edb676c156a6b0ae4e9db9**, selected UID1000 explicitly administrator
+with explicit UDP traffic-control grant (see "Daemon-owned UDP rollout" below).
 Both sockets retain UID1000/root group,0600; primary daemon-monitor, companion
 host-monitor/backend_mode daemon-monitor. Enforcement is **stopped**, can_manage_rules
-true on primary, can_decide false. Companion mutations remain rejected. No system
-service/autostart/BPF/queue/firewall activation was performed.
+true on primary, can_decide false. Companion mutations remain rejected. UDP
+collection is **disabled** until the user explicitly Enables it in Activity. No
+system service/autostart/BPF/queue/firewall activation was performed.
 
 Exact Stop (only if deliberately stopping this monitor):
 
 ```
 sudo -n /home/flowgate-user/Apps/flowgate/.workspace/flowgate monitor-stop \
-  --generation a0109011f97dad19dd723e7e483d7860
+  --generation 4e18ec0723edb676c156a6b0ae4e9db9
 ```
+
+## Daemon-owned UDP rollout
+
+Source `ea13560d5354b5714a91b447b263abd9b5e8b744` (UDP backend 15d6e1a + UI 66a0c02).
+`.workspace/flowgate` SHA256 f9c446c1ede22ced0fff9b08281aabacda7ef14ea0c4adead926c89c93cf1b4c;
+helper `.workspace/udp-collector` SHA256
+118a8877d7b58dba43f20622064e3b60c38138a3453cf4a9aa87305720ab205c (pinned at startup).
+Actual launch (via the existing NOPASSWD rule for that executable only):
+
+```
+sudo -n /home/flowgate-user/Apps/flowgate/.workspace/flowgate serve \
+  --socket /run/flowgate-api/daemon.sock --database /var/lib/flowgate/rules.db \
+  --uid 1000 --administrator \
+  --udp-helper /home/flowgate-user/Apps/flowgate/.workspace/udp-collector --allow-traffic-control
+```
+
+Procedure (`.workspace/udp-rollout/rollout.py`, log/before/after/launch JSON there):
+root peer, generation a0109011f97dad19dd723e7e483d7860, arguments and empty rule
+inventory checked; running executable exported with `monitor-backup` to
+`.workspace/udp-rollout/flowgate-running-previous` (SHA256 0d3feb00fea9646c700c67fec72ec3cd7cefaabd50056a3e6ba69c471ad8530d,
+e2ef7f7); new build renamed into place (running inode never truncated);
+generation-checked `monitor-stop`; old process exited before the new serve took the
+database lock. Live UID1000 check (`live-verify.log`): daemon-udp-monitor-v1,
+can_view_measurements/can_control_traffic true, collector disabled/available with no
+helper process, enforcement stopped, TCP Activity and policy-view available, rules
+still empty, companion Start/Stop `forbidden`, socket owners/modes unchanged.
+
+Rollback (only if needed): generation-checked Stop of the current monitor, wait for
+exit, rename the retained executable back to `.workspace/flowgate`, then start it
+with the previous arguments (the launch above without the last two options).
 
 After any later restart, inspect the new generation rather than reusing this token.
 Do not launch a competing writer against the database. Evaluation remains separately

@@ -1,5 +1,16 @@
 # Continuation handoff
 
+## Current: host monitor runs daemon-owned UDP (collector disabled)
+
+Root monitor PID 2152405, generation 4e18ec0723edb676c156a6b0ae4e9db9, source
+ea13560 (executable SHA256 f9c446c1..., helper 118a8877...), same database and
+UID1000 administrator plus `--udp-helper .../.workspace/udp-collector
+--allow-traffic-control`. Collector **disabled** until the user Enables UDP in
+Activity; enforcement stopped; rules unchanged (empty). Launch
+`scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock`. Exact launch,
+Stop, rollback and evidence: INTEGRATION.md "Daemon-owned UDP rollout". UI agent
+owns the brief desktop acceptance. No host BPF, firewall or service changes.
+
 ## Integrated: daemon-owned UDP accounting + Electron consumer
 
 Backend `15d6e1a` (daemon-udp-monitor-v1) merged with released UI
