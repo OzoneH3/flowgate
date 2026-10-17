@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { Bridge, ClientState, Decision } from './protocol';
 const api: Bridge = {
+  applicationIcons: (keys) => ipcRenderer.invoke('application:icons', keys),
   graph: (value) => ipcRenderer.invoke('graph', value),
   backgroundStatus: () => ipcRenderer.invoke('background:status'),
   quit: () => ipcRenderer.invoke('app:quit'),

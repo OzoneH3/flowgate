@@ -1,3 +1,5 @@
+import { ruleStatus, ruleState, ruleDescription } from './rule-status';
+import type { Application } from './protocol';
 import { TrafficGraph } from './graph';
 import { setupWorkflows, updateWorkflows } from './workflows';
 import type { ClientState, ViewEvent, Scope } from './protocol';
@@ -31,6 +33,7 @@ let sort = 'name',
   descending = false;
 const expanded = new Set<string>();
 const localSubmitted = new Set<string>();
+let ruleSignature = '';
 let lastGeneration = '';
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, text = '', className = '') {
@@ -58,6 +61,98 @@ function rowIcon(kind: Row['kind']) {
   svg.append(path);
   return svg;
 }
+
+const iconCache = new Map<string, string | null>();
+const iconPending = new Set<string>();
+let iconScheduled = false;
+function installedIcon(app: Application | undefined, kind: Row['kind']) {
+  const span = element('span', '', 'application-icon');
+  span.append(rowIcon(kind));
+  if (!app?.key) return span;
+  const key = JSON.stringify([app.key, app.revision, app.executable]);
+  span.dataset.iconKey = key;
+  const paint = (node: HTMLElement, url: string) => {
+    const img = element('img');
+    img.src = url;
+    img.alt = '';
+    img.width = img.height = 14;
+    img.onerror = () => {
+      if (node.dataset.iconKey) iconCache.set(node.dataset.iconKey, null);
+      node.replaceChildren(rowIcon('application'));
+    };
+    node.replaceChildren(img);
+  };
+  const url = iconCache.get(key);
+  if (url) paint(span, url);
+  else if (!iconCache.has(key)) {
+    if (iconPending.size < 2048) iconPending.add(key);
+    if (!iconScheduled) {
+      iconScheduled = true;
+      queueMicrotask(async () => {
+        const keys = [...iconPending].slice(0, 128);
+        keys.forEach((k) => iconPending.delete(k));
+        try {
+          const result = await window.flowgate.applicationIcons(keys);
+          for (const [key, url] of Object.entries(result)) {
+            if (iconCache.size >= 2048) iconCache.delete(iconCache.keys().next().value!);
+            iconCache.set(key, url);
+            if (url)
+              for (const node of document.querySelectorAll<HTMLElement>('[data-icon-key]'))
+                if (node.dataset.iconKey === key) paint(node, url);
+          }
+        } catch {
+          for (const key of keys) iconCache.set(key, null);
+        } finally {
+          iconScheduled = false;
+        }
+      });
+    }
+  }
+  return span;
+}
+function rowApplication(r: Row) {
+  return (
+    r.process?.application ||
+    r.displayApplication ||
+    (r.socket?.owners.length === 1
+      ? state.observation.activity?.processes[r.socket.owners[0]]?.application
+      : r.socket?.display_application)
+  );
+}
+function ruleIndicators(r: Row) {
+  const status = ruleStatus(r, state),
+    cell = element('td', '', 'rule-status');
+  cell.title = status.reason;
+  if (!status.available) {
+    cell.append(element('span', '—', 'rule-unavailable'));
+    cell.setAttribute('aria-label', status.reason);
+    return cell;
+  }
+  for (const direction of ['incoming', 'outgoing'] as const) {
+    const group = element('span', '', 'rule-direction');
+    group.append(element('span', direction === 'incoming' ? 'In' : 'Out', 'rule-direction-label'));
+    const rules = status[direction];
+    for (const type of ['allow', 'block', 'disabled', 'expired', 'unknown'] as const) {
+      const matches = rules.filter((rule) => ruleState(rule, status.now) === type);
+      if (!matches.length) continue;
+      const glyph = { allow: '✓', block: '×', disabled: '○', expired: '◷', unknown: '?' }[type];
+      const indicator = element('span', glyph, 'rule-indicator rule-' + type);
+      indicator.title =
+        `${direction}: ${matches.length} ${type} scoped rule(s)\n` +
+        matches.map((rule) => ruleDescription(rule, status.now)).join('\n');
+      indicator.setAttribute('aria-label', indicator.title);
+      group.append(indicator);
+    }
+    if (!rules.length) {
+      const none = element('span', '·', 'rule-none');
+      none.title = direction + ': no listed rules (not an Allow/Block verdict)';
+      group.append(none);
+    }
+    cell.append(group);
+  }
+  return cell;
+}
+
 function field(container: HTMLElement, label: string, value: string) {
   container.append(element('dt', label), element('dd', value || 'Unknown'));
 }
@@ -78,6 +173,7 @@ if (promptID) {
     ['name', 'Application / process / connection'],
     ['download_bps', 'DL rate'],
     ['upload_bps', 'UL rate'],
+    ['rules', 'Rule Status'],
     ['count', 'Sockets'],
     ['pid', 'PID'],
     ['downloaded', 'Downloaded'],
@@ -91,6 +187,9 @@ if (promptID) {
     const th = element('th');
     th.className = 'col-' + key;
     const b = element('button', title);
+    if (key === 'download_bps' || key === 'upload_bps') b.append(element('small', 'Auto units'));
+    if (key === 'rules') b.append(element('small', 'Scoped inventory'));
+    b.disabled = key === 'rules';
     b.onclick = () => {
       descending = sort === key ? !descending : ['upload_bps', 'download_bps'].includes(key);
       sort = key;
@@ -231,7 +330,11 @@ function renderTree() {
       renderTree();
       renderInfo();
     };
-    name.append(toggle, rowIcon(r.kind), document.createTextNode(r.label));
+    name.append(
+      toggle,
+      installedIcon(r.kind === 'socket' ? undefined : rowApplication(r), r.kind),
+      document.createTextNode(r.label),
+    );
     name.title = r.process?.executable || r.socket?.socket.remote || r.label;
     tr.append(name);
     for (const key of ['download_bps', 'upload_bps'] as Metric[]) {
@@ -244,6 +347,7 @@ function renderTree() {
       td.title = `${s.known}/${s.count} measured sockets${s.mixed ? ' · incompatible measurement sources' : ''}`;
       tr.append(td);
     }
+    tr.append(ruleIndicators(r));
     tr.append(
       element('td', String(r.rows.length), 'numeric'),
       element('td', r.pid === undefined ? '' : String(r.pid), 'numeric'),
@@ -287,6 +391,9 @@ function renderInfo() {
           'Socket identity',
           'Ownership evidence category',
           'Measurement',
+          'Rule inventory',
+          'Incoming rule scopes',
+          'Outgoing rule scopes',
         ].includes(dt.textContent || '')
       ) {
         const dd = dt.nextElementSibling;
@@ -302,7 +409,14 @@ function renderInfo() {
     if (live.textContent !== info.textContent) live.replaceChildren(...Array.from(info.childNodes));
   };
   const r = allRows(roots).find((r) => r.id === selected);
-  $('selectedName').textContent = r?.label ?? 'FlowGate Activity';
+  const selectedName = $('selectedName');
+  if (selectedName.dataset.identity !== (r?.id || '')) {
+    selectedName.dataset.identity = r?.id || '';
+    selectedName.replaceChildren(
+      ...(r ? [installedIcon(rowApplication(r), r.kind)] : []),
+      document.createTextNode(r?.label ?? 'FlowGate Activity'),
+    );
+  }
   if (!r) {
     field(
       info,
@@ -314,6 +428,31 @@ function renderInfo() {
     commit();
     return;
   }
+  const inventory = ruleStatus(r, state);
+  field(info, 'Rule inventory', inventory.reason);
+  for (const direction of ['incoming', 'outgoing'] as const) {
+    const rules = inventory[direction];
+    field(
+      info,
+      direction === 'incoming' ? 'Rules · In' : 'Rules · Out',
+      !inventory.available
+        ? 'Unavailable'
+        : ['allow', 'block', 'disabled', 'expired']
+            .map(
+              (type) =>
+                `${rules.filter((rule) => ruleState(rule, inventory.now) === type).length} ${type}`,
+            )
+            .join(' · '),
+    );
+  }
+  if (inventory.available)
+    for (const direction of ['incoming', 'outgoing'] as const)
+      field(
+        info,
+        direction === 'incoming' ? 'Incoming rule scopes' : 'Outgoing rule scopes',
+        inventory[direction].map((rule) => ruleDescription(rule, inventory.now)).join('\n') ||
+          'No listed rules; not a connection verdict.',
+      );
   if (r.displayApplication) {
     field(info, 'Display application', r.displayApplication.executable);
     field(
@@ -486,7 +625,9 @@ function renderRequests() {
     const incoming = e.flow.direction === 'incoming';
     field(route, 'From', incoming ? e.flow.remote : eventName(e));
     field(route, 'To', incoming ? eventName(e) : e.flow.remote);
-    route.querySelectorAll('dd')[incoming ? 1 : 0].classList.add('route-application');
+    const applicationRoute = route.querySelectorAll('dd')[incoming ? 1 : 0];
+    applicationRoute.classList.add('route-application');
+    applicationRoute.prepend(installedIcon(e.attribution.application, 'application'));
     container.append(route);
     const fields = element('dl', '', 'connection-fields');
     field(
@@ -644,6 +785,17 @@ function consume(next: ClientState) {
       chosenScope = 'once';
     }
     lastGeneration = state.control.generation;
+    const rulesStamp = JSON.stringify([
+      state.control.connected,
+      state.control.generation,
+      state.control.rules,
+      (state.control.rules || []).map((r) => ruleState(r, state.control.serverNow ?? NaN)),
+    ]);
+    if (ruleSignature !== rulesStamp) {
+      ruleSignature = rulesStamp;
+      renderTree();
+      renderInfo();
+    }
   }
   renderRequests();
   if (!promptID) {

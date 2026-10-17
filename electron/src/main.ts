@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, protocol, session, type IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
+import { ApplicationIcons } from './icons';
 import { Background } from './background';
 import { TrafficHistory } from './history';
 import type { RequestRef } from './notifications';
@@ -149,9 +150,22 @@ function windowFor(isPrompt = false, id = '', generation = '') {
 app.whenReady().then(async () => {
   const csp =
     "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; frame-ancestors 'none'";
+  const icons = new ApplicationIcons();
   protocol.handle('flowgate', (request) => {
     const u = new URL(request.url);
     const name = u.pathname.slice(1);
+    if (u.host === 'app' && /^icons\/[a-f0-9]{64}\.(png|svg)$/.test(name)) {
+      const asset = icons.asset(name.slice(6));
+      return asset
+        ? new Response(new Uint8Array(asset.data), {
+            headers: {
+              'Content-Type': asset.type,
+              'Content-Security-Policy': csp,
+              'X-Content-Type-Options': 'nosniff',
+            },
+          })
+        : new Response('Not found', { status: 404 });
+    }
     if (u.host !== 'app' || !['index.html', 'style.css', 'renderer.js'].includes(name))
       return new Response('Not found', { status: 404 });
     return new Response(fs.readFileSync(path.join(__dirname, name)), {
@@ -178,9 +192,14 @@ app.whenReady().then(async () => {
   });
   backend = new Backend(observer!, controller, (state) => {
     history.observe(state.observation);
+    icons.observe(state);
     for (const w of windows)
       if (!w.isDestroyed() && w.isVisible() && !w.isMinimized()) w.webContents.send('state', state);
     background?.update(state);
+  });
+  ipcMain.handle('application:icons', (e, value) => {
+    trusted(e);
+    return icons.request(value);
   });
   const rules = new Rules(backend);
   const extended = new ExtendedMonitoring(path.resolve(__dirname, '../..'));

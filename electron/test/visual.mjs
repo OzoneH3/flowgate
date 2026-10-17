@@ -5,6 +5,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import net from 'node:net';
 import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+const { call } = createRequire(import.meta.url)('../dist/test/backend.cjs');
 const root = path.resolve(import.meta.dirname, '../..'),
   stage = process.env.VISUAL_STAGE || 'after',
   run = fs.mkdtempSync(path.join(root, '.workspace/vis-'));
@@ -120,6 +122,44 @@ try {
       }),
     ),
   );
+  metrics.presentation = await page.evaluate(() => {
+    const row = document.querySelector('#rows tr'),
+      cell = row.querySelector('td'),
+      icon = row.querySelector('.application-icon');
+    const c = getComputedStyle(cell),
+      h = getComputedStyle(document.querySelector('#tree th'));
+    const canvas = document.createElement('canvas'),
+      ctx = canvas.getContext('2d');
+    return {
+      font: c.fontFamily,
+      fontSize: c.fontSize,
+      lineHeight: c.lineHeight,
+      cellPadding: c.padding,
+      rowPitch: row.getBoundingClientRect().height,
+      header: document.querySelector('#tree thead').getBoundingClientRect().height,
+      headerBackground: h.backgroundColor,
+      iconRect: icon.getBoundingClientRect().toJSON(),
+      fontWidths: Object.fromEntries(
+        ['Noto Sans', 'Open Sans', 'Liberation Sans'].map((f) => {
+          ctx.font = '12px ' + JSON.stringify(f);
+          return [f, ctx.measureText('Windows Push Notifications System Service').width];
+        }),
+      ),
+    };
+  });
+  if (stage.startsWith('target')) {
+    const firefox = page.locator('#rows tr').filter({ hasText: 'firefox' }).first();
+    await wait(() => firefox.locator('img').count());
+    await firefox.click();
+    await wait(() => page.locator('#selectedName img').count());
+    await page.screenshot({ path: path.join(evidence, 'installed-icons.png') });
+    const invalid = await page.evaluate(() => window.flowgate.applicationIcons(['/etc/passwd']));
+    assert.equal(invalid['/etc/passwd'], null);
+    assert(await page.locator('.col-rules').isVisible());
+    console.log(
+      'PASS installed desktop icons in real Activity and sidebar, arbitrary icon identity rejected',
+    );
+  }
   metrics.dpr = await page.evaluate(() => devicePixelRatio);
   fs.writeFileSync(path.join(evidence, 'metrics.json'), JSON.stringify(metrics, null, 2));
   if (stage !== 'before') {
@@ -224,6 +264,65 @@ try {
   await page.click('#saveRule');
   await wait(() => received(44005) === 1);
   console.log('PASS real isolated rule preview/save and receiver delivery');
+  if (stage.startsWith('target')) {
+    await app.evaluate(({ app }) => app.exit());
+    await app.close();
+    app = undefined;
+    app = await _electron.launch({
+      chromiumSandbox: true,
+      args: [
+        '--ozone-platform=wayland',
+        path.join(root, 'electron'),
+        '--observer',
+        path.join(run, 'observer.sock'),
+        '--control',
+        path.join(run, 'api/control.sock'),
+      ],
+      cwd: root,
+      env: {
+        ...process.env,
+        WAYLAND_DISPLAY: 'wayland-0',
+        XDG_CACHE_HOME: path.join(run, 'cache'),
+        TMPDIR: path.join(root, '.workspace/tmp'),
+      },
+    });
+    const inventoryPage = await app.firstWindow();
+    await inventoryPage.setViewportSize({ width: 1280, height: 896 });
+    const read = () => inventoryPage.evaluate(() => window.flowgate.snapshot());
+    await wait(
+      async () =>
+        (await read()).control.rules?.length && inventoryPage.locator('.rule-allow').count(),
+    );
+    const selected = inventoryPage
+      .locator('#rows tr')
+      .filter({ has: inventoryPage.locator('.rule-allow') })
+      .first();
+    await selected.click();
+    await inventoryPage.screenshot({ path: path.join(evidence, 'rules-allow-real.png') });
+    let current = (await read()).control.rules[0];
+    const mutate = async (extra) => {
+      const c = (await read()).control;
+      const r = await call(path.join(run, 'api/control.sock'), {
+        operation: 'rule-save',
+        generation: c.generation,
+        id: current.id,
+        expected_version: current.version,
+        rule: { ...current, ...extra },
+      });
+      assert.equal(r.error, '');
+      current = r.saved_rule;
+    };
+    await mutate({ action: 'block' });
+    await wait(() => inventoryPage.locator('.rule-block').count());
+    await inventoryPage.screenshot({ path: path.join(evidence, 'rules-block-real.png') });
+    await mutate({ disabled: true });
+    await wait(() => inventoryPage.locator('.rule-disabled').count());
+    await inventoryPage.screenshot({ path: path.join(evidence, 'rules-disabled-real.png') });
+    console.log(
+      'PASS real isolated rule inventory follows Allow, Block and disabled saved rule updates',
+    );
+  }
+
   clearInterval(burst);
   burst = undefined;
   fs.writeFileSync(

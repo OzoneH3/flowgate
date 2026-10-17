@@ -528,3 +528,23 @@ See [VISUAL-REVIEW.md](VISUAL-REVIEW.md) for the desktop verification scope.
 Focused reproduction with already-installed dependencies: `scripts/check-electron-visual.sh`.
 It uses real unprivileged host TCP observation and the existing disposable namespace
 controller, never host enforcement or privileged host UDP collection.
+
+### Targeted palette, table, rule inventory and installed icons
+
+See [VISUAL-TARGET.md](VISUAL-TARGET.md) for rule indicators and installed icons. Activity uses installed Open Sans when available (Noto Sans
+fallback); no proprietary fonts are downloaded. Actual Linux application icons are
+resolved from matching desktop-entry executables and the installed theme in main,
+with a neutral fallback; icon association has no policy authority.
+
+**Rule Status** follows the two rate columns. In/Out glyphs summarize the **listed
+scoped rules**, not a connection verdict: enabled Allow/Block, disabled, expired,
+no listed rules, or unavailable. Exact counts/scopes are in tooltips and selectable
+sidebar details. Observation-only application associations never become rule targets.
+Controller loss clears the indicators. Rules cannot be inferred from packet delivery.
+
+Focused checks with existing local dependencies:
+`cd electron && npm run build && node --test test/model.test.cjs test/presentation.test.cjs`.
+`node electron/test/presentation.mjs` from the worktree root exercises labelled
+synthetic UI edge states, without enforcement. `VISUAL_STAGE=target-final node
+electron/test/visual.mjs` uses the existing disposable controller for the actual
+inventory check, preserving independent host controllers and collectors.

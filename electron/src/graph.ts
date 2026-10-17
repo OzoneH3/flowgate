@@ -83,7 +83,9 @@ export class TrafficGraph {
     this.canvas.height = Math.round(height * dpr);
     const c = this.canvas.getContext('2d')!;
     c.scale(dpr, dpr);
-    c.fillStyle = '#242424';
+    const palette = getComputedStyle(this.canvas);
+    const tokenColor = (name: string) => palette.getPropertyValue(name).trim();
+    c.fillStyle = tokenColor('--fg-content');
     c.fillRect(0, 0, width, height);
     const left = 55,
       right = 8,
@@ -93,10 +95,10 @@ export class TrafficGraph {
       h = height - top - bottom;
     const max = Math.max(1, ...points.flatMap((p) => [p.up || 0, p.down || 0]));
     const ceiling = Math.pow(2, Math.ceil(Math.log2(max)));
-    c.font = '10px sans-serif';
+    c.font = '10px "Open Sans", sans-serif';
     c.lineWidth = 1;
-    c.strokeStyle = '#3a3a3a';
-    c.fillStyle = '#a6a6a6';
+    c.strokeStyle = tokenColor('--fg-border');
+    c.fillStyle = tokenColor('--fg-muted');
     for (let i = 0; i <= 2; i++) {
       const y = top + (h * i) / 2;
       c.beginPath();
@@ -118,8 +120,8 @@ export class TrafficGraph {
       );
     }
     for (const [key, color] of [
-      ['down', '#83b74b'],
-      ['up', '#ef725b'],
+      ['down', tokenColor('--fg-chart-down')],
+      ['up', tokenColor('--fg-chart-up')],
     ] as const) {
       c.strokeStyle = color;
       c.setLineDash(key === 'up' ? [3, 2] : []);

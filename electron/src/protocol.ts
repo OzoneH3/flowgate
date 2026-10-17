@@ -133,6 +133,7 @@ export interface Decision {
   scope: Scope;
 }
 export interface Bridge {
+  applicationIcons(keys: string[]): Promise<Record<string, string | null>>;
   graph(value: { id: string; seconds: number }): Promise<import('./history').GraphView>;
   snapshot(): Promise<ClientState>;
   backgroundStatus(): Promise<{ trayAvailable: boolean; notifications: string }>;
