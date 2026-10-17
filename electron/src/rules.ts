@@ -158,33 +158,58 @@ export class Rules {
       !v ||
       Object.keys(v).sort().join(',') !== 'generation,id,version' ||
       typeof v.id !== 'string' ||
+      !v.id ||
       v.id.length > 256 ||
       typeof v.generation !== 'string' ||
-      !Number.isSafeInteger(v.version)
+      !v.generation ||
+      v.generation.length > 256 ||
+      !Number.isSafeInteger(v.version) ||
+      v.version < 0
     )
       throw Error('Invalid deletion');
-    await this.backend.pollControl();
     const c = this.authority();
-    if (
-      this.busy ||
-      c.generation !== v.generation ||
-      !c.rules?.some((r) => r.id === v.id && r.version === v.version)
-    )
-      throw Error('Rule changed; review current version');
+    if (!c.capabilities?.includes('conditional-rule-delete-v1'))
+      throw Error(
+        'Safe Delete unavailable: backend must advertise conditional-rule-delete-v1. No legacy fallback.',
+      );
+    if (this.busy) throw Error('Rule operation already in progress');
     this.busy = true;
     try {
       const r = await call(this.backend.controller!, {
-        operation: 'rule',
+        operation: 'rule-delete',
+        generation: v.generation,
         id: v.id,
-        action: 'delete',
+        expected_version: v.version,
       });
-      if (r.error) return { phase: 'rejected', message: r.error };
-      if (r.generation !== v.generation) throw Error('Generation changed');
-      return { phase: 'acknowledged', message: 'Rule deleted' };
+      if (r.error || r.error_code) {
+        const guidance: Record<string, string> = {
+          version_conflict:
+            'Rule changed; no deletion. Refreshing rules; review the new snapshot and confirm again.',
+          generation_conflict:
+            'Backend generation changed; no deletion. Refreshing session and rules; review and confirm again.',
+          not_found: 'Rule is already absent; this client did not delete it.',
+        };
+        return {
+          phase: 'rejected',
+          message: [r.error_code, r.error, guidance[r.error_code]].filter(Boolean).join(' · '),
+        };
+      }
+      if (
+        r.generation !== v.generation ||
+        r.deleted_rule?.id !== v.id ||
+        r.deleted_rule.version !== v.version
+      )
+        throw Error('Deletion acknowledgement does not match submitted generation, ID and version');
+      return {
+        phase: 'acknowledged',
+        message: 'Rule deleted by backend (matching conditional acknowledgement)',
+      };
     } catch (e) {
       return {
         phase: 'unknown',
-        message: 'Delete outcome unresolved; inspect authoritative list. ' + String(e),
+        message:
+          'Delete outcome unresolved; refreshing authoritative rules. Absence does not prove this client deleted it. No automatic retry. ' +
+          String(e),
       };
     } finally {
       this.busy = false;

@@ -91,6 +91,9 @@ export interface Reply {
   mode: string;
   server_time: string;
   error: string;
+  error_code: string;
+  capabilities: string[];
+  deleted_rule?: { id: string; version: number };
   activity?: Activity;
   events: RequestEvent[];
   decision?: RequestEvent;
@@ -118,6 +121,7 @@ export interface ClientState {
     enforcement?: Reply['enforcement'];
     events: ViewEvent[];
     rules?: Rule[];
+    capabilities?: string[];
     serverNow?: number;
   };
 }
@@ -236,6 +240,14 @@ export function parseReply(raw: unknown): Reply {
     mode: string(r.mode),
     server_time: string(r.server_time),
     error: string(r.error),
+    error_code: string(r.error_code),
+    capabilities: array(r.capabilities, 64).map(string),
+    deleted_rule: r.deleted_rule
+      ? {
+          id: string(object(r.deleted_rule).id),
+          version: ruleVersion(object(r.deleted_rule).version ?? null),
+        }
+      : undefined,
     events: array(r.events, 256).map(event),
     rules: array(r.rules, 8192).map(parseRule),
     saved_rule: r.saved_rule ? parseRule(r.saved_rule) : undefined,
@@ -401,10 +413,18 @@ function ruleFilter(v: unknown): RuleFilter {
     uid: number(f.uid),
   };
 }
+function ruleVersion(v: unknown): number {
+  if (v === undefined) return 0;
+  if (typeof v !== 'number' || !Number.isSafeInteger(v) || v < 0)
+    throw Error(
+      'Rule version cannot be represented losslessly in this Electron client; operation refused. Use a uint64-capable client.',
+    );
+  return v;
+}
 function parseRule(v: unknown): Rule {
   const r = object(v);
   return {
-    version: number(r.version),
+    version: ruleVersion(r.version),
     executable: string(r.executable),
     created: string(r.created),
     disabled: r.disabled === true,

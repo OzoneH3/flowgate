@@ -84,7 +84,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
   const view = node('main', '');
   view.id = 'rulesView';
   view.hidden = true;
-  view.innerHTML = `<section class="rules-main"><div class="filterbar"><button id="editRule">Edit selected</button><button id="toggleRule">Enable / Disable…</button><button id="deleteRule">Delete…</button></div><div class="table-scroll"><table id="rulesTable" tabindex="0" aria-label="Saved rules"><thead><tr><th>Application</th><th>Action</th><th>Direction</th><th>Protocol</th><th>Endpoint scope</th><th>Expiry</th><th>State</th></tr></thead><tbody id="ruleRows"></tbody></table></div><p class="hint">Rules are evaluated by Go. Changing rules does not necessarily disconnect already-approved TCP sessions.</p><p id="ruleFeedback" role="status"></p></section><aside><h2>Rule information</h2><dl id="ruleInfo">Select a saved rule.</dl></aside>`;
+  view.innerHTML = `<section class="rules-main"><div class="filterbar"><button id="editRule">Edit selected</button><button id="toggleRule">Enable / Disable…</button><button id="deleteRule">Delete…</button></div><div class="table-scroll"><table id="rulesTable" tabindex="0" aria-label="Saved rules"><thead><tr><th>Application</th><th>Action</th><th>Direction</th><th>Protocol</th><th>Endpoint scope</th><th>Expiry</th><th>State</th></tr></thead><tbody id="ruleRows"></tbody></table></div><p class="hint">Rules are evaluated by Go. Changing rules does not necessarily disconnect already-approved TCP sessions.</p><p id="deleteCompatibility" class="hint"></p><p id="ruleFeedback" role="status"></p></section><aside><h2>Rule information</h2><dl id="ruleInfo">Select a saved rule.</dl></aside>`;
   $('requestsView').after(view);
   const evaluation = node('section', '');
   evaluation.className = 'evaluationbar';
@@ -199,21 +199,15 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
   };
   $('deleteRule').onclick = () => {
     const r = state.control.rules?.find((r) => r.id === selected);
-    if (!r) return;
+    if (!r || !state.control.capabilities?.includes('conditional-rule-delete-v1')) return;
+    // Freeze exactly the snapshot displayed in this confirmation, including its generation.
+    const snapshot = { id: r.id, generation: state.control.generation, version: r.version ?? 0 };
     confirmAction(
       'Delete rule',
-      'Delete this saved rule? Existing approved TCP sessions may continue.',
+      `Delete ${r.executable || r.filter.application}? Action: ${r.action}; ${r.filter.direction} ${r.filter.protocol}; remote ${r.filter.remote_address || r.filter.remote || '*'}; ports ${r.filter.local_port || '*'} → ${r.filter.remote_port || '*'}; expiry ${r.expires}; ${r.disabled ? 'disabled' : 'enabled'}. Rule ${snapshot.id}, version ${snapshot.version}, generation ${snapshot.generation}. Existing approved TCP sessions may continue.`,
       async () => {
         try {
-          status(
-            (
-              await window.flowgate.ruleDelete({
-                id: r.id,
-                generation: state.control.generation,
-                version: r.version,
-              })
-            ).message,
-          );
+          status((await window.flowgate.ruleDelete(snapshot)).message);
         } catch (e) {
           status(String(e));
         }
@@ -389,6 +383,11 @@ export function updateWorkflows(next: ClientState) {
   }
   for (const id of ['editRule', 'toggleRule', 'deleteRule'])
     $<HTMLButtonElement>(id).disabled = !writable() || !rules.some((r) => r.id === selected);
+  const compatible = state.control.capabilities?.includes('conditional-rule-delete-v1');
+  $<HTMLButtonElement>('deleteRule').disabled ||= !compatible;
+  $('deleteCompatibility').textContent = compatible
+    ? ''
+    : 'Safe Delete unavailable: backend must advertise conditional-rule-delete-v1. No unconditional fallback.';
   const access = state.control.connected
     ? state.control.readOnly
       ? 'readonly'

@@ -55,7 +55,7 @@ that window or choosing **Decide later** sends no verdict.
   Production CSP blocks connections, frames, objects, inline scripts and remote
   assets. Navigation, new windows and permissions are denied. Diagnostic names,
   paths, addresses and metadata are inserted using text nodes/textContent.
-- Authenticated API v1 `list`, `decide`, `rule-preview`, `rule-save` and `rule` are used. Go peer credentials and
+- Authenticated API v1 `list`, `decide`, `rule-preview`, `rule-save` and capability-gated `rule-delete` are used. Go peer credentials and
   socket permissions are unchanged. Snapshots are bounded to 4 MiB, validated and
   projected into typed fields before reaching the renderer.
 - Backend generations, deadlines and read-only authorization gate every decision.
@@ -155,10 +155,11 @@ Backend/Qt/collector/shared bridge implementations are unchanged.
   requires **Reload version, keep fields**, review and a fresh preview. Ambiguous
   acknowledgements lock the editor; inspect the authoritative Rules list before
   opening another draft. No mutation is automatically replayed after reconnect.
-- Enable/Disable uses versioned preview/save. Delete checks the current listed
-  generation/version before using the existing backend Delete API; that API has
-  **no atomic expected-version parameter**, so deletion cannot promise atomic
-  conflict detection. Changing rules may leave already-approved TCP sessions alive.
+- Enable/Disable uses versioned preview/save. Delete uses atomic `rule-delete`
+  with the generation, rule ID and version frozen in the displayed confirmation.
+  Backend capability `conditional-rule-delete-v1` is required; without it Delete
+  is disabled with a compatibility explanation. There is no unconditional fallback.
+  Changing rules may leave already-approved TCP sessions alive.
 - **Minimize / Resume editor** retains unfinished input while requests are handled.
   Ctrl+1/2/3 selects Activity/requests/Rules; Ctrl+E opens the selected (or first)
   rule; Ctrl+P opens the selected request. Escape minimizes the editor.
@@ -351,5 +352,58 @@ eight Electron processes and one observer. Reopen-cycle/window-count evidence is
 from the isolated test above, not this debugger-free sample. No sandbox or GPU
 settings were weakened. Production launcher termination cleaned its observer.
 
-A later backend atomic conditional-delete API is under development separately;
-this branch still documents the existing non-atomic Delete limitation above.
+## Atomic conditional Delete integration
+
+Frontend history was rebased onto required backend
+`1729c292e29e5feef73b286864aa44bf4d551fcb`, preserving the earlier Electron increments.
+Qt/backend/shared authentication files were not modified by this frontend migration.
+
+Delete sends exactly one `rule-delete` request with the snapshot shown in its
+confirmation: generation, rule ID and `expected_version` (numeric 0 when omitted
+from an older stored rule). Polling never replaces those tokens while confirmation
+is open. The backend atomically checks and deletes. Version/generation conflicts
+refresh authoritative state and require a newly displayed snapshot/confirmation;
+`not_found` is already absent, not this client's successful deletion. Other
+structured failures retain their backend code and message.
+
+Success requires an acknowledgement matching the submitted generation, ID and
+version. Lost/malformed/mismatched responses remain unresolved even if a refreshed
+list shows absence; no automatic retry occurs. Protocol capability is independent
+of authorization and health. Read-only/disconnected clients remain unable to mutate.
+
+This client supports rule versions through JavaScript's exact integer range
+(0–9007199254740991). A larger uint64, negative, fractional or malformed version is
+rejected explicitly at protocol projection, before display or submission; mutations
+are unavailable until a valid authoritative snapshot is available. It never silently
+rounds a version into a mutation. Use a uint64-capable client for larger versions.
+A missing stored version is 0; a missing acknowledgement version is invalid.
+No backend wire change is required, and this limitation was coordinated with its owner.
+
+Run `scripts/check-electron-delete.sh` with existing repository-local dependencies.
+It builds and runs only focused delete/rule-save checks and sandboxed Wayland
+Electron against the disposable real controller. No package installation, host
+enforcement, privileged collection or broad UDP/tray matrices.
+
+Passed real-backend/UI checks:
+
+- Electron Delete succeeds with matching conditional acknowledgement.
+- Deterministic concurrent edit: confirmation is displayed first, another client
+  saves and receives acknowledgement, then Electron submits its frozen version.
+  Delete conflicts and the newer rule survives.
+- Actual controller restart before confirmation submission rejects the original
+  generation; the persisted rule survives.
+- Real deletion with **synthetic proxy response loss** refreshes to authoritative
+  absence, retains unresolved outcome and sends no replay. Activity remains usable.
+
+Synthetic compatibility stripping disables Delete and direct bridge submission.
+Synthetic protocol/transport checks cover version 0, unsafe uint64 rejection,
+all structured failure codes, missing/mismatched acknowledgements and no replay.
+Existing rule-save identity/expiry/single-use receipt regression passes. Completed
+backend concurrency and prior tray/UDP evidence are reused, not rerun.
+
+Evidence: `.workspace/delete-ui.log`, `.workspace/delete-unit.log` and
+`.workspace/del-kCUuoE/conditional-delete.png` (actual isolated-controller UI).
+Test-owned Electron and namespace supervisor processes exited. No real sudo
+workflow was exercised. Integration files for this increment: four frontend
+modules (`backend`, `protocol`, `rules`, `workflows`), two focused delete tests,
+this README and `scripts/check-electron-delete.sh`.

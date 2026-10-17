@@ -156,6 +156,7 @@ export class Backend {
         mode: r.mode,
         enforcement: r.enforcement,
         rules: r.rules,
+        capabilities: r.capabilities,
         events: [],
       };
     } catch (e) {
