@@ -277,4 +277,7 @@ legacy conservative pending/cache invalidation; already approved TCP connections
 continue. API-created replacements use fresh server-issued random IDs, and backend
 restart changes generation. Versions cannot wrap on updates. See API.md for exact
 structured error outcomes and lost-response handling. Legacy `rule` Delete remains
-unconditional and is explicitly not concurrency-safe; frontend migration is pending.
+unconditional and is explicitly not concurrency-safe. Integrated Qt/Electron Delete
+controls now require the conditional capability, freeze confirmation tokens and
+never replay an ambiguous mutation. Qt preserves uint64 tokens; Electron refuses
+versions outside its safe-integer range rather than rounding.

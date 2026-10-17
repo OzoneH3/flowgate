@@ -75,12 +75,13 @@ client-side list/precheck cannot make it safe against concurrent edits. Merely
 adding condition fields to that legacy operation does not change its semantics.
 There is no silent fallback from `rule-delete` to the legacy operation.
 
-Electron should replace its precheck-plus-delete sequence with one `rule-delete`
-using the displayed snapshot's generation/ID/version. If the capability is absent,
-disable safe Delete or clearly offer a separately labelled legacy action. Qt has
-not been modified in this backend task and still requires migration. Existing
-Save behavior remains versioned; its stale/missing/authorization/persistence errors
-now also carry the corresponding structured codes above. Other editor validation
+Both integrated clients now use one `rule-delete` with the displayed snapshot's
+frozen generation/ID/version and require the capability. No legacy fallback is
+exposed by either Delete control. Qt preserves uint64 values as decimal tokens
+through parsing/serialization; Electron rejects values above 9007199254740991
+explicitly rather than rounding them. Qt/Electron migration is complete. Existing
+Save behavior remains versioned; stale/missing/authorization/persistence errors
+also carry the corresponding structured codes above. Other editor validation
 errors may still have only the existing `error` string.
 
 CLI (with an already running authorized controller):

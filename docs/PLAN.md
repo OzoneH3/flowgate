@@ -1,5 +1,13 @@
 # Authoritative implementation plan
 
+## Complete: runnable frontend integration
+
+Full Electron series integrated from its released clean checkpoint; Qt retained
+and migrated to conditional Delete with exact uint64 handling. Main-checkout
+Wayland Activity/decision/rule/tray smoke and focused Qt checks passed. Keep
+`run-desktop.sh` default unchanged and use `run-electron.sh` for the alternative.
+No new release gate or game work; retain the explicit host-activation boundary.
+
 ## Complete: atomic conditional rule deletion
 
 Add generation/version-conditioned deletion under the existing edit/commit mutex;

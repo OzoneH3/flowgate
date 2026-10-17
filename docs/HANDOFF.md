@@ -1,10 +1,25 @@
 # Continuation handoff
 
-## Conditional deletion increment
+## Integrated runnable checkout
+
+Backend starting snapshot `1729c292e29e5feef73b286864aa44bf4d551fcb`; frontend final
+release `297fe09bd4c1b29076a74fb3a51897673104db54` fully merged as `838871f8dd9705ded3574e930468e03eb02ce9fb`.
+Qt migration checkpoints `e3890cb`/`b006898` plus final strict acknowledgement check
+are retained. No default launcher change: run `scripts/run-electron.sh` for Electron
+or `scripts/run-desktop.sh` for Qt. Both normally read-only. Both clients migrated
+conditional Delete; read API.md for exact tokens and Electron uint64 limits.
+
+Main integrated smoke and Qt focused checks passed; current STATUS records logs,
+screenshot and scope. `scripts/check-integration.sh` reproduces only these focused
+paths. Actual KDE tray activation was exercised; Quit confirmation response was
+simulated. Authentication, host coexistence and privileged Electron UDP activation
+are not established. No live host enforcement/collection was performed. Frontend
+ownership was released before integration; do not restart feature-branch integration.
+
+## Previous backend conditional deletion increment
 
 Started dbe651f. Read API.md for `conditional-rule-delete-v1`, exact requests,
-structured outcomes and legacy compatibility. Electron/Qt need to adopt the new
-operation; frontend files and branches were not touched/integrated. Backend Save
+structured outcomes and legacy compatibility. Electron/Qt adopted the new operation in the integration above; frontend files and branches were not touched/integrated. Backend Save
 stale/missing/authorization/persistence codes are additive. Native ownership and
 UDP evidence remain reusable. Focused API/CLI/race/SQLite and isolated UDP receiver
 checks passed; no live-host enforcement. No database migration.

@@ -1,13 +1,41 @@
 # Current status
 
+## Current: Electron integrated, Qt retained, conditional Delete in both
+
+Started from backend `1729c292e29e5feef73b286864aa44bf4d551fcb`. Integrated the full
+seven-commit frontend history through clean `297fe09bd4c1b29076a74fb3a51897673104db54`
+with merge `838871f8dd9705ded3574e930468e03eb02ce9fb`; no conflicts. Qt checkpoint
+`e3890cb` plus build-test include fix `b006898` migrated Delete and exact version handling.
+
+Launch `scripts/run-electron.sh`; default/fallback `scripts/run-desktop.sh` is unchanged.
+Both are unprivileged/read-only normally. Both Delete controls require the new
+capability, freeze displayed tokens and reject stale acknowledgements without retry.
+Qt handles full uint64; Electron refuses unsafe-integer versions.
+
+Main-checkout focused Wayland check passed: real TCP counts/ownership details;
+Electron Allow delivers held UDP, edit to Block prevents new delivery, conditional
+Delete restores Ask; KDE tray hide/reopen/Quit cleans the owned observer and leaves
+the independent controller active (native Quit confirmation response simulated).
+Evidence `.workspace/integration-electron-final.log`, `.workspace/integrated-ho0t6y/`.
+Real Activity screenshot: `integrated-activity.png` there. Qt deletion/stale external
+edit check 3/3 and codec/capability checks 4/4 passed; logs `integration-qt-delete.log`
+and `integration-qt-exact.log` under `.workspace`.
+
+Focused reproduction: `scripts/check-integration.sh`. Existing frontend rule/editor,
+evaluation, notification and ownership evidence is indexed in electron/README.md;
+its focused stale-delete evidence is reused. No privileged UDP/ownership/firewall
+matrix rerun. No host enforcement, privileged host collection, install, service,
+network/security change or push. Live sudo/host coexistence and privileged Electron
+monitoring activation remain unverified.
+
 ## Current: atomic conditional rule deletion
 
 The authenticated v1 API now advertises `conditional-rule-delete-v1`. New
 `rule-delete` requires displayed backend generation and expected rule version;
 check, SQLite commit and publication share the edit mutex. Stale/missing/denied/
 unavailable/storage errors are structured. The new CLI uses the displayed version.
-Legacy Qt `rule` Delete remains unconditional until migrated; no frontend files
-were changed. See [API contract and migration](API.md).
+Legacy API `rule` Delete remains unconditional for compatibility; both clients
+have now migrated as described above. See [API contract and migration](API.md).
 
 Deterministic Unix API races, actual transaction rollback, recreation/restart,
 response loss and CLI confirmation tests passed, plus focused race/vet checks.

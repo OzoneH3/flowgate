@@ -1321,7 +1321,8 @@ void Window::confirmDeleteRule() {
                                  ". Reload before confirming again.");
                       else {
                         auto deleted = r["deleted_rule"].toObject();
-                        if (deleted["id"].toString() == id &&
+                        if (deleted.contains("version") &&
+                            deleted["id"].toString() == id &&
                             ExactJson::ruleVersion(deleted) == version)
                           feedback("Rule deletion acknowledged");
                         else

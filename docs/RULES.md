@@ -44,6 +44,7 @@ Use `rule-delete` with the displayed backend generation and expected version;
 check, transaction and publication are atomic relative to edits. A stale delete
 cannot remove the edited rule. Fresh creation uses a new random ID; restart has a
 new generation. See [API.md](API.md) for capability, errors, retries and CLI.
-Legacy `rule`/`delete` is still unconditional for existing Qt/older callers; a
-frontend precheck does not close its race. Those callers need explicit migration.
+Legacy `rule`/`delete` is still unconditional for older third-party callers; a
+frontend precheck does not close its race. The integrated Qt/Electron Delete
+controls have migrated and require the conditional capability.
 No storage schema/table migration is required.

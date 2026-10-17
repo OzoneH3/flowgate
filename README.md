@@ -2,6 +2,28 @@
 
 A native Qt 6 desktop application with an independent Go backend. **Normal launch shows real host application/socket activity read-only.** No firewall rules, interception or host protection. The accepted prompt workflow remains a separate isolated lab.
 
+## Integrated Electron alternative
+
+From `/home/flowgate-user/Apps/flowgate`:
+
+```sh
+scripts/run-electron.sh
+```
+
+Sandboxed, unprivileged Electron provides Activity, prompts, saved-rule editing,
+explicit evaluation/monitoring controls, opt-in tray and bounded native notifications.
+Normal launch is read-only and starts no enforcement or privileged collector.
+**Keep running in the tray** makes window close hide it; **Quit FlowGate…** exits
+and cleans up its owned observer. An independent controller keeps its deadline.
+See [Electron behavior and verification](electron/README.md).
+
+`scripts/run-desktop.sh` remains the unchanged default Qt entry point and fallback.
+Both clients use capability-gated conditional Delete. Qt preserves exact uint64
+versions; Electron explicitly refuses versions above JavaScript's safe integer
+range rather than submitting a rounded value. Neither retries deletion automatically.
+Live sudo/host coexistence and privileged Electron monitoring activation remain
+unverified; development enforcement checks use disposable namespaces only.
+
 ## One window: Activity and optional five-minute control
 
 ```sh
