@@ -381,7 +381,10 @@ function renderPolicyList() {
       void openRule({ observed: source });
     }
   };
-  content.append(create, element('p', creationReason, 'hint'));
+  const creation = element('div', '', 'policy-create');
+  creation.append(create);
+  if (create.disabled) creation.append(element('p', creationReason, 'hint'));
+  content.insertBefore(creation, content.children[1] || null);
   content.append(
     element(
       'p',
@@ -391,6 +394,11 @@ function renderPolicyList() {
   );
   if (!canManageRules(state.control))
     content.append(element('p', 'Rule management is unavailable or read-only.', 'hint'));
+  const technical = element('details', '', 'policy-technical');
+  technical.append(element('summary', 'Defaults and policy details'));
+  for (const hint of Array.from(content.querySelectorAll(':scope > p.hint')))
+    technical.append(hint);
+  if (technical.childElementCount > 1) content.append(technical);
   panel.replaceChildren(heading, content);
 }
 
@@ -717,7 +725,7 @@ function renderInfo() {
       direction === 'incoming' ? 'Rules · In' : 'Rules · Out',
       authoritative
         ? summary
-          ? `${policyLabel(summary)} · ${summary.enforcement.state}`
+          ? policyLabel(summary)
           : 'Unavailable'
         : !inventory.available
           ? 'Unavailable'

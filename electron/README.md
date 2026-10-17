@@ -692,3 +692,48 @@ and descending-first rates passed with no host mutations; captures/logs are in
 stopped; adoption of the new API needs a separately authorized backend update.
 Test-owned namespace daemon/Electron processes exited. Existing accounting, icons,
 tray and receiver-enforcement evidence was reused, not rerun.
+
+## Activity/editor polish after integration c448cf1
+
+Base: `c448cf15c6e2c30621649f6d877f6f34b1bce567`, fast-forwarded only after
+integration released ownership. Backend/API/authentication/launcher are unchanged.
+
+Policy cells say Allow/Block only for backend uniform configured policy, otherwise
+Scoped, Mixed, Inactive rules, No explicit rule or Unavailable. Coverage and defaults
+remain in the policy view/tooltip; no default or historical verdict is inferred.
+New incoming/outgoing rule is near the top of the panel. Longer default/permission
+explanations are expandable. Overall enforcement remains visible in the toolbar;
+redundant per-direction sidebar status and idle footer warnings are removed.
+
+The editor exposes Any address/Any port checkboxes instead of requiring `*`/0.
+Unchecked fields require an explicit valid value; empty ports cannot silently become
+wildcards. Protocol-wide scope is still an explicit selection and covers only TCP
+or UDP, not all traffic. Expiry choices distinguish keeping the existing absolute
+expiry, one hour from preview, and persistent. Application/direction/UID remain visible.
+A readable summary uses the **structured reviewed backend rule**; full unmodified
+backend scope text is expandable. It is display formatting, not another evaluator.
+
+The existing polling update displays remaining preview seconds beside Save; no new
+timer or renewal loop was added. Expiry/session invalidation preserves fields and
+shows Refresh preview. Refresh obtains a new receipt for review, never saves. Stale
+identity errors explain reselection. Existing acknowledgement/reconciliation and
+conditional deletion safeguards remain unchanged.
+
+Focused evidence: build and 12 presentation/creation/policy/rules/delete tests;
+real sandboxed Wayland isolated first-rule runner against released backend
+`8ef90cde66c73c69bf8fd8b686e82d2298b98536`, including real preview expiry, preserved
+fields/focus, incoming/outgoing save, edit/delete, read-only denial and a labelled
+lost-ACK transport fault with no duplicate creation. Root monitor inspection was
+read-only and verified descending-first rate sorting, keyboard focus, policy details,
+real icons and normal/narrow layout. No host rule saves or daemon lifecycle changes.
+
+Creation captures: `.workspace/creation-ui-ZLz0Ct/first-rule-preview.png` and
+`first-rule-preview-narrow.png` (real isolated listener/database, explicitly labelled).
+Logs: `.workspace/activity-polish/{build,tests,after,isolated-final}.log`.
+Remaining differences: Linux font rasterization, supported policy instead of NetLimiter's
+limiter/priority controls, and sparse sidebar/table content for the actual host inventory.
+No overall similarity percentage is assigned.
+One intermediate repeat closed its Electron process unexpectedly; its screenshot-error
+handler obscured the original failure. The runner now logs the original exception
+before attempting a failure capture. The subsequent complete run passed; no cause
+for that intermediate closure was established.

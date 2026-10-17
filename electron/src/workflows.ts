@@ -1,4 +1,5 @@
 import { canManageRules } from './protocol';
+import { reviewedScope, previewSeconds } from './editor-presentation';
 import type {
   ClientState,
   Rule,
@@ -18,6 +19,7 @@ const node = (tag: string, text: string) => {
 let editRevision = 0;
 let accessState = '';
 let editorSource: RuleSource = {};
+let previewNeedsRefresh = false;
 let previewExpires = 0,
   reconcileReceipt = '';
 let showTab: (s: string) => void = () => {};
@@ -39,13 +41,35 @@ function writable() {
   return !!state && canManageRules(state.control);
 }
 function editValue(): RuleEdit {
+  for (const [toggle, field] of [
+    ['anyLocal', 'editLocal'],
+    ['anyRemote', 'editRemote'],
+  ]) {
+    const value = Number($<HTMLInputElement>(field).value);
+    if (
+      !$<HTMLInputElement>(toggle).checked &&
+      (!Number.isInteger(value) || value < 1 || value > 65535)
+    )
+      throw Error('Enter a port from 1 to 65535, or choose Any port.');
+  }
+  if (
+    !$<HTMLInputElement>('anyAddress').checked &&
+    ['', '*'].includes($<HTMLInputElement>('editAddress').value.trim())
+  )
+    throw Error('Enter an IP address/CIDR, or choose Any address.');
   return {
     token: draft!.token,
     action: $<HTMLSelectElement>('editAction').value as 'allow' | 'block',
     protocol: $<HTMLSelectElement>('editProtocol').value,
-    remote_address: $<HTMLInputElement>('editAddress').value,
-    local_port: Number($<HTMLInputElement>('editLocal').value),
-    remote_port: Number($<HTMLInputElement>('editRemote').value),
+    remote_address: $<HTMLInputElement>('anyAddress').checked
+      ? '*'
+      : $<HTMLInputElement>('editAddress').value,
+    local_port: $<HTMLInputElement>('anyLocal').checked
+      ? 0
+      : Number($<HTMLInputElement>('editLocal').value),
+    remote_port: $<HTMLInputElement>('anyRemote').checked
+      ? 0
+      : Number($<HTMLInputElement>('editRemote').value),
     priority: Number($<HTMLInputElement>('editPriority').value),
     disabled: !$<HTMLInputElement>('editEnabled').checked,
     expiry: $<HTMLSelectElement>('editExpiry').value as RuleEdit['expiry'],
@@ -59,6 +83,7 @@ function invalidate() {
   receipt = '';
   previewExpires = 0;
   $('rulePreview').textContent = 'Preview required before saving.';
+  $('scopeSummary').textContent = 'Choose scope, then review the backend preview.';
   $<HTMLButtonElement>('saveRule').disabled = true;
 }
 export async function openRule(source: RuleSource) {
@@ -72,6 +97,7 @@ export async function openRule(source: RuleSource) {
     editorSource = source;
     unresolved = false;
     reconcileReceipt = '';
+    previewNeedsRefresh = false;
     saving = false;
     const r = draft.rule;
     $('editorApplication').textContent =
@@ -80,13 +106,26 @@ export async function openRule(source: RuleSource) {
       `${r.executable}\n${r.filter.application} · revision ${r.filter.revision}\n${r.filter.direction} · UID ${r.filter.uid} · ${draft.source}`;
     $<HTMLSelectElement>('editAction').value = r.action;
     $<HTMLSelectElement>('editProtocol').value = r.filter.protocol;
-    $<HTMLInputElement>('editAddress').value = r.filter.remote_address || '*';
-    $<HTMLInputElement>('editLocal').value = String(r.filter.local_port || 0);
-    $<HTMLInputElement>('editRemote').value = String(r.filter.remote_port || 0);
+    const address = r.filter.remote_address || '*';
+    $<HTMLInputElement>('editAddress').value = address === '*' ? '' : address;
+    $<HTMLInputElement>('anyAddress').checked = address === '*';
+    $<HTMLInputElement>('anyLocal').checked = !r.filter.local_port;
+    $<HTMLInputElement>('anyRemote').checked = !r.filter.remote_port;
+    $<HTMLInputElement>('editLocal').value = r.filter.local_port ? String(r.filter.local_port) : '';
+    $<HTMLInputElement>('editRemote').value = r.filter.remote_port
+      ? String(r.filter.remote_port)
+      : '';
     $<HTMLInputElement>('editPriority').value = String(r.priority);
     $<HTMLInputElement>('editEnabled').checked = !r.disabled;
     $<HTMLSelectElement>('editExpiry').value = 'preserve';
-    $('absoluteExpiry').textContent = 'Absolute expiry: ' + r.expires;
+    $('absoluteExpiry').textContent = r.expires.startsWith('0001-')
+      ? 'Persistent: no expiry.'
+      : 'Expires: ' + new Date(r.expires).toLocaleString();
+    $('editExpiry').querySelector('option[value=preserve]')!.textContent = r.expires.startsWith(
+      '0001-',
+    )
+      ? 'Keep persistent'
+      : 'Keep this expiry';
     $('creationScopeFields').hidden = !draft.observed;
     $<HTMLSelectElement>('createScope').value = '';
     for (const e of document.querySelectorAll<HTMLElement>('#editPriority,label[for=editPriority]'))
@@ -153,7 +192,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
   panel.hidden = true;
   panel.setAttribute('role', 'dialog');
   panel.setAttribute('aria-label', 'Rule editor');
-  panel.innerHTML = `<header><strong>FlowGate — Rule editor</strong><span><button id="minimizeEditor">Minimize</button> <button id="closeEditor">Close</button></span></header><div class="editor-body"><div class="editor-tab">Rule</div><h2>For</h2><details class="editor-identity"><summary id="editorApplication">Application identity</summary><pre id="editorIdentity"></pre></details><h2>Rule and scope</h2><div id="creationScopeFields" hidden><label for="createScope">Scope</label> <select id="createScope"><option value="">Choose scope…</option><option value="custom">Specified address / ports</option><option value="application">All addresses / ports for this protocol</option></select></div><div class="editor-fields"><label for="editAction">Action</label><select id="editAction"><option value="allow">Allow</option><option value="block">Block</option></select><label for="editProtocol">Protocol</label><select id="editProtocol"><option value="tcp">TCP</option><option value="udp">UDP</option><option value="*">Any</option></select><label for="editAddress">Remote IP / CIDR</label><input id="editAddress" maxlength="256"><label for="editLocal">Local port (0 = any)</label><input id="editLocal" type="number" min="0" max="65535"><label for="editRemote">Remote port (0 = any)</label><input id="editRemote" type="number" min="0" max="65535"><label for="editPriority">Priority</label><input id="editPriority" type="number" min="-1000" max="1000"><label for="editExpiry">Expiry</label><select id="editExpiry"><option value="preserve">Preserve absolute expiry</option><option value="hour">Explicitly reset to 1 hour</option><option value="permanent">No expiry</option></select><label for="editEnabled">Enabled</label><input id="editEnabled" type="checkbox"></div><p id="absoluteExpiry"></p><h2>Authoritative scope</h2><p id="rulePreview" class="scope-preview"></p><p id="editorFeedback" role="status"></p></div><footer><button id="reloadRule">Reload version, keep fields</button><button id="previewRule">Preview</button><button id="saveRule" disabled>Save</button><button id="reconcileRule" hidden>Check save result</button></footer>`;
+  panel.innerHTML = `<header><strong>FlowGate — Rule editor</strong><span><button id="minimizeEditor">Minimize</button> <button id="closeEditor">Close</button></span></header><div class="editor-body"><div class="editor-tab">Rule</div><h2>For</h2><details class="editor-identity"><summary id="editorApplication">Application identity</summary><pre id="editorIdentity"></pre></details><h2>Rule and scope</h2><div id="creationScopeFields" hidden><label for="createScope">Scope</label> <select id="createScope"><option value="">Choose scope…</option><option value="custom">Specified address / ports</option><option value="application">All addresses / ports for this protocol</option></select></div><div class="editor-fields"><label for="editAction">Action</label><select id="editAction"><option value="allow">Allow</option><option value="block">Block</option></select><label for="editProtocol">Protocol</label><select id="editProtocol"><option value="tcp">TCP</option><option value="udp">UDP</option><option value="*">Any</option></select><label for="editAddress">Remote address</label><div class="scope-input"><label><input id="anyAddress" type="checkbox">Any address</label><input id="editAddress" maxlength="256" placeholder="IP address or CIDR"></div><label for="editLocal">Local port</label><div class="scope-input"><label><input id="anyLocal" type="checkbox">Any port</label><input id="editLocal" type="number" min="1" max="65535" aria-label="Specific local port"></div><label for="editRemote">Remote port</label><div class="scope-input"><label><input id="anyRemote" type="checkbox">Any port</label><input id="editRemote" type="number" min="1" max="65535" aria-label="Specific remote port"></div><label for="editPriority">Priority</label><input id="editPriority" type="number" min="-1000" max="1000"><label for="editExpiry">Expiry</label><select id="editExpiry"><option value="preserve">Preserve absolute expiry</option><option value="hour">For 1 hour from preview</option><option value="permanent">Persistent (no expiry)</option></select><label for="editEnabled">Enabled</label><input id="editEnabled" type="checkbox"></div><p id="absoluteExpiry"></p><h2>Review scope</h2><p id="scopeSummary"></p><details id="backendScope"><summary>Full backend preview</summary><p id="rulePreview" class="scope-preview"></p></details><p id="editorFeedback" role="status"></p></div><footer><button id="reloadRule">Reload version, keep fields</button><button id="previewRule">Preview</button><button id="saveRule" disabled>Save</button><span id="previewValidity" role="timer"></span><button id="reconcileRule" hidden>Check save result</button></footer>`;
   panel.querySelector('header')!.prepend(panel.querySelector('.editor-tab')!);
   const editorFooter = panel.querySelector('footer')!;
   editorFooter.prepend(panel.querySelector('#saveRule')!);
@@ -183,14 +222,18 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
     resume.hidden = false;
   };
   panel.addEventListener('input', () => {
-    if (!unresolved) invalidate();
+    if (!unresolved) {
+      invalidate();
+      updateButtons();
+    }
   });
   $('createScope').onchange = () => {
     if ($<HTMLSelectElement>('createScope').value === 'application') {
-      $<HTMLInputElement>('editAddress').value = '*';
-      $<HTMLInputElement>('editLocal').value = '0';
-      $<HTMLInputElement>('editRemote').value = '0';
+      for (const id of ['anyAddress', 'anyLocal', 'anyRemote'])
+        $<HTMLInputElement>(id).checked = true;
     }
+    if ($<HTMLSelectElement>('createScope').value === 'custom')
+      $<HTMLInputElement>('anyAddress').checked = false;
     invalidate();
     updateButtons();
   };
@@ -240,6 +283,11 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
       const r = await window.flowgate.rulePreview(editValue());
       if (revision !== editRevision || !draft || $('ruleEditor').hidden) return;
       receipt = r.receipt;
+      previewNeedsRefresh = false;
+      $('scopeSummary').textContent = r.verifiedRule
+        ? reviewedScope(r.verifiedRule)
+        : 'Backend preview ready. Review full scope below.';
+      if (!r.verifiedRule) $<HTMLDetailsElement>('backendScope').open = true;
       $('rulePreview').textContent = r.preview;
       previewExpires = r.expiresAt ? Date.parse(r.expiresAt) : 0;
       if (r.verifiedRule) {
@@ -248,13 +296,20 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
           `Verified · ${rule.executable} · ${rule.filter.direction} · UID ${rule.filter.uid}`;
         $('editorIdentity').textContent =
           `${rule.executable}\n${rule.filter.application} · revision ${rule.filter.revision}\n${rule.filter.direction} · UID ${rule.filter.uid} · process ${r.processID}`;
-        $('absoluteExpiry').textContent =
-          `Rule expiry: ${rule.expires} · Preview expires: ${r.expiresAt}`;
+        $('absoluteExpiry').textContent = rule.expires.startsWith('0001-')
+          ? 'Persistent: no expiry.'
+          : 'Expires: ' + new Date(rule.expires).toLocaleString();
       }
       $<HTMLButtonElement>('saveRule').disabled = !writable();
-      editorMessage('Review backend scope, then save.');
+      editorMessage('Review this scope before Save. Saving does not start enforcement.');
+      updateButtons();
     } catch (e) {
-      editorMessage(String(e));
+      editorMessage(
+        /stale_target|unsupported_target/.test(String(e))
+          ? String(e) +
+              ' Close this editor and select a live supported application again; your draft has not been rebound.'
+          : String(e),
+      );
     }
   };
   $('saveRule').onclick = async () => {
@@ -448,6 +503,7 @@ function updateButtons() {
       !writable() ||
       (previewExpires && previewExpires <= (state?.control.serverNow ?? Date.now())))
   ) {
+    previewNeedsRefresh = true;
     invalidate();
     editorMessage(
       'Preview expired or session/permission changed. Review a fresh preview; identity is not rebound.',
@@ -457,6 +513,24 @@ function updateButtons() {
     '#ruleEditor input,#ruleEditor select',
   ))
     input.disabled = saving || unresolved;
+  for (const [toggle, field] of [
+    ['anyAddress', 'editAddress'],
+    ['anyLocal', 'editLocal'],
+    ['anyRemote', 'editRemote'],
+  ]) {
+    const any = $<HTMLInputElement>(toggle);
+    $<HTMLInputElement>(field).disabled ||= any.checked;
+    if (draft?.observed && $<HTMLSelectElement>('createScope').value === 'application')
+      any.disabled = true;
+  }
+  const remaining = previewSeconds(previewExpires, state?.control.serverNow ?? Date.now());
+  $('previewValidity').textContent =
+    receipt && previewExpires
+      ? `Review valid for ${remaining}s`
+      : previewNeedsRefresh
+        ? 'Refresh required · draft kept'
+        : '';
+  $('previewRule').textContent = previewNeedsRefresh ? 'Refresh preview' : 'Preview';
   if (draft?.observed) {
     $<HTMLInputElement>('editPriority').disabled = true;
     if ($<HTMLSelectElement>('createScope').value === 'application')
@@ -542,7 +616,7 @@ export function updateWorkflows(next: ClientState) {
         : access === 'readonly'
           ? 'Read-only controller; mutations disabled.'
           : state.control.enforcement?.state === 'stopped'
-            ? 'Stored policy editable. Enforcement stopped; changes do not activate protection.'
+            ? 'Stored rules editable · select an In / Out cell to review policy.'
             : 'Connected. Rule changes require a backend preview.',
     );
   }

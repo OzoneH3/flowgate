@@ -265,11 +265,11 @@ export function authoritativePolicy(
 }
 export function policyLabel(d: DirectionPolicy) {
   return d.configured === 'uniform'
-    ? `${d.action === 'block' ? 'Block' : d.action === 'allow' ? 'Allow' : d.action} · app-wide`
+    ? `${d.action === 'block' ? 'Block' : d.action === 'allow' ? 'Allow' : d.action}`
     : d.configured === 'absent'
-      ? 'No rule'
+      ? 'No explicit rule'
       : d.configured === 'inactive_only'
-        ? 'Disabled / expired'
+        ? 'Inactive rules'
         : d.configured === 'mixed'
           ? `Mixed · ${d.rules.length}`
           : `Scoped · ${d.rules.length}`;
