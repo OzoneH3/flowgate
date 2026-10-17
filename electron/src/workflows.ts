@@ -1,3 +1,4 @@
+import { renderDaemonEvaluation } from './evaluation-view';
 import { canManageRules } from './protocol';
 import { reviewedScope, previewSeconds } from './editor-presentation';
 import type {
@@ -384,12 +385,33 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
     const r = state.control.rules?.find((r) => r.id === selected);
     if (r) confirmRuleDelete(r, state.control.generation);
   };
-  $('evalStart').onclick = () =>
+  $('evalStart').onclick = async () => {
+    const e = await window.flowgate.evaluationState();
+    if (e.mode === 'daemon') {
+      renderDaemonEvaluation(e);
+      if (!e.canStart || !e.tokens) return;
+      const frozen = { ...e.tokens };
+      confirmAction(
+        'Review incoming firewall evaluation',
+        e.status!.review,
+        async () => {
+          $<HTMLDetailsElement>('controlMenu').open = true;
+          try {
+            await window.flowgate.evaluation('start', frozen);
+          } catch (error) {
+            $('evaluationStatus').textContent = String(error);
+          }
+        },
+        'Start incoming evaluation',
+      );
+      return;
+    }
     confirmAction(
       'Start five-minute evaluation',
       'This explicitly enables firewall evaluation for the selected profile. New unmatched connections wait for a decision and may be blocked. Authenticate only in the separate terminal. The controller keeps its original five-minute deadline if this window closes.',
       () => evaluate('start'),
     );
+  };
   $('evalRecover').onclick = () =>
     confirmAction(
       'Recover controller',
@@ -405,6 +427,10 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
     evalBusy = true;
     try {
       const e = await window.flowgate.evaluationState();
+      if (e.mode === 'daemon') {
+        renderDaemonEvaluation(e);
+        return;
+      }
       const c = state?.control,
         active = c?.connected && c.enforcement;
       const remaining = active
@@ -500,7 +526,15 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
   void setupSizing();
 }
 async function evaluate(a: 'start' | 'stop' | 'status' | 'recover' | 'cancel') {
+  for (const id of ['evalStart', 'evalStop', 'evalStatus'])
+    $<HTMLButtonElement>(id).disabled = true;
   try {
+    const current = await window.flowgate.evaluationState();
+    if (current.mode === 'daemon') {
+      if (!current.tokens) throw Error('Daemon status unavailable; no evaluation action sent.');
+      await window.flowgate.evaluation(a, { ...current.tokens });
+      return;
+    }
     await window.flowgate.evaluation(
       a,
       a === 'start'
@@ -511,7 +545,13 @@ async function evaluate(a: 'start' | 'stop' | 'status' | 'recover' | 'cancel') {
     $('evaluationStatus').textContent = String(e);
   }
 }
-function confirmAction(title: string, text: string, fn: () => Promise<void>) {
+function confirmAction(
+  title: string,
+  text: string,
+  fn: () => Promise<void>,
+  actionLabel = 'Continue',
+) {
+  $('confirmYes').textContent = actionLabel;
   $('confirmTitle').textContent = title;
   $('confirmText').textContent = text;
   const d = $<HTMLDialogElement>('confirmation');

@@ -1,3 +1,8 @@
+import {
+  parseEvaluation,
+  type DaemonEvaluationStatus,
+  type EvaluationTokens,
+} from './evaluation-model';
 import type { DecisionLogState } from './decision-log-client';
 import type { LogFilter, LogRecord } from './decision-log';
 import { parsePolicyView, type PolicyView } from './policy';
@@ -113,6 +118,7 @@ export interface ExtendedState {
   partial: boolean;
 }
 export interface Permissions {
+  can_control_evaluation?: boolean;
   can_view_measurements?: boolean;
   can_control_traffic?: boolean;
   role: 'user' | 'administrator';
@@ -122,6 +128,7 @@ export interface Permissions {
   can_decide: boolean;
 }
 export interface Reply {
+  evaluation?: DaemonEvaluationStatus;
   decision_log?: unknown;
   decision_record?: unknown;
   traffic_monitor?: TrafficMonitor;
@@ -165,9 +172,11 @@ export interface ClientState {
     capabilities?: string[];
     permissions?: Permissions;
     trafficMonitor?: TrafficMonitor;
+    evaluation?: DaemonEvaluationStatus;
   };
   control: {
     trafficMonitor?: TrafficMonitor;
+    evaluation?: DaemonEvaluationStatus;
     snapshotStarted?: number;
     connected: boolean;
     message: string;
@@ -205,7 +214,10 @@ export interface Bridge {
   rulePreview(value: RuleEdit): Promise<RulePreview>;
   ruleSave(receipt: string): Promise<Attempt>;
   ruleDelete(value: { id: string; generation: string; version: number }): Promise<Attempt>;
-  evaluation(action: EvaluationAction, profile?: 'incoming' | 'both'): Promise<void>;
+  evaluation(
+    action: EvaluationAction,
+    profile?: 'incoming' | 'both' | EvaluationTokens,
+  ): Promise<void>;
   evaluationState(): Promise<EvaluationState>;
   preferences(value?: Preferences): Promise<Preferences>;
   subscribe(fn: (state: ClientState) => void): () => void;
@@ -327,6 +339,7 @@ export function parseReply(raw: unknown): Reply {
     // Validated by decision-log.ts, which owns the decision-log-v1 schema.
     decision_log: r.decision_log,
     decision_record: r.decision_record,
+    evaluation: parseEvaluation(r.evaluation),
   };
   if (r.permissions !== undefined || result.capabilities.includes('explicit-administrator-v1')) {
     const p = object(r.permissions);
@@ -346,6 +359,7 @@ export function parseReply(raw: unknown): Reply {
       can_decide: p.can_decide,
       can_view_measurements: p.can_view_measurements === true,
       can_control_traffic: p.can_control_traffic === true,
+      can_control_evaluation: p.can_control_evaluation === true,
     } as Permissions;
   }
   if (result.capabilities.includes('daemon-udp-monitor-v1')) {
@@ -567,6 +581,14 @@ export interface RuleEdit {
 }
 export type EvaluationAction = 'start' | 'stop' | 'status' | 'recover' | 'cancel';
 export interface EvaluationState {
+  mode?: 'daemon' | 'legacy';
+  label?: string;
+  status?: DaemonEvaluationStatus;
+  remainingMs?: number;
+  tokens?: EvaluationTokens;
+  canCheck?: boolean;
+  canStart?: boolean;
+  canStop?: boolean;
   phase: string;
   message: string;
   generation: string;

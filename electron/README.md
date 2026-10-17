@@ -2,7 +2,7 @@
 
 An additional unprivileged frontend; Qt and `scripts/run-desktop.sh` remain intact.
 Vanilla TypeScript, CSS and Electron, built by esbuild. No web development server,
-remote assets, frontend rule matching or packaging. Explicit controls delegate privileged work to the existing terminal bridges.
+remote assets, frontend rule matching or packaging. Explicit controls use advertised daemon operations; older supported prototypes retain their terminal bridges.
 
 ## Run
 
@@ -972,3 +972,75 @@ The explicit newest-page action reuses the existing filter operation. No host da
 collector, rule or enforcement changes; presentation fixtures are not new firewall
 or receiver evidence. Backend deduplication, capacity-aggregation and durability
 corrections above remain authoritative. No backend contract dependency remains.
+
+## Daemon-owned incoming evaluation (`daemon-evaluation-v1`)
+
+Connect with `scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock`.
+The **Firewall** menu contains **Check readiness**, **Start incoming · 5 minutes…**
+and **Stop firewall evaluation**. Expand readiness checks to see concrete backend
+codes, reasons and next actions. Start is enabled only after reported readiness and
+an explicit `can_control_evaluation` grant; rule management, connection decisions
+and UDP collector control are separate permissions. The daemon must have been
+configured for this delegation. Merely connecting or reading rules enables nothing.
+
+The review displays the exact backend `evaluation.review` prose before submission.
+The daemon supports incoming initiation only, for 300 seconds including startup;
+its outgoing limitation is shown verbatim in details. Stored rules apply, supported
+unmatched identities prompt and unsafe identities block according to Go policy.
+Existing connections are preserved as described by the backend. Readiness is an
+inspection, never proof of active enforcement; Start repeats preflight/queue binding.
+The active countdown uses backend time advanced monotonically. At local zero it
+says expiry confirmation is pending until backend cleanup is confirmed.
+
+The main process sends only fixed readiness/start/stop requests through the existing
+connection. A confirmation freezes daemon generation and last evaluation ID; a fresh
+Start nonce is generated in main. Duplicate submission is locked. Lost responses are
+uncertain until a newer authoritative list snapshot; requests are never replayed.
+Generation changes invalidate old session tokens. Metadata loss/disconnect reports
+unknown; it cannot trigger legacy fallback after this capability is recognized.
+The renderer receives no shell, arbitrary socket, file or privileged options.
+
+Closing/hiding/quitting FlowGate leaves this independent daemon and its original
+bounded evaluation deadline intact. Explicit Stop removes only evaluation resources;
+Activity, stored rules and UDP monitoring remain independent. This path adds no sudo
+terminal, daemon, observer or polling loop. Older daemons keep their previous truthful
+capability-gated behavior; a daemon-monitor without this capability cannot start an
+evaluation through the old terminal path.
+
+Focused verification uses `test/daemon-evaluation.test.cjs` (synthetic Unix replies),
+`test/daemon-evaluation-display.mjs` (labelled synthetic sandboxed Wayland states)
+and `test/daemon-evaluation-workflow.mjs` (externally owned real isolated fixture).
+No host evaluation, rule mutation, daemon restart or collector change is performed.
+Verified backend: `bfa93b6a695fb1928b0f7d55b4aff5cd1d71f626`, released binary
+`.workspace/flowgate-evaluation-release` (SHA256
+`3e717df8790683c5222dc47c9426f843825fd309c6224b483e6963193608eb77`).
+Contract: [DAEMON-EVALUATION.md](../docs/DAEMON-EVALUATION.md).
+
+Build/typecheck and eight synthetic lifecycle/model tests passed (plus six focused
+collector regression tests for the shared protocol). Labelled synthetic Wayland
+states passed readiness/blockers, frozen confirmation across generation change,
+active countdown, lost Stop acknowledgement without replay, permission loss,
+disconnect/reconnect and keyboard focus. Captures:
+`.workspace/evaluation-display-nbjQGL/{blocked-normal,review-normal,active-narrow}.png`.
+
+Final **real** isolated fixture `.workspace/eval-ui-released` was setup/cleanup owned
+by the backend agent; UI alone controlled lifecycle and fixture commands until DONE.
+Actual sandboxed Wayland tested readiness → exact backend review → Start; incoming
+UDP44001 Allow once delivered one retained datagram, UDP44003 Block once delivered
+zero. Decision Log showed both user outcomes. Read-only Start returned forbidden.
+GUI process exit during active evaluation preserved its ID/generation/original
+deadline; a new GUI reconnected and explicitly stopped it. Cleanup was confirmed,
+Activity continued, stored rules were unchanged, and the daemon survived GUI exit.
+Evidence in this UI worktree `.workspace/evaluation-ui-S42wAW/result.log` and
+`review-real.png`, `active-normal.png` (1280×760), `active-narrow.png` (860×600),
+`decisions-real.png`. These show real isolated traffic, not the host. The backend
+owner's five-minute expiry/failure/cleanup evidence is reused without repeating its
+matrix. No BPF or active-collector continuity test was added; collector controls were
+untouched, and established accounting evidence remains separate.
+
+Reproduce against an exclusively delegated disposable held instance only:
+`FLOWGATE_EVALUATION_UI_RUN=/absolute/project/.workspace/fixture WAYLAND_DISPLAY=wayland-0 node electron/test/daemon-evaluation-workflow.mjs`.
+The runner refuses host endpoints, leaves the fixture daemon alive and prints DONE;
+its owner then cleans up. The running host was not upgraded and still lacks this new
+capability; deploying the backend/grant is a separately authorized integration step.
+No contract gap remains.
