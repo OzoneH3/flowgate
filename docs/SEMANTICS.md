@@ -1,5 +1,17 @@
 # Milestone semantics and safety boundaries
 
+## Current-policy metadata is not admission history
+
+Primary-only policy-view/explain report supported native configured rules and
+sampled direction coverage with coherent generation/token/order metadata. Concrete
+explanations evaluate recorded event identity/endpoints against current stored
+rules via the same policy.Evaluate. They neither expire/decide pending traffic nor
+resolve ownership/consume Once grants. Established TCP admission can differ from
+current policy. Shared/display-only associations remain unavailable, not permission
+targets. Direction is connection initiation, independent of upload/download.
+See POLICY-EXPLANATIONS.md for exact defaults, proof limits and authorization.
+
+
 ## Bounded Tailscale coexistence
 
 Incoming-only control can coexist with the exact inspected1.104.1 iptables-nft

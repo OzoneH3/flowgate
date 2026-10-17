@@ -1,5 +1,20 @@
 # Continuation handoff
 
+## Policy summaries/explanations increment
+
+Started5b66323, backend/API/tests/docs only; no frontend integration. Capability
+policy-explanations-v1 primary-only. POLICY-EXPLANATIONS.md has exact shape/errors,
+string versions/order tokens, actual Unix API examples and limitations. App summary
+is configured inventory plus conservative uniform proof; recorded-event explanation
+uses current evaluator, not live/historical admission. No creation authority.
+
+Root monitor1973082/gen5a559274aa006090cdc4bb5cd8faed47 was preserved on old code;
+no restart or executable-path replacement. New build .workspace/flowgate-policy.
+An eventual deliberate restart is needed to expose the API. Tests reproduce with
+scripts/check-policy-view.sh; reuse settled receiver/accounting/coexistence/UI
+results because no verdict path changed. UI agent owns consumer independently;
+its request for observed-app rule creation is a separate backend follow-up.
+
 ## Tailscale coexistence increment
 
 Started4859df5. Backend/CLI/isolated fixtures/docs only. No frontend integration.

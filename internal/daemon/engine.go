@@ -27,23 +27,25 @@ type Event struct {
 	Token            string               `json:"-"`
 }
 type Engine struct {
-	StopMonitoring   func() // configured only for non-enforcing root daemon; API requires root peer
-	SaveRules        func([]policy.Rule) error
-	Enforcement      func() EnforcementStatus
-	AdministratorUID *uint32
-	APIUID           *uint32
-	Activity         func() identity.ActivitySnapshot
-	Generation       string
-	Mode             string
-	mu               sync.Mutex
-	events           map[string]*Event
-	rules            []policy.Rule
-	Resolve          func(identity.Flow) identity.Attribution
-	Now              func() time.Time
-	Timeout          time.Duration
-	Max              int
-	window           time.Time
-	created          int
+	policyQueryMu      sync.Mutex // serializes metadata health sampling with response ordering
+	policyReadSequence uint64     // read-response ordering only, protected by mu
+	StopMonitoring     func()     // configured only for non-enforcing root daemon; API requires root peer
+	SaveRules          func([]policy.Rule) error
+	Enforcement        func() EnforcementStatus
+	AdministratorUID   *uint32
+	APIUID             *uint32
+	Activity           func() identity.ActivitySnapshot
+	Generation         string
+	Mode               string
+	mu                 sync.Mutex
+	events             map[string]*Event
+	rules              []policy.Rule
+	Resolve            func(identity.Flow) identity.Attribution
+	Now                func() time.Time
+	Timeout            time.Duration
+	Max                int
+	window             time.Time
+	created            int
 }
 
 func New(timeout time.Duration) *Engine {

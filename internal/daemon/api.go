@@ -18,15 +18,17 @@ import (
 )
 
 type Request struct {
-	Generation      string       `json:"generation,omitempty"`
-	EventID         string       `json:"event_id,omitempty"`
-	ExpectedVersion *uint64      `json:"expected_version,omitempty"`
-	Rule            *policy.Rule `json:"rule,omitempty"`
-	Version         int          `json:"version"`
-	Operation       string       `json:"operation"`
-	ID              string       `json:"id,omitempty"`
-	Action          string       `json:"action,omitempty"`
-	Scope           string       `json:"scope,omitempty"`
+	ExpectedPolicyToken string       `json:"expected_policy_token,omitempty"`
+	EventIDs            []string     `json:"event_ids,omitempty"`
+	Generation          string       `json:"generation,omitempty"`
+	EventID             string       `json:"event_id,omitempty"`
+	ExpectedVersion     *uint64      `json:"expected_version,omitempty"`
+	Rule                *policy.Rule `json:"rule,omitempty"`
+	Version             int          `json:"version"`
+	Operation           string       `json:"operation"`
+	ID                  string       `json:"id,omitempty"`
+	Action              string       `json:"action,omitempty"`
+	Scope               string       `json:"scope,omitempty"`
 }
 type EnforcementStatus struct {
 	Profile string    `json:"profile"`
@@ -35,26 +37,28 @@ type EnforcementStatus struct {
 	StopsAt time.Time `json:"stops_at"`
 }
 type Response struct {
-	BackendMode  string                     `json:"backend_mode,omitempty"`
-	Stopping     bool                       `json:"stopping,omitempty"`
-	Permissions  *Permissions               `json:"permissions,omitempty"`
-	Capabilities []string                   `json:"capabilities,omitempty"`
-	ErrorCode    string                     `json:"error_code,omitempty"`
-	DeletedRule  *DeletedRule               `json:"deleted_rule,omitempty"`
-	SavedRule    *policy.Rule               `json:"saved_rule,omitempty"`
-	ScopePreview string                     `json:"scope_preview,omitempty"`
-	Enforcement  *EnforcementStatus         `json:"enforcement,omitempty"`
-	Rules        []policy.Rule              `json:"rules,omitempty"`
-	Activity     *identity.ActivitySnapshot `json:"activity,omitempty"`
-	Version      int                        `json:"version"`
-	Generation   string                     `json:"generation"`
-	ReadOnly     bool                       `json:"read_only"`
-	Mode         string                     `json:"mode"`
-	ServerTime   time.Time                  `json:"server_time"`
-	PeerUID      uint32                     `json:"peer_uid"`
-	Events       []Event                    `json:"events,omitempty"`
-	Decision     *Event                     `json:"decision,omitempty"`
-	Error        string                     `json:"error,omitempty"`
+	PolicyView         *PolicyView                `json:"policy_view,omitempty"`
+	PolicyExplanations *PolicyExplanations        `json:"policy_explanations,omitempty"`
+	BackendMode        string                     `json:"backend_mode,omitempty"`
+	Stopping           bool                       `json:"stopping,omitempty"`
+	Permissions        *Permissions               `json:"permissions,omitempty"`
+	Capabilities       []string                   `json:"capabilities,omitempty"`
+	ErrorCode          string                     `json:"error_code,omitempty"`
+	DeletedRule        *DeletedRule               `json:"deleted_rule,omitempty"`
+	SavedRule          *policy.Rule               `json:"saved_rule,omitempty"`
+	ScopePreview       string                     `json:"scope_preview,omitempty"`
+	Enforcement        *EnforcementStatus         `json:"enforcement,omitempty"`
+	Rules              []policy.Rule              `json:"rules,omitempty"`
+	Activity           *identity.ActivitySnapshot `json:"activity,omitempty"`
+	Version            int                        `json:"version"`
+	Generation         string                     `json:"generation"`
+	ReadOnly           bool                       `json:"read_only"`
+	Mode               string                     `json:"mode"`
+	ServerTime         time.Time                  `json:"server_time"`
+	PeerUID            uint32                     `json:"peer_uid"`
+	Events             []Event                    `json:"events,omitempty"`
+	Decision           *Event                     `json:"decision,omitempty"`
+	Error              string                     `json:"error,omitempty"`
 }
 
 func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
@@ -133,6 +137,9 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 							r.Capabilities = append(r.Capabilities, "monitor-stop-v1")
 						}
 					}
+					if !readonly && e.Mode != "host-monitor" {
+						r.Capabilities = append(r.Capabilities, PolicyExplanationCapability)
+					}
 					stopAfterResponse := false
 					if e.APIUID != nil && cred.Uid != *e.APIUID && cred.Uid != 0 {
 						continueResponse(c, r)
@@ -159,6 +166,53 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						r.ErrorCode = "invalid_request"
 					} else {
 						switch q.Operation {
+						case "policy-view", "policy-explain":
+							if readonly || e.Mode == "host-monitor" {
+								r.Error = "Policy metadata requires the authenticated primary endpoint"
+								r.ErrorCode = "primary_required"
+							} else {
+								func() {
+									e.policyQueryMu.Lock()
+									defer e.policyQueryMu.Unlock()
+									// Re-sample after request decoding, in the same ordering
+									// as metadata sequences. No queue/policy lock is held here.
+									if e.Enforcement != nil {
+										health := e.Enforcement()
+										r.Enforcement = &health
+										r.ReadOnly = readonly || (health.State != "active" && e.Mode != "daemon-monitor")
+										p := e.permissions(cred.Uid, r.ReadOnly)
+										r.Permissions = &p
+									}
+									var err error
+									if q.Operation == "policy-view" {
+										v, er := e.PolicyView(q.Generation, q.ExpectedPolicyToken, cred.Uid, admin, r.Enforcement)
+										err = er
+										if err == nil {
+											err = boundedPolicyResponse(v)
+										}
+										if err == nil {
+											r.PolicyView = &v
+										}
+									} else {
+										v, er := e.PolicyExplain(q.Generation, q.ExpectedPolicyToken, q.EventIDs, cred.Uid, admin, r.Enforcement)
+										err = er
+										if err == nil {
+											err = boundedPolicyResponse(v)
+										}
+										if err == nil {
+											r.PolicyExplanations = &v
+										}
+									}
+									if err != nil {
+										r.Error = err.Error()
+										r.ErrorCode = "limit_exceeded"
+										var typed *RuleMutationError
+										if errors.As(err, &typed) {
+											r.ErrorCode = typed.Code
+										}
+									}
+								}()
+							}
 						case "monitor-stop":
 							if r.ReadOnly {
 								r.Error = "read-only API"

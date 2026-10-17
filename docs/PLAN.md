@@ -1,5 +1,13 @@
 # Authoritative implementation plan
 
+## Complete: Activity policy explanation contract
+
+Read-only generation/token/ordered-sequence batches expose configured scopes,
+defaults and direction coverage without inventing historical verdicts or permission
+targets. Recorded-event explanations reuse policy.Evaluate directly. Preserve the
+unchanged mutation/verdict engine. UI consumption and eventual authorized monitor
+restart are separate; observed-app first-rule creation is a later backend task.
+
 ## Complete: bounded Tailscale coexistence increment
 
 Replace only the corroborated1.104.1 iptables-nft client refusal, validate opaque

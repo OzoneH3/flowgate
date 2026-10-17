@@ -1,5 +1,23 @@
 # Current status
 
+## Current: authoritative policy summaries and recorded-context explanations
+
+Primary API capability policy-explanations-v1 provides one bounded native Activity
+policy batch, separate In/Out configured scopes/defaults/coverage, exact rule
+versions and coherent policy/order tokens. Current-policy event explanation calls
+the unchanged evaluator; it is never historical admission evidence. Unknown,
+shared and display-only associations gain no authority. Companion requests reject.
+
+Focused race/vet + actual UID1000 Unix/native Activity/SQLite fixture passed,
+including privacy, precedence, expiry/edit/delete/order, persistence failure,
+maximum uint64 and read-only denial. See POLICY-EXPLANATIONS.md and
+.workspace/policy-view-verification.log. Verdict/retention/accounting paths and
+storage schema unchanged; no enforcement/coexistence/UDP/UI matrix rerun.
+Build .workspace/flowgate-policy leaves the running monitor's executable alone.
+The existing root monitor remains running on its old API and eventually needs
+an explicitly authorized restart; not performed. UI consumption is separately
+owned, and observed-app first-rule creation remains unsupported by this read API.
+
 ## Current: bounded Tailscale coexistence path tested
 
 Actual root read-only evidence identifies CLI/daemon1.104.1, iptables-nft,

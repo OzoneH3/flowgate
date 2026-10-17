@@ -1,5 +1,15 @@
 # Local API additions: conditional rule deletion
 
+## Current: backend-authoritative Activity policy metadata
+
+Capability `policy-explanations-v1` adds primary-only, generation-bound read-only
+`policy-view` batches and separate `policy-explain` recorded-event evaluation.
+Exact decimal-string versions/sequences, policy token, expiry/order guards, native
+association limits and captured real API examples are in
+[POLICY-EXPLANATIONS.md](POLICY-EXPLANATIONS.md). Existing mutations/numeric version
+contracts are unchanged; companion metadata is not expanded.
+
+
 The existing newline-delimited authenticated Unix protocol remains **v1**. No new
 socket, privileges, database table or migration. Responses advertise
 `capabilities: ["conditional-rule-delete-v1"]`. This means protocol support, not
