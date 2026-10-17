@@ -808,9 +808,39 @@ survival after frontend exit. `.workspace/daemon-udp-ui-JBH2BD/attachment-blocke
 records `bpf_load_failed`: `collector_inspection_denied: cannot exclude an older
 tracing collector: Operation not permitted`. The backend owner's isolated initial-
 user-namespace attempt was refused with `sudo: a password is required`; it was not
-retried. Therefore **no real consolidated UDP measurements or successful kernel
-attachment are claimed**. The backend's prior UDP counter-accuracy evidence is reused,
-not a substitute for this consolidated attachment check.
+retried at that stage (superseded by the kernel-backed check below).
+
+### Kernel-backed consolidated UDP check
+
+Backend `15d6e1a9762092c86fdb3201ffb7d71c77303eb0` (`daemon-udp-monitor-v1`; fixture
+artifacts reported bit-exact to that source) with this UI. The user ran
+`scripts/check-daemon-udp.sh --kernel --reuse-build --hold --traffic`, a disposable
+initial-user-namespace net/pid/mount namespace with continuous native UDP4/6 + TCP.
+No host collector, rule, firewall or route change. Sandboxed Wayland Electron attached:
+
+```sh
+R=/absolute/project/.workspace/daemon-udp-<run>
+FLOWGATE_UDP_UI_ENDPOINT=$R/api/daemon.sock FLOWGATE_UDP_UI_RECEIVER=$R/receiver.json \
+FLOWGATE_UDP_UI_EXPECT=active node electron/test/daemon-udp-workflow.mjs
+```
+
+- **Real measurements** (`.workspace/daemon-udp-ui-bVpoWV/`): six fixture sockets
+  (UDP4/UDP6, connected/unconnected) shown as `udp-api-reported`; displayed bytes advanced
+  exactly with the fixture's receiver counts across a traffic tick (constant per-socket
+  offset, since receiver counts start at fixture creation and the collector at Enable).
+  `consolidated-udp.png` is labelled REAL ISOLATED UDP. Stop rendered `—` (not zero),
+  ended the UDP graph and kept TCP updating.
+- **Restart and GUI exit** (`.workspace/daemon-udp-ui-KKXSTR/`, separate fixture run):
+  each socket's UDP graph shows a two-sample break ("new baseline") and restarted rates
+  equal to prior rates (e.g. 1421.0 vs 1421.2 B/s; no spike). After Electron exit the
+  daemon generation, collector generation and active state were unchanged; enforcement
+  stopped. Read-only connection: view permitted, control denied.
+
+Two earlier fixture runs ended mid-check after an interrupt-like signal to the harness
+(backend verified graceful shutdown and clean namespaces); the signal's origin is
+unconfirmed. The runner sends no signals; in the second case the socket disappeared
+before Electron closed, and the final fixture survived two Electron exits.
+Shared-socket deduplication was not separately verified in this check.
 
 Actual failure normal/narrow captures and result are in `.workspace/daemon-udp-ui-JBH2BD/`.
 Explicitly **synthetic** active/partial UDP display, restart, Stop and read-only checks

@@ -9,6 +9,10 @@ const root = path.resolve(import.meta.dirname, '../..');
 const endpoint = process.env.FLOWGATE_UDP_UI_ENDPOINT;
 const expected = process.env.FLOWGATE_UDP_UI_EXPECT || 'active';
 const synthetic = process.env.FLOWGATE_UDP_UI_SYNTHETIC === '1';
+// Optional fixture-owner receiver counts: {states:[{family,cookies,uploaded,downloaded}],at}.
+// Fixture PIDs are namespace-local, so identity is matched by socket cookie only.
+const receiverFile = process.env.FLOWGATE_UDP_UI_RECEIVER;
+const receiverStates = () => JSON.parse(fs.readFileSync(receiverFile, 'utf8')).states;
 if (
   !endpoint ||
   !path.isAbsolute(endpoint) ||
@@ -100,6 +104,15 @@ try {
   await enable();
   await wait(async () => (await snap()).control.trafficMonitor.state === expected);
   let first = (await snap()).control.trafficMonitor;
+  let fixtureIds = [],
+    beforeStop = new Map();
+  const graph = (id) => page.evaluate((id) => window.flowgate.graph({ id, seconds: 300 }), id);
+  // Rendered text of one table row: name, rates, policy, sockets, PID, downloaded, uploaded.
+  const cells = (id) =>
+    page.evaluate((id) => {
+      const tr = [...document.querySelectorAll('#rows tr')].find((r) => r.dataset.id === id);
+      return tr && [...tr.querySelectorAll('td')].map((td) => td.textContent);
+    }, id);
   if (expected === 'active') {
     await wait(async () =>
       (await snap()).observation.activity?.rows.some(
@@ -111,9 +124,61 @@ try {
     );
     await page.locator('#controlMenu').evaluate((e) => (e.open = false));
     await page.click('#expand');
-    const udp = (await snap()).observation.activity.rows.find(
-      (r) => r.socket.protocol === 'udp' && r.traffic.available,
-    );
+    if (receiverFile) {
+      // Receiver counts are cumulative since fixture start; the collector counts from attachment.
+      // Within one collector generation, receiver minus displayed bytes must therefore stay
+      // constant per socket: require two such samples with traffic in between. receiver.json
+      // updates slightly before Activity, so lagging samples are kept but cannot match.
+      let match;
+      const seen = new Map();
+      await wait(async () => {
+        const states = receiverStates(),
+          rows = (await snap()).observation.activity.rows,
+          found = [],
+          offsets = [],
+          totals = [];
+        for (const s of states)
+          for (const [i, cookie] of s.cookies.entries()) {
+            const r = rows.find(
+              (r) => r.socket.protocol === 'udp' && r.socket.cookie === String(cookie),
+            );
+            if (
+              !r?.traffic.available ||
+              r.traffic.definition !== 'udp-api-reported' ||
+              r.traffic.uploaded === undefined ||
+              r.traffic.downloaded === undefined
+            )
+              return false;
+            found.push(r);
+            offsets.push(
+              s.uploaded[i] - r.traffic.uploaded,
+              s.downloaded[i] - r.traffic.downloaded,
+            );
+            totals.push(s.uploaded[i], s.downloaded[i]);
+          }
+        if (!found.length || offsets.some((o) => o < 0)) return false;
+        const sample = { states, offsets, totals, rows: found };
+        const key = offsets.join(','),
+          earlier = seen.get(key);
+        if (earlier && earlier.totals.some((t, i) => t !== totals[i])) {
+          match = { first: earlier, second: sample };
+          return true;
+        }
+        if (!earlier) seen.set(key, sample);
+        return false;
+      });
+      match.rows = match.second.rows;
+      fixtureIds = match.rows.map((r) => r.id);
+      fs.writeFileSync(path.join(run, 'receiver-match.json'), JSON.stringify(match, null, 2));
+      for (const id of fixtureIds) {
+        const c = await cells(id);
+        assert(c && c[7] !== '—' && c[8] !== '—', 'Measured UDP totals not rendered: ' + c);
+      }
+    } else
+      fixtureIds = (await snap()).observation.activity.rows
+        .filter((r) => r.socket.protocol === 'udp' && r.traffic.available)
+        .map((r) => r.id);
+    const udp = (await snap()).observation.activity.rows.find((r) => r.id === fixtureIds[0]);
     await page
       .locator('#rows tr')
       .filter({ has: page.locator('td') })
@@ -143,6 +208,7 @@ try {
     await page.screenshot({ path: path.join(run, 'attachment-blocker-narrow.png') });
     await page.setViewportSize({ width: 1280, height: 896 });
   }
+  for (const id of fixtureIds) beforeStop.set(id, (await graph(id)).points);
   await page.locator('#controlMenu').evaluate((e) => (e.open = true));
   await wait(() => page.locator('#extendedStop').isEnabled());
   await page.click('#extendedStop');
@@ -154,10 +220,53 @@ try {
       rows.filter((r) => r.socket.protocol === 'udp').every((r) => !r.traffic.available)
     );
   });
+  // Unavailable after Stop is rendered as unknown, never as zero; graphs stop measuring.
+  for (const id of fixtureIds) {
+    await page.locator('#controlMenu').evaluate((e) => (e.open = false));
+    await wait(async () => {
+      const c = await cells(id);
+      return !c || (c[7] === '—' && c[8] === '—');
+    });
+    await wait(async () => (await graph(id)).points.at(-1)?.up === undefined);
+  }
   if (expected === 'active') {
     await enable();
     await wait(async () => (await snap()).control.trafficMonitor.state === 'active');
     assert.notEqual((await snap()).control.trafficMonitor.generation, first.generation);
+    // New collector generation: a break separates old samples and the first new rates are not a spike.
+    const restart = {};
+    for (const id of fixtureIds) {
+      // Graph views are time-windowed and may trim, so split by sample time, not index.
+      const stopAt = Math.max(...beforeStop.get(id).map((p) => p.at)),
+        old = beforeStop
+          .get(id)
+          .filter((p) => p.up !== undefined)
+          .map((p) => p.up + p.down);
+      // A final old-generation sample may land between the snapshot and Stop, so locate
+      // the gap itself and require restarted samples after it.
+      let after, gap, resumed;
+      try {
+        await wait(async () => {
+          after = (await graph(id)).points.filter((p) => p.at > stopAt);
+          gap = after.findIndex((p) => p.up === undefined);
+          resumed = gap < 0 ? [] : after.slice(gap).filter((p) => p.up !== undefined);
+          return resumed.length >= 2;
+        });
+      } finally {
+        restart[id] = { stopAt, after };
+        fs.writeFileSync(path.join(run, 'restart-graph.json'), JSON.stringify(restart, null, 2));
+      }
+      assert(after[gap].breakBefore, 'UDP gap point does not break the trace');
+      const peak = Math.max(...resumed.map((p) => p.up + p.down));
+      assert(peak <= 4 * Math.max(0, ...old) + 65536, `Restart rate spike ${peak} vs ${old}`);
+      restart[id] = {
+        priorPeak: Math.max(0, ...old),
+        restartedPeak: peak,
+        gapPoints: after.slice(gap).findIndex((p) => p.up !== undefined),
+        after,
+      };
+    }
+    fs.writeFileSync(path.join(run, 'restart-graph.json'), JSON.stringify(restart, null, 2));
   }
   const before = await api();
   await app.evaluate(({ app }) => app.exit());
