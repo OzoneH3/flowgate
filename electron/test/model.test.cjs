@@ -100,3 +100,21 @@ test('explicit display association groups shared sockets once; unresolved and in
   assert.match(ownershipExplanation('no-userspace-inode'), /No userspace inode/);
   assert.match(ownershipExplanation('unknown'), /do not prove/);
 });
+test('rate sorting uses numbers across units and leaves unavailable last in both directions', () => {
+  const roots = hierarchy({
+    rows: [
+      row('small', [], { upload_bps: 900, download_bps: 900 }),
+      row('large', [], { upload_bps: 2048, download_bps: 2048 }),
+      row('missing', [], { available: false, upload_bps: undefined, download_bps: undefined }),
+    ],
+    processes: {},
+  });
+  for (const key of ['upload_bps', 'download_bps'])
+    for (const desc of [true, false])
+      assert.deepEqual(
+        flatten(roots, new Set(['unidentified']), key, desc)
+          .slice(1)
+          .map((v) => v.row.id),
+        desc ? ['large', 'small', 'missing'] : ['small', 'large', 'missing'],
+      );
+});

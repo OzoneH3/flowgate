@@ -704,3 +704,123 @@ dialog::backdrop {
 #graphStatus, .graph-scope { margin: 3px 5px; font-size: 10px; color: #aaa; line-height: 1.3; overflow-wrap: anywhere; }
 #graphStatus { max-height: 28px; overflow: auto; }
 @media (max-height: 650px) { #trafficCanvas { height: 82px; } }
+
+
+:root { font-size: 13px; --info-width: 38vw; }
+.toolbar { height: 38px; min-height: 38px; gap: 10px; overflow: visible; padding: 4px 8px; }
+.brand { font-size: 14px; color: #c7d951; }
+#observerStatus { margin-left: auto; font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+#controlStatus { max-width: 34%; font-size: 11px; white-space: nowrap; }
+.desktop-menu { position: relative; flex-shrink: 0; }
+.desktop-menu > summary { list-style: none; padding: 4px 7px; cursor: pointer; }
+.desktop-menu > summary:hover, .desktop-menu[open] > summary { background: #484848; }
+.menu-panel { position: absolute; top: 30px; left: 0; width: min(460px, 80vw); background: #303030; border: 1px solid #666; box-shadow: 0 4px 14px #111; z-index: 20; white-space: normal; }
+.menu-panel .evaluationbar,.menu-panel .extendedbar,.menu-panel .backgroundbar { padding: 10px; gap: 6px; }
+.menu-panel .extendedbar { border-top: 1px solid #555; }
+.menu-panel #evaluationStatus { min-width: 100%; max-height: 120px; line-height: 1.5; }
+.menu-panel .backgroundbar { display: flex; }
+.menu-panel .backgroundbar label { white-space: normal; }
+.tabs { position: absolute; z-index: 2; top: 38px; left: 4px; width: calc(100% - min(var(--info-width),45vw) - 16px); height: 28px; padding: 1px 0; border-bottom: 1px solid #444; }
+.tabs button { font-size: 12px; padding: 3px 9px; }
+main { gap: 3px; padding: 4px; }
+.activity-main,.request-list,.rules-main { padding-top: 28px; }
+.filterbar { min-height: 34px; align-items: center; flex-wrap: nowrap; gap: 5px; padding: 4px 0; }
+.filterbar input { min-width: 100px; }
+.filterbar select { max-width: 130px; }
+.filterbar button { padding: 3px 7px; }
+#tree { width: 1320px; }
+#tree th { height: 40px; background: #2d2d2d; border-right-color: #393939; }
+#tree th button { min-height: 38px; font-size: 12px; }
+#tree td { height: 24px; font-size: 12px; padding-top: 1px; padding-bottom: 1px; }
+.col-name { width: 290px; }
+.col-download_bps,.col-upload_bps { width: 82px; }
+.col-downloaded,.col-uploaded { width: 92px; }
+.col-count { width: 58px; }
+.col-pid { width: 75px; }
+.row-icon { width: 14px; height: 14px; display: inline-block; vertical-align: -2px; fill: none; stroke: #a2b8c0; stroke-width: 1.3; margin-right: 5px; }
+tbody tr:nth-child(even) { background: #242424; }
+tbody tr[aria-selected='true'] { background: #00a8dc; }
+td.down { color: #c1e2ed; background: #07516a; }
+td.up { color: #c7daa8; background: #344b20; }
+.name.depth-1 { padding-left: 22px; }.name.depth-2 { padding-left: 38px; }.name.depth-3 { padding-left: 54px; }
+#activityView > aside { background: #222; }
+#activityView #info { font-size: 12px; }
+#activityView #info dt { margin-top: 5px; }
+#activityView #info dd { margin-bottom: 7px; line-height: 1.35; }
+#activityView h2 { height: 26px; padding: 4px 7px; background: #373737; }
+#activityView h3 { margin: 6px 8px; }
+.summary { height: 23px; min-height: 23px; max-height: 23px; padding: 3px 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 10px; }
+#app > footer { min-height: 22px; height: 22px; padding: 2px 7px; font-size: 10px; }
+#trafficGraph { height: 190px; }
+#trafficCanvas { height: 87px; }
+.graph-controls { padding: 2px 4px; }
+.graph-controls select { min-height: 21px; height: 21px; font-size: 11px; background: #292929; }
+.graph-values { font-size: 10px; padding: 1px 5px; }
+#graphStatus,.graph-scope { font-size: 9px; line-height: 1.2; margin: 2px 5px; }
+#graphStatus { max-height: 22px; }
+.graph-scope { white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+/* Dialog compositions use the supplied larger dialog capture scale. */
+.prompt-shell { border-color: #04a9f3; }
+.prompt-heading { background: #04a9f3; padding: 18px 17px 15px; min-height: 78px; }
+.prompt-heading strong { font-size: 20px; }.prompt-heading span { font-size: 15px; }
+#promptBody { padding: 10px; }
+#promptBody #requestDetails { padding-bottom: 10px; background: linear-gradient(#373737, #222); }
+.connection-banner { background: #679f38; padding: 8px 12px; font-size: 15px; margin: 0; font-weight: 400; }
+.identity-route { display: grid; grid-template-columns: 60px minmax(0,1fr); padding: 0; background: #373737; }
+.identity-route dt,.identity-route dd { margin: 0; padding: 9px 10px; border-bottom: 1px solid #2b2b2b; }
+.identity-route dt { font-weight: 600; border-right: 1px solid #2b2b2b; color: #aaa; }
+.identity-route dd { font-size: 15px; }.identity-route dd:first-of-type { font-weight: 600; font-size: 17px; }
+#promptBody .connection-fields { grid-template-columns: 115px minmax(0,1fr); font-size: 14px; padding: 10px 12px 3px; gap: 3px 7px; }
+#promptBody .connection-fields dd { overflow-wrap: anywhere; }
+.identity-details { margin: 6px 12px; font-size: 12px; }
+.identity-details summary { color: #43b1d5; cursor: pointer; }
+.attribution-warning { margin: 5px 12px; color: #ddc38d; font-size: 12px; }
+#promptBody .expiry { margin: 4px 12px; }
+#promptBody .scope-preview { font-size: 12px; padding: 6px; margin-top: 5px; margin-bottom: 8px; background: transparent; border-color: #414141; line-height: 1.35; max-height: 100px; }
+#promptBody .decision-controls button { font-size: 15px; min-height: 30px; padding: 4px 12px; }
+#promptBody .decision-controls select { font-size: 13px; min-height: 30px; }
+#promptBody .request-result { font-size: 11px; line-height: 1.3; }
+.prompt-shell footer { min-height: 48px; background: #373737; }
+#ruleEditor { width: min(640px,calc(100vw - 24px)); height: min(582px,calc(100vh - 74px)); top: 62px; right: 12px; font-size: 14px; background: #222; }
+#ruleEditor header { height: 34px; padding: 4px 9px; }
+#ruleEditor header strong { font-weight: 400; }
+#ruleEditor header button { min-height: 24px; font-size: 11px; }
+.editor-body { padding: 6px 12px; }
+.editor-tab { display: inline-block; background: #04a9e4; color: white; padding: 5px 9px; margin: 0 0 4px; }
+#ruleEditor h2 { background: transparent; padding: 4px 0; border-bottom: 1px solid #484848; font-size: 16px; margin: 0 0 6px; }
+.editor-identity { padding: 0 0 10px; }
+.editor-identity summary { background: #292929; border: 1px solid #4a4a4a; padding: 5px 7px; cursor: pointer; overflow-wrap: anywhere; font-size: 12px; }
+.editor-fields { grid-template-columns: 155px minmax(0,1fr); gap: 5px 12px; padding: 3px 0; }
+.editor-fields input,.editor-fields select { min-height: 25px; height: 25px; font-size: 13px; }
+#absoluteExpiry,#editorFeedback { font-size: 11px; margin: 5px 0; padding: 0; }
+#rulePreview { font-size: 12px; line-height: 1.35; max-height: 80px; margin: 4px 0; padding: 5px; }
+#ruleEditor footer { min-height: 42px; justify-content: flex-start; background: #373737; padding: 6px 12px; }
+#ruleEditor footer button { min-height: 28px; }
+@media(max-width:950px) {
+ .toolbar { gap: 4px; }.brand { font-size: 12px; }.desktop-menu > summary { padding: 4px; }
+ #observerStatus { max-width: 31%; } #controlStatus { max-width: 29%; }
+ .filterbar input { flex-basis: auto; width: auto; }.filterbar select { max-width: 105px; }
+ .filterbar button { font-size: 11px; padding: 3px 4px; }
+ .activity-main { min-width: 320px; }
+}
+@media(max-height:650px) { #trafficGraph { height: 190px; } #trafficCanvas { height: 72px; } }
+
+#info { display: grid; grid-template-columns: 96px minmax(0,1fr); align-content: start; gap: 4px 8px; }
+#activityView #info > dt,#activityView #info > dd { margin: 0; padding: 4px 0; }
+#info > .info-technical { grid-column: 1 / -1; margin-top: 12px; }
+.info-technical summary { color: #43a5c0; cursor: pointer; font-size: 11px; }
+.info-technical dl { padding: 3px 0; }
+.prompt-shell { border-radius: 6px; }
+.prompt-heading { border-radius: 3px 3px 0 0; }
+#promptBody #requestDetails { border-radius: 6px; }
+.connection-banner { border-radius: 5px 5px 0 0; }
+.allow:before,.block:before { display: inline-block; width: 15px; height: 15px; line-height: 15px; border-radius: 50%; color: #eee; text-align: center; font-size: 12px; margin-right: 5px; }
+.allow:before { content: '✓'; background: #679f38; }.block:before { content: '×'; background: #d4524b; }
+#ruleEditor header { height: 38px; background: #222; gap: 8px; }
+#ruleEditor header strong { flex: 1; font-size: 12px; color: #aaa; }
+#ruleEditor header .editor-tab { margin: 0; }
+#ruleEditor footer #reloadRule { margin-left: auto; font-size: 11px; }
+#ruleEditor footer #saveRule { min-width: 80px; }
+
+.identity-route dd:first-of-type { font-size: 15px; font-weight: 400; }
+.identity-route dd.route-application { font-size: 17px; font-weight: 600; }

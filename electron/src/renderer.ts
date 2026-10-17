@@ -39,6 +39,25 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, text = '', class
   e.className = className;
   return e;
 }
+function rowIcon(kind: Row['kind']) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('class', 'row-icon');
+  svg.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS(svg.namespaceURI, 'path');
+  path.setAttribute(
+    'd',
+    kind === 'application'
+      ? 'M2 2h12v9H2zM5 14h6M8 11v3M2 5h12'
+      : kind === 'process'
+        ? 'M5 3h6v10H5zM2 5h3m6 0h3M2 8h3m6 0h3M2 11h3m6 0h3'
+        : kind === 'socket'
+          ? 'M2 5h4v6H2zM10 5h4v6h-4zM6 8h4'
+          : 'M3 3h10v10H3zM6 6a2 2 0 1 1 3 2l-1 1M8 11v1',
+  );
+  svg.append(path);
+  return svg;
+}
 function field(container: HTMLElement, label: string, value: string) {
   container.append(element('dt', label), element('dd', value || 'Unknown'));
 }
@@ -51,7 +70,7 @@ const scopeLabels: Record<Scope, string> = {
   persistent: 'Persistent until disabled / deleted',
 };
 if (promptID) {
-  root.innerHTML = `<section class="prompt-shell"><header class="prompt-heading"><strong>FlowGate Blocker</strong><span>Connection permission</span></header><div id="promptBody"><div id="requestDetails"></div></div><footer><span id="controlStatus"></span><button id="dismiss">Decide later</button></footer><div id="feedback" role="status" aria-live="polite"></div></section>`;
+  root.innerHTML = `<section class="prompt-shell"><header class="prompt-heading"><strong>FlowGate Blocker</strong><span>Pending connection permission</span></header><div id="promptBody"><div id="requestDetails"></div></div><footer><span id="controlStatus"></span><button id="dismiss">Decide later</button></footer><div id="feedback" role="status" aria-live="polite"></div></section>`;
   $('dismiss').onclick = () => void window.flowgate.dismissPrompt();
 } else {
   root.innerHTML = `<header class="toolbar"><strong class="brand">▣ FlowGate</strong><span id="observerStatus"></span><span class="separator"></span><span id="controlStatus"></span></header><nav class="tabs" aria-label="Views"><button id="activityTab" aria-selected="true">Activity</button><button id="requestsTab" aria-selected="false">Pending requests <span id="pendingCount">0</span></button></nav><main id="activityView"><section class="activity-main"><div class="filterbar"><input id="search" type="search" aria-label="Search Activity" placeholder="Search application, path, PID or endpoint"><select id="filter" aria-label="Socket filter"><option value="all">All sockets</option><option value="active">Active TCP / connected UDP</option><option value="listening">Listening TCP / bound UDP</option></select><button id="expand">Expand all</button><button id="collapse">Collapse all</button></div><div class="table-scroll"><table id="tree" role="treegrid" tabindex="0" aria-label="Application process socket activity"><thead><tr id="headers"></tr></thead><tbody id="rows"></tbody></table></div><div id="activitySummary" class="summary"></div></section><aside><h2>Info View</h2><h3 id="selectedName">FlowGate Activity</h3><dl id="info"></dl><section id="trafficGraph"></section></aside></main><main id="requestsView" hidden><section class="request-list"><h2>Pending &amp; recent requests</h2><p class="hint">Select a request to decide. Dismissal grants nothing. Closing FlowGate leaves an independent controller running.</p><div class="table-scroll"><table id="requests"><thead><tr><th>Application</th><th>Direction</th><th>Protocol</th><th>Remote endpoint</th><th>State</th></tr></thead><tbody id="requestRows"></tbody></table></div></section><aside class="request-sidebar"><h2>Connection permission</h2><div id="requestDetails"></div></aside></main><footer><span>Activity and firewall control are independent.</span><span id="feedback" role="status" aria-live="polite"></span></footer>`;
@@ -73,7 +92,7 @@ if (promptID) {
     th.className = 'col-' + key;
     const b = element('button', title);
     b.onclick = () => {
-      descending = sort === key ? !descending : false;
+      descending = sort === key ? !descending : ['upload_bps', 'download_bps'].includes(key);
       sort = key;
       renderTree();
     };
@@ -175,6 +194,7 @@ function buildTree() {
   $('activitySummary').textContent = a
     ? `${roots.reduce((n, r) => n + r.rows.length, 0)} / ${a.rows.length} sockets · ${a.complete ? 'Complete census' : 'Partial visibility'} · ${a.collected} · ${a.issues.join('; ')}`
     : state.observation.message;
+  $('activitySummary').title = $('activitySummary').textContent || '';
 }
 function renderTree() {
   visible = flatten(roots, expanded, sort, descending);
@@ -211,21 +231,7 @@ function renderTree() {
       renderTree();
       renderInfo();
     };
-    name.append(
-      toggle,
-      element(
-        'span',
-        r.kind === 'socket'
-          ? '◇'
-          : r.kind === 'unidentified'
-            ? '?'
-            : r.kind === 'application'
-              ? '▣'
-              : '▪',
-        'row-icon',
-      ),
-      document.createTextNode(r.label),
-    );
+    name.append(toggle, rowIcon(r.kind), document.createTextNode(r.label));
     name.title = r.process?.executable || r.socket?.socket.remote || r.label;
     tr.append(name);
     for (const key of ['download_bps', 'upload_bps'] as Metric[]) {
@@ -267,7 +273,32 @@ function renderInfo() {
   const live = $('info');
   const info = element('dl');
   const commit = () => {
-    // Preserve text selection and scroll while an unchanged observation refreshes.
+    const details = element('details', '', 'info-technical');
+    details.open = !!live.querySelector('details[open]');
+    details.append(element('summary', 'Identity and measurement details'));
+    const technical = element('dl');
+    for (const dt of Array.from(info.querySelectorAll('dt'))) {
+      if (
+        [
+          'Executable',
+          'Identity',
+          'Totals',
+          'Evidence',
+          'Socket identity',
+          'Ownership evidence category',
+          'Measurement',
+        ].includes(dt.textContent || '')
+      ) {
+        const dd = dt.nextElementSibling;
+        technical.append(dt);
+        if (dd) technical.append(dd);
+      }
+    }
+    if (technical.childElementCount) {
+      details.append(technical);
+      info.append(details);
+    }
+    // Preserve text selection and expanded details during unchanged polling.
     if (live.textContent !== info.textContent) live.replaceChildren(...Array.from(info.childNodes));
   };
   const r = allRows(roots).find((r) => r.id === selected);
@@ -450,33 +481,59 @@ function renderRequests() {
         `${e.flow.direction} connection · ${e.flow.protocol.toUpperCase()}`,
         'connection-banner',
       ),
-      element('h3', eventName(e), 'application-name'),
     );
+    const route = element('dl', '', 'identity-route');
+    const incoming = e.flow.direction === 'incoming';
+    field(route, 'From', incoming ? e.flow.remote : eventName(e));
+    field(route, 'To', incoming ? eventName(e) : e.flow.remote);
+    route.querySelectorAll('dd')[incoming ? 1 : 0].classList.add('route-application');
+    container.append(route);
     const fields = element('dl', '', 'connection-fields');
-    const [local, localPort] = endpoint(e.flow.local),
-      [remote, remotePort] = endpoint(e.flow.remote);
-    field(fields, 'Application', e.attribution.application?.executable ?? 'Unavailable');
     field(
       fields,
-      'Process',
+      'Application',
+      e.attribution.application?.executable.split('/').pop() || 'Unavailable',
+    );
+    field(
+      fields,
+      'Process ID',
+      e.attribution.owners.map((p) => String(p.pid)).join(', ') || 'Unavailable',
+    );
+    field(fields, 'Local endpoint', e.flow.local);
+    field(fields, 'Remote endpoint', e.flow.remote);
+    field(fields, 'Deadline', e.deadline.replace(/\.\d+/, ''));
+    container.append(fields);
+    const technical = element('details', '', 'identity-details');
+    technical.append(element('summary', 'Application identity and attribution details'));
+    const identity = element('dl', '', 'connection-fields');
+    field(identity, 'Exact backend deadline', e.deadline);
+    field(identity, 'Executable', e.attribution.application?.executable || 'Unavailable');
+    field(
+      identity,
+      'Process identity',
       e.attribution.owners
         .map((p) => `${p.pid} · start ${p.start_ticks} · UID ${p.uid}`)
         .join('\n') || 'Unavailable',
     );
-    field(fields, 'Local address', local);
-    field(fields, 'Local port', localPort);
-    field(fields, 'Remote address', remote);
-    field(fields, 'Remote port', remotePort);
-    field(fields, 'Attribution', `${e.attribution.status}\n${e.attribution.reason}`);
+    field(identity, 'Attribution', `${e.attribution.status}\n${e.attribution.reason}`);
     field(
-      fields,
+      identity,
       'Coverage',
       e.attribution.visibility_complete
         ? 'Backend reports complete visibility'
         : 'Limited observation; hidden owners or races may remain',
     );
-    field(fields, 'Deadline', e.deadline);
-    container.append(fields, element('p', '', 'expiry'));
+    technical.append(identity);
+    container.append(technical);
+    if (!e.attribution.visibility_complete || e.attribution.status !== 'directly-associated')
+      container.append(
+        element(
+          'p',
+          `Attribution: ${e.attribution.status}. ${e.attribution.reason}`,
+          'attribution-warning',
+        ),
+      );
+    container.append(element('p', '', 'expiry'));
     const preview = element('p', '', 'scope-preview');
     preview.id = 'scopePreview';
     container.append(preview);
@@ -522,7 +579,7 @@ function renderRequests() {
       updateDecisions();
     };
     controls.append(scopes);
-    container.append(controls);
+    container.insertBefore(controls, preview);
     if (!promptID) {
       const open = element('button', 'Open permission window', 'open-prompt');
       open.onclick = () => void window.flowgate.openPrompt(e.id);
@@ -568,8 +625,10 @@ function consume(next: ClientState) {
   $('controlStatus').textContent =
     state.control.message +
     (state.control.connected && state.control.readOnly ? ' · read-only' : '');
+  $('controlStatus').title = $('controlStatus').textContent || '';
   if (!promptID) {
     $('observerStatus').textContent = state.observation.message;
+    $('observerStatus').title = state.observation.message;
     $('pendingCount').textContent = String(
       state.control.events.filter((e) => e.state === 'awaiting-decision' && e.remainingMs > 0)
         .length,

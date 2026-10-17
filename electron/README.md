@@ -264,7 +264,7 @@ scrollable, and endpoint columns scroll horizontally at narrow widths.
 
 ## Tray, background requests and attribution increment
 
-Enable **Keep running in the tray when the window closes** at the bottom of the
+Enable **Keep running in the tray when the window closes** in the **Options** menu of the
 main window. It is off by default. Closing then hides the existing window and
 preserves selection, layout and unfinished rule input. The tray offers Open,
 current pending count/list, independent enforcement/extended-monitoring status,
@@ -505,3 +505,26 @@ Eight Electron processes in both samples; same retained history and idle fixture
 This bounded comparison does not establish a leak or a production resource budget.
 Integration adds `electron/src/{history,graph}.ts`, their typed bridge/render hooks,
 focused tests and `scripts/check-electron-graphs.sh`; no backend/Qt changes required.
+
+## Desktop controls and layout (2026-10-17)
+
+**Control** contains the existing evaluation profile/Start/Stop/status/recovery
+and independent extended-monitoring controls. **Options** contains the opt-in
+close-to-tray preference and Quit. Activity, enforcement status and pending-request
+access remain visible. Neither menu starts privileged work automatically.
+
+The sidebar defaults to 38% of the window; saved widths still take precedence.
+Drag its separator or use its arrow keys. Technical identity details expand in
+place. The live graph remains available, with TCP/UDP sources separated and gaps
+preserved. Upload/download headers now sort descending on their first selection,
+then toggle; unavailable measurements remain below measured values in either order.
+
+Prompt From/To follows incoming/outgoing direction. Full executable identity,
+attribution and exact backend deadline are selectable in the expandable details;
+endpoint, deadline, scope and decision controls remain visible. The modeless editor
+keeps its draft and offers pending-request access through Minimize/resume.
+
+See [VISUAL-REVIEW.md](VISUAL-REVIEW.md) for the desktop verification scope.
+Focused reproduction with already-installed dependencies: `scripts/check-electron-visual.sh`.
+It uses real unprivileged host TCP observation and the existing disposable namespace
+controller, never host enforcement or privileged host UDP collection.
