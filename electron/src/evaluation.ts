@@ -31,9 +31,10 @@ export class Evaluation {
   } // Detached terminal and controller retain their original deadline.
   async action(action: unknown, profile: unknown) {
     if (
-      typeof action!=='string' ||
+      typeof action !== 'string' ||
       !['start', 'stop', 'status', 'recover', 'cancel'].includes(String(action)) ||
-      (profile !== undefined && (typeof profile!=='string'||!['incoming', 'both'].includes(profile)))
+      (profile !== undefined &&
+        (typeof profile !== 'string' || !['incoming', 'both'].includes(profile)))
     )
       throw Error('Invalid evaluation action');
     if (action === 'cancel') {
@@ -45,7 +46,8 @@ export class Evaluation {
     }
     if (this.state.busy) throw Error('Authentication or cleanup already in progress');
     const c = this.backend.view().control;
-    if(action==='stop' && !/^[a-f0-9]{32}$/.test(c.generation||this.state.generation)) throw Error('No verified generation; use Status or Recovery');
+    if (action === 'stop' && !/^[a-f0-9]{32}$/.test(c.generation || this.state.generation))
+      throw Error('No verified generation; use Status or Recovery');
     if (
       action === 'start' &&
       ((c.connected && !c.readOnly) || this.jobs.some((j) => j.action === 'start'))
@@ -159,8 +161,22 @@ export class Evaluation {
           }
         } else if (['stopped', 'failed', 'cancelled', 'unknown', 'status'].includes(r.phase)) {
           this.jobs = this.jobs.filter((x) => x !== j);
-          if(r.generation && this.state.generation && r.generation!==this.state.generation) continue;
-          if(r.phase==='stopped') this.jobs=this.jobs.filter(x=>x.action!=='start');
+          if (r.phase === 'status' && /^[a-f0-9]{32}$/.test(r.generation)) {
+            try {
+              const reply = await call(this.endpoint, { operation: 'list' });
+              if (
+                reply.generation === r.generation &&
+                reply.mode === 'host-enforcement' &&
+                !reply.error
+              ) {
+                this.backend.controller = this.endpoint;
+                await this.backend.pollControl();
+              }
+            } catch {}
+          }
+          if (r.generation && this.state.generation && r.generation !== this.state.generation)
+            continue;
+          if (r.phase === 'stopped') this.jobs = this.jobs.filter((x) => x.action !== 'start');
           this.state = {
             phase: r.phase,
             message: r.message,

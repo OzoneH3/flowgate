@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, protocol, session, type IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
+import { ExtendedMonitoring } from './extended';
 import { Rules } from './rules';
 import { Evaluation } from './evaluation';
 import type { Preferences } from './protocol';
@@ -132,6 +133,15 @@ app.whenReady().then(async () => {
     for (const w of windows) if (!w.isDestroyed()) w.webContents.send('state', state);
   });
   const rules = new Rules(backend);
+  const extended = new ExtendedMonitoring(path.resolve(__dirname, '../..'));
+  ipcMain.handle('extended:action', (e, a) => {
+    trusted(e);
+    return extended.action(a);
+  });
+  ipcMain.handle('extended:state', (e) => {
+    trusted(e);
+    return extended.view(backend.view().observation.activity?.udp?.state === 'active');
+  });
   evaluation = new Evaluation(
     path.resolve(__dirname, '../..'),
     backend,

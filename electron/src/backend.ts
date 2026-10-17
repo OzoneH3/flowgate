@@ -89,6 +89,7 @@ export class Backend {
       ...this.state,
       control: {
         ...this.state.control,
+        serverNow: this.now(),
         events: (this.reply?.events ?? []).map((e) => ({
           ...e,
           remainingMs: Math.max(0, Date.parse(e.deadline) - this.now()),

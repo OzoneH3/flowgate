@@ -161,7 +161,7 @@ if op=='status':
     'lab',
   );
   await wait(() => existsSync(path.join(run, 'ready')));
-  const [gui, page] = await electron(
+  let [gui, page] = await electron(
     path.join(run, 'observer.sock'),
     path.join(run, 'api/control.sock'),
   );
@@ -205,6 +205,25 @@ if op=='status':
   await page.locator('#ruleRows tr').first().click();
   await page.click('#editRule');
   const initial = (await snap(page)).control.rules[0];
+  const [readOnlyGui, readOnlyPage] = await electron(
+    path.join(run, 'observer.sock'),
+    path.join(run, 'api/control.sock.monitor'),
+  );
+  await wait(async () => (await snap(readOnlyPage)).control.connected);
+  assert((await snap(readOnlyPage)).control.readOnly);
+  assert(
+    await readOnlyPage.evaluate(async (id) => {
+      try {
+        await window.flowgate.ruleDraft({ id });
+        return false;
+      } catch {
+        return true;
+      }
+    }, initial.id),
+  );
+  readOnlyGui.kill('SIGTERM');
+  console.log('PASS real read-only API cannot create an editable draft');
+
   await page.selectOption('#editAction', 'block');
   await page.fill('#editAddress', 'invalid-address');
   await page.click('#previewRule');
@@ -264,22 +283,96 @@ if op=='status':
   assert((await snap(page)).observation.connected);
   assert.equal((await command('status')).table_present, false);
   console.log('PASS Stop cleanup acknowledged while Activity continues');
-  const previousGeneration=(await snap(page)).control.generation;
+  const previousGeneration = (await snap(page)).control.generation;
   await wait(() => page.locator('#evalStart').isEnabled());
   await page.click('#evalStart');
   await page.click('#confirmYes');
   await wait(async () => (await snap(page)).control.enforcement?.state === 'active');
-  await wait(async()=>(await snap(page)).control.generation!==previousGeneration && (await page.evaluate(()=>window.flowgate.evaluationState())).phase==='active');
+  await wait(
+    async () =>
+      (await snap(page)).control.generation !== previousGeneration &&
+      (await page.evaluate(() => window.flowgate.evaluationState())).phase === 'active',
+  );
   const deadline = (await snap(page)).control.enforcement.stops_at;
+  gui.kill('SIGTERM');
+  await sleep(600);
+  assert.equal(
+    (await call(path.join(run, 'api/control.sock'), { operation: 'list' })).enforcement.stops_at,
+    deadline,
+  );
+  [gui, page] = await electron(path.join(run, 'observer.sock'), path.join(run, 'api/control.sock'));
+  await wait(async () => (await snap(page)).control.connected);
+  console.log('PASS closing Electron preserves independent controller and original deadline');
   await command('kill');
   await wait(async () => !(await snap(page)).control.connected);
   await wait(async () => (await page.textContent('#evaluationStatus')).includes('unknown'));
   assert((await snap(page)).observation.connected);
-  console.log('PASS controller loss is unknown; Activity continues');
+  assert(
+    await page.evaluate(async () => {
+      try {
+        await window.flowgate.ruleDraft({ id: 'gone' });
+        return false;
+      } catch {
+        return true;
+      }
+    }),
+  );
+  console.log(
+    'PASS controller loss is unknown; Activity continues; disconnected mutation rejected',
+  );
   await page.click('#evalRecover');
   await page.click('#confirmYes');
   await wait(
     async () => (await page.evaluate(() => window.flowgate.evaluationState())).phase === 'stopped',
+  );
+  // Explicit synthetic observer fixture: UI availability/partial/disconnect only, not UDP evidence.
+  let udpState = 'active';
+  const fixturePath = path.join(run, 'synthetic.sock');
+  const fixture = net.createServer((socket) =>
+    socket.once('data', () =>
+      socket.end(
+        JSON.stringify({
+          version: 1,
+          generation: 'synthetic-ui',
+          read_only: true,
+          mode: 'host-monitor',
+          server_time: new Date().toISOString(),
+          activity: {
+            sequence: Date.now(),
+            collected: new Date().toISOString(),
+            complete: true,
+            issues: ['SYNTHETIC UI FIXTURE — no kernel collection'],
+            rows: [],
+            processes: {},
+            udp: {
+              state: udpState,
+              reason: 'SYNTHETIC UI FIXTURE: socket-level API bytes, not per-peer',
+              generation: 'fixture',
+              missed_operations: 1,
+              uid: 1000,
+              collected: new Date().toISOString(),
+            },
+          },
+        }) + '\n',
+      ),
+    ),
+  );
+  await new Promise((r) => fixture.listen(fixturePath, r));
+  const [fixtureGui, fixturePage] = await electron(fixturePath);
+  await wait(async () =>
+    (await fixturePage.textContent('#extendedStatus')).includes('partial coverage'),
+  );
+  assert(await fixturePage.locator('#extendedEnable').isDisabled());
+  await fixturePage.screenshot({ path: path.join(run, 'synthetic-udp-partial.png') });
+  udpState = 'disconnected';
+  await wait(async () =>
+    (await fixturePage.textContent('#extendedStatus')).includes('disconnected'),
+  );
+  assert(await fixturePage.locator('#extendedEnable').isEnabled());
+  fixtureGui.kill('SIGTERM');
+  await new Promise((r) => fixture.close(r));
+  console.log(
+    'PASS synthetic UDP availability, partial-coverage and disconnect UI; no privileged collector launched',
   );
   console.log('EVIDENCE', run);
   assert.deepEqual(logs, []);

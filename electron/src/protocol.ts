@@ -44,6 +44,14 @@ export interface SocketRow {
   traffic: Traffic;
 }
 export interface Activity {
+  udp?: {
+    state: string;
+    reason: string;
+    generation: string;
+    missed_operations: number;
+    collected: string;
+    uid: number;
+  };
   sequence: number;
   collected: string;
   complete: boolean;
@@ -107,6 +115,7 @@ export interface ClientState {
     enforcement?: Reply['enforcement'];
     events: ViewEvent[];
     rules?: Rule[];
+    serverNow?: number;
   };
 }
 export interface Decision {
@@ -117,6 +126,8 @@ export interface Decision {
 }
 export interface Bridge {
   snapshot(): Promise<ClientState>;
+  extended(action: 'enable' | 'stop'): Promise<void>;
+  extendedState(): Promise<{ busy: boolean; message: string }>;
   ruleDraft(source: { id?: string; event?: string }): Promise<RuleDraft>;
   rulePreview(value: RuleEdit): Promise<{ receipt: string; preview: string }>;
   ruleSave(receipt: string): Promise<Attempt>;
@@ -241,6 +252,16 @@ export function parseReply(raw: unknown): Reply {
       processes[id] = process(p);
     }
     result.activity = {
+      udp: a.udp
+        ? {
+            state: string(object(a.udp).state),
+            reason: string(object(a.udp).reason),
+            generation: string(object(a.udp).generation),
+            missed_operations: number(object(a.udp).missed_operations),
+            collected: string(object(a.udp).collected),
+            uid: number(object(a.udp).uid),
+          }
+        : undefined,
       sequence: number(a.sequence),
       collected: string(a.collected),
       complete: a.complete === true,

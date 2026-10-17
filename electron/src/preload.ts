@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { Bridge, ClientState, Decision } from './protocol';
 const api: Bridge = {
+  extended: (a) => ipcRenderer.invoke('extended:action', a),
+  extendedState: () => ipcRenderer.invoke('extended:state'),
   ruleDraft: (v) => ipcRenderer.invoke('rule:draft', v),
   rulePreview: (v) => ipcRenderer.invoke('rule:preview', v),
   ruleSave: (v) => ipcRenderer.invoke('rule:save', v),

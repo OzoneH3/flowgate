@@ -5,6 +5,8 @@ const node = (tag: string, text: string) => {
   n.textContent = text;
   return n;
 };
+let editRevision = 0;
+let accessState = '';
 let editorSource: { id?: string; event?: string } = {};
 let state: ClientState,
   selected = '',
@@ -36,6 +38,7 @@ function editValue(): RuleEdit {
   };
 }
 function invalidate() {
+  editRevision++;
   receipt = '';
   $('rulePreview').textContent = 'Preview required before saving.';
   $<HTMLButtonElement>('saveRule').disabled = true;
@@ -81,7 +84,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
   const view = node('main', '');
   view.id = 'rulesView';
   view.hidden = true;
-  view.innerHTML = `<section class="rules-main"><div class="filterbar"><button id="editRule">Edit selected</button><button id="toggleRule">Enable / Disable…</button><button id="deleteRule">Delete…</button></div><div class="table-scroll"><table id="rulesTable" tabindex="0" aria-label="Saved rules"><thead><tr><th>Application</th><th>Action</th><th>Direction</th><th>Protocol</th><th>Endpoint scope</th><th>Expiry</th><th>State</th></tr></thead><tbody id="ruleRows"></tbody></table></div><p class="hint">Rules are evaluated by Go. Changing rules does not necessarily disconnect already-approved TCP sessions.</p><p id="ruleFeedback" role="status"></p></section><aside><h2>Rule information</h2><pre id="ruleInfo">Select a saved rule.</pre></aside>`;
+  view.innerHTML = `<section class="rules-main"><div class="filterbar"><button id="editRule">Edit selected</button><button id="toggleRule">Enable / Disable…</button><button id="deleteRule">Delete…</button></div><div class="table-scroll"><table id="rulesTable" tabindex="0" aria-label="Saved rules"><thead><tr><th>Application</th><th>Action</th><th>Direction</th><th>Protocol</th><th>Endpoint scope</th><th>Expiry</th><th>State</th></tr></thead><tbody id="ruleRows"></tbody></table></div><p class="hint">Rules are evaluated by Go. Changing rules does not necessarily disconnect already-approved TCP sessions.</p><p id="ruleFeedback" role="status"></p></section><aside><h2>Rule information</h2><dl id="ruleInfo">Select a saved rule.</dl></aside>`;
   $('requestsView').after(view);
   const evaluation = node('section', '');
   evaluation.className = 'evaluationbar';
@@ -98,9 +101,16 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
   panel.setAttribute('aria-label', 'Rule editor');
   panel.innerHTML = `<header><strong>FlowGate — Rule editor</strong><span><button id="minimizeEditor">Minimize</button> <button id="closeEditor">Close</button></span></header><div class="editor-body"><h2>For</h2><pre id="editorIdentity"></pre><h2>Rule</h2><div class="editor-fields"><label for="editAction">Action</label><select id="editAction"><option value="allow">Allow</option><option value="block">Block</option></select><label for="editProtocol">Protocol</label><select id="editProtocol"><option value="tcp">TCP</option><option value="udp">UDP</option><option value="*">Any</option></select><label for="editAddress">Remote IP / CIDR</label><input id="editAddress" maxlength="256"><label for="editLocal">Local port (0 = any)</label><input id="editLocal" type="number" min="0" max="65535"><label for="editRemote">Remote port (0 = any)</label><input id="editRemote" type="number" min="0" max="65535"><label for="editPriority">Priority</label><input id="editPriority" type="number" min="-1000" max="1000"><label for="editExpiry">Expiry</label><select id="editExpiry"><option value="preserve">Preserve absolute expiry</option><option value="hour">Explicitly reset to 1 hour</option><option value="permanent">No expiry</option></select><label for="editEnabled">Enabled</label><input id="editEnabled" type="checkbox"></div><p id="absoluteExpiry"></p><h2>Authoritative scope</h2><p id="rulePreview" class="scope-preview"></p><p id="editorFeedback" role="status"></p></div><footer><button id="reloadRule">Reload version, keep fields</button><button id="previewRule">Preview</button><button id="saveRule" disabled>Save</button></footer>`;
   document.body.append(panel);
-  document.addEventListener('keydown',e=>{
-   if(e.ctrlKey&&e.key.toLowerCase()==='e'){e.preventDefault();const id=selected||state?.control.rules?.[0]?.id;if(id)void open({id});}
-   if(e.key==='Escape'&&draft&&!saving){panel.hidden=true;$('resumeEditor').hidden=false;}
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.key.toLowerCase() === 'e') {
+      e.preventDefault();
+      const id = selected || state?.control.rules?.[0]?.id;
+      if (id) void open({ id });
+    }
+    if (e.key === 'Escape' && draft && !saving) {
+      panel.hidden = true;
+      $('resumeEditor').hidden = false;
+    }
   });
   const resume = node('button', 'Resume editor') as HTMLButtonElement;
   resume.id = 'resumeEditor';
@@ -141,7 +151,9 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
     if (!draft || saving || unresolved) return;
     invalidate();
     try {
+      const revision = editRevision;
       const r = await window.flowgate.rulePreview(editValue());
+      if (revision !== editRevision || !draft || $('ruleEditor').hidden) return;
       receipt = r.receipt;
       $('rulePreview').textContent = r.preview;
       $<HTMLButtonElement>('saveRule').disabled = !writable();
@@ -161,6 +173,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
       editorMessage(result.message);
       if (result.phase === 'acknowledged') {
         panel.hidden = true;
+        $('resumeEditor').hidden = true;
         draft = undefined;
         status(result.message);
       }
@@ -231,10 +244,15 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
       const c = state?.control,
         active = c?.connected && c.enforcement;
       const remaining = active
-        ? Math.max(0, Math.ceil((Date.parse(active.stops_at) - Date.now()) / 1000))
+        ? Math.max(
+            0,
+            Math.ceil(
+              (Date.parse(active.stops_at) - (state.control.serverNow ?? Date.now())) / 1000,
+            ),
+          )
         : 0;
       $('evaluationStatus').textContent = active
-        ? `${active.state} · ${active.profile} · ${remaining}s · ${active.detail} · ${e.message}`
+        ? `${active.state} · ${active.profile} · ${remaining}s · ${active.detail} · ${e.phase === 'idle' ? 'Independent controller; closing FlowGate leaves it running.' : e.message}`
         : `${e.phase === 'stopped' ? 'Cleanup confirmed' : 'Enforcement state unknown'} · ${e.message}`;
       $('evalCancel').hidden = !e.starting;
       $<HTMLButtonElement>('evalStart').disabled =
@@ -246,6 +264,41 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
       evalBusy = false;
     }
   }, 500);
+  const tools = node('div', '');
+  tools.className = 'extendedbar';
+  tools.innerHTML = `<button id="extendedEnable">Enable extended monitoring…</button><button id="extendedStop">Stop extended monitoring</button><span id="extendedStatus"></span>`;
+  document.querySelector('.activity-main')!.prepend(tools);
+  const perform = async (a: 'enable' | 'stop') => {
+    try {
+      await window.flowgate.extended(a);
+    } catch (e) {
+      $('extendedStatus').textContent = String(e);
+      extendedError = String(e);
+    }
+  };
+  let extendedError = '';
+  $('extendedEnable').onclick = () =>
+    confirmAction(
+      'Extended UDP monitoring',
+      'Enable privileged UDP API-byte collection for this user? This does not activate firewall evaluation. Authenticate in the terminal. Counts cover each socket across all peers, may miss traffic before registration, and remain separate from TCP transport bytes. Close the terminal or use Stop to end collection.',
+      () => perform('enable'),
+    );
+  $('extendedStop').onclick = () => perform('stop');
+  let extendedBusy = false;
+  setInterval(async () => {
+    if (extendedBusy) return;
+    extendedBusy = true;
+    try {
+      const e = await window.flowgate.extendedState(),
+        u = state?.observation.activity?.udp;
+      $('extendedStatus').textContent =
+        `UDP ${u?.state || 'unavailable'}${u?.missed_operations ? ' · partial coverage · ' + u.missed_operations + ' missed operations' : ''} · ${u?.reason || 'No collector snapshot'} · ${extendedError || e.message}`;
+      $<HTMLButtonElement>('extendedEnable').disabled = e.busy || u?.state === 'active';
+      $<HTMLButtonElement>('extendedStop').disabled = e.busy;
+    } finally {
+      extendedBusy = false;
+    }
+  }, 750);
   void setupSizing();
 }
 async function evaluate(a: 'start' | 'stop' | 'status' | 'recover' | 'cancel') {
@@ -272,6 +325,10 @@ function confirmAction(title: string, text: string, fn: () => Promise<void>) {
   d.showModal();
 }
 function updateButtons() {
+  for (const input of document.querySelectorAll<HTMLInputElement | HTMLSelectElement>(
+    '#ruleEditor input,#ruleEditor select',
+  ))
+    input.disabled = saving;
   for (const id of ['previewRule', 'reloadRule'])
     $<HTMLButtonElement>(id).disabled = saving || unresolved || !writable();
   $<HTMLButtonElement>('saveRule').disabled = saving || unresolved || !receipt || !writable();
@@ -281,7 +338,14 @@ export function updateWorkflows(next: ClientState) {
   state = next;
   updateButtons();
   const rules = state.control.rules || [],
-    sig = JSON.stringify(rules);
+    sig = JSON.stringify([
+      rules,
+      rules.map(
+        (r) =>
+          Date.parse(r.expires) > 0 &&
+          Date.parse(r.expires) <= (state.control.serverNow ?? Date.now()),
+      ),
+    ]);
   if (sig !== signature) {
     signature = sig;
     const body = $('ruleRows');
@@ -297,7 +361,8 @@ export function updateWorkflows(next: ClientState) {
         r.filter.protocol,
         `${r.filter.remote_address || r.filter.remote || '*'} · local ${r.filter.local_port || '*'} / remote ${r.filter.remote_port || '*'}`,
         r.expires.startsWith('0001') ? 'No expiry' : r.expires,
-        Date.parse(r.expires) > 0 && Date.parse(r.expires) <= Date.now()
+        Date.parse(r.expires) > 0 &&
+        Date.parse(r.expires) <= (state.control.serverNow ?? Date.now())
           ? 'Expired'
           : r.disabled
             ? 'Disabled'
@@ -324,9 +389,21 @@ export function updateWorkflows(next: ClientState) {
   }
   for (const id of ['editRule', 'toggleRule', 'deleteRule'])
     $<HTMLButtonElement>(id).disabled = !writable() || !rules.some((r) => r.id === selected);
-  if (!state.control.connected)
-    status('Controller disconnected. Displayed rules may be stale; mutations disabled.');
-  else if (state.control.readOnly) status('Read-only controller; mutations disabled.');
+  const access = state.control.connected
+    ? state.control.readOnly
+      ? 'readonly'
+      : 'write'
+    : 'offline';
+  if (access !== accessState) {
+    accessState = access;
+    status(
+      access === 'offline'
+        ? 'Controller disconnected. Displayed rules may be stale; mutations disabled.'
+        : access === 'readonly'
+          ? 'Read-only controller; mutations disabled.'
+          : 'Connected. Rule changes require a backend preview.',
+    );
+  }
   const detail = $('requestDetails');
   if (detail && !detail.querySelector('#createRule')) {
     const b = node('button', 'Create rule…') as HTMLButtonElement;
@@ -355,8 +432,33 @@ function selectRule() {
   for (const tr of document.querySelectorAll<HTMLTableRowElement>('#ruleRows tr'))
     tr.setAttribute('aria-selected', String(tr.dataset.id === selected));
   const r = state.control.rules?.find((r) => r.id === selected);
-  const text = r ? JSON.stringify(r, null, 2) : 'Select a saved rule.';
-  if ($('ruleInfo').textContent !== text) $('ruleInfo').textContent = text;
+  const info = $('ruleInfo');
+  const fields = r
+    ? [
+        ['Application', r.executable || r.filter.application],
+        ['Action / direction', r.action + ' · ' + r.filter.direction],
+        ['Protocol', r.filter.protocol],
+        ['Remote address', r.filter.remote_address || r.filter.remote || '*'],
+        [
+          'Ports',
+          `Local ${r.filter.local_port || 'any'} · remote ${r.filter.remote_port || 'any'}`,
+        ],
+        ['Absolute expiry', r.expires.startsWith('0001') ? 'No expiry' : r.expires],
+        ['Enabled', r.disabled ? 'No' : 'Yes (expiry still applies)'],
+        ['Priority', String(r.priority)],
+        ['Application identity', r.filter.application],
+        ['Revision', r.filter.revision],
+        ['UID', String(r.filter.uid)],
+        ['Edit version', String(r.version)],
+      ]
+    : [];
+  const signature = JSON.stringify(fields);
+  if (info.dataset.signature !== signature) {
+    info.dataset.signature = signature;
+    info.replaceChildren();
+    if (!r) info.textContent = 'Select a saved rule.';
+    for (const [label, value] of fields) info.append(node('dt', label), node('dd', value));
+  }
 }
 async function setupSizing() {
   let prefs: Preferences = await window.flowgate.preferences();

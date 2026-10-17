@@ -2,7 +2,7 @@
 
 An additional unprivileged frontend; Qt and `scripts/run-desktop.sh` remain intact.
 Vanilla TypeScript, CSS and Electron, built by esbuild. No web development server,
-remote assets, rule matching, privileged activation, packaging or charts.
+remote assets, frontend rule matching, packaging or charts. Explicit controls delegate privileged work to the existing terminal bridges.
 
 ## Run
 
@@ -25,8 +25,7 @@ sandbox must work; there is no `--no-sandbox` fallback.
 Default startup creates a private mode-0700 `.workspace/electron-run-*` directory
 and starts only its own read-only observer. Its observer stops when Electron closes
 or the launcher receives Ctrl+C. `--observer` reuses an existing observer and leaves
-it running. `--control` attaches to an existing authenticated Go API and never
-starts, stops, or recovers its controller. Independent controllers/collectors
+it running. `--control` attaches to an existing authenticated Go API. Merely launching or closing Electron never starts, stops, or recovers its controller. Evaluation buttons require an explicit user action. Independent controllers/collectors
 survive client exit. Each launcher owns only its own children and socket. Logs and
 Electron profile/cache directories remain under `.workspace` for inspection.
 
@@ -48,15 +47,14 @@ that window or choosing **Decide later** sends no verdict.
 - `main.ts` owns the Unix sockets indirectly through `backend.ts`. A separate
   serial poll loop serves Activity and control. Losing one does not stop the other.
 - The renderer is sandboxed with context isolation, no Node integration and no
-  webview. `preload.ts` exposes only snapshot/subscription, decision and explicit
-  permission-window operations. Sender WebContents, main frame and local origin
+  webview. `preload.ts` exposes snapshot/subscription, decisions, rule drafts/previews/mutations, bounded preferences, and fixed evaluation/extended-monitoring operations. Sender WebContents, main frame and local origin
   are validated for every invoke; decision payloads have exact allowed keys and
   enum values. No generic filesystem, shell, socket or IPC capability is exposed.
 - Only three local assets are served by the custom `flowgate://app` protocol.
   Production CSP blocks connections, frames, objects, inline scripts and remote
   assets. Navigation, new windows and permissions are denied. Diagnostic names,
   paths, addresses and metadata are inserted using text nodes/textContent.
-- Only authenticated API v1 `list` and `decide` are used. Go peer credentials and
+- Authenticated API v1 `list`, `decide`, `rule-preview`, `rule-save` and `rule` are used. Go peer credentials and
   socket permissions are unchanged. Snapshots are bounded to 4 MiB, validated and
   projected into typed fields before reaching the renderer.
 - Backend generations, deadlines and read-only authorization gate every decision.
@@ -89,7 +87,7 @@ FlowGate uses installed application icons when attribution is available and neut
 scripts/check-electron.sh
 ```
 
-This builds native fixtures, runs seven small synthetic model/transport checks,
+This builds native fixtures, runs focused synthetic model/transport checks,
 then launches actual sandboxed Electron on the existing KDE/Wayland session.
 It uses the read-only observer with real TCP loopback fixtures, and the existing
 `scripts/lab.sh`/`desktop-lab.py` disposable namespace for firewall checks. Its supervisor receives an explicit quit, with an owned process-group fallback
@@ -135,18 +133,128 @@ Evidence (relative to this worktree, all uncommitted runtime artifacts):
 - `.workspace/electron-launch-check.log` and `.workspace/el-launch-4lo5jko4/` —
   production launcher cleanup evidence.
 
+## Rules, evaluation and extended monitoring increment
+
+Based on integration `a48ee2be1a54d0fa2d5304dab668f11e61d3d128`, rebased from
+frontend starting snapshot `8cd82a08bf04ba76a3e3e5b0baf97538068ed7bc`.
+Backend/Qt/collector/shared bridge implementations are unchanged.
+
+### Workflows
+
+- **Rules** lists backend-saved policies. Select **Edit**, **Enable / Disable…**,
+  or **Delete…**. **Create rule…** is available on an attributable pending request
+  in the main window. Go must support durable editing (host-enforcement mode).
+- The modeless editor preserves application/revision/UID/direction and absolute
+  expiry. Resetting expiry to one hour or removing it is explicit; enabling an
+  expired rule leaves it expired. Legacy exact endpoints are converted without
+  broadening their scope. All matching, validation and precedence remain in Go.
+- **Preview** gets the exact backend scope. Any field change invalidates the
+  preview. Save uses a single-use main-process receipt tied to the generation,
+  original version and immutable identity. Failed saves retain fields. A conflict
+  requires **Reload version, keep fields**, review and a fresh preview. Ambiguous
+  acknowledgements lock the editor; inspect the authoritative Rules list before
+  opening another draft. No mutation is automatically replayed after reconnect.
+- Enable/Disable uses versioned preview/save. Delete checks the current listed
+  generation/version before using the existing backend Delete API; that API has
+  **no atomic expected-version parameter**, so deletion cannot promise atomic
+  conflict detection. Changing rules may leave already-approved TCP sessions alive.
+- **Minimize / Resume editor** retains unfinished input while requests are handled.
+  Ctrl+1/2/3 selects Activity/requests/Rules; Ctrl+E opens the selected (or first)
+  rule; Ctrl+P opens the selected request. Escape minimizes the editor.
+- **Start 5-minute evaluation…** explains the effect before opening Konsole and
+  the unchanged `scripts/desktop-control.py`. Choose incoming-only or both
+  directions. Only the terminal handles sudo; Electron remains unprivileged.
+  Readiness must match the authenticated backend generation. Countdown uses backend
+  time. **Stop**, **Cancel authentication**, **Status** and **Recovery…** reuse the
+  same lifecycle. Controller loss is unknown, and only an acknowledged cleanup
+  is described as stopped. Detached controllers retain their original deadline
+  across frontend exit; Activity polling continues independently.
+- **Enable extended monitoring…** is separately opt-in and invokes only the
+  unchanged `scripts/traffic-control.py`. Build its optional helper first with
+  `scripts/build-udp.sh` (existing build prerequisites required). **Stop extended
+  monitoring** invokes fixed `.workspace/flowgate udp-stop`; Go authenticates the
+  privileged collector and its acknowledgement. Neither operation starts/stops
+  firewall evaluation. Closing Electron leaves independently owned collectors alone.
+  Authentication cancellation/refusal is inspected in the held terminal; observer
+  availability remains authoritative. Missing helpers produce a clear error.
+- UDP status/missed-operation indicators come from the observer. Socket totals
+  cover all peers; API-reported UDP bytes remain separate from TCP transport bytes.
+  Partial coverage never becomes fabricated missing-byte estimates. See the updated
+  [UDP](../docs/UDP.md) and [traffic](../docs/TRAFFIC.md) documentation.
+- Drag the information-panel divider or use its left/right arrow keys. Drag Activity
+  column edges to resize. Widths and main-window size persist in the local
+  `.workspace/electron-preferences.json`; Wayland controls screen placement.
+  Editor/detail DOM remains stable during unchanged polling.
+
+### Focused verification
+
+```sh
+scripts/check-electron-workflows.sh
+```
+
+Actual sandboxed Electron on KDE/Wayland, real Go host-session API and disposable
+user/network namespaces; **terminal authentication is simulated**, not real sudo.
+The private harness uses a 120-second deadline to bound tests; production bridge
+arguments remain five minutes. No host enforcement or privileged UDP collection.
+
+Passing real-backend checks: create Allow releases retained UDP to the receiver;
+edit Block prevents a new delivery; Enable/Disable preserve expiry; Delete removes
+policy; stale save rejects without losing fields; invalid preview retains input;
+read-only and disconnected clients cannot mutate; selected both profile reaches
+Go; Stop confirms cleanup while Activity continues; refusal/cancellation preserves
+monitoring; controller loss reports unknown; closing Electron preserves the
+controller and its exact original deadline. Prior Activity/prompt evidence above
+is reused; no UDP kernel or Wine/Proton matrix was rerun.
+
+Nine synthetic unit checks include ambiguous-save single-use receipts, unchanged
+expired-rule expiry/identity, fixed extended-monitoring subprocess arguments,
+failed Stop acknowledgement, mixed-source sums and partial metrics. An explicitly
+labelled **synthetic UDP UI fixture** checks active/partial/disconnected states.
+These are not kernel or enforcement evidence. Existing real UDP evidence remains
+integration `.workspace/udp-verified-o2oghdyo` and docs/UDP.md at a48ee2b.
+
+Artifacts relative to this worktree:
+
+- `.workspace/workflows-final.log`, `.workspace/unit-final.log`.
+- `.workspace/er-JqNtV8/rules.png`, `rule-editor.png`, `editor-narrow.png`,
+  `evaluation.png`: actual namespace-backed Electron UI, normal and 860×600.
+- `.workspace/er-JqNtV8/synthetic-udp-partial.png`: synthetic status only.
+
+### Bounded production memory diagnostic
+
+No debugger, CDP or test runner attached. Production `electron/launch.py` reused a
+real isolated Go observer/controller with approximately 20 sockets. `/proc` PSS
+and private memory were accessible for all eight Electron processes (main,
+renderer, GPU, utility, zygotes and broker); Go observer reported separately.
+CPU is a five-second interval, percent of one CPU. The editor was opened/closed
+using normal keyboard controls. This diagnostic predates the extra UDP toolbar.
+
+| Sample | Electron PSS | Private | Summed RSS | CPU | Go observer PSS / private / RSS / CPU |
+|---|---:|---:|---:|---:|---|
+| Idle | 313.6 MiB | 149.3 MiB | 819.1 MiB | 0.8% | 16.2 / 16.2 / 17.7 MiB / 0.8% |
+| After editor cycle | 379.1 MiB | 207.2 MiB | 896.7 MiB | 1.0% | 17.9 / 17.9 / 19.4 MiB / 0.6% |
+
+Raw samples: `.workspace/mm/idle.json`, `.workspace/mm/after-editor.json`;
+production editor capture `.workspace/mm/editor2.png`. Eight processes remained
+in both samples. The increase in this short sample does not establish a leak;
+there is no history buffer, duplicate backend poller or retained native editor
+window (the editor is bounded DOM). Permission-window open/close **was not measured
+in this debugger-free pass**: desktop focus could not be controlled reliably.
+No extended benchmarking or sandbox/GPU changes were made. The earlier ~963 MiB
+figure was summed RSS with the test debugger, not private memory or PSS.
+
 ## Integration and remaining migration gaps
 
-Branch `frontend/electron`, worktree `.workspace/worktrees/electron`, based on
-current integration HEAD above (not the older supplied c631a70 snapshot). Integrate
-`electron/` plus `scripts/build-electron.sh`, `scripts/check-electron.sh` and
-`scripts/run-electron.sh`. No backend, API, UDP, Qt, existing scripts or dependency
-contracts were changed. No new backend dependency is required.
+Stay on `frontend/electron`, worktree `.workspace/worktrees/electron`. Integrate
+`electron/`, `scripts/build-electron.sh`, `scripts/run-electron.sh`,
+`scripts/check-electron.sh`, and `scripts/check-electron-workflows.sh`. No API or
+shared bridge change is required. Qt remains available. New backend attribution
+work underway on milestone/backend is intentionally not included beyond a48ee2b.
 
-This is a working first frontend, not pixel-identical completion. It has no rule
-editor, Start/Stop authentication workflow, traffic charts, packaging, desktop
-notifications or application artwork. The extra authoritative scope/attribution
-fields make the prompt taller than the reference. The fixed-width dense tree uses
-horizontal scrolling at narrow sizes; the information panel is not yet resizable.
-Qt remains the fuller control frontend during migration. UDP expanded privileged
-verification remains with the backend owner/user-authenticated workflow.
+Remaining gaps: real system sudo authentication and privileged extended-monitoring
+Enable/Stop through Electron are unverified; their frontend boundary/status checks
+are simulated and existing Go kernel evidence is reused. Permission-window PSS
+cycle remains unmeasured. No charts, packaging, artwork or tray notifications.
+The dense dark presentation follows NetLimiter proportions without claiming a
+pixel-identical match; required identity/scope text makes the editor taller and
+scrollable, and endpoint columns scroll horizontally at narrow widths.

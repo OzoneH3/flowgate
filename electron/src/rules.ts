@@ -65,7 +65,11 @@ export class Rules {
         source: s.id ? 'Saved rule' : 'Pending request',
         ...s,
       };
-    if (this.drafts.size >= 64) this.drafts.delete(this.drafts.keys().next().value!);
+    if (this.drafts.size >= 64) {
+      const old = this.drafts.keys().next().value!;
+      this.drafts.delete(old);
+      for (const [key, p] of this.receipts) if (p.draft === old) this.receipts.delete(key);
+    }
     this.drafts.set(token, draft);
     return draft;
   }

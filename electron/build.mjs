@@ -25,7 +25,7 @@ await build({
   outfile: 'dist/renderer.js',
 });
 await build({
-  entryPoints: ['src/model.ts', 'src/backend.ts'],
+  entryPoints: ['src/model.ts', 'src/backend.ts', 'src/extended.ts', 'src/rules.ts'],
   bundle: true,
   platform: 'node',
   format: 'cjs',

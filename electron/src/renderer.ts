@@ -88,9 +88,16 @@ if (promptID) {
     $('requestsTab').setAttribute('aria-selected', String(next === 'requests'));
   };
   setupWorkflows(chooseTab);
-  document.addEventListener('keydown',e=>{
-    if(e.ctrlKey && ['1','2','3'].includes(e.key)){e.preventDefault();chooseTab({'1':'activity','2':'requests','3':'rules'}[e.key]!);}
-    if(e.ctrlKey&&e.key.toLowerCase()==='p'){e.preventDefault();const event=currentEvent();if(event)void window.flowgate.openPrompt(event.id);}
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && ['1', '2', '3'].includes(e.key)) {
+      e.preventDefault();
+      chooseTab({ '1': 'activity', '2': 'requests', '3': 'rules' }[e.key]!);
+    }
+    if (e.ctrlKey && e.key.toLowerCase() === 'p') {
+      e.preventDefault();
+      const event = currentEvent();
+      if (event) void window.flowgate.openPrompt(event.id);
+    }
   });
   $('activityTab').onclick = () => chooseTab('activity');
   $('requestsTab').onclick = () => chooseTab('requests');
