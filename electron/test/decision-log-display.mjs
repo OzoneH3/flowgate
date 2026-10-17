@@ -9,6 +9,10 @@ import { _electron } from 'playwright-core';
 const root = path.resolve(import.meta.dirname, '../..'),
   dir = fs.mkdtempSync(path.join(root, '.workspace/synlog-'));
 let variant = 'unsupported';
+let navigation = [];
+let missingId = '';
+const prefPath = path.join(root, '.workspace/electron-preferences.json');
+const preferences = fs.existsSync(prefPath) ? fs.readFileSync(prefPath) : undefined;
 const base = (readonly) => ({
   version: 1,
   generation: 'synthetic-daemon',
@@ -145,6 +149,37 @@ const page = () => ({
     newest: '',
   },
 });
+// Explicitly synthetic server-side filters and cursor pages for navigation checks.
+function fixturePage(q = {}) {
+  if (variant !== 'navigation') return page();
+  let rows = navigation.filter(
+    (r) =>
+      (!q.application || r.application?.key === q.application) &&
+      (!q.direction || r.flow.direction === q.direction) &&
+      (!q.action || r.decision.action === q.action),
+  );
+  rows = q.after
+    ? rows
+        .filter((r) => BigInt(r.sequence) > BigInt(q.after))
+        .sort((a, b) => Number(a.sequence) - Number(b.sequence))
+    : rows
+        .filter((r) => !q.before || BigInt(r.sequence) < BigInt(q.before))
+        .sort((a, b) => Number(b.sequence) - Number(a.sequence));
+  const loaded = rows.slice(0, q.limit ?? 100);
+  return {
+    ...page(),
+    records: loaded,
+    has_more: rows.length > loaded.length,
+    next_before: !q.after && rows.length > loaded.length ? loaded.at(-1).sequence : '',
+    health: {
+      ...page().health,
+      state: 'ok',
+      dropped: 0,
+      last_error: '',
+      newest: navigation.at(-1)?.sequence || '',
+    },
+  };
+}
 const servers = [];
 let app;
 try {
@@ -157,9 +192,17 @@ try {
           r =
             variant === 'forbidden'
               ? { ...r, error: 'SYNTHETIC denial', error_code: 'forbidden' }
-              : { ...r, decision_log: page() };
+              : { ...r, decision_log: fixturePage(q.decision_query) };
         if (q.operation === 'decision-log-get')
-          r = { ...r, decision_record: page().records.find((x) => x.id === q.decision_id) };
+          r =
+            q.decision_id === missingId
+              ? { ...r, error_code: 'not_found', error: 'Unavailable' }
+              : {
+                  ...r,
+                  decision_record: (variant === 'navigation' ? navigation : page().records).find(
+                    (x) => x.id === q.decision_id,
+                  ),
+                };
         s.end(JSON.stringify(r) + '\n');
       }),
     );
@@ -224,7 +267,10 @@ try {
   assert.doesNotMatch(details, /Delivered/);
   // A missing final in a loaded page must not become evidence of absent history.
   await p.click('#logRows tr[data-id="syn-7"]');
-  await until(async () => /Outcome not loaded/.test(await p.locator('#logDetails').innerText()), 'unloaded outcome');
+  await until(
+    async () => /Outcome not loaded/.test(await p.locator('#logDetails').innerText()),
+    'unloaded outcome',
+  );
   assert.doesNotMatch(await p.locator('#logDetails').innerText(), /outcome was not recorded/i);
   // Decision-time snapshot vs current inventory (edit/delete are not in the lab fixture).
   await p.click('#logRows tr[data-id="syn-9"]');
@@ -249,6 +295,145 @@ try {
   await p.setViewportSize({ width: 860, height: 600 });
   await p.waitForTimeout(500);
   await p.screenshot({ path: path.join(dir, 'degraded-narrow.png') });
+  // Long names, IPv6, paged/filtered history and unavailable outcomes are fixtures.
+  navigation = Array.from({ length: 180 }, (_, i) => {
+    const r = record(i + 1, i % 2 ? 'block' : 'allow', 'user');
+    r.application.name = 'SYNTHETIC long application — full name remains in details';
+    r.flow.family = 'ipv6';
+    r.flow.local = '[2001:db8:abcd:1234:5678:90ab:cdef:1234]:49152';
+    r.flow.remote = '[2001:db8:ffff:abcd:5678:90ab:cdef:9876]:443';
+    return r;
+  });
+  navigation[178].kind = 'pending';
+  navigation[178].request_id = navigation[179].request_id;
+  navigation[177].kind = 'pending'; // no final with this request ID is loaded
+  for (const i of [177, 178]) {
+    navigation[i].decision = {
+      ...navigation[i].decision,
+      action: 'pending',
+      source: 'default_ask',
+      scope: null,
+    };
+    navigation[i].verdict = { state: 'held', detail: '' };
+  }
+  variant = 'navigation';
+  await p.setViewportSize({ width: 1280, height: 760 });
+  await p.click('#logClear');
+  await until(
+    async () => (await p.locator('#logRows tr').count()) === 100,
+    'navigation first page',
+  );
+  await p.click('#logRows tr[data-id="syn-178"]');
+  await until(
+    async () => /Outcome not loaded/.test(await p.locator('#logDetails').innerText()),
+    'missing outcome',
+  );
+  assert.doesNotMatch(await p.locator('#logDetails').innerText(), /outcome was not recorded/);
+  await p.click('#logRows tr[data-id="syn-179"]');
+  await until(
+    async () => await p.getByRole('button', { name: 'Open recorded outcome' }).count(),
+    'known outcome link',
+  );
+  missingId = 'syn-180';
+  await p.getByRole('button', { name: 'Open recorded outcome' }).click();
+  await until(
+    async () => /Outcome unavailable/.test(await p.locator('#logDetails').innerText()),
+    'authoritative not_found',
+  );
+  missingId = '';
+  await p.click('#logRows tr[data-id="syn-180"]');
+  await until(
+    async () => /Copy remote endpoint/.test(await p.locator('#logDetails').innerText()),
+    'endpoint copy',
+  );
+  await p.getByRole('button', { name: 'Copy remote endpoint' }).click();
+  assert.equal(
+    await app.evaluate(({ clipboard }) => clipboard.readText()),
+    navigation[179].flow.remote,
+  );
+  await p.getByRole('button', { name: 'Only this application' }).click();
+  await until(
+    async () => await p.locator('#logApplication').isVisible(),
+    'application filter label',
+  );
+  assert.match(await p.locator('#logApplication').innerText(), /^Application:/);
+  assert.match(await p.locator('#logLive').innerText(), /filtered/);
+  await p.click('#logApplication');
+  await until(async () => !(await p.locator('#logClear').isVisible()), 'remove application filter');
+  await p.click('#logOlder');
+  await until(async () => (await p.locator('#logRows tr').count()) === 180, 'older page');
+  await p.locator('#logRows tr[data-id="syn-150"]').scrollIntoViewIfNeeded();
+  await p.click('#logRows tr[data-id="syn-150"]');
+  const top = () => p.locator('#logScroll').evaluate((e) => e.scrollTop);
+  const beforeTop = await top();
+  await p.waitForTimeout(1300);
+  assert.equal(await top(), beforeTop, 'selection and polling preserve scroll');
+  const anchorY = () =>
+    p.locator('#logRows tr[data-id="syn-150"]').evaluate((e) => e.getBoundingClientRect().top);
+  const beforeY = await anchorY();
+  navigation.push(record(181, 'allow', 'rule'));
+  await until(async () => (await p.locator('#logRows tr').count()) === 181, 'live insertion');
+  assert.equal(await anchorY(), beforeY, 'arrival preserves visible row offset');
+  assert.equal(
+    await p.locator('#logRows tr[aria-selected="true"]').getAttribute('data-id'),
+    'syn-150',
+  );
+  await p.locator('#logTable').focus();
+  await p.keyboard.press('ArrowDown');
+  assert.equal(
+    await p.locator('#logRows tr[aria-selected="true"]').getAttribute('data-id'),
+    'syn-149',
+  );
+  await p.keyboard.press('Enter');
+  assert.equal(await p.evaluate(() => document.activeElement.id), 'logDetails');
+  await p.keyboard.press('Escape');
+  assert.equal(await p.evaluate(() => document.activeElement.id), 'logTable');
+  await p.click('#logLive');
+  navigation.push(record(182, 'block', 'user'));
+  await until(async () => await p.locator('#logNew').isVisible(), 'paused arrival indicator');
+  await p.click('#logNew');
+  await until(
+    async () => (await p.locator('#logRows tr').first().getAttribute('data-id')) === 'syn-182',
+    'jump latest',
+  );
+  assert.equal(await top(), 0);
+  assert.match(await p.locator('#logLive').innerText(), /Paused/, 'jump does not silently resume');
+  await p.selectOption('#logDirection', 'outgoing');
+  await until(
+    async () => /filtered/.test(await p.locator('#logLive').innerText()),
+    'paused filtered state',
+  );
+  await p.click('#logRows tr[data-id="syn-180"]');
+  await until(
+    async () => /2001:db8:ffff/.test(await p.locator('#logDetails').innerText()),
+    'full IPv6 detail',
+  );
+  await p.screenshot({ path: path.join(dir, 'navigation-normal.png') });
+  await p.setViewportSize({ width: 860, height: 600 });
+  await p.waitForTimeout(300);
+  const columns = await p.locator('#logTable th').evaluateAll((xs) =>
+    xs.slice(0, 4).map((e) => ({
+      text: e.textContent,
+      width: e.getBoundingClientRect().width,
+      right: e.getBoundingClientRect().right,
+    })),
+  );
+  assert.deepEqual(
+    columns.map((x) => x.text),
+    ['Time', 'Application', 'Decision', 'Source'],
+  );
+  const edge = await p.locator('#logScroll').evaluate((e) => e.getBoundingClientRect().right - 15);
+  assert(
+    columns.every((x) => x.width >= 70 && x.right <= edge),
+    'essential columns visible at narrow size',
+  );
+  await p.screenshot({ path: path.join(dir, 'navigation-narrow.png') });
+  await p.click('#logClear');
+  await until(async () => !(await p.locator('#logClear').isVisible()), 'clear filters');
+  console.log(
+    'PASS SYNTHETIC navigation: missing/known/unavailable outcomes, copy IPv6, filters, paging, anchor, keyboard, pause/latest; ' +
+      dir,
+  );
   console.log(
     'PASS SYNTHETIC decision-log states (unsupported, forbidden, empty, filtered, degraded+gap, rule edited/deleted since decision) ' +
       dir,
@@ -259,4 +444,6 @@ try {
     await app.close().catch(() => {});
   }
   servers.forEach((s) => s.close());
+  if (preferences) fs.writeFileSync(prefPath, preferences);
+  else fs.rmSync(prefPath, { force: true });
 }

@@ -871,7 +871,7 @@ primary controller when it advertises the capability, otherwise the read-only co
   deciding UID, kernel verdict, recorded application identity and attribution, rule
   snapshot (ID/version/filter). **Allow is a policy decision plus verdict submission;
   delivery is always "Not observed by FlowGate".** A pending record links only to a
-  loaded final record with the same request ID, otherwise "Outcome not loaded" (a page/filter is not the complete history).
+  loaded final record with the same nonempty request ID and daemon generation, otherwise "Outcome not loaded" (a page/filter is not the complete history).
 - The current rule is shown separately (same version / changed since / no longer
   exists, plus "View current rule…" through the versioned editor). Deletion is only
   claimed on a rule-managing connection; elsewhere current state is "not available".
@@ -936,3 +936,39 @@ observed. Monitoring-only daemons invent no decisions. Historical-versus-current
 edited/deleted rule presentation remains synthetic UI coverage; backend snapshot
 immutability is unit-tested. The real isolated fixture covers actual decisions,
 lookup, filtering, paging and restart, not durable rule-editor operations.
+
+### Decision Log navigation refinement (base `32e7fa9`)
+
+- **Clear filters** appears while any server filter is active. The removable
+  **Application:** chip names the selected application. Live/Paused explicitly says
+  **filtered**; pausing does not disable filtering or older-page navigation.
+- **Jump to latest** and the new-record indicator request the newest page with the
+  existing filter. This is deliberate navigation and preserves Live/Paused. Selecting
+  records does not rebuild the table; new rows preserve the first visible row's
+  position even if bounded retention removes rows below it.
+- Arrow keys select records, Enter focuses details, Escape returns to the table.
+  Ordinary scrolling stays native. Copy record remains available; **Copy local
+  endpoint** / **Copy remote endpoint** copy full recorded values through a narrow,
+  validated loaded-record selector (no arbitrary clipboard text or file access).
+- Time, Application, Decision and Source are first and remain visible at 860×600.
+  Protocol/direction/endpoints remain in details when narrow. Pending rows say
+  **Pending record**, explicitly historical and never actionable. A known loaded
+  outcome has an **Open recorded outcome** button. Its authoritative `not_found`
+  response says **Outcome unavailable**, with retention/authorization uncertainty;
+  no relationship lookup or entire-log scan is attempted.
+
+Verification: build/typecheck and 11 focused model tests passed. Sandboxed native
+Wayland presentation/navigation runner `node electron/test/decision-log-display.mjs`
+passed with **labelled synthetic** 180-row paged history, live insert anchoring,
+selection/polling stability, keyboard details, filter removal, paused latest jump,
+missing/known/unavailable outcomes, full IPv6 copying, and edited/deleted current-rule
+comparison. Normal 1280×760 and narrow 860×600, scale factor 1 captures:
+`.workspace/synlog-LgqX8H/navigation-normal.png` and
+`.workspace/synlog-LgqX8H/navigation-narrow.png` (UI worktree).
+
+The real 284-record isolated daemon acceptance from integrated `32e7fa9` is reused:
+no query schema, cursor/store algorithm, polling loop or 1,000-row bound changed.
+The explicit newest-page action reuses the existing filter operation. No host daemon,
+collector, rule or enforcement changes; presentation fixtures are not new firewall
+or receiver evidence. Backend deduplication, capacity-aggregation and durability
+corrections above remain authoritative. No backend contract dependency remains.

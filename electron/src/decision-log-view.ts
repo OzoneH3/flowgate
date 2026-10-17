@@ -1,5 +1,6 @@
 import {
   LOG_SOURCES,
+  loadedOutcome,
   directionLabel,
   healthSummary,
   outcomeLabel,
@@ -59,14 +60,16 @@ export function setupDecisionLog(
   view.innerHTML = `<section class="rules-main log-main"><div class="filterbar">
 <select id="logRange" aria-label="Time range">${RANGES.map(([v, t]) => option(v, t)).join('')}</select>
 <select id="logDirection" aria-label="Direction">${option('', 'Any direction')}${option('incoming', 'Incoming')}${option('outgoing', 'Outgoing')}</select>
-<select id="logAction" aria-label="Outcome">${option('', 'Any outcome')}${option('allow', 'Allowed')}${option('block', 'Blocked')}${option('pending', 'Awaiting decision')}</select>
+<select id="logAction" aria-label="Outcome">${option('', 'Any outcome')}${option('allow', 'Allowed')}${option('block', 'Blocked')}${option('pending', 'Pending records')}</select>
 <select id="logSource" aria-label="Decision source">${option('', 'Any source')}${LOG_SOURCES.map((s) => option(s, sourceLabel(s))).join('')}</select>
 <button id="logApplication" hidden title="Remove application filter"></button>
+<button id="logClear" hidden>Clear filters</button>
 <span class="log-spacer"></span>
+<button id="logLatest">Jump to latest</button>
 <button id="logNew" hidden></button>
 <button id="logLive" aria-pressed="true"></button>
-</div><div class="table-scroll" id="logScroll"><table id="logTable" tabindex="0" aria-label="Firewall decision log"><thead><tr><th>Time</th><th>Application</th><th>Direction</th><th>Protocol</th><th>Local endpoint</th><th>Remote endpoint</th><th>Decision</th><th>Reason / source</th></tr></thead><tbody id="logRows"></tbody></table><p id="logEmpty" class="log-empty" hidden></p><div class="log-more"><button id="logOlder">Load older</button></div></div>
-<div id="logStatus" class="summary"></div></section><aside><h2>Decision details</h2><div id="logDetails" class="log-details"><p class="hint">Select a record.</p></div></aside>`;
+</div><div class="table-scroll" id="logScroll"><table id="logTable" tabindex="0" aria-label="Firewall decision log"><thead><tr><th>Time</th><th>Application</th><th>Decision</th><th>Source</th><th>Direction</th><th>Protocol</th><th>Local endpoint</th><th>Remote endpoint</th></tr></thead><tbody id="logRows"></tbody></table><p id="logEmpty" class="log-empty" hidden></p><div class="log-more"><button id="logOlder">Load older</button></div></div>
+<div id="logStatus" class="summary"></div></section><aside><h2>Decision details</h2><div id="logDetails" class="log-details" tabindex="0" aria-label="Decision details"><p class="hint">Select a record.</p></div></aside>`;
   $('rulesView').after(view);
   const change = () => void applyFilter();
   for (const id of ['logRange', 'logDirection', 'logAction', 'logSource']) $(id).onchange = change;
@@ -74,16 +77,29 @@ export function setupDecisionLog(
     application = undefined;
     change();
   };
+  $('logClear').onclick = () => {
+    application = undefined;
+    for (const id of ['logDirection', 'logAction', 'logSource'])
+      $<HTMLSelectElement>(id).value = '';
+    $<HTMLSelectElement>('logRange').value = 'any';
+    change();
+  };
   $('logLive').onclick = async () => {
     current = await window.flowgate.decisionLogLive(!current?.live);
     render();
   };
-  $('logNew').onclick = async () => {
+  const latest = async () => {
+    if (!current) return;
+    // Explicit user navigation: reuse the same server filter and newest-page operation.
+    // Preserve Live/Paused rather than silently resuming follow.
+    current = await window.flowgate.decisionLogFilter(current.filter);
     newAbove = 0;
+    render();
     $('logScroll').scrollTop = 0;
-    if (!current?.live) current = await window.flowgate.decisionLogLive(true);
     render();
   };
+  $('logLatest').onclick = () => void latest();
+  $('logNew').onclick = () => void latest();
   $('logOlder').onclick = async () => {
     current = await window.flowgate.decisionLogOlder();
     render();
@@ -91,14 +107,25 @@ export function setupDecisionLog(
   $('logScroll').onscroll = () => {
     if ($('logScroll').scrollTop === 0 && newAbove) {
       newAbove = 0;
-      render(true);
+      render();
     }
   };
   $('logRows').onclick = (e) => {
     const tr = (e.target as HTMLElement).closest('tr');
-    if (tr?.dataset.id) select(tr.dataset.id);
+    if (tr?.dataset.id) {
+      select(tr.dataset.id);
+      $('logTable').focus({ preventScroll: true });
+    }
+  };
+  $('logDetails').onkeydown = (e) => {
+    if (e.key === 'Escape') $('logTable').focus({ preventScroll: true });
   };
   $('logTable').onkeydown = (e) => {
+    if (e.key === 'Enter' && selected) {
+      e.preventDefault();
+      $('logDetails').focus({ preventScroll: true });
+      return;
+    }
     if (!['ArrowDown', 'ArrowUp'].includes(e.key) || !current?.records.length) return;
     e.preventDefault();
     const i = current.records.findIndex((r) => r.id === selected);
@@ -134,6 +161,7 @@ async function applyFilter() {
   $('logDetails').replaceChildren(el('p', 'Select a record.', 'hint'));
   current = await window.flowgate.decisionLogFilter(filter());
   render();
+  $('logScroll').scrollTop = 0;
 }
 export async function showDecisionLog(show: boolean) {
   if (visible === show) return;
@@ -178,6 +206,7 @@ const appName = (r: LogRecord) =>
 function row(r: LogRecord) {
   const tr = el('tr');
   tr.dataset.id = r.id;
+  tr.id = 'log-record-' + r.id;
   tr.setAttribute('aria-selected', String(r.id === selected));
   const t = el('td', time(r.time));
   t.title = r.time;
@@ -209,17 +238,22 @@ function row(r: LogRecord) {
     outcomeLabel(r),
     'log-outcome ' + (r.kind === 'pending' ? 'pending' : r.decision?.action || ''),
   );
-  const reason = el('td', reasonSummary(r));
-  reason.title = r.decision?.reason || '';
+  const reason = el('td', sourceLabel(r.decision?.source || ''));
+  reason.title = [reasonSummary(r), r.decision?.reason].filter(Boolean).join(' · ');
+  const endpoint = (value: string | undefined) => {
+    const cell = el('td', value || '—');
+    cell.title = value || '';
+    return cell;
+  };
   tr.append(
     t,
     name,
-    el('td', directionLabel(r.flow?.direction)),
-    el('td', protocolLabel(r)),
-    el('td', r.flow?.local || '—'),
-    el('td', r.flow?.remote || '—'),
     outcome,
     reason,
+    el('td', directionLabel(r.flow?.direction)),
+    el('td', protocolLabel(r)),
+    endpoint(r.flow?.local),
+    endpoint(r.flow?.remote),
   );
   return tr;
 }
@@ -242,11 +276,13 @@ function emptyText(s: DecisionLogState) {
   return 'No firewall decisions recorded yet.' + idle;
 }
 
-function render(force = false) {
+function render() {
   const s = current;
   if (!s) return;
   const live = $('logLive');
-  live.textContent = s.live ? '● Live' : '❚❚ Paused';
+  live.textContent = (s.live ? '● Live' : '❚❚ Paused') + (s.filtered ? ' · filtered' : '');
+  $('logClear').hidden = !s.filtered;
+  $<HTMLButtonElement>('logLatest').disabled = !s.connected || !s.supported || s.busy;
   live.setAttribute('aria-pressed', String(s.live));
   live.title = s.live
     ? 'Following new records. Click to pause.'
@@ -256,26 +292,32 @@ function render(force = false) {
   appButton.textContent = application
     ? `Application: ${application.name || application.key} ✕`
     : '';
-  const sig = JSON.stringify([
-    s.session,
-    s.status,
-    s.records.length,
-    s.records[0]?.id,
-    s.records.at(-1)?.id,
-    selected,
-  ]);
+  appButton.title = application
+    ? `Remove application filter: ${application.name || application.key}`
+    : '';
+  const sig = JSON.stringify([s.session, s.records.map((r) => r.id)]);
   const scroll = $('logScroll');
-  if (sig !== signature || force) {
-    // Keep the inspected position: compensate for rows inserted above.
-    const before = scroll.scrollHeight,
-      top = scroll.scrollTop,
-      firstBefore = signature ? $('logRows').firstElementChild?.getAttribute('data-id') : '';
-    const rows = $('logRows');
-    rows.replaceChildren(...s.records.map(row));
-    if (top > 0 && firstBefore && s.records[0]?.id !== firstBefore) {
-      const index = s.records.findIndex((r) => r.id === firstBefore);
-      if (index > 0) newAbove += index;
-      scroll.scrollTop = top + (scroll.scrollHeight - before);
+  if (sig !== signature) {
+    // Anchor the first visible row, not total height: a bounded page can insert
+    // above and evict below without changing its height. Disable browser anchoring.
+    const top = scroll.scrollTop;
+    const firstBefore = $('logRows').firstElementChild?.getAttribute('data-id');
+    const edge =
+      scroll.getBoundingClientRect().top +
+      $('logTable').querySelector('thead')!.getBoundingClientRect().height;
+    const anchor = Array.from($('logRows').children).find(
+      (r) => r.getBoundingClientRect().bottom > edge,
+    ) as HTMLElement | undefined;
+    const anchorId = anchor?.dataset.id;
+    const anchorTop = anchor?.getBoundingClientRect().top;
+    $('logRows').replaceChildren(...s.records.map(row));
+    if (top > 0 && anchorId && anchorTop !== undefined) {
+      const replacement = document.getElementById('log-record-' + anchorId);
+      if (replacement) scroll.scrollTop = top + replacement.getBoundingClientRect().top - anchorTop;
+      if (firstBefore) {
+        const index = s.records.findIndex((r) => r.id === firstBefore);
+        if (index > 0) newAbove += index;
+      }
     }
     signature = sig;
   }
@@ -290,7 +332,7 @@ function render(force = false) {
     : 'Load older';
   const indicator = $('logNew');
   indicator.hidden = !(newAbove > 0 || (!s.live && s.newAvailable));
-  indicator.textContent = newAbove > 0 ? `↑ ${newAbove} new` : 'New records — show';
+  indicator.textContent = newAbove > 0 ? `↑ ${newAbove} new — latest` : 'New records — latest';
   const health = healthSummary(s.health);
   const status = $('logStatus');
   status.className = 'summary log-health ' + health.level;
@@ -300,7 +342,9 @@ function render(force = false) {
     s.supported ? health.text : '',
     scope,
     `${s.records.length} loaded`,
-    s.status === 'disconnected' ? 'disconnected — loaded records shown' : '',
+    !s.connected || s.status === 'disconnected'
+      ? 'Disconnected — loaded history; reconnect using Control'
+      : '',
     s.notice,
     ...s.limitations,
     'Firewall decisions only; not a complete connection history',
@@ -310,29 +354,36 @@ function render(force = false) {
   status.title = status.textContent;
 }
 
-function select(id: string) {
+function select(id: string, outcome = false) {
   selected = id;
   for (const tr of document.querySelectorAll<HTMLElement>('#logRows tr'))
     tr.setAttribute('aria-selected', String(tr.dataset.id === id));
-  signature = '';
-  void showDetail(id);
+  $('logTable').setAttribute('aria-activedescendant', 'log-record-' + id);
+  void showDetail(id, outcome);
 }
 
 const field = (dl: HTMLElement, label: string, value: string | number | null | undefined) => {
   if (value === undefined || value === null || value === '') return;
   dl.append(el('dt', label), el('dd', String(value)));
 };
-async function showDetail(id: string) {
+async function showDetail(id: string, outcome = false) {
   detailFor = id;
-  const { record: r, note } = await window.flowgate.decisionLogDetail(id);
+  const { record: r, note, unavailable } = await window.flowgate.decisionLogDetail(id);
   if (detailFor !== id) return;
   const box = $('logDetails');
   if (!r) {
-    box.replaceChildren(el('p', note || 'Record unavailable.', 'hint'));
+    box.replaceChildren(
+      el(
+        'p',
+        (outcome && unavailable ? 'Outcome unavailable. ' : '') + (note || 'Record unavailable.'),
+        'hint',
+      ),
+    );
     return;
   }
   const parts: HTMLElement[] = [el('h3', `${outcomeLabel(r)} · ${time(r.time)}`)];
-  if (note) parts.push(el('p', note, 'hint'));
+  if (note)
+    parts.push(el('p', (outcome && unavailable ? 'Outcome unavailable. ' : '') + note, 'hint'));
   const section = (title: string) => {
     parts.push(el('h4', title));
     const dl = el('dl');
@@ -349,20 +400,24 @@ async function showDetail(id: string) {
   } else {
     const d = section('Decision (recorded at decision time)');
     field(d, 'Outcome', outcomeLabel(r));
-    field(d, 'Source', r.decision ? sourceLabel(r.decision.source) : 'Not decided yet');
+    field(
+      d,
+      'Source',
+      r.decision ? sourceLabel(r.decision.source) : 'No decision at this record time',
+    );
     field(d, 'Scope', scopeLabel(r.decision?.scope));
     field(d, 'Reason', r.decision?.reason);
     field(d, 'Decided by UID', r.decision?.decided_by_uid);
     field(
       d,
       'Record type',
-      r.kind === 'pending' ? 'Request awaiting an answer' : 'Final disposition',
+      r.kind === 'pending'
+        ? 'Historical pending request; not an actionable prompt'
+        : 'Final disposition',
     );
     if (r.kind === 'pending') {
       // Link only to a final record actually present; never infer an outcome.
-      const final = current?.records.find(
-        (x) => x.kind === 'final' && x.request_id === r.request_id,
-      );
+      const final = loadedOutcome(r, current?.records || []);
       parts.push(
         el(
           'p',
@@ -372,6 +427,11 @@ async function showDetail(id: string) {
           'hint',
         ),
       );
+      if (final) {
+        const link = el('button', 'Open recorded outcome');
+        link.onclick = () => select(final.id, true);
+        parts.push(link);
+      }
     }
     const v = section('Kernel verdict');
     field(v, 'Verdict', verdictLabel(r.verdict?.state));
@@ -383,6 +443,22 @@ async function showDetail(id: string) {
     field(c, 'Local', r.flow?.local);
     field(c, 'Remote', r.flow?.remote);
     field(c, 'Interface index', r.flow?.interface_index);
+    const endpoints = el('div', '', 'log-actions');
+    for (const side of ['local', 'remote'] as const) {
+      if (!r.flow?.[side]) continue;
+      const copy = el('button', `Copy ${side} endpoint`);
+      copy.title = r.flow[side];
+      copy.onclick = async () => {
+        try {
+          await window.flowgate.decisionLogCopy(r.id, side);
+          copy.textContent = 'Copied';
+        } catch {
+          copy.textContent = 'Copy unavailable';
+        }
+      };
+      endpoints.append(copy);
+    }
+    parts.push(endpoints);
     const a = section('Application at decision time');
     field(a, 'Name', r.application?.name || 'Unidentified');
     field(a, 'Executable', r.application?.executable);
@@ -426,8 +502,12 @@ async function showDetail(id: string) {
   const actions = el('div', '', 'log-actions');
   const copy = el('button', 'Copy record');
   copy.onclick = async () => {
-    await window.flowgate.decisionLogCopy(r.id);
-    copy.textContent = 'Copied';
+    try {
+      await window.flowgate.decisionLogCopy(r.id);
+      copy.textContent = 'Copied';
+    } catch {
+      copy.textContent = 'Copy unavailable';
+    }
     setTimeout(() => (copy.textContent = 'Copy record'), 1500);
   };
   actions.append(copy);

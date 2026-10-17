@@ -209,3 +209,31 @@ test('labels never claim delivery and keep historical scope wording', () => {
   assert.equal(h.level, 'warning');
   assert.match(h.text, /3 records dropped/);
 });
+
+test('pending outcome links only known nonempty identities in the same generation', () => {
+  const pending = record(2, { kind: 'pending', request_id: 'request' });
+  const wrong = record(3, { request_id: 'request', generation: 'restarted' });
+  const final = record(4, { request_id: 'request' });
+  assert.equal(L.loadedOutcome(pending, [wrong]), undefined);
+  assert.equal(L.loadedOutcome(pending, [wrong, final]), final);
+  assert.equal(
+    L.loadedOutcome({ ...pending, request_id: '' }, [record(5, { request_id: '' })]),
+    undefined,
+  );
+});
+
+test('copy bridge permits only a loaded record id and a specific endpoint selector', () => {
+  assert.deepEqual(L.logCopyRequest('r1'), { id: 'r1', endpoint: undefined });
+  assert.deepEqual(L.logCopyRequest({ id: 'r1', endpoint: 'remote' }), {
+    id: 'r1',
+    endpoint: 'remote',
+  });
+  for (const value of [
+    null,
+    {},
+    { id: '' },
+    { id: 'r1', endpoint: 'file' },
+    { id: 'r1', text: 'arbitrary' },
+  ])
+    assert.throws(() => L.logCopyRequest(value));
+});
