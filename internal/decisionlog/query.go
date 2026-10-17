@@ -53,7 +53,7 @@ var Limitations = []string{
 	"Recorded only while FlowGate evaluates new connections (enforcing host or isolated lab); the non-enforcing monitor never records allow/block decisions and Activity rows are never backfilled.",
 	"One record per evaluated initiation: a TCP SYN (retransmissions collapse) or a UDP flow lease; individual datagrams/packets are not logged.",
 	"Allow means a FlowGate policy decision and kernel verdict submission; other firewall chains may still drop and receiver delivery is never observed.",
-	"Records buffered in memory up to durability_window_ms (or a full batch) are lost if the daemon crashes; gap records mark known losses.",
+	"Durability begins at SQLite transaction commit, not enqueue. The nominal flush interval is not a crash-loss bound: queued/in-flight records and volatile counters can be lost without a reconstructible count; persisted gap records cover only known losses reported before a successful commit.",
 	"Unparseable/non-initial queued packets (fragments, extension headers, non-SYN TCP) are dropped without a decision record.",
 	"Retention keeps at most max_records within max_age_days; older records are removed in bounded steps.",
 }

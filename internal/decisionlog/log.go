@@ -40,17 +40,21 @@ type Retention struct {
 	RemovedThrough string `json:"removed_through"`
 }
 type Health struct {
-	LogID              string    `json:"log_id"`
-	State              string    `json:"state"`
-	Recording          bool      `json:"recording"`
-	CountsWithheld     bool      `json:"counts_withheld,omitempty"`
-	Buffered           int       `json:"buffered"`
-	Dropped            uint64    `json:"dropped"`
-	WriteFailures      uint64    `json:"write_failures"`
-	LostInFailures     uint64    `json:"lost_in_failures"`
-	LastError          string    `json:"last_error,omitempty"`
-	LastWrite          time.Time `json:"last_write"`
+	LogID          string    `json:"log_id"`
+	State          string    `json:"state"`
+	Recording      bool      `json:"recording"`
+	CountsWithheld bool      `json:"counts_withheld,omitempty"`
+	Buffered       int       `json:"buffered"`
+	Dropped        uint64    `json:"dropped"`
+	WriteFailures  uint64    `json:"write_failures"`
+	LostInFailures uint64    `json:"lost_in_failures"`
+	LastError      string    `json:"last_error,omitempty"`
+	LastWrite      time.Time `json:"last_write"`
+	// Deprecated: legacy name for nominal flush interval, NOT a loss bound.
 	DurabilityWindowMS int       `json:"durability_window_ms"`
+	FlushIntervalMS    int       `json:"flush_interval_ms"`
+	CrashLossBoundMS   *int      `json:"crash_loss_bound_ms"`
+	DurableAfter       string    `json:"durable_after"`
 	Retention          Retention `json:"retention"`
 	Oldest             string    `json:"oldest"`
 	Newest             string    `json:"newest"`
@@ -207,8 +211,8 @@ func (l *Log) Record(r Record) {
 }
 func (l *Log) count(n uint64) { l.mu.Lock(); l.dropped += n; l.mu.Unlock() }
 
-// Close flushes buffered records (the durability window ends here) and releases
-// the database lock.
+// Close drains queued records and attempts a final commit, then releases the lock.
+// It can wait for storage; failed batches are counted, not retried.
 func (l *Log) Close() error {
 	if l == nil || l.db == nil {
 		return nil
@@ -402,7 +406,7 @@ func pruneTx(tx *sql.Tx, now time.Time) error {
 // Health reports recording state. Ordinary peers get state only: machine-wide
 // loss counts are withheld like UDP miss telemetry.
 func (l *Log) Health(admin bool) Health {
-	h := Health{DurabilityWindowMS: int(FlushInterval / time.Millisecond), Retention: Retention{MaxRecords: MaxRecords, MaxAgeDays: int(MaxAge / (24 * time.Hour))}}
+	h := Health{FlushIntervalMS: int(FlushInterval / time.Millisecond), DurableAfter: "sqlite_transaction_commit", DurabilityWindowMS: int(FlushInterval / time.Millisecond), Retention: Retention{MaxRecords: MaxRecords, MaxAgeDays: int(MaxAge / (24 * time.Hour))}}
 	if l == nil {
 		h.State = "unavailable"
 		return h

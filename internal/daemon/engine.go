@@ -35,6 +35,8 @@ type Event struct {
 	capacity      bool
 	pendingLogged bool
 	finalLogged   bool
+	logAttemptID  string
+	logDeadline   time.Time
 }
 type TrafficManager interface {
 	Status() udpaccount.Status
@@ -44,8 +46,7 @@ type TrafficManager interface {
 type Engine struct {
 	// Decisions records decision-time evidence; nil disables recording.
 	Decisions      *decisionlog.Log
-	capacityLogged map[string]time.Time
-	recentFinal    map[string]time.Time // identical re-decisions after cache lease expiry
+	capacityLogged map[string]*capacityAggregate
 
 	Traffic           TrafficManager
 	TrafficControlUID *uint32 // explicit root configuration, independent of rules/decisions
@@ -87,6 +88,7 @@ func randomID() string {
 	return hex.EncodeToString(b[:])
 }
 func (e *Engine) expire(now time.Time) {
+	e.flushCapacity(now, false)
 	for key, v := range e.events {
 		if !now.Before(v.Deadline) {
 			if v.State == "awaiting-decision" {
@@ -121,6 +123,12 @@ func (e *Engine) Observe(f identity.Flow, token string) Event {
 	}
 	action, rule, conflicts := policy.Evaluate(e.rules, f, a, now)
 	v := Event{ID: randomID(), Flow: f, Attribution: a, FirstSeen: now, Deadline: now.Add(e.Timeout), Rule: rule, Conflicts: conflicts, Token: token, Permission: "once: this TCP connection or UDP tuple for 30 seconds; exact application and remote endpoint"}
+	v.logAttemptID, v.logDeadline = v.ID, v.Deadline
+	// Unsafe ownership is deliberately re-evaluated for every packet. Preserve
+	// only its logging identity within a fixed lease, never its verdict authority.
+	if old := e.events[key]; old != nil && rule == "unsafe-attribution" && old.Rule == rule && old.Attribution.Fingerprint == a.Fingerprint && now.Before(old.logDeadline) {
+		v.logAttemptID, v.logDeadline, v.finalLogged = old.logAttemptID, old.logDeadline, old.finalLogged
+	}
 	v.decided = e.ruleLocked(rule)
 	if a.Principal() != nil {
 		filter := policy.Remembered(f, a)

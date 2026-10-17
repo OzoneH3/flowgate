@@ -51,7 +51,7 @@ def records(**q):
     r = api('decision-log', decision_query=dict(dict(after='0', limit=100), **q))
     assert 'error' not in r, r; return r['decision_log']
 def by_request(rid, n=2):
-    # Records become queryable within the durability window (batched ~1 s).
+    # Records become queryable after a successful batch commit (nominal flush interval ~1 s).
     return wait(lambda: (lambda r: r if len(r) >= n else None)([x for x in records()['records'] if x.get('request_id') == rid]), 5)
 def tcp(port):
     return lablib.client(port)

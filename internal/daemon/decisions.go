@@ -3,7 +3,7 @@ package daemon
 import (
 	"flowgate/internal/decisionlog"
 	"flowgate/internal/policy"
-	"strconv"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -41,6 +41,9 @@ func clip(s string, n int) string {
 // decision time. Unknown values stay absent; direction comes only from the hook.
 func (e *Engine) baseRecord(v *Event, kind string) decisionlog.Record {
 	r := decisionlog.Record{ID: decisionlog.NewRecordID(), Time: e.Now(), Generation: e.Generation, Mode: e.Mode, Kind: kind, RequestID: v.ID, Delivery: "not_observed"}
+	if v.logAttemptID != "" {
+		r.RequestID = v.logAttemptID
+	}
 	family := "ipv6"
 	if v.Flow.Remote.Addr().Is4() {
 		family = "ipv4"
@@ -94,6 +97,7 @@ func (e *Engine) discardPendingLocked(reason string) {
 func (e *Engine) FinalizePending() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	e.flushCapacity(e.Now(), true)
 	for _, v := range e.events {
 		if v.State == "awaiting-decision" {
 			e.recordFinal(v, "block", "shutdown", "", "daemon stopped before a decision; held packets drop", nil, nil, "deferred", "")
@@ -115,17 +119,29 @@ func (e *Engine) RecordPacketOutcome(v Event, verdict string, submitErr error) {
 		detail = clip(submitErr.Error(), 256)
 	}
 	if v.capacity {
-		// Not stored by the engine; collapse repeats per flow for 5 seconds.
-		now, key := e.Now(), v.Flow.Key()+"|"+v.Token
-		if e.capacityLogged == nil || len(e.capacityLogged) > 256 {
-			e.capacityLogged = map[string]time.Time{}
+		// Capacity refusals have no admitted event identity. Count observations,
+		// explicitly not unique connections, in bounded five-second buckets.
+		now := e.Now()
+		e.flushCapacity(now, false)
+		key := v.Flow.Key() + "|" + v.Token + "|" + v.Attribution.Fingerprint + "|" + verdict + "|" + detail
+		if e.capacityLogged == nil {
+			e.capacityLogged = map[string]*capacityAggregate{}
 		}
-		if at, ok := e.capacityLogged[key]; ok && now.Sub(at) < 5*time.Second {
-			return
+		if e.capacityLogged[key] == nil {
+			if len(e.capacityLogged) >= 256 {
+				var oldest string
+				for k, b := range e.capacityLogged {
+					if oldest == "" || b.first.Before(e.capacityLogged[oldest].first) {
+						oldest = k
+					}
+				}
+				e.emitCapacity(oldest)
+			}
+			e.capacityLogged[key] = &capacityAggregate{event: v, first: now, verdict: verdict, detail: detail}
 		}
-		e.capacityLogged[key] = now
-		c := v
-		e.recordFinal(&c, "block", "capacity", "", v.Reason, nil, nil, verdict, detail)
+		bucket := e.capacityLogged[key]
+		bucket.count++
+		bucket.last = now
 		return
 	}
 	stored := e.events[v.Flow.Key()+"|"+v.Token]
@@ -159,21 +175,35 @@ func (e *Engine) RecordPacketOutcome(v Event, verdict string, submitErr error) {
 		} else if strings.HasPrefix(v.Rule, "once:") || target.decided == nil {
 			return // user/edit dispositions are recorded where they are decided
 		}
-		// A retransmitted SYN or continuing UDP flow re-evaluated after its cached
-		// lease expired yields the same decision: record it once per minute.
-		key := v.Flow.Key() + "|" + v.Token + "|" + source + "|" + action
-		if target.decided != nil {
-			key += "|" + target.decided.ID + "|" + strconv.FormatUint(target.decided.Version, 10)
-		}
-		now := e.Now()
-		if e.recentFinal == nil || len(e.recentFinal) > 1024 {
-			e.recentFinal = map[string]time.Time{}
-		}
-		if at, ok := e.recentFinal[key]; ok && now.Sub(at) < time.Minute {
-			target.finalLogged = true
-			return
-		}
-		e.recentFinal[key] = now
+
 		e.recordFinal(target, action, source, "", v.Reason, target.decided, nil, verdict, detail)
 	}
+}
+
+// Aggregates are volatile until flushed by engine maintenance or clean shutdown.
+// Expiry is a bucket boundary, not a durability deadline.
+type capacityAggregate struct {
+	event           Event
+	first, last     time.Time
+	count           uint64
+	verdict, detail string
+}
+
+func (e *Engine) flushCapacity(now time.Time, all bool) {
+	for key, b := range e.capacityLogged {
+		if all || now.Sub(b.first) >= 5*time.Second {
+			e.emitCapacity(key)
+		}
+	}
+}
+func (e *Engine) emitCapacity(key string) {
+	b := e.capacityLogged[key]
+	delete(e.capacityLogged, key)
+	r := e.baseRecord(&b.event, decisionlog.KindFinal)
+	r.RequestID = "" // a bucket is not an individual admitted attempt
+	r.Time = b.last
+	r.Aggregation = &decisionlog.Aggregation{Observations: b.count, First: b.first, Last: b.last, WindowMS: 5000}
+	r.Decision = &decisionlog.Decision{Action: "block", Source: "capacity", Reason: fmt.Sprintf("%s; aggregated %d capacity-refused initiation observations (not unique connections; retransmissions/datagrams may repeat)", b.event.Reason, b.count)}
+	r.Verdict = &decisionlog.Verdict{State: b.verdict, Detail: b.detail}
+	e.Decisions.Record(r)
 }

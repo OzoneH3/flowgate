@@ -26,12 +26,35 @@ ownership → block), `capacity` (pending capacity/prompt rate → block), `user
 request), `rule_edit` (a committed editor rule decided the pending request),
 `shutdown` (daemon stopped while pending). A `pending` record is normally followed
 by a final with the same `request_id`; after a crash (not a clean stop) a pending
-record can remain without a final — present it as "outcome not recorded".
+record can remain without a final. An absent final in a loaded page/filter means
+**Outcome not loaded**, not proof that no final was recorded.
 
-One record per evaluated initiation: a TCP SYN or a UDP flow lease. Retransmitted
-SYNs hit the cached decision; identical re-decisions of the same flow/token after the
-cache lease expires (same source/action/rule/version) collapse to one per minute;
-repeated capacity refusals of a flow collapse per 5 s. Datagrams are not logged.
+Deduplication follows an engine admission attempt (`request_id`), not a minute of
+matching action/rule/endpoint values. A TCP attempt uses namespace, direction,
+protocol, endpoints and initial SYN sequence within the engine lease. Retransmitted
+SYN observations in that lease share a record; different source ports or initial
+sequences are distinct. A fresh evaluation after lease expiry is recorded again,
+even for a reused tuple/sequence and identical policy. Such a late evaluation is
+not proof of a distinct physical TCP connection. UDP is one tuple/ownership lease,
+not one datagram: repeated datagrams inside the lease share its decision; after
+expiry the new evaluation is separate. Unsafe ownership is rechecked on every
+observation; only its logging identity is shared within a fixed lease, never its
+permission authority.
+
+Capacity refusals have no admitted attempt identity. They are explicitly aggregated
+in at most 256 five-second flow/token/ownership/verdict buckets. `aggregation`
+contains `observations`, `first_seen`, `last_seen`, `window_ms`; the recorded reason
+also says this is an aggregate, and `request_id` is absent. Counts are initiation
+observations, **not unique connections** (retransmissions/datagrams may repeat).
+Maintenance or the next observation flushes expired buckets, clean shutdown flushes
+all, and capacity pressure flushes the oldest bucket. Idle buckets can remain
+volatile beyond five seconds; abrupt exit may lose them without a known count.
+
+The fixture's saved capacity Block on port 24701 is expected **admission protection**:
+the pre-existing engine bounds (256 retained events, 20 new evaluations/second) also
+apply when an Allow rule matches. A matching rule is not permission to exceed those
+bounds. That Block is caused by capacity, not by a Block rule. This logging change
+does not change those limits or packet verdicts.
 
 `verdict.state`: `accept_submitted`/`drop_submitted` (kernel verdict call succeeded),
 `submission_failed` (+detail), `held`, `deferred` (user/timeout/edit outcomes apply to
@@ -62,12 +85,28 @@ oversized (>256 MiB) files and a second owner (flock) are refused.
 
 The packet path only does a non-blocking enqueue into a 1024-record buffer; a writer
 goroutine commits batches (≤256 records or every 1 s, `synchronous=FULL`).
-**Durability window: up to ~1 s of records** (or one batch) is lost if the daemon
-crashes; clean shutdown records pending→`shutdown` and flushes. Overflow/oversize/
-write failure never blocks packets or changes policy: they are counted
-(`dropped`, `write_failures`, `lost_in_failures`), health becomes `degraded`, and the
-next successful write inserts a `gap` record. If the file cannot be opened the daemon
-still starts; health reports `unavailable`.
+A record becomes durable only after a successful SQLite transaction commit, subject
+to filesystem/device guarantees. The one-second interval is a **nominal flush
+schedule, not a maximum crash-loss window**. Storage stalls can delay commits
+indefinitely; failed batches are discarded, not retried. Until commit, channel
+contents (1024), the current/in-flight batch (256), and engine capacity aggregates
+are volatile. `buffered` counts only the channel, not all uncommitted observations.
+
+Enqueue performs no storage I/O and never waits for the writer. A full queue drops
+the new record. Overflow/oversize/closed enqueue increments `dropped`; failed write
+transactions increment `write_failures` and their discarded record count increments
+`lost_in_failures`. A later successful transaction persists a `gap` for those known
+losses. These counters are per-process and reset on restart; a committed gap survives.
+A crash may lose uncommitted records **and their loss counters**. Neither a gap nor
+its absence accounts for unknown crash loss; exact missing attempts cannot be
+reconstructed. Clean shutdown drains the queue and attempts a final commit but can
+wait on storage and cannot recover previously failed batches. File-open failure
+leaves enforcement running and reports log `unavailable`.
+
+Health adds `flush_interval_ms:1000`, `durable_after:"sqlite_transaction_commit"`,
+`crash_loss_bound_ms:null`. The v1 `durability_window_ms:1000` field is retained only
+for compatibility and is **deprecated: it means nominal flush interval, not a loss
+bound**.
 
 Retention: at most **20,000 records** and **30 days**, pruned inside each write
 transaction in steps of ≤1000; `retention.removed`/`removed_through` report pruning.
@@ -138,13 +177,13 @@ Focused race/vet on decisionlog, daemon, queue, hostfirewall, cmd/flowgate
 (`.workspace/decision-log-tests.log`): migration/refusals and rule-DB independence,
 restart persistence, age/count retention, stable paging under arrivals, UID privacy/
 administrator visibility, overflow and storage-failure gap reporting, rule snapshot
-across disable+delete, no duplicate for retransmission/lease re-evaluation, user/
+across disable+delete, no duplicate within a lease; distinct re-evaluations after expiry, user/
 timeout/policy-change/identity/shutdown/capacity sources, monitor mode records
 nothing, read-only API errors.
 
 Not covered: host enforcement was not run (no host changes); unparseable or
 non-initial queued packets (fragments, IPv6 extension headers, non-SYN TCP) are
 dropped without a record; held-packet verdicts after a decision are not individually
-logged; receiver delivery is never observed; log-on-crash loses the durability window.
+logged; receiver delivery is never observed; abrupt-crash loss has no time bound or reconstructible exact count.
 The running host monitor is unchanged; a later deliberate rollout creates
 `/var/lib/flowgate/decisions.db` (empty history, recording off in monitor mode).

@@ -293,3 +293,63 @@ func TestQueryValidation(t *testing.T) {
 		t.Fatal("health-only page", p)
 	}
 }
+
+// A storage stall fills a bounded queue; packet-side enqueue still completes.
+// The gate makes this deterministic rather than relying on a slow filesystem.
+func TestSlowFailingWriterNeverWaitsInRecord(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "d.db")
+	l := open(t, path)
+	entered, release := make(chan struct{}), make(chan struct{})
+	calls := 0 // writer goroutine only
+	l.failWrite = func() error {
+		calls++
+		if calls == 1 {
+			close(entered)
+			<-release
+			return errors.New("injected stalled transaction failure")
+		}
+		return nil
+	}
+	for i := 0; i < BatchSize; i++ {
+		l.Record(rec(u(1000), time.Now(), "allow"))
+	}
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("writer did not enter gate")
+	}
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < BufferSize+7; i++ {
+			l.Record(rec(u(1000), time.Now(), "block"))
+		}
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		close(release)
+		t.Fatal("enqueue blocked behind storage")
+	}
+	if h := l.Health(true); h.Buffered != BufferSize || h.Dropped != 7 {
+		close(release)
+		t.Fatal(h)
+	}
+	close(release)
+	if err := l.Close(); err != nil {
+		t.Fatal(err)
+	}
+	l = open(t, path)
+	defer l.Close()
+	p := query(t, l, `{"after":"0","limit":100}`, 0, true)
+	if len(p.Records) == 0 || p.Records[0].Gap == nil || *p.Records[0].Gap.Dropped != BatchSize+7 {
+		t.Fatal("known failed batch and overflow not persisted", p.Records)
+	}
+	h := l.Health(true)
+	if h.Dropped != 0 || h.LostInFailures != 0 || h.WriteFailures != 0 || h.CrashLossBoundMS != nil || h.FlushIntervalMS != 1000 {
+		t.Fatal("volatile health must reset; no crash loss bound", h)
+	}
+	if h.Newest != "1025" {
+		t.Fatal("only gap plus queued records should survive", h.Newest)
+	}
+}

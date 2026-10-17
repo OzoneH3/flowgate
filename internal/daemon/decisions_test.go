@@ -3,6 +3,7 @@ package daemon
 import (
 	"encoding/json"
 	"flowgate/internal/decisionlog"
+	"flowgate/internal/identity"
 	"flowgate/internal/policy"
 	"net/netip"
 	"os"
@@ -57,8 +58,8 @@ func TestRuleDecisionKeepsDecisionTimeSnapshotAcrossEditAndDelete(t *testing.T) 
 		t.Fatal(err)
 	}
 	rs := records(t, e, l, path)
-	if len(rs) != 1 {
-		t.Fatalf("want one final decision, got %d", len(rs))
+	if len(rs) != 2 || rs[0].RequestID == rs[1].RequestID {
+		t.Fatalf("want distinct evaluations after lease expiry, got %d", len(rs))
 	}
 	d := rs[0]
 	if d.Kind != "final" || d.Decision.Source != "rule" || d.Decision.Action != "block" || d.Verdict.State != VerdictDropped || d.Delivery != "not_observed" {
@@ -153,7 +154,7 @@ func TestShutdownFinalizesPendingAndCapacityCollapses(t *testing.T) {
 	}
 	e.FinalizePending()
 	rs := records(t, e, l, path)
-	if len(rs) != 3 || rs[1].Decision.Source != "capacity" || rs[2].Decision.Source != "shutdown" || rs[2].RequestID != v.ID {
+	if len(rs) != 3 || rs[1].Decision.Source != "capacity" || rs[1].Aggregation == nil || rs[1].Aggregation.Observations != 5 || rs[1].RequestID != "" || rs[2].Decision.Source != "shutdown" || rs[2].RequestID != v.ID {
 		for _, r := range rs {
 			t.Log(r.Kind, r.Decision.Source)
 		}
@@ -232,5 +233,124 @@ func TestDecisionLogAPIOnReadOnlyEndpoint(t *testing.T) {
 	}
 	if r, _ := Call(path, Request{Version: 1, Operation: "decision-log-get", DecisionID: "missing"}); r.ErrorCode != "not_found" {
 		t.Fatal(r.ErrorCode)
+	}
+}
+
+// Attempt identity follows the engine's bounded admission lease, not a minute
+// of matching endpoint/action/rule values. UDP is a lease, not per-datagram.
+func TestDecisionLogDistinctAttemptsAndLeaseBoundaries(t *testing.T) {
+	for _, protocol := range []string{"tcp", "udp"} {
+		t.Run(protocol, func(t *testing.T) {
+			e, f, _, now := fixture()
+			*now = time.Now()
+			f.Protocol = protocol
+			path := filepath.Join(t.TempDir(), "decisions.db")
+			l, err := decisionlog.Open(path, e.Generation, "isolated-lab", true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			e.Decisions = l
+			rule := policy.Rule{ID: "r", Version: 1, Schema: 2, Action: "block", Filter: policy.Filter{Application: "app", Revision: "rev", UID: 1000, Direction: "incoming", Protocol: protocol, RemoteAddress: "*"}}
+			if err := e.SetRules([]policy.Rule{rule}); err != nil {
+				t.Fatal(err)
+			}
+			token := "udp"
+			if protocol == "tcp" {
+				token = "1234"
+			}
+			first := e.Observe(f, token)
+			for i := 0; i < 10; i++ {
+				e.RecordPacketOutcome(e.Observe(f, token), VerdictDropped, nil)
+			}
+			other := f
+			other.Remote = netip.AddrPortFrom(f.Remote.Addr(), f.Remote.Port()+1)
+			e.RecordPacketOutcome(e.Observe(other, token), VerdictDropped, nil)
+			want := 3
+			if protocol == "tcp" {
+				e.RecordPacketOutcome(e.Observe(f, "5678"), VerdictDropped, nil)
+				want++
+			}
+			*now = now.Add(e.Timeout + time.Millisecond)
+			next := e.Observe(f, token)
+			if next.ID == first.ID {
+				t.Fatal("new evaluation reused attempt ID")
+			}
+			e.RecordPacketOutcome(next, VerdictDropped, nil)
+			rs := records(t, e, l, path)
+			if len(rs) != want {
+				t.Fatalf("got %d evaluations, want %d", len(rs), want)
+			}
+			ids := map[string]bool{}
+			for _, r := range rs {
+				if ids[r.RequestID] {
+					t.Fatal("duplicate attempt", r.RequestID)
+				}
+				ids[r.RequestID] = true
+			}
+		})
+	}
+}
+
+func TestCapacityProtectionAlsoAppliesToMatchedAllow(t *testing.T) {
+	for _, limit := range []string{"event-capacity", "admission-rate"} {
+		t.Run(limit, func(t *testing.T) {
+			e, f, _, now := fixture()
+			*now = time.Now()
+			r := policy.Rule{ID: "allow", Version: 1, Schema: 2, Action: "allow", Filter: policy.Filter{Application: "app", Revision: "rev", UID: 1000, Direction: "incoming", Protocol: "udp", RemoteAddress: "*"}}
+			if err := e.SetRules([]policy.Rule{r}); err != nil {
+				t.Fatal(err)
+			}
+			n := 20
+			if limit == "event-capacity" {
+				e.Max = 1
+				n = 1
+			}
+			for i := 0; i < n; i++ {
+				g := f
+				g.Remote = netip.AddrPortFrom(f.Remote.Addr(), uint16(10000+i))
+				v := e.Observe(g, "udp")
+				if v.State != "allowed" {
+					t.Fatal(v.State, v.Reason)
+				}
+			}
+			g := f
+			g.Remote = netip.AddrPortFrom(f.Remote.Addr(), 11000)
+			v := e.Observe(g, "udp")
+			if !v.capacity || v.State != "blocked" || v.decided == nil || v.decided.ID != "allow" {
+				t.Fatal("capacity is independent of matching Allow", v)
+			}
+			*now = now.Add(e.Timeout + 6*time.Second)
+			if next := e.Observe(g, "udp"); next.State != "allowed" {
+				t.Fatal("capacity must recover", next.Reason)
+			}
+		})
+	}
+}
+
+func TestUnsafeAttributionLoggingDoesNotReuseAuthority(t *testing.T) {
+	e, f, a, now := fixture()
+	*now = time.Now()
+	a.Application = nil
+	a.Fingerprint = "unknown"
+	path := filepath.Join(t.TempDir(), "d.db")
+	l, err := decisionlog.Open(path, e.Generation, "isolated-lab", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Decisions = l
+	calls := 0
+	e.Resolve = func(_ identity.Flow) identity.Attribution { calls++; return *a }
+	for i := 0; i < 10; i++ {
+		v := e.Observe(f, "udp")
+		if v.State != "blocked" {
+			t.Fatal(v)
+		}
+		e.RecordPacketOutcome(v, VerdictDropped, nil)
+	}
+	*now = now.Add(e.Timeout + time.Millisecond)
+	e.RecordPacketOutcome(e.Observe(f, "udp"), VerdictDropped, nil)
+	rs := records(t, e, l, path)
+	if len(rs) != 2 || calls != 11 {
+		t.Fatalf("records=%d resolver calls=%d", len(rs), calls)
 	}
 }

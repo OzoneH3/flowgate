@@ -78,7 +78,16 @@ type Gap struct {
 	Dropped *uint64 `json:"dropped,omitempty"`
 	Reason  string  `json:"reason"`
 }
+
+// Aggregation describes capacity observations, not a count of unique flows.
+type Aggregation struct {
+	Observations uint64    `json:"observations"`
+	First        time.Time `json:"first_seen"`
+	Last         time.Time `json:"last_seen"`
+	WindowMS     int       `json:"window_ms"`
+}
 type Record struct {
+	Aggregation  *Aggregation `json:"aggregation,omitempty"`
 	ID           string       `json:"id"`
 	Sequence     string       `json:"sequence"`
 	Time         time.Time    `json:"time"`
