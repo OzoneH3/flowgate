@@ -33,6 +33,7 @@ await build({
     'src/rule-status.ts',
     'src/backend.ts',
     'src/extended.ts',
+    'src/daemon-monitoring.ts',
     'src/rules.ts',
     'src/observed-rules.ts',
     'src/notifications.ts',

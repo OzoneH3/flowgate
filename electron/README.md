@@ -737,3 +737,86 @@ One intermediate repeat closed its Electron process unexpectedly; its screenshot
 handler obscured the original failure. The runner now logs the original exception
 before attempting a failure capture. The subsequent complete run passed; no cause
 for that intermediate closure was established.
+
+## Daemon-owned extended UDP monitoring
+
+The `daemon-udp-monitor-v1` capability selects the connected daemon's
+`traffic_monitor` status and fixed `traffic-start` / `traffic-stop` operations.
+Electron reuses its existing Activity/control connections and polling; it launches
+no helper/observer/second daemon and requests no sudo for this capability.
+The compact **UDP · state** Activity button opens the existing Control menu's
+Extended monitoring Enable/Stop controls. Enable is explicit and disabled by default.
+
+`can_view_measurements` and `can_control_traffic` are consumed separately from
+`can_manage_rules` and `can_decide`. A primary administrator needs the backend's
+explicit collector-control grant; writable rule storage alone is insufficient.
+Companion/read-only connections can display authorized data but cannot control it.
+Static `available` is not proof of attachment: starting remains starting until Go
+reports active. Failed/unsupported states retain their actual reason in details.
+TCP Activity, rules and enforcement status remain independent.
+
+Each lifecycle operation freezes daemon and collector generations. No duplicate
+operation is sent while a response is pending. Lost/mismatched responses remain
+uncertain until a **list request begun after the operation finished** returns;
+an earlier in-flight poll cannot unlock another Start. Reconciliation only reads
+status, never retries Start/Stop. Generation changes discard stale responses. After
+recognizing daemon ownership, metadata failure, disconnect or capability loss never
+falls back to the legacy privileged launcher. Invalid optional collector metadata
+disables lifecycle controls without dropping the ordinary TCP/rules API.
+
+Older daemons retain the clearly labelled **legacy monitoring** authentication path.
+The frontend never combines a legacy measurement stream with daemon-owned samples.
+Enable on the consolidated path requires Activity from the same daemon generation.
+No setting restores collection automatically after reconnect. Hiding/quitting Electron
+leaves independent collection running; explicit Stop only stops UDP collection,
+not the daemon or firewall. The tray displays the observer's collector status.
+
+Activity continues using existing UDP socket API-byte fields, counted once across
+peers/shared holders, independently from TCP transport payload. Partial coverage is
+`*` with detail, missing data is not zero, and mixed definitions are not summed.
+The bounded main-process graph store now explicitly breaks UDP traces on collector
+generation/state changes, suppressing the transition sample while retaining historical
+points; TCP samples continue. No new history timer, collector, or baseline calculation
+was introduced. These are application/socket observations, not deduplicated internet
+usage or VPN transport accounting.
+
+Focused reproduction (installed dependencies):
+
+```sh
+npm --prefix electron run build
+node --test electron/test/daemon-monitoring.test.cjs electron/test/history.test.cjs electron/test/extended.test.cjs electron/test/backend.test.cjs
+# Attach only to an externally owned, disposable fixture, initially disabled:
+FLOWGATE_UDP_UI_ENDPOINT=/absolute/project/.workspace/fixture/api/daemon.sock \
+FLOWGATE_UDP_UI_EXPECT=failed node electron/test/daemon-udp-workflow.mjs
+# Explicitly synthetic active rates/lifecycle; no Go daemon/BPF:
+node electron/test/daemon-udp-display.mjs
+# Ordinary launch remains non-enforcing; no collection starts automatically:
+./scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock
+```
+
+The Wayland runner refuses host `/run` endpoints. With `EXPECT=active`, the fixture
+owner must supply actual measured UDP transfers and independently clean up after
+GUI exit; it tests Stop then restart and leaves the collector active for that owner.
+With `EXPECT=failed`, it records the actual attachment error and tests Stop/TCP
+continuity. The runner logs Electron stderr, closure and renderer crashes; no
+unexplained window closure recurred in this increment.
+
+Evidence: 18 focused tests passed (synthetic lifecycle/fault replies and graph samples).
+Actual sandboxed Wayland against the production Go daemon in a disposable user/net
+namespace passed Enable→failed→Stop, TCP availability, read-only denial and daemon
+survival after frontend exit. `.workspace/daemon-udp-ui-JBH2BD/attachment-blocker.json`
+records `bpf_load_failed`: `collector_inspection_denied: cannot exclude an older
+tracing collector: Operation not permitted`. The backend owner's isolated initial-
+user-namespace attempt was refused with `sudo: a password is required`; it was not
+retried. Therefore **no real consolidated UDP measurements or successful kernel
+attachment are claimed**. The backend's prior UDP counter-accuracy evidence is reused,
+not a substitute for this consolidated attachment check.
+
+Actual failure normal/narrow captures and result are in `.workspace/daemon-udp-ui-JBH2BD/`.
+Explicitly **synthetic** active/partial UDP display, restart, Stop and read-only checks
+passed in `.workspace/daemon-udp-ui-xmH6ua/`; screenshots label synthetic data in the
+window. Unit graph tests also prove UDP generation gaps without losing TCP samples.
+Old-capability host fallback was inspected read-only in `.workspace/daemon-udp-evidence/`:
+real Activity/icons, sorting and normal/narrow layout, no host mutation or restart.
+Logs: `.workspace/daemon-udp-{build,tests,wayland,display}.log`. Backend fixture owner
+handles its namespace/helper cleanup; Electron owns neither.

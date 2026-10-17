@@ -84,7 +84,9 @@ export class Background {
       ? `Enforcement: ${c.enforcement?.state || c.mode || 'unknown'}`
       : 'Enforcement: unknown / disconnected';
     const udp = state.observation.connected
-      ? state.observation.activity?.udp?.state || 'unavailable'
+      ? state.observation.trafficMonitor?.state ||
+        state.observation.activity?.udp?.state ||
+        'unavailable'
       : 'unknown / observer disconnected';
     const signature = JSON.stringify([count, enforcement, udp]);
     if (signature === this.menuSignature) return;

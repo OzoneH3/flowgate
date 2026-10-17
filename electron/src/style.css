@@ -943,3 +943,7 @@ td.up { color: #c7daa8; background: #344b20; }
 #ruleEditor .scope-input input[type='checkbox'] { height: 13px; min-height: 13px; }
 #creationScopeFields { padding-bottom: 4px; }
 #ruleEditor #scopeSummary { font-size: 12px; line-height: 1.35; }
+
+/* Compact independent UDP status; lifecycle details stay in the existing Control menu. */
+#extendedBadge { font-size: 11px; min-height: 22px; height: 22px; padding: 1px 5px; background: transparent; border-color: var(--fg-border); flex-shrink: 0; }
+@media(max-width:950px) { #extendedBadge { max-width: 120px; overflow: hidden; text-overflow: ellipsis; } }

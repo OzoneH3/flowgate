@@ -50,6 +50,7 @@ export interface SocketRow {
 }
 export interface Activity {
   udp?: {
+    machine_scope?: boolean;
     state: string;
     reason: string;
     generation: string;
@@ -86,7 +87,32 @@ export interface RequestEvent {
 }
 export type Scope = 'once' | 'application' | 'persistent';
 export type Action = 'allow' | 'block';
+export interface TrafficMonitor {
+  state: 'disabled' | 'starting' | 'active' | 'stopping' | 'failed';
+  available: boolean;
+  reason_code: string;
+  reason: string;
+  generation: string;
+  netns: string;
+  scope: 'machine' | 'self';
+  partial: boolean;
+  missed_operations: number;
+  collected: string;
+}
+export interface ExtendedState {
+  mode: 'daemon' | 'legacy';
+  state: string;
+  busy: boolean;
+  message: string;
+  canEnable: boolean;
+  canStop: boolean;
+  canView: boolean;
+  canControl: boolean;
+  partial: boolean;
+}
 export interface Permissions {
+  can_view_measurements?: boolean;
+  can_control_traffic?: boolean;
   role: 'user' | 'administrator';
   observation_scope: 'self' | 'machine' | 'user-visible';
   policy_scope: 'self' | 'machine';
@@ -94,6 +120,7 @@ export interface Permissions {
   can_decide: boolean;
 }
 export interface Reply {
+  traffic_monitor?: TrafficMonitor;
   policy_view?: PolicyView;
   observed_preview?: ObservedPreview;
   permissions?: Permissions;
@@ -126,8 +153,18 @@ export interface ViewEvent extends RequestEvent {
   attempt?: Attempt;
 }
 export interface ClientState {
-  observation: { connected: boolean; message: string; generation: string; activity?: Activity };
+  observation: {
+    connected: boolean;
+    message: string;
+    generation: string;
+    activity?: Activity;
+    capabilities?: string[];
+    permissions?: Permissions;
+    trafficMonitor?: TrafficMonitor;
+  };
   control: {
+    trafficMonitor?: TrafficMonitor;
+    snapshotStarted?: number;
     connected: boolean;
     message: string;
     generation: string;
@@ -158,7 +195,7 @@ export interface Bridge {
   quit(): Promise<void>;
   onNavigate(fn: (value: { tab: 'requests'; message: string }) => void): () => void;
   extended(action: 'enable' | 'stop'): Promise<void>;
-  extendedState(): Promise<{ busy: boolean; message: string }>;
+  extendedState(): Promise<ExtendedState>;
   ruleDraft(source: RuleSource): Promise<RuleDraft>;
   ruleReconcile(receipt: string): Promise<Attempt>;
   rulePreview(value: RuleEdit): Promise<RulePreview>;
@@ -291,7 +328,39 @@ export function parseReply(raw: unknown): Reply {
       policy_scope: p.policy_scope,
       can_manage_rules: p.can_manage_rules,
       can_decide: p.can_decide,
+      can_view_measurements: p.can_view_measurements === true,
+      can_control_traffic: p.can_control_traffic === true,
     } as Permissions;
+  }
+  if (result.capabilities.includes('daemon-udp-monitor-v1')) {
+    try {
+      const m = object(r.traffic_monitor),
+        p = object(r.permissions);
+      if (
+        !['disabled', 'starting', 'active', 'stopping', 'failed'].includes(string(m.state)) ||
+        !['machine', 'self'].includes(string(m.scope)) ||
+        typeof m.available !== 'boolean' ||
+        typeof m.partial !== 'boolean' ||
+        typeof p.can_control_traffic !== 'boolean' ||
+        typeof p.can_view_measurements !== 'boolean'
+      )
+        throw Error('Invalid daemon collector metadata');
+      result.traffic_monitor = {
+        state: m.state as TrafficMonitor['state'],
+        available: m.available,
+        reason_code: string(m.reason_code),
+        reason: string(m.reason),
+        generation: string(m.generation),
+        netns: string(m.netns),
+        scope: m.scope as TrafficMonitor['scope'],
+        partial: m.partial,
+        missed_operations: number(m.missed_operations),
+        collected: string(m.collected),
+      };
+    } catch {
+      // Fail closed for this optional lifecycle feature without dropping TCP/rules.
+      result.traffic_monitor = undefined;
+    }
   }
   result.backend_mode = string(r.backend_mode);
   if (r.policy_view) result.policy_view = parsePolicyView(r.policy_view);
@@ -339,6 +408,7 @@ export function parseReply(raw: unknown): Reply {
       udp: a.udp
         ? {
             state: string(object(a.udp).state),
+            machine_scope: object(a.udp).machine_scope === true,
             reason: string(object(a.udp).reason),
             generation: string(object(a.udp).generation),
             missed_operations: number(object(a.udp).missed_operations),

@@ -202,7 +202,7 @@ app.whenReady().then(async () => {
     return icons.request(value);
   });
   const rules = new Rules(backend);
-  const extended = new ExtendedMonitoring(path.resolve(__dirname, '../..'));
+  const extended = new ExtendedMonitoring(path.resolve(__dirname, '../..'), backend);
   ipcMain.handle('extended:action', (e, a) => {
     trusted(e);
     return extended.action(a);
