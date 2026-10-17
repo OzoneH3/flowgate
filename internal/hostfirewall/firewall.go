@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flowgate/internal/daemon"
 	"flowgate/internal/identity"
 	"flowgate/internal/monitor"
@@ -189,8 +190,11 @@ func remove(r Record) error {
 	}
 	return nil
 }
-func preflight() error {
-	checks := readiness.Firewall(context.Background(), readiness.Default())
+func preflight() error { return preflightFor("incoming", false) }
+func preflightFor(profile string, administrator bool) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	checks := readiness.FirewallFor(ctx, readiness.Default(), profile, administrator)
 	for _, c := range checks {
 		// Preserve the original queue-census fallback: actual binding remains
 		// authoritative, but other incomplete prerequisite checks refuse startup.
@@ -273,7 +277,7 @@ func RunProfileAuthorized(ctx context.Context, dir, socket, database string, uid
 	} else if er != nil && !os.IsNotExist(er) {
 		return er
 	}
-	if err = preflight(); err != nil {
+	if err = preflightFor(profile, administrator); err != nil {
 		return err
 	}
 	if database == "" {
@@ -284,6 +288,9 @@ func RunProfileAuthorized(ctx context.Context, dir, socket, database string, uid
 	}
 	db, err := store.OpenExclusive(database)
 	if err != nil {
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return readiness.Fail("policy_database_owned", "Another daemon owns the policy database; running monitor is preserved", "Explicitly stop the confirmed monitor generation before evaluation; never use a competing writer or copy its database")
+		}
 		return fmt.Errorf("storage unavailable: %w", err)
 	}
 	defer db.Close()

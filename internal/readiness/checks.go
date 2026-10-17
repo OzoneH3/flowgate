@@ -134,6 +134,10 @@ func ProbeFailure(id string, err error) Check {
 // Firewall is also startup's preflight. Each item is a completed read-only check,
 // never an assertion that NFQUEUE binding/interception will succeed.
 func Firewall(ctx context.Context, env Environment) []Check {
+	return FirewallFor(ctx, env, "incoming", false)
+}
+func FirewallFor(ctx context.Context, env Environment, profile string, administrator bool) []Check {
+	tailscaleLink := false
 	out := []Check{}
 	links, err := env.Run(ctx, "ip", "-j", "-d", "link", "show")
 	if err != nil {
@@ -152,6 +156,10 @@ func Firewall(ctx context.Context, env Environment) []Check {
 			for _, i := range interfaces {
 				switch i.Linkinfo.Kind {
 				case "wireguard", "tun", "xfrm":
+					if i.Ifname == "tailscale0" && i.Linkinfo.Kind == "tun" {
+						tailscaleLink = true
+						continue
+					}
 					c.Status = Blocked
 					c.Code = "firewall_conflict"
 					c.Detail = fmt.Sprintf("VPN/tunnel interface %.80s (%.24s): initial profile requires a separately reviewed integration", i.Ifname, i.Linkinfo.Kind)
@@ -189,8 +197,19 @@ func Firewall(ctx context.Context, env Environment) []Check {
 			c.Code = "instance_or_foreign_table"
 			c.Detail = "FlowGate table already exists; table name alone does not prove ownership"
 			c.Next = "Inspect host-status; use scoped Stop/recovery only for a confirmed owned instance"
+		} else if tailscaleLink {
+			ts := Tailscale(ctx, env, b, profile, administrator)
+			out = append(out, ts)
+			if ts.Status != Ready {
+				c.Status = ts.Status
+				c.Code = ts.Code
+				c.Detail = ts.Detail
+				c.Next = ts.Next
+			} else {
+				c.Detail = "Inspected Tailscale client mark/copy profile; other chains may still deny traffic"
+			}
 		} else {
-			for _, term := range []string{`"mark"`, `"queue"`, `"notrack"`, `"zone"`} {
+			for _, term := range []string{`"mark"`, `"queue"`, `"notrack"`, `"zone"`, `"MARK"`, `"CONNMARK"`, `"NFQUEUE"`, `"CT"`, `"flowtable"`} {
 				if bytes.Contains(b, []byte(term)) {
 					c.Status = Blocked
 					c.Code = "firewall_conflict"

@@ -168,3 +168,17 @@ generation_conflict. Accepted response adds `stopping:true`; shutdown follows
 the response attempt even if the client lost it. Inspect authoritative process/
 endpoint state rather than replaying; never use an unconditional stop.
 This operation is not an enforcement Stop/recovery operation.
+
+## Controller observation companion / coexistence diagnostics
+
+When the host controller supplies Activity, its read-only companion now uses
+mode=host-monitor, backend_mode=host-enforcement; its primary still uses
+host-enforcement with actual health/profile. ReadOnly and permission flags remain
+authoritative. No frontend mutation/activation grant changes. The root monitor's
+existing companion contract is unchanged; monitoring Stop does not stop controllers.
+
+Terminal refusal codes add tailscale_unsupported, tailscale_profile_unsupported,
+administrator_required and policy_database_owned. Doctor's planned profile/admin
+flags only inspect; they neither grant roles nor activate policy. Existing API
+Enforcement.profile remains incoming/both; this profile accepts incoming only.
+See COEXISTENCE.md for the finite configuration and activation boundary.

@@ -120,9 +120,10 @@ second privileged Go policy/observation daemon. No root service, autostart, gene
 local-admin membership, privilege broker installation or new Stop authority is added.
 
 Root observation improves system-service visibility; it does not make Tailscale
-coexistence safe. Current preflight still refuses tunnel interfaces/existing marks.
-Allocation, routing, conntrack and hook-order tests are required before changing
-that refusal. No workaround disables Tailscale or weakens security.
+coexistence safe. The bounded incoming-only Tailscale client profile is now tested; see
+COEXISTENCE.md for exact masked-copy/routing validation, unsupported cases and
+the future user-triggered database handoff. Other tunnels/mark configurations
+still refuse; live encrypted Tailscale interception remains unverified. No workaround disables Tailscale or weakens security.
 
 ## Evidence and limits
 

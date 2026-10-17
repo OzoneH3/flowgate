@@ -1,5 +1,20 @@
 # Continuation handoff
 
+## Tailscale coexistence increment
+
+Started4859df5. Backend/CLI/isolated fixtures/docs only. No frontend integration.
+COEXISTENCE.md is authoritative for exact supported profile, current host findings,
+read-only tailscale-inspect/doctor flags and future explicit monitor->evaluation
+handoff. Root monitor1973082/gen5a559274aa006090cdc4bb5cd8faed47 is preserved;
+no host enforcement/Stop/BPF/network mutation was performed. Incoming+administrator
+profile inspection now passes; outgoing/both and unsafe mark/routing modes refuse.
+Actual TUN/kernel/receiver evidence uses emulated metadata and userspace L3 relay,
+not an actual tailscaled instance. Foreign config changes are not continuously
+revalidated. New policy_database_owned refusal protects the DB; active controller
+companion is host-monitor/backend_mode host-enforcement/read-only for existing UI.
+Reuse .workspace/tailscale-verification.log and tailscale-daemon-tests.log; no UDP
+accounting/Wine/full frontend matrix rerun. UI branch remains separately owned.
+
 ## Authorized live root monitoring setup
 
 Continued 08a4112. Fixed-path `monitor-setup` validates or creates only
@@ -24,14 +39,15 @@ mode, secure path requirements, self projection and writer lock. Existing deskto
 launchers retain the selected-user prototype. UDP remains a separate prototype;
 do not claim one-daemon accounting is complete. User authorized sudo -n absolute
 backend for read-only host checks; doctor/sockets ran, no root host endpoint or
-collection/enforcement activated. Tailscale/marks still refuse activation.
+collection/enforcement activated. At that checkpoint Tailscale/marks refused;
+the current coexistence increment supersedes that blanket refusal.
 
 ## Doctor increment
 
 Started ffa5c45; backend/CLI/check fixtures/docs only. No frontend integration or
 Electron/Qt presentation/auth-script changes. Read DIAGNOSTICS.md for schema 1,
 shared startup checks, reason codes, read-only guarantees, exact privileged
-inspection command and current tailscale0/tun refusal. Existing UDP helper needs
+inspection command and the historical tailscale0/tun refusal. Existing UDP helper needs
 metadata rebuild; no accounting event/byte semantics changed. Reuse kernel/GUI
 evidence; only focused diagnostics/race/vet/namespace checks ran.
 

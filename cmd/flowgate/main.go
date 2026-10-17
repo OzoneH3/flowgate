@@ -36,7 +36,7 @@ func main() {
 	identity.WineBrokerExecutable = os.Getenv("FLOWGATE_WINE_BROKER")
 
 	if len(os.Args) < 2 {
-		fmt.Printf("%s: doctor | runtime-discover | sockets | process PID | attribute | pending | decide | rule-delete | monitor-setup | monitor-stop | serve | observe | serve-lab | host-start | host-status | host-stop | host-recover\n", productName)
+		fmt.Printf("%s: doctor | tailscale-inspect | runtime-discover | sockets | process PID | attribute | pending | decide | rule-delete | monitor-setup | monitor-stop | serve | observe | serve-lab | host-start | host-status | host-stop | host-recover\n", productName)
 		return
 	}
 	switch os.Args[1] {
@@ -54,6 +54,10 @@ func main() {
 			fatal(err)
 		}
 		output(sessions)
+	case "tailscale-inspect":
+		if err := tailscaleInspectCommand(os.Args[2:]); err != nil {
+			fatal(err)
+		}
 	case "doctor":
 		if err := doctorCommand(os.Args[2:]); err != nil {
 			fatal(err)

@@ -1,12 +1,20 @@
 # Authoritative implementation plan
 
+## Complete: bounded Tailscale coexistence increment
+
+Replace only the corroborated1.104.1 iptables-nft client refusal, validate opaque
+writer masks/locations plus routing, keep incoming-only/admin requirement, test
+actual TUN receiver/mark/copy/drop/lifecycle behavior. Preserve active monitor and
+user activation boundary. Live encrypted tailnet/roaming and dynamic configuration
+revalidation remain explicitly unverified; no force flag or automatic exemption.
+
 ## Current architecture direction: one root backend, unprivileged desktop
 
 Non-enforcing native root daemon, explicit administrator grants, privacy projection
 and combined Activity/policy API are implemented. Next: permission-aware frontend
 attachment, integrate accounting into that process, then deliberate service and
-mode-transition design. Preserve ordinary read-only startup. Tailscale coexistence
-needs actual allocation/routing/hook tests; root authority is insufficient.
+mode-transition design. Preserve ordinary read-only startup. Tailscale component allocation/routing/hook tests passed; actual encrypted
+tailnet interception and dynamic rewrites remain unverified.
 See AUTHORIZATION.md. No deployment or live enforcement is part of this task.
 
 ## Complete: practical read-only diagnostics
@@ -15,7 +23,7 @@ Human/JSON doctor shares real firewall preflight, reports bounded visibility,
 helper/BTF metadata, existing authorized status and explicit unchecked activation
 steps. Startup refusal codes are additive; no UI or activation workflow change.
 Focused controlled/namespace tests and one unprivileged host sample recorded.
-Current host profile needs reviewed tailscale0/tun coexistence; do not bypass it.
+The current bounded Tailscale profile is documented above; never bypass refusal.
 
 ## Complete: runnable frontend integration
 

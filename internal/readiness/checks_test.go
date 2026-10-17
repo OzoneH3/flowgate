@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -19,7 +20,7 @@ func fakeEnv() Environment {
 	}, Read: func(string) ([]byte, error) { return nil, os.ErrNotExist }}
 }
 func TestFirewallHealthyAndConflicts(t *testing.T) {
-	for _, tc := range []struct{ name, value, code string }{{"healthy", "", ""}, {"vpn", `[{"ifname":"fixture-vpn","linkinfo":{"info_kind":"wireguard"}}]`, "firewall_conflict"}, {"table", `{"nftables":[{"table":{"name":"flowgate_host"}}]}`, "instance_or_foreign_table"}, {"mark", `{"nftables":[{"rule":{"mark":1}}]}`, "firewall_conflict"}, {"queue", "101 0 0", "queue_occupied"}} {
+	for _, tc := range []struct{ name, value, code string }{{"healthy", "", ""}, {"vpn", `[{"ifname":"fixture-vpn","linkinfo":{"info_kind":"wireguard"}}]`, "firewall_conflict"}, {"table", `{"nftables":[{"table":{"name":"flowgate_host"}}]}`, "instance_or_foreign_table"}, {"mark", `{"nftables":[{"rule":{"mark":1}}]}`, "firewall_conflict"}, {"opaque-mark", `{"nftables":[{"rule":{"expr":[{"xt":{"name":"MARK","type":"target"}}]}}]}`, "firewall_conflict"}, {"opaque-copy", `{"nftables":[{"rule":{"expr":[{"xt":{"name":"CONNMARK","type":"target"}}]}}]}`, "firewall_conflict"}, {"queue", "101 0 0", "queue_occupied"}} {
 		t.Run(tc.name, func(t *testing.T) {
 			env := fakeEnv()
 			original := env.Run
@@ -27,7 +28,7 @@ func TestFirewallHealthyAndConflicts(t *testing.T) {
 				if tc.name == "vpn" && name == "ip" {
 					return []byte(tc.value), nil
 				}
-				if (tc.name == "table" || tc.name == "mark") && name == "nft" {
+				if (tc.name == "table" || tc.name == "mark" || strings.HasPrefix(tc.name, "opaque")) && name == "nft" {
 					return []byte(tc.value), nil
 				}
 				return original(ctx, name, args...)

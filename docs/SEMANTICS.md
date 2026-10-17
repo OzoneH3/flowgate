@@ -1,5 +1,17 @@
 # Milestone semantics and safety boundaries
 
+## Bounded Tailscale coexistence
+
+Incoming-only control can coexist with the exact inspected1.104.1 iptables-nft
+client profile; see COEXISTENCE.md. No automatic transport exception or root UID
+Allow is introduced. Transport and inner applications use separate current
+identities/rules; explicit administrator authority permits decisions for service
+UIDs without changing the rule's principal. Combined outgoing mode still refuses
+this profile. Mark-copy/routing checks are shared by doctor and startup; they do
+not continuously attest foreign manager changes. Initiation/expiry/precedence
+and recovery ownership contracts are unchanged.
+
+
 ## Actor permissions and root monitoring
 
 An explicit root-configured administrator may manage supported application

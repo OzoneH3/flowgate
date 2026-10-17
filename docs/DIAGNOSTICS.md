@@ -1,5 +1,20 @@
 # Read-only doctor and startup troubleshooting
 
+## Current Tailscale inspection
+
+`flowgate tailscale-inspect` performs fixed bounded read-only version/preferences,
+chain/mark-export/routing probes and a conntrack mark histogram, omitting peer
+identities and redacting address selectors. No arbitrary command runner is exposed.
+`doctor --json --profile incoming --administrator --uid 1000` shares the actual
+startup profile checks. --administrator describes a planned privileged grant;
+it does not grant API authority. Incoming Tailscale profile compatibility passes
+on the current sample; `both` refuses tailscale_profile_unsupported and missing
+administrative grant refuses administrator_required. Other unsupported masks,
+hooks, routes or builds report tailscale_unsupported. A running writer still
+blocks actual startup with policy_database_owned. See COEXISTENCE.md for exact
+scope and live-host gap; the older blanket-refusal sample below is historical.
+
+
 ## Build and inspect
 
 From the repository root:
@@ -147,8 +162,8 @@ One actual unprivileged host JSON sample: `.workspace/doctor-host.json`, x86-64
 CachyOS kernel 7.2.9-2-cachyos, UID 1000, 24 ms total. Basic visibility worked with
 88 sockets / 10 visible tasks / 353 inaccessible process directories (partial).
 `ip`, `nft`, running backend libraries, optional helper metadata/library names and
-required BTF names were observed. **The current profile refuses `tailscale0` (tun)**;
-reviewed Tailscale coexistence is needed, not a security-setting workaround. nft
+required BTF names were observed. At that earlier checkpoint tailscale0 was refused; the current bounded
+profile described above supersedes the blanket refusal. nft
 rules/queue and private controller record checks were not completed under this
 UID; selected API sockets were absent. `unprivileged_bpf_disabled=2`; no BPF load
 permission or attachment is claimed. No privileged host diagnostic, collector or

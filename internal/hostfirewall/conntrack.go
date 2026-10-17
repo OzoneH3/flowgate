@@ -128,3 +128,16 @@ func clearMarks() error {
 	}
 	return nil
 }
+
+// MarkCensus is read-only and deliberately omits endpoints/peer identities.
+func MarkCensus() (map[string]int, error) {
+	fs, err := flows()
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]int{}
+	for _, f := range fs {
+		out[fmt.Sprintf("0x%08x", f.Mark)]++
+	}
+	return out, nil
+}

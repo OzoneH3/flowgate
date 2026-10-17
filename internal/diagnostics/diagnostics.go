@@ -22,6 +22,8 @@ import (
 )
 
 type Options struct {
+	Profile                                   string
+	Administrator                             bool
 	Helper, State, Controller, Collector, BTF string
 	UID                                       uint32
 }
@@ -42,7 +44,7 @@ type Report struct {
 func Defaults() Options {
 	exe, _ := os.Executable()
 	uid := uint32(os.Getuid())
-	return Options{Helper: filepath.Join(filepath.Dir(exe), "udp-collector"), State: "/run/flowgate", Controller: "/run/flowgate-api/control.sock", Collector: fmt.Sprintf("/run/flowgate-traffic/%d/api.sock", uid), BTF: "/sys/kernel/btf/vmlinux", UID: uid}
+	return Options{Profile: "incoming", Helper: filepath.Join(filepath.Dir(exe), "udp-collector"), State: "/run/flowgate", Controller: "/run/flowgate-api/control.sock", Collector: fmt.Sprintf("/run/flowgate-traffic/%d/api.sock", uid), BTF: "/sys/kernel/btf/vmlinux", UID: uid}
 }
 func Collect(ctx context.Context, o Options) Report {
 	at := time.Now()
@@ -88,7 +90,7 @@ func Collect(ctx context.Context, o Options) Report {
 		visibility.Detail += "; partial visibility (unknown owners are not guessed)"
 	}
 	add(visibility)
-	r.Checks = append(r.Checks, readiness.Firewall(ctx, readiness.Default())...)
+	r.Checks = append(r.Checks, readiness.FirewallFor(ctx, readiness.Default(), o.Profile, o.Administrator)...)
 	modules, _ := readiness.Read("/proc/modules")
 	for _, m := range []string{"nf_tables", "nf_conntrack", "nfnetlink_queue"} {
 		c := readiness.Check{ID: "kernel." + m, Status: readiness.Unchecked, Code: "module_not_observed", Detail: m + " not observed as loaded; may be built in, absent or loadable (not tested)"}

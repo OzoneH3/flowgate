@@ -1,5 +1,17 @@
 # Explicit host-control evaluation
 
+## Current: tested Tailscale incoming-only coexistence profile
+
+[COEXISTENCE.md](COEXISTENCE.md) defines the supported1.104.1 iptables-nft client
+profile, actual masks/routing, isolated TUN receiver evidence and exact future
+monitor/database handoff. Planned incoming evaluation with explicit administrator
+now passes host profile inspection; both/outgoing and unsupported configurations
+still refuse. No live evaluation was activated; root monitor remains running.
+There is no automatic transport exemption: tailscaled UID0 is an independently
+controlled application. The active controller's read-only companion now exposes
+host-monitor mode plus backend_mode host-enforcement for shared Activity/control.
+
+
 ## Production authorization direction
 
 Root backend and unprivileged desktop are the intended architecture. Selected-UID
@@ -8,14 +20,16 @@ Explicit root-configured `--administrator` on host-start/host-session grants the
 selected peer administration of supported service identities. No existing launcher
 adds this flag. A separate non-enforcing root `serve` mode is documented in
 AUTHORIZATION.md; native Activity is now also supplied by the controller API.
-Tailscale/mark refusal checks are unchanged, irrespective of administrative role.
+The bounded Tailscale profile requires an explicit administrator grant; unknown
+mark/routing configurations still refuse. See COEXISTENCE.md.
 
 
 Before any explicit activation, use `.workspace/flowgate doctor` (or `--json`).
 It shares read-only preflight inspection but never binds queues, installs rules
 or starts a controller. See [DIAGNOSTICS.md](DIAGNOSTICS.md) for status meanings,
 startup reason codes and the optional privileged read-only command. The sampled
-host currently refuses tailscale0/tun; no bypass or live activation was tested.
+host now passes the bounded incoming/admin profile checks; live activation was
+not performed.
 
 ## Optional outgoing profile
 
@@ -153,9 +167,11 @@ recovery: no software watchdog can survive its own destruction.
   Marks use masked OR/update, preserving all other bits. NFQUEUE Accept resumes at
   the next base hook; admission marking intentionally resides there.
 - Preflight reads nft rules, interfaces and available queue/legacy-table diagnostics.
-  It refuses an existing FlowGate table, existing nft mark/queue/notrack/zone usage,
+  It refuses an existing FlowGate table, unsupported nft mark/queue/notrack/zone usage
+  (only the exact inspected Tailscale mark/copy profile is excepted),
   reserved bits already present, detectable legacy iptables tables, and detected
-  WireGuard/TUN/XFRM interfaces. This is deliberately conservative; many VPN/firewall
+  WireGuard/TUN/XFRM interfaces except the corroborated incoming-only Tailscale
+  client profile described in COEXISTENCE.md. This is deliberately conservative; many VPN/firewall
   setups therefore cannot activate this initial profile. Permission-limited queue
   census is reported, with exclusive kernel queue binding required before mutation.
   It does not prove compatibility with every manager, route policy, BPF hook or

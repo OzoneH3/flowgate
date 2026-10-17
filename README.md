@@ -1,5 +1,15 @@
 # FlowGate
 
+## Tailscale evaluation compatibility
+
+A bounded incoming-only1.104.1 iptables-nft client profile now passes the sampled
+host's read-only checks. No live enforcement was enabled. See
+[COEXISTENCE.md](docs/COEXISTENCE.md) for masks, limits, isolated receiver evidence
+and the explicit five-minute evaluation procedure with monitor/database handoff.
+Read-only inspection: `sudo -n "$PWD/.workspace/flowgate" tailscale-inspect`.
+Combined incoming/outgoing Tailscale evaluation remains unsupported.
+
+
 ## Use the authorized root Activity monitor
 
 ```
@@ -38,7 +48,8 @@ go build -o .workspace/flowgate ./cmd/flowgate
 Doctor is read-only, never requests sudo or starts enforcement/collection.
 “Ready” applies only to the named completed check; “Not checked” includes privilege
 and intentionally unattempted queue/BPF attachment. On the sampled host the current
-profile refuses `tailscale0` (tun); retain monitoring until coexistence is reviewed.
+profile now supports the bounded incoming-only Tailscale client case described in
+COEXISTENCE.md; other configurations still refuse.
 See [diagnostics and actionable startup errors](docs/DIAGNOSTICS.md) for the exact
 optional user-run privileged inspection command and existing Stop/recovery paths.
 

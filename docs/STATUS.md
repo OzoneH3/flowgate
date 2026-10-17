@@ -1,5 +1,25 @@
 # Current status
 
+## Current: bounded Tailscale coexistence path tested
+
+Actual root read-only evidence identifies CLI/daemon1.104.1, iptables-nft,
+masked packet/conntrack copies0x00ff0000 and routing5210/5230/5250/5270. No exit
+node/subnet mode. Host profile checks now pass for incoming-only + explicit
+administrator; combined/outgoing, other builds/backends and unsafe mark/routing
+variants refuse. No port/interface/root-UID transport exemption is added.
+
+Focused parser/race/vet and real kernel TUN/NFQUEUE receiver tests passed for
+IPv4/IPv6 TCP/one-shot UDP decisions, replies, mark/routing preservation, foreign
+Drop, exclusive DB handoff/new generation and owned Stop/recovery. Tailscale
+metadata/transport is emulated: no live tailnet interception or encrypted traffic
+validation. Foreign configuration is checked at preflight, not continuously.
+See COEXISTENCE.md and .workspace/tailscale-verification.log.
+
+Root monitor1973082/generation5a559274aa006090cdc4bb5cd8faed47 remains running,
+non-enforcing; its DB was not opened by a competing host writer. No host BPF,
+firewall/Tailscale/routes/services changed. The exact future user-triggered
+five-minute procedure and monitor handoff are in COEXISTENCE.md, not executed.
+
 ## Current: authorized root monitor running
 
 Root native monitor was actually started, PID **1973082**, socket
@@ -30,7 +50,8 @@ Focused role/privacy/real Unix peer/race/vet, isolated stored-service-rule check
 and a controller conditional-delete receiver smoke
 passed; read AUTHORIZATION.md for evidence and the delegated-host-UID test limit.
 Authorized root host diagnostics observed 95 sockets, 0 inaccessible process dirs;
-Tailscale and existing mark use still block evaluation. No host enforcement, BPF
+That earlier checkpoint refused Tailscale/marks; the bounded profile above
+now passes planned incoming/admin inspection. No host enforcement, BPF
 attachment, runtime-directory creation or service installation. Machine-wide UDP
 and frontend recognition of the new mode/permissions remain future integration;
 existing launchers and the separate selected-UID UDP prototype remain available.
@@ -47,7 +68,8 @@ a rebuild via `scripts/build-udp.sh`; counter/BPF event semantics are unchanged.
 Focused Go race/vet and namespace checks passed without doctor changing rules,
 interfaces or fixture state. One UID-1000 host run took 24 ms: visibility partial,
 UDP ELF/BTF prerequisites observed, privileged nft/private-state checks incomplete.
-**Current profile blocks on `tailscale0` (tun)** and needs reviewed coexistence.
+This older diagnostic sample refused tailscale0/marks; the current bounded
+coexistence profile above supersedes that blanket refusal.
 No privileged host collection/diagnostic or enforcement/configuration changes.
 See [DIAGNOSTICS.md](DIAGNOSTICS.md) for commands, bounds and exact evidence.
 

@@ -124,12 +124,12 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 					r := Response{Capabilities: []string{ConditionalDeleteCapability, "explicit-administrator-v1"}, Version: 1, Generation: e.Generation, ReadOnly: readonly, Mode: e.Mode, ServerTime: time.Now(), PeerUID: cred.Uid}
 					// The companion exposes the existing read-only observation contract while
 					// retaining the actual daemon mode for permission-aware clients.
-					if e.Mode == "daemon-monitor" {
+					if e.Mode == "daemon-monitor" || (e.Mode == "host-enforcement" && e.Activity != nil) {
 						r.BackendMode = e.Mode
 						if readonly {
 							r.Mode = "host-monitor"
 						}
-						if e.StopMonitoring != nil {
+						if e.Mode == "daemon-monitor" && e.StopMonitoring != nil {
 							r.Capabilities = append(r.Capabilities, "monitor-stop-v1")
 						}
 					}

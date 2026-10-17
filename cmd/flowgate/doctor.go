@@ -12,6 +12,8 @@ import (
 func doctorCommand(args []string) error {
 	o := diagnostics.Defaults()
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	fs.StringVar(&o.Profile, "profile", o.Profile, "planned evaluation profile: incoming or both; no activation")
+	fs.BoolVar(&o.Administrator, "administrator", false, "inspect planned explicit selected-peer administrator configuration; does not grant API permission")
 	jsonOutput := fs.Bool("json", false, "versioned JSON check output")
 	fs.StringVar(&o.Helper, "udp-helper", o.Helper, "explicitly selected optional helper (inspected, never executed)")
 	fs.StringVar(&o.State, "state", o.State, "existing controller state directory; never created")
@@ -20,6 +22,9 @@ func doctorCommand(args []string) error {
 	uid := fs.Uint("uid", uint(o.UID), "selected GUI UID for collector path; does not change peer authorization")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if o.Profile != "incoming" && o.Profile != "both" {
+		return fmt.Errorf("profile must be incoming or both")
 	}
 	if uint64(*uid) > uint64(^uint32(0)) {
 		return fmt.Errorf("invalid selected UID")
