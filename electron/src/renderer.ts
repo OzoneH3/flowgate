@@ -12,6 +12,7 @@ import {
   type Metric,
 } from './model';
 const root = document.querySelector<HTMLDivElement>('#app')!;
+const promptGeneration = new URL(location.href).searchParams.get('generation');
 const promptID = new URL(location.href).searchParams.get('request');
 let state: ClientState;
 let selected = '';
@@ -88,6 +89,10 @@ if (promptID) {
     $('requestsTab').setAttribute('aria-selected', String(next === 'requests'));
   };
   setupWorkflows(chooseTab);
+  window.flowgate.onNavigate((v) => {
+    chooseTab('requests');
+    message(v.message);
+  });
   document.addEventListener('keydown', (e) => {
     if (e.ctrlKey && ['1', '2', '3'].includes(e.key)) {
       e.preventDefault();
@@ -334,6 +339,7 @@ function eventName(e: ViewEvent) {
   );
 }
 function currentEvent() {
+  if (promptID && promptGeneration !== state?.control.generation) return undefined;
   return state?.control.events.find((e) => e.id === selectedRequest);
 }
 function actionable(e: ViewEvent | undefined) {
@@ -564,3 +570,7 @@ void window.flowgate
   .catch((e) => {
     root.textContent = 'FlowGate could not initialize: ' + String(e);
   });
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) void window.flowgate.snapshot().then(consume);
+});

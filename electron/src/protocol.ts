@@ -126,6 +126,9 @@ export interface Decision {
 }
 export interface Bridge {
   snapshot(): Promise<ClientState>;
+  backgroundStatus(): Promise<{ trayAvailable: boolean; notifications: string }>;
+  quit(): Promise<void>;
+  onNavigate(fn: (value: { tab: 'requests'; message: string }) => void): () => void;
   extended(action: 'enable' | 'stop'): Promise<void>;
   extendedState(): Promise<{ busy: boolean; message: string }>;
   ruleDraft(source: { id?: string; event?: string }): Promise<RuleDraft>;
@@ -372,6 +375,7 @@ export interface EvaluationState {
   starting: boolean;
 }
 export interface Preferences {
+  keepInTray?: boolean;
   sidebar?: number;
   columns?: Record<string, number>;
 }

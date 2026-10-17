@@ -1,5 +1,7 @@
 import { app, BrowserWindow, ipcMain, protocol, session, type IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
+import { Background } from './background';
+import type { RequestRef } from './notifications';
 import fs from 'node:fs';
 import { ExtendedMonitoring } from './extended';
 import { Rules } from './rules';
@@ -61,6 +63,37 @@ let prompt: BrowserWindow | undefined;
 const windows = new Set<BrowserWindow>();
 let backend: Backend;
 let evaluation: Evaluation;
+let background: Background;
+let quitting = false;
+function showMain(list = false, message = '') {
+  if (main.isDestroyed()) return;
+  main.show();
+  main.restore();
+  main.focus();
+  main.webContents.send('state', backend.view());
+  if (list) main.webContents.send('navigate', { tab: 'requests', message });
+}
+async function review(ref: RequestRef) {
+  await backend.pollControl();
+  const c = backend.view().control;
+  const e = c.events.find((e) => e.id === ref.id);
+  if (
+    !c.connected ||
+    c.generation !== ref.generation ||
+    !e ||
+    e.state !== 'awaiting-decision' ||
+    e.remainingMs <= 0 ||
+    e.attempt
+  ) {
+    showMain(
+      true,
+      'Request no longer pending or controller unavailable. Review the current list; no decision was sent.',
+    );
+    return;
+  }
+  if (prompt && !prompt.isDestroyed()) prompt.close();
+  prompt = windowFor(true, ref.id, ref.generation);
+}
 function trusted(e: IpcMainInvokeEvent) {
   if (
     ![...windows].some((w) => !w.isDestroyed() && w.webContents === e.sender) ||
@@ -71,7 +104,7 @@ function trusted(e: IpcMainInvokeEvent) {
   if (u.protocol !== 'flowgate:' || u.host !== 'app' || u.pathname !== '/index.html')
     throw Error('Unexpected IPC origin');
 }
-function windowFor(isPrompt = false, id = '') {
+function windowFor(isPrompt = false, id = '', generation = '') {
   const w = new BrowserWindow({
     title: isPrompt ? 'FlowGate — connection permission' : 'FlowGate',
     width: isPrompt ? 620 : width,
@@ -99,8 +132,16 @@ function windowFor(isPrompt = false, id = '') {
   w.webContents.on('will-attach-webview', (e) => e.preventDefault());
   w.on('closed', () => windows.delete(w));
   w.once('ready-to-show', () => w.show());
+  const refresh = () => {
+    if (backend && !w.isDestroyed()) w.webContents.send('state', backend.view());
+  };
+  w.on('show', refresh);
+  w.on('restore', refresh);
   void w.loadURL(
-    'flowgate://app/index.html' + (isPrompt ? '?request=' + encodeURIComponent(id) : ''),
+    'flowgate://app/index.html' +
+      (isPrompt
+        ? '?request=' + encodeURIComponent(id) + '&generation=' + encodeURIComponent(generation)
+        : ''),
   );
   return w;
 }
@@ -130,7 +171,9 @@ app.whenReady().then(async () => {
     callback({ cancel: !details.url.startsWith('flowgate://app/') }),
   );
   backend = new Backend(observer!, controller, (state) => {
-    for (const w of windows) if (!w.isDestroyed()) w.webContents.send('state', state);
+    for (const w of windows)
+      if (!w.isDestroyed() && w.isVisible() && !w.isMinimized()) w.webContents.send('state', state);
+    background?.update(state);
   });
   const rules = new Rules(backend);
   const extended = new ExtendedMonitoring(path.resolve(__dirname, '../..'));
@@ -165,13 +208,21 @@ app.whenReady().then(async () => {
     trusted(e);
     return evaluation.state;
   });
+  ipcMain.handle('background:status', (e) => {
+    trusted(e);
+    return background.status();
+  });
+  ipcMain.handle('app:quit', (e) => {
+    trusted(e);
+    return background.requestQuit();
+  });
   ipcMain.handle('preferences', (e, v) => {
     trusted(e);
     if (v !== undefined) {
       if (
         !v ||
         typeof v !== 'object' ||
-        Object.keys(v).some((k) => !['sidebar', 'columns'].includes(k))
+        Object.keys(v).some((k) => !['sidebar', 'columns', 'keepInTray'].includes(k))
       )
         throw Error('Invalid preferences');
       if (
@@ -179,6 +230,8 @@ app.whenReady().then(async () => {
         (!Number.isInteger(v.sidebar) || v.sidebar < 240 || v.sidebar > 600)
       )
         throw Error('Invalid sidebar');
+      if (v.keepInTray !== undefined && typeof v.keepInTray !== 'boolean')
+        throw Error('Invalid tray preference');
       const columns: Record<string, number> = {};
       if (v.columns) {
         if (typeof v.columns !== 'object' || Object.keys(v.columns).length > 16)
@@ -206,7 +259,12 @@ app.whenReady().then(async () => {
           columns[k] = Number(n);
         }
       }
-      saved.ui = { sidebar: v.sidebar, columns };
+      saved.ui = {
+        ...saved.ui,
+        sidebar: v.sidebar,
+        columns,
+        ...(v.keepInTray !== undefined ? { keepInTray: v.keepInTray } : {}),
+      };
       persist();
     }
     return saved.ui || {};
@@ -228,7 +286,7 @@ app.whenReady().then(async () => {
     )
       throw Error('Unknown request');
     if (prompt && !prompt.isDestroyed()) prompt.close();
-    prompt = windowFor(true, id);
+    prompt = windowFor(true, id, backend.view().control.generation);
   });
   ipcMain.handle('prompt:dismiss', (e) => {
     trusted(e);
@@ -241,10 +299,28 @@ app.whenReady().then(async () => {
     saved.height = h;
     persist();
   });
+  background = new Background(
+    main,
+    windows,
+    () => backend.view(),
+    showMain,
+    (ref) => void review(ref),
+    () => app.quit(),
+  );
+  main.on('close', (e) => {
+    if (quitting) return;
+    e.preventDefault();
+    if (saved.ui?.keepInTray === true && background.available()) {
+      if (prompt && !prompt.isDestroyed()) prompt.close();
+      main.hide();
+    } else void background.requestQuit();
+  });
   main.on('closed', () => app.quit());
   backend.start();
 });
 app.on('before-quit', () => {
+  quitting = true;
+  background?.close();
   backend?.stop();
   evaluation?.close();
 });

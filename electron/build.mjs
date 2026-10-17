@@ -25,7 +25,7 @@ await build({
   outfile: 'dist/renderer.js',
 });
 await build({
-  entryPoints: ['src/model.ts', 'src/backend.ts', 'src/extended.ts', 'src/rules.ts'],
+  entryPoints: ['src/model.ts', 'src/backend.ts', 'src/extended.ts', 'src/rules.ts', 'src/notifications.ts'],
   bundle: true,
   platform: 'node',
   format: 'cjs',
@@ -33,3 +33,5 @@ await build({
   outExtension: { '.js': '.cjs' },
 });
 for (const file of ['index.html', 'style.css']) await copyFile(`src/${file}`, `dist/${file}`);
+
+await copyFile('assets/flowgate-tray.png','dist/flowgate-tray.png');

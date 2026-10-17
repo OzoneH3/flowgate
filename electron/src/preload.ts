@@ -1,6 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { Bridge, ClientState, Decision } from './protocol';
 const api: Bridge = {
+  backgroundStatus: () => ipcRenderer.invoke('background:status'),
+  quit: () => ipcRenderer.invoke('app:quit'),
+  onNavigate: (fn) => {
+    const listener = (_e: unknown, value: { tab: 'requests'; message: string }) => fn(value);
+    ipcRenderer.on('navigate', listener);
+    return () => ipcRenderer.removeListener('navigate', listener);
+  },
   extended: (a) => ipcRenderer.invoke('extended:action', a),
   extendedState: () => ipcRenderer.invoke('extended:state'),
   ruleDraft: (v) => ipcRenderer.invoke('rule:draft', v),

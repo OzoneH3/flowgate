@@ -237,7 +237,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
   $('evalStatus').onclick = () => void evaluate('status');
   let evalBusy = false;
   setInterval(async () => {
-    if (evalBusy) return;
+    if (evalBusy || document.hidden) return;
     evalBusy = true;
     try {
       const e = await window.flowgate.evaluationState();
@@ -286,7 +286,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
   $('extendedStop').onclick = () => perform('stop');
   let extendedBusy = false;
   setInterval(async () => {
-    if (extendedBusy) return;
+    if (extendedBusy || document.hidden) return;
     extendedBusy = true;
     try {
       const e = await window.flowgate.extendedState(),
@@ -463,6 +463,31 @@ function selectRule() {
 async function setupSizing() {
   let prefs: Preferences = await window.flowgate.preferences();
   const save = () => void window.flowgate.preferences(prefs);
+  const controls = node('section', '');
+  controls.className = 'backgroundbar';
+  controls.innerHTML = `<label><input type="checkbox" id="keepInTray"> Keep running in the tray when the window closes</label><span>When enabled, closing hides this window; requests stay monitored. Quit exits the frontend only.</span><button id="quitFlowGate">Quit FlowGate…</button><span id="backgroundStatus" role="status"></span>`;
+  document.querySelector('#app > footer')!.before(controls);
+  $<HTMLInputElement>('keepInTray').checked = prefs.keepInTray === true;
+  $('keepInTray').onchange = () => {
+    prefs.keepInTray = $<HTMLInputElement>('keepInTray').checked;
+    save();
+  };
+  $('quitFlowGate').onclick = () => void window.flowgate.quit();
+  let checking = false;
+  const refresh = async () => {
+    if (checking || document.hidden) return;
+    checking = true;
+    try {
+      const s = await window.flowgate.backgroundStatus();
+      $('backgroundStatus').textContent =
+        (s.trayAvailable ? 'Tray available. ' : 'Tray unavailable: closing will quit instead. ') +
+        s.notifications;
+    } finally {
+      checking = false;
+    }
+  };
+  void refresh();
+  setInterval(() => void refresh(), 3000);
   for (const aside of document.querySelectorAll<HTMLElement>('main aside')) {
     aside.style.width = (prefs.sidebar || 330) + 'px';
     const grip = node('div', '');

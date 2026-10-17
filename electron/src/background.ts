@@ -1,0 +1,132 @@
+import { Tray, Menu, Notification, nativeImage, BrowserWindow, dialog } from 'electron';
+import { execFile } from 'node:child_process';
+import path from 'node:path';
+import type { ClientState } from './protocol';
+import { RequestNotifications, pending, type RequestRef } from './notifications';
+export class Background {
+  private tray?: Tray;
+  private host = false;
+  private checking = false;
+  private closed = false;
+  private timer: NodeJS.Timeout;
+  private menuSignature = '';
+  private notifications: RequestNotifications;
+  private quittingDialog = false;
+  constructor(
+    private main: BrowserWindow,
+    private windows: Set<BrowserWindow>,
+    private state: () => ClientState,
+    private show: (list?: boolean, message?: string) => void,
+    private review: (ref: RequestRef) => void,
+    private quit: () => void,
+  ) {
+    const icon = nativeImage.createFromPath(path.join(__dirname, 'flowgate-tray.png'));
+    try {
+      this.tray = new Tray(icon);
+      this.tray.setToolTip('FlowGate');
+      this.tray.on('click', () => this.show());
+    } catch {}
+    this.notifications = new RequestNotifications(
+      () => Notification.isSupported(),
+      (content) =>
+        new Notification({
+          ...content,
+          icon,
+          silent: true,
+          urgency: 'normal',
+          timeoutType: 'default',
+        }),
+      (ref) => (ref ? this.review(ref) : this.show(true)),
+    );
+    void this.checkHost();
+    this.timer = setInterval(() => void this.checkHost(), 10000);
+  }
+  private async checkHost() {
+    if (this.checking) return;
+    this.checking = true;
+    this.host = await new Promise<boolean>((resolve) =>
+      execFile(
+        'dbus-send',
+        [
+          '--session',
+          '--print-reply',
+          '--dest=org.kde.StatusNotifierWatcher',
+          '/StatusNotifierWatcher',
+          'org.freedesktop.DBus.Properties.Get',
+          'string:org.kde.StatusNotifierWatcher',
+          'string:IsStatusNotifierHostRegistered',
+        ],
+        { timeout: 1500, maxBuffer: 8192 },
+        (err, out) => resolve(!err && /boolean true/.test(out)),
+      ),
+    );
+    this.checking = false;
+    if (this.closed) return;
+    if (!this.available() && !this.main.isDestroyed() && !this.main.isVisible())
+      this.main.showInactive();
+    this.update(this.state());
+  }
+  available() {
+    return this.host && !!this.tray && !this.tray.isDestroyed();
+  }
+  status() {
+    return { trayAvailable: this.available(), notifications: this.notifications.status };
+  }
+  update(state: ClientState) {
+    const active = [...this.windows].some(
+      (w) => !w.isDestroyed() && w.isVisible() && !w.isMinimized() && w.isFocused(),
+    );
+    this.notifications.update(state, active);
+    if (!this.tray || this.tray.isDestroyed()) return;
+    const count = pending(state).length,
+      c = state.control;
+    const enforcement = c.connected
+      ? `Enforcement: ${c.enforcement?.state || c.mode || 'unknown'}`
+      : 'Enforcement: unknown / disconnected';
+    const udp = state.observation.connected
+      ? state.observation.activity?.udp?.state || 'unavailable'
+      : 'unknown / observer disconnected';
+    const signature = JSON.stringify([count, enforcement, udp]);
+    if (signature === this.menuSignature) return;
+    this.menuSignature = signature;
+    this.tray.setToolTip(`FlowGate · ${count} pending · ${enforcement}`);
+    this.tray.setContextMenu(
+      Menu.buildFromTemplate([
+        { label: 'Open FlowGate', click: () => this.show() },
+        { label: `Pending requests (${count})`, click: () => this.show(true) },
+        { type: 'separator' },
+        { label: enforcement, enabled: false },
+        { label: `Extended monitoring: ${udp}`, enabled: false },
+        { type: 'separator' },
+        { label: 'Quit FlowGate…', click: () => void this.requestQuit() },
+      ]),
+    );
+  }
+  async requestQuit() {
+    if (this.quittingDialog) return;
+    this.quittingDialog = true;
+    this.show();
+    try {
+      const result = await dialog.showMessageBox(this.main, {
+        type: 'question',
+        title: 'Quit FlowGate',
+        message: 'Quit FlowGate and stop request monitoring?',
+        detail:
+          'Electron and its owned read-only observer will exit. Independent firewall evaluation and UDP collection are NOT stopped. Their current state may be active or unknown; evaluation keeps its original deadline. You will no longer receive FlowGate request notifications.',
+        buttons: ['Keep running', 'Quit FlowGate'],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      });
+      if (result.response === 1) this.quit();
+    } finally {
+      this.quittingDialog = false;
+    }
+  }
+  close() {
+    this.closed = true;
+    clearInterval(this.timer);
+    this.notifications.close();
+    this.tray?.destroy();
+  }
+}
