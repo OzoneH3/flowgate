@@ -9,6 +9,7 @@ import { canDecide, canManageRules } from './protocol';
 import type { Application } from './protocol';
 import { TrafficGraph } from './graph';
 import { setupWorkflows, updateWorkflows, openRule, confirmRuleDelete } from './workflows';
+import { setupDecisionLog, showDecisionLog, updateDecisionLog } from './decision-log-view';
 import type { ClientState, ViewEvent, Scope } from './protocol';
 import {
   hierarchy,
@@ -470,6 +471,11 @@ if (promptID) {
       $('rulesView').hidden = next !== 'rules';
       $('rulesTab').setAttribute('aria-selected', String(next === 'rules'));
     }
+    if ($('decisionLogView')) {
+      $('decisionLogView').hidden = next !== 'log';
+      $('decisionLogTab').setAttribute('aria-selected', String(next === 'log'));
+      void showDecisionLog(next === 'log');
+    }
     $('activityView').hidden = next !== 'activity';
     $('requestsView').hidden = next !== 'requests';
     if (next === 'activity') void graph?.update(selected, sequence + ':shown');
@@ -477,15 +483,23 @@ if (promptID) {
     $('requestsTab').setAttribute('aria-selected', String(next === 'requests'));
   };
   setupWorkflows(chooseTab);
+  setupDecisionLog(
+    chooseTab,
+    (app) => installedIcon(app, 'application'),
+    (id) => {
+      chooseTab('rules');
+      void openRule({ id });
+    },
+  );
   graph = new TrafficGraph($('trafficGraph'));
   window.flowgate.onNavigate((v) => {
     chooseTab('requests');
     message(v.message);
   });
   document.addEventListener('keydown', (e) => {
-    if (e.ctrlKey && ['1', '2', '3'].includes(e.key)) {
+    if (e.ctrlKey && ['1', '2', '3', '4'].includes(e.key)) {
       e.preventDefault();
-      chooseTab({ '1': 'activity', '2': 'requests', '3': 'rules' }[e.key]!);
+      chooseTab({ '1': 'activity', '2': 'requests', '3': 'rules', '4': 'log' }[e.key]!);
     }
     if (e.ctrlKey && e.key.toLowerCase() === 'p') {
       e.preventDefault();
@@ -1128,6 +1142,7 @@ function consume(next: ClientState) {
     const details = $('requestDetails');
     details.dataset.eventId = currentEvent()?.id || '';
     updateWorkflows(state);
+    updateDecisionLog(state);
     renderPolicyList();
   }
 }

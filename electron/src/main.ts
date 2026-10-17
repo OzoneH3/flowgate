@@ -1,4 +1,12 @@
-import { app, BrowserWindow, ipcMain, protocol, session, type IpcMainInvokeEvent } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  ipcMain,
+  protocol,
+  session,
+  type IpcMainInvokeEvent,
+} from 'electron';
 import path from 'node:path';
 import { ApplicationIcons } from './icons';
 import { Background } from './background';
@@ -7,6 +15,7 @@ import type { RequestRef } from './notifications';
 import fs from 'node:fs';
 import { ExtendedMonitoring } from './extended';
 import { Rules } from './rules';
+import { DecisionLogClient } from './decision-log-client';
 import { Evaluation } from './evaluation';
 import type { Preferences } from './protocol';
 import { Backend } from './backend';
@@ -202,6 +211,20 @@ app.whenReady().then(async () => {
     return icons.request(value);
   });
   const rules = new Rules(backend);
+  const decisionLog = new DecisionLogClient(backend);
+  for (const [channel, handler] of Object.entries({
+    'log:state': () => decisionLog.state(),
+    'log:visible': (v: unknown) => decisionLog.setVisible(v),
+    'log:filter': (v: unknown) => decisionLog.setFilter(v),
+    'log:older': () => decisionLog.older(),
+    'log:live': (v: unknown) => decisionLog.setLive(v),
+    'log:detail': (v: unknown) => decisionLog.detail(v),
+    'log:copy': (v: unknown) => clipboard.writeText(decisionLog.copyText(v)),
+  }))
+    ipcMain.handle(channel, (e, v) => {
+      trusted(e);
+      return handler(v);
+    });
   const extended = new ExtendedMonitoring(path.resolve(__dirname, '../..'), backend);
   ipcMain.handle('extended:action', (e, a) => {
     trusted(e);
