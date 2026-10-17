@@ -1,69 +1,119 @@
 # Integrated desktop and non-enforcing root monitor
 
-## Current launch
+## Current: Decision Log rollout completed
 
-```
+```sh
 cd /home/flowgate-user/Apps/flowgate
 scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock
 ```
 
-Electron remains UID1000 and sandboxed. This reuses the independent root daemon's
-companion for Activity and primary for authorized policy management. Closing/Quit
-leaves the daemon running. Ordinary `scripts/run-electron.sh` and Qt
-`scripts/run-desktop.sh` remain available; neither implicitly enables enforcement.
+Released UI `ba4862b065dc7e092ccba253a0afc591f8e81afd` was merged in full as
+**`1732584b7ba181ceeffb06fb92cdbbd8aa10b078`**. This is the running binary's
+source revision (`vcs.modified=false`). It includes Decision Log backend028ca809,
+correctness fixef1d237 and prior UI18ca65a. Later documentation-only commits do not
+change the deployed source or require another restart.
 
-The authorized monitor update retains `/var/lib/flowgate/rules.db` and root-owned
-path validation. Current PID **2152405**, generation
-**4e18ec0723edb676c156a6b0ae4e9db9**, selected UID1000 explicitly administrator
-with explicit UDP traffic-control grant (see "Daemon-owned UDP rollout" below).
-Both sockets retain UID1000/root group,0600; primary daemon-monitor, companion
-host-monitor/backend_mode daemon-monitor. Enforcement is **stopped**, can_manage_rules
-true on primary, can_decide false. Companion mutations remain rejected. UDP
-collection is **disabled** until the user explicitly Enables it in Activity. No
-system service/autostart/BPF/queue/firewall activation was performed.
+### Actual runtime
 
-Exact Stop (only if deliberately stopping this monitor):
+- Root Go daemon PID **2201352**, generation **0840f7c256126f1708702f27c5b26551**.
+- Running executable SHA256 **a666b7dd1e8aa5c7c8c955f262fcb4da47a959d3c0884421ff78e294279c2681**,
+  verified by generation-checked export of the actual process executable.
+- Primary `/run/flowgate-api/daemon.sock`; read-only companion `.sock.monitor`.
+  Both remain UID1000/root group, mode0600; runtime directory root0711.
+- Same `/var/lib/flowgate/rules.db`, root0700 storage directory. Authoritative
+  rule inventory was empty before and after. No rule test writes or database
+  migration/copy occurred. Exclusive database ownership passed through orderly
+  shutdown; no live SQLite/WAL file was copied and no second writer was started.
+- Selected UID1000 retains explicit administrator/machine visibility, rule
+  management and collector-control grant; `can_decide:false` in monitoring mode.
+- Enforcement **stopped** throughout; no NFQUEUE/firewall activation.
+- UDP **active**, one daemon-owned native helper PID **2201368**, generation
+  **43a091abb81a09901be2c9b460080ee1**. Reviewed helper source SHA256
+  `118a8877d7b58dba43f20622064e3b60c38138a3453cf4a9aa87305720ab205c` is unchanged.
+  Existing partial/unregistered-cookie coverage limitations remain.
+- `decision-log-v1` advertised alongside existing policy/creation/conditional-delete/
+  daemon-UDP capabilities. `/var/lib/flowgate/decisions.db` is a separate private
+  log. Health **ok**, `recording:false`, empty history, zero reported drops/write
+  failures. Log ID `51895974a3befdf96c212db757be8718`. Empty is expected: monitoring
+  makes no firewall decisions. Crash loss remains unbounded in time, not a 1s guarantee.
 
-```
-sudo -n /home/flowgate-user/Apps/flowgate/.workspace/flowgate monitor-stop \
-  --generation 4e18ec0723edb676c156a6b0ae4e9db9
-```
+### Controlled procedure and collection gap
 
-## Daemon-owned UDP rollout
+The exact running old executable (f9c446c1...) was retained before interruption.
+Old daemon2152405 generation4e18ec0723edb676c156a6b0ae4e9db9 and helper2155270
+were verified, generation-stopped and exited. Only then was the prepared candidate
+atomically renamed to `.workspace/flowgate` (no running inode was truncated) and
+started with the same arguments. The former active UDP state was restored by one
+UID1000 generation/collector-generation guarded `traffic-start`; no duplicate
+helper or policy daemon was launched. The measured stop-to-collector-active control
+interval was about **0.22s**. This is not an exact packet-measurement gap: collection
+was interrupted and the new collector has a **fresh accounting baseline**, with
+no claim of byte continuity or reconstructed traffic.
 
-Source `ea13560d5354b5714a91b447b263abd9b5e8b744` (UDP backend 15d6e1a + UI 66a0c02).
-`.workspace/flowgate` SHA256 f9c446c1ede22ced0fff9b08281aabacda7ef14ea0c4adead926c89c93cf1b4c;
-helper `.workspace/udp-collector` SHA256
-118a8877d7b58dba43f20622064e3b60c38138a3453cf4a9aa87305720ab205c (pinned at startup).
-Actual launch (via the existing NOPASSWD rule for that executable only):
+Actual launch (same permissions/configuration as before):
 
-```
+```sh
 sudo -n /home/flowgate-user/Apps/flowgate/.workspace/flowgate serve \
   --socket /run/flowgate-api/daemon.sock --database /var/lib/flowgate/rules.db \
   --uid 1000 --administrator \
   --udp-helper /home/flowgate-user/Apps/flowgate/.workspace/udp-collector --allow-traffic-control
 ```
 
-Procedure (`.workspace/udp-rollout/rollout.py`, log/before/after/launch JSON there):
-root peer, generation a0109011f97dad19dd723e7e483d7860, arguments and empty rule
-inventory checked; running executable exported with `monitor-backup` to
-`.workspace/udp-rollout/flowgate-running-previous` (SHA256 0d3feb00fea9646c700c67fec72ec3cd7cefaabd50056a3e6ba69c471ad8530d,
-e2ef7f7); new build renamed into place (running inode never truncated);
-generation-checked `monitor-stop`; old process exited before the new serve took the
-database lock. Live UID1000 check (`live-verify.log`): daemon-udp-monitor-v1,
-can_view_measurements/can_control_traffic true, collector disabled/available with no
-helper process, enforcement stopped, TCP Activity and policy-view available, rules
-still empty, companion Start/Stop `forbidden`, socket owners/modes unchanged.
+Do not run that command while this daemon owns the database. Fresh daemon startup
+still leaves UDP disabled until an authorized explicit Start; this rollout restored
+it only because it was active immediately before interruption.
 
-Rollback (only if needed): generation-checked Stop of the current monitor, wait for
-exit, rename the retained executable back to `.workspace/flowgate`, then start it
-with the previous arguments (the launch above without the last two options).
+Exact deliberate Stop (not performed after this rollout):
 
-After any later restart, inspect the new generation rather than reusing this token.
-Do not launch a competing writer against the database. Evaluation remains separately
-explicit; incoming-only Tailscale compatibility/limitations in COEXISTENCE.md remain.
+```sh
+sudo -n /home/flowgate-user/Apps/flowgate/.workspace/flowgate monitor-stop \
+  --generation 0840f7c256126f1708702f27c5b26551
+```
 
-## Included history
+### Rollback and evidence
+
+Private workspace artifact `.workspace/decision-log-rollout/flowgate-running-previous`
+is the exact old running executable, SHA256
+`f9c446c1ede22ced0fff9b08281aabacda7ef14ea0c4adead926c89c93cf1b4c`.
+`before.json` and `launch.json` retain the previous exact arguments, helper hash,
+permissions, rule inventory and collector state. `flowgate-on-disk-previous` also
+preserves the prior on-disk binary, which differed from the running inode.
+The separate candidate remains `.workspace/decisionlog-build/flowgate-rollout-candidate`.
+
+If rollback is needed, generation-check Stop of the verified current monitor, wait
+for daemon/helper exit, atomically place a copy of the retained running executable
+at the sudo-authorized `.workspace/flowgate` path, then launch with the same serve
+arguments above. Use its **new** generation to restore the formerly active UDP
+state through guarded `traffic-start`. Do not blindly reuse a token, overwrite a
+live executable, or run a competing database owner. Startup succeeded, so rollback
+was not exercised. The rule database schema/file is unchanged; the new separate
+history file does not affect the older monitor.
+
+New checks: build/typecheck, 11 focused model tests, synthetic sandboxed Wayland
+navigation/copy/normal+narrow rendering. Reused32e7fa9 evidence: Go race/vet and
+real isolated284-record paging/detail/filter/live/restart/receiver behavior; no
+firewall, ownership or UDP matrix was rerun.
+
+Actual UID1000 host API: private sockets, administrator/companion permission
+separation, TCP Activity and measurements, both history reads, empty healthy log,
+unchanged rules and active UDP. Actual sandboxed Wayland Electron: Activity usable,
+Decision Log supported with correct empty/non-recording explanation; closing the
+verification GUI preserves independent daemon/collector generations and rules.
+No host test rules, synthetic history imports or enforcement traffic tests.
+
+Evidence `.workspace/decision-log-rollout/`: `prepare.log`, `before.json`,
+`upgrade.log`, `launch.json`, `after.json`, `uid1000-verification.json`,
+`host-smoke.log`, `host-ui-result.json`, `host-decision-log.png`. Screenshot shows
+**real host monitoring with empty decision history**, not enforced traffic.
+Focused UI logs `.workspace/dlog-rollout-ui-tests.log` and
+`.workspace/dlog-rollout-ui-display.log` (synthetic `.workspace/synlog-1LF76i`).
+
+Live firewall activation/coexistence and live sudo evaluation remain unverified.
+The authorized action here was one monitor upgrade and restoration of user-enabled
+UDP collection, not protection. No Tailscale/routing/firewall/security, service,
+autostart, package or sudoers changes. Incoming-only Tailscale limitation remains.
+
+## Historical integration evidence
 
 Backend policy explanations0aca36145adc857bdb59d52f1862a420bbdac9cf and verified
 observed creation8ef90cde66c73c69bf8fd8b686e82d2298b98536 were preserved. The full
@@ -80,7 +130,7 @@ Merge checkpoint e2ef7f734a102bbaa39a08ff43d3a81ed33e9899, with no conflicts.
 Backend rollout utility03ff71f exports the exact running executable for rollback.
 Final documentation commit is reported outside this file; no self-hash loop.
 
-## Verification and rollout evidence
+## Historical rollout verification
 
 From the integration checkout, built Go/Electron and ran:
 
@@ -136,7 +186,7 @@ Host preview evidence `.workspace/monitor-rollout/host-ui.log`, `host-ui-result.
 listener, not an enforced event. Only bounded summary metadata was retained; no
 unrelated host arguments/environments or full inventories were archived.
 
-## Remaining limits
+## Remaining limits (including prior rollout evidence)
 
 Live firewall activation/sudo evaluation, encrypted live-tailnet traffic and
 privileged UDP activation through Electron remain unverified. Root observation

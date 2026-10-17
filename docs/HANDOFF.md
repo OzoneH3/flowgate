@@ -1,42 +1,36 @@
 # Continuation handoff
 
-## Current: integrated Decision Log (not deployed to the host)
+## Current: Decision Log integrated and running in non-enforcing root monitor
 
-Backend foundation `028ca809`, correctness fix `ef1d237`, released Electron
-`18ca65a452b867cf5eec3bf9a5579778effc7d36`, integrated by merge `0b8056d`.
-Capability `decision-log-v1`: separate private SQLite history, cursor reads and
-UID/admin visibility. Attempt/lease dedup now preserves fresh evaluations;
-capacity refusals carry explicit observation counts/time ranges. Durability begins
-at commit; the nominal 1 s schedule is not a crash-loss bound. See
-[DECISION-LOG.md](DECISION-LOG.md) for loss semantics and fixture commands.
+Running source **1732584b7ba181ceeffb06fb92cdbbd8aa10b078**, full released UI
+**ba4862b065dc7e092ccba253a0afc591f8e81afd** integrated. Preserves backend028ca809,
+correctness fixef1d237, prior UI18ca65a and durability/capacity semantics.
+Root daemon **PID2201352**, generation **0840f7c256126f1708702f27c5b26551**;
+UID1000 explicit administrator and collector control retained. Rules database and
+empty inventory preserved. Enforcement **stopped**.
 
-Main-checkout build, 9 focused store tests, race/vet and actual sandboxed Wayland
-fixture passed (284-record paging/filter/detail/live/restart; fixture cleaned up).
-Evidence `.workspace/decision-log-ui-VYyAPS`; labelled synthetic outcome/history
-checks `.workspace/synlog-8KeqNT`.
+Decision Log capability available, health **ok**, `recording:false`, empty history
+(expected in monitoring mode). User-enabled UDP restored **active**, one helper
+PID2201368, generation **43a091abb81a09901be2c9b460080ee1**. The restart introduced
+a collection gap/fresh accounting baseline; no byte continuity is claimed.
+TCP observation and measurements remain available.
 
-Electron has recorded reason/scope/rule snapshots, detail lookup, filters, pagination,
-live follow and restart persistence. Pending without a loaded final says **Outcome
-not loaded**. Rule snapshot edit/delete immutability is backend unit coverage;
-historical-versus-current UI comparisons remain labelled synthetic evidence.
+```sh
+scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock
+```
 
-Build used `.workspace/decisionlog-build/flowgate-decisionlog-fixed`, never the
-running executable. Normal launch:
-`scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock`.
-The host daemon has **not** been upgraded to the Decision Log build, so it does
-not expose this capability yet. No host enforcement or collector changes.
+New build/typecheck, 11 focused model tests and synthetic Wayland navigation pass;
+actual UID1000 host API and sandboxed Wayland Activity/Decision Log empty-state
+smoke pass. GUI exit preserves daemon/collector. Reused real isolated284-record
+acceptance and focused Go race/vet; no broad matrices rerun.
 
-## Host runtime: existing monitor and user-enabled UDP preserved
+**Single current rollout record:** [INTEGRATION.md](INTEGRATION.md), including exact
+binary/helper hashes, Stop/launch, backup/rollback, evidence and remaining limits.
+Artifact `.workspace/decision-log-rollout/flowgate-running-previous` preserves the
+old running executable. Startup succeeded; rollback not exercised. No firewall,
+Tailscale, routing, service or sudoers changes. Live enforcement remains unverified.
 
-Root monitor PID 2152405, generation 4e18ec0723edb676c156a6b0ae4e9db9, source
-ea13560 (executable SHA256 f9c446c1..., helper 118a8877...), same database and
-UID1000 administrator plus `--udp-helper .../.workspace/udp-collector
---allow-traffic-control`. Read-only verification during Decision Log integration found collector **active**,
-generation `8936d03cf0ff1e320ffba001c59b159b`, with partial coverage; enforcement
-stopped. This task did not start/stop it or mutate rules. Launch
-`scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock`. Exact launch,
-Stop, rollback and evidence: INTEGRATION.md "Daemon-owned UDP rollout". UI agent
-owns the brief desktop acceptance. No host BPF, firewall or service changes.
+## Historical milestones (runtime identities below are superseded)
 
 ## Integrated: daemon-owned UDP accounting + Electron consumer
 

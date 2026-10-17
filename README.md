@@ -20,7 +20,9 @@ The independent root monitor is running with enforcement **stopped**. Electron
 stays unprivileged; closing it leaves the monitor running. The integrated client
 loads live Activity, authoritative In/Out summaries and authorized stored-rule
 creation/edit/conditional Delete through the primary endpoint. Stored rules do not
-control traffic while enforcement is stopped. Rollout evidence/current Stop:
+control traffic while enforcement is stopped. Decision Log is available with
+healthy empty/non-recording history; user-enabled UDP monitoring was restored after
+the controlled upgrade with a fresh accounting baseline. Rollout evidence/current Stop:
 [INTEGRATION.md](docs/INTEGRATION.md). Setup/manual root startup:
 [AUTHORIZATION.md](docs/AUTHORIZATION.md).
 Ordinary launch without this argument remains the original unprivileged observer.
