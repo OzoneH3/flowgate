@@ -949,14 +949,19 @@ td.up { color: #c7daa8; background: #344b20; }
 @media(max-width:950px) { #extendedBadge { max-width: 180px; overflow: hidden; text-overflow: ellipsis; } }
 
 /* Decision log: same density as Rules; gaps and degraded health stay visible. */
-#logTable { table-layout: fixed; width: 100%; min-width: 720px; }
+#logTable { table-layout: fixed; width: 100%; min-width: 880px; }
 #logTable th, #logTable td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#logTable th:nth-child(1) { width: 68px; }
-#logTable th:nth-child(2) { width: 18%; }
-#logTable th:nth-child(3) { width: 72px; }
-#logTable th:nth-child(4) { width: 52px; }
-#logTable th:nth-child(5), #logTable th:nth-child(6) { width: 15%; }
-#logTable th:nth-child(7) { width: 120px; }
+#logTable th:nth-child(1) { width: 74px; }
+#logTable th:nth-child(2) { width: 155px; }
+#logTable th:nth-child(3) { width: 116px; }
+#logTable th:nth-child(4) { width: 132px; }
+#logTable th:nth-child(5) { width: 76px; }
+#logTable th:nth-child(6) { width: 60px; }
+#logTable th:nth-child(7), #logTable th:nth-child(8) { width: 140px; }
+#logScroll { overflow-anchor: none; }
+#logApplication { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#decisionLogView .filterbar > button { flex-shrink: 0; }
+#decisionLogView > aside { width: 32%; max-width: 380px; }
 #decisionLogView .filterbar { flex-wrap: wrap; }
 .log-details dl { align-items: baseline; }
 #logTable .application-icon { margin-right: 5px; }
@@ -978,9 +983,13 @@ td.up { color: #c7daa8; background: #344b20; }
 .log-details pre.log-filter { max-height: 140px; overflow: auto; padding: 4px; background: #262626; }
 .log-actions { display: flex; gap: 5px; margin-top: 10px; flex-wrap: wrap; }
 @media(max-width:950px) { #decisionLogView .filterbar select { max-width: 120px; } }
-/* Narrow: keep Decision visible; protocol and local endpoint remain in details. */
+/* Narrow: prioritize Time/Application/Decision/Source; endpoints remain selectable
+   and individually copyable in details. No squeezed-to-zero source column. */
 @media(max-width:950px) {
-  #logTable { min-width: 0; }
-  #logTable th:nth-child(4), #logTable td:nth-child(4), #logTable th:nth-child(5), #logTable td:nth-child(5) { display: none; }
-  #logTable th:nth-child(6) { width: 26%; }
+  #decisionLogView > aside { width: 290px; max-width: 290px; }
+  #logTable { min-width: 470px; }
+  #logTable th:nth-child(n+5), #logTable td:nth-child(n+5) { display: none; }
+  #logTable th:nth-child(2) { width: 140px; }
+  #logTable th:nth-child(4) { width: 120px; }
+  #logApplication { max-width: 180px; }
 }

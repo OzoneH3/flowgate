@@ -538,7 +538,7 @@ const SOURCE_LABELS: Record<string, string> = {
 export const sourceLabel = (s: string) => SOURCE_LABELS[s] || s || '—';
 export function outcomeLabel(r: LogRecord) {
   if (r.kind === 'gap') return 'Records lost';
-  if (r.kind === 'pending') return 'Awaiting decision';
+  if (r.kind === 'pending') return 'Pending record';
   const a = r.decision?.action;
   return a === 'allow' ? 'Allowed' : a === 'block' ? 'Blocked' : a || 'Unknown';
 }
@@ -606,4 +606,28 @@ export function healthSummary(h: LogHealth | undefined) {
     ? `${h.retention.removed} older records removed by retention`
     : '';
   return { level, text: [head, ...notes, removed, retention].filter(Boolean).join(' · ') };
+}
+
+// A page is incomplete history. Only link explicit nonempty request identities in
+// the same daemon generation; never mistake reused event IDs for a relationship.
+export function loadedOutcome(pending: LogRecord, records: LogRecord[]) {
+  if (pending.kind !== 'pending' || !pending.request_id || !pending.generation) return undefined;
+  return records.find(
+    (r) =>
+      r.kind === 'final' &&
+      r.request_id === pending.request_id &&
+      r.generation === pending.generation,
+  );
+}
+export function logCopyRequest(value: unknown): { id: string; endpoint?: 'local' | 'remote' } {
+  const v = typeof value === 'string' ? { id: value } : obj(value);
+  if (
+    typeof v.id !== 'string' ||
+    !v.id ||
+    v.id.length > 256 ||
+    Object.keys(v).some((k) => !['id', 'endpoint'].includes(k)) ||
+    (v.endpoint !== undefined && v.endpoint !== 'local' && v.endpoint !== 'remote')
+  )
+    throw Error('Invalid log copy request');
+  return { id: v.id, endpoint: v.endpoint as 'local' | 'remote' | undefined };
 }

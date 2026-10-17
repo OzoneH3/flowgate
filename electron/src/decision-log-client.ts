@@ -3,6 +3,7 @@ import {
   DECISION_LOG_CAPABILITY,
   DecisionLogStore,
   LogError,
+  logCopyRequest,
   parsePage,
   parseRecord,
   validateFilter,
@@ -89,7 +90,7 @@ export class DecisionLogClient {
   }
   // Fresh authoritative copy of one record; falls back to the retained row if the
   // backend no longer has it (e.g. removed by retention) and says so.
-  async detail(id: unknown): Promise<{ record?: LogRecord; note: string }> {
+  async detail(id: unknown): Promise<{ record?: LogRecord; note: string; unavailable?: boolean }> {
     if (typeof id !== 'string' || !id || id.length > 256) throw Error('Invalid record ID');
     const retained = this.store.get(id);
     const t = this.target();
@@ -103,9 +104,10 @@ export class DecisionLogClient {
       if (r.error || r.error_code)
         return {
           record: retained,
+          unavailable: r.error_code === 'not_found',
           note:
             r.error_code === 'not_found'
-              ? 'No longer stored by the daemon (retention); shown from the loaded page.'
+              ? 'Record unavailable from the daemon; retention or authorization may explain absence. Shown from the loaded page.'
               : `Detail unavailable: ${r.error || r.error_code}`,
         };
       const raw = r.decision_record ?? (r.decision_log as { records?: unknown[] })?.records?.[0];
@@ -115,8 +117,14 @@ export class DecisionLogClient {
     }
   }
   copyText(id: unknown) {
-    const r = typeof id === 'string' ? this.store.get(id) : undefined;
+    const request = logCopyRequest(id);
+    const r = this.store.get(request.id);
     if (!r) throw Error('Record not loaded');
+    if (request.endpoint) {
+      const endpoint = r.flow?.[request.endpoint];
+      if (!endpoint) throw Error('Endpoint not recorded');
+      return endpoint;
+    }
     return JSON.stringify(r, null, 2);
   }
   stop() {

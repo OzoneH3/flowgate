@@ -35,6 +35,7 @@ const api: Bridge = {
   decisionLogOlder: () => ipcRenderer.invoke('log:older'),
   decisionLogLive: (v) => ipcRenderer.invoke('log:live', v),
   decisionLogDetail: (id) => ipcRenderer.invoke('log:detail', id),
-  decisionLogCopy: (id) => ipcRenderer.invoke('log:copy', id),
+  decisionLogCopy: (id, endpoint) =>
+    ipcRenderer.invoke('log:copy', endpoint ? { id, endpoint } : id),
 };
 contextBridge.exposeInMainWorld('flowgate', Object.freeze(api));
