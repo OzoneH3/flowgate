@@ -306,7 +306,12 @@ func (e *Engine) ChangeRule(id, action string, uid uint32, admin bool) error {
 			return fmt.Errorf("not authorized")
 		}
 		found = true
-		next[i].Version++
+		if action != "delete" && r.Version == ^uint64(0) {
+			return fmt.Errorf("rule version exhausted; delete and create a new rule")
+		}
+		if action != "delete" {
+			next[i].Version++
+		}
 		switch action {
 		case "enable":
 			next[i].Disabled = false

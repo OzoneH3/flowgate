@@ -37,3 +37,13 @@ SQLite tables/schema version are unchanged. JSON rule documents add optional
 `version`; old documents load at zero without changing direction or expiry.
 Older strict-decoding binaries reject new documents rather than silently ignoring
 edit versions. Back up the database before downgrading; rollback is not automatic.
+
+## Deletion concurrency
+
+Use `rule-delete` with the displayed backend generation and expected version;
+check, transaction and publication are atomic relative to edits. A stale delete
+cannot remove the edited rule. Fresh creation uses a new random ID; restart has a
+new generation. See [API.md](API.md) for capability, errors, retries and CLI.
+Legacy `rule`/`delete` is still unconditional for existing Qt/older callers; a
+frontend precheck does not close its race. Those callers need explicit migration.
+No storage schema/table migration is required.

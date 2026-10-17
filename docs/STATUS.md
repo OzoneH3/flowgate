@@ -1,5 +1,20 @@
 # Current status
 
+## Current: atomic conditional rule deletion
+
+The authenticated v1 API now advertises `conditional-rule-delete-v1`. New
+`rule-delete` requires displayed backend generation and expected rule version;
+check, SQLite commit and publication share the edit mutex. Stale/missing/denied/
+unavailable/storage errors are structured. The new CLI uses the displayed version.
+Legacy Qt `rule` Delete remains unconditional until migrated; no frontend files
+were changed. See [API contract and migration](API.md).
+
+Deterministic Unix API races, actual transaction rollback, recreation/restart,
+response loss and CLI confirmation tests passed, plus focused race/vet checks.
+One isolated host-controller UDP receiver check confirmed deletion restores Ask
+and subsequent Block prevents delivery. No live-host enforcement or privileged
+collection, frontend integration, network/security/service changes or push.
+
 ## Current: native observation ownership improvements
 
 Leader-exit worker fallback now identifies real TCP/UDP IPv4/IPv6 sockets that

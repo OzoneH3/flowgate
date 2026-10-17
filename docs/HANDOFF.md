@@ -1,5 +1,14 @@
 # Continuation handoff
 
+## Conditional deletion increment
+
+Started dbe651f. Read API.md for `conditional-rule-delete-v1`, exact requests,
+structured outcomes and legacy compatibility. Electron/Qt need to adopt the new
+operation; frontend files and branches were not touched/integrated. Backend Save
+stale/missing/authorization/persistence codes are additive. Native ownership and
+UDP evidence remain reusable. Focused API/CLI/race/SQLite and isolated UDP receiver
+checks passed; no live-host enforcement. No database migration.
+
 ## Native ownership increment
 
 Started at a48ee2b; backend observation-only changes and native fixtures. Read

@@ -82,15 +82,15 @@ func (e *Engine) EditRule(id, eventID string, expected *uint64, candidate policy
 			}
 		}
 		if index < 0 {
-			return policy.Rule{}, "", fmt.Errorf("rule no longer exists")
+			return policy.Rule{}, "", mutationError("not_found", "rule no longer exists")
 		}
 		old := e.rules[index]
 		expiryUnchanged = candidate.Expires.Equal(old.Expires)
 		if !admin && old.Filter.UID != uid {
-			return policy.Rule{}, "", fmt.Errorf("not authorized")
+			return policy.Rule{}, "", mutationError("forbidden", "not authorized")
 		}
 		if expected == nil || *expected != old.Version {
-			return policy.Rule{}, "", fmt.Errorf("stale rule version; reload before editing")
+			return policy.Rule{}, "", mutationError("version_conflict", "stale rule version; reload before editing")
 		}
 		if candidate.Filter.Application != old.Filter.Application || candidate.Filter.Revision != old.Filter.Revision || candidate.Filter.UID != old.Filter.UID || candidate.Filter.Direction != old.Filter.Direction {
 			return policy.Rule{}, "", fmt.Errorf("application/revision/UID/direction are immutable")
@@ -101,6 +101,9 @@ func (e *Engine) EditRule(id, eventID string, expected *uint64, candidate policy
 		candidate.ID = id
 		candidate.Created = old.Created
 		candidate.Executable = old.Executable
+		if old.Version == ^uint64(0) {
+			return policy.Rule{}, "", fmt.Errorf("rule version exhausted; delete and create a new rule")
+		}
 		candidate.Version = old.Version + 1
 		if candidate.Expires.Before(now) && !candidate.Expires.IsZero() && !candidate.Expires.Equal(old.Expires) {
 			return policy.Rule{}, "", fmt.Errorf("changed expiry must be in the future; unchanged expired rules remain expired")
@@ -120,7 +123,7 @@ func (e *Engine) EditRule(id, eventID string, expected *uint64, candidate policy
 			return policy.Rule{}, "", fmt.Errorf("stale pending request; create from a new attempt")
 		}
 		if !admin && !owned(found.Attribution, uid) {
-			return policy.Rule{}, "", fmt.Errorf("not authorized")
+			return policy.Rule{}, "", mutationError("forbidden", "not authorized")
 		}
 		a := e.Resolve(found.Flow)
 		if !e.Now().Before(found.Deadline) || a.Application == nil || a.Principal() == nil || a.Fingerprint != found.Attribution.Fingerprint {
@@ -187,7 +190,7 @@ func (e *Engine) EditRule(id, eventID string, expected *uint64, candidate policy
 		next[index] = candidate
 	}
 	if err := e.SaveRules(next); err != nil {
-		return policy.Rule{}, "", fmt.Errorf("transaction failed; old policy retained: %w", err)
+		return policy.Rule{}, "", mutationError("persistence_failed", fmt.Sprintf("transaction failed; old policy retained: %v", err))
 	}
 	e.rules = next
 	// Keep pending IDs so a newly created scoped rule can release the selected

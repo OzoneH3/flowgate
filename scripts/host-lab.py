@@ -111,7 +111,10 @@ try:
         for v6,port in [(False,68),(True,546)]:remote('udp',port=port,v6=v6,dhcp=True);wait(lambda:counts[port]==1);assert not pending(port)
         print('PASS pre-existing TCP IPv4/IPv6 and DHCP client-port bootstrap datagrams',flush=True)
         stop_backend();sys.exit(0)
-    if '--outgoing-suite' in sys.argv:
+    if '--delete-suite' in sys.argv:
+        from delete_cases import exercise
+        exercise(globals())
+    elif '--outgoing-suite' in sys.argv:
         from outgoing_cases import exercise
         exercise(globals())
     elif '--suite' in sys.argv:

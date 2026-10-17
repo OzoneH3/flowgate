@@ -1,5 +1,12 @@
 # Authoritative implementation plan
 
+## Complete: atomic conditional rule deletion
+
+Add generation/version-conditioned deletion under the existing edit/commit mutex;
+retain explicitly unsafe legacy compatibility, provide conditional CLI, verify
+concurrency/rollback/recreation/lost response and one isolated receiver path.
+Caller migration is separate frontend work; contract is in API.md.
+
 ## Complete: bounded native ownership improvement
 
 Read-only host categories sampled; native leader-exit gap reproduced and fixed.

@@ -3,6 +3,7 @@ package daemon
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"flowgate/internal/identity"
 	"flowgate/internal/policy"
 	"fmt"
@@ -33,6 +34,9 @@ type EnforcementStatus struct {
 	StopsAt time.Time `json:"stops_at"`
 }
 type Response struct {
+	Capabilities []string                   `json:"capabilities,omitempty"`
+	ErrorCode    string                     `json:"error_code,omitempty"`
+	DeletedRule  *DeletedRule               `json:"deleted_rule,omitempty"`
 	SavedRule    *policy.Rule               `json:"saved_rule,omitempty"`
 	ScopePreview string                     `json:"scope_preview,omitempty"`
 	Enforcement  *EnforcementStatus         `json:"enforcement,omitempty"`
@@ -107,7 +111,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 					if err != nil || cred == nil {
 						return
 					}
-					r := Response{Version: 1, Generation: e.Generation, ReadOnly: readonly, Mode: e.Mode, ServerTime: time.Now(), PeerUID: cred.Uid}
+					r := Response{Capabilities: []string{ConditionalDeleteCapability}, Version: 1, Generation: e.Generation, ReadOnly: readonly, Mode: e.Mode, ServerTime: time.Now(), PeerUID: cred.Uid}
 					if e.APIUID != nil && cred.Uid != *e.APIUID && cred.Uid != 0 {
 						continueResponse(c, r)
 						return
@@ -127,6 +131,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 					}
 					if err = json.Unmarshal(scanner.Bytes(), &q); err != nil || q.Version != 1 {
 						r.Error = "invalid v1 request"
+						r.ErrorCode = "invalid_request"
 					} else {
 						switch q.Operation {
 						case "list":
@@ -146,17 +151,44 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						case "rule-preview", "rule-save":
 							if r.ReadOnly {
 								r.Error = "read-only API"
+								r.ErrorCode = "read_only"
 							} else if q.Generation != e.Generation {
 								r.Error = "backend generation changed; reload"
+								r.ErrorCode = "generation_conflict"
 							} else if q.Rule == nil {
 								r.Error = "rule document required"
+								r.ErrorCode = "invalid_request"
 							} else {
 								rule, preview, err := e.EditRule(q.ID, q.EventID, q.ExpectedVersion, *q.Rule, cred.Uid, cred.Uid == 0, q.Operation == "rule-save")
 								if err != nil {
 									r.Error = err.Error()
+									var typed *RuleMutationError
+									if errors.As(err, &typed) {
+										r.ErrorCode = typed.Code
+									}
 								} else {
 									r.SavedRule = &rule
 									r.ScopePreview = preview
+								}
+							}
+						case "rule-delete":
+							if r.ReadOnly {
+								r.Error = "read-only API"
+								r.ErrorCode = "read_only"
+								if r.Enforcement != nil && r.Enforcement.State != "active" {
+									r.Error = "enforcement backend unavailable"
+									r.ErrorCode = "unavailable"
+								}
+							} else {
+								deleted, err := e.DeleteRule(q.Generation, q.ID, q.ExpectedVersion, cred.Uid, cred.Uid == 0)
+								if err != nil {
+									r.Error = err.Error()
+									var typed *RuleMutationError
+									if errors.As(err, &typed) {
+										r.ErrorCode = typed.Code
+									}
+								} else {
+									r.DeletedRule = &deleted
 								}
 							}
 						case "rule":
@@ -217,6 +249,7 @@ func Call(path string, q Request) (Response, error) {
 
 func continueResponse(c net.Conn, r Response) {
 	r.Error = "not authorized"
+	r.ErrorCode = "forbidden"
 	json.NewEncoder(c).Encode(r)
 }
 

@@ -37,7 +37,7 @@ func main() {
 	identity.WineBrokerExecutable = os.Getenv("FLOWGATE_WINE_BROKER")
 
 	if len(os.Args) < 2 {
-		fmt.Printf("%s: doctor | runtime-discover | sockets | process PID | attribute | pending | decide | observe | serve-lab | host-start | host-status | host-stop | host-recover\n", productName)
+		fmt.Printf("%s: doctor | runtime-discover | sockets | process PID | attribute | pending | decide | rule-delete | observe | serve-lab | host-start | host-status | host-stop | host-recover\n", productName)
 		return
 	}
 	switch os.Args[1] {
@@ -88,6 +88,10 @@ func main() {
 			fatal(e)
 		}
 		output(identity.Resolve(f))
+	case "rule-delete":
+		if err := deleteRuleCLI(os.Args[2:], os.Stdin, os.Stdout); err != nil {
+			fatal(err)
+		}
 	case "pending", "decide":
 		fs := flag.NewFlagSet(os.Args[1], flag.ExitOnError)
 		s := fs.String("socket", ".workspace/run/control.sock", "v1 API socket")

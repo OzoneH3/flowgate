@@ -267,3 +267,14 @@ Stored-rule `enable` uses existing ownership checks and preserves all scope/expi
 fields. Offline rules are labelled last received. Minimized notifications are
 bounded and open current pending state; they contain no approval action. Dismissal
 or a stale callback never grants permission.
+
+## Conditional saved-rule deletion
+
+The additive v1 `rule-delete` operation requires current backend generation and
+`expected_version`, checked under the same lock as edits and SQLite commit. Failed
+conditions/transactions preserve policy and caches. Successful deletion preserves
+legacy conservative pending/cache invalidation; already approved TCP connections
+continue. API-created replacements use fresh server-issued random IDs, and backend
+restart changes generation. Versions cannot wrap on updates. See API.md for exact
+structured error outcomes and lost-response handling. Legacy `rule` Delete remains
+unconditional and is explicitly not concurrency-safe; frontend migration is pending.
