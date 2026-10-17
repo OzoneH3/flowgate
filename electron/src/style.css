@@ -690,3 +690,17 @@ dialog::backdrop {
   flex-basis: 100%;
   font-size: 10px;
 }
+
+
+#activityView > aside { overflow: hidden; }
+#activityView #info { flex: 1; min-height: 50px; }
+#trafficGraph { flex: 0 0 auto; border-top: 1px solid #555; margin-top: auto; }
+.graph-controls { display: flex; gap: 4px; padding: 4px; }
+.graph-controls select:first-child { flex: 1; min-width: 0; }
+.graph-values { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 3px; padding: 0 5px; font-size: 11px; }
+.graph-download { color: #83b74b; }
+.graph-upload { color: #ef725b; }
+#trafficCanvas { display: block; width: 100%; height: 112px; }
+#graphStatus, .graph-scope { margin: 3px 5px; font-size: 10px; color: #aaa; line-height: 1.3; overflow-wrap: anywhere; }
+#graphStatus { max-height: 28px; overflow: auto; }
+@media (max-height: 650px) { #trafficCanvas { height: 82px; } }

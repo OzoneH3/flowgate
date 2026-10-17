@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, protocol, session, type IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
 import { Background } from './background';
+import { TrafficHistory } from './history';
 import type { RequestRef } from './notifications';
 import fs from 'node:fs';
 import { ExtendedMonitoring } from './extended';
@@ -170,7 +171,13 @@ app.whenReady().then(async () => {
   session.defaultSession.webRequest.onBeforeRequest((details, callback) =>
     callback({ cancel: !details.url.startsWith('flowgate://app/') }),
   );
+  const history = new TrafficHistory();
+  ipcMain.handle('graph', (e, value) => {
+    trusted(e);
+    return history.view(value);
+  });
   backend = new Backend(observer!, controller, (state) => {
+    history.observe(state.observation);
     for (const w of windows)
       if (!w.isDestroyed() && w.isVisible() && !w.isMinimized()) w.webContents.send('state', state);
     background?.update(state);

@@ -2,7 +2,7 @@
 
 An additional unprivileged frontend; Qt and `scripts/run-desktop.sh` remain intact.
 Vanilla TypeScript, CSS and Electron, built by esbuild. No web development server,
-remote assets, frontend rule matching, packaging or charts. Explicit controls delegate privileged work to the existing terminal bridges.
+remote assets, frontend rule matching or packaging. Explicit controls delegate privileged work to the existing terminal bridges.
 
 ## Run
 
@@ -257,7 +257,7 @@ Also integrate `scripts/check-electron-background.sh`.
 Remaining gaps: real system sudo authentication and privileged extended-monitoring
 Enable/Stop through Electron are unverified; their frontend boundary/status checks
 are simulated and existing Go kernel evidence is reused. Permission-window PSS
-cycle remains unmeasured. No charts, packaging or application artwork beyond the original tray glyph.
+cycle remains unmeasured. No packaging or application artwork beyond the original tray glyph.
 The dense dark presentation follows NetLimiter proportions without claiming a
 pixel-identical match; required identity/scope text makes the editor taller and
 scrollable, and endpoint columns scroll horizontally at narrow widths.
@@ -407,3 +407,101 @@ Test-owned Electron and namespace supervisor processes exited. No real sudo
 workflow was exercised. Integration files for this increment: four frontend
 modules (`backend`, `protocol`, `rules`, `workflows`), two focused delete tests,
 this README and `scripts/check-electron-delete.sh`.
+
+## Live traffic graphs
+
+Based on exact integrated checkout `ffa5c45f99c393853e73e28af2b2be7c6e948371`.
+The lower Info View contains a lightweight canvas chart for the selected socket,
+process, application or Unidentified group. Choose **60 s / 5 min** and **TCP
+transport payload / UDP API-reported bytes**. Download is green/solid; upload is
+orange/dashed so equal rates remain distinguishable. Axes show B/s and elapsed
+time. Labels remain text; no remote assets or chart framework are loaded.
+
+Group charts include **all observed member sockets**, independent of table search
+and filters. Thus a filtered table can show a smaller subtotal than its graph;
+the chart states this scope. Membership is recorded at each sample, not calculated
+retroactively from current owners. Shared sockets are counted once. Discovery of a
+new owner keeps socket history, while earlier unidentified traffic stays in the
+historical Unidentified group. Display attribution remains observation-only.
+
+TCP/UDP definitions never share a sum or rate axis simultaneously: use the source
+selector to inspect each independently. Unsupported UDP has an explanatory empty
+graph, not fake zeroes. Collector availability, partial measurement coverage and
+census visibility limitations remain distinct. Partial sums use known measurements
+with `*`; missing components are not imputed. Rates come directly from Go (which
+uses monotonic intervals); Electron does not differentiate counters or infer bytes.
+
+Backend generation/sequence/collection time identify a sample. Duplicate/older
+poll deliveries add nothing. Collection times are anchored onto the frontend's
+monotonic timeline; wall-clock discontinuities break and re-anchor the trace.
+The first observation/reconnect warms up without a rate; known baseline/source
+changes and counter decreases produce gaps. Missing rates, absent sockets,
+collector loss and observer loss never become zero or connected line segments.
+Measured zero is plotted as zero. Sequence skips break the line rather than
+inventing the missing samples. New backend generations start a fresh history so
+reused IDs cannot inherit a previous observer's socket history.
+
+### Bounds and background operation
+
+One main-process in-memory store samples the **existing observer callback**. No
+new observer, timer or endpoint. No disk history, export or historical analytics.
+History begins when this frontend observes the socket/group; empty time before
+that is left blank. On-demand typed graph IPC returns only the selected history.
+
+- Up to five minutes and 1,202 source-points per entity (TCP/UDP points count
+  separately); 120,000 points across the entire store.
+- Up to 2,048 current socket measurements, matching the backend census; at most
+  8,192 total socket/process/application/group records.
+- At most 256 inactive records, including closed sockets/groups, for 60 seconds.
+- A proportional per-record budget shortens history under heavy socket counts;
+  **History shortened by memory bound** is explicit. Five minutes is a maximum,
+  not a guarantee. Evicted records return empty; identities never share buffers.
+
+Hidden/tray windows continue bounded sampling without canvas rendering or graph
+IPC polling. Showing them queries retained data. Rendering occurs only for fresh
+samples, selection/window/source changes or resizing; no animation timer. Existing
+selection, table filters/sorting/widths, sidebar sizing, rules, conditional Delete,
+authentication, tray notifications and firewall behavior are unchanged.
+
+### Focused verification
+
+`scripts/check-electron-graphs.sh` uses existing dependencies, builds the ordinary
+read-only observer/native loopback fixture, and runs only graph/model checks and
+actual sandboxed Electron on KDE/Wayland. No controller, live-host enforcement,
+privileged collection or UDP kernel suite. Existing UDP evidence is reused.
+
+Real TCP shared-FD fixture: correct upload/download series, exact agreement with
+socket table rates, idle measured zero, application graph agreement with unique
+socket sums, and three hide/reopen cycles retaining history with no duplicate
+sample times or windows. Normal 1280×820 and narrow 860×600 screenshots inspected.
+A process/application includes both ends of its own loopback exchange; that is
+not an interface-wide total. All fixture/observer/Electron processes clean up.
+
+Synthetic unit samples cover mixed sources, shared deduplication, partial coverage,
+unavailable samples, disconnect/reconnect, reset/source change, bounded eviction,
+new socket identities/reused endpoints, ownership reassociation, duplicate/older
+sample delivery, and backend wall-clock jumps. These are **not UDP/kernel evidence**.
+The focused model regression is reused in the same run. No synthetic screenshot is
+presented as real measured traffic.
+
+Evidence: `.workspace/graph-real.log`, `.workspace/graph-unit.log`; the real log
+identifies the capture directory containing `real-tcp-socket.png`,
+`real-tcp-application.png`, `real-tcp-narrow.png`, and `graphs.json`.
+
+The short visible/hidden resource comparison in that directory (`visible.json`,
+`hidden.json`) sums the Electron tree's PSS/private memory and RSS, with the Go
+observer separate; CPU is percent of one CPU over five seconds. **The external
+Playwright debugger is attached in both samples**, so these are comparable UI-test
+measurements, not production memory figures. No resource gate or extended benchmark.
+
+Latest graph run: `.workspace/gr-Vhk0fS/` (nine synthetic/model checks passed).
+
+| State | Electron PSS | Private | Summed RSS | CPU | Observer PSS / private / RSS / CPU |
+|---|---:|---:|---:|---:|---|
+| Graph visible | 430.6 MiB | 257.6 MiB | 961.5 MiB | 2.8% | 17.1 / 17.1 / 18.6 MiB / 1.4% |
+| Hidden | 431.2 MiB | 258.1 MiB | 962.1 MiB | 1.0% | 17.1 / 17.1 / 18.5 MiB / 1.4% |
+
+Eight Electron processes in both samples; same retained history and idle fixture.
+This bounded comparison does not establish a leak or a production resource budget.
+Integration adds `electron/src/{history,graph}.ts`, their typed bridge/render hooks,
+focused tests and `scripts/check-electron-graphs.sh`; no backend/Qt changes required.

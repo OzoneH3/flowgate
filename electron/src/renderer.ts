@@ -1,3 +1,4 @@
+import { TrafficGraph } from './graph';
 import { setupWorkflows, updateWorkflows } from './workflows';
 import type { ClientState, ViewEvent, Scope } from './protocol';
 import {
@@ -17,6 +18,7 @@ const promptGeneration = new URL(location.href).searchParams.get('generation');
 const promptID = new URL(location.href).searchParams.get('request');
 let state: ClientState;
 let selected = '';
+let graph: TrafficGraph | undefined;
 let selectedRequest = promptID ?? '';
 let chosenScope: Scope = 'once';
 let tab = 'activity';
@@ -52,7 +54,7 @@ if (promptID) {
   root.innerHTML = `<section class="prompt-shell"><header class="prompt-heading"><strong>FlowGate Blocker</strong><span>Connection permission</span></header><div id="promptBody"><div id="requestDetails"></div></div><footer><span id="controlStatus"></span><button id="dismiss">Decide later</button></footer><div id="feedback" role="status" aria-live="polite"></div></section>`;
   $('dismiss').onclick = () => void window.flowgate.dismissPrompt();
 } else {
-  root.innerHTML = `<header class="toolbar"><strong class="brand">▣ FlowGate</strong><span id="observerStatus"></span><span class="separator"></span><span id="controlStatus"></span></header><nav class="tabs" aria-label="Views"><button id="activityTab" aria-selected="true">Activity</button><button id="requestsTab" aria-selected="false">Pending requests <span id="pendingCount">0</span></button></nav><main id="activityView"><section class="activity-main"><div class="filterbar"><input id="search" type="search" aria-label="Search Activity" placeholder="Search application, path, PID or endpoint"><select id="filter" aria-label="Socket filter"><option value="all">All sockets</option><option value="active">Active TCP / connected UDP</option><option value="listening">Listening TCP / bound UDP</option></select><button id="expand">Expand all</button><button id="collapse">Collapse all</button></div><div class="table-scroll"><table id="tree" role="treegrid" tabindex="0" aria-label="Application process socket activity"><thead><tr id="headers"></tr></thead><tbody id="rows"></tbody></table></div><div id="activitySummary" class="summary"></div></section><aside><h2>Info View</h2><h3 id="selectedName">FlowGate Activity</h3><dl id="info"></dl><section class="measurement-note"><h2>Measurements</h2><p>Observed bytes from currently visible sockets. TCP transport payload and optional UDP API bytes are separate sources.</p><p>— Unavailable &nbsp; * Partial coverage</p><p>Traffic charts are not available in this frontend.</p></section></aside></main><main id="requestsView" hidden><section class="request-list"><h2>Pending &amp; recent requests</h2><p class="hint">Select a request to decide. Dismissal grants nothing. Closing FlowGate leaves an independent controller running.</p><div class="table-scroll"><table id="requests"><thead><tr><th>Application</th><th>Direction</th><th>Protocol</th><th>Remote endpoint</th><th>State</th></tr></thead><tbody id="requestRows"></tbody></table></div></section><aside class="request-sidebar"><h2>Connection permission</h2><div id="requestDetails"></div></aside></main><footer><span>Activity and firewall control are independent.</span><span id="feedback" role="status" aria-live="polite"></span></footer>`;
+  root.innerHTML = `<header class="toolbar"><strong class="brand">▣ FlowGate</strong><span id="observerStatus"></span><span class="separator"></span><span id="controlStatus"></span></header><nav class="tabs" aria-label="Views"><button id="activityTab" aria-selected="true">Activity</button><button id="requestsTab" aria-selected="false">Pending requests <span id="pendingCount">0</span></button></nav><main id="activityView"><section class="activity-main"><div class="filterbar"><input id="search" type="search" aria-label="Search Activity" placeholder="Search application, path, PID or endpoint"><select id="filter" aria-label="Socket filter"><option value="all">All sockets</option><option value="active">Active TCP / connected UDP</option><option value="listening">Listening TCP / bound UDP</option></select><button id="expand">Expand all</button><button id="collapse">Collapse all</button></div><div class="table-scroll"><table id="tree" role="treegrid" tabindex="0" aria-label="Application process socket activity"><thead><tr id="headers"></tr></thead><tbody id="rows"></tbody></table></div><div id="activitySummary" class="summary"></div></section><aside><h2>Info View</h2><h3 id="selectedName">FlowGate Activity</h3><dl id="info"></dl><section id="trafficGraph"></section></aside></main><main id="requestsView" hidden><section class="request-list"><h2>Pending &amp; recent requests</h2><p class="hint">Select a request to decide. Dismissal grants nothing. Closing FlowGate leaves an independent controller running.</p><div class="table-scroll"><table id="requests"><thead><tr><th>Application</th><th>Direction</th><th>Protocol</th><th>Remote endpoint</th><th>State</th></tr></thead><tbody id="requestRows"></tbody></table></div></section><aside class="request-sidebar"><h2>Connection permission</h2><div id="requestDetails"></div></aside></main><footer><span>Activity and firewall control are independent.</span><span id="feedback" role="status" aria-live="polite"></span></footer>`;
   const columns = [
     ['name', 'Application / process / connection'],
     ['download_bps', 'DL rate'],
@@ -86,10 +88,12 @@ if (promptID) {
     }
     $('activityView').hidden = next !== 'activity';
     $('requestsView').hidden = next !== 'requests';
+    if (next === 'activity') void graph?.update(selected, sequence + ':shown');
     $('activityTab').setAttribute('aria-selected', String(next === 'activity'));
     $('requestsTab').setAttribute('aria-selected', String(next === 'requests'));
   };
   setupWorkflows(chooseTab);
+  graph = new TrafficGraph($('trafficGraph'));
   window.flowgate.onNavigate((v) => {
     chooseTab('requests');
     message(v.message);
@@ -259,6 +263,7 @@ function renderTree() {
   }
 }
 function renderInfo() {
+  void graph?.update(selected, sequence);
   const live = $('info');
   const info = element('dl');
   const commit = () => {
@@ -597,5 +602,8 @@ void window.flowgate
   });
 
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) void window.flowgate.snapshot().then(consume);
+  if (!document.hidden) {
+    void window.flowgate.snapshot().then(consume);
+    void graph?.update(selected, sequence + ':resume:' + performance.now());
+  }
 });

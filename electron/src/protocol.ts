@@ -15,6 +15,7 @@ export interface Process {
   application: Application;
 }
 export interface Traffic {
+  state?: string;
   available: boolean;
   partial: boolean;
   definition: string;
@@ -132,6 +133,7 @@ export interface Decision {
   scope: Scope;
 }
 export interface Bridge {
+  graph(value: { id: string; seconds: number }): Promise<import('./history').GraphView>;
   snapshot(): Promise<ClientState>;
   backgroundStatus(): Promise<{ trayAvailable: boolean; notifications: string }>;
   quit(): Promise<void>;
@@ -314,6 +316,7 @@ export function parseReply(raw: unknown): Reply {
             state: number(s.state),
           },
           traffic: {
+            state: string(t.state),
             available: t.available === true,
             partial: t.partial === true,
             definition: string(t.definition),
