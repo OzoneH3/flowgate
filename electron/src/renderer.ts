@@ -344,13 +344,43 @@ function renderPolicyList() {
       content.append(item);
     }
   }
-  const create = element('button', 'New rule…');
+  const create = element('button', `New ${policySelection.direction} rule…`);
   create.id = 'newActivityRule';
-  create.disabled = true;
+  const application = row ? authoritativePolicy(row, state).application : undefined;
+  const candidate = row?.rows.find(
+    (socket) =>
+      socket.owners.length === 1 &&
+      socket.ownership_category === 'visible-holder' &&
+      application?.process_ids.includes(socket.owners[0]) &&
+      (!row.process || row.kind === 'application' || row.process.id === socket.owners[0]),
+  );
+  const source = candidate
+    ? {
+        generation: state.control.generation,
+        row_id: candidate.id,
+        process_id: candidate.owners[0],
+        direction: policySelection.direction,
+      }
+    : undefined;
   const creationReason = !canManageRules(state.control)
     ? 'Rule management is read-only or unavailable.'
-    : 'This daemon cannot create rules from Activity yet. New rules require an attributable pending request; an observed application is not a permission target.';
+    : !state.control.capabilities?.includes('observed-rule-create-v1')
+      ? 'Backend update required for creation from Activity (observed-rule-create-v1). Pending-request creation remains available.'
+      : !source
+        ? result?.reason ||
+          'A live supported single-holder native process is required; shared or unresolved observations cannot create rules.'
+        : 'Preview will verify this live process. Direction is connection initiation, not upload/download.';
+  create.disabled =
+    !source ||
+    !canManageRules(state.control) ||
+    !state.control.capabilities?.includes('observed-rule-create-v1');
   create.title = creationReason;
+  create.onclick = () => {
+    if (source) {
+      closePolicyList();
+      void openRule({ observed: source });
+    }
+  };
   content.append(create, element('p', creationReason, 'hint'));
   content.append(
     element(

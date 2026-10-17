@@ -558,8 +558,8 @@ companion allows viewing policy but exposes no mutation controls. Invalid advert
 permission metadata fails closed. Prototype evaluation controls are disabled for
 this independently managed non-enforcing daemon; this UI does not transition it.
 
-Creating the first rule directly from an Activity row is not supported by the current
-API: creation still requires an attributable pending request. Existing configured
+Creating the first rule from Activity requires `observed-rule-create-v1` on the
+primary endpoint. Older daemons retain pending-request creation only. Existing configured
 rules open the existing authoritative preview/versioned-save workflow; conditional
 deletion protections remain unchanged. Changing policy need not disconnect existing
 approved TCP sessions.
@@ -594,9 +594,9 @@ numeric mutation APIs still refuse unsafe uint64 values instead of rounding them
 
 Policy details offer Edit and conditional Delete using existing preview/version and
 frozen-confirmation safeguards. Unfinished editor fields survive metadata refreshes.
-The new read-only API explicitly supplies **no creation authority**: first-rule creation
-from Activity is still unavailable. It needs a backend-authorized observed-identity
-creation draft/preview and token-bound save; summary association is not that token.
+The read-only policy API supplies **no creation authority**. Activity creation uses
+the separate `observed-rule-create-v1` preview/save contract described below; a
+summary association is never used as a creation token.
 The existing pending-request creation workflow is unchanged. No stored Ask action,
 new precedence, filter semantics or accounting exclusion is introduced.
 
@@ -627,8 +627,8 @@ Verification for this increment: backend **0aca36145adc857bdb59d52f1862a420bbdac
 No backend commits were merged into the UI branch. Build and 22 focused checks passed;
 synthetic generation/order/expiry cases are not enforcement evidence. Actual sandboxed
 Wayland + real isolated daemon/seeded rule passed in `.workspace/policy-ui-upGpIo`
-(policy list, editor/save, narrow and companion read-only screenshots). First-rule
-creation was **not** tested or implemented: the released API does not support it.
+(policy list, editor/save, narrow and companion read-only screenshots). That earlier policy-summary increment did not include first-rule creation; see the
+subsequent creation evidence below.
 
 Real host fallback screenshot with installed icons and policy details:
 `.workspace/policy-authoritative/root-fallback.png`; narrow: `after-narrow.png` in the
@@ -638,3 +638,57 @@ the separate 15-executable pre-launch audit. `tests.log`, `isolated.log`, `root.
 `synthetic.log` and `final-lifecycle.json` distinguish evidence and confirm fixture
 cleanup plus unchanged root peer PID/generation/stopped state/zero rules. No host
 mutation, activation, collection, daemon restart or unrelated suite was performed.
+
+## First rule from Activity (observed-rule-create-v1)
+
+Click an application's **In Blocker / Out Blocker** cell → **New incoming/outgoing
+rule…**. Direction means connection initiation, not download/upload. The primary
+must advertise `observed-rule-create-v1` and grant `can_manage_rules`; it need not
+grant `can_decide`. Older daemons show an update explanation, and read-only or
+unsupported selections cannot create. No pending connection is required.
+
+Choose an explicit address/port scope or **All addresses / ports for this protocol**,
+TCP or UDP, Allow or Block, enabled state and expiry. All-endpoint scope covers only
+the selected protocol. The initial expiry is one hour; preserving expiry retains
+that absolute time. Priority is backend-fixed at 100. Preview verifies the live native
+single-holder socket/process/executable/UID/namespaces and displays the backend scope.
+Shared/runtime/unsupported identities cannot use this operation. Policy-summary display
+associations alone never confer creation authority.
+
+Preview lasts 30 seconds. Changing fields invalidates Save; expiry, permissions or
+session changes require review again. Save sends the exact frozen draft and token,
+never invented identity or pending IDs. No automatic retry occurs. Lost/mismatched
+acknowledgements freeze the editor and offer **Check save result**, which only reads
+authoritative rules and compares the reserved rule ID and full reviewed contents.
+Absence is unresolved, not proof of failure; closing warns to inspect saved rules
+before creating again. Acknowledged/reconciled success selects the rule in Rules.
+Saving stored policy never activates enforcement or releases a pending packet.
+
+Verification backend: **8ef90cde66c73c69bf8fd8b686e82d2298b98536**; no backend
+commit merged here. Build and nine focused creation/rules/delete/policy tests passed.
+Synthetic tests cover generation/identity changes, capability denial, expiry and
+persistence failure. Actual sandboxed Wayland with a real non-enforcing isolated Go
+daemon, native Python listener and initially empty policy passed first incoming and
+outgoing creation with no pending events, authoritative policy appearance, edit,
+conditional delete, real 30-second expiry, focus preservation and read-only denial.
+A labelled proxy fault dropped one real save acknowledgement: reconciliation found
+the committed rule without a second save. This is not host enforcement evidence.
+
+Reproduce with installed dependencies:
+
+```sh
+npm --prefix electron run build
+node --test electron/test/observed-rules.test.cjs electron/test/rules.test.cjs electron/test/delete.test.cjs electron/test/policy.test.cjs
+FLOWGATE_TEST_DAEMON=/absolute/path/to/released/flowgate node electron/test/creation-workflow.mjs
+./scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock
+```
+
+Inspected captures (relative to this worktree):
+`.workspace/creation-ui-5tNt4G/first-rule-preview.png` (1280×896),
+`first-rule-preview-narrow.png` (860×600), and `created-rules.png` in that directory.
+They show a labelled real isolated fixture, not host rules. Older root-daemon fallback
+and descending-first rates passed with no host mutations; captures/logs are in
+`.workspace/observed-creation/`. Existing root daemon stayed running with enforcement
+stopped; adoption of the new API needs a separately authorized backend update.
+Test-owned namespace daemon/Electron processes exited. Existing accounting, icons,
+tray and receiver-enforcement evidence was reused, not rerun.

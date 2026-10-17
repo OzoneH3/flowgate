@@ -15,6 +15,7 @@ const api: Bridge = {
   ruleDraft: (v) => ipcRenderer.invoke('rule:draft', v),
   rulePreview: (v) => ipcRenderer.invoke('rule:preview', v),
   ruleSave: (v) => ipcRenderer.invoke('rule:save', v),
+  ruleReconcile: (v) => ipcRenderer.invoke('rule:reconcile', v),
   ruleDelete: (v) => ipcRenderer.invoke('rule:delete', v),
   evaluation: (a, p) => ipcRenderer.invoke('evaluation:action', a, p),
   evaluationState: () => ipcRenderer.invoke('evaluation:state'),

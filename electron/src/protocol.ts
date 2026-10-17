@@ -95,6 +95,7 @@ export interface Permissions {
 }
 export interface Reply {
   policy_view?: PolicyView;
+  observed_preview?: ObservedPreview;
   permissions?: Permissions;
   backend_mode?: string;
   version: 1;
@@ -117,6 +118,8 @@ export interface Reply {
 export interface Attempt {
   phase: 'submitting' | 'acknowledged' | 'rejected' | 'unknown';
   message: string;
+  rule?: Rule;
+  reconcile?: string;
 }
 export interface ViewEvent extends RequestEvent {
   remainingMs: number;
@@ -156,8 +159,9 @@ export interface Bridge {
   onNavigate(fn: (value: { tab: 'requests'; message: string }) => void): () => void;
   extended(action: 'enable' | 'stop'): Promise<void>;
   extendedState(): Promise<{ busy: boolean; message: string }>;
-  ruleDraft(source: { id?: string; event?: string }): Promise<RuleDraft>;
-  rulePreview(value: RuleEdit): Promise<{ receipt: string; preview: string }>;
+  ruleDraft(source: RuleSource): Promise<RuleDraft>;
+  ruleReconcile(receipt: string): Promise<Attempt>;
+  rulePreview(value: RuleEdit): Promise<RulePreview>;
   ruleSave(receipt: string): Promise<Attempt>;
   ruleDelete(value: { id: string; generation: string; version: number }): Promise<Attempt>;
   evaluation(action: EvaluationAction, profile?: 'incoming' | 'both'): Promise<void>;
@@ -291,6 +295,29 @@ export function parseReply(raw: unknown): Reply {
   }
   result.backend_mode = string(r.backend_mode);
   if (r.policy_view) result.policy_view = parsePolicyView(r.policy_view);
+  if (r.observed_preview) {
+    const p = object(r.observed_preview),
+      e = object(p.enforcement);
+    if (
+      !string(p.token) ||
+      !string(p.process_id) ||
+      !string(p.scope_preview) ||
+      !Number.isFinite(Date.parse(string(p.expires_at))) ||
+      typeof e.covered !== 'boolean'
+    )
+      throw Error('Invalid observed preview');
+    result.observed_preview = {
+      token: string(p.token),
+      expires_at: string(p.expires_at),
+      rule: parseRule(p.rule),
+      application: application(p.application),
+      process_id: string(p.process_id),
+      pid: number(p.pid),
+      principal_uid: number(p.principal_uid),
+      scope_preview: string(p.scope_preview),
+      enforcement: { state: string(e.state), covered: e.covered, reason: string(e.reason) },
+    };
+  }
   if (r.decision) result.decision = event(r.decision);
   if (r.enforcement) {
     const e = object(r.enforcement);
@@ -413,6 +440,32 @@ export interface RuleDraft {
   generation: string;
   rule: Rule;
   source: string;
+  observed?: boolean;
+}
+export interface ObservedSource {
+  generation: string;
+  row_id: string;
+  process_id: string;
+  direction: 'incoming' | 'outgoing';
+}
+export type RuleSource = { id?: string; event?: string; observed?: ObservedSource };
+export interface ObservedPreview {
+  token: string;
+  expires_at: string;
+  rule: Rule;
+  application: Application;
+  process_id: string;
+  pid: number;
+  principal_uid: number;
+  scope_preview: string;
+  enforcement: { state: string; covered: boolean; reason: string };
+}
+export interface RulePreview {
+  receipt: string;
+  preview: string;
+  expiresAt?: string;
+  verifiedRule?: Rule;
+  processID?: string;
 }
 export interface RuleEdit {
   token: string;
@@ -424,6 +477,7 @@ export interface RuleEdit {
   priority: number;
   disabled: boolean;
   expiry: 'preserve' | 'hour' | 'permanent';
+  creation_scope?: 'application' | 'custom';
 }
 export type EvaluationAction = 'start' | 'stop' | 'status' | 'recover' | 'cancel';
 export interface EvaluationState {
@@ -478,8 +532,13 @@ function parseRule(v: unknown): Rule {
 export function validateEdit(v: unknown): RuleEdit {
   const e = object(v);
   if (
-    Object.keys(e).sort().join(',') !==
+    Object.keys(e)
+      .filter((k) => k !== 'creation_scope')
+      .sort()
+      .join(',') !==
       'action,disabled,expiry,local_port,priority,protocol,remote_address,remote_port,token' ||
+    (e.creation_scope !== undefined &&
+      !['application', 'custom'].includes(String(e.creation_scope))) ||
     typeof e.token !== 'string' ||
     e.token.length > 128 ||
     !['allow', 'block'].includes(String(e.action)) ||

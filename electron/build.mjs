@@ -33,6 +33,7 @@ await build({
     'src/backend.ts',
     'src/extended.ts',
     'src/rules.ts',
+    'src/observed-rules.ts',
     'src/notifications.ts',
     'src/history.ts',
   ],

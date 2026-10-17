@@ -220,6 +220,7 @@ app.whenReady().then(async () => {
     'rule:draft': (v: unknown) => rules.draft(v),
     'rule:preview': (v: unknown) => rules.preview(v),
     'rule:save': (v: unknown) => rules.save(v),
+    'rule:reconcile': (v: unknown) => rules.reconcile(v),
     'rule:delete': (v: unknown) => rules.delete(v),
   }))
     ipcMain.handle(channel, (e, v) => {
