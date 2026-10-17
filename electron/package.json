@@ -1,0 +1,23 @@
+{
+  "name": "flowgate-electron",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Unprivileged FlowGate Activity and permission client",
+  "main": "dist/main.cjs",
+  "scripts": {
+    "build": "tsc --noEmit && node build.mjs",
+    "start": "electron .",
+    "test": "node --test test/*.test.cjs"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "electron": "44.9.0",
+    "esbuild": "0.28.2",
+    "playwright-core": "1.64.1",
+    "prettier": "3.9.10",
+    "typescript": "7.0.2"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}
