@@ -92,7 +92,8 @@ scripts/check-electron.sh
 This builds native fixtures, runs seven small synthetic model/transport checks,
 then launches actual sandboxed Electron on the existing KDE/Wayland session.
 It uses the read-only observer with real TCP loopback fixtures, and the existing
-`scripts/lab.sh`/`desktop-lab.py` disposable namespace for firewall checks. It does
+`scripts/lab.sh`/`desktop-lab.py` disposable namespace for firewall checks. Its supervisor receives an explicit quit, with an owned process-group fallback
+for failed startup; test-owned processes exit before completion. It does
 not run host enforcement, UDP collector or Wine/Proton matrices. Test-only CDP
 binds to loopback and is supplied by the external test runner; the production
 launcher enables no debugger or TCP control service.
@@ -122,13 +123,13 @@ Verified on base `86ce7e4163ef31afae15889babb475f1a110ae4f`:
 Evidence (relative to this worktree, all uncommitted runtime artifacts):
 
 - `.workspace/electron-acceptance-final.log` — complete passing real-backend run.
-- `.workspace/el-check-BNWiS6/electron-activity.png` — real controlled TCP traffic.
-- `.workspace/el-check-BNWiS6/electron-prompt.png` — real isolated UDP request.
-- `.workspace/el-check-BNWiS6/electron-main.png` — Activity after controller loss.
-- `.workspace/el-check-BNWiS6/electron-narrow.png` — actual 860×600 Electron window.
-- `.workspace/el-check-BNWiS6/resources.json` — idle Electron process tree sample:
-  **984608 KiB summed RSS (~962 MiB)**; **0.05 CPU seconds over 2.5 seconds**
-  (~2% of one CPU), eight processes. Summed RSS double-counts shared mappings;
+- `.workspace/el-check-DrlXgE/electron-activity.png` — real controlled TCP traffic.
+- `.workspace/el-check-DrlXgE/electron-prompt.png` — real isolated UDP request.
+- `.workspace/el-check-DrlXgE/electron-main.png` — Activity after controller loss.
+- `.workspace/el-check-DrlXgE/electron-narrow.png` — actual 860×600 Electron window.
+- `.workspace/el-check-DrlXgE/resources.json` — idle Electron process tree sample:
+  **986200 KiB summed RSS (~963 MiB)**; **0.05 CPU seconds over 2.5 seconds**
+  (~2.0% of one CPU), eight processes. Summed RSS double-counts shared mappings;
   this includes the Electron GPU/utility/renderer processes, excludes the observer
   and test driver, and is a brief sample with the test debugger attached.
 - `.workspace/electron-launch-check.log` and `.workspace/el-launch-4lo5jko4/` —

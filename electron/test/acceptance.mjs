@@ -40,6 +40,8 @@ async function wait(fn, seconds = 15) {
 function start(command, args = [], name = 'process') {
   const p = spawn(command, args, {
     cwd: root,
+    // Own a distinct process group so failed namespace startup can be cleaned up too.
+    detached: name === 'lab',
     env: {
       ...process.env,
       WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY || 'wayland-0',
@@ -48,6 +50,7 @@ function start(command, args = [], name = 'process') {
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
+  p.ownedGroup = name === 'lab';
   children.push(p);
   let output = '';
   p.stdout.on('data', (b) => {
@@ -118,6 +121,7 @@ function command(operation, port = 41001) {
   return new Promise((resolve, reject) => {
     const s = net.createConnection(path.join(run, 'demo.sock'));
     s.on('error', reject);
+    s.setTimeout(2500, () => s.destroy(new Error('Harness command timed out')));
     s.on('connect', () => s.write(JSON.stringify({ operation, port })));
     s.once('data', (b) => {
       s.destroy();
@@ -407,12 +411,36 @@ try {
   console.log('PASS normal/narrow captures; no renderer exceptions');
   console.log('EVIDENCE', run);
 } finally {
-  for (const b of browsers) await b.close().catch(() => {});
-  for (const p of children.reverse()) {
-    if (p.exitCode === null) {
-      p.kill('SIGTERM');
-      await wait(() => p.exitCode !== null, 5).catch(() => p.kill('SIGKILL'));
+  // The namespace supervisor must shut down its receiver children before unshare exits.
+  let cleanupError;
+  if (existsSync(path.join(run, 'demo.sock'))) {
+    try {
+      await command('quit');
+      await wait(() => !existsSync(path.join(run, 'ready')), 10);
+    } catch (error) {
+      cleanupError = error;
     }
   }
+  for (const b of browsers) await b.close().catch(() => {});
+  for (const p of children.reverse()) {
+    if (p.ownedGroup) {
+      try {
+        process.kill(-p.pid, 'SIGTERM');
+      } catch (error) {
+        if (error.code !== 'ESRCH') cleanupError = error;
+      }
+    }
+    if (p.exitCode === null && p.signalCode === null) {
+      p.kill('SIGTERM');
+      await wait(() => p.exitCode !== null || p.signalCode !== null, 5).catch(() =>
+        p.kill('SIGKILL'),
+      );
+    }
+    p.stdin.destroy();
+    p.stdout.destroy();
+    p.stderr.destroy();
+  }
   writeFileSync(path.join(run, 'renderer.log'), logs.join('\n'));
+  if (cleanupError) throw cleanupError;
+  console.log('PASS explicit isolated-lab quit and test-owned process cleanup');
 }
