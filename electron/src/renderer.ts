@@ -1,7 +1,8 @@
-import { ruleStatus, ruleState, ruleDescription } from './rule-status';
+import { ruleStatus, ruleState, ruleDescription, configuredPolicy } from './rule-status';
+import { canDecide, canManageRules } from './protocol';
 import type { Application } from './protocol';
 import { TrafficGraph } from './graph';
-import { setupWorkflows, updateWorkflows } from './workflows';
+import { setupWorkflows, updateWorkflows, openRule } from './workflows';
 import type { ClientState, ViewEvent, Scope } from './protocol';
 import {
   hierarchy,
@@ -111,6 +112,7 @@ function installedIcon(app: Application | undefined, kind: Row['kind']) {
   return span;
 }
 function rowApplication(r: Row) {
+  if (r.displayApplication || (r.socket && r.socket.owners.length > 1)) return undefined;
   return (
     r.process?.application ||
     r.displayApplication ||
@@ -119,38 +121,141 @@ function rowApplication(r: Row) {
       : r.socket?.display_application)
   );
 }
-function ruleIndicators(r: Row) {
+type PolicyDirection = 'incoming' | 'outgoing';
+let policySelection: { id: string; direction: PolicyDirection } | undefined;
+let policySignature = '';
+function policyCell(r: Row, direction: PolicyDirection) {
   const status = ruleStatus(r, state),
     cell = element('td', '', 'rule-status');
-  cell.title = status.reason;
-  if (!status.available) {
-    cell.append(element('span', '—', 'rule-unavailable'));
-    cell.setAttribute('aria-label', status.reason);
-    return cell;
-  }
-  for (const direction of ['incoming', 'outgoing'] as const) {
-    const group = element('span', '', 'rule-direction');
-    group.append(element('span', direction === 'incoming' ? 'In' : 'Out', 'rule-direction-label'));
-    const rules = status[direction];
-    for (const type of ['allow', 'block', 'disabled', 'expired', 'unknown'] as const) {
-      const matches = rules.filter((rule) => ruleState(rule, status.now) === type);
-      if (!matches.length) continue;
-      const glyph = { allow: '✓', block: '×', disabled: '○', expired: '◷', unknown: '?' }[type];
-      const indicator = element('span', glyph, 'rule-indicator rule-' + type);
-      indicator.title =
-        `${direction}: ${matches.length} ${type} scoped rule(s)\n` +
-        matches.map((rule) => ruleDescription(rule, status.now)).join('\n');
-      indicator.setAttribute('aria-label', indicator.title);
-      group.append(indicator);
-    }
-    if (!rules.length) {
-      const none = element('span', '·', 'rule-none');
-      none.title = direction + ': no listed rules (not an Allow/Block verdict)';
-      group.append(none);
-    }
-    cell.append(group);
-  }
+  const rules = status[direction];
+  const label = status.available ? configuredPolicy(rules, status.now) : 'Unavailable';
+  const button = element('button', label, 'policy-cell');
+  button.dataset.direction = direction;
+  button.title =
+    `${direction}: configured policy. ${status.reason}\n${state.control.enforcement?.state === 'stopped' ? 'Stored only; enforcement stopped.\n' : ''}` +
+    rules.map((rule) => ruleDescription(rule, status.now)).join('\n');
+  button.setAttribute('aria-label', `${r.label} · ${direction} · ${label} · configured policy`);
+  if (!status.available) button.classList.add('rule-unavailable');
+  else if (rules.length === 1) button.classList.add('policy-' + ruleState(rules[0], status.now));
+  button.onclick = (event) => {
+    event.stopPropagation();
+    selected = r.id;
+    policySelection = { id: r.id, direction };
+    policySignature = '';
+    renderTree();
+    renderInfo();
+    renderPolicyList();
+    $('closePolicy').focus();
+  };
+  cell.append(button);
   return cell;
+}
+function closePolicyList() {
+  const selection = policySelection;
+  policySelection = undefined;
+  $('policyList')?.remove();
+  for (const row of document.querySelectorAll<HTMLElement>('#rows tr'))
+    if (selection && row.dataset.id === selection.id)
+      row
+        .querySelector<HTMLButtonElement>(`.policy-cell[data-direction="${selection.direction}"]`)
+        ?.focus({ preventScroll: true });
+}
+function renderPolicyList() {
+  if (!policySelection || promptID) return;
+  const row = allRows(roots).find((r) => r.id === policySelection!.id);
+  const inventory = row ? ruleStatus(row, state) : undefined;
+  const rules = inventory?.[policySelection.direction] || [];
+  const signature = JSON.stringify([
+    policySelection,
+    inventory?.available,
+    inventory?.reason,
+    row?.label,
+    rules,
+    rules.map((r) => ruleState(r, inventory!.now)),
+    canManageRules(state.control),
+    state.control.enforcement?.state,
+  ]);
+  if (signature === policySignature) return;
+  policySignature = signature;
+  let panel = $('policyList');
+  if (!panel) {
+    panel = element('section', '', 'policy-list');
+    panel.id = 'policyList';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-label', 'Configured policy');
+    root.append(panel);
+    panel.onkeydown = (e) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        closePolicyList();
+      }
+    };
+  }
+  const heading = element('header'),
+    title = element(
+      'strong',
+      `${policySelection.direction === 'incoming' ? 'Incoming' : 'Outgoing'} configured policy`,
+    ),
+    close = element('button', 'Close');
+  close.id = 'closePolicy';
+  close.onclick = closePolicyList;
+  heading.append(title, close);
+  const content = element('div', '', 'policy-list-content');
+  content.append(element('p', row?.label || 'Selection no longer visible', 'policy-identity'));
+  content.append(
+    element(
+      'p',
+      state.control.enforcement?.state === 'stopped'
+        ? 'Stored policy only · enforcement stopped.'
+        : 'Configured inventory, not an effective connection verdict.',
+      'hint',
+    ),
+  );
+  if (state.control.permissions)
+    content.append(
+      element(
+        'p',
+        `${state.control.permissions.role} · ${state.control.permissions.policy_scope} policy · ${canManageRules(state.control) ? 'editing permitted' : 'read-only'}`,
+        'hint',
+      ),
+    );
+  if (!inventory?.available)
+    content.append(element('p', inventory?.reason || 'No current observation identity.'));
+  else if (!rules.length)
+    content.append(
+      element(
+        'p',
+        'No explicit rule listed. No default action is inferred. Creating a new rule currently requires an attributable pending request.',
+      ),
+    );
+  else {
+    content.append(
+      element(
+        'p',
+        rules.length > 1
+          ? 'Multiple scopes; precedence remains in Go.'
+          : 'Scope and expiry below are the stored backend values.',
+        'hint',
+      ),
+    );
+    for (const rule of rules) {
+      const item = element('section', '', 'policy-rule');
+      item.append(element('p', ruleDescription(rule, inventory.now)));
+      if (canManageRules(state.control)) {
+        const edit = element('button', 'Edit rule');
+        edit.dataset.ruleId = rule.id;
+        edit.onclick = () => {
+          closePolicyList();
+          void openRule({ id: rule.id });
+        };
+        item.append(edit);
+      }
+      content.append(item);
+    }
+  }
+  if (!canManageRules(state.control))
+    content.append(element('p', 'Rule management is unavailable or read-only.', 'hint'));
+  panel.replaceChildren(heading, content);
 }
 
 function field(container: HTMLElement, label: string, value: string) {
@@ -173,7 +278,8 @@ if (promptID) {
     ['name', 'Application / process / connection'],
     ['download_bps', 'DL rate'],
     ['upload_bps', 'UL rate'],
-    ['rules', 'Rule Status'],
+    ['incoming_policy', 'In Blocker'],
+    ['outgoing_policy', 'Out Blocker'],
     ['count', 'Sockets'],
     ['pid', 'PID'],
     ['downloaded', 'Downloaded'],
@@ -188,8 +294,8 @@ if (promptID) {
     th.className = 'col-' + key;
     const b = element('button', title);
     if (key === 'download_bps' || key === 'upload_bps') b.append(element('small', 'Auto units'));
-    if (key === 'rules') b.append(element('small', 'Scoped inventory'));
-    b.disabled = key === 'rules';
+    if (key.endsWith('_policy')) b.append(element('small', 'Configured policy'));
+    b.disabled = key.endsWith('_policy');
     b.onclick = () => {
       descending = sort === key ? !descending : ['upload_bps', 'download_bps'].includes(key);
       sort = key;
@@ -296,6 +402,10 @@ function buildTree() {
   $('activitySummary').title = $('activitySummary').textContent || '';
 }
 function renderTree() {
+  const focused = document.activeElement as HTMLElement;
+  const focusedPolicy = focused?.classList.contains('policy-cell')
+    ? { id: focused.closest('tr')?.dataset.id, direction: focused.dataset.direction }
+    : undefined;
   visible = flatten(roots, expanded, sort, descending);
   const body = $('rows');
   const fragment = document.createDocumentFragment();
@@ -347,7 +457,7 @@ function renderTree() {
       td.title = `${s.known}/${s.count} measured sockets${s.mixed ? ' · incompatible measurement sources' : ''}`;
       tr.append(td);
     }
-    tr.append(ruleIndicators(r));
+    tr.append(policyCell(r, 'incoming'), policyCell(r, 'outgoing'));
     tr.append(
       element('td', String(r.rows.length), 'numeric'),
       element('td', r.pid === undefined ? '' : String(r.pid), 'numeric'),
@@ -367,6 +477,14 @@ function renderTree() {
     fragment.append(tr);
   }
   body.replaceChildren(fragment);
+  if (focusedPolicy)
+    for (const row of body.querySelectorAll<HTMLElement>('tr'))
+      if (row.dataset.id === focusedPolicy.id)
+        row
+          .querySelector<HTMLButtonElement>(
+            `.policy-cell[data-direction="${focusedPolicy.direction}"]`,
+          )
+          ?.focus({ preventScroll: true });
   for (const th of Array.from($('headers').children)) {
     const key = th.className.slice(4);
     th.setAttribute('aria-sort', key === sort ? (descending ? 'descending' : 'ascending') : 'none');
@@ -444,6 +562,16 @@ function renderInfo() {
             )
             .join(' · '),
     );
+    const value = info.lastElementChild as HTMLElement;
+    const link = element('button', value.textContent || '', 'sidebar-policy');
+    link.title = `Open ${direction} configured policy`;
+    link.onclick = () => {
+      policySelection = { id: r.id, direction };
+      policySignature = '';
+      renderPolicyList();
+      $('closePolicy').focus();
+    };
+    value.replaceChildren(link);
   }
   if (inventory.available)
     for (const direction of ['incoming', 'outgoing'] as const)
@@ -546,7 +674,7 @@ function actionable(e: ViewEvent | undefined) {
   return (
     !!e &&
     state.control.connected &&
-    !state.control.readOnly &&
+    canDecide(state.control) &&
     e.state === 'awaiting-decision' &&
     e.remainingMs > 0 &&
     !e.attempt &&
@@ -561,6 +689,7 @@ function renderRequests() {
     state.control.generation,
     state.control.connected,
     state.control.readOnly,
+    state.control.permissions,
     events.map((e) => [e.id, e.state, e.attempt]),
   ]);
   if (!promptID && signature !== eventSignature) {
@@ -745,7 +874,7 @@ function updateDecisions() {
       !!e.attempt ||
       localSubmitted.has(state.control.generation + ':' + e.id) ||
       !state.control.connected ||
-      state.control.readOnly ||
+      !canDecide(state.control) ||
       e.state !== 'awaiting-decision' ||
       e.remainingMs <= 0;
   if ($('scopePreview'))
@@ -766,7 +895,15 @@ function consume(next: ClientState) {
   $('controlStatus').textContent =
     state.control.message +
     (state.control.connected && state.control.readOnly ? ' · read-only' : '');
-  $('controlStatus').title = $('controlStatus').textContent || '';
+  $('controlStatus').title = [
+    $('controlStatus').textContent,
+    state.control.enforcement?.detail,
+    state.control.permissions
+      ? `${state.control.permissions.role} · ${state.control.permissions.policy_scope} policy · rule management ${state.control.permissions.can_manage_rules ? 'permitted' : 'denied'} · decisions ${state.control.permissions.can_decide ? 'permitted' : 'denied'}`
+      : 'Legacy permission contract',
+  ]
+    .filter(Boolean)
+    .join('\n');
   if (!promptID) {
     $('observerStatus').textContent = state.observation.message;
     $('observerStatus').title = state.observation.message;
@@ -788,6 +925,8 @@ function consume(next: ClientState) {
     const rulesStamp = JSON.stringify([
       state.control.connected,
       state.control.generation,
+      state.control.permissions,
+      state.control.enforcement?.state,
       state.control.rules,
       (state.control.rules || []).map((r) => ruleState(r, state.control.serverNow ?? NaN)),
     ]);
@@ -802,6 +941,7 @@ function consume(next: ClientState) {
     const details = $('requestDetails');
     details.dataset.eventId = currentEvent()?.id || '';
     updateWorkflows(state);
+    renderPolicyList();
   }
 }
 window.flowgate.subscribe(consume);

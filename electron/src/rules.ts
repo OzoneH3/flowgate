@@ -1,3 +1,4 @@
+import { canManageRules } from './protocol';
 import { randomUUID } from 'node:crypto';
 import { Backend, call } from './backend';
 import { validateEdit, type Rule, type RuleDraft, type RuleEdit, type Attempt } from './protocol';
@@ -12,7 +13,7 @@ export class Rules {
   constructor(private backend: Backend) {}
   private authority() {
     const c = this.backend.view().control;
-    if (!c.connected || c.readOnly || !this.backend.controller)
+    if (!canManageRules(c) || !this.backend.controller)
       throw Error('Controller unavailable or read-only');
     return c;
   }

@@ -77,8 +77,7 @@ Paths are relative to this **frontend worktree**:
   clearing stale indicators. No mutation was sent by this fixture. Its screenshot
   paths are printed in the log and identify synthetic content in the application.
 
-The real table/status check uses only its disposable namespace controller. The
-integration owner's independent root monitor is untouched. Its newer `daemon-monitor`
-primary endpoint still needs permission-aware client support in a separate migration;
-this branch does not pretend writable means enforcing. Its read-only `.monitor`
-endpoint is compatible, but this pass's recorded captures use the owned observer.
+The original table/status check above used its disposable namespace controller.
+The subsequent permission-aware daemon migration and separate actionable In/Out
+columns are recorded in [ACTIVITY-POLICY.md](ACTIVITY-POLICY.md). That increment
+also captures the independent root monitor without changing its stored rules.

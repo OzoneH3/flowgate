@@ -142,17 +142,20 @@ try {
   });
   const page = await app.firstWindow();
   await page.setViewportSize({ width: 1280, height: 896 });
-  await wait(() => page.locator('.rule-expired').count());
+  await wait(async () =>
+    (await page.locator('.policy-cell').first().innerText()).includes('Mixed'),
+  );
   const row = page.locator('#rows tr').first();
-  await row.click();
-  for (const type of ['allow', 'block', 'disabled', 'expired'])
-    assert.equal(await row.locator('.rule-' + type).count(), 1);
-  assert.match(await row.locator('.rule-allow').getAttribute('title'), /2 allow scoped/);
+  await row.locator('.policy-cell').first().click();
+  assert.equal(await page.locator('#policyList .policy-rule').count(), 5);
+  assert.match(await page.locator('#policyList').innerText(), /expired block/);
+  assert.match(await page.locator('#policyList').innerText(), /disabled allow/);
   await wait(() => row.locator('img').count());
   await page.screenshot({ path: path.join(run, 'synthetic-scoped-rules.png') });
+  await page.click('#closePolicy');
   // No new Activity sequence: only control inventory changes. Selection must survive.
   rules = [rule('new', 'block')];
-  await wait(async () => (await row.locator('.rule-allow').count()) === 0);
+  await wait(async () => (await row.locator('.policy-block').count()) === 1);
   assert.equal(await row.getAttribute('aria-selected'), 'true');
   await page.click('#requestsTab');
   await page.locator('#requestRows tr').first().click();
@@ -168,7 +171,7 @@ try {
   await page.screenshot({ path: path.join(run, 'synthetic-narrow.png') });
   servers[1].close();
   await wait(() => page.locator('.rule-unavailable').count());
-  assert.equal(await page.locator('.rule-block').count(), 0);
+  assert.equal(await page.locator('.policy-block').count(), 0);
   assert.equal(mutations, 0);
   console.log(
     'PASS synthetic multiple scoped rules, disabled/expired/permanent, control-only update/selection, installed prompt icon/read-only controls, disconnect clears stale indicators; no mutations. ' +

@@ -2,6 +2,7 @@ import net from 'node:net';
 import { performance } from 'node:perf_hooks';
 import {
   parseReply,
+  canDecide,
   validateDecision,
   type Reply,
   type ClientState,
@@ -115,9 +116,7 @@ export class Backend {
         throw Error('Observer snapshot is stale');
       this.state.observation = {
         connected: true,
-        message: r.activity.complete
-          ? 'Activity · read-only'
-          : 'Activity · partial visibility · read-only',
+        message: `Activity · ${r.permissions?.observation_scope || 'user-visible'}${r.activity.complete ? '' : ' · partial'} · read-only`,
         generation: r.generation,
         activity: r.activity,
       };
@@ -137,7 +136,18 @@ export class Backend {
     this.busy.control = true;
     try {
       const r = await call(this.controller, { operation: 'list' });
-      if (r.error || !['isolated-lab', 'host-enforcement'].includes(r.mode))
+      if (
+        r.error ||
+        !(
+          ['isolated-lab', 'host-enforcement'].includes(r.mode) ||
+          (r.permissions &&
+            r.capabilities.includes('explicit-administrator-v1') &&
+            (r.mode === 'daemon-monitor' ||
+              (r.mode === 'host-monitor' &&
+                r.read_only &&
+                ['daemon-monitor', 'host-enforcement'].includes(r.backend_mode || ''))))
+        )
+      )
         throw Error(r.error || 'Not a firewall controller');
       if (this.reply?.generation !== r.generation) this.attempts.clear();
       this.reply = r;
@@ -149,10 +159,13 @@ export class Backend {
         message:
           r.mode === 'isolated-lab'
             ? 'Isolated lab controller'
-            : `Enforcement ${r.enforcement?.state ?? 'unknown'}`,
+            : `Enforcement ${r.enforcement?.state ?? 'unknown'} · ${!r.read_only && (r.permissions?.can_manage_rules ?? (r.mode !== 'host-enforcement' || r.enforcement?.state === 'active')) ? 'stored rules editable' : 'policy read-only'}`,
+        permissions: r.permissions,
+        backendMode: r.backend_mode,
         generation: r.generation,
         readOnly:
-          r.read_only || (r.mode === 'host-enforcement' && r.enforcement?.state !== 'active'),
+          r.read_only ||
+          (!r.permissions && r.mode === 'host-enforcement' && r.enforcement?.state !== 'active'),
         mode: r.mode,
         enforcement: r.enforcement,
         rules: r.rules,
@@ -178,7 +191,7 @@ export class Backend {
     if (
       !this.controller ||
       !c.connected ||
-      c.readOnly ||
+      !canDecide(c) ||
       c.generation !== d.generation ||
       !e ||
       e.state !== 'awaiting-decision' ||

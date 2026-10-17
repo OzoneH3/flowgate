@@ -1,3 +1,4 @@
+import { canManageRules } from './protocol';
 import type { ClientState, Rule, RuleDraft, RuleEdit, Preferences } from './protocol';
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const node = (tag: string, text: string) => {
@@ -22,7 +23,7 @@ function editorMessage(s: string) {
   $('editorFeedback').textContent = s;
 }
 function writable() {
-  return state?.control.connected && !state.control.readOnly;
+  return !!state && canManageRules(state.control);
 }
 function editValue(): RuleEdit {
   return {
@@ -43,7 +44,7 @@ function invalidate() {
   $('rulePreview').textContent = 'Preview required before saving.';
   $<HTMLButtonElement>('saveRule').disabled = true;
 }
-async function open(source: { id?: string; event?: string }) {
+export async function openRule(source: { id?: string; event?: string }) {
   if (draft) {
     $('ruleEditor').hidden = false;
     status('An unfinished editor is already open. Save or close it first.');
@@ -134,7 +135,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
     if (e.ctrlKey && e.key.toLowerCase() === 'e') {
       e.preventDefault();
       const id = selected || state?.control.rules?.[0]?.id;
-      if (id) void open({ id });
+      if (id) void openRule({ id });
     }
     if (e.key === 'Escape' && draft && !saving) {
       panel.hidden = true;
@@ -214,13 +215,13 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
       updateButtons();
     }
   };
-  $('editRule').onclick = () => void open({ id: selected });
+  $('editRule').onclick = () => void openRule({ id: selected });
   $('toggleRule').onclick = async () => {
     if (!$('ruleEditor').hidden) {
       status('Close the unfinished editor first.');
       return;
     }
-    await open({ id: selected });
+    await openRule({ id: selected });
     if (draft && draft.rule.id === selected) {
       $<HTMLInputElement>('editEnabled').checked = draft.rule.disabled;
       invalidate();
@@ -282,7 +283,14 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
         e.busy || !!(c?.connected && !c.readOnly) || e.phase === 'active';
       $<HTMLSelectElement>('evalProfile').disabled = $<HTMLButtonElement>('evalStart').disabled;
       for (const id of ['evalStop', 'evalStatus', 'evalRecover'])
-        $<HTMLButtonElement>(id).disabled = e.busy;
+        $<HTMLButtonElement>(id).disabled =
+          e.busy || c?.mode === 'daemon-monitor' || c?.backendMode === 'daemon-monitor';
+      if (c?.mode === 'daemon-monitor' || c?.backendMode === 'daemon-monitor') {
+        $<HTMLButtonElement>('evalStart').disabled = true;
+        $<HTMLSelectElement>('evalProfile').disabled = true;
+        $('evaluationStatus').textContent =
+          'Independent non-enforcing daemon · stored policy only. Evaluation transitions are not supported by this connection.';
+      }
     } finally {
       evalBusy = false;
     }
@@ -403,7 +411,7 @@ export function updateWorkflows(next: ClientState) {
         if (e.key === 'Enter') {
           selected = r.id;
           selectRule();
-          void open({ id: r.id });
+          void openRule({ id: r.id });
         }
       };
       body.append(tr);
@@ -417,11 +425,7 @@ export function updateWorkflows(next: ClientState) {
   $('deleteCompatibility').textContent = compatible
     ? ''
     : 'Safe Delete unavailable: backend must advertise conditional-rule-delete-v1. No unconditional fallback.';
-  const access = state.control.connected
-    ? state.control.readOnly
-      ? 'readonly'
-      : 'write'
-    : 'offline';
+  const access = state.control.connected ? (!writable() ? 'readonly' : 'write') : 'offline';
   if (access !== accessState) {
     accessState = access;
     status(
@@ -429,7 +433,9 @@ export function updateWorkflows(next: ClientState) {
         ? 'Controller disconnected. Displayed rules may be stale; mutations disabled.'
         : access === 'readonly'
           ? 'Read-only controller; mutations disabled.'
-          : 'Connected. Rule changes require a backend preview.',
+          : state.control.enforcement?.state === 'stopped'
+            ? 'Stored policy editable. Enforcement stopped; changes do not activate protection.'
+            : 'Connected. Rule changes require a backend preview.',
     );
   }
   const detail = $('requestDetails');
@@ -438,7 +444,7 @@ export function updateWorkflows(next: ClientState) {
     b.id = 'createRule';
     b.onclick = () => {
       const event = detail.dataset.eventId;
-      if (event) void open({ event });
+      if (event) void openRule({ event });
     };
     detail.append(b);
   }

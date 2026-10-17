@@ -155,7 +155,7 @@ try {
     await page.screenshot({ path: path.join(evidence, 'installed-icons.png') });
     const invalid = await page.evaluate(() => window.flowgate.applicationIcons(['/etc/passwd']));
     assert.equal(invalid['/etc/passwd'], null);
-    assert(await page.locator('.col-rules').isVisible());
+    assert(await page.locator('.col-incoming_policy').isVisible());
     console.log(
       'PASS installed desktop icons in real Activity and sidebar, arbitrary icon identity rejected',
     );
@@ -291,11 +291,11 @@ try {
     const read = () => inventoryPage.evaluate(() => window.flowgate.snapshot());
     await wait(
       async () =>
-        (await read()).control.rules?.length && inventoryPage.locator('.rule-allow').count(),
+        (await read()).control.rules?.length && inventoryPage.locator('.policy-allow').count(),
     );
     const selected = inventoryPage
       .locator('#rows tr')
-      .filter({ has: inventoryPage.locator('.rule-allow') })
+      .filter({ has: inventoryPage.locator('.policy-allow') })
       .first();
     await selected.click();
     await inventoryPage.screenshot({ path: path.join(evidence, 'rules-allow-real.png') });
@@ -313,10 +313,10 @@ try {
       current = r.saved_rule;
     };
     await mutate({ action: 'block' });
-    await wait(() => inventoryPage.locator('.rule-block').count());
+    await wait(() => inventoryPage.locator('.policy-block').count());
     await inventoryPage.screenshot({ path: path.join(evidence, 'rules-block-real.png') });
     await mutate({ disabled: true });
-    await wait(() => inventoryPage.locator('.rule-disabled').count());
+    await wait(() => inventoryPage.locator('.policy-disabled').count());
     await inventoryPage.screenshot({ path: path.join(evidence, 'rules-disabled-real.png') });
     console.log(
       'PASS real isolated rule inventory follows Allow, Block and disabled saved rule updates',

@@ -60,3 +60,25 @@ export function ruleDescription(rule: Rule, now: number) {
   const f = rule.filter;
   return `${ruleState(rule, now)} ${rule.action} · ${f.direction} ${f.protocol} · remote ${f.remote_address || f.remote || 'any'} · local port ${f.local_port || 'any'} · remote port ${f.remote_port || 'any'} · expires ${rule.expires && !rule.expires.startsWith('0001-') ? rule.expires : 'never'} · ${rule.id}`;
 }
+
+// Describe stored filter constraints; this does not evaluate a connection or precedence.
+export function configuredPolicy(rules: Rule[], now: number) {
+  if (!rules.length) return 'No rule';
+  const active = rules.filter((r) => ['allow', 'block'].includes(ruleState(r, now)));
+  if (!active.length)
+    return rules.every((r) => ruleState(r, now) === 'expired')
+      ? 'Expired'
+      : rules.every((r) => ruleState(r, now) === 'disabled')
+        ? 'Disabled'
+        : 'Inactive · mixed';
+  if (rules.length > 1)
+    return new Set(active.map((r) => r.action)).size > 1
+      ? `Mixed · ${rules.length}`
+      : `Scoped · ${rules.length}`;
+  const r = active[0],
+    f = r.filter,
+    broad = !f.remote && !f.remote_address && !f.local_port && !f.remote_port;
+  const scope =
+    broad && f.protocol === '*' ? 'app-wide' : broad ? f.protocol.toUpperCase() : 'scoped';
+  return `${r.action === 'allow' ? 'Allow' : 'Block'} · ${scope}`;
+}

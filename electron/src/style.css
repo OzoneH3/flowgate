@@ -881,3 +881,18 @@ td.up { color: #c7daa8; background: #344b20; }
 
 #activityView .table-scroll { border-top: 0; }
 .application-icon { vertical-align: middle; }
+
+.col-incoming_policy,.col-outgoing_policy { width: 106px; }
+#tree td.rule-status { padding: 0 3px; }
+.policy-cell { display: block; width: 100%; height: 20px; min-height: 20px; padding: 0 4px; border: 1px solid transparent; background: #272727; font-size: 10px; line-height: 18px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.policy-cell:hover,.policy-cell:focus-visible { border-color: var(--fg-selected); outline-offset: -1px; }
+.policy-allow::before { content: '✓ '; color: var(--fg-allow); }.policy-block::before { content: '× '; color: var(--fg-block); }
+.policy-disabled::before { content: '○ '; }.policy-expired::before { content: '◷ '; }
+.policy-list { position: absolute; z-index: 15; top: 110px; left: min(450px,calc(100vw - 530px)); width: min(510px,calc(100vw - 24px)); max-height: calc(100vh - 135px); background: var(--fg-content); border: 1px solid #555; box-shadow: 0 4px 16px #111; font-size: 12px; overflow: auto; }
+.policy-list header { display: flex; align-items: center; justify-content: space-between; padding: 5px 8px; background: var(--fg-section); }
+.policy-list header strong { font-weight: 400; }.policy-list button { font-size: 11px; }
+.policy-list-content { padding: 5px 10px; }.policy-list p { margin: 6px 0; overflow-wrap: anywhere; user-select: text; }
+.policy-identity { color: var(--fg-selected); }.policy-rule { border-top: 1px solid var(--fg-border); padding: 5px 0; }
+
+.sidebar-policy { text-align: left; padding: 0; border: 0; background: transparent; font-size: 11px; line-height: 16px; min-height: 16px; white-space: normal; }
+.sidebar-policy:hover,.sidebar-policy:focus-visible { color: var(--fg-selected); text-decoration: underline; }

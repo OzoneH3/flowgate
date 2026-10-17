@@ -85,7 +85,16 @@ export interface RequestEvent {
 }
 export type Scope = 'once' | 'application' | 'persistent';
 export type Action = 'allow' | 'block';
+export interface Permissions {
+  role: 'user' | 'administrator';
+  observation_scope: 'self' | 'machine' | 'user-visible';
+  policy_scope: 'self' | 'machine';
+  can_manage_rules: boolean;
+  can_decide: boolean;
+}
 export interface Reply {
+  permissions?: Permissions;
+  backend_mode?: string;
   version: 1;
   generation: string;
   read_only: boolean;
@@ -120,6 +129,8 @@ export interface ClientState {
     readOnly: boolean;
     mode: string;
     enforcement?: Reply['enforcement'];
+    permissions?: Permissions;
+    backendMode?: string;
     events: ViewEvent[];
     rules?: Rule[];
     capabilities?: string[];
@@ -256,6 +267,25 @@ export function parseReply(raw: unknown): Reply {
     saved_rule: r.saved_rule ? parseRule(r.saved_rule) : undefined,
     scope_preview: string(r.scope_preview),
   };
+  if (r.permissions !== undefined || result.capabilities.includes('explicit-administrator-v1')) {
+    const p = object(r.permissions);
+    if (
+      !['user', 'administrator'].includes(string(p.role)) ||
+      !['self', 'machine', 'user-visible'].includes(string(p.observation_scope)) ||
+      !['self', 'machine'].includes(string(p.policy_scope)) ||
+      typeof p.can_manage_rules !== 'boolean' ||
+      typeof p.can_decide !== 'boolean'
+    )
+      throw Error('Invalid explicit permission metadata');
+    result.permissions = {
+      role: p.role,
+      observation_scope: p.observation_scope,
+      policy_scope: p.policy_scope,
+      can_manage_rules: p.can_manage_rules,
+      can_decide: p.can_decide,
+    } as Permissions;
+  }
+  result.backend_mode = string(r.backend_mode);
   if (r.decision) result.decision = event(r.decision);
   if (r.enforcement) {
     const e = object(r.enforcement);
@@ -461,4 +491,13 @@ export function validateEdit(v: unknown): RuleEdit {
   )
     throw Error('Invalid rule edit');
   return e as unknown as RuleEdit;
+}
+
+// Legacy control state already incorporates its enforcement/read-only restrictions.
+// Explicit grants are operation-specific; writable storage never authorizes a verdict.
+export function canManageRules(c: ClientState['control']) {
+  return c.connected && !c.readOnly && (c.permissions?.can_manage_rules ?? true);
+}
+export function canDecide(c: ClientState['control']) {
+  return c.connected && !c.readOnly && (c.permissions?.can_decide ?? true);
 }

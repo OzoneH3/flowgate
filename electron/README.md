@@ -536,11 +536,36 @@ fallback); no proprietary fonts are downloaded. Actual Linux application icons a
 resolved from matching desktop-entry executables and the installed theme in main,
 with a neutral fallback; icon association has no policy authority.
 
-**Rule Status** follows the two rate columns. In/Out glyphs summarize the **listed
-scoped rules**, not a connection verdict: enabled Allow/Block, disabled, expired,
-no listed rules, or unavailable. Exact counts/scopes are in tooltips and selectable
-sidebar details. Observation-only application associations never become rule targets.
-Controller loss clears the indicators. Rules cannot be inferred from packet delivery.
+**In Blocker / Out Blocker** follow the rate columns and explicitly describe
+**configured policy**, never an effective connection verdict. Cells distinguish
+application-wide, protocol/scoped, mixed, disabled/expired, no explicit rule and
+unavailable policy. Click either cell (or the sidebar direction count) for the
+relevant scopes and existing versioned editor. Shared observation-only identities
+never become permission targets. An empty inventory does not imply Allow or Ask.
+
+### Existing machine daemon
+
+```sh
+./scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock
+```
+
+This reuses the primary policy endpoint and its `.monitor` Activity companion;
+no additional observer starts. Electron remains unprivileged and closing it leaves
+the independent daemon running. The explicit backend permissions independently
+gate stored-rule editing and pending decisions. A non-enforcing daemon can permit
+rule editing while the toolbar correctly says **Enforcement stopped**. A read-only
+companion allows viewing policy but exposes no mutation controls. Invalid advertised
+permission metadata fails closed. Prototype evaluation controls are disabled for
+this independently managed non-enforcing daemon; this UI does not transition it.
+
+Creating the first rule directly from an Activity row is not supported by the current
+API: creation still requires an attributable pending request. Existing configured
+rules open the existing authoritative preview/versioned-save workflow; conditional
+deletion protections remain unchanged. Changing policy need not disconnect existing
+approved TCP sessions.
+
+See [ACTIVITY-POLICY.md](ACTIVITY-POLICY.md) for current root-monitor captures,
+measured dimensions, real versus seeded/synthetic evidence and focused checks.
 
 Focused checks with existing local dependencies:
 `cd electron && npm run build && node --test test/model.test.cjs test/presentation.test.cjs`.

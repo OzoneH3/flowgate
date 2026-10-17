@@ -1,3 +1,4 @@
+import { canDecide } from './protocol';
 import type { ClientState, ViewEvent } from './protocol';
 export interface RequestRef {
   generation: string;
@@ -38,7 +39,7 @@ export class RequestNotifications {
     private now = () => Date.now(),
   ) {}
   update(state: ClientState, active: boolean) {
-    const events = state.control.readOnly ? [] : pending(state).filter((e) => !e.attempt),
+    const events = !canDecide(state.control) ? [] : pending(state).filter((e) => !e.attempt),
       current = new Map(
         events.map((e) => [key({ generation: state.control.generation, id: e.id }), e]),
       );

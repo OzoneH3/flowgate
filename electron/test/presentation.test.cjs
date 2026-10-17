@@ -116,3 +116,28 @@ test('Go zero-time expiry remains permanent', () =>
     ruleState(rule('permanent', 'allow', { expires: '0001-01-01T00:00:00Z' }), 10000),
     'allow',
   ));
+test('configured labels separate broad constraints, scoped, mixed and absent without effective inference', () => {
+  const { configuredPolicy } = require('../dist/test/rule-status.cjs');
+  assert.equal(configuredPolicy([], 10000), 'No rule');
+  assert.equal(
+    configuredPolicy(
+      [
+        rule('wide', 'allow', {
+          filter: { ...rule('').filter, protocol: '*', remote_address: '' },
+        }),
+      ],
+      10000,
+    ),
+    'Allow · app-wide',
+  );
+  assert.equal(
+    configuredPolicy(
+      [rule('tcp', 'allow', { filter: { ...rule('').filter, remote_address: '' } })],
+      10000,
+    ),
+    'Allow · TCP',
+  );
+  assert.equal(configuredPolicy([rule('one')], 10000), 'Allow · scoped');
+  assert.equal(configuredPolicy([rule('one'), rule('two', 'block')], 10000), 'Mixed · 2');
+  assert.equal(configuredPolicy([rule('one'), rule('two')], 10000), 'Scoped · 2');
+});

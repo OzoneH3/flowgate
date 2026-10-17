@@ -113,3 +113,61 @@ test('host-control response without active status cannot enable decisions', asyn
   assert.equal(decisions, 0);
   b.stop();
 });
+test('daemon stored-rule grant is independent of decisions; companion and malformed grants fail closed', async (t) => {
+  let role = 'primary',
+    mutations = 0;
+  const endpoint = await fixture(t, (s, q) => {
+    if (q.operation !== 'list') mutations++;
+    const r = {
+      ...response(event()),
+      mode: role === 'companion' ? 'host-monitor' : 'daemon-monitor',
+      backend_mode: 'daemon-monitor',
+      read_only: role === 'companion',
+      capabilities: ['explicit-administrator-v1'],
+      permissions: {
+        role: 'administrator',
+        observation_scope: 'machine',
+        policy_scope: 'machine',
+        can_manage_rules: role !== 'companion',
+        can_decide: false,
+      },
+      enforcement: { state: 'stopped' },
+      rules: [
+        {
+          id: 'stored',
+          version: 0,
+          filter: {
+            application: 'a',
+            revision: 'r',
+            uid: 0,
+            direction: 'incoming',
+            protocol: 'tcp',
+          },
+        },
+      ],
+    };
+    if (role === 'invalid') r.permissions.can_decide = 'true';
+    if (role === 'missing') delete r.permissions;
+    s.end(JSON.stringify(r) + '\n');
+  });
+  const b = new Backend(endpoint, endpoint, () => {});
+  const { Rules } = require('../dist/test/rules.cjs');
+  const rules = new Rules(b);
+  await b.pollControl();
+  assert.equal(b.view().control.connected, true);
+  assert.equal(b.view().control.readOnly, false);
+  assert.equal((await rules.draft({ id: 'stored' })).rule.id, 'stored');
+  await assert.rejects(() => b.decide(answer), /no longer actionable/);
+  assert.equal(mutations, 0);
+  role = 'companion';
+  await b.pollControl();
+  await assert.rejects(() => rules.draft({ id: 'stored' }), /read-only/);
+  assert.equal(b.view().control.enforcement.state, 'stopped');
+  for (role of ['invalid', 'missing']) {
+    await b.pollControl();
+    assert.equal(b.view().control.connected, false);
+    await assert.rejects(() => b.decide(answer));
+  }
+  assert.equal(mutations, 0);
+  b.stop();
+});
