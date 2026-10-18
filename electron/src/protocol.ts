@@ -421,7 +421,9 @@ export function parseReply(raw: unknown): Reply {
         }
       : undefined,
     events: array(r.events, 256).map(event),
-    rules: array(r.rules, 8192).map(parseRule),
+    rules: array(r.rules, 8192)
+      .map(parseRule)
+      .sort((a, b) => a.id.localeCompare(b.id)),
     rule_states: r.rule_states
       ? Object.fromEntries(
           Object.entries(object(r.rule_states))

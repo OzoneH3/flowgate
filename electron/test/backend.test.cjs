@@ -186,6 +186,8 @@ test('popup refresh joins policy in flight then obtains a corresponding Activity
   b.pollControl = async () => {
     void b.pollPolicy();
   };
+  b.publishPair = () => {};
+  b.emit = () => {};
   b.view = () => ({ ready: true });
   const first = b.pollPolicy(),
     second = b.pollPolicy(true);

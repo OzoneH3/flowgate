@@ -48,6 +48,7 @@ await build({
     'src/rule-status.ts',
     'src/rule-chip.ts',
     'src/backend.ts',
+    'src/inventory-coherence.ts',
     'src/extended.ts',
     'src/daemon-monitoring.ts',
     'src/rules.ts',

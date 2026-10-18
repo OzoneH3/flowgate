@@ -137,9 +137,22 @@ const paneModel = new PaneModel(
 const detached = new Map<PaneKind, BrowserWindow>();
 const paneRoles = new Map<number, PaneKind>();
 const paneFrame = () => ({ presentation: paneModel.value, state: backend.view() });
+let panePublication = '';
 function publishPanes() {
   if (!backend || quitting) return;
-  for (const w of windows) if (!w.isDestroyed()) w.webContents.send('pane:frame', paneFrame());
+  const frame = paneFrame(),
+    c = frame.state.control;
+  const key = JSON.stringify([
+    paneModel.value.revision,
+    c.snapshotStarted,
+    c.policy?.snapshot.sequence,
+    c.connected,
+    c.generation,
+    c.policyError,
+  ]);
+  if (key === panePublication) return;
+  panePublication = key;
+  for (const w of windows) if (!w.isDestroyed()) w.webContents.send('pane:frame', frame);
 }
 function paneWindow(kind: PaneKind) {
   const existing = detached.get(kind);
@@ -188,6 +201,7 @@ function paneWindow(kind: PaneKind) {
   w.on('move', save);
   w.once('ready-to-show', () => {
     if (main.isVisible()) w.show();
+    panePublication = '';
     publishPanes();
   });
   const contentsID = w.webContents.id;

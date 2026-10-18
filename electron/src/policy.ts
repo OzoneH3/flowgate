@@ -286,6 +286,36 @@ export function parsePolicyView(raw: unknown): PolicyView {
     throw Error('Invalid policy identities');
   return view;
 }
+const policyIndexes = new WeakMap<
+  PolicyView,
+  {
+    apps: Map<string, ApplicationPolicy[]>;
+    rows: Map<string, PolicyView['rows'][number]>;
+    processes: Map<string, ProcessPolicy[]>;
+  }
+>();
+function indexPolicy(v: PolicyView) {
+  let index = policyIndexes.get(v);
+  if (index) return index;
+  index = {
+    apps: new Map(),
+    rows: new Map(v.rows.map((r) => [r.row_id, r])),
+    processes: new Map(),
+  };
+  for (const app of v.applications)
+    for (const pid of app.process_ids) {
+      const list = index.apps.get(pid) || [];
+      list.push(app);
+      index.apps.set(pid, list);
+    }
+  for (const p of v.processes || []) {
+    const list = index.processes.get(p.process_id) || [];
+    list.push(p);
+    index.processes.set(p.process_id, list);
+  }
+  policyIndexes.set(v, index);
+  return index;
+}
 export function authoritativePolicy(
   row: Row,
   state: ClientState,
@@ -327,7 +357,7 @@ export function authoritativePolicy(
       ? state.observation.activity?.processes[row.socket.owners[0]]
       : undefined);
   if (!p) return { reason: 'No supported single-process application identity.' };
-  const a = v.applications.find(
+  const a = (indexPolicy(v).apps.get(p.id) || []).find(
     (a) =>
       a.identity.key === p.application.key &&
       a.identity.revision === p.application.revision &&
@@ -337,7 +367,7 @@ export function authoritativePolicy(
   if (row.socket) {
     if (row.socket.owners.length !== 1 || row.socket.ownership_category !== 'visible-holder')
       return { reason: 'A current unique visible holder is required for application policy.' };
-    const association = v.rows.find((r) => r.row_id === row.socket!.id);
+    const association = indexPolicy(v).rows.get(row.socket!.id);
     if (
       !association ||
       association.status !== 'observed_native' ||
@@ -384,24 +414,24 @@ export function authoritativeProcessPolicy(
   const p = row.process || (row.socket && a.processes[row.socket.owners[0]]);
   if (!p) return;
   const candidates =
-    v.processes?.filter(
-      (entry) =>
-        entry.target.session === c.generation &&
-        entry.process_id === p.id &&
-        entry.target.pid === p.pid &&
-        entry.target.start_ticks === p.start_ticks &&
-        entry.target.uid === p.uid &&
-        entry.target.executable === p.application.executable &&
-        entry.target.revision === p.application.revision,
-    ) || [];
+    indexPolicy(v)
+      .processes.get(p.id)
+      ?.filter(
+        (entry) =>
+          entry.target.session === c.generation &&
+          entry.process_id === p.id &&
+          entry.target.pid === p.pid &&
+          entry.target.start_ticks === p.start_ticks &&
+          entry.target.uid === p.uid &&
+          entry.target.executable === p.application.executable &&
+          entry.target.revision === p.application.revision,
+      ) || [];
   const result = candidates.find((entry) => entry.state === 'active') || candidates[0];
   if (
     row.socket &&
-    !v.rows.some(
-      (r) =>
-        r.row_id === row.socket!.id &&
-        r.status === 'observed_native' &&
-        r.application_ref === result?.application_ref,
+    !(
+      indexPolicy(v).rows.get(row.socket!.id)?.status === 'observed_native' &&
+      indexPolicy(v).rows.get(row.socket!.id)?.application_ref === result?.application_ref
     )
   )
     return;

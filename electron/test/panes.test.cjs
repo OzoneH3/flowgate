@@ -117,3 +117,23 @@ test('connection dots distinguish connected peers from listening/bound rows', ()
   assert.equal(hasObservedConnection(row('tcp', 1, '192.0.2.1:443')), true);
   assert.equal(hasObservedConnection(row('udp', 1, '192.0.2.1:53')), true);
 });
+test('clock-only pane observations reuse indexed hierarchy and presentation revision', () => {
+  const { PaneModel } = require('../dist/test/pane-model.cjs');
+  const p = new PaneModel();
+  const state = {
+    observation: {
+      connected: true,
+      generation: 'g',
+      activity: { sequence: 1, collected: '2026-10-18T10:00:00Z', rows: [], processes: {} },
+    },
+    control: {},
+  };
+  p.observe(state);
+  const revision = p.value.revision,
+    row = p.value.row;
+  for (let i = 0; i < 20; i++) p.observe({ ...state, control: { serverNow: i } });
+  assert.equal(p.value.revision, revision);
+  assert.equal(p.value.row, row);
+  p.update({ unit: 'autoBit' }, true, state);
+  assert(p.value.revision > revision);
+});

@@ -893,6 +893,11 @@ function setupPaneControls() {
   });
   applyPanes();
 }
+const renderedRows = new Map<
+  string,
+  { signature: string; presentation: string; node: HTMLTableRowElement }
+>();
+let treePolicyRevision = 0;
 function renderTree() {
   for (const th of document.querySelectorAll<HTMLElement>('#headers th')) {
     const key = th.className.replace('col-', '');
@@ -909,8 +914,49 @@ function renderTree() {
     : undefined;
   visible = flatten(roots, expanded, sort, descending, measurementSource);
   const body = $('rows');
-  const fragment = document.createDocumentFragment();
+  const ordered: HTMLTableRowElement[] = [];
+  const liveIds = new Set<string>();
   for (const { row: r, depth } of visible) {
+    liveIds.add(r.id);
+    const rowSignature = JSON.stringify([
+      r.kind,
+      r.label,
+      r.pid,
+      r.rows,
+      r.socket,
+      r.process,
+      r.displayApplication,
+      r.children.map((c) => c.id),
+      depth,
+      selected === r.id,
+      expanded.has(r.id),
+      treePolicyRevision,
+    ]);
+    const cellPresentation = `${measurementSource}:${displayUnit}:${rateMode}`;
+    const cached = renderedRows.get(r.id);
+    if (cached?.signature === rowSignature) {
+      if (cached.presentation !== cellPresentation) {
+        for (const [index, key] of rateKeys().entries()) {
+          const value = sum(r.rows, key, measurementSource),
+            cell = cached.node.cells[index + 1];
+          cell.className =
+            'numeric ' +
+            (value.value && value.value > 0 ? (key.startsWith('download') ? 'down' : 'up') : '');
+          cell.querySelector('.rate-value')!.textContent = displayMetric(
+            value,
+            rateMode === 'rate',
+          );
+          cell.title = `${measurementSource.toUpperCase()} · ${value.known}/${value.count} measured sockets${value.mixed ? ' · incompatible measurement sources' : ''}`;
+        }
+        for (const [index, key] of (['downloaded', 'uploaded'] as Metric[]).entries())
+          cached.node.cells[index + 6].textContent = displayMetric(
+            sum(r.rows, key, measurementSource),
+          );
+        cached.presentation = cellPresentation;
+      }
+      ordered.push(cached.node);
+      continue;
+    }
     const tr = element('tr');
     tr.dataset.id = r.id;
     tr.setAttribute('aria-level', String(depth + 1));
@@ -1011,9 +1057,17 @@ function renderTree() {
       tr.append(td);
     }
     tr.append(element('td', '', 'filler'));
-    fragment.append(tr);
+    renderedRows.set(r.id, { signature: rowSignature, presentation: cellPresentation, node: tr });
+    ordered.push(tr);
   }
-  body.replaceChildren(fragment);
+  for (const [id, cached] of renderedRows)
+    if (!liveIds.has(id)) {
+      cached.node.remove();
+      renderedRows.delete(id);
+    }
+  for (let i = 0; i < ordered.length; i++)
+    if (body.children[i] !== ordered[i]) body.insertBefore(ordered[i], body.children[i] || null);
+  while (body.children.length > ordered.length) body.lastElementChild!.remove();
   if (focusedPolicy)
     for (const row of body.querySelectorAll<HTMLElement>('tr'))
       if (row.dataset.id === focusedPolicy.id)
@@ -1730,6 +1784,7 @@ function consume(next: ClientState) {
     ]);
     if (ruleSignature !== rulesStamp) {
       ruleSignature = rulesStamp;
+      treePolicyRevision++;
       renderTree();
       renderInfo();
     }

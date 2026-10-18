@@ -106,6 +106,9 @@ export function ruleAction(raw: unknown): PaneRuleAction {
 // Presentation identity is NOT policy authority. Rules.preview/save still revalidate every target.
 export class PaneModel {
   value: Presentation;
+  private activityStamp = '';
+  private rows = new Map<string, Row>();
+  private boundSelection = '';
   constructor(unit: DisplayUnit = 'autoByte') {
     this.value = {
       revision: 0,
@@ -126,11 +129,23 @@ export class PaneModel {
     }
     this.value.generation = g;
     const a = state.observation.activity;
-    const row =
-      a && [overview(a), ...networkOverviews(), ...allRows(hierarchy(a))].find((r) => r.id === this.value.selection);
-    if (row) this.value.row = { ...row, children: [] };
-    else if (this.value.row) this.value.row = { ...this.value.row, rows: [], children: [] };
-    this.value.revision++;
+    const stamp = JSON.stringify([g, state.observation.connected, a?.sequence, a?.collected]);
+    const changed = stamp !== this.activityStamp;
+    if (changed) {
+      this.activityStamp = stamp;
+      this.rows = new Map(
+        a
+          ? [overview(a), ...networkOverviews(), ...allRows(hierarchy(a))].map((r) => [r.id, r])
+          : [],
+      );
+    }
+    if (changed || this.boundSelection !== this.value.selection) {
+      this.boundSelection = this.value.selection;
+      const row = this.rows.get(this.value.selection);
+      if (row) this.value.row = { ...row, children: [] };
+      else if (this.value.row) this.value.row = { ...this.value.row, rows: [], children: [] };
+      this.value.revision++;
+    }
   }
   update(raw: unknown, main: boolean, state: ClientState) {
     const v = object(raw);
@@ -146,7 +161,10 @@ export class PaneModel {
       const a = state.observation.activity;
       if (
         v.selection !== this.value.selection &&
-        (!a || ![overview(a), ...networkOverviews(), ...allRows(hierarchy(a))].some((r) => r.id === v.selection))
+        (!a ||
+          ![overview(a), ...networkOverviews(), ...allRows(hierarchy(a))].some(
+            (r) => r.id === v.selection,
+          ))
       )
         throw Error('Selection unavailable');
     } else if (v.generation !== undefined) throw Error('Generation without selection');
@@ -166,6 +184,7 @@ export class PaneModel {
     if (v.unit !== undefined) this.value.unit = v.unit as DisplayUnit;
     if (chart) this.value.chart = { ...this.value.chart, ...chart };
     this.observe(state);
+    this.value.revision++;
   }
   mode(kind: PaneKind, mode: PaneMode) {
     this.value.panes[kind] = mode;

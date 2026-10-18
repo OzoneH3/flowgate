@@ -150,6 +150,11 @@ export class Rules {
     return { receipt, preview: r.scope_preview, verifiedRule: r.saved_rule };
   }
   async save(receipt: unknown): Promise<Attempt> {
+    return this.backend.ruleMutation
+      ? this.backend.ruleMutation(() => this.saveInner(receipt))
+      : this.saveInner(receipt);
+  }
+  private async saveInner(receipt: unknown): Promise<Attempt> {
     if (this.zones.ownsReceipt(receipt)) return this.zones.save(receipt);
     if (this.observed.ownsReceipt(receipt)) return this.observed.save(receipt);
     if (typeof receipt !== 'string' || receipt.length > 128) throw Error('Invalid preview receipt');
@@ -196,6 +201,11 @@ export class Rules {
     }
   }
   async delete(value: unknown): Promise<Attempt> {
+    return this.backend.ruleMutation
+      ? this.backend.ruleMutation(() => this.deleteInner(value))
+      : this.deleteInner(value);
+  }
+  private async deleteInner(value: unknown): Promise<Attempt> {
     const v = value as { id: string; generation: string; version: number };
     if (
       !v ||

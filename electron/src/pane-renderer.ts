@@ -90,7 +90,10 @@ function consume(next: PaneFrame) {
     graph.setUnit(p.unit);
     graph.setSource(p.source);
     graph.setPresentation(p.chart);
-    void graph.update(p.selection, `${p.revision}`);
+    void graph.update(
+      p.selection,
+      `${s.observation.generation}:${s.observation.activity?.sequence}:${s.observation.connected}`,
+    );
     return;
   }
   const fields: [string, string][] = [];

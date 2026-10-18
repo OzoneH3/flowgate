@@ -198,8 +198,7 @@ test('batch transport rejects old generation and sequence, clears disconnect, ne
   b.policyLast = -Infinity;
   seq = '1';
   await b.pollPolicy();
-  assert.equal(b.view().control.policy, undefined);
-  assert.match(b.view().control.policyError, /Out-of-order/);
+  assert.equal(b.view().control.policy.snapshot.sequence, '2'); // retain newer accepted batch
   hold = true;
   b.policyLast = -Infinity;
   seq = '3';

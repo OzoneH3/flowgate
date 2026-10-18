@@ -1,3 +1,4 @@
+import { inventoryStamp } from './inventory-coherence';
 import {
   REMEMBER_ZONE_CAPABILITY,
   parseDecisionPreview,
@@ -121,8 +122,64 @@ export class Backend {
   private emit() {
     if (!this.stopped) this.changed(this.view());
   }
+  private mutationEpoch = 0;
+  private controlFlight?: Promise<void>;
+  private controlEpoch = -1;
+  private pendingInventory?: Reply;
+  private pendingPair?: {
+    reply: Reply;
+    policy: NonNullable<Reply['policy_view']>;
+    epoch: number;
+    stamp: string;
+  };
+  async ruleMutation<T>(run: () => Promise<T>): Promise<T> {
+    this.mutationEpoch++;
+    this.pendingPair = undefined;
+    this.policyLast = -Infinity;
+    try {
+      return await run();
+    } finally {
+      this.mutationEpoch++;
+      this.pendingPair = undefined;
+      this.policyLast = -Infinity;
+      await this.refreshRuleContext();
+    }
+  }
+  private publishPair() {
+    const pair = this.pendingPair,
+      o = this.state.observation;
+    if (
+      !pair ||
+      this.stopped ||
+      pair.epoch !== this.mutationEpoch ||
+      !this.state.control.connected ||
+      this.state.control.generation !== pair.reply.generation ||
+      !this.pendingInventory ||
+      inventoryStamp(this.pendingInventory) !== pair.stamp
+    )
+      return;
+    if (
+      pair.policy.activity_available &&
+      o.connected &&
+      (o.generation !== pair.reply.generation ||
+        !o.activity ||
+        BigInt(pair.policy.activity_sequence) > BigInt(o.activity.sequence) ||
+        Date.parse(pair.policy.activity_collected) > Date.parse(o.activity.collected))
+    )
+      return;
+    this.state.control = {
+      ...this.state.control,
+      rules: pair.reply.rules,
+      rule_states: pair.reply.rule_states,
+      policy: pair.policy,
+      policyError: '',
+    };
+    this.pendingPair = undefined;
+  }
   private observerFlight?: Promise<void>;
   private policyFlight?: Promise<void>;
+  private policyFlightEpoch = -1;
+  private contextFlightEpoch = -1;
   pollObserver(): Promise<void> {
     if (this.observerFlight) return this.observerFlight;
     const request = this.readObserver().finally(() => {
@@ -133,7 +190,11 @@ export class Backend {
   }
   private contextFlight?: Promise<ClientState>;
   refreshRuleContext(): Promise<ClientState> {
-    if (this.contextFlight) return this.contextFlight;
+    if (this.contextFlight) {
+      if (this.contextFlightEpoch === this.mutationEpoch) return this.contextFlight;
+      return this.contextFlight.then(() => this.refreshRuleContext());
+    }
+    this.contextFlightEpoch = this.mutationEpoch;
     const request = this.readRuleContext().finally(() => {
       if (this.contextFlight === request) this.contextFlight = undefined;
     });
@@ -145,6 +206,8 @@ export class Backend {
     await this.pollPolicy(true);
     await this.observerFlight;
     await this.pollObserver();
+    this.publishPair();
+    this.emit();
     return this.view();
   }
   private async readObserver() {
@@ -178,15 +241,31 @@ export class Backend {
       };
     } finally {
       this.busy.observer = false;
+      this.publishPair();
       this.emit();
     }
   }
-  async pollControl() {
-    if (!this.controller || this.busy.control || this.stopped) return;
+  pollControl(): Promise<void> {
+    if (this.controlFlight) {
+      if (this.controlEpoch === this.mutationEpoch) return this.controlFlight;
+      return this.controlFlight.then(() => this.pollControl());
+    }
+    this.controlEpoch = this.mutationEpoch;
+    const flight = this.readControl().finally(() => {
+      if (this.controlFlight === flight) this.controlFlight = undefined;
+    });
+    this.controlFlight = flight;
+    return flight;
+  }
+  private async readControl() {
+    if (!this.controller || this.stopped) return;
+    const readEpoch = this.mutationEpoch,
+      endpoint = this.controller;
     this.busy.control = true;
     const snapshotStarted = performance.now();
     try {
-      const r = await call(this.controller, { operation: 'list' });
+      const r = await call(endpoint, { operation: 'list' });
+      if (readEpoch !== this.mutationEpoch || this.controller !== endpoint || this.stopped) return;
       for (const [token, v] of this.decisionPreviews)
         if (Date.parse(v.preview.expires_at) + 300000 < this.now())
           this.decisionPreviews.delete(token);
@@ -208,20 +287,23 @@ export class Backend {
         this.decisionPreviews.clear();
         this.policySequence = -1n;
       }
-      const stamp = JSON.stringify([
-        this.controller,
-        r.generation,
-        r.rules,
-        r.permissions,
-        r.enforcement,
-        r.capabilities,
-      ]);
+      const stamp = inventoryStamp(r);
+      const sameGeneration = this.state.control.generation === r.generation;
+      const previousPolicy = this.state.control.policy;
+      const authorityChanged =
+        JSON.stringify([
+          this.state.control.permissions,
+          this.state.control.enforcement,
+          this.state.control.capabilities,
+          this.state.control.mode,
+          this.state.control.readOnly,
+        ]) !== JSON.stringify([r.permissions, r.enforcement, r.capabilities, r.mode, r.read_only]);
       if (stamp !== this.policyStamp) {
         this.policyStamp = stamp;
-        this.policyEpoch++;
-        this.state.control.policy = undefined;
         this.policyLast = -Infinity;
       }
+      this.pendingInventory = r;
+      const retainedPolicy = sameGeneration && !authorityChanged ? previousPolicy : undefined;
       this.reply = r;
       this.received = performance.now();
       for (const id of this.attempts.keys())
@@ -236,7 +318,7 @@ export class Backend {
             ? 'Isolated lab controller'
             : `Enforcement ${r.enforcement?.state === 'active' ? (r.enforcement.profile === 'incoming' ? 'incoming active · outgoing not covered' : r.enforcement.profile === 'both' ? 'both directions active' : 'active · profile unknown') : (r.enforcement?.state ?? 'unknown')} · ${!r.read_only && (r.permissions?.can_manage_rules ?? (r.mode !== 'host-enforcement' || r.enforcement?.state === 'active')) ? 'stored rules editable' : 'policy read-only'}`,
         networkZones: r.network_zones,
-        policy: this.state.control.policy,
+        policy: retainedPolicy,
         policyError: this.state.control.policyError,
         permissions: r.permissions,
         backendMode: r.backend_mode,
@@ -246,12 +328,19 @@ export class Backend {
           (!r.permissions && r.mode === 'host-enforcement' && r.enforcement?.state !== 'active'),
         mode: r.mode,
         enforcement: r.enforcement,
-        rules: r.rules,
-        rule_states: r.rule_states,
+        rules:
+          r.capabilities.includes(POLICY_CAPABILITY) && sameGeneration && !authorityChanged
+            ? this.state.control.rules
+            : r.rules,
+        rule_states:
+          r.capabilities.includes(POLICY_CAPABILITY) && sameGeneration && !authorityChanged
+            ? this.state.control.rule_states
+            : r.rule_states,
         capabilities: r.capabilities,
         events: [],
       };
     } catch (e) {
+      if (readEpoch !== this.mutationEpoch || this.controller !== endpoint || this.stopped) return;
       this.state.control = {
         ...this.state.control,
         connected: false,
@@ -264,6 +353,7 @@ export class Backend {
       };
     } finally {
       this.busy.control = false;
+      if (readEpoch !== this.mutationEpoch || this.controller !== endpoint || this.stopped) return;
       this.emit();
       if (!this.state.control.connected) this.policyEpoch++;
       else void this.pollPolicy();
@@ -272,7 +362,11 @@ export class Backend {
   // One bounded batch, driven by the existing control loop. Pending requests do not
   // wait for metadata; no per-row sockets, timers, or renderer polling are added.
   pollPolicy(force = false): Promise<void> {
-    if (this.policyFlight) return this.policyFlight;
+    if (this.policyFlight) {
+      if (this.policyFlightEpoch === this.mutationEpoch) return this.policyFlight;
+      return this.policyFlight.then(() => this.pollPolicy(force));
+    }
+    this.policyFlightEpoch = this.mutationEpoch;
     const request = this.readPolicy(force).finally(() => {
       if (this.policyFlight === request) this.policyFlight = undefined;
     });
@@ -288,7 +382,14 @@ export class Backend {
     this.policyBusy = true;
     this.policyLast = performance.now();
     const epoch = this.policyEpoch,
+      mutationEpoch = this.mutationEpoch,
+      baseline = this.pendingInventory,
       generation = c.generation;
+    if (!baseline) {
+      this.policyBusy = false;
+      return;
+    }
+    const baselineStamp = inventoryStamp(baseline);
     if (this.policyEndpoint !== endpoint) {
       this.policySequence = -1n;
       this.policyEndpoint = endpoint;
@@ -298,7 +399,10 @@ export class Backend {
       this.controller === endpoint &&
       this.state.control.connected &&
       this.state.control.generation === generation &&
-      this.policyEpoch === epoch;
+      this.policyEpoch === epoch &&
+      this.mutationEpoch === mutationEpoch &&
+      !!this.pendingInventory &&
+      inventoryStamp(this.pendingInventory) === baselineStamp;
     try {
       const r = await call(endpoint, { operation: 'policy-view', generation });
       if (!current()) return;
@@ -310,21 +414,34 @@ export class Backend {
       )
         throw Error(r.error || 'Policy generation or response mismatch');
       const v = r.policy_view;
-      if (BigInt(v.snapshot.sequence) <= this.policySequence)
-        throw Error('Out-of-order policy response discarded');
+      if (BigInt(v.snapshot.sequence) <= this.policySequence) return;
       if (
         Date.parse(v.snapshot.evaluated_at) > this.now() + 5000 ||
         this.now() - Date.parse(v.snapshot.evaluated_at) > 45000 ||
         (v.snapshot.valid_until && Date.parse(v.snapshot.valid_until) <= this.now())
       )
         throw Error('Policy snapshot expired; refreshing');
+      const confirmation = await call(endpoint, { operation: 'list' });
+      if (!current()) return;
+      if (
+        confirmation.error ||
+        confirmation.generation !== generation ||
+        inventoryStamp(confirmation) !== baselineStamp
+      ) {
+        this.policyLast = -Infinity;
+        return;
+      }
       this.policySequence = BigInt(v.snapshot.sequence);
-      this.state.control.policy = v;
-      this.state.control.policyError = '';
+      this.pendingPair = { reply: baseline, policy: v, epoch: mutationEpoch, stamp: baselineStamp };
+      this.publishPair();
     } catch (e) {
       if (current()) {
-        this.state.control.policy = undefined;
         this.state.control.policyError = String(e);
+        if (this.pendingInventory) {
+          this.state.control.rules = this.pendingInventory.rules;
+          this.state.control.rule_states = this.pendingInventory.rule_states;
+        }
+        this.state.control.policy = undefined;
       }
     } finally {
       this.policyBusy = false;
@@ -445,6 +562,10 @@ export class Backend {
     return result;
   }
   async decide(raw: Decision): Promise<Attempt> {
+    const d = validateDecision(raw);
+    return d.scope === 'once' ? this.decideInner(d) : this.ruleMutation(() => this.decideInner(d));
+  }
+  private async decideInner(raw: Decision): Promise<Attempt> {
     const d = validateDecision(raw);
     const c = this.state.control;
     const e = this.reply?.events.find((e) => e.id === d.id);
