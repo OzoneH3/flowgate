@@ -172,3 +172,22 @@ Exact scope, same-executable exec limitation, evidence and reproduction are in
 Deployed in the non-enforcing root monitor (60d35a3, 2026-10-18; see INTEGRATION.md).
 Stored process-rule documents are durable data; downgrade requires a reviewed
 data-preserving migration/restore plan, never deleting or stripping them.
+
+### Deferred: explicit stored Ask control
+
+UI2 round3 and backend agreed not to add Ask during the visual fidelity pass.
+The pure evaluator already accepts Ask, but Activity creation/editor paths do not.
+A dedicated increment must cover matched-Ask pending attribution and immutable
+Decision Log snapshots (separate from unmatched defaults and final user outcomes),
+Once versus Remember collision/override semantics without changing precedence,
+and legacy-editor acknowledgement so Ask cannot silently become Allow. Older
+schema2/3 readers already accept Ask; a capability alone is not a downgrade guard,
+so document/reader compatibility needs an explicit fail-closed design.
+
+Proposed boundary: current native application/process targets and existing scopes,
+existing tiers/priority/ID, current retention deadline/Once leases, stored-only when
+monitoring; no weights/default redesign or implied receiver delivery. Dependency
+estimate: one focused backend API/decision/log/compatibility increment with isolated
+receiver and authenticated mutation cases, then one capability-gated UI consumer
+and integration journey. No Ask control ships until that contract is implemented.
+No action/API/storage or live runtime change results from this roadmap entry.
