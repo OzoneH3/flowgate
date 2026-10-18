@@ -1,5 +1,45 @@
 # Continuation handoff
 
+## Current: released shared Activity panes integrated (round 6)
+
+Exact UI **0fe0989e080a11a1e58b4eda7ac99a5a56cc8331** (pane checkpoint
+**e3451ca**, base7760c35) was explicitly released with a clean frontend worktree
+and merged without conflicts at **590d0393322ea1a3d3a0d6a1bb2f4778e7009503**.
+All newer backend commits through b030f06 are preserved. Installed root backend
+remains **7ec89ad**; no daemon restart, evaluation, collector control or host rule
+mutation was performed for this UI integration. Host acceptance/runtime details
+remain in the following section.
+
+Real detached Info/chart share selection, display units, accounting source and
+main-owned backend connection. Rule entry delegates to the single main setter;
+secondary panes do not gain mutation IPC. Dock/close/reopen/main hide/show/Quit are
+implemented. Chart pan/zoom/sample navigation uses retained actual observations;
+no fabricated one-second history or persistent statistics. Double-click expands
+parent rows or opens connection Info. Connected-peer dots do not imply protection
+or delivery. Internet/Local Network are pinned informational rows, always above
+apps irrespective of sort, with explicit unavailable measurements; they are not
+policy targets and do not classify unknown traffic as Internet. Genuine zone
+membership/accounting is separately scoped in PLAN.md.
+
+New main-checkout build/typecheck and **25 focused panes/units/history/assets/model
+tests** pass: `.workspace/ui-r6-integration-{build,tests}.log`. Reused released
+sandboxed Wayland real isolated pane/process-rule create/delete (rules0), GUI-exit
+daemon survival and bounded real TCP chart/shared-socket evidence, plus labelled
+synthetic normal/narrow/disconnect/navigation presentation. No receiver, UDP or
+firewall matrix repeated. Backend independently verified the held fixture's exact
+generation and empty rules before owned quit; CLEANED and both sockets removed.
+Reference/evidence/limitations: `electron/ACTIVITY-PARITY-R6.md`.
+
+Complete-window comparison (local native crops, labelled actual/synthetic content):
+`.workspace/netlimiter-reference/rule-status-r6/round6-comparison.png`.
+Windows console input is paused pending the user's free-console confirmation;
+inspection changed pane docking positions and restoration is **not** claimed.
+Theme/units/rules unchanged; do not take Windows input to finish that restoration
+without resolving the existing user question. This is not a visual-completion claim.
+
+Launch from the main checkout:
+` scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock `.
+
 ## Current: host connection-control acceptance completed
 
 Backend/runtime **7ec89ad52c841212fa84610b8a0c37cf8a8961ea** on UI/base7760c35.
