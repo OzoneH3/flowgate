@@ -205,9 +205,7 @@ function statusFamilyGlyph(key: string) {
   const path = document.createElementNS(svg.namespaceURI, 'path');
   path.setAttribute(
     'd',
-    key === 'in-blocker'
-      ? 'M5 8V4a1 1 0 0 1 2 0v3-5a1 1 0 0 1 2 0v5-4a1 1 0 0 1 2 0v5-2a1 1 0 0 1 2 0v4l-2 4H7l-4-4a1 1 0 0 1 1-2l1 1'
-      : key === 'out-blocker'
+    key === 'in-blocker' || key === 'out-blocker'
         ? 'M3 8l3 3 7-7'
         : key.includes('quota')
           ? 'M8 1l6 3v8l-6 3-6-3V4zM8 1v14M2 4l6 4 6-4'
