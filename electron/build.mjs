@@ -28,6 +28,7 @@ await build({
   entryPoints: [
     'src/model.ts',
     'src/assets.ts',
+    'src/display-units.ts',
     'src/initiation.ts',
     'src/protocol.ts',
     'src/process-rules.ts',

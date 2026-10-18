@@ -862,7 +862,12 @@ function selectRule() {
 }
 async function setupSizing() {
   let prefs: Preferences = await window.flowgate.preferences();
-  const save = () => void window.flowgate.preferences(prefs);
+  const save = () =>
+    void window.flowgate.preferences({
+      sidebar: prefs.sidebar,
+      columns: prefs.columns,
+      keepInTray: prefs.keepInTray,
+    });
   const controls = node('section', '');
   controls.className = 'backgroundbar';
   controls.innerHTML = `<label><input type="checkbox" id="keepInTray"> Keep running in the tray when the window closes</label><span>When enabled, closing hides this window; requests stay monitored. Quit exits the frontend only.</span><button id="quitFlowGate">Quit FlowGate…</button><span id="backgroundStatus" role="status"></span>`;

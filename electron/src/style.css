@@ -1314,3 +1314,20 @@ body.preset-status #tree { width: 100%; }
 .info-rule-matrix td:not(.matrix-filler):not([colspan]) { width: 86px; }
 .info-rule-matrix th.matrix-filler, .info-rule-matrix td.matrix-filler { width: auto; padding: 0; }
 .info-rule-matrix tr:first-child th:nth-child(2), .info-rule-matrix tr:first-child th:nth-child(3) { width: 86px; }
+
+/* Round 5: compact menus and independent display/accounting controls. */
+.toolbar { gap: 8px; }
+.toolbar .desktop-menu[open] > summary { background: var(--fg-section); outline: 1px solid var(--fg-border); }
+.toolbar #toolsMenu .desktop-menu { display: block; }
+.toolbar #toolsMenu .desktop-menu > summary { padding: 5px 8px; }
+.toolbar #toolsMenu .desktop-menu > .menu-panel { position: static; border: 0; box-shadow: none; }
+.toolbar #toolsMenu > .menu-panel { width: min(650px, calc(100vw - 150px)); }
+.source-control { display: flex; align-items: center; gap: 8px; padding: 5px 8px; }
+.source-control select { min-width: 120px; }
+.toolbar .firewall-state { white-space: nowrap; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+.toolbar #controlStatus { display: none; } /* Same state remains in the firewall entry and Tools review. */
+.toolbar #observerStatus { max-width: 115px; font-size: 11px; }
+.graph-sample { position: absolute; z-index: 7; left: 15px; right: 10px; bottom: 77px; padding: 8px; border: 1px solid var(--fg-border); background: var(--fg-content); box-shadow: 0 2px 8px #0008; font-size: 11px; line-height: 1.4; }
+.graph-values > span { white-space: nowrap; }
+#trafficCanvas:focus-visible { outline: 1px solid var(--fg-selected); outline-offset: -1px; }
+@media (max-width: 1000px) { .toolbar { gap: 5px; } .toolbar #observerStatus { display: none; } .toolbar .brand { margin-right: 0; font-size: 13px; } .toolbar-units select { width: 82px; } }

@@ -184,3 +184,15 @@ test('overview retains bounded source-separated history with shared sockets coun
   f.h.observe({ connected: false, generation: 'g' });
   assert.equal(f.view('overview').points.at(-1).up, undefined);
 });
+test('legend totals are source-specific socket counters, not rates; 10min is bounded and timestamped', () => {
+  const f = fixture();
+  const rows = [row('tcp'), row('udp', 'udp', ['p'], { uploaded: 9000, downloaded: 10000 })];
+  f.send(rows);
+  f.send(rows);
+  const v = f.h.view({ id: 'app:app|r|uid:1000', seconds: 600 });
+  assert.equal(v.points.filter((p) => p.source === 'tcp').at(-1).downloaded, 20);
+  assert.equal(v.points.filter((p) => p.source === 'udp').at(-1).uploaded, 9000);
+  assert.equal(v.points.filter((p) => p.source === 'tcp').at(-1).up, 4);
+  f.send([row('unavailable', 'tcp', ['p'], { available: false })]);
+  assert.equal(f.view('app:app|r|uid:1000').points.at(-1).uploaded, undefined);
+});

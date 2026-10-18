@@ -1067,3 +1067,13 @@ See [Activity rules reference and evidence](ACTIVITY-RULES.md) for the live NetL
 mapping, backend b9840d0 verification, screenshots and the scoped process-rule gap.
 
 Process-only selection, lifetime and verification: [PROCESS-RULES.md](PROCESS-RULES.md).
+
+### Activity display units and chart
+
+The toolbar's **Units** selector converts existing byte measurements for presentation (decimal SI:
+1KB=1000B;1byte=8bits). It persists independently of **Accounting source** in Tools/Traffic chart.
+TCP transport payload and UDP API-reported bytes remain separate; unknown values stay unavailable.
+Rate/Total switches the two table columns; numeric sorting uses the original byte values.
+Chart legends show source-specific observed socket totals, axes show rates, and sample details show
+actual collection times.60s/5min/10min windows contain only retained observations; pause freezes
+redrawing without stopping collection. See [round5 evidence and remaining differences](ACTIVITY-PARITY-R5.md).

@@ -8,6 +8,7 @@ import {
   type IpcMainInvokeEvent,
 } from 'electron';
 import path from 'node:path';
+import { isDisplayUnit } from './display-units';
 import { bundledAsset } from './assets';
 import { ApplicationIcons } from './icons';
 import { Background } from './background';
@@ -282,7 +283,7 @@ app.whenReady().then(async () => {
       if (
         !v ||
         typeof v !== 'object' ||
-        Object.keys(v).some((k) => !['sidebar', 'columns', 'keepInTray'].includes(k))
+        Object.keys(v).some((k) => !['sidebar', 'columns', 'keepInTray', 'displayUnit'].includes(k))
       )
         throw Error('Invalid preferences');
       if (
@@ -292,6 +293,8 @@ app.whenReady().then(async () => {
         throw Error('Invalid sidebar');
       if (v.keepInTray !== undefined && typeof v.keepInTray !== 'boolean')
         throw Error('Invalid tray preference');
+      if (v.displayUnit !== undefined && !isDisplayUnit(v.displayUnit))
+        throw Error('Invalid display unit');
       const columns: Record<string, number> = {};
       if (v.columns) {
         if (typeof v.columns !== 'object' || Object.keys(v.columns).length > 16)
@@ -321,8 +324,9 @@ app.whenReady().then(async () => {
       }
       saved.ui = {
         ...saved.ui,
-        sidebar: v.sidebar,
-        columns,
+        ...(v.sidebar !== undefined ? { sidebar: v.sidebar } : {}),
+        ...(v.columns !== undefined ? { columns } : {}),
+        ...(v.displayUnit !== undefined ? { displayUnit: v.displayUnit } : {}),
         ...(v.keepInTray !== undefined ? { keepInTray: v.keepInTray } : {}),
       };
       persist();

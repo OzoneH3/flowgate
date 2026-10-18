@@ -4,6 +4,9 @@ import type { ClientState, SocketRow } from './protocol';
 export type Source = 'tcp' | 'udp';
 export interface GraphPoint {
   at: number;
+  wallAt?: number;
+  uploaded?: number;
+  downloaded?: number;
   source: Source;
   up?: number;
   down?: number;
@@ -14,6 +17,7 @@ export interface GraphPoint {
 export interface GraphView {
   revision: number;
   now: number;
+  wallNow?: number;
   started: number;
   connected: boolean;
   label: string;
@@ -35,12 +39,12 @@ interface Previous {
   down?: number;
 }
 export const HISTORY_LIMITS = {
-  duration: 300000,
+  duration: 600000,
   closedDuration: 60000,
   closed: 256,
   entities: 8192,
   points: 120000,
-  perEntity: 1202,
+  perEntity: 2402,
 };
 // Observation-only. No counters are differentiated here; backend rate semantics remain authoritative.
 export class TrafficHistory {
@@ -152,6 +156,9 @@ export class TrafficHistory {
       measured.set(s.id, {
         at: this.sampleAt,
         source,
+        wallAt: this.collectedAt || undefined,
+        uploaded: t.available && supported && !collectorUnavailable ? t.uploaded : undefined,
+        downloaded: t.available && supported && !collectorUnavailable ? t.downloaded : undefined,
         up,
         down,
         partial: t.partial,
@@ -226,6 +233,13 @@ export class TrafficHistory {
         entry.points.push({
           at: this.sampleAt,
           source,
+          wallAt: this.collectedAt || undefined,
+          uploaded: points.some((p) => p.uploaded !== undefined)
+            ? points.reduce((n, p) => n + (p.uploaded ?? 0), 0)
+            : undefined,
+          downloaded: points.some((p) => p.downloaded !== undefined)
+            ? points.reduce((n, p) => n + (p.downloaded ?? 0), 0)
+            : undefined,
           up: knownUp.length ? knownUp.reduce((n, p) => n + p.up!, 0) : undefined,
           down: knownDown.length ? knownDown.reduce((n, p) => n + p.down!, 0) : undefined,
           partial,
@@ -275,7 +289,7 @@ export class TrafficHistory {
       Object.keys(q).sort().join(',') !== 'id,seconds' ||
       typeof q.id !== 'string' ||
       q.id.length > 4096 ||
-      ![60, 300].includes(q.seconds)
+      ![60, 300, 600].includes(q.seconds)
     )
       throw Error('Invalid graph selection');
     const now = this.clock(),
@@ -283,6 +297,7 @@ export class TrafficHistory {
     return {
       revision: this.revision,
       now,
+      wallNow: this.collectedAt ? this.collectedAt + now - this.sampleAt : undefined,
       started: this.started,
       connected: this.connected,
       label: e?.label || '',

@@ -655,6 +655,7 @@ export interface EvaluationState {
   starting: boolean;
 }
 export interface Preferences {
+  displayUnit?: import('./display-units').DisplayUnit;
   keepInTray?: boolean;
   sidebar?: number;
   columns?: Record<string, number>;
