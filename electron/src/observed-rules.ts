@@ -1,4 +1,9 @@
-import { PROCESS_CAPABILITY, sameProcessTarget, type ProcessTarget } from './process-rules';
+import {
+  ANY_PROTOCOL_CAPABILITY,
+  PROCESS_CAPABILITY,
+  sameProcessTarget,
+  type ProcessTarget,
+} from './process-rules';
 import { randomUUID } from 'node:crypto';
 import { call, type Backend } from './backend';
 import {
@@ -169,8 +174,14 @@ export class ObservedRules {
     if (!d || d.locked) throw Error('Resolve the outstanding save before creating another preview');
     if (d.generation !== c.generation || d.endpoint !== this.backend.controller)
       throw Error('Generation/endpoint changed; close editor and select again');
-    if (!['tcp', 'udp'].includes(e.protocol) || e.priority !== 100 || !e.creation_scope)
-      throw Error('Choose explicit scope and TCP or UDP; priority is backend-fixed');
+    // '*' means TCP + UDP only and must be explicit; it needs the backend's any-protocol capability.
+    const protocols = c.capabilities?.includes(ANY_PROTOCOL_CAPABILITY)
+      ? ['tcp', 'udp', '*']
+      : ['tcp', 'udp'];
+    if (!protocols.includes(e.protocol) || e.priority !== 100 || !e.creation_scope)
+      throw Error(
+        `Choose explicit scope and ${protocols.includes('*') ? 'TCP, UDP or TCP + UDP' : 'TCP or UDP'}; priority is backend-fixed`,
+      );
     if (
       e.creation_scope === 'application' &&
       (e.remote_address !== '*' || e.local_port !== 0 || e.remote_port !== 0)

@@ -66,12 +66,17 @@ export class TrafficGraph {
     const values = this.host.querySelector('#graphValues')!;
     values.replaceChildren();
     for (const [name, value, color] of [
-      ['↓ Download', current?.down, 'graph-download'],
-      ['↑ Upload', current?.up, 'graph-upload'],
+      ['Download', current?.down, 'graph-download'],
+      ['', undefined, 'graph-selection'],
+      ['Upload', current?.up, 'graph-upload'],
     ] as const) {
       const span = document.createElement('span');
       span.className = color;
-      span.textContent = `${name} ${amount(value, true)}${current?.partial ? ' *' : ''}`;
+      // Chart name follows the Activity selection, as in the reference legend.
+      span.textContent =
+        color === 'graph-selection'
+          ? document.getElementById('selectedName')?.textContent || ''
+          : `${name} (${amount(value, true)}${current?.partial ? ' *' : ''})`;
       values.append(span);
     }
     const status = !v.connected

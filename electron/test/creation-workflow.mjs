@@ -97,8 +97,9 @@ try {
     await p.click('#activityTab');
     await p.locator('#rows tr[data-id^="app:"]').first().locator('.name').click();
     await p.locator(`#infoRules .sidebar-policy[data-direction="${direction}"]`).click();
-    await p.getByLabel('Rule to create or change', { exact: true }).selectOption('new');
-    await p.locator('.activity-quick-actions button').filter({ hasText: 'Advanced' }).click();
+    await wait(() => p.locator('.quick-popup').isVisible());
+    if (await p.locator('[data-focus=qs-new]').count()) await p.click('[data-focus=qs-new]');
+    await p.click('[data-focus=qs-advanced]');
     await p.waitForTimeout(100);
     if (!(await p.locator('#ruleEditor').isVisible()))
       console.log('OPEN FEEDBACK', await p.locator('#feedback').innerText());

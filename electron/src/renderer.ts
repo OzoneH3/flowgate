@@ -1,12 +1,7 @@
 import { initiationPresentation } from './initiation';
-import { ActivityPolicy } from './activity-policy';
-import { ruleChip, renderChip } from './rule-chip';
-import {
-  POLICY_CAPABILITY,
-  authoritativePolicy,
-  authoritativeProcessPolicy,
-  policyLabel,
-} from './policy';
+import { ActivityPolicy, STATUS_SLOTS, blockerGlyph } from './activity-policy';
+import { ruleChip, type RuleChip } from './rule-chip';
+import { POLICY_CAPABILITY, authoritativePolicy, authoritativeProcessPolicy } from './policy';
 import { ruleStatus, ruleState, ruleDescription, configuredPolicy } from './rule-status';
 import { canDecide } from './protocol';
 import type { Application } from './protocol';
@@ -136,70 +131,88 @@ function rowApplication(r: Row) {
       : r.socket?.display_application)
   );
 }
-type PolicyDirection = 'incoming' | 'outgoing';
 
-function policyCell(r: Row, direction: PolicyDirection) {
-  const status = ruleStatus(r, state),
-    cell = element('td', '', 'rule-status');
-  const rules = status[direction];
+// Seven-slot Rule Status strip. Slots 4/5 are the In/Out Blocker state for the
+// row's own target (a process without its own rule shows its application fallback dimmed). The
+// other slots are explicitly unavailable rule families, never controls.
+function statusStrip(r: Row) {
+  const cell = element('td', '', 'rule-status');
+  const strip = element('span', '', 'status-strip');
+  strip.setAttribute('role', 'group');
+  strip.setAttribute('aria-label', r.label + ' rule status');
+  const status = ruleStatus(r, state);
   const authoritative = state.control.capabilities?.includes(POLICY_CAPABILITY);
   const result = authoritative ? authoritativePolicy(r, state) : undefined;
   const processPolicy = authoritativeProcessPolicy(r, state);
-  const summary = processPolicy?.[direction] || result?.application?.[direction];
-  const label = authoritative
-    ? summary
-      ? policyLabel(summary)
-      : 'Unavailable'
-    : status.available
-      ? configuredPolicy(rules, status.now)
-      : 'Unavailable';
-  const button = element('button', '', 'policy-cell');
-  // Process/socket rows show the instance's own rules; with none, the backend's
-  // application fallback for that exact instance is shown dimmed (never from grouping).
-  const fallback =
-    processPolicy && !processPolicy[direction].rules.length
-      ? processPolicy[direction === 'incoming' ? 'application_incoming' : 'application_outgoing']
-      : undefined;
-  if (r.kind === 'overview') button.textContent = '—';
-  else if (authoritative) {
-    const shown = fallback?.rules.length ? fallback : summary;
-    const chip = ruleChip(shown, processPolicy?.state === 'inactive' && shown === summary, true);
-    // Connection rows carry no rules of their own; their holder's status is in the Info View.
-    if (r.kind === 'socket') button.classList.add('policy-connection');
-    else button.append(renderChip(chip, fallback && shown === fallback ? '↳ ' : ''));
+  for (const slot of STATUS_SLOTS) {
+    if (!slot.direction) {
+      const dot = element('span', '·', 'status-slot unavailable');
+      dot.title = `${slot.label}: not a FlowGate feature`;
+      strip.append(dot);
+      continue;
+    }
+    const direction = slot.direction;
+    const button = element('button', '', 'policy-cell status-slot');
+    button.dataset.direction = direction;
+    button.disabled = r.kind === 'overview';
+    let chip: RuleChip = { glyph: '', text: 'Not set', tone: 'none', detail: '' };
+    let fallbackShown = false;
+    let title = '';
+    if (r.kind === 'overview') {
+      chip = { glyph: '', text: '', tone: 'none', detail: '' };
+      title = 'Machine: no rules at this level.';
+    } else if (r.kind === 'socket') {
+      chip = { glyph: '', text: '', tone: 'none', detail: '' };
+      title = `${slot.label}: connections carry no rules; see the holder process.`;
+    } else if (authoritative) {
+      const summary = processPolicy?.[direction] || result?.application?.[direction];
+      const fallback =
+        processPolicy && !processPolicy[direction].rules.length
+          ? processPolicy[
+              direction === 'incoming' ? 'application_incoming' : 'application_outgoing'
+            ]
+          : undefined;
+      const shown = fallback?.rules.length ? fallback : summary;
+      fallbackShown = !!fallback?.rules.length;
+      chip = ruleChip(shown, processPolicy?.state === 'inactive' && shown === summary, true);
+      title = summary
+        ? `${slot.label}: ${chip.text}${fallbackShown ? ' (application fallback; no own rule)' : ''}\n${chip.detail}\n${summary.reason}\nEnforcement: ${summary.enforcement.state} · ${summary.enforcement.reason}`
+        : `${slot.label}: ${result?.reason || 'unavailable'}`;
+      if (!summary) chip = { glyph: '', text: 'Unavailable', tone: 'unavailable', detail: '' };
+    } else if (status.available) {
+      const rules = status[direction];
+      chip = {
+        glyph: '',
+        text: rules.length ? configuredPolicy(rules, status.now) : 'Not set',
+        tone:
+          rules.length === 1
+            ? (ruleState(rules[0], status.now) as RuleChip['tone'])
+            : rules.length
+              ? 'mixed'
+              : 'none',
+        detail: rules.map((rule) => ruleDescription(rule, status.now)).join('\n'),
+      };
+      title = `${slot.label} (compatibility inventory): ${chip.text}\n${chip.detail}`;
+    } else title = `${slot.label}: ${status.reason}`;
+    button.append(blockerGlyph(chip));
+    if (!chip.glyph && !['allow', 'block', 'mixed', 'off'].includes(chip.tone))
+      button.textContent = '·';
     button.classList.add('tone-' + chip.tone);
-    if (fallback && shown === fallback) button.classList.add('policy-fallback');
-  } else button.textContent = label === 'No explicit rule' ? 'Not set' : label;
-  button.disabled = r.kind === 'overview';
-  button.dataset.direction = direction;
-  button.title =
-    `${direction}: configured policy. ${status.reason}\n${state.control.enforcement?.state === 'stopped' ? 'Stored only; enforcement stopped.\n' : ''}` +
-    rules.map((rule) => ruleDescription(rule, status.now)).join('\n');
-  if (authoritative)
-    button.title = summary
-      ? `Backend summary · ${summary.reason}\nEnforcement: ${summary.enforcement.state} · ${summary.enforcement.reason}\nCurrent policy, not a historical verdict.${processPolicy ? '\nProcess policy: ' + processPolicy.reason + '\nApplication fallback: ' + policyLabel(processPolicy[direction === 'incoming' ? 'application_incoming' : 'application_outgoing']) : ''}`
-      : result!.reason;
-  else
+    if (fallbackShown) button.classList.add('policy-fallback');
     button.title =
-      'Compatibility inventory (locally grouped listed rules; not a backend summary).\n' +
-      button.title;
-  button.setAttribute(
-    'aria-label',
-    `${r.label} · ${direction} · ${button.textContent || label} · configured policy`,
-  );
-  if (authoritative ? !summary : !status.available) button.classList.add('rule-unavailable');
-  else if (!authoritative && rules.length === 1)
-    button.classList.add('policy-' + ruleState(rules[0], status.now));
-  if (fallback?.rules.length)
-    button.title += `\nThis process has no own ${direction} rule; application fallback shown.`;
-  button.onclick = (event) => {
-    event.stopPropagation();
-    selected = r.id;
-    renderTree();
-    renderInfo();
-    activityPolicy?.activate(direction);
-  };
-  cell.append(button);
+      title +
+      (state.control.enforcement?.state === 'stopped' ? '\nStored only; enforcement stopped.' : '');
+    button.setAttribute('aria-label', `${r.label} · ${slot.label} · ${chip.text || 'none'}`);
+    button.onclick = (event) => {
+      event.stopPropagation();
+      selected = r.id;
+      renderTree();
+      renderInfo();
+      activityPolicy?.activate(direction);
+    };
+    strip.append(button);
+  }
+  cell.append(strip);
   return cell;
 }
 function field(container: HTMLElement, label: string, value: string) {
@@ -217,13 +230,12 @@ if (promptID) {
   root.innerHTML = `<section class="prompt-shell"><header class="prompt-heading"><strong>FlowGate Blocker</strong><span>Pending connection permission</span></header><div id="promptBody"><div id="requestDetails"></div></div><footer><span id="controlStatus"></span><button id="dismiss">Decide later</button></footer><div id="feedback" role="status" aria-live="polite"></div></section>`;
   $('dismiss').onclick = () => void window.flowgate.dismissPrompt();
 } else {
-  root.innerHTML = `<header class="toolbar"><strong class="brand">▣ FlowGate</strong><input id="search" type="search" aria-label="Search Activity" placeholder="Search"><span id="observerStatus"></span><span class="separator"></span><span id="controlStatus"></span></header><nav class="tabs" aria-label="Views"><button id="activityTab" aria-selected="true">Activity</button><button id="requestsTab" aria-selected="false">Pending requests <span id="pendingCount">0</span></button></nav><main id="activityView"><section class="activity-main"><div class="filterbar"><select id="activitySource" aria-label="Activity measurement source"><option value="tcp">TCP rates</option><option value="udp">UDP rates</option></select><select id="filter" aria-label="Socket filter"><option value="all">All sockets</option><option value="active">Active TCP / connected UDP</option><option value="listening">Listening TCP / bound UDP</option></select><button id="expand">Expand all</button><button id="collapse">Collapse all</button></div><div class="table-scroll"><table id="tree" role="treegrid" tabindex="0" aria-label="Application process socket activity"><thead><tr id="headers"></tr></thead><tbody id="rows"></tbody></table></div><div id="activitySummary" class="summary"></div></section><aside><h2>Info View</h2><h3 id="selectedName">FlowGate Activity</h3><div id="selectedExecutable"></div><div class="info-scroll"><section id="infoRules"></section><h3 id="infoProperties" class="info-section-title">Overview</h3><dl id="info"></dl><section class="info-tools"><h3 class="info-section-title">Tools</h3><button id="infoOpenRules">Rule list</button><button id="infoOpenLog">Decision log</button><button id="infoOpenPending">Pending requests</button></section></div><section id="trafficGraph"></section></aside></main><main id="requestsView" hidden><section class="request-list"><h2>Pending &amp; recent requests</h2><p class="hint">Select a request to decide. Dismissal grants nothing. Closing FlowGate leaves an independent controller running.</p><div class="table-scroll"><table id="requests"><thead><tr><th>Application</th><th>Direction</th><th>Protocol</th><th>Remote endpoint</th><th>State</th></tr></thead><tbody id="requestRows"></tbody></table></div></section><aside class="request-sidebar"><h2>Connection permission</h2><div id="requestDetails"></div></aside></main><footer><span>Activity and firewall control are independent.</span><span id="feedback" role="status" aria-live="polite"></span></footer>`;
+  root.innerHTML = `<header class="toolbar"><strong class="brand">▣ FlowGate</strong><input id="search" type="search" aria-label="Search Activity" placeholder="Search"><span id="observerStatus"></span><span class="separator"></span><span id="controlStatus"></span></header><nav class="tabs" aria-label="Views"><button id="activityTab" aria-selected="true">Activity</button><button id="requestsTab" aria-selected="false">Pending requests <span id="pendingCount">0</span></button></nav><main id="activityView"><section class="activity-main"><div class="filterbar"><select id="activitySource" aria-label="Activity measurement source"><option value="tcp">TCP rates</option><option value="udp">UDP rates</option></select><select id="filter" aria-label="Socket filter"><option value="all">All sockets</option><option value="active">Active TCP / connected UDP</option><option value="listening">Listening TCP / bound UDP</option></select><button id="expand">Expand all</button><button id="collapse">Collapse all</button></div><div class="table-scroll"><table id="tree" role="treegrid" tabindex="0" aria-label="Application process socket activity"><thead><tr id="headers"></tr></thead><tbody id="rows"></tbody></table></div><div id="activitySummary" class="summary"></div></section><aside><h2>Info View</h2><h3 id="selectedName">FlowGate Activity</h3><div id="selectedExecutable"></div><div class="info-scroll"><h3 id="infoProperties" class="info-section-title">Overview</h3><dl id="info"></dl><section id="infoRules"></section><section class="info-tools"><h3 class="info-section-title">Tools</h3><button id="infoOpenRules">Rule list</button><button id="infoOpenLog">Decision log</button><button id="infoOpenPending">Pending requests</button></section></div><section id="trafficGraph"></section></aside></main><main id="requestsView" hidden><section class="request-list"><h2>Pending &amp; recent requests</h2><p class="hint">Select a request to decide. Dismissal grants nothing. Closing FlowGate leaves an independent controller running.</p><div class="table-scroll"><table id="requests"><thead><tr><th>Application</th><th>Direction</th><th>Protocol</th><th>Remote endpoint</th><th>State</th></tr></thead><tbody id="requestRows"></tbody></table></div></section><aside class="request-sidebar"><h2>Connection permission</h2><div id="requestDetails"></div></aside></main><footer><span>Activity and firewall control are independent.</span><span id="feedback" role="status" aria-live="polite"></span></footer>`;
   const columns = [
     ['name', 'Name'],
-    ['download_bps', 'DL rate'],
-    ['upload_bps', 'UL rate'],
-    ['incoming_policy', 'In Blocker'],
-    ['outgoing_policy', 'Out Blocker'],
+    ['download_bps', 'DL Rate'],
+    ['upload_bps', 'UL Rate'],
+    ['rule_status', 'Rule Status'],
     ['count', 'Sockets'],
     ['pid', 'PID'],
     ['downloaded', 'Downloaded'],
@@ -237,9 +249,9 @@ if (promptID) {
     const th = element('th');
     th.className = 'col-' + key;
     const b = element('button', title);
-    if (key === 'download_bps' || key === 'upload_bps') b.append(element('small', 'Auto units'));
-    if (key.endsWith('_policy')) b.append(element('small', 'Configured policy'));
-    b.disabled = key.endsWith('_policy');
+    if (key === 'download_bps' || key === 'upload_bps')
+      b.append(element('small', 'autoByte (def)'));
+    b.disabled = key === 'rule_status';
     b.onclick = () => {
       descending = sort === key ? !descending : ['upload_bps', 'download_bps'].includes(key);
       sort = key;
@@ -303,7 +315,39 @@ if (promptID) {
     renderTree();
     renderInfo();
   };
-  $('filter').onchange = () => buildTree();
+  $('filter').onchange = () => {
+    syncFilterGroup();
+    buildTree();
+  };
+  // Reference-style All / Active / Listening toggle strip; the select stays as the accessible model.
+  const filterGroup = element('div', '', 'filter-group');
+  filterGroup.setAttribute('role', 'radiogroup');
+  filterGroup.setAttribute('aria-label', 'Socket filter');
+  for (const [value, label] of [
+    ['all', 'All'],
+    ['active', 'Active'],
+    ['listening', 'Listening'],
+  ]) {
+    const b = element('button', label);
+    b.dataset.value = value;
+    b.setAttribute('role', 'radio');
+    b.onclick = () => {
+      $<HTMLSelectElement>('filter').value = value;
+      syncFilterGroup();
+      buildTree();
+    };
+    filterGroup.append(b);
+  }
+  $('filter').after(filterGroup);
+  $('filter').classList.add('visually-hidden');
+  function syncFilterGroup() {
+    for (const b of filterGroup.querySelectorAll<HTMLElement>('button'))
+      b.setAttribute(
+        'aria-checked',
+        String(b.dataset.value === $<HTMLSelectElement>('filter').value),
+      );
+  }
+  syncFilterGroup();
   $('expand').onclick = () => {
     for (const r of allRows(roots)) if (r.children.length) expanded.add(r.id);
     renderTree();
@@ -427,7 +471,12 @@ function renderTree() {
       if (direction.state === 'listening') rowLabel = `Listening · ${r.socket.socket.local}`;
       if (direction.state === 'unconnected') rowLabel = `UDP bound · ${r.socket.socket.local}`;
     }
-    name.append(toggle, icon, document.createTextNode(rowLabel));
+    // Reference-style online LED. FlowGate lists only currently observed owners, so every live
+    // row is online; the retained exited selection never appears in this table.
+    const led = element('span', '', 'online-dot on');
+    led.title = 'Online: currently observed';
+    led.setAttribute('aria-hidden', 'true');
+    name.append(led, toggle, icon, document.createTextNode(rowLabel));
     name.title = r.process?.executable || r.socket?.socket.remote || r.label;
     tr.append(name);
     for (const key of ['download_bps', 'upload_bps'] as Metric[]) {
@@ -442,7 +491,7 @@ function renderTree() {
       td.title = `${measurementSource.toUpperCase()} · ${s.known}/${s.count} measured sockets${s.mixed ? ' · incompatible measurement sources' : ''}`;
       tr.append(td);
     }
-    tr.append(policyCell(r, 'incoming'), policyCell(r, 'outgoing'));
+    tr.append(statusStrip(r));
     tr.append(
       element('td', String(r.rows.length), 'numeric'),
       element('td', r.pid === undefined ? '' : String(r.pid), 'numeric'),
@@ -541,7 +590,19 @@ function renderInfo() {
     selectedName.dataset.identity = r?.id || '';
     selectedName.replaceChildren(
       ...(r ? [installedIcon(rowApplication(r), r.kind)] : []),
-      document.createTextNode(r?.label ?? 'FlowGate Activity'),
+      document.createTextNode(
+        !r
+          ? 'FlowGate Activity'
+          : r.kind === 'application'
+            ? 'Application'
+            : r.kind === 'process'
+              ? `Process ${r.pid ?? ''}`.trim()
+              : r.kind === 'socket'
+                ? 'Connection'
+                : r.kind === 'unidentified'
+                  ? 'Unidentified'
+                  : r.label,
+      ),
     );
   }
   if (!r) {
@@ -592,6 +653,12 @@ function renderInfo() {
       'Common application of shared holders. Not a firewall permission target.',
     );
   }
+  if (r.kind === 'application' || r.kind === 'process')
+    field(
+      info,
+      'Name',
+      r.kind === 'application' ? r.label : r.process?.application.name || r.label,
+    );
   if (r.process) {
     field(info, 'Executable', r.process.executable);
     field(info, 'User ID', String(r.process.uid));
@@ -909,12 +976,10 @@ function consume(next: ClientState) {
     .filter(Boolean)
     .join('\n');
   if (!promptID) {
-    for (const label of document.querySelectorAll<HTMLElement>(
-      '.col-incoming_policy small,.col-outgoing_policy small',
-    ))
-      label.textContent = state.control.capabilities?.includes(POLICY_CAPABILITY)
-        ? 'Backend policy'
-        : 'Listed · legacy';
+    for (const th of document.querySelectorAll<HTMLElement>('.col-rule_status button'))
+      th.title = state.control.capabilities?.includes(POLICY_CAPABILITY)
+        ? 'Priority · DL Limit · UL Limit · In Blocker · Out Blocker · In Quota · Out Quota. Only Blocker is a FlowGate feature; backend policy summary.'
+        : 'Compatibility inventory (listed rules; no backend summary).';
     $('observerStatus').textContent = state.observation.message;
     $('observerStatus').title = state.observation.message;
     $('pendingCount').textContent = String(

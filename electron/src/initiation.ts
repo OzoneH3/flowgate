@@ -46,7 +46,7 @@ export function initiationPresentation(row: SocketRow) {
           : state === 'ambiguous'
             ? '↔'
             : '?',
-    className: 'connection-neutral',
+    className: state === 'listening' ? 'connection-listening' : 'connection-neutral',
     title: `${label}\n${i?.reason || 'No trustworthy initiation observation supplied.'}${i?.source ? '\nEvidence: ' + i.source : ''}\nNo direction is inferred from endpoints or traffic.`,
   };
 }

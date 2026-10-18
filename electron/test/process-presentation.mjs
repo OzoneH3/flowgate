@@ -293,17 +293,22 @@ try {
       .count()
       .then((n) => n === 2),
   );
+  await page.locator('.rule-details summary').click();
   assert.match(await page.locator('#infoRules').innerText(), /This process/);
   assert.match(await page.locator('#infoRules').innerText(), /Application fallback/);
   await page.screenshot({ path: path.join(run, 'synthetic-process-normal.png') });
   for (const [id, name, pattern] of [
-    ['socket-out', 'synthetic-connection-outgoing.png', /This connection · Outgoing/],
-    ['socket-shared', 'synthetic-connection-shared.png', /Shared\/display-only|shared holder/],
-    ['socket-unknown', 'synthetic-connection-unidentified.png', /Unavailable|No supported/],
+    ['socket-out', 'synthetic-connection-outgoing.png', /Outgoing: initiated the connection/],
+    ['socket-shared', 'synthetic-connection-shared.png', /Shared\/display-only|shared holders/],
+    [
+      'socket-unknown',
+      'synthetic-connection-unidentified.png',
+      /Unavailable|No supported|not a policy target/,
+    ],
   ]) {
     await page.locator(`#rows tr[data-id="${id}"] .name`).click();
     await page.waitForTimeout(300);
-    assert.match(await page.locator('#infoRules').innerText(), pattern);
+    assert.match(await page.locator('#activityView aside').innerText(), pattern);
     assert.equal(
       await page.locator('.activity-quick button.quick-allow:not(:disabled)').count(),
       0,
@@ -313,11 +318,12 @@ try {
   await page.locator('#rows tr[data-id^="process:"][data-id$=":101:123"] .name').click();
   await page.waitForTimeout(300);
   await page.locator('.sidebar-process-policy[data-direction=incoming]').click();
-  assert.match(await page.locator('.activity-quick').innerText(), /In · This process · PID 101/);
+  await wait(() => page.locator('.quick-popup').isVisible());
+  assert.equal(await page.evaluate(() => document.activeElement?.dataset.focus), 'quick');
+  assert.match(await page.locator('.quick-popup').innerText(), /This process · PID 101/);
   await page.screenshot({ path: path.join(run, 'synthetic-process-setter.png') });
-  if (await page.locator('[data-focus=quick-new]').count())
-    await page.click('[data-focus=quick-new]');
-  await page.click('[data-focus=quick-advanced]');
+  if (await page.locator('[data-focus=qs-new]').count()) await page.click('[data-focus=qs-new]');
+  await page.click('[data-focus=qs-advanced]');
   await wait(() => page.locator('#ruleEditor').isVisible());
   assert.match(await page.locator('#editorApplication').innerText(), /This process/);
   await page.selectOption('#createScope', 'custom');
@@ -343,8 +349,16 @@ try {
     page
       .locator('#infoRules')
       .innerText()
-      .then((t) => t.includes('Process exited')),
+      .then((t) => /ended|Inactive/.test(t)),
   );
+  // Inactive target: popup offers Delete only; action pills and enable toggle are disabled.
+  await page.locator('.sidebar-process-policy[data-direction=incoming]').click();
+  await wait(() => page.locator('.quick-popup').isVisible());
+  assert(await page.locator('[data-focus="qs:process-rule:allow"]').isDisabled());
+  assert(await page.locator('[data-focus="qs:process-rule:enabled"]').isDisabled());
+  assert(await page.locator('[data-focus="qs-delete"]').isEnabled());
+  await page.screenshot({ path: path.join(run, 'synthetic-exited-popup.png') });
+  await page.keyboard.press('Escape');
   await page.setViewportSize({ width: 860, height: 600 });
   await page.screenshot({ path: path.join(run, 'synthetic-exited-narrow.png') });
   await page.click('#rulesTab');

@@ -1,5 +1,7 @@
 // Backend-issued immutable binding. Display/echo validation only, never policy matching.
 export const PROCESS_CAPABILITY = 'process-instance-rules-v1';
+// One observed rule may cover TCP + UDP (explicit protocol '*') when the backend advertises this.
+export const ANY_PROTOCOL_CAPABILITY = 'observed-rule-any-protocol-v1';
 export interface ProcessTarget {
   instance_id: string;
   session: string;

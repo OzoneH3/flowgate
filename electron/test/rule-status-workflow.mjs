@@ -1,5 +1,5 @@
 // Real Rule Status journey against an externally held, disposable process-rule fixture
-// (scripts/process-rules-isolated.py --hold). Drives API mutations through the UI only.
+// (scripts/process-rules-isolated.py --hold). Drives API mutations through the UI popup only.
 // Never point this at the host daemon. Fixture owner quits/cleans after this run.
 import { _electron } from 'playwright-core';
 import fs from 'node:fs';
@@ -28,11 +28,11 @@ const wait = async (fn, ms = 20000) => {
   }
   throw Error('Timeout: ' + fn);
 };
-const list = () =>
+const call = (body) =>
   new Promise((resolve, reject) => {
     const s = net.createConnection(ready.socket);
     let b = '';
-    s.on('connect', () => s.write('{"version":1,"operation":"list"}\n'));
+    s.on('connect', () => s.write(JSON.stringify({ version: 1, ...body }) + '\n'));
     s.on('data', (c) => {
       b += c;
       if (b.includes('\n')) {
@@ -42,6 +42,7 @@ const list = () =>
     });
     s.on('error', reject);
   });
+const list = () => call({ operation: 'list' }).then((l) => ({ ...l, rules: l.rules || [] }));
 let app;
 try {
   fs.writeFileSync(prefs, '{}');
@@ -73,221 +74,250 @@ try {
     const s = await snapshot();
     return s.control.connected && s.control.policy?.processes?.length >= 2;
   });
-  const alpha = ready.alpha_target.process_id,
-    beta = ready.beta_target.process_id;
+  // Own disposable fixture: start from zero rules through the real conditional delete API.
+  for (const r of (await list()).rules) {
+    const d = await call({
+      operation: 'rule-delete',
+      generation: ready.generation,
+      id: r.id,
+      expected_version: r.version,
+    });
+    if (d.error) throw Error('reset: ' + JSON.stringify(d.error));
+  }
+  await wait(async () => (await snapshot()).control.rules.length === 0);
   const before = await list();
   assert(before.capabilities.includes('process-instance-rules-v1'));
+  const anyProtocol = before.capabilities.includes('observed-rule-any-protocol-v1');
+  step(`backend ${before.generation} any-protocol=${anyProtocol}`);
+  const alpha = ready.alpha_target.process_id,
+    beta = ready.beta_target.process_id;
   const rows = (pid) => p.locator(`#rows tr[data-id^="process:"][data-id$=":${pid}"]`);
   const cell = (tier, d) => p.locator(`[data-focus="cell:${tier}:${d}"]`);
-  const ready2 = () =>
-    wait(async () => !/Unavailable/.test(await cell('process', 'incoming').innerText()));
+  const popup = () => p.locator('.quick-popup');
+  const focusKey = () => p.evaluate(() => document.activeElement?.dataset.focus);
   const select = async (pid) => {
     await rows(pid).locator('.name').click();
-    await ready2();
-  };
-  const saveReview = async () => {
-    await wait(() => p.locator('.inline-review.phase-review').isVisible());
-    assert.match(await p.locator('.inline-review .draft-badge').innerText(), /Draft · not saved/);
-    await p.locator('[data-focus=review-save]').click();
-    await wait(async () => !(await p.locator('.inline-review').count()));
+    await wait(async () => !/Unavailable/.test(await cell('process', 'incoming').innerText()));
   };
   const own = (s, pid) =>
     s.control.rules.filter(
       (r) => r.filter.process && `${r.filter.process.pid}` === pid.split(':')[0],
     );
+  const appRules = (s) => s.control.rules.filter((r) => !r.filter.process);
+  const noPending = () => wait(async () => !(await p.locator('.inline-review').count()));
 
-  step('select application');
+  step('select application; In cell opens popup; Enter on the cell cannot trigger an action');
   await p.click('#expand');
   await p.locator('#rows tr[data-id^="app:"] .name').first().click();
-  await wait(() => p.locator('[data-focus="cell:application:incoming"]').isVisible());
+  await wait(async () => !/Unavailable/.test(await cell('application', 'incoming').innerText()));
   assert.equal(await p.locator('[data-focus^="cell:process"]').count(), 0);
-  await p.screenshot({ path: path.join(run, '01-application.png') });
-
-  step('select alpha; open In via keyboard, Escape returns focus');
-  await select(alpha);
-  await cell('process', 'incoming').focus();
+  const countBefore = (await list()).rules.length;
+  await cell('application', 'incoming').focus();
   await p.keyboard.press('Enter');
-  await wait(() => p.locator('.activity-quick').isVisible());
+  await wait(() => popup().isVisible());
+  assert.equal(await focusKey(), 'quick', 'popup itself is focused, not an action');
+  await p.keyboard.press('Enter');
   await p.waitForTimeout(800);
-  assert.equal(await p.locator('.inline-review').count(), 0, 'Enter must not trigger an action');
-  assert.equal(await p.evaluate(() => document.activeElement?.dataset.focus), 'quick');
+  assert.equal(await p.locator('.inline-review').count(), 0);
+  assert.equal((await list()).rules.length, countBefore, 'nothing saved by keyboard');
+  await p.screenshot({ path: path.join(run, '01-application-popup.png') });
   await p.keyboard.press('Escape');
-  await wait(async () => !(await p.locator('.activity-quick').count()));
-  assert.equal(
-    await p.evaluate(() => document.activeElement?.dataset.focus),
-    'cell:process:incoming',
-  );
+  await wait(async () => !(await popup().count()));
+  assert.equal(await focusKey(), 'cell:application:incoming');
 
-  const appRulesBefore = before.rules.filter((r) => !r.filter.process);
-  let s = await snapshot();
-  let target;
-  if (own(s, alpha).length === 1) {
-    step('alpha has one own rule: setter routes to that exact rule');
-    target = own(s, alpha)[0];
-    await cell('process', target.filter.direction).click();
-    assert.match(await p.locator('.activity-quick').innerText(), /Change the existing rule/);
-    await p.screenshot({ path: path.join(run, '02-setter-existing.png') });
-    const previous = target.action;
-    await p.locator(`.activity-quick [data-focus="setter:${target.id}:flip"]`).click();
-    await wait(() => p.locator('.inline-review.phase-review').isVisible());
-    step('review keeps focus through polling; Save reached by Tab, not pre-focused');
-    assert.equal(await p.evaluate(() => document.activeElement?.dataset.focus), 'review');
-    await p.keyboard.press('Tab');
-    assert.equal(await p.evaluate(() => document.activeElement?.dataset.focus), 'review-save');
-    await p.waitForTimeout(3500);
-    assert.equal(await p.evaluate(() => document.activeElement?.dataset.focus), 'review-save');
-    await p.screenshot({ path: path.join(run, '03-inline-review.png') });
-    await saveReview();
-    await wait(async () => {
-      const r = (await snapshot()).control.rules.find((x) => x.id === target.id);
-      return r && r.action !== previous;
-    });
-    const changed = (await snapshot()).control.rules.find((x) => x.id === target.id);
-    assert.deepEqual(changed.filter, target.filter, 'binding/scope preserved');
-    assert.equal(changed.expires, target.expires);
-    target = changed;
-  } else {
-    step('alpha has no own rule: create process Allow UDP');
-    await cell('process', 'incoming').click();
-    await p.locator('[data-focus="quick-protocol:udp"]').click();
-    await p.locator('.activity-quick .quick-allow').click();
-    await p.screenshot({ path: path.join(run, '03-inline-review.png') });
-    await saveReview();
-    await wait(async () => own(await snapshot(), alpha).length === 1);
-    target = own(await snapshot(), alpha)[0];
-  }
+  step('one click: application In Allow (scope shown before click), saved via backend preview');
+  await cell('application', 'incoming').click();
+  const shown = await p.locator('.qs-scope').innerText();
+  assert.match(shown, anyProtocol ? /TCP \+ UDP/ : /TCP|UDP/);
+  assert.match(shown, /any address · any port · persistent/);
+  await p.locator('[data-focus="qs:new:allow"]').click();
+  await wait(async () => appRules(await snapshot()).some((r) => r.filter.direction === 'incoming'));
+  await noPending();
+  const appIn = appRules(await snapshot()).find((r) => r.filter.direction === 'incoming');
+  assert.equal(appIn.action, 'allow');
+  assert.equal(appIn.filter.protocol, anyProtocol ? '*' : 'tcp');
+  assert.equal(appIn.filter.remote_address, '*');
+  assert(appIn.expires.startsWith('0001-'), 'persistent as shown');
+  await wait(async () => !(await popup().count()), 5000);
+  assert.equal(await focusKey(), 'cell:application:incoming', 'focus returns to the cell');
+  await wait(async () => /Allow/.test(await cell('application', 'incoming').innerText()));
+  await p.screenshot({ path: path.join(run, '02-application-allow.png') });
 
-  step('create a second, new process rule (Out Block TCP) via one-click setter');
+  step('select alpha: This process row + App fallback row; create process Out Block');
+  await select(alpha);
+  assert.match(await cell('application', 'incoming').innerText(), /Allow/);
+  assert.match(await cell('process', 'incoming').innerText(), /Not set/);
   await cell('process', 'outgoing').click();
-  if (await p.locator('.activity-quick [data-focus=quick-new]').count())
-    await p.locator('.activity-quick [data-focus=quick-new]').click();
-  await p.locator('[data-focus="quick-protocol:tcp"]').click();
-  await p.locator('.activity-quick .quick-block').click();
-  await wait(() => p.locator('.inline-review.phase-review').isVisible());
-  assert.match(await p.locator('.inline-review-scope').innerText(), /This process · PID/);
-  assert.match(await p.locator('.inline-review-scope').innerText(), /Block outgoing TCP/);
-  await saveReview();
-  await wait(async () => own(await snapshot(), alpha).length === 2);
-  s = await snapshot();
-  const outRule = own(s, alpha).find((r) => r.filter.direction === 'outgoing');
-  assert(outRule && outRule.filter.process.pid === Number(alpha.split(':')[0]));
-  await wait(async () =>
-    /Block TCP|Block · TCP/.test(await cell('process', 'outgoing').innerText()),
+  assert.match(
+    await p.locator('.qs-scope').innerText(),
+    /This process · PID 21|This process · PID/,
   );
-  await p.screenshot({ path: path.join(run, '04-alpha-two-own-rules.png') });
+  assert.match(await p.locator('.qs-scope').innerText(), /until this process exits/);
+  await p.locator('[data-focus="qs:new:block"]').click();
+  await wait(async () => own(await snapshot(), alpha).length === 1);
+  await noPending();
+  const procOut = own(await snapshot(), alpha)[0];
+  assert.equal(procOut.filter.direction, 'outgoing');
+  assert.equal(procOut.action, 'block');
+  assert.equal(procOut.schema, 3);
+  assert(procOut.expires.startsWith('0001-'));
+  await wait(async () => /Block/.test(await cell('process', 'outgoing').innerText()));
+  assert.match(
+    await rows(alpha).locator('.status-slot[data-direction=outgoing]').getAttribute('aria-label'),
+    /Block/,
+  );
+  await p.screenshot({ path: path.join(run, '03-alpha-process-block.png') });
 
-  step('beta unaffected: no own rules, fallback visible');
+  step('beta unaffected: no own rule; table and matrix show only the application fallback');
   await select(beta);
   assert.equal(own(await snapshot(), beta).length, 0);
   assert.match(await cell('process', 'incoming').innerText(), /Not set/);
   assert.match(await cell('process', 'outgoing').innerText(), /Not set/);
-  assert.equal(await p.locator(`.activity-rule[data-rule-id="${outRule.id}"]`).count(), 0);
-  assert.equal(await p.locator(`.activity-rule[data-rule-id="${target.id}"]`).count(), 0);
-  const betaRow = await rows(beta).locator('.policy-cell').first().innerText();
-  step('beta table In cell: ' + betaRow);
-  await p.screenshot({ path: path.join(run, '05-beta-fallback.png') });
-  assert.deepEqual(
-    (await list()).rules.filter((r) => !r.filter.process).map((r) => [r.id, r.version]),
-    appRulesBefore.map((r) => [r.id, r.version]),
-    'application rules untouched',
-  );
+  assert.match(await cell('application', 'incoming').innerText(), /Allow/);
+  const betaIn = rows(beta).locator('.status-slot[data-direction=incoming]');
+  assert(await betaIn.evaluate((e) => e.classList.contains('policy-fallback')), 'dimmed fallback');
+  await p.screenshot({ path: path.join(run, '04-beta-fallback.png') });
 
-  step('beta draft: preview token expires, nothing saved, no silent refresh');
-  const countBefore = (await list()).rules.length;
-  await cell('process', 'incoming').click();
-  await p.locator('[data-focus="quick-protocol:tcp"]').click();
-  await p.locator('.activity-quick .quick-block').click();
-  await wait(() => p.locator('.inline-review.phase-review').isVisible());
-  assert.match(await p.locator('.review-timer').innerText(), /Review valid \d+ s/);
-  await p.screenshot({ path: path.join(run, '05b-beta-draft.png') });
-  await wait(() => p.locator('.inline-review.phase-expired').isVisible(), 45000);
-  assert.equal(await p.locator('[data-focus=review-save]').count(), 0);
-  await p.waitForTimeout(2500);
-  assert(await p.locator('.inline-review.phase-expired').isVisible(), 'stays expired');
-  assert.equal((await list()).rules.length, countBefore);
-  await p.screenshot({ path: path.join(run, '05c-beta-expired.png') });
-  await p.locator('[data-focus=review-discard]').click();
-  await wait(async () => !(await p.locator('.inline-review').count()));
-  step('stale review: let token expire, no silent refresh');
+  step('alpha: flip the existing process rule via the popup pill (exact id/version, scope kept)');
   await select(alpha);
-  await p.locator(`.activity-rule[data-rule-id="${outRule.id}"] [data-focus$=":toggle"]`).click();
-  await wait(() => p.locator('.inline-review.phase-review').isVisible());
-  const expiryVisible = await p.locator('.review-timer').innerText();
-  step('timer: ' + (expiryVisible || '(edit preview has no backend expiry)'));
-  if (expiryVisible) {
-    await wait(() => p.locator('.inline-review.phase-expired').isVisible(), 40000);
-    assert.equal(await p.locator('[data-focus=review-save]').count(), 0);
-    await p.locator('[data-focus=review-again]').click();
-  }
-  step('disable second rule');
-  await saveReview();
-  await wait(
-    async () => (await snapshot()).control.rules.find((r) => r.id === outRule.id)?.disabled,
+  await cell('process', 'outgoing').click();
+  assert(
+    await p
+      .locator('[data-focus="qs:' + procOut.id + ':block"]')
+      .evaluate((e) => e.classList.contains('current')),
   );
+  await p.locator(`[data-focus="qs:${procOut.id}:allow"]`).click();
+  await wait(
+    async () =>
+      (await snapshot()).control.rules.find((r) => r.id === procOut.id)?.action === 'allow',
+  );
+  await noPending();
+  const flipped = (await snapshot()).control.rules.find((r) => r.id === procOut.id);
+  assert.deepEqual(flipped.filter, procOut.filter);
+  assert.equal(flipped.expires, procOut.expires);
+  assert.equal(
+    (await snapshot()).control.rules.find((r) => r.id === appIn.id).version,
+    appIn.version,
+    'app rule untouched',
+  );
+
+  step('alpha: disable via the popup checkbox');
+  await cell('process', 'outgoing').click();
+  await p.locator(`[data-focus="qs:${procOut.id}:enabled"]`).click();
+  await wait(
+    async () =>
+      (await snapshot()).control.rules.find((r) => r.id === procOut.id)?.disabled === true,
+  );
+  await noPending();
   await wait(async () => /Disabled/.test(await cell('process', 'outgoing').innerText()));
-  await p.screenshot({ path: path.join(run, '06-disabled.png') });
+  await p.screenshot({ path: path.join(run, '05-alpha-disabled.png') });
 
-  step('delete second rule (conditional)');
-  await p.locator(`.activity-rule[data-rule-id="${outRule.id}"] [data-focus$=":delete"]`).click();
+  step('stale action: rule deleted behind the UI → click reports conflict, nothing recreated');
+  await cell('process', 'outgoing').click();
+  await wait(() => popup().isVisible());
+  const current = (await list()).rules.find((r) => r.id === procOut.id);
+  const del = await call({
+    operation: 'rule-delete',
+    generation: before.generation,
+    id: procOut.id,
+    expected_version: current.version,
+  });
+  assert(!del.error, 'fixture delete ' + JSON.stringify(del.error || ''));
+  await p
+    .locator(`[data-focus="qs:${procOut.id}:enabled"]`)
+    .click({ force: true })
+    .catch(() => {});
+  await p.waitForTimeout(1500);
+  const after = await list();
+  assert.equal(after.rules.filter((r) => r.filter.process).length, 0, 'nothing recreated');
+  const text =
+    (await p.locator('#infoRules').innerText()) +
+    (await p
+      .locator('.inline-review')
+      .innerText()
+      .catch(() => ''));
+  step('stale text: ' + text.replace(/\s+/g, ' ').slice(0, 160));
+  await p.screenshot({ path: path.join(run, '06-stale.png') });
+  await p.keyboard.press('Escape');
+  await p.keyboard.press('Escape');
+
+  step('application: popup with the existing rule, Delete from the popup (conditional)');
+  await p.locator('#rows tr[data-id^="app:"] .name').first().click();
+  await wait(async () => !/Unavailable/.test(await cell('application', 'incoming').innerText()));
+  await cell('application', 'incoming').click();
+  await p.locator('[data-focus="qs-delete"]').click();
   await p.click('#confirmYes');
-  await wait(async () => !(await snapshot()).control.rules.some((r) => r.id === outRule.id));
-  assert((await snapshot()).control.rules.some((r) => r.id === target.id));
+  await wait(async () => !(await snapshot()).control.rules.some((r) => r.id === appIn.id));
+  await wait(async () => /Not set/.test(await cell('application', 'incoming').innerText()));
 
-  step('narrow 860×600 with setter open');
+  step('narrow 860×600 with popup open');
   await p.setViewportSize({ width: 860, height: 600 });
+  await select(alpha);
   await cell('process', 'incoming').click();
   await p.waitForTimeout(400);
-  await p.screenshot({ path: path.join(run, '07-narrow-setter.png') });
+  const box = await popup().boundingBox();
+  const aside = await p.locator('#activityView aside').boundingBox();
+  assert(box.x + box.width <= aside.x + aside.width + 1, 'popup within Info View');
+  await p.screenshot({ path: path.join(run, '07-narrow-popup.png') });
   await p.keyboard.press('Escape');
   await p.setViewportSize({ width: 1280, height: 656 });
 
   let exited = false;
   if (process.env.FLOWGATE_EXIT_ALPHA === '1') {
-    step('exit alpha via fixture owner command; session-bound rule becomes inactive');
+    step('recreate a process rule, exit alpha via the owner command → inactive, Delete only');
+    await select(alpha);
+    await cell('process', 'incoming').click();
+    await p.locator('[data-focus="qs:new:allow"]').click();
+    await wait(async () => own(await snapshot(), alpha).length === 1);
+    await noPending();
+    const finalRule = own(await snapshot(), alpha)[0];
     fs.writeFileSync(ready.command, JSON.stringify({ op: 'exit', name: 'alpha' }) + '\n');
     await wait(
-      async () => (await snapshot()).control.rule_states?.[target.id]?.state === 'inactive',
+      async () => (await snapshot()).control.rule_states?.[finalRule.id]?.state === 'inactive',
       30000,
     );
-    await wait(async () => /ended/i.test(await cell('process', 'incoming').innerText()));
-    const card = p.locator(`.activity-rule[data-rule-id="${target.id}"]`);
-    assert(await card.locator('[data-focus$=":flip"]').isDisabled());
-    assert(await card.locator('[data-focus$=":delete"]').isEnabled());
+    await wait(async () => /Inactive|ended/i.test(await cell('process', 'incoming').innerText()));
+    await cell('process', 'incoming').click();
+    assert(await p.locator(`[data-focus="qs:${finalRule.id}:block"]`).isDisabled());
+    assert(await p.locator('[data-focus="qs-delete"]').isEnabled());
     await p.screenshot({ path: path.join(run, '08-exited-inactive.png') });
-    await p.setViewportSize({ width: 860, height: 600 });
-    await p.screenshot({ path: path.join(run, '09-exited-narrow.png') });
-    await p.setViewportSize({ width: 1280, height: 656 });
-    step('delete inactive rule');
-    await card.locator('[data-focus$=":delete"]').click();
+    await p.locator('[data-focus="qs-delete"]').click();
     await p.click('#confirmYes');
-    await wait(async () => !(await snapshot()).control.rules.some((r) => r.id === target.id));
+    await wait(async () => !(await snapshot()).control.rules.some((r) => r.id === finalRule.id));
     exited = true;
   }
   const g = (await list()).generation;
   await app.evaluate(({ app }) => app.exit());
   await app.close().catch(() => {});
   app = undefined;
-  const after = await list();
-  assert.equal(after.generation, g);
-  assert.equal(after.enforcement.state, 'stopped');
+  const fin = await list();
+  assert.equal(fin.generation, g);
+  assert.equal(fin.enforcement.state, 'stopped');
   fs.writeFileSync(
     path.join(run, 'result.json'),
     JSON.stringify(
       {
         backend: process.env.FLOWGATE_TEST_BACKEND_SHA,
-        generation: after.generation,
+        generation: fin.generation,
+        anyProtocol,
         alpha,
         beta,
         exited,
         steps: log,
-        remaining: after.rules.map((r) => [r.id, r.action, r.filter.direction, !!r.filter.process]),
-        enforcement: after.enforcement.state,
+        remaining: fin.rules.map((r) => [
+          r.id,
+          r.action,
+          r.filter.direction,
+          r.filter.protocol,
+          !!r.filter.process,
+        ]),
+        enforcement: fin.enforcement.state,
       },
       null,
       2,
     ),
   );
-  console.log('PASS rule-status journey ' + run);
+  console.log('PASS rule-status popup journey ' + run);
 } catch (e) {
   if (app) {
     const p = await app.firstWindow();

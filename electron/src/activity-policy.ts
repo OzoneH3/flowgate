@@ -1,4 +1,4 @@
-import { PROCESS_CAPABILITY } from './process-rules';
+import { ANY_PROTOCOL_CAPABILITY, PROCESS_CAPABILITY } from './process-rules';
 import type { Attempt, ClientState, ObservedSource, Rule, RuleEdit, RuleSource } from './protocol';
 import { canManageRules } from './protocol';
 import type { Row } from './model';
@@ -10,12 +10,16 @@ import {
   type DirectionPolicy,
 } from './policy';
 import { ruleStatus, ruleState } from './rule-status';
-import { ruleChip, renderChip, refState, shortScope } from './rule-chip';
+import { ruleChip, renderChip, refState, shortScope, type RuleChip } from './rule-chip';
 import { reviewedScope, previewSeconds } from './editor-presentation';
 import { initiationPresentation } from './initiation';
-import { openRule, confirmRuleDelete, type EditorOptions } from './workflows';
+import { openRule, confirmRuleDelete } from './workflows';
+// Backend capability letting one observed rule cover TCP and UDP (NetLimiter's Blocker cell is
+// protocol-agnostic). Older daemons keep the explicit TCP | UDP choice.
+export { ANY_PROTOCOL_CAPABILITY };
 type Direction = 'incoming' | 'outgoing';
 type Tier = 'process' | 'application';
+type Protocol = 'tcp' | 'udp' | '*';
 const directions: Direction[] = ['incoming', 'outgoing'];
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, text = '', cls = '') => {
   const n = document.createElement(tag);
@@ -30,6 +34,7 @@ const button = (text: string, focus: string, cls = '') => {
   return b;
 };
 const short = (d: Direction) => (d === 'incoming' ? 'In' : 'Out');
+const protocolText = (p: Protocol) => (p === '*' ? 'TCP + UDP' : p.toUpperCase());
 export function scopeLabel(ref: PolicyRuleRef) {
   const f = ref.scope;
   const protocol = f.protocol === '*' ? 'TCP + UDP' : f.protocol.toUpperCase();
@@ -87,53 +92,84 @@ export function selectionInventory(row: Row, state: ClientState) {
   };
 }
 type Inventory = ReturnType<typeof selectionInventory>;
-// One inline backend review at a time. Preview persists nothing; Save is the acknowledgement.
+// One backend-reviewed change at a time. Preview persists nothing; the identical draft is saved
+// only when the verified scope equals the scope that was shown before the click.
 interface Pending {
   seq: number;
   rowId: string;
   rowLabel: string;
-  anchor: string;
   title: string;
-  phase: 'previewing' | 'review' | 'expired' | 'saving' | 'unknown' | 'error';
+  phase: 'previewing' | 'confirm' | 'saving' | 'unknown' | 'error';
   receipt?: string;
   scope?: string;
-  lifetime?: string;
-  enforcement?: string;
   expiresAt?: number;
   message?: string;
   reconcile?: string;
   retry?: () => void;
-  advanced?: () => void;
 }
-interface Setter {
+interface Popup {
   direction: Direction;
   tier: Tier;
   mode: 'auto' | 'new';
+  protocol: Protocol;
+  lifetime: 'persistent' | 'hour';
+  enabled: boolean;
+}
+const SLOTS: { key: string; label: string; direction?: Direction }[] = [
+  { key: 'priority', label: 'Priority' },
+  { key: 'dl-limit', label: 'DL Limit' },
+  { key: 'ul-limit', label: 'UL Limit' },
+  { key: 'in-blocker', label: 'In Blocker', direction: 'incoming' },
+  { key: 'out-blocker', label: 'Out Blocker', direction: 'outgoing' },
+  { key: 'in-quota', label: 'In Quota' },
+  { key: 'out-quota', label: 'Out Quota' },
+];
+export const STATUS_SLOTS = SLOTS;
+// Blocker cell: circular glyph + state word.
+export function blockerGlyph(chip: RuleChip) {
+  const g = el('span', '', 'blocker-glyph tone-' + chip.tone);
+  g.textContent =
+    chip.tone === 'allow'
+      ? '✓'
+      : chip.tone === 'block'
+        ? '✕'
+        : chip.tone === 'mixed'
+          ? '±'
+          : chip.tone === 'unavailable'
+            ? '?'
+            : '';
+  g.setAttribute('aria-hidden', 'true');
+  return g;
 }
 export class ActivityPolicy {
   private row?: Row;
   private state?: ClientState;
   private signature = '';
-  private setter?: Setter;
+  private popup?: Popup;
   private saved = '';
   private pending?: Pending;
   private seq = 0;
   private timer?: ReturnType<typeof setInterval>;
   private skew = 0;
-  private newValues = new Map<string, { protocol: string; expiry: 'hour' | 'permanent' }>();
   constructor(private host: HTMLElement) {
+    host.classList.add('rules-host');
     host.addEventListener('keydown', (event) => {
       if (event.key !== 'Escape') return;
-      if (this.pending && ['review', 'expired', 'error'].includes(this.pending.phase)) {
+      if (this.pending && ['confirm', 'error'].includes(this.pending.phase)) {
         event.stopPropagation();
         this.discard();
-      } else if (this.setter && !this.pending) {
+      } else if (this.popup && (!this.pending || this.pending.phase === 'error')) {
         event.stopPropagation();
-        const { direction, tier } = this.setter;
-        this.setter = undefined;
-        this.refresh();
-        host.querySelector<HTMLElement>(`[data-focus="cell:${tier}:${direction}"]`)?.focus();
+        this.close(true);
       }
+    });
+    document.addEventListener('pointerdown', (event) => {
+      if (!this.popup) return;
+      const t = event.target as Node;
+      if (host.querySelector('.quick-popup')?.contains(t)) return;
+      if ((t as HTMLElement).closest?.('.rule-cell, .policy-cell')) return;
+      if (this.pending && this.pending.phase !== 'error') return;
+      this.close(false);
     });
     window.addEventListener('activity-rule-saved', (e) => {
       this.saved = (e as CustomEvent<string>).detail;
@@ -151,22 +187,40 @@ export class ActivityPolicy {
       ? 'process'
       : 'application';
   }
+  private anyProtocol() {
+    return !!this.state?.control.capabilities?.includes(ANY_PROTOCOL_CAPABILITY);
+  }
   activate(direction: Direction, tier = this.defaultTier()) {
     if (!this.row || !this.state) return;
     if (this.pending && this.pending.phase !== 'error') {
-      this.host.querySelector<HTMLElement>('.inline-review')?.focus();
+      this.host.querySelector<HTMLElement>('.quick-popup')?.focus();
       return;
     }
     this.pending = undefined;
-    this.setter = { direction, tier, mode: 'auto' };
+    const row = this.row;
+    const protocol: Protocol = this.anyProtocol()
+      ? '*'
+      : (row.kind === 'socket' ? row.socket?.socket.protocol : undefined) === 'udp'
+        ? 'udp'
+        : 'tcp';
+    this.popup = { direction, tier, mode: 'auto', protocol, lifetime: 'persistent', enabled: true };
     this.refresh();
-    // Focus the group, not an action: the key that opened the setter must not also trigger it.
-    this.host.querySelector<HTMLElement>('.activity-quick')?.focus({ preventScroll: true });
-    this.host.querySelector('.activity-quick')?.scrollIntoView({ block: 'nearest' });
+    // Focus the popup itself, never an action: the key that opened it must not also trigger it.
+    this.host.querySelector<HTMLElement>('.quick-popup')?.focus({ preventScroll: true });
+  }
+  private close(restoreFocus: boolean) {
+    const p = this.popup;
+    this.popup = undefined;
+    if (this.pending?.phase === 'error') this.pending = undefined;
+    this.refresh();
+    if (restoreFocus && p)
+      this.host
+        .querySelector<HTMLElement>(`[data-focus="cell:${p.tier}:${p.direction}"]`)
+        ?.focus({ preventScroll: true });
   }
   update(row: Row | undefined, state: ClientState) {
     if (this.row?.id !== row?.id) {
-      this.setter = undefined;
+      this.popup = undefined;
       if (this.pending && !['saving', 'unknown'].includes(this.pending.phase))
         this.pending = undefined;
     }
@@ -195,101 +249,30 @@ export class ActivityPolicy {
       c.enforcement,
       c.rule_states,
       c.capabilities,
-      this.setter,
+      this.popup,
       this.saved,
-      this.pending && { ...this.pending, retry: 0, advanced: 0 },
+      this.pending && { ...this.pending, retry: 0 },
     ]);
     if (signature === this.signature) return;
     this.signature = signature;
     const active = document.activeElement as HTMLElement | null;
     const focusKey = active && this.host.contains(active) ? active.dataset.focus : undefined;
-    const oldScroll = this.host.querySelector('.activity-rule-list')?.scrollTop || 0;
+    const details = this.host.querySelector<HTMLDetailsElement>('.rule-details');
+    const detailsOpen = !!details?.open;
     const fragment = document.createDocumentFragment();
-    fragment.append(this.header());
+    fragment.append(el('h3', 'Rules', 'info-section-title'));
+    fragment.append(this.matrix(row, inv));
     if (this.pending && this.pending.rowId !== row.id)
-      fragment.append(this.review(`Unresolved save · ${this.pending.rowLabel}`));
-    fragment.append(this.context(row, inv), this.matrix(row, inv));
-    if (!inv.available) {
-      fragment.append(el('p', inv.reason, 'activity-policy-note'));
-      // Keep an open setter/draft through transient association gaps; actions stay disabled.
-      if (this.setter) fragment.append(this.quickSetter(inv));
-      else if (this.pending?.rowId === row.id) fragment.append(this.review());
-    } else {
-      if (!inv.complete)
-        fragment.append(
-          el(
-            'p',
-            inv.authoritative
-              ? 'Partial policy batch · some rules may be unavailable.'
-              : inv.reason,
-            'activity-policy-note',
-          ),
-        );
-      if (this.setter) fragment.append(this.quickSetter(inv));
-      fragment.append(this.ruleList(row, inv));
-      if (!canManageRules(c))
-        fragment.append(el('p', 'Read-only rule access.', 'activity-policy-note'));
-      fragment.append(this.details(inv));
-    }
+      fragment.append(this.reviewBox(`Unresolved save · ${this.pending.rowLabel}`));
+    fragment.append(this.underMatrix(row, inv, detailsOpen));
+    if (this.popup) fragment.append(this.popupBox(inv));
     this.host.replaceChildren(fragment);
-    const list = this.host.querySelector('.activity-rule-list');
-    if (list) list.scrollTop = oldScroll;
+    this.place();
     if (focusKey)
       this.host
         .querySelector<HTMLElement>(`[data-focus="${CSS.escape(focusKey)}"]`)
         ?.focus({ preventScroll: true });
     this.tick();
-  }
-  private header() {
-    const c = this.state!.control;
-    const head = el('div', '', 'rule-status-head');
-    head.append(el('h3', 'Rules', 'info-section-title'));
-    const covered = c.enforcement?.state === 'active';
-    const badge = el(
-      'span',
-      !c.connected
-        ? 'Controller disconnected'
-        : c.enforcement?.state === 'stopped'
-          ? 'Stored only · firewall stopped'
-          : covered
-            ? 'Firewall active'
-            : `Firewall ${c.enforcement?.state || 'state unknown'}`,
-      'enforcement-badge ' + (covered ? 'enforced' : 'stored'),
-    );
-    badge.title = covered
-      ? 'Enforcement is active; per-direction coverage is listed in details.'
-      : 'Rules are stored and editable but do not currently protect connections.';
-    head.append(badge);
-    return head;
-  }
-  private context(row: Row, inv: Inventory) {
-    const box = el('div', '', 'rule-status-context');
-    const p = inv.processPolicy;
-    if (row.kind === 'socket' && row.socket) {
-      const d = initiationPresentation(row.socket);
-      const line = el('p', '', 'rule-connection-line');
-      const g = el('span', d.glyph, 'connection-direction ' + d.className);
-      g.setAttribute('aria-hidden', 'true');
-      line.append(
-        g,
-        document.createTextNode(
-          `This connection · ${d.label} · ${row.socket.socket.protocol.toUpperCase()}${row.socket.owners.length === 1 ? '' : ' · shared holder'}`,
-        ),
-      );
-      line.title = d.title;
-      box.append(line);
-    }
-    if (p)
-      box.append(
-        el(
-          'p',
-          p.state === 'inactive'
-            ? `PID ${p.target.pid} · process ended — its rules are inactive and never move to another process`
-            : `PID ${p.target.pid} · live instance · process rules last until it exits`,
-          'activity-policy-note' + (p.state === 'inactive' ? ' inactive-target' : ''),
-        ),
-      );
-    return box;
   }
   private tierSummary(inv: Inventory, tier: Tier, d: Direction): DirectionPolicy | undefined {
     if (tier === 'process') return inv.processPolicy?.[d];
@@ -297,266 +280,188 @@ export class ActivityPolicy {
       ? inv.processPolicy[d === 'incoming' ? 'application_incoming' : 'application_outgoing']
       : inv.app?.[d];
   }
-  private matrix(row: Row, inv: Inventory) {
+  private tiers(row: Row): Tier[] {
     const c = this.state!.control;
+    return c.capabilities?.includes(PROCESS_CAPABILITY) &&
+      (row.kind === 'process' || (row.kind === 'socket' && row.socket?.owners.length === 1))
+      ? ['process', 'application']
+      : ['application'];
+  }
+  // Type × In/Out matrix in the Info View. Only Blocker is a FlowGate feature;
+  // Limit, Priority and Quota rows are shown as explicitly unavailable, never as controls.
+  private matrix(row: Row, inv: Inventory) {
     const table = el('table', '', 'info-rule-matrix');
-    table.setAttribute('aria-label', 'Rule status by target and initiation direction');
+    table.setAttribute('aria-label', 'Rules by type and initiation direction');
     const connection =
       row.kind === 'socket' && row.socket ? initiationPresentation(row.socket).direction : '';
     const head = el('tr');
-    head.append(el('th', 'Target'));
+    head.append(el('th', 'Type'));
     for (const d of directions) {
-      const th = el('th', d === 'incoming' ? 'In' : 'Out');
-      th.title = `${d === 'incoming' ? 'Incoming' : 'Outgoing'}: who initiated the connection, not upload/download.`;
+      const th = el('th', short(d));
+      th.title = `${short(d) === 'In' ? 'Incoming' : 'Outgoing'}: who initiated the connection, not upload/download.`;
       if (connection === d) th.classList.add('connection-column');
       head.append(th);
     }
     table.append(head);
-    const tiers: Tier[] =
-      c.capabilities?.includes(PROCESS_CAPABILITY) &&
-      (row.kind === 'process' || (row.kind === 'socket' && row.socket?.owners.length === 1))
-        ? ['process', 'application']
-        : ['application'];
+    const tiers = this.tiers(row);
     for (const tier of tiers) {
-      const tr = el('tr', '', 'tier-' + tier);
-      const label = el(
-        'th',
-        tier === 'process'
-          ? 'This process'
-          : row.kind === 'application'
-            ? 'Application'
-            : tiers.length > 1
-              ? 'App fallback'
-              : 'Application',
+      const tr = el(
+        'tr',
+        '',
+        'tier-' + tier + (tier === 'application' && tiers.length > 1 ? ' fallback-tier' : ''),
       );
+      const label = el('th', tier === 'process' || tiers.length === 1 ? 'Blocker' : '↳ App');
       label.scope = 'row';
       label.title =
         tier === 'process'
-          ? 'Rules bound to this one backend-verified process instance. They are checked before application rules.'
-          : 'Rules for this executable revision and user, covering all its processes. Used when no process rule matches.';
+          ? 'Blocker rule bound to this one backend-verified process instance; checked before application rules.'
+          : tiers.length > 1
+            ? 'Application fallback: Blocker rules for this executable revision and user, used when no process rule matches.'
+            : 'Blocker rules for this executable revision and user, covering all its processes.';
       tr.append(label);
       for (const d of directions) {
         const summary =
           inv.available || tier === 'process' ? this.tierSummary(inv, tier, d) : undefined;
-        const chip =
-          !summary && tier === 'application' && inv.available && !inv.authoritative
-            ? undefined
-            : ruleChip(summary, tier === 'process' && inv.processPolicy?.state === 'inactive');
         const td = el('td');
         const b = button('', `cell:${tier}:${d}`, 'rule-cell');
-        if (chip) {
-          b.append(renderChip(chip));
-          b.classList.add('tone-' + chip.tone);
-          b.title = `${short(d)} · ${label.textContent}\n${chip.detail}${summary ? '\n' + summary.reason : ''}`;
-        } else {
-          const count = inv.fallback[d].length;
-          b.textContent = count ? `${count} listed` : 'Not set';
+        if (!inv.authoritative && inv.available && tier === 'application') {
+          const n = inv.fallback[d].length;
+          b.append(blockerGlyph({ glyph: '', text: '', tone: n ? 'mixed' : 'none', detail: '' }));
+          b.append(el('span', n ? `${n} listed` : 'Not set', 'cell-text'));
           b.title = 'Compatibility inventory; no backend summary.';
+        } else {
+          const chip = ruleChip(
+            summary,
+            tier === 'process' && inv.processPolicy?.state === 'inactive',
+          );
+          const [word, ...rest] = chip.text.split(' · ');
+          b.append(blockerGlyph(chip), el('span', word, 'cell-text'));
+          if (rest.length && !['all', 'ended'].includes(rest.join('')))
+            b.append(el('small', rest.join(' · '), 'cell-qualifier'));
+          b.classList.add('tone-' + chip.tone);
+          b.title = `${short(d)} Blocker · ${tier === 'process' ? 'this process' : 'application'}\n${chip.detail}${summary ? '\n' + summary.reason : ''}`;
         }
-        const open = this.setter?.direction === d && this.setter.tier === tier;
+        const open = this.popup?.direction === d && this.popup.tier === tier;
         b.setAttribute('aria-expanded', String(open));
+        b.setAttribute('aria-haspopup', 'dialog');
         if (open) b.classList.add('open');
         b.setAttribute(
           'aria-label',
-          `${label.textContent} ${d}: ${b.textContent}. Open quick setter.`,
+          `${label.textContent} ${short(d)}: ${b.textContent}. Open quick setter.`,
         );
-        b.disabled = !inv.available && tier === 'application';
-        b.onclick = () => (open ? this.close() : this.activate(d, tier));
-        if (tier === 'process') b.classList.add('sidebar-process-policy');
-        else b.classList.add('sidebar-policy');
+        // Never disabled: a transient association gap must not steal keyboard focus.
+        b.onclick = () => (open ? this.close(true) : this.activate(d, tier));
+        b.classList.add(tier === 'process' ? 'sidebar-process-policy' : 'sidebar-policy');
         b.dataset.direction = d;
         td.append(b);
         tr.append(td);
       }
       table.append(tr);
     }
+    for (const [name, glyph] of [
+      ['Limit', '□'],
+      ['Priority', '⊖'],
+      ['Quota', '⬡'],
+    ]) {
+      const tr = el('tr', '', 'unsupported-family');
+      const label = el('th', name);
+      label.scope = 'row';
+      tr.append(label);
+      for (const d of directions) {
+        const td = el('td');
+        const cell = el('span', '', 'rule-cell static');
+        cell.append(el('span', glyph, 'blocker-glyph tone-none'), el('span', 'n/a', 'cell-text'));
+        cell.title = `${name} rules are not a FlowGate feature (no traffic shaping backend). Shown only to mirror the reference layout.`;
+        cell.setAttribute('aria-label', `${name} ${short(d)}: not available in FlowGate`);
+        td.append(cell);
+        tr.append(td);
+      }
+      table.append(tr);
+    }
     return table;
   }
-  private close() {
-    if (this.pending && this.pending.phase !== 'error') return;
-    this.pending = undefined;
-    this.setter = undefined;
-    this.refresh();
-  }
-  private applicable(inv: Inventory, d: Direction, tier: Tier) {
-    return inv.rules.filter(
-      (r) => r.scope.direction === d && (tier === 'process') === !!r.scope.process,
-    );
-  }
-  private blockReason(inv: Inventory, tier: Tier): string {
+  private underMatrix(row: Row, inv: Inventory, detailsOpen: boolean) {
     const c = this.state!.control;
-    if (!canManageRules(c)) return 'Read-only: this connection cannot change rules.';
-    if (!inv.available) return inv.reason;
-    if (tier === 'process' && (!inv.processPolicy || inv.processPolicy.state !== 'active'))
-      return (
-        inv.processPolicy?.reason ||
-        'This process identity is unsupported or unavailable; no application-wide substitute is made.'
+    const wrap = el('div', '', 'under-matrix');
+    const links = el('div', '', 'rule-links');
+    const add = button('Add rule', 'add-rule', 'link-button');
+    add.title =
+      'Open the full rule editor for this target (address, port, protocol and expiry scope).';
+    const tier = this.defaultTier();
+    add.disabled =
+      !canManageRules(c) ||
+      !inv.candidate ||
+      !c.capabilities?.includes('observed-rule-create-v1') ||
+      (tier === 'process' && inv.processPolicy?.state !== 'active');
+    add.onclick = () => {
+      const source = this.newSource('incoming', tier, inv);
+      if (source) void openRule(source, { activity: true });
+    };
+    links.append(add);
+    wrap.append(links);
+    const p = inv.processPolicy;
+    const notes: string[] = [];
+    if (!c.connected) notes.push('Controller disconnected');
+    else if (c.enforcement?.state === 'stopped') notes.push('Stored only · firewall stopped');
+    else if (c.enforcement?.state !== 'active')
+      notes.push(`Firewall ${c.enforcement?.state || 'state unknown'}`);
+    if (p?.state === 'inactive')
+      notes.push(
+        `PID ${p.target.pid} ended — its rules are inactive and never move to another process`,
       );
-    return '';
-  }
-  private quickSetter(inv: Inventory) {
-    const { direction, tier, mode } = this.setter!,
-      row = this.row!;
-    const box = el('section', '', `activity-quick caret-${direction}`);
-    box.tabIndex = -1;
-    box.dataset.focus = 'quick';
-    box.setAttribute('role', 'group');
-    box.setAttribute(
-      'aria-label',
-      `${direction} quick setter · ${tier === 'process' ? 'this process' : 'application'}`,
-    );
-    const heading = el('div', '', 'activity-quick-heading');
-    heading.append(
-      el(
-        'strong',
-        `${short(direction)} · ${tier === 'process' ? `This process${inv.processPolicy ? ' · PID ' + inv.processPolicy.target.pid : ''}` : 'Application · all instances'}`,
-      ),
-    );
-    const close = button('×', 'quick-close', 'quick-close');
-    close.setAttribute('aria-label', 'Close quick setter');
-    close.onclick = () => this.close();
-    heading.append(close);
-    box.append(heading);
-    const reason = this.blockReason(inv, tier);
-    const busy = !!this.pending && this.pending.phase !== 'error';
-    const rules = this.applicable(inv, direction, tier);
-    if (reason) box.append(el('p', reason, 'activity-policy-note'));
-    if (rules.length && mode === 'auto') {
-      box.append(
+    if (!inv.available) notes.push(inv.reason);
+    else if (!inv.complete && inv.authoritative)
+      notes.push('Partial policy batch · some rules may be unavailable');
+    if (!canManageRules(c)) notes.push('Read-only rule access');
+    if (notes.length) {
+      const note = el(
+        'p',
+        notes.join(' · '),
+        'rule-note' + (p?.state === 'inactive' ? ' inactive-target' : ''),
+      );
+      wrap.append(note);
+    }
+    if (inv.rules.length) {
+      const details = el('details', '', 'rule-details');
+      details.open = detailsOpen;
+      details.append(
         el(
-          'p',
-          rules.length === 1
-            ? 'Change the existing rule (its scope and lifetime stay the same):'
-            : `${rules.length} rules apply here. Choose which one to change:`,
-          'quick-hint',
+          'summary',
+          `${inv.rules.length} rule${inv.rules.length === 1 ? '' : 's'} for this target`,
         ),
       );
-      for (const ref of rules) box.append(this.quickRule(ref, !!reason || busy));
-      const addNew = button('New separate rule…', 'quick-new', 'link-button');
-      addNew.disabled = !!reason || busy;
-      addNew.onclick = () => {
-        this.setter = { direction, tier, mode: 'new' };
-        this.refresh();
-        this.host.querySelector<HTMLElement>('[data-focus^="quick-protocol"]')?.focus();
-      };
-      box.append(addNew);
-    } else box.append(this.newRule(inv, direction, tier, !!reason || busy));
-    if (this.pending?.anchor === 'setter' && this.pending.rowId === row.id)
-      box.append(this.review());
-    return box;
-  }
-  private newRule(inv: Inventory, direction: Direction, tier: Tier, blocked: boolean) {
-    const c = this.state!.control,
-      row = this.row!;
-    const wrap = el('div', '', 'quick-new');
-    const key = `${row.id}|${direction}|${tier}`;
-    const values = this.newValues.get(key) || {
-      protocol:
-        (row.kind === 'socket' ? row.socket?.socket.protocol : inv.candidate?.socket.protocol) ===
-        'udp'
-          ? 'udp'
-          : 'tcp',
-      expiry: tier === 'process' ? 'permanent' : 'hour',
-    };
-    this.newValues.set(key, values);
-    const candidate = inv.candidate;
-    const supported = !!c.capabilities?.includes('observed-rule-create-v1');
-    const reason = blocked
-      ? ''
-      : !supported
-        ? 'Backend update required to create rules from Activity.'
-        : !candidate
-          ? 'No live, uniquely owned native socket to verify this target.'
-          : '';
-    if (reason) wrap.append(el('p', reason, 'activity-policy-note'));
-    const proto = el('div', '', 'segmented');
-    proto.setAttribute('role', 'radiogroup');
-    proto.setAttribute('aria-label', 'Quick rule protocol');
-    for (const p of ['tcp', 'udp']) {
-      const b = button(p.toUpperCase(), `quick-protocol:${p}`);
-      b.setAttribute('role', 'radio');
-      b.setAttribute('aria-checked', String(values.protocol === p));
-      b.onclick = () => {
-        values.protocol = p;
-        this.refresh();
-      };
-      proto.append(b);
-    }
-    const line = el('div', '', 'quick-row');
-    line.append(proto);
-    if (tier === 'application') {
-      const expiry = el('select');
-      expiry.dataset.focus = 'quick-expiry';
-      expiry.setAttribute('aria-label', 'Quick rule expiry');
-      expiry.append(new Option('For 1 hour', 'hour'), new Option('Persistent', 'permanent'));
-      expiry.value = values.expiry;
-      expiry.onchange = () => {
-        values.expiry = expiry.value as 'hour' | 'permanent';
-      };
-      line.append(expiry);
-    }
-    wrap.append(line);
-    const actions = el('div', '', 'activity-quick-actions');
-    const protocol = values.protocol.toUpperCase();
-    for (const action of ['allow', 'block'] as const) {
-      const b = button(
-        `${action === 'allow' ? '✓ Allow' : '✕ Block'} ${protocol}`,
-        `quick-${action}`,
-        `quick-${action}`,
+      const busy = !!this.pending && this.pending.phase !== 'error';
+      const groups: [string, PolicyRuleRef[]][] = [
+        [
+          p ? `This process · PID ${p.target.pid}` : 'This process',
+          inv.rules.filter((r) => !!r.scope.process),
+        ],
+        [
+          row.kind === 'application' || !p
+            ? 'Application · all instances'
+            : 'Application fallback · all instances',
+          inv.rules.filter((r) => !r.scope.process),
+        ],
+      ];
+      for (const [name, refs] of groups) {
+        if (!refs.length) continue;
+        details.append(el('h4', name, 'activity-rule-group'));
+        for (const d of directions)
+          for (const ref of refs.filter((r) => r.scope.direction === d))
+            details.append(this.ruleLine(ref, inv, busy));
+      }
+      details.append(
+        el(
+          'p',
+          'Matching process rules take precedence; application rules are the fallback. “Not set” is no explicit rule, not Allow. In/Out means connection initiation.',
+          'rule-note',
+        ),
       );
-      b.disabled = blocked || !!reason;
-      b.title = `Create a new ${action} rule for ${direction} ${protocol}, any remote address and any port. The backend reviews it before you save.`;
-      b.onclick = () => {
-        if (!candidate) return;
-        const source: RuleSource = {
-          observed: {
-            ...(c.capabilities?.includes(PROCESS_CAPABILITY) ? { target_scope: tier } : {}),
-            generation: c.generation,
-            row_id: candidate.id,
-            process_id: candidate.owners[0],
-            direction,
-          } satisfies ObservedSource,
-        };
-        const expiry = tier === 'process' ? 'permanent' : values.expiry;
-        this.review_new(source, 'setter', `New ${action} rule`, {
-          action,
-          protocol: values.protocol,
-          expiry,
-        });
-      };
-      actions.append(b);
+      wrap.append(details);
     }
-    const advanced = button('Advanced…', 'quick-advanced', 'link-button');
-    advanced.disabled = blocked || !!reason;
-    advanced.title = 'Open the full editor for address, port and expiry scope.';
-    advanced.onclick = () => {
-      if (!candidate) return;
-      void openRule(
-        {
-          observed: {
-            ...(c.capabilities?.includes(PROCESS_CAPABILITY) ? { target_scope: tier } : {}),
-            generation: c.generation,
-            row_id: candidate.id,
-            process_id: candidate.owners[0],
-            direction,
-          },
-        },
-        { activity: true },
-      );
-    };
-    actions.append(advanced);
-    wrap.append(
-      actions,
-      el(
-        'p',
-        `New rule · ${protocol} · any address · any port · ${tier === 'process' ? 'until this process exits' : values.expiry === 'hour' ? 'for 1 hour' : 'persistent'}`,
-        'quick-scope-line',
-      ),
-    );
     return wrap;
   }
-  // One rule with its actions beside it. Used in the setter and in the full list.
-  private ruleLine(ref: PolicyRuleRef, inv: Inventory, anchorBase: string, blocked: boolean) {
+  private ruleLine(ref: PolicyRuleRef, inv: Inventory, blocked: boolean) {
     const c = this.state!.control;
     const card = el('section', '', 'activity-rule');
     card.dataset.ruleId = ref.id;
@@ -568,11 +473,7 @@ export class ActivityPolicy {
     const title = el('div', '', 'activity-rule-title');
     title.append(
       el('span', short(ref.scope.direction as Direction), 'rule-direction-chip'),
-      el(
-        'strong',
-        `${ref.action === 'allow' ? '✓ Allow' : '✕ Block'}`,
-        `rule-action-${ref.action}`,
-      ),
+      el('strong', ref.action === 'allow' ? '✓ Allow' : '✕ Block', `rule-action-${ref.action}`),
       el('span', shortScope(ref), 'activity-rule-scope'),
       el('span', state, 'rule-enabled-state state-' + state.toLowerCase()),
     );
@@ -591,161 +492,20 @@ export class ActivityPolicy {
     meta.title = `${scopeLabel(ref)}\n${ref.id} · version ${ref.version} · ${ref.expires}`;
     card.append(meta);
     const rule = this.editable(ref);
-    const anchor = `${anchorBase}:${ref.id}`;
     if (canManageRules(c) && rule) {
       const actions = el('div', '', 'activity-rule-actions');
-      const editBlocked = blocked || ref.expired || inactiveTarget;
-      const other = ref.action === 'allow' ? 'block' : 'allow';
-      const flip = button(
-        other === 'allow' ? 'Set ✓ Allow' : 'Set ✕ Block',
-        `${anchor}:flip`,
-        `quick-${other}`,
-      );
-      flip.disabled = editBlocked;
-      flip.title = ref.expired
-        ? 'Expired rule: use Advanced to review a new expiry.'
-        : 'Change only the action of this rule; scope and lifetime stay the same.';
-      flip.onclick = () =>
-        this.review_edit(ref, anchor, `Change to ${other === 'allow' ? 'Allow' : 'Block'}`, {
-          action: other,
-          disabled: ref.disabled,
-        });
-      const toggle = button(ref.disabled ? 'Enable' : 'Disable', `${anchor}:toggle`);
-      toggle.disabled = editBlocked;
-      toggle.onclick = () =>
-        this.review_edit(ref, anchor, ref.disabled ? 'Enable rule' : 'Disable rule', {
-          action: ref.action === 'allow' ? 'allow' : 'block',
-          disabled: !ref.disabled,
-        });
-      const remove = button('Delete…', `${anchor}:delete`);
+      const advanced = button('Advanced…', `list:${ref.id}:advanced`);
+      advanced.disabled = blocked || inactiveTarget;
+      advanced.onclick = () => void openRule({ id: ref.id }, { activity: true });
+      const remove = button('Delete…', `list:${ref.id}:delete`);
       remove.disabled = blocked || !c.capabilities?.includes('conditional-rule-delete-v1');
       const generation = c.generation;
       remove.onclick = () => confirmRuleDelete(rule, generation);
-      const advanced = button('Advanced…', `${anchor}:advanced`);
-      advanced.disabled = blocked || inactiveTarget;
-      advanced.onclick = () => void openRule({ id: ref.id }, { activity: true });
-      actions.append(flip, toggle, remove, advanced);
+      actions.append(advanced, remove);
       card.append(actions);
-    } else if (canManageRules(c))
-      card.append(
-        el('p', 'Refresh required before editing this exact version.', 'activity-policy-note'),
-      );
-    if (this.pending?.anchor === anchor && this.pending.rowId === this.row?.id)
-      card.append(this.review());
+    }
+    void inv;
     return card;
-  }
-  // Compact pick row inside the setter: the action change sits beside the rule it affects.
-  private quickRule(ref: PolicyRuleRef, blocked: boolean) {
-    const c = this.state!.control;
-    const line = el('div', '', 'quick-rule');
-    line.dataset.ruleId = ref.id;
-    const inactiveTarget =
-      ref.target_state === 'inactive' || c.rule_states?.[ref.id]?.state === 'inactive';
-    const state = inactiveTarget ? 'Inactive' : refState(ref);
-    const title = el('div', '', 'activity-rule-title');
-    title.append(
-      el('strong', ref.action === 'allow' ? '✓ Allow' : '✕ Block', `rule-action-${ref.action}`),
-      el('span', shortScope(ref), 'activity-rule-scope'),
-      el('span', state, 'rule-enabled-state state-' + state.toLowerCase()),
-    );
-    const anchor = `setter:${ref.id}`;
-    const other = ref.action === 'allow' ? 'block' : 'allow';
-    const flip = button(
-      other === 'allow' ? 'Set ✓ Allow' : 'Set ✕ Block',
-      `${anchor}:flip`,
-      `quick-${other}`,
-    );
-    flip.disabled =
-      blocked || ref.expired || inactiveTarget || !canManageRules(c) || !this.editable(ref);
-    flip.title = ref.expired
-      ? 'Expired rule: use Advanced in the list below to review a new expiry.'
-      : 'Change only the action of this rule; scope and lifetime stay the same.';
-    flip.onclick = () =>
-      this.review_edit(ref, anchor, `Change to ${other === 'allow' ? 'Allow' : 'Block'}`, {
-        action: other,
-        disabled: ref.disabled,
-      });
-    title.append(flip);
-    line.append(title);
-    if (this.pending?.anchor === anchor && this.pending.rowId === this.row?.id)
-      line.append(this.review());
-    return line;
-  }
-  private ruleList(row: Row, inv: Inventory) {
-    const list = el('div', '', 'activity-rule-list');
-    list.setAttribute('aria-label', 'Relevant configured firewall rules');
-    if (!inv.rules.length) {
-      list.append(
-        el(
-          'p',
-          'No explicit rules for this target. Click an In or Out cell above to set one.',
-          'activity-policy-note',
-        ),
-      );
-      return list;
-    }
-    const busy = !!this.pending && this.pending.phase !== 'error';
-    const groups: [string, string, PolicyRuleRef[]][] = [
-      [
-        inv.processPolicy ? `This process · PID ${inv.processPolicy.target.pid}` : 'This process',
-        'Checked first: matching rules for this exact process instance take precedence over application rules.',
-        inv.rules.filter((r) => !!r.scope.process),
-      ],
-      [
-        row.kind === 'application' || !inv.processPolicy
-          ? 'Application · all instances'
-          : 'Application fallback · all instances',
-        'Used when no enabled process rule matches. Covers every process of this executable revision and user.',
-        inv.rules.filter((r) => !r.scope.process),
-      ],
-    ];
-    for (const [name, help, refs] of groups) {
-      if (!refs.length) continue;
-      const h = el('h4', `${name} · ${refs.length}`, 'activity-rule-group');
-      h.title = help;
-      list.append(h);
-      for (const d of directions)
-        for (const ref of refs.filter((r) => r.scope.direction === d))
-          list.append(this.ruleLine(ref, inv, 'list', busy || !!this.blockReasonFor(ref, inv)));
-    }
-    return list;
-  }
-  private blockReasonFor(ref: PolicyRuleRef, inv: Inventory) {
-    return ref.scope.process
-      ? canManageRules(this.state!.control)
-        ? ''
-        : 'read-only'
-      : this.blockReason(inv, 'application');
-  }
-  private details(inv: Inventory) {
-    const details = el('details', '', 'activity-policy-details');
-    details.append(el('summary', 'Precedence, defaults and enforcement'));
-    if (inv.processPolicy)
-      details.append(
-        el(
-          'p',
-          'Matching process rules take precedence; application rules are the fallback when no active process rule matches. Evaluation happens in the backend.',
-        ),
-        el('p', inv.processPolicy.reason),
-      );
-    for (const d of directions) {
-      const s = this.tierSummary(inv, 'application', d);
-      if (s)
-        details.append(
-          el('p', `${d}: ${s.reason} ${s.enforcement.reason}`),
-          el(
-            'p',
-            `Configured default: ${s.configured_default.known ? s.configured_default.action : 'unknown'}. ${s.configured_default.reason}`,
-          ),
-        );
-    }
-    details.append(
-      el(
-        'p',
-        '“Not set” means no explicit rule; it is not Allow. Incoming/outgoing means connection initiation, not upload/download. Editing rules may not disconnect already-approved TCP sessions.',
-      ),
-    );
-    return details;
   }
   private editable(ref: PolicyRuleRef): Rule | undefined {
     return this.state?.control.rules?.find(
@@ -753,13 +513,288 @@ export class ActivityPolicy {
         r.id === ref.id && Number.isSafeInteger(r.version) && String(r.version) === ref.version,
     );
   }
-  // ---- inline backend review -------------------------------------------------------------
-  private begin(anchor: string, title: string): Pending {
+  private applicable(inv: Inventory, d: Direction, tier: Tier) {
+    return inv.rules.filter(
+      (r) => r.scope.direction === d && (tier === 'process') === !!r.scope.process,
+    );
+  }
+  private blockReason(inv: Inventory, tier: Tier): string {
+    const c = this.state!.control;
+    if (!canManageRules(c)) return 'Read-only: this connection cannot change rules.';
+    if (!inv.available) return inv.reason;
+    if (tier === 'process' && (!inv.processPolicy || inv.processPolicy.state !== 'active'))
+      return (
+        inv.processPolicy?.reason ||
+        'This process identity is unsupported or unavailable; no application-wide substitute is made.'
+      );
+    return '';
+  }
+  private newSource(direction: Direction, tier: Tier, inv: Inventory): RuleSource | undefined {
+    const c = this.state!.control,
+      candidate = inv.candidate;
+    if (!candidate) return;
+    return {
+      observed: {
+        ...(c.capabilities?.includes(PROCESS_CAPABILITY) ? { target_scope: tier } : {}),
+        generation: c.generation,
+        row_id: candidate.id,
+        process_id: candidate.owners[0],
+        direction,
+      } satisfies ObservedSource,
+    };
+  }
+  // ---- floating quick setter ------------------------------------------------------------
+  private popupBox(inv: Inventory) {
+    const pop = this.popup!,
+      c = this.state!.control,
+      { direction, tier } = pop;
+    const box = el('div', '', 'quick-popup');
+    box.tabIndex = -1;
+    box.dataset.focus = 'quick';
+    box.setAttribute('role', 'dialog');
+    box.setAttribute(
+      'aria-label',
+      `${short(direction)} Blocker quick setter · ${tier === 'process' ? 'this process' : 'application'}`,
+    );
+    const reason = this.blockReason(inv, tier);
+    const busy = !!this.pending && this.pending.phase !== 'error';
+    const rules = this.applicable(inv, direction, tier);
+    const target =
+      tier === 'process'
+        ? `This process${inv.processPolicy ? ' · PID ' + inv.processPolicy.target.pid : ''}`
+        : 'Application · all instances';
+    if (rules.length && pop.mode === 'auto') {
+      if (rules.length > 1)
+        box.append(
+          el(
+            'p',
+            `${rules.length} ${short(direction)} rules apply to ${target.toLowerCase()}. Change one:`,
+            'qs-scope',
+          ),
+        );
+      else
+        box.append(
+          el('p', `${short(direction)} · ${target} · ${shortScope(rules[0])}`, 'qs-scope'),
+        );
+      for (const ref of rules) box.append(this.actionRow(ref, inv, !!reason || busy));
+      const links = el('div', '', 'qs-links');
+      if (rules.length === 1) {
+        const only = rules[0],
+          rule = this.editable(only);
+        const advanced = button('Advanced', 'qs-advanced', 'link-button');
+        advanced.disabled = !!reason || busy || only.target_state === 'inactive';
+        advanced.onclick = () => void openRule({ id: only.id }, { activity: true });
+        // Delete stays available for an inactive (exited) target; only edits are blocked.
+        const remove = button('Delete', 'qs-delete', 'link-button');
+        remove.disabled =
+          !canManageRules(c) ||
+          busy ||
+          !rule ||
+          !c.capabilities?.includes('conditional-rule-delete-v1');
+        const generation = c.generation;
+        remove.onclick = () => {
+          if (rule) confirmRuleDelete(rule, generation);
+        };
+        links.append(advanced, remove);
+      }
+      const addNew = button('New rule…', 'qs-new', 'link-button');
+      addNew.disabled = !!reason || busy;
+      addNew.onclick = () => {
+        pop.mode = 'new';
+        this.refresh();
+        this.host.querySelector<HTMLElement>('.quick-popup')?.focus();
+      };
+      links.append(addNew);
+      box.append(links);
+    } else {
+      const supported = !!c.capabilities?.includes('observed-rule-create-v1');
+      const blocked =
+        reason ||
+        (!supported ? 'Backend update required to create rules from Activity.' : '') ||
+        (!inv.candidate ? 'No live, uniquely owned native socket to verify this target.' : '');
+      const lifetime =
+        tier === 'process'
+          ? 'until this process exits'
+          : pop.lifetime === 'hour'
+            ? 'for 1 hour'
+            : 'persistent';
+      box.append(
+        el(
+          'p',
+          `${short(direction)} · ${target} · ${protocolText(pop.protocol)} · any address · any port · ${lifetime}${pop.enabled ? '' : ' · stored disabled'}`,
+          'qs-scope',
+        ),
+      );
+      box.append(this.actionRow(undefined, inv, !!blocked || busy));
+      const links = el('div', '', 'qs-links');
+      const advanced = button('Advanced', 'qs-advanced', 'link-button');
+      advanced.disabled = !!blocked || busy;
+      advanced.title = 'Open the full editor for address, port and expiry scope.';
+      advanced.onclick = () => {
+        const source = this.newSource(direction, tier, inv);
+        if (source)
+          void openRule(source, {
+            activity: true,
+            protocol: pop.protocol === '*' ? undefined : pop.protocol,
+          });
+      };
+      links.append(advanced);
+      if (!this.anyProtocol()) {
+        const seg = el('span', '', 'segmented small');
+        seg.setAttribute('role', 'radiogroup');
+        seg.setAttribute('aria-label', 'Protocol for the new rule');
+        seg.title =
+          'This daemon stores one protocol per rule; choose which one this click creates.';
+        for (const p of ['tcp', 'udp'] as const) {
+          const b = button(p.toUpperCase(), `qs-protocol:${p}`);
+          b.setAttribute('role', 'radio');
+          b.setAttribute('aria-checked', String(pop.protocol === p));
+          b.disabled = busy;
+          b.onclick = () => {
+            pop.protocol = p;
+            this.refresh();
+          };
+          seg.append(b);
+        }
+        links.append(seg);
+      }
+      if (tier === 'application') {
+        const life = button(
+          pop.lifetime === 'hour' ? '1 hour' : 'Persistent',
+          'qs-lifetime',
+          'link-button',
+        );
+        life.title = 'Lifetime of the new rule. Click to switch between persistent and one hour.';
+        life.disabled = busy;
+        life.onclick = () => {
+          pop.lifetime = pop.lifetime === 'hour' ? 'persistent' : 'hour';
+          this.refresh();
+        };
+        links.append(life);
+      }
+      box.append(links);
+      if (blocked) box.append(el('p', blocked, 'rule-note'));
+    }
+    if (this.pending && this.pending.rowId === this.row?.id) box.append(this.reviewBox());
+    return box;
+  }
+  // [enabled] [✓ Allow] [✕ Block] — for an existing rule the current action is highlighted and a
+  // click changes only that; for a new rule a click creates exactly the scope shown above.
+  private actionRow(ref: PolicyRuleRef | undefined, inv: Inventory, blocked: boolean) {
+    const c = this.state!.control;
+    const row = el('div', '', 'qs-row');
+    const inactiveTarget =
+      !!ref && (ref.target_state === 'inactive' || c.rule_states?.[ref.id]?.state === 'inactive');
+    const editable = !ref || !!this.editable(ref);
+    const disabled = blocked || (!!ref && (ref.expired || inactiveTarget || !editable));
+    const key = ref ? `qs:${ref.id}` : 'qs:new';
+    const enabled = el('input');
+    enabled.type = 'checkbox';
+    enabled.dataset.focus = `${key}:enabled`;
+    enabled.checked = ref ? !ref.disabled : this.popup!.enabled;
+    enabled.disabled = disabled;
+    enabled.title = ref
+      ? ref.disabled
+        ? 'Enable this rule'
+        : 'Disable this rule (kept, not deleted)'
+      : 'Create the rule enabled (unchecked: stored disabled).';
+    enabled.setAttribute('aria-label', ref ? 'Rule enabled' : 'New rule enabled');
+    enabled.onchange = () => {
+      if (!ref) {
+        this.popup!.enabled = enabled.checked;
+        return;
+      }
+      this.review_edit(ref, enabled.checked ? 'Enable rule' : 'Disable rule', {
+        action: ref.action === 'allow' ? 'allow' : 'block',
+        disabled: !enabled.checked,
+      });
+    };
+    row.append(enabled);
+    for (const action of ['allow', 'block'] as const) {
+      const b = button(
+        action === 'allow' ? 'Allow' : 'Block',
+        `${key}:${action}`,
+        `qs-action qs-${action}`,
+      );
+      b.prepend(el('span', action === 'allow' ? '✓' : '✕', 'blocker-glyph tone-' + action));
+      const current = ref?.action === action;
+      if (current) b.classList.add('current');
+      b.setAttribute('aria-pressed', String(current));
+      b.disabled = disabled || current;
+      b.title = ref
+        ? current
+          ? `Current action: ${action}.`
+          : `Change this rule to ${action}; scope and lifetime stay the same.`
+        : `Create the ${action} rule shown above. The backend verifies the target before storing it.`;
+      b.onclick = () => {
+        if (ref)
+          this.review_edit(ref, `Change to ${action === 'allow' ? 'Allow' : 'Block'}`, {
+            action,
+            disabled: ref.disabled,
+          });
+        else this.review_new(inv, action);
+      };
+      row.append(b);
+    }
+    if (ref) {
+      const several =
+        this.applicable(
+          inv,
+          ref.scope.direction as Direction,
+          ref.scope.process ? 'process' : 'application',
+        ).length > 1;
+      const scope = el('span', several ? shortScope(ref) : '', 'qs-rule-scope');
+      scope.hidden = !several;
+      scope.title = scopeLabel(ref);
+      row.append(scope);
+      const rule = this.editable(ref);
+      const links = el('span', '', 'qs-row-links');
+      links.hidden = !several;
+      const advanced = button('Advanced', `${key}:advanced`, 'link-button');
+      advanced.disabled = blocked || inactiveTarget;
+      advanced.onclick = () => void openRule({ id: ref.id }, { activity: true });
+      const remove = button('Delete', `${key}:delete`, 'link-button');
+      remove.disabled =
+        !canManageRules(c) || !rule || !c.capabilities?.includes('conditional-rule-delete-v1');
+      const generation = c.generation;
+      remove.onclick = () => {
+        if (rule) confirmRuleDelete(rule, generation);
+      };
+      links.append(advanced, remove);
+      row.append(links);
+    }
+    return row;
+  }
+  private place() {
+    const pop = this.host.querySelector<HTMLElement>('.quick-popup');
+    if (!pop || !this.popup) return;
+    const anchor = this.host.querySelector<HTMLElement>(
+      `[data-focus="cell:${this.popup.tier}:${this.popup.direction}"]`,
+    );
+    const h = this.host.getBoundingClientRect();
+    if (!anchor) return;
+    const a = anchor.getBoundingClientRect();
+    const width = Math.min(pop.offsetWidth || 240, h.width - 4);
+    let left = a.left - h.left - 1;
+    if (left + width > h.width - 2) left = Math.max(2, h.width - width - 2);
+    pop.style.left = `${Math.round(left)}px`;
+    pop.style.top = `${Math.round(a.bottom - h.top + 7)}px`;
+    pop.style.setProperty('--caret-x', `${Math.round(a.left - h.left - left + 12)}px`);
+    // Keep the whole popup inside the scrollable Info View (narrow windows).
+    const scroller = this.host.closest<HTMLElement>('.info-scroll');
+    if (scroller) {
+      const r = pop.getBoundingClientRect(),
+        sr = scroller.getBoundingClientRect();
+      if (r.bottom > sr.bottom)
+        scroller.scrollTop += Math.min(r.bottom - sr.bottom + 6, r.top - sr.top);
+    }
+  }
+  // ---- backend review: preview, compare with the shown scope, then save the identical draft ----
+  private begin(title: string): Pending {
     const p: Pending = {
       seq: ++this.seq,
       rowId: this.row!.id,
       rowLabel: this.row!.label,
-      anchor,
       title,
       phase: 'previewing',
     };
@@ -770,38 +805,46 @@ export class ActivityPolicy {
   private current(p: Pending) {
     return this.pending?.seq === p.seq;
   }
-  private review_new(
-    source: RuleSource,
-    anchor: string,
-    title: string,
-    o: { action: 'allow' | 'block'; protocol: string; expiry: 'hour' | 'permanent' },
-  ) {
+  private review_new(inv: Inventory, action: 'allow' | 'block') {
+    const pop = this.popup!;
+    const { direction, tier, protocol, lifetime, enabled } = pop;
+    const source = this.newSource(direction, tier, inv);
+    if (!source) return;
+    const expiry: 'hour' | 'permanent' =
+      tier === 'process' ? 'permanent' : lifetime === 'hour' ? 'hour' : 'permanent';
     const run = async () => {
-      const p = this.begin(anchor, title);
-      p.advanced = () =>
-        void openRule(source, {
-          activity: true,
-          quick: true,
-          action: o.action,
-          protocol: o.protocol,
-          expiry: o.expiry,
-          applicationScope: true,
-        });
+      const p = this.begin(`New ${action} rule`);
       try {
         const draft = await window.flowgate.ruleDraft(source);
         if (!this.current(p)) return;
-        await this.preview(p, {
-          token: draft.token,
-          action: o.action,
-          protocol: o.protocol,
-          remote_address: '*',
-          local_port: 0,
-          remote_port: 0,
-          priority: 100,
-          disabled: false,
-          expiry: o.expiry,
-          creation_scope: 'application',
-        });
+        await this.preview(
+          p,
+          {
+            token: draft.token,
+            action,
+            protocol,
+            remote_address: '*',
+            local_port: 0,
+            remote_port: 0,
+            priority: 100,
+            disabled: !enabled,
+            expiry,
+            creation_scope: 'application',
+          },
+          (rule) =>
+            rule.action === action &&
+            rule.filter.direction === direction &&
+            rule.filter.protocol === protocol &&
+            (rule.filter.remote_address || '*') === '*' &&
+            !rule.filter.remote &&
+            !rule.filter.local_port &&
+            !rule.filter.remote_port &&
+            rule.disabled === !enabled &&
+            !!rule.filter.process === (tier === 'process') &&
+            (expiry === 'permanent'
+              ? rule.expires.startsWith('0001-')
+              : Math.abs(Date.parse(rule.expires) - (Date.now() + this.skew + 3600000)) < 120000),
+        );
       } catch (e) {
         this.fail(p, e);
       }
@@ -811,31 +854,37 @@ export class ActivityPolicy {
   }
   private review_edit(
     ref: PolicyRuleRef,
-    anchor: string,
     title: string,
     o: { action: 'allow' | 'block'; disabled: boolean },
   ) {
-    const options: EditorOptions = { activity: true, quick: true, ...o };
     const run = async () => {
-      const p = this.begin(anchor, title);
-      p.advanced = () => void openRule({ id: ref.id }, options);
+      const p = this.begin(title);
       try {
         const draft = await window.flowgate.ruleDraft({ id: ref.id });
         if (!this.current(p)) return;
         const r = draft.rule;
         if (String(r.version) !== ref.version || r.id !== ref.id)
           throw Error('This rule changed since it was listed; review the current version.');
-        await this.preview(p, {
-          token: draft.token,
-          action: o.action,
-          protocol: r.filter.protocol,
-          remote_address: r.filter.remote_address || '*',
-          local_port: r.filter.local_port || 0,
-          remote_port: r.filter.remote_port || 0,
-          priority: r.priority,
-          disabled: o.disabled,
-          expiry: 'preserve',
-        });
+        await this.preview(
+          p,
+          {
+            token: draft.token,
+            action: o.action,
+            protocol: r.filter.protocol,
+            remote_address: r.filter.remote_address || '*',
+            local_port: r.filter.local_port || 0,
+            remote_port: r.filter.remote_port || 0,
+            priority: r.priority,
+            disabled: o.disabled,
+            expiry: 'preserve',
+          },
+          (rule) =>
+            rule.id === ref.id &&
+            rule.action === o.action &&
+            rule.disabled === o.disabled &&
+            rule.expires === r.expires &&
+            JSON.stringify(rule.filter) === JSON.stringify(r.filter),
+        );
       } catch (e) {
         this.fail(p, e);
       }
@@ -843,24 +892,23 @@ export class ActivityPolicy {
     };
     void run();
   }
-  private async preview(p: Pending, edit: RuleEdit) {
+  private async preview(p: Pending, edit: RuleEdit, matches: (rule: Rule) => boolean) {
     const r = await window.flowgate.rulePreview(edit);
     if (!this.current(p)) return;
     const rule = r.verifiedRule;
     p.receipt = r.receipt;
     p.scope = rule ? reviewedScope(rule) : r.preview;
-    p.lifetime = rule
-      ? rule.expires.startsWith('0001-')
-        ? rule.filter.process
-          ? 'Lifetime: until this process exits (this daemon session).'
-          : 'Lifetime: persistent, no expiry.'
-        : `Lifetime: expires ${new Date(rule.expires).toLocaleString()}.`
-      : '';
-    p.enforcement = /Enforcement: ([^\n]*)/.exec(r.preview)?.[1] || '';
     p.expiresAt = r.expiresAt ? Date.parse(r.expiresAt) : undefined;
-    p.phase = 'review';
+    if (rule && matches(rule) && (!p.expiresAt || p.expiresAt > Date.now() + this.skew + 2000)) {
+      await this.save(p);
+      return;
+    }
+    // Verified scope differs from what was shown (or the token is nearly expired): explicit review.
+    p.phase = 'confirm';
+    p.message = rule
+      ? 'The backend verified a different scope than shown. Save only if this is what you want.'
+      : 'Review the backend preview before saving.';
     this.refresh();
-    // Save stays a deliberate Tab/click; never pre-focus the acknowledgement.
     this.host.querySelector<HTMLElement>('.inline-review')?.focus({ preventScroll: true });
   }
   private fail(p: Pending, e: unknown) {
@@ -869,20 +917,18 @@ export class ActivityPolicy {
     p.receipt = undefined;
     const text = String(e).replace(/^Error: /, '');
     p.message = /stale_target|unsupported|target_inactive|immutable_target|changed/.test(text)
-      ? `${text} Nothing was saved; select the target again to review.`
+      ? `${text} Nothing was saved; select the target again to retry.`
       : `${text} Nothing was saved.`;
     this.refresh();
   }
   private discard() {
     if (!this.pending || ['saving', 'previewing'].includes(this.pending.phase)) return;
-    const anchor = this.pending.anchor;
     this.pending = undefined;
     this.refresh();
-    this.host.querySelector<HTMLElement>(`[data-focus^="${CSS.escape(anchor)}"]`)?.focus();
+    this.host.querySelector<HTMLElement>('.quick-popup')?.focus();
   }
-  private async save() {
-    const p = this.pending;
-    if (!p || p.phase !== 'review' || !p.receipt) return;
+  private async save(p: Pending) {
+    if (!p.receipt) return;
     const receipt = p.receipt;
     p.receipt = undefined;
     p.phase = 'saving';
@@ -912,12 +958,17 @@ export class ActivityPolicy {
   private settle(p: Pending, result: Attempt) {
     if (!this.current(p)) return;
     if (result.phase === 'acknowledged') {
+      const pop = this.popup;
       this.pending = undefined;
-      this.setter = undefined;
+      this.popup = undefined;
       this.saved = result.rule?.id || '';
       const feedback = document.getElementById('feedback');
       if (feedback) feedback.textContent = result.message;
       this.refresh();
+      if (pop)
+        this.host
+          .querySelector<HTMLElement>(`[data-focus="cell:${pop.tier}:${pop.direction}"]`)
+          ?.focus({ preventScroll: true });
       return;
     }
     if (result.phase === 'unknown') {
@@ -930,65 +981,53 @@ export class ActivityPolicy {
     }
     this.refresh();
   }
-  private review(label = '') {
+  private reviewBox(label = '') {
     const p = this.pending!;
     const box = el('div', '', 'inline-review phase-' + p.phase);
     box.tabIndex = -1;
     box.dataset.focus = 'review';
     box.setAttribute('role', 'group');
-    box.setAttribute('aria-label', 'Rule change review');
+    box.setAttribute('aria-label', 'Rule change status');
     const head = el('div', '', 'inline-review-head');
     head.append(
       el(
         'span',
         p.phase === 'saving'
           ? 'Saving…'
-          : p.phase === 'unknown'
-            ? 'Save result unknown'
-            : p.phase === 'error'
-              ? 'Not saved'
-              : 'Draft · not saved',
+          : p.phase === 'previewing'
+            ? 'Verifying…'
+            : p.phase === 'unknown'
+              ? 'Save result unknown'
+              : p.phase === 'error'
+                ? 'Not saved'
+                : 'Not saved yet',
         'draft-badge',
       ),
       el('strong', label || p.title),
     );
     box.append(head);
-    if (p.phase === 'previewing')
-      box.append(el('p', 'Asking the backend to verify this exact target and scope…'));
-    if (p.scope) box.append(el('p', p.scope, 'inline-review-scope'));
-    if (p.lifetime) box.append(el('p', p.lifetime, 'inline-review-meta'));
-    if (p.enforcement && p.phase === 'review')
-      box.append(el('p', 'Enforcement: ' + p.enforcement, 'inline-review-meta'));
-    if (p.message) box.append(el('p', p.message, 'activity-policy-note'));
+    if (p.scope && p.phase !== 'saving') box.append(el('p', p.scope, 'inline-review-scope'));
+    if (p.message) box.append(el('p', p.message, 'rule-note'));
     const actions = el('div', '', 'inline-review-actions');
-    if (p.phase === 'review') {
+    if (p.phase === 'confirm') {
       const save = button('Save', 'review-save', 'primary');
       save.disabled = !canManageRules(this.state!.control);
-      save.onclick = () => void this.save();
+      save.onclick = () => void this.save(p);
       const timer = el('span', '', 'review-timer');
       timer.setAttribute('role', 'timer');
       actions.append(save, this.discardButton(), timer);
-    } else if (p.phase === 'expired') {
-      box.append(el('p', 'Review expired — nothing was saved.', 'activity-policy-note'));
-      const again = button('Review again', 'review-again', 'primary');
-      again.onclick = () => p.retry?.();
-      actions.append(again, this.discardButton());
     } else if (p.phase === 'unknown') {
       const check = button('Check save result', 'review-reconcile', 'primary');
       check.disabled = !p.reconcile;
       check.onclick = () => void this.reconcile();
       actions.append(check);
-    } else if (p.phase === 'error') actions.append(this.discardButton('Dismiss'));
-    if (['review', 'expired', 'error'].includes(p.phase) && p.advanced) {
-      const advanced = button('Advanced…', 'review-advanced', 'link-button');
-      advanced.title = 'Discard this inline draft and open the full editor with the same choice.';
-      advanced.onclick = () => {
-        const open = p.advanced!;
-        this.pending = undefined;
-        this.refresh();
-        open();
-      };
-      actions.append(advanced);
+    } else if (p.phase === 'error') {
+      actions.append(this.discardButton('Dismiss'));
+      if (p.retry) {
+        const again = button('Try again', 'review-again');
+        again.onclick = () => p.retry?.();
+        actions.append(again);
+      }
     }
     box.append(actions);
     return box;
@@ -1000,20 +1039,21 @@ export class ActivityPolicy {
   }
   private tick() {
     const p = this.pending;
-    if (!p || p.phase !== 'review' || !p.expiresAt) {
+    if (!p || p.phase !== 'confirm' || !p.expiresAt) {
       if (this.timer) clearInterval(this.timer);
       this.timer = undefined;
       return;
     }
     const paint = () => {
-      if (this.pending !== p || p.phase !== 'review') return;
+      if (this.pending !== p || p.phase !== 'confirm') return;
       const s = previewSeconds(p.expiresAt!, Date.now() + this.skew);
       const t = this.host.querySelector('.review-timer');
       if (t) t.textContent = `Review valid ${s} s`;
       if (s <= 0) {
-        // Never refresh the token silently; the user must explicitly review again.
-        p.phase = 'expired';
+        // Never refresh the token silently; the user must explicitly try again.
+        p.phase = 'error';
         p.receipt = undefined;
+        p.message = 'Review expired — nothing was saved.';
         this.refresh();
       }
     };

@@ -143,12 +143,19 @@ try {
   const page = await app.firstWindow();
   await page.setViewportSize({ width: 1280, height: 896 });
   await wait(async () =>
-    (await page.locator('#rows tr[data-id^="app:"] .policy-cell').first().innerText()).includes(
-      'Mixed',
-    ),
+    (
+      await page
+        .locator('#rows tr[data-id^="app:"] .status-slot[data-direction=incoming]')
+        .first()
+        .getAttribute('aria-label')
+    ).includes('Mixed'),
   );
   const row = page.locator('#rows tr[data-id^="app:"]').first();
   await row.locator('.policy-cell').first().click();
+  await wait(() => page.locator('.quick-popup').isVisible());
+  await page.keyboard.press('Escape');
+  await wait(() => page.locator('.rule-details summary').isVisible());
+  await page.locator('.rule-details summary').click();
   assert.equal(await page.locator('#infoRules .activity-rule').count(), 5);
   assert.match(await page.locator('#infoRules').innerText(), /Block[\s\S]*Expired/);
   assert.match(await page.locator('#infoRules').innerText(), /Allow[\s\S]*Disabled/);
@@ -157,7 +164,7 @@ try {
   await page.keyboard.press('Escape');
   // No new Activity sequence: only control inventory changes. Selection must survive.
   rules = [rule('new', 'block')];
-  await wait(async () => (await row.locator('.policy-block').count()) === 1);
+  await wait(async () => (await row.locator('.status-slot.tone-block').count()) === 1);
   assert.equal(await row.getAttribute('aria-selected'), 'true');
   await page.click('#requestsTab');
   await page.locator('#requestRows tr').first().click();
@@ -172,8 +179,8 @@ try {
   await page.setViewportSize({ width: 860, height: 600 });
   await page.screenshot({ path: path.join(run, 'synthetic-narrow.png') });
   servers[1].close();
-  await wait(async () => (await page.locator('.policy-block').count()) === 0);
-  assert.equal(await page.locator('.policy-block').count(), 0);
+  await wait(async () => (await page.locator('.status-slot.tone-block').count()) === 0);
+  assert.equal(await page.locator('.status-slot.tone-block').count(), 0);
   assert.equal(mutations, 0);
   console.log(
     'PASS synthetic multiple scoped rules, disabled/expired/permanent, control-only update/selection, installed prompt icon/read-only controls, disconnect clears stale indicators; no mutations. ' +
