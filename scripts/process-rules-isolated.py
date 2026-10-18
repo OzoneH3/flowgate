@@ -4,9 +4,9 @@ Run through scripts/lab.sh. Never opens host endpoints or deployed executable.
 """
 import argparse,json,os,pathlib,socket,subprocess,time,sys
 ROOT=pathlib.Path(__file__).resolve().parents[1]
-p=argparse.ArgumentParser();p.add_argument('--binary',required=True);p.add_argument('--native',required=True);p.add_argument('--run',required=True);p.add_argument('--hold',action='store_true');p.add_argument('--any-protocol',action='store_true');p.add_argument('--zones',action='store_true');p.add_argument('--zones-unknown',action='store_true');p.add_argument('--hold-enforcement',action='store_true',help='with --hold, bounded private incoming+outgoing interception for prompt acceptance');a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--binary',required=True);p.add_argument('--native',required=True);p.add_argument('--run',required=True);p.add_argument('--hold',action='store_true');p.add_argument('--any-protocol',action='store_true');p.add_argument('--zones',action='store_true');p.add_argument('--zones-unknown',action='store_true');p.add_argument('--remember-zones',action='store_true');p.add_argument('--hold-enforcement',action='store_true',help='with --hold, bounded private incoming+outgoing interception for prompt acceptance');a=p.parse_args()
 if a.hold_enforcement and not a.hold:p.error('--hold-enforcement requires --hold')
-if a.zones_unknown:a.zones=True
+if a.zones_unknown or a.remember_zones:a.zones=True
 assert os.environ['FLOWGATE_PARENT_NETNS']!=os.readlink('/proc/self/ns/net')
 RUN=pathlib.Path(a.run).resolve();assert RUN.is_relative_to(ROOT/'.workspace');RUN.mkdir(mode=0o700,parents=True)
 for d in ['api','data','state']:(RUN/d).mkdir(mode=0o700)
@@ -68,11 +68,11 @@ def outgoing(name,proto,v6,allowed):
  else:
   time.sleep(.4);assert(len(f.read_text().splitlines())if f.exists()else 0)==before
   pid=infos[name]['pid'];wait(lambda:any(v['flow']['direction']=='outgoing'and v['flow']['protocol']==proto and v['state']=='blocked'and any(o['pid']==pid for o in v['attribution']['owners'])for v in api().get('events',[])))
-def start():
+def start(zone_flip=False):
  global backend
  with (RUN/'daemon.log').open('a')as f:
   args=[BIN,'serve','--socket',API,'--database',str(RUN/'data/rules.db'),'--uid','0','--administrator']if a.hold and not a.hold_enforcement else[BIN,'host-start','--state',str(RUN/'state'),'--socket',API,'--database',str(RUN/'data/rules.db'),'--uid','0','--administrator','--profile','both','--duration','300s','--timeout','60s'if a.hold_enforcement else'4s']
-  if a.zones:args+=['--zone-local','10.79.0.0/24','--zone-internet','fd79::/64']
+  if a.zones:args+=['--zone-local','fd79::/64'if zone_flip else'10.79.0.0/24','--zone-internet','10.79.0.0/24'if zone_flip else'fd79::/64']
   backend=subprocess.Popen(args,stdout=f,stderr=f)
  def ready():
   if backend.poll()is not None:raise RuntimeError((RUN/'daemon.log').read_text())
@@ -110,6 +110,9 @@ try:
     f=RUN/'peer-received.log';result={'lines':f.read_text().splitlines()if f.exists()else[]}
    else:result=ask(children[name],op)
    (RUN/'command-result.json').write_text(json.dumps(result))
+ elif a.remember_zones:
+  from remember_zone_acceptance import check
+  check(globals())
  elif a.zones:
   from zone_policy_acceptance import check,check_unknown
   (check_unknown if a.zones_unknown else check)(globals())

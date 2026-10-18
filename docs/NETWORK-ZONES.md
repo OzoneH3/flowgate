@@ -179,3 +179,18 @@ zone_conflict, zone_mismatch, preview_required/missing/expired/mismatch,
 identity_changed, stale_decision, forbidden, capacity and persistence_failed.
 Decision Log's immutable rule snapshot carries actual `filter.network_zone`; old
 Any rules are never migrated.
+
+Focused pending-Remember evidence: `.workspace/remember-zone-receivers-2/remember-zone-evidence.json`
+and owner log. `process-rules-isolated.py --remember-zones` holds application,
+protocol, peer address and service constant while restarting only its disposable
+daemon with swapped explicit prefix definitions. Local Allow delivers twice;
+same-peer Internet classification prompts instead of inheriting it. Internet Deny
+prevents matching deliveries; restoring Local permits Local Allow again. Any on a
+separate service continues across membership change. A distinct executable reusing
+the original exact service/peer prompts and Deny keeps its receiver0. Lost ACK
+reconciles by receipt, exact retry creates one rule; old generation and mismatching
+named preview refuse. Rules0 and namespace cleanup confirmed. Unit/API race checks
+cover concurrent tokens/replay, expiry during resolution, fingerprint/flow/revision
+changes, unknown Any vs refused named scope, read-only/foreign receipt denial,
+failed persistence, legacy Any and immutable logged zone snapshots. Actual PID reuse
+and unrelated BPF/accounting matrices were not repeated.
