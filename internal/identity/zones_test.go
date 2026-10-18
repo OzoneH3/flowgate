@@ -10,7 +10,7 @@ func TestConfiguredZonesNoAddressClassGuess(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	for addr, want := range map[string]string{"127.0.0.1": "local", "::1": "local", "169.254.3.2": "local", "fe80::1%4": "local", "192.0.2.9": "local", "100.64.2.3": "local", "fd79::2": "local", "203.0.113.2": "internet", "2001:db8::2": "internet", "10.1.2.3": "", "172.16.1.2": "", "fd80::1": "", "8.8.8.8": "", "0.0.0.0": "", "ff02::1": ""} {
+	for addr, want := range map[string]string{"127.0.0.1": "local", "::1": "local", "169.254.3.2": "local", "fe80::1%4": "local", "192.0.2.9": "local", "100.64.2.3": "local", "fd79::2": "local", "203.0.113.2": "internet", "2001:db8::2": "internet", "10.1.2.3": "", "172.16.1.2": "", "fd80::1": "", "8.8.8.8": "", "0.0.0.0": "", "ff02::1": "", "255.255.255.255": ""} {
 		v := z.Classify(netip.MustParseAddr(addr))
 		if v.Zone != want || (v.State == "known") != (want != "") {
 			t.Errorf("%s %+v", addr, v)

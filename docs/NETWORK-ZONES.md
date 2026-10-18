@@ -115,3 +115,8 @@ The actual incoming event is unknown/default Ask; explicit Deny keeps the native
 receiver count unchanged. SQLite schema4 reload and stale generation/zone revision
 are tested separately; the restart comparison uses serialized documents because
 Go's in-memory monotonic timestamp component is intentionally not persisted.
+
+An additional policy regression proves an incomplete non-nil application (missing
+key or revision) cannot gain a global Allow. It is rejected as unsafe attribution;
+existing resolver and retained fingerprint checks remain. Limited IPv4 broadcast is
+also unclassified. These guards do not resolve the older retained-identity failure.

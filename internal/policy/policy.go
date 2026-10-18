@@ -102,7 +102,7 @@ func Evaluate(rules []Rule, f identity.Flow, a identity.Attribution, now time.Ti
 	return EvaluateSession(rules, f, a, now, "")
 }
 func EvaluateSession(rules []Rule, f identity.Flow, a identity.Attribution, now time.Time, session string) (string, string, []string) {
-	if a.Application == nil || a.Principal() == nil {
+	if a.Application == nil || a.Application.Key == "" || a.Application.Revision == "" || a.Principal() == nil {
 		return "block", "unsafe-attribution", nil
 	}
 	var matches []Rule

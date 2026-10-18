@@ -68,3 +68,16 @@ func TestZoneTierAndUnknown(t *testing.T) {
 		t.Fatal("invented application accepted")
 	}
 }
+
+func TestGlobalAllowRequiresCompleteApplicationIdentity(t *testing.T) {
+	f, _ := identity.ParseFlow("udp", "incoming", "127.0.0.1:80", "127.0.0.2:3000")
+	f.NetworkScope = identity.NetworkScope{State: "known", Zone: "local"}
+	r := Rule{Schema: 4, ID: "global", Action: "allow", Filter: Filter{AllPrograms: true, AllUIDs: true, NetworkZone: "local", Direction: "incoming", Protocol: "*"}}
+	for _, app := range []identity.Application{{}, {Key: "key"}, {Revision: "revision"}} {
+		a := identity.Attribution{Application: &app, Owners: []identity.Process{{UID: 1000}}}
+		act, id, _ := Evaluate([]Rule{r}, f, a, time.Now())
+		if act != "block" || id != "unsafe-attribution" {
+			t.Fatalf("incomplete identity got %s/%s", act, id)
+		}
+	}
+}

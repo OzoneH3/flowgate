@@ -67,7 +67,7 @@ func DefaultNetworkZones() NetworkZones { z, _ := NewNetworkZones(nil, nil); ret
 func (z NetworkZones) Classify(remote netip.Addr) NetworkScope {
 	out := NetworkScope{State: "unavailable", Revision: z.Revision, Source: "configured-prefix-v1", Reason: "Peer has no explicitly configured zone membership"}
 	remote = remote.Unmap().WithZone("")
-	if !remote.IsValid() || remote.IsUnspecified() || remote.IsMulticast() {
+	if !remote.IsValid() || remote.IsUnspecified() || remote.IsMulticast() || remote == netip.AddrFrom4([4]byte{255, 255, 255, 255}) {
 		out.Reason = "No classifiable unicast peer"
 		return out
 	}
