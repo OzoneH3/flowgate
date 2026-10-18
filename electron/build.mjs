@@ -28,6 +28,8 @@ await build({
   entryPoints: [
     'src/model.ts',
     'src/assets.ts',
+    'src/pane-model.ts',
+    'src/chart-view.ts',
     'src/display-units.ts',
     'src/initiation.ts',
     'src/protocol.ts',
@@ -56,7 +58,9 @@ await build({
   outdir: 'dist/test',
   outExtension: { '.js': '.cjs' },
 });
-for (const file of ['index.html', 'style.css']) await copyFile(`src/${file}`, `dist/${file}`);
+await build({entryPoints:['src/pane-preload.ts'],bundle:true,platform:'node',format:'cjs',external:['electron'],outfile:'dist/pane-preload.cjs'});
+await build({entryPoints:['src/pane-renderer.ts'],bundle:true,platform:'browser',format:'iife',outfile:'dist/pane.js'});
+for (const file of ['index.html', 'pane.html', 'style.css']) await copyFile(`src/${file}`, `dist/${file}`);
 
 await copyFile('assets/flowgate-tray.png', 'dist/flowgate-tray.png');
 await mkdir('dist/fonts', { recursive: true });

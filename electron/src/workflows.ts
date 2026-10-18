@@ -194,6 +194,13 @@ export async function openRule(source: RuleSource, options: EditorOptions = {}) 
     status(String(e));
   }
 }
+export function resumeRuleEditor() {
+  if (!draft) return false;
+  const editor = $('ruleEditor');
+  editor.hidden = false;
+  editor.querySelector<HTMLElement>('input,button')?.focus();
+  return true;
+}
 export function setupWorkflows(chooseTab: (s: string) => void) {
   showTab = chooseTab;
   $('requestsTab').after(node('button', 'Rules'));

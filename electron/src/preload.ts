@@ -1,6 +1,20 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { Bridge, ClientState, Decision } from './protocol';
 const api: Bridge = {
+  paneSnapshot: () => ipcRenderer.invoke('pane:snapshot'),
+  paneUpdate: (value) => ipcRenderer.invoke('pane:update', value),
+  paneControl: (kind, action) => ipcRenderer.invoke('pane:control', kind, action),
+  paneRule: (action) => ipcRenderer.invoke('pane:rule', action),
+  onPaneFrame: (fn) => {
+    const listener = (_e: unknown, frame: import('./pane-model').PaneFrame) => fn(frame);
+    ipcRenderer.on('pane:frame', listener);
+    return () => ipcRenderer.removeListener('pane:frame', listener);
+  },
+  onPaneRule: (fn) => {
+    const listener = (_e: unknown, action: import('./pane-model').PaneRuleAction) => fn(action);
+    ipcRenderer.on('pane:rule-open', listener);
+    return () => ipcRenderer.removeListener('pane:rule-open', listener);
+  },
   applicationIcons: (keys) => ipcRenderer.invoke('application:icons', keys),
   graph: (value) => ipcRenderer.invoke('graph', value),
   backgroundStatus: () => ipcRenderer.invoke('background:status'),

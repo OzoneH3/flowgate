@@ -74,7 +74,12 @@ export class Background {
   }
   update(state: ClientState) {
     const active = [...this.windows].some(
-      (w) => !w.isDestroyed() && w.isVisible() && !w.isMinimized() && w.isFocused(),
+      (w) =>
+        !w.isDestroyed() &&
+        w.isVisible() &&
+        !w.isMinimized() &&
+        w.isFocused() &&
+        w.webContents.getURL().startsWith('flowgate://app/index.html'),
     );
     this.notifications.update(state, active);
     if (!this.tray || this.tray.isDestroyed()) return;

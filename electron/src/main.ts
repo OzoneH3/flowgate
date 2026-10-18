@@ -5,9 +5,18 @@ import {
   ipcMain,
   protocol,
   session,
+  screen,
   type IpcMainInvokeEvent,
 } from 'electron';
 import path from 'node:path';
+import {
+  PaneModel,
+  paneKind,
+  ruleAction,
+  visibleGeometry,
+  type PaneKind,
+  type Rect,
+} from './pane-model';
 import { isDisplayUnit } from './display-units';
 import { bundledAsset } from './assets';
 import { ApplicationIcons } from './icons';
@@ -66,7 +75,12 @@ function dimension(name: string, fallback: number, min: number, max: number) {
   if (!Number.isInteger(n) || n < min || n > max) throw Error('Invalid window dimension');
   return n;
 }
-let saved: { width?: number; height?: number; ui?: Preferences } = {};
+let saved: {
+  width?: number;
+  height?: number;
+  ui?: Preferences;
+  panes?: Partial<Record<PaneKind, Rect>>;
+} = {};
 const prefsFile = path.join(workspace, 'electron-preferences.json');
 try {
   saved = JSON.parse(fs.readFileSync(prefsFile, 'utf8'));
@@ -91,6 +105,78 @@ let backend: Backend;
 let evaluation: Evaluation;
 let background: Background;
 let quitting = false;
+const paneModel = new PaneModel(
+  isDisplayUnit(saved.ui?.displayUnit) ? saved.ui.displayUnit : 'autoByte',
+);
+const detached = new Map<PaneKind, BrowserWindow>();
+const paneRoles = new Map<number, PaneKind>();
+const paneFrame = () => ({ presentation: paneModel.value, state: backend.view() });
+function publishPanes() {
+  if (!backend || quitting) return;
+  for (const w of windows) if (!w.isDestroyed()) w.webContents.send('pane:frame', paneFrame());
+}
+function paneWindow(kind: PaneKind) {
+  const existing = detached.get(kind);
+  if (existing && !existing.isDestroyed()) {
+    existing.show();
+    existing.focus();
+    return;
+  }
+  const bounds = visibleGeometry(
+    saved.panes?.[kind],
+    screen.getAllDisplays().map((d) => d.workArea),
+    { x: 40, y: 40, width: kind === 'info' ? 500 : 700, height: kind === 'info' ? 650 : 350 },
+  );
+  const w = new BrowserWindow({
+    title: kind === 'info' ? 'FlowGate — Info View' : 'FlowGate — Traffic chart',
+    ...bounds,
+    minWidth: 320,
+    minHeight: 220,
+    backgroundColor: '#222222',
+    show: false,
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'pane-preload.cjs'),
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+      webSecurity: true,
+      webviewTag: false,
+      spellcheck: false,
+    },
+  });
+  detached.set(kind, w);
+  paneRoles.set(w.webContents.id, kind);
+  windows.add(w);
+  w.setMenu(null);
+  w.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  w.webContents.on('will-navigate', (e) => e.preventDefault());
+  w.webContents.on('will-attach-webview', (e) => e.preventDefault());
+  const save = () => {
+    if (!quitting && !w.isDestroyed()) {
+      saved.panes = { ...saved.panes, [kind]: w.getBounds() };
+      persist();
+    }
+  };
+  w.on('resize', save);
+  w.on('move', save);
+  w.once('ready-to-show', () => {
+    if (main.isVisible()) w.show();
+    publishPanes();
+  });
+  const contentsID = w.webContents.id;
+  w.on('closed', () => {
+    paneRoles.delete(contentsID);
+    windows.delete(w);
+    detached.delete(kind);
+    if (!quitting) {
+      if (paneModel.value.panes[kind] === 'detached') paneModel.mode(kind, 'hidden');
+      publishPanes();
+    }
+  });
+  void w.loadURL('flowgate://app/pane.html?pane=' + kind);
+}
+
 function showMain(list = false, message = '') {
   if (main.isDestroyed()) return;
   main.show();
@@ -120,15 +206,25 @@ async function review(ref: RequestRef) {
   if (prompt && !prompt.isDestroyed()) prompt.close();
   prompt = windowFor(true, ref.id, ref.generation);
 }
-function trusted(e: IpcMainInvokeEvent) {
+function trusted(e: IpcMainInvokeEvent, allowPane = false) {
   if (
     ![...windows].some((w) => !w.isDestroyed() && w.webContents === e.sender) ||
     e.senderFrame !== e.sender.mainFrame
   )
     throw Error('Untrusted IPC sender');
   const u = new URL(e.senderFrame.url);
-  if (u.protocol !== 'flowgate:' || u.host !== 'app' || u.pathname !== '/index.html')
+  if (
+    u.protocol !== 'flowgate:' ||
+    u.host !== 'app' ||
+    u.pathname !== (paneRoles.has(e.sender.id) ? '/pane.html' : '/index.html') ||
+    (!allowPane && paneRoles.has(e.sender.id))
+  )
     throw Error('Unexpected IPC origin');
+}
+function presentationSender(e: IpcMainInvokeEvent) {
+  trusted(e, true);
+  if (e.sender !== main.webContents && !paneRoles.has(e.sender.id))
+    throw Error('Presentation operation is unavailable from a prompt');
 }
 function windowFor(isPrompt = false, id = '', generation = '') {
   const w = new BrowserWindow({
@@ -207,19 +303,72 @@ app.whenReady().then(async () => {
   );
   const history = new TrafficHistory();
   ipcMain.handle('graph', (e, value) => {
-    trusted(e);
+    trusted(e, true);
     return history.view(value);
   });
   backend = new Backend(observer!, controller, (state) => {
     history.observe(state.observation);
+    paneModel.observe(state);
+    publishPanes();
     icons.observe(state);
     for (const w of windows)
-      if (!w.isDestroyed() && w.isVisible() && !w.isMinimized()) w.webContents.send('state', state);
+      if (!w.isDestroyed() && !paneRoles.has(w.webContents.id) && w.isVisible() && !w.isMinimized())
+        w.webContents.send('state', state);
     background?.update(state);
   });
   ipcMain.handle('application:icons', (e, value) => {
-    trusted(e);
+    trusted(e, true);
     return icons.request(value);
+  });
+  ipcMain.handle('pane:snapshot', (e) => {
+    trusted(e, true);
+    return paneFrame();
+  });
+  ipcMain.handle('pane:update', (e, v) => {
+    presentationSender(e);
+    paneModel.update(v, e.sender === main.webContents, backend.view());
+    if (v.unit !== undefined) {
+      saved.ui = { ...saved.ui, displayUnit: paneModel.value.unit };
+      persist();
+    }
+    publishPanes();
+  });
+  ipcMain.handle('pane:control', (e, raw, action) => {
+    presentationSender(e);
+    const kind = paneKind(raw);
+    const role = paneRoles.get(e.sender.id);
+    if (role && role !== kind) throw Error('Pane cannot control another window');
+    if (!['undock', 'dock', 'close', 'open'].includes(action))
+      throw Error('Unknown pane operation');
+    if (action === 'open' && paneModel.value.panes[kind] === 'detached') {
+      paneWindow(kind);
+      publishPanes();
+      return;
+    }
+    if (action === 'open') action = 'dock';
+    if (action === 'undock') {
+      paneModel.mode(kind, 'detached');
+      paneWindow(kind);
+    } else {
+      paneModel.mode(kind, action === 'dock' ? 'docked' : 'hidden');
+      detached.get(kind)?.close();
+    }
+    publishPanes();
+  });
+  ipcMain.handle('pane:rule', (e, raw) => {
+    trusted(e, true);
+    if (paneRoles.get(e.sender.id) !== 'info')
+      throw Error('Rule entry is only available from Info View');
+    const action = ruleAction(raw),
+      p = paneModel.value;
+    if (
+      action.selection !== p.selection ||
+      action.generation !== p.generation ||
+      !backend.view().observation.connected
+    )
+      throw Error('Selection changed or disconnected; reselect and review in Activity');
+    showMain();
+    main.webContents.send('pane:rule-open', action);
   });
   const rules = new Rules(backend);
   const decisionLog = new DecisionLogClient(backend);
@@ -357,6 +506,14 @@ app.whenReady().then(async () => {
     if (prompt && !prompt.isDestroyed() && prompt.webContents === e.sender) prompt.close();
   });
   main = windowFor();
+  main.on('hide', () => {
+    for (const w of detached.values()) if (!w.isDestroyed()) w.hide();
+  });
+  main.on('show', () => {
+    for (const [kind, w] of detached)
+      if (paneModel.value.panes[kind] === 'detached' && !w.isDestroyed()) w.show();
+    publishPanes();
+  });
   main.webContents.on('did-finish-load', () =>
     console.info(
       'FlowGate: main window rendered; sandbox enabled; native platform',

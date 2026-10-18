@@ -3,7 +3,7 @@ export type Metric = 'download_bps' | 'upload_bps' | 'downloaded' | 'uploaded';
 export interface Row {
   id: string;
   parent?: string;
-  kind: 'overview' | 'application' | 'process' | 'socket' | 'unidentified';
+  kind: 'overview' | 'network' | 'application' | 'process' | 'socket' | 'unidentified';
   label: string;
   pid?: number;
   rows: SocketRow[];
@@ -11,6 +11,14 @@ export interface Row {
   process?: Process;
   displayApplication?: Application;
   socket?: SocketRow;
+}
+// Observation status only: a listening/bound socket is not a connected peer.
+export function hasObservedConnection(row: Row): boolean {
+  return row.rows.some((r) =>
+    r.socket.protocol === 'tcp'
+      ? r.socket.state === 1
+      : r.socket.protocol === 'udp' &&  /:[1-9]\d*$/.test(r.socket.remote),
+  );
 }
 export interface Sum {
   value?: number;
@@ -25,6 +33,13 @@ export const sourceRows = (rows: SocketRow[], source?: MeasurementSource) => [
     rows.filter((r) => !source || r.socket.protocol === source).map((r) => [r.id, r]),
   ).values(),
 ];
+export const NETWORK_UNAVAILABLE = 'Classification unavailable: the daemon supplies no configured network-zone attribution. These totals are unknown, not zero; this is not a firewall target.';
+export function networkOverviews(): Row[] {
+  return ['Internet', 'Local Network'].map((label, index) => ({
+    id: index ? 'network:local' : 'network:internet', parent: 'overview',
+    kind: 'network' as const, label, rows: [], children: [],
+  }));
+}
 export function overview(activity: Activity, children: Row[] = []): Row {
   return {
     id: 'overview',
@@ -222,6 +237,10 @@ export function flatten(
                   : (sum(r.rows, key as Metric, source).value ?? -1);
   const walk = (rows: Row[], depth: number) => {
     for (const row of [...rows].sort((a, b) => {
+      if (a.kind === 'network' || b.kind === 'network') {
+        if (a.kind !== b.kind) return a.kind === 'network' ? -1 : 1;
+        return a.id === b.id ? 0 : a.id === 'network:internet' ? -1 : 1;
+      }
       const av = value(a),
         bv = value(b);
       if (['upload_bps', 'download_bps'].includes(key) && (av === -1 || bv === -1) && av !== bv)

@@ -1,3 +1,4 @@
+import type { PolicyEntry } from './pane-model';
 import { ANY_PROTOCOL_CAPABILITY, PROCESS_CAPABILITY } from './process-rules';
 import type { Attempt, ClientState, ObservedSource, Rule, RuleEdit, RuleSource } from './protocol';
 import { canManageRules } from './protocol';
@@ -159,7 +160,10 @@ export class ActivityPolicy {
   private seq = 0;
   private timer?: ReturnType<typeof setInterval>;
   private skew = 0;
-  constructor(private host: HTMLElement) {
+  constructor(
+    private host: HTMLElement,
+    private delegate?: (action: PolicyEntry) => void,
+  ) {
     host.classList.add('rules-host');
     host.addEventListener('keydown', (event) => {
       if (event.key !== 'Escape') return;
@@ -188,6 +192,9 @@ export class ActivityPolicy {
     this.signature = '';
     if (this.state) this.update(this.row, this.state);
   }
+  hasOutstandingAction() {
+    return !!this.pending && this.pending.phase !== 'error';
+  }
   private defaultTier(): Tier {
     return this.row &&
       this.row.kind !== 'application' &&
@@ -199,6 +206,10 @@ export class ActivityPolicy {
     return !!this.state?.control.capabilities?.includes(ANY_PROTOCOL_CAPABILITY);
   }
   activate(direction: Direction, tier = this.defaultTier()) {
+    if (this.delegate) {
+      this.delegate({ kind: 'quick', direction, tier });
+      return;
+    }
     if (!this.row || !this.state) return;
     if (this.pending && this.pending.phase !== 'error') {
       this.host.querySelector<HTMLElement>('.quick-popup')?.focus();
@@ -235,7 +246,7 @@ export class ActivityPolicy {
     this.row = row;
     this.state = state;
     if (Number.isFinite(state.control.serverNow)) this.skew = state.control.serverNow! - Date.now();
-    this.host.hidden = !row || row.kind === 'overview';
+    this.host.hidden = !row || row.kind === 'overview' || row.kind === 'network';
     if (this.host.hidden || !row) return;
     const inv = selectionInventory(row, state),
       c = state.control;
@@ -413,6 +424,10 @@ export class ActivityPolicy {
       !c.capabilities?.includes('observed-rule-create-v1') ||
       (tier === 'process' && inv.processPolicy?.state !== 'active');
     add.onclick = () => {
+      if (this.delegate) {
+        this.delegate({ kind: 'new' });
+        return;
+      }
       const source = this.newSource('incoming', tier, inv);
       if (source) void openRule(source, { activity: true });
     };
@@ -519,11 +534,17 @@ export class ActivityPolicy {
       const actions = el('div', '', 'activity-rule-actions');
       const advanced = button('Advanced…', `list:${ref.id}:advanced`);
       advanced.disabled = blocked || inactiveTarget;
-      advanced.onclick = () => void openRule({ id: ref.id }, { activity: true });
+      advanced.onclick = () =>
+        this.delegate
+          ? this.delegate({ kind: 'edit', id: ref.id })
+          : void openRule({ id: ref.id }, { activity: true });
       const remove = button('Delete…', `list:${ref.id}:delete`);
       remove.disabled = blocked || !c.capabilities?.includes('conditional-rule-delete-v1');
       const generation = c.generation;
-      remove.onclick = () => confirmRuleDelete(rule, generation);
+      remove.onclick = () =>
+        this.delegate
+          ? this.delegate({ kind: 'delete', id: ref.id })
+          : confirmRuleDelete(rule, generation);
       actions.append(advanced, remove);
       card.append(actions);
     }

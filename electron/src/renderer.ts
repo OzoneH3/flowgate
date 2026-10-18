@@ -1,3 +1,4 @@
+import type { Presentation, PaneFrame } from './pane-model';
 import { DISPLAY_UNITS, displayAmount, isDisplayUnit, type DisplayUnit } from './display-units';
 import { initiationPresentation } from './initiation';
 import { ActivityPolicy, STATUS_SLOTS, blockerGlyph } from './activity-policy';
@@ -7,12 +8,15 @@ import { ruleStatus, ruleState, ruleDescription, configuredPolicy } from './rule
 import { canDecide } from './protocol';
 import type { Application } from './protocol';
 import { TrafficGraph } from './graph';
-import { setupWorkflows, updateWorkflows, openRule } from './workflows';
+import { setupWorkflows, updateWorkflows, openRule, resumeRuleEditor } from './workflows';
 import { setupDecisionLog, showDecisionLog, updateDecisionLog } from './decision-log-view';
 import type { ClientState, ViewEvent, Scope } from './protocol';
 import {
   hierarchy,
+  hasObservedConnection,
   overview,
+  networkOverviews,
+  NETWORK_UNAVAILABLE,
   flatten,
   allRows,
   sum,
@@ -27,6 +31,25 @@ const promptGeneration = new URL(location.href).searchParams.get('generation');
 const promptID = new URL(location.href).searchParams.get('request');
 let state: ClientState;
 let selected = 'overview';
+let presentation: Presentation | undefined;
+let selectionPending = '';
+function syncSelection() {
+  if (
+    !state ||
+    selectionPending === selected ||
+    (presentation?.selection === selected &&
+      presentation.generation === state.observation.generation)
+  )
+    return;
+  selectionPending = selected;
+  const pending = selected;
+  void window.flowgate
+    .paneUpdate({ selection: selected, generation: state.observation.generation })
+    .catch(() => {})
+    .finally(() => {
+      if (selectionPending === pending) selectionPending = '';
+    });
+}
 // Declared before the init code below: esbuild hoists top-level lets, so order matters.
 let displayUnit: DisplayUnit = 'autoByte';
 let rateMode: 'rate' | 'total' = 'rate';
@@ -161,13 +184,13 @@ function statusStrip(r: Row) {
     const direction = slot.direction;
     const button = element('button', '', 'policy-cell status-slot');
     button.dataset.direction = direction;
-    button.disabled = r.kind === 'overview';
+    button.disabled = r.kind === 'overview' || r.kind === 'network';
     let chip: RuleChip = { glyph: '', text: 'Not set', tone: 'none', detail: '' };
     let fallbackShown = false;
     let title = '';
-    if (r.kind === 'overview') {
+    if (r.kind === 'overview' || r.kind === 'network') {
       chip = { glyph: '', text: '', tone: 'none', detail: '' };
-      title = 'Machine: no rules at this level.';
+      title = r.kind === 'network' ? NETWORK_UNAVAILABLE : 'Machine: no rules at this level.';
     } else if (r.kind === 'socket') {
       chip = { glyph: '', text: '', tone: 'none', detail: '' };
       title = `${slot.label}: connections carry no rules; see the holder process.`;
@@ -304,7 +327,10 @@ if (promptID) {
       void openRule({ id });
     },
   );
-  graph = new TrafficGraph($('trafficGraph'));
+  graph = new TrafficGraph($('trafficGraph'), {
+    change: (chart) => void window.flowgate.paneUpdate({ chart }).catch(message),
+    source: (source) => void window.flowgate.paneUpdate({ source }).catch(message),
+  });
   setupPaneControls();
   activityPolicy = new ActivityPolicy($('infoRules'));
   window.flowgate.onNavigate((v) => {
@@ -328,6 +354,7 @@ if (promptID) {
   $('activitySource').onchange = () => {
     measurementSource = ($('activitySource') as HTMLSelectElement).value as 'tcp' | 'udp';
     graph?.setSource(measurementSource);
+    void window.flowgate.paneUpdate({ source: measurementSource }).catch(message);
     renderTree();
     renderInfo();
   };
@@ -410,7 +437,7 @@ function buildTree() {
     ? hierarchy(a, $<HTMLInputElement>('search').value, $<HTMLSelectElement>('filter').value)
     : [];
   if (a) {
-    const children = roots;
+    const children = [...networkOverviews(), ...roots];
     for (const child of children) child.parent = 'overview';
     roots = [overview(a, children)];
   }
@@ -465,29 +492,36 @@ function paneList(): { key: 'info' | 'chart'; label: string }[] {
   ];
 }
 function paneState(): Record<'info' | 'chart', boolean> {
-  try {
-    return {
-      info: true,
-      chart: true,
-      ...JSON.parse(localStorage.getItem('flowgate.panes') || '{}'),
-    };
-  } catch {
-    return { info: true, chart: true };
-  }
+  return {
+    info: presentation?.panes.info !== 'hidden',
+    chart: presentation?.panes.chart !== 'hidden',
+  };
 }
 function applyPanes() {
-  const panes = paneState();
-  document.body.classList.toggle('hide-info', !panes.info);
-  document.body.classList.toggle('hide-chart', !panes.chart);
-  for (const item of document.querySelectorAll<HTMLButtonElement>('.pane-menu button[data-pane]'))
-    item.setAttribute('aria-checked', String(panes[item.dataset.pane as 'info' | 'chart']));
-  const layout = document.getElementById('layoutPreset') as HTMLSelectElement | null;
-  if (layout) layout.value = !panes.info ? 'activity' : panes.chart ? 'chart' : 'plain';
-  void graph?.update(selected, sequence + ':panes:' + performance.now());
+  const info = presentation?.panes.info || 'docked',
+    chart = presentation?.panes.chart || 'docked';
+  document.body.classList.toggle('hide-sidebar', info !== 'docked' && chart !== 'docked');
+  document.body.classList.toggle('hide-info', info !== 'docked');
+  document.body.classList.toggle('hide-chart', chart !== 'docked');
+  document.body.classList.toggle('info-detached', info === 'detached');
+  document.body.classList.toggle('chart-detached', chart === 'detached');
+  for (const item of document.querySelectorAll<HTMLButtonElement>('.pane-menu button[data-pane]')) {
+    const key = item.dataset.pane as 'info' | 'chart';
+    item.setAttribute('aria-checked', String(paneState()[key]));
+    item.title =
+      presentation?.panes[key] === 'detached'
+        ? 'Detached — click to dock'
+        : paneState()[key]
+          ? 'Close pane'
+          : 'Open pane';
+  }
+  const layout = $<HTMLSelectElement>('layoutPreset');
+  if (layout)
+    layout.value = info !== 'docked' ? 'activity' : chart === 'docked' ? 'chart' : 'plain';
+  void graph?.update(selected, sequence + ':panes');
 }
 function setPane(key: 'info' | 'chart', open: boolean) {
-  localStorage.setItem('flowgate.panes', JSON.stringify({ ...paneState(), [key]: open }));
-  applyPanes();
+  void window.flowgate.paneControl(key, open ? 'dock' : 'close').catch(message);
 }
 function paneControls(self?: 'info' | 'chart', summaryText = '▾') {
   const wrap = element('span', '', 'pane-controls-inner');
@@ -505,12 +539,19 @@ function paneControls(self?: 'info' | 'chart', summaryText = '▾') {
     item.dataset.pane = pane.key;
     item.setAttribute('role', 'menuitemcheckbox');
     item.onclick = () => {
-      setPane(pane.key, !paneState()[pane.key]);
+      setPane(pane.key, presentation?.panes[pane.key] === 'detached' || !paneState()[pane.key]);
       menu.open = false;
     };
     panel.append(item);
   }
   if (self) {
+    const undock = element('button', 'Undock');
+    undock.dataset.undock = self;
+    undock.onclick = () => {
+      void window.flowgate.paneControl(self, 'undock').catch(message);
+      menu.open = false;
+    };
+    panel.prepend(undock, element('hr'));
     const close = element('button', 'Close');
     close.onclick = () => {
       setPane(self, false);
@@ -655,7 +696,7 @@ function setupPaneControls() {
   units.onchange = () => {
     if (!isDisplayUnit(units.value)) return;
     applyUnit(units.value);
-    void window.flowgate.preferences({ displayUnit }).catch(message);
+    void window.flowgate.paneUpdate({ unit: displayUnit }).catch(message);
   };
   void window.flowgate
     .preferences()
@@ -666,11 +707,8 @@ function setupPaneControls() {
   setupMainMenus(windowMenu);
   $<HTMLSelectElement>('layoutPreset').onchange = () => {
     const v = $<HTMLSelectElement>('layoutPreset').value;
-    localStorage.setItem(
-      'flowgate.panes',
-      JSON.stringify({ info: v !== 'activity', chart: v === 'chart' }),
-    );
-    applyPanes();
+    void window.flowgate.paneControl('info', v === 'activity' ? 'close' : 'dock');
+    void window.flowgate.paneControl('chart', v === 'chart' ? 'dock' : 'close');
   };
   const chartHead = document.querySelector('#trafficGraph .graph-heading');
   if (chartHead) {
@@ -743,9 +781,19 @@ function renderTree() {
     if (r.children.length) tr.setAttribute('aria-expanded', String(expanded.has(r.id)));
     tr.onclick = () => {
       selected = r.id;
-      renderTree();
+      for (const row of document.querySelectorAll<HTMLElement>('#rows tr'))
+        row.setAttribute('aria-selected', String(row.dataset.id === selected));
       renderInfo();
       $('tree').focus();
+    };
+    tr.ondblclick = (event) => {
+      if ((event.target as HTMLElement).closest('button,input,select')) return;
+      if (r.children.length) {
+        if (expanded.has(r.id)) expanded.delete(r.id);
+        else expanded.add(r.id);
+        renderTree();
+        renderInfo();
+      } else void window.flowgate.paneControl('info', 'open').catch(message);
     };
     const name = element('td');
     name.className = `name depth-${depth}`;
@@ -780,11 +828,12 @@ function renderTree() {
       if (direction.state === 'listening') rowLabel = r.socket.socket.local;
       if (direction.state === 'unconnected') rowLabel = r.socket.socket.local;
     }
-    // Reference-style online LED. FlowGate lists only currently observed owners, so every live
-    // row is online; the retained exited selection never appears in this table.
-    const led = element('span', '', 'online-dot on');
-    led.title =
-      'Online: has at least one socket in the current observation snapshot (not a reachability claim)';
+    // A dot is a connected-peer observation, not simply a row-exists indicator.
+    const connected = hasObservedConnection(r);
+    const led = element('span', '', 'online-dot' + (connected ? ' on' : ''));
+    led.title = connected
+      ? 'Contains an observed established TCP or connected UDP socket. Not a firewall, delivery or reachability verdict.'
+      : 'No observed connected peer; listening/bound sockets do not light this indicator.';
     led.setAttribute('aria-hidden', 'true');
     name.append(led, toggle, icon, document.createTextNode(rowLabel));
     name.title = r.process?.executable || r.socket?.socket.remote || r.label;
@@ -836,6 +885,7 @@ function renderTree() {
   }
 }
 function renderInfo() {
+  syncSelection();
   void graph?.update(selected, sequence);
   const live = $('info');
   const info = element('dl');
@@ -935,6 +985,12 @@ function renderInfo() {
       'Observation',
       'Selected instance is no longer visible. No target is rebound; reselect a live instance to create a rule.',
     );
+  if (r.kind === 'network') {
+    field(info, 'Network', r.label);
+    field(info, 'Coverage', NETWORK_UNAVAILABLE);
+    commit();
+    return;
+  }
   if (r.kind === 'overview') {
     field(
       info,
@@ -1341,6 +1397,102 @@ function consume(next: ClientState) {
     updateWorkflows(state);
     updateDecisionLog(state);
   }
+}
+function consumePresentation(frame: PaneFrame) {
+  if (promptID || (presentation && frame.presentation.revision < presentation.revision)) return;
+  const old = presentation;
+  presentation = frame.presentation;
+  if (!$('activityView')) return;
+  const p = presentation;
+  const nextSelection =
+    selectionPending && selectionPending !== p.selection ? selected : p.selection;
+  const selectionChanged = selected !== nextSelection;
+  selected = nextSelection;
+  measurementSource = p.source;
+  displayUnit = p.unit;
+  $<HTMLSelectElement>('displayUnits').value = p.unit;
+  $<HTMLSelectElement>('activitySource').value = p.source;
+  for (const small of document.querySelectorAll('.rate-header small'))
+    small.textContent = p.unit + ' (def)';
+  graph?.setSource(p.source);
+  graph?.setUnit(p.unit);
+  graph?.setPresentation(p.chart);
+  applyPanes();
+  if (state && (selectionChanged || old?.source !== p.source || old?.unit !== p.unit)) {
+    renderTree();
+    renderInfo();
+  }
+}
+if (!promptID) {
+  window.flowgate.onPaneFrame(consumePresentation);
+  void window.flowgate.paneSnapshot().then(consumePresentation);
+  window.flowgate.onPaneRule((action) => {
+    if (
+      !state ||
+      action.selection !== selected ||
+      action.generation !== state.observation.generation
+    ) {
+      message('Selection changed; review the current Activity target.');
+      return;
+    }
+    if (activityPolicy?.hasOutstandingAction()) {
+      message('Resolve the current quick action before opening another rule action.');
+      return;
+    }
+    if (resumeRuleEditor()) {
+      message('Finish the existing editor before opening another rule action.');
+      return;
+    }
+    if (($('confirmation') as HTMLDialogElement)?.open) {
+      message('Finish the current confirmation first.');
+      return;
+    }
+    const editor = $('ruleEditor');
+    if (editor && !editor.hidden) {
+      editor.querySelector<HTMLElement>('input,button')?.focus();
+      message('Finish the open editor before opening another rule action.');
+      return;
+    }
+    $('activityTab').click();
+    if (action.kind === 'quick' && presentation?.panes.info !== 'docked') {
+      let floating = $('floatingRuleStatus');
+      if (!floating) {
+        floating = element('section', '', 'floating-rule-status');
+        floating.id = 'floatingRuleStatus';
+        floating.setAttribute('aria-label', 'Activity rule status');
+        const title = element('header', 'Rule Status · actions reviewed in Activity');
+        const close = element('button', '✕');
+        close.setAttribute('aria-label', 'Close floating rule status');
+        title.append(close);
+        floating.append(title);
+        document.body.append(floating);
+        const anchor = document.createComment('Info rule host');
+        $('infoRules').before(anchor);
+        close.onclick = () => {
+          anchor.after($('infoRules'));
+          floating.remove();
+          anchor.remove();
+        };
+      }
+      floating.append($('infoRules'));
+    }
+    const focus =
+      action.kind === 'quick'
+        ? `cell:${action.tier}:${action.direction}`
+        : action.kind === 'new'
+          ? 'add-rule'
+          : `list:${action.id}:${action.kind === 'edit' ? 'advanced' : 'delete'}`;
+    const button = document.querySelector<HTMLButtonElement>(
+      `#infoRules [data-focus="${CSS.escape(focus)}"]`,
+    );
+    if (!button || button.disabled) {
+      message('Rule entry is unavailable for the current target.');
+      return;
+    }
+    const details = button.closest('details');
+    if (details) details.open = true;
+    button.click();
+  });
 }
 window.flowgate.subscribe(consume);
 void window.flowgate
