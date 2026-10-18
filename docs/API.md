@@ -361,3 +361,16 @@ actual endpoint and sampled sockets; backend cleans after explicit UI DONE by
 touching only that run's `quit`. SYN-ACK holding uses private-namespace fixture nft
 rules, deleted before READY. It never starts FlowGate enforcement, loads BPF or
 uses a host endpoint. UI controls only this disposable daemon/database.
+
+## Application display metadata
+
+`application-display-metadata-v1` adds `display_name`, `display_executable` and
+`executable_status` (`linked`, `deleted`, `unavailable`) to application metadata.
+A verified zero-link `/proc/PID/exe` is displayed without its kernel ` (deleted)`
+suffix; legacy name/executable, key and revision stay unchanged. Display paths
+may select an installed desktop icon, never authorize a policy or substitute the
+replacement file's identity. The old running image remains a separate revision.
+Read-only host Firefox inspection found PID3053 running zero-link inode5706575;
+its existing disk path points at inode5959864. No process restart or file change.
+Private evidence: `.workspace/firefox-executable-status.json`. A real isolated
+unlink/replace test proves metadata cleanup retains the running revision and key.

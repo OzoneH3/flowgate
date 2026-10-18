@@ -171,7 +171,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						r.Capabilities = append(r.Capabilities, DecisionLogCapability)
 					}
 					if e.Activity != nil {
-						r.Capabilities = append(r.Capabilities, "activity-initiation-v1")
+						r.Capabilities = append(r.Capabilities, "activity-initiation-v1", "application-display-metadata-v1")
 					}
 					stopAfterResponse := false
 					if e.APIUID != nil && cred.Uid != *e.APIUID && cred.Uid != 0 {

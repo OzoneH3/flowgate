@@ -15,15 +15,18 @@ import (
 )
 
 type Application struct {
-	Key        string   `json:"key"`
-	Name       string   `json:"name"`
-	Kind       string   `json:"kind"`
-	Executable string   `json:"executable"`
-	Revision   string   `json:"revision"`
-	Runtime    string   `json:"runtime,omitempty"`
-	Prefix     string   `json:"prefix,omitempty"`
-	SteamAppID string   `json:"steam_app_id,omitempty"`
-	Evidence   []string `json:"evidence"`
+	DisplayName       string   `json:"display_name,omitempty"`
+	DisplayExecutable string   `json:"display_executable,omitempty"`
+	ExecutableStatus  string   `json:"executable_status,omitempty"`
+	Key               string   `json:"key"`
+	Name              string   `json:"name"`
+	Kind              string   `json:"kind"`
+	Executable        string   `json:"executable"`
+	Revision          string   `json:"revision"`
+	Runtime           string   `json:"runtime,omitempty"`
+	Prefix            string   `json:"prefix,omitempty"`
+	SteamAppID        string   `json:"steam_app_id,omitempty"`
+	Evidence          []string `json:"evidence"`
 }
 type Process struct {
 	BootID             string      `json:"boot_id,omitempty"`
@@ -158,6 +161,18 @@ func Inspect(pid int) (Process, error) {
 	}
 	if a.Executable != "" && a.Revision != "" {
 		a.Key = digest(fmt.Sprintf("%d|%s|%s|%s", p.UID, a.Kind, a.Prefix, a.Executable))
+	}
+	// Display metadata never changes executable/key/revision authority.
+	a.DisplayName, a.DisplayExecutable, a.ExecutableStatus = a.Name, a.Executable, "unavailable"
+	if a.Kind == "native" {
+		if st, err := os.Stat(base + "/exe"); err == nil {
+			a.ExecutableStatus = "linked"
+			if st.Sys().(*syscall.Stat_t).Nlink == 0 {
+				a.ExecutableStatus = "deleted"
+				a.DisplayExecutable = strings.TrimSuffix(a.Executable, " (deleted)")
+				a.DisplayName = filepath.Base(a.DisplayExecutable)
+			}
+		}
 	}
 	p.Application = a
 	end, _, e := processStat(base)
