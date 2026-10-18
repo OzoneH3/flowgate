@@ -1,5 +1,6 @@
 import { initiationPresentation } from './initiation';
 import { ActivityPolicy } from './activity-policy';
+import { ruleChip, renderChip } from './rule-chip';
 import {
   POLICY_CAPABILITY,
   authoritativePolicy,
@@ -152,11 +153,23 @@ function policyCell(r: Row, direction: PolicyDirection) {
     : status.available
       ? configuredPolicy(rules, status.now)
       : 'Unavailable';
-  const button = element(
-    'button',
-    r.kind === 'overview' ? '—' : label === 'No explicit rule' ? 'Not set' : label,
-    'policy-cell',
-  );
+  const button = element('button', '', 'policy-cell');
+  // Process/socket rows show the instance's own rules; with none, the backend's
+  // application fallback for that exact instance is shown dimmed (never from grouping).
+  const fallback =
+    processPolicy && !processPolicy[direction].rules.length
+      ? processPolicy[direction === 'incoming' ? 'application_incoming' : 'application_outgoing']
+      : undefined;
+  if (r.kind === 'overview') button.textContent = '—';
+  else if (authoritative) {
+    const shown = fallback?.rules.length ? fallback : summary;
+    const chip = ruleChip(shown, processPolicy?.state === 'inactive' && shown === summary, true);
+    // Connection rows carry no rules of their own; their holder's status is in the Info View.
+    if (r.kind === 'socket') button.classList.add('policy-connection');
+    else button.append(renderChip(chip, fallback && shown === fallback ? '↳ ' : ''));
+    button.classList.add('tone-' + chip.tone);
+    if (fallback && shown === fallback) button.classList.add('policy-fallback');
+  } else button.textContent = label === 'No explicit rule' ? 'Not set' : label;
   button.disabled = r.kind === 'overview';
   button.dataset.direction = direction;
   button.title =
@@ -170,18 +183,15 @@ function policyCell(r: Row, direction: PolicyDirection) {
     button.title =
       'Compatibility inventory (locally grouped listed rules; not a backend summary).\n' +
       button.title;
-  button.setAttribute('aria-label', `${r.label} · ${direction} · ${label} · configured policy`);
+  button.setAttribute(
+    'aria-label',
+    `${r.label} · ${direction} · ${button.textContent || label} · configured policy`,
+  );
   if (authoritative ? !summary : !status.available) button.classList.add('rule-unavailable');
-  else if (authoritative && summary?.configured === 'uniform')
-    button.classList.add('policy-' + summary.action);
-  else if (authoritative && summary?.rules.length === 1) {
-    const ref = summary.rules[0];
-    button.classList.add(
-      'policy-' +
-        (ref.expired ? 'expired' : ref.disabled ? 'disabled' : ref.active ? ref.action : 'unknown'),
-    );
-  } else if (!authoritative && rules.length === 1)
+  else if (!authoritative && rules.length === 1)
     button.classList.add('policy-' + ruleState(rules[0], status.now));
+  if (fallback?.rules.length)
+    button.title += `\nThis process has no own ${direction} rule; application fallback shown.`;
   button.onclick = (event) => {
     event.stopPropagation();
     selected = r.id;

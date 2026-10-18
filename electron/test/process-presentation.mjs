@@ -99,23 +99,61 @@ function activity() {
     collected,
     complete: true,
     processes,
-    rows: Object.values(processes).map((p) => ({
-      id: 'socket-' + p.pid,
-      owners: [p.id],
-      ownership_category: 'visible-holder',
-      state: 'Established',
-      direction: 'Unknown',
-      initiation: { state: 'unknown', source: 'synthetic', reason: 'Synthetic layout fixture' },
-      socket: {
-        protocol: 'tcp',
-        local: '[::1]:44001',
-        remote: '[2001:db8::1]:50000',
-        uid: 1000,
-        state: 1,
-      },
-      traffic: { available: false, reason: 'SYNTHETIC — no measured traffic' },
-    })),
+    rows: Object.values(processes)
+      .map((p) => ({
+        id: 'socket-' + p.pid,
+        owners: [p.id],
+        ownership_category: 'visible-holder',
+        state: 'Established',
+        direction: 'Unknown',
+        initiation: { state: 'unknown', source: 'synthetic', reason: 'Synthetic layout fixture' },
+        socket: {
+          protocol: 'tcp',
+          local: '[::1]:44001',
+          remote: '[2001:db8::1]:50000',
+          uid: 1000,
+          state: 1,
+        },
+        traffic: { available: false, reason: 'SYNTHETIC — no measured traffic' },
+      }))
+      .concat(exited ? [] : extraRows()),
   };
+}
+// SYNTHETIC: known outgoing initiation, shared holders and unidentified ownership.
+function extraRows() {
+  const base = (id, owners, category, local, remote, initiation, extra = {}) => ({
+    id,
+    owners,
+    ownership_category: category,
+    state: 'Established',
+    direction: 'Unknown',
+    initiation,
+    socket: { protocol: 'tcp', local, remote, uid: 1000, state: 1 },
+    traffic: { available: false, reason: 'SYNTHETIC — no measured traffic' },
+    ...extra,
+  });
+  return [
+    base('socket-out', [p.id], 'visible-holder', '[::1]:44002', '[2001:db8::2]:443', {
+      state: 'known',
+      direction: 'outgoing',
+      source: 'synthetic',
+      reason: 'SYNTHETIC initiated by this process',
+    }),
+    base(
+      'socket-shared',
+      [p.id, q.id],
+      'shared',
+      '[::1]:44003',
+      '[2001:db8::3]:443',
+      { state: 'unknown', source: 'synthetic', reason: 'SYNTHETIC shared holders' },
+      { display_application: application },
+    ),
+    base('socket-unknown', [], 'unknown', '[::1]:44004', '[2001:db8::4]:80', {
+      state: 'unknown',
+      source: 'synthetic',
+      reason: 'SYNTHETIC no holder',
+    }),
+  ];
 }
 function view() {
   const a = activity(),
@@ -160,7 +198,8 @@ function view() {
     })),
     rows: a.rows.map((r) => ({
       row_id: r.id,
-      status: 'observed_native',
+      status:
+        r.owners.length === 1 ? 'observed_native' : r.owners.length ? 'shared' : 'unattributed',
       application_ref: 'appref',
       reason: 'SYNTHETIC',
       decision_authority: false,
@@ -257,14 +296,30 @@ try {
   assert.match(await page.locator('#infoRules').innerText(), /This process/);
   assert.match(await page.locator('#infoRules').innerText(), /Application fallback/);
   await page.screenshot({ path: path.join(run, 'synthetic-process-normal.png') });
+  for (const [id, name, pattern] of [
+    ['socket-out', 'synthetic-connection-outgoing.png', /This connection · Outgoing/],
+    ['socket-shared', 'synthetic-connection-shared.png', /Shared\/display-only|shared holder/],
+    ['socket-unknown', 'synthetic-connection-unidentified.png', /Unavailable|No supported/],
+  ]) {
+    await page.locator(`#rows tr[data-id="${id}"] .name`).click();
+    await page.waitForTimeout(300);
+    assert.match(await page.locator('#infoRules').innerText(), pattern);
+    assert.equal(
+      await page.locator('.activity-quick button.quick-allow:not(:disabled)').count(),
+      0,
+    );
+    await page.screenshot({ path: path.join(run, name) });
+  }
+  await page.locator('#rows tr[data-id^="process:"][data-id$=":101:123"] .name').click();
+  await page.waitForTimeout(300);
   await page.locator('.sidebar-process-policy[data-direction=incoming]').click();
-  assert.equal(await page.getByLabel('Rule target', { exact: true }).inputValue(), 'process');
-  await page.getByLabel('Rule to create or change', { exact: true }).selectOption('new');
-  await page.getByText('All addresses and ports for this protocol', { exact: true }).check();
-  await page.locator('.quick-allow').click();
+  assert.match(await page.locator('.activity-quick').innerText(), /In · This process · PID 101/);
+  await page.screenshot({ path: path.join(run, 'synthetic-process-setter.png') });
+  if (await page.locator('[data-focus=quick-new]').count())
+    await page.click('[data-focus=quick-new]');
+  await page.click('[data-focus=quick-advanced]');
   await wait(() => page.locator('#ruleEditor').isVisible());
   assert.match(await page.locator('#editorApplication').innerText(), /This process/);
-  await page.click('#editorMode');
   await page.selectOption('#createScope', 'custom');
   await page.fill('#editAddress', '2001:db8::123');
   await page.locator('#editAddress').evaluate((e) => e.setSelectionRange(2, 6));

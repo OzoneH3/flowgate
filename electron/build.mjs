@@ -35,6 +35,7 @@ await build({
     'src/editor-presentation.ts',
     'src/icons.ts',
     'src/rule-status.ts',
+    'src/rule-chip.ts',
     'src/backend.ts',
     'src/extended.ts',
     'src/daemon-monitoring.ts',
