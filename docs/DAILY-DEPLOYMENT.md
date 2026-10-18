@@ -1,0 +1,142 @@
+# Daily service: prepared candidate, host acceptance pending authentication
+
+This increment adds continuous incoming/both-direction operation, not a longer
+five-minute evaluation. `CONTINUOUS.md` is the API/failure contract. The matched
+UI includes released ce8bb0f, continuous checkpoint4e93f8e and its accepted followups.
+The earlier real kernel TCP collector evidence and zone/process/UDP matrices are
+reused. No host install or reboot is claimed by this preparation document.
+
+## Installation and exact identity
+
+`scripts/prepare-daily-release.sh` requires a clean master and builds an immutable-
+hash bundle under `.workspace/daily-releases/FULL_SHA`. It reuses the accepted UDP
+and TCP helper binaries, compiles native test programs and includes typed control,
+local recovery, unit/configuration and focused host acceptance adapters. The
+manifest records source/hash/evidence. `flowgate version` and API `build` report
+executing source and SHA256. Source files in the checkout are never the service's
+executables; no running inode is overwritten.
+
+The one authenticated install command printed by preparation performs root
+readiness first. Refusal preserves the old runtime. It snapshots the old executable,
+arguments and online SQLite backups under `/var/lib/flowgate/backups/FULL_SHA`,
+then installs root-owned `/usr/local/lib/flowgate/releases/FULL_SHA`, atomically
+sets `current`, stages/validates units, generation-stops the old writer, and starts
+monitoring before explicit acceptance activation. No two writers share a database.
+New schemas are never made readable by deleting process/zone records or restoring
+an older database over newer policy. Previous artifact and data remain for review.
+
+The focused host stage uses only dedicated native receivers and its fixed veth
+peer, exact test rules, current readiness and original administrator UID1000.
+It verifies Allow+delivery/Deny0 in both directions/families, remembered policy,
+process override/inactive-after-restart, same-peer zone reclassification and another
+executable. It restores original zone config and deletes exact test rule versions.
+Failure preserves evidence and invokes local monitoring recovery, never declares
+continuous protection passed. Root authentication is not available to the agent;
+no repeated sudo attempts or sudoers change is used.
+
+## Actual host adapter and startup failure policy
+
+Observed CachyOS uses NetworkManager; networkd is disabled. Tailscale and bpftune
+are enabled. `flowgate-guard.service` is before network-pre/NetworkManager/Tailscale,
+and a FlowGate-owned NetworkManager drop-in **Requires** the guard with ordering.
+This explicit dependency, not just Before=network-pre.target, prevents normal NM
+startup after guard failure. The guard persists on daemon initialization/crash
+failure and blocks new local TCP SYN/unestablished UDP; existing connections and
+narrow DHCP bootstrap are preserved. Non-TCP/UDP and forwarded/other-namespace
+traffic are not covered. Initramfs/pre-unit traffic and other network managers are
+not guaranteed; no claim of full early-boot containment or reboot acceptance yet.
+
+The actual daemon starts after NM, Tailscale and bpftune. This avoids a cycle:
+bpftune itself is after network.target. While these dependencies start, the guard
+holds new supported TCP/UDP. bpftune is Type=simple, so unit ordering alone is not
+callback readiness: the root launch adapter waits for the observed connection-tuner
+program inventory to settle before shared TCP attachment. Missing/unstable inventory
+disables that optional source for this start, explicitly logged, rather than
+weakening the foreign-program check. Enforcement remains independent. Accepted
+running-session helper proof is reused; cold-boot callbacks remain a reboot check.
+
+`flowgate.service` sends systemd READY only after rules/API and desired hooks are
+ready (or deliberately monitoring). Crash restarts are bounded; repeated failure
+leaves the guard and a failed service for local recovery. Optional collector loss
+never bypasses enforcement. Queue/pending timeout denies without a GUI; saved rules
+continue without Electron. Stop saves monitoring before cleanup; ordinary service
+restart preserves desired protection, but process-instance permissions become
+inactive and remain in inventory. Rules do not terminate existing admitted TCP.
+
+Foreign nftables, Tailscale routing/marks and bpftune programs are not changed.
+Supported Tailscale remains the inspected1.104.1 client profile with no exit/subnet
+routing. No application/transport blanket exemption is installed. New root service
+traffic can prompt; administrator decisions remain necessary. Existing admitted
+transport sessions are preserved. Host acceptance must report actual state rather
+than infer encrypted tailnet delivery from the simulated TUN component.
+
+## Commands after successful installation
+
+```sh
+scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock
+flowgate-control status
+systemctl status flowgate.service flowgate-guard.service
+journalctl -u flowgate.service -b
+flowgate-control stop                    # intentional monitoring, persisted
+flowgate-control both                    # explicit new Start; inspect status
+sudo /usr/local/sbin/flowgate-recover     # local API-independent monitoring recovery
+sudo /usr/local/sbin/flowgate-uninstall   # remove startup/daemon; preserve all data
+```
+
+Recovery is root-owned, uses fixed installed paths, saves monitoring atomically,
+stops the service, verifies absence of the recorded consumer and removes only its
+owned table/marks/guard, then starts monitoring/UDP again. It does not depend on
+network, GUI or a working API. Uninstall first recovers, stops/disables the two units
+and removes only unchanged FlowGate unit/drop-in files. Policies/backups/releases
+are preserved. Do not merely disable the daemon and leave the NM guard dependency
+or a fail-closed table without understanding the result.
+
+## Evidence and remaining boundaries
+
+- Real isolated TUN/conntrack/NFQUEUE with simulated Tailscale configuration:
+  `.workspace/continuous-component-i290r4k2/result.json` and
+  `.workspace/continuous-component-f4fozgp6/result.json`; the latter remained active
+  for310 actual seconds without GUI. Both direction/family TCP+UDP deliveries and
+  blocked receivers, replies/masks, expiry, Stop, actual SIGKILL/stale recovery,
+  foreign rule/routing preservation passed.
+- `.workspace/daily-adapter-_pkkeo1h/acceptance/result.json`: production acceptance
+  driver exercised real private receiver/policy/identity/zone paths, using a
+  **simulated systemd restart adapter**, not host systemd. Original log case labels
+  inherited “host” wording; this is isolated evidence only. Harness label is explicit.
+- `.workspace/daily-adapter-rncpxafd/failure-result.json`: actual private guard
+  prevented delivery before/during unsupported-tunnel initialization refusal;
+  local owned recovery restored delivery. Unit syntax/dependency resolution lint
+  passed with present candidate executable paths. Installed unit graph and boot
+  still require privileged stage/reboot checks.
+- Real sandboxed UI `.workspace/worktrees/electron/.workspace/continuous-real-5migP3/`
+  passed concurrent prompts, expiry, queued selection, no Enter decision, lost ACK,
+  reconnect, exact rule cleanup, GUI exit retaining active enforcement and explicit
+  Stop. Backend independently verified generation/rules0 and cleaned its fixture.
+- Earlier retained-identity rejection remains unexplained. Revalidation was not
+  relaxed; current TCP admissions passed isolated checks. Host failures capture
+  fresh attribution/Decision Log before any rerun.
+
+Zones retain explicit configured-prefix semantics; no zone byte totals. Unknown
+classification is not Internet. No process-only pending Remember or stored Ask.
+BPF event coverage remains partial (pre-existing/closed-before-snapshot unknown).
+UI source reliability improvements do not prove every intermittent stall resolved.
+
+## Reboot acceptance (only after installed host acceptance passes)
+
+One user action: reboot when convenient; no agent reboot.
+
+After login, **before opening Electron**, inspect:
+
+```sh
+systemctl is-enabled flowgate.service flowgate-guard.service
+systemctl status flowgate.service flowgate-guard.service
+flowgate-control status
+journalctl -b -u flowgate-guard.service -u flowgate.service --no-pager
+```
+
+Require a fresh daemon generation, intended `desired_mode: both`, actual `active`
+profileboth (no countdown), active UDP, honest shared TCP collector state, and READY
+only after hooks. Check guard-before-NM ordering with
+`systemd-analyze critical-chain NetworkManager.service flowgate.service` and verify
+Tailscale/bpftune remain active. Repeat one dedicated remembered/new request journey
+as a separate reboot acceptance; an enabled unit alone is not evidence of protection.

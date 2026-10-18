@@ -1,0 +1,24 @@
+[Unit]
+Description=FlowGate application firewall and connection observer
+Requires=flowgate-guard.service
+Wants=NetworkManager.service tailscaled.service bpftune.service
+After=flowgate-guard.service NetworkManager.service tailscaled.service bpftune.service
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStartPre=/usr/local/lib/flowgate/current/flowgate monitor-setup
+ExecStartPre=/usr/local/lib/flowgate/current/flowgate protection-guard --state /run/flowgate-enforcement --desired /var/lib/flowgate/protection.json
+ExecStart=/usr/local/lib/flowgate/current/launch
+Restart=on-failure
+RestartSec=3s
+TimeoutStartSec=60s
+TimeoutStopSec=45s
+KillMode=control-group
+UMask=0077
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

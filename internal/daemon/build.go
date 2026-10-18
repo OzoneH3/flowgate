@@ -1,0 +1,7 @@
+package daemon
+
+type BuildIdentity struct {
+	Source           string `json:"source"`
+	ExecutableSHA256 string `json:"executable_sha256"`
+	Modified         bool   `json:"modified"`
+}

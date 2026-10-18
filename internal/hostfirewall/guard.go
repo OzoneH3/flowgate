@@ -99,6 +99,11 @@ func RemoveGuard(dir string) error {
 // RecoverContinuous never removes a live daemon's interception. It protects new
 // admissions before reclaiming a stale exact-token record for the same netns.
 func RecoverContinuous(dir string) error {
+	if _, err := os.Lstat(dir); os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return err
+	}
 	r, err := Read(dir)
 	if os.IsNotExist(err) {
 		return nil

@@ -2,9 +2,9 @@
 """Private native process-rule receiver suite or exclusively delegated UI fixture.
 Run through scripts/lab.sh. Never opens host endpoints or deployed executable.
 """
-import argparse,json,os,pathlib,socket,subprocess,time,sys
+import argparse,json,os,pathlib,socket,subprocess,time,sys,shutil
 ROOT=pathlib.Path(__file__).resolve().parents[1]
-p=argparse.ArgumentParser();p.add_argument('--binary',required=True);p.add_argument('--native',required=True);p.add_argument('--run',required=True);p.add_argument('--hold',action='store_true');p.add_argument('--any-protocol',action='store_true');p.add_argument('--zones',action='store_true');p.add_argument('--zones-unknown',action='store_true');p.add_argument('--remember-zones',action='store_true');p.add_argument('--hold-enforcement',action='store_true',help='with --hold, bounded private incoming+outgoing interception for prompt acceptance');p.add_argument('--continuous',action='store_true',help='held daily lifecycle candidate; monitoring initially, UI owns Start/Stop');a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--binary',required=True);p.add_argument('--native',required=True);p.add_argument('--run',required=True);p.add_argument('--hold',action='store_true');p.add_argument('--any-protocol',action='store_true');p.add_argument('--zones',action='store_true');p.add_argument('--zones-unknown',action='store_true');p.add_argument('--remember-zones',action='store_true');p.add_argument('--hold-enforcement',action='store_true',help='with --hold, bounded private incoming+outgoing interception for prompt acceptance');p.add_argument('--continuous',action='store_true',help='held daily lifecycle candidate; monitoring initially, UI owns Start/Stop');p.add_argument('--other',action='store_true',help='held third executable identity');a=p.parse_args()
 if a.continuous and not a.hold:p.error('--continuous requires --hold')
 if a.hold_enforcement and not a.hold:p.error('--hold-enforcement requires --hold')
 if a.zones_unknown or a.remember_zones:a.zones=True
@@ -94,12 +94,14 @@ try:
  wait(lambda:os.readlink(f'/proc/{peer.pid}/ns/net')!=os.readlink('/proc/self/ns/net'))
  cmd('ip','link','add','fghost','type','veth','peer','name','fgpeer');cmd('ip','link','set','fgpeer','netns',str(peer.pid));cmd('ip','link','set','fghost','up');cmd('ip','addr','add','10.79.0.1/24','dev','fghost');cmd('ip','-6','addr','add','fd79::1/64','dev','fghost','nodad');remote('setup')
  cmd('nft','add','table','inet','unrelated_fixture');cmd('nft','add','chain','inet','unrelated_fixture','track','{ type filter hook input priority 0; policy accept; }');cmd('nft','add','rule','inet','unrelated_fixture','track','ct','state','established','counter')
- for name,port in [('alpha',45000),('beta',45010)]:
-  children[name]=subprocess.Popen([NATIVE,str(port)],env=dict(os.environ,FLOWGATE_FIXTURE_TIMEOUT_SECONDS='60'if a.hold_enforcement or a.continuous else'2'),stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=(RUN/(name+'.log')).open('w'),text=True);infos[name]=json.loads(children[name].stdout.readline())
+ for name,port in [('alpha',45000),('beta',45010)]+([('other',45020)]if a.other else []):
+  executable=NATIVE
+  if name=='other':executable=str(RUN/'native-other');shutil.copy2(NATIVE,executable)
+  children[name]=subprocess.Popen([executable,str(port)],env=dict(os.environ,FLOWGATE_FIXTURE_TIMEOUT_SECONDS='60'if a.hold_enforcement or a.continuous else'2'),stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=(RUN/(name+'.log')).open('w'),text=True);infos[name]=json.loads(children[name].stdout.readline())
  initial=start();generation=initial['generation'];assert 'process-instance-rules-v1'in initial['capabilities']
  ta,tb=target('alpha'),target('beta')
  if a.hold:
-  (RUN/'ready.json').write_text(json.dumps(dict(socket=API,monitor_socket=API+'.monitor',generation=generation,alpha=infos['alpha'],beta=infos['beta'],alpha_target=ta,beta_target=tb,command=str(RUN/'command'),profile='continuous'if a.continuous else'both'if a.hold_enforcement else'monitor',prompt_timeout_seconds=12 if a.continuous else 60 if a.hold_enforcement else None,enforcement=initial.get('enforcement'))))
+  (RUN/'ready.json').write_text(json.dumps(dict(socket=API,monitor_socket=API+'.monitor',generation=generation,alpha=infos['alpha'],beta=infos['beta'],alpha_target=ta,beta_target=tb,other=infos.get('other'),other_target=target('other')if a.other else None,command=str(RUN/'command'),profile='continuous'if a.continuous else'both'if a.hold_enforcement else'monitor',prompt_timeout_seconds=12 if a.continuous else 60 if a.hold_enforcement else None,enforcement=initial.get('enforcement'))))
   log('READY; UI exclusively owns API. command file JSON: {op:incoming|outgoing,protocol:tcp|udp,v6:false,name:alpha|beta}, {op:counts|peer-counts|exit|exec,name:alpha|beta}, or {op:quit}. Reply command-result.json')
   while True:
    path=RUN/'command'

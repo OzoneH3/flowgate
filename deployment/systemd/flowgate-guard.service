@@ -1,0 +1,16 @@
+[Unit]
+Description=FlowGate fail-closed guard for new TCP/UDP admissions
+DefaultDependencies=no
+RequiresMountsFor=/usr/local/lib/flowgate /var/lib/flowgate
+After=local-fs.target systemd-modules-load.service
+Before=network-pre.target NetworkManager.service tailscaled.service
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/flowgate/current/flowgate protection-guard --state /run/flowgate-enforcement --desired /var/lib/flowgate/protection.json
+RemainAfterExit=yes
+TimeoutStartSec=15s
+
+[Install]
+WantedBy=network-pre.target

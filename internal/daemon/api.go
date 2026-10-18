@@ -53,6 +53,7 @@ type EnforcementStatus struct {
 	StopsAt time.Time `json:"stops_at"`
 }
 type Response struct {
+	Build           *BuildIdentity             `json:"build,omitempty"`
 	DecisionPreview *DecisionPreview           `json:"decision_preview,omitempty"`
 	DecisionReceipt *DecisionReceipt           `json:"decision_receipt,omitempty"`
 	NetworkZones    *identity.NetworkZones     `json:"network_zones,omitempty"`
@@ -154,7 +155,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 					if err != nil || cred == nil {
 						return
 					}
-					r := Response{Capabilities: []string{ConditionalDeleteCapability, "explicit-administrator-v1"}, Version: 1, Generation: e.Generation, ReadOnly: readonly, Mode: e.Mode, ServerTime: time.Now(), PeerUID: cred.Uid}
+					r := Response{Build: e.Build, Capabilities: []string{ConditionalDeleteCapability, "explicit-administrator-v1"}, Version: 1, Generation: e.Generation, ReadOnly: readonly, Mode: e.Mode, ServerTime: time.Now(), PeerUID: cred.Uid}
 					// The companion exposes the existing read-only observation contract while
 					// retaining the actual daemon mode for permission-aware clients.
 					if e.Mode == "daemon-monitor" || (e.Mode == "host-enforcement" && e.Activity != nil) {

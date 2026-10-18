@@ -96,6 +96,8 @@ func serveCommand(args []string) error {
 		return fmt.Errorf("decision-timeout must be 1s–60s")
 	}
 	e := daemon.New(*decisionTimeout)
+	build := buildIdentity()
+	e.Build = &build
 	e.Zones = zones
 	defer e.CloseProcessTargets()
 	peer := uint32(*uid)

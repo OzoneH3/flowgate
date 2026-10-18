@@ -411,6 +411,12 @@ func (m *Evaluation) run(ctx context.Context, id string) {
 								return
 							}
 							if continuous {
+								m.mu.Lock()
+								m.status.State = "degraded"
+								m.status.ReasonCode = "runtime_compatibility_failed"
+								m.status.Reason = er.Error()
+								m.status.Cleanup = "unconfirmed"
+								m.mu.Unlock()
 								if guardErr := InstallGuard(m.dir); guardErr != nil {
 									er = fmt.Errorf("%v; guard installation failed: %w", er, guardErr)
 								}

@@ -40,6 +40,8 @@ func main() {
 		return
 	}
 	switch os.Args[1] {
+	case "version":
+		output(buildIdentity())
 	case "protection-guard", "protection-recover":
 		if err := protectionLocalCommand(os.Args[1], os.Args[2:]); err != nil {
 			fatal(err)

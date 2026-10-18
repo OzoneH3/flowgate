@@ -44,6 +44,7 @@ type TrafficManager interface {
 	Stop(...string) (udpaccount.Status, error)
 }
 type Engine struct {
+	Build            *BuildIdentity
 	Zones            identity.NetworkZones
 	zonePreviews     map[string]*zonePreview
 	decisionPreviews map[string]*decisionPreview
