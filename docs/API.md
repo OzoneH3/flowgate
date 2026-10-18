@@ -252,3 +252,26 @@ crash loss. Capacity final records have no individual `request_id`; additive
 identify counted initiation observations, not unique connections. Read the full
 [deduplication and durability contract](DECISION-LOG.md). A final missing from a
 loaded page/filter must be labelled **Outcome not loaded**, not presumed absent.
+
+## Terminal bridge executable selection (launcher compatibility)
+
+`scripts/desktop-control.py` and `scripts/traffic-control.py` accept the optional
+`--backend {flowgate,electron-backend}` enum. Default `flowgate` preserves Qt and
+existing terminal callers. Electron supplies the fixed internal argument
+`--backend electron-backend` and builds `.workspace/electron-backend`, leaving the
+host-approved `.workspace/flowgate` executable untouched. No renderer-supplied path
+is accepted: each enum resolves only to that fixed repository workspace filename;
+absolute paths, traversal and other names reject before authentication.
+
+This is a local terminal bridge argument, not a Unix API field or authority grant.
+Authentication and existing sudo policy are unchanged; a fresh executable path may
+require interactive authentication. Desktop Stop/Status/Recovery still prefer the
+existing root-pinned `/run/flowgate/controller` and use the selected workspace
+executable only as their existing fallback. UDP Start uses the selected executable;
+daemon-owned collector/evaluation API paths do not use these legacy bridges.
+No password is collected by Electron, and no privilege configuration is changed.
+
+Focused check: `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check-bridge-backend.py`.
+Four checks cover default/selected builds, pinned preference and invalid argument
+rejection. Authentication/control are explicitly mocked; no host or namespace
+firewall/collector activation is performed or claimed by these tests.

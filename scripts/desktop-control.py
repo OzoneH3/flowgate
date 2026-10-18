@@ -16,6 +16,7 @@ p=argparse.ArgumentParser()
 p.add_argument('--action',required=True,choices=['start','stop','recover','status'])
 p.add_argument('--job',required=True)
 p.add_argument('--token',default='')
+p.add_argument('--backend',choices=['flowgate','electron-backend'],default='flowgate',help='Fixed workspace build for Start/fallback; pinned controller remains preferred')
 a=p.parse_args()
 job=Path(a.job)
 assert job.is_absolute() and job.is_relative_to(ROOT/'.workspace')
@@ -58,8 +59,8 @@ try:
         sys.exit(1)
     # Start pins this executing binary into a root-owned runtime snapshot. Later
     # control uses that snapshot, independent of a user rebuilding the workspace.
-    binary=ROOT/'.workspace/flowgate' if a.action=='start' else Path('/run/flowgate/controller')
-    if not binary.exists():binary=ROOT/'.workspace/flowgate'
+    binary=ROOT/'.workspace'/a.backend if a.action=='start' else Path('/run/flowgate/controller')
+    if not binary.exists():binary=ROOT/'.workspace'/a.backend
     args=['sudo','-n',str(binary),'host-session','--action',a.action]
     if a.action=='start':args+=['--uid',str(os.getuid()),'--duration','5m','--timeout','30s','--profile',profile]
     if a.token:args+=['--token',a.token]
