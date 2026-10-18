@@ -5,11 +5,11 @@ Default proves unavailable isolation, not kernel byte accuracy.
 """
 import argparse,hashlib,json,os,signal,socket,subprocess,time
 from pathlib import Path
-p=argparse.ArgumentParser();p.add_argument('--run',required=True);p.add_argument('--uid',type=int,required=True);p.add_argument('--gid',type=int,required=True);p.add_argument('--kernel',action='store_true');p.add_argument('--hold',action='store_true');p.add_argument('--traffic',action='store_true');a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--run',required=True);p.add_argument('--uid',type=int,required=True);p.add_argument('--gid',type=int,required=True);p.add_argument('--kernel',action='store_true');p.add_argument('--hold',action='store_true');p.add_argument('--traffic',action='store_true');p.add_argument('--evaluation-continuity',action='store_true');p.add_argument('--binary');a=p.parse_args()
 root=Path(__file__).resolve().parents[1];run=Path(a.run).resolve();assert run.is_relative_to(root/'.workspace')
 assert os.geteuid()==0 and os.environ['FLOWGATE_PARENT_NETNS']!=os.readlink('/proc/self/ns/net')
 api_dir=run/'api';data=run/'data';api_dir.mkdir(mode=0o711);data.mkdir(mode=0o700)
-binary=root/'.workspace/flowgate-udp-daemon';helper=root/'.workspace/udp-collector'
+binary=Path(a.binary).resolve() if a.binary else root/'.workspace/flowgate-udp-daemon';helper=root/'.workspace/udp-collector'
 subprocess.run(['ip','link','set','lo','up'],check=True)
 if a.kernel:
  # Private mount namespace overlays only the already-authorized FlowGate runtime
@@ -48,6 +48,7 @@ def api(op='list',root_peer=False,readonly=False,**q):
 def start_daemon(admin=True):
  global daemon
  cmd=[str(binary),'serve','--socket',daemon_socket,'--database',database,'--uid',str(a.uid),'--udp-helper',str(helper)]
+ if a.evaluation_continuity:cmd+=['--allow-evaluation','--evaluation-state','/run/flowgate-api/evaluation']
  if admin:cmd+=['--administrator','--allow-traffic-control']
  with (run/'daemon.log').open('a')as f:daemon=subprocess.Popen(cmd,stdout=f,stderr=f)
  def ready():
@@ -95,12 +96,19 @@ try:
  before_rules=subprocess.check_output(['nft','-j','list','ruleset'])
  before_routes=subprocess.check_output(['ip','-j','route','show','table','all'])
  before_routes6=subprocess.check_output(['ip','-6','-j','route','show','table','all'])
+ if a.evaluation_continuity:
+  assert a.kernel, 'continuity requires isolated initial-namespace BPF authority'
+  subprocess.run(['nft','-f','-'],input='table inet unrelated_fixture { chain track { type filter hook input priority 0; policy accept; ct state established counter; } }',text=True,check=True)
  s=start_daemon();assert 'daemon-udp-monitor-v1'in s['capabilities']and s['traffic_monitor']['state']=='disabled'
  # Real persistent TCP exchange continues regardless of UDP lifecycle/failure.
  listen=socket.socket();listen.bind(('127.0.0.1',0));listen.listen();client=socket.socket();client.connect(listen.getsockname());accepted,_=listen.accept();client.sendall(b'tcp-baseline');assert accepted.recv(12)==b'tcp-baseline';wait(tcp_present)
  denied=api('traffic-start',readonly=True,generation=s['generation'],collector_generation='');assert denied['error_code']=='forbidden'
  assert api('traffic-start',generation='stale',collector_generation='')['error_code']=='generation_conflict'
  assert api('traffic-start',generation=s['generation'],collector_generation='stale')['error_code']=='collector_conflict'
+ if a.evaluation_continuity:
+  from evaluation_udp_continuity import check
+  check(globals())
+  raise SystemExit(0)
  if a.hold:
   import sys,threading
   held=[(f,fam)for fam in ['4','6']for f,_ in [fixture(fam)]];lock=threading.Lock();done=threading.Event()

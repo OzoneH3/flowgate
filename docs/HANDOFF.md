@@ -1,5 +1,16 @@
 # Continuation handoff
 
+## Integrated evaluation UI; kernel continuity authentication pending
+
+Full releases81c0aaa +bf3b79d are integrated with backendbfa93b6 at90cbac5.
+Integrated build/typecheck and8 evaluation tests pass. The focused real-BPF
+continuity fixture is implemented, but its concrete `sudo -n unshare` launch
+required authentication before any fixture execution. Run
+`scripts/check-evaluation-udp.sh` once interactively from this checkout. No real-BPF
+continuity result is claimed yet. Host daemon/active collector remain unchanged;
+no deployment or activation. See [INTEGRATION.md](INTEGRATION.md) for exact evidence,
+current host state, future deployment versus activation and rollback procedure.
+
 ## New backend: daemon-owned incoming evaluation (not deployed)
 
 Backend release **bfa93b6a695fb1928b0f7d55b4aff5cd1d71f626**; separate clean
@@ -12,7 +23,8 @@ No second policy daemon or database owner. Real isolated receiver/Stop and actua
 activation cleanup passed. See [DAEMON-EVALUATION.md](DAEMON-EVALUATION.md) for
 exact API, reproducible fixtures, evidence and future host procedure.
 The running host monitor and active UDP collector are untouched; no host activation
-or rollout occurred. Frontend consumer is owned by the separate UI session (not merged here). Its
+or rollout occurred. Released frontend81c0aaa and referencebf3b79d are now integrated at90cbac5;
+the newer UI visual pass remains separately owned. Its
 exact-release sandboxed Wayland Start/Allow/Block/log/active-GUI-exit/reconnect/Stop
 journey passed; fixture CLEANED after DONE. Details and binary hash in
 [DAEMON-EVALUATION.md](DAEMON-EVALUATION.md).

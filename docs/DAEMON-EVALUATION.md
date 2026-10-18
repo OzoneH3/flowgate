@@ -208,9 +208,28 @@ confirmed Stop, same daemon/rules/Activity afterwards. Screenshots/evidence in U
 worktree `.workspace/evaluation-ui-S42wAW/` (active-normal, active-narrow,
 review-real, decisions-real). UI owner sent DONE; backend then sent quit and the
 fixture confirmed CLEANED. Earlier candidate UI evidence `.workspace/evaluation-ui-
-fNpKcs` is separate. No UI source files or unreleased frontend commits were merged.
+fNpKcs` is separate. The released UI81c0aaa was subsequently integrated; the new visual pass remains separate.
 
 Host read-only final check: daemon generation **0840f7c256126f1708702f27c5b26551**,
 collector **43a091abb81a09901be2c9b460080ee1** still active, enforcement stopped,
 rules unchanged. It still lacks daemon-evaluation-v1. No host restart, collector
 interruption or enforcement was performed.
+
+
+## Integrated UI and focused real-BPF continuity follow-up
+
+UI81c0aaa and referencebf3b79d are integrated at90cbac5. The settled API is unchanged.
+`scripts/check-evaluation-udp.sh` adds one isolated initial-user-namespace BPF
+continuity journey using the existing adapter/fixtures: continuous controlled UDP4/6
+connected/unconnected transfers, TCP control, incoming evaluation Allow/Block and
+explicit Stop. Same socket IDs, observed-since, helper PID and collector generation
+are required, with final socket-API byte totals compared to fixture counts.
+It checks actual Decision Log outcomes and foreign rules/routes preservation.
+No claim of remote delivery is derived from accounting; separate receivers check
+only the Allow/Block flows. This does not repeat five-minute expiry.
+
+The concrete noninteractive launch was denied authentication before namespace or
+BPF execution. **This new case has not passed against the kernel.** Run exactly
+`scripts/check-evaluation-udp.sh` from the main checkout and authenticate if prompted;
+see [INTEGRATION.md](INTEGRATION.md) for evidence paths and remaining deployment steps.
+Host monitor and active collector were not restarted or interrupted.

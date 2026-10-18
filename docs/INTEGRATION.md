@@ -1,6 +1,77 @@
 # Integrated desktop and non-enforcing root monitor
 
-## Current: Decision Log rollout completed
+## Evaluation integration base and pending real-BPF continuity check
+
+Clean integration base **90cbac500fb96542bb8adcd22d7c2307d8082b1e** includes backend
+**bfa93b6a695fb1928b0f7d55b4aff5cd1d71f626**, full released evaluation UI
+**81c0aaac7a2245d4f0f3737bbcd0698413151c63** (merge6c936d2), and measured reference
+**bf3b79d83aaf60ad4c851bb14d1642b59a643012**. The UI owner advanced independently
+from this base for the Activity visual pass; that moving pass is not integrated.
+No API or enforcement implementation changed in this integration increment.
+
+New focused fixture: `scripts/check-evaluation-udp.sh`. It builds only the separate
+`.workspace/flowgate-eval-udp` binary and reuses the reviewed native helper/UDP
+fixtures. It creates fresh network/PID/private mount namespaces, a separate
+runtime/database, controlled UDP4/6 socket-API transfers, a TCP control connection,
+and veth Allow/Block receivers. It checks daemon/helper/collector identity and
+observed-since baselines across incoming Start/Stop, exact final cumulative fixture
+byte counts, real Decision Log outcomes, TCP availability, unchanged foreign
+rules/routes and owned cleanup. It never opens the host API or restarts its helper.
+The native tracing hooks may attach globally but registration/counters are scoped
+to this fixture's network namespace; the host collector is not reused or stopped.
+
+**Kernel result remains unverified.** The one attempted noninteractive launch
+stopped at `sudo: a password is required`, before unshare/fixture/BPF execution.
+Evidence: `.workspace/evaluation-udp-1792310361-2539650/` (source/artifact hashes).
+A sudo command-list query had succeeded; that did not establish permission to
+execute the concrete unshare command. No repeated noninteractive attempts were
+made. Minimum next action, from the main checkout:
+
+```sh
+cd /home/flowgate-user/Apps/flowgate
+scripts/check-evaluation-udp.sh
+```
+
+Enter authentication for the existing isolated harness if requested. This is a
+fixture run, **not host activation**. A successful run writes `continuity.json`
+and `verification.log` under the printed fresh workspace evidence path. On failure,
+inspect that path's `daemon.log` and actual error before retrying. The test does not
+repeat the settled300s deadline, broader UDP protocol matrix or visual matrix.
+Until this command passes, active real-BPF continuity is a coverage gap, not a claim
+established by the existing collector-lifecycle model or syntax checks.
+
+New checks: integrated Electron build/typecheck and8 focused evaluation tests
+passed; Python compile and shell syntax passed; separate Go build passed. Reused
+exact-release real Electron journey, evaluation expiry/receiver/watchdog/rollback/
+Tailscale component evidence and previously verified UDP adapter behavior. No new
+kernel counters or receiver results are claimed from the blocked launch.
+
+Read-only host check: daemon generation0840f7c256126f1708702f27c5b26551,
+collector43a091abb81a09901be2c9b460080ee1 active, enforcement stopped, zero stored
+rules. Primary retains UID1000 administrator/machine visibility and explicit
+collector control. Host still advertises Decision Log/policy/creation/UDP capabilities
+but **not daemon-evaluation-v1**. Existing partial/unregistered-cookie UDP coverage
+remains explicitly reported. No daemon restart, executable replacement, collection
+interruption or host firewall/BPF/routing action occurred.
+
+Future deployment requires a separately authorized controlled rollout, using the
+procedure below: verify current generation/configuration; retain the **then-current
+running executable** and arguments for rollback; generation-Stop and wait for
+helper/database release; atomically replace the stopped executable with the prepared
+build; start with the same database, endpoints, UID1000 administrator/helper/control
+settings plus `--allow-evaluation`; restore formerly-active UDP via guarded Start.
+Never copy a live SQLite file without its consistent backup procedure and never
+start a competing database writer. If startup fails, restore the retained exact
+executable/configuration and former collector state. Collector restart has a new
+baseline, not byte continuity. Existing rollback artifacts below refer to the prior
+Decision Log rollout, not a backup of this future rollout's running executable.
+
+The future serve command is in [DAEMON-EVALUATION.md](DAEMON-EVALUATION.md#future-host-procedure--not-executed).
+**Deploying `--allow-evaluation` grants authority only; it does not start enforcement.**
+A separate deliberate UI review/readiness/Start is required; incoming-only Tailscale
+limitations and original five-minute deadline remain. Neither step was executed here.
+
+## Deployed: Decision Log rollout completed
 
 ```sh
 cd /home/flowgate-user/Apps/flowgate

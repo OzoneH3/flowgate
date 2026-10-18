@@ -136,3 +136,19 @@ STATUS.md records current capabilities; HISTORY.md indexes prior backend evidenc
 HANDOFF.md records reproducible continuation instructions.
 
 Integration outcome: both NetLimiter 5 design commits reviewed and integrated without conflicts. Actual Wayland live-monitor and isolated UI Allow smokes passed. Reuse broader recorded evidence. Next: explicitly authorized host evaluation of the new bounded controller; game detection remains deferred.
+
+## Deferred functionality from the NetLimiter comparison
+
+The released [reference](NETLIMITER-REFERENCE.md) found no new backend dependency
+for existing Activity, prompts, policy summaries or observed-application rule creation.
+Firewall direction remains connection initiation, independent of upload/download.
+Keep the following future backend work separate from this evaluation integration:
+
+- Connection lifecycle history (not the Decision Log's recorded decisions).
+- Persistent traffic statistics (not the bounded live Activity graph).
+- Upload/download limits with actual traffic shaping semantics.
+- Bandwidth priorities with actual allocation semantics.
+- Reusable filters/zones, quotas and scheduling with explicit supported policy/storage.
+
+No placeholder controls, new policy actions or accounting/VPN deduplication are
+implemented by listing these gaps. They are optional roadmap items, not activation gates.
