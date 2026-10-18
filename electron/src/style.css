@@ -1195,3 +1195,53 @@ button.status-slot.policy-fallback .blocker-glyph { opacity: .5; }
 #tree tr[aria-selected='true'] .status-strip { background: #272727; border-color: #272727; }
 .status-slot,#tree tr[aria-selected='true'] .status-slot { color: #636363; }
 .status-slot.unavailable { color: #636363; }
+
+#tree tbody tr:hover > td { background: #373737; }
+#tree tbody tr[aria-selected='true']:hover > td { background: var(--fg-selected); }
+.disclosure { font-size: 9px; color: #e6e6e6; }
+.status-strip { gap: 0; }
+.status-slot .slot-icon { display: none; width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid #8a8a8a; color: #8a8a8a; font-size: 9px; line-height: 11px; align-items: center; justify-content: center; box-sizing: border-box; font-weight: 700; }
+.status-slot .slot-icon.family-dl-limit,.status-slot .slot-icon.family-ul-limit { border-radius: 3px; }
+.status-slot .slot-icon.family-in-quota,.status-slot .slot-icon.family-out-quota { border: 0; font-size: 15px; line-height: 14px; font-weight: 400; }
+#tree tbody tr:hover .status-slot .slot-icon,#tree tbody tr[aria-selected='true'] .status-slot .slot-icon { display: inline-flex; }
+#tree tbody tr:hover .status-slot .slot-dot,#tree tbody tr[aria-selected='true'] .status-slot .slot-dot { display: none; }
+#tree tbody tr:hover .status-strip { background: #272727; border-color: #272727; }
+#tree tbody tr[aria-selected='true'] .slot-icon { border-color: #c6c6c6; color: #c6c6c6; }
+.rule-cell.wide { width: 160px; }
+.quick-popup { width: 241px; padding: 6px 8px 5px; }
+.qs-row { margin: 0 0 5px; gap: 8px; }
+.qs-action { height: 22px; min-height: 22px; border-radius: 11px; border-color: #4a4a4a; padding: 0 9px 0 5px; }
+.qs-links { gap: 12px; }
+.link-button:hover:not(:disabled) { text-decoration: underline; }
+.rule-cell.static .blocker-glyph.family-priority { border-radius: 50%; }
+.rule-cell.static .blocker-glyph.family-limit { border-radius: 2px; }
+.rule-cell.static .blocker-glyph.family-quota { border: 0; font-size: 15px; }
+.pane-controls { margin-left: auto; display: inline-flex; align-items: center; gap: 2px; }
+#activityView h2 { display: flex; align-items: center; }
+.pane-controls-inner { display: inline-flex; align-items: center; gap: 2px; }
+.pane-controls .desktop-menu > summary,.pane-controls .pane-close { min-height: 20px; height: 20px; padding: 0 6px; border: 0; background: transparent; color: #d0d0d0; font-size: 11px; line-height: 20px; cursor: pointer; list-style: none; }
+.pane-controls .desktop-menu > summary::-webkit-details-marker { display: none; }
+.pane-controls .desktop-menu > summary:hover,.pane-controls .pane-close:hover { background: #4a4a4a; }
+.pane-menu { position: relative; }
+.pane-menu .menu-panel { position: absolute; right: 0; top: 22px; z-index: 30; min-width: 150px; padding: 4px 0; background: #2b2b2b; border: 1px solid #555; box-shadow: 0 4px 12px rgba(0,0,0,.5); }
+.pane-menu .menu-panel button { display: block; width: 100%; text-align: left; border: 0; background: transparent; padding: 4px 12px 4px 26px; min-height: 24px; font-size: 12px; position: relative; }
+.pane-menu .menu-panel button:hover { background: var(--fg-selected); color: #fff; }
+.pane-menu .menu-panel button[aria-checked='true']::before { content: '✓'; position: absolute; left: 10px; }
+.pane-menu .menu-panel .menu-heading { padding: 3px 12px; color: var(--fg-muted); font-size: 11px; }
+.pane-menu .menu-panel hr { border: 0; border-top: 1px solid #555; margin: 3px 0; }
+.tabs .pane-controls { position: absolute; right: 6px; top: 4px; }
+body.hide-info #activityView > aside { display: none; }
+body.hide-info .tabs { width: calc(100% - 8px); }
+body.hide-info #app:has(#activityView:not([hidden])) > footer { width: 100%; }
+body.hide-chart #activityView #trafficGraph { display: none; }
+.graph-heading .pane-controls { margin-left: 4px; }
+
+.status-slot .slot-icon { border: 0; background: #8a8a8a; color: #222; }
+.status-slot .slot-icon.family-in-quota,.status-slot .slot-icon.family-out-quota { background: transparent; color: #8a8a8a; }
+#tree tbody tr[aria-selected='true'] .slot-icon { background: #c6c6c6; color: #222; border: 0; }
+#tree tbody tr[aria-selected='true'] .slot-icon.family-in-quota,#tree tbody tr[aria-selected='true'] .slot-icon.family-out-quota { background: transparent; color: #c6c6c6; }
+.status-slot .slot-icon.family-priority,.status-slot .slot-icon.family-in-blocker,.status-slot .slot-icon.family-out-blocker { border-radius: 50%; }
+.rule-cell { padding: 0 3px; gap: 3px; }
+.rule-cell .cell-qualifier { margin-left: 0; }
+.pane-menu .menu-panel { left: auto; right: 0; width: max-content; min-width: 150px; }
+.tabs .pane-menu .menu-panel { right: 0; }

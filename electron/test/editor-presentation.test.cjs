@@ -31,7 +31,7 @@ test('reviewed structured scope preserves direction, protocol and any endpoints'
         remote_port: 443,
       },
     }),
-    'Application · all instances · Block outgoing UDP connections · remote 2001:db8::/32 · any local port · remote port 443 · saved disabled.',
+    'Application · all instances · Deny outgoing UDP connections · remote 2001:db8::/32 · any local port · remote port 443 · saved disabled.',
   );
 });
 test('preview validity clamps expiry and never renews it', () => {

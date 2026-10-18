@@ -14,6 +14,16 @@ export const endpointWide = (r: PolicyRuleRef) =>
   !r.scope.remote &&
   !r.scope.local_port &&
   !r.scope.remote_port;
+// Presentation only: the API action stays 'block'; the reference calls it Deny.
+export const actionWord = (action: string) =>
+  action === 'allow'
+    ? 'Allow'
+    : action === 'block'
+      ? 'Deny'
+      : action
+        ? action.charAt(0).toUpperCase() + action.slice(1)
+        : 'Unknown';
+export const knownAction = (action: string) => action === 'allow' || action === 'block';
 export const refState = (r: PolicyRuleRef) =>
   r.expired ? 'Expired' : r.disabled ? 'Disabled' : r.active ? 'Enabled' : 'Inactive';
 export function shortScope(r: PolicyRuleRef) {
@@ -35,7 +45,7 @@ export function ruleChip(
   const sep = compact ? ' ' : ' · ';
   if (!d) return { glyph: '', text: 'Unavailable', tone: 'unavailable', detail: '' };
   const detail = d.rules
-    .map((r) => `${refState(r)} ${r.action === 'allow' ? 'Allow' : 'Block'} · ${shortScope(r)}`)
+    .map((r) => `${refState(r)} ${actionWord(r.action)} · ${shortScope(r)}`)
     .join('\n');
   if (d.configured === 'absent' || !d.rules.length)
     return { glyph: '', text: 'Not set', tone: 'none', detail: 'No explicit rule.' };
@@ -58,15 +68,28 @@ export function ruleChip(
   }
   const actions = new Set(active.map((r) => r.action));
   if (d.configured === 'mixed' || actions.size > 1) {
-    const allow = active.filter((r) => r.action === 'allow').length;
+    const allow = active.filter((r) => r.action === 'allow').length,
+      deny = active.filter((r) => r.action === 'block').length,
+      other = active.length - allow - deny;
     return {
       glyph: '±',
-      text: compact ? 'Mixed' : `Mixed · ${allow} allow, ${active.length - allow} block`,
+      text: compact
+        ? 'Mixed'
+        : `Mixed · ${allow} allow, ${deny} deny${other ? `, ${other} other` : ''}`,
       tone: 'mixed',
       detail,
     };
   }
-  const action = active[0].action === 'allow' ? 'allow' : 'block';
+  // Only explicit allow/block are presented as Allow/Deny; anything else (e.g. a stored ask
+  // accepted by older readers) stays neutral and read-only rather than being mislabelled.
+  if (!knownAction(active[0].action))
+    return {
+      glyph: '?',
+      text: `${actionWord(active[0].action)}${compact ? '' : ' · unsupported here'}`,
+      tone: 'unavailable',
+      detail,
+    };
+  const action = active[0].action;
   const qualifier =
     d.configured === 'uniform'
       ? 'all'
@@ -80,7 +103,7 @@ export function ruleChip(
   const off = d.rules.length - active.length;
   return {
     glyph: action === 'allow' ? '✓' : '✕',
-    text: `${action === 'allow' ? 'Allow' : 'Block'}${sep}${qualifier}${off && !compact ? ` +${off} off` : ''}`,
+    text: `${actionWord(action)}${sep}${qualifier}${off && !compact ? ` +${off} off` : ''}`,
     tone: action,
     detail,
   };

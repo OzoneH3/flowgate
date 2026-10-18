@@ -37,8 +37,8 @@ test('rule chip shows action and scope, never Allow for absent', () => {
   assert.equal(ruleChip(undefined).text, 'Unavailable');
   const one = ruleChip(dir('scoped', [ref('block')]));
   assert.equal(one.glyph, '✕');
-  assert.equal(one.text, 'Block · UDP');
-  assert.equal(ruleChip(dir('scoped', [ref('block')]), false, true).text, 'Block UDP');
+  assert.equal(one.text, 'Deny · UDP');
+  assert.equal(ruleChip(dir('scoped', [ref('block')]), false, true).text, 'Deny UDP');
   const narrow = ref('allow', {
     scope: { ...ref('allow').scope, protocol: 'tcp', remote_address: '10.0.0.0/8' },
   });
@@ -53,16 +53,25 @@ test('rule chip shows action and scope, never Allow for absent', () => {
 test('rule chip keeps multiple scoped rules distinct and shows inactive', () => {
   const mixed = ruleChip(dir('mixed', [ref('allow'), ref('block')]));
   assert.equal(mixed.tone, 'mixed');
-  assert.match(mixed.text, /1 allow, 1 block/);
+  assert.match(mixed.text, /1 allow, 1 deny/);
   assert.equal(mixed.detail.split('\n').length, 2);
-  assert.equal(ruleChip(dir('scoped', [ref('block'), ref('block')])).text, 'Block · 2 rules');
+  assert.equal(ruleChip(dir('scoped', [ref('block'), ref('block')])).text, 'Deny · 2 rules');
   const off = ref('allow', { disabled: true, active: false });
   assert.equal(ruleChip(dir('inactive_only', [off])).text, 'Disabled');
-  assert.equal(ruleChip(dir('scoped', [ref('block'), off])).text, 'Block · UDP +1 off');
+  assert.equal(ruleChip(dir('scoped', [ref('block'), off])).text, 'Deny · UDP +1 off');
   assert.equal(
     ruleChip(dir('inactive_only', [ref('allow', { expired: true, active: false })])).text,
     'Expired',
   );
   assert.equal(ruleChip(dir('scoped', [ref('block')]), true).text, 'Inactive · ended');
   assert.equal(ruleChip(dir('scoped', [ref('block')]), true).tone, 'off');
+});
+test('rule chip never presents a non-block action as Deny', () => {
+  const ask = ref('ask');
+  const one = ruleChip(dir('scoped', [ask]));
+  assert.equal(one.tone, 'unavailable');
+  assert.match(one.text, /^Ask/);
+  assert.doesNotMatch(one.text, /Deny/);
+  const mixed = ruleChip(dir('mixed', [ref('allow'), ask]));
+  assert.match(mixed.text, /1 allow, 0 deny, 1 other/);
 });

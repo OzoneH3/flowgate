@@ -10,7 +10,14 @@ import {
   type DirectionPolicy,
 } from './policy';
 import { ruleStatus, ruleState } from './rule-status';
-import { ruleChip, renderChip, refState, shortScope, type RuleChip } from './rule-chip';
+import {
+  ruleChip,
+  actionWord,
+  knownAction,
+  refState,
+  shortScope,
+  type RuleChip,
+} from './rule-chip';
 import { reviewedScope, previewSeconds } from './editor-presentation';
 import { initiationPresentation } from './initiation';
 import { openRule, confirmRuleDelete } from './workflows';
@@ -115,14 +122,14 @@ interface Popup {
   lifetime: 'persistent' | 'hour';
   enabled: boolean;
 }
-const SLOTS: { key: string; label: string; direction?: Direction }[] = [
-  { key: 'priority', label: 'Priority' },
-  { key: 'dl-limit', label: 'DL Limit' },
-  { key: 'ul-limit', label: 'UL Limit' },
-  { key: 'in-blocker', label: 'In Blocker', direction: 'incoming' },
-  { key: 'out-blocker', label: 'Out Blocker', direction: 'outgoing' },
-  { key: 'in-quota', label: 'In Quota' },
-  { key: 'out-quota', label: 'Out Quota' },
+const SLOTS: { key: string; label: string; glyph: string; direction?: Direction }[] = [
+  { key: 'priority', label: 'Priority', glyph: '↑' },
+  { key: 'dl-limit', label: 'DL Limit', glyph: '↓' },
+  { key: 'ul-limit', label: 'UL Limit', glyph: '↑' },
+  { key: 'in-blocker', label: 'In Blocker', glyph: '✓', direction: 'incoming' },
+  { key: 'out-blocker', label: 'Out Blocker', glyph: '✓', direction: 'outgoing' },
+  { key: 'in-quota', label: 'In Quota', glyph: '⬡' },
+  { key: 'out-quota', label: 'Out Quota', glyph: '⬡' },
 ];
 export const STATUS_SLOTS = SLOTS;
 // Blocker cell: circular glyph + state word.
@@ -367,12 +374,20 @@ export class ActivityPolicy {
       const label = el('th', name);
       label.scope = 'row';
       tr.append(label);
-      for (const d of directions) {
+      // Priority is direction-less in the reference: one cell spanning In and Out.
+      for (const d of name === 'Priority' ? ['both'] : directions) {
         const td = el('td');
-        const cell = el('span', '', 'rule-cell static');
-        cell.append(el('span', glyph, 'blocker-glyph tone-none'), el('span', 'n/a', 'cell-text'));
+        if (d === 'both') td.colSpan = 2;
+        const cell = el('span', '', 'rule-cell static' + (d === 'both' ? ' wide' : ''));
+        cell.append(
+          el('span', glyph, 'blocker-glyph tone-none family-' + name.toLowerCase()),
+          el('span', 'n/a', 'cell-text'),
+        );
         cell.title = `${name} rules are not a FlowGate feature (no traffic shaping backend). Shown only to mirror the reference layout.`;
-        cell.setAttribute('aria-label', `${name} ${short(d)}: not available in FlowGate`);
+        cell.setAttribute(
+          'aria-label',
+          `${name}${d === 'both' ? '' : ' ' + short(d as Direction)}: not available in FlowGate`,
+        );
         td.append(cell);
         tr.append(td);
       }
@@ -473,7 +488,11 @@ export class ActivityPolicy {
     const title = el('div', '', 'activity-rule-title');
     title.append(
       el('span', short(ref.scope.direction as Direction), 'rule-direction-chip'),
-      el('strong', ref.action === 'allow' ? '✓ Allow' : '✕ Block', `rule-action-${ref.action}`),
+      el(
+        'strong',
+        `${ref.action === 'allow' ? '✓' : '✕'} ${actionWord(ref.action)}`,
+        `rule-action-${ref.action}`,
+      ),
       el('span', shortScope(ref), 'activity-rule-scope'),
       el('span', state, 'rule-enabled-state state-' + state.toLowerCase()),
     );
@@ -639,6 +658,10 @@ export class ActivityPolicy {
           });
       };
       links.append(advanced);
+      const noDelete = button('Delete', 'qs-delete-none', 'link-button');
+      noDelete.disabled = true;
+      noDelete.title = 'No rule to delete here yet.';
+      links.append(noDelete);
       if (!this.anyProtocol()) {
         const seg = el('span', '', 'segmented small');
         seg.setAttribute('role', 'radiogroup');
@@ -686,7 +709,9 @@ export class ActivityPolicy {
     const inactiveTarget =
       !!ref && (ref.target_state === 'inactive' || c.rule_states?.[ref.id]?.state === 'inactive');
     const editable = !ref || !!this.editable(ref);
-    const disabled = blocked || (!!ref && (ref.expired || inactiveTarget || !editable));
+    // A rule whose action this UI does not support (e.g. stored ask) is shown but not changed here.
+    const foreign = !!ref && !knownAction(ref.action);
+    const disabled = blocked || foreign || (!!ref && (ref.expired || inactiveTarget || !editable));
     const key = ref ? `qs:${ref.id}` : 'qs:new';
     const enabled = el('input');
     enabled.type = 'checkbox';
@@ -710,12 +735,10 @@ export class ActivityPolicy {
       });
     };
     row.append(enabled);
+    if (foreign)
+      row.title = `Action "${ref!.action}" is not editable from this quick setter; use Advanced or the Rule list.`;
     for (const action of ['allow', 'block'] as const) {
-      const b = button(
-        action === 'allow' ? 'Allow' : 'Block',
-        `${key}:${action}`,
-        `qs-action qs-${action}`,
-      );
+      const b = button(actionWord(action), `${key}:${action}`, `qs-action qs-${action}`);
       b.prepend(el('span', action === 'allow' ? '✓' : '✕', 'blocker-glyph tone-' + action));
       const current = ref?.action === action;
       if (current) b.classList.add('current');
@@ -728,7 +751,7 @@ export class ActivityPolicy {
         : `Create the ${action} rule shown above. The backend verifies the target before storing it.`;
       b.onclick = () => {
         if (ref)
-          this.review_edit(ref, `Change to ${action === 'allow' ? 'Allow' : 'Block'}`, {
+          this.review_edit(ref, `Change to ${actionWord(action)}`, {
             action,
             disabled: ref.disabled,
           });
@@ -778,7 +801,7 @@ export class ActivityPolicy {
     let left = a.left - h.left - 1;
     if (left + width > h.width - 2) left = Math.max(2, h.width - width - 2);
     pop.style.left = `${Math.round(left)}px`;
-    pop.style.top = `${Math.round(a.bottom - h.top + 7)}px`;
+    pop.style.top = `${Math.round(a.bottom - h.top + 4)}px`;
     pop.style.setProperty('--caret-x', `${Math.round(a.left - h.left - left + 12)}px`);
     // Keep the whole popup inside the scrollable Info View (narrow windows).
     const scroller = this.host.closest<HTMLElement>('.info-scroll');
@@ -813,7 +836,7 @@ export class ActivityPolicy {
     const expiry: 'hour' | 'permanent' =
       tier === 'process' ? 'permanent' : lifetime === 'hour' ? 'hour' : 'permanent';
     const run = async () => {
-      const p = this.begin(`New ${action} rule`);
+      const p = this.begin(`New ${actionWord(action).toLowerCase()} rule`);
       try {
         const draft = await window.flowgate.ruleDraft(source);
         if (!this.current(p)) return;

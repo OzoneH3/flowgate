@@ -157,7 +157,7 @@ try {
   await wait(() => page.locator('.rule-details summary').isVisible());
   await page.locator('.rule-details summary').click();
   assert.equal(await page.locator('#infoRules .activity-rule').count(), 5);
-  assert.match(await page.locator('#infoRules').innerText(), /Block[\s\S]*Expired/);
+  assert.match(await page.locator('#infoRules').innerText(), /Deny[\s\S]*Expired/);
   assert.match(await page.locator('#infoRules').innerText(), /Allow[\s\S]*Disabled/);
   await wait(() => row.locator('img').count());
   await page.screenshot({ path: path.join(run, 'synthetic-scoped-rules.png') });
