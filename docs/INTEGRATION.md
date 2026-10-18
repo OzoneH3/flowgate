@@ -1,5 +1,58 @@
 # Integrated desktop and non-enforcing root monitor
 
+## Deployed: process-instance rules monitor upgrade (2026-10-18)
+
+Running source **60d35a366ae0104f9131f36916ff4172ef71ce71** (exact-release
+`.workspace/flowgate-process`, SHA256
+`882556c5c977765b678c4dd09521bef6dc596e4532f6af223fcca073ea4ebd05`, `vcs.modified=false`).
+Checkout bfed394 differs from it only in docs/electron, so the receiver/race-tested
+release artifact was installed unchanged; no Go tests were rerun.
+
+- Root daemon PID **2847094**, generation **e47c8938265ebf19cacc1fee5a681c8c**,
+  `daemon-monitor`. Same sockets (`/run/flowgate-api/daemon.sock`, `.sock.monitor`,
+  UID1000/root 0600, dir 0711), same `/var/lib/flowgate/rules.db`, same arguments:
+  `serve --socket … --database … --uid 1000 --administrator --udp-helper … --allow-traffic-control`.
+  No `--allow-evaluation`: the new `can_control_evaluation` permission is **false**;
+  all previous permission fields are unchanged. Observer endpoint remains read-only.
+- New capabilities: `process-instance-rules-v1`, `activity-initiation-v1`,
+  `daemon-evaluation-v1` (advertised; not granted). Previous ones retained.
+- UDP was active before and was restored by one guarded `traffic-start`: helper
+  PID **2847108**, collector **ac3056b3b8f3299dce5dc2b57985808f**. Fresh baseline,
+  ~0.23s control-path gap, no byte continuity claimed.
+- Enforcement **stopped** throughout. Stored rules 0 before/after. Decision Log ok,
+  `recording:false`, same log ID. Single database writer; no orphan helpers.
+
+**Attempt 1 rolled back automatically.** The upgrade script's strict permission
+equality rejected the additive `can_control_evaluation:false` field; the script
+generation-stopped the candidate, reinstalled the retained running executable and
+restored UDP (intermediate generation 573821314736bed2e74a26eae899113e). This
+exercised the rollback path for real. The check was then narrowed to "all prior
+fields equal, only that new field, and false"; attempt 2 succeeded. Two extra
+collector restarts/baselines resulted. Evidence `.workspace/process-rollout/`
+(`attempt1-*`, `before.json`, `after.json`, `upgrade.log`, `rules-inventory-before.json`).
+
+### Rollback (prepared; path exercised in attempt 1)
+
+`.workspace/process-rollout/flowgate-running-previous` is the exact previous running
+executable (source1732584, SHA256 `a666b7dd…2c2681`), exported via generation-checked
+`monitor-backup`. `flowgate-on-disk-7020db0` preserves the unrelated previous on-disk
+file. Procedure: generation-checked `monitor-stop`, wait for daemon+helper exit,
+copy backup to a temp file, chmod 755, rename over `.workspace/flowgate`, launch the
+same arguments, restore prior UDP with the new generation.
+
+Schema compatibility: "schema3" is per rule document; the SQLite file stays
+`user_version 1`, and the Decision Log changes are additive JSON fields. The old
+binary therefore reads this database unchanged **while no process rule is stored**.
+If process rules exist, the old binary refuses to start (unsupported schema). Then,
+before rollback and still under the new daemon, delete each process-scoped rule with
+conditional Delete (they are session-bound and become inactive on any restart
+anyway, so nothing durable is lost). If the new daemon has already exited, relaunch
+the new binary with the same arguments only to perform those deletions. Never strip or
+rewrite `filter.process` to make the old binary start. No file-level SQLite copy
+was taken: the DB is root-only and no supported root reader exists; adding one
+would widen the sudo-authorized binary. The consistent logical backup is the
+authoritative inventory snapshot (`rules-inventory-before.json`, empty).
+
 ## Current integration: native process-instance rules
 
 Backend **60d35a366ae0104f9131f36916ff4172ef71ce71** and explicitly released UI

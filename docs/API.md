@@ -1,6 +1,6 @@
 # Local API additions: conditional rule deletion
 
-## Process-instance extension (not deployed)
+## Process-instance extension (deployed on host monitor 60d35a3)
 
 Primary capability `process-instance-rules-v1` adds explicit process targets with
 pinned native/session identity, process-tier precedence and inactive lifecycle

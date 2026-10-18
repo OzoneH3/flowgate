@@ -1,5 +1,18 @@
 # Continuation handoff
 
+## Deployed: process-instance rules on the host monitor
+
+Root monitor now runs exact-release **60d35a3** (SHA256 `882556c5…ebd05`), PID
+**2847094**, generation **e47c8938265ebf19cacc1fee5a681c8c**, same sockets/database/
+arguments/UID1000 administrator grants; `can_control_evaluation:false` (no new grant).
+`process-instance-rules-v1` and `activity-initiation-v1` are now live on the host.
+UDP restored active (collector `ac3056b3b8f3299dce5dc2b57985808f`, helper2847108,
+fresh baseline). Enforcement **stopped**, rules0. First attempt auto-rolled back on
+an over-strict permission check (real rollback exercise); second attempt succeeded.
+Exact record, schema3 rollback rules and evidence: [INTEGRATION.md](INTEGRATION.md).
+Host UI acceptance stays read-only. Launch:
+`scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock`.
+
 ## Current integration: native process-instance rules
 
 Backend **60d35a366ae0104f9131f36916ff4172ef71ce71** and explicitly released UI
