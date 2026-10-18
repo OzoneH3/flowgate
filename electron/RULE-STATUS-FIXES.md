@@ -78,3 +78,5 @@ labelled synthetic failure/event evidence is separate from kernel proof. Popup/p
 regression is `electron/test/rule-clicks-workflow.mjs` (zero mutation calls).
 
 Correction: the hand in the hover capture was the pointer cursor, not the In Blocker artwork. The inferred palm glyph was removed; both unset Blocker slots retain the existing check glyph. The obscured screenshot does not establish a distinct underlying In icon.
+
+Cursor-free followup: live capture `glyph-unobscured.png` with the pointer over the last quota slot confirms both In/Out use a dark check inside a filled gray circle. Original SVG now matches the heavier check, 14px footprint and sampled flat gray #a7a7a7 / dark #272727. `glyph-inspect.png` is a nearest-neighbor enlarged inspection crop, not a product asset. No settings/rules changed.

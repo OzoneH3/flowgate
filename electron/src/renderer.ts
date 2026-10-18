@@ -206,16 +206,16 @@ function statusFamilyGlyph(key: string) {
   path.setAttribute(
     'd',
     key === 'in-blocker' || key === 'out-blocker'
-        ? 'M3 8l3 3 7-7'
-        : key.includes('quota')
-          ? 'M8 1l6 3v8l-6 3-6-3V4zM8 1v14M2 4l6 4 6-4'
-          : key === 'dl-limit'
-            ? 'M8 3v10M4 9l4 4 4-4'
-            : 'M8 13V3M4 7l4-4 4 4',
+      ? 'M3.5 7.5L6.2 10.2L12 4.4'
+      : key.includes('quota')
+        ? 'M8 1l6 3v8l-6 3-6-3V4zM8 1v14M2 4l6 4 6-4'
+        : key === 'dl-limit'
+          ? 'M8 3v10M4 9l4 4 4-4'
+          : 'M8 13V3M4 7l4-4 4 4',
   );
   path.setAttribute('fill', 'none');
   path.setAttribute('stroke', 'currentColor');
-  path.setAttribute('stroke-width', '1.3');
+  path.setAttribute('stroke-width', key === 'in-blocker' || key === 'out-blocker' ? '2.2' : '1.3');
   path.setAttribute('stroke-linecap', 'round');
   path.setAttribute('stroke-linejoin', 'round');
   svg.append(path);
