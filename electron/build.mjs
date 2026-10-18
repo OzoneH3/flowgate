@@ -30,6 +30,7 @@ await build({
     'src/assets.ts',
     'src/pane-model.ts',
     'src/chart-view.ts',
+    'src/popup-position.ts',
     'src/display-units.ts',
     'src/initiation.ts',
     'src/protocol.ts',

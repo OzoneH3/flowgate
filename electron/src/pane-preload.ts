@@ -1,5 +1,19 @@
 import { contextBridge, ipcRenderer } from 'electron';
+let ruleContext: { selection: string; generation: string } | undefined;
+const operation = (op: string, value: unknown) =>
+  ipcRenderer.invoke('pane:rule-operation', op, value, ruleContext);
 const api = {
+  ruleDraft: async (source: unknown) => {
+    const frame = await ipcRenderer.invoke('pane:snapshot');
+    ruleContext = {
+      selection: frame.presentation.selection,
+      generation: frame.presentation.generation,
+    };
+    return operation('draft', source);
+  },
+  rulePreview: (value: unknown) => operation('preview', value),
+  ruleSave: (value: unknown) => operation('save', value),
+  ruleReconcile: (value: unknown) => operation('reconcile', value),
   applicationIcons: (keys: unknown) => ipcRenderer.invoke('application:icons', keys),
   graph: (value: unknown) => ipcRenderer.invoke('graph', value),
   paneSnapshot: () => ipcRenderer.invoke('pane:snapshot'),

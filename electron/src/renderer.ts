@@ -161,6 +161,28 @@ function rowApplication(r: Row) {
 // Seven-slot Rule Status strip. Slots 4/5 are the In/Out Blocker state for the
 // row's own target (a process without its own rule shows its application fallback dimmed). The
 // other slots are explicitly unavailable rule families, never controls.
+function showFloatingRuleStatus() {
+  let floating = $('floatingRuleStatus');
+  if (!floating) {
+    floating = element('section', '', 'floating-rule-status');
+    floating.id = 'floatingRuleStatus';
+    floating.setAttribute('aria-label', 'Activity rule status');
+    const title = element('header', 'Rule Status · actions reviewed in Activity');
+    const close = element('button', '✕');
+    close.setAttribute('aria-label', 'Close floating rule status');
+    title.append(close);
+    floating.append(title);
+    document.body.append(floating);
+    const anchor = document.createComment('Info rule host');
+    $('infoRules').before(anchor);
+    close.onclick = () => {
+      anchor.after($('infoRules'));
+      floating.remove();
+      anchor.remove();
+    };
+  }
+  floating.append($('infoRules'));
+}
 function statusStrip(r: Row) {
   const cell = element('td', '', 'rule-status');
   const strip = element('span', '', 'status-strip');
@@ -239,9 +261,15 @@ function statusStrip(r: Row) {
     button.onclick = (event) => {
       event.stopPropagation();
       selected = r.id;
-      renderTree();
+      void window.flowgate.paneUpdate({
+        selection: selected,
+        generation: state.observation.generation,
+      });
+      for (const tr of document.querySelectorAll<HTMLElement>('#rows tr'))
+        tr.setAttribute('aria-selected', String(tr.dataset.id === selected));
       renderInfo();
-      activityPolicy?.activate(direction);
+      if (presentation?.panes.info !== 'docked') showFloatingRuleStatus();
+      activityPolicy?.activate(direction, undefined, button);
     };
     strip.append(button);
   }
@@ -1455,26 +1483,7 @@ if (!promptID) {
     }
     $('activityTab').click();
     if (action.kind === 'quick' && presentation?.panes.info !== 'docked') {
-      let floating = $('floatingRuleStatus');
-      if (!floating) {
-        floating = element('section', '', 'floating-rule-status');
-        floating.id = 'floatingRuleStatus';
-        floating.setAttribute('aria-label', 'Activity rule status');
-        const title = element('header', 'Rule Status · actions reviewed in Activity');
-        const close = element('button', '✕');
-        close.setAttribute('aria-label', 'Close floating rule status');
-        title.append(close);
-        floating.append(title);
-        document.body.append(floating);
-        const anchor = document.createComment('Info rule host');
-        $('infoRules').before(anchor);
-        close.onclick = () => {
-          anchor.after($('infoRules'));
-          floating.remove();
-          anchor.remove();
-        };
-      }
-      floating.append($('infoRules'));
+      showFloatingRuleStatus();
     }
     const focus =
       action.kind === 'quick'

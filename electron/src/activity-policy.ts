@@ -1,3 +1,4 @@
+import { popupPosition } from './popup-position';
 import type { PolicyEntry } from './pane-model';
 import { ANY_PROTOCOL_CAPABILITY, PROCESS_CAPABILITY } from './process-rules';
 import type { Attempt, ClientState, ObservedSource, Rule, RuleEdit, RuleSource } from './protocol';
@@ -160,6 +161,10 @@ export class ActivityPolicy {
   private seq = 0;
   private timer?: ReturnType<typeof setInterval>;
   private skew = 0;
+  private anchor?: HTMLElement;
+  private returnFocus?: HTMLElement;
+  private popupContext = '';
+
   constructor(
     private host: HTMLElement,
     private delegate?: (action: PolicyEntry) => void,
@@ -183,6 +188,15 @@ export class ActivityPolicy {
       if (this.pending && this.pending.phase !== 'error') return;
       this.close(false);
     });
+    window.addEventListener('resize', () => this.place());
+    document.addEventListener(
+      'scroll',
+      (event) => {
+        if (this.popup && !this.host.querySelector('.quick-popup')?.contains(event.target as Node))
+          this.place();
+      },
+      true,
+    );
     window.addEventListener('activity-rule-saved', (e) => {
       this.saved = (e as CustomEvent<string>).detail;
       this.refresh();
@@ -205,17 +219,16 @@ export class ActivityPolicy {
   private anyProtocol() {
     return !!this.state?.control.capabilities?.includes(ANY_PROTOCOL_CAPABILITY);
   }
-  activate(direction: Direction, tier = this.defaultTier()) {
-    if (this.delegate) {
-      this.delegate({ kind: 'quick', direction, tier });
-      return;
-    }
+  activate(direction: Direction, tier = this.defaultTier(), anchor?: HTMLElement) {
     if (!this.row || !this.state) return;
     if (this.pending && this.pending.phase !== 'error') {
       this.host.querySelector<HTMLElement>('.quick-popup')?.focus();
       return;
     }
     this.pending = undefined;
+    this.anchor = anchor;
+    this.returnFocus = anchor;
+    this.popupContext = this.context();
     const row = this.row;
     const protocol: Protocol = this.anyProtocol()
       ? '*'
@@ -227,11 +240,33 @@ export class ActivityPolicy {
     // Focus the popup itself, never an action: the key that opened it must not also trigger it.
     this.host.querySelector<HTMLElement>('.quick-popup')?.focus({ preventScroll: true });
   }
+  private context() {
+    return JSON.stringify([
+      this.row?.id,
+      this.row?.process?.id,
+      this.state?.control.generation,
+      this.state?.control.policy?.snapshot.token,
+      this.state?.control.connected,
+    ]);
+  }
   private close(restoreFocus: boolean) {
     const p = this.popup;
     this.popup = undefined;
     if (this.pending?.phase === 'error') this.pending = undefined;
     this.refresh();
+    if (restoreFocus && this.anchor?.classList.contains('policy-cell') && this.row && p) {
+      const control = document.querySelector<HTMLElement>(
+        `tr[data-id="${CSS.escape(this.row.id)}"] [data-direction="${p.direction}"]`,
+      );
+      if (control) {
+        control.focus({ preventScroll: true });
+        return;
+      }
+    }
+    if (restoreFocus && this.returnFocus?.isConnected) {
+      this.returnFocus.focus({ preventScroll: true });
+      return;
+    }
     if (restoreFocus && p)
       this.host
         .querySelector<HTMLElement>(`[data-focus="cell:${p.tier}:${p.direction}"]`)
@@ -245,6 +280,8 @@ export class ActivityPolicy {
     }
     this.row = row;
     this.state = state;
+    if (this.popup && this.popupContext !== this.context() && !this.hasOutstandingAction())
+      this.popup = undefined;
     if (Number.isFinite(state.control.serverNow)) this.skew = state.control.serverNow! - Date.now();
     this.host.hidden = !row || row.kind === 'overview' || row.kind === 'network';
     if (this.host.hidden || !row) return;
@@ -370,7 +407,16 @@ export class ActivityPolicy {
           `${label.textContent} ${short(d)}: ${b.textContent}. Open quick setter.`,
         );
         // Never disabled: a transient association gap must not steal keyboard focus.
-        b.onclick = () => (open ? this.close(true) : this.activate(d, tier));
+        const activate = (event: Event) => {
+          event.stopPropagation();
+          open ? this.close(true) : this.activate(d, tier, b);
+        };
+        b.onclick = activate;
+        td.onclick = (event) => {
+          if (event.target === td) activate(event);
+        };
+        td.classList.add('rule-cell-target');
+        td.ondblclick = (event) => event.stopPropagation();
         b.classList.add(tier === 'process' ? 'sidebar-process-policy' : 'sidebar-policy');
         b.dataset.direction = d;
         td.append(b);
@@ -645,7 +691,10 @@ export class ActivityPolicy {
           rule = this.editable(only);
         const advanced = button('Advanced', 'qs-advanced', 'link-button');
         advanced.disabled = !!reason || busy || only.target_state === 'inactive';
-        advanced.onclick = () => void openRule({ id: only.id }, { activity: true });
+        advanced.onclick = () =>
+          this.delegate
+            ? this.delegate({ kind: 'edit', id: only.id })
+            : void openRule({ id: only.id }, { activity: true });
         // Delete stays available for an inactive (exited) target; only edits are blocked.
         const remove = button('Delete', 'qs-delete', 'link-button');
         remove.disabled =
@@ -655,7 +704,10 @@ export class ActivityPolicy {
           !c.capabilities?.includes('conditional-rule-delete-v1');
         const generation = c.generation;
         remove.onclick = () => {
-          if (rule) confirmRuleDelete(rule, generation);
+          if (rule)
+            this.delegate
+              ? this.delegate({ kind: 'delete', id: rule.id })
+              : confirmRuleDelete(rule, generation);
         };
         links.append(advanced, remove);
       }
@@ -697,7 +749,8 @@ export class ActivityPolicy {
       advanced.title = 'Open the full editor for address, port and expiry scope.';
       advanced.onclick = () => {
         const source = this.newSource(direction, tier, inv);
-        if (source)
+        if (source && this.delegate) this.delegate({ kind: 'new' });
+        else if (source)
           void openRule(source, {
             activity: true,
             protocol: pop.protocol === '*' ? undefined : pop.protocol,
@@ -821,13 +874,19 @@ export class ActivityPolicy {
       links.hidden = !several;
       const advanced = button('Advanced', `${key}:advanced`, 'link-button');
       advanced.disabled = blocked || inactiveTarget;
-      advanced.onclick = () => void openRule({ id: ref.id }, { activity: true });
+      advanced.onclick = () =>
+        this.delegate
+          ? this.delegate({ kind: 'edit', id: ref.id })
+          : void openRule({ id: ref.id }, { activity: true });
       const remove = button('Delete', `${key}:delete`, 'link-button');
       remove.disabled =
         !canManageRules(c) || !rule || !c.capabilities?.includes('conditional-rule-delete-v1');
       const generation = c.generation;
       remove.onclick = () => {
-        if (rule) confirmRuleDelete(rule, generation);
+        if (rule)
+          this.delegate
+            ? this.delegate({ kind: 'delete', id: rule.id })
+            : confirmRuleDelete(rule, generation);
       };
       links.append(advanced, remove);
       row.append(links);
@@ -837,27 +896,45 @@ export class ActivityPolicy {
   private place() {
     const pop = this.host.querySelector<HTMLElement>('.quick-popup');
     if (!pop || !this.popup) return;
-    const anchor = this.host.querySelector<HTMLElement>(
-      `[data-focus="cell:${this.popup.tier}:${this.popup.direction}"]`,
-    );
-    const h = this.host.getBoundingClientRect();
-    if (!anchor) return;
-    const a = anchor.getBoundingClientRect();
-    const width = Math.min(pop.offsetWidth || 240, h.width - 4);
-    let left = a.left - h.left - 1;
-    if (left + width > h.width - 2) left = Math.max(2, h.width - width - 2);
-    pop.style.left = `${Math.round(left)}px`;
-    pop.style.top = `${Math.round(a.bottom - h.top + 4)}px`;
-    pop.style.setProperty('--caret-x', `${Math.round(a.left - h.left - left + 12)}px`);
-    // Keep the whole popup inside the scrollable Info View (narrow windows).
-    const scroller = this.host.closest<HTMLElement>('.info-scroll');
-    if (scroller) {
-      const r = pop.getBoundingClientRect(),
-        sr = scroller.getBoundingClientRect();
-      if (r.bottom > sr.bottom)
-        scroller.scrollTop += Math.min(r.bottom - sr.bottom + 6, r.top - sr.top);
+    const external = this.anchor?.classList.contains('policy-cell');
+    const liveExternal =
+      external && this.row
+        ? document.querySelector<HTMLElement>(
+            `tr[data-id="${CSS.escape(this.row.id)}"] [data-direction="${this.popup.direction}"]`,
+          )
+        : undefined;
+    const anchor =
+      liveExternal ||
+      (this.anchor?.isConnected
+        ? this.anchor
+        : this.host.querySelector<HTMLElement>(
+            `[data-focus="cell:${this.popup.tier}:${this.popup.direction}"]`,
+          ));
+    if (!anchor) {
+      this.close(false);
+      return;
     }
+    if (external && !liveExternal) {
+      this.close(false);
+      return;
+    }
+    const a = anchor.getBoundingClientRect();
+    const margin = 6,
+      width = Math.min(241, innerWidth - margin * 2);
+    pop.style.position = 'fixed';
+    pop.style.width = width + 'px';
+    pop.style.maxWidth = width + 'px';
+    pop.style.maxHeight = Math.max(60, innerHeight - margin * 2) + 'px';
+    pop.style.overflowY = 'auto';
+    const height = pop.getBoundingClientRect().height;
+    const { left, top } = popupPosition(a, width, height, {
+      width: innerWidth,
+      height: innerHeight,
+    });
+    pop.style.left = Math.round(left) + 'px';
+    pop.style.top = Math.round(top) + 'px';
   }
+
   // ---- backend review: preview, compare with the shown scope, then save the identical draft ----
   private begin(title: string): Pending {
     const p: Pending = {

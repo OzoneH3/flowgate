@@ -271,8 +271,27 @@ export class TrafficGraph {
         `${requested ? new Date(requested).toLocaleTimeString() : 'Selected time'} · No observed sample. Gaps are not zero.`;
     else {
       const spacing = observationSpacing(points, point);
-      box.querySelector('span')!.textContent =
-        `${point.wallAt ? new Date(point.wallAt).toLocaleTimeString() : 'Observed sample'} · Download ${displayAmount(point.down, true, this.unit)} · Upload ${displayAmount(point.up, true, this.unit)} · Observation spacing ${spacing !== undefined ? spacing.toFixed(2) + ' s' : 'unavailable (gap/baseline)'} · ${point.note}${point.partial ? ' · Partial coverage' : ''}`;
+      const content = box.querySelector('span')!;
+      content.replaceChildren(
+        document.createTextNode(
+          `${point.wallAt ? new Date(point.wallAt).toLocaleTimeString() : 'Observed sample'} · `,
+        ),
+      );
+      for (const [key, label, value] of [
+        ['download', 'Download', point.down],
+        ['upload', 'Upload', point.up],
+      ] as const) {
+        const series = document.createElement('span');
+        series.className = 'graph-' + key;
+        series.dataset.sampleSeries = key;
+        series.textContent = `${label} ${displayAmount(value, true, this.unit)}`;
+        content.append(series, document.createTextNode(' · '));
+      }
+      content.append(
+        document.createTextNode(
+          `Observation spacing ${spacing !== undefined ? spacing.toFixed(2) + ' s' : 'unavailable (gap/baseline)'} · ${point.note}${point.partial ? ' · Partial coverage' : ''}`,
+        ),
+      );
     }
     this.host.querySelector<HTMLButtonElement>('#graphPrevious')!.disabled = !points.some(
       (p) => p.at < at,

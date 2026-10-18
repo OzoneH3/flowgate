@@ -26,6 +26,7 @@ import type { RequestRef } from './notifications';
 import fs from 'node:fs';
 import { ExtendedMonitoring } from './extended';
 import { Rules } from './rules';
+import { sameProcessTarget } from './process-rules';
 import { DecisionLogClient } from './decision-log-client';
 import { Evaluation } from './evaluation';
 import type { Preferences } from './protocol';
@@ -371,6 +372,92 @@ app.whenReady().then(async () => {
     main.webContents.send('pane:rule-open', action);
   });
   const rules = new Rules(backend);
+  // Detached Info can use only drafts/receipts issued to its frozen selection.
+  // Rules remains the single main-process mutation/preview service.
+  const paneDrafts = new Map<string, { owner: number; selection: string; generation: string }>();
+  const paneReceipts = new Map<string, { owner: number; selection: string; generation: string }>();
+  const paneReconciles = new Map<
+    string,
+    { owner: number; selection: string; generation: string }
+  >();
+  ipcMain.handle('pane:rule-operation', async (e, op, value, context) => {
+    trusted(e, true);
+    if (paneRoles.get(e.sender.id) !== 'info')
+      throw Error('Only Info View can request a quick action');
+    const p = paneModel.value,
+      state = backend.view();
+    if (
+      !context ||
+      context.selection !== p.selection ||
+      context.generation !== p.generation ||
+      !state.control.connected ||
+      !state.observation.connected
+    )
+      throw Error('Selection changed or disconnected; review the target again');
+    const binding = { owner: e.sender.id, selection: p.selection, generation: p.generation };
+    const owned = (map: typeof paneDrafts, token: unknown) => {
+      const held = typeof token === 'string' ? map.get(token) : undefined;
+      if (!held || JSON.stringify(held) !== JSON.stringify(binding))
+        throw Error('Fresh selection-bound preview required');
+    };
+    if (op === 'draft') {
+      const row = p.row;
+      if (!row || !value || typeof value !== 'object') throw Error('Unsupported target');
+      if (value.observed) {
+        const o = value.observed;
+        if (
+          o.generation !== p.generation ||
+          !row.rows.some(
+            (r) => r.id === o.row_id && r.owners.length === 1 && r.owners[0] === o.process_id,
+          )
+        )
+          throw Error('Observed target is not the selected identity');
+      } else {
+        const rule = state.control.rules?.find((r) => r.id === value.id);
+        const app = row.process?.application;
+        if (
+          !rule ||
+          !app ||
+          rule.filter.application !== app.key ||
+          rule.filter.revision !== app.revision ||
+          rule.filter.uid !== row.process?.uid ||
+          (rule.filter.process &&
+            !sameProcessTarget(
+              rule.filter.process,
+              state.control.policy?.processes?.find((p) => p.process_id === row.process?.id)
+                ?.target,
+            ))
+        )
+          throw Error('Rule does not belong to selected target');
+      }
+      const draft = await rules.draft(value);
+      if (paneDrafts.size >= 32) paneDrafts.delete(paneDrafts.keys().next().value!);
+      paneDrafts.set(draft.token, binding);
+      return draft;
+    }
+    if (op === 'preview') {
+      owned(paneDrafts, value?.token);
+      const preview = await rules.preview(value);
+      if (paneReceipts.size >= 32) paneReceipts.delete(paneReceipts.keys().next().value!);
+      paneReceipts.set(preview.receipt, binding);
+      return preview;
+    }
+    if (op === 'save') {
+      owned(paneReceipts, value);
+      paneReceipts.delete(value);
+      const result = await rules.save(value);
+      if (result.reconcile) {
+        if (paneReconciles.size >= 32) paneReconciles.delete(paneReconciles.keys().next().value!);
+        paneReconciles.set(result.reconcile, binding);
+      }
+      return result;
+    }
+    if (op === 'reconcile') {
+      owned(paneReconciles, value);
+      return rules.reconcile(value);
+    }
+    throw Error('Unsupported pane rule operation');
+  });
   const decisionLog = new DecisionLogClient(backend);
   for (const [channel, handler] of Object.entries({
     'log:state': () => decisionLog.state(),

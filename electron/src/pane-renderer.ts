@@ -51,7 +51,7 @@ if (kind === 'chart') {
   });
 } else {
   content.innerHTML =
-    '<h3 id="selectedName"></h3><div id="selectedExecutable"></div><div class="info-scroll"><h3 class="info-section-title">Properties</h3><dl id="info"></dl><section id="infoRules"></section></div><p class="pane-action-hint">Rule actions open in Activity. One editor handles review and saves.</p>';
+    '<h3 id="selectedName"></h3><div id="selectedExecutable"></div><div class="info-scroll"><h3 class="info-section-title">Properties</h3><dl id="info"></dl><section id="infoRules"></section></div><p class="pane-action-hint">Quick actions use the shared rule service. Advanced editing opens in Activity.</p>';
   const delegate = (action: PolicyEntry) => {
     if (!frame) return;
     void window.flowgate
@@ -117,7 +117,11 @@ function consume(next: PaneFrame) {
         ['Ownership', r.socket.ownership],
         ['Measurements', trafficDetails(r.socket.traffic)],
       );
-    if (r.kind === 'network') fields.push(['Coverage', 'Classification unavailable. No configured network-zone attribution; totals are unknown, not zero. Not a firewall target.']);
+    if (r.kind === 'network')
+      fields.push([
+        'Coverage',
+        'Classification unavailable. No configured network-zone attribution; totals are unknown, not zero. Not a firewall target.',
+      ]);
     if (!r.rows.length && r.kind !== 'network')
       fields.push([
         'Observation',

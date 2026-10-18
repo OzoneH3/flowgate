@@ -94,11 +94,11 @@ try {
   await main.locator('#rows tr[data-id^="process:"] .name').last().click();
   const label = await main.locator('#selectedName').getAttribute('data-label');
   await wait(async () => (await info.locator('#selectedName').innerText()) === label);
-  assert.equal(await info.evaluate(() => typeof window.flowgate.ruleSave), 'undefined');
+  assert.equal(await info.evaluate(() => typeof window.flowgate.ruleDelete), 'undefined');
   await info.locator('[data-focus="cell:process:incoming"]').click();
-  await main.locator('.quick-popup').waitFor();
-  assert.equal(await info.locator('.quick-popup').count(), 0);
-  await main.locator('[data-focus="qs:new:allow"]').click();
+  await info.locator('.quick-popup').waitFor();
+  assert.equal(await main.locator('.quick-popup').count(), 0);
+  await info.locator('[data-focus="qs:new:allow"]').click();
   await wait(async () => ((await call({ operation: 'list' })).rules || []).length === 1);
   created = (await call({ operation: 'list' })).rules[0];
   assert(created.filter.process);
@@ -109,7 +109,14 @@ try {
   await info.screenshot({ path: run + '/02-info-real-process-rule.png' });
   await chart.screenshot({ path: run + '/03-chart-real.png' });
   await main.screenshot({ path: run + '/04-main-one-rule-owner.png' });
-  await main.locator('#floatingRuleStatus > header button').click();
+  await info.locator('[data-focus="cell:process:incoming"]').click();
+  await info.locator('.quick-popup').waitFor();
+  await info.screenshot({ path: run + '/popup-before-deny.png' });
+  await info.locator('[data-focus$=":block"]').click();
+  await wait(async () => (await call({ operation: 'list' })).rules?.[0]?.action === 'block');
+  created = (await call({ operation: 'list' })).rules[0];
+  await wait(async () => (await info.locator('.quick-popup').count()) === 0);
+  await info.screenshot({ path: run + '/popup-after-deny.png' });
   await wait(async () => {
     const g = await main.evaluate(async () =>
       window.flowgate.graph({
