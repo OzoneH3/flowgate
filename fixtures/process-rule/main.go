@@ -15,6 +15,16 @@ import (
 
 func main() {
 	base, _ := strconv.Atoi(os.Args[1])
+	// A held disposable prompt fixture needs time for an actual GUI decision.
+	// Default suite behavior stays two seconds; never controls the host daemon.
+	timeout := 2 * time.Second
+	if raw := os.Getenv("FLOWGATE_FIXTURE_TIMEOUT_SECONDS"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > 60 {
+			panic("fixture timeout must be 1..60 seconds")
+		}
+		timeout = time.Duration(n) * time.Second
+	}
 	host4, host6 := "10.79.0.1", "fd79::1"
 	// Optional explicit bind addresses for the separately authorized host peer.
 	// This fixture still runs as the ordinary selected user, never as root.
@@ -115,12 +125,12 @@ func main() {
 			jobs.Add(1)
 			go func() {
 				defer jobs.Done()
-				c, e := net.DialTimeout(key, net.JoinHostPort(host, strconv.Itoa(port)), 2*time.Second)
+				c, e := net.DialTimeout(key, net.JoinHostPort(host, strconv.Itoa(port)), timeout)
 				if e != nil {
 					return
 				}
 				defer c.Close()
-				c.SetDeadline(time.Now().Add(2 * time.Second))
+				c.SetDeadline(time.Now().Add(timeout))
 				c.Write([]byte("process-fixture"))
 				c.Read(make([]byte, 128))
 			}()

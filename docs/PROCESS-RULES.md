@@ -215,3 +215,41 @@ with target_scope process, wildcard address/ports and year-1 expiry. The saved r
 retains that entire binding. Decision-time evidence is in
 `.workspace/pr-guard/decision-example.json`; `target_scope:process` and full binding
 are historical snapshots even after this fixture exits.
+
+### Held native pending-prompt fixture
+
+For a UI-owned pending-decision journey, the existing disposable process fixture
+also supports `--hold --hold-enforcement --zones`. Unlike ordinary `--hold`
+(monitor only), this starts the existing isolated `host-start --profile both`
+engine with its independent **300-second watchdog** and 60-second pending/socket
+waits. This is not the incoming-only host daemon evaluation API and does not
+establish outgoing host/Tailscale support. Run only through `scripts/lab.sh`, with
+a separate candidate executable, native fixture and fresh `.workspace` directory.
+Start only when the UI driver is ready; do not extend/renew automatically.
+
+`ready.json` publishes exact generation, socket endpoints, alpha/beta identities,
+ports, active profile/deadline, and command path. Write one JSON command at a time;
+remove/read `command-result.json` between commands:
+
+- `{ "op":"incoming", "name":"alpha", "protocol":"udp", "v6":false }`
+  sends from the disposable peer to that native receiver.
+- `{ "op":"outgoing", "name":"alpha", "protocol":"tcp", "v6":false }`
+  starts a native connection to the disposable peer (TCP43000, UDP43001).
+- `{ "op":"counts", "name":"alpha" }` reports receiver payload counts keyed
+  by tcp4/tcp6/udp4/udp6; `peer-counts` reports actual peer receive log lines.
+- `quit` ends the held fixture; backend cleanup follows explicit UI DONE only.
+
+Only one owner drives API decisions/commands while attached. Scope previews are
+backend supplied. Pending Decide supports Once, one-hour application, and durable
+persistent application only; it does **not** create process-only or zone-constrained
+rules. Remember is exact application/revision/UID/direction/protocol/remote peer and
+service port, Any zone. `event.flow.network_scope` is contextual classification,
+not the scope of a remembered permission. Process/zone creation uses its separate
+identity-bound preview/save workflow.
+
+Focused fixture smoke: `.workspace/prompt-hold-smoke-results.json` records real
+incoming UDP Allow receiver1 / Deny receiver0; outgoing remembered UDP receiver2
+including same-executable sibling application scope; nonmatching outgoing TCP
+prompt then Deny receiver0. Exact conditional cleanup restored rules0 and owner log
+confirms namespace cleanup. This verifies the added fixture commands/timeouts,
+not a new host acceptance or a rerun of the settled protocol matrix.
