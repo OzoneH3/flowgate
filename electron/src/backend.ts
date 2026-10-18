@@ -1,3 +1,10 @@
+import {
+  REMEMBER_ZONE_CAPABILITY,
+  parseDecisionPreview,
+  agreesWithDecision,
+  sameRememberedRule,
+  type DecisionPreview,
+} from './decision-remember';
 import { POLICY_CAPABILITY } from './policy';
 import net from 'node:net';
 import { performance } from 'node:perf_hooks';
@@ -180,6 +187,9 @@ export class Backend {
     const snapshotStarted = performance.now();
     try {
       const r = await call(this.controller, { operation: 'list' });
+      for (const [token, v] of this.decisionPreviews)
+        if (Date.parse(v.preview.expires_at) + 300000 < this.now())
+          this.decisionPreviews.delete(token);
       if (
         r.error ||
         !(
@@ -195,6 +205,7 @@ export class Backend {
         throw Error(r.error || 'Not a firewall controller');
       if (this.reply?.generation !== r.generation) {
         this.attempts.clear();
+        this.decisionPreviews.clear();
         this.policySequence = -1n;
       }
       const stamp = JSON.stringify([
@@ -320,6 +331,119 @@ export class Backend {
       this.emit();
     }
   }
+  private decisionPreviews = new Map<
+    string,
+    { choice: Decision; preview: DecisionPreview; sent: boolean }
+  >();
+  private decisionEvent(d: Decision) {
+    const c = this.state.control,
+      e = this.reply?.events.find((e) => e.id === d.id);
+    if (
+      !this.controller ||
+      !canDecide(c) ||
+      c.generation !== d.generation ||
+      !e ||
+      e.state !== 'awaiting-decision' ||
+      Date.parse(e.deadline) <= this.now() ||
+      !e.scope_previews[d.scope]
+    )
+      throw Error('Request is no longer actionable');
+    return e;
+  }
+  async previewDecision(raw: Decision): Promise<DecisionPreview> {
+    const d = validateDecision(raw),
+      c = this.state.control,
+      e = this.decisionEvent(d);
+    if (
+      d.scope === 'once' ||
+      !!d.preview_token ||
+      !c.capabilities?.includes(REMEMBER_ZONE_CAPABILITY) ||
+      !d.network_zone ||
+      d.zone_revision !== c.networkZones?.revision
+    )
+      throw Error('Remembered network scope unavailable');
+    if (
+      d.network_zone !== 'any' &&
+      (e.flow.network_scope?.state !== 'known' ||
+        e.flow.network_scope.zone !== d.network_zone ||
+        e.flow.network_scope.revision !== d.zone_revision)
+    )
+      throw Error('Network zone does not match this connection');
+    const key = JSON.stringify(d);
+    for (const [token, v] of this.decisionPreviews) {
+      if (Date.parse(v.preview.expires_at) <= this.now() && !v.sent)
+        this.decisionPreviews.delete(token);
+      else if (!v.sent && JSON.stringify(v.choice) === key) return v.preview;
+    }
+    const r = await call(this.controller!, { operation: 'decision-preview', ...d });
+    if (r.error) throw Error(r.error);
+    if (r.generation !== d.generation) throw Error('Daemon generation changed');
+    const p = agreesWithDecision(
+      parseDecisionPreview(r.decision_preview),
+      d,
+      this.decisionEvent(d),
+      this.now(),
+    );
+    if (this.decisionPreviews.size >= 64) throw Error('Too many retained decision reviews');
+    this.decisionPreviews.set(p.token, { choice: d, preview: p, sent: false });
+    return p;
+  }
+  async reconcileDecision(value: {
+    generation: string;
+    id: string;
+    preview_token: string;
+  }): Promise<Attempt> {
+    const held = this.decisionPreviews.get(value.preview_token);
+    if (
+      !held?.sent ||
+      held.choice.generation !== value.generation ||
+      held.choice.id !== value.id ||
+      !this.controller ||
+      !this.state.control.connected ||
+      this.state.control.readOnly ||
+      this.state.control.generation !== value.generation
+    )
+      throw Error('Original decision receipt unavailable; no decision resent');
+    const r = await call(this.controller, {
+      operation: 'decision-status',
+      generation: value.generation,
+      preview_token: value.preview_token,
+    });
+    if (r.error || r.generation !== value.generation)
+      throw Error(r.error || 'Daemon generation changed');
+    const receipt = r.decision_receipt as
+      { state?: string; preview?: unknown; decision?: unknown; saved_rule?: unknown } | undefined;
+    const expected = held.preview,
+      p = parseDecisionPreview(receipt?.preview);
+    if (JSON.stringify(p) !== JSON.stringify(expected)) throw Error('Receipt preview changed');
+    let result: Attempt = {
+      phase: 'unknown',
+      message: 'Outcome still uncertain; no decision resent.',
+      reconcile: value.preview_token,
+    };
+    if (receipt?.state === 'committed') {
+      const parsed = parseReply({
+        ...r,
+        decision: receipt.decision,
+        saved_rule: receipt.saved_rule,
+      });
+      if (
+        parsed.decision?.id !== value.id ||
+        parsed.decision.state !== (held.choice.action === 'allow' ? 'allowed' : 'blocked') ||
+        !parsed.saved_rule ||
+        !sameRememberedRule(parsed.saved_rule, expected.rule)
+      )
+        throw Error('Invalid committed decision receipt');
+      result = {
+        phase: 'acknowledged',
+        message: `Backend confirmed ${parsed.decision.state} · ${parsed.decision.reason}`,
+        rule: parsed.saved_rule,
+      };
+    } else if (receipt?.state !== 'pending') throw Error('Invalid decision receipt');
+    if (this.state.control.generation === value.generation) this.attempts.set(value.id, result);
+    this.emit();
+    return result;
+  }
   async decide(raw: Decision): Promise<Attempt> {
     const d = validateDecision(raw);
     const c = this.state.control;
@@ -337,6 +461,14 @@ export class Backend {
       [...this.attempts.values()].filter((a) => a.phase === 'submitting').length >= 8
     )
       throw Error('Request is no longer actionable; refresh authoritative state');
+    const zoned = c.capabilities?.includes(REMEMBER_ZONE_CAPABILITY) && d.scope !== 'once';
+    const held = d.preview_token ? this.decisionPreviews.get(d.preview_token) : undefined;
+    if (zoned) {
+      if (!held || held.sent || !d.preview_token) throw Error('Fresh decision preview required');
+      agreesWithDecision(held.preview, d, e, this.now());
+      held.sent = true;
+    } else if (d.network_zone || d.zone_revision || d.preview_token)
+      throw Error('Decision network scope unsupported');
     this.attempts.set(d.id, {
       phase: 'submitting',
       message: 'Submitting · waiting for backend acknowledgement',
@@ -346,6 +478,14 @@ export class Backend {
     try {
       const r = await call(this.controller, {
         operation: 'decide',
+        ...(zoned
+          ? {
+              generation: d.generation,
+              network_zone: d.network_zone,
+              zone_revision: d.zone_revision,
+              preview_token: d.preview_token,
+            }
+          : {}),
         id: d.id,
         action: d.action,
         scope: d.scope,
@@ -355,13 +495,15 @@ export class Backend {
         result = { phase: 'rejected', message: 'Backend rejected: ' + r.error };
       } else if (
         r.decision?.id !== d.id ||
-        r.decision.state !== (d.action === 'allow' ? 'allowed' : 'blocked')
+        r.decision.state !== (d.action === 'allow' ? 'allowed' : 'blocked') ||
+        (zoned && (!r.saved_rule || !sameRememberedRule(r.saved_rule, held!.preview.rule)))
       )
         throw Error('Invalid decision acknowledgement');
       else {
         result = {
           phase: 'acknowledged',
           message: `Backend acknowledged ${r.decision.state} · ${r.decision.reason}`,
+          rule: r.saved_rule,
         };
         if (this.reply?.generation === d.generation)
           this.reply.events = this.reply.events.map((e) => (e.id === d.id ? r.decision! : e));
@@ -372,6 +514,7 @@ export class Backend {
         message:
           'Acknowledgement unavailable; outcome unknown. No automatic retry. ' +
           (e as Error).message,
+        reconcile: zoned ? d.preview_token : undefined,
       };
     }
     // A reply from an old connection must never mutate a new session.

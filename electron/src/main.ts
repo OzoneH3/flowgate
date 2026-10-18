@@ -649,6 +649,26 @@ app.whenReady().then(async () => {
     trusted(e);
     return backend.view();
   });
+  ipcMain.handle('decision:preview', (e, value) => {
+    trusted(e);
+    return backend.previewDecision(boundDecision(value, promptRefs.get(e.sender.id)));
+  });
+  ipcMain.handle('decision:reconcile', (e, value) => {
+    trusted(e);
+    if (
+      !value ||
+      typeof value !== 'object' ||
+      Object.keys(value).sort().join(',') !== 'generation,id,preview_token' ||
+      ['generation', 'id', 'preview_token'].some(
+        (k) => typeof value[k] !== 'string' || !value[k] || value[k].length > 256,
+      )
+    )
+      throw Error('Invalid decision receipt');
+    const ref = promptRefs.get(e.sender.id);
+    if (ref && (ref.generation !== value.generation || ref.id !== value.id))
+      throw Error('Receipt belongs to another request');
+    return backend.reconcileDecision(value);
+  });
   ipcMain.handle('decide', (e, value) => {
     trusted(e);
     return backend.decide(boundDecision(value, promptRefs.get(e.sender.id)));

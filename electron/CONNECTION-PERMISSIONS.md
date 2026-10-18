@@ -1,6 +1,6 @@
 # Compact connection permissions
 
-Base: `e2f045a172e3af63f6b8ef2209f5eca70c322900`. Isolated backend pairing:
+Initial presentation base: `e2f045a172e3af63f6b8ef2209f5eca70c322900`. Initial isolated backend pairing:
 `5c85f1334eb1791151539a1b345f16f1b93ac3fa` (fixture support only; policy unchanged).
 
 ## Presentation and behavior
@@ -79,3 +79,68 @@ FlowGate uses a scope selector rather than unsupported “For a while”; no dom
 location enrichment; compact logical size differs from the illustration; non-KDE
 Wayland placement remains compositor-controlled. TCP event helper privileged proof
 is still pending; this work never upgrades missing Activity direction evidence.
+
+## Followup: request binding, remembered zones, correct KDE monitor
+
+Frontend base `48089de8982566311443a6a9606441182827b534`; safety checkpoint
+`eb8fa8b` freezes each prompt's request/generation in main and gives its compositor
+operation a window-specific numeric caption and cancellation checks. The prompt
+cannot invoke the main Activity operation to open a different request.
+
+Backend pairing `05c341bf3336fa9c9bd328f493eea38c6fdf71ce`, capability
+`decision-zone-remember-v1`: remembered scope defaults visibly to Any network.
+A matching known Local Network/Internet option becomes available. Explicit scope/
+zone changes prepare separate action-bound previews for Allow/Deny; polling never
+renews them. Buttons remain disabled until validated previews arrive. Exact app,
+UID, direction, protocol, backend remembered peer/service filter, chosen zone and
+absolute expiry are checked before the one-click commit. Persistent requires the
+backend-offered scope; there is no process-only Remember. An expired review needs
+explicit Refresh review. Once remains the original zone-free operation.
+
+Main retains bounded preview tokens and validates exact saved-rule acknowledgements.
+Unknown acknowledgements offer **Check result**, a `decision-status` query; pending
+receipts remain unknown and never cause another Decide. Historical committed
+receipts do not assert that a rule is still enabled/present. Old daemons keep
+explicit Any-network behavior; no new fields are sent to them.
+
+### Wrong-monitor cause and fix
+
+Actual host read-only output inspection showed KDE **DP-2, priority1**, at x2560;
+DP-3, priority2, at x0. Electron incorrectly treated DP-3 as primary. The earlier
+(2040,980) proof therefore established placement on the wrong monitor.
+
+The bounded placement adapter now reads `kscreen-doctor -j` (no setting changes),
+selects the connected output with highest configured priority, and asks KWin for
+that named output's usable client area. Only its own PID + exact numeric prompt
+caption is moved/activated. Actual final compositor proof:
+`FLOWGATE_PROMPT_PLACED_1398517 DP-2 {"x":4600,"y":980,"width":520,"height":460}`.
+Evidence `.workspace/decision-compact/primary-monitor-proof.log`. No installed
+KWin rule/script or display preference remains. Other compositors still govern
+absolute placement. Native client `getBounds` does not expose reliable global
+Wayland coordinates and is not used as proof.
+
+### Final evidence
+
+- `.workspace/connection-real-suf8ni/`: real released isolated backend. Local UDP4
+  remembered Allow + subsequent delivery; Internet UDP6 remembered Deny + subsequent
+  nondelivery; outgoing UDP4 default-Any remembered Allow + sibling delivery;
+  nonmatching TCP4 Once Deny. Exact saved schema4 Local/Internet and schema2 Any
+  rules were checked, conditionally deleted back to0, and the backend owner
+  independently confirmed cleanup. Selector focus survived polling; detached Info,
+  automatic windows and normal/narrow layouts passed. These different-peer UI
+  checks alone do **not** prove zone isolation: backend same-peer classification-
+  swap receiver evidence in `docs/NETWORK-ZONES.md` supplies that proof.
+- `.workspace/connection-compact-6gRLxJ/`: labelled synthetic GUI regression after
+  final monitor mapping, expiry/disconnect/focus and keyboard checks.
+- 28 focused checks + build/typecheck passed, including broader peer/service/expiry
+  rejection, expired preview, old capability, lost ACK and foreign receipt checks.
+  No host rules, evaluation, collector or daemon lifecycle operations performed.
+
+Minimal checks additionally include:
+
+```sh
+node --test electron/test/decision-remember.test.cjs
+```
+
+Privileged TCP initiation collector proof remains the backend owner's pending
+user-authenticated check. No successful kernel proof is implied by these UI tests.

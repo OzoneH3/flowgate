@@ -43,6 +43,8 @@ const api: Bridge = {
     return () => ipcRenderer.removeListener('state', listener);
   },
   decide: (d: Decision) => ipcRenderer.invoke('decide', d),
+  decisionPreview: (d) => ipcRenderer.invoke('decision:preview', d),
+  decisionReconcile: (d) => ipcRenderer.invoke('decision:reconcile', d),
   openPrompt: (id: string) => ipcRenderer.invoke('prompt:open', id),
   dismissPrompt: () => ipcRenderer.invoke('prompt:dismiss'),
   decisionLog: () => ipcRenderer.invoke('log:state'),
