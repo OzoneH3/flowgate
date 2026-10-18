@@ -1,9 +1,11 @@
+import { PROCESS_CAPABILITY, targetLabel } from './process-rules';
 import type { ClientState, ObservedSource, Rule, RuleSource } from './protocol';
 import { canManageRules } from './protocol';
 import type { Row } from './model';
 import {
   POLICY_CAPABILITY,
   authoritativePolicy,
+  authoritativeProcessPolicy,
   policyLabel,
   type PolicyRuleRef,
   type DirectionPolicy,
@@ -27,9 +29,17 @@ export function selectionInventory(row: Row, state: ClientState) {
   const authoritative = !!state.control.capabilities?.includes(POLICY_CAPABILITY);
   const result = authoritativePolicy(row, state),
     app = result.application;
+  const processPolicy = state.control.capabilities?.includes(PROCESS_CAPABILITY)
+    ? authoritativeProcessPolicy(row, state)
+    : undefined;
   const fallback = ruleStatus(row, state);
   const rules: PolicyRuleRef[] = authoritative
-    ? directions.flatMap((d) => app?.[d].rules || [])
+    ? directions.flatMap((d) => [
+        ...(processPolicy?.[d].rules || []),
+        ...(processPolicy
+          ? processPolicy[d === 'incoming' ? 'application_incoming' : 'application_outgoing'].rules
+          : app?.[d].rules || []),
+      ])
     : directions.flatMap((d) =>
         fallback[d].map((r) => ({
           id: r.id,
@@ -44,19 +54,20 @@ export function selectionInventory(row: Row, state: ClientState) {
         })),
       );
   const candidate =
-    app &&
+    (app || processPolicy) &&
     row.rows.find(
       (s) =>
         s.owners.length === 1 &&
         s.ownership_category === 'visible-holder' &&
-        app.process_ids.includes(s.owners[0]) &&
+        (app?.process_ids.includes(s.owners[0]) || processPolicy?.process_id === s.owners[0]) &&
         (!row.process || row.kind === 'application' || row.process.id === s.owners[0]),
     );
   return {
     authoritative,
     app,
+    processPolicy,
     rules,
-    available: authoritative ? !!app : fallback.available,
+    available: authoritative ? !!app || !!processPolicy : fallback.available,
     complete: authoritative && !!state.control.policy?.complete,
     reason: authoritative
       ? result.reason
@@ -69,7 +80,7 @@ export class ActivityPolicy {
   private row?: Row;
   private state?: ClientState;
   private signature = '';
-  private quick?: { direction: Direction; id: string };
+  private quick?: { direction: Direction; id: string; scope: 'application' | 'process' };
   private saved = '';
   private quickValues?: {
     key: string;
@@ -98,9 +109,19 @@ export class ActivityPolicy {
   activate(direction: Direction) {
     if (!this.row || !this.state) return;
     const inv = selectionInventory(this.row, this.state);
+    const scope =
+      this.row.kind !== 'application' &&
+      this.state.control.capabilities?.includes(PROCESS_CAPABILITY)
+        ? 'process'
+        : 'application';
     this.quick = {
       direction,
-      id: inv.rules.some((r) => r.scope.direction === direction) ? '' : 'new',
+      scope,
+      id: inv.rules.some(
+        (r) => r.scope.direction === direction && !!r.scope.process === (scope === 'process'),
+      )
+        ? ''
+        : 'new',
     };
     this.signature = '';
     this.update(this.row, this.state);
@@ -122,6 +143,7 @@ export class ActivityPolicy {
       inv.available,
       inv.complete,
       inv.reason,
+      inv.processPolicy,
       inv.app?.incoming,
       inv.app?.outgoing,
       inv.candidate?.id,
@@ -129,6 +151,7 @@ export class ActivityPolicy {
       c.generation,
       c.connected,
       c.enforcement,
+      c.rule_states,
       this.quick,
       this.saved,
     ]);
@@ -140,22 +163,50 @@ export class ActivityPolicy {
     const scope = el(
       'p',
       row.kind === 'process'
-        ? 'Application policy · all process instances'
+        ? state.control.capabilities?.includes(PROCESS_CAPABILITY)
+          ? 'This process + application fallback'
+          : 'Application policy · all process instances (older backend)'
         : row.kind === 'socket'
-          ? 'Application policy · not this connection’s historical verdict'
+          ? state.control.capabilities?.includes(PROCESS_CAPABILITY)
+            ? 'Holder process + application · current policy, not a historical verdict'
+            : 'Application policy · not this connection’s historical verdict'
           : 'Configured application policy',
       'activity-policy-context',
     );
     scope.title =
-      'Rules target application key, executable revision and user ID. They do not target a process instance.';
+      'Process rules target one backend-verified instance. Application rules target the executable revision and user across instances.';
     fragment.append(scope);
     const matrix = el('table', '', 'info-rule-matrix');
     matrix.innerHTML =
       '<colgroup><col style="width:65px"><col style="width:100px"><col></colgroup><tr><th>Type</th><th>In</th><th>Out</th></tr>';
+    if (row.kind !== 'application' && state.control.capabilities?.includes(PROCESS_CAPABILITY)) {
+      const processLine = el('tr');
+      processLine.append(el('td', 'This process'));
+      for (const d of directions) {
+        const summary = inv.processPolicy?.[d],
+          cell = el('td'),
+          button = el(
+            'button',
+            summary ? policyLabel(summary).replace('No explicit rule', 'Not set') : 'Unavailable',
+            'sidebar-process-policy',
+          );
+        button.dataset.direction = d;
+        button.title =
+          inv.processPolicy?.reason || 'No supported authoritative process association';
+        button.onclick = () => {
+          this.activate(d);
+        };
+        cell.append(button);
+        processLine.append(cell);
+      }
+      matrix.append(processLine);
+    }
     const line = el('tr');
-    line.append(el('td', 'Blocker'));
+    line.append(el('td', row.kind === 'application' ? 'Application' : 'App fallback'));
     for (const d of directions) {
-      const summary = inv.app?.[d];
+      const summary = inv.processPolicy
+        ? inv.processPolicy[d === 'incoming' ? 'application_incoming' : 'application_outgoing']
+        : inv.app?.[d];
       const label = summary
         ? policyLabel(summary)
         : inv.available
@@ -166,12 +217,30 @@ export class ActivityPolicy {
       b.dataset.direction = d;
       b.title = `${d} configured policy. ${summary?.reason || inv.reason}\n${summary?.enforcement.reason || 'Coverage unavailable'}`;
       b.setAttribute('aria-label', `${d} configured policy · ${label} · quick setter`);
-      b.onclick = () => this.activate(d);
+      b.onclick = () => {
+        this.activate(d);
+        if (this.quick) {
+          this.quick.scope = 'application';
+          this.signature = '';
+          this.update(this.row, this.state!);
+        }
+      };
       cell.append(b);
       line.append(cell);
     }
     matrix.append(line);
     fragment.append(matrix);
+    if (inv.processPolicy) {
+      const note = el(
+        'p',
+        inv.processPolicy.state === 'inactive'
+          ? 'Inactive process · ' + inv.processPolicy.reason
+          : 'Live process instance · session-bound',
+        'activity-policy-note',
+      );
+      note.title = inv.processPolicy.reason;
+      fragment.append(note);
+    }
     if (!inv.available) fragment.append(el('p', inv.reason, 'activity-policy-note'));
     else {
       const covered = directions.filter((d) => inv.app?.[d].enforcement.covered);
@@ -196,6 +265,16 @@ export class ActivityPolicy {
             'activity-policy-note',
           ),
         );
+      if (inv.processPolicy) {
+        const explanation = el(
+          'p',
+          inv.processPolicy.precedence === 'matching-process-before-application'
+            ? 'Matching process rules take precedence; application rules are the fallback when no active process rule matches.'
+            : inv.processPolicy.precedence,
+          'activity-policy-precedence',
+        );
+        fragment.append(explanation);
+      }
       if (this.quick) fragment.append(this.quickSetter(inv));
       const list = el('div', '', 'activity-rule-list');
       list.setAttribute('aria-label', 'Relevant configured firewall rules');
@@ -207,7 +286,22 @@ export class ActivityPolicy {
             'activity-policy-note',
           ),
         );
-      for (const ref of inv.rules) {
+      let previousGroup = '';
+      const orderedRules = [
+        ...inv.rules.filter((r) => !!r.scope.process),
+        ...inv.rules.filter((r) => !r.scope.process),
+      ];
+      for (const ref of orderedRules) {
+        const group = ref.scope.process
+          ? 'This process'
+          : row.kind === 'application'
+            ? 'Application · all instances'
+            : 'Application fallback · all instances';
+        if (previousGroup !== group) {
+          list.append(el('h4', group, 'activity-rule-group'));
+          previousGroup = group;
+        }
+
         const card = el('section', '', 'activity-rule');
         card.dataset.ruleId = ref.id;
         if (ref.id === this.saved) card.classList.add('recently-saved');
@@ -228,10 +322,29 @@ export class ActivityPolicy {
           ),
         );
         card.append(title, el('p', scopeLabel(ref), 'activity-rule-scope'));
+        if (ref.scope.process)
+          card.append(
+            el(
+              'p',
+              `${targetLabel(ref.scope.process)} · ${ref.target_state || c.rule_states?.[ref.id]?.state || 'target state unavailable'}`,
+              'activity-rule-target',
+            ),
+          );
+        if (ref.target_state === 'inactive' || c.rule_states?.[ref.id]?.state === 'inactive')
+          card.append(
+            el(
+              'p',
+              ref.target_reason || c.rule_states?.[ref.id]?.reason || 'Inactive process target',
+              'activity-policy-note',
+            ),
+          );
+
         const expiry = el(
           'p',
           ref.expires.startsWith('0001-')
-            ? 'No expiry'
+            ? ref.scope.process
+              ? 'This daemon session · ends on process exit'
+              : 'No expiry'
             : `Expires ${new Date(ref.expires).toLocaleString()}`,
           'activity-rule-expiry',
         );
@@ -241,19 +354,29 @@ export class ActivityPolicy {
         if (canManageRules(c) && rule) {
           const actions = el('div', '', 'activity-rule-actions');
           const quick = el('button', 'Quick set');
-          quick.disabled = ref.expired;
+          quick.disabled =
+            ref.expired ||
+            ref.target_state === 'inactive' ||
+            c.rule_states?.[ref.id]?.state === 'inactive';
           quick.title = ref.expired
             ? 'Expired rule: use Advanced to explicitly review expiry.'
             : 'Change this exact rule; scope and expiry remain unchanged.';
           quick.onclick = () => {
-            this.quick = { direction: ref.scope.direction as Direction, id: ref.id };
+            this.quick = {
+              direction: ref.scope.direction as Direction,
+              id: ref.id,
+              scope: ref.scope.process ? 'process' : 'application',
+            };
             this.signature = '';
             this.update(this.row, this.state!);
           };
           const advanced = el('button', 'Advanced');
           advanced.onclick = () => void openRule({ id: ref.id }, { activity: true });
           const toggle = el('button', ref.disabled ? 'Enable…' : 'Disable…');
-          toggle.disabled = ref.expired;
+          toggle.disabled =
+            ref.expired ||
+            ref.target_state === 'inactive' ||
+            c.rule_states?.[ref.id]?.state === 'inactive';
           toggle.onclick = () =>
             void openRule({ id: ref.id }, { activity: true, quick: true, disabled: !ref.disabled });
           const remove = el('button', 'Delete…');
@@ -273,6 +396,7 @@ export class ActivityPolicy {
         fragment.append(el('p', 'Read-only rule access.', 'activity-policy-note'));
       const details = el('details', '', 'activity-policy-details');
       details.append(el('summary', 'Scope, defaults and enforcement details'));
+      if (inv.processPolicy) details.append(el('p', inv.processPolicy.reason));
       for (const d of directions) {
         const s = inv.app?.[d];
         if (s)
@@ -303,7 +427,7 @@ export class ActivityPolicy {
     );
   }
   private quickSetter(inv: ReturnType<typeof selectionInventory>) {
-    const { direction, id } = this.quick!,
+    const { direction, id, scope } = this.quick!,
       c = this.state!.control;
     const box = el('section', '', 'activity-quick');
     box.setAttribute('aria-label', `${direction} quick setter`);
@@ -323,21 +447,52 @@ export class ActivityPolicy {
     const target = el('select');
     target.setAttribute('aria-label', 'Rule to create or change');
     target.append(new Option('Choose a rule…', ''), new Option('New separate rule', 'new'));
-    for (const r of inv.rules.filter((r) => r.scope.direction === direction))
+    for (const r of inv.rules.filter(
+      (r) => r.scope.direction === direction && (scope === 'process') === !!r.scope.process,
+    ))
       target.append(new Option(`${r.action} · ${scopeLabel(r)} · ${r.id}`, r.id));
     target.value = id;
     target.onchange = () => {
-      this.quick = { direction, id: target.value };
+      this.quick = { direction, id: target.value, scope };
       this.signature = '';
       this.update(this.row, this.state!);
     };
-    box.append(target);
+    if (this.row?.kind !== 'application' && c.capabilities?.includes(PROCESS_CAPABILITY)) {
+      const targetScope = el('select');
+      targetScope.setAttribute('aria-label', 'Rule target');
+      targetScope.append(
+        new Option('This process', 'process'),
+        new Option('Application · all instances', 'application'),
+      );
+      targetScope.value = scope;
+      targetScope.onchange = () => {
+        this.quick = {
+          direction,
+          id: 'new',
+          scope: targetScope.value as 'process' | 'application',
+        };
+        this.signature = '';
+        this.update(this.row, this.state!);
+      };
+      box.append(targetScope);
+    }
+    box.append(
+      el(
+        'p',
+        scope === 'process'
+          ? 'Target: this process instance only'
+          : 'Target: application · all instances',
+        'quick-target-label',
+      ),
+      target,
+    );
     const ref = inv.rules.find((r) => r.id === id),
       candidate = inv.candidate;
     const source: RuleSource | undefined =
       id === 'new' && candidate
         ? {
             observed: {
+              ...(c.capabilities?.includes(PROCESS_CAPABILITY) ? { target_scope: scope } : {}),
               generation: c.generation,
               row_id: candidate.id,
               process_id: candidate.owners[0],
@@ -350,18 +505,21 @@ export class ActivityPolicy {
     const supported = id !== 'new' || c.capabilities?.includes('observed-rule-create-v1');
     const reason = !canManageRules(c)
       ? 'Rule management is read-only.'
-      : !supported
-        ? 'Backend update required for creation from Activity.'
-        : !source
-          ? 'Select a supported live native application or an existing exact rule.'
-          : ref?.expired
-            ? 'Expired rule: use Advanced and explicitly review expiry.'
-            : '';
+      : scope === 'process' && (!inv.processPolicy || inv.processPolicy.state !== 'active')
+        ? inv.processPolicy?.reason ||
+          'This process identity is unsupported or unavailable; no application fallback.'
+        : !supported
+          ? 'Backend update required for creation from Activity.'
+          : !source
+            ? 'Select a supported live native application or an existing exact rule.'
+            : ref?.expired
+              ? 'Expired rule: use Advanced and explicitly review expiry.'
+              : '';
     if (reason) box.append(el('p', reason, 'activity-policy-note'));
     const protocol = el('select');
     protocol.setAttribute('aria-label', 'Quick rule protocol');
     protocol.append(new Option('TCP', 'tcp'), new Option('UDP', 'udp'));
-    const key = `${this.row!.id}|${direction}|${id}`;
+    const key = `${this.row!.id}|${direction}|${scope}|${id}`;
     if (this.quickValues?.key !== key)
       this.quickValues = {
         key,
@@ -373,7 +531,10 @@ export class ActivityPolicy {
     protocol.value = this.quickValues.protocol;
     const expiry = el('select');
     expiry.setAttribute('aria-label', 'Quick rule expiry');
-    expiry.append(new Option('For 1 hour', 'hour'), new Option('Persistent', 'permanent'));
+    expiry.append(
+      new Option('For 1 hour', 'hour'),
+      new Option(scope === 'process' ? 'This daemon session' : 'Persistent', 'permanent'),
+    );
     expiry.value = this.quickValues.expiry;
     const any = el('input');
     any.type = 'checkbox';

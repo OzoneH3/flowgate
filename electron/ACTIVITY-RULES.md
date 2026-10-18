@@ -23,6 +23,10 @@
 
 ### Backend support and remaining differences
 
+**Update:** Genuine process-instance scope is now implemented under
+`process-instance-rules-v1`; see [PROCESS-RULES.md](PROCESS-RULES.md). The paragraph
+below records the earlier proposal and the original application-only evidence.
+
 Base/released backend **b9840d01096d156d92ce515bd69a07fef443eef6** adds
 `activity-initiation-v1`. Validated bridge projection retains state/direction,
 source, reason and observation time. Incoming evidence is sampled request-socket

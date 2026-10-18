@@ -17,7 +17,20 @@ async function fixture(t) {
     rules = [],
     captured;
   const application = { key: 'app', revision: 'rev', executable: '/native/app', name: 'native' },
-    process = { id: '1:start', uid: 1000, application };
+    process = { id: '1:start', pid: 1, start_ticks: '10', uid: 1000, application };
+  const target = {
+    instance_id: 'a'.repeat(32),
+    session: 'g',
+    boot_id: 'boot',
+    pid: 1,
+    start_ticks: '10',
+    uid: 1000,
+    netns: 'net:[1]',
+    mountns: 'mnt:[2]',
+    pidns: 'pid:[3]',
+    executable: '/native/app',
+    revision: 'rev',
+  };
   const state = {
     control: {
       connected: true,
@@ -54,7 +67,7 @@ async function fixture(t) {
         const rule = {
           id: 'created-' + previews,
           version: 1,
-          schema: 2,
+          schema: d.target_scope === 'process' ? 3 : 2,
           created: new Date(now).toISOString(),
           executable: application.executable,
           action: d.action,
@@ -62,6 +75,14 @@ async function fixture(t) {
           priority: 100,
           expires: d.expires,
           filter: {
+            ...(d.target_scope === 'process'
+              ? {
+                  process: {
+                    ...target,
+                    instance_id: mode === 'wrongtarget' ? 'b'.repeat(32) : target.instance_id,
+                  },
+                }
+              : {}),
             application: 'app',
             revision: mode === 'identity' ? 'changed' : 'rev',
             uid: 1000,
@@ -118,6 +139,7 @@ async function fixture(t) {
     },
   };
   return {
+    target,
     engine: new ObservedRules(backend),
     state,
     counts: () => ({ previews, saves }),
@@ -205,4 +227,43 @@ test('lost save acknowledgement locks draft and reconciles unique ID without rep
   assert.equal(result.phase, 'acknowledged');
   assert.match(result.message, /Authoritative rules confirm/);
   assert.equal(f.counts().saves, 1);
+});
+
+test('process creation is capability-gated and binds exact instance across previews/ACK/reconciliation', async (t) => {
+  const f = await fixture(t);
+  const source = { ...f.source, target_scope: 'process' };
+  await assert.rejects(f.engine.draft(source), /update required/);
+  f.state.control.capabilities.push('process-instance-rules-v1');
+  f.state.control.policy = {
+    applications: [],
+    processes: [{ process_id: '1:start', state: 'active', target: f.target }],
+  };
+  const d = await f.engine.draft(source);
+  assert.equal(d.targetScope, 'process');
+  const p = await f.engine.preview(fields(d.token));
+  assert.deepEqual(p.verifiedRule.filter.process, f.target);
+  f.mode('wrongtarget');
+  await assert.rejects(f.engine.preview(fields(d.token)), /binding changed/);
+  f.mode('lost');
+  const q = await f.engine.preview(fields(d.token));
+  const result = await f.engine.save(q.receipt);
+  assert.equal(result.phase, 'unknown');
+  const reconciled = await f.engine.reconcile(result.reconcile);
+  assert.equal(reconciled.phase, 'acknowledged');
+  assert.deepEqual(reconciled.rule.filter.process, f.target);
+  assert.equal(f.counts().saves, 1);
+});
+
+test('lost process capability and exited instance send no save and never widen target', async (t) => {
+  const f = await fixture(t);
+  f.state.control.capabilities.push('process-instance-rules-v1');
+  const d = await f.engine.draft({ ...f.source, target_scope: 'process' }),
+    p = await f.engine.preview(fields(d.token));
+  f.state.control.capabilities = ['observed-rule-create-v1'];
+  await assert.rejects(f.engine.save(p.receipt), /capability lost/);
+  assert.equal(f.counts().saves, 0);
+  f.state.control.capabilities.push('process-instance-rules-v1');
+  delete f.state.observation.activity.processes['1:start'];
+  await assert.rejects(f.engine.save(p.receipt), /no longer available/);
+  assert.equal(f.counts().saves, 0);
 });

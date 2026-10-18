@@ -1,3 +1,4 @@
+import { PROCESS_CAPABILITY, targetLabel } from './process-rules';
 import { renderDaemonEvaluation } from './evaluation-view';
 import { canManageRules } from './protocol';
 import { reviewedScope, previewSeconds } from './editor-presentation';
@@ -115,7 +116,7 @@ export async function openRule(source: RuleSource, options: EditorOptions = {}) 
     saving = false;
     const r = draft.rule;
     $('editorApplication').textContent =
-      `${r.executable || r.filter.application} · ${r.filter.direction} · UID ${r.filter.uid}`;
+      `${draft.targetScope === 'process' ? 'This process · ' : targetLabel(r.filter.process) + ' · '}${r.executable || r.filter.application} · ${r.filter.direction} · UID ${r.filter.uid}`;
     $('editorIdentity').textContent =
       `${r.executable}\n${r.filter.application} · revision ${r.filter.revision}\n${r.filter.direction} · UID ${r.filter.uid} · ${draft.source}`;
     $<HTMLSelectElement>('editAction').value = r.action;
@@ -133,12 +134,16 @@ export async function openRule(source: RuleSource, options: EditorOptions = {}) 
     $<HTMLInputElement>('editEnabled').checked = !r.disabled;
     $<HTMLSelectElement>('editExpiry').value = 'preserve';
     $('absoluteExpiry').textContent = r.expires.startsWith('0001-')
-      ? 'Persistent: no expiry.'
+      ? r.filter.process || draft.targetScope === 'process'
+        ? 'This daemon session · ends on process exit.'
+        : 'Persistent: no expiry.'
       : 'Expires: ' + new Date(r.expires).toLocaleString();
     $('editExpiry').querySelector('option[value=preserve]')!.textContent = r.expires.startsWith(
       '0001-',
     )
-      ? 'Keep persistent'
+      ? r.filter.process || draft.targetScope === 'process'
+        ? 'Keep this daemon session lifetime'
+        : 'Keep persistent'
       : 'Keep this expiry';
     $('creationScopeFields').hidden = !draft.observed;
     $<HTMLSelectElement>('createScope').value = '';
@@ -147,6 +152,14 @@ export async function openRule(source: RuleSource, options: EditorOptions = {}) 
     $<HTMLOptionElement>('editProtocol').querySelector<HTMLOptionElement>(
       'option[value="*"]',
     )!.disabled = !!draft.observed;
+    $('editExpiry').querySelector('option[value=permanent]')!.textContent =
+      r.filter.process || draft.targetScope === 'process'
+        ? 'This daemon session (ends on exit)'
+        : 'Persistent (no expiry)';
+    $('editExpiry').querySelector('option[value=hour]')!.textContent =
+      r.filter.process || draft.targetScope === 'process'
+        ? 'Up to 1 hour (ends on exit/session)'
+        : 'For 1 hour from preview';
     if (options.action) $<HTMLSelectElement>('editAction').value = options.action;
     if (options.disabled !== undefined)
       $<HTMLInputElement>('editEnabled').checked = !options.disabled;
@@ -163,11 +176,13 @@ export async function openRule(source: RuleSource, options: EditorOptions = {}) 
     if (options.quick && draft.observed)
       $('absoluteExpiry').textContent =
         options.expiry === 'permanent'
-          ? 'Requested: persistent, no expiry.'
+          ? draft.targetScope === 'process'
+            ? 'Requested: this daemon session, ends on process exit.'
+            : 'Requested: persistent, no expiry.'
           : 'Requested: one hour from backend preview.';
     if (options.quick)
       $('scopeSummary').textContent = draft.observed
-        ? `Proposed ${options.protocol?.toUpperCase() || r.filter.protocol.toUpperCase()} · ${r.filter.direction} · all addresses and ports for this protocol. Backend verification required.`
+        ? `Proposed ${draft.targetScope === 'process' ? 'this process only' : 'application, all instances'} · ${options.protocol?.toUpperCase() || r.filter.protocol.toUpperCase()} · ${r.filter.direction} · all addresses and ports for this protocol. Backend verification required.`
         : `Preserved scope: ${reviewedScope(r)}`;
     editorMessage(
       draft.observed
@@ -337,11 +352,13 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
       if (r.verifiedRule) {
         const rule = r.verifiedRule;
         $('editorApplication').textContent =
-          `Verified · ${rule.executable} · ${rule.filter.direction} · UID ${rule.filter.uid}`;
+          `Verified · ${targetLabel(rule.filter.process)} · ${rule.executable} · ${rule.filter.direction} · UID ${rule.filter.uid}`;
         $('editorIdentity').textContent =
-          `${rule.executable}\n${rule.filter.application} · revision ${rule.filter.revision}\n${rule.filter.direction} · UID ${rule.filter.uid} · process ${r.processID}`;
+          `${rule.executable}\n${rule.filter.application} · revision ${rule.filter.revision}\n${rule.filter.direction} · UID ${rule.filter.uid}${r.processID ? ' · observed process ' + r.processID : ''}`;
         $('absoluteExpiry').textContent = rule.expires.startsWith('0001-')
-          ? 'Persistent: no expiry.'
+          ? rule.filter.process
+            ? 'This daemon session · ends on process exit.'
+            : 'Persistent: no expiry.'
           : 'Expires: ' + new Date(rule.expires).toLocaleString();
       }
       $<HTMLButtonElement>('saveRule').disabled = !writable();
@@ -349,7 +366,9 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
       updateButtons();
     } catch (e) {
       editorMessage(
-        /stale_target|unsupported_target/.test(String(e))
+        /stale_target|unsupported_target|unsupported_process|target_inactive|immutable_target/.test(
+          String(e),
+        )
           ? String(e) +
               ' Close this editor and select a live supported application again; your draft has not been rebound.'
           : String(e),
@@ -659,6 +678,35 @@ function updateButtons() {
   $<HTMLButtonElement>('reloadRule').hidden = !!draft?.observed;
   $<HTMLButtonElement>('previewRule').disabled ||=
     !!draft?.observed && !$<HTMLSelectElement>('createScope').value;
+  const observed = draft?.observed && editorSource.observed;
+  if (
+    observed &&
+    (!state?.observation.connected ||
+      state.control.generation !== observed.generation ||
+      state.observation.generation !== observed.generation ||
+      !state.observation.activity?.processes[observed.process_id])
+  ) {
+    $<HTMLButtonElement>('previewRule').disabled = true;
+    $<HTMLButtonElement>('saveRule').disabled = true;
+    if (!saving && !unresolved)
+      editorMessage(
+        'Selected instance is no longer available in this session. Draft kept; close and reselect a live instance. No application fallback.',
+      );
+  }
+  if (draft?.rule.filter.process) {
+    const targetState = state?.control.rule_states?.[draft.rule.id];
+    if (
+      !state?.control.capabilities?.includes(PROCESS_CAPABILITY) ||
+      targetState?.state !== 'active'
+    ) {
+      $<HTMLButtonElement>('previewRule').disabled = true;
+      $<HTMLButtonElement>('saveRule').disabled = true;
+      if (!saving && !unresolved)
+        editorMessage(
+          `${targetState?.reason || 'Process target unavailable in this session'}. Draft kept; target cannot be rebound. Delete remains available from the rule list.`,
+        );
+    }
+  }
   $('reconcileRule').hidden = !reconcileReceipt;
   $<HTMLButtonElement>('reconcileRule').disabled = saving || !state?.control.connected;
   $<HTMLButtonElement>('closeEditor').disabled = saving;
@@ -669,6 +717,7 @@ export function updateWorkflows(next: ClientState) {
   const rules = state.control.rules || [],
     sig = JSON.stringify([
       rules,
+      state.control.rule_states,
       rules.map(
         (r) =>
           Date.parse(r.expires) > 0 &&
@@ -689,13 +738,19 @@ export function updateWorkflows(next: ClientState) {
         r.filter.direction,
         r.filter.protocol,
         `${r.filter.remote_address || r.filter.remote || '*'} · local ${r.filter.local_port || '*'} / remote ${r.filter.remote_port || '*'}`,
-        r.expires.startsWith('0001') ? 'No expiry' : r.expires,
+        r.expires.startsWith('0001')
+          ? r.filter.process
+            ? 'This daemon session / until process exit'
+            : 'No expiry'
+          : r.expires,
         Date.parse(r.expires) > 0 &&
         Date.parse(r.expires) <= (state.control.serverNow ?? Date.now())
           ? 'Expired'
           : r.disabled
             ? 'Disabled'
-            : 'Enabled',
+            : state.control.rule_states?.[r.id]?.state === 'inactive'
+              ? 'Inactive target'
+              : 'Enabled',
       ]) {
         const td = node('td', value);
         td.title = value;
@@ -768,6 +823,12 @@ function selectRule() {
   const fields = r
     ? [
         ['Application', r.executable || r.filter.application],
+        ['Target', targetLabel(r.filter.process)],
+        [
+          'Target lifetime',
+          state.control.rule_states?.[r.id]?.reason ||
+            (r.filter.process ? 'Unavailable; no target rebound' : 'Application-wide'),
+        ],
         ['Action / direction', r.action + ' · ' + r.filter.direction],
         ['Protocol', r.filter.protocol],
         ['Remote address', r.filter.remote_address || r.filter.remote || '*'],
@@ -775,7 +836,14 @@ function selectRule() {
           'Ports',
           `Local ${r.filter.local_port || 'any'} · remote ${r.filter.remote_port || 'any'}`,
         ],
-        ['Absolute expiry', r.expires.startsWith('0001') ? 'No expiry' : r.expires],
+        [
+          'Absolute expiry',
+          r.expires.startsWith('0001')
+            ? r.filter.process
+              ? 'This daemon session / until process exit'
+              : 'No expiry'
+            : r.expires,
+        ],
         ['Enabled', r.disabled ? 'No' : 'Yes (expiry still applies)'],
         ['Priority', String(r.priority)],
         ['Application identity', r.filter.application],
@@ -897,7 +965,7 @@ export function confirmRuleDelete(r: Rule, generation: string) {
   const snapshot = { id: r.id, generation: generation, version: r.version ?? 0 };
   confirmAction(
     'Delete rule',
-    `Delete ${r.executable || r.filter.application}? Action: ${r.action}; ${r.filter.direction} ${r.filter.protocol}; remote ${r.filter.remote_address || r.filter.remote || '*'}; ports ${r.filter.local_port || '*'} → ${r.filter.remote_port || '*'}; expiry ${r.expires}; ${r.disabled ? 'disabled' : 'enabled'}. Rule ${snapshot.id}, version ${snapshot.version}, generation ${snapshot.generation}. Existing approved TCP sessions may continue.`,
+    `Delete ${targetLabel(r.filter.process)} · ${r.executable || r.filter.application}? Action: ${r.action}; ${r.filter.direction} ${r.filter.protocol}; remote ${r.filter.remote_address || r.filter.remote || '*'}; ports ${r.filter.local_port || '*'} → ${r.filter.remote_port || '*'}; expiry ${r.expires}; ${r.disabled ? 'disabled' : 'enabled'}. Rule ${snapshot.id}, version ${snapshot.version}, generation ${snapshot.generation}. Existing approved TCP sessions may continue.`,
     async () => {
       try {
         status((await window.flowgate.ruleDelete(snapshot)).message);

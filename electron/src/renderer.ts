@@ -1,6 +1,11 @@
 import { initiationPresentation } from './initiation';
 import { ActivityPolicy } from './activity-policy';
-import { POLICY_CAPABILITY, authoritativePolicy, policyLabel } from './policy';
+import {
+  POLICY_CAPABILITY,
+  authoritativePolicy,
+  authoritativeProcessPolicy,
+  policyLabel,
+} from './policy';
 import { ruleStatus, ruleState, ruleDescription, configuredPolicy } from './rule-status';
 import { canDecide } from './protocol';
 import type { Application } from './protocol';
@@ -26,6 +31,8 @@ const promptGeneration = new URL(location.href).searchParams.get('generation');
 const promptID = new URL(location.href).searchParams.get('request');
 let state: ClientState;
 let selected = 'overview';
+// Retain only the selected context, not a second inventory. Never rebind by PID/name.
+let retainedSelection: { generation: string; row: Row } | undefined;
 let measurementSource: 'tcp' | 'udp' = 'tcp';
 let graph: TrafficGraph | undefined;
 let activityPolicy: ActivityPolicy | undefined;
@@ -136,7 +143,8 @@ function policyCell(r: Row, direction: PolicyDirection) {
   const rules = status[direction];
   const authoritative = state.control.capabilities?.includes(POLICY_CAPABILITY);
   const result = authoritative ? authoritativePolicy(r, state) : undefined;
-  const summary = result?.application?.[direction];
+  const processPolicy = authoritativeProcessPolicy(r, state);
+  const summary = processPolicy?.[direction] || result?.application?.[direction];
   const label = authoritative
     ? summary
       ? policyLabel(summary)
@@ -156,7 +164,7 @@ function policyCell(r: Row, direction: PolicyDirection) {
     rules.map((rule) => ruleDescription(rule, status.now)).join('\n');
   if (authoritative)
     button.title = summary
-      ? `Backend summary · ${summary.reason}\nEnforcement: ${summary.enforcement.state} · ${summary.enforcement.reason}\nCurrent policy, not a historical verdict.`
+      ? `Backend summary · ${summary.reason}\nEnforcement: ${summary.enforcement.state} · ${summary.enforcement.reason}\nCurrent policy, not a historical verdict.${processPolicy ? '\nProcess policy: ' + processPolicy.reason + '\nApplication fallback: ' + policyLabel(processPolicy[direction === 'incoming' ? 'application_incoming' : 'application_outgoing']) : ''}`
       : result!.reason;
   else
     button.title =
@@ -493,7 +501,17 @@ function renderInfo() {
     // Preserve text selection and expanded details during unchanged polling.
     if (live.textContent !== info.textContent) live.replaceChildren(...Array.from(info.childNodes));
   };
-  const r = allRows(roots).find((r) => r.id === selected);
+  const liveRow = allRows(roots).find((r) => r.id === selected);
+  if (liveRow && ['process', 'socket'].includes(liveRow.kind))
+    retainedSelection = { generation: state.control.generation, row: liveRow };
+  else if (
+    liveRow ||
+    retainedSelection?.row.id !== selected ||
+    retainedSelection.generation !== state.control.generation
+  )
+    retainedSelection = undefined;
+  const retained = !liveRow && retainedSelection?.row;
+  const r = liveRow || (retained ? { ...retained, rows: [], children: [] } : undefined);
   activityPolicy?.update(r, state);
   $('infoProperties').textContent =
     r?.kind === 'socket'
@@ -527,6 +545,12 @@ function renderInfo() {
     commit();
     return;
   }
+  if (retained)
+    field(
+      info,
+      'Observation',
+      'Selected instance is no longer visible. No target is rebound; reselect a live instance to create a rule.',
+    );
   if (r.kind === 'overview') {
     field(
       info,
@@ -904,11 +928,13 @@ function consume(next: ClientState) {
       state.control.permissions,
       state.control.enforcement?.state,
       state.control.rules,
+      state.control.rule_states,
       state.control.policy
         ? [
             state.control.policy.snapshot.token,
             state.control.policy.applications.map((a) => [a.ref, a.process_ids]),
             state.control.policy.rows,
+            state.control.policy.processes,
           ]
         : state.control.policyError,
       (state.control.rules || []).map((r) => ruleState(r, state.control.serverNow ?? NaN)),

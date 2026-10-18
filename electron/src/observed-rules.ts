@@ -1,3 +1,4 @@
+import { PROCESS_CAPABILITY, sameProcessTarget, type ProcessTarget } from './process-rules';
 import { randomUUID } from 'node:crypto';
 import { call, type Backend } from './backend';
 import {
@@ -11,7 +12,14 @@ import {
   type Attempt,
 } from './protocol';
 export const CREATE_CAPABILITY = 'observed-rule-create-v1';
-type Draft = RuleDraft & { target: ObservedSource; endpoint: string; locked: boolean };
+type Draft = RuleDraft & {
+  target: ObservedSource;
+  endpoint: string;
+  locked: boolean;
+  startTicks: string;
+  pid: number;
+  boundTarget?: ProcessTarget;
+};
 type Receipt = {
   draft: Draft;
   value: object;
@@ -36,6 +44,7 @@ const ruleFields = (r: Rule) => [
   r.filter.remote || '',
   r.filter.local_port || 0,
   r.filter.remote_port || 0,
+  r.filter.process,
 ];
 const sameRule = (a: Rule, b: Rule) =>
   JSON.stringify(ruleFields(a)) === JSON.stringify(ruleFields(b));
@@ -63,7 +72,11 @@ export class ObservedRules {
     if (
       !s ||
       typeof s !== 'object' ||
-      Object.keys(s).sort().join(',') !== 'direction,generation,process_id,row_id' ||
+      Object.keys(s)
+        .filter((k) => k !== 'target_scope')
+        .sort()
+        .join(',') !== 'direction,generation,process_id,row_id' ||
+      (s.target_scope !== undefined && !['application', 'process'].includes(s.target_scope)) ||
       !['incoming', 'outgoing'].includes(s.direction) ||
       ![s.generation, s.row_id, s.process_id].every(
         (v) => typeof v === 'string' && v.length > 0 && v.length <= 1024,
@@ -72,6 +85,8 @@ export class ObservedRules {
       throw Error('Invalid observed selection');
     const c = this.authority(),
       o = this.backend.view().observation;
+    if (s.target_scope === 'process' && !c.capabilities?.includes(PROCESS_CAPABILITY))
+      throw Error('Backend update required for This process; no application fallback');
     if (!o.connected || c.generation !== s.generation || o.generation !== s.generation)
       throw Error('Generation changed; select the application again');
     const row = o.activity?.rows.find((r) => r.id === s.row_id),
@@ -98,6 +113,19 @@ export class ObservedRules {
         generation: s.generation,
         source: 'Activity observation · identity verification required at Preview',
         observed: true,
+        targetScope: s.target_scope || 'application',
+        processID: s.process_id,
+        startTicks: p.start_ticks,
+        pid: p.pid,
+        boundTarget:
+          s.target_scope === 'process'
+            ? c.policy?.processes?.find(
+                (entry) =>
+                  entry.process_id === p.id &&
+                  entry.state === 'active' &&
+                  !!entry.target.instance_id,
+              )?.target
+            : undefined,
         target: structuredClone(s),
         endpoint: this.backend.controller!,
         locked: false,
@@ -129,6 +157,8 @@ export class ObservedRules {
       generation: d.generation,
       source: d.source,
       observed: true,
+      targetScope: d.targetScope,
+      processID: s.process_id,
       rule: structuredClone(d.rule),
     };
   }
@@ -156,7 +186,10 @@ export class ObservedRules {
     for (const [key, r] of this.receipts)
       if (r.draft.token === e.token && !r.sent) this.receipts.delete(key);
     if (this.receipts.size >= 64) throw Error('Outstanding receipt limit reached');
+    if (d.targetScope === 'process' && !c.capabilities?.includes(PROCESS_CAPABILITY))
+      throw Error('Process capability lost; no fallback');
     const value = {
+      ...(c.capabilities?.includes(PROCESS_CAPABILITY) ? { target_scope: d.targetScope } : {}),
       direction: d.target.direction,
       protocol: e.protocol,
       action: e.action,
@@ -196,6 +229,22 @@ export class ObservedRules {
       p.rule.filter.direction !== d.target.direction
     )
       throw Error('Verified identity changed; close editor and select again');
+    if (d.targetScope === 'process') {
+      const t = p.rule.filter.process;
+      if (d.boundTarget && !sameProcessTarget(d.boundTarget, t))
+        throw Error('Process instance binding changed; close and reselect');
+      if (
+        !t ||
+        t.pid !== d.pid ||
+        t.start_ticks !== d.startTicks ||
+        t.uid !== d.rule.filter.uid ||
+        t.executable !== d.rule.executable ||
+        t.revision !== d.rule.filter.revision
+      )
+        throw Error('Verified process instance changed; close and reselect');
+      d.boundTarget = t;
+    } else if (p.rule.filter.process)
+      throw Error('Unexpected process target in application preview');
     const receipt = randomUUID();
     this.receipts.set(receipt, { draft: d, value, preview: p, sent: false, unresolved: false });
     return {
@@ -225,6 +274,19 @@ export class ObservedRules {
     const c = this.authority();
     if (c.generation !== r.draft.generation || this.backend.controller !== r.draft.endpoint)
       throw Error('Generation/endpoint changed; no save sent');
+    if (r.draft.targetScope === 'process') {
+      if (!c.capabilities?.includes(PROCESS_CAPABILITY))
+        throw Error('Process capability lost; no save or fallback');
+      const p = this.backend.view().observation.activity?.processes[r.draft.target.process_id];
+      if (
+        !p ||
+        p.pid !== r.draft.pid ||
+        p.start_ticks !== r.draft.startTicks ||
+        p.uid !== r.draft.rule.filter.uid ||
+        p.application.revision !== r.draft.rule.filter.revision
+      )
+        throw Error('Process instance no longer available; draft retained, no save sent');
+    }
     if (Date.parse(r.preview.expires_at) <= this.backend.now())
       throw Error('Preview expired; preview again');
     r.sent = true;

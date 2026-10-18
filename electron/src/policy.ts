@@ -1,3 +1,4 @@
+import { parseProcessTarget, type ProcessTarget } from './process-rules';
 import type { ClientState, RuleFilter } from './protocol';
 import type { Row } from './model';
 export const POLICY_CAPABILITY = 'policy-explanations-v1';
@@ -11,6 +12,9 @@ export interface PolicyRuleRef {
   expired: boolean;
   active: boolean;
   expires: string;
+  target_scope?: 'application' | 'process';
+  target_state?: string;
+  target_reason?: string;
 }
 export interface PolicyDefault {
   known: boolean;
@@ -38,7 +42,21 @@ export interface ApplicationPolicy {
   incoming: DirectionPolicy;
   outgoing: DirectionPolicy;
 }
+export interface ProcessPolicy {
+  ref: string;
+  process_id: string;
+  application_ref: string;
+  target: ProcessTarget;
+  state: string;
+  reason: string;
+  precedence: string;
+  incoming: DirectionPolicy;
+  outgoing: DirectionPolicy;
+  application_incoming: DirectionPolicy;
+  application_outgoing: DirectionPolicy;
+}
 export interface PolicyView {
+  processes?: ProcessPolicy[];
   snapshot: {
     generation: string;
     token: string;
@@ -129,6 +147,18 @@ function direction(v: unknown, expected: string): DirectionPolicy {
       if (typeof r.priority !== 'number' || !Number.isSafeInteger(r.priority))
         throw Error('Invalid priority');
       return {
+        target_scope:
+          r.target_scope === undefined
+            ? undefined
+            : r.target_scope === 'process'
+              ? 'process'
+              : r.target_scope === 'application'
+                ? 'application'
+                : (() => {
+                    throw Error('Invalid target scope');
+                  })(),
+        target_state: str(r.target_state, true),
+        target_reason: str(r.target_reason, true),
         id: str(r.id),
         version: decimal(r.version),
         action: str(r.action),
@@ -138,6 +168,7 @@ function direction(v: unknown, expected: string): DirectionPolicy {
         active: bool(r.active),
         expires: date(r.expires),
         scope: {
+          process: parseProcessTarget(f.process),
           application: str(f.application),
           revision: str(f.revision),
           uid: num(f.uid),
@@ -169,6 +200,28 @@ export function parsePolicyView(raw: unknown): PolicyView {
     activity_available: bool(v.activity_available),
     complete: bool(v.complete),
     reason: str(v.reason, true),
+    processes:
+      v.processes === undefined
+        ? undefined
+        : list(v.processes, 2048).map((value) => {
+            const p = obj(value),
+              target = parseProcessTarget(p.target, true);
+            if (!target || !['active', 'inactive'].includes(str(p.state)))
+              throw Error('Invalid process policy');
+            return {
+              ref: str(p.ref),
+              process_id: str(p.process_id),
+              application_ref: str(p.application_ref, true),
+              target,
+              state: str(p.state),
+              reason: str(p.reason),
+              precedence: str(p.precedence),
+              incoming: direction(p.incoming, 'incoming'),
+              outgoing: direction(p.outgoing, 'outgoing'),
+              application_incoming: direction(p.application_incoming, 'incoming'),
+              application_outgoing: direction(p.application_outgoing, 'outgoing'),
+            };
+          }),
     applications: list(v.applications, 256).map((v) => {
       const a = obj(v),
         i = obj(a.identity);
@@ -264,6 +317,62 @@ export function authoritativePolicy(
   return a
     ? { application: a, reason: v.snapshot.meaning }
     : { reason: v.reason || 'Application not supported or outside this bounded policy batch.' };
+}
+// Association only: policy classification, precedence and liveness come from Go.
+export function authoritativeProcessPolicy(
+  row: Row,
+  state: ClientState,
+): ProcessPolicy | undefined {
+  if (row.kind !== 'process' && row.kind !== 'socket') return;
+  const c = state.control,
+    v = c.policy,
+    a = state.observation.activity;
+  if (!c.capabilities?.includes('process-instance-rules-v1')) return;
+  if (
+    !c.connected ||
+    !state.observation.connected ||
+    !v ||
+    !a ||
+    v.snapshot.generation !== c.generation ||
+    state.observation.generation !== c.generation ||
+    !v.activity_available ||
+    (v.snapshot.valid_until && Date.parse(v.snapshot.valid_until) <= (c.serverNow ?? Infinity)) ||
+    BigInt(v.activity_sequence) > BigInt(a.sequence) ||
+    Date.parse(v.activity_collected) > Date.parse(a.collected) ||
+    (c.serverNow ?? Infinity) - Date.parse(v.activity_collected) > 45000
+  )
+    return;
+  if (
+    row.displayApplication ||
+    (row.socket &&
+      (row.socket.owners.length !== 1 || row.socket.ownership_category !== 'visible-holder'))
+  )
+    return;
+  const p = row.process || (row.socket && a.processes[row.socket.owners[0]]);
+  if (!p) return;
+  const candidates =
+    v.processes?.filter(
+      (entry) =>
+        entry.target.session === c.generation &&
+        entry.process_id === p.id &&
+        entry.target.pid === p.pid &&
+        entry.target.start_ticks === p.start_ticks &&
+        entry.target.uid === p.uid &&
+        entry.target.executable === p.application.executable &&
+        entry.target.revision === p.application.revision,
+    ) || [];
+  const result = candidates.find((entry) => entry.state === 'active') || candidates[0];
+  if (
+    row.socket &&
+    !v.rows.some(
+      (r) =>
+        r.row_id === row.socket!.id &&
+        r.status === 'observed_native' &&
+        r.application_ref === result?.application_ref,
+    )
+  )
+    return;
+  return result;
 }
 export function policyLabel(d: DirectionPolicy) {
   return d.configured === 'uniform'

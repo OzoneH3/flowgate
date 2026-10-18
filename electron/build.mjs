@@ -29,6 +29,7 @@ await build({
     'src/model.ts',
     'src/initiation.ts',
     'src/protocol.ts',
+    'src/process-rules.ts',
     'src/activity-policy.ts',
     'src/policy.ts',
     'src/editor-presentation.ts',

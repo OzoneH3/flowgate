@@ -1,3 +1,4 @@
+import { PROCESS_CAPABILITY, sameProcessTarget } from './process-rules';
 import { ObservedRules } from './observed-rules';
 import { canManageRules } from './protocol';
 import { randomUUID } from 'node:crypto';
@@ -94,7 +95,7 @@ export class Rules {
     for (const [k, v] of this.receipts) if (v.draft === e.token) this.receipts.delete(k);
     const rule = structuredClone(d.rule);
     Object.assign(rule, {
-      schema: 2,
+      schema: d.rule.filter.process ? 3 : 2,
       action: e.action,
       disabled: e.disabled,
       priority: e.priority,
@@ -111,6 +112,8 @@ export class Rules {
         e.expiry === 'hour'
           ? new Date(this.backend.now() + 3600000).toISOString()
           : '0001-01-01T00:00:00Z';
+    if (rule.filter.process && !c.capabilities?.includes(PROCESS_CAPABILITY))
+      throw Error('Process-rule backend capability unavailable; no mutation');
     const request = {
       generation: d.generation,
       id: d.id || '',
@@ -121,6 +124,8 @@ export class Rules {
     const r = await call(this.backend.controller!, { operation: 'rule-preview', ...request });
     if (r.error || !r.saved_rule || !r.scope_preview || r.generation !== d.generation)
       throw Error(r.error || 'Preview not acknowledged');
+    if (!sameProcessTarget(r.saved_rule.filter.process, rule.filter.process))
+      throw Error('Preview changed immutable process target');
     const receipt = randomUUID();
     this.receipts.set(receipt, {
       draft: e.token,
@@ -129,7 +134,7 @@ export class Rules {
       generation: d.generation,
       id: d.id,
     });
-    return { receipt, preview: r.scope_preview };
+    return { receipt, preview: r.scope_preview, verifiedRule: r.saved_rule };
   }
   async save(receipt: unknown): Promise<Attempt> {
     if (this.observed.ownsReceipt(receipt)) return this.observed.save(receipt);
@@ -139,6 +144,12 @@ export class Rules {
     if (!p || this.busy) throw Error('Fresh preview required');
     const c = this.authority();
     if (c.generation !== p.generation) throw Error('Generation changed; reopen editor');
+    if (
+      p.rule.filter.process &&
+      (!c.capabilities?.includes(PROCESS_CAPABILITY) ||
+        c.rule_states?.[p.rule.id]?.state !== 'active')
+    )
+      throw Error('Process target is inactive or unavailable; no save sent');
     this.busy = true;
     try {
       const r = await call(this.backend.controller!, { operation: 'rule-save', ...p.request });
@@ -149,10 +160,15 @@ export class Rules {
             r.error +
             '; preview again. For a version conflict, reload the current version before previewing.',
         };
-      if (!r.saved_rule || r.generation !== p.generation)
+      if (
+        !r.saved_rule ||
+        r.generation !== p.generation ||
+        r.saved_rule.id !== p.rule.id ||
+        !sameProcessTarget(r.saved_rule.filter.process, p.rule.filter.process)
+      )
         throw Error('Missing save acknowledgement');
       this.drafts.delete(p.draft);
-      return { phase: 'acknowledged', message: 'Rule saved by backend' };
+      return { phase: 'acknowledged', rule: r.saved_rule, message: 'Rule saved by backend' };
     } catch (e) {
       return {
         phase: 'unknown',

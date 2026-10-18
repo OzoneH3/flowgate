@@ -1063,3 +1063,8 @@ td.up { color: #c7daa8; background: #344b20; }
 .connection-direction { display:inline-flex; width:16px; height:16px; border:2px solid currentColor; border-radius:50%; align-items:center; justify-content:center; margin-right:4px; vertical-align:middle; font-size:12px; line-height:12px; font-weight:600; }
 .connection-incoming { color:#f44336; }.connection-outgoing { color:#9ccc65; }.connection-neutral { color:#aaa; }
 #tree tr[aria-selected=true] .connection-direction { color:white; }
+/* Process policy and application fallback stay adjacent in the selected context. */
+.info-rule-matrix td:first-child { white-space: nowrap; padding-right: 8px; }
+.sidebar-process-policy { min-width: 75px; font-size: 11px; padding: 3px 6px; }
+.activity-rule-group { margin: 8px 0 2px; padding: 4px 2px; color: var(--muted); font-size: 11px; font-weight: 600; border-bottom: 1px solid var(--border); }
+.activity-policy-precedence,.activity-rule-target,.quick-target-label { font-size: 11px; margin: 5px 0; }

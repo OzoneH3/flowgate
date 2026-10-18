@@ -38,6 +38,7 @@ export function ruleStatus(row: Row, state: ClientState): RuleStatus {
   for (const rule of state.control.rules) {
     const f = rule.filter;
     if (
+      f.process ||
       f.application !== process.application.key ||
       f.revision !== process.application.revision ||
       f.uid !== process.uid

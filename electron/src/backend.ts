@@ -209,6 +209,7 @@ export class Backend {
         mode: r.mode,
         enforcement: r.enforcement,
         rules: r.rules,
+        rule_states: r.rule_states,
         capabilities: r.capabilities,
         events: [],
       };

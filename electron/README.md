@@ -1059,9 +1059,11 @@ Selected applications, processes and uniquely associated sockets show the comple
 available incoming/outgoing rule inventory in Info View. In/Out opens an inline
 quick setter; a chosen rule can be reviewed, edited, disabled or conditionally
 deleted without leaving Activity. New separate rules explicitly choose protocol
-and scope, then use the existing authoritative Preview/Save. Process/socket views
-clearly label application-wide identity scope; process-only rules are not supported.
+and scope, then use the existing authoritative Preview/Save. With `process-instance-rules-v1`, process/socket views default to This process and
+show application fallback separately. Older daemons explicitly retain application-wide scope.
 Stored policy is not active enforcement. Connection arrows use backend
 `activity-initiation-v1` evidence, with explicit neutral states when unavailable.
 See [Activity rules reference and evidence](ACTIVITY-RULES.md) for the live NetLimiter
 mapping, backend b9840d0 verification, screenshots and the scoped process-rule gap.
+
+Process-only selection, lifetime and verification: [PROCESS-RULES.md](PROCESS-RULES.md).

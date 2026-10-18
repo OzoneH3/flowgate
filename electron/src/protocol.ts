@@ -1,3 +1,4 @@
+import { parseProcessTarget, type ProcessTarget } from './process-rules';
 import {
   parseEvaluation,
   type DaemonEvaluationStatus,
@@ -156,6 +157,7 @@ export interface Reply {
   events: RequestEvent[];
   decision?: RequestEvent;
   rules: Rule[];
+  rule_states?: Record<string, RuleTargetState>;
   saved_rule?: Rule;
   scope_preview: string;
   enforcement?: { state: string; detail: string; profile: string; stops_at: string };
@@ -195,6 +197,7 @@ export interface ClientState {
     backendMode?: string;
     events: ViewEvent[];
     rules?: Rule[];
+    rule_states?: Record<string, RuleTargetState>;
     capabilities?: string[];
     serverNow?: number;
     policy?: PolicyView;
@@ -341,6 +344,28 @@ export function parseReply(raw: unknown): Reply {
       : undefined,
     events: array(r.events, 256).map(event),
     rules: array(r.rules, 8192).map(parseRule),
+    rule_states: r.rule_states
+      ? Object.fromEntries(
+          Object.entries(object(r.rule_states))
+            .slice(0, 8192)
+            .map(([id, value]) => {
+              const v = object(value);
+              if (
+                !['application', 'process'].includes(string(v.target_scope)) ||
+                !['active', 'inactive'].includes(string(v.state))
+              )
+                throw Error('Invalid rule target state');
+              return [
+                id,
+                {
+                  target_scope: v.target_scope as 'application' | 'process',
+                  state: v.state as 'active' | 'inactive',
+                  reason: string(v.reason),
+                },
+              ];
+            }),
+        )
+      : undefined,
     saved_rule: r.saved_rule ? parseRule(r.saved_rule) : undefined,
     scope_preview: string(r.scope_preview),
     // Validated by decision-log.ts, which owns the decision-log-v1 schema.
@@ -538,6 +563,7 @@ export function validateDecision(v: unknown): Decision {
 }
 
 export interface RuleFilter {
+  process?: ProcessTarget;
   application: string;
   revision: string;
   direction: string;
@@ -547,6 +573,11 @@ export interface RuleFilter {
   remote_port?: number;
   remote?: string;
   uid: number;
+}
+export interface RuleTargetState {
+  target_scope: 'application' | 'process';
+  state: 'active' | 'inactive';
+  reason: string;
 }
 export interface Rule {
   version: number;
@@ -566,8 +597,11 @@ export interface RuleDraft {
   rule: Rule;
   source: string;
   observed?: boolean;
+  targetScope?: 'application' | 'process';
+  processID?: string;
 }
 export interface ObservedSource {
+  target_scope?: 'application' | 'process';
   generation: string;
   row_id: string;
   process_id: string;
@@ -628,6 +662,7 @@ export interface Preferences {
 function ruleFilter(v: unknown): RuleFilter {
   const f = object(v);
   return {
+    process: parseProcessTarget(f.process),
     application: string(f.application),
     revision: string(f.revision),
     direction: string(f.direction),
@@ -648,7 +683,10 @@ function ruleVersion(v: unknown): number {
   return v;
 }
 function parseRule(v: unknown): Rule {
-  const r = object(v);
+  const r = object(v),
+    filter = ruleFilter(r.filter);
+  if ((number(r.schema) === 3) !== !!filter.process)
+    throw Error('Process rule requires schema3 and a complete immutable binding');
   return {
     version: ruleVersion(r.version),
     executable: string(r.executable),
@@ -657,7 +695,7 @@ function parseRule(v: unknown): Rule {
     schema: number(r.schema),
     id: string(r.id),
     priority: number(r.priority),
-    filter: ruleFilter(r.filter),
+    filter,
     action: string(r.action),
     expires: string(r.expires),
   };
