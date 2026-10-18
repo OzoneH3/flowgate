@@ -1,5 +1,43 @@
 # Integrated desktop and non-enforcing root monitor
 
+## Current: Rule Status popup and chart-detail fixes integrated
+
+Explicitly released clean UI **8ecd71b652353f4af6596e713112d6e2f036366f**,
+base8e16061, is fast-forward integrated with its complete history. No backend/API
+change or privileged deployment. Main build/typecheck and **39 focused tests** pass
+(`.workspace/ui-rule-clicks-integration-{build,tests}.log`). Exact-release synthetic
+click/placement/color/reconnect evidence and real isolated process Allow→Deny edit,
+conditional Delete to rules0 and GUI-exit daemon survival are reused. No receiver,
+UDP or evaluation matrix repeated. Detail: `electron/RULE-STATUS-FIXES.md`.
+
+Table setters anchor to the clicked row; matrix icon/text/background behave alike.
+Viewport flip/clamp/reposition, keyboard focus and frozen target survive polling.
+Detached Info has a local setter; its reviewed main-process proxy accepts only
+registered Info senders with current selection/generation, draft/receipt ownership,
+full process-target comparison and the existing Rules service authorization,
+preview/save/version/reconciliation safeguards. Advanced editors and Delete
+confirmation remain in Activity. Bounded maps retain at most32 entries per kind;
+receipts are consumed before save, not automatically replayed.
+
+Chart traces were already download green/upload red; the reproduced inconsistency
+was monochrome sample details, now using the same series tokens. No unsupported
+claim of a swapped-line fix. Missing measurements remain unavailable.
+
+UI returned explicit DONE for popup-ui generation43be3202900fa8370b9a6761c99cc44c.
+Backend independently verified exact generation, rules0 and stopped enforcement,
+sent its owned quit, then confirmed CLEANED and both API sockets removed. Evidence:
+UI `.workspace/panes-real-PLjSai`, main `.workspace/popup-ui-owner.log` and
+`.workspace/popup-ui/cleanup-before.json`. An earlier locator failure after successful
+cleanup is documented; the corrected full real journey passed.
+
+Installed host backend stays7ec89ad, PID1113279, generation3e696c4462fb777d9be0bc350a56df2e;
+UDP active generationde1c7cda058de0f47be901dcdf92cfa3, enforcement stopped at the last
+read-only host verification. No host runtime/network/policy action or Windows input
+was performed in this increment. Prior Windows docking-restoration question remains
+pending. Existing host receiver acceptance remains documented below, not rerun.
+
+Normal launch: `scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock`.
+
 ## Current: released shared Activity panes integrated (round 6)
 
 Exact UI **0fe0989e080a11a1e58b4eda7ac99a5a56cc8331** (pane checkpoint
