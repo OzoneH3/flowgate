@@ -75,7 +75,9 @@ export class TrafficGraph {
       // Chart name follows the Activity selection, as in the reference legend.
       span.textContent =
         color === 'graph-selection'
-          ? document.getElementById('selectedName')?.textContent || ''
+          ? document.getElementById('selectedName')?.dataset.label ||
+            document.getElementById('selectedName')?.textContent ||
+            ''
           : `${name} (${amount(value, true)}${current?.partial ? ' *' : ''})`;
       values.append(span);
     }

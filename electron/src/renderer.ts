@@ -146,7 +146,11 @@ function statusStrip(r: Row) {
   const processPolicy = authoritativeProcessPolicy(r, state);
   for (const slot of STATUS_SLOTS) {
     if (!slot.direction) {
-      const dot = element('span', '·', 'status-slot unavailable');
+      const dot = element('span', '', 'status-slot unavailable');
+      dot.append(
+        element('span', '·', 'slot-dot'),
+        element('span', slot.glyph, 'slot-icon family-' + slot.key),
+      );
       dot.title = `${slot.label}: not a FlowGate feature`;
       strip.append(dot);
       continue;
@@ -194,9 +198,12 @@ function statusStrip(r: Row) {
       };
       title = `${slot.label} (compatibility inventory): ${chip.text}\n${chip.detail}`;
     } else title = `${slot.label}: ${status.reason}`;
-    button.append(blockerGlyph(chip));
-    if (!chip.glyph && !['allow', 'block', 'mixed', 'off'].includes(chip.tone))
-      button.textContent = '·';
+    if (['allow', 'block', 'mixed', 'off'].includes(chip.tone)) button.append(blockerGlyph(chip));
+    else
+      button.append(
+        element('span', '·', 'slot-dot'),
+        element('span', slot.glyph, 'slot-icon family-' + slot.key),
+      );
     button.classList.add('tone-' + chip.tone);
     if (fallbackShown) button.classList.add('policy-fallback');
     button.title =
@@ -230,7 +237,7 @@ if (promptID) {
   root.innerHTML = `<section class="prompt-shell"><header class="prompt-heading"><strong>FlowGate Blocker</strong><span>Pending connection permission</span></header><div id="promptBody"><div id="requestDetails"></div></div><footer><span id="controlStatus"></span><button id="dismiss">Decide later</button></footer><div id="feedback" role="status" aria-live="polite"></div></section>`;
   $('dismiss').onclick = () => void window.flowgate.dismissPrompt();
 } else {
-  root.innerHTML = `<header class="toolbar"><strong class="brand">▣ FlowGate</strong><input id="search" type="search" aria-label="Search Activity" placeholder="Search"><span id="observerStatus"></span><span class="separator"></span><span id="controlStatus"></span></header><nav class="tabs" aria-label="Views"><button id="activityTab" aria-selected="true">Activity</button><button id="requestsTab" aria-selected="false">Pending requests <span id="pendingCount">0</span></button></nav><main id="activityView"><section class="activity-main"><div class="filterbar"><select id="activitySource" aria-label="Activity measurement source"><option value="tcp">TCP rates</option><option value="udp">UDP rates</option></select><select id="filter" aria-label="Socket filter"><option value="all">All sockets</option><option value="active">Active TCP / connected UDP</option><option value="listening">Listening TCP / bound UDP</option></select><button id="expand">Expand all</button><button id="collapse">Collapse all</button></div><div class="table-scroll"><table id="tree" role="treegrid" tabindex="0" aria-label="Application process socket activity"><thead><tr id="headers"></tr></thead><tbody id="rows"></tbody></table></div><div id="activitySummary" class="summary"></div></section><aside><h2>Info View</h2><h3 id="selectedName">FlowGate Activity</h3><div id="selectedExecutable"></div><div class="info-scroll"><h3 id="infoProperties" class="info-section-title">Overview</h3><dl id="info"></dl><section id="infoRules"></section><section class="info-tools"><h3 class="info-section-title">Tools</h3><button id="infoOpenRules">Rule list</button><button id="infoOpenLog">Decision log</button><button id="infoOpenPending">Pending requests</button></section></div><section id="trafficGraph"></section></aside></main><main id="requestsView" hidden><section class="request-list"><h2>Pending &amp; recent requests</h2><p class="hint">Select a request to decide. Dismissal grants nothing. Closing FlowGate leaves an independent controller running.</p><div class="table-scroll"><table id="requests"><thead><tr><th>Application</th><th>Direction</th><th>Protocol</th><th>Remote endpoint</th><th>State</th></tr></thead><tbody id="requestRows"></tbody></table></div></section><aside class="request-sidebar"><h2>Connection permission</h2><div id="requestDetails"></div></aside></main><footer><span>Activity and firewall control are independent.</span><span id="feedback" role="status" aria-live="polite"></span></footer>`;
+  root.innerHTML = `<header class="toolbar"><strong class="brand">▣ FlowGate</strong><input id="search" type="search" aria-label="Search Activity" placeholder="Search"><span id="observerStatus"></span><span class="separator"></span><span id="controlStatus"></span></header><nav class="tabs" aria-label="Views"><button id="activityTab" aria-selected="true">Activity</button><button id="requestsTab" aria-selected="false">Pending requests <span id="pendingCount">0</span></button><span id="tabsPaneControls" class="pane-controls"></span></nav><main id="activityView"><section class="activity-main"><div class="filterbar"><select id="activitySource" aria-label="Activity measurement source"><option value="tcp">TCP rates</option><option value="udp">UDP rates</option></select><select id="filter" aria-label="Socket filter"><option value="all">All sockets</option><option value="active">Active TCP / connected UDP</option><option value="listening">Listening TCP / bound UDP</option></select><button id="expand">Expand all</button><button id="collapse">Collapse all</button></div><div class="table-scroll"><table id="tree" role="treegrid" tabindex="0" aria-label="Application process socket activity"><thead><tr id="headers"></tr></thead><tbody id="rows"></tbody></table></div><div id="activitySummary" class="summary"></div></section><aside><h2>Info View<span id="infoPaneControls" class="pane-controls"></span></h2><h3 id="selectedName">FlowGate Activity</h3><div id="selectedExecutable"></div><div class="info-scroll"><h3 id="infoProperties" class="info-section-title">Overview</h3><dl id="info"></dl><section id="infoRules"></section><section class="info-tools"><h3 class="info-section-title">Tools</h3><button id="infoOpenRules">Rule list</button><button id="infoOpenLog">Decision log</button><button id="infoOpenPending">Pending requests</button></section></div><section id="trafficGraph"></section></aside></main><main id="requestsView" hidden><section class="request-list"><h2>Pending &amp; recent requests</h2><p class="hint">Select a request to decide. Dismissal grants nothing. Closing FlowGate leaves an independent controller running.</p><div class="table-scroll"><table id="requests"><thead><tr><th>Application</th><th>Direction</th><th>Protocol</th><th>Remote endpoint</th><th>State</th></tr></thead><tbody id="requestRows"></tbody></table></div></section><aside class="request-sidebar"><h2>Connection permission</h2><div id="requestDetails"></div></aside></main><footer><span>Activity and firewall control are independent.</span><span id="feedback" role="status" aria-live="polite"></span></footer>`;
   const columns = [
     ['name', 'Name'],
     ['download_bps', 'DL Rate'],
@@ -290,6 +297,7 @@ if (promptID) {
     },
   );
   graph = new TrafficGraph($('trafficGraph'));
+  setupPaneControls();
   activityPolicy = new ActivityPolicy($('infoRules'));
   window.flowgate.onNavigate((v) => {
     chooseTab('requests');
@@ -418,6 +426,93 @@ function buildTree() {
     : state.observation.message;
   $('activitySummary').title = [a?.collected, ...(a?.issues || [])].filter(Boolean).join(' · ');
 }
+// Reference dock controls (▾ menu: Open Window ▸ / Close; ✕: Close) for the Info View and the
+// Traffic chart. The Activity list itself cannot be closed, so its strip only offers Open Window.
+function paneList(): { key: 'info' | 'chart'; label: string }[] {
+  return [
+    { key: 'info', label: 'Info View' },
+    { key: 'chart', label: 'Traffic chart' },
+  ];
+}
+function paneState(): Record<'info' | 'chart', boolean> {
+  try {
+    return {
+      info: true,
+      chart: true,
+      ...JSON.parse(localStorage.getItem('flowgate.panes') || '{}'),
+    };
+  } catch {
+    return { info: true, chart: true };
+  }
+}
+function applyPanes() {
+  const panes = paneState();
+  document.body.classList.toggle('hide-info', !panes.info);
+  document.body.classList.toggle('hide-chart', !panes.chart);
+  for (const item of document.querySelectorAll<HTMLButtonElement>('.pane-menu button[data-pane]'))
+    item.setAttribute('aria-checked', String(panes[item.dataset.pane as 'info' | 'chart']));
+  void graph?.update(selected, sequence + ':panes:' + performance.now());
+}
+function setPane(key: 'info' | 'chart', open: boolean) {
+  localStorage.setItem('flowgate.panes', JSON.stringify({ ...paneState(), [key]: open }));
+  applyPanes();
+}
+function paneControls(self?: 'info' | 'chart') {
+  const wrap = element('span', '', 'pane-controls-inner');
+  const menu = element('details', '', 'desktop-menu pane-menu');
+  const summary = element('summary', '▾');
+  summary.title = 'Window menu';
+  summary.setAttribute(
+    'aria-label',
+    (self ? paneList().find((p) => p.key === self)!.label : 'Activity') + ' window menu',
+  );
+  const panel = element('div', '', 'menu-panel');
+  panel.append(element('div', 'Open Window', 'menu-heading'));
+  for (const pane of paneList()) {
+    const item = element('button', pane.label);
+    item.dataset.pane = pane.key;
+    item.setAttribute('role', 'menuitemcheckbox');
+    item.onclick = () => {
+      setPane(pane.key, !paneState()[pane.key]);
+      menu.open = false;
+    };
+    panel.append(item);
+  }
+  if (self) {
+    const close = element('button', 'Close');
+    close.onclick = () => {
+      setPane(self, false);
+      menu.open = false;
+    };
+    panel.append(element('hr'), close);
+  }
+  menu.append(summary, panel);
+  wrap.append(menu);
+  if (self) {
+    const x = element('button', '✕', 'pane-close');
+    x.title =
+      'Close ' + paneList().find((p) => p.key === self)!.label + ' (reopen from any ▾ window menu)';
+    x.setAttribute('aria-label', x.title);
+    x.onclick = () => setPane(self, false);
+    wrap.append(x);
+  }
+  return wrap;
+}
+function setupPaneControls() {
+  $('infoPaneControls').append(paneControls('info'));
+  $('tabsPaneControls').append(paneControls());
+  const chartHead = document.querySelector('#trafficGraph .graph-heading');
+  if (chartHead) {
+    const c = element('span', '', 'pane-controls');
+    c.append(paneControls('chart'));
+    chartHead.append(c);
+  }
+  document.addEventListener('pointerdown', (event) => {
+    for (const menu of document.querySelectorAll<HTMLDetailsElement>('.pane-menu[open]'))
+      if (!menu.contains(event.target as Node)) menu.open = false;
+  });
+  applyPanes();
+}
 function renderTree() {
   const focused = document.activeElement as HTMLElement;
   const focusedPolicy = focused?.classList.contains('policy-cell')
@@ -442,7 +537,7 @@ function renderTree() {
     name.className = `name depth-${depth}`;
     const toggle = element(
       'button',
-      r.children.length ? (expanded.has(r.id) ? '▾' : '▸') : '·',
+      r.children.length ? (expanded.has(r.id) ? '◢' : '▷') : '',
       'disclosure',
     );
     toggle.tabIndex = -1;
@@ -474,7 +569,8 @@ function renderTree() {
     // Reference-style online LED. FlowGate lists only currently observed owners, so every live
     // row is online; the retained exited selection never appears in this table.
     const led = element('span', '', 'online-dot on');
-    led.title = 'Online: currently observed';
+    led.title =
+      'Online: has at least one socket in the current observation snapshot (not a reachability claim)';
     led.setAttribute('aria-hidden', 'true');
     name.append(led, toggle, icon, document.createTextNode(rowLabel));
     name.title = r.process?.executable || r.socket?.socket.remote || r.label;
@@ -588,6 +684,8 @@ function renderInfo() {
   const selectedName = $('selectedName');
   if (selectedName.dataset.identity !== (r?.id || '')) {
     selectedName.dataset.identity = r?.id || '';
+    // The chart legend names the selected entity (reference), not the type word shown as title.
+    selectedName.dataset.label = r?.label || '';
     selectedName.replaceChildren(
       ...(r ? [installedIcon(rowApplication(r), r.kind)] : []),
       document.createTextNode(

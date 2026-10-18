@@ -161,10 +161,10 @@ try {
   assert.equal(procOut.action, 'block');
   assert.equal(procOut.schema, 3);
   assert(procOut.expires.startsWith('0001-'));
-  await wait(async () => /Block/.test(await cell('process', 'outgoing').innerText()));
+  await wait(async () => /Deny/.test(await cell('process', 'outgoing').innerText()));
   assert.match(
     await rows(alpha).locator('.status-slot[data-direction=outgoing]').getAttribute('aria-label'),
-    /Block/,
+    /Deny/,
   );
   await p.screenshot({ path: path.join(run, '03-alpha-process-block.png') });
 
