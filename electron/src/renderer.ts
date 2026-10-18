@@ -1,3 +1,5 @@
+import { applicationHeading } from './application-heading';
+import { connectionPresentation, permissionTarget } from './connection-presentation';
 import { ZONE_CAPABILITY, zoneLabel } from './network-zones';
 import type { Presentation, PaneFrame } from './pane-model';
 import { DISPLAY_UNITS, displayAmount, isDisplayUnit, type DisplayUnit } from './display-units';
@@ -323,11 +325,18 @@ function message(text: string) {
 const scopeLabels: Record<Scope, string> = {
   once: 'Once',
   application: 'Remember · 1 hour',
-  persistent: 'Persistent until disabled / deleted',
+  persistent: 'Remember · persistent',
 };
 if (promptID) {
-  root.innerHTML = `<section class="prompt-shell"><header class="prompt-heading"><strong>FlowGate Blocker</strong><span>Pending connection permission</span></header><div id="promptBody"><div id="requestDetails"></div></div><footer><span id="controlStatus"></span><button id="dismiss">Decide later</button></footer><div id="feedback" role="status" aria-live="polite"></div></section>`;
+  root.innerHTML = `<section class="prompt-shell"><header class="prompt-heading"><strong>FlowGate Blocker</strong><span id="promptPending">Connection permission</span><button id="closePrompt" aria-label="Dismiss permission window">×</button></header><div id="promptBody"><div id="requestDetails"></div></div><footer><span id="controlStatus"></span><button id="dismiss">Decide later</button></footer><div id="feedback" role="status" aria-live="polite"></div></section>`;
   $('dismiss').onclick = () => void window.flowgate.dismissPrompt();
+  $('closePrompt').onclick = () => void window.flowgate.dismissPrompt();
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      void window.flowgate.dismissPrompt();
+    }
+  });
 } else {
   root.innerHTML = `<header class="toolbar"><strong class="brand">FLOWGATE</strong><span id="toolbarUnits" class="toolbar-units"><label for="displayUnits">Units</label><select id="displayUnits" aria-label="Display units" title="Display only: bytes or bits, decimal SI prefixes (1 KB = 1000 B). Accounting sources stay separate."></select></span><span id="observerStatus" class="toolbar-status"></span><span id="controlStatus" class="toolbar-status"></span><span class="toolbar-layout"><select id="layoutPreset" aria-label="Window layout"><option value="chart">Default with Chart</option><option value="plain">Default</option><option value="activity">Activity only</option></select></span><input id="search" type="search" aria-label="Search Activity" placeholder="Search"></header><nav class="tabs" aria-label="Views"><button id="activityTab" aria-selected="true">Activity</button><button id="requestsTab" aria-selected="false">Pending requests <span id="pendingCount">0</span></button><span id="tabsPaneControls" class="pane-controls"></span></nav><main id="activityView"><section class="activity-main"><div class="filterbar"><select id="activitySource" aria-label="Activity measurement source"><option value="tcp">TCP</option><option value="udp">UDP</option></select><button id="rateMode" aria-pressed="false" title="Switch the two traffic columns between current rate and total transferred">Rate</button><select id="columnPreset" aria-label="Column preset"><option value="status">Status</option><option value="details">Details</option></select><select id="filter" aria-label="Socket filter"><option value="all">All sockets</option><option value="active">Active TCP / connected UDP</option><option value="listening">Listening TCP / bound UDP</option></select><span class="filterbar-icons"><button id="expand" class="icon-button" title="Expand all" aria-label="Expand all">⊞</button><button id="collapse" class="icon-button" title="Collapse all" aria-label="Collapse all">⊟</button><button id="refreshNow" class="icon-button" title="Refresh now" aria-label="Refresh now">↻</button></span></div><div class="table-scroll"><table id="tree" role="treegrid" tabindex="0" aria-label="Application process socket activity"><thead><tr id="headers"></tr></thead><tbody id="rows"></tbody></table></div><div id="activitySummary" class="summary"></div></section><aside><h2>Info View<span id="infoPaneControls" class="pane-controls"></span></h2><h3 id="selectedName">FlowGate Activity</h3><div id="selectedExecutable"></div><div class="info-scroll"><h3 id="infoProperties" class="info-section-title">Overview</h3><dl id="info"></dl><section id="infoRules"></section><section class="info-tools"><h3 class="info-section-title">Tools</h3><button id="infoOpenRules">Rule list</button><button id="infoOpenLog">Decision log</button><button id="infoOpenPending">Pending requests</button></section></div><section id="trafficGraph"></section></aside></main><main id="requestsView" hidden><section class="request-list"><h2>Pending &amp; recent requests</h2><p class="hint">Select a request to decide. Dismissal grants nothing. Closing FlowGate leaves an independent controller running.</p><div class="table-scroll"><table id="requests"><thead><tr><th>Application</th><th>Direction</th><th>Protocol</th><th>Remote endpoint</th><th>State</th></tr></thead><tbody id="requestRows"></tbody></table></div></section><aside class="request-sidebar"><h2>Connection permission</h2><div id="requestDetails"></div></aside></main><footer><span id="footerSummary"></span><span id="feedback" role="status" aria-live="polite"></span></footer>`;
   const columns = [
@@ -1231,7 +1240,8 @@ function renderInfo() {
 }
 function eventName(e: ViewEvent) {
   return (
-    e.attribution.application?.name ||
+    e.attribution.application?.display_name ||
+    e.attribution.application?.name.replace(/ \(deleted\)$/, '') ||
     e.attribution.application?.executable ||
     'Unidentified application'
   );
@@ -1295,7 +1305,7 @@ function renderRequests() {
   const sig = JSON.stringify([
     selectedRequest,
     state.control.generation,
-    e ? { ...e, remainingMs: 0 } : null,
+    e ? [e.id, e.flow, e.attribution, e.deadline, e.scope_previews] : null,
   ]);
   if (sig !== detailSignature) {
     detailSignature = sig;
@@ -1313,38 +1323,32 @@ function renderRequests() {
       );
       return;
     }
-    container.append(
+    container.tabIndex = -1;
+    container.onkeydown = (event) => {
+      if (event.key === 'Enter' && event.target === container) event.preventDefault();
+    };
+    const presentation = connectionPresentation(e.flow);
+    const route = element('div', '', 'connection-route');
+    route.append(
       element(
         'h3',
-        `${e.flow.direction} connection · ${e.flow.protocol.toUpperCase()}`,
+        `${presentation.direction} connection · ${e.flow.protocol.toUpperCase()}`,
         'connection-banner',
       ),
+      applicationHeading(e.attribution.application, eventName(e)),
+      element('strong', e.flow.remote, 'remote-endpoint'),
     );
-    const route = element('dl', '', 'identity-route');
-    const incoming = e.flow.direction === 'incoming';
-    field(route, 'From', incoming ? e.flow.remote : eventName(e));
-    field(route, 'To', incoming ? eventName(e) : e.flow.remote);
-    const applicationRoute = route.querySelectorAll('dd')[incoming ? 1 : 0];
-    applicationRoute.classList.add('route-application');
-    applicationRoute.prepend(installedIcon(e.attribution.application, 'application'));
+    route.title = presentation.relation;
     container.append(route);
+    container.append(element('p', presentation.relation, 'connection-relation'));
     const fields = element('dl', '', 'connection-fields');
-    field(
-      fields,
-      'Application',
-      e.attribution.application?.executable.split('/').pop() || 'Unavailable',
-    );
-    field(
-      fields,
-      'Process ID',
-      e.attribution.owners.map((p) => String(p.pid)).join(', ') || 'Unavailable',
-    );
-    field(fields, 'Local endpoint', e.flow.local);
-    field(fields, 'Remote endpoint', e.flow.remote);
-    field(fields, 'Deadline', e.deadline.replace(/\.\d+/, ''));
+    field(fields, 'Local', e.flow.local);
+    field(fields, 'Protocol', e.flow.protocol.toUpperCase());
+    field(fields, 'Network', presentation.zone);
+    fields.title = e.flow.network_scope?.reason || 'Classification unavailable';
     container.append(fields);
     const technical = element('details', '', 'identity-details');
-    technical.append(element('summary', 'Application identity and attribution details'));
+    technical.append(element('summary', 'Details'));
     const identity = element('dl', '', 'connection-fields');
     field(identity, 'Exact backend deadline', e.deadline);
     field(identity, 'Executable', e.attribution.application?.executable || 'Unavailable');
@@ -1363,7 +1367,10 @@ function renderRequests() {
         ? 'Backend reports complete visibility'
         : 'Limited observation; hidden owners or races may remain',
     );
-    technical.append(identity);
+    field(identity, 'Network classification', e.flow.network_scope?.reason || 'Unavailable');
+    const preview = element('p', '', 'scope-preview');
+    preview.id = 'scopePreview';
+    technical.append(identity, preview);
     container.append(technical);
     if (!e.attribution.visibility_complete || e.attribution.status !== 'directly-associated')
       container.append(
@@ -1374,26 +1381,29 @@ function renderRequests() {
         ),
       );
     container.append(element('p', '', 'expiry'));
-    const preview = element('p', '', 'scope-preview');
-    preview.id = 'scopePreview';
-    container.append(preview);
+    const scopeTarget = element('p', '', 'permission-target');
+    scopeTarget.id = 'permissionTarget';
+    container.append(scopeTarget);
     const controls = element('div', '', 'decision-controls');
     for (const [action, label] of [
       ['allow', 'Allow'],
-      ['block', 'Block'],
+      ['block', 'Deny'],
     ] as const) {
       const button = element('button', label, action);
       button.id = action;
       button.onclick = async () => {
-        localSubmitted.add(state.control.generation + ':' + e.id);
+        if (!actionable(currentEvent()) || currentEvent()?.id !== e.id) return;
+        const generation = state.control.generation,
+          scope = chosenScope;
+        localSubmitted.add(generation + ':' + e.id);
         updateDecisions();
         message('Submitting decision…');
         try {
           const result = await window.flowgate.decide({
-            generation: state.control.generation,
+            generation,
             id: e.id,
             action,
-            scope: chosenScope,
+            scope,
           });
           message(result.message);
         } catch (error) {
@@ -1419,7 +1429,7 @@ function renderRequests() {
       updateDecisions();
     };
     controls.append(scopes);
-    container.insertBefore(controls, preview);
+    container.append(controls);
     if (!promptID) {
       const open = element('button', 'Open permission window', 'open-prompt');
       open.onclick = () => void window.flowgate.openPrompt(e.id);
@@ -1428,11 +1438,18 @@ function renderRequests() {
     const result = element('p', e.attempt?.message || e.reason, 'request-result');
     result.id = 'requestResult';
     container.append(result);
+    if (promptID && !container.dataset.focused) {
+      container.focus({ preventScroll: true });
+      container.dataset.focused = 'true';
+    }
   }
   updateDecisions();
 }
 function updateDecisions() {
   const e = currentEvent();
+  if ($('promptPending'))
+    $('promptPending').textContent =
+      `Pending connections (${state.control.events.filter((e) => e.state === 'awaiting-decision' && e.remainingMs > 0).length})`;
   for (const id of ['allow', 'block']) {
     const b = $<HTMLButtonElement>(id);
     if (b) b.disabled = !actionable(e);
@@ -1450,6 +1467,12 @@ function updateDecisions() {
   if ($('scopePreview'))
     $('scopePreview').textContent =
       e?.scope_previews[chosenScope] || 'Authoritative scope unavailable; decisions disabled.';
+  if ($('requestResult') && e)
+    $('requestResult').textContent = !state.control.connected
+      ? 'Disconnected · decisions unavailable. Request details retained; no retry sent.'
+      : e.attempt?.message || e.reason;
+  if ($('permissionTarget'))
+    $('permissionTarget').textContent = permissionTarget(chosenScope, e?.flow.protocol || '');
   const expiry = document.querySelector('.expiry');
   if (expiry)
     expiry.textContent = e

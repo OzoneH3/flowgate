@@ -1,3 +1,5 @@
+import { placeKDEPrompt, PROMPT_TITLE } from './prompt-placement';
+import { AutomaticPrompts, edgePosition } from './automatic-prompts';
 import {
   app,
   BrowserWindow,
@@ -101,6 +103,28 @@ const width = dimension(
   );
 let main: BrowserWindow;
 let prompt: BrowserWindow | undefined;
+const automaticPrompts = new AutomaticPrompts();
+function openDecision(ref: RequestRef) {
+  if (prompt && !prompt.isDestroyed()) {
+    const url = new URL(prompt.webContents.getURL() || 'about:blank');
+    if (
+      url.searchParams.get('request') === ref.id &&
+      url.searchParams.get('generation') === ref.generation
+    ) {
+      prompt.show();
+      prompt.focus();
+      return;
+    }
+    prompt.close();
+  }
+  automaticPrompts.mark(ref);
+  prompt = windowFor(true, ref.id, ref.generation);
+}
+function automaticDecision() {
+  if (quitting || !backend || !main) return;
+  const next = automaticPrompts.next(backend.view(), !!prompt && !prompt.isDestroyed());
+  if (next) openDecision(next);
+}
 const windows = new Set<BrowserWindow>();
 let backend: Backend;
 let evaluation: Evaluation;
@@ -204,8 +228,7 @@ async function review(ref: RequestRef) {
     );
     return;
   }
-  if (prompt && !prompt.isDestroyed()) prompt.close();
-  prompt = windowFor(true, ref.id, ref.generation);
+  openDecision(ref);
 }
 function trusted(e: IpcMainInvokeEvent, allowPane = false) {
   if (
@@ -229,11 +252,12 @@ function presentationSender(e: IpcMainInvokeEvent) {
 }
 function windowFor(isPrompt = false, id = '', generation = '') {
   const w = new BrowserWindow({
-    title: isPrompt ? 'FlowGate — connection permission' : 'FlowGate',
-    width: isPrompt ? 620 : width,
-    height: isPrompt ? 740 : height,
+    title: isPrompt ? PROMPT_TITLE : 'FlowGate',
+    frame: !isPrompt,
+    width: isPrompt ? 520 : width,
+    height: isPrompt ? 460 : height,
     minWidth: isPrompt ? 480 : 800,
-    minHeight: isPrompt ? 560 : 550,
+    minHeight: isPrompt ? 400 : 550,
     backgroundColor: '#222222',
     autoHideMenuBar: true,
     show: false,
@@ -249,12 +273,36 @@ function windowFor(isPrompt = false, id = '', generation = '') {
     },
   });
   windows.add(w);
+  if (isPrompt) w.on('page-title-updated', (event) => event.preventDefault());
   w.setMenu(null);
   w.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   w.webContents.on('will-navigate', (e) => e.preventDefault());
   w.webContents.on('will-attach-webview', (e) => e.preventDefault());
-  w.on('closed', () => windows.delete(w));
-  w.once('ready-to-show', () => w.show());
+  w.on('closed', () => {
+    windows.delete(w);
+    if (isPrompt && prompt === w) {
+      prompt = undefined;
+      setImmediate(automaticDecision);
+    }
+  });
+  w.once('ready-to-show', () => {
+    if (isPrompt) {
+      const area = screen.getPrimaryDisplay().workArea;
+      w.setBounds(edgePosition(area, 520, 460));
+    }
+    w.show();
+    if (isPrompt) {
+      w.focus();
+      setTimeout(() => {
+        if (!w.isDestroyed())
+          void placeKDEPrompt(
+            profile,
+            process.pid,
+            edgePosition(screen.getPrimaryDisplay().workArea, 520, 460),
+          ).catch((error) => console.info('FlowGate: prompt placement unavailable', String(error)));
+      }, 100);
+    }
+  });
   const refresh = () => {
     if (backend && !w.isDestroyed()) w.webContents.send('state', backend.view());
   };
@@ -315,6 +363,7 @@ app.whenReady().then(async () => {
     for (const w of windows)
       if (!w.isDestroyed() && !paneRoles.has(w.webContents.id) && w.isVisible() && !w.isMinimized())
         w.webContents.send('state', state);
+    automaticDecision();
     background?.update(state);
   });
   ipcMain.handle('application:metadata', (e, value) => {
@@ -603,8 +652,7 @@ app.whenReady().then(async () => {
       !backend.view().control.events.some((v) => v.id === id)
     )
       throw Error('Unknown request');
-    if (prompt && !prompt.isDestroyed()) prompt.close();
-    prompt = windowFor(true, id, backend.view().control.generation);
+    openDecision({ id, generation: backend.view().control.generation });
   });
   ipcMain.handle('prompt:dismiss', (e) => {
     trusted(e);
@@ -649,7 +697,6 @@ app.whenReady().then(async () => {
     if (quitting) return;
     e.preventDefault();
     if (saved.ui?.keepInTray === true && background.available()) {
-      if (prompt && !prompt.isDestroyed()) prompt.close();
       main.hide();
     } else void background.requestQuit();
   });
