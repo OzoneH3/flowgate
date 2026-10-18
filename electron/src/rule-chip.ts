@@ -1,3 +1,4 @@
+import { zoneLabel } from './network-zones';
 import type { DirectionPolicy, PolicyRuleRef } from './policy';
 // Presentation of a backend direction summary. Inventory only: no matching or precedence.
 export type ChipTone = 'none' | 'allow' | 'block' | 'mixed' | 'off' | 'unavailable';
@@ -28,7 +29,13 @@ export const refState = (r: PolicyRuleRef) =>
   r.expired ? 'Expired' : r.disabled ? 'Disabled' : r.active ? 'Enabled' : 'Inactive';
 export function shortScope(r: PolicyRuleRef) {
   const f = r.scope;
-  const parts = [protocolLabel(r)];
+  const parts = [
+    protocolLabel(r),
+    zoneLabel(f.network_zone),
+    ...(f.all_programs
+      ? [f.all_uids ? 'all programs / all users' : 'all programs / UID ' + f.uid]
+      : []),
+  ];
   const address = f.remote_address && f.remote_address !== '*' ? f.remote_address : f.remote;
   parts.push(address ? address : 'any address');
   if (f.local_port) parts.push('local ' + f.local_port);

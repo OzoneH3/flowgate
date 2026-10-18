@@ -47,6 +47,6 @@ export function initiationPresentation(row: SocketRow) {
             ? '↔'
             : '?',
     className: state === 'listening' ? 'connection-listening' : 'connection-neutral',
-    title: `${label}\n${i?.reason || 'No trustworthy initiation observation supplied.'}${i?.source ? '\nEvidence: ' + i.source : ''}\nNo direction is inferred from endpoints or traffic.`,
+    title: `${label}\n${i?.reason || 'No trustworthy initiation observation supplied.'}${i?.source ? '\nEvidence: ' + i.source + (i.generation ? '\nGeneration: ' + i.generation : '') : ''}\nNo direction is inferred from endpoints or traffic.`,
   };
 }

@@ -317,6 +317,10 @@ app.whenReady().then(async () => {
         w.webContents.send('state', state);
     background?.update(state);
   });
+  ipcMain.handle('application:metadata', (e, value) => {
+    trusted(e, true);
+    return icons.metadata(value);
+  });
   ipcMain.handle('application:icons', (e, value) => {
     trusted(e, true);
     return icons.request(value);
@@ -371,6 +375,10 @@ app.whenReady().then(async () => {
     showMain();
     main.webContents.send('pane:rule-open', action);
   });
+  ipcMain.handle('rule:context', async (e) => {
+    trusted(e, true);
+    return backend.refreshRuleContext();
+  });
   const rules = new Rules(backend);
   // Detached Info can use only drafts/receipts issued to its frozen selection.
   // Rules remains the single main-process mutation/preview service.
@@ -403,7 +411,14 @@ app.whenReady().then(async () => {
     if (op === 'draft') {
       const row = p.row;
       if (!row || !value || typeof value !== 'object') throw Error('Unsupported target');
-      if (value.observed) {
+      if (value.zone) {
+        if (
+          row.kind !== 'network' ||
+          value.zone.zone !== (row.id === 'network:local' ? 'local' : 'internet') ||
+          value.zone.generation !== p.generation
+        )
+          throw Error('Zone target differs from selection');
+      } else if (value.observed) {
         const o = value.observed;
         if (
           o.generation !== p.generation ||
@@ -415,7 +430,10 @@ app.whenReady().then(async () => {
       } else {
         const rule = state.control.rules?.find((r) => r.id === value.id);
         const app = row.process?.application;
-        if (
+        if (rule?.filter.all_programs && row.kind === 'network') {
+          if (rule.filter.network_zone !== (row.id === 'network:local' ? 'local' : 'internet'))
+            throw Error('Zone rule differs from selection');
+        } else if (
           !rule ||
           !app ||
           rule.filter.application !== app.key ||

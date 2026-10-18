@@ -1,3 +1,4 @@
+import { ZoneRules } from './zone-rules';
 import { PROCESS_CAPABILITY, sameProcessTarget } from './process-rules';
 import { ObservedRules } from './observed-rules';
 import { canManageRules } from './protocol';
@@ -13,11 +14,15 @@ export class Rules {
   >();
   private busy = false;
   private observed: ObservedRules;
+  private zones: ZoneRules;
   constructor(private backend: Backend) {
     this.observed = new ObservedRules(backend);
+    this.zones = new ZoneRules(backend);
   }
   reconcile(value: unknown) {
-    return this.observed.reconcile(value);
+    return this.zones.ownsReceipt(value)
+      ? this.zones.reconcile(value)
+      : this.observed.reconcile(value);
   }
   private authority() {
     const c = this.backend.view().control;
@@ -28,6 +33,8 @@ export class Rules {
   async draft(source: unknown): Promise<RuleDraft> {
     if (!source || typeof source !== 'object' || Array.isArray(source))
       throw Error('Invalid source');
+    if (Object.keys(source).join(',') === 'zone')
+      return this.zones.draft((source as { zone: unknown }).zone);
     if (Object.keys(source).join(',') === 'observed')
       return this.observed.draft((source as { observed: unknown }).observed);
     const s = source as { id?: string; event?: string };
@@ -85,6 +92,8 @@ export class Rules {
     return draft;
   }
   async preview(value: unknown) {
+    if (this.zones.ownsDraft((value as { token?: unknown })?.token))
+      return this.zones.preview(value);
     if (this.observed.ownsDraft((value as { token?: unknown })?.token))
       return this.observed.preview(value);
     const e: RuleEdit = validateEdit(value),
@@ -95,7 +104,7 @@ export class Rules {
     for (const [k, v] of this.receipts) if (v.draft === e.token) this.receipts.delete(k);
     const rule = structuredClone(d.rule);
     Object.assign(rule, {
-      schema: d.rule.filter.process ? 3 : 2,
+      schema: d.rule.schema === 4 ? 4 : d.rule.filter.process ? 3 : 2,
       action: e.action,
       disabled: e.disabled,
       priority: e.priority,
@@ -107,6 +116,8 @@ export class Rules {
       remote_port: e.remote_port,
       remote: '',
     });
+    if (e.network_zone !== undefined && e.network_zone !== (rule.filter.network_zone || ''))
+      throw Error('Network zone is immutable; create a new rule to change it');
     if (e.expiry !== 'preserve')
       rule.expires =
         e.expiry === 'hour'
@@ -116,6 +127,7 @@ export class Rules {
       throw Error('Process-rule backend capability unavailable; no mutation');
     const request = {
       generation: d.generation,
+      ...(rule.schema === 4 ? { zone_revision: c.networkZones?.revision } : {}),
       id: d.id || '',
       event_id: d.event || '',
       expected_version: d.id ? d.rule.version : undefined,
@@ -132,11 +144,13 @@ export class Rules {
       request,
       rule: r.saved_rule,
       generation: d.generation,
+      ...(rule.schema === 4 ? { zone_revision: c.networkZones?.revision } : {}),
       id: d.id,
     });
     return { receipt, preview: r.scope_preview, verifiedRule: r.saved_rule };
   }
   async save(receipt: unknown): Promise<Attempt> {
+    if (this.zones.ownsReceipt(receipt)) return this.zones.save(receipt);
     if (this.observed.ownsReceipt(receipt)) return this.observed.save(receipt);
     if (typeof receipt !== 'string' || receipt.length > 128) throw Error('Invalid preview receipt');
     const p = this.receipts.get(receipt);

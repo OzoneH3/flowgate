@@ -1,3 +1,4 @@
+import { parseNetworkZones, type NetworkZones, type NetworkZone } from './network-zones';
 import { parseProcessTarget, type ProcessTarget } from './process-rules';
 import type { ClientState, RuleFilter } from './protocol';
 import type { Row } from './model';
@@ -12,7 +13,7 @@ export interface PolicyRuleRef {
   expired: boolean;
   active: boolean;
   expires: string;
-  target_scope?: 'application' | 'process';
+  target_scope?: 'application' | 'process' | 'zone';
   target_state?: string;
   target_reason?: string;
 }
@@ -36,6 +37,7 @@ export interface DirectionPolicy {
   enforcement: { state: string; covered: boolean; reason: string };
 }
 export interface ApplicationPolicy {
+  zone_fallback_rule_ids?: string[];
   ref: string;
   identity: { key: string; revision: string; uid: number };
   process_ids: string[];
@@ -43,6 +45,7 @@ export interface ApplicationPolicy {
   outgoing: DirectionPolicy;
 }
 export interface ProcessPolicy {
+  zone_fallback_rule_ids?: string[];
   ref: string;
   process_id: string;
   application_ref: string;
@@ -56,6 +59,8 @@ export interface ProcessPolicy {
   application_outgoing: DirectionPolicy;
 }
 export interface PolicyView {
+  network_zones?: NetworkZones;
+  zones?: { zone: NetworkZone; incoming: DirectionPolicy; outgoing: DirectionPolicy }[];
   processes?: ProcessPolicy[];
   snapshot: {
     generation: string;
@@ -152,11 +157,13 @@ function direction(v: unknown, expected: string): DirectionPolicy {
             ? undefined
             : r.target_scope === 'process'
               ? 'process'
-              : r.target_scope === 'application'
-                ? 'application'
-                : (() => {
-                    throw Error('Invalid target scope');
-                  })(),
+              : r.target_scope === 'zone'
+                ? 'zone'
+                : r.target_scope === 'application'
+                  ? 'application'
+                  : (() => {
+                      throw Error('Invalid target scope');
+                    })(),
         target_state: str(r.target_state, true),
         target_reason: str(r.target_reason, true),
         id: str(r.id),
@@ -168,10 +175,15 @@ function direction(v: unknown, expected: string): DirectionPolicy {
         active: bool(r.active),
         expires: date(r.expires),
         scope: {
+          network_zone: ['local', 'internet'].includes(String(f.network_zone))
+            ? (f.network_zone as NetworkZone)
+            : undefined,
+          all_programs: f.all_programs === true || undefined,
+          all_uids: f.all_uids === true || undefined,
           process: parseProcessTarget(f.process),
-          application: str(f.application),
-          revision: str(f.revision),
-          uid: num(f.uid),
+          application: str(f.application, true),
+          revision: str(f.revision, true),
+          uid: f.uid === undefined && f.all_programs === true ? 0 : num(f.uid),
           direction: str(f.direction),
           protocol: str(f.protocol),
           remote: str(f.remote, true),
@@ -187,6 +199,19 @@ export function parsePolicyView(raw: unknown): PolicyView {
   const v = obj(raw),
     s = obj(v.snapshot);
   const view: PolicyView = {
+    network_zones: parseNetworkZones(v.network_zones),
+    zones:
+      v.zones === undefined
+        ? undefined
+        : list(v.zones, 2).map((value) => {
+            const z = obj(value);
+            if (!['local', 'internet'].includes(str(z.zone))) throw Error('Invalid policy zone');
+            return {
+              zone: z.zone as NetworkZone,
+              incoming: direction(z.incoming, 'incoming'),
+              outgoing: direction(z.outgoing, 'outgoing'),
+            };
+          }),
     snapshot: {
       generation: str(s.generation),
       token: str(s.token),
@@ -209,6 +234,10 @@ export function parsePolicyView(raw: unknown): PolicyView {
             if (!target || !['active', 'inactive'].includes(str(p.state)))
               throw Error('Invalid process policy');
             return {
+              zone_fallback_rule_ids:
+                p.zone_fallback_rule_ids === undefined
+                  ? undefined
+                  : list(p.zone_fallback_rule_ids, 8192).map((v) => str(v)),
               ref: str(p.ref),
               process_id: str(p.process_id),
               application_ref: str(p.application_ref, true),
@@ -226,6 +255,10 @@ export function parsePolicyView(raw: unknown): PolicyView {
       const a = obj(v),
         i = obj(a.identity);
       return {
+        zone_fallback_rule_ids:
+          a.zone_fallback_rule_ids === undefined
+            ? undefined
+            : list(a.zone_fallback_rule_ids, 8192).map((v) => str(v)),
         ref: str(a.ref),
         identity: { key: str(i.key), revision: str(i.revision), uid: num(i.uid) },
         process_ids: list(a.process_ids, 2048).map((v) => str(v)),
@@ -388,4 +421,22 @@ export function policyLabel(d: DirectionPolicy) {
 export function policyRuleDescription(r: PolicyRuleRef) {
   const f = r.scope;
   return `${r.expired ? 'Expired' : r.disabled ? 'Disabled' : r.active ? 'Enabled' : 'Inactive'} ${r.action} · ${f.direction} ${f.protocol} · remote ${f.remote_address || f.remote || 'any'} · local port ${f.local_port || 'any'} · remote port ${f.remote_port || 'any'} · expires ${r.expires.startsWith('0001-') ? 'never' : r.expires} · ${r.id} v${r.version}`;
+}
+
+// Exact backend inventory association only; never classify an endpoint or choose a rule.
+export function authoritativeZonePolicy(row: Row, state: ClientState) {
+  const c = state.control,
+    v = c.policy;
+  if (
+    row.kind !== 'network' ||
+    !c.connected ||
+    !c.capabilities?.includes('network-zone-policy-v1') ||
+    !v ||
+    v.snapshot.generation !== c.generation ||
+    v.network_zones?.revision !== c.networkZones?.revision ||
+    !Number.isFinite(c.serverNow) ||
+    (v.snapshot.valid_until && Date.parse(v.snapshot.valid_until) <= c.serverNow!)
+  )
+    return;
+  return v.zones?.find((z) => z.zone === (row.id === 'network:local' ? 'local' : 'internet'));
 }
