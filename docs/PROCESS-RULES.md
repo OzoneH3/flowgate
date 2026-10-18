@@ -20,7 +20,8 @@ Matching **process tier precedes application tier**, regardless of their relativ
 priorities. Inside each tier existing descending priority, then ascending rule ID
 ordering is unchanged. No matching live process rule means application fallback,
 then the existing engine default. Scope still includes explicit direction, TCP or
-UDP, remote address/CIDR, local/remote ports. There is no new filter/action model.
+UDP (or explicit TCP+UDP with `observed-rule-any-protocol-v1`), remote address/CIDR,
+local/remote ports. See the capability contract in [OBSERVED-RULES.md](OBSERVED-RULES.md#tcpudp-observed-creation-extension). There is no new filter/action model.
 Direction is connection initiation, independent of upload/download.
 
 Normal threads belong to the live thread-group leader. A fork child is a distinct

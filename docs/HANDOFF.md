@@ -1,33 +1,67 @@
 # Continuation handoff
 
-## Current backend support: explicit TCP+UDP observed rules (not deployed)
+## Current integration: UI2 floating Rule Status and explicit TCP+UDP
 
-Backend **6c68f8cd0627bce69f15f4e995a3cf68fa161215** implements UI2's concrete
-`observed-rule-any-protocol-v1` request end to end: explicit `protocol:"*"` means
-TCP+UDP only in one application/process rule. Existing identity/authorization,
-preview/save/replay, process precedence, versioned edit/Delete and expiry remain.
-Unrestricted wildcard summaries are uniform; endpoint restrictions stay scoped;
-conflicting wildcard/specific actions stay mixed, with existing tier/priority/ID
-order. No Ask, shaping or all-IP protocol semantics were added. Legacy wildcard
-narrowing is rejected `protocol_scope_changed`; see
-[OBSERVED-RULES.md](OBSERVED-RULES.md#tcpudp-observed-creation-extension).
+Full released UI **09b56426a8a97677ce9489a0aaa0098a7208e646** (UI2 c772f7c2) is
+fast-forward integrated atop clean backend/test/docs **77f7e6d**, preserving0989411
+and all prior history. Explicit clean release and Electron ownership release were
+verified first. Backend production release **6c68f8cd0627bce69f15f4e995a3cf68fa161215**
+adds only the requested `observed-rule-any-protocol-v1`: explicit `*` means TCP+UDP
+in one application/process rule, never all IP protocols. Validation, pure matching,
+overlap, summaries, previews, history and persistence agree. Existing scope,
+principal/identity, process tiers, versioned edits/Delete and replay rules remain.
+Legacy implicit wildcard narrowing is rejected `protocol_scope_changed`.
+Exact contract: [OBSERVED-RULES.md](OBSERVED-RULES.md#tcpudp-observed-creation-extension).
 
-Focused race/vet pass; scoped address/port and mixed-summary regression checks
-also pass. Real private `--any-protocol` receiver check `.workspace/ap-receiver`
-passes incoming/outgoing TCP/UDP IPv4/6, process override/sibling fallback,
-Allow/Block, uniform summaries, historical wildcard snapshots and owned cleanup.
-Separate binary `.workspace/flowgate-any-protocol` SHA256
-`7b8fbbe065001c78641eb2157b747d085a93359eab045fdffe478eb70ab83893`.
-The new guard and tests do not change the tested wildcard verdict path.
+UI adds a floating quick-set popup, rule-family matrix, Info View composition and
+compact cells. One click uses the displayed exact scope, backend preview and same
+draft save; verified differences/errors/uncertainty stop the chain. Multiple rules
+still require an exact selection; edits preserve target/filter/expiry/version,
+stale Delete does not recreate anything. Current old-cap host keeps the explicit
+TCP|UDP choice. Limit/priority/quota rows are **static unavailable**, not new policy
+features. No Ask action, shaping, bandwidth allocation or new enforcement behavior.
+Visual differences/measurements are recorded in `electron/RULE-STATUS.md`; this is
+not a claim of complete NetLimiter fidelity.
 
-UI2 c772f7c2 round2 is still in progress; no unreleased Electron history integrated.
-It exclusively owns held monitor fixture `.workspace/ap-ui` until explicit DONE;
-backend01a145f0 owns later cleanup and integration, handed over by backend2 at
-0989411. UI reported real popup wildcard/CRUD journey passing; final exit/checks/
-docs/release remain. Host read-only baseline is unchanged this round: PID2847094,
-generatione47c8938265ebf19cacc1fee5a681c8c, activeUDPac3056b3b8f3299dce5dc2b57985808f,
-enforcement stopped, rules0. Host source60d35a3 lacks the new wildcard capability;
-UI must use explicit TCP|UDP fallback there. No host rollout in this increment.
+Evidence reused: UI release real popup/creation, 76 unit checks, synthetic and
+read-only host acceptance; earlier process/UDP/watchdog/coexistence evidence.
+New bounded backend race/vet checks pass; `.workspace/ap-receiver` real namespace
+TCP/UDP IPv4/6 both-direction Allow/Block, process override and sibling/app fallback,
+uniform summary, wildcard decision snapshot and owned-only cleanup pass. Scoped
+address/port restrictions and scoped/mixed summaries have focused regression tests.
+Separate `.workspace/flowgate-any-protocol` source6c68f8c SHA256
+`7b8fbbe065001c78641eb2157b747d085a93359eab045fdffe478eb70ab83893`;
+no running executable was overwritten. The legacy-edit guard does not change the
+receiver-tested wildcard matching path.
+
+Main checkout build/typecheck, **14 focused consumer tests** and sandboxed synthetic
+normal/narrow process presentation pass. Logs `.workspace/ui2-r2-{build,tests,presentation}.log`;
+synthetic captures `.workspace/pp-28APSb`.
+One additional real sandboxed Wayland journey was warranted by the UI release's
+inactive-popup Delete fix (then only synthetically tested):
+`FLOWGATE_TEST_READY=<fresh fixture>/ready.json FLOWGATE_EXIT_ALPHA=1 node electron/test/rule-status-workflow.mjs`.
+It **passes** at exact UI09b5642/backend6c68f8c, including one-click wildcard creation,
+process-only target/sibling independence, exact edit/disable/stale-delete/conditional
+Delete, narrow view, actual alpha exit, inactive-popup Delete and GUI exit preserving
+private daemon. Evidence `.workspace/rule-status-real-qxV6RE`, log
+`.workspace/ui2-r2-real-exit.log`. This closes the specific live gap in the UI release
+note; no firewall/accounting/expiry matrix was repeated.
+
+Fixture ownership was explicit: UI alone drove `.workspace/ap-ui` until DONE;
+backend then cleaned it. Main follow-up used a fresh `.workspace/ap-final-exit` with
+one driver. Both supervisors exited0, daemon/instances/peer cleaned and primary+
+companion sockets removed. Offline disposable DB/evidence retained only in workspace.
+
+Host read-only before/after summaries match exactly: PID2847094,
+generatione47c8938265ebf19cacc1fee5a681c8c, UDPac3056b3b8f3299dce5dc2b57985808f active,
+enforcement stopped, rules0. No host restart/upgrade, policy write, collector action,
+BPF attachment or networking change in this support round. Deployed60d35a3 already
+supports process rules but **does not expose the new wildcard capability**. A later
+separately authorized daemon upgrade is required for TCP+UDP one-click mode there;
+current normal UI uses the explicit per-protocol fallback. Retained Qt has no
+wildcard selector and is guarded against implicit narrowing, not fully migrated.
+Normal launch from the main checkout remains:
+`scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock`.
 
 ## Current integration: Activity Rule Status quick-set (UI 897cd43)
 
