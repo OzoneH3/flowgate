@@ -95,10 +95,10 @@ try {
   await p.locator('.brand').evaluate((e) => (e.textContent = 'FlowGate · ISOLATED CREATION'));
   async function open(direction) {
     await p.click('#activityTab');
-    await p.locator(`.policy-cell[data-direction="${direction}"]`).first().click();
-    await wait(() => p.locator('#newActivityRule').isEnabled());
-    await p.locator('#newActivityRule').focus();
-    await p.keyboard.press('Enter');
+    await p.locator('#rows tr[data-id^="app:"]').first().locator('.name').click();
+    await p.locator(`#infoRules .sidebar-policy[data-direction="${direction}"]`).click();
+    await p.getByLabel('Rule to create or change', { exact: true }).selectOption('new');
+    await p.locator('.activity-quick-actions button').filter({ hasText: 'Advanced' }).click();
     await p.waitForTimeout(100);
     if (!(await p.locator('#ruleEditor').isVisible()))
       console.log('OPEN FEEDBACK', await p.locator('#feedback').innerText());
@@ -152,6 +152,8 @@ try {
       a.incoming.rules.some((r) => r.id === incoming.id),
     ),
   );
+  assert(await p.locator('#activityView').isVisible());
+  await p.click('#rulesTab');
   assert(await p.locator('#rulesView').isVisible());
   assert.equal(
     await p.locator('#ruleRows tr[aria-selected=true]').getAttribute('data-id'),
@@ -180,6 +182,7 @@ try {
   await wait(async () => (await snapshot()).control.rules.length === 2);
   const outgoing = (await snapshot()).control.rules.find((r) => r.filter.direction === 'outgoing');
   assert.equal(outgoing.filter.remote_port, 443);
+  await p.click('#rulesTab');
   await p.locator(`#ruleRows tr[data-id="${incoming.id}"]`).click();
   await p.click('#deleteRule');
   await p.click('#confirmYes');
@@ -205,8 +208,8 @@ try {
   app = await launch(true);
   const ro = await app.firstWindow();
   await wait(() => ro.locator('.policy-cell').count());
-  await ro.locator('.policy-cell').first().click();
-  assert(await ro.locator('#newActivityRule').isDisabled());
+  await ro.locator('#rows tr[data-id^="app:"]').first().locator('.name').click();
+  assert.equal(await ro.locator('.activity-rule-actions').count(), 0);
   const denied = await ro.evaluate(async () => {
     const s = await window.flowgate.snapshot(),
       r = s.observation.activity.rows[0];

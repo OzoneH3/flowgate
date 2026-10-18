@@ -1028,3 +1028,38 @@ td.up { color: #c7daa8; background: #344b20; }
 #evaluationCheckText { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 210px; overflow: auto; margin: 5px 0; font: inherit; user-select: text; }
 #confirmation #confirmText { white-space: pre-line; max-width: 480px; line-height: 1.5; }
 #controlMenu > summary { white-space: nowrap; }
+
+/* Activity policy workflow: contextual rules and explicit quick setters. */
+.activity-policy-context,.activity-policy-coverage,.activity-policy-note { margin: 5px 0; font-size: 11px; line-height: 15px; overflow-wrap: anywhere; }
+.activity-policy-context,.activity-policy-note { color: var(--fg-muted); }
+.activity-policy-coverage { color: var(--fg-text); }
+.activity-rule-list { margin: 8px 0; }
+.activity-rule { border-top: 1px solid var(--fg-border); padding: 6px 3px; }
+.activity-rule-title { display: flex; gap: 7px; align-items: center; }
+.rule-direction-chip { min-width: 25px; color: var(--fg-muted); }
+.rule-enabled-state { margin-left: auto; color: var(--fg-muted); font-size: 11px; }
+.rule-action-allow { color: var(--fg-allow); }.rule-action-block { color: var(--fg-block); }
+.activity-rule-scope,.activity-rule-expiry { margin: 3px 0; font-size: 11px; line-height: 15px; overflow-wrap: anywhere; user-select: text; }
+.activity-rule-expiry { color: var(--fg-muted); }
+.activity-rule-actions,.activity-quick-actions { display:flex; gap:6px; flex-wrap:wrap; }
+.activity-rule-actions button { color:var(--fg-selected); font-size:11px; padding:1px 0; min-height:20px; background:transparent; border:0; }
+.activity-rule-actions button:disabled { color:#777; }
+.activity-rule.recently-saved { border-left:2px solid var(--fg-selected); padding-left:6px; }
+.activity-policy-details { font-size:11px; color:var(--fg-muted); margin:8px 0; }
+.activity-policy-details p { user-select:text; }
+.activity-quick { border:1px solid var(--fg-selected); padding:7px; margin:7px 0; background:#292929; }
+.activity-quick-heading { display:flex; align-items:center; justify-content:space-between; margin-bottom:5px; }
+.activity-quick-heading button { padding:0 5px; min-height:20px; }
+.activity-quick select { width:100%; margin:3px 0; min-height:23px; }
+.activity-quick label { display:flex; align-items:center; gap:5px; margin:4px 0; font-size:11px; }
+.activity-quick input[type=checkbox] { min-width:0; }
+.activity-quick-actions button { min-height:24px; padding:2px 8px; }
+.quick-allow { color:var(--fg-allow); }.quick-block { color:var(--fg-block); }
+#ruleEditor.quick-editor { width:min(560px,calc(100vw - 24px)); height:auto; max-height:calc(100vh - 100px); top:90px; font-size:12px; }
+#ruleEditor.quick-editor .editor-body { flex:0 1 auto; }
+#ruleEditor.quick-editor h2 { font-size:13px; }
+.quick-editor .advanced-rule-field,.quick-editor #creationScopeFields { display:none !important; }
+.quick-editor .editor-fields { grid-template-columns:110px minmax(0,1fr); }
+.connection-direction { display:inline-flex; width:16px; height:16px; border:2px solid currentColor; border-radius:50%; align-items:center; justify-content:center; margin-right:4px; vertical-align:middle; font-size:12px; line-height:12px; font-weight:600; }
+.connection-incoming { color:#f44336; }.connection-outgoing { color:#9ccc65; }.connection-neutral { color:#aaa; }
+#tree tr[aria-selected=true] .connection-direction { color:white; }

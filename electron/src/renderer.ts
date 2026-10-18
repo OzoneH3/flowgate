@@ -1,14 +1,11 @@
-import {
-  POLICY_CAPABILITY,
-  authoritativePolicy,
-  policyLabel,
-  policyRuleDescription,
-} from './policy';
+import { initiationPresentation } from './initiation';
+import { ActivityPolicy } from './activity-policy';
+import { POLICY_CAPABILITY, authoritativePolicy, policyLabel } from './policy';
 import { ruleStatus, ruleState, ruleDescription, configuredPolicy } from './rule-status';
-import { canDecide, canManageRules } from './protocol';
+import { canDecide } from './protocol';
 import type { Application } from './protocol';
 import { TrafficGraph } from './graph';
-import { setupWorkflows, updateWorkflows, openRule, confirmRuleDelete } from './workflows';
+import { setupWorkflows, updateWorkflows, openRule } from './workflows';
 import { setupDecisionLog, showDecisionLog, updateDecisionLog } from './decision-log-view';
 import type { ClientState, ViewEvent, Scope } from './protocol';
 import {
@@ -31,6 +28,7 @@ let state: ClientState;
 let selected = 'overview';
 let measurementSource: 'tcp' | 'udp' = 'tcp';
 let graph: TrafficGraph | undefined;
+let activityPolicy: ActivityPolicy | undefined;
 let selectedRequest = promptID ?? '';
 let chosenScope: Scope = 'once';
 let tab = 'activity';
@@ -131,8 +129,7 @@ function rowApplication(r: Row) {
   );
 }
 type PolicyDirection = 'incoming' | 'outgoing';
-let policySelection: { id: string; direction: PolicyDirection } | undefined;
-let policySignature = '';
+
 function policyCell(r: Row, direction: PolicyDirection) {
   const status = ruleStatus(r, state),
     cell = element('td', '', 'rule-status');
@@ -180,251 +177,12 @@ function policyCell(r: Row, direction: PolicyDirection) {
   button.onclick = (event) => {
     event.stopPropagation();
     selected = r.id;
-    policySelection = { id: r.id, direction };
-    policySignature = '';
     renderTree();
     renderInfo();
-    renderPolicyList();
-    $('closePolicy').focus();
+    activityPolicy?.activate(direction);
   };
   cell.append(button);
   return cell;
-}
-function closePolicyList() {
-  const selection = policySelection;
-  policySelection = undefined;
-  $('policyList')?.remove();
-  for (const row of document.querySelectorAll<HTMLElement>('#rows tr'))
-    if (selection && row.dataset.id === selection.id)
-      row
-        .querySelector<HTMLButtonElement>(`.policy-cell[data-direction="${selection.direction}"]`)
-        ?.focus({ preventScroll: true });
-}
-function renderPolicyList() {
-  if (!policySelection || promptID) return;
-  const row = allRows(roots).find((r) => r.id === policySelection!.id);
-  const inventory = row ? ruleStatus(row, state) : undefined;
-  const rules = inventory?.[policySelection.direction] || [];
-  const authoritative = !!state.control.capabilities?.includes(POLICY_CAPABILITY);
-  const result = row && authoritative ? authoritativePolicy(row, state) : undefined;
-  const summary = result?.application?.[policySelection.direction];
-  const signature = JSON.stringify([
-    policySelection,
-    authoritative,
-    summary,
-    result?.reason,
-    state.control.generation,
-    inventory?.available,
-    inventory?.reason,
-    row?.label,
-    rules,
-    rules.map((r) => ruleState(r, inventory!.now)),
-    canManageRules(state.control),
-    state.control.enforcement?.state,
-  ]);
-  if (signature === policySignature) return;
-  policySignature = signature;
-  let panel = $('policyList');
-  if (!panel) {
-    panel = element('section', '', 'policy-list');
-    panel.id = 'policyList';
-    panel.setAttribute('role', 'dialog');
-    panel.setAttribute('aria-label', 'Configured policy');
-    root.append(panel);
-    panel.onkeydown = (e) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        closePolicyList();
-      }
-    };
-  }
-  const heading = element('header'),
-    title = element(
-      'strong',
-      `${policySelection.direction === 'incoming' ? 'Incoming' : 'Outgoing'} configured policy`,
-    ),
-    close = element('button', 'Close');
-  close.id = 'closePolicy';
-  close.onclick = closePolicyList;
-  heading.append(title, close);
-  const content = element('div', '', 'policy-list-content');
-  content.append(element('p', row?.label || 'Selection no longer visible', 'policy-identity'));
-  content.append(
-    element(
-      'p',
-      state.control.enforcement?.state === 'stopped'
-        ? 'Stored policy only · enforcement stopped.'
-        : 'Configured inventory, not an effective connection verdict.',
-      'hint',
-    ),
-  );
-  if (state.control.permissions)
-    content.append(
-      element(
-        'p',
-        `${state.control.permissions.role} · ${state.control.permissions.policy_scope} policy · ${canManageRules(state.control) ? 'editing permitted' : 'read-only'}`,
-        'hint',
-      ),
-    );
-  if (authoritative) {
-    content.append(
-      element(
-        'p',
-        'Backend-authoritative configured policy · current explanation, not a historical verdict.',
-        'hint',
-      ),
-    );
-    if (state.control.policy && !state.control.policy.complete)
-      content.append(
-        element(
-          'p',
-          'Partial policy batch · ' +
-            (state.control.policy.reason || 'Activity visibility is partial.'),
-          'hint',
-        ),
-      );
-    if (summary) {
-      content.append(element('p', policyLabel(summary) + ' · ' + summary.reason));
-      content.append(
-        element(
-          'p',
-          `Enforcement: ${summary.enforcement.state} · ${summary.enforcement.covered ? 'direction covered' : 'direction not confirmed covered'} · ${summary.enforcement.reason}`,
-        ),
-      );
-      for (const [label, d] of [
-        ['Configured default', summary.configured_default],
-        ['Runtime default', summary.runtime_default],
-      ] as const)
-        content.append(
-          element('p', `${label}: ${d.known ? d.action : 'unknown'} · ${d.reason}`, 'hint'),
-        );
-      if (summary.potential_overlapping_actions)
-        content.append(
-          element(
-            'p',
-            'Potentially overlapping actions; Go resolves precedence for a concrete context.',
-          ),
-        );
-      for (const ref of summary.rules) {
-        const item = element('section', '', 'policy-rule');
-        item.append(element('p', policyRuleDescription(ref)));
-        const rule = state.control.rules?.find(
-          (r) => r.id === ref.id && String(r.version) === ref.version,
-        );
-        if (canManageRules(state.control) && rule) appendPolicyActions(item, rule);
-        else if (canManageRules(state.control))
-          item.append(
-            element(
-              'p',
-              'Refresh required before editing: listed version differs or is not losslessly representable.',
-              'hint',
-            ),
-          );
-        content.append(item);
-      }
-    } else content.append(element('p', result?.reason || 'No supported observation identity.'));
-  } else
-    content.append(
-      element(
-        'p',
-        'Compatibility inventory · locally grouped listed rules, not a backend-authoritative summary. Enforcement coverage and defaults are not inferred.',
-        'hint',
-      ),
-    );
-  if (!authoritative && !inventory?.available)
-    content.append(element('p', inventory?.reason || 'No current observation identity.'));
-  else if (!authoritative && !rules.length)
-    content.append(element('p', 'No explicit rule listed. No default action is inferred.'));
-  else if (!authoritative) {
-    content.append(
-      element(
-        'p',
-        rules.length > 1
-          ? 'Multiple scopes; precedence remains in Go.'
-          : 'Scope and expiry below are the stored backend values.',
-        'hint',
-      ),
-    );
-    for (const rule of rules) {
-      const item = element('section', '', 'policy-rule');
-      item.append(element('p', ruleDescription(rule, inventory!.now)));
-      if (canManageRules(state.control)) appendPolicyActions(item, rule);
-      content.append(item);
-    }
-  }
-  const create = element('button', `New ${policySelection.direction} rule…`);
-  create.id = 'newActivityRule';
-  const application = row ? authoritativePolicy(row, state).application : undefined;
-  const candidate = row?.rows.find(
-    (socket) =>
-      socket.owners.length === 1 &&
-      socket.ownership_category === 'visible-holder' &&
-      application?.process_ids.includes(socket.owners[0]) &&
-      (!row.process || row.kind === 'application' || row.process.id === socket.owners[0]),
-  );
-  const source = candidate
-    ? {
-        generation: state.control.generation,
-        row_id: candidate.id,
-        process_id: candidate.owners[0],
-        direction: policySelection.direction,
-      }
-    : undefined;
-  const creationReason = !canManageRules(state.control)
-    ? 'Rule management is read-only or unavailable.'
-    : !state.control.capabilities?.includes('observed-rule-create-v1')
-      ? 'Backend update required for creation from Activity (observed-rule-create-v1). Pending-request creation remains available.'
-      : !source
-        ? result?.reason ||
-          'A live supported single-holder native process is required; shared or unresolved observations cannot create rules.'
-        : 'Preview will verify this live process. Direction is connection initiation, not upload/download.';
-  create.disabled =
-    !source ||
-    !canManageRules(state.control) ||
-    !state.control.capabilities?.includes('observed-rule-create-v1');
-  create.title = creationReason;
-  create.onclick = () => {
-    if (source) {
-      closePolicyList();
-      void openRule({ observed: source });
-    }
-  };
-  const creation = element('div', '', 'policy-create');
-  creation.append(create);
-  if (create.disabled) creation.append(element('p', creationReason, 'hint'));
-  content.insertBefore(creation, content.children[1] || null);
-  content.append(
-    element(
-      'p',
-      'Incoming/outgoing refers to connection initiation, not download/upload. Rule changes may not disconnect existing approved TCP sessions.',
-      'hint',
-    ),
-  );
-  if (!canManageRules(state.control))
-    content.append(element('p', 'Rule management is unavailable or read-only.', 'hint'));
-  const technical = element('details', '', 'policy-technical');
-  technical.append(element('summary', 'Defaults and policy details'));
-  for (const hint of Array.from(content.querySelectorAll(':scope > p.hint')))
-    technical.append(hint);
-  if (technical.childElementCount > 1) content.append(technical);
-  panel.replaceChildren(heading, content);
-}
-
-function appendPolicyActions(item: HTMLElement, rule: import('./protocol').Rule) {
-  const edit = element('button', 'Edit rule');
-  edit.dataset.ruleId = rule.id;
-  edit.onclick = () => {
-    closePolicyList();
-    void openRule({ id: rule.id });
-  };
-  const remove = element('button', 'Delete…');
-  remove.disabled = !state.control.capabilities?.includes('conditional-rule-delete-v1');
-  remove.title = remove.disabled
-    ? 'Safe conditional deletion unsupported by this daemon.'
-    : 'Review frozen version before deleting';
-  const generation = state.control.generation;
-  remove.onclick = () => confirmRuleDelete(rule, generation);
-  item.append(edit, remove);
 }
 function field(container: HTMLElement, label: string, value: string) {
   container.append(element('dt', label), element('dd', value || 'Unknown'));
@@ -441,7 +199,7 @@ if (promptID) {
   root.innerHTML = `<section class="prompt-shell"><header class="prompt-heading"><strong>FlowGate Blocker</strong><span>Pending connection permission</span></header><div id="promptBody"><div id="requestDetails"></div></div><footer><span id="controlStatus"></span><button id="dismiss">Decide later</button></footer><div id="feedback" role="status" aria-live="polite"></div></section>`;
   $('dismiss').onclick = () => void window.flowgate.dismissPrompt();
 } else {
-  root.innerHTML = `<header class="toolbar"><strong class="brand">▣ FlowGate</strong><input id="search" type="search" aria-label="Search Activity" placeholder="Search"><span id="observerStatus"></span><span class="separator"></span><span id="controlStatus"></span></header><nav class="tabs" aria-label="Views"><button id="activityTab" aria-selected="true">Activity</button><button id="requestsTab" aria-selected="false">Pending requests <span id="pendingCount">0</span></button></nav><main id="activityView"><section class="activity-main"><div class="filterbar"><select id="activitySource" aria-label="Activity measurement source"><option value="tcp">TCP rates</option><option value="udp">UDP rates</option></select><select id="filter" aria-label="Socket filter"><option value="all">All sockets</option><option value="active">Active TCP / connected UDP</option><option value="listening">Listening TCP / bound UDP</option></select><button id="expand">Expand all</button><button id="collapse">Collapse all</button></div><div class="table-scroll"><table id="tree" role="treegrid" tabindex="0" aria-label="Application process socket activity"><thead><tr id="headers"></tr></thead><tbody id="rows"></tbody></table></div><div id="activitySummary" class="summary"></div></section><aside><h2>Info View</h2><h3 id="selectedName">FlowGate Activity</h3><div id="selectedExecutable"></div><div class="info-scroll"><h3 id="infoProperties" class="info-section-title">Overview</h3><dl id="info"></dl><section id="infoRules"></section><section class="info-tools"><h3 class="info-section-title">Tools</h3><button id="infoOpenRules">Rule list</button><button id="infoOpenLog">Decision log</button><button id="infoOpenPending">Pending requests</button></section></div><section id="trafficGraph"></section></aside></main><main id="requestsView" hidden><section class="request-list"><h2>Pending &amp; recent requests</h2><p class="hint">Select a request to decide. Dismissal grants nothing. Closing FlowGate leaves an independent controller running.</p><div class="table-scroll"><table id="requests"><thead><tr><th>Application</th><th>Direction</th><th>Protocol</th><th>Remote endpoint</th><th>State</th></tr></thead><tbody id="requestRows"></tbody></table></div></section><aside class="request-sidebar"><h2>Connection permission</h2><div id="requestDetails"></div></aside></main><footer><span>Activity and firewall control are independent.</span><span id="feedback" role="status" aria-live="polite"></span></footer>`;
+  root.innerHTML = `<header class="toolbar"><strong class="brand">▣ FlowGate</strong><input id="search" type="search" aria-label="Search Activity" placeholder="Search"><span id="observerStatus"></span><span class="separator"></span><span id="controlStatus"></span></header><nav class="tabs" aria-label="Views"><button id="activityTab" aria-selected="true">Activity</button><button id="requestsTab" aria-selected="false">Pending requests <span id="pendingCount">0</span></button></nav><main id="activityView"><section class="activity-main"><div class="filterbar"><select id="activitySource" aria-label="Activity measurement source"><option value="tcp">TCP rates</option><option value="udp">UDP rates</option></select><select id="filter" aria-label="Socket filter"><option value="all">All sockets</option><option value="active">Active TCP / connected UDP</option><option value="listening">Listening TCP / bound UDP</option></select><button id="expand">Expand all</button><button id="collapse">Collapse all</button></div><div class="table-scroll"><table id="tree" role="treegrid" tabindex="0" aria-label="Application process socket activity"><thead><tr id="headers"></tr></thead><tbody id="rows"></tbody></table></div><div id="activitySummary" class="summary"></div></section><aside><h2>Info View</h2><h3 id="selectedName">FlowGate Activity</h3><div id="selectedExecutable"></div><div class="info-scroll"><section id="infoRules"></section><h3 id="infoProperties" class="info-section-title">Overview</h3><dl id="info"></dl><section class="info-tools"><h3 class="info-section-title">Tools</h3><button id="infoOpenRules">Rule list</button><button id="infoOpenLog">Decision log</button><button id="infoOpenPending">Pending requests</button></section></div><section id="trafficGraph"></section></aside></main><main id="requestsView" hidden><section class="request-list"><h2>Pending &amp; recent requests</h2><p class="hint">Select a request to decide. Dismissal grants nothing. Closing FlowGate leaves an independent controller running.</p><div class="table-scroll"><table id="requests"><thead><tr><th>Application</th><th>Direction</th><th>Protocol</th><th>Remote endpoint</th><th>State</th></tr></thead><tbody id="requestRows"></tbody></table></div></section><aside class="request-sidebar"><h2>Connection permission</h2><div id="requestDetails"></div></aside></main><footer><span>Activity and firewall control are independent.</span><span id="feedback" role="status" aria-live="polite"></span></footer>`;
   const columns = [
     ['name', 'Name'],
     ['download_bps', 'DL rate'],
@@ -502,6 +260,7 @@ if (promptID) {
     },
   );
   graph = new TrafficGraph($('trafficGraph'));
+  activityPolicy = new ActivityPolicy($('infoRules'));
   window.flowgate.onNavigate((v) => {
     chooseTab('requests');
     message(v.message);
@@ -636,11 +395,21 @@ function renderTree() {
       renderTree();
       renderInfo();
     };
-    name.append(
-      toggle,
-      installedIcon(r.kind === 'socket' ? undefined : rowApplication(r), r.kind),
-      document.createTextNode(r.label),
+    let rowLabel = r.label;
+    let icon: HTMLElement = installedIcon(
+      r.kind === 'socket' ? undefined : rowApplication(r),
+      r.kind,
     );
+    if (r.socket) {
+      const direction = initiationPresentation(r.socket);
+      icon = element('span', direction.glyph, 'connection-direction ' + direction.className);
+      icon.title = direction.title;
+      icon.setAttribute('role', 'img');
+      icon.setAttribute('aria-label', direction.label);
+      if (direction.state === 'listening') rowLabel = `Listening · ${r.socket.socket.local}`;
+      if (direction.state === 'unconnected') rowLabel = `UDP bound · ${r.socket.socket.local}`;
+    }
+    name.append(toggle, icon, document.createTextNode(rowLabel));
     name.title = r.process?.executable || r.socket?.socket.remote || r.label;
     tr.append(name);
     for (const key of ['download_bps', 'upload_bps'] as Metric[]) {
@@ -721,44 +490,11 @@ function renderInfo() {
       details.append(technical);
       info.append(details);
     }
-    const rulesHost = $('infoRules');
-    const matrix = element('table', '', 'info-rule-matrix');
-    const cols = element('colgroup');
-    for (const width of ['65px', '95px', 'auto']) {
-      const col = element('col');
-      col.style.width = width;
-      cols.append(col);
-    }
-    matrix.append(cols);
-    const heading = element('tr');
-    for (const text of ['Type', 'In', 'Out']) heading.append(element('th', text));
-    matrix.append(heading);
-    const cells = element('tr');
-    cells.append(element('td', 'Blocker'));
-    for (const label of ['Rules · In', 'Rules · Out']) {
-      const dt = [...info.querySelectorAll('dt')].find((n) => n.textContent === label);
-      const dd = dt?.nextElementSibling;
-      const cell = element('td');
-      if (dd) {
-        cell.append(...dd.childNodes);
-        dd.remove();
-      }
-      dt?.remove();
-      cells.append(cell);
-    }
-    matrix.append(cells);
-    const sectionTitle = element('h3', 'Rules', 'info-section-title');
-    if (
-      rulesHost.dataset.selection !== selected ||
-      rulesHost.textContent !== sectionTitle.textContent + matrix.textContent
-    )
-      rulesHost.replaceChildren(sectionTitle, matrix);
-    rulesHost.dataset.selection = selected;
-    rulesHost.hidden = !info.dataset.policy;
     // Preserve text selection and expanded details during unchanged polling.
     if (live.textContent !== info.textContent) live.replaceChildren(...Array.from(info.childNodes));
   };
   const r = allRows(roots).find((r) => r.id === selected);
+  activityPolicy?.update(r, state);
   $('infoProperties').textContent =
     r?.kind === 'socket'
       ? 'Connection properties'
@@ -814,56 +550,6 @@ function renderInfo() {
     commit();
     return;
   }
-  info.dataset.policy = 'true';
-  const inventory = ruleStatus(r, state);
-  field(
-    info,
-    'Rule inventory',
-    state.control.capabilities?.includes(POLICY_CAPABILITY)
-      ? authoritativePolicy(r, state).reason
-      : 'Compatibility inventory · ' + inventory.reason,
-  );
-  for (const direction of ['incoming', 'outgoing'] as const) {
-    const rules = inventory[direction];
-    const authoritative = state.control.capabilities?.includes(POLICY_CAPABILITY);
-    const summary = authoritative
-      ? authoritativePolicy(r, state).application?.[direction]
-      : undefined;
-    field(
-      info,
-      direction === 'incoming' ? 'Rules · In' : 'Rules · Out',
-      authoritative
-        ? summary
-          ? policyLabel(summary)
-          : 'Unavailable'
-        : !inventory.available
-          ? 'Unavailable'
-          : ['allow', 'block', 'disabled', 'expired']
-              .map(
-                (type) =>
-                  `${rules.filter((rule) => ruleState(rule, inventory.now) === type).length} ${type}`,
-              )
-              .join(' · '),
-    );
-    const value = info.lastElementChild as HTMLElement;
-    const link = element('button', value.textContent || '', 'sidebar-policy');
-    link.title = `Open ${direction} configured policy`;
-    link.onclick = () => {
-      policySelection = { id: r.id, direction };
-      policySignature = '';
-      renderPolicyList();
-      $('closePolicy').focus();
-    };
-    value.replaceChildren(link);
-  }
-  if (inventory.available && !state.control.capabilities?.includes(POLICY_CAPABILITY))
-    for (const direction of ['incoming', 'outgoing'] as const)
-      field(
-        info,
-        direction === 'incoming' ? 'Incoming rule scopes' : 'Outgoing rule scopes',
-        inventory[direction].map((rule) => ruleDescription(rule, inventory!.now)).join('\n') ||
-          'No listed rules; not a connection verdict.',
-      );
   if (r.displayApplication) {
     field(info, 'Display application', r.displayApplication.executable);
     field(
@@ -894,7 +580,7 @@ function renderInfo() {
       ['Local endpoint', s.socket.local],
       ['Remote endpoint', s.socket.remote],
       ['State', s.state],
-      ['Initiation', s.direction || 'Unknown'],
+      ['Initiation', initiationPresentation(s).title],
       ['Ownership', s.ownership],
       ['Ownership evidence category', ownershipExplanation(s.ownership_category)],
       ['Socket creation UID', String(s.socket.uid)],
@@ -1239,7 +925,6 @@ function consume(next: ClientState) {
     details.dataset.eventId = currentEvent()?.id || '';
     updateWorkflows(state);
     updateDecisionLog(state);
-    renderPolicyList();
   }
 }
 window.flowgate.subscribe(consume);

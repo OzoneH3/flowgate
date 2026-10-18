@@ -69,16 +69,15 @@ try {
   await p.locator('.brand').evaluate((e) => (e.textContent = 'FlowGate · ISOLATED FIXTURE'));
   const before = (await snap()).control.rules[0];
   await p.locator('.policy-allow').first().click();
-  assert.match(await p.locator('#policyList').innerText(), /Stored policy only/);
+  assert.match(await p.locator('#infoRules').innerText(), /Stored rules · firewall stopped/);
   if (authoritative) {
-    assert.match(await p.locator('#policyList').innerText(), /Backend-authoritative/);
-    assert.match(await p.locator('#policyList').innerText(), /Configured default: ask/);
-    assert(await p.locator('#newActivityRule').isDisabled());
-    assert.match(
-      await p.locator('#newActivityRule').getAttribute('title'),
-      /cannot create rules from Activity/,
-    );
-    await p.locator('#policyList button').filter({ hasText: 'Delete…' }).click();
+    assert.match(await p.locator('#infoRules').innerText(), /Configured application policy/);
+    await p.locator('.activity-policy-details summary').click();
+    assert.match(await p.locator('#infoRules').innerText(), /Configured default: ask/);
+    await p
+      .locator('#infoRules .activity-rule-actions button')
+      .filter({ hasText: 'Delete…' })
+      .click();
     assert.match(
       await p.locator('#confirmText').innerText(),
       new RegExp('version ' + before.version),
@@ -89,7 +88,7 @@ try {
     await p.setViewportSize({ width: 1280, height: 896 });
   }
   await p.screenshot({ path: path.join(run, 'isolated-policy-list.png') });
-  await p.locator('#policyList button[data-rule-id]').first().click();
+  await p.locator('.activity-rule-actions button').filter({ hasText: 'Advanced' }).first().click();
   await p.locator('#editAction').selectOption('block');
   await p.locator('#editAddress').focus();
   await p.waitForTimeout(1800);
@@ -135,7 +134,7 @@ try {
   await ro.locator('.brand').evaluate((e) => (e.textContent = 'FlowGate · READ-ONLY FIXTURE'));
   await wait(() => ro.locator('.policy-block').count());
   await ro.locator('.policy-block').first().click();
-  assert.equal(await ro.locator('#policyList button[data-rule-id]').count(), 0);
+  assert.equal(await ro.locator('.activity-rule-actions').count(), 0);
   assert(
     await ro.evaluate(async () => {
       try {

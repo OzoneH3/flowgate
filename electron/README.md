@@ -1052,3 +1052,16 @@ Activity uses compact rows and source-specific chart indicators.
 Activity now starts with an **All applications** overview. Choose TCP rates or UDP rates in Activity; totals and numeric sorting use that measurement source. The graph retains separate source histories over all observed sockets, independent of search. Missing measurements remain unavailable, and the overview cannot be used as a rule target. In/Out cells retain backend policy details; “Not set” means no explicit rule. The sidebar shows executable, properties, a compact Rules matrix and navigation links.
 
 See [Activity presentation and verification](ACTIVITY-COMPOSITION.md) and [ordinary Wayland launch diagnostics](LAUNCH-DIAGNOSTICS.md). The launcher retains GUI output/exit status in its run directory. Electron builds use `.workspace/electron-backend`, preserving the separate approved backend executable.
+
+## Activity-context rule workflow
+
+Selected applications, processes and uniquely associated sockets show the complete
+available incoming/outgoing rule inventory in Info View. In/Out opens an inline
+quick setter; a chosen rule can be reviewed, edited, disabled or conditionally
+deleted without leaving Activity. New separate rules explicitly choose protocol
+and scope, then use the existing authoritative Preview/Save. Process/socket views
+clearly label application-wide identity scope; process-only rules are not supported.
+Stored policy is not active enforcement. Connection arrows use backend
+`activity-initiation-v1` evidence, with explicit neutral states when unavailable.
+See [Activity rules reference and evidence](ACTIVITY-RULES.md) for the live NetLimiter
+mapping, backend b9840d0 verification, screenshots and the scoped process-rule gap.

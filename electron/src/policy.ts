@@ -233,7 +233,7 @@ export function authoritativePolicy(
     return { reason: 'Policy association awaits its Activity snapshot; no identity is rebound.' };
   if ((c.serverNow ?? Infinity) - Date.parse(v.activity_collected) > 45000)
     return { reason: 'Policy observation association is stale; refreshing.' };
-  if (row.displayApplication || row.socket?.display_application)
+  if (row.displayApplication || (row.socket?.display_application && row.socket.owners.length > 1))
     return { reason: 'Shared/display-only identity is not a policy target.' };
   const p =
     row.process ||
@@ -249,6 +249,8 @@ export function authoritativePolicy(
       a.process_ids.includes(p.id),
   );
   if (row.socket) {
+    if (row.socket.owners.length !== 1 || row.socket.ownership_category !== 'visible-holder')
+      return { reason: 'A current unique visible holder is required for application policy.' };
     const association = v.rows.find((r) => r.row_id === row.socket!.id);
     if (
       !association ||

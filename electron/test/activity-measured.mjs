@@ -333,7 +333,7 @@ try {
     .first()
     .focus();
   await page.keyboard.press('Enter');
-  await page.waitForSelector('.policy-list');
+  await page.waitForSelector('.activity-quick');
   await page.screenshot({ path: path.join(evidence, 'policy-normal.png') });
   await page.keyboard.press('Escape');
   await page.locator('#rows tr').filter({ hasText: 'Firefox' }).first().locator('.name').click();

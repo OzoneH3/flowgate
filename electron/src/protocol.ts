@@ -43,6 +43,13 @@ export interface SocketRow {
   owners: string[];
   state: string;
   direction: string;
+  initiation?: {
+    state: 'known' | 'listening' | 'unconnected' | 'unknown' | 'ambiguous';
+    direction?: 'incoming' | 'outgoing';
+    source: string;
+    reason: string;
+    observed_at?: string;
+  };
   evidence: string;
   socket: {
     protocol: string;
@@ -468,6 +475,24 @@ export function parseReply(raw: unknown): Reply {
           owners: array(row.owners, 2048).map(string),
           state: string(row.state),
           direction: string(row.direction),
+          initiation: row.initiation
+            ? (() => {
+                const i = object(row.initiation);
+                const state = string(i.state);
+                if (!['known', 'listening', 'unconnected', 'unknown', 'ambiguous'].includes(state))
+                  throw Error('Invalid initiation state');
+                const direction = string(i.direction);
+                if (state === 'known' && !['incoming', 'outgoing'].includes(direction))
+                  throw Error('Invalid initiation direction');
+                return {
+                  state: state as NonNullable<SocketRow['initiation']>['state'],
+                  direction: state === 'known' ? (direction as 'incoming' | 'outgoing') : undefined,
+                  source: string(i.source),
+                  reason: string(i.reason),
+                  observed_at: string(i.observed_at) || undefined,
+                };
+              })()
+            : undefined,
           evidence: string(row.evidence),
           socket: {
             protocol: string(s.protocol),

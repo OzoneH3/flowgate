@@ -21,7 +21,7 @@ export function ruleStatus(row: Row, state: ClientState): RuleStatus {
       'Rule inventory unavailable: controller disconnected or no authoritative snapshot.';
     return result;
   }
-  if (row.displayApplication || row.socket?.display_application) {
+  if (row.displayApplication || (row.socket?.display_application && row.socket.owners.length > 1)) {
     result.reason = 'Observation-only display association; no permission identity inferred.';
     return result;
   }

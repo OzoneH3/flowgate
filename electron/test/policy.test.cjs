@@ -98,8 +98,30 @@ test('exact decimal versions and sequences remain strings; malformed/unsafe poli
 test('summary uses only backend association and classification; shared/reused/expired/disconnected identities refuse', () => {
   const v = parsePolicyView(view()),
     s = state(v),
-    row = { kind: 'socket', socket: { id: 'socket', owners: ['pid:start'] } };
+    row = {
+      kind: 'socket',
+      socket: { id: 'socket', owners: ['pid:start'], ownership_category: 'visible-holder' },
+    };
   assert.equal(authoritativePolicy(row, s).application.ref, 'ref');
+  assert.equal(
+    authoritativePolicy(
+      { ...row, socket: { ...row.socket, display_application: { name: 'display metadata' } } },
+      s,
+    ).application.ref,
+    'ref',
+  );
+  assert.equal(
+    authoritativePolicy({ ...row, socket: { ...row.socket, owners: ['pid:start', 'other'] } }, s)
+      .application,
+    undefined,
+  );
+  assert.equal(
+    authoritativePolicy(
+      { ...row, socket: { ...row.socket, ownership_category: 'holder-changed' } },
+      s,
+    ).application,
+    undefined,
+  );
   assert.equal(
     policyLabel({ ...v.applications[0].incoming, configured: 'mixed', rules: [{}, {}] }),
     'Mixed · 2',

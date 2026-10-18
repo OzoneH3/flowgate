@@ -143,16 +143,18 @@ try {
   const page = await app.firstWindow();
   await page.setViewportSize({ width: 1280, height: 896 });
   await wait(async () =>
-    (await page.locator('.policy-cell').first().innerText()).includes('Mixed'),
+    (await page.locator('#rows tr[data-id^="app:"] .policy-cell').first().innerText()).includes(
+      'Mixed',
+    ),
   );
-  const row = page.locator('#rows tr').first();
+  const row = page.locator('#rows tr[data-id^="app:"]').first();
   await row.locator('.policy-cell').first().click();
-  assert.equal(await page.locator('#policyList .policy-rule').count(), 5);
-  assert.match(await page.locator('#policyList').innerText(), /expired block/);
-  assert.match(await page.locator('#policyList').innerText(), /disabled allow/);
+  assert.equal(await page.locator('#infoRules .activity-rule').count(), 5);
+  assert.match(await page.locator('#infoRules').innerText(), /Block[\s\S]*Expired/);
+  assert.match(await page.locator('#infoRules').innerText(), /Allow[\s\S]*Disabled/);
   await wait(() => row.locator('img').count());
   await page.screenshot({ path: path.join(run, 'synthetic-scoped-rules.png') });
-  await page.click('#closePolicy');
+  await page.keyboard.press('Escape');
   // No new Activity sequence: only control inventory changes. Selection must survive.
   rules = [rule('new', 'block')];
   await wait(async () => (await row.locator('.policy-block').count()) === 1);
@@ -170,7 +172,7 @@ try {
   await page.setViewportSize({ width: 860, height: 600 });
   await page.screenshot({ path: path.join(run, 'synthetic-narrow.png') });
   servers[1].close();
-  await wait(() => page.locator('.rule-unavailable').count());
+  await wait(async () => (await page.locator('.policy-block').count()) === 0);
   assert.equal(await page.locator('.policy-block').count(), 0);
   assert.equal(mutations, 0);
   console.log(

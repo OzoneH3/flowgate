@@ -20,6 +20,16 @@ const node = (tag: string, text: string) => {
 let editRevision = 0;
 let accessState = '';
 let editorSource: RuleSource = {};
+let stayInActivity = false;
+export interface EditorOptions {
+  activity?: boolean;
+  quick?: boolean;
+  action?: 'allow' | 'block';
+  disabled?: boolean;
+  protocol?: string;
+  expiry?: 'hour' | 'permanent';
+  applicationScope?: boolean;
+}
 let previewNeedsRefresh = false;
 let previewExpires = 0,
   reconcileReceipt = '';
@@ -87,7 +97,7 @@ function invalidate() {
   $('scopeSummary').textContent = 'Choose scope, then review the backend preview.';
   $<HTMLButtonElement>('saveRule').disabled = true;
 }
-export async function openRule(source: RuleSource) {
+export async function openRule(source: RuleSource, options: EditorOptions = {}) {
   if (draft) {
     $('ruleEditor').hidden = false;
     status('An unfinished editor is already open. Save or close it first.');
@@ -96,6 +106,9 @@ export async function openRule(source: RuleSource) {
   try {
     draft = await window.flowgate.ruleDraft(source);
     editorSource = source;
+    stayInActivity = !!options.activity;
+    $('ruleEditor').classList.toggle('quick-editor', !!options.quick);
+    $('editorMode').textContent = options.quick ? 'Advanced editor' : 'Compact editor';
     unresolved = false;
     reconcileReceipt = '';
     previewNeedsRefresh = false;
@@ -134,8 +147,28 @@ export async function openRule(source: RuleSource) {
     $<HTMLOptionElement>('editProtocol').querySelector<HTMLOptionElement>(
       'option[value="*"]',
     )!.disabled = !!draft.observed;
+    if (options.action) $<HTMLSelectElement>('editAction').value = options.action;
+    if (options.disabled !== undefined)
+      $<HTMLInputElement>('editEnabled').checked = !options.disabled;
+    if (draft.observed && options.protocol && ['tcp', 'udp'].includes(options.protocol))
+      $<HTMLSelectElement>('editProtocol').value = options.protocol;
+    if (options.expiry) $<HTMLSelectElement>('editExpiry').value = options.expiry;
+    if (draft.observed && options.applicationScope) {
+      $<HTMLSelectElement>('createScope').value = 'application';
+      for (const id of ['anyAddress', 'anyLocal', 'anyRemote'])
+        $<HTMLInputElement>(id).checked = true;
+    }
     $('ruleEditor').hidden = false;
     invalidate();
+    if (options.quick && draft.observed)
+      $('absoluteExpiry').textContent =
+        options.expiry === 'permanent'
+          ? 'Requested: persistent, no expiry.'
+          : 'Requested: one hour from backend preview.';
+    if (options.quick)
+      $('scopeSummary').textContent = draft.observed
+        ? `Proposed ${options.protocol?.toUpperCase() || r.filter.protocol.toUpperCase()} · ${r.filter.direction} · all addresses and ports for this protocol. Backend verification required.`
+        : `Preserved scope: ${reviewedScope(r)}`;
     editorMessage(
       draft.observed
         ? 'Observed identity; Preview must verify the live process. Choose explicit scope before reviewing.'
@@ -193,12 +226,22 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
   panel.hidden = true;
   panel.setAttribute('role', 'dialog');
   panel.setAttribute('aria-label', 'Rule editor');
-  panel.innerHTML = `<header><strong>FlowGate — Rule editor</strong><span><button id="minimizeEditor">Minimize</button> <button id="closeEditor">Close</button></span></header><div class="editor-body"><div class="editor-tab">Rule</div><h2>For</h2><details class="editor-identity"><summary id="editorApplication">Application identity</summary><pre id="editorIdentity"></pre></details><h2>Rule and scope</h2><div id="creationScopeFields" hidden><label for="createScope">Scope</label> <select id="createScope"><option value="">Choose scope…</option><option value="custom">Specified address / ports</option><option value="application">All addresses / ports for this protocol</option></select></div><div class="editor-fields"><label for="editAction">Action</label><select id="editAction"><option value="allow">Allow</option><option value="block">Block</option></select><label for="editProtocol">Protocol</label><select id="editProtocol"><option value="tcp">TCP</option><option value="udp">UDP</option><option value="*">Any</option></select><label for="editAddress">Remote address</label><div class="scope-input"><label><input id="anyAddress" type="checkbox">Any address</label><input id="editAddress" maxlength="256" placeholder="IP address or CIDR"></div><label for="editLocal">Local port</label><div class="scope-input"><label><input id="anyLocal" type="checkbox">Any port</label><input id="editLocal" type="number" min="1" max="65535" aria-label="Specific local port"></div><label for="editRemote">Remote port</label><div class="scope-input"><label><input id="anyRemote" type="checkbox">Any port</label><input id="editRemote" type="number" min="1" max="65535" aria-label="Specific remote port"></div><label for="editPriority">Priority</label><input id="editPriority" type="number" min="-1000" max="1000"><label for="editExpiry">Expiry</label><select id="editExpiry"><option value="preserve">Preserve absolute expiry</option><option value="hour">For 1 hour from preview</option><option value="permanent">Persistent (no expiry)</option></select><label for="editEnabled">Enabled</label><input id="editEnabled" type="checkbox"></div><p id="absoluteExpiry"></p><h2>Review scope</h2><p id="scopeSummary"></p><details id="backendScope"><summary>Full backend preview</summary><p id="rulePreview" class="scope-preview"></p></details><p id="editorFeedback" role="status"></p></div><footer><button id="reloadRule">Reload version, keep fields</button><button id="previewRule">Preview</button><button id="saveRule" disabled>Save</button><span id="previewValidity" role="timer"></span><button id="reconcileRule" hidden>Check save result</button></footer>`;
+  panel.innerHTML = `<header><strong>FlowGate — Rule editor</strong><span><button id="editorMode">Compact editor</button> <button id="minimizeEditor">Minimize</button> <button id="closeEditor">Close</button></span></header><div class="editor-body"><div class="editor-tab">Rule</div><h2>For</h2><details class="editor-identity"><summary id="editorApplication">Application identity</summary><pre id="editorIdentity"></pre></details><h2>Rule and scope</h2><div id="creationScopeFields" hidden><label for="createScope">Scope</label> <select id="createScope"><option value="">Choose scope…</option><option value="custom">Specified address / ports</option><option value="application">All addresses / ports for this protocol</option></select></div><div class="editor-fields"><label for="editAction">Action</label><select id="editAction"><option value="allow">Allow</option><option value="block">Block</option></select><label for="editProtocol">Protocol</label><select id="editProtocol"><option value="tcp">TCP</option><option value="udp">UDP</option><option value="*">Any</option></select><label for="editAddress">Remote address</label><div class="scope-input"><label><input id="anyAddress" type="checkbox">Any address</label><input id="editAddress" maxlength="256" placeholder="IP address or CIDR"></div><label for="editLocal">Local port</label><div class="scope-input"><label><input id="anyLocal" type="checkbox">Any port</label><input id="editLocal" type="number" min="1" max="65535" aria-label="Specific local port"></div><label for="editRemote">Remote port</label><div class="scope-input"><label><input id="anyRemote" type="checkbox">Any port</label><input id="editRemote" type="number" min="1" max="65535" aria-label="Specific remote port"></div><label for="editPriority">Priority</label><input id="editPriority" type="number" min="-1000" max="1000"><label for="editExpiry">Expiry</label><select id="editExpiry"><option value="preserve">Preserve absolute expiry</option><option value="hour">For 1 hour from preview</option><option value="permanent">Persistent (no expiry)</option></select><label for="editEnabled">Enabled</label><input id="editEnabled" type="checkbox"></div><p id="absoluteExpiry"></p><h2>Review scope</h2><p id="scopeSummary"></p><details id="backendScope"><summary>Full backend preview</summary><p id="rulePreview" class="scope-preview"></p></details><p id="editorFeedback" role="status"></p></div><footer><button id="reloadRule">Reload version, keep fields</button><button id="previewRule">Preview</button><button id="saveRule" disabled>Save</button><span id="previewValidity" role="timer"></span><button id="reconcileRule" hidden>Check save result</button></footer>`;
   panel.querySelector('header')!.prepend(panel.querySelector('.editor-tab')!);
   const editorFooter = panel.querySelector('footer')!;
   editorFooter.prepend(panel.querySelector('#saveRule')!);
   editorFooter.append(panel.querySelector('#closeEditor')!);
   document.body.append(panel);
+  $('editorMode').onclick = () => {
+    const compact = panel.classList.toggle('quick-editor');
+    $('editorMode').textContent = compact ? 'Advanced editor' : 'Compact editor';
+  };
+  for (const id of ['editProtocol', 'editAddress', 'editLocal', 'editRemote', 'editPriority']) {
+    const input = $(id);
+    input.classList.add('advanced-rule-field');
+    input.closest('.scope-input')?.classList.add('advanced-rule-field');
+    panel.querySelector(`label[for="${id}"]`)?.classList.add('advanced-rule-field');
+  }
   document.addEventListener('keydown', (e) => {
     if (e.ctrlKey && e.key.toLowerCase() === 'e') {
       e.preventDefault();
@@ -325,7 +368,11 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
       if (result.phase === 'acknowledged') {
         if (result.rule) {
           selected = result.rule.id;
-          showTab('rules');
+          if (!stayInActivity) showTab('rules');
+          else
+            window.dispatchEvent(
+              new CustomEvent('activity-rule-saved', { detail: result.rule.id }),
+            );
           selectRule();
         }
         panel.hidden = true;
@@ -358,7 +405,9 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
         reconcileReceipt = '';
         panel.hidden = true;
         $('resumeEditor').hidden = true;
-        showTab('rules');
+        if (!stayInActivity) showTab('rules');
+        else
+          window.dispatchEvent(new CustomEvent('activity-rule-saved', { detail: result.rule.id }));
         selectRule();
         status(result.message);
       }
