@@ -1,4 +1,4 @@
-import { canDecide, type ClientState } from './protocol';
+import { canDecide, validateDecision, type ClientState } from './protocol';
 import type { RequestRef } from './notifications';
 // One foreground request, pinned until closed. A dismissed request never auto-opens again.
 export class AutomaticPrompts {
@@ -35,4 +35,11 @@ export function edgePosition(
     width: Math.min(width, area.width),
     height: Math.min(height, area.height),
   };
+}
+
+export function boundDecision(value: unknown, ref?: RequestRef) {
+  const decision = validateDecision(value);
+  if (ref && (decision.id !== ref.id || decision.generation !== ref.generation))
+    throw Error('Decision does not belong to this permission window');
+  return decision;
 }

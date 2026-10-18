@@ -69,7 +69,7 @@ try {
   await main.setViewportSize({ width: 1280, height: 656 });
   await main.locator('#requestsTab').click();
   const seen = new Set();
-  async function decide(op, name, protocol, v6, action, scope = 'once') {
+  async function decide(op, name, protocol, v6, action, scope = 'once', zone = 'any') {
     const before = await command(
       op === 'incoming' ? { op: 'counts', name } : { op: 'peer-counts' },
     );
@@ -117,8 +117,22 @@ try {
       'awaiting-decision',
     );
     await prompt.locator('#scope').selectOption(scope);
+    if (process.env.REMEMBER_ZONES && scope !== 'once') {
+      assert.equal(await prompt.locator('#decisionZone').inputValue(), 'any');
+      await prompt.locator('#decisionZone').selectOption(zone);
+      await prompt.locator('#allow:not([disabled])').waitFor();
+      await prompt.locator('#decisionZone').focus();
+      await sleep(900);
+      assert.equal(
+        await prompt.locator('#decisionZone').evaluate((n) => n === document.activeElement),
+        true,
+      );
+    }
     if (scope !== 'once')
-      assert.match(await prompt.locator('#permissionTarget').innerText(), /Any network/);
+      assert.match(
+        await prompt.locator('#permissionTarget').innerText(),
+        zone === 'local' ? /Local Network/ : zone === 'internet' ? /Internet/ : /Any network/,
+      );
     await prompt.screenshot({
       path: path.join(run, `${op}-${protocol}-${v6 ? '6' : '4'}-${action}.png`),
     });
@@ -161,13 +175,42 @@ try {
     fs.writeFileSync(path.join(run, 'evidence.json'), JSON.stringify(evidence, null, 2));
     await prompt.close();
   }
-  await decide('incoming', 'alpha', 'udp', false, 'allow');
-  await decide('incoming', 'alpha', 'udp', true, 'block');
+  await decide(
+    'incoming',
+    'alpha',
+    'udp',
+    false,
+    'allow',
+    process.env.REMEMBER_ZONES ? 'application' : 'once',
+    process.env.REMEMBER_ZONES ? 'local' : 'any',
+  );
+  await decide(
+    'incoming',
+    'alpha',
+    'udp',
+    true,
+    'block',
+    process.env.REMEMBER_ZONES ? 'application' : 'once',
+    process.env.REMEMBER_ZONES ? 'internet' : 'any',
+  );
+  if (process.env.REMEMBER_ZONES) {
+    const before = await command({ op: 'counts', name: 'alpha' });
+    await command({ op: 'incoming', name: 'alpha', protocol: 'udp', v6: false });
+    await command({ op: 'incoming', name: 'alpha', protocol: 'udp', v6: true });
+    const after = await command({ op: 'counts', name: 'alpha' });
+    assert.equal((after.counts.udp4 || 0) - (before.counts.udp4 || 0), 1);
+    assert.equal((after.counts.udp6 || 0) - (before.counts.udp6 || 0), 0);
+    evidence.namedZoneSubsequent = { before, after };
+  }
   await decide('outgoing', 'alpha', 'udp', false, 'allow', 'application');
   const saved = (await call({ operation: 'list' })).rules || [];
-  assert.equal(saved.length, 1);
-  assert(!saved[0].filter.network_zone);
-  assert(!saved[0].filter.process);
+  assert.equal(saved.length, process.env.REMEMBER_ZONES ? 3 : 1);
+  if (process.env.REMEMBER_ZONES) {
+    assert(saved.some((r) => r.filter.network_zone === 'local'));
+    assert(saved.some((r) => r.filter.network_zone === 'internet'));
+    assert(saved.some((r) => !r.filter.network_zone));
+  }
+  assert(saved.every((r) => !r.filter.process));
   const before = await command({ op: 'peer-counts' });
   await command({ op: 'outgoing', name: 'beta', protocol: 'udp', v6: false });
   await sleep(300);

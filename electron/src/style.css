@@ -1422,3 +1422,7 @@ body.hide-sidebar #activityView > aside { display:none; }
 .connection-banner { color:white; background:#679f38; padding:6px 9px; border-radius:4px 4px 0 0; font-size:13px; }
 .remote-endpoint { padding:0 8px; }
 #promptBody .compact-application { margin-bottom:6px; }
+.decision-network { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-top:7px; font-size:11px; }
+.decision-network select { min-height:24px; font-size:12px; max-width:150px; margin-left:4px; }
+.decision-network[hidden] { display:none; }
+.decision-review { margin:4px 0; color:#ddc38d; font-size:11px; }

@@ -198,6 +198,8 @@ export interface Reply {
   activity?: Activity;
   events: RequestEvent[];
   decision?: RequestEvent;
+  decision_preview?: unknown;
+  decision_receipt?: unknown;
   rules: Rule[];
   rule_states?: Record<string, RuleTargetState>;
   saved_rule?: Rule;
@@ -252,6 +254,9 @@ export interface Decision {
   id: string;
   action: Action;
   scope: Scope;
+  network_zone?: 'any' | NetworkZone;
+  zone_revision?: string;
+  preview_token?: string;
 }
 export interface Bridge {
   paneSnapshot(): Promise<import('./pane-model').PaneFrame>;
@@ -293,6 +298,12 @@ export interface Bridge {
   preferences(value?: Preferences): Promise<Preferences>;
   subscribe(fn: (state: ClientState) => void): () => void;
   decide(value: Decision): Promise<Attempt>;
+  decisionPreview(value: Decision): Promise<import('./decision-remember').DecisionPreview>;
+  decisionReconcile(value: {
+    generation: string;
+    id: string;
+    preview_token: string;
+  }): Promise<Attempt>;
   openPrompt(id: string): Promise<void>;
   dismissPrompt(): Promise<void>;
   decisionLog(): Promise<DecisionLogState>;
@@ -437,6 +448,8 @@ export function parseReply(raw: unknown): Reply {
     scope_preview: string(r.scope_preview),
     // Validated by decision-log.ts, which owns the decision-log-v1 schema.
     decision_log: r.decision_log,
+    decision_preview: r.decision_preview,
+    decision_receipt: r.decision_receipt,
     decision_record: r.decision_record,
     network_zones: parseNetworkZones(r.network_zones),
     evaluation: parseEvaluation(r.evaluation),
@@ -668,7 +681,18 @@ export function parseReply(raw: unknown): Reply {
 export function validateDecision(v: unknown): Decision {
   const d = object(v);
   if (
-    Object.keys(d).sort().join(',') !== 'action,generation,id,scope' ||
+    Object.keys(d).some(
+      (k) =>
+        ![
+          'action',
+          'generation',
+          'id',
+          'scope',
+          'network_zone',
+          'zone_revision',
+          'preview_token',
+        ].includes(k),
+    ) ||
     !string(d.id) ||
     string(d.id).length > 256 ||
     !string(d.generation) ||
@@ -677,6 +701,18 @@ export function validateDecision(v: unknown): Decision {
     !['once', 'application', 'persistent'].includes(string(d.scope))
   )
     throw Error('Invalid decision');
+  const zoned =
+    d.network_zone !== undefined || d.zone_revision !== undefined || d.preview_token !== undefined;
+  if (
+    zoned &&
+    (d.scope === 'once' ||
+      !['any', 'local', 'internet'].includes(string(d.network_zone)) ||
+      !string(d.zone_revision) ||
+      string(d.zone_revision).length > 256 ||
+      (d.preview_token !== undefined &&
+        (!string(d.preview_token) || string(d.preview_token).length > 256)))
+  )
+    throw Error('Invalid decision network scope');
   return d as unknown as Decision;
 }
 
@@ -815,7 +851,7 @@ function ruleVersion(v: unknown): number {
     );
   return v;
 }
-function parseRule(v: unknown): Rule {
+export function parseRule(v: unknown): Rule {
   const r = object(v),
     filter = ruleFilter(r.filter);
   if (

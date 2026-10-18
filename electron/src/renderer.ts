@@ -1,3 +1,4 @@
+import { REMEMBER_ZONE_CAPABILITY, type DecisionPreview } from './decision-remember';
 import { applicationHeading } from './application-heading';
 import { connectionPresentation, permissionTarget } from './connection-presentation';
 import { ZONE_CAPABILITY, zoneLabel } from './network-zones';
@@ -68,6 +69,67 @@ let graph: TrafficGraph | undefined;
 let activityPolicy: ActivityPolicy | undefined;
 let selectedRequest = promptID ?? '';
 let chosenScope: Scope = 'once';
+let decisionZone: 'any' | 'local' | 'internet' = 'any';
+let decisionReviews: Partial<Record<'allow' | 'block', DecisionPreview>> = {};
+let reviewSequence = 0,
+  reviewChecking = false,
+  reviewMessage = '',
+  reviewFor = '';
+function needsDecisionReview() {
+  return chosenScope !== 'once' && !!state.control.capabilities?.includes(REMEMBER_ZONE_CAPABILITY);
+}
+function reviewKey() {
+  return JSON.stringify([
+    state.control.generation,
+    selectedRequest,
+    chosenScope,
+    decisionZone,
+    state.control.networkZones?.revision,
+  ]);
+}
+async function prepareDecisions() {
+  const e = currentEvent();
+  const seq = ++reviewSequence,
+    key = reviewKey();
+  decisionReviews = {};
+  reviewMessage = '';
+  reviewChecking = false;
+  if (!e || !needsDecisionReview() || !actionable(e)) {
+    updateDecisions();
+    return;
+  }
+  reviewChecking = true;
+  updateDecisions();
+  try {
+    const entries = await Promise.all(
+      (['allow', 'block'] as const).map(
+        async (action) =>
+          [
+            action,
+            await window.flowgate.decisionPreview({
+              generation: state.control.generation,
+              id: e.id,
+              action,
+              scope: chosenScope,
+              network_zone: decisionZone,
+              zone_revision: state.control.networkZones?.revision || '',
+            }),
+          ] as const,
+      ),
+    );
+    if (seq === reviewSequence && key === reviewKey()) {
+      decisionReviews = Object.fromEntries(entries);
+      reviewFor = key;
+    }
+  } catch (error) {
+    if (seq === reviewSequence && key === reviewKey()) reviewMessage = String(error);
+  } finally {
+    if (seq === reviewSequence) {
+      reviewChecking = false;
+      updateDecisions();
+    }
+  }
+}
 let tab = 'activity';
 let sequence = '';
 let eventSignature = '';
@@ -1286,6 +1348,9 @@ function renderRequests() {
       const select = () => {
         selectedRequest = e.id;
         chosenScope = 'once';
+        decisionZone = 'any';
+        decisionReviews = {};
+        ++reviewSequence;
         detailSignature = '';
         renderRequests();
       };
@@ -1395,6 +1460,14 @@ function renderRequests() {
         if (!actionable(currentEvent()) || currentEvent()?.id !== e.id) return;
         const generation = state.control.generation,
           scope = chosenScope;
+        const preview = decisionReviews[action];
+        if (
+          needsDecisionReview() &&
+          (reviewFor !== reviewKey() ||
+            !preview ||
+            Date.parse(preview.expires_at) <= (state.control.serverNow || Date.now()))
+        )
+          return;
         localSubmitted.add(generation + ':' + e.id);
         updateDecisions();
         message('Submitting decision…');
@@ -1404,6 +1477,13 @@ function renderRequests() {
             id: e.id,
             action,
             scope,
+            ...(needsDecisionReview()
+              ? {
+                  network_zone: decisionZone,
+                  zone_revision: preview!.zone_revision,
+                  preview_token: preview!.token,
+                }
+              : {}),
           });
           message(result.message);
         } catch (error) {
@@ -1426,10 +1506,64 @@ function renderRequests() {
     scopes.value = chosenScope;
     scopes.onchange = () => {
       chosenScope = scopes.value as Scope;
-      updateDecisions();
+      void prepareDecisions();
     };
     controls.append(scopes);
     container.append(controls);
+    const networks = element('div', '', 'decision-network');
+    const networkLabel = element('label', 'Remember on ');
+    const zone = element('select');
+    zone.id = 'decisionZone';
+    zone.setAttribute('aria-label', 'Remember network scope');
+    zone.append(new Option('Any network', 'any'));
+    if (
+      state.control.capabilities?.includes(REMEMBER_ZONE_CAPABILITY) &&
+      e.flow.network_scope?.state === 'known' &&
+      e.flow.network_scope.revision === state.control.networkZones?.revision
+    )
+      zone.append(new Option(zoneLabel(e.flow.network_scope.zone), e.flow.network_scope.zone));
+    zone.value = decisionZone;
+    if (!zone.value) {
+      decisionZone = 'any';
+      zone.value = 'any';
+      decisionReviews = {};
+    }
+    zone.onchange = () => {
+      decisionZone = zone.value as typeof decisionZone;
+      void prepareDecisions();
+    };
+    networkLabel.append(zone);
+    networks.append(networkLabel);
+    const refresh = element('button', 'Refresh review', 'link-button');
+    refresh.id = 'refreshDecision';
+    refresh.onclick = () => void prepareDecisions();
+    networks.append(refresh);
+    container.append(networks);
+    const reviewStatus = element('p', '', 'decision-review');
+    reviewStatus.id = 'decisionReview';
+    reviewStatus.setAttribute('role', 'status');
+    container.append(reviewStatus);
+    const reconcile = element('button', 'Check result', 'link-button');
+    reconcile.id = 'decisionReconcile';
+    reconcile.onclick = async () => {
+      const current = currentEvent(),
+        token = current?.attempt?.reconcile;
+      if (!current || !token) return;
+      reconcile.disabled = true;
+      try {
+        const result = await window.flowgate.decisionReconcile({
+          generation: state.control.generation,
+          id: current.id,
+          preview_token: token,
+        });
+        message(result.message);
+      } catch (error) {
+        message(String(error));
+      } finally {
+        updateDecisions();
+      }
+    };
+    container.append(reconcile);
     if (!promptID) {
       const open = element('button', 'Open permission window', 'open-prompt');
       open.onclick = () => void window.flowgate.openPrompt(e.id);
@@ -1452,7 +1586,18 @@ function updateDecisions() {
       `Pending connections (${state.control.events.filter((e) => e.state === 'awaiting-decision' && e.remainingMs > 0).length})`;
   for (const id of ['allow', 'block']) {
     const b = $<HTMLButtonElement>(id);
-    if (b) b.disabled = !actionable(e);
+    const review = decisionReviews[id as 'allow' | 'block'];
+    if (b) {
+      b.disabled =
+        !actionable(e) ||
+        (needsDecisionReview() &&
+          (reviewFor !== reviewKey() ||
+            !review ||
+            Date.parse(review.expires_at) <= (state.control.serverNow || Date.now())));
+      b.title = needsDecisionReview()
+        ? review?.scope_preview || 'Review required'
+        : e?.scope_previews[chosenScope] || '';
+    }
   }
   const scope = $<HTMLSelectElement>('scope');
   if (scope)
@@ -1465,14 +1610,60 @@ function updateDecisions() {
       e.state !== 'awaiting-decision' ||
       e.remainingMs <= 0;
   if ($('scopePreview'))
-    $('scopePreview').textContent =
-      e?.scope_previews[chosenScope] || 'Authoritative scope unavailable; decisions disabled.';
+    $('scopePreview').textContent = needsDecisionReview()
+      ? Object.entries(decisionReviews)
+          .map(([action, p]) => `${action === 'allow' ? 'Allow' : 'Deny'}: ${p.scope_preview}`)
+          .join('\n') || 'Review required'
+      : e?.scope_previews[chosenScope] || 'Authoritative scope unavailable; decisions disabled.';
+  const zone = $<HTMLSelectElement>('decisionZone');
+  if (zone) {
+    zone.disabled = !!scope?.disabled || !needsDecisionReview();
+    zone.title = needsDecisionReview()
+      ? 'Scope of the remembered rule'
+      : 'Any network · backend upgrade required for remembered zone rules';
+    zone.parentElement!.parentElement!.hidden = chosenScope === 'once';
+  }
+  if ($('refreshDecision')) {
+    const refresh = $<HTMLButtonElement>('refreshDecision');
+    refresh.hidden = !needsDecisionReview();
+    refresh.disabled = reviewChecking || !actionable(e);
+  }
+  if ($('decisionReview'))
+    $('decisionReview').textContent = reviewChecking
+      ? 'Checking remembered scope…'
+      : reviewMessage ||
+        (needsDecisionReview() && !decisionReviews.allow
+          ? 'Choose scope, then refresh review.'
+          : needsDecisionReview() &&
+              Date.parse(decisionReviews.allow?.expires_at || '') <=
+                (state.control.serverNow || Date.now())
+            ? 'Review expired · refresh to decide.'
+            : '');
+  if ($('decisionReconcile')) {
+    const reconcile = $<HTMLButtonElement>('decisionReconcile');
+    reconcile.hidden = !e?.attempt?.reconcile;
+    reconcile.disabled = !state.control.connected;
+  }
   if ($('requestResult') && e)
     $('requestResult').textContent = !state.control.connected
       ? 'Disconnected · decisions unavailable. Request details retained; no retry sent.'
       : e.attempt?.message || e.reason;
   if ($('permissionTarget'))
-    $('permissionTarget').textContent = permissionTarget(chosenScope, e?.flow.protocol || '');
+    $('permissionTarget').textContent = permissionTarget(
+      chosenScope,
+      e?.flow.protocol || '',
+      needsDecisionReview() ? decisionZone : 'any',
+    );
+  if (
+    $('permissionTarget') &&
+    needsDecisionReview() &&
+    reviewFor === reviewKey() &&
+    decisionReviews.allow
+  ) {
+    const until = decisionReviews.allow.rule.expires;
+    $('permissionTarget').textContent =
+      `Application + peer/service · ${decisionZone === 'any' ? 'Any network' : zoneLabel(decisionZone)} · ${until.startsWith('0001-') ? 'persistent' : 'until ' + new Date(until).toLocaleTimeString()}`;
+  }
   const expiry = document.querySelector('.expiry');
   if (expiry)
     expiry.textContent = e

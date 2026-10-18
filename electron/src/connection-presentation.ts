@@ -24,14 +24,18 @@ export function connectionPresentation(flow: RequestEvent['flow']) {
           : 'Initiation direction unavailable',
   };
 }
-export function permissionTarget(scope: Scope, protocol: string) {
+export function permissionTarget(
+  scope: Scope,
+  protocol: string,
+  zone: 'any' | 'local' | 'internet' = 'any',
+) {
   return scope === 'once'
     ? protocol === 'udp'
       ? 'Once · this UDP tuple · 30 seconds'
       : protocol === 'tcp'
         ? 'Once · this TCP connection · 30s admission'
         : 'Once · backend-defined scope'
-    : `Application + peer/service · Any network · ${scope === 'application' ? '1 hour' : 'persistent'}`;
+    : `Application + peer/service · ${zone === 'local' ? 'Local Network' : zone === 'internet' ? 'Internet' : 'Any network'} · ${scope === 'application' ? '1 hour' : 'persistent'}`;
 }
 export function parseConnectionZone(value: unknown): SocketRow['network_scope'] {
   if (value === undefined) return;
