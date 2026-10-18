@@ -1,5 +1,49 @@
 # Integrated desktop and non-enforcing root monitor
 
+## Current integration: selected rules, quick setters and observed initiation
+
+Full released frontend **d3268a4f94716c6b21314757736171c1e8dd1a48** is integrated by
+fast-forward atop backend **b9840d01096d156d92ce515bd69a07fef443eef6** (retaining
+4105194). Clean checkpoint and explicit ownership release verified first. Backend
+adds only `activity-initiation-v1` observation evidence; existing policy-view
+inventory and preview/versioned-save/conditional-delete contracts are reused.
+UI shows all relevant scoped/disabled/expired rules for selected application,
+process or supported socket, with explicit application-wide scope; it does not
+pretend to support process-instance permissions. Live NetLimiter process-only
+behavior is recorded as a separate bounded proposal in PLAN.md, not implemented.
+
+Backend focused identity+daemon race tests/vet passed. Real authenticated private
+TCP4/6 handshake fixture verifies observed incoming/outgoing retention into
+established sockets, honest preexisting unknown, neutral listener/UDP and read-only
+capability. Exact binary b9840d0 SHA256
+91339fece1dacb077cfe7ff497ce282b9757f92d51cc15ec20fd21fef43bad06.
+Fixture metadata and API rows: `.workspace/direction-ui-release/ready.json` and
+result.json. UI alone drove mutations until explicit DONE; backend then touched
+quit, supervisor exited0 and daemon socket was removed. Offline disposable rules
+remain only in the ignored fixture database/evidence; no runtime owner remains.
+
+Exact-release actual sandboxed Wayland journey reused from UI worktree
+`.workspace/activity-rules-real-28BVUv/`: first rule without pending, three scoped
+rules across directions, app/process/socket complete inventory, quick exact edit,
+disable/re-enable preserving expiry, conditional Delete preserving siblings,
+input/focus and read-only denial, GUI exit preserving daemon. Actual observed
+TCP4/6 rows:2incoming+2outgoing. Not a new firewall verdict/receiver claim; settled
+enforcement/UDP matrices reused. UI recorded its own Windows fixture cleanup.
+New integrated checks: Electron build/typecheck,18 focused consumer tests and
+sandboxed **synthetic** presentation runner pass (multiple scopes/disabled/expired,
+selection/control refresh/read-only/disconnect); captures `.workspace/presentation-nYl0Sa`.
+Logs `.workspace/activity-round2-{build,ui-tests,presentation}.log`.
+No broad matrix repeat or claim that backend completion proves visual fidelity.
+
+Host read-only final check: root peerPID2201352,
+generation0840f7c256126f1708702f27c5b26551, UDP collector43a091abb81a09901be2c9b460080ee1
+active, enforcement stopped, zero stored rules. Host executable/daemon/collector
+never replaced/restarted/interrupted; no host policy writes. Old deployed1732584
+**does not expose activity-initiation-v1**: known-direction arrows require a later
+separately authorized rollout. Current UI uses explicit unknown on that old daemon;
+rule inventory/create/edit support already exists there. Normal launch:
+`scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock`.
+
 ## UI support integration: Activity composition and launcher separation
 
 Released frontend **85364c94f170f88eede9fc79111ab98143f4ba48** is integrated in full

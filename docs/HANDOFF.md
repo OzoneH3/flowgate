@@ -1,5 +1,19 @@
 # Continuation handoff
 
+## Current integration: Activity rules and initiation
+
+Released UId3268a4 fully integrated atop backendb9840d0, retaining4105194.
+`activity-initiation-v1` provides bounded observed TCP initiation; no new policy
+engine or permission authority. Existing APIs supply complete relevant-rule lists,
+first-rule creation, quick edits and conditional Delete. Process-instance scope is
+an explicit PLAN follow-up, not implemented as an application-wide approximation.
+Focused race/vet, real TCP4/6/API and exact-release Wayland journey passed;
+integrated build+18 focused tests+synthetic presentation passed. Fixture CLEANED
+only after UI DONE. Host same daemon/active UDP/stopped enforcement/rules0; its old
+build lacks the new initiation capability and requires a future authorized rollout.
+Exact source/hash/evidence and limitations: [INTEGRATION.md](INTEGRATION.md).
+Normal launch: `scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock`.
+
 ## Backend UI support: observed Activity initiation
 
 New additive `activity-initiation-v1`: rows carry initiation state/direction/source/
