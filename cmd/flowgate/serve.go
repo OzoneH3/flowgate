@@ -9,6 +9,7 @@ import (
 	"flowgate/internal/monitor"
 	"flowgate/internal/readiness"
 	"flowgate/internal/store"
+	"flowgate/internal/tcpinit"
 	"flowgate/internal/udpaccount"
 	"fmt"
 	"os"
@@ -40,6 +41,8 @@ func serveCommand(args []string) error {
 	database := fs.String("database", "", "SQLite file in an existing secure root-owned directory")
 	uid := fs.Int("uid", -1, "explicit desktop peer UID")
 	administrator := fs.Bool("administrator", false, "root grants that selected UID machine-wide visibility and rule authority")
+	tcpHelper := fs.String("tcp-initiation-helper", "", "optional reviewed sockops initiation helper; no host attach without this explicit root startup option")
+	tcpCgroup := fs.String("tcp-initiation-cgroup", "/sys/fs/cgroup", "cgroup-v2 observation coverage; current network namespace only")
 	helper := fs.String("udp-helper", "", "reviewed UDP native helper; pinned at startup but never implicitly attached")
 	allowEvaluation := fs.Bool("allow-evaluation", false, "explicit selected administrator authority to start/stop incoming five-minute evaluation")
 	evaluationState := fs.String("evaluation-state", "/run/flowgate-evaluation", "root-owned evaluation state; prepared only on explicit Start")
@@ -122,6 +125,9 @@ func serveCommand(args []string) error {
 	e.Activity = observer.Snapshot
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
+	initiation := tcpinit.New(ctx, *tcpHelper, *tcpCgroup, filepath.Dir(*socket))
+	defer initiation.Close()
+	observer.InitiationEvents = initiation.Sample
 	evaluation := hostfirewall.NewEvaluation(ctx, e, *evaluationState, *socket, *database)
 	e.Evaluation = evaluation
 	if *allowEvaluation {

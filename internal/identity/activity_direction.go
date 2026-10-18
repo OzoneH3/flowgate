@@ -10,6 +10,7 @@ import (
 // Initiation describes observed TCP initiation, never firewall admission or byte
 // direction. No process, application, port convention or policy decision is used.
 type Initiation struct {
+	Generation string     `json:"generation,omitempty"`
 	State      string     `json:"state"`
 	Direction  string     `json:"direction,omitempty"`
 	Source     string     `json:"source"`

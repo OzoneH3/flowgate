@@ -42,6 +42,7 @@ type ActivityRow struct {
 	Evidence           string       `json:"evidence"`
 }
 type ActivitySnapshot struct {
+	TCPInitiation   *InitiationEvents          `json:"tcp_initiation,omitempty"`
 	UDP             *UDPSnapshot               `json:"udp,omitempty"`
 	Sequence        uint64                     `json:"sequence"`
 	Started         time.Time                  `json:"started"`
@@ -60,12 +61,13 @@ type cachedActivityProcess struct {
 	checked time.Time
 }
 type ActivityCollector struct {
-	Zones       NetworkZones
-	initiations map[string]initiationSample
-	UDP         func() UDPSnapshot
-	cache       map[int]cachedActivityProcess
-	sequence    uint64
-	traffic     map[string]trafficSample
+	InitiationEvents func([]Socket) InitiationEvents
+	Zones            NetworkZones
+	initiations      map[string]initiationSample
+	UDP              func() UDPSnapshot
+	cache            map[int]cachedActivityProcess
+	sequence         uint64
+	traffic          map[string]trafficSample
 }
 
 func SocketState(s Socket) string {
@@ -124,6 +126,13 @@ func (c *ActivityCollector) Collect() ActivitySnapshot {
 			out.Rows[i].NetworkScope = c.Zones.SocketScope(out.Rows[i].Socket)
 		}
 		c.directions(&out, out.Started)
+		if c.InitiationEvents != nil {
+			sockets := make([]Socket, 0, len(out.Rows))
+			for _, r := range out.Rows {
+				sockets = append(sockets, r.Socket)
+			}
+			ApplyInitiationEvents(&out, c.InitiationEvents(sockets))
+		}
 		c.measure(&out, out.Started)
 		if out.UDP != nil {
 			out.UDP.Rows = nil

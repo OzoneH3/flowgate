@@ -47,6 +47,14 @@ func activityFor(s identity.ActivitySnapshot, uid uint32, admin bool) identity.A
 		return s
 	}
 	out := s
+	if s.TCPInitiation != nil {
+		v := *s.TCPInitiation
+		v.Rows = nil
+		v.Lost = 0
+		v.Partial = true
+		v.Reason = "User-scoped event evidence; machine-global loss counters withheld"
+		out.TCPInitiation = &v
+	}
 	out.Rows = []identity.ActivityRow{}
 	out.Processes = map[string]identity.ActivityProcess{}
 	out.OwnershipCounts = map[string]int{}
