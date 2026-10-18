@@ -20,3 +20,17 @@ FlowGate now bundles **Selawik** (Microsoft, SIL OFL 1.1,
   `aria-pressed`; popup focus stays on the container; outside click closes.
 - Populated chart: real unprivileged TCP observer run `graphs.mjs` (`.workspace/gr-*/real-tcp-application.png`).
 - Host read-only check: not possible (host daemon absent after the reboots); nothing was started.
+
+## Verified follow-up: bundled font loading
+
+The original R4 bundle copied Selawik correctly, but the asset protocol omitted the font files.
+Consequently the original R4 running screenshots used a later installed fallback; CSS family names
+and width probes alone did not establish successful font use. The fixed protocol now allows exactly
+three bundled font paths with `font/ttf`, retaining CSP, sandbox and the OFL attribution.
+
+Actual sandboxed Wayland verification on unchanged isolated rsf-c780:
+`document.fonts.load` for 400/600/700 failed with NetworkError before the fix and succeeded afterward.
+Evidence: UI `.workspace/round5/{before.json,font.json,before-normal.png,font-normal.png}`.
+Build/typecheck and two static asset allowlist tests pass. The read-only 01e3 follow-up pane run also
+passed presets, Rate/Total, Status/Details, source/window menu, pause → selection → resume, and
+outside popup dismissal; no fixture rules or host state changed.

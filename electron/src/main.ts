@@ -8,6 +8,7 @@ import {
   type IpcMainInvokeEvent,
 } from 'electron';
 import path from 'node:path';
+import { bundledAsset } from './assets';
 import { ApplicationIcons } from './icons';
 import { Background } from './background';
 import { TrafficHistory } from './history';
@@ -188,15 +189,11 @@ app.whenReady().then(async () => {
           })
         : new Response('Not found', { status: 404 });
     }
-    if (u.host !== 'app' || !['index.html', 'style.css', 'renderer.js'].includes(name))
-      return new Response('Not found', { status: 404 });
+    const mime = bundledAsset(name);
+    if (u.host !== 'app' || !mime) return new Response('Not found', { status: 404 });
     return new Response(fs.readFileSync(path.join(__dirname, name)), {
       headers: {
-        'Content-Type': name.endsWith('.html')
-          ? 'text/html'
-          : name.endsWith('.css')
-            ? 'text/css'
-            : 'text/javascript',
+        'Content-Type': mime,
         'Content-Security-Policy': csp,
         'X-Content-Type-Options': 'nosniff',
       },
