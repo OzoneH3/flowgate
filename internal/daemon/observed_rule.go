@@ -8,6 +8,7 @@ import (
 )
 
 const ObservedRuleCapability = "observed-rule-create-v1"
+const ObservedAnyProtocolCapability = "observed-rule-any-protocol-v1"
 
 type ObservedTarget struct {
 	RowID     string `json:"row_id"`
@@ -55,8 +56,8 @@ func draftBytes(d ObservedDraft) (string, error) {
 		return "", mutationError("invalid_request", "target_scope must be application or process")
 	}
 	d.TargetScope = processScope(d)
-	if d.LocalPort == nil || d.RemotePort == nil || d.Expires == nil || d.RemoteAddress == "" || len(d.RemoteAddress) > 128 || (d.Direction != "incoming" && d.Direction != "outgoing") || (d.Protocol != "tcp" && d.Protocol != "udp") || (d.Action != "allow" && d.Action != "block") {
-		return "", mutationError("invalid_request", "Explicit direction, protocol, action, remote_address, local_port, remote_port and expires required; zero ports/zero expiry are deliberate wildcard/persistent choices")
+	if d.LocalPort == nil || d.RemotePort == nil || d.Expires == nil || d.RemoteAddress == "" || len(d.RemoteAddress) > 128 || (d.Direction != "incoming" && d.Direction != "outgoing") || (d.Protocol != "tcp" && d.Protocol != "udp" && d.Protocol != "*") || (d.Action != "allow" && d.Action != "block") {
+		return "", mutationError("invalid_request", "Explicit direction, protocol (tcp, udp, or * for TCP+UDP only), action, remote_address, local_port, remote_port and expires required; zero ports/zero expiry are deliberate wildcard/persistent choices")
 	}
 	b, _ := json.Marshal(d)
 	return string(b), nil

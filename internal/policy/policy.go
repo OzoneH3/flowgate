@@ -76,7 +76,7 @@ func (r Rule) Validate() error {
 	if r.Filter.Direction != "incoming" && r.Filter.Direction != "outgoing" {
 		return fmt.Errorf("invalid direction")
 	}
-	if r.Filter.Protocol != "tcp" && r.Filter.Protocol != "udp" {
+	if r.Filter.Protocol != "tcp" && r.Filter.Protocol != "udp" && !(r.Filter.Protocol == "*" && (r.Schema == 2 || r.Schema == 3)) {
 		return fmt.Errorf("invalid protocol")
 	}
 	return nil
@@ -100,7 +100,7 @@ func EvaluateSession(rules []Rule, f identity.Flow, a identity.Attribution, now 
 		if !r.Expires.IsZero() && !now.Before(r.Expires) {
 			continue
 		}
-		if x.Application != a.Application.Key || x.Revision != a.Application.Revision || x.UID != a.Principal().UID || x.Direction != f.Direction || x.Protocol != f.Protocol {
+		if x.Application != a.Application.Key || x.Revision != a.Application.Revision || x.UID != a.Principal().UID || x.Direction != f.Direction || !ProtocolMatches(x.Protocol, f.Protocol) {
 			continue
 		}
 		if x.Remote != "" && x.Remote != f.Remote.String() {
@@ -155,4 +155,13 @@ func Remembered(f identity.Flow, a identity.Attribution) Filter {
 		x.RemotePort = f.Remote.Port()
 	}
 	return x
+}
+
+// ProtocolMatches deliberately limits wildcard scope to the supported TCP/UDP
+// initiation engine. It never means all IP protocols (ICMP, raw traffic, etc.).
+func ProtocolMatches(rule, actual string) bool {
+	return (actual == "tcp" || actual == "udp") && (rule == actual || rule == "*")
+}
+func ProtocolsOverlap(a, b string) bool {
+	return ProtocolMatches(a, "tcp") && ProtocolMatches(b, "tcp") || ProtocolMatches(a, "udp") && ProtocolMatches(b, "udp")
 }

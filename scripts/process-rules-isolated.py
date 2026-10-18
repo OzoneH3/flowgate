@@ -4,7 +4,7 @@ Run through scripts/lab.sh. Never opens host endpoints or deployed executable.
 """
 import argparse,json,os,pathlib,socket,subprocess,time,sys
 ROOT=pathlib.Path(__file__).resolve().parents[1]
-p=argparse.ArgumentParser();p.add_argument('--binary',required=True);p.add_argument('--native',required=True);p.add_argument('--run',required=True);p.add_argument('--hold',action='store_true');a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--binary',required=True);p.add_argument('--native',required=True);p.add_argument('--run',required=True);p.add_argument('--hold',action='store_true');p.add_argument('--any-protocol',action='store_true');a=p.parse_args()
 assert os.environ['FLOWGATE_PARENT_NETNS']!=os.readlink('/proc/self/ns/net')
 RUN=pathlib.Path(a.run).resolve();assert RUN.is_relative_to(ROOT/'.workspace');RUN.mkdir(mode=0o700,parents=True)
 for d in ['api','data','state']:(RUN/d).mkdir(mode=0o700)
@@ -102,6 +102,23 @@ try:
    elif op=='exec':children[name].stdin.write('{"op":"exec"}\n');children[name].stdin.flush();result={'exec':name}
    else:result=ask(children[name],op)
    (RUN/'command-result.json').write_text(json.dumps(result))
+ elif a.any_protocol:
+  assert 'observed-rule-any-protocol-v1' in initial['capabilities']
+  for direction in ['incoming','outgoing']:
+   app=create('alpha','application',direction,'*','block');pa=create('alpha','process',direction,'*','allow')
+   send=incoming if direction=='incoming'else outgoing
+   for proto in ['tcp','udp']:
+    for v6 in [False,True]:send('alpha',proto,v6,True);send('beta',proto,v6,False)
+   view=api('policy-view',generation=generation)['policy_view']
+   assert any(x[direction]['configured']=='uniform'for x in view['applications'])
+   app=edit(app,action='allow');pa=edit(pa,action='block')
+   for proto in ['tcp','udp']:send('alpha',proto,False,False);send('beta',proto,False,True)
+   delete(pa);delete(app)
+   log('PASS wildcard '+direction+' one rule covers TCP+UDP IPv4/6, process override/sibling fallback, Allow/Block receiver results and uniform summary')
+  records=wait(lambda:(lambda r:r if any(x.get('decision',{}).get('rule',{}).get('filter',{}).get('protocol')=='*'for x in r['decision_log']['records'])else None)(api('decision-log',decision_query={'limit':100})))
+  (RUN/'wildcard-decision.json').write_text(json.dumps(next(x for x in records['decision_log']['records']if x.get('decision',{}).get('rule',{}).get('filter',{}).get('protocol')=='*'),indent=2))
+  stop();assert 'flowgate_host'not in cmd('nft','list','tables')and'unrelated_fixture'in cmd('nft','list','tables')
+  log('PASS immutable wildcard Decision Log snapshot; owned-only cleanup; no host changes')
  else:
   # Each protocol/direction has an application fallback plus one exclusive instance override.
   for direction in ['incoming','outgoing']:

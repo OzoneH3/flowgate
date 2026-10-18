@@ -158,7 +158,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						}
 					}
 					if !readonly && e.Mode != "host-monitor" {
-						r.Capabilities = append(r.Capabilities, PolicyExplanationCapability, ObservedRuleCapability, ProcessRuleCapability)
+						r.Capabilities = append(r.Capabilities, PolicyExplanationCapability, ObservedRuleCapability, ProcessRuleCapability, ObservedAnyProtocolCapability)
 					}
 					if e.Evaluation != nil {
 						r.Capabilities = append(r.Capabilities, EvaluationCapability)

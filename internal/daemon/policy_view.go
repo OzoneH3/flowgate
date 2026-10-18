@@ -196,6 +196,9 @@ func summaryFor(a PolicyIdentity, direction, mode string, h *EnforcementStatus, 
 		active = append(active, r)
 		if f.Remote == "" && (f.RemoteAddress == "" || f.RemoteAddress == "*") && f.LocalPort == 0 && f.RemotePort == 0 {
 			broad[f.Protocol] = true
+			if f.Protocol == "*" {
+				broad["tcp"], broad["udp"] = true, true
+			}
 		}
 	}
 	if len(out.Rules) == 0 {

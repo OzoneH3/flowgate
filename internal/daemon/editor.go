@@ -69,7 +69,7 @@ func RuleSentence(r policy.Rule) string {
 	if r.Disabled {
 		state = "disabled"
 	}
-	return fmt.Sprintf("Target: %s. Matching process rules override application rules; within each tier highest priority then smallest ID. %s %s %s for application %s, revision %s, UID %d; remote %s, local port %s, remote port %s; any local address/interface; %s (%s). Priority %d; highest priority wins, then smallest rule ID. Approved TCP connections continue.", target, strings.ToUpper(r.Action), f.Direction, f.Protocol, f.Application, f.Revision, f.UID, address, port(f.LocalPort), port(f.RemotePort), expiry, state, r.Priority)
+	return fmt.Sprintf("Target: %s. Matching process rules override application rules; within each tier highest priority then smallest ID. %s %s %s for application %s, revision %s, UID %d; remote %s, local port %s, remote port %s; any local address/interface; %s (%s). Priority %d; highest priority wins, then smallest rule ID. Approved TCP connections continue.", target, strings.ToUpper(r.Action), f.Direction, protocolLabel(f.Protocol), f.Application, f.Revision, f.UID, address, port(f.LocalPort), port(f.RemotePort), expiry, state, r.Priority)
 }
 
 // EditRule is used for both authoritative preview and commit. Creation derives
@@ -102,6 +102,9 @@ func (e *Engine) EditRule(id, eventID string, expected *uint64, candidate policy
 		}
 		if expected == nil || *expected != old.Version {
 			return policy.Rule{}, "", mutationError("version_conflict", "stale rule version; reload before editing")
+		}
+		if old.Filter.Protocol == "*" && candidate.Filter.Protocol != "*" {
+			return policy.Rule{}, "", mutationError("protocol_scope_changed", "Existing TCP+UDP rule must preserve protocol *; use a fresh observed preview to create a different protocol scope")
 		}
 		if candidate.Filter.Process != old.Filter.Process {
 			return policy.Rule{}, "", mutationError("immutable_target", "Process/application target is immutable; obtain a new creation preview")
@@ -259,7 +262,7 @@ func (e *Engine) reviewRuleLocked(candidate policy.Rule, now time.Time, expiryUn
 func filtersOverlap(a, b policy.Filter) bool {
 	a = canonicalFilter(a)
 	b = canonicalFilter(b)
-	if a.Application != b.Application || a.Revision != b.Revision || a.UID != b.UID || a.Direction != b.Direction || a.Protocol != b.Protocol {
+	if a.Application != b.Application || a.Revision != b.Revision || a.UID != b.UID || a.Direction != b.Direction || !policy.ProtocolsOverlap(a.Protocol, b.Protocol) {
 		return false
 	}
 	if !a.Process.IsZero() && !b.Process.IsZero() && a.Process != b.Process {
@@ -296,4 +299,11 @@ func (e *Engine) publishRulesLocked(next []policy.Rule) error {
 	e.rules = next
 	e.pruneHandlesLocked()
 	return nil
+}
+
+func protocolLabel(p string) string {
+	if p == "*" {
+		return "TCP+UDP only"
+	}
+	return p
 }

@@ -1,5 +1,16 @@
 # Local API additions: conditional rule deletion
 
+## Explicit TCP+UDP observed rules
+
+Primary capability `observed-rule-any-protocol-v1` permits explicit
+`observed_draft.protocol:"*"` on existing observed preview/save: one rule for TCP+UDP
+only, unchanged exact target/draft/token/authorization/replay. `filter.protocol:"*"`
+is preserved through versioned edits and history. Wildcard-to-specific edit is
+rejected with `protocol_scope_changed` (fresh observed creation required), guarding
+legacy clients. [Full contract and fixture](OBSERVED-RULES.md#tcpudp-observed-creation-extension).
+No host rollout or automatic default broadening; old daemons retain TCP|UDP choice.
+
+
 ## Process-instance extension (deployed on host monitor 60d35a3)
 
 Primary capability `process-instance-rules-v1` adds explicit process targets with

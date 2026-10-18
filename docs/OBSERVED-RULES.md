@@ -50,7 +50,7 @@ process-selection context; a rule can address another supported protocol/service
 
 Every scope is explicit:
 
-- `direction`: incoming or outgoing; `protocol`: tcp or udp; `action`: allow/block.
+- `direction`: incoming or outgoing; `protocol`: tcp or udp, or explicit `*` with `observed-rule-any-protocol-v1` (TCP+UDP only); `action`: allow/block.
 - `remote_address`: IP, CIDR, or explicit `*` for any address, using existing schema2.
 - `local_port`, `remote_port`: explicit numbers; **0 deliberately means any**.
   Missing/null ports reject, rather than becoming a broad permission.
@@ -60,7 +60,9 @@ Every scope is explicit:
   local port0. Never infer initiation direction from the observed endpoints.
 - Protocol-wide rule: explicit remote `*` and both ports0. It is broad only for
   the selected protocol, application/revision/UID and direction. There is no
-  all-protocol shortcut: TCP and UDP are separate rules.
+  all-IP-protocol shortcut. With `observed-rule-any-protocol-v1`, explicit protocol
+  `*` covers TCP+UDP in one stored rule; it does not cover ICMP/raw/other protocols.
+  Without that capability TCP and UDP remain separate explicit choices.
 - `expires` must be present as a timestamp. Explicit year1 zero means persistent;
   a timed rule uses a future absolute timestamp (including an explicitly chosen
   one-hour expiry), at most365 days. It is never renewed by saving/restarting.
@@ -302,3 +304,57 @@ integration is performed by this increment.
 }
 ```
 
+
+## TCP+UDP observed creation extension
+
+Primary capability **`observed-rule-any-protocol-v1`** accepts explicit
+`observed_draft.protocol:"*"` for both application and process targets. It preserves
+`filter.protocol:"*"` in one rule (schema2 app/schema3 process), preview, ACK and
+Decision Log snapshot. Existing identity, generation, exact-draft/token, UID,
+absolute expiry, versioning and bounded receipt/reconciliation checks are unchanged.
+Missing/unknown protocol is rejected; nothing defaults to both.
+
+`*` means the supported TCP+UDP initiation engine only, never all IP protocols.
+Remote address and port restrictions apply to both; one local/remote service port
+has the same numeric restriction in each transport. Full unrestricted `*` is
+classified `uniform`; endpoint-restricted `*` is `scoped`. Opposite overlapping
+protocol-specific and wildcard actions are mixed; existing process/app tiers and
+priority/ID order remain. There is **no protocol-specificity priority**. Disabled,
+expired, unsupported-owner and inactive-process behavior remain unchanged.
+Stored policy is not active protection while enforcement is stopped.
+
+Preview text explicitly says `TCP+UDP only`. Save echoes the identical draft:
+
+```json
+{"version":1,"operation":"observed-rule-preview","generation":"<listed generation>","observed_target":{"row_id":"<current exclusive native socket>","process_id":"<PID:start>"},"observed_draft":{"target_scope":"process","direction":"incoming","protocol":"*","action":"allow","remote_address":"*","local_port":0,"remote_port":0,"disabled":false,"expires":"0001-01-01T00:00:00Z"}}
+```
+
+Existing rule action/enable/expiry edits preserve `*`. A wildcard-to-specific
+protocol edit returns **`protocol_scope_changed`** and requires a fresh observed
+creation preview; this prevents legacy editors with a TCP-only default from
+silently narrowing existing wildcard scope. TCP/UDP legacy edits are unchanged.
+Conditional Delete and observed lost-ACK reconciliation remain unchanged.
+Clients must capability-gate the new option and display `TCP+UDP`, not unrestricted
+IP. Older backends reject `*` on load; downgrading after such rules are stored
+requires a reviewed compatible data/backup plan. Retained Qt has no wildcard
+selector; do not claim it can edit these rules fully. No Qt file was changed.
+
+Focused race/vet and authenticated primary API tests cover both targets, exact
+preview/save/replay, draft mismatch, one-rule persistence, summaries and legacy
+narrowing denial. Actual isolated receiver evidence `.workspace/ap-receiver`
+passed TCP/UDP IPv4/6 in both directions, process override and sibling/application
+fallback, Allow/Block, immutable wildcard log snapshot and owned-only cleanup.
+The actual preview response is `.workspace/ap-receiver/example-preview.json`;
+its `observed_preview.rule.filter.protocol` is `*`, full target binding retained.
+
+Reproduce only this bounded receiver extension (not the older whole matrix):
+
+```sh
+. scripts/go-env.sh
+go build -o .workspace/flowgate-any-protocol ./cmd/flowgate
+scripts/lab.sh python3 scripts/process-rules-isolated.py --binary "$PWD/.workspace/flowgate-any-protocol" --native "$PWD/.workspace/process-fixtures/native" --run "$PWD/.workspace/any-protocol-$(date +%s)" --any-protocol
+```
+
+The running host monitor is unchanged and does not advertise this new capability;
+no host rule, collector, evaluation or daemon lifecycle operation is authorized by
+this support increment. The new binary is separately built for disposable fixtures.
