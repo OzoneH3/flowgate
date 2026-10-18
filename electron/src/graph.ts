@@ -14,6 +14,25 @@ export class TrafficGraph {
     host.innerHTML =
       '<header class="graph-heading"><h2>Traffic chart</h2><div class="graph-controls"><select id="graphSource" aria-label="Measurement source"><option value="tcp">TCP transport payload</option><option value="udp">UDP API-reported bytes</option></select><select id="graphWindow" aria-label="History window"><option value="60">60 s</option><option value="300">5 min</option></select></div></header><div id="graphValues" class="graph-values"></div><canvas id="trafficCanvas" role="img" aria-label="Observed upload and download rates over time"></canvas><p id="graphStatus"></p><details class="graph-explanation"><summary>Measurement details</summary><p class="graph-scope">All observed sockets, independent of table filters. History starts here; gaps are not zero. TCP transport and UDP API payload are separate sources. Totals include local socket perspectives.</p></details>';
     this.canvas = host.querySelector('canvas')!;
+    // Reference: a round pause/resume button beside the plot ("Continue refreshing the chart").
+    const pause = document.createElement('button');
+    pause.id = 'graphPause';
+    pause.type = 'button';
+    pause.className = 'graph-pause';
+    pause.textContent = '❚❚';
+    pause.title = 'Pause refreshing the chart';
+    pause.setAttribute('aria-pressed', 'false');
+    pause.onclick = () => {
+      this.paused = !this.paused;
+      pause.textContent = this.paused ? '▶' : '❚❚';
+      pause.title = this.paused ? 'Continue refreshing the chart' : 'Pause refreshing the chart';
+      pause.setAttribute('aria-pressed', String(this.paused));
+      if (!this.paused) {
+        this.signature = '';
+        void this.update(this.id, this.lastStamp);
+      }
+    };
+    this.canvas.after(pause);
     this.selector = host.querySelector('#graphSource')!;
     this.selector.onchange = () => {
       this.source = this.selector.value as Source;
@@ -35,7 +54,11 @@ export class TrafficGraph {
     this.selector.value = source;
     this.draw();
   }
+  paused = false;
+  private lastStamp = '';
   async update(id: string, stamp: string) {
+    this.lastStamp = stamp;
+    if (this.paused) return;
     if (document.hidden || this.host.closest('main')?.hidden) return;
     const signature = id + ':' + stamp + ':' + this.seconds;
     if (signature === this.signature) return;

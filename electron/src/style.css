@@ -1,6 +1,11 @@
+/* Selawik is the fallback when Segoe UI is unavailable.
+   License: fonts/LICENSE-Selawik-OFL.txt (SIL OFL 1.1, Microsoft). */
+@font-face { font-family: 'Selawik'; src: url('fonts/selawk.ttf') format('truetype'); font-weight: 400; font-style: normal; }
+@font-face { font-family: 'Selawik'; src: url('fonts/selawksb.ttf') format('truetype'); font-weight: 600; font-style: normal; }
+@font-face { font-family: 'Selawik'; src: url('fonts/selawkb.ttf') format('truetype'); font-weight: 700; font-style: normal; }
 :root {
   color-scheme: dark;
-  font-family: 'Segoe UI', 'Noto Sans', sans-serif;
+  font-family: 'Segoe UI', 'Selawik', 'Noto Sans', sans-serif;
   font-size: 12px;
   color: #d2d2d2;
   background: #222;
@@ -1245,3 +1250,58 @@ body.hide-chart #activityView #trafficGraph { display: none; }
 .rule-cell .cell-qualifier { margin-left: 0; }
 .pane-menu .menu-panel { left: auto; right: 0; width: max-content; min-width: 150px; }
 .tabs .pane-menu .menu-panel { right: 0; }
+
+.toolbar { gap: 14px; padding: 4px 8px 4px 10px; }
+.toolbar .brand { font-size: 15px; font-weight: 700; color: var(--fg-selected); letter-spacing: .2px; margin-right: 4px; }
+.toolbar .desktop-menu > summary { font-size: 13px; padding: 2px 4px; background: transparent; border: 0; color: var(--fg-text); }
+.toolbar .desktop-menu > summary:hover { background: #3a3a3a; }
+.toolbar-window-menu .menu-panel { left: 0; right: auto; }
+.toolbar-units { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-text); }
+.toolbar-units select { height: 24px; min-height: 24px; width: 92px; padding: 0 4px; font-size: 12px; }
+.toolbar-status { font-size: 12px; color: var(--fg-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
+.toolbar .separator { display: none; }
+.toolbar-layout select { height: 24px; min-height: 24px; width: 126px; font-size: 12px; padding: 0 4px; }
+.toolbar #search { order: 9; flex: 0 1 320px; width: 320px; min-width: 120px; height: 24px; margin-left: auto; font-size: 12px; }
+.tabs { height: 30px; padding: 2px 0 0; }
+.tabs button { font-size: 12px; padding: 0 8px; height: 22px; min-height: 22px; line-height: 22px; border-radius: 0; }
+#activityView .filterbar { height: 33px; gap: 4px; padding: 4px 4px 4px 8px; }
+#activityView .filterbar #rateMode { min-width: 88px; height: 24px; min-height: 24px; padding: 0 10px; font-size: 12px; background: #2b2b2b; border: 1px solid #5a5a5a; }
+#activityView .filterbar #rateMode[aria-pressed='true'] { background: #3a3a3a; }
+#activityView .filterbar #columnPreset { width: 72px; height: 24px; min-height: 24px; font-size: 12px; padding: 0 4px; margin-left: 4px; }
+#activityView .filterbar #activitySource { display: none; }
+.filter-group { margin-left: 2px; }
+.filterbar-icons { margin-left: auto; display: inline-flex; gap: 6px; }
+.icon-button { width: 26px; min-width: 26px; height: 24px; min-height: 24px; padding: 0; border: 0; background: transparent; color: #d0d0d0; font-size: 14px; line-height: 24px; }
+.icon-button:hover:not(:disabled) { background: #3a3a3a; }
+body.preset-status #tree th:nth-child(n+5), body.preset-status #tree td:nth-child(n+5) { display: none; }
+body.preset-status #tree { width: auto; }
+#activityView .summary { display: none; }
+#app > footer { height: 26px; min-height: 26px; padding: 0 10px; align-items: center; background: #2d2d2d; border-top: 1px solid #3a3a3a; font-size: 12px; }
+#app:has(#activityView:not([hidden])) > footer > span:first-child { display: inline; color: var(--fg-muted); }
+#app > footer #feedback { margin-left: auto; color: var(--fg-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#activityView > aside { margin-bottom: 0; }
+#activityView #trafficGraph { flex: 0 0 136px; height: 136px; }
+.graph-heading { height: 24px; min-height: 24px; }
+.graph-heading h2 { height: 24px; padding: 3px 7px; }
+.graph-heading .graph-controls { display: none; }
+#trafficGraph { position: relative; }
+.graph-pause { position: absolute; right: 8px; top: 48px; width: 22px; height: 22px; min-height: 22px; padding: 0; border: 0; border-radius: 50%; background: var(--fg-selected); color: #fff; font-size: 9px; line-height: 22px; text-align: center; }
+.graph-pause:hover { background: #2fb8f7; }
+#trafficCanvas { width: calc(100% - 36px) !important; }
+.info-rule-matrix { border: 1px solid #4e4e4e; border-radius: 2px; padding: 2px 4px 4px; margin-left: 0; width: 100%; }
+.info-rule-matrix th[scope=row] { padding-left: 4px; }
+.quick-popup { padding: 5px 8px 5px; }
+.qs-scope { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 0 0 5px; font-size: 11px; }
+.col-filler, #tree td.filler { width: auto; padding: 0; border-left: 0; }
+#tree th.col-filler button { display: none; }
+body.preset-status #tree th.col-filler, body.preset-status #tree td.filler { display: table-cell; }
+body.preset-status #tree { width: 100%; }
+.toolbar > button, .toolbar .udp-badge { border: 0; background: transparent; padding: 0 2px; font-size: 12px; color: var(--fg-text); min-height: 22px; }
+.toolbar > button:hover:not(:disabled) { background: #3a3a3a; }
+.toolbar-status { flex: 0 1 auto; min-width: 0; }
+#app > footer { gap: 12px; }
+#app > footer > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#app > footer { flex-wrap: nowrap; overflow: hidden; }
+.toolbar-status { max-width: 220px; }
+@media (max-width: 1000px) { .toolbar-layout { display: none; } .toolbar-status { max-width: 150px; } }
+@media (max-width: 900px) { #observerStatus { display: none; } #controlStatus { max-width: 170px; } .toolbar #search { flex-basis: 150px; } }

@@ -699,6 +699,9 @@ export class ActivityPolicy {
       if (blocked) box.append(el('p', blocked, 'rule-note'));
     }
     if (this.pending && this.pending.rowId === this.row?.id) box.append(this.reviewBox());
+    // One concise line (reference popup height); the full wording stays in the tooltip.
+    for (const line of box.querySelectorAll<HTMLElement>('.qs-scope'))
+      line.title = line.textContent || '';
     return box;
   }
   // [enabled] [✓ Allow] [✕ Block] — for an existing rule the current action is highlighted and a

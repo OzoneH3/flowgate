@@ -27,6 +27,8 @@ const promptGeneration = new URL(location.href).searchParams.get('generation');
 const promptID = new URL(location.href).searchParams.get('request');
 let state: ClientState;
 let selected = 'overview';
+// Declared before the init code below: esbuild hoists top-level lets, so order matters.
+let rateMode: 'rate' | 'total' = 'rate';
 // Retain only the selected context, not a second inventory. Never rebind by PID/name.
 let retainedSelection: { generation: string; row: Row } | undefined;
 let measurementSource: 'tcp' | 'udp' = 'tcp';
@@ -237,7 +239,7 @@ if (promptID) {
   root.innerHTML = `<section class="prompt-shell"><header class="prompt-heading"><strong>FlowGate Blocker</strong><span>Pending connection permission</span></header><div id="promptBody"><div id="requestDetails"></div></div><footer><span id="controlStatus"></span><button id="dismiss">Decide later</button></footer><div id="feedback" role="status" aria-live="polite"></div></section>`;
   $('dismiss').onclick = () => void window.flowgate.dismissPrompt();
 } else {
-  root.innerHTML = `<header class="toolbar"><strong class="brand">▣ FlowGate</strong><input id="search" type="search" aria-label="Search Activity" placeholder="Search"><span id="observerStatus"></span><span class="separator"></span><span id="controlStatus"></span></header><nav class="tabs" aria-label="Views"><button id="activityTab" aria-selected="true">Activity</button><button id="requestsTab" aria-selected="false">Pending requests <span id="pendingCount">0</span></button><span id="tabsPaneControls" class="pane-controls"></span></nav><main id="activityView"><section class="activity-main"><div class="filterbar"><select id="activitySource" aria-label="Activity measurement source"><option value="tcp">TCP rates</option><option value="udp">UDP rates</option></select><select id="filter" aria-label="Socket filter"><option value="all">All sockets</option><option value="active">Active TCP / connected UDP</option><option value="listening">Listening TCP / bound UDP</option></select><button id="expand">Expand all</button><button id="collapse">Collapse all</button></div><div class="table-scroll"><table id="tree" role="treegrid" tabindex="0" aria-label="Application process socket activity"><thead><tr id="headers"></tr></thead><tbody id="rows"></tbody></table></div><div id="activitySummary" class="summary"></div></section><aside><h2>Info View<span id="infoPaneControls" class="pane-controls"></span></h2><h3 id="selectedName">FlowGate Activity</h3><div id="selectedExecutable"></div><div class="info-scroll"><h3 id="infoProperties" class="info-section-title">Overview</h3><dl id="info"></dl><section id="infoRules"></section><section class="info-tools"><h3 class="info-section-title">Tools</h3><button id="infoOpenRules">Rule list</button><button id="infoOpenLog">Decision log</button><button id="infoOpenPending">Pending requests</button></section></div><section id="trafficGraph"></section></aside></main><main id="requestsView" hidden><section class="request-list"><h2>Pending &amp; recent requests</h2><p class="hint">Select a request to decide. Dismissal grants nothing. Closing FlowGate leaves an independent controller running.</p><div class="table-scroll"><table id="requests"><thead><tr><th>Application</th><th>Direction</th><th>Protocol</th><th>Remote endpoint</th><th>State</th></tr></thead><tbody id="requestRows"></tbody></table></div></section><aside class="request-sidebar"><h2>Connection permission</h2><div id="requestDetails"></div></aside></main><footer><span>Activity and firewall control are independent.</span><span id="feedback" role="status" aria-live="polite"></span></footer>`;
+  root.innerHTML = `<header class="toolbar"><strong class="brand">FLOWGATE</strong><span id="toolbarUnits" class="toolbar-units"><label for="activitySource">Source</label></span><span id="observerStatus" class="toolbar-status"></span><span id="controlStatus" class="toolbar-status"></span><span class="toolbar-layout"><select id="layoutPreset" aria-label="Window layout"><option value="chart">Default with Chart</option><option value="plain">Default</option><option value="activity">Activity only</option></select></span><input id="search" type="search" aria-label="Search Activity" placeholder="Search"></header><nav class="tabs" aria-label="Views"><button id="activityTab" aria-selected="true">Activity</button><button id="requestsTab" aria-selected="false">Pending requests <span id="pendingCount">0</span></button><span id="tabsPaneControls" class="pane-controls"></span></nav><main id="activityView"><section class="activity-main"><div class="filterbar"><select id="activitySource" aria-label="Activity measurement source"><option value="tcp">TCP</option><option value="udp">UDP</option></select><button id="rateMode" aria-pressed="false" title="Switch the two traffic columns between current rate and total transferred">Rate</button><select id="columnPreset" aria-label="Column preset"><option value="status">Status</option><option value="details">Details</option></select><select id="filter" aria-label="Socket filter"><option value="all">All sockets</option><option value="active">Active TCP / connected UDP</option><option value="listening">Listening TCP / bound UDP</option></select><span class="filterbar-icons"><button id="expand" class="icon-button" title="Expand all" aria-label="Expand all">⊞</button><button id="collapse" class="icon-button" title="Collapse all" aria-label="Collapse all">⊟</button><button id="refreshNow" class="icon-button" title="Refresh now" aria-label="Refresh now">↻</button></span></div><div class="table-scroll"><table id="tree" role="treegrid" tabindex="0" aria-label="Application process socket activity"><thead><tr id="headers"></tr></thead><tbody id="rows"></tbody></table></div><div id="activitySummary" class="summary"></div></section><aside><h2>Info View<span id="infoPaneControls" class="pane-controls"></span></h2><h3 id="selectedName">FlowGate Activity</h3><div id="selectedExecutable"></div><div class="info-scroll"><h3 id="infoProperties" class="info-section-title">Overview</h3><dl id="info"></dl><section id="infoRules"></section><section class="info-tools"><h3 class="info-section-title">Tools</h3><button id="infoOpenRules">Rule list</button><button id="infoOpenLog">Decision log</button><button id="infoOpenPending">Pending requests</button></section></div><section id="trafficGraph"></section></aside></main><main id="requestsView" hidden><section class="request-list"><h2>Pending &amp; recent requests</h2><p class="hint">Select a request to decide. Dismissal grants nothing. Closing FlowGate leaves an independent controller running.</p><div class="table-scroll"><table id="requests"><thead><tr><th>Application</th><th>Direction</th><th>Protocol</th><th>Remote endpoint</th><th>State</th></tr></thead><tbody id="requestRows"></tbody></table></div></section><aside class="request-sidebar"><h2>Connection permission</h2><div id="requestDetails"></div></aside></main><footer><span id="footerSummary"></span><span id="feedback" role="status" aria-live="polite"></span></footer>`;
   const columns = [
     ['name', 'Name'],
     ['download_bps', 'DL Rate'],
@@ -251,17 +253,22 @@ if (promptID) {
     ['local', 'Local endpoint'],
     ['remote', 'Remote endpoint'],
     ['state', 'State'],
+    ['filler', ''],
   ];
   for (const [key, title] of columns) {
     const th = element('th');
     th.className = 'col-' + key;
     const b = element('button', title);
-    if (key === 'download_bps' || key === 'upload_bps')
+    if (key === 'download_bps' || key === 'upload_bps') {
+      b.classList.add('rate-header');
       b.append(element('small', 'autoByte (def)'));
+    }
     b.disabled = key === 'rule_status';
     b.onclick = () => {
-      descending = sort === key ? !descending : ['upload_bps', 'download_bps'].includes(key);
-      sort = key;
+      const actual =
+        key === 'download_bps' ? rateKeys()[0] : key === 'upload_bps' ? rateKeys()[1] : key;
+      descending = sort === actual ? !descending : /bps|loaded/.test(actual);
+      sort = actual;
       renderTree();
     };
     th.append(b);
@@ -421,13 +428,35 @@ function buildTree() {
   }
   renderTree();
   renderInfo();
-  $('activitySummary').textContent = a
+  $('footerSummary').textContent = $('activitySummary').textContent = a
     ? `${roots[0]?.children.reduce((n, r) => n + r.rows.length, 0) || 0} / ${a.rows.length} sockets · ${a.complete ? 'Complete census' : 'Partial visibility'}`
     : state.observation.message;
-  $('activitySummary').title = [a?.collected, ...(a?.issues || [])].filter(Boolean).join(' · ');
+  $('activitySummary').title = $('footerSummary').title = [a?.collected, ...(a?.issues || [])]
+    .filter(Boolean)
+    .join(' · ');
 }
 // Reference dock controls (▾ menu: Open Window ▸ / Close; ✕: Close) for the Info View and the
 // Traffic chart. The Activity list itself cannot be closed, so its strip only offers Open Window.
+// Reference control row: Rate/Total toggle and column preset (Status = the four reference columns).
+const rateKeys = (): Metric[] =>
+  rateMode === 'rate' ? ['download_bps', 'upload_bps'] : ['downloaded', 'uploaded'];
+function applyRateMode() {
+  $('rateMode').textContent = rateMode === 'rate' ? 'Rate' : 'Total';
+  $('rateMode').setAttribute('aria-pressed', String(rateMode === 'total'));
+  for (const [key, label] of [
+    ['download_bps', 'DL'],
+    ['upload_bps', 'UL'],
+  ]) {
+    const b = document.querySelector<HTMLElement>(`.col-${key} button`);
+    if (b) b.childNodes[0].textContent = `${label} ${rateMode === 'rate' ? 'Rate' : 'Total'}`;
+  }
+}
+function applyColumnPreset() {
+  document.body.classList.toggle(
+    'preset-status',
+    $<HTMLSelectElement>('columnPreset').value === 'status',
+  );
+}
 function paneList(): { key: 'info' | 'chart'; label: string }[] {
   return [
     { key: 'info', label: 'Info View' },
@@ -451,16 +480,18 @@ function applyPanes() {
   document.body.classList.toggle('hide-chart', !panes.chart);
   for (const item of document.querySelectorAll<HTMLButtonElement>('.pane-menu button[data-pane]'))
     item.setAttribute('aria-checked', String(panes[item.dataset.pane as 'info' | 'chart']));
+  const layout = document.getElementById('layoutPreset') as HTMLSelectElement | null;
+  if (layout) layout.value = !panes.info ? 'activity' : panes.chart ? 'chart' : 'plain';
   void graph?.update(selected, sequence + ':panes:' + performance.now());
 }
 function setPane(key: 'info' | 'chart', open: boolean) {
   localStorage.setItem('flowgate.panes', JSON.stringify({ ...paneState(), [key]: open }));
   applyPanes();
 }
-function paneControls(self?: 'info' | 'chart') {
+function paneControls(self?: 'info' | 'chart', summaryText = '▾') {
   const wrap = element('span', '', 'pane-controls-inner');
   const menu = element('details', '', 'desktop-menu pane-menu');
-  const summary = element('summary', '▾');
+  const summary = element('summary', summaryText);
   summary.title = 'Window menu';
   summary.setAttribute(
     'aria-label',
@@ -501,12 +532,60 @@ function paneControls(self?: 'info' | 'chart') {
 function setupPaneControls() {
   $('infoPaneControls').append(paneControls('info'));
   $('tabsPaneControls').append(paneControls());
+  // Toolbar "Window" menu (reference: Window menu lists dockable windows).
+  const windowMenu = paneControls(undefined, 'Window');
+  windowMenu.classList.add('toolbar-window-menu');
+  (document.getElementById('controlMenu') || document.querySelector('.brand'))!.after(windowMenu);
+  // Toolbar "Source" slot mirrors the reference Units selector; moved from the control row.
+  $('toolbarUnits').append($('activitySource'));
+  $<HTMLSelectElement>('layoutPreset').onchange = () => {
+    const v = $<HTMLSelectElement>('layoutPreset').value;
+    localStorage.setItem(
+      'flowgate.panes',
+      JSON.stringify({ info: v !== 'activity', chart: v === 'chart' }),
+    );
+    applyPanes();
+  };
   const chartHead = document.querySelector('#trafficGraph .graph-heading');
   if (chartHead) {
     const c = element('span', '', 'pane-controls');
-    c.append(paneControls('chart'));
+    const controls = paneControls('chart');
+    // Chart source / window options live in the chart's ▾ menu (reference header has no selects).
+    const panel = controls.querySelector('.menu-panel')!;
+    for (const [id, heading] of [
+      ['graphSource', 'Source'],
+      ['graphWindow', 'Window'],
+    ]) {
+      const select = document.getElementById(id) as HTMLSelectElement;
+      panel.append(element('hr'), element('div', heading, 'menu-heading'));
+      for (const option of Array.from(select.options)) {
+        const item = element('button', option.textContent || '');
+        item.setAttribute('role', 'menuitemradio');
+        const sync = () => item.setAttribute('aria-checked', String(select.value === option.value));
+        sync();
+        select.addEventListener('change', sync);
+        item.onclick = () => {
+          select.value = option.value;
+          select.dispatchEvent(new Event('change'));
+          (controls.querySelector('details') as HTMLDetailsElement).open = false;
+        };
+        panel.append(item);
+      }
+    }
+    c.append(controls);
     chartHead.append(c);
   }
+  $('rateMode').onclick = () => {
+    const was = rateKeys();
+    rateMode = rateMode === 'rate' ? 'total' : 'rate';
+    if (was.includes(sort as Metric)) sort = rateKeys()[was.indexOf(sort as Metric)];
+    applyRateMode();
+    renderTree();
+  };
+  $('columnPreset').onchange = applyColumnPreset;
+  $('refreshNow').onclick = () => void window.flowgate.snapshot().then(consume);
+  applyRateMode();
+  applyColumnPreset();
   document.addEventListener('pointerdown', (event) => {
     for (const menu of document.querySelectorAll<HTMLDetailsElement>('.pane-menu[open]'))
       if (!menu.contains(event.target as Node)) menu.open = false;
@@ -575,12 +654,12 @@ function renderTree() {
     name.append(led, toggle, icon, document.createTextNode(rowLabel));
     name.title = r.process?.executable || r.socket?.socket.remote || r.label;
     tr.append(name);
-    for (const key of ['download_bps', 'upload_bps'] as Metric[]) {
+    for (const key of rateKeys()) {
       const s = sum(r.rows, key, measurementSource);
       const td = element(
         'td',
-        metricLabel(s, true),
-        'numeric ' + (s.value && s.value > 0 ? (key === 'download_bps' ? 'down' : 'up') : ''),
+        metricLabel(s, rateMode === 'rate'),
+        'numeric ' + (s.value && s.value > 0 ? (key.startsWith('download') ? 'down' : 'up') : ''),
       );
       const rateText = td.textContent || '';
       td.replaceChildren(element('span', rateText, 'rate-value'));
@@ -604,6 +683,7 @@ function renderTree() {
       td.title = value ?? '';
       tr.append(td);
     }
+    tr.append(element('td', '', 'filler'));
     fragment.append(tr);
   }
   body.replaceChildren(fragment);
