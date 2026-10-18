@@ -1,5 +1,27 @@
 # Integrated desktop and non-enforcing root monitor
 
+## Current: actual shared TCP direction checks passed; one fixture fault check remains
+
+User-authenticated kernel evidence `.workspace/tcp-initiation-1792356931-1419542`
+uses clean source03dd0e4483e11b620a6d7836e870e94aac14c7cb. Actual fast TCP4/6
+active/passive and both loopback ends passed (32 socket ends), exact-cookie joins,
+closure/new sockets and restart old-unknown/new-known passed. Foreign bpftune109
+and sysctl99 inventory unchanged; cleanup confirmed. No host rollout or UDP change.
+Saved timings recovered without a repeat:527750ns baseline /620470ns event for
+16 connections; bounded sample only. Zone Remember/UI evidence remains complete.
+
+A test-only helper-death lookup stopped before signal because Go's child was forked
+from another OS thread. Corrected lookup unions all task children and verifies
+PPID, exact pinned path and helper hash before kill; deterministic Go-thread test
+passed. No Go/collector behavior changed. Only the affected fault case needs run:
+
+```sh
+scripts/check-tcp-initiation.sh --observe-shared --failure-only
+```
+
+Do not repeat the passed direction/zone/UDP/firewall matrices. See TCP-INITIATION.md
+for precise evidence, recovered overhead and remaining failure-only checks.
+
 ## Current: remaining TCP kernel check uses explicit shared-hook observation
 
 Zone-scoped Remember and released UI remain complete atf7b04c49; no receiver/UI

@@ -1,9 +1,11 @@
 #!/bin/sh
 # Initial-namespace BPF credentials, collection strictly filtered to a fresh netns.
 set -eu
-if [ "$#" -gt 1 ] || { [ "$#" -eq 1 ] && [ "$1" != "--observe-shared" ]; }; then
-  echo "usage: scripts/check-tcp-initiation.sh [--observe-shared]" >&2; exit 2
-fi
+for option in "$@"; do
+  case "$option" in --observe-shared|--failure-only) ;; *)
+    echo "usage: scripts/check-tcp-initiation.sh [--observe-shared] [--failure-only]" >&2; exit 2;;
+  esac
+done
 cd "$(dirname "$0")/.."
 . scripts/go-env.sh
 run="$PWD/.workspace/tcp-initiation-$(date +%s)-$$"

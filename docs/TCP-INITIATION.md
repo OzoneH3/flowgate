@@ -198,3 +198,43 @@ It retains the existing fast TCP4/6, both loopback ends, same-cookie identity,
 closure/new-cookie, restart/old-unknown, helper-failure fallback and bounded overhead
 checks. It additionally verifies foreign program inventory after cleanup. It does
 not restart the host daemon, enable enforcement or stop bpftune/UDP collection.
+
+## Real shared kernel direction proof; helper-failure followup
+
+Authenticated run `.workspace/tcp-initiation-1792356931-1419542`, clean source
+**03dd0e4483e11b620a6d7836e870e94aac14c7cb**, successfully loaded/attached the actual
+shared BPF source. Saved event-known.json proves all32 completed native TCP4/6
+socket ends:16 outgoing active and16 incoming accepted, including both loopback
+ends, joined by exact cookies. Partial=true, reported loss0 (not complete-history
+proof). Verification.log records closure/new-cookie isolation and collector restart:
+old established sockets unknown, new sockets known. All original effective programs
+including bpftune109 and sysctl99 match exactly in before/after JSON, and cleanup
+completed. This supersedes the earlier blanket 'no real arrows' limitation for the
+explicit shared configuration; default exclusive refusal on bpftune remains correct.
+
+The run then exposed a **fixture lookup defect** before killing the owned helper:
+`task/<main-tid>/children` lists only children forked from that one Go OS thread.
+No helper was found there, so the fault-injection assertion stopped. The fixture
+now unions all daemon thread children, requires actual direct PPID, pinned-runtime
+path/prefix and exact reviewed helper SHA256 before signaling. This reuses the
+settled UDP fixture strategy. A deterministic unprivileged Go-thread fork test
+passed (`.workspace/tcp-initiation-thread-lookup-test.json`), with exec TID distinct
+from daemon leader and exactly the expected child verified. No collector/daemon
+implementation changes were needed for this correction.
+
+The bounded timings already existed in the saved native JSON before that failure;
+recovered without rerunning to `overhead-recovered.json`: baseline527750ns vs event
+620470ns for16 connections (8/family). One short loopback sample includes socket
+setup, scheduling and existing bpftune; not a general overhead percentage/benchmark.
+Passed direction/restart/cleanup cases need not repeat. Run only the remaining
+actual helper-death fallback case:
+
+```sh
+scripts/check-tcp-initiation.sh --observe-shared --failure-only
+```
+
+It checks an active source, kills only its hash/PPID/path-verified own helper, then
+requires old evidence unknown, same daemon still stopped-enforcement and fresh
+TCP4/6 observations available. Its result is labelled `passed-kernel-helper-failure`
+separately from the preserved full direction evidence. Foreign program preservation
+and own cleanup are still required. This last fault case remains pending until run.
