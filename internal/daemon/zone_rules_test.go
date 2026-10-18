@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flowgate/internal/identity"
 	"flowgate/internal/policy"
+	"os"
 	"testing"
 	"time"
 )
@@ -160,5 +161,36 @@ func TestZoneSQLiteRestartAndDefinitionBinding(t *testing.T) {
 	q := Request{Version: 1, Operation: "rule-preview", Generation: a.e.Generation, ID: r.ID, ExpectedVersion: &r.Version, Rule: &r}
 	if response := callResponse(a.path, q); response.ErrorCode != "zone_conflict" {
 		t.Fatal("missing definition accepted", response)
+	}
+}
+
+func TestOrdinaryAuthenticatedPeerCannotMutateMachineZone(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("ordinary authenticated UID test needs non-root runner")
+	}
+	a, _, _, _ := observedAPI(t)
+	d := observedDraft("incoming")
+	target := ZoneTarget{"local", "machine"}
+	q := Request{Version: 1, Operation: "zone-rule-preview", Generation: a.e.Generation, ZoneRevision: a.e.Zones.Revision, ZoneTarget: &target, ObservedDraft: &d}
+	r := callResponse(a.path, q)
+	if r.ErrorCode != "forbidden" {
+		t.Fatalf("ordinary SO_PEERCRED created global: %+v", r)
+	}
+	v, err := a.e.PreviewZoneRule(a.e.Generation, a.e.Zones.Revision, target, d, 0, true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule, _, _, err := a.e.SaveZoneRule(a.e.Generation, a.e.Zones.Revision, v.Token, target, d, 0, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule.Action = "allow"
+	r = callResponse(a.path, Request{Version: 1, Operation: "rule-save", Generation: a.e.Generation, ZoneRevision: a.e.Zones.Revision, ID: rule.ID, ExpectedVersion: &rule.Version, Rule: &rule})
+	if r.ErrorCode != "forbidden" {
+		t.Fatal("ordinary global edit", r)
+	}
+	r = callResponse(a.path, Request{Version: 1, Operation: "rule-delete", Generation: a.e.Generation, ID: rule.ID, ExpectedVersion: &rule.Version})
+	if r.ErrorCode != "forbidden" {
+		t.Fatal("ordinary global delete", r)
 	}
 }
