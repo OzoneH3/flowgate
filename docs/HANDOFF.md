@@ -1,25 +1,59 @@
 # Continuation handoff
 
-## Current backend release: native process-instance rules
+## Current integration: native process-instance rules
 
-`process-instance-rules-v1` extends existing preview/save/versioned edit/Delete and
-policy-view with pidfd-pinned native targets. Process tier precedes app tier;
-inside tiers priority/ID ordering is preserved. Schema3 survives as inactive
-inventory after session restart; it never rebinds or widens. Exact semantics,
-request/response shapes, same-executable exec limitation and reproduction:
-[PROCESS-RULES.md](PROCESS-RULES.md).
+Backend **60d35a366ae0104f9131f36916ff4172ef71ce71** and explicitly released UI
+**a73276ea4c846f5ea757bd01922a5455787b170a** are fully integrated by fast-forward,
+retaining e2f3f29 and all earlier frontend history. UI worktree was clean and
+ownership released before integration. No competing frontend edits were made.
 
-Focused race/vet/API tests pass. Real private receiver suite at
-`.workspace/pr-guard` passes incoming/outgoing TCP/UDP IPv4/6 process Allow/Block,
-sibling isolation, app fallback/override, disable/enable/delete, actual exit/exec,
-inactive restart persistence and Decision Log immutable process snapshots.
-Earlier fixture runs exposed transient-socket selection/unfinished attempt races,
-a process-edit representative selection defect (fixed), and an oversized log query
-(fixture fixed); they are not used as complete acceptance. PID reuse is simulated
-identity-generation coverage, not a forced kernel PID wrap. All fixture processes
-were cleaned. Separate `.workspace/flowgate-process` binary; deployed executable
-and live monitor/UDP/enforcement unchanged. UI consumer owns Electron and is
-awaiting an exact-release held monitor fixture; no unreleased work integrated.
+Primary `process-instance-rules-v1`: server-issued pidfd/native/session binding,
+process tier before application fallback; existing priority/ID order inside each.
+Exact contract, permissions, schema3/inactive restart behavior and same-executable
+exec limitation: [PROCESS-RULES.md](PROCESS-RULES.md). No PID-only permission or
+implicit application widening; process lifetime is session-bound, not persistent.
+Preview/save revalidation, versioned edits and conditional Delete retain full target.
+Policy-view separates own instance rules and app fallback; Decision Log preserves
+immutable actual-target snapshots. Creation never approves existing sockets.
+
+Focused Go race tests pass for identity/policy/daemon/Decision Log/store; vet passes
+for those plus hostfirewall/cmd. Real disposable receiver evidence `.workspace/pr-guard`
+passes incoming/outgoing TCP/UDP IPv4/6 process Allow/Block versus sibling,
+application override/fallback, disable/enable/delete, actual exit/different-executable
+exec, inactive restart persistence and historical target snapshots. Exact-release
+binary `.workspace/flowgate-process` source60d35a3 SHA256
+`882556c5c977765b678c4dd09521bef6dc596e4532f6af223fcca073ea4ebd05`.
+Final source adds application metadata labels only after receiver run; actual
+verdict logic is unchanged. PID reuse is simulated generation coverage, not an
+actual forced PID-wrap experiment. Fork/thread identity cases are deterministic;
+no BPF/UDP accounting/watchdog matrix was repeated.
+
+Exact60d35a3 held fixture `.workspace/pr-ui-release` was exclusively driven by UI:
+real sandboxed Wayland first process Allow, distinct sibling/parent, application
+Block fallback, exact edit/disable/enable/Delete preserving app rules, recreate,
+alpha exit, inactive target/stale draft and input focus, GUI exit preserving daemon.
+Evidence UI worktree `.workspace/process-rules-real-rbmfwl`; final surviving beta
+narrow capture shows fallback only. UI explicitly sent DONE before backend cleanup;
+supervisor exited0, both sockets removed, both instances/peer gone. Disposable
+inactive/app records remain only in ignored offline evidence DB. UI initial runner
+association-settling failure was corrected; only its final passing run is accepted.
+
+Main-checkout build/typecheck, **23 focused frontend checks**, and sandboxed
+**synthetic** process presentation pass (normal/narrow, exit, input/focus, no mutations).
+Logs `.workspace/process-integration-{build,tests,presentation}.log`, captures
+`.workspace/pp-nf0PUV`. Exact real UI/receiver evidence reused; no additional matrix.
+This proves scope correctness, not overall NetLimiter visual fidelity or support
+for its unsupported policy families. UI intentionally permits inactive Delete only;
+backend also permits disabling inactive records, never re-enabling/rebinding them.
+
+Read-only host check: same PID2201352/generation0840f7c256126f1708702f27c5b26551,
+UDP43a091abb81a09901be2c9b460080ee1 active, enforcement stopped, rules0. No host
+restart, executable replacement, policy write, collector interruption or BPF attach.
+The deployed1732584 build **does not expose process-instance-rules-v1**. A future
+separately authorized daemon upgrade is required; current host UI explicitly gates
+this workflow rather than approximating process-only with application-wide scope.
+Normal main-checkout launch remains:
+`scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock`.
 
 ## Current integration: Activity rules and initiation
 

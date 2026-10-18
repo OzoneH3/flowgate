@@ -40,6 +40,9 @@ across restart for inventory, versioned cleanup and history; a different daemon
 generation makes it inactive forever. It never rebinds to a reused PID or surviving
 process. Application documents retain their previous schemas and semantics.
 An older backend rejects unsupported schema3 instead of loading it as an app rule.
+After process rules are stored, rolling back to an older binary requires an
+appropriate consistent database backup or a compatible reader; do not widen or
+silently strip the process binding to make an older binary start.
 
 Existing admitted TCP connections are not terminated. New admissions and UDP
 leases re-evaluate the winning tier before using a cached decision; a configured
@@ -149,3 +152,63 @@ UI alone owns API mutations until explicit DONE. JSON command file supports
 `{"op":"exit","name":"alpha"}`, `exec`, `counts` and `quit`; results appear in
 command-result.json. Backend sends quit only after UI releases ownership, then
 verifies cleanup. No privileged host collector or host firewall is touched.
+
+### Recorded private-fixture response
+
+This excerpt is from `.workspace/pr-guard/example-preview.json`, for beta in the
+disposable namespace (UID0 is namespace root, not a host rule). Full reviewed text
+and application metadata remain in the local response artifact.
+
+```json
+{
+  "observed_preview": {
+    "token": "e7026a96e2ec6f2e85a0a363c301a9ef",
+    "expires_at": "2026-10-18T14:04:15.866473911+02:00",
+    "rule": {
+      "version": 1,
+      "executable": "/home/flowgate-user/Apps/flowgate/.workspace/process-fixtures/native",
+      "created": "2026-10-18T14:03:45.866473911+02:00",
+      "disabled": false,
+      "schema": 3,
+      "id": "user:aebcc58e3e041c10500fc2c1f867985d",
+      "priority": 100,
+      "filter": {
+        "process": {
+          "instance_id": "3aa311b43aa911fd0bcfc8132a605e66",
+          "session": "11e119ca609b1fe5ea385bf3a168cc8e",
+          "boot_id": "0df97295-4d92-47cb-aca5-e634069c655f",
+          "pid": 28,
+          "start_ticks": "19453521",
+          "uid": 0,
+          "netns": "net:[4026534688]",
+          "mountns": "mnt:[4026534576]",
+          "pidns": "pid:[4026534687]",
+          "executable": "/home/flowgate-user/Apps/flowgate/.workspace/process-fixtures/native",
+          "revision": "51:28037340:5054457:1792324717836441883:1792324717837530621"
+        },
+        "application": "6b3b6bc188734a968b2468ebd8e77e1b03209bc8c0a8549e16b07c227eabdbc7",
+        "revision": "51:28037340:5054457:1792324717836441883:1792324717837530621",
+        "direction": "incoming",
+        "protocol": "udp",
+        "remote_address": "*",
+        "uid": 0
+      },
+      "action": "block",
+      "expires": "0001-01-01T00:00:00Z"
+    },
+    "process_id": "28:19453521",
+    "principal_uid": 0,
+    "enforcement": {
+      "state": "active",
+      "covered": true,
+      "reason": "Profile covers new attributable TCP/UDP initiations; existing admission, bootstrap exceptions and other firewalls are separate"
+    }
+  }
+}
+```
+
+Its matching save uses the returned token and exactly the incoming/UDP/Block draft
+with target_scope process, wildcard address/ports and year-1 expiry. The saved rule
+retains that entire binding. Decision-time evidence is in
+`.workspace/pr-guard/decision-example.json`; `target_scope:process` and full binding
+are historical snapshots even after this fixture exits.
