@@ -6,7 +6,9 @@ Never opens host endpoints or reuses a database. Run only through scripts/lab.sh
 import argparse,json,os,socket,subprocess,sys,time,threading,pathlib,uuid,fcntl,struct
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 p=argparse.ArgumentParser();p.add_argument('--binary',required=True);p.add_argument('--run',required=True);p.add_argument('--hold',action='store_true');p.add_argument('--suite',action='store_true');p.add_argument('--tailscale',action='store_true');p.add_argument('--skip-expiry',action='store_true');p.add_argument('--docker-dnat',action='store_true',help='focused Tailscale-shaped Docker DNAT readiness/translation check; no evaluation')
+p.add_argument('--tcp-once',action='store_true',help='focused retained TCP Allow identity check')
 a=p.parse_args()
+if a.tcp_once and (a.suite or a.hold or a.docker_dnat):p.error('--tcp-once is a separate focused case')
 if a.docker_dnat and (not a.tailscale or a.suite or a.hold):p.error('--docker-dnat requires --tailscale and no --suite/--hold')
 assert os.environ['FLOWGATE_PARENT_NETNS']!=os.readlink('/proc/self/ns/net')
 RUN=pathlib.Path(a.run).resolve();assert RUN.is_relative_to(ROOT/'.workspace');RUN.mkdir(mode=0o700,parents=True,exist_ok=True)
@@ -102,6 +104,16 @@ try:
   except(OSError,ValueError):return None
  before=wait(ready);assert before['enforcement']['state']=='stopped';generation=before['generation']
  api('evaluation-readiness',generation=generation,profile='incoming');v=wait(lambda:(lambda s:s if s['readiness']['state']!='checking'else None)(session()));assert v['readiness']['state']=='ready',v
+ if a.tcp_once:
+  start();send(44002);event=wait(lambda:pending(44002))
+  (RUN/'pending.json').write_text(json.dumps(event,indent=2))
+  result=api('decide',id=event['id'],action='allow',scope='once');assert not result.get('error'),result
+  try:wait(lambda:counts[44002]==1,3)
+  finally:
+   (RUN/'post-once.json').write_text(json.dumps(api(),indent=2))
+   (RUN/'fresh-attribution.json').write_text(cmd(BIN,'attribute','--protocol','tcp','--direction','incoming','--local',event['flow']['local'],'--remote',event['flow']['remote']))
+   stop()
+  log('PASS focused retained TCP Allow Once receiver delivery')
  if a.docker_dnat:
   nft_before=cmd('nft','-s','-j','list','ruleset')
   for v6,port in [(False,44001),(True,44101)]:

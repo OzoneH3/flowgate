@@ -312,6 +312,13 @@ func (e *Engine) RetainedState(id, fingerprint string) string {
 		if !e.Now().Before(v.Deadline) || a.Application == nil || a.Fingerprint != fingerprint {
 			v.State = "expired"
 			v.Reason = "identity changed before retained verdict"
+			if a.Application == nil {
+				v.Reason = fmt.Sprintf("attribution unavailable before retained verdict: %s: %s", a.Status, a.Reason)
+			} else if a.Fingerprint != fingerprint {
+				v.Reason = fmt.Sprintf("identity changed before retained verdict (owners %d to %d, sockets %d to %d)", len(v.Attribution.Owners), len(a.Owners), len(v.Attribution.Sockets), len(a.Sockets))
+			} else {
+				v.Reason = "decision lease expired before retained verdict"
+			}
 			v.finalLogged = false // a revised disposition of an earlier Allow
 			e.recordFinal(v, "block", "identity_changed", "", v.Reason+"; held packets drop", nil, nil, "deferred", "")
 			return "drop"

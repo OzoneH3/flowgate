@@ -145,3 +145,29 @@ func TestScopePreviews(t *testing.T) {
 		t.Fatal(v.ScopePreviews)
 	}
 }
+
+func TestRetainedFailureExplainsUnavailableAttribution(t *testing.T) {
+	e, f, a, _ := fixture()
+	v := e.Observe(f, "one")
+	if _, err := e.Decide(v.ID, "allow", "once", 1000, false); err != nil {
+		t.Fatal(err)
+	}
+	a.Application = nil
+	a.Status = "unidentified"
+	a.Reason = "incomplete process visibility; cannot exclude another owner"
+	if e.RetainedState(v.ID, v.Attribution.Fingerprint) != "drop" {
+		t.Fatal("unavailable attribution released")
+	}
+	found := false
+	for _, event := range e.List(1000, false) {
+		if event.ID == v.ID {
+			found = true
+		}
+		if event.ID == v.ID && (!strings.Contains(event.Reason, "attribution unavailable") || !strings.Contains(event.Reason, a.Reason)) {
+			t.Fatal(event.Reason)
+		}
+	}
+	if !found {
+		t.Fatal("missing retained refusal event")
+	}
+}
