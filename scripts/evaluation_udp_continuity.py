@@ -1,6 +1,20 @@
 """Focused kernel continuity check, called only by the isolated UDP harness."""
 import json,os,socket,subprocess,threading,time,uuid
 
+def route_snapshot():
+ # Preserve every route field; canonicalize only JSON representation/order.
+ return [sorted(json.loads(subprocess.check_output(['ip',family,'-j','route','show','table','all'],text=True)),key=lambda r:json.dumps(r,sort_keys=True))for family in ['-4','-6']]
+
+def settle_ipv6(wait):
+ # Bringing the veth up starts kernel link-local DAD asynchronously. Its local
+ # route appears only on completion; that setup is not an evaluation mutation.
+ def ready():
+  links=json.loads(subprocess.check_output(['ip','-6','-j','addr','show'],text=True))
+  info=[a for link in links for a in link['addr_info']]
+  assert not any('dadfailed'in a.get('flags',[])or a.get('dadfailed',False)for a in info),info
+  return any(a.get('scope')=='link'for a in info)and not any('tentative'in a.get('flags',[])or a.get('tentative',False)for a in info)
+ wait(ready)
+
 def check(g):
  api,wait,run,root=g['api'],g['wait'],g['run'],g['root']
  peer=None;receivers=[];done=threading.Event();worker=None;errors=[];states=[];lock=threading.Lock()
@@ -30,7 +44,9 @@ def check(g):
   peer=subprocess.Popen(['unshare','--net','python3',str(root/'scripts/host-peer.py'),str(run)],stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True)
   wait(lambda:os.readlink(f'/proc/{peer.pid}/ns/net')!=os.readlink('/proc/self/ns/net'))
   cmd('ip','link','add','fghost','type','veth','peer','name','fgpeer');cmd('ip','link','set','fgpeer','netns',str(peer.pid));cmd('ip','link','set','fghost','up');cmd('ip','addr','add','10.79.0.1/24','dev','fghost');cmd('ip','-6','addr','add','fd79::1/64','dev','fghost','nodad');remote(op='setup')
-  original=normalized_rules();routes=[cmd('ip',fam,'-j','route','show','table','all')for fam in ['-4','-6']]
+  settle_ipv6(wait)
+  original=normalized_rules();routes=route_snapshot()
+  (run/'routes-before.json').write_text(json.dumps(routes,indent=2))
   counts={44001:0,44003:0}
   def receive(s,port):
    while not done.is_set():
@@ -86,8 +102,10 @@ def check(g):
   for state in states:g['verify'](state)
   final=stable();assert normalized_rules()==original
   assert not log['decision_log']['health']['recording'],log['decision_log']['health']
-  assert [cmd('ip',fam,'-j','route','show','table','all')for fam in ['-4','-6']]==routes
-  (run/'continuity.json').write_text(json.dumps(dict(daemon_generation=generation,collector_generation=collector,helper_pid=helper,evaluation=evaluation,receiver_counts=counts,fixture_totals=states,phases={name:{k:dict(id=row['id'],traffic=row['traffic'])for k,row in values.items()if k in cookies}for name,values in phases.items()},final={k:final[k]['traffic']for k in cookies},traffic_monitor=api()['traffic_monitor'],decision_log=log,owned_cleanup=True,routes_unchanged=True),indent=2))
+  after_routes=route_snapshot()
+  (run/'routes-after.json').write_text(json.dumps(after_routes,indent=2))
+  (run/'continuity.json').write_text(json.dumps(dict(daemon_generation=generation,collector_generation=collector,helper_pid=helper,evaluation=evaluation,receiver_counts=counts,fixture_totals=states,phases={name:{k:dict(id=row['id'],traffic=row['traffic'])for k,row in values.items()if k in cookies}for name,values in phases.items()},final={k:final[k]['traffic']for k in cookies},traffic_monitor=api()['traffic_monitor'],decision_log=log,owned_cleanup=True,routes_unchanged=after_routes==routes),indent=2))
+  assert after_routes==routes, f'Routes changed; inspect {run}/routes-{{before,after}}.json and continuity.json'
   g['log']('PASS real BPF UDP4/6 connected/unconnected counters advance before/during/after evaluation; stable cookie IDs, observed-since baselines, helper and collector generation; exact final socket API byte totals')
   g['log']('PASS incoming Allow receiver1 / Block receiver0; TCP exchange and Decision Log available; Stop removes only owned interception, foreign rules/routes unchanged; host untouched')
   g['log']('EVIDENCE '+str(run))

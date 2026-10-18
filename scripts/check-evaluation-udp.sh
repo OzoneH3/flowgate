@@ -17,6 +17,6 @@ sha256sum .workspace/flowgate-eval-udp .workspace/udp-collector .workspace/udp-f
 echo "EVIDENCE $run"
 # Word splitting is intentional for the fixed optional sudo flag only.
 exec sudo $sudo_n unshare --net --pid --mount --fork --mount-proc --propagation private \
- env FLOWGATE_PARENT_NETNS="$(readlink /proc/self/ns/net)" \
+ env PYTHONDONTWRITEBYTECODE=1 FLOWGATE_PARENT_NETNS="$(readlink /proc/self/ns/net)" \
  python3 "$PWD/scripts/daemon-udp-isolated.py" --run "$run" --uid "$(id -u)" --gid "$(id -g)" \
  --kernel --evaluation-continuity --binary "$PWD/.workspace/flowgate-eval-udp"

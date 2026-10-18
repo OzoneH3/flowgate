@@ -241,3 +241,18 @@ newline-delimited nft input. The exact source literal was installed, inspected a
 removed successfully in a disposable user/network namespace. This validates the
 syntax fix only, not BPF continuity. Retry `scripts/check-evaluation-udp.sh` for
 the still-pending full kernel case; no host daemon/collector action is needed.
+
+The next authenticated run `.workspace/evaluation-udp-1792311720-2557445`
+reached the final route assertion: collector identity/baseline and counter advances,
+exact final UDP4/6 fixture totals, Allow receiver1/Block receiver0, TCP exchange,
+Decision Log outcomes, stopped enforcement and foreign nft preservation assertions
+had succeeded. The full case still failed and did not write its final evidence file.
+A separate namespace reproduction without any FlowGate daemon showed the kernel
+adding the veth IPv6 link-local local-table route after DAD completed. The fixture
+now waits for IPv6 address setup before taking its baseline, compares canonical
+JSON without omitting any route fields, saves routes-before/after.json, and writes
+continuity.json even when the route comparison fails. The isolated regression
+`scripts/lab.sh python3 scripts/check-evaluation-udp-routes.py` passed stable-route
+comparison after DAD and confirmed an intentional route addition is still detected.
+This is a fixture fix, not a relaxation of routing checks. Full kernel rerun remains
+required. The wrapper also disables Python bytecode output for privileged runs.
