@@ -31,6 +31,7 @@ const Table = readiness.Table
 const Queue = readiness.Queue
 
 type Record struct {
+	Continuous   bool
 	Embedded     bool
 	Profile      string
 	MarksOwned   bool

@@ -8,6 +8,7 @@ type Permissions struct {
 	CanManageMachineRules bool `json:"can_manage_machine_rules"`
 	CanViewMeasurements   bool `json:"can_view_measurements"`
 	CanControlTraffic     bool `json:"can_control_traffic"`
+	CanControlProtection  bool `json:"can_control_protection"`
 	CanControlEvaluation  bool `json:"can_control_evaluation"`
 
 	Role             string `json:"role"`
@@ -25,6 +26,12 @@ func (e *Engine) permissions(uid uint32, readonly bool) Permissions {
 	if e.Evaluation != nil {
 		p.CanDecide = !readonly && e.Evaluation.Status().State == "active"
 		p.CanControlEvaluation = !readonly && (uid == 0 || (e.EvaluationControlUID != nil && uid == *e.EvaluationControlUID && e.administrator(uid)))
+	}
+	if e.Protection != nil {
+		p.CanControlProtection = !readonly && (uid == 0 || (e.ProtectionControlUID != nil && uid == *e.ProtectionControlUID && e.administrator(uid)))
+		if e.Protection.ProtectionStatus().State == "active" {
+			p.CanDecide = !readonly
+		}
 	}
 	p.CanViewMeasurements = e.Activity != nil
 	p.CanControlTraffic = !readonly && e.Traffic != nil && (uid == 0 || (e.TrafficControlUID != nil && uid == *e.TrafficControlUID && e.administrator(uid)))

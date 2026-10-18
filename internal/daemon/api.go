@@ -23,6 +23,7 @@ type Request struct {
 	NetworkZone         string          `json:"network_zone,omitempty"`
 	ZoneTarget          *ZoneTarget     `json:"zone_target,omitempty"`
 	ZoneRevision        string          `json:"zone_revision,omitempty"`
+	ProtectionID        string          `json:"protection_id,omitempty"`
 	EvaluationID        string          `json:"evaluation_id,omitempty"`
 	RequestID           string          `json:"request_id,omitempty"`
 	Profile             string          `json:"profile,omitempty"`
@@ -57,6 +58,7 @@ type Response struct {
 	NetworkZones    *identity.NetworkZones     `json:"network_zones,omitempty"`
 	ZonePreview     *ZonePreview               `json:"zone_preview,omitempty"`
 	RuleStates      map[string]RuleTargetState `json:"rule_states,omitempty"`
+	Protection      *ProtectionStatus          `json:"protection,omitempty"`
 	Evaluation      *EvaluationStatus          `json:"evaluation,omitempty"`
 	DecisionLog     *decisionlog.Page          `json:"decision_log,omitempty"`
 	DecisionRecord  *decisionlog.Record        `json:"decision_record,omitempty"`
@@ -171,6 +173,9 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						r.Capabilities = append(r.Capabilities, EvaluationCapability)
 
 					}
+					if e.Protection != nil {
+						r.Capabilities = append(r.Capabilities, ProtectionCapability)
+					}
 					if e.Traffic != nil {
 						r.Capabilities = append(r.Capabilities, "daemon-udp-monitor-v1")
 					}
@@ -199,10 +204,17 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 							r.ReadOnly = true
 						}
 					}
+					if e.Protection != nil {
+						v := e.Protection.ProtectionStatus()
+						r.Protection = &v
+						if v.State != "stopped" || v.DesiredMode != "monitoring" {
+							r.Enforcement = &EnforcementStatus{State: v.State, Profile: v.Profile, Detail: v.Reason}
+						}
+					}
 					admin := e.administrator(cred.Uid)
 					permissions := e.permissions(cred.Uid, r.ReadOnly)
 					if r.Evaluation != nil {
-						permissions.CanDecide = !readonly && r.Evaluation.State == "active"
+						permissions.CanDecide = !readonly && (r.Evaluation.State == "active" || (r.Protection != nil && r.Protection.State == "active"))
 					}
 					r.Permissions = &permissions
 					if e.Traffic != nil {
@@ -222,6 +234,36 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						r.NetworkZones = &e.Zones
 						r.Capabilities = append(r.Capabilities, NetworkZoneCapability)
 						switch q.Operation {
+						case "protection-readiness", "protection-start", "protection-stop":
+							if e.Protection == nil {
+								r.ErrorCode, r.Error = "unavailable", "Continuous protection unavailable"
+							} else if q.Operation != "protection-readiness" && !permissions.CanControlProtection {
+								r.ErrorCode, r.Error = "forbidden", "Explicit protection permission on primary endpoint required"
+							} else if q.Generation != e.Generation {
+								r.ErrorCode, r.Error = "generation_conflict", "Daemon generation changed; refresh state"
+							} else {
+								var v ProtectionStatus
+								var er error
+								switch q.Operation {
+								case "protection-readiness":
+									v, er = e.Protection.ProtectionReadiness(q.Profile)
+								case "protection-start":
+									v, er = e.Protection.ProtectionStart(q.ProtectionID, q.RequestID, q.Profile)
+								case "protection-stop":
+									v, er = e.Protection.ProtectionStop(q.ProtectionID)
+								}
+								r.Protection = &v
+								r.Enforcement = &EnforcementStatus{State: v.State, Profile: v.Profile, Detail: v.Reason}
+								permissions.CanDecide = !readonly && v.State == "active"
+								r.Permissions = &permissions
+								if er != nil {
+									r.ErrorCode, r.Error = "protection_conflict", er.Error()
+									var typed *RuleMutationError
+									if errors.As(er, &typed) {
+										r.ErrorCode = typed.Code
+									}
+								}
+							}
 						case "evaluation-readiness", "evaluation-start", "evaluation-stop":
 							if e.Evaluation == nil {
 								r.ErrorCode, r.Error = "unavailable", "Daemon evaluation unavailable"

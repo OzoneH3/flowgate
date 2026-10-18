@@ -12,9 +12,11 @@ import (
 	"flowgate/internal/tcpinit"
 	"flowgate/internal/udpaccount"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -45,6 +47,11 @@ func serveCommand(args []string) error {
 	tcpShared := fs.Bool("tcp-initiation-observe-shared", false, "explicit shared sockops observation; never changes callback/tuning fields; requires foreign close callbacks")
 	tcpCgroup := fs.String("tcp-initiation-cgroup", "/sys/fs/cgroup", "cgroup-v2 observation coverage; current network namespace only")
 	helper := fs.String("udp-helper", "", "reviewed UDP native helper; pinned at startup but never implicitly attached")
+	allowProtection := fs.Bool("allow-protection", false, "explicit selected administrator authority for continuous Start/Stop")
+	protectionState := fs.String("protection-state", "/var/lib/flowgate/protection.json", "durable desired protection mode")
+	restoreUDP := fs.Bool("restore-udp", false, "restore previously authorized machine UDP monitoring independently of firewall")
+	notify := fs.Bool("systemd-notify", false, "send readiness only after policy and desired enforcement initialized")
+	decisionTimeout := fs.Duration("decision-timeout", 30*time.Second, "bounded pending retention (1s-60s)")
 	allowEvaluation := fs.Bool("allow-evaluation", false, "explicit selected administrator authority to start/stop incoming five-minute evaluation")
 	evaluationState := fs.String("evaluation-state", "/run/flowgate-evaluation", "root-owned evaluation state; prepared only on explicit Start")
 	allowTraffic := fs.Bool("allow-traffic-control", false, "explicitly allow the selected administrator to start/stop machine UDP collection")
@@ -54,7 +61,7 @@ func serveCommand(args []string) error {
 	if os.Geteuid() != 0 {
 		return readiness.Fail("permission_required", "serve requires a root Go daemon; Electron remains unprivileged", "Use read-only ordinary launch; privileged manual start is a separate explicit action")
 	}
-	if *allowEvaluation && !*administrator {
+	if (*allowEvaluation || *allowProtection) && !*administrator {
 		return fmt.Errorf("--allow-evaluation requires --administrator")
 	}
 	if !filepath.IsAbs(*evaluationState) {
@@ -85,7 +92,10 @@ func serveCommand(args []string) error {
 	if err != nil {
 		return err
 	}
-	e := daemon.New(30 * time.Second)
+	if *decisionTimeout < time.Second || *decisionTimeout > 60*time.Second {
+		return fmt.Errorf("decision-timeout must be 1s–60s")
+	}
+	e := daemon.New(*decisionTimeout)
 	e.Zones = zones
 	defer e.CloseProcessTargets()
 	peer := uint32(*uid)
@@ -131,6 +141,13 @@ func serveCommand(args []string) error {
 	observer.InitiationEvents = initiation.Sample
 	evaluation := hostfirewall.NewEvaluation(ctx, e, *evaluationState, *socket, *database)
 	e.Evaluation = evaluation
+	if *allowProtection {
+		if err = evaluation.ConfigureProtection(*protectionState); err != nil {
+			return err
+		}
+		e.Protection = evaluation
+		e.ProtectionControlUID = &peer
+	}
 	if *allowEvaluation {
 		e.EvaluationControlUID = &peer
 	}
@@ -140,6 +157,12 @@ func serveCommand(args []string) error {
 	}
 	defer evaluation.Close()
 	e.StopMonitoring = cancel
+	if err = daemon.RecoverSocket(*socket, peer); err != nil {
+		return err
+	}
+	if err = daemon.RecoverSocket(*socket+".monitor", peer); err != nil {
+		return err
+	}
 	api, err := daemon.Serve(*socket, e, false)
 	if err != nil {
 		return err
@@ -151,7 +174,62 @@ func serveCommand(args []string) error {
 	}
 	defer ro.Close()
 	go observer.Run(ctx)
-	fmt.Fprintln(os.Stderr, "READY: root daemon — non-enforcing; administrative grant:", *administrator)
-	<-ctx.Done()
-	return nil
+	if *restoreUDP {
+		if _, er := traffic.Start(); er != nil {
+			fmt.Fprintln(os.Stderr, "WARNING: UDP restoration failed independently:", er)
+		}
+	}
+	if *allowProtection {
+		if err = evaluation.Restore(); err != nil {
+			return err
+		}
+	}
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	ready := false
+	for {
+		if !ready {
+			s := evaluation.ProtectionStatus()
+			if !*allowProtection || s.DesiredMode == "monitoring" || s.State == "active" {
+				if *notify {
+					if err = notifyService("READY=1\nSTATUS=Policy loaded; " + s.State + " " + s.Profile); err != nil {
+						return err
+					}
+				}
+				fmt.Fprintln(os.Stderr, "READY: root daemon; desired:", s.DesiredMode, "actual:", s.State)
+				ready = true
+			}
+		}
+		if *allowProtection {
+			s := evaluation.ProtectionStatus()
+			if s.DesiredMode != "monitoring" && (s.State == "failed" || s.State == "degraded") {
+				if *notify {
+					notifyService("STATUS=Protection failure: " + s.Reason)
+				}
+				return fmt.Errorf("continuous protection failed: %s", s.Reason)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+		}
+	}
+}
+
+func notifyService(message string) error {
+	path := os.Getenv("NOTIFY_SOCKET")
+	if path == "" {
+		return fmt.Errorf("systemd notification requested without NOTIFY_SOCKET")
+	}
+	if strings.HasPrefix(path, "@") {
+		path = "\x00" + path[1:]
+	}
+	c, err := net.DialUnix("unixgram", nil, &net.UnixAddr{Name: path, Net: "unixgram"})
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	_, err = c.Write([]byte(message))
+	return err
 }

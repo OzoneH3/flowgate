@@ -4,12 +4,13 @@ Run through scripts/lab.sh. Never opens host endpoints or deployed executable.
 """
 import argparse,json,os,pathlib,socket,subprocess,time,sys
 ROOT=pathlib.Path(__file__).resolve().parents[1]
-p=argparse.ArgumentParser();p.add_argument('--binary',required=True);p.add_argument('--native',required=True);p.add_argument('--run',required=True);p.add_argument('--hold',action='store_true');p.add_argument('--any-protocol',action='store_true');p.add_argument('--zones',action='store_true');p.add_argument('--zones-unknown',action='store_true');p.add_argument('--remember-zones',action='store_true');p.add_argument('--hold-enforcement',action='store_true',help='with --hold, bounded private incoming+outgoing interception for prompt acceptance');a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--binary',required=True);p.add_argument('--native',required=True);p.add_argument('--run',required=True);p.add_argument('--hold',action='store_true');p.add_argument('--any-protocol',action='store_true');p.add_argument('--zones',action='store_true');p.add_argument('--zones-unknown',action='store_true');p.add_argument('--remember-zones',action='store_true');p.add_argument('--hold-enforcement',action='store_true',help='with --hold, bounded private incoming+outgoing interception for prompt acceptance');p.add_argument('--continuous',action='store_true',help='held daily lifecycle candidate; monitoring initially, UI owns Start/Stop');a=p.parse_args()
+if a.continuous and not a.hold:p.error('--continuous requires --hold')
 if a.hold_enforcement and not a.hold:p.error('--hold-enforcement requires --hold')
 if a.zones_unknown or a.remember_zones:a.zones=True
 assert os.environ['FLOWGATE_PARENT_NETNS']!=os.readlink('/proc/self/ns/net')
 RUN=pathlib.Path(a.run).resolve();assert RUN.is_relative_to(ROOT/'.workspace');RUN.mkdir(mode=0o700,parents=True)
-for d in ['api','data','state']:(RUN/d).mkdir(mode=0o700)
+for d in ['api','data','state']:(RUN/d).mkdir(mode=0o711 if d=='api' and a.continuous else 0o700)
 BIN=str(pathlib.Path(a.binary).resolve());assert BIN!=str(ROOT/'.workspace/flowgate');NATIVE=str(pathlib.Path(a.native).resolve());API=str(RUN/'api/control.sock')
 backend=peer=None;children={};infos={}
 def cmd(*args):return subprocess.check_output(args,text=True,stderr=subprocess.STDOUT)
@@ -72,6 +73,7 @@ def start(zone_flip=False):
  global backend
  with (RUN/'daemon.log').open('a')as f:
   args=[BIN,'serve','--socket',API,'--database',str(RUN/'data/rules.db'),'--uid','0','--administrator']if a.hold and not a.hold_enforcement else[BIN,'host-start','--state',str(RUN/'state'),'--socket',API,'--database',str(RUN/'data/rules.db'),'--uid','0','--administrator','--profile','both','--duration','300s','--timeout','60s'if a.hold_enforcement else'4s']
+  if a.continuous:args=[BIN,'serve','--socket',API,'--database',str(RUN/'data/rules.db'),'--uid','0','--administrator','--allow-protection','--protection-state',str(RUN/'data/desired.json'),'--allow-evaluation','--evaluation-state',str(RUN/'state'),'--decision-timeout','12s']
   if a.zones:args+=['--zone-local','fd79::/64'if zone_flip else'10.79.0.0/24','--zone-internet','10.79.0.0/24'if zone_flip else'fd79::/64']
   backend=subprocess.Popen(args,stdout=f,stderr=f)
  def ready():
@@ -81,7 +83,10 @@ def start(zone_flip=False):
  return wait(ready)
 def stop():
  if backend and backend.poll()is None:
-  if a.hold and not a.hold_enforcement:backend.terminate()
+  if a.continuous:
+   s=api();r=api('protection-stop',generation=s['generation'],protection_id=s['protection']['id']) if s['protection']['state']!='stopped'else {};assert not r.get('error'),r
+   wait(lambda:api()['protection']['state']=='stopped');backend.terminate()
+  elif a.hold and not a.hold_enforcement:backend.terminate()
   else:cmd(BIN,'host-stop','--state',str(RUN/'state'))
   backend.wait(20)
 try:
@@ -90,18 +95,27 @@ try:
  cmd('ip','link','add','fghost','type','veth','peer','name','fgpeer');cmd('ip','link','set','fgpeer','netns',str(peer.pid));cmd('ip','link','set','fghost','up');cmd('ip','addr','add','10.79.0.1/24','dev','fghost');cmd('ip','-6','addr','add','fd79::1/64','dev','fghost','nodad');remote('setup')
  cmd('nft','add','table','inet','unrelated_fixture');cmd('nft','add','chain','inet','unrelated_fixture','track','{ type filter hook input priority 0; policy accept; }');cmd('nft','add','rule','inet','unrelated_fixture','track','ct','state','established','counter')
  for name,port in [('alpha',45000),('beta',45010)]:
-  children[name]=subprocess.Popen([NATIVE,str(port)],env=dict(os.environ,FLOWGATE_FIXTURE_TIMEOUT_SECONDS='60'if a.hold_enforcement else'2'),stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=(RUN/(name+'.log')).open('w'),text=True);infos[name]=json.loads(children[name].stdout.readline())
+  children[name]=subprocess.Popen([NATIVE,str(port)],env=dict(os.environ,FLOWGATE_FIXTURE_TIMEOUT_SECONDS='60'if a.hold_enforcement or a.continuous else'2'),stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=(RUN/(name+'.log')).open('w'),text=True);infos[name]=json.loads(children[name].stdout.readline())
  initial=start();generation=initial['generation'];assert 'process-instance-rules-v1'in initial['capabilities']
  ta,tb=target('alpha'),target('beta')
  if a.hold:
-  (RUN/'ready.json').write_text(json.dumps(dict(socket=API,monitor_socket=API+'.monitor',generation=generation,alpha=infos['alpha'],beta=infos['beta'],alpha_target=ta,beta_target=tb,command=str(RUN/'command'),profile='both'if a.hold_enforcement else'monitor',prompt_timeout_seconds=60 if a.hold_enforcement else None,enforcement=initial.get('enforcement'))))
+  (RUN/'ready.json').write_text(json.dumps(dict(socket=API,monitor_socket=API+'.monitor',generation=generation,alpha=infos['alpha'],beta=infos['beta'],alpha_target=ta,beta_target=tb,command=str(RUN/'command'),profile='continuous'if a.continuous else'both'if a.hold_enforcement else'monitor',prompt_timeout_seconds=12 if a.continuous else 60 if a.hold_enforcement else None,enforcement=initial.get('enforcement'))))
   log('READY; UI exclusively owns API. command file JSON: {op:incoming|outgoing,protocol:tcp|udp,v6:false,name:alpha|beta}, {op:counts|peer-counts|exit|exec,name:alpha|beta}, or {op:quit}. Reply command-result.json')
   while True:
    path=RUN/'command'
    if not path.exists():time.sleep(.1);continue
    q=json.loads(path.read_text());path.unlink();op=q['op'];name=q.get('name','alpha')
    if op=='quit':break
-   if op=='exit':children[name].terminate();children[name].wait(5);result={'exited':name}
+   if op=='batch':
+    results=[]
+    for item in q['items']:
+     n=item.get('name','alpha');proto=item.get('protocol','udp');v6=item.get('v6',False)
+     if item['op']=='incoming':r=remote(proto,port=infos[n]['ports'][proto+('6'if v6 else'4')],v6=v6)
+     elif item['op']=='outgoing':r=ask(children[n],'send',protocol=proto,v6=v6)
+     else:raise ValueError('batch accepts incoming/outgoing only')
+     results.append(r)
+    result={'started':results}
+   elif op=='exit':children[name].terminate();children[name].wait(5);result={'exited':name}
    elif op=='exec':children[name].stdin.write('{"op":"exec"}\n');children[name].stdin.flush();result={'exec':name}
    elif op=='incoming':
     proto=q.get('protocol','udp');v6=q.get('v6',False);port=infos[name]['ports'][proto+('6'if v6 else'4')];result=remote(proto,port=port,v6=v6)

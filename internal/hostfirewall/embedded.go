@@ -21,6 +21,9 @@ import (
 )
 
 type Evaluation struct {
+	continuous            bool
+	desiredMode           string
+	desiredPath           string
 	mu                    sync.Mutex
 	e                     *daemon.Engine
 	ctx                   context.Context
@@ -44,10 +47,10 @@ func NewEvaluation(ctx context.Context, e *daemon.Engine, dir, socket, database 
 	m.probe = func() []readiness.Check {
 		ctx, cancel := context.WithTimeout(m.ctx, 15*time.Second)
 		defer cancel()
-		return readiness.FirewallFor(ctx, readiness.Default(), "incoming", e.AdministratorUID != nil)
+		return readiness.FirewallFor(ctx, readiness.Default(), m.Status().Profile, e.AdministratorUID != nil)
 	}
 	m.runner = func(ctx context.Context, ready func() error) error {
-		return queue.RunConfigured(ctx, e, "incoming", Queue, false, ready)
+		return queue.RunConfigured(ctx, e, m.Status().Profile, Queue, false, ready)
 	}
 	m.prepare = func() (string, error) { return PrepareSession(m.dir, filepath.Dir(m.socket), m.database) }
 	return m
@@ -101,12 +104,19 @@ func validNonce(s string) bool {
 	return true
 }
 func (m *Evaluation) Start(expected, request string) (daemon.EvaluationStatus, error) {
+	return m.start(expected, request, "incoming", false)
+}
+func (m *Evaluation) start(expected, request, profile string, continuous bool) (daemon.EvaluationStatus, error) {
 	m.mu.Lock()
 	if !validNonce(request) {
 		m.mu.Unlock()
 		return m.Status(), lifecycleError("invalid_request", "fresh 32 lowercase hexadecimal request_id required")
 	}
-	if request == m.status.RequestID {
+	if request == m.status.RequestID && (continuous != m.continuous || profile != m.status.Profile) {
+		m.mu.Unlock()
+		return m.Status(), lifecycleError("protection_conflict", "request_id already binds another lifecycle/profile")
+	}
+	if request == m.status.RequestID && continuous == m.continuous && profile == m.status.Profile {
 		m.mu.Unlock()
 		return m.Status(), nil
 	}
@@ -126,6 +136,18 @@ func (m *Evaluation) Start(expected, request string) (daemon.EvaluationStatus, e
 		m.mu.Unlock()
 		return m.Status(), lifecycleError("unavailable", "Daemon shutting down")
 	}
+	if continuous {
+		if err := m.saveDesired(profile); err != nil {
+			m.mu.Unlock()
+			return m.Status(), err
+		}
+	} else if m.desiredMode != "" && m.desiredMode != "monitoring" {
+		m.mu.Unlock()
+		return m.Status(), lifecycleError("busy", "Stop continuous protection before starting evaluation")
+	}
+	m.continuous = continuous
+	m.status.Profile = profile
+	m.status.DurationSeconds = 300
 	m.status.ID = decisionlog.NewRecordID()
 	m.status.RequestID = request
 	m.status.State = "starting"
@@ -134,6 +156,12 @@ func (m *Evaluation) Start(expected, request string) (daemon.EvaluationStatus, e
 	m.status.ReasonCode = "starting"
 	m.status.Reason = "Rechecking preflight, watchdog, queue and owned interception"
 	ctx, cancel := context.WithDeadline(m.ctx, m.status.StopsAt)
+	if continuous {
+		cancel()
+		ctx, cancel = context.WithCancel(m.ctx)
+		m.status.StopsAt = time.Time{}
+		m.status.DurationSeconds = 0
+	}
 	m.cancel = cancel
 	m.done = make(chan struct{})
 	id := m.status.ID
@@ -142,12 +170,25 @@ func (m *Evaluation) Start(expected, request string) (daemon.EvaluationStatus, e
 	return m.Status(), nil
 }
 func (m *Evaluation) Stop(expected string) (daemon.EvaluationStatus, error) {
+	return m.stop(expected, false)
+}
+func (m *Evaluation) stop(expected string, continuous bool) (daemon.EvaluationStatus, error) {
 	m.mu.Lock()
+	if m.continuous != continuous {
+		m.mu.Unlock()
+		return m.Status(), lifecycleError("protection_conflict", "Wrong lifecycle; refresh continuous/evaluation status")
+	}
+	if continuous && expected == m.status.ID {
+		if err := m.saveDesired("monitoring"); err != nil {
+			m.mu.Unlock()
+			return m.Status(), err
+		}
+	}
 	if expected == "" || expected != m.status.ID {
 		m.mu.Unlock()
 		return m.Status(), lifecycleError("evaluation_conflict", "Current evaluation_id required")
 	}
-	if m.cancel == nil && m.status.Cleanup == "unconfirmed" {
+	if m.cancel == nil && (m.status.Cleanup == "unconfirmed" || continuous) {
 		ctx, cancel := context.WithCancel(m.ctx)
 		_ = ctx
 		m.cancel = cancel
@@ -156,7 +197,16 @@ func (m *Evaluation) Stop(expected string) (daemon.EvaluationStatus, error) {
 		m.status.State = "stopping"
 		m.status.ReasonCode = "cleanup_retry"
 		m.status.Reason = "Retrying cleanup of this exact owned evaluation"
-		go func() { err := cleanupEmbedded(m.dir, id); m.finish(err, err == nil) }()
+		go func() {
+			err := cleanupEmbedded(m.dir, id)
+			if continuous && os.IsNotExist(err) {
+				err = nil
+			}
+			if err == nil && continuous {
+				err = RemoveGuard(m.dir)
+			}
+			m.finish(err, err == nil)
+		}()
 	} else if m.cancel != nil {
 		m.status.State = "stopping"
 		m.status.ReasonCode = "stop_requested"
@@ -190,10 +240,13 @@ func (m *Evaluation) finish(err error, clean bool) {
 		m.status.State = "stopped"
 		m.status.ReasonCode = "stopped"
 		m.status.Reason = "Evaluation ended; FlowGate is not controlling traffic"
-		if !time.Now().Before(m.status.StopsAt) {
+		if !m.continuous && !time.Now().Before(m.status.StopsAt) {
 			m.status.ReasonCode = "expired"
 			m.status.Reason = "Original five-minute deadline reached; FlowGate enforcement stopped"
 		}
+	}
+	if m.continuous && m.desiredMode != "monitoring" && err != nil {
+		clean = false
 	}
 	if clean {
 		m.status.Cleanup = "confirmed"
@@ -208,6 +261,15 @@ func (m *Evaluation) finish(err error, clean bool) {
 	close(m.done)
 }
 func (m *Evaluation) run(ctx context.Context, id string) {
+	m.mu.Lock()
+	continuous, profile := m.continuous, m.status.Profile
+	m.mu.Unlock()
+	if continuous {
+		if err := RecoverContinuous(m.dir); err != nil {
+			m.finish(err, false)
+			return
+		}
+	}
 	checks := m.probe()
 	m.setChecks(checks)
 	if ctx.Err() != nil {
@@ -217,6 +279,12 @@ func (m *Evaluation) run(ctx context.Context, id string) {
 	if err := blocked(checks); err != nil {
 		m.finish(err, true)
 		return
+	}
+	if continuous {
+		if err := InstallGuard(m.dir); err != nil {
+			m.finish(err, false)
+			return
+		}
 	}
 	exe, err := m.prepare()
 	if err != nil {
@@ -240,16 +308,18 @@ func (m *Evaluation) run(ctx context.Context, id string) {
 		return
 	}
 	s := m.Status()
-	r := Record{Embedded: true, Profile: "incoming", Token: id, PID: os.Getpid(), Start: startID(os.Getpid()), NetNS: identity.NetNS(), State: "starting", StopsAt: s.StopsAt}
+	r := Record{Continuous: continuous, Embedded: true, Profile: profile, Token: id, PID: os.Getpid(), Start: startID(os.Getpid()), NetNS: identity.NetNS(), State: "starting", StopsAt: s.StopsAt}
 	if err = save(m.dir, r); err != nil {
 		finish(err, true)
 		return
 	}
-	if err = startEmbeddedWatch(exe, m.dir, id); err != nil {
-		r.State = "stopped"
-		save(m.dir, r)
-		finish(err, true)
-		return
+	if !continuous {
+		if err = startEmbeddedWatch(exe, m.dir, id); err != nil {
+			r.State = "stopped"
+			save(m.dir, r)
+			finish(err, true)
+			return
+		}
 	}
 	m.e.ResetAdmission()
 	m.e.Decisions.SetRecording(true)
@@ -257,6 +327,7 @@ func (m *Evaluation) run(ctx context.Context, id string) {
 	runctx, cancelRun := context.WithCancel(ctx)
 	defer cancelRun()
 	auditError := make(chan error, 1)
+	var auditDone chan struct{}
 	err = m.runner(runctx, func() error {
 		return evaluationLock(m.dir, func() error {
 			if er := ctx.Err(); er != nil {
@@ -268,7 +339,7 @@ func (m *Evaluation) run(ctx context.Context, id string) {
 			if er := ctx.Err(); er != nil {
 				return er
 			}
-			if er := batch(profileRules(id, "incoming")); er != nil {
+			if er := batch(profileRules(id, profile)); er != nil {
 				return er
 			}
 			if m.afterInstall != nil {
@@ -285,16 +356,31 @@ func (m *Evaluation) run(ctx context.Context, id string) {
 			if er = save(m.dir, r); er != nil {
 				return er
 			}
+			if continuous {
+				if yes, er := guardOwned(); er != nil {
+					return er
+				} else if yes {
+					if _, er = nft("delete", "table", "inet", GuardTable); er != nil {
+						return er
+					}
+				}
+			}
 			activated = true
 			m.mu.Lock()
 			if m.status.State == "starting" {
 				m.status.State = "active"
 				m.status.ReasonCode = "active"
 				m.status.Reason = "Incoming interception verified; independent deadline armed"
+				if continuous {
+					m.status.Reason = "Continuous " + profile + " interception verified; GUI not required"
+				}
 			}
 			m.mu.Unlock()
 			expectedDigest := r.TableDigest
+			lastSafety := time.Now()
+			auditDone = make(chan struct{})
 			go func(record Record) {
+				defer close(auditDone)
 				ticker := time.NewTicker(time.Second)
 				defer ticker.Stop()
 				for {
@@ -313,7 +399,19 @@ func (m *Evaluation) run(ctx context.Context, id string) {
 								er = fmt.Errorf("owned interception table changed")
 							}
 						}
+						if er == nil && continuous && time.Since(lastSafety) >= 10*time.Second {
+							er = m.auditEnvironment(runctx, profile)
+							lastSafety = time.Now()
+						}
 						if er != nil {
+							if runctx.Err() != nil {
+								return
+							}
+							if continuous {
+								if guardErr := InstallGuard(m.dir); guardErr != nil {
+									er = fmt.Errorf("%v; guard installation failed: %w", er, guardErr)
+								}
+							}
 							select {
 							case auditError <- er:
 							default:
@@ -327,6 +425,10 @@ func (m *Evaluation) run(ctx context.Context, id string) {
 			return nil
 		})
 	})
+	cancelRun()
+	if auditDone != nil {
+		<-auditDone
+	}
 	// Queue has drained held packets before returning. On unexpected failure keep
 	// owned interception fail-closed until deliberate Stop or original deadline.
 	m.e.ResetAdmission()
@@ -347,7 +449,26 @@ func (m *Evaluation) run(ctx context.Context, id string) {
 		m.mu.Unlock()
 		<-ctx.Done()
 	}
+	if continuous {
+		m.mu.Lock()
+		deliberate := m.desiredMode == "monitoring"
+		m.mu.Unlock()
+		if !deliberate {
+			guardErr := InstallGuard(m.dir)
+			if err == nil {
+				err = fmt.Errorf("continuous consumer ended; new admissions fail closed until restart or explicit recovery")
+			}
+			if guardErr != nil {
+				err = fmt.Errorf("%v; guard: %w", err, guardErr)
+			}
+			m.finish(err, false)
+			return
+		}
+	}
 	cleanupErr := cleanupEmbedded(m.dir, id)
+	if cleanupErr == nil && continuous {
+		cleanupErr = RemoveGuard(m.dir)
+	}
 	m.e.Decisions.SetRecording(false)
 	if cleanupErr != nil {
 		finish(cleanupErr, false)

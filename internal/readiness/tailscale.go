@@ -89,9 +89,9 @@ func Tailscale(ctx context.Context, env Environment, nft []byte, profile string,
 			}
 		}
 	}
-	if profile != "incoming" {
+	if profile != "incoming" && profile != "both" {
 		c.Code = "tailscale_profile_unsupported"
-		return fail("Tailscale coexistence currently supports incoming-only evaluation; outgoing transport control is unverified")
+		return fail("Only incoming or both local-host admission profiles supported")
 	}
 	if !administrator {
 		c.Code = "administrator_required"
@@ -99,7 +99,7 @@ func Tailscale(ctx context.Context, env Environment, nft []byte, profile string,
 	}
 	c.Status = Ready
 	c.Code = "tailscale_client_supported"
-	c.Detail = "Tailscale 1.104.1 iptables-nft client; packet/conntrack copy masks 0x00ff0000 disjoint from 0x30000000; routing 5210/5230/5250/5270 inspected; incoming-only. No transport exemption: current tailscaled listener prompts as UID0; administrator must approve it separately from inner applications. Other firewall drops still apply; post-preflight changes require re-evaluation."
+	c.Detail = "Tailscale 1.104.1 iptables-nft client; packet/conntrack copy masks 0x00ff0000 disjoint from 0x30000000; routing 5210/5230/5250/5270 inspected; incoming and outgoing local-host TCP/UDP admissions. No transport exemption: current tailscaled listener prompts as UID0; administrator must approve it separately from inner applications. Other firewall drops still apply; post-preflight changes require re-evaluation."
 	c.Next = "Monitor must release its database before explicit evaluation; this check never stops it or activates enforcement"
 	return c
 }

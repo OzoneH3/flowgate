@@ -52,6 +52,8 @@ type Engine struct {
 	Decisions      *decisionlog.Log
 	capacityLogged map[string]*capacityAggregate
 
+	Protection           ProtectionManager
+	ProtectionControlUID *uint32
 	Evaluation           EvaluationManager
 	EvaluationControlUID *uint32
 	Traffic              TrafficManager

@@ -68,7 +68,7 @@ func TestTailscaleProfileAndRouting(t *testing.T) {
 		profile string
 		admin   bool
 		want    string
-	}{{"incoming", true, "tailscale_client_supported"}, {"incoming", false, "administrator_required"}, {"both", true, "tailscale_profile_unsupported"}} {
+	}{{"incoming", true, "tailscale_client_supported"}, {"incoming", false, "administrator_required"}, {"both", true, "tailscale_client_supported"}} {
 		c := Tailscale(context.Background(), tailEnvironment(), tailNFTFixture(), tc.profile, tc.admin)
 		if c.Code != tc.want {
 			t.Fatal(c)
@@ -147,8 +147,8 @@ func TestDockerDNATDoesNotHideMarkConflicts(t *testing.T) {
 				t.Fatal(family, "accepted unsupported DNAT placement/target or adjacent mark write")
 			}
 		}
-		if c := Tailscale(context.Background(), tailEnvironment(), b, "both", true); c.Code != "tailscale_profile_unsupported" {
-			t.Fatal("DNAT changed outgoing refusal", c)
+		if c := Tailscale(context.Background(), tailEnvironment(), b, "both", true); c.Code != "tailscale_client_supported" {
+			t.Fatal("DNAT changed supported bidirectional profile", c)
 		}
 	}
 }
