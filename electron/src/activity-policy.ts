@@ -1,3 +1,4 @@
+import { applicationHeading } from './application-heading';
 import { ZONE_CAPABILITY, zoneLabel, type NetworkZone } from './network-zones';
 import { popupPosition } from './popup-position';
 import type { PolicyEntry } from './pane-model';
@@ -758,6 +759,11 @@ export class ActivityPolicy {
       'aria-label',
       `${short(direction)} Blocker quick setter · ${tier === 'process' ? 'this process' : 'application'}`,
     );
+    const selected = this.row;
+    const app = selected?.process?.application || selected?.displayApplication;
+    box.append(applicationHeading(app, selected?.label || 'Selected target'));
+    const heading = el('div', direction === 'incoming' ? 'Incoming' : 'Outgoing', 'qs-direction');
+    box.append(heading);
     const reason = this.blockReason(inv, tier);
     const busy = this.checking || (!!this.pending && this.pending.phase !== 'error');
     box.setAttribute('aria-busy', String(this.checking));

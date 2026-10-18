@@ -1,3 +1,4 @@
+import { parseConnectionZone } from './connection-presentation';
 import {
   parseNetworkZones,
   type NetworkZones,
@@ -115,7 +116,13 @@ export interface RequestEvent {
   deadline: string;
   first_seen: string;
   permission: string;
-  flow: { direction: string; protocol: string; local: string; remote: string };
+  flow: {
+    direction: string;
+    protocol: string;
+    local: string;
+    remote: string;
+    network_scope?: SocketRow['network_scope'];
+  };
   attribution: {
     status: string;
     reason: string;
@@ -365,6 +372,7 @@ function event(v: unknown): RequestEvent {
       protocol: string(f.protocol),
       local: string(f.local),
       remote: string(f.remote),
+      network_scope: parseConnectionZone(f.network_scope),
     },
     attribution: {
       status: string(a.status),

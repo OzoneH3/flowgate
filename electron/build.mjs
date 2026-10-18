@@ -27,6 +27,9 @@ await build({
 await build({
   entryPoints: [
     'src/model.ts',
+    'src/connection-presentation.ts',
+    'src/automatic-prompts.ts',
+    'src/prompt-placement.ts',
     'src/assets.ts',
     'src/pane-model.ts',
     'src/chart-view.ts',
