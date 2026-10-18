@@ -1,5 +1,5 @@
-import { placeKDEPrompt, PROMPT_TITLE } from './prompt-placement';
-import { AutomaticPrompts, edgePosition } from './automatic-prompts';
+import { placeKDEPrompt, PROMPT_TITLE, promptTitle } from './prompt-placement';
+import { AutomaticPrompts, edgePosition, boundDecision } from './automatic-prompts';
 import {
   app,
   BrowserWindow,
@@ -104,6 +104,7 @@ const width = dimension(
 let main: BrowserWindow;
 let prompt: BrowserWindow | undefined;
 const automaticPrompts = new AutomaticPrompts();
+const promptRefs = new Map<number, RequestRef>();
 function openDecision(ref: RequestRef) {
   if (prompt && !prompt.isDestroyed()) {
     const url = new URL(prompt.webContents.getURL() || 'about:blank');
@@ -273,7 +274,13 @@ function windowFor(isPrompt = false, id = '', generation = '') {
     },
   });
   windows.add(w);
-  if (isPrompt) w.on('page-title-updated', (event) => event.preventDefault());
+  if (isPrompt) {
+    w.setTitle(promptTitle(w.id));
+    promptRefs.set(w.webContents.id, { id, generation });
+    w.on('page-title-updated', (event) => event.preventDefault());
+    const senderID = w.webContents.id;
+    w.on('closed', () => promptRefs.delete(senderID));
+  }
   w.setMenu(null);
   w.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   w.webContents.on('will-navigate', (e) => e.preventDefault());
@@ -298,7 +305,9 @@ function windowFor(isPrompt = false, id = '', generation = '') {
           void placeKDEPrompt(
             profile,
             process.pid,
+            w.id,
             edgePosition(screen.getPrimaryDisplay().workArea, 520, 460),
+            () => !w.isDestroyed() && prompt === w,
           ).catch((error) => console.info('FlowGate: prompt placement unavailable', String(error)));
       }, 100);
     }
@@ -642,10 +651,11 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('decide', (e, value) => {
     trusted(e);
-    return backend.decide(validateDecision(value));
+    return backend.decide(boundDecision(value, promptRefs.get(e.sender.id)));
   });
   ipcMain.handle('prompt:open', (e, id) => {
     trusted(e);
+    if (e.sender !== main.webContents) throw Error('Open permissions from Activity');
     if (
       typeof id !== 'string' ||
       id.length > 256 ||

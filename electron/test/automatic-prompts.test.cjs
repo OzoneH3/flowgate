@@ -1,6 +1,10 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { AutomaticPrompts, edgePosition } = require('../dist/test/automatic-prompts.cjs');
+const {
+  AutomaticPrompts,
+  edgePosition,
+  boundDecision,
+} = require('../dist/test/automatic-prompts.cjs');
 const state = (ids, generation = 'g') => ({
   control: {
     connected: true,
@@ -44,4 +48,12 @@ test('bottom-right work area placement handles display offset and small screens'
     width: 400,
     height: 300,
   });
+});
+
+test('permission sender is frozen to request and daemon, main retains explicit selection', () => {
+  const d = { generation: 'g', id: 'a', action: 'allow', scope: 'once' };
+  assert.deepEqual(boundDecision(d, { generation: 'g', id: 'a' }), d);
+  assert.throws(() => boundDecision(d, { generation: 'g', id: 'b' }));
+  assert.throws(() => boundDecision(d, { generation: 'new', id: 'a' }));
+  assert.deepEqual(boundDecision(d), d);
 });
