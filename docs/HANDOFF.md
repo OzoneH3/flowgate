@@ -1,5 +1,21 @@
 # Continuation handoff
 
+### Final accepted desktop verification
+
+Released frontend **1b399257c9dc2acb0162596b21cdd6562340c925** is integrated,
+including ce8bb0f/4e93f8e/34b29e0. The final follow-up is tests/docs only; product
+source equals the prepared backend **d7c969bd73d20332011b544227782a6203b7fa0c**
+(artifact SHA256 `ba33343169a3745c372b402b6366b065472fbd9588a196cffa6ea5eb03a2e003`).
+
+The45-minute monitor soak passed on its labelled earlier copied build; the final
+compiled UI separately passed15 minutes of concurrent real prompts and GUI-absent
+reopen/expiry. Exact pairing, bounds, cleanup and trace-export measurement correction
+are in [electron/RELIABILITY.md](../electron/RELIABILITY.md). Integration syntax
+checks plus6 backend bridge checks pass; no kernel/receiver suites were repeated.
+No claim of every freeze resolved, final-build45-minute enforcement, installed-host
+acceptance or reboot acceptance is made. The d7c969b bundle is the only enabled
+installation candidate; previous prepared manifests are deliberately disabled.
+
 ## Daily-use lifecycle candidate (host installation pending)
 
 Master now includes the continuous incoming/both-direction lifecycle, immutable
