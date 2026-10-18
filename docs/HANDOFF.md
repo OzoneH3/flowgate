@@ -1,5 +1,71 @@
 # Continuation handoff
 
+## Current: zone Remember and real TCP kernel verification complete (not deployed)
+
+Integrated UI **7a210332976b3ed61d8aded29134d2ec73cc06ad**; zone Remember backend
+**ee7ba47** / receiver followup **05c341bf3336fa9c9bd328f493eea38c6fdf71ce**;
+shared-event implementation **03dd0e4483e11b620a6d7836e870e94aac14c7cb** and fixture
+correction **8548a2a9ba309b1250b27a02278573d6011ecdb0**. All implementation and
+released UI history are integrated. No remaining authentication/kernel check blocker.
+Earlier pending notes below are chronological evidence, superseded by this result.
+
+### Verified kernel evidence, preserved without repeating passed cases
+
+- `.workspace/tcp-initiation-1792356931-1419542`, clean03dd0e4: real fast TCP4/6,
+  active outgoing and passive accepted incoming,32 socket ends/both loopback ends
+  correctly joined by exact cookies; closure/new-cookie isolation; collector restart
+  clears prior evidence (old established unknown/new known). Reported loss0 and
+  partial=true, not a complete-history guarantee. Final fault injection stopped at
+  a test lookup assertion, not a direction/verifier failure; passed assertions kept.
+- `.workspace/tcp-initiation-1792357244-1427753`, clean8548a2a: focused remaining
+  helper-death case **passed**. Union of all Go-thread children plus direct PPID,
+  exact pinned path and reviewed executable hash verifies the sole signal target.
+  After actual helper termination, old event evidence is unknown; same daemon,
+  stopped enforcement and native processes remain, eight fresh TCP4/6 socket ends
+  are observable with honest unknown direction. `result.json`, `helper-failure.json`
+  and `verification.log` record the pass. This completes the privileged fault case.
+- Both runs' collector SHA256 is exactly
+  `86b6e8844ac8f73c357673471e726e4fdeff5b5edbc59e4331e2ab5e1c5312b3`.
+  Runtime Go/collector/native source did not change between them; only fixture/docs
+  changed. Native binary hashes include different Go build VCS metadata. Foreign
+  effective program metadata (bpftune109, sysctl99) compares exactly before/after;
+  both runs cleaned their own helper/link/maps/daemon/native and private namespaces.
+- Original native timing data recovered as `overhead-recovered.json`:16 loopback
+  connections, baseline527750ns/event620470ns (0.528/0.620ms). One bounded sample,
+  including scheduling/setup/existing bpftune, not a general overhead claim.
+
+The explicit shared root option writes no callback/tuning/reply fields, requires
+existing close subscriptions and stops on foreign-ID inventory change. Missing
+callbacks/loss/unsupported configuration remain partial/unknown. Default exclusive
+mode still refuses bpftune; it was never disabled/detached. No UI inference, PID/port
+heuristic or permission authority comes from direction evidence. Existing-before-
+attach/closed-before-snapshot connections are not reconstructed; UDP remains
+connectionless. No durable connection-history feature or default host enablement.
+
+### Zone/UI and host state
+
+Real same-peer zone-revision receiver proof and released real UI Local Allow /
+Internet Deny / Any Remember, repeat attempts, sibling scope and exact3-rule cleanup
+remain passed and reused (details below). Lost ACK reconciliation does not repeat
+decisions/rules; process-only Remember and stored Ask remain unsupported. Main UI
+build/typecheck+20 integration checks and changed Go race/vet evidence reused;
+no firewall/UDP/process-rule/watchdog matrix rerun after these fixture-only fixes.
+
+Final read-only `.workspace/kernel-verification-final-host-readonly.json`: installed
+source remains7ec89ad, PID1113279, generation3e696c4462fb777d9be0bc350a56df2e;
+UDP active generationde1c7cda058de0f47be901dcdf92cfa3; enforcement stopped, rules0.
+No host rollout, rule mutation, collector interruption, service or network change.
+
+A later authorized rollout must use the consistent-backup/generation-stop/atomic-
+replace procedure below, preserve schema4 inventory and UID1000 administrator/UDP
+configuration, and review explicit zone prefixes. On this bpftune host, event startup
+requires reviewed helper/cgroup **and `--tcp-initiation-observe-shared`**. This grants
+no enforcement; `--allow-evaluation` also grants bounded permission without Start.
+Host outgoing evaluation remains unsupported; isolated outgoing receiver success
+is not host/Tailscale coexistence proof. No autostart service; reboot remains manual.
+
+Normal launch: `scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock`.
+
 ## Current: actual shared TCP direction checks passed; one fixture fault check remains
 
 User-authenticated kernel evidence `.workspace/tcp-initiation-1792356931-1419542`
@@ -157,7 +223,8 @@ sudo -n /home/flowgate-user/Apps/flowgate/.workspace/flowgate serve \
   --udp-helper /home/flowgate-user/Apps/flowgate/.workspace/udp-collector \
   --zone-local REVIEWED_LOCAL_CIDR --zone-internet REVIEWED_INTERNET_CIDR \
   --tcp-initiation-helper /home/flowgate-user/Apps/flowgate/.workspace/tcp-initiation-collector \
-  --tcp-initiation-cgroup /sys/fs/cgroup
+  --tcp-initiation-cgroup /sys/fs/cgroup \
+  --tcp-initiation-observe-shared
 ```
 
 Prefix placeholders require an explicit reviewed policy definition; repeat flags as

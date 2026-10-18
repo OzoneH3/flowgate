@@ -1,5 +1,25 @@
 # Optional event-based TCP initiation (`activity-initiation-events-v1`)
 
+## Current verification: passed on the real kernel
+
+Explicit shared mode completed actual direction acceptance on clean03dd0e4 and
+focused helper-death acceptance on clean8548a2a. Evidence:
+`.workspace/tcp-initiation-1792356931-1419542/` and
+`.workspace/tcp-initiation-1792357244-1427753/`. Both use collector SHA256
+86b6e8844ac8f73c357673471e726e4fdeff5b5edbc59e4331e2ab5e1c5312b3.
+Real ordinary TCP4/6 active/passive/both loopback ends, exact-cookie joins,
+closure/new sockets, restart old-unknown/new-known, actual owned-helper death with
+old evidence cleared/new TCP observation available, foreign program preservation
+and cleanup passed. No unrelated matrix repeated. One saved16-connection timing
+sample is0.528ms baseline/0.620ms event, not a general performance benchmark.
+There is no remaining privileged verification blocker for this configuration.
+
+Not deployed: host daemon/UDP/enforcement unchanged. Shared mode remains an
+explicit root choice; default exclusive refusal and unsupported/missing-callback
+unknown semantics remain. Earlier failed/pending checkpoints below are retained
+as history, superseded by these two actual successful case sets.
+
+
 Implemented, not deployed. Fast completed handshakes routinely fall between the
 existing inet_diag snapshots. The native fixture reproduces TCP4/TCP6 loopback
 Dial/Accept/data exchange before the next observation: both established ends are
