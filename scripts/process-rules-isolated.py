@@ -4,7 +4,8 @@ Run through scripts/lab.sh. Never opens host endpoints or deployed executable.
 """
 import argparse,json,os,pathlib,socket,subprocess,time,sys
 ROOT=pathlib.Path(__file__).resolve().parents[1]
-p=argparse.ArgumentParser();p.add_argument('--binary',required=True);p.add_argument('--native',required=True);p.add_argument('--run',required=True);p.add_argument('--hold',action='store_true');p.add_argument('--any-protocol',action='store_true');p.add_argument('--zones',action='store_true');a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--binary',required=True);p.add_argument('--native',required=True);p.add_argument('--run',required=True);p.add_argument('--hold',action='store_true');p.add_argument('--any-protocol',action='store_true');p.add_argument('--zones',action='store_true');p.add_argument('--zones-unknown',action='store_true');a=p.parse_args()
+if a.zones_unknown:a.zones=True
 assert os.environ['FLOWGATE_PARENT_NETNS']!=os.readlink('/proc/self/ns/net')
 RUN=pathlib.Path(a.run).resolve();assert RUN.is_relative_to(ROOT/'.workspace');RUN.mkdir(mode=0o700,parents=True)
 for d in ['api','data','state']:(RUN/d).mkdir(mode=0o700)
@@ -104,8 +105,8 @@ try:
    else:result=ask(children[name],op)
    (RUN/'command-result.json').write_text(json.dumps(result))
  elif a.zones:
-  from zone_policy_acceptance import check
-  check(globals())
+  from zone_policy_acceptance import check,check_unknown
+  (check_unknown if a.zones_unknown else check)(globals())
  elif a.any_protocol:
   assert 'observed-rule-any-protocol-v1' in initial['capabilities']
   for direction in ['incoming','outgoing']:

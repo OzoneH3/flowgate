@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"errors"
 	"flowgate/internal/identity"
 	"flowgate/internal/policy"
@@ -126,4 +127,38 @@ func TestZoneAPIAndObservedBinding(t *testing.T) {
 		t.Fatal("zone views missing")
 	}
 	_ = identity.DefaultNetworkZones()
+}
+
+func TestZoneSQLiteRestartAndDefinitionBinding(t *testing.T) {
+	a, _, _, _ := observedAPI(t)
+	d := observedDraft("incoming")
+	target := ZoneTarget{"internet", "self"}
+	v, err := a.e.PreviewZoneRule(a.e.Generation, a.e.Zones.Revision, target, d, 1000, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, _, _, err := a.e.SaveZoneRule(a.e.Generation, a.e.Zones.Revision, v.Token, target, d, 1000, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := a.s.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := New(time.Second)
+	if err = next.SetRules(stored); err != nil {
+		t.Fatal(err)
+	}
+	beforeJSON, _ := json.Marshal(r)
+	afterJSON, _ := json.Marshal(next.Rules(1000, false)[0])
+	if len(next.Rules(1000, false)) != 1 || string(beforeJSON) != string(afterJSON) {
+		t.Fatal("schema4 document changed on restart")
+	}
+	if _, _, _, err = next.SaveZoneRule(a.e.Generation, a.e.Zones.Revision, v.Token, target, d, 1000, false); err == nil {
+		t.Fatal("old generation replayed")
+	}
+	q := Request{Version: 1, Operation: "rule-preview", Generation: a.e.Generation, ID: r.ID, ExpectedVersion: &r.Version, Rule: &r}
+	if response := callResponse(a.path, q); response.ErrorCode != "zone_conflict" {
+		t.Fatal("missing definition accepted", response)
+	}
 }

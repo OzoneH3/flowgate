@@ -41,3 +41,19 @@ def check(g):
  logs=api('decision-log',decision_query={'limit':100});assert not logs.get('error');(run/'zone-decision-log.json').write_text(json.dumps(logs,indent=2));assert any(r.get('flow',{}).get('network_scope',{}).get('zone')=='internet' for r in logs['decision_log']['records'])
  (run/'zone-decision-log.json').write_text(json.dumps(logs,indent=2))
  log('PASS Decision Log zone scope/target snapshots; no Activity byte-total claim; final rules0')
+
+def check_unknown(g):
+ import time
+ api,run,log,cmd,wait=[g[k]for k in ['api','RUN','log','cmd','wait']]
+ cmd('nsenter','--net=/proc/'+str(g['peer'].pid)+'/ns/net','ip','addr','add','10.80.0.2/32','dev','fgpeer')
+ cmd('ip','route','add','10.80.0.2/32','dev','fghost')
+ gen=api()['generation'];revision=api()['network_zones']['revision'];d=dict(direction='incoming',protocol='*',action='allow',remote_address='*',local_port=0,remote_port=0,disabled=False,expires='0001-01-01T00:00:00Z');target=dict(zone='local',scope='machine')
+ p=api('zone-rule-preview',generation=gen,zone_revision=revision,zone_target=target,observed_draft=d);assert not p.get('error'),p
+ v=p['zone_preview'];s=api('zone-rule-save',generation=gen,zone_revision=revision,zone_target=target,observed_draft=d,preview_token=v['token']);assert not s.get('error'),s
+ before=g['received']('alpha','udp4');g['remote']('udp',port=g['infos']['alpha']['ports']['udp4'],source_address='10.80.0.2')
+ def pending():
+  return next((x for x in api().get('events',[])if x['flow']['remote'].startswith('10.80.0.2:')and x['state']=='awaiting-decision'),None)
+ event=wait(pending);assert event['flow']['network_scope']['state']=='unavailable';assert not event['flow']['network_scope'].get('zone');assert event['rule']=='default-ask';assert g['received']('alpha','udp4')==before
+ r=api('decide',generation=gen,id=event['id'],action='block',scope='once');assert not r.get('error'),r;time.sleep(.5);assert g['received']('alpha','udp4')==before
+ (run/'unknown-peer.json').write_text(json.dumps(event,indent=2));g['delete'](s['saved_rule']);assert api().get('rules',[])==[]
+ log('PASS routed private peer outside configured Local does not inherit LocalAllow; explicit unknown/Ask then Deny, receiver count unchanged; rules0')

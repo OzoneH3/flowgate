@@ -107,3 +107,11 @@ run passed policy/receiver cases but exposed missing zone fields in the custom l
 projection; fixed projection and full affected case passed in zones-receiver-2.
 No new host interception or BPF attachment. Existing retained identity failure is
 unresolved: this classifier does not weaken resolver/fingerprint checks.
+
+Additional focused private receiver case `--zones-unknown` passed in
+`.workspace/zones-unknown-1.log`: routed private10.80.0.2 is outside configured
+Local10.79/24 and Internetfd79::/64, so it does not inherit global LocalAllow.
+The actual incoming event is unknown/default Ask; explicit Deny keeps the native
+receiver count unchanged. SQLite schema4 reload and stale generation/zone revision
+are tested separately; the restart comparison uses serialized documents because
+Go's in-memory monotonic timestamp component is intentionally not persisted.

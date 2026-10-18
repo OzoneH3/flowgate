@@ -38,7 +38,7 @@ for raw in sys.stdin:
             subprocess.run(['ping','-6' if v6 else '-4','-c','1','-W','2','fd79::1' if v6 else '10.79.0.1'],check=True,stdout=subprocess.DEVNULL);answer={'ok':True}
         elif op=='udp':
             s=socket.socket(family,socket.SOCK_DGRAM)
-            if q.get('source_port'):s.bind(('fd79::2' if v6 else '10.79.0.2',q['source_port']))
+            if q.get('source_port') or q.get('source_address'):s.bind((q.get('source_address','fd79::2' if v6 else '10.79.0.2'),q.get('source_port',0)))
             if q.get('dhcp'):s.bind(('fe80::2',547,0,socket.if_nametoindex('fgpeer')) if v6 else ('10.79.0.2',67))
             s.sendto(b'fixture',('fd79::1' if v6 else '10.79.0.1',q['port']));
             if q.get('wait_reply'):connections['udp'+str(q['port'])+str(v6)]=s
