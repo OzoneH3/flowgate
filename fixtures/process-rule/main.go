@@ -15,15 +15,24 @@ import (
 
 func main() {
 	base, _ := strconv.Atoi(os.Args[1])
+	host4, host6 := "10.79.0.1", "fd79::1"
+	// Optional explicit bind addresses for the separately authorized host peer.
+	// This fixture still runs as the ordinary selected user, never as root.
+	if len(os.Args) == 4 {
+		host4, host6 = os.Args[2], os.Args[3]
+		if net.ParseIP(host4).To4() == nil || net.ParseIP(host6) == nil {
+			panic("invalid native fixture bind addresses")
+		}
+	}
 	var mu sync.Mutex
 	var jobs sync.WaitGroup
 	counts := map[string]int{}
 	ports := map[string]int{}
 	count := func(k string) { mu.Lock(); counts[k]++; mu.Unlock() }
 	for _, family := range []string{"4", "6"} {
-		host := "10.79.0.1"
+		host := host4
 		if family == "6" {
-			host = "fd79::1"
+			host = host6
 		}
 		for i, proto := range []string{"tcp", "udp"} {
 			key := proto + family

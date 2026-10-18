@@ -117,3 +117,38 @@ func TestTailscaleOpaqueTargetsAndHooks(t *testing.T) {
 		}
 	}
 }
+
+func TestDockerDNATDoesNotHideMarkConflicts(t *testing.T) {
+	for _, family := range []string{"ip", "ip6"} {
+		appendRule := func(table, chain, name, kind string, extra ...any) []byte {
+			var n map[string][]any
+			if err := json.Unmarshal(tailNFTFixture(), &n); err != nil {
+				t.Fatal(err)
+			}
+			expr := []any{map[string]any{"xt": map[string]any{"name": name, "type": kind}}}
+			expr = append(expr, extra...)
+			n["nftables"] = append(n["nftables"], map[string]any{"rule": map[string]any{"family": family, "table": table, "chain": chain, "expr": expr}})
+			b, _ := json.Marshal(n)
+			return b
+		}
+		b := appendRule("nat", "DOCKER", "DNAT", "target")
+		if c := Tailscale(context.Background(), tailEnvironment(), b, "incoming", true); c.Status != Ready {
+			t.Fatal(family, c)
+		}
+		for _, b := range [][]byte{
+			appendRule("filter", "DOCKER", "DNAT", "target"),
+			appendRule("nat", "other", "DNAT", "target"),
+			appendRule("nat", "DOCKER", "DNAT", "match"),
+			appendRule("nat", "DOCKER", "OTHER", "target"),
+			appendRule("nat", "DOCKER", "DNAT", "target", map[string]any{"xt": map[string]any{"name": "MARK", "type": "target"}}),
+			appendRule("nat", "DOCKER", "DNAT", "target", map[string]any{"mangle": map[string]any{"key": map[string]any{"ct": map[string]any{"key": "mark"}}, "value": 0}}),
+		} {
+			if err := tailscaleNFT(b); err == nil {
+				t.Fatal(family, "accepted unsupported DNAT placement/target or adjacent mark write")
+			}
+		}
+		if c := Tailscale(context.Background(), tailEnvironment(), b, "both", true); c.Code != "tailscale_profile_unsupported" {
+			t.Fatal("DNAT changed outgoing refusal", c)
+		}
+	}
+}

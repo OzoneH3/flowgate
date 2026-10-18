@@ -39,7 +39,20 @@ with corroborating interface, CLI/daemon version, preferences, actual nft object
 iptables exports and IPv4/IPv6 routing. Interface name or version alone is not
 sufficient. Both the kernel's opaque-writer locations/counts and their independently
 exported target masks must agree. Known non-mark conntrack/addrtype matches and
-MASQUERADE targets may coexist; unknown opaque targets remain refused.
+MASQUERADE targets may coexist. The standard DNAT target is now also recognized
+only at ip/ip6 `nat/DOCKER`, with xt type `target`. Its destination translation does
+not write packet/conntrack marks; neighboring mark writers still undergo all mask
+and location checks. DNAT elsewhere or as an unknown match still refuses. This
+corrects the concrete Docker published-port refusal found after reboot; it is not
+a Docker forwarding-control feature. Unknown opaque targets remain refused.
+
+Focused evidence: `TestDockerDNATDoesNotHideMarkConflicts` covers both families,
+wrong table/chain/type, unknown targets, adjacent native/opaque mark writes and
+continued outgoing refusal. `daemon-evaluation-isolated.py --tailscale --docker-dnat`
+checks real IPv4/IPv6 translated receiver delivery and read-only readiness without
+activating interception; its shaped Tailscale metadata is not encrypted tailnet
+evidence. Kernel definition: [xt_nat DNAT](https://kernel.googlesource.com/pub/scm/linux/kernel/git/torvalds/linux.git/+/627b7865c062ff642c0000f3a4775f1a44b986a4/net/netfilter/xt_nat.c).
+
 
 Only `--profile incoming --administrator --uid 1000` is currently supported on
 this host. An ordinary selected-user evaluation refuses `administrator_required`:

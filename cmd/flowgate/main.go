@@ -40,6 +40,10 @@ func main() {
 		return
 	}
 	switch os.Args[1] {
+	case "host-test-peer", "host-test-peer-child":
+		if err := hostTestPeerCommand(os.Args[1], os.Args[2:]); err != nil {
+			fatal(err)
+		}
 	case "host-session", "host-start", "host-stop", "host-status", "host-recover", "host-watch", "host-embedded-watch":
 		if err := hostCommand(); err != nil {
 			fatal(err)

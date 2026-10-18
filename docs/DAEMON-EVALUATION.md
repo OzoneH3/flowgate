@@ -270,3 +270,24 @@ and routes are unchanged. No suite rerun, no host collection/daemon action.
 See INTEGRATION.md for source/hash pairing and combined UI rollout/rollback. This
 supersedes the historical pending statements above; the initial failed runs are
 retained to explain the fixture corrections, not counted as passes.
+
+## Temporary native host acceptance peer
+
+`sudo -n /home/flowgate-user/Apps/flowgate/.workspace/flowgate host-test-peer` is an
+explicit test tool, not part of daemon startup or a root shell runner. It creates
+only `fg-accept-h`/`fg-accept-p`, connected addresses192.0.2.1/30 and
+fd79:6667::1/64 with a private peer at .2/::2, and expires after ten minutes.
+It refuses existing names or address-route overlaps and never changes existing
+routes, rules, sysctls or firewall objects. Cleanup removes only its original
+interface index and owned child namespace. Normal EOF, quit, signal and deadline
+clean up; SIGKILL is not a guaranteed parent cleanup path and requires inspection.
+Do not run two peers. Root daemon/evaluation/UDP ownership remains independent.
+
+After its JSON ready line, stdin accepts only `{"op":"send","protocol":"udp",
+"port":24681,"v6":false}` (TCP or UDP, fixed peer-to-host destinations, ports
+24680..24709, fixed harmless payload) and `{"op":"quit"}`. Acknowledgement means
+submitted, not receiver delivery. Run native receivers as UID1000, inspect exact
+attribution and receiver counts, and never decide unrelated pending requests.
+This command requires explicit test authorization; it does not start an evaluation,
+change policy, install anything, or broaden the sudoers policy. A private-namespace
+TCP/UDP4/6 delivery/teardown check and focused command-bound tests cover the tool.

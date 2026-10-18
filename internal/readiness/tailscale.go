@@ -275,6 +275,14 @@ func tailscaleNFT(b []byte) error {
 						}
 						seen[key]++
 					case "conntrack", "addrtype", "MASQUERADE": // no mark assignment; NAT/drop coexistence remains independent
+					case "DNAT":
+						// xt_nat's DNAT target changes the destination tuple, not
+						// packet/conntrack marks. Docker's published-port chain is
+						// orthogonal to local INPUT admission; forwarded container
+						// traffic is not covered by our incoming-only profile.
+						if (family != "ip" && family != "ip6") || table != "nat" || chain != "DOCKER" || xt["type"] != "target" {
+							return fmt.Errorf("DNAT outside inspected Docker NAT target location")
+						}
 					default:
 						return fmt.Errorf("Opaque compatibility expression%s not supported", name)
 					}
