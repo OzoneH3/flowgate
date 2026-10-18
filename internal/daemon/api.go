@@ -583,6 +583,10 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 								}
 							}
 						case "decide":
+							if q.Generation != "" && q.Generation != e.Generation {
+								r.ErrorCode, r.Error = "generation_conflict", "Daemon generation changed; request is no longer actionable"
+								break
+							}
 							if !permissions.CanDecide {
 								r.Error = "decision unavailable in non-enforcing/read-only mode"
 								r.ErrorCode = "unavailable"

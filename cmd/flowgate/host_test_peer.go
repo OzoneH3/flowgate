@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -28,7 +29,7 @@ type peerRequest struct {
 }
 
 func validatePeerRequest(q peerRequest) error {
-	if q.Op == "quit" && q.Port == 0 && q.Protocol == "" && !q.V6 {
+	if (q.Op == "quit" || q.Op == "counts") && q.Port == 0 && q.Protocol == "" && !q.V6 {
 		return nil
 	}
 	if q.Op != "send" || (q.Protocol != "udp" && q.Protocol != "tcp") || q.Port < 24680 || q.Port > 24709 {
@@ -209,6 +210,53 @@ func testPeerChild() error {
 			return e
 		}
 	}
+	var countMu sync.Mutex
+	counts := map[string]int{}
+	for _, spec := range []struct{ network, addr string }{{"tcp4", "192.0.2.2:24688"}, {"tcp6", "[fd79:6667::2]:24688"}, {"udp4", "192.0.2.2:24689"}, {"udp6", "[fd79:6667::2]:24689"}} {
+		spec := spec
+		record := func() { countMu.Lock(); counts[spec.network]++; countMu.Unlock() }
+		if spec.network[:3] == "tcp" {
+			l, err := net.Listen(spec.network, spec.addr)
+			if err != nil {
+				return err
+			}
+			defer l.Close()
+			go func() {
+				for {
+					c, err := l.Accept()
+					if err != nil {
+						return
+					}
+					go func(c net.Conn) {
+						defer c.Close()
+						c.SetDeadline(time.Now().Add(12 * time.Second))
+						b := make([]byte, 128)
+						if n, err := c.Read(b); err == nil && n > 0 {
+							record()
+							c.Write(b[:n])
+						}
+					}(c)
+				}
+			}()
+		} else {
+			u, err := net.ListenPacket(spec.network, spec.addr)
+			if err != nil {
+				return err
+			}
+			defer u.Close()
+			go func() {
+				b := make([]byte, 128)
+				for {
+					n, a, err := u.ReadFrom(b)
+					if err != nil {
+						return
+					}
+					record()
+					u.WriteTo(b[:n], a)
+				}
+			}()
+		}
+	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.Encode(map[string]any{"ready": true, "scope": "temporary input-hook peer only", "host4": "192.0.2.1", "host6": "fd79:6667::1", "ports": "24680..24709", "deadline_seconds": 600})
 	for {
@@ -221,6 +269,18 @@ func testPeerChild() error {
 		}
 		if q.Op == "quit" {
 			return nil
+		}
+		if q.Op == "counts" {
+			countMu.Lock()
+			copy := map[string]int{}
+			for k, v := range counts {
+				copy[k] = v
+			}
+			countMu.Unlock()
+			if err := enc.Encode(map[string]any{"counts": copy}); err != nil {
+				return err
+			}
+			continue
 		}
 		go func(q peerRequest) {
 			host := "192.0.2.1"

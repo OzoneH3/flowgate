@@ -240,6 +240,9 @@ func (m *Evaluation) finish(err error, clean bool) {
 		m.status.State = "stopped"
 		m.status.ReasonCode = "stopped"
 		m.status.Reason = "Evaluation ended; FlowGate is not controlling traffic"
+		if m.continuous {
+			m.status.Reason = "Protection stopped intentionally; monitoring and independent collectors remain available"
+		}
 		if !m.continuous && !time.Now().Before(m.status.StopsAt) {
 			m.status.ReasonCode = "expired"
 			m.status.Reason = "Original five-minute deadline reached; FlowGate enforcement stopped"

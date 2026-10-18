@@ -114,6 +114,9 @@ func main() {
 		case "send":
 			key := q.Protocol + "4"
 			host := "10.79.0.2"
+			if p := os.Getenv("FLOWGATE_FIXTURE_PEER4"); p != "" {
+				host = p
+			}
 			port := 43000
 			if q.Protocol == "udp" {
 				port = 43001
@@ -121,6 +124,22 @@ func main() {
 			if q.V6 {
 				key = q.Protocol + "6"
 				host = "fd79::2"
+				if p := os.Getenv("FLOWGATE_FIXTURE_PEER6"); p != "" {
+					host = p
+				}
+			}
+			if p := os.Getenv("FLOWGATE_FIXTURE_PEER_PORT"); p != "" {
+				n, err := strconv.Atoi(p)
+				if err != nil || n < 1024 || n > 65534 {
+					panic("invalid peer fixture port")
+				}
+				port = n
+				if q.Protocol == "udp" {
+					port++
+				}
+			}
+			if net.ParseIP(host) == nil {
+				panic("invalid fixture peer")
 			}
 			jobs.Add(1)
 			go func() {
