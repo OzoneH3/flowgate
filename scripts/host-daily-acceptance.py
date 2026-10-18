@@ -76,7 +76,7 @@ def rule_delivery(name,key,expected):
  else:time.sleep(.7);assert counts(name,key)==before
 
 def restart():
- g=api()['generation'];cmd('systemctl','restart','flowgate.service');r=wait(lambda:(lambda r:r if r['generation']!=g and r['protection']['state']=='active'else None)(api()));assert r['protection']['desired_mode']=='both';return r
+ g=api()['generation'];cmd('systemctl','reset-failed','flowgate.service');cmd('systemctl','restart','flowgate.service');r=wait(lambda:(lambda r:r if r['generation']!=g and r['protection']['state']=='active'else None)(api()));assert r['protection']['desired_mode']=='both';return r
 
 def write_zones(z):
  path=pathlib.Path('/etc/flowgate/zones.json');tmp=path.with_suffix('.acceptance-new');tmp.write_text(json.dumps(z));tmp.chmod(0o600);os.replace(tmp,path)
@@ -94,7 +94,7 @@ baseline=api();baseline_ids={r['id']for r in baseline.get('rules',[])};oldzones=
 # not public connectivity. Original zone configuration is restored afterwards.
 testzones={'local':list(dict.fromkeys(oldzones['local']+['192.0.2.0/30'])),'internet':list(dict.fromkeys(oldzones['internet']+['fd79:6667::/64']))}
 try:
- write_zones(testzones);cmd('systemctl','restart','flowgate.service');initial=api();assert initial['protection']['state']=='stopped'
+ write_zones(testzones);cmd('systemctl','reset-failed','flowgate.service');cmd('systemctl','restart','flowgate.service');initial=api();assert initial['protection']['state']=='stopped'
  peer=subprocess.Popen([str(release/'flowgate'),'host-test-peer'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=(evidence/'peer.log').open('w'),text=True)
  assert json.loads(peer.stdout.readline())['ready']
  for name,base,exe in [('alpha',24680,'native'),('beta',24690,'native'),('other',24700,'native-other')]:
@@ -138,7 +138,7 @@ finally:
  (evidence/'remaining-test-rules.json').write_text(json.dumps(owned,indent=2))
  # Final restart restores original config and desired mode, no disposable resources.
  if not owned:
-  cmd('systemctl','restart','flowgate.service')
+  cmd('systemctl','reset-failed','flowgate.service');cmd('systemctl','restart','flowgate.service')
 assert not owned,'Unconfirmed test rule cleanup; inspect exact IDs in saved evidence'
 r=wait(lambda:(lambda r:r if r['protection']['state']=='active'and (a.isolated or (r['traffic_monitor']['state']=='active'and r.get('activity',{}).get('tcp_initiation',{}).get('state')=='active'))else None)(api()))
 assert{rule['id']for rule in r.get('rules',[])}==baseline_ids

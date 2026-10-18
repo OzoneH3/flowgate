@@ -40,7 +40,9 @@ def serve():
   with c:
    request=c.recv(1024).decode().strip()
    try:
-    assert request=='restart flowgate.service';restart();c.sendall(b'OK restart')
+    if request=='restart flowgate.service':restart()
+    else:assert request=='reset-failed flowgate.service'
+    c.sendall(b'OK restart')
    except Exception as e:c.sendall(('FAILED '+str(e)).encode())
 restart();threading.Thread(target=serve,daemon=True).start()
 try:
