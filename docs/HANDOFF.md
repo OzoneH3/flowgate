@@ -1,5 +1,29 @@
 # Continuation handoff
 
+## Current development base: master (local merge, no deployment)
+
+`master` was fast-forwarded frome2f045a to accepted checkpoint
+**c8f4dc28f58246cc44d465c7db0b2c79e72f69a5**, preserving all development history.
+Accepted source and master tree IDs matched exactly:
+`b095b1636ccc188513f456d6fd23666c8a50bbf1`. This handoff note is the only
+post-acceptance change; no production source or test fixture changed during merge.
+`master` is now the integrated development base; `milestone/backend` retains its
+accepted checkpoint. Released frontend7a21033 (including575aca8 and safetyeb8fa8b)
+and all backend/kernel fixture followups are ancestors of master.
+
+Zone-scoped Remember and real TCP initiation verification are complete as detailed
+below. Exact-release build/race/vet/UI/receiver/kernel evidence is reused; merge
+checks are ancestry, tree equality and documentation-only diff, not repeated suites.
+The separate pre-existing `frontend/netlimiter-design` branch is unmerged and was
+not included as accepted work. No released frontend work remains omitted.
+
+Host deployment remains separate and was not performed. Host daemon/UDP/rules and
+stopped enforcement are unchanged. Shared initiation remains explicit opt-in,
+partial event coverage with unknown on missing evidence; host evaluation remains
+incoming-only. No process-only Remember, stored Ask, zone byte accounting or durable
+connection-history claim is added. The future rollout/rollback procedure below
+still requires separate authorization. No push or service installation.
+
 ## Current: zone Remember and real TCP kernel verification complete (not deployed)
 
 Integrated UI **7a210332976b3ed61d8aded29134d2ec73cc06ad**; zone Remember backend
