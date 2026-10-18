@@ -1,5 +1,132 @@
 # Continuation handoff
 
+## Current: reviewed zone-scoped pending Remember integrated; kernel proof awaiting authentication
+
+Backend API **ee7ba47**, receiver followup **05c341bf3336fa9c9bd328f493eea38c6fdf71ce**,
+and explicit clean UI **7a210332976b3ed61d8aded29134d2ec73cc06ad** (including sender/
+window safety checkpointeb8fa8b) merged at **d306a8cac3388037b8b40bb4da9da94595734a9b**.
+No host deployment. `decision-zone-remember-v1` uses action-bound30-second previews,
+exact zone/configuration revision and reserved rule binding, plus5-minute queryable
+receipts. Once unchanged; no process-only Remember/stored Ask. Visible default
+**Any network**; Local/Internet require current known matching classification.
+Unknown named scope refuses rather than guessing. Legacy Any rules remain schema2;
+named scope uses schema4. Exact contract/examples: `NETWORK-ZONES.md` pending section.
+
+Preview/commit preserve application/revision/UID/protocol/peer/service and absolute
+expiry. Identity, generation, definition, classification and pending deadline are
+revalidated; mismatch never substitutes a different scope. Current admission is
+separate from the future remembered rule. Lost ACK uses decision-status query;
+pending/unknown never triggers blind resend. Same successful token acknowledges
+its historical receipt only, not another rule, decision, packet verdict or log entry.
+Decision Log stores the actual zone-constrained rule snapshot. Receipt memory is
+bounded and volatile, not crash-proof reconciliation or proof of receiver delivery.
+
+### Passed focused evidence
+
+- `.workspace/remember-zone-receivers-2/remember-zone-evidence.json`: actual native
+  receiver proof with SAME application/peer/protocol/service across explicit zone
+  definition changes in the disposable daemon. Local Allow/subsequent delivery;
+  that identical peer classified Internet no longer inherits Local Allow; Internet
+  Deny/subsequent receiver0; restored Local again delivers; Any on another service
+  continues across both definitions. Different executable at the identical original
+  service/peer gets independent Ask/Deny0. Old generation, mismatch and lost ACK
+  reconciliation/idempotence checked. Root configuration changes require daemon
+  restart/new generation; fixture private addresses are policy labels, not public
+  Internet reachability. Final rules0, namespace discarded.
+- Actual UI on exact05c341b binary SHA256
+  `363158d16af56f5d453798f92cabcec8173435455246ef60a73f4a445f528c41`:
+  `.workspace/worktrees/electron/.workspace/connection-real-suf8ni/evidence.json`.
+  LocalUDP4 Remember Allow+repeat delivery; InternetUDP6 Remember Deny+repeat0;
+  outgoingUDP4 Any Allow+sibling delivery; nonmatchingTCP4 Once Deny0. Focus during
+  polling, automatic prompt, detached/narrow checks passed. Backend independently
+  checked generation48780e9525607c8c6b37bc84ecb9b202/rules0 after explicit UI DONE,
+  then owned quit; `.workspace/remember-zone-ui-owner.log` confirms CLEANED.
+- Main UI build/typecheck and **20 minimal integration tests** pass in
+  `.workspace/remember-ui-integration-{build,tests}.log`. Changed Go daemon/policy/
+  Decision Log race and command vet pass in `.workspace/remember-zone-release-*`.
+  Tests cover concurrent/replayed commit, expiry during identity resolution,
+  unauthorized/read-only access, malformed/mismatched scope, unknown Any, failed
+  persistence, legacy behavior and immutable logged zone. UI exact-release wider
+  focused checks reused; no unrelated accounting/firewall/process/watchdog matrix.
+- UI sender identity/generation freezes per prompt. Temporary KDE placement targets
+  own PID and numeric-window caption, cancels stale runs and removes its own script.
+  Read-only KScreen priority fixes actual preferred output vs Electron enumeration:
+  DP-2 priority1, actual compositor coordinates4600,980 /520x460. Evidence UI
+  `.workspace/decision-compact/primary-monitor-proof.log`. No installed window rule,
+  host policy mutation or generic renderer command bridge.
+
+### Kernel direction check: NOT yet passed
+
+Existing fast TCP4/6 sampling-miss reproduction and real EPERM fallback remain
+preserved. The implemented event helper has not been rewritten simply for lack of
+privilege. Initial-root noninteractive attempt required authentication. No real
+active/passive kernel evidence or active-helper overhead is claimed. Exact command
+requested from the user (fresh netns/cgroup-filtered fixture, no host daemon/API):
+
+```sh
+cd /home/flowgate-user/Apps/flowgate
+scripts/check-tcp-initiation.sh
+```
+
+Inspect the resulting verifier/error/evidence before any edit or repeat. This
+portion remains blocked until that authenticated result is supplied; protocol/model
+checks are not a substitute. `TCP-INITIATION.md` lists intended cookie/namespace,
+loopback, closure/restart/failure and bounded timing acceptance. The older host
+retained-identity failure remains unresolved; its checks were not weakened.
+
+### Host boundary and proposed later rollout (NOT executed)
+
+Read-only `.workspace/remember-host-readonly.json` confirms unchanged PID1113279,
+generation3e696c4462fb777d9be0bc350a56df2e, UDP active generation
+ de1c7cda058de0f47be901dcdf92cfa3, enforcement stopped, rules0. Installed source
+remains7ec89ad; it does not advertise decision-zone-remember-v1. No host restart,
+collector/rule/firewall/network change. Outgoing receiver proof above is isolated;
+host/Tailscale evaluation remains incoming-only. Reboot still needs manual startup.
+
+For a later separately authorized rollout, first complete the kernel check and
+review explicit Local/Internet prefixes against actual host routing/VPN intentions.
+Do not infer private=Local/public=Internet. Then:
+
+1. Read current generation/config/UDP state; refuse unexpected active enforcement.
+2. Export the verified running executable with
+   `sudo -n .workspace/flowgate monitor-backup --generation ACTUAL_GENERATION > .workspace/ROLLBACK_EXECUTABLE`.
+   This command backs up the **executable only**, not SQLite.
+3. Generation-check shutdown:
+   `sudo -n .workspace/flowgate monitor-stop --generation ACTUAL_GENERATION`.
+   Wait for helper/socket/database-writer release; never run competing writers.
+4. Use SQLite backup API for the preserved database (handles WAL consistently),
+   not a bare live-file copy. For example, in a reviewed private rollback directory:
+   `sudo python3 -c 'import os,sqlite3; os.umask(0o077); s=sqlite3.connect("file:/var/lib/flowgate/rules.db?mode=ro",uri=True); d=sqlite3.connect("/home/flowgate-user/Apps/flowgate/.workspace/PRIVATE_ROLLBACK/rules-before.db"); s.backup(d); d.close(); s.close()'`.
+5. Copy a separately built/hash-reviewed candidate to a new inode at the approved
+   launch path; atomically rename only after Stop. Never truncate a live executable.
+   Retain existing root-owned database, endpoints, selected UID/admin permissions.
+6. Launch with retained arguments plus explicitly reviewed zone definitions and,
+   only after its successful kernel proof, the optional event helper:
+
+```sh
+sudo -n /home/flowgate-user/Apps/flowgate/.workspace/flowgate serve \
+  --socket /run/flowgate-api/daemon.sock \
+  --database /var/lib/flowgate/rules.db --uid 1000 --administrator \
+  --allow-evaluation --allow-traffic-control \
+  --udp-helper /home/flowgate-user/Apps/flowgate/.workspace/udp-collector \
+  --zone-local REVIEWED_LOCAL_CIDR --zone-internet REVIEWED_INTERNET_CIDR \
+  --tcp-initiation-helper /home/flowgate-user/Apps/flowgate/.workspace/tcp-initiation-collector \
+  --tcp-initiation-cgroup /sys/fs/cgroup
+```
+
+Prefix placeholders require an explicit reviewed policy definition; repeat flags as
+needed. No host prefix choices or rollout are authorized by this proposal.
+`--allow-evaluation` grants bounded control, **does not Start interception**. Restore
+UDP only if previously enabled through generation-checked control; accept new
+collector generation/baseline and an observation gap. Verify capabilities/rules/
+permissions and monitoring mode before any separately reviewed evaluation.
+Rollback preserves all schema4 documents: use a compatible executable (or the
+complete consistent pre-upgrade data state only when explicitly authorized), never
+strip new rules to satisfy an older reader. If event attachment fails, retain honest
+failure/unknown monitoring and inspect error; do not make speculative restart loops.
+
+Launch current UI: `scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock`.
+
 ## Current: automatic pending permission workflow integrated
 
 Explicit clean UI release **575aca86f6ab013c474c46f4b7700420125471ab**,
@@ -123,8 +250,9 @@ Host incoming-only evaluation remains the supported activation profile; isolated
 outgoing evidence does not grant outgoing host/Tailscale compatibility.
 
 Future deployment is a separate authorized operation: preserve actual running
-executable/configuration, consistent database backup via the existing monitor-backup
-procedure, generation-check Stop, wait for socket/database/helper release, atomically
+executable/configuration (`monitor-backup` exports the executable only), generation-
+check Stop, wait for socket/database/helper release, then use SQLite backup API for
+a consistent database copy before atomically
 install a copy of reviewed candidate (never truncate a live inode), then reuse the
 existing retained `serve` command below. Add reviewed `--zone-local CIDR` /
 `--zone-internet CIDR` definitions explicitly; optional event startup additionally
