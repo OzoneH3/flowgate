@@ -7,6 +7,10 @@ paths=[(pathlib.Path('/etc/systemd/system/flowgate.service'),'flowgate.service')
 for path,name in paths:
  if path.exists()and path.read_bytes()!=(root/name).read_bytes():raise SystemExit(f'{path} changed; inspect before removing')
 subprocess.run(['/usr/local/sbin/flowgate-recover'],check=True)
+# Remove the dependent unit's Requires edge before stopping its guard. Otherwise
+# systemd can propagate the guard stop to NetworkManager and interrupt networking.
+paths[-1][0].unlink(missing_ok=True)
+subprocess.run(['systemctl','daemon-reload'],check=True)
 subprocess.run(['systemctl','disable','--now','flowgate.service','flowgate-guard.service'],check=True)
 for path,_ in paths:path.unlink(missing_ok=True)
 subprocess.run(['systemctl','daemon-reload'],check=True)

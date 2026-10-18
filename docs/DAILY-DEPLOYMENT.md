@@ -161,3 +161,9 @@ explicitly enables only its private loopback, and the preserved rerun above pass
 READY notification follows policy/hook initialization; subsequent STATUS messages
 track desired mode, actual state and failure reason. Actual installed systemd
 notification and boot ordering still require the authenticated stage and reboot.
+
+Uninstall first performs scoped monitoring recovery, removes only its verified
+NetworkManager drop-in and reloads the dependency graph **before** stopping the
+guard service. This avoids propagating a Requires stop into NetworkManager.
+`scripts/test-deployment-uninstall.py` checks the exact order with mocked systemd
+calls and preserved immutable artifacts; installed uninstall remains unobserved.
