@@ -17,6 +17,7 @@ export class TrafficGraph {
   private signature = '';
   private settings = chartDefaults();
   private hoverAt?: number;
+  private paint?: number;
   private canvas: HTMLCanvasElement;
   private selector: HTMLSelectElement;
   private drag?: {
@@ -186,6 +187,7 @@ export class TrafficGraph {
   }
   setPresentation(settings: ChartSettings) {
     if (this.drag) return;
+    if (JSON.stringify(this.settings) === JSON.stringify(settings)) return;
     const was = this.settings.paused;
     this.settings = { ...settings };
     this.sync();
@@ -307,8 +309,7 @@ export class TrafficGraph {
       this.request++;
       return;
     }
-    if (document.hidden || this.host.closest('main')?.hidden || !this.host.getClientRects().length)
-      return;
+    if (document.hidden || this.host.hidden || this.host.closest('main')?.hidden) return;
     const signature = id + ':' + stamp;
     if (signature === this.signature) return;
     this.signature = signature;
@@ -324,7 +325,19 @@ export class TrafficGraph {
     }
   }
   private draw() {
+    if (this.paint !== undefined || document.hidden || this.host.hidden) return;
+    this.paint = requestAnimationFrame(() => {
+      this.paint = undefined;
+      this.paintNow();
+    });
+  }
+  private paintNow() {
     if (!this.view || document.hidden || this.host.closest('main')?.hidden) return;
+    // Read geometry/style before legend writes; avoid forcing layout after DOM changes.
+    const width = this.canvas.clientWidth,
+      height = this.canvas.clientHeight;
+    if (!width || !height) return;
+    const palette = getComputedStyle(this.canvas);
     const v = this.view,
       range = chartRange(v, this.settings, this.source),
       points = range.points,
@@ -366,16 +379,12 @@ export class TrafficGraph {
     this.host.title = `${v.label}\n${v.message}\n${latest?.note || ''}`;
     this.sync();
     this.sample();
-    const width = this.canvas.clientWidth,
-      height = this.canvas.clientHeight;
-    if (!width || !height) return;
     const dpr = window.devicePixelRatio || 1;
     this.canvas.width = Math.round(width * dpr);
     this.canvas.height = Math.round(height * dpr);
     const c = this.canvas.getContext('2d')!;
     c.scale(dpr, dpr);
-    const palette = getComputedStyle(this.canvas),
-      color = (name: string) => palette.getPropertyValue(name).trim();
+    const color = (name: string) => palette.getPropertyValue(name).trim();
     c.fillStyle = color('--fg-content');
     c.fillRect(0, 0, width, height);
     const left = 55,

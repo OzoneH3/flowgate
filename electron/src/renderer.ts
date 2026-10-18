@@ -1,3 +1,6 @@
+import { acceptsPublication } from './publication';
+import { PROTECTION_CAPABILITY, stateProtection } from './protection-model';
+import { advanceClock } from './state-clock';
 import { REMEMBER_ZONE_CAPABILITY, type DecisionPreview } from './decision-remember';
 import { applicationHeading } from './application-heading';
 import { connectionPresentation, permissionTarget } from './connection-presentation';
@@ -712,11 +715,13 @@ function updateFirewallStatus() {
   const status = document.getElementById('firewallMenuStatus');
   if (!status) return;
   const summary = document.querySelector('#controlMenu > summary');
-  status.textContent = state?.control.capabilities?.includes('daemon-evaluation-v1')
-    ? summary?.textContent || 'Firewall · unknown'
-    : !state?.control.connected
-      ? 'Firewall · unavailable'
-      : `Firewall · ${state.control.enforcement?.state || 'unknown'}`;
+  status.textContent = state?.control.capabilities?.includes(PROTECTION_CAPABILITY)
+    ? stateProtection(state)
+    : state?.control.capabilities?.includes('daemon-evaluation-v1')
+      ? summary?.textContent || 'Firewall · unknown'
+      : !state?.control.connected
+        ? 'Firewall · unavailable'
+        : `Firewall · ${state.control.enforcement?.state || 'unknown'}`;
   status.title =
     document.getElementById('controlStatus')?.title ||
     'Enforcement state unavailable. Monitoring never implies protection.';
@@ -739,7 +744,7 @@ function setupMainMenus(windowMenu: HTMLElement) {
     options = $('optionsMenu');
   // The stateful controls keep their existing IDs and authorization paths, inside Tools.
   const controlTitle = control.querySelector('summary')!;
-  controlTitle.dataset.menuLabel = 'Firewall evaluation';
+  controlTitle.dataset.menuLabel = 'Firewall';
   tools.lastElementChild!.append(control, element('hr'), options);
   const about = element('button', 'About FlowGate');
   const dialog = element('dialog');
@@ -1434,9 +1439,11 @@ function renderRequests() {
       container.append(
         element(
           'p',
-          selectedRequest
-            ? 'Request no longer present. It may have expired or been resolved by another client.'
-            : 'No pending connection selected.',
+          promptID && promptGeneration !== state.control.generation
+            ? 'Daemon session changed. This old request is no longer actionable.'
+            : selectedRequest
+              ? 'Request no longer present. It may have expired or been resolved by another client.'
+              : 'No pending connection selected.',
           'hint',
         ),
       );
@@ -1635,6 +1642,21 @@ function renderRequests() {
 }
 function updateDecisions() {
   const e = currentEvent();
+  if (promptID && $('dismiss')) {
+    const other = state.control.connected
+      ? state.control.events.filter(
+          (r) =>
+            r.id !== promptID && r.state === 'awaiting-decision' && r.remainingMs > 0 && !r.attempt,
+        ).length
+      : 0;
+    $('dismiss').textContent = other
+      ? `Next request (${other})`
+      : e?.state === 'awaiting-decision' && e.remainingMs > 0
+        ? 'Decide later'
+        : 'Close';
+    $('dismiss').title =
+      'Dismiss this view without Allow or Deny. Unanswered requests retain their original deadlines.';
+  }
   if ($('promptPending'))
     $('promptPending').textContent =
       `Pending connections (${state.control.events.filter((e) => e.state === 'awaiting-decision' && e.remainingMs > 0).length})`;
@@ -1701,7 +1723,9 @@ function updateDecisions() {
   if ($('requestResult') && e)
     $('requestResult').textContent = !state.control.connected
       ? 'Disconnected · decisions unavailable. Request details retained; no retry sent.'
-      : e.attempt?.message || e.reason;
+      : e.attempt?.phase === 'unknown' && e.state !== 'awaiting-decision'
+        ? `Backend now reports ${e.state}. Original acknowledgement remains unknown; no retry sent. ${e.reason}`
+        : e.attempt?.message || e.reason;
   if ($('permissionTarget'))
     $('permissionTarget').textContent = permissionTarget(
       chosenScope,
@@ -1727,6 +1751,7 @@ function updateDecisions() {
       : '';
 }
 function consume(next: ClientState) {
+  if (!acceptsPublication(state, next)) return;
   state = next;
   const present = new Set(state.control.events.map((e) => state.control.generation + ':' + e.id));
   for (const key of localSubmitted) if (!present.has(key)) localSubmitted.delete(key);
@@ -1875,6 +1900,10 @@ if (!promptID) {
   });
 }
 window.flowgate.subscribe(consume);
+window.flowgate.onClock((clock) => {
+  const next = advanceClock(state, clock);
+  if (next && next !== state) consume(next);
+});
 void window.flowgate
   .snapshot()
   .then(consume)

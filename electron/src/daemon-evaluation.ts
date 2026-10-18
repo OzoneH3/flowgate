@@ -55,6 +55,10 @@ export class DaemonEvaluation {
       c.permissions?.can_control_evaluation === true &&
       !!c.capabilities?.includes(EVALUATION_CAPABILITY);
     const remainingMs = e ? Date.parse(e.stops_at) - this.backend.now() : NaN;
+    const continuousBusy =
+      !!c.protection &&
+      (c.protection.desired_mode !== 'monitoring' ||
+        ['starting', 'active', 'stopping', 'degraded'].includes(c.protection.state));
     const safeStopped =
       e &&
       ['stopped', 'failed'].includes(e.state) &&
@@ -95,6 +99,7 @@ export class DaemonEvaluation {
         canControl &&
         !busy &&
         safeStopped &&
+        !continuousBusy &&
         e?.readiness.state === 'ready' &&
         e.review.trim()
       ),

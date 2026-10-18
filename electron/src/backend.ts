@@ -71,6 +71,7 @@ export class Backend {
   private busy = { observer: false, control: false };
   private timers: NodeJS.Timeout[] = [];
   private stopped = false;
+  private publication = 0;
   private policyBusy = false;
   private policyEpoch = 0;
   private policySequence = -1n;
@@ -80,7 +81,7 @@ export class Backend {
   constructor(
     readonly observer: string,
     public controller: string | undefined,
-    private changed: (state: ClientState) => void,
+    private changed: (state: ClientState, clockOnly?: boolean) => void,
   ) {}
   start() {
     void this.pollObserver();
@@ -88,7 +89,7 @@ export class Backend {
     this.timers.push(
       setInterval(() => void this.pollObserver(), 1000),
       setInterval(() => void this.pollControl(), 750),
-      setInterval(() => this.emit(), 250),
+      setInterval(() => this.emit(true), 250),
     );
   }
   stop() {
@@ -103,6 +104,7 @@ export class Backend {
   view(): ClientState {
     return {
       ...this.state,
+      publication: this.publication,
       control: {
         ...this.state.control,
         serverNow: this.now(),
@@ -119,8 +121,11 @@ export class Backend {
       },
     };
   }
-  private emit() {
-    if (!this.stopped) this.changed(this.view());
+  private emit(clockOnly = false) {
+    if (!this.stopped) {
+      this.publication++;
+      this.changed(this.view(), clockOnly);
+    }
   }
   private mutationEpoch = 0;
   private controlFlight?: Promise<void>;
@@ -229,6 +234,7 @@ export class Backend {
         activity: r.activity,
         trafficMonitor: r.traffic_monitor,
         evaluation: r.evaluation,
+        protection: r.protection,
         permissions: r.permissions,
         capabilities: r.capabilities,
       };
@@ -312,6 +318,7 @@ export class Backend {
         snapshotStarted,
         trafficMonitor: r.traffic_monitor,
         evaluation: r.evaluation,
+        protection: r.protection,
         connected: true,
         message:
           r.mode === 'isolated-lab'
@@ -599,6 +606,7 @@ export class Backend {
     try {
       const r = await call(this.controller, {
         operation: 'decide',
+        generation: d.generation,
         ...(zoned
           ? {
               generation: d.generation,

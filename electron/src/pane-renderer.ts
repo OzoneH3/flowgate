@@ -1,3 +1,5 @@
+import { acceptsPublication } from './publication';
+import { PROTECTION_CAPABILITY, stateProtection } from './protection-model';
 import { ActivityPolicy } from './activity-policy';
 import { TrafficGraph } from './graph';
 import { DISPLAY_UNITS } from './display-units';
@@ -68,14 +70,23 @@ if (kind === 'chart') {
 }
 let signature = '';
 function consume(next: PaneFrame) {
-  if (frame && next.presentation.revision < frame.presentation.revision) return;
+  if (
+    frame &&
+    (next.presentation.revision < frame.presentation.revision ||
+      !acceptsPublication(frame.state, next.state))
+  )
+    return;
   frame = next;
   const p = next.presentation,
     s = next.state,
     r = p.row;
-  document.getElementById('paneEnforcement')!.textContent = !s.control.connected
-    ? 'Firewall · disconnected / unknown'
-    : `Firewall · ${s.control.enforcement?.state || 'unknown'}${s.control.enforcement?.state === 'active' ? ' · ' + s.control.enforcement.profile : ''}`;
+  document.getElementById('paneEnforcement')!.textContent = s.control.capabilities?.includes(
+    PROTECTION_CAPABILITY,
+  )
+    ? stateProtection(s)
+    : !s.control.connected
+      ? 'Firewall · disconnected / unknown'
+      : `Firewall · ${s.control.enforcement?.state || 'unknown'}${s.control.enforcement?.state === 'active' ? ' · ' + s.control.enforcement.profile : ''}`;
   units.value = p.unit;
   source.value = p.source;
   if (graph) {

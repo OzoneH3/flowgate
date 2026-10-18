@@ -152,6 +152,21 @@ try {
     });
   });
   const cdp = await main.context().newCDPSession(main);
+  if (process.env.PROFILE_CPU) {
+    await cdp.send('Profiler.enable');
+    await cdp.send('Profiler.start');
+    await app.evaluate(async () => {
+      const inspector = process.getBuiltinModule('node:inspector');
+      globalThis.__cpu = new inspector.Session();
+      __cpu.connect();
+      await new Promise((resolve, reject) =>
+        __cpu.post('Profiler.enable', (e) => (e ? reject(e) : resolve())),
+      );
+      await new Promise((resolve, reject) =>
+        __cpu.post('Profiler.start', (e) => (e ? reject(e) : resolve())),
+      );
+    });
+  }
   await cdp.send('Tracing.start', {
     categories: 'devtools.timeline,v8,disabled-by-default-devtools.timeline',
     transferMode: 'ReturnAsStream',
@@ -283,6 +298,26 @@ try {
     }
   }
   await sleep(1500);
+  if (process.env.PROFILE_CPU) {
+    fs.writeFileSync(
+      path.join(run, 'renderer.cpuprofile'),
+      JSON.stringify((await cdp.send('Profiler.stop')).profile),
+    );
+    fs.writeFileSync(
+      path.join(run, 'main.cpuprofile'),
+      JSON.stringify(
+        await app.evaluate(
+          () =>
+            new Promise((resolve, reject) =>
+              __cpu.post('Profiler.stop', (e, r) => {
+                __cpu.disconnect();
+                e ? reject(e) : resolve(r.profile);
+              }),
+            ),
+        ),
+      ),
+    );
+  }
   const done = cdp.waitForEvent ? null : null;
   const completed = new Promise((resolve) => cdp.once('Tracing.tracingComplete', resolve));
   await cdp.send('Tracing.end');

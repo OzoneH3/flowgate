@@ -1,3 +1,4 @@
+import { acceptsPublication } from './publication';
 import { applicationHeading } from './application-heading';
 import { ZONE_CAPABILITY, zoneLabel, type NetworkZone } from './network-zones';
 import { popupPosition } from './popup-position';
@@ -285,6 +286,7 @@ export class ActivityPolicy {
           .then((state) => {
             if (openSequence !== this.openSequence || !this.popup || this.row?.id !== targetId)
               return;
+            if (!acceptsPublication(this.state, state)) state = this.state!;
             this.checking = false;
             if (state.control.generation !== generation || !state.control.connected) {
               this.close(false);
@@ -345,6 +347,7 @@ export class ActivityPolicy {
         ?.focus({ preventScroll: true });
   }
   update(row: Row | undefined, state: ClientState) {
+    if (!acceptsPublication(this.state, state)) return;
     if (this.row?.id !== row?.id) {
       this.popup = undefined;
       if (this.pending && !['saving', 'unknown'].includes(this.pending.phase))
