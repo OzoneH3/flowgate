@@ -1,5 +1,124 @@
 # Integrated desktop and non-enforcing root monitor
 
+## Current: practical host incoming control restored (2026-10-18)
+
+Installed backend source **7ec89ad52c841212fa84610b8a0c37cf8a8961ea**, following
+**74b12144d7dd1334e52227778dfd9485579e6338**, on integrated UI/base **7760c3568895eec25ceb36222ebcbdfc00ec09fe**.
+The separate pane/chart frontend remains owned by the UI partner and is not merged.
+These runtime facts supersede the older absent-after-reboot reports below.
+
+- Root PID **1113279**, generation **3e696c4462fb777d9be0bc350a56df2e**.
+- Installed `.workspace/flowgate` SHA256
+  `761c4991b8047d79680e6fc98f996bd328e401bf68a0ee9ac1b80cc75d5baf0e`.
+- Primary `/run/flowgate-api/daemon.sock`, observer `.sock.monitor`, existing
+  `/var/lib/flowgate/rules.db`; UID1000 explicit administrator, separate traffic
+  control and bounded-evaluation grants. No competing database owner or service.
+- Enforcement **stopped**, last evaluation cleanup **confirmed**. Primary
+  `can_decide=false` outside evaluation; readonly companion cannot mutate/control.
+- UDP **active**, collector generation **de1c7cda058de0f47be901dcdf92cfa3**;
+  same generation throughout the successful evaluation and GUI exit. Coverage is
+  explicitly partial when unregistered-cookie operations are missed. Restoring and
+  diagnostic-upgrading the daemon introduced fresh baselines; no byte continuity
+  across those restarts is claimed.
+- Original stored inventory was empty; only test-owned rules were conditionally
+  deleted, final inventory empty. Existing database retained, never downgraded,
+  deleted or copied live without SQLite coordination. Durable inactive process
+  rules remain supported by the installed schema even though this inventory had none.
+- Capabilities include daemon-evaluation-v1, daemon-udp-monitor-v1, decision-log-v1,
+  process-instance-rules-v1, observed-rule-any-protocol-v1, policy-explanations-v1,
+  observed-rule-create-v1 and activity-initiation-v1.
+
+### Concrete fixes and actual host results
+
+Docker's standard opaque xt DNAT in ip/ip6 nat/DOCKER caused a readiness refusal.
+74b1214 recognizes that narrowly verified non-mark-writing target; unknown targets,
+mark conflicts and unsupported outgoing still refuse. Real disposable DNAT4/6
+receiver/readiness and fixed-peer TCP/UDP4/6 checks passed before deployment.
+
+First authorized host attempt showed an identifiable native TCP prompt, but Allow
+Once was followed by retained identity rejection and **no receiver delivery**.
+The evaluation was explicitly stopped and cleaned up. Isolated TCP Allow Once
+then passed; bounded live attribution probes were stable. No root cause was proven.
+7ec89ad adds precise retained-attribution failure reasons and a focused reproduction;
+it does **not** weaken identity revalidation or change verdict behavior.
+
+The user explicitly authorized one additional bounded evaluation. That run used
+session **2cd74fec91ffc0638dfcadcb7dd90bf0**, original deadline
+**2026-10-18T19:54:37.163577235+02:00** (300seconds, no renewal), and explicit Stop:
+
+- Real UID1000 sandboxed Wayland Electron connected and showed native executable,
+  PID, application/process identity, protocol, local/remote endpoints and incoming
+  initiation. The actual permission window's Allow Once TCP4 delivered one payload.
+- Separate UDP6 Deny Once delivered zero payloads.
+- Remembered application UDP4 rule bound executable/revision/UID, peer192.0.2.2
+  and local port24681; initial and subsequent matching attempts delivered.
+- Out-of-scope TCP6 and a different executable's UDP4 each prompted independently;
+  Deny prevented delivery. No guessed display/PID/port authorization.
+- Backend-previewed application UDP4 Block plus alpha-process UDP4 Allow delivered
+  to alpha; same-executable beta received nothing under application fallback.
+  These two rules were created via the authoritative API, not the GUI editor.
+- Final alpha counts TCP4=1, UDP4=3; all other fixture counters zero. Decision Log
+  remained accessible, healthy, and stopped recording on Stop. Its verdict records
+  corroborate rule selection; receiver counts separately establish delivery.
+- Stop confirmed, test rules removed, GUI exited: same root daemon and UDP
+  generation survived. Dedicated peer/receivers exited; fg-accept-h/fg-accept-p
+  removed. Read-only before/after coexistence exports match for every field except
+  the naturally changing conntrack-mark histogram: foreign firewall objects,
+  Tailscale preferences and inspected routing rules/table52 unchanged.
+
+Host evidence is private/local `.workspace/host-practical/`: `host-result.json`,
+`host-journey-output.log`, `native-permission-window.png`, `pending-*.json`,
+`after-final-coexistence.json`, `supervisor-2.log`; first failure under `attempt1/`
+and `first-attempt-decisions.json`. Do not publish unrelated pending-process data.
+The first failure remains a concrete intermittent limitation, not declared fixed
+because a second run passed. Unknown/shared, stale, exec-changed and unsupported
+namespace identities still refuse. Sampled Activity direction may be unknown even
+when the separate incoming packet attribution can identify a pending request.
+
+Focused race/vet passed daemon/queue/readiness/cmd packages; retained diagnostic
+race/vet passed. Existing exact-release UI, process, UDP accounting, watchdog and
+isolated outgoing receiver matrices were reused. No host outgoing control or real
+encrypted-tailnet receiver result is claimed. During incoming evaluation, unrelated
+new incoming attempts can also prompt/block; this is not a dedicated-port-only
+interception profile. No unrelated prompts were approved to manufacture evidence.
+
+### Launch, manual restoration and rollback
+
+Normal unprivileged application launch:
+
+```sh
+scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock
+```
+
+After reboot, manual startup is still required. With no existing daemon/database
+writer and after supported stale-resource inspection/recovery, the retained launch
+configuration is:
+
+```sh
+sudo -n /home/flowgate-user/Apps/flowgate/.workspace/flowgate serve \
+  --socket /run/flowgate-api/daemon.sock \
+  --database /var/lib/flowgate/rules.db --uid 1000 --administrator \
+  --allow-evaluation \
+  --udp-helper /home/flowgate-user/Apps/flowgate/.workspace/udp-collector \
+  --allow-traffic-control
+```
+
+`--allow-evaluation` grants bounded control; it does not Start enforcement.
+UDP Start is a separate generation-checked action after connection; do not assume
+serve automatically restores it. Use the existing UI Enable action if needed.
+Readiness then an explicit reviewed Start is needed for any future evaluation;
+this task has already used its two expressly authorized sessions. Do not renew.
+
+Compatible rollback artifact: `.workspace/host-practical/running-74b-rollback`,
+SHA256 `373c8daf0a38e205157c1776c845fc8519ee8abe008ba450b900fc4a805c9a2b`.
+For a separately authorized rollback: query actual generation/state, explicitly Stop
+any evaluation, use `monitor-stop --generation <actual-generation>`, wait for owned
+helper exit and socket/database-lock release, atomically install a copy of that
+artifact at the approved executable path, then use the exact serve arguments above.
+Never truncate a running inode; never remove process documents to downgrade.
+Restore UDP only if previously active, accepting a new generation and baseline.
+No rollback or daemon Stop is requested now; leave monitoring and UDP running.
+
 ## Current: Activity round 5 (menus, display Units and chart presentation)
 
 Exact clean UI release **f2f9ae43a1d0313fc7c420c46cee0c2107568f78**, based on

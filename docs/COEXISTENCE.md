@@ -117,7 +117,14 @@ The **profile compatibility checks now pass on the sampled host**. Actual activa
 queue bind, startup preservation, database ownership and coexistence are separate
 checks. Startup repeats profile inspection; a diagnostic pass is not authorization.
 
-## User-triggered monitor/database handoff — NOT executed on the host
+## Historical separate-controller handoff (superseded)
+
+The following records the earlier separate host-start workflow, not the current
+daemon-evaluation-v1 procedure. Do not stop the current monitor to Start its embedded
+evaluation or follow these old PID/generation values. Current deployment, actual
+host acceptance and Stop/rollback are in INTEGRATION.md.
+
+### Original handoff — not executed at that checkpoint
 
 The current monitor remains PID1973082, generation
 `5a559274aa006090cdc4bb5cd8faed47`, enforcement stopped, holding
@@ -201,3 +208,19 @@ race-free transaction across external writers and no promise that they cannot
 invalidate this profile after preflight. Keep the first evaluation bounded; inspect
 again after configuration changes. Existing watchdog/expiry/UDP/ownership/UI
 matrices were reused, not rerun. Root monitor stayed running throughout.
+
+
+## Next bounded outgoing increment (not implemented or authorized here)
+
+Current daemon lifecycle supports incoming only. Existing disposable outgoing
+TCP/UDP4/6 receiver evidence proves the engine, not host/Tailscale coexistence.
+A next increment must define an explicit outgoing/both capability/profile and
+activation grant, recheck current mark/NAT/routing compatibility, and distinguish
+root tailscaled encrypted transport from inner application policy. Use current
+native service identity and explicit administrator decisions; no blanket root,
+UDP, interface or tailnet Allow exception. Then verify packet/conntrack mark
+preservation and replies in disposable fixtures, followed only with separate host
+authorization by one bounded controlled existing-tailnet-peer receiver journey.
+Do not enroll a device, alter routing or change defaults to make it pass. Unknown
+writers, tunnel modes or routing interactions must still refuse. No estimate of
+host readiness is a substitute for that missing end-to-end evidence.

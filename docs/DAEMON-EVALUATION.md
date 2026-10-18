@@ -1,7 +1,8 @@
 # Daemon-owned incoming evaluation (`daemon-evaluation-v1`)
 
-Implemented for the existing root `serve` daemon; **not deployed or activated on
-the host in this increment**. One Go daemon continues to own Activity, rules.db,
+Implemented for the existing root `serve` daemon. The original implementation
+increment did not deploy or activate it; the later authorized host acceptance and
+current stopped runtime are recorded in INTEGRATION.md. One Go daemon continues to own Activity, rules.db,
 Decision Log and optional UDP accounting. Evaluation adds an NFQUEUE session, not
 a second controller/API/database owner. Electron remains unprivileged.
 

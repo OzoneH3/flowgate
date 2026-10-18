@@ -1,5 +1,31 @@
 # Continuation handoff
 
+## Current: host connection-control acceptance completed
+
+Backend/runtime **7ec89ad52c841212fa84610b8a0c37cf8a8961ea** on UI/base7760c35.
+PID1113279, generation3e696c4462fb777d9be0bc350a56df2e; UDP active generation
+de1c7cda058de0f47be901dcdf92cfa3; enforcement stopped, cleanup confirmed, rules0.
+Normal launch: `scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock`.
+No service/autostart; reboot still requires manual daemon restoration.
+
+Docker DNAT readiness compatibility fixed narrowly and tested. First host TCP Allow
+attempt failed retained identity validation; preserved as unresolved intermittent
+failure. Diagnostic-only reasons added, no weakened attribution. User-authorized
+second incoming evaluation passed actual TCP4 Allow, UDP6 Deny, scoped remembered
+UDP4, independent out-of-scope/different-executable prompts, process override and
+same-executable sibling application fallback. Receiver counts, not acknowledgements,
+establish effects. Explicit Stop and GUI exit preserved daemon/collector generation.
+All test rules/host peer/receivers removed; foreign firewall/routing exports unchanged
+apart from naturally varying conntrack histogram. Full evidence, precise scope,
+launch/rollback and remaining outgoing limitation: current section of INTEGRATION.md.
+
+UI owner01a1465b continues independent pane/chart work; no moving frontend merged.
+Held **isolated** pane-ui fixture generatione34a5a828c98416a810ea6ebeebbbb40 is
+exclusively delegated to that UI owner until explicit DONE. Ready/command paths:
+`.workspace/pane-ui/ready.json`. Exact backend6c68f8c, no collector/enforcement,
+alpha21/beta27. Backend retains cleanup responsibility after DONE; do not stop it
+while attached. Host acceptance ownership is released; host checks remain read-only.
+
 ## Current: Activity round 5 (menus, display Units and chart presentation)
 
 Exact clean UI release **f2f9ae43a1d0313fc7c420c46cee0c2107568f78**, based on
