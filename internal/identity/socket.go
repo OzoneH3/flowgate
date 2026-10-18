@@ -31,12 +31,13 @@ type Socket struct {
 	NetNS        string         `json:"netns"`
 }
 type Flow struct {
-	Protocol  string         `json:"protocol"`
-	Direction string         `json:"direction"`
-	Local     netip.AddrPort `json:"local"`
-	Remote    netip.AddrPort `json:"remote"`
-	NetNS     string         `json:"netns"`
-	Interface uint32         `json:"interface_index"`
+	NetworkScope NetworkScope   `json:"network_scope"`
+	Protocol     string         `json:"protocol"`
+	Direction    string         `json:"direction"`
+	Local        netip.AddrPort `json:"local"`
+	Remote       netip.AddrPort `json:"remote"`
+	NetNS        string         `json:"netns"`
+	Interface    uint32         `json:"interface_index"`
 }
 
 func (f Flow) Key() string {

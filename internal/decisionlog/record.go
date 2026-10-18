@@ -5,6 +5,7 @@
 package decisionlog
 
 import (
+	"flowgate/internal/identity"
 	"flowgate/internal/policy"
 	"time"
 )
@@ -25,12 +26,13 @@ var Sources = map[string]bool{
 }
 
 type Flow struct {
-	Direction string `json:"direction"`
-	Protocol  string `json:"protocol"`
-	Family    string `json:"family"`
-	Local     string `json:"local"`
-	Remote    string `json:"remote"`
-	Interface uint32 `json:"interface_index"`
+	NetworkScope identity.NetworkScope `json:"network_scope"`
+	Direction    string                `json:"direction"`
+	Protocol     string                `json:"protocol"`
+	Family       string                `json:"family"`
+	Local        string                `json:"local"`
+	Remote       string                `json:"remote"`
+	Interface    uint32                `json:"interface_index"`
 }
 type Application struct {
 	Key        string `json:"key"`
@@ -110,6 +112,9 @@ type Record struct {
 
 func Snapshot(r policy.Rule) *RuleSnapshot {
 	scope := "application"
+	if r.Filter.AllPrograms {
+		scope = "zone"
+	}
 	if !r.Filter.Process.IsZero() {
 		scope = "process"
 	}

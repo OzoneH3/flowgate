@@ -193,7 +193,7 @@ func remove(r Record) error {
 	return nil
 }
 func preflight() error { return preflightFor("incoming", false) }
-func preflightFor(profile string, administrator bool) error {
+func preflightFor(profile string, administrator bool, zones ...identity.NetworkZones) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	checks := readiness.FirewallFor(ctx, readiness.Default(), profile, administrator)
@@ -256,7 +256,7 @@ func RunProfile(ctx context.Context, dir, socket, database string, uid uint32, d
 }
 
 // Administrative permission is a privileged configuration grant, not request data.
-func RunProfileAuthorized(ctx context.Context, dir, socket, database string, uid uint32, duration, timeout time.Duration, profile string, administrator bool) error {
+func RunProfileAuthorized(ctx context.Context, dir, socket, database string, uid uint32, duration, timeout time.Duration, profile string, administrator bool, zones ...identity.NetworkZones) error {
 	if profile != "incoming" && profile != "both" {
 		return fmt.Errorf("profile must be incoming or both")
 	}
@@ -301,6 +301,9 @@ func RunProfileAuthorized(ctx context.Context, dir, socket, database string, uid
 		return err
 	}
 	e := daemon.New(timeout)
+	if len(zones) > 0 {
+		e.Zones = zones[0]
+	}
 	defer e.CloseProcessTargets()
 	e.Mode = "host-enforcement"
 	decisions, derr := decisionlog.Open(filepath.Join(filepath.Dir(database), "decisions.db"), e.Generation, e.Mode, true)
@@ -316,6 +319,7 @@ func RunProfileAuthorized(ctx context.Context, dir, socket, database string, uid
 		e.AdministratorUID = &uid
 	}
 	observation := monitor.New(time.Second)
+	observation.Zones = e.Zones
 	observationContext, stopObservation := context.WithCancel(ctx)
 	defer stopObservation()
 	go observation.Run(observationContext)

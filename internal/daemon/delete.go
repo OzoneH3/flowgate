@@ -38,7 +38,7 @@ func (e *Engine) DeleteRule(generation, id string, expected *uint64, uid uint32,
 		if r.ID != id {
 			continue
 		}
-		if !admin && r.Filter.UID != uid {
+		if !admin && (r.Filter.AllUIDs || r.Filter.UID != uid) {
 			return DeletedRule{}, mutationError("forbidden", "not authorized")
 		}
 		if r.Version != *expected {

@@ -52,7 +52,7 @@ func (e *Engine) baseRecord(v *Event, kind string) decisionlog.Record {
 	if v.Flow.Remote.Addr().Is4() {
 		family = "ipv4"
 	}
-	r.Flow = &decisionlog.Flow{Direction: v.Flow.Direction, Protocol: v.Flow.Protocol, Family: family, Local: v.Flow.Local.String(), Remote: v.Flow.Remote.String(), Interface: v.Flow.Interface}
+	r.Flow = &decisionlog.Flow{NetworkScope: v.Flow.NetworkScope, Direction: v.Flow.Direction, Protocol: v.Flow.Protocol, Family: family, Local: v.Flow.Local.String(), Remote: v.Flow.Remote.String(), Interface: v.Flow.Interface}
 	a := v.Attribution
 	r.Attribution = &decisionlog.Attribution{Status: clip(a.Status, 64), Reason: clip(a.Reason, 512)}
 	if a.Application != nil {

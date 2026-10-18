@@ -44,6 +44,8 @@ type TrafficManager interface {
 	Stop(...string) (udpaccount.Status, error)
 }
 type Engine struct {
+	Zones          identity.NetworkZones
+	zonePreviews   map[string]*zonePreview
 	processHandles map[identity.Instance]*identity.ProcessHandle
 	// Decisions records decision-time evidence; nil disables recording.
 	Decisions      *decisionlog.Log
@@ -80,7 +82,7 @@ type Engine struct {
 }
 
 func New(timeout time.Duration) *Engine {
-	return &Engine{Generation: randomID(), events: map[string]*Event{}, Resolve: identity.Resolve, Now: time.Now, Timeout: timeout, Max: 256}
+	return &Engine{Zones: identity.DefaultNetworkZones(), Generation: randomID(), events: map[string]*Event{}, Resolve: identity.Resolve, Now: time.Now, Timeout: timeout, Max: 256}
 }
 func randomID() string {
 	var b [16]byte
@@ -106,6 +108,7 @@ func (e *Engine) expire(now time.Time) {
 	}
 }
 func (e *Engine) Observe(f identity.Flow, token string) Event {
+	f.NetworkScope = e.Zones.Classify(f.Remote.Addr())
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	now := e.Now()
@@ -350,7 +353,7 @@ func (e *Engine) Rules(uid uint32, admin bool) []policy.Rule {
 	defer e.mu.Unlock()
 	out := []policy.Rule{}
 	for _, r := range e.rules {
-		if admin || r.Filter.UID == uid {
+		if admin || r.Filter.AllUIDs || r.Filter.UID == uid {
 			out = append(out, r)
 		}
 	}
@@ -368,7 +371,7 @@ func (e *Engine) ChangeRule(id, action string, uid uint32, admin bool) error {
 		if r.ID != id {
 			continue
 		}
-		if !admin && r.Filter.UID != uid {
+		if !admin && (r.Filter.AllUIDs || r.Filter.UID != uid) {
 			return fmt.Errorf("not authorized")
 		}
 		found = true

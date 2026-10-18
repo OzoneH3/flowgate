@@ -58,11 +58,12 @@ type DirectionPolicy struct {
 	Enforcement        PolicyCoverage  `json:"enforcement"`
 }
 type ApplicationPolicy struct {
-	Ref        string          `json:"ref"`
-	Identity   PolicyIdentity  `json:"identity"`
-	ProcessIDs []string        `json:"process_ids"`
-	Incoming   DirectionPolicy `json:"incoming"`
-	Outgoing   DirectionPolicy `json:"outgoing"`
+	ZoneFallbackRuleIDs []string        `json:"zone_fallback_rule_ids"`
+	Ref                 string          `json:"ref"`
+	Identity            PolicyIdentity  `json:"identity"`
+	ProcessIDs          []string        `json:"process_ids"`
+	Incoming            DirectionPolicy `json:"incoming"`
+	Outgoing            DirectionPolicy `json:"outgoing"`
 }
 type PolicyAssociation struct {
 	RowID             string `json:"row_id"`
@@ -80,15 +81,17 @@ type PolicySnapshot struct {
 	Meaning     string     `json:"meaning"`
 }
 type PolicyView struct {
-	Processes         []ProcessPolicy     `json:"processes"`
-	Snapshot          PolicySnapshot      `json:"snapshot"`
-	ActivitySequence  string              `json:"activity_sequence"`
-	ActivityCollected time.Time           `json:"activity_collected"`
-	ActivityAvailable bool                `json:"activity_available"`
-	Complete          bool                `json:"complete"`
-	Reason            string              `json:"reason,omitempty"`
-	Applications      []ApplicationPolicy `json:"applications"`
-	Rows              []PolicyAssociation `json:"rows"`
+	NetworkZones      identity.NetworkZones `json:"network_zones"`
+	Zones             []ZonePolicy          `json:"zones"`
+	Processes         []ProcessPolicy       `json:"processes"`
+	Snapshot          PolicySnapshot        `json:"snapshot"`
+	ActivitySequence  string                `json:"activity_sequence"`
+	ActivityCollected time.Time             `json:"activity_collected"`
+	ActivityAvailable bool                  `json:"activity_available"`
+	Complete          bool                  `json:"complete"`
+	Reason            string                `json:"reason,omitempty"`
+	Applications      []ApplicationPolicy   `json:"applications"`
+	Rows              []PolicyAssociation   `json:"rows"`
 }
 type PolicyExplanation struct {
 	EventID            string          `json:"event_id"`
@@ -174,7 +177,7 @@ func summaryFor(a PolicyIdentity, direction, mode string, h *EnforcementStatus, 
 	active := []policy.Rule{}
 	for _, r := range rules {
 		f := r.Filter
-		if !f.Process.IsZero() {
+		if !f.Process.IsZero() || f.AllPrograms {
 			continue
 		}
 		if f.Application != a.Key || f.Revision != a.Revision || f.UID != a.UID || f.Direction != direction {
@@ -194,7 +197,7 @@ func summaryFor(a PolicyIdentity, direction, mode string, h *EnforcementStatus, 
 		out.Active++
 		actions[r.Action] = true
 		active = append(active, r)
-		if f.Remote == "" && (f.RemoteAddress == "" || f.RemoteAddress == "*") && f.LocalPort == 0 && f.RemotePort == 0 {
+		if f.NetworkZone == "" && f.Remote == "" && (f.RemoteAddress == "" || f.RemoteAddress == "*") && f.LocalPort == 0 && f.RemotePort == 0 {
 			broad[f.Protocol] = true
 			if f.Protocol == "*" {
 				broad["tcp"], broad["udp"] = true, true
@@ -237,7 +240,7 @@ func (e *Engine) snapshotLocked(uid uint32, admin bool, h *EnforcementStatus, ex
 	now := e.Now()
 	rules := []policy.Rule{}
 	for _, r := range e.rules {
-		if admin || r.Filter.UID == uid {
+		if admin || r.Filter.AllUIDs || r.Filter.UID == uid {
 			rules = append(rules, r)
 		}
 	}
@@ -257,11 +260,11 @@ func (e *Engine) snapshotLocked(uid uint32, admin bool, h *EnforcementStatus, ex
 		state, profile = h.State, h.Profile
 	}
 	encoded, _ := json.Marshal(struct {
-		Generation, Mode, State, Profile string
-		UID                              uint32
-		Admin                            bool
-		Rules                            []PolicyRuleRef
-	}{e.Generation, e.Mode, state, profile, uid, admin, refs})
+		Generation, Mode, State, Profile, ZoneRevision string
+		UID                                            uint32
+		Admin                                          bool
+		Rules                                          []PolicyRuleRef
+	}{e.Generation, e.Mode, state, profile, e.Zones.Revision, uid, admin, refs})
 	if len(encoded) > 256*1024 {
 		return PolicySnapshot{}, nil, mutationError("limit_exceeded", "Policy metadata exceeds bounded explanation size")
 	}
@@ -293,7 +296,7 @@ func (e *Engine) PolicyView(generation, expected string, uid uint32, admin bool,
 	if err != nil {
 		return PolicyView{}, err
 	}
-	out := PolicyView{Snapshot: snapshot, ActivitySequence: strconv.FormatUint(activity.Sequence, 10), ActivityCollected: activity.Collected, Applications: []ApplicationPolicy{}, Rows: []PolicyAssociation{}, Complete: activity.Complete}
+	out := PolicyView{NetworkZones: e.Zones, Zones: e.zoneViews(rules, h, snapshot.EvaluatedAt), Snapshot: snapshot, ActivitySequence: strconv.FormatUint(activity.Sequence, 10), ActivityCollected: activity.Collected, Applications: []ApplicationPolicy{}, Rows: []PolicyAssociation{}, Complete: activity.Complete}
 	now := snapshot.EvaluatedAt
 	var processComplete bool
 	out.Processes, processComplete = e.processViewsLocked(activity, rules, h, now)
@@ -335,7 +338,7 @@ func (e *Engine) PolicyView(generation, expected string, uid uint32, admin bool,
 				out.Rows = append(out.Rows, assoc)
 				continue
 			}
-			group = &ApplicationPolicy{Ref: ref, Identity: a, ProcessIDs: []string{}, Incoming: summaryFor(a, "incoming", e.Mode, h, rules, now), Outgoing: summaryFor(a, "outgoing", e.Mode, h, rules, now)}
+			group = &ApplicationPolicy{Ref: ref, Identity: a, ZoneFallbackRuleIDs: zoneFallbackIDs(rules, a.UID), ProcessIDs: []string{}, Incoming: summaryFor(a, "incoming", e.Mode, h, rules, now), Outgoing: summaryFor(a, "outgoing", e.Mode, h, rules, now)}
 			groups[ref] = group
 		}
 		seen := false
@@ -406,7 +409,7 @@ func (e *Engine) PolicyExplain(generation, expected string, eventIDs []string, u
 		result.Status = "evaluated"
 		result.ConfiguredAction = action
 		result.SelectedRule = rule
-		result.Reason = "Current stored policy evaluated for recorded event identity/endpoints; ownership not revalidated; no historical verdict or live delivery claim. Matching process tier overrides application tier; within each tier highest priority wins, then smallest rule ID"
+		result.Reason = "Current stored policy evaluated for recorded event identity/endpoints; ownership not revalidated; no historical verdict or live delivery claim. Matching process tier overrides application tier, which overrides all-program zone tier; within each tier highest priority wins, then smallest rule ID"
 		if a := found.Attribution.Application; a != nil && found.Attribution.Principal() != nil {
 			result.Identity = &PolicyIdentity{a.Key, a.Revision, found.Attribution.Principal().UID}
 		}

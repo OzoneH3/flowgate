@@ -18,6 +18,8 @@ type ObservedTarget struct {
 // Pointers require explicit wildcard ports/expiry rather than omitted fields
 // silently becoming an application-wide persistent permission.
 type ObservedDraft struct {
+	NetworkZone   string     `json:"network_zone,omitempty"`
+	ZoneRevision  string     `json:"zone_revision,omitempty"`
 	TargetScope   string     `json:"target_scope,omitempty"`
 	Direction     string     `json:"direction"`
 	Protocol      string     `json:"protocol"`
@@ -102,6 +104,9 @@ func (e *Engine) pruneCreationLocked(now time.Time) {
 	e.pruneHandlesLocked()
 }
 func (e *Engine) PreviewObservedRule(generation string, target ObservedTarget, draft ObservedDraft, uid uint32, admin bool, h *EnforcementStatus) (ObservedPreview, error) {
+	if err := e.zoneRevision(draft.NetworkZone, draft.ZoneRevision); err != nil {
+		return ObservedPreview{}, err
+	}
 	raw, err := draftBytes(draft)
 	if err != nil {
 		return ObservedPreview{}, err
@@ -167,7 +172,7 @@ func (e *Engine) PreviewObservedRule(generation string, target ObservedTarget, d
 	if len(e.rules) >= 256 {
 		return ObservedPreview{}, mutationError("limit_exceeded", "Rule capacity reached")
 	}
-	candidate := policy.Rule{ID: "user:" + randomID(), Version: 1, Created: now, Executable: current.Application.Executable, Priority: 100, Action: draft.Action, Disabled: draft.Disabled, Expires: *draft.Expires, Filter: policy.Filter{Application: current.Application.Key, Revision: current.Application.Revision, UID: current.UID, Direction: draft.Direction, Protocol: draft.Protocol, RemoteAddress: draft.RemoteAddress, LocalPort: *draft.LocalPort, RemotePort: *draft.RemotePort}}
+	candidate := policy.Rule{ID: "user:" + randomID(), Version: 1, Created: now, Executable: current.Application.Executable, Priority: 100, Action: draft.Action, Disabled: draft.Disabled, Expires: *draft.Expires, Filter: policy.Filter{NetworkZone: draft.NetworkZone, Application: current.Application.Key, Revision: current.Application.Revision, UID: current.UID, Direction: draft.Direction, Protocol: draft.Protocol, RemoteAddress: draft.RemoteAddress, LocalPort: *draft.LocalPort, RemotePort: *draft.RemotePort}}
 	if processScope(draft) == "process" {
 		if _, err = e.attachProcessTarget(current, &candidate); err != nil {
 			return ObservedPreview{}, err
@@ -186,6 +191,9 @@ func (e *Engine) PreviewObservedRule(generation string, target ObservedTarget, d
 	return v, nil
 }
 func (e *Engine) SaveObservedRule(generation, token string, draft ObservedDraft, uid uint32, admin bool) (policy.Rule, string, bool, error) {
+	if err := e.zoneRevision(draft.NetworkZone, draft.ZoneRevision); err != nil {
+		return policy.Rule{}, "", false, err
+	}
 	raw, err := draftBytes(draft)
 	if err != nil {
 		return policy.Rule{}, "", false, err

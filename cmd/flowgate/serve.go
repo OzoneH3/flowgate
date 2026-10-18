@@ -33,6 +33,9 @@ func openDecisionLog(path, generation, mode string, recording bool) *decisionlog
 
 func serveCommand(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+	var localZones, internetZones zonePrefixes
+	fs.Var(&localZones, "zone-local", "repeatable administrator-defined Local Network prefix")
+	fs.Var(&internetZones, "zone-internet", "repeatable administrator-defined Internet policy prefix, not connectivity proof")
 	socket := fs.String("socket", "", "existing root-owned API directory + new private socket")
 	database := fs.String("database", "", "SQLite file in an existing secure root-owned directory")
 	uid := fs.Int("uid", -1, "explicit desktop peer UID")
@@ -74,7 +77,12 @@ func serveCommand(args []string) error {
 	if err != nil {
 		return err
 	}
+	zones, err := configuredZones(localZones, internetZones)
+	if err != nil {
+		return err
+	}
 	e := daemon.New(30 * time.Second)
+	e.Zones = zones
 	defer e.CloseProcessTargets()
 	peer := uint32(*uid)
 	e.APIUID = &peer
@@ -109,6 +117,7 @@ func serveCommand(args []string) error {
 		e.TrafficControlUID = &peer
 	}
 	observer := monitor.New(time.Second)
+	observer.Zones = zones
 	observer.UDP = traffic.Snapshot
 	e.Activity = observer.Snapshot
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)

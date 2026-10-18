@@ -4,7 +4,7 @@ Run through scripts/lab.sh. Never opens host endpoints or deployed executable.
 """
 import argparse,json,os,pathlib,socket,subprocess,time,sys
 ROOT=pathlib.Path(__file__).resolve().parents[1]
-p=argparse.ArgumentParser();p.add_argument('--binary',required=True);p.add_argument('--native',required=True);p.add_argument('--run',required=True);p.add_argument('--hold',action='store_true');p.add_argument('--any-protocol',action='store_true');a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--binary',required=True);p.add_argument('--native',required=True);p.add_argument('--run',required=True);p.add_argument('--hold',action='store_true');p.add_argument('--any-protocol',action='store_true');p.add_argument('--zones',action='store_true');a=p.parse_args()
 assert os.environ['FLOWGATE_PARENT_NETNS']!=os.readlink('/proc/self/ns/net')
 RUN=pathlib.Path(a.run).resolve();assert RUN.is_relative_to(ROOT/'.workspace');RUN.mkdir(mode=0o700,parents=True)
 for d in ['api','data','state']:(RUN/d).mkdir(mode=0o700)
@@ -70,6 +70,7 @@ def start():
  global backend
  with (RUN/'daemon.log').open('a')as f:
   args=[BIN,'serve','--socket',API,'--database',str(RUN/'data/rules.db'),'--uid','0','--administrator']if a.hold else[BIN,'host-start','--state',str(RUN/'state'),'--socket',API,'--database',str(RUN/'data/rules.db'),'--uid','0','--administrator','--profile','both','--duration','300s','--timeout','4s']
+  if a.zones:args+=['--zone-local','10.79.0.0/24','--zone-internet','fd79::/64']
   backend=subprocess.Popen(args,stdout=f,stderr=f)
  def ready():
   if backend.poll()is not None:raise RuntimeError((RUN/'daemon.log').read_text())
@@ -102,6 +103,9 @@ try:
    elif op=='exec':children[name].stdin.write('{"op":"exec"}\n');children[name].stdin.flush();result={'exec':name}
    else:result=ask(children[name],op)
    (RUN/'command-result.json').write_text(json.dumps(result))
+ elif a.zones:
+  from zone_policy_acceptance import check
+  check(globals())
  elif a.any_protocol:
   assert 'observed-rule-any-protocol-v1' in initial['capabilities']
   for direction in ['incoming','outgoing']:

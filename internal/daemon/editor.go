@@ -41,6 +41,12 @@ func duplicate(rules []policy.Rule, r policy.Rule) string {
 func RuleSentence(r policy.Rule) string {
 	f := r.Filter
 	target := "all process instances"
+	if f.AllPrograms {
+		target = "all programs for principal UID " + fmt.Sprint(f.UID)
+		if f.AllUIDs {
+			target = "all programs/all principal UIDs (administrator machine scope)"
+		}
+	}
 	if !f.Process.IsZero() {
 		target = processLabel(f.Process)
 	}
@@ -69,7 +75,15 @@ func RuleSentence(r policy.Rule) string {
 	if r.Disabled {
 		state = "disabled"
 	}
-	return fmt.Sprintf("Target: %s. Matching process rules override application rules; within each tier highest priority then smallest ID. %s %s %s for application %s, revision %s, UID %d; remote %s, local port %s, remote port %s; any local address/interface; %s (%s). Priority %d; highest priority wins, then smallest rule ID. Approved TCP connections continue.", target, strings.ToUpper(r.Action), f.Direction, protocolLabel(f.Protocol), f.Application, f.Revision, f.UID, address, port(f.LocalPort), port(f.RemotePort), expiry, state, r.Priority)
+	zone := "Any network zone"
+	if f.NetworkZone != "" {
+		zone = "configured " + f.NetworkZone + " zone"
+	}
+	identityText := fmt.Sprintf("application %s, revision %s, UID %d", f.Application, f.Revision, f.UID)
+	if f.AllPrograms {
+		identityText = target
+	}
+	return zone + ". " + fmt.Sprintf("Target: %s. Matching process rules override application rules, which override all-program zone rules; within each tier highest priority then smallest ID. %s %s %s for %s; remote %s, local port %s, remote port %s; any local address/interface; %s (%s). Priority %d; highest priority wins, then smallest rule ID. Approved TCP connections continue.", target, strings.ToUpper(r.Action), f.Direction, protocolLabel(f.Protocol), identityText, address, port(f.LocalPort), port(f.RemotePort), expiry, state, r.Priority)
 }
 
 // EditRule is used for both authoritative preview and commit. Creation derives
@@ -97,7 +111,7 @@ func (e *Engine) EditRule(id, eventID string, expected *uint64, candidate policy
 		}
 		old := e.rules[index]
 		expiryUnchanged = candidate.Expires.Equal(old.Expires)
-		if !admin && old.Filter.UID != uid {
+		if !admin && (old.Filter.AllUIDs || old.Filter.UID != uid) {
 			return policy.Rule{}, "", mutationError("forbidden", "not authorized")
 		}
 		if expected == nil || *expected != old.Version {
@@ -105,6 +119,9 @@ func (e *Engine) EditRule(id, eventID string, expected *uint64, candidate policy
 		}
 		if old.Filter.Protocol == "*" && candidate.Filter.Protocol != "*" {
 			return policy.Rule{}, "", mutationError("protocol_scope_changed", "Existing TCP+UDP rule must preserve protocol *; use a fresh observed preview to create a different protocol scope")
+		}
+		if candidate.Filter.NetworkZone != old.Filter.NetworkZone || candidate.Filter.AllPrograms != old.Filter.AllPrograms || candidate.Filter.AllUIDs != old.Filter.AllUIDs {
+			return policy.Rule{}, "", mutationError("zone_scope_changed", "Zone and principal scope are immutable on edit; create a fresh reviewed target to change scope")
 		}
 		if candidate.Filter.Process != old.Filter.Process {
 			return policy.Rule{}, "", mutationError("immutable_target", "Process/application target is immutable; obtain a new creation preview")
@@ -158,6 +175,9 @@ func (e *Engine) EditRule(id, eventID string, expected *uint64, candidate policy
 			return policy.Rule{}, "", mutationError("unsupported_process", "Create process rules through verified Activity preview")
 		}
 		basis := policy.Remembered(found.Flow, a)
+		if candidate.Filter.AllPrograms || candidate.Filter.AllUIDs {
+			return policy.Rule{}, "", mutationError("invalid_request", "All-program creation requires a zone preview")
+		}
 		if candidate.Filter.Application != basis.Application || candidate.Filter.Revision != basis.Revision || candidate.Filter.UID != basis.UID || candidate.Filter.Direction != basis.Direction {
 			return policy.Rule{}, "", fmt.Errorf("identity must match the pending application/revision/UID/direction")
 		}
@@ -233,6 +253,9 @@ func (e *Engine) reviewRuleLocked(candidate policy.Rule, now time.Time, expiryUn
 	if !candidate.Filter.Process.IsZero() {
 		candidate.Schema = 3
 	}
+	if candidate.Filter.NetworkZone != "" || candidate.Filter.AllPrograms {
+		candidate.Schema = 4
+	}
 	candidate.Filter = canonicalFilter(candidate.Filter)
 	if err := candidate.Validate(); err != nil {
 		return policy.Rule{}, "", err
@@ -241,6 +264,9 @@ func (e *Engine) reviewRuleLocked(candidate policy.Rule, now time.Time, expiryUn
 		return policy.Rule{}, "", fmt.Errorf("duplicate scope already exists as %s; edit that rule explicitly", other)
 	}
 	sentence := RuleSentence(candidate)
+	if candidate.Filter.NetworkZone != "" {
+		sentence += " Zone definition " + e.Zones.Model + " revision " + e.Zones.Revision + "; rules follow explicitly configured definitions after daemon restart; unknown peers do not match. Zone classification is not zone byte accounting."
+	}
 	count := 0
 	for _, other := range e.rules {
 		if other.ID == candidate.ID || other.Disabled || (!other.Expires.IsZero() && !now.Before(other.Expires)) {
@@ -262,7 +288,7 @@ func (e *Engine) reviewRuleLocked(candidate policy.Rule, now time.Time, expiryUn
 func filtersOverlap(a, b policy.Filter) bool {
 	a = canonicalFilter(a)
 	b = canonicalFilter(b)
-	if a.Application != b.Application || a.Revision != b.Revision || a.UID != b.UID || a.Direction != b.Direction || !policy.ProtocolsOverlap(a.Protocol, b.Protocol) {
+	if (!a.AllPrograms && !b.AllPrograms && (a.Application != b.Application || a.Revision != b.Revision)) || (!a.AllUIDs && !b.AllUIDs && a.UID != b.UID) || (a.NetworkZone != "" && b.NetworkZone != "" && a.NetworkZone != b.NetworkZone) || a.Direction != b.Direction || !policy.ProtocolsOverlap(a.Protocol, b.Protocol) {
 		return false
 	}
 	if !a.Process.IsZero() && !b.Process.IsZero() && a.Process != b.Process {

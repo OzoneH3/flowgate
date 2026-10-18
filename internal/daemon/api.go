@@ -20,6 +20,8 @@ import (
 )
 
 type Request struct {
+	ZoneTarget          *ZoneTarget     `json:"zone_target,omitempty"`
+	ZoneRevision        string          `json:"zone_revision,omitempty"`
 	EvaluationID        string          `json:"evaluation_id,omitempty"`
 	RequestID           string          `json:"request_id,omitempty"`
 	Profile             string          `json:"profile,omitempty"`
@@ -49,6 +51,8 @@ type EnforcementStatus struct {
 	StopsAt time.Time `json:"stops_at"`
 }
 type Response struct {
+	NetworkZones    *identity.NetworkZones     `json:"network_zones,omitempty"`
+	ZonePreview     *ZonePreview               `json:"zone_preview,omitempty"`
 	RuleStates      map[string]RuleTargetState `json:"rule_states,omitempty"`
 	Evaluation      *EvaluationStatus          `json:"evaluation,omitempty"`
 	DecisionLog     *decisionlog.Page          `json:"decision_log,omitempty"`
@@ -212,6 +216,8 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						r.Error = "invalid v1 request"
 						r.ErrorCode = "invalid_request"
 					} else {
+						r.NetworkZones = &e.Zones
+						r.Capabilities = append(r.Capabilities, NetworkZoneCapability)
 						switch q.Operation {
 						case "evaluation-readiness", "evaluation-start", "evaluation-stop":
 							if e.Evaluation == nil {
@@ -225,6 +231,8 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 							} else {
 								v := e.Evaluation.Status()
 								var err error
+								r.NetworkZones = &e.Zones
+								r.Capabilities = append(r.Capabilities, NetworkZoneCapability)
 								switch q.Operation {
 								case "evaluation-readiness":
 									v = e.Evaluation.Readiness()
@@ -279,6 +287,8 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 							} else {
 								var s udpaccount.Status
 								var err error
+								r.NetworkZones = &e.Zones
+								r.Capabilities = append(r.Capabilities, NetworkZoneCapability)
 								switch q.Operation {
 								case "traffic-start":
 									s, err = e.Traffic.Start(q.CollectorGeneration)
@@ -293,6 +303,34 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 									r.ErrorCode, r.Error = "collector_unavailable", err.Error()
 									if errors.Is(err, udpaccount.ErrCollectorGeneration) {
 										r.ErrorCode = "collector_conflict"
+									}
+								}
+							}
+						case "zone-rule-preview", "zone-rule-save":
+							if readonly || !permissions.CanManageRules {
+								r.ErrorCode, r.Error = "read_only", "Rule management unavailable"
+							} else if q.ZoneTarget == nil || q.ObservedDraft == nil {
+								r.ErrorCode, r.Error = "invalid_request", "Explicit zone_target/observed_draft required"
+							} else {
+								var err error
+								if q.Operation == "zone-rule-preview" {
+									var v ZonePreview
+									v, err = e.PreviewZoneRule(q.Generation, q.ZoneRevision, *q.ZoneTarget, *q.ObservedDraft, cred.Uid, admin, r.Enforcement)
+									if err == nil {
+										r.ZonePreview = &v
+									}
+								} else {
+									var v policy.Rule
+									v, r.ScopePreview, r.Replayed, err = e.SaveZoneRule(q.Generation, q.ZoneRevision, q.PreviewToken, *q.ZoneTarget, *q.ObservedDraft, cred.Uid, admin)
+									if err == nil {
+										r.SavedRule = &v
+									}
+								}
+								if err != nil {
+									r.ErrorCode, r.Error = "invalid_request", err.Error()
+									var typed *RuleMutationError
+									if errors.As(err, &typed) {
+										r.ErrorCode = typed.Code
 									}
 								}
 							}
@@ -416,6 +454,12 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 								}
 							}
 						case "rule-preview", "rule-save":
+							if q.Rule != nil && q.Rule.Filter.NetworkZone != "" {
+								if er := e.zoneRevision(q.Rule.Filter.NetworkZone, q.ZoneRevision); er != nil {
+									r.ErrorCode, r.Error = "zone_conflict", er.Error()
+									break
+								}
+							}
 							if r.ReadOnly {
 								r.Error = "read-only API"
 								r.ErrorCode = "read_only"

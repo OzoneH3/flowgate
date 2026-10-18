@@ -5,9 +5,10 @@ import "flowgate/internal/identity"
 // AdministratorUID is configured by a privileged daemon before serving, never
 // supplied in a request. Each endpoint still authenticates SO_PEERCRED and 0600.
 type Permissions struct {
-	CanViewMeasurements  bool `json:"can_view_measurements"`
-	CanControlTraffic    bool `json:"can_control_traffic"`
-	CanControlEvaluation bool `json:"can_control_evaluation"`
+	CanManageMachineRules bool `json:"can_manage_machine_rules"`
+	CanViewMeasurements   bool `json:"can_view_measurements"`
+	CanControlTraffic     bool `json:"can_control_traffic"`
+	CanControlEvaluation  bool `json:"can_control_evaluation"`
 
 	Role             string `json:"role"`
 	ObservationScope string `json:"observation_scope"`
@@ -35,6 +36,7 @@ func (e *Engine) permissions(uid uint32, readonly bool) Permissions {
 		p.ObservationScope = "machine"
 		p.PolicyScope = "machine"
 	}
+	p.CanManageMachineRules = p.CanManageRules && e.administrator(uid)
 	return p
 }
 

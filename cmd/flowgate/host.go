@@ -17,6 +17,9 @@ import (
 func hostCommand() error {
 	op := os.Args[1]
 	fs := flag.NewFlagSet(op, flag.ContinueOnError)
+	var localZones, internetZones zonePrefixes
+	fs.Var(&localZones, "zone-local", "Local Network configured prefix")
+	fs.Var(&internetZones, "zone-internet", "Internet configured policy prefix")
 	state := fs.String("state", "", "existing private daemon-owned state directory")
 	database := fs.String("database", "", "durable SQLite path; default STATE/rules.db")
 	socket := fs.String("socket", "", "GUI user's private API socket path")
@@ -28,6 +31,10 @@ func hostCommand() error {
 	action := fs.String("action", "", "session start/status/stop/recover")
 	token := fs.String("token", "", "internal watchdog generation")
 	if err := fs.Parse(os.Args[2:]); err != nil {
+		return err
+	}
+	zones, err := configuredZones(localZones, internetZones)
+	if err != nil {
 		return err
 	}
 	if op == "host-session" {
@@ -59,6 +66,12 @@ func hostCommand() error {
 			if *administrator {
 				args = append(args, "--administrator")
 			}
+			for _, p := range localZones {
+				args = append(args, "--zone-local", p)
+			}
+			for _, p := range internetZones {
+				args = append(args, "--zone-internet", p)
+			}
 			return syscall.Exec(target, args, []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C.UTF-8"})
 		case "status":
 			v, err := hostfirewall.Status(*state)
@@ -84,7 +97,7 @@ func hostCommand() error {
 		}
 		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer cancel()
-		return hostfirewall.RunProfileAuthorized(ctx, *state, *socket, *database, uint32(*uid), *duration, *timeout, *profile, *administrator)
+		return hostfirewall.RunProfileAuthorized(ctx, *state, *socket, *database, uint32(*uid), *duration, *timeout, *profile, *administrator, zones)
 	case "host-stop":
 		return hostfirewall.StopGeneration(*state, *token)
 	case "host-recover":

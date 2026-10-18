@@ -9,6 +9,7 @@ import (
 )
 
 type ProcessPolicy struct {
+	ZoneFallbackRuleIDs []string          `json:"zone_fallback_rule_ids"`
 	Ref                 string            `json:"ref"`
 	ProcessID           string            `json:"process_id"`
 	ApplicationRef      string            `json:"application_ref"`
@@ -128,7 +129,7 @@ func (e *Engine) processViewsLocked(activity identity.ActivitySnapshot, rules []
 		if ref == "" {
 			ref = fmt.Sprintf("observed:%s:%d:%s", e.Generation, b.PID, b.Start)
 		}
-		out = append(out, ProcessPolicy{Ref: ref, ProcessID: fmt.Sprintf("%d:%s", b.PID, b.Start), ApplicationRef: appPolicyRef(a), Target: b, State: s.State, Reason: s.Reason, Incoming: e.processSummaryLocked(a, b, "incoming", h, rules, now, s), Outgoing: e.processSummaryLocked(a, b, "outgoing", h, rules, now, s), ApplicationIncoming: summaryFor(a, "incoming", e.Mode, h, rules, now), ApplicationOutgoing: summaryFor(a, "outgoing", e.Mode, h, rules, now), Precedence: "matching-process-before-application"})
+		out = append(out, ProcessPolicy{ZoneFallbackRuleIDs: zoneFallbackIDs(rules, a.UID), Ref: ref, ProcessID: fmt.Sprintf("%d:%s", b.PID, b.Start), ApplicationRef: appPolicyRef(a), Target: b, State: s.State, Reason: s.Reason, Incoming: e.processSummaryLocked(a, b, "incoming", h, rules, now, s), Outgoing: e.processSummaryLocked(a, b, "outgoing", h, rules, now, s), ApplicationIncoming: summaryFor(a, "incoming", e.Mode, h, rules, now), ApplicationOutgoing: summaryFor(a, "outgoing", e.Mode, h, rules, now), Precedence: "matching-process-before-application-before-zone"})
 	}
 	return out, complete
 }
@@ -138,7 +139,7 @@ func (e *Engine) RuleInventory(uid uint32, admin bool) ([]policy.Rule, map[strin
 	rules := []policy.Rule{}
 	states := map[string]RuleTargetState{}
 	for _, r := range e.rules {
-		if admin || r.Filter.UID == uid {
+		if admin || r.Filter.AllUIDs || r.Filter.UID == uid {
 			rules = append(rules, r)
 			states[r.ID] = e.targetStateLocked(r)
 		}

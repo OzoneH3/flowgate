@@ -16,6 +16,9 @@ type RuleTargetState struct {
 }
 
 func (e *Engine) targetStateLocked(r policy.Rule) RuleTargetState {
+	if r.Filter.AllPrograms {
+		return RuleTargetState{"zone", "active", "All-program configured zone; process and application tiers override; unsafe attribution still blocks"}
+	}
 	b := r.Filter.Process
 	if b.IsZero() {
 		return RuleTargetState{"application", "active", "Application/revision/UID rule, all process instances; enabled and expiry are separate"}
@@ -37,7 +40,7 @@ func (e *Engine) RuleStates(uid uint32, admin bool) map[string]RuleTargetState {
 	defer e.mu.Unlock()
 	out := map[string]RuleTargetState{}
 	for _, r := range e.rules {
-		if admin || r.Filter.UID == uid {
+		if admin || r.Filter.AllUIDs || r.Filter.UID == uid {
 			out[r.ID] = e.targetStateLocked(r)
 		}
 	}
@@ -53,6 +56,7 @@ func (e *Engine) activeRulesLocked(rules []policy.Rule) []policy.Rule {
 	return out
 }
 func (e *Engine) evaluateLocked(rules []policy.Rule, f identity.Flow, a identity.Attribution, now time.Time) (string, string, []string) {
+	f.NetworkScope = e.Zones.Classify(f.Remote.Addr())
 	return policy.EvaluateSession(e.activeRulesLocked(rules), f, a, now, e.Generation)
 }
 func (e *Engine) pruneHandlesLocked() {
