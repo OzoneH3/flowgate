@@ -1,3 +1,9 @@
+import {
+  parseProtection,
+  type ProtectionStatus,
+  type ProtectionTokens,
+  type ProtectionView,
+} from './protection-model';
 import { parseConnectionZone } from './connection-presentation';
 import {
   parseNetworkZones,
@@ -161,6 +167,7 @@ export interface ExtendedState {
 export interface Permissions {
   can_manage_machine_rules?: boolean;
   can_control_evaluation?: boolean;
+  can_control_protection?: boolean;
   can_view_measurements?: boolean;
   can_control_traffic?: boolean;
   role: 'user' | 'administrator';
@@ -178,6 +185,7 @@ export interface Reply {
     scope_preview: string;
     network_zones: NetworkZones;
   };
+  protection?: ProtectionStatus;
   evaluation?: DaemonEvaluationStatus;
   decision_log?: unknown;
   decision_record?: unknown;
@@ -217,6 +225,7 @@ export interface ViewEvent extends RequestEvent {
   attempt?: Attempt;
 }
 export interface ClientState {
+  publication?: number;
   observation: {
     connected: boolean;
     message: string;
@@ -225,10 +234,12 @@ export interface ClientState {
     capabilities?: string[];
     permissions?: Permissions;
     trafficMonitor?: TrafficMonitor;
+    protection?: ProtectionStatus;
     evaluation?: DaemonEvaluationStatus;
   };
   control: {
     trafficMonitor?: TrafficMonitor;
+    protection?: ProtectionStatus;
     evaluation?: DaemonEvaluationStatus;
     snapshotStarted?: number;
     connected: boolean;
@@ -295,8 +306,13 @@ export interface Bridge {
     profile?: 'incoming' | 'both' | EvaluationTokens,
   ): Promise<void>;
   evaluationState(): Promise<EvaluationState>;
+  protection(action: 'status' | 'start' | 'stop', tokens: ProtectionTokens): Promise<void>;
+  protectionState(): Promise<ProtectionView>;
   preferences(value?: Preferences): Promise<Preferences>;
   subscribe(fn: (state: ClientState) => void): () => void;
+  onClock(
+    fn: (clock: { generation: string; serverNow: number; publication?: number }) => void,
+  ): () => void;
   decide(value: Decision): Promise<Attempt>;
   decisionPreview(value: Decision): Promise<import('./decision-remember').DecisionPreview>;
   decisionReconcile(value: {
@@ -455,6 +471,7 @@ export function parseReply(raw: unknown): Reply {
     decision_record: r.decision_record,
     network_zones: parseNetworkZones(r.network_zones),
     evaluation: parseEvaluation(r.evaluation),
+    protection: parseProtection(r.protection),
   };
   if (r.permissions !== undefined || result.capabilities.includes('explicit-administrator-v1')) {
     const p = object(r.permissions);
@@ -476,6 +493,7 @@ export function parseReply(raw: unknown): Reply {
       can_view_measurements: p.can_view_measurements === true,
       can_control_traffic: p.can_control_traffic === true,
       can_control_evaluation: p.can_control_evaluation === true,
+      can_control_protection: p.can_control_protection === true,
     } as Permissions;
   }
   if (result.capabilities.includes('daemon-udp-monitor-v1')) {

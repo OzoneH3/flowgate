@@ -1,3 +1,4 @@
+import { PROTECTION_CAPABILITY, stateProtection } from './protection-model';
 import { Tray, Menu, Notification, nativeImage, BrowserWindow, dialog } from 'electron';
 import { execFile } from 'node:child_process';
 import path from 'node:path';
@@ -85,9 +86,11 @@ export class Background {
     if (!this.tray || this.tray.isDestroyed()) return;
     const count = pending(state).length,
       c = state.control;
-    const enforcement = c.connected
-      ? `Enforcement: ${c.enforcement?.state || c.mode || 'unknown'}`
-      : 'Enforcement: unknown / disconnected';
+    const enforcement = c.capabilities?.includes(PROTECTION_CAPABILITY)
+      ? stateProtection(state)
+      : c.connected
+        ? `Enforcement: ${c.enforcement?.state || c.mode || 'unknown'}`
+        : 'Enforcement: unknown / disconnected';
     const udp = state.observation.connected
       ? state.observation.trafficMonitor?.state ||
         state.observation.activity?.udp?.state ||
@@ -111,6 +114,17 @@ export class Background {
   }
   async requestQuit() {
     if (this.quittingDialog) return;
+    const state = this.state();
+    // A verified continuous daemon is independent; a normal UI Quit needs no extra confirmation.
+    if (
+      state.control.connected &&
+      state.control.capabilities?.includes(PROTECTION_CAPABILITY) &&
+      state.control.protection &&
+      !pending(state).length
+    ) {
+      this.quit();
+      return;
+    }
     this.quittingDialog = true;
     this.show();
     try {
@@ -119,7 +133,7 @@ export class Background {
         title: 'Quit FlowGate',
         message: 'Quit FlowGate and stop request monitoring?',
         detail:
-          'Electron and its owned read-only observer will exit. Independent firewall evaluation and UDP collection are NOT stopped. Their current state may be active or unknown; evaluation keeps its original deadline. You will no longer receive FlowGate request notifications.',
+          'Only this interface and its owned read-only observer exit. Independent daemon protection and UDP collection are not stopped. Their state may be active or unknown; bounded evaluation keeps its original deadline. Without the interface, unanswered requests can time out and be denied. You will no longer receive request notifications.',
         buttons: ['Keep running', 'Quit FlowGate'],
         defaultId: 0,
         cancelId: 0,

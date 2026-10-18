@@ -117,3 +117,70 @@ Optional UI rerun only against a fresh disposable held fixture:
 ```sh
 STAGE=after JOURNEY=1 FLOWGATE_TEST_READY=/absolute/project/.workspace/owned/ready.json node electron/test/reliability.mjs
 ```
+
+## Continuous-use follow-up (2026-10-19)
+
+Implementation base **ce8bb0f**, now integrated by the backend owner. Electron owns
+only its frontend and disposable fixtures; backend owns deployment/integration.
+
+### Remaining stacks and focused fixes
+
+CPU profiles at **89 native socket rows** identified repeated `TrafficGraph.draw`
+through unchanged `setPresentation`, forced `getClientRects` layout in chart update,
+and native IPC serialization of full state on every250ms deadline tick.
+
+- Unchanged chart settings do not redraw; same-frame unit/source/settings changes
+  coalesce into one animation-frame paint. Geometry is read before legend writes.
+- Deadline ticks now send only generation/time/publication, preserving real request
+  deadlines and policy expiry. Full authoritative changes still publish immediately.
+- Hidden/minimized panes receive a fresh frame on show rather than continuously
+  rendering hidden copies. Main hide/show handles detached views together.
+- Electron-local publication sequence orders pushed state against asynchronous
+  initial/resume/popup snapshot replies. It is **not** a backend policy revision or
+  authorization signal. Older delivery cannot remove newer rules or retarget a pane.
+
+Same bounded normal-workload interaction, before/after: sampled chart drawing CPU
+89ms→6ms; FunctionCall trace total362ms→210ms; layout/style count328→234.
+Both runs had zero renderer long tasks over50ms. Main maximum144ms→137ms remains:
+there is **no** claim that all freezing or the main peak is fixed.
+Evidence: `.workspace/reliability-cpu-before-a7i6Yu/` and
+`.workspace/reliability-cpu-after-yDVVuv/` (`*.cpuprofile`, trace and result).
+Optional future stack capture: `PROFILE_CPU=1` on `test/reliability.mjs`.
+
+### Continuous protection consumer
+
+Capability **continuous-firewall-v1**, explicit primary
+`can_control_protection`; backend contract in the backend owner's coordination
+note. Separate continuous section in the existing Firewall menu:
+
+- Actual stopped/starting/active/stopping/failed/degraded, profile incoming/both,
+  requested mode and cleanup. No countdown and no active label from a preference.
+- Fixed readiness/start/stop with frozen daemon generation/session, fresh Start
+  nonce, no automatic mutation retry. Unknown acknowledgement is reconciled from
+  current status. Older backends say unavailable; bounded evaluation stays separate.
+- Only the main window can invoke lifecycle mutations. Panes share read-only status;
+  rules and decisions retain their independent backend permissions.
+- UI disconnect says protection unknown, not stopped. Quit does not send Stop.
+  Known continuous protection with no pending decisions permits ordinary GUI exit
+  without a redundant confirmation; warnings remain when requests await a decision.
+- Prompts remain pinned while others arrive. Existing dismiss control says Next
+  request when another awaits review; dismissal never means Deny. Old-generation
+  prompts are explicitly unavailable. Lost Once ACK retains uncertainty while also
+  showing the backend's actual terminal request state. Every Decide sends generation.
+
+Real sandboxed Wayland candidate **55198b35fa65063036dce471839059807acdfdc3**,
+binary754b2a9b… in a private namespace: readiness→both active; concurrent incoming
+and outgoing native attempts while main hidden/Info detached; harmless repeated
+Enter; expiry; explicit next request; Allow/Deny; disconnect and dropped Once ACK
+(one Decide); detached process rule stable across refreshes and conditional Delete;
+GUI exit leaves active protection, reopen recovers without Start replay; explicit
+Stop confirms monitoring, zero rules. This is **isolated-real**, not host evidence.
+Evidence `.workspace/continuous-real-5migP3/{evidence.json,*.png}`; fixture cleanup
+is delegated back to its backend owner after explicit DONE. Receiver/kernel proofs
+are reused; no host action was taken by the UI agent.
+
+The bounded45-minute monitor soak is still in progress at this implementation
+checkpoint; final aggregate and cleanup will follow. It uses89 sockets, periodic
+native churn, pane create/close, stored-rule refreshes and deliberate disconnects.
+Prompt/continuous acceptance is the separate real journey above; the monitor soak
+must not be described as enforcement or pending-prompt soak evidence.

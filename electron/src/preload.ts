@@ -34,6 +34,8 @@ const api: Bridge = {
   ruleReconcile: (v) => ipcRenderer.invoke('rule:reconcile', v),
   ruleDelete: (v) => ipcRenderer.invoke('rule:delete', v),
   evaluation: (a, p) => ipcRenderer.invoke('evaluation:action', a, p),
+  protection: (a, t) => ipcRenderer.invoke('protection:action', a, t),
+  protectionState: () => ipcRenderer.invoke('protection:state'),
   evaluationState: () => ipcRenderer.invoke('evaluation:state'),
   preferences: (v) => ipcRenderer.invoke('preferences', v),
   snapshot: () => ipcRenderer.invoke('snapshot'),
@@ -41,6 +43,14 @@ const api: Bridge = {
     const listener = (_event: unknown, state: ClientState) => fn(state);
     ipcRenderer.on('state', listener);
     return () => ipcRenderer.removeListener('state', listener);
+  },
+  onClock: (fn) => {
+    const listener = (
+      _e: unknown,
+      clock: { generation: string; serverNow: number; publication?: number },
+    ) => fn(clock);
+    ipcRenderer.on('state:clock', listener);
+    return () => ipcRenderer.removeListener('state:clock', listener);
   },
   decide: (d: Decision) => ipcRenderer.invoke('decide', d),
   decisionPreview: (d) => ipcRenderer.invoke('decision:preview', d),

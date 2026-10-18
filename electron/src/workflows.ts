@@ -1,3 +1,4 @@
+import { setupProtectionControls } from './protection-view';
 import { ZONE_CAPABILITY, zoneLabel } from './network-zones';
 import { ANY_PROTOCOL_CAPABILITY, PROCESS_CAPABILITY, targetLabel } from './process-rules';
 import { renderDaemonEvaluation } from './evaluation-view';
@@ -257,6 +258,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
   evaluation.className = 'evaluationbar';
   evaluation.innerHTML = `<select id="evalProfile" aria-label="Evaluation profile"><option value="incoming">Incoming only</option><option value="both" disabled>Both directions · support not advertised</option></select><button id="evalStart">Start 5-minute evaluation…</button><button id="evalStop">Stop evaluation</button><button id="evalCancel" hidden>Cancel authentication</button><button id="evalStatus">Status</button><button id="evalRecover">Recovery…</button><span id="evaluationStatus" role="status"></span>`;
   document.querySelector('#controlMenu .menu-panel')!.append(evaluation);
+  setupProtectionControls();
   const confirmation = node('dialog', '');
   confirmation.id = 'confirmation';
   confirmation.innerHTML = `<h2 id="confirmTitle"></h2><p id="confirmText"></p><div class="editor-actions"><button id="confirmNo">Cancel</button><button id="confirmYes">Continue</button></div>`;

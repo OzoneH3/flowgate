@@ -1,3 +1,4 @@
+import { Protection } from './protection';
 import { placeKDEPrompt, PROMPT_TITLE, promptTitle } from './prompt-placement';
 import { AutomaticPrompts, edgePosition, boundDecision } from './automatic-prompts';
 import {
@@ -152,7 +153,9 @@ function publishPanes() {
   ]);
   if (key === panePublication) return;
   panePublication = key;
-  for (const w of windows) if (!w.isDestroyed()) w.webContents.send('pane:frame', frame);
+  for (const w of windows)
+    if (!w.isDestroyed() && w.isVisible() && !w.isMinimized() && !promptRefs.has(w.webContents.id))
+      w.webContents.send('pane:frame', frame);
 }
 function paneWindow(kind: PaneKind) {
   const existing = detached.get(kind);
@@ -199,6 +202,14 @@ function paneWindow(kind: PaneKind) {
   };
   w.on('resize', save);
   w.on('move', save);
+  w.on('show', () => {
+    panePublication = '';
+    publishPanes();
+  });
+  w.on('restore', () => {
+    panePublication = '';
+    publishPanes();
+  });
   w.once('ready-to-show', () => {
     if (main.isVisible()) w.show();
     panePublication = '';
@@ -327,7 +338,13 @@ function windowFor(isPrompt = false, id = '', generation = '') {
     }
   });
   const refresh = () => {
-    if (backend && !w.isDestroyed()) w.webContents.send('state', backend.view());
+    if (backend && !w.isDestroyed()) {
+      w.webContents.send('state', backend.view());
+      if (!isPrompt) {
+        panePublication = '';
+        publishPanes();
+      }
+    }
   };
   w.on('show', refresh);
   w.on('restore', refresh);
@@ -378,7 +395,24 @@ app.whenReady().then(async () => {
     trusted(e, true);
     return history.view(value);
   });
-  backend = new Backend(observer!, controller, (state) => {
+  backend = new Backend(observer!, controller, (state, clockOnly) => {
+    if (clockOnly) {
+      for (const w of windows)
+        if (
+          !w.isDestroyed() &&
+          !paneRoles.has(w.webContents.id) &&
+          w.isVisible() &&
+          !w.isMinimized()
+        )
+          w.webContents.send('state:clock', {
+            generation: state.control.generation,
+            serverNow: state.control.serverNow,
+            publication: state.publication,
+          });
+      automaticDecision();
+      background?.update(state);
+      return;
+    }
     history.observe(state.observation);
     paneModel.observe(state);
     publishPanes();
@@ -571,6 +605,16 @@ app.whenReady().then(async () => {
     trusted(e);
     return extended.view(backend.view().observation.activity?.udp?.state === 'active');
   });
+  const protection = new Protection(backend);
+  ipcMain.handle('protection:state', (e) => {
+    trusted(e);
+    return protection.view();
+  });
+  ipcMain.handle('protection:action', (e, action, tokens) => {
+    trusted(e);
+    if (e.sender !== main.webContents) throw Error('Protection control requires the main window');
+    return protection.action(action, tokens);
+  });
   evaluation = new Evaluation(
     path.resolve(__dirname, '../..'),
     backend,
@@ -737,6 +781,12 @@ app.whenReady().then(async () => {
     (ref) => void review(ref),
     () => app.quit(),
   );
+  main.on('hide', () => {
+    for (const w of detached.values()) if (!w.isDestroyed()) w.hide();
+  });
+  main.on('show', () => {
+    for (const w of detached.values()) if (!w.isDestroyed()) w.showInactive();
+  });
   main.on('close', (e) => {
     if (quitting) return;
     e.preventDefault();
