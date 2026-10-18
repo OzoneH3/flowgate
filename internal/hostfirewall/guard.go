@@ -6,15 +6,72 @@ package hostfirewall
 import (
 	"encoding/json"
 	"flowgate/internal/daemon"
+	"flowgate/internal/decisionlog"
+	"flowgate/internal/identity"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
+	"syscall"
 )
 
 const GuardTable = "flowgate_guard"
-const guardComment = "flowgate:continuous-startup:v1"
 
-func guardRules() string {
-	return `add table inet flowgate_guard { comment "flowgate:continuous-startup:v1"; }
+type guardRecord struct {
+	Token  string `json:"token"`
+	NetNS  string `json:"netns"`
+	Digest string `json:"digest"`
+}
+
+func guardMetadata(dir string) (guardRecord, error) {
+	var r guardRecord
+	path := filepath.Join(dir, "guard.json")
+	st, err := os.Lstat(path)
+	if err != nil {
+		return r, err
+	}
+	if !st.Mode().IsRegular() || st.Mode().Perm() != 0600 || st.Sys().(*syscall.Stat_t).Uid != uint32(os.Geteuid()) {
+		return r, fmt.Errorf("unsafe guard ownership metadata")
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return r, err
+	}
+	if len(b) > 4096 || json.Unmarshal(b, &r) != nil || !validNonce(r.Token) || r.NetNS != identity.NetNS() {
+		return r, fmt.Errorf("invalid guard token/namespace metadata")
+	}
+	return r, nil
+}
+func saveGuard(dir string, r guardRecord) error {
+	b, _ := json.Marshal(r)
+	f, err := os.CreateTemp(dir, ".guard-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	if _, err = f.Write(b); err == nil {
+		err = f.Sync()
+	}
+	ce := f.Close()
+	if err == nil {
+		err = ce
+	}
+	if err == nil {
+		err = os.Rename(f.Name(), filepath.Join(dir, "guard.json"))
+	}
+	if err != nil {
+		return err
+	}
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
+}
+
+func guardRules(token string) string {
+	return strings.ReplaceAll(`add table inet flowgate_guard { comment "flowgate:guard:TOKEN"; }
 add chain inet flowgate_guard input { type filter hook input priority 9; policy accept; }
 add chain inet flowgate_guard output { type filter hook output priority 9; policy accept; }
 add rule inet flowgate_guard input meta nfproto ipv4 udp sport 67 udp dport 68 accept
@@ -27,9 +84,9 @@ add rule inet flowgate_guard input ct state established,related accept
 add rule inet flowgate_guard output ct state established,related accept
 add rule inet flowgate_guard input meta l4proto { tcp, udp } drop
 add rule inet flowgate_guard output meta l4proto { tcp, udp } drop
-`
+`, "TOKEN", token)
 }
-func guardOwned() (bool, error) {
+func guardOwned(dir string) (bool, error) {
 	b, err := nft("-j", "list", "tables")
 	if err != nil {
 		return false, err
@@ -59,7 +116,20 @@ func guardOwned() (bool, error) {
 					if t, ok := p["table"]; ok {
 						var x struct{ Comment string }
 						json.Unmarshal(t, &x)
-						if x.Comment == guardComment {
+						r, er := guardMetadata(dir)
+						if er != nil {
+							return false, fmt.Errorf("unrecorded guard; refusing: %w", er)
+						}
+						if x.Comment == "flowgate:guard:"+r.Token {
+							if r.Digest != "" {
+								d, er := tableDigestFor(GuardTable)
+								if er != nil {
+									return false, er
+								}
+								if d != r.Digest {
+									return false, fmt.Errorf("recorded guard structure changed; refusing automatic removal")
+								}
+							}
 							return true, nil
 						}
 					}
@@ -78,16 +148,39 @@ func InstallGuard(dir string) error {
 		return err
 	}
 	return evaluationLock(dir, func() error {
-		yes, err := guardOwned()
+		yes, err := guardOwned(dir)
 		if err != nil || yes {
 			return err
 		}
-		return batch(guardRules())
+		r := guardRecord{Token: decisionlog.NewRecordID(), NetNS: identity.NetNS()}
+		if err = saveGuard(dir, r); err != nil {
+			return err
+		}
+		if err = batch(guardRules(r.Token)); err != nil {
+			return err
+		}
+		r.Digest, err = tableDigestFor(GuardTable)
+		if err != nil {
+			return err
+		}
+		return saveGuard(dir, r)
 	})
 }
 func RemoveGuard(dir string) error {
+	if _, err := os.Lstat(dir); os.IsNotExist(err) {
+		yes, er := guardOwned(dir)
+		if er != nil {
+			return er
+		}
+		if yes {
+			return fmt.Errorf("guard exists without its private state")
+		}
+		return nil
+	} else if err != nil {
+		return err
+	}
 	return evaluationLock(dir, func() error {
-		yes, err := guardOwned()
+		yes, err := guardOwned(dir)
 		if err != nil || !yes {
 			return err
 		}

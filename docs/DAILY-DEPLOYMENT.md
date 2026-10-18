@@ -85,7 +85,10 @@ sudo /usr/local/sbin/flowgate-uninstall   # remove startup/daemon; preserve all 
 
 Recovery is root-owned, uses fixed installed paths, saves monitoring atomically,
 stops the service, verifies absence of the recorded consumer and removes only its
-owned table/marks/guard, then starts monitoring/UDP again. It does not depend on
+owned table/marks/guard, then starts monitoring/UDP again. Guard ownership binds a
+root-private random token, network namespace and structural digest; a foreign or
+modified guard refuses automatic removal for local inspection. Empty-state recovery
+is a safe no-op. It does not depend on
 network, GUI or a working API. Uninstall first recovers, stops/disables the two units
 and removes only unchanged FlowGate unit/drop-in files. Policies/backups/releases
 are preserved. Do not merely disable the daemon and leave the NM guard dependency
@@ -99,11 +102,10 @@ or a fail-closed table without understanding the result.
   for310 actual seconds without GUI. Both direction/family TCP+UDP deliveries and
   blocked receivers, replies/masks, expiry, Stop, actual SIGKILL/stale recovery,
   foreign rule/routing preservation passed.
-- `.workspace/daily-adapter-_pkkeo1h/acceptance/result.json`: production acceptance
+- `.workspace/daily-adapter-mwjqsow3/acceptance/result.json`: production acceptance
   driver exercised real private receiver/policy/identity/zone paths, using a
-  **simulated systemd restart adapter**, not host systemd. Original log case labels
-  inherited “host” wording; this is isolated evidence only. Harness label is explicit.
-- `.workspace/daily-adapter-rncpxafd/failure-result.json`: actual private guard
+  **simulated systemd restart adapter**, not host systemd. Labels explicitly distinguish isolated receivers from host acceptance.
+- `.workspace/daily-adapter-4vvk7z28/failure-result.json`: actual private guard
   prevented delivery before/during unsupported-tunnel initialization refusal;
   local owned recovery restored delivery. Unit syntax/dependency resolution lint
   passed with present candidate executable paths. Installed unit graph and boot

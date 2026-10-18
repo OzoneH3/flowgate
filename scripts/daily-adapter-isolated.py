@@ -66,6 +66,20 @@ try:
   os.close(tun)
   cmd(str(release/'flowgate'),'protection-recover','--state','/run/flowgate-enforcement')
   sender.sendto(b'recovered',receiver.getsockname());assert receiver.recv(128)==b'recovered'
+  # Recovery before any session is a valid no-op, not a missing-directory failure.
+  cmd(str(release/'flowgate'),'protection-recover','--state','/run/never-started')
+  cmd('nft','add','table','inet','flowgate_guard','{ comment "foreign-fixture"; }')
+  foreign=cmd('nft','-s','list','table','inet','flowgate_guard')
+  denied=subprocess.run([str(release/'flowgate'),'protection-guard','--state','/run/flowgate-enforcement'],capture_output=True,text=True)
+  assert denied.returncode and foreign==cmd('nft','-s','list','table','inet','flowgate_guard')
+  cmd('nft','delete','table','inet','flowgate_guard')
+  cmd(str(release/'flowgate'),'protection-guard','--state','/run/flowgate-enforcement')
+  cmd('nft','add','rule','inet','flowgate_guard','input','counter')
+  changed=cmd('nft','-s','list','table','inet','flowgate_guard')
+  denied=subprocess.run([str(release/'flowgate'),'protection-recover','--state','/run/flowgate-enforcement'],capture_output=True,text=True)
+  assert denied.returncode and changed==cmd('nft','-s','list','table','inet','flowgate_guard')
+  cmd('nft','delete','table','inet','flowgate_guard') # own disposable fault fixture only
+  print('PASS empty recovery and foreign/modified guard refusal without destructive cleanup',flush=True)
   print('PASS startup readiness refusal leaves real fail-closed guard; local exact-owned recovery restores delivery',flush=True)
   receiver.close();sender.close()
   (run/'failure-result.json').write_text(json.dumps({'passed':True,'label':'real isolated guard/refusal/recovery; not boot proof'}))

@@ -532,8 +532,9 @@ func Status(dir string) (any, error) {
 }
 
 // Counters vary with traffic; structural mutations must invalidate Active.
-func tableDigest() (string, error) {
-	b, err := nft("-j", "list", "table", "inet", Table)
+func tableDigest() (string, error) { return tableDigestFor(Table) }
+func tableDigestFor(table string) (string, error) {
+	b, err := nft("-j", "list", "table", "inet", table)
 	if err != nil {
 		return "", err
 	}

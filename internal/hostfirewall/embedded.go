@@ -43,7 +43,7 @@ func NewEvaluation(ctx context.Context, e *daemon.Engine, dir, socket, database 
 	m := &Evaluation{e: e, ctx: ctx, dir: dir, socket: socket, database: database, duration: 5 * time.Minute}
 	m.status = daemon.EvaluationStatus{State: "stopped", Profile: "incoming", DurationSeconds: 300, Cleanup: "not_needed", ReasonCode: "monitoring", Reason: "Monitoring only; no evaluation resources", Readiness: daemon.EvaluationReadiness{State: "not_checked", Checks: []readiness.Check{}}}
 	m.status.Review = "For five minutes, current stored rules decide new incoming TCP/UDP; supported unmatched applications prompt, unknown/ambiguous ownership blocks. Existing connections are preserved; outgoing remains allowed. Stop/expiry removes only FlowGate enforcement and does not disconnect already-approved TCP deliberately. Other firewalls can still block. Closing the GUI does not stop or extend the deadline."
-	m.status.UnsupportedOutgoing = "Only incoming is supported by this daemon lifecycle, including the bounded Tailscale client profile; combined outgoing evaluation is unavailable."
+	m.status.UnsupportedOutgoing = "Bounded evaluation supports incoming only. Use continuous-firewall-v1 for supported continuous incoming+outgoing protection."
 	m.probe = func() []readiness.Check {
 		ctx, cancel := context.WithTimeout(m.ctx, 15*time.Second)
 		defer cancel()
@@ -360,7 +360,7 @@ func (m *Evaluation) run(ctx context.Context, id string) {
 				return er
 			}
 			if continuous {
-				if yes, er := guardOwned(); er != nil {
+				if yes, er := guardOwned(m.dir); er != nil {
 					return er
 				} else if yes {
 					if _, er = nft("delete", "table", "inet", GuardTable); er != nil {

@@ -25,7 +25,7 @@ python3 - "$bundle" "$revision" <<'PY'
 import hashlib,json,pathlib,sys
 b=pathlib.Path(sys.argv[1]);revision=sys.argv[2]
 # These paths intentionally point to preserved exact acceptance, not a broad rerun.
-root=pathlib.Path.cwd();component=root/'.workspace/continuous-component-f4fozgp6/result.json';adapter=root/'.workspace/daily-adapter-_pkkeo1h/acceptance/result.json';failure=root/'.workspace/daily-adapter-rncpxafd/failure-result.json'
+root=pathlib.Path.cwd();component=root/'.workspace/continuous-component-f4fozgp6/result.json';adapter=root/'.workspace/daily-adapter-mwjqsow3/acceptance/result.json';failure=root/'.workspace/daily-adapter-4vvk7z28/failure-result.json'
 assert all(json.loads(p.read_text())['passed']for p in [component,adapter,failure])
 executables=['flowgate','native','native-other','tcp-initiation','udp-collector','launch','control.py','recover.py','uninstall.py','install.py','host-acceptance.py']
 m={'release':revision,'source':revision,'isolated_passed':True,'evidence':list(map(str,[component,adapter,failure])),'executables':executables,'files':{p.name:hashlib.sha256(p.read_bytes()).hexdigest()for p in b.iterdir()if p.is_file()}}
