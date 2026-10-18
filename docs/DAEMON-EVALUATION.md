@@ -233,3 +233,11 @@ BPF execution. **This new case has not passed against the kernel.** Run exactly
 `scripts/check-evaluation-udp.sh` from the main checkout and authenticate if prompted;
 see [INTEGRATION.md](INTEGRATION.md) for evidence paths and remaining deployment steps.
 Host monitor and active collector were not restarted or interrupted.
+
+Continuity fixture follow-up: the first authenticated run
+`.workspace/evaluation-udp-1792311639-2556540` exposed a missing nft separator after
+its unrelated chain declaration, before daemon startup. The fixture now uses
+newline-delimited nft input. The exact source literal was installed, inspected and
+removed successfully in a disposable user/network namespace. This validates the
+syntax fix only, not BPF continuity. Retry `scripts/check-evaluation-udp.sh` for
+the still-pending full kernel case; no host daemon/collector action is needed.

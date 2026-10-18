@@ -98,7 +98,7 @@ try:
  before_routes6=subprocess.check_output(['ip','-6','-j','route','show','table','all'])
  if a.evaluation_continuity:
   assert a.kernel, 'continuity requires isolated initial-namespace BPF authority'
-  subprocess.run(['nft','-f','-'],input='table inet unrelated_fixture { chain track { type filter hook input priority 0; policy accept; ct state established counter; } }',text=True,check=True)
+  subprocess.run(['nft','-f','-'],input='table inet unrelated_fixture {\n chain track {\n  type filter hook input priority 0; policy accept;\n  ct state established counter;\n }\n}\n',text=True,check=True)
  s=start_daemon();assert 'daemon-udp-monitor-v1'in s['capabilities']and s['traffic_monitor']['state']=='disabled'
  # Real persistent TCP exchange continues regardless of UDP lifecycle/failure.
  listen=socket.socket();listen.bind(('127.0.0.1',0));listen.listen();client=socket.socket();client.connect(listen.getsockname());accepted,_=listen.accept();client.sendall(b'tcp-baseline');assert accepted.recv(12)==b'tcp-baseline';wait(tcp_present)
