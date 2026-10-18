@@ -22,8 +22,10 @@ int main(int argc,char **argv){
  if(ownership<0||bind(ownership,(struct sockaddr*)&owner,offsetof(struct sockaddr_un,sun_path)+1+strlen(name))){fprintf(stderr,"collector_conflict: existing initiation helper in this namespace\n");return 1;}
  int cg=open(argv[1],O_DIRECTORY|O_RDONLY|O_CLOEXEC|O_NOFOLLOW);struct statfs fs;
  if(cg<0||fstatfs(cg,&fs)||fs.f_type!=CGROUP2_SUPER_MAGIC){fprintf(stderr,"cgroup_unavailable: real cgroup-v2 directory required: %s\n",strerror(errno));return 1;}
- uint32_t ids[64],attach_flags=0,count=64;
- if(bpf_prog_query(cg,BPF_CGROUP_SOCK_OPS,BPF_F_QUERY_EFFECTIVE,&attach_flags,ids,&count)||count){fprintf(stderr,"sockops_conflict_or_unavailable: cannot exclusively observe cgroup with pre-existing effective sockops programs: %s\n",strerror(errno));close(cg);return 1;}
+ uint32_t ids[64]={0},attach_flags=0,count=64;
+ errno=0;int query=bpf_prog_query(cg,BPF_CGROUP_SOCK_OPS,BPF_F_QUERY_EFFECTIVE,&attach_flags,ids,&count);
+ if(query){int code=errno?errno:(query<0?-query:EIO);fprintf(stderr,"sockops_query_failed: rc=%d errno=%d count=%u: %s\n",query,code,count,strerror(code));close(cg);return 1;}
+ if(count){fprintf(stderr,"sockops_conflict: %u effective programs, attach_flags=0x%x, ids=",count,attach_flags);for(uint32_t i=0;i<count&&i<64;i++)fprintf(stderr,"%s%u",i?",":"",ids[i]);fputc('\n',stderr);close(cg);return 1;}
  int ns=socket(AF_INET,SOCK_STREAM|SOCK_CLOEXEC,0);uint64_t cookie=0;socklen_t len=sizeof(cookie);
  if(ns<0||getsockopt(ns,SOL_SOCKET,SO_NETNS_COOKIE,&cookie,&len)||!cookie){fprintf(stderr,"netns_cookie_unavailable: %s\n",strerror(errno));return 1;}close(ns);
  struct initiation_bpf *s=initiation_bpf__open();if(!s){fprintf(stderr,"BPF open failed\n");return 1;}

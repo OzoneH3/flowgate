@@ -126,3 +126,18 @@ path/owner validation is unchanged, no repository chown or host path mutation.
 Pass progress and final success marker are saved as verification.log/result.json;
 startup exits surface the actual daemon error immediately. Python/shell syntax
 checks passed; the corrected privileged branch still needs the exact command above.
+
+### Effective-program query diagnosis
+
+Corrected fixture run `.workspace/tcp-initiation-1792356262-1404752` passed the real
+fast TCP4/6 sampling-miss baseline and cleaned up, then the helper refused before
+load/attach at its effective-sockops query. Its old combined message ended in
+`Success`, which does **not** by itself prove a verifier failure or identify foreign
+programs: that branch conflated a failed query with a nonzero returned count.
+Diagnostics now distinguish `sockops_query_failed` (return/errno/count) from
+`sockops_conflict` (count/flags/program IDs). The refusal behavior is unchanged;
+no program is detached/overridden. Native build passed; no successful kernel source
+or overhead evidence is claimed. Before another full acceptance attempt, obtain the
+read-only `sudo bpftool -j cgroup show /sys/fs/cgroup effective` result and inspect
+which case is actually present. Kernel query contract reference:
+https://github.com/torvalds/linux/blob/master/kernel/bpf/cgroup.c (`__cgroup_bpf_query`).
