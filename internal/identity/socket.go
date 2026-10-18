@@ -14,18 +14,21 @@ import (
 )
 
 type Socket struct {
-	Counters  *TCPBytes      `json:"counters,omitempty"`
-	Interface uint32         `json:"interface_index,omitempty"`
-	Family    uint8          `json:"family"`
-	V6Only    *bool          `json:"v6_only,omitempty"`
-	Protocol  string         `json:"protocol"`
-	Local     netip.AddrPort `json:"local"`
-	Remote    netip.AddrPort `json:"remote"`
-	State     uint8          `json:"state"`
-	Inode     uint32         `json:"inode"`
-	Cookie    string         `json:"cookie"`
-	UID       uint32         `json:"uid"`
-	NetNS     string         `json:"netns"`
+	// Internal diagnostic framing distinguishes a request_sock from a full socket.
+	diagObserved bool
+	diagFull     bool
+	Counters     *TCPBytes      `json:"counters,omitempty"`
+	Interface    uint32         `json:"interface_index,omitempty"`
+	Family       uint8          `json:"family"`
+	V6Only       *bool          `json:"v6_only,omitempty"`
+	Protocol     string         `json:"protocol"`
+	Local        netip.AddrPort `json:"local"`
+	Remote       netip.AddrPort `json:"remote"`
+	State        uint8          `json:"state"`
+	Inode        uint32         `json:"inode"`
+	Cookie       string         `json:"cookie"`
+	UID          uint32         `json:"uid"`
+	NetNS        string         `json:"netns"`
 }
 type Flow struct {
 	Protocol  string         `json:"protocol"`
@@ -119,11 +122,15 @@ func SocketsLimited(limit int) ([]Socket, error) {
 				}
 				var v6only *bool
 				var counters *TCPBytes
+				var full bool
 				attrs, err := netlink.UnmarshalAttributes(b[72:])
 				if err != nil {
 					return nil, err
 				}
 				for _, attr := range attrs {
+					if attr.Type == 2 || attr.Type == 8 || attr.Type == 22 {
+						full = true
+					}
 					if limit > 0 && proto == unix.IPPROTO_TCP && attr.Type == 2 /* INET_DIAG_INFO */ {
 						counters = parseTCPBytes(attr.Data)
 					}
@@ -132,7 +139,7 @@ func SocketsLimited(limit int) ([]Socket, error) {
 						v6only = &value
 					}
 				}
-				result = append(result, Socket{Counters: counters, Interface: iface, Family: family, V6Only: v6only, Protocol: name, Local: netip.AddrPortFrom(la.Unmap(), binary.BigEndian.Uint16(b[4:6])), Remote: netip.AddrPortFrom(ra.Unmap(), binary.BigEndian.Uint16(b[6:8])), State: b[1], Inode: binary.NativeEndian.Uint32(b[68:72]), UID: binary.NativeEndian.Uint32(b[64:68]), Cookie: fmt.Sprintf("%x", b[44:52]), NetNS: NetNS()})
+				result = append(result, Socket{diagObserved: true, diagFull: full, Counters: counters, Interface: iface, Family: family, V6Only: v6only, Protocol: name, Local: netip.AddrPortFrom(la.Unmap(), binary.BigEndian.Uint16(b[4:6])), Remote: netip.AddrPortFrom(ra.Unmap(), binary.BigEndian.Uint16(b[6:8])), State: b[1], Inode: binary.NativeEndian.Uint32(b[68:72]), UID: binary.NativeEndian.Uint32(b[64:68]), Cookie: fmt.Sprintf("%x", b[44:52]), NetNS: NetNS()})
 			}
 			if dumpErr != nil {
 				return result, dumpErr

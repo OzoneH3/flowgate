@@ -169,6 +169,9 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 					if e.Decisions != nil {
 						r.Capabilities = append(r.Capabilities, DecisionLogCapability)
 					}
+					if e.Activity != nil {
+						r.Capabilities = append(r.Capabilities, "activity-initiation-v1")
+					}
 					stopAfterResponse := false
 					if e.APIUID != nil && cred.Uid != *e.APIUID && cred.Uid != 0 {
 						continueResponse(c, r)

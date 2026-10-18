@@ -92,3 +92,38 @@ func TestNonActiveEnforcementRejectsMutation(t *testing.T) {
 		}
 	}
 }
+
+func TestInitiationReadOnlyWireContract(t *testing.T) {
+	dir, err := os.MkdirTemp("../../.workspace/tmp", "initiation-api-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	path, _ := filepath.Abs(filepath.Join(dir, "s"))
+	e, _, _, _ := fixture()
+	e.Mode = "host-monitor"
+	e.Activity = func() identity.ActivitySnapshot {
+		return identity.ActivitySnapshot{Rows: []identity.ActivityRow{{ID: "stable", Direction: "Outgoing", Initiation: identity.Initiation{State: "known", Direction: "outgoing", Source: "inet-diag-syn-sent", Reason: "fixture observed handshake"}}}}
+	}
+	l, err := Serve(path, e, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	r, err := Call(path, Request{Version: 1, Operation: "list"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, v := range r.Capabilities {
+		if v == "activity-initiation-v1" {
+			found = true
+		}
+	}
+	if !found || !r.ReadOnly || r.Activity.Rows[0].Initiation.Direction != "outgoing" || r.Permissions.CanDecide {
+		t.Fatal(r)
+	}
+	if _, err = Call(path, Request{Version: 1, Operation: "decide", ID: "stable", Action: "allow", Scope: "once"}); err == nil {
+		t.Fatal("direction metadata granted authority")
+	}
+}

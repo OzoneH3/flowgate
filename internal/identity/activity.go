@@ -23,6 +23,7 @@ type ActivityProcess struct {
 	Application Application `json:"application"`
 }
 type ActivityRow struct {
+	Initiation Initiation `json:"initiation"`
 	// Display-only association; never consulted by Resolve or policy. Owners remain complete.
 	DisplayApplication *Application `json:"display_application,omitempty"`
 	OwnershipCategory  string       `json:"ownership_category"`
@@ -54,10 +55,11 @@ type cachedActivityProcess struct {
 	checked time.Time
 }
 type ActivityCollector struct {
-	UDP      func() UDPSnapshot
-	cache    map[int]cachedActivityProcess
-	sequence uint64
-	traffic  map[string]trafficSample
+	initiations map[string]initiationSample
+	UDP         func() UDPSnapshot
+	cache       map[int]cachedActivityProcess
+	sequence    uint64
+	traffic     map[string]trafficSample
 }
 
 func SocketState(s Socket) string {
@@ -112,6 +114,7 @@ func (c *ActivityCollector) Collect() ActivitySnapshot {
 			u := c.UDP()
 			out.UDP = &u
 		}
+		c.directions(&out, out.Started)
 		c.measure(&out, out.Started)
 		if out.UDP != nil {
 			out.UDP.Rows = nil

@@ -275,3 +275,69 @@ Focused check: `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check-bridge-backend.p
 Four checks cover default/selected builds, pinned preference and invalid argument
 rejection. Authentication/control are explicitly mocked; no host or namespace
 firewall/collector activation is performed or claimed by these tests.
+
+## Activity initiation evidence
+
+Capability **`activity-initiation-v1`** is advertised on primary and companion
+endpoints with Activity collection. Existing `list` gains `activity.rows[].initiation`:
+
+```json
+{"state":"known","direction":"outgoing","source":"inet-diag-syn-sent","reason":"Observed TCP SYN-sent on this kernel socket cookie; retained only while this socket remains continuously visible","observed_at":"<last direct handshake sample RFC3339>"}
+```
+
+`state` is `known`, `listening`, `unconnected`, `unknown` or `ambiguous`.
+Only `known` carries lowercase `direction:incoming|outgoing`. Existing display
+`row.direction` is `Incoming`, `Outgoing` or `Unknown`; it is not byte direction.
+Other examples: `{state:listening,source:inet-diag,reason:...}` for a TCP listener,
+`unconnected` for UDP without a peer, `unknown` for connected UDP or established
+TCP whose handshake was not sampled. No initiation is inferred from listener port,
+process/name, endpoint convention, stored rules, connection state alone or traffic.
+
+Incoming source `inet-diag-passive-request` requires a sampled TCP SYN-received
+passive request: inode zero **and absence of full-socket diagnostic framing**.
+An orphaned full socket also can have inode zero, so inode alone is insufficient.
+A full socket in SYN-received is ambiguous (simultaneous open is possible).
+Outgoing requires an actual SYN-sent sample. The existing bounded census is reused;
+no BPF hook, conntrack lookup, faster poller or process/per-packet scan is added.
+
+`observed_at` is the last direct handshake observation. It is retained unchanged
+once established; additional sampled SYNs before establishment may advance it.
+Freshness is `activity.started/collected` and the usual backend generation/sequence,
+not observed_at (which can legitimately be old on an enduring connection).
+Continuity is keyed by network namespace/family/protocol/kernel cookie, with exact
+endpoint/inode constraints. The kernel copies a passive request cookie into its
+accepted socket; only that observed zero-to-live-inode transition is retained.
+Existing row IDs are not changed: a request row's inode transition may produce a
+new row ID, while the kernel-cookie initiation evidence remains valid. No
+endpoint-only matching or application authority is created by that association.
+
+Cache is bounded by current census rows (at most2048), removed on disappearance,
+observed disconnect/close, observer restart, incomplete census or sample gap>60s.
+Conflicting handshake/identity observations become ambiguous until continuity
+ends. New cookies do not inherit evidence. Handshakes and disconnect/reconnect
+transitions entirely between samples cannot be reconstructed; this reports an
+observed socket handshake, not a durable connection-event history. Pre-existing
+or fast TCP connections can therefore remain unknown; no complete-coverage claim.
+
+These read-only fields follow existing UID/administrator Activity projection and
+never authorize a rule target, decide retained packets or assert a past verdict.
+Permission flags, read-only restrictions and all mutation APIs remain unchanged.
+Old daemons omit the capability/fields; render explicit unknown instead of guessing.
+The running host daemon has not been restarted to expose this addition.
+
+Focused checks: source `scripts/go-env.sh`, then `go test -race ./internal/identity
+./internal/daemon` and `go vet ./internal/identity ./internal/daemon ./cmd/flowgate`.
+Real isolated fixture (separate binary/database, no host collection/enforcement):
+
+```sh
+. scripts/go-env.sh
+go build -o .workspace/flowgate-direction ./cmd/flowgate
+scripts/lab.sh python3 scripts/activity-direction-isolated.py \
+ --binary "$PWD/.workspace/flowgate-direction" --run "$PWD/.workspace/direction-FRESH"
+```
+
+Add `--hold` for an exclusively assigned UI driver. It writes ready.json with the
+actual endpoint and sampled sockets; backend cleans after explicit UI DONE by
+touching only that run's `quit`. SYN-ACK holding uses private-namespace fixture nft
+rules, deleted before READY. It never starts FlowGate enforcement, loads BPF or
+uses a host endpoint. UI controls only this disposable daemon/database.

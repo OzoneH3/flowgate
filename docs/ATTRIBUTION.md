@@ -130,3 +130,21 @@ observer sanity output under `.workspace/own-98qxzqdt/summary.json`: 3.001 secon
 No enforcement attribution changed, so the settled firewall/UDP/Wayland suites
 were reused rather than repeated. No live host collection privilege or enforcement
 was activated, and no host network/security/service settings changed.
+
+## Observation-only TCP initiation evidence
+
+`activity-initiation-v1` adds bounded handshake evidence to Activity without
+changing ownership resolution, application keys, socket IDs, traffic baselines or
+enforcement. SYN-sent supplies outgoing; passive request diagnostics supply incoming.
+The inode-zero test is combined with full-socket diagnostic framing so orphaned
+full sockets are not assumed passive. Same-cookie request-to-accepted transition
+is supported; full SYN-received/simultaneous-open contexts stay ambiguous. All other
+unobserved initiation remains explicit unknown. Exact schema, lifetimes, sample
+limitations and disposable fixture are in [API.md](API.md#activity-initiation-evidence).
+
+Primary kernel sources consulted for this concrete distinction:
+[tcp_diag.c request versus full diagnostics](https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_diag.c),
+[inet_diag.c full-socket attributes](https://github.com/torvalds/linux/blob/master/net/ipv4/inet_diag.c),
+[inet_connection_sock.c accepted-child cookie transfer](https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c).
+These distinguish kernel observation from a guessed port/process relationship;
+they do not make an Activity association a firewall permission target.

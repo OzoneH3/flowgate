@@ -1,5 +1,20 @@
 # Continuation handoff
 
+## Backend UI support: observed Activity initiation
+
+New additive `activity-initiation-v1`: rows carry initiation state/direction/source/
+reason/last handshake observation. Bounded SYN-state evidence retained only by
+current kernel-cookie continuity; no guessing from ports/bytes, no new BPF or
+policy authority. Exact UI-agreed contract in [API.md](API.md#activity-initiation-evidence).
+Separate binary `.workspace/flowgate-direction`; host daemon/executable untouched.
+Focused identity/daemon race tests and vet pass. Real disposable TCP4/6 handshake
+fixture `.workspace/direction-check-4` passes known incoming/outgoing after
+establishment; preexisting TCP unknown, listener/UDP neutral, read-only capability,
+owned nft cleanup. Early fixture selector/timestamp comparisons were corrected;
+no acceptance claim is based on those failing runs. Rules inventory already exists
+in policy-view; no new inventory mutation/query was needed. UI owns its consumer
+and matching real Wayland fixture check; no active frontend branch integrated here.
+
 ## UI support integration: Activity composition and launcher separation
 
 Released frontend **85364c94f170f88eede9fc79111ab98143f4ba48** is integrated in full
