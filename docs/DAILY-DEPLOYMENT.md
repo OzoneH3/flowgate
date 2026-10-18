@@ -142,3 +142,22 @@ only after hooks. Check guard-before-NM ordering with
 `systemd-analyze critical-chain NetworkManager.service flowgate.service` and verify
 Tailscale/bpftune remain active. Repeat one dedicated remembered/new request journey
 as a separate reboot acceptance; an enabled unit alone is not evidence of protection.
+
+## Final recovery boundary checks
+
+`.workspace/daily-adapter-ofl4hfcl/stop-crash-result.json` injects SIGKILL after
+monitoring intent is durable but before interception cleanup. A new daemon
+finishes exact-owned cleanup before exposing stopped monitoring status.
+`.workspace/daily-adapter-kxiw4xhv/failure-result.json` repeats the changed startup
+path: real private guard blocks, unsupported tunnel readiness refuses, scoped
+recovery restores delivery; foreign and modified guards are preserved.
+`.workspace/daily-adapter-ri9_sdjq/acceptance/result.json` verifies the production
+receiver driver after this ordering change (private namespace/simulated systemd).
+`test-deployment-recovery.py` traces the fixed local command without host actions.
+The earlier failure-only attempt `daily-adapter-113yb88q` stopped before guard
+verification because the private loopback interface was down; the fixture now
+explicitly enables only its private loopback, and the preserved rerun above passes.
+
+READY notification follows policy/hook initialization; subsequent STATUS messages
+track desired mode, actual state and failure reason. Actual installed systemd
+notification and boot ordering still require the authenticated stage and reboot.

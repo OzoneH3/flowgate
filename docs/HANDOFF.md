@@ -1,5 +1,28 @@
 # Continuation handoff
 
+## Daily-use lifecycle candidate (host installation pending)
+
+Master now includes the continuous incoming/both-direction lifecycle, immutable
+service preparation, root recovery and released UI reliability/continuous controls
+ce8bb0f,4e93f8e,34b29e0. This supersedes the older status descriptions below.
+See [DAILY-DEPLOYMENT.md](DAILY-DEPLOYMENT.md) and
+[CONTINUOUS.md](CONTINUOUS.md) for the current contract and evidence.
+
+Private kernel receivers passed incoming/outgoing TCP4/6 and UDP4/6 Allow/Deny,
+310 seconds active without Electron, crash/restart, explicit Stop, same-peer zone
+separation, process invalidation and conservative foreign-resource recovery.
+The production driver passed in a private namespace with a **simulated systemd
+adapter**; this is not installed-host or reboot acceptance. A crash after durable
+Stop intent now finishes stale owned cleanup before the monitoring API opens.
+
+Root authentication is unavailable to the agent. No host installation, daemon
+replacement, collector toggle or live activation has occurred. The existing host
+runtime remains monitoring/enforcement stopped with UDP active. Only the final
+hash-bound bundle command should be used; superseded bundle manifests are disabled.
+Real kernel TCP initiation verification (including shared bpftune) and zone-scoped
+Remember remain accepted and are not being rerun. The historical retained-identity
+rejection is preserved, not explained away. Reboot acceptance remains separate.
+
 ## Current development base: master (local merge, no deployment)
 
 `master` was fast-forwarded frome2f045a to accepted checkpoint

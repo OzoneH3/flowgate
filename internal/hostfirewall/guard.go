@@ -207,8 +207,8 @@ func RecoverContinuous(dir string) error {
 	if r.State == "stopped" {
 		return nil
 	}
-	if !r.Continuous {
-		return fmt.Errorf("unfinished bounded evaluation requires explicit scoped recovery")
+	if !r.Embedded {
+		return fmt.Errorf("standalone owned session requires explicit scoped recovery")
 	}
 	if r.Start != "" && startID(r.PID) == r.Start {
 		return fmt.Errorf("continuous consumer still alive; refusing competing owner")

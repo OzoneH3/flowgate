@@ -119,7 +119,7 @@ func (m *Evaluation) ProtectionStop(expected string) (daemon.ProtectionStatus, e
 	return m.ProtectionStatus(), err
 }
 
-// Restore is called after policy loading and API creation. It uses the same
+// Restore is called after policy loading and before API creation. It uses the same
 // readiness/activation path as Start, never a privileged bypass.
 func (m *Evaluation) Restore() error {
 	m.mu.Lock()
@@ -127,6 +127,17 @@ func (m *Evaluation) Restore() error {
 	id := m.status.ID
 	m.mu.Unlock()
 	if mode == "monitoring" {
+		// A crash after saving Stop but before cleanup must finish that exact owned
+		// cleanup before a new API reports monitoring. No application policy changes.
+		if err := RecoverContinuous(m.dir); err != nil {
+			return err
+		}
+		if err := RemoveGuard(m.dir); err != nil {
+			return err
+		}
+		m.mu.Lock()
+		m.status.Cleanup = "confirmed"
+		m.mu.Unlock()
 		return nil
 	}
 	_, err := m.ProtectionStart(id, decisionlog.NewRecordID(), mode)

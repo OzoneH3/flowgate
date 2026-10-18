@@ -6,6 +6,7 @@ import json,os,pathlib,shutil,socket,subprocess,sys,tempfile,threading,time
 root=pathlib.Path(__file__).resolve().parents[1];assert os.environ['FLOWGATE_PARENT_NETNS']!=os.readlink('/proc/self/ns/net')
 run=pathlib.Path(tempfile.mkdtemp(prefix='daily-adapter-',dir=root/'.workspace'));print('EVIDENCE',run,flush=True)
 def cmd(*a):return subprocess.check_output(a,text=True,stderr=subprocess.STDOUT)
+cmd('ip','link','set','lo','up')
 for path in ['/run','/etc','/var/lib']:cmd('mount','-t','tmpfs','-o','mode=755','tmpfs',path)
 for path,mode in [('/run/flowgate-api',0o711),('/var/lib/flowgate',0o700),('/etc/flowgate',0o755)]:os.mkdir(path,mode)
 pathlib.Path('/etc/flowgate/zones.json').write_text('{"local":[],"internet":[]}')
@@ -46,6 +47,16 @@ def serve():
    except Exception as e:c.sendall(('FAILED '+str(e)).encode())
 restart();threading.Thread(target=serve,daemon=True).start()
 try:
+ if '--stop-crash-only'in sys.argv:
+  pathlib.Path('/var/lib/flowgate/protection.json').write_text('{"schema":1,"mode":"both"}');restart();assert api()['protection']['state']=='active'
+  # Exact boundary fault: Stop intent is durable, cleanup has not run.
+  pathlib.Path('/var/lib/flowgate/protection.json').write_text('{"schema":1,"mode":"monitoring"}')
+  backend.kill();backend.wait(5);assert'flowgate_host'in cmd('nft','list','tables')
+  restart();r=api();assert r['protection']['state']=='stopped'and r['protection']['desired_mode']=='monitoring'
+  assert'flowgate_host'not in cmd('nft','list','tables')and'flowgate_guard'not in cmd('nft','list','tables')
+  print('PASS actual crash after durable Stop intent: restart finishes exact owned cleanup before monitoring API',flush=True)
+  (run/'stop-crash-result.json').write_text(json.dumps({'passed':True,'label':'isolated exact Stop crash boundary; simulated service adapter'}))
+  sys.exit(0)
  if '--failure-only'in sys.argv:
   import fcntl,struct
   pathlib.Path('/var/lib/flowgate/protection.json').write_text('{"schema":1,"mode":"both"}')

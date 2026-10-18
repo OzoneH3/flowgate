@@ -165,6 +165,11 @@ func serveCommand(args []string) error {
 	if err = daemon.RecoverSocket(*socket+".monitor", peer); err != nil {
 		return err
 	}
+	if *allowProtection {
+		if err = evaluation.Restore(); err != nil {
+			return err
+		}
+	}
 	api, err := daemon.Serve(*socket, e, false)
 	if err != nil {
 		return err
@@ -181,14 +186,11 @@ func serveCommand(args []string) error {
 			fmt.Fprintln(os.Stderr, "WARNING: UDP restoration failed independently:", er)
 		}
 	}
-	if *allowProtection {
-		if err = evaluation.Restore(); err != nil {
-			return err
-		}
-	}
+
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	ready := false
+	lastStatus := ""
 	for {
 		if !ready {
 			s := evaluation.ProtectionStatus()
@@ -200,6 +202,16 @@ func serveCommand(args []string) error {
 				}
 				fmt.Fprintln(os.Stderr, "READY: root daemon; desired:", s.DesiredMode, "actual:", s.State)
 				ready = true
+			}
+		}
+		if ready && *notify {
+			p, s := evaluation.ProtectionStatus(), evaluation.Status()
+			summary := "desired " + p.DesiredMode + "; actual " + s.State + " " + s.Profile + "; " + s.ReasonCode
+			if summary != lastStatus {
+				if er := notifyService("STATUS=" + summary); er != nil {
+					fmt.Fprintln(os.Stderr, "WARNING: status notification:", er)
+				}
+				lastStatus = summary
 			}
 		}
 		if *allowProtection {

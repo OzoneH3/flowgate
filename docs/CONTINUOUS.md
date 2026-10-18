@@ -53,9 +53,14 @@ conntrack/NFQUEUE, emulated Tailscale metadata; IPv4/6 incoming/outgoing TCP+UDP
 receiver-confirmed Allow/replies and Deny0; no-GUI expiry; Stop; actual SIGKILL and
 fresh-generation restoration; unchanged foreign rules and routing. Not encrypted
 tailnet or live-host proof. Existing accepted zone/process/collector evidence reused.
-A separate run checks more than five actual minutes; final release records exact
-artifact pairing and results. Root installation/live-host acceptance is not yet run.
+A separate accepted run remained active for310 actual seconds without Electron;
+see DAILY-DEPLOYMENT.md for exact evidence and artifact preparation. Root installation/live-host acceptance is not yet run.
 
 The earlier retained-identity rejection is preserved: strict fingerprint revalidation
 was not relaxed. Current TCP retained admissions passed in the disposable fixture;
 that does not establish the cause of the historical failure.
+
+A crash between saving intentional Stop and removing interception is recovered
+before a new monitoring API is opened. Recovery also recognizes stale embedded
+bounded evaluation sessions; live consumers, standalone sessions, foreign namespace
+or mismatching guard token/structure are refused rather than destructively cleaned.
