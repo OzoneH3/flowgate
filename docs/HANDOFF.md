@@ -1,5 +1,30 @@
 # Continuation handoff
 
+## UI support integration: Activity composition and launcher separation
+
+Released frontend **85364c94f170f88eede9fc79111ab98143f4ba48** is integrated in full
+by fast-forward from backend bridge release **29436689afdaf86a8021558c27284e2c7c4bb3e7**,
+retaining7020db0. Explicit clean checkpoint/ownership release verified. Adds an
+observation-only overview, separate compatible TCP/UDP source totals/history,
+compact policy/details composition and launcher diagnostics/Wayland graphics fix.
+No new policy, attribution or accounting API was necessary. Shared bridges now
+accept only the fixed --backend enum; Qt defaults unchanged. Normal Electron
+builds electron-backend instead of overwriting the host-approved flowgate path.
+
+Main-checkout build/typecheck,14 focused frontend checks,4 mocked bridge checks
+and sandboxed Wayland measured presentation journey passed. Presentation fixture
+is **synthetic**, not new kernel/receiver evidence; settled real evidence reused.
+Logs: .workspace/ui-support-integration-{build,tests}.log,
+ui-support-bridge-tests.log and ui-support-integrated-visual.log; captures in
+.workspace/ui-support-integrated-visual/after. UI exact-release normal-host launch,
+hardware/sandbox and exit evidence are in electron/ACTIVITY-COMPOSITION.md and
+LAUNCH-DIAGNOSTICS.md. This does not prove overall NetLimiter fidelity.
+No host daemon/collector lifecycle or host-policy operation was performed; deployed
+source remains1732584 with active UDP/stopped enforcement. No rollout in this task.
+Backend remains available for concrete UI dependencies; larger shaping/history/
+quota/filter features need separate scoped proposals. Launch from main checkout:
+`scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock`.
+
 ## Current integration: real UDP continuity passed; measured UI released
 
 Visual UI1a53e355 integrated as11316c52 atop backendb4aaf82; preserves full evaluation
