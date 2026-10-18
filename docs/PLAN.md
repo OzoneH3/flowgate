@@ -191,3 +191,23 @@ estimate: one focused backend API/decision/log/compatibility increment with isol
 receiver and authenticated mutation cases, then one capability-gated UI consumer
 and integration journey. No Ask control ships until that contract is implemented.
 No action/API/storage or live runtime change results from this roadmap entry.
+
+### Activity network grouping follow-up (agreed with UI, not implemented)
+
+Pinned Internet/Local Network presentation rows may exist now only as informational,
+non-policy targets with classification explicitly unavailable (`—`, not zero).
+Current Activity exposes endpoints, namespace and optional bound interface index,
+not trustworthy policy-zone membership. Do not classify Internet from a public
+address, gateway/default route, VPN interface name or the absence of local evidence.
+No new backend capability or privileged census is being introduced for placeholders.
+
+Before real group totals, agree a bounded explicit network-zone definition/configuration
+and additive authorized snapshot contract with known/unavailable membership, source,
+reason, freshness and conflict behavior. Define loopback, direct peers, public LAN,
+overlays/VPN inner versus outer layers, namespaces, listeners/unconnected sockets and
+routing changes. Rules/filter-zone semantics must be separately explicit if offered;
+a display group must not become permission authority. Preserve per-socket deduplication
+and separate TCP transport/UDP API sources. UDP lifetime totals span peers; endpoint
+changes or uncertain membership cannot relabel historical bytes. Specify membership
+baseline/gap behavior before aggregating. Acceptance needs controlled local/public/
+overlay/unknown cases and source-specific totals, not a whole-machine Internet claim.

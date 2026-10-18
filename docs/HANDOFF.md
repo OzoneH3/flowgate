@@ -20,11 +20,15 @@ apart from naturally varying conntrack histogram. Full evidence, precise scope,
 launch/rollback and remaining outgoing limitation: current section of INTEGRATION.md.
 
 UI owner01a1465b continues independent pane/chart work; no moving frontend merged.
-Held **isolated** pane-ui fixture generatione34a5a828c98416a810ea6ebeebbbb40 is
-exclusively delegated to that UI owner until explicit DONE. Ready/command paths:
-`.workspace/pane-ui/ready.json`. Exact backend6c68f8c, no collector/enforcement,
-alpha21/beta27. Backend retains cleanup responsibility after DONE; do not stop it
-while attached. Host acceptance ownership is released; host checks remain read-only.
+The UI owner returned explicit DONE for isolated pane-ui generation
+e34a5a828c98416a810ea6ebeebbbb40 after the real pane/shared-selection/units/source
+journey, delegated process-rule creation and exact conditional Delete (rules0),
+dock/close/reopen and GUI exit preserving the fixture daemon. Backend verified exact
+generation/rules0/stopped enforcement, sent only its quit command and confirmed
+CLEANED plus both API sockets removed. Evidence: UI `.workspace/panes-real-brlu3b`,
+main `.workspace/pane-ui-owner.log` and `.workspace/pane-ui/backend-cleanup-before.json`.
+No host or collector action. Final pane/pinned-row UI release is still pending;
+do not merge the moving branch. Host checks remain read-only.
 
 ## Current: Activity round 5 (menus, display Units and chart presentation)
 
