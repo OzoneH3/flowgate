@@ -52,6 +52,8 @@ await build({
     'src/inventory-coherence.ts',
     'src/state-clock.ts',
     'src/publication.ts',
+    'src/row-structure.ts',
+    'src/keyed-rows.ts',
     'src/protection-model.ts',
     'src/protection.ts',
     'src/extended.ts',
