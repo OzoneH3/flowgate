@@ -1044,3 +1044,7 @@ The runner refuses host endpoints, leaves the fixture daemon alive and prints DO
 its owner then cleans up. The running host was not upgraded and still lacks this new
 capability; deploying the backend/grant is a separately authorized integration step.
 No contract gap remains.
+
+### Measured Activity presentation
+
+Activity uses compact rows and source-specific chart indicators.

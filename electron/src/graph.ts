@@ -95,7 +95,7 @@ export class TrafficGraph {
       h = height - top - bottom;
     const max = Math.max(1, ...points.flatMap((p) => [p.up || 0, p.down || 0]));
     const ceiling = Math.pow(2, Math.ceil(Math.log2(max)));
-    c.font = '10px "Open Sans", sans-serif';
+    c.font = '10px ' + palette.fontFamily;
     c.lineWidth = 1;
     c.strokeStyle = tokenColor('--fg-border');
     c.fillStyle = tokenColor('--fg-muted');
