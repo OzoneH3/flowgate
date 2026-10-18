@@ -4,6 +4,7 @@ export class TrafficGraph {
   private id = '';
   private seconds = 60;
   private source: Source = 'tcp';
+  private sourceChosen = false;
   private view?: GraphView;
   private request = 0;
   private signature = '';
@@ -11,11 +12,12 @@ export class TrafficGraph {
   private selector: HTMLSelectElement;
   constructor(private host: HTMLElement) {
     host.innerHTML =
-      '<h2>Traffic chart</h2><div class="graph-controls"><select id="graphSource" aria-label="Measurement source"><option value="tcp">TCP transport payload</option><option value="udp">UDP API-reported bytes</option></select><select id="graphWindow" aria-label="History window"><option value="60">60 s</option><option value="300">5 min</option></select></div><div id="graphValues" class="graph-values"></div><canvas id="trafficCanvas" role="img" aria-label="Observed upload and download rates over time"></canvas><p id="graphStatus"></p><p class="graph-scope">All observed sockets, independent of table filters. History starts here; gaps are not zero.</p>';
+      '<header class="graph-heading"><h2>Traffic chart</h2><div class="graph-controls"><select id="graphSource" aria-label="Measurement source"><option value="tcp">TCP transport payload</option><option value="udp">UDP API-reported bytes</option></select><select id="graphWindow" aria-label="History window"><option value="60">60 s</option><option value="300">5 min</option></select></div></header><div id="graphValues" class="graph-values"></div><canvas id="trafficCanvas" role="img" aria-label="Observed upload and download rates over time"></canvas><p id="graphStatus"></p><details class="graph-explanation"><summary>Measurement details</summary><p class="graph-scope">All observed sockets, independent of table filters. History starts here; gaps are not zero. TCP transport and UDP API payload are separate sources. Totals include local socket perspectives.</p></details>';
     this.canvas = host.querySelector('canvas')!;
     this.selector = host.querySelector('#graphSource')!;
     this.selector.onchange = () => {
       this.source = this.selector.value as Source;
+      this.sourceChosen = true;
       this.draw();
     };
     host.querySelector<HTMLSelectElement>('#graphWindow')!.onchange = (e) => {
@@ -26,6 +28,12 @@ export class TrafficGraph {
     new ResizeObserver(() => {
       if (!document.hidden) this.draw();
     }).observe(this.canvas);
+  }
+  setSource(source: Source) {
+    this.sourceChosen = true;
+    this.source = source;
+    this.selector.value = source;
+    this.draw();
   }
   async update(id: string, stamp: string) {
     if (document.hidden || this.host.closest('main')?.hidden) return;
@@ -40,7 +48,7 @@ export class TrafficGraph {
       if (request !== this.request || document.hidden) return;
       this.view = view;
       const sources = new Set(view.points.map((p) => p.source));
-      if (changed && !sources.has(this.source) && sources.size) {
+      if (changed && !this.sourceChosen && !sources.has(this.source) && sources.size) {
         this.source = [...sources][0];
         this.selector.value = this.source;
       }

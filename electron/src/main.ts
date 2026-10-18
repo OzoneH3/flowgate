@@ -22,6 +22,19 @@ import { Backend } from './backend';
 import { validateDecision } from './protocol';
 if (process.getuid?.() === 0) throw Error('FlowGate Electron must run unprivileged');
 app.enableSandbox();
+// Native Wayland uses the accelerated OpenGL/ANGLE path; Vulkan presentation
+// is unsupported by Chromium's Wayland surface factory in this Electron release.
+// WebGPU's Vulkan/GL interop otherwise initializes Vulkan independently of the
+// compositor flag. Select its GLES adapter too; do not disable GPU acceleration.
+if (app.commandLine.getSwitchValue('ozone-platform') === 'wayland') {
+  const disabled = new Set(
+    app.commandLine.getSwitchValue('disable-features').split(',').filter(Boolean),
+  );
+  disabled.add('Vulkan');
+  app.commandLine.appendSwitch('disable-features', [...disabled].join(','));
+  app.commandLine.appendSwitch('use-angle', 'gl');
+  app.commandLine.appendSwitch('use-webgpu-adapter', 'opengles');
+}
 const workspace = path.resolve(__dirname, '../../.workspace');
 fs.mkdirSync(workspace, { recursive: true });
 const profile = fs.mkdtempSync(path.join(workspace, 'electron-profile-'));
@@ -343,6 +356,18 @@ app.whenReady().then(async () => {
     if (prompt && !prompt.isDestroyed() && prompt.webContents === e.sender) prompt.close();
   });
   main = windowFor();
+  main.webContents.on('did-finish-load', () =>
+    console.info(
+      'FlowGate: main window rendered; sandbox enabled; native platform',
+      app.commandLine.getSwitchValue('ozone-platform') || 'default',
+    ),
+  );
+  main.webContents.on('render-process-gone', (_event, details) =>
+    console.error('FlowGate: renderer exited', JSON.stringify(details)),
+  );
+  app.on('child-process-gone', (_event, details) =>
+    console.error('FlowGate: child process exited', JSON.stringify(details)),
+  );
   main.on('resize', () => {
     const [w, h] = main.getSize();
     saved.width = w;

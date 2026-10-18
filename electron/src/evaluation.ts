@@ -75,6 +75,8 @@ export class Evaluation {
       '-e',
       'python3',
       path.join(this.root, 'scripts/desktop-control.py'),
+      '--backend',
+      'electron-backend',
       '--action',
       String(action),
       '--job',

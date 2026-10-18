@@ -691,7 +691,7 @@ dialog::backdrop {
 
 #activityView > aside { overflow: hidden; }
 #activityView #info { flex: 1; min-height: 50px; }
-#trafficGraph { flex: 0 0 170px; height: 170px; border-top: 1px solid var(--fg-border); margin-top: auto; }
+#trafficGraph { flex: 0 0 126px; height: 126px; border-top: 1px solid var(--fg-border); margin-top: auto; }
 .graph-controls { display: flex; gap: 4px; padding: 4px; }
 .graph-controls select:first-child { flex: 1; min-width: 0; }
 .graph-values { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 3px; padding: 0 5px; font-size: 11px; }
@@ -704,6 +704,9 @@ dialog::backdrop {
 
 :root { --info-width: 38vw; }
 .toolbar { height: 39px; min-height: 39px; gap: 10px; overflow: visible; padding: 4px 8px; }
+.toolbar #search { order: 9; flex: 0 1 240px; width: 240px; min-width: 100px; height: 26px; margin-left: 4px; }
+#activitySource { width: 105px; }
+#activityView .filterbar #expand { margin-left: auto; }
 .brand { font-size: 14px; color: #c7d951; }
 #observerStatus { margin-left: auto; font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
 #controlStatus { max-width: 34%; font-size: 11px; white-space: nowrap; }
@@ -738,9 +741,37 @@ td.up { color: #c7daa8; background: #344b20; }
 .name.depth-1 { padding-left: 22px; }.name.depth-2 { padding-left: 38px; }.name.depth-3 { padding-left: 54px; }
 #activityView > aside { background: #222; }
 #activityView #info { font-size: 12px; }
-#activityView #info dt { margin-top: 5px; }
-#activityView #info dd { margin-bottom: 7px; line-height: 1.35; }
-#activityView h2 { height: 26px; padding: 4px 7px; background: #373737; }
+#activityView #info dt { margin-top: 0; }
+#activityView #info dd { margin-bottom: 0; line-height: 1.35; }
+#activityView h2 { height: 29px; padding: 6px 7px; background: #373737; }
+.info-scroll { flex: 1; min-height: 0; overflow: auto; padding: 0 10px; }
+#activityView .info-section-title { color: var(--fg-text); margin: 14px 0 9px; font-size: 12px; font-weight: 400; }
+.info-section-title::before { content: '⌃'; display: inline-block; text-align: center; width: 20px; height: 20px; line-height: 24px; background: #484848; border-radius: 50%; margin-right: 5px; }
+#activityView #info { margin: 0; padding: 7px; border: 1px solid var(--fg-border); border-radius: 2px; }
+.info-rule-matrix { width: 100%; }
+.info-rule-matrix th { position: static; height: 20px; background: transparent; color: var(--fg-muted); border: 0; padding: 0 5px; text-align: left; }
+.info-rule-matrix td { height: 26px; padding: 0 5px; border: 0; }
+.info-rule-matrix td:first-child { font-weight: 600; width: 65px; }
+.info-rule-matrix tr:last-child { outline: 1px solid var(--fg-border); }
+.info-rule-matrix .sidebar-policy { padding: 2px 6px; background: var(--fg-section); min-width: 75px; }
+.info-tools button { border: 0; background: transparent; color: var(--fg-selected); padding: 4px 5px 4px 0; min-height: 22px; font-size: 12px; }
+#activityView aside { overflow: hidden; }
+#activityView #trafficGraph { position: relative; flex: 0 0 126px; height: 126px; margin-top: 0; }
+#activityView > aside { margin-bottom: -26px; z-index: 3; }
+#app:has(#activityView:not([hidden])) > footer { width: calc(100% - min(var(--info-width),45vw) - 10px); }
+#app:has(#activityView:not([hidden])) > footer > span:first-child { display: none; }
+.graph-heading { display: flex; align-items: center; background: var(--fg-section); border-top: 1px solid var(--fg-border); }
+.graph-heading h2 { flex: 1; border: 0; height: 29px; white-space: nowrap; }
+.graph-heading .graph-controls { max-width: 72%; gap: 3px; }
+.graph-heading select { width: 100%; max-width: 190px; font-size: 10px; background: var(--fg-section); border: 0; }
+.graph-heading #graphWindow { width: 50px; flex: 0 0 50px; }
+#graphStatus { white-space: nowrap; text-overflow: ellipsis; overflow: hidden; max-height: 14px; }
+.graph-explanation { position: absolute; right: 4px; bottom: 2px; z-index: 5; font-size: 10px; color: var(--fg-muted); padding: 0 3px; background: var(--fg-content); }
+.graph-explanation[open] { width: min(300px,90%); max-height: 160px; overflow: auto; padding: 5px; border: 1px solid var(--fg-border); }
+.graph-explanation .graph-scope { white-space: normal; }
+.graph-explanation summary { cursor: pointer; }
+#trafficCanvas { height: 64px; }
+
 #activityView h3 { margin: 6px 8px; }
 .summary { height: 23px; min-height: 23px; max-height: 23px; padding: 3px 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 10px; }
 #app > footer { min-height: 22px; height: 22px; padding: 2px 7px; font-size: 10px; }
@@ -832,7 +863,7 @@ td.up { color: #c7daa8; background: #344b20; }
  --fg-chart-up: #f44336;
  --fg-allow: #a1c456;
  --fg-block: #c84e48;
- font-family: 'Noto Sans', sans-serif;
+ font-family: Arial, 'Liberation Sans', sans-serif;
  color: var(--fg-text);
  background: var(--fg-content);
 }
@@ -841,7 +872,7 @@ td.up { color: #c7daa8; background: #344b20; }
 #tree th, #tree td, #activityView aside, .table-scroll, .tabs, #activityView h2 { border-color: var(--fg-border); }
 #tree tbody tr:nth-child(even), #tree tbody tr:nth-child(odd) { background: var(--fg-content); }
 #tree tbody tr:hover { background: var(--fg-section); }
-#tree tbody tr[aria-selected='true'] { background: var(--fg-selected); color: #10212a; }
+#tree tbody tr[aria-selected='true'] { background: var(--fg-selected); color: #ffffff; }
 #tree tr[aria-selected='true'] td { color: inherit; }
 #tree tr[aria-selected='true'] td.down, #tree tr[aria-selected='true'] td.up { background: transparent; }
 #tree th { height: 40px; padding: 0; font-size: 12px; line-height: 15px; }
@@ -854,8 +885,8 @@ td.up { color: #c7daa8; background: #344b20; }
 #tree .name.depth-2 { padding-left: 46px; }
 #tree .name.depth-3 { padding-left: 62px; }
 #tree .disclosure { width: 16px; min-height: 16px; height: 16px; line-height: 16px; padding: 0; vertical-align: middle; }
-#tree td.down { background: var(--fg-download-cell); color: var(--fg-text); }
-#tree td.up { background: var(--fg-upload-cell); color: var(--fg-upload-text); }
+#tree td.down { background: transparent; color: var(--fg-text); }
+#tree td.up { background: transparent; color: var(--fg-upload-text); }
 .col-name { width: 322px; }.col-download_bps,.col-upload_bps { width: 84px; }.col-rules { width: 168px; }
 .application-icon { display: inline-flex; width: var(--fg-icon-size); height: var(--fg-icon-size); margin-right: 4px; vertical-align: -2px; align-items: center; justify-content: center; }
 .application-icon img,.application-icon svg { width: var(--fg-icon-size); height: var(--fg-icon-size); margin: 0; object-fit: contain; }
@@ -873,6 +904,10 @@ td.up { color: #c7daa8; background: #344b20; }
 #activityView #info dt { color: var(--fg-muted); }
 .graph-download { color: var(--fg-chart-down); }.graph-upload { color: var(--fg-chart-up); }
 
+#tree td.down .rate-value,#tree td.up .rate-value { background: #333; border-radius: 3px; padding: 1px 2px; font-size: 11px; }
+#tree tr[aria-selected='true'] .rate-value { background: transparent; }
+#selectedExecutable { padding: 0 10px; font-weight: 600; font-size: 12px; line-height: 16px; max-height: 32px; overflow: auto; overflow-wrap: anywhere; user-select: text; }
+.info-rule-matrix { font-size: 12px; }
 #tree td.numeric { font-size: 12px; padding-left: 4px; padding-right: 4px; }
 
 #activityView .table-scroll { border-top: 0; }
@@ -897,10 +932,11 @@ td.up { color: #c7daa8; background: #344b20; }
 .tabs button[aria-selected='true'] { background: var(--fg-tab); color: #222; }
 .tabs { border-bottom-color: var(--fg-tab); }
 #tree .application-icon { vertical-align: middle; }
-.col-incoming_policy,.col-outgoing_policy { width: 112px; }
+.col-incoming_policy,.col-outgoing_policy { width: 88px; }
 .policy-cell { font-size: 11px; background: transparent; padding: 0 3px; }
 .policy-cell:hover { background: var(--fg-section); }
-#tree tr[aria-selected='true'] .policy-cell { background: #273036; color: #e0e0e0; }
+#tree tr[aria-selected='true'] .policy-cell { background: transparent; color: #ffffff; }
+#tree tr[aria-selected='true'] .policy-cell::before { color: #ffffff; }
 #tree th,#tree th button { font-size: 12px; }
 #info { grid-template-columns: 80px minmax(0,1fr); }
 #activityView #info > dt,#activityView #info > dd { padding: 2px 0; }

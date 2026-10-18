@@ -118,3 +118,26 @@ test('rate sorting uses numbers across units and leaves unavailable last in both
         desc ? ['large', 'small', 'missing'] : ['small', 'large', 'missing'],
       );
 });
+
+test('overview/source selection deduplicates sockets and preserves missing-source coverage', () => {
+  const { overview } = require('../dist/test/model.cjs');
+  const tcp = row('tcp', [], { definition: 'tcp-transport-payload', upload_bps: 120 });
+  const udp = {
+    ...row('udp', [], { definition: 'udp-api-reported', upload_bps: 70 }),
+    socket: { protocol: 'udp' },
+  };
+  const missing = { ...row('missing', [], { available: false }), socket: { protocol: 'udp' } };
+  const root = overview({ rows: [tcp, tcp, udp, missing] });
+  assert.equal(root.rows.length, 3);
+  assert.equal(root.kind, 'overview');
+  assert.equal(root.process, undefined);
+  assert.equal(sum(root.rows, 'upload_bps').value, undefined);
+  assert.equal(sum(root.rows, 'upload_bps', 'tcp').value, 120);
+  assert.deepEqual(sum(root.rows, 'upload_bps', 'udp'), {
+    value: 70,
+    partial: true,
+    mixed: false,
+    known: 1,
+    count: 2,
+  });
+});

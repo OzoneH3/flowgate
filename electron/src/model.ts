@@ -3,7 +3,7 @@ export type Metric = 'download_bps' | 'upload_bps' | 'downloaded' | 'uploaded';
 export interface Row {
   id: string;
   parent?: string;
-  kind: 'application' | 'process' | 'socket' | 'unidentified';
+  kind: 'overview' | 'application' | 'process' | 'socket' | 'unidentified';
   label: string;
   pid?: number;
   rows: SocketRow[];
@@ -19,14 +19,34 @@ export interface Sum {
   known: number;
   count: number;
 }
-export function sum(rows: SocketRow[], metric: Metric): Sum {
+export type MeasurementSource = 'tcp' | 'udp';
+export const sourceRows = (rows: SocketRow[], source?: MeasurementSource) => [
+  ...new Map(
+    rows.filter((r) => !source || r.socket.protocol === source).map((r) => [r.id, r]),
+  ).values(),
+];
+export function overview(activity: Activity, children: Row[] = []): Row {
+  return {
+    id: 'overview',
+    kind: 'overview',
+    label: 'All applications',
+    rows: sourceRows(activity.rows),
+    children,
+  };
+}
+export function sum(rows: SocketRow[], metric: Metric, source?: MeasurementSource): Sum {
+  rows = sourceRows(rows, source);
   const definitions = new Set<string>();
   let value = 0,
     known = 0,
     partial = false;
   for (const r of rows) {
     const t = r.traffic;
-    if (t.available) {
+    if (
+      t.available &&
+      (!source ||
+        t.definition === (source === 'tcp' ? 'tcp-transport-payload' : 'udp-api-reported'))
+    ) {
       definitions.add(t.definition || t.source || 'unknown');
       if (t[metric] !== undefined) {
         value += t[metric]!;
@@ -181,6 +201,7 @@ export function flatten(
   expanded: Set<string>,
   key: string,
   descending: boolean,
+  source?: MeasurementSource,
 ): { row: Row; depth: number }[] {
   const result: { row: Row; depth: number }[] = [];
   const value = (r: Row): number | string =>
@@ -198,7 +219,7 @@ export function flatten(
                 ? (r.socket?.socket.remote ?? '')
                 : key === 'state'
                   ? (r.socket?.state ?? '')
-                  : (sum(r.rows, key as Metric).value ?? -1);
+                  : (sum(r.rows, key as Metric, source).value ?? -1);
   const walk = (rows: Row[], depth: number) => {
     for (const row of [...rows].sort((a, b) => {
       const av = value(a),

@@ -1048,3 +1048,7 @@ No contract gap remains.
 ### Measured Activity presentation
 
 Activity uses compact rows and source-specific chart indicators.
+
+Activity now starts with an **All applications** overview. Choose TCP rates or UDP rates in Activity; totals and numeric sorting use that measurement source. The graph retains separate source histories over all observed sockets, independent of search. Missing measurements remain unavailable, and the overview cannot be used as a rule target. In/Out cells retain backend policy details; “Not set” means no explicit rule. The sidebar shows executable, properties, a compact Rules matrix and navigation links.
+
+See [Activity presentation and verification](ACTIVITY-COMPOSITION.md) and [ordinary Wayland launch diagnostics](LAUNCH-DIAGNOSTICS.md). The launcher retains GUI output/exit status in its run directory. Electron builds use `.workspace/electron-backend`, preserving the separate approved backend executable.

@@ -13,6 +13,7 @@ import { setupDecisionLog, showDecisionLog, updateDecisionLog } from './decision
 import type { ClientState, ViewEvent, Scope } from './protocol';
 import {
   hierarchy,
+  overview,
   flatten,
   allRows,
   sum,
@@ -27,7 +28,8 @@ const root = document.querySelector<HTMLDivElement>('#app')!;
 const promptGeneration = new URL(location.href).searchParams.get('generation');
 const promptID = new URL(location.href).searchParams.get('request');
 let state: ClientState;
-let selected = '';
+let selected = 'overview';
+let measurementSource: 'tcp' | 'udp' = 'tcp';
 let graph: TrafficGraph | undefined;
 let selectedRequest = promptID ?? '';
 let chosenScope: Scope = 'once';
@@ -39,7 +41,7 @@ let roots: Row[] = [];
 let visible: { row: Row; depth: number }[] = [];
 let sort = 'name',
   descending = false;
-const expanded = new Set<string>();
+const expanded = new Set<string>(['overview']);
 const localSubmitted = new Set<string>();
 let ruleSignature = '';
 let lastGeneration = '';
@@ -58,7 +60,7 @@ function rowIcon(kind: Row['kind']) {
   const path = document.createElementNS(svg.namespaceURI, 'path');
   path.setAttribute(
     'd',
-    kind === 'application'
+    kind === 'application' || kind === 'overview'
       ? 'M2 2h12v9H2zM5 14h6M8 11v3M2 5h12'
       : kind === 'process'
         ? 'M5 3h6v10H5zM2 5h3m6 0h3M2 8h3m6 0h3M2 11h3m6 0h3'
@@ -145,7 +147,12 @@ function policyCell(r: Row, direction: PolicyDirection) {
     : status.available
       ? configuredPolicy(rules, status.now)
       : 'Unavailable';
-  const button = element('button', label, 'policy-cell');
+  const button = element(
+    'button',
+    r.kind === 'overview' ? '—' : label === 'No explicit rule' ? 'Not set' : label,
+    'policy-cell',
+  );
+  button.disabled = r.kind === 'overview';
   button.dataset.direction = direction;
   button.title =
     `${direction}: configured policy. ${status.reason}\n${state.control.enforcement?.state === 'stopped' ? 'Stored only; enforcement stopped.\n' : ''}` +
@@ -434,9 +441,9 @@ if (promptID) {
   root.innerHTML = `<section class="prompt-shell"><header class="prompt-heading"><strong>FlowGate Blocker</strong><span>Pending connection permission</span></header><div id="promptBody"><div id="requestDetails"></div></div><footer><span id="controlStatus"></span><button id="dismiss">Decide later</button></footer><div id="feedback" role="status" aria-live="polite"></div></section>`;
   $('dismiss').onclick = () => void window.flowgate.dismissPrompt();
 } else {
-  root.innerHTML = `<header class="toolbar"><strong class="brand">▣ FlowGate</strong><span id="observerStatus"></span><span class="separator"></span><span id="controlStatus"></span></header><nav class="tabs" aria-label="Views"><button id="activityTab" aria-selected="true">Activity</button><button id="requestsTab" aria-selected="false">Pending requests <span id="pendingCount">0</span></button></nav><main id="activityView"><section class="activity-main"><div class="filterbar"><input id="search" type="search" aria-label="Search Activity" placeholder="Search application, path, PID or endpoint"><select id="filter" aria-label="Socket filter"><option value="all">All sockets</option><option value="active">Active TCP / connected UDP</option><option value="listening">Listening TCP / bound UDP</option></select><button id="expand">Expand all</button><button id="collapse">Collapse all</button></div><div class="table-scroll"><table id="tree" role="treegrid" tabindex="0" aria-label="Application process socket activity"><thead><tr id="headers"></tr></thead><tbody id="rows"></tbody></table></div><div id="activitySummary" class="summary"></div></section><aside><h2>Info View</h2><h3 id="selectedName">FlowGate Activity</h3><dl id="info"></dl><section id="trafficGraph"></section></aside></main><main id="requestsView" hidden><section class="request-list"><h2>Pending &amp; recent requests</h2><p class="hint">Select a request to decide. Dismissal grants nothing. Closing FlowGate leaves an independent controller running.</p><div class="table-scroll"><table id="requests"><thead><tr><th>Application</th><th>Direction</th><th>Protocol</th><th>Remote endpoint</th><th>State</th></tr></thead><tbody id="requestRows"></tbody></table></div></section><aside class="request-sidebar"><h2>Connection permission</h2><div id="requestDetails"></div></aside></main><footer><span>Activity and firewall control are independent.</span><span id="feedback" role="status" aria-live="polite"></span></footer>`;
+  root.innerHTML = `<header class="toolbar"><strong class="brand">▣ FlowGate</strong><input id="search" type="search" aria-label="Search Activity" placeholder="Search"><span id="observerStatus"></span><span class="separator"></span><span id="controlStatus"></span></header><nav class="tabs" aria-label="Views"><button id="activityTab" aria-selected="true">Activity</button><button id="requestsTab" aria-selected="false">Pending requests <span id="pendingCount">0</span></button></nav><main id="activityView"><section class="activity-main"><div class="filterbar"><select id="activitySource" aria-label="Activity measurement source"><option value="tcp">TCP rates</option><option value="udp">UDP rates</option></select><select id="filter" aria-label="Socket filter"><option value="all">All sockets</option><option value="active">Active TCP / connected UDP</option><option value="listening">Listening TCP / bound UDP</option></select><button id="expand">Expand all</button><button id="collapse">Collapse all</button></div><div class="table-scroll"><table id="tree" role="treegrid" tabindex="0" aria-label="Application process socket activity"><thead><tr id="headers"></tr></thead><tbody id="rows"></tbody></table></div><div id="activitySummary" class="summary"></div></section><aside><h2>Info View</h2><h3 id="selectedName">FlowGate Activity</h3><div id="selectedExecutable"></div><div class="info-scroll"><h3 id="infoProperties" class="info-section-title">Overview</h3><dl id="info"></dl><section id="infoRules"></section><section class="info-tools"><h3 class="info-section-title">Tools</h3><button id="infoOpenRules">Rule list</button><button id="infoOpenLog">Decision log</button><button id="infoOpenPending">Pending requests</button></section></div><section id="trafficGraph"></section></aside></main><main id="requestsView" hidden><section class="request-list"><h2>Pending &amp; recent requests</h2><p class="hint">Select a request to decide. Dismissal grants nothing. Closing FlowGate leaves an independent controller running.</p><div class="table-scroll"><table id="requests"><thead><tr><th>Application</th><th>Direction</th><th>Protocol</th><th>Remote endpoint</th><th>State</th></tr></thead><tbody id="requestRows"></tbody></table></div></section><aside class="request-sidebar"><h2>Connection permission</h2><div id="requestDetails"></div></aside></main><footer><span>Activity and firewall control are independent.</span><span id="feedback" role="status" aria-live="polite"></span></footer>`;
   const columns = [
-    ['name', 'Application / process / connection'],
+    ['name', 'Name'],
     ['download_bps', 'DL rate'],
     ['upload_bps', 'UL rate'],
     ['incoming_policy', 'In Blocker'],
@@ -483,6 +490,9 @@ if (promptID) {
     $('requestsTab').setAttribute('aria-selected', String(next === 'requests'));
   };
   setupWorkflows(chooseTab);
+  $('infoOpenRules').onclick = () => chooseTab('rules');
+  $('infoOpenLog').onclick = () => chooseTab('log');
+  $('infoOpenPending').onclick = () => chooseTab('requests');
   setupDecisionLog(
     chooseTab,
     (app) => installedIcon(app, 'application'),
@@ -510,6 +520,12 @@ if (promptID) {
   $('activityTab').onclick = () => chooseTab('activity');
   $('requestsTab').onclick = () => chooseTab('requests');
   $('search').oninput = () => buildTree();
+  $('activitySource').onchange = () => {
+    measurementSource = ($('activitySource') as HTMLSelectElement).value as 'tcp' | 'udp';
+    graph?.setSource(measurementSource);
+    renderTree();
+    renderInfo();
+  };
   $('filter').onchange = () => buildTree();
   $('expand').onclick = () => {
     for (const r of allRows(roots)) if (r.children.length) expanded.add(r.id);
@@ -517,7 +533,8 @@ if (promptID) {
   };
   $('collapse').onclick = () => {
     expanded.clear();
-    selected = '';
+    selected = 'overview';
+    expanded.add('overview');
     renderTree();
     renderInfo();
   };
@@ -555,6 +572,11 @@ function buildTree() {
   roots = a
     ? hierarchy(a, $<HTMLInputElement>('search').value, $<HTMLSelectElement>('filter').value)
     : [];
+  if (a) {
+    const children = roots;
+    for (const child of children) child.parent = 'overview';
+    roots = [overview(a, children)];
+  }
   const all = allRows(roots);
   const r = all.find((r) => r.id === selected);
   if (r) {
@@ -571,16 +593,16 @@ function buildTree() {
   renderTree();
   renderInfo();
   $('activitySummary').textContent = a
-    ? `${roots.reduce((n, r) => n + r.rows.length, 0)} / ${a.rows.length} sockets · ${a.complete ? 'Complete census' : 'Partial visibility'} · ${a.collected} · ${a.issues.join('; ')}`
+    ? `${roots[0]?.children.reduce((n, r) => n + r.rows.length, 0) || 0} / ${a.rows.length} sockets · ${a.complete ? 'Complete census' : 'Partial visibility'}`
     : state.observation.message;
-  $('activitySummary').title = $('activitySummary').textContent || '';
+  $('activitySummary').title = [a?.collected, ...(a?.issues || [])].filter(Boolean).join(' · ');
 }
 function renderTree() {
   const focused = document.activeElement as HTMLElement;
   const focusedPolicy = focused?.classList.contains('policy-cell')
     ? { id: focused.closest('tr')?.dataset.id, direction: focused.dataset.direction }
     : undefined;
-  visible = flatten(roots, expanded, sort, descending);
+  visible = flatten(roots, expanded, sort, descending, measurementSource);
   const body = $('rows');
   const fragment = document.createDocumentFragment();
   for (const { row: r, depth } of visible) {
@@ -622,13 +644,15 @@ function renderTree() {
     name.title = r.process?.executable || r.socket?.socket.remote || r.label;
     tr.append(name);
     for (const key of ['download_bps', 'upload_bps'] as Metric[]) {
-      const s = sum(r.rows, key);
+      const s = sum(r.rows, key, measurementSource);
       const td = element(
         'td',
         metricLabel(s, true),
         'numeric ' + (s.value && s.value > 0 ? (key === 'download_bps' ? 'down' : 'up') : ''),
       );
-      td.title = `${s.known}/${s.count} measured sockets${s.mixed ? ' · incompatible measurement sources' : ''}`;
+      const rateText = td.textContent || '';
+      td.replaceChildren(element('span', rateText, 'rate-value'));
+      td.title = `${measurementSource.toUpperCase()} · ${s.known}/${s.count} measured sockets${s.mixed ? ' · incompatible measurement sources' : ''}`;
       tr.append(td);
     }
     tr.append(policyCell(r, 'incoming'), policyCell(r, 'outgoing'));
@@ -637,7 +661,7 @@ function renderTree() {
       element('td', r.pid === undefined ? '' : String(r.pid), 'numeric'),
     );
     for (const key of ['downloaded', 'uploaded'] as Metric[])
-      tr.append(element('td', metricLabel(sum(r.rows, key)), 'numeric'));
+      tr.append(element('td', metricLabel(sum(r.rows, key, measurementSource)), 'numeric'));
     for (const value of [
       r.socket?.socket.protocol,
       r.socket?.socket.local,
@@ -697,10 +721,57 @@ function renderInfo() {
       details.append(technical);
       info.append(details);
     }
+    const rulesHost = $('infoRules');
+    const matrix = element('table', '', 'info-rule-matrix');
+    const cols = element('colgroup');
+    for (const width of ['65px', '95px', 'auto']) {
+      const col = element('col');
+      col.style.width = width;
+      cols.append(col);
+    }
+    matrix.append(cols);
+    const heading = element('tr');
+    for (const text of ['Type', 'In', 'Out']) heading.append(element('th', text));
+    matrix.append(heading);
+    const cells = element('tr');
+    cells.append(element('td', 'Blocker'));
+    for (const label of ['Rules · In', 'Rules · Out']) {
+      const dt = [...info.querySelectorAll('dt')].find((n) => n.textContent === label);
+      const dd = dt?.nextElementSibling;
+      const cell = element('td');
+      if (dd) {
+        cell.append(...dd.childNodes);
+        dd.remove();
+      }
+      dt?.remove();
+      cells.append(cell);
+    }
+    matrix.append(cells);
+    const sectionTitle = element('h3', 'Rules', 'info-section-title');
+    if (
+      rulesHost.dataset.selection !== selected ||
+      rulesHost.textContent !== sectionTitle.textContent + matrix.textContent
+    )
+      rulesHost.replaceChildren(sectionTitle, matrix);
+    rulesHost.dataset.selection = selected;
+    rulesHost.hidden = !info.dataset.policy;
     // Preserve text selection and expanded details during unchanged polling.
     if (live.textContent !== info.textContent) live.replaceChildren(...Array.from(info.childNodes));
   };
   const r = allRows(roots).find((r) => r.id === selected);
+  $('infoProperties').textContent =
+    r?.kind === 'socket'
+      ? 'Connection properties'
+      : r?.kind === 'process'
+        ? 'Process properties'
+        : r?.kind === 'application'
+          ? 'Application properties'
+          : 'Overview';
+  const pathText = r?.process?.executable || r?.displayApplication?.executable || '';
+  if ($('selectedExecutable').textContent !== pathText)
+    $('selectedExecutable').textContent = pathText;
+  $('selectedExecutable').title = pathText;
+  $('selectedExecutable').hidden = !pathText;
   const selectedName = $('selectedName');
   if (selectedName.dataset.identity !== (r?.id || '')) {
     selectedName.dataset.identity = r?.id || '';
@@ -720,6 +791,30 @@ function renderInfo() {
     commit();
     return;
   }
+  if (r.kind === 'overview') {
+    field(
+      info,
+      'Scope',
+      state.control.permissions?.observation_scope === 'machine'
+        ? 'Machine · current network namespace'
+        : 'Visible sockets · current network namespace',
+    );
+    field(info, 'Applications', String(r.children.filter((c) => c.kind === 'application').length));
+    field(info, 'Sockets', String(r.rows.length));
+    field(
+      info,
+      'Measurement',
+      'TCP transport payload and UDP API-reported payload are shown separately. Socket sums include local perspectives; they are not deduplicated internet usage.',
+    );
+    field(
+      info,
+      'Coverage',
+      state.observation.activity?.complete ? 'Complete visible census' : 'Partial visibility',
+    );
+    commit();
+    return;
+  }
+  info.dataset.policy = 'true';
   const inventory = ruleStatus(r, state);
   field(
     info,
@@ -779,6 +874,7 @@ function renderInfo() {
   }
   if (r.process) {
     field(info, 'Executable', r.process.executable);
+    field(info, 'User ID', String(r.process.uid));
     field(
       info,
       'Identity',

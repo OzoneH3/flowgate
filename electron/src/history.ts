@@ -1,5 +1,5 @@
 import { performance } from 'node:perf_hooks';
-import { hierarchy, allRows } from './model';
+import { hierarchy, allRows, overview } from './model';
 import type { ClientState, SocketRow } from './protocol';
 export type Source = 'tcp' | 'udp';
 export interface GraphPoint {
@@ -188,7 +188,7 @@ export class TrafficHistory {
     this.previous = next;
     const active = new Set<string>();
     // Unfiltered hierarchy freezes historical membership; later ownership discovery cannot reassign old points.
-    for (const row of allRows(hierarchy(a))) {
+    for (const row of [overview(a), ...allRows(hierarchy(a))]) {
       if (active.size >= this.limits.entities) break;
       active.add(row.id);
       let entry = this.entries.get(row.id);

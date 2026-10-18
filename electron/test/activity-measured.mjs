@@ -266,6 +266,11 @@ try {
   await page.setViewportSize({ width: 1280, height: 656 });
   await page.waitForSelector('#rows tr');
   await sleep(1800);
+  assert.equal(await page.locator('#rows tr[aria-selected=true]').getAttribute('data-id'), 'overview');
+  await page.selectOption('#activitySource', 'udp');
+  assert.equal(await page.locator('#graphSource').inputValue(), 'udp');
+  assert.match(await page.locator('#rows tr').first().innerText(), /—/);
+  await page.selectOption('#activitySource', 'tcp');
   await page.locator('#rows tr').filter({ hasText: 'Firefox' }).first().locator('.name').click();
   await sleep(1200);
   await page.evaluate(
@@ -311,6 +316,7 @@ try {
       await page.locator('#rows tr').filter({ hasText: 'Firefox' }).first().locator('img').count(),
     );
   assert.match(await page.locator('#graphSource').textContent(), /UDP API/);
+  assert.equal(await page.locator('#selectedExecutable').innerText(), '/usr/lib/firefox/firefox');
   await page.screenshot({ path: path.join(evidence, 'activity-normal.png') });
   for (const key of ['upload_bps', 'download_bps']) {
     await page.click('.col-' + key + ' button');

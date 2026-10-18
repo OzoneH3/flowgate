@@ -171,3 +171,16 @@ test('UDP collector generation and Stop produce gaps while TCP continues', () =>
   assert.equal(f.view('tcp').points.at(-1).up, 4);
   assert(f.view('udp').points.some((p) => p.up === 4));
 });
+
+test('overview retains bounded source-separated history with shared sockets counted once', () => {
+  const f = fixture();
+  const tcp = row('shared', 'tcp', ['p', 'q']);
+  f.send([tcp, row('u', 'udp')]);
+  f.send([tcp, tcp, row('u', 'udp')]);
+  const v = f.view('overview');
+  assert.equal(v.label, 'All applications');
+  assert.equal(v.points.filter((p) => p.source === 'tcp').at(-1).up, 4);
+  assert.equal(v.points.filter((p) => p.source === 'udp').at(-1).up, 4);
+  f.h.observe({ connected: false, generation: 'g' });
+  assert.equal(f.view('overview').points.at(-1).up, undefined);
+});

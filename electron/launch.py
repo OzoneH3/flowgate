@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Own only a newly-created read-only observer; never start/stop enforcement."""
 import argparse
+import json
 import os
 from pathlib import Path
 import signal
@@ -62,9 +63,16 @@ try:
             args += ['--control', a.control]
         print('FlowGate: read-only Activity. Controller:', a.control or 'not attached; enforcement state unknown', flush=True)
         print('Owned run directory:', run, flush=True)
-        gui = subprocess.Popen(args, env=env)
+        (run/'launch.json').write_text(json.dumps({'args': args, 'started': time.time()}))
+        gui = subprocess.Popen(args, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors='replace')
         children.append(gui)
+        with (run/'electron.log').open('w') as gui_log:
+            for line in gui.stdout:
+                gui_log.write(line)
+                gui_log.flush()
+                print(line, end='', flush=True)
         code = gui.wait()
+        (run/'exit.json').write_text(json.dumps({'code': code, 'finished': time.time()}))
         if code:
             raise RuntimeError(f'Electron exited with {code}; sandbox remains enabled')
 except KeyboardInterrupt:

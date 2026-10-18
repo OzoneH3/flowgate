@@ -34,12 +34,15 @@ test('extended bridge uses fixed operations; Stop acknowledgement and failure re
       '-e',
       'python3',
       path.join(root, 'scripts/traffic-control.py'),
+      '--backend',
+      'electron-backend',
     ]);
     assert(ext.view(false).busy);
     await assert.rejects(() => ext.action('enable'));
     ext.view(true);
     await ext.action('stop');
     assert.match(ext.state.message, /acknowledged Stop/);
+    assert.equal(calls[1][0], path.join(root, '.workspace/electron-backend'));
     assert.deepEqual(calls[1][1], ['udp-stop']);
     cp.execFile = (c, a, o, done) => done(Error('lost acknowledgement'), '', 'disconnected');
     await ext.action('stop');

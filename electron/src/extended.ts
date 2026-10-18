@@ -55,6 +55,8 @@ export class ExtendedMonitoring {
           '-e',
           'python3',
           path.join(this.root, 'scripts/traffic-control.py'),
+          '--backend',
+          'electron-backend',
         ],
         { detached: true, stdio: 'ignore' },
       );
@@ -71,7 +73,7 @@ export class ExtendedMonitoring {
     this.pendingUntil = Date.now() + 6000;
     await new Promise<void>((resolve) =>
       execFile(
-        path.join(this.root, '.workspace/flowgate'),
+        path.join(this.root, '.workspace/electron-backend'),
         ['udp-stop'],
         { timeout: 5000, maxBuffer: 65536 },
         (error, stdout, stderr) => {
