@@ -772,12 +772,10 @@ async function setupSizing() {
   void refresh();
   setInterval(() => void refresh(), 3000);
   for (const aside of document.querySelectorAll<HTMLElement>('main aside')) {
-    const defaultSidebar = Math.round(window.innerWidth * 0.38);
-    aside.style.width = (prefs.sidebar || defaultSidebar) + 'px';
-    document.documentElement.style.setProperty(
-      '--info-width',
-      (prefs.sidebar || defaultSidebar) + 'px',
-    );
+    // Keep the default proportion responsive; only a user resize stores pixels.
+    const sidebarWidth = prefs.sidebar ? prefs.sidebar + 'px' : '38vw';
+    aside.style.width = sidebarWidth;
+    document.documentElement.style.setProperty('--info-width', sidebarWidth);
     const grip = node('div', '');
     grip.className = 'sidebar-grip';
     grip.tabIndex = 0;
