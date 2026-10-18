@@ -128,8 +128,14 @@ try {
   step('one click: application In Allow (scope shown before click), saved via backend preview');
   await cell('application', 'incoming').click();
   const shown = await p.locator('.qs-scope').innerText();
-  assert.match(shown, anyProtocol ? /TCP \+ UDP/ : /TCP|UDP/);
-  assert.match(shown, /any address · any port · persistent/);
+  // Before the click: target, direction, protocol scope and lifetime, plus a visible endpoint marker.
+  assert.match(
+    shown,
+    anyProtocol
+      ? /^In · Application · TCP \+ UDP · persistent$/
+      : /^In · Application · (TCP|UDP) · persistent$/,
+  );
+  assert.equal(await p.locator('.quick-popup .qs-endpoint').innerText(), 'Any endpoint');
   await p.locator('[data-focus="qs:new:allow"]').click();
   await wait(async () => appRules(await snapshot()).some((r) => r.filter.direction === 'incoming'));
   await noPending();
@@ -148,11 +154,8 @@ try {
   assert.match(await cell('application', 'incoming').innerText(), /Allow/);
   assert.match(await cell('process', 'incoming').innerText(), /Not set/);
   await cell('process', 'outgoing').click();
-  assert.match(
-    await p.locator('.qs-scope').innerText(),
-    /This process · PID 21|This process · PID/,
-  );
-  assert.match(await p.locator('.qs-scope').innerText(), /until this process exits/);
+  assert.match(await p.locator('.qs-scope').innerText(), /^Out · Process \d+ · .* · session$/);
+  assert.equal(await p.locator('.quick-popup .qs-endpoint').innerText(), 'Any endpoint');
   await p.locator('[data-focus="qs:new:block"]').click();
   await wait(async () => own(await snapshot(), alpha).length === 1);
   await noPending();

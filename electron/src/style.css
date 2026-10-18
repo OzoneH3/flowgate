@@ -1305,3 +1305,12 @@ body.preset-status #tree { width: 100%; }
 .toolbar-status { max-width: 220px; }
 @media (max-width: 1000px) { .toolbar-layout { display: none; } .toolbar-status { max-width: 150px; } }
 @media (max-width: 900px) { #observerStatus { display: none; } #controlStatus { max-width: 170px; } .toolbar #search { flex-basis: 150px; } }
+/* Review fixes: visible endpoint marker, compact matrix columns inside the full-width box. */
+.qs-scope { white-space: normal; overflow: visible; text-overflow: clip; margin: 0 0 4px; font-size: 11px; line-height: 14px; }
+.qs-endpoint { display: inline-block; margin: -2px 0 5px; padding: 0 6px; border: 1px solid #4a4a4a; border-radius: 9px; font-size: 10px; line-height: 16px; color: #c8c8c8; }
+.qs-scope-detail { margin: -2px 0 5px; font-size: 11px; line-height: 14px; color: var(--fg-text); overflow-wrap: anywhere; }
+.info-rule-matrix { table-layout: fixed; }
+.info-rule-matrix th[scope=row], .info-rule-matrix tr:first-child th:first-child { width: 60px; }
+.info-rule-matrix td:not(.matrix-filler):not([colspan]) { width: 86px; }
+.info-rule-matrix th.matrix-filler, .info-rule-matrix td.matrix-filler { width: auto; padding: 0; }
+.info-rule-matrix tr:first-child th:nth-child(2), .info-rule-matrix tr:first-child th:nth-child(3) { width: 86px; }

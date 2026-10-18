@@ -29,8 +29,8 @@ export class TrafficGraph {
       pause.setAttribute('aria-pressed', String(this.paused));
       if (!this.paused) {
         this.signature = '';
-        void this.update(this.id, this.lastStamp);
-      }
+        void this.update(this.lastId || this.id, this.lastStamp);
+      } else this.request++;
     };
     this.canvas.after(pause);
     this.selector = host.querySelector('#graphSource')!;
@@ -56,9 +56,15 @@ export class TrafficGraph {
   }
   paused = false;
   private lastStamp = '';
+  private lastId = '';
   async update(id: string, stamp: string) {
     this.lastStamp = stamp;
-    if (this.paused) return;
+    this.lastId = id;
+    if (this.paused) {
+      // Keep the newest requested selection; any in-flight fetch is invalidated.
+      this.request++;
+      return;
+    }
     if (document.hidden || this.host.closest('main')?.hidden) return;
     const signature = id + ':' + stamp + ':' + this.seconds;
     if (signature === this.signature) return;
@@ -68,7 +74,7 @@ export class TrafficGraph {
     const request = ++this.request;
     try {
       const view = await window.flowgate.graph({ id, seconds: this.seconds });
-      if (request !== this.request || document.hidden) return;
+      if (request !== this.request || this.paused || document.hidden) return;
       this.view = view;
       const sources = new Set(view.points.map((p) => p.source));
       if (changed && !this.sourceChosen && !sources.has(this.source) && sources.size) {

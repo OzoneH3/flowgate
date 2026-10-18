@@ -17,6 +17,7 @@ import {
   refState,
   shortScope,
   type RuleChip,
+  endpointWide,
 } from './rule-chip';
 import { reviewedScope, previewSeconds } from './editor-presentation';
 import { initiationPresentation } from './initiation';
@@ -309,6 +310,7 @@ export class ActivityPolicy {
       if (connection === d) th.classList.add('connection-column');
       head.append(th);
     }
+    head.append(el('th', '', 'matrix-filler'));
     table.append(head);
     const tiers = this.tiers(row);
     for (const tier of tiers) {
@@ -363,6 +365,7 @@ export class ActivityPolicy {
         td.append(b);
         tr.append(td);
       }
+      tr.append(el('td', '', 'matrix-filler'));
       table.append(tr);
     }
     for (const [name, glyph] of [
@@ -391,6 +394,7 @@ export class ActivityPolicy {
         td.append(cell);
         tr.append(td);
       }
+      tr.append(el('td', '', 'matrix-filler'));
       table.append(tr);
     }
     return table;
@@ -582,19 +586,37 @@ export class ActivityPolicy {
       tier === 'process'
         ? `This process${inv.processPolicy ? ' · PID ' + inv.processPolicy.target.pid : ''}`
         : 'Application · all instances';
+    const targetShort =
+      tier === 'process'
+        ? `Process${inv.processPolicy ? ' ' + inv.processPolicy.target.pid : ''}`
+        : 'Application';
+    const lifetimeShort = (expires: string) =>
+      expires.startsWith('0001-')
+        ? tier === 'process'
+          ? 'session'
+          : 'persistent'
+        : `until ${new Date(expires).toLocaleTimeString()}`;
     if (rules.length && pop.mode === 'auto') {
       if (rules.length > 1)
         box.append(
+          el('p', `${rules.length} ${short(direction)} rules · ${targetShort}`, 'qs-scope'),
+        );
+      else {
+        const only = rules[0];
+        box.append(
           el(
             'p',
-            `${rules.length} ${short(direction)} rules apply to ${target.toLowerCase()}. Change one:`,
+            `${short(direction)} · ${targetShort} · ${shortScope(only).split(' · ')[0]} · ${lifetimeShort(only.expires)}`,
             'qs-scope',
           ),
         );
-      else
+        // Endpoint scope stays visible before the click: compact marker, or full details when scoped.
         box.append(
-          el('p', `${short(direction)} · ${target} · ${shortScope(rules[0])}`, 'qs-scope'),
+          endpointWide(only)
+            ? el('span', 'Any endpoint', 'qs-endpoint')
+            : el('p', `Scoped: ${shortScope(only)}`, 'qs-scope-detail'),
         );
+      }
       for (const ref of rules) box.append(this.actionRow(ref, inv, !!reason || busy));
       const links = el('div', '', 'qs-links');
       if (rules.length === 1) {
@@ -640,10 +662,13 @@ export class ActivityPolicy {
       box.append(
         el(
           'p',
-          `${short(direction)} · ${target} · ${protocolText(pop.protocol)} · any address · any port · ${lifetime}${pop.enabled ? '' : ' · stored disabled'}`,
+          `${short(direction)} · ${targetShort} · ${protocolText(pop.protocol)} · ${tier === 'process' ? 'session' : lifetime}${pop.enabled ? '' : ' · stored disabled'}`,
           'qs-scope',
         ),
       );
+      const anyEndpoint = el('span', 'Any endpoint', 'qs-endpoint');
+      anyEndpoint.title = 'Any remote address · any local port · any remote port';
+      box.append(anyEndpoint);
       box.append(this.actionRow(undefined, inv, !!blocked || busy));
       const links = el('div', '', 'qs-links');
       const advanced = button('Advanced', 'qs-advanced', 'link-button');
@@ -699,9 +724,6 @@ export class ActivityPolicy {
       if (blocked) box.append(el('p', blocked, 'rule-note'));
     }
     if (this.pending && this.pending.rowId === this.row?.id) box.append(this.reviewBox());
-    // One concise line (reference popup height); the full wording stays in the tooltip.
-    for (const line of box.querySelectorAll<HTMLElement>('.qs-scope'))
-      line.title = line.textContent || '';
     return box;
   }
   // [enabled] [✓ Allow] [✕ Block] — for an existing rule the current action is highlighted and a
