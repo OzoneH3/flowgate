@@ -14,4 +14,5 @@ git diff --binary > "$run/source-working.diff"
 sha256sum "$run/flowgate" "$run/collector" "$run/native" > "$run/artifacts.sha256"
 printf 'EVIDENCE %s\n' "$run"
 parent=$(readlink /proc/self/ns/net)
-exec sudo unshare --net --pid --mount --fork --mount-proc --propagation private env PYTHONDONTWRITEBYTECODE=1 FLOWGATE_PARENT_NETNS="$parent" python3 scripts/tcp-initiation-isolated.py --run "$run" --binary "$run/flowgate" --helper "$run/collector" --native "$run/native"
+parent_mnt=$(readlink /proc/self/ns/mnt)
+exec sudo unshare --net --pid --mount --fork --mount-proc --propagation private env PYTHONDONTWRITEBYTECODE=1 FLOWGATE_PARENT_NETNS="$parent" FLOWGATE_PARENT_MNTNS="$parent_mnt" python3 scripts/tcp-initiation-isolated.py --run "$run" --binary "$run/flowgate" --helper "$run/collector" --native "$run/native"

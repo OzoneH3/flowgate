@@ -112,3 +112,17 @@ collector restart (old unknown/new known), helper crash with TCP still available
 and a short baseline/event native connection setup timing sample. Those acceptance
 claims remain pending until that command actually passes; no scheduler-noise rate
 comparison or broad performance claim is appropriate. Host deployment is separate.
+
+### Initial-root fixture path correction
+
+User-authenticated run `.workspace/tcp-initiation-1792356098-1402400` recorded clean
+sourcef7b04c49 and matching release hashes, then failed **before BPF**: production
+SecureDirectory correctly rejected root runtime/database paths below a user-owned
+workspace ancestor. This is not a verifier rejection or successful collector check.
+The fixture now reuses the existing real-UDP harness's private bind mounts over
+`/run/flowgate-api` and `/var/lib/flowgate`, backed entirely by that run's workspace
+api/data directories. It requires distinct mount AND network namespaces; production
+path/owner validation is unchanged, no repository chown or host path mutation.
+Pass progress and final success marker are saved as verification.log/result.json;
+startup exits surface the actual daemon error immediately. Python/shell syntax
+checks passed; the corrected privileged branch still needs the exact command above.
