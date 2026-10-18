@@ -1,5 +1,43 @@
 # Continuation handoff
 
+## Current: UI2 Activity fidelity round 3 (released and integrated)
+
+Released UI **fbe9737e7c65e25743007151ff46545a812a4c99** (including checkpoint
+97b20af, based on aea5f1a) is integrated at **197ddece88fc61b871846f3134f39bf08232da5b**.
+Clean release and explicit ownership release were verified before merging. The
+stored-Ask dependency note in **0d0a2be** is retained; backend production code
+remains **6c68f8cd0627bce69f15f4e995a3cf68fa161215**, with no API change this round.
+
+Changes: Deny presentation still sends API action `block`; Ask/unsupported actions
+remain neutral and read-only. Hover/selection rule-family icons, popup anchoring,
+Priority composition, expanders, chart legend and local pane Open Window/Close
+controls follow the inspected reference. Pane preferences do not change collection
+or enforcement. Stored Ask remains deferred. Font family is unverified; this is
+not a claim of complete NetLimiter fidelity. Details: `electron/ACTIVITY-PARITY-R3.md`.
+
+Reused exact-release evidence: UI build/typecheck and **77 unit tests**; real private
+fixture popup/exit journey (`electron` worktree `.workspace/rule-status-real-mkoDhk`);
+pane/hover run (`.workspace/rs/r3-panes/result.json` in that worktree). UI owner
+reported rsf-c778 orderly cleanup; earlier private fixtures died in the external
+reboots. Backend owned no new fixture. New integrated checks: Electron
+build/typecheck and **6 focused rule-chip/editor-presentation tests** passed; logs
+`.workspace/ui2-r3-build.log` and `.workspace/ui2-r3-tests.log`. No kernel, UDP,
+firewall or Go matrix was repeated for these presentation-only changes.
+
+**Runtime correction after external reboots:** the previously deployed root daemon
+is no longer available: `/run/flowgate-api/daemon.sock` and its runtime directory
+are absent, and historical PID2847094 is gone. Thus the previous active UDP state
+is historical, not current verified collection. The root storage directory remains;
+no database mutation, daemon restoration, collector attachment or host networking
+change was performed in this round. Host UI acceptance was **unavailable**, not
+passed. Older deployment sections below describe historical state.
+
+Basic unprivileged Activity launch from the main checkout: `scripts/run-electron.sh`
+(owns a read-only observer). The daemon-connected command remains
+`scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock`, but requires a
+separately authorized restoration of the root monitor first; this integration does
+not restore it or activate enforcement.
+
 ## Current integration: UI2 floating Rule Status and explicit TCP+UDP
 
 Full released UI **09b56426a8a97677ce9489a0aaa0098a7208e646** (UI2 c772f7c2) is
