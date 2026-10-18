@@ -46,3 +46,18 @@ func TestTCPUDPWildcardIsBounded(t *testing.T) {
 		t.Fatal("overlap semantics")
 	}
 }
+
+func TestWildcardKeepsEndpointRestrictions(t *testing.T) {
+	app := identity.Application{Key: "a", Revision: "r"}
+	a := identity.Attribution{Application: &app, Owners: []identity.Process{{UID: 1000}}}
+	r := Rule{Schema: 2, ID: "scoped", Action: "allow", Filter: Filter{Application: "a", Revision: "r", UID: 1000, Protocol: "*", Direction: "incoming", RemoteAddress: "192.0.2.0/24", LocalPort: 8080, RemotePort: 9000}}
+	for _, proto := range []string{"tcp", "udp"} {
+		for _, tc := range []struct{ local, remote, want string }{{"127.0.0.1:8080", "192.0.2.2:9000", "allow"}, {"127.0.0.1:8081", "192.0.2.2:9000", "ask"}, {"127.0.0.1:8080", "192.0.2.2:9001", "ask"}, {"127.0.0.1:8080", "198.51.100.2:9000", "ask"}} {
+			f, _ := identity.ParseFlow(proto, "incoming", tc.local, tc.remote)
+			action, _, _ := Evaluate([]Rule{r}, f, a, time.Now())
+			if action != tc.want {
+				t.Fatal(proto, tc, action)
+			}
+		}
+	}
+}

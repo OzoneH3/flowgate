@@ -77,3 +77,26 @@ func TestObservedWildcardAPI(t *testing.T) {
 		t.Fatal(action, id)
 	}
 }
+
+func TestWildcardSummaryDoesNotOverstateScope(t *testing.T) {
+	a := PolicyIdentity{Key: "a", Revision: "r", UID: 1000}
+	now := time.Now()
+	r := policy.Rule{Schema: 2, ID: "wide", Action: "allow", Filter: policy.Filter{Application: "a", Revision: "r", UID: 1000, Direction: "incoming", Protocol: "*", RemoteAddress: "*"}}
+	s := summaryFor(a, "incoming", "daemon-monitor", nil, []policy.Rule{r}, now)
+	if s.Configured != "uniform" || s.Enforcement.Covered {
+		t.Fatal(s)
+	}
+	r.Filter.LocalPort = 8080
+	s = summaryFor(a, "incoming", "daemon-monitor", nil, []policy.Rule{r}, now)
+	if s.Configured != "scoped" {
+		t.Fatal(s)
+	}
+	other := r
+	other.ID = "specific"
+	other.Action = "block"
+	other.Filter.Protocol = "tcp"
+	s = summaryFor(a, "incoming", "daemon-monitor", nil, []policy.Rule{r, other}, now)
+	if s.Configured != "mixed" || !s.OverlappingActions {
+		t.Fatal(s)
+	}
+}

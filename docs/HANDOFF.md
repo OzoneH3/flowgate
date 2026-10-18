@@ -1,5 +1,34 @@
 # Continuation handoff
 
+## Current backend support: explicit TCP+UDP observed rules (not deployed)
+
+Backend **6c68f8cd0627bce69f15f4e995a3cf68fa161215** implements UI2's concrete
+`observed-rule-any-protocol-v1` request end to end: explicit `protocol:"*"` means
+TCP+UDP only in one application/process rule. Existing identity/authorization,
+preview/save/replay, process precedence, versioned edit/Delete and expiry remain.
+Unrestricted wildcard summaries are uniform; endpoint restrictions stay scoped;
+conflicting wildcard/specific actions stay mixed, with existing tier/priority/ID
+order. No Ask, shaping or all-IP protocol semantics were added. Legacy wildcard
+narrowing is rejected `protocol_scope_changed`; see
+[OBSERVED-RULES.md](OBSERVED-RULES.md#tcpudp-observed-creation-extension).
+
+Focused race/vet pass; scoped address/port and mixed-summary regression checks
+also pass. Real private `--any-protocol` receiver check `.workspace/ap-receiver`
+passes incoming/outgoing TCP/UDP IPv4/6, process override/sibling fallback,
+Allow/Block, uniform summaries, historical wildcard snapshots and owned cleanup.
+Separate binary `.workspace/flowgate-any-protocol` SHA256
+`7b8fbbe065001c78641eb2157b747d085a93359eab045fdffe478eb70ab83893`.
+The new guard and tests do not change the tested wildcard verdict path.
+
+UI2 c772f7c2 round2 is still in progress; no unreleased Electron history integrated.
+It exclusively owns held monitor fixture `.workspace/ap-ui` until explicit DONE;
+backend01a145f0 owns later cleanup and integration, handed over by backend2 at
+0989411. UI reported real popup wildcard/CRUD journey passing; final exit/checks/
+docs/release remain. Host read-only baseline is unchanged this round: PID2847094,
+generatione47c8938265ebf19cacc1fee5a681c8c, activeUDPac3056b3b8f3299dce5dc2b57985808f,
+enforcement stopped, rules0. Host source60d35a3 lacks the new wildcard capability;
+UI must use explicit TCP|UDP fallback there. No host rollout in this increment.
+
 ## Current integration: Activity Rule Status quick-set (UI 897cd43)
 
 Released UI **897cd43f937998bb2b9ff4a810cf628caf19b36b** (UI2 c772f7c2, parent 99b13fc)
