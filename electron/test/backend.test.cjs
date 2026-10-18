@@ -171,3 +171,25 @@ test('daemon stored-rule grant is independent of decisions; companion and malfor
   assert.equal(mutations, 0);
   b.stop();
 });
+
+test('popup refresh joins policy in flight then obtains a corresponding Activity snapshot', async () => {
+  const b = Object.create(Backend.prototype),
+    trace = [];
+  b.readPolicy = async () => {
+    trace.push('policy-start');
+    await new Promise((r) => setTimeout(r, 5));
+    trace.push('policy-end');
+  };
+  b.readObserver = async () => {
+    trace.push('activity-after-policy');
+  };
+  b.pollControl = async () => {
+    void b.pollPolicy();
+  };
+  b.view = () => ({ ready: true });
+  const first = b.pollPolicy(),
+    second = b.pollPolicy(true);
+  assert.equal(first, second);
+  assert.deepEqual(await b.refreshRuleContext(), { ready: true });
+  assert.deepEqual(trace, ['policy-start', 'policy-end', 'activity-after-policy']);
+});

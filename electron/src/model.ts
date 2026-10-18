@@ -17,7 +17,7 @@ export function hasObservedConnection(row: Row): boolean {
   return row.rows.some((r) =>
     r.socket.protocol === 'tcp'
       ? r.socket.state === 1
-      : r.socket.protocol === 'udp' &&  /:[1-9]\d*$/.test(r.socket.remote),
+      : r.socket.protocol === 'udp' && /:[1-9]\d*$/.test(r.socket.remote),
   );
 }
 export interface Sum {
@@ -33,11 +33,16 @@ export const sourceRows = (rows: SocketRow[], source?: MeasurementSource) => [
     rows.filter((r) => !source || r.socket.protocol === source).map((r) => [r.id, r]),
   ).values(),
 ];
-export const NETWORK_UNAVAILABLE = 'Classification unavailable: the daemon supplies no configured network-zone attribution. These totals are unknown, not zero; this is not a firewall target.';
+export const NETWORK_UNAVAILABLE =
+  'Classification unavailable: the daemon supplies no configured network-zone attribution. These totals are unknown, not zero; this is not a firewall target.';
 export function networkOverviews(): Row[] {
   return ['Internet', 'Local Network'].map((label, index) => ({
-    id: index ? 'network:local' : 'network:internet', parent: 'overview',
-    kind: 'network' as const, label, rows: [], children: [],
+    id: index ? 'network:local' : 'network:internet',
+    parent: 'overview',
+    kind: 'network' as const,
+    label,
+    rows: [],
+    children: [],
   }));
 }
 export function overview(activity: Activity, children: Row[] = []): Row {
@@ -135,7 +140,8 @@ export function hierarchy(activity: Activity, query = '', filter = 'all'): Row[]
         a = {
           id: 'app:' + key,
           kind: 'application',
-          label: display.name || display.executable,
+          label:
+            display.display_name || display.name.replace(/ \(deleted\)$/, '') || display.executable,
           children: [],
           rows: [],
           displayApplication: display,
@@ -155,7 +161,11 @@ export function hierarchy(activity: Activity, query = '', filter = 'all'): Row[]
         a = {
           id: 'app:' + key,
           kind: 'application',
-          label: p.application.name || p.executable || 'Unknown application',
+          label:
+            p.application.display_name ||
+            p.application.name.replace(/ \(deleted\)$/, '') ||
+            p.executable ||
+            'Unknown application',
           children: [],
           rows: [],
           process: p,

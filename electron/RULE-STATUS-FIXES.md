@@ -48,3 +48,31 @@ journey passed in `.workspace/panes-real-PLjSai/`. This is stored-policy accepta
 not a new enforcement/receiver claim. Settled receiver/lifecycle evidence is reused.
 
 Run: `scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock`.
+
+## Activity compact/zone increment (base 24a5385)
+
+| Complaint | Result | Evidence / remaining limit |
+| --- | --- | --- |
+| Slow popups | Fixed poll-bound readiness delay; shell renders from selected snapshot first, actions disabled during one coalesced read refresh. | Existing policy request is joined, then Activity is read after it; no new poll loop. Eight same-host automation samples: baseline shell median14.7/max18.6ms, ready median16.7/max438.4ms; fixed shell15.7/max25.9ms, ready43.4/max71.3ms. Warm readiness includes a new validation cost; these are samples, not guaranteed bounds. |
+| Too much text | Partially fixed. Removed repeated stopped-firewall text; tightened popup rows and duplicate labels; technical identity remains collapsed. | Required target, direction, network/principal and consequential failures remain visible. The setter accommodates the displayed scopes. |
+| Icons/mouseover | Corrected original 12px vector family glyphs, palm/check distinction, hover/pressed/focus treatment and 16px installed app icons. | Unsupported families remain inactive. |
+| Proportions | Default Info45.5vw vs old38vw. | Saved pixel widths preserved; normal1280×656 and860×600 checked. Reference currently has chart closed; FlowGate's chart remains independently closeable. |
+| Missing program icons | Reliable installed desktop display associations restored, including deleted/replaced image paths. | Host audit3/14 distinct observed application identities: Firefox, KRdp, KDE Connect resolved. Eleven services/runtimes had no reliable association; neutral fallbacks retained. Actual PNG loading checked in normal and detached Info. |
+| “firefox (deleted)” | Friendly desktop name Firefox and clean display path; deleted-image status moved into identity details. | key/revision/executable and process binding unchanged. Icon/name describe installed desktop metadata, not proof the old running image is the replacement. |
+| Local/Internet rules | Implemented authoritative zone inventories, all-program machine/current-user targets, application/process zone constraints, previews/saves and immutable-zone editing. | Released backend c0a9543. Policy is configured-prefix-v1; Internet membership is explicitly configured, not inferred connectivity. No zone traffic totals. Older daemons show unavailable controls. |
+| Direction ineffective | New event metadata consumed, generation/source retained; unknown stays neutral. | Backend643b872 is implemented but real privileged BPF attachment proof remains blocked: user-namespace EPERM and initial sudo password requirement. No successful kernel-event arrows claimed. Pre-attachment established sockets and UDP remain honestly unknown where no evidence exists. |
+
+Backend pairing: zones/metadata `c0a9543` (includes4789181), optional TCP events643b872;
+backend test followups e3a5f62/464c4e7 do not change the contract. No host deployment.
+
+Real isolated zone journey `.workspace/panes-real-71aeVT/`: machine Local incoming Block,
+Internet outgoing Block, app Local incoming Allow, detached process Internet incoming Block;
+exact process disable, global Block→Allow edit, advanced immutable zone, normal/narrow.
+All four rules conditionally deleted; backend independently confirmed zero/stopped and
+cleaned its fixture after DONE. Exact binary b4ef570eecc6f3142a29df1f63c3738beda176c7f82aea002ee2386af587242b.
+Receiver semantics reuse backend evidence; GUI storage success is not a delivery claim.
+
+Focused build/tests include zone principal/revision/expiry/receipt/permission failure,
+lost-ACK reconciliation without replay, strict schema4 and exact inventory association;
+labelled synthetic failure/event evidence is separate from kernel proof. Popup/pane
+regression is `electron/test/rule-clicks-workflow.mjs` (zero mutation calls).

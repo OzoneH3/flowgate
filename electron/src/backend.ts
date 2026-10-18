@@ -114,7 +114,33 @@ export class Backend {
   private emit() {
     if (!this.stopped) this.changed(this.view());
   }
-  async pollObserver() {
+  private observerFlight?: Promise<void>;
+  private policyFlight?: Promise<void>;
+  pollObserver(): Promise<void> {
+    if (this.observerFlight) return this.observerFlight;
+    const request = this.readObserver().finally(() => {
+      if (this.observerFlight === request) this.observerFlight = undefined;
+    });
+    this.observerFlight = request;
+    return request;
+  }
+  private contextFlight?: Promise<ClientState>;
+  refreshRuleContext(): Promise<ClientState> {
+    if (this.contextFlight) return this.contextFlight;
+    const request = this.readRuleContext().finally(() => {
+      if (this.contextFlight === request) this.contextFlight = undefined;
+    });
+    this.contextFlight = request;
+    return request;
+  }
+  private async readRuleContext() {
+    await this.pollControl();
+    await this.pollPolicy(true);
+    await this.observerFlight;
+    await this.pollObserver();
+    return this.view();
+  }
+  private async readObserver() {
     if (this.busy.observer || this.stopped) return;
     this.busy.observer = true;
     try {
@@ -198,6 +224,7 @@ export class Backend {
           r.mode === 'isolated-lab'
             ? 'Isolated lab controller'
             : `Enforcement ${r.enforcement?.state === 'active' ? (r.enforcement.profile === 'incoming' ? 'incoming active · outgoing not covered' : r.enforcement.profile === 'both' ? 'both directions active' : 'active · profile unknown') : (r.enforcement?.state ?? 'unknown')} · ${!r.read_only && (r.permissions?.can_manage_rules ?? (r.mode !== 'host-enforcement' || r.enforcement?.state === 'active')) ? 'stored rules editable' : 'policy read-only'}`,
+        networkZones: r.network_zones,
         policy: this.state.control.policy,
         policyError: this.state.control.policyError,
         permissions: r.permissions,
@@ -233,12 +260,20 @@ export class Backend {
   }
   // One bounded batch, driven by the existing control loop. Pending requests do not
   // wait for metadata; no per-row sockets, timers, or renderer polling are added.
-  async pollPolicy() {
+  pollPolicy(force = false): Promise<void> {
+    if (this.policyFlight) return this.policyFlight;
+    const request = this.readPolicy(force).finally(() => {
+      if (this.policyFlight === request) this.policyFlight = undefined;
+    });
+    this.policyFlight = request;
+    return request;
+  }
+  private async readPolicy(force = false) {
     const c = this.state.control,
       endpoint = this.controller;
     if (!endpoint || this.stopped || !c.connected || !c.capabilities?.includes(POLICY_CAPABILITY))
       return;
-    if (this.policyBusy || performance.now() - this.policyLast < 1000) return;
+    if (this.policyBusy || (!force && performance.now() - this.policyLast < 1000)) return;
     this.policyBusy = true;
     this.policyLast = performance.now();
     const epoch = this.policyEpoch,

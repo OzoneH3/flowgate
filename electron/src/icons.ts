@@ -60,6 +60,7 @@ export class ApplicationIcons {
   private ready: Promise<void>;
   private imageBytes = 0;
   private entries = new Map<string, Set<string>>();
+  private names = new Map<string, Set<string>>();
   private themes: string[] = [];
   private iconRoots: string[];
   private themeDirs = new Map<string, string[]>();
@@ -117,6 +118,11 @@ export class ApplicationIcons {
           const icons = this.entries.get(executable) || new Set<string>();
           icons.add(entry.Icon);
           this.entries.set(executable, icons);
+          if (entry.Name && entry.Name.length < 256) {
+            const names = this.names.get(executable) || new Set<string>();
+            names.add(entry.Name);
+            this.names.set(executable, names);
+          }
         } catch {}
       }
     }
@@ -201,9 +207,34 @@ export class ApplicationIcons {
       }
       if (!this.cache.has(key)) {
         if (this.cache.size >= 2048) this.cache.delete(this.cache.keys().next().value!);
-        this.cache.set(key, this.resolve(a.executable));
+        this.cache.set(
+          key,
+          this.resolve(a.display_executable || a.executable.replace(/ \(deleted\)$/, '')),
+        );
       }
       result[key] = await this.cache.get(key)!;
+    }
+    return result;
+  }
+  async metadata(value: unknown) {
+    const icons = await this.request(value);
+    const result: Record<
+      string,
+      { icon: string | null; name?: string; source: 'desktop-metadata' | 'unavailable' }
+    > = Object.create(null);
+    for (const [key, icon] of Object.entries(icons)) {
+      const app = this.allowed.get(key);
+      const executable =
+        app &&
+        (await this.executable(
+          app.display_executable || app.executable.replace(/ \(deleted\)$/, ''),
+        ));
+      const names = executable ? this.names.get(executable) : undefined;
+      result[key] = {
+        icon,
+        name: names?.size === 1 ? [...names][0] : undefined,
+        source: icon || names?.size === 1 ? 'desktop-metadata' : 'unavailable',
+      };
     }
     return result;
   }

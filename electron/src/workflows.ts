@@ -1,4 +1,5 @@
-import { PROCESS_CAPABILITY, targetLabel } from './process-rules';
+import { ZONE_CAPABILITY, zoneLabel } from './network-zones';
+import { ANY_PROTOCOL_CAPABILITY, PROCESS_CAPABILITY, targetLabel } from './process-rules';
 import { renderDaemonEvaluation } from './evaluation-view';
 import { canManageRules } from './protocol';
 import { reviewedScope, previewSeconds } from './editor-presentation';
@@ -73,6 +74,7 @@ function editValue(): RuleEdit {
     token: draft!.token,
     action: $<HTMLSelectElement>('editAction').value as 'allow' | 'block',
     protocol: $<HTMLSelectElement>('editProtocol').value,
+    network_zone: $<HTMLSelectElement>('editZone').value as RuleEdit['network_zone'],
     remote_address: $<HTMLInputElement>('anyAddress').checked
       ? '*'
       : $<HTMLInputElement>('editAddress').value,
@@ -121,6 +123,18 @@ export async function openRule(source: RuleSource, options: EditorOptions = {}) 
       `${r.executable}\n${r.filter.application} · revision ${r.filter.revision}\n${r.filter.direction} · UID ${r.filter.uid} · ${draft.source}`;
     $<HTMLSelectElement>('editAction').value = r.action;
     $<HTMLSelectElement>('editProtocol').value = r.filter.protocol;
+    $<HTMLSelectElement>('editZone').value = r.filter.network_zone || '';
+    $<HTMLSelectElement>('editZone').disabled =
+      !!source.id || !!source.zone || !state?.control.capabilities?.includes(ZONE_CAPABILITY);
+    $('editZone').title = source.id
+      ? 'Network scope is immutable. Create a new rule to change zone.'
+      : state?.control.capabilities?.includes(ZONE_CAPABILITY)
+        ? 'Configured policy zone; unknown peers do not match zone rules.'
+        : 'Backend update required';
+    if (r.filter.all_programs)
+      $('editorApplication').textContent =
+        `All programs · ${r.filter.all_uids ? 'all users' : 'current user'} · ${zoneLabel(r.filter.network_zone)} · ${r.filter.direction}`;
+
     const address = r.filter.remote_address || '*';
     $<HTMLInputElement>('editAddress').value = address === '*' ? '' : address;
     $<HTMLInputElement>('anyAddress').checked = address === '*';
@@ -148,10 +162,14 @@ export async function openRule(source: RuleSource, options: EditorOptions = {}) 
     $('creationScopeFields').hidden = !draft.observed;
     $<HTMLSelectElement>('createScope').value = '';
     for (const e of document.querySelectorAll<HTMLElement>('#editPriority,label[for=editPriority]'))
-      e.hidden = !!draft.observed;
+      e.hidden = !!draft.observed || !!r.filter.all_programs;
     $<HTMLOptionElement>('editProtocol').querySelector<HTMLOptionElement>(
       'option[value="*"]',
-    )!.disabled = !!draft.observed;
+    )!.disabled =
+      !!draft.observed &&
+      !state?.control.capabilities?.some((cap) =>
+        [ANY_PROTOCOL_CAPABILITY, ZONE_CAPABILITY].includes(cap),
+      );
     $('editExpiry').querySelector('option[value=permanent]')!.textContent =
       r.filter.process || draft.targetScope === 'process'
         ? 'This daemon session (ends on exit)'
@@ -248,7 +266,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
   panel.hidden = true;
   panel.setAttribute('role', 'dialog');
   panel.setAttribute('aria-label', 'Rule editor');
-  panel.innerHTML = `<header><strong>FlowGate — Rule editor</strong><span><button id="editorMode">Compact editor</button> <button id="minimizeEditor">Minimize</button> <button id="closeEditor">Close</button></span></header><div class="editor-body"><div class="editor-tab">Rule</div><h2>For</h2><details class="editor-identity"><summary id="editorApplication">Application identity</summary><pre id="editorIdentity"></pre></details><h2>Rule and scope</h2><div id="creationScopeFields" hidden><label for="createScope">Scope</label> <select id="createScope"><option value="">Choose scope…</option><option value="custom">Specified address / ports</option><option value="application">All addresses / ports for this protocol</option></select></div><div class="editor-fields"><label for="editAction">Action</label><select id="editAction"><option value="allow">Allow</option><option value="block">Block</option></select><label for="editProtocol">Protocol</label><select id="editProtocol"><option value="tcp">TCP</option><option value="udp">UDP</option><option value="*">Any</option></select><label for="editAddress">Remote address</label><div class="scope-input"><label><input id="anyAddress" type="checkbox">Any address</label><input id="editAddress" maxlength="256" placeholder="IP address or CIDR"></div><label for="editLocal">Local port</label><div class="scope-input"><label><input id="anyLocal" type="checkbox">Any port</label><input id="editLocal" type="number" min="1" max="65535" aria-label="Specific local port"></div><label for="editRemote">Remote port</label><div class="scope-input"><label><input id="anyRemote" type="checkbox">Any port</label><input id="editRemote" type="number" min="1" max="65535" aria-label="Specific remote port"></div><label for="editPriority">Priority</label><input id="editPriority" type="number" min="-1000" max="1000"><label for="editExpiry">Expiry</label><select id="editExpiry"><option value="preserve">Preserve absolute expiry</option><option value="hour">For 1 hour from preview</option><option value="permanent">Persistent (no expiry)</option></select><label for="editEnabled">Enabled</label><input id="editEnabled" type="checkbox"></div><p id="absoluteExpiry"></p><h2>Review scope</h2><p id="scopeSummary"></p><details id="backendScope"><summary>Full backend preview</summary><p id="rulePreview" class="scope-preview"></p></details><p id="editorFeedback" role="status"></p></div><footer><button id="reloadRule">Reload version, keep fields</button><button id="previewRule">Preview</button><button id="saveRule" disabled>Save</button><span id="previewValidity" role="timer"></span><button id="reconcileRule" hidden>Check save result</button></footer>`;
+  panel.innerHTML = `<header><strong>FlowGate — Rule editor</strong><span><button id="editorMode">Compact editor</button> <button id="minimizeEditor">Minimize</button> <button id="closeEditor">Close</button></span></header><div class="editor-body"><div class="editor-tab">Rule</div><h2>For</h2><details class="editor-identity"><summary id="editorApplication">Application identity</summary><pre id="editorIdentity"></pre></details><h2>Rule and scope</h2><div id="creationScopeFields" hidden><label for="createScope">Scope</label> <select id="createScope"><option value="">Choose scope…</option><option value="custom">Specified address / ports</option><option value="application">All addresses / ports for this protocol</option></select></div><div class="editor-fields"><label for="editAction">Action</label><select id="editAction"><option value="allow">Allow</option><option value="block">Block</option></select><label for="editProtocol">Protocol</label><select id="editProtocol"><option value="tcp">TCP</option><option value="udp">UDP</option><option value="*">Any</option></select><label for="editZone">Network</label><select id="editZone" aria-label="Network zone"><option value="">Any network</option><option value="local">Local Network</option><option value="internet">Internet</option></select><label for="editAddress">Remote address</label><div class="scope-input"><label><input id="anyAddress" type="checkbox">Any address</label><input id="editAddress" maxlength="256" placeholder="IP address or CIDR"></div><label for="editLocal">Local port</label><div class="scope-input"><label><input id="anyLocal" type="checkbox">Any port</label><input id="editLocal" type="number" min="1" max="65535" aria-label="Specific local port"></div><label for="editRemote">Remote port</label><div class="scope-input"><label><input id="anyRemote" type="checkbox">Any port</label><input id="editRemote" type="number" min="1" max="65535" aria-label="Specific remote port"></div><label for="editPriority">Priority</label><input id="editPriority" type="number" min="-1000" max="1000"><label for="editExpiry">Expiry</label><select id="editExpiry"><option value="preserve">Preserve absolute expiry</option><option value="hour">For 1 hour from preview</option><option value="permanent">Persistent (no expiry)</option></select><label for="editEnabled">Enabled</label><input id="editEnabled" type="checkbox"></div><p id="absoluteExpiry"></p><h2>Review scope</h2><p id="scopeSummary"></p><details id="backendScope"><summary>Full backend preview</summary><p id="rulePreview" class="scope-preview"></p></details><p id="editorFeedback" role="status"></p></div><footer><button id="reloadRule">Reload version, keep fields</button><button id="previewRule">Preview</button><button id="saveRule" disabled>Save</button><span id="previewValidity" role="timer"></span><button id="reconcileRule" hidden>Check save result</button></footer>`;
   panel.querySelector('header')!.prepend(panel.querySelector('.editor-tab')!);
   const editorFooter = panel.querySelector('footer')!;
   editorFooter.prepend(panel.querySelector('#saveRule')!);
@@ -359,7 +377,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
       if (r.verifiedRule) {
         const rule = r.verifiedRule;
         $('editorApplication').textContent =
-          `Verified · ${targetLabel(rule.filter.process)} · ${rule.executable} · ${rule.filter.direction} · UID ${rule.filter.uid}`;
+          `Verified · ${rule.filter.all_programs ? 'All programs · ' + (rule.filter.all_uids ? 'all users' : 'UID ' + rule.filter.uid) : targetLabel(rule.filter.process) + ' · ' + rule.executable} · ${zoneLabel(rule.filter.network_zone)} · ${rule.filter.direction}`;
         $('editorIdentity').textContent =
           `${rule.executable}\n${rule.filter.application} · revision ${rule.filter.revision}\n${rule.filter.direction} · UID ${rule.filter.uid}${r.processID ? ' · observed process ' + r.processID : ''}`;
         $('absoluteExpiry').textContent = rule.expires.startsWith('0001-')
@@ -685,6 +703,10 @@ function updateButtons() {
   $<HTMLButtonElement>('reloadRule').hidden = !!draft?.observed;
   $<HTMLButtonElement>('previewRule').disabled ||=
     !!draft?.observed && !$<HTMLSelectElement>('createScope').value;
+  $<HTMLSelectElement>('editZone').disabled ||=
+    !!editorSource.id ||
+    !!editorSource.zone ||
+    !state?.control.capabilities?.includes(ZONE_CAPABILITY);
   const observed = draft?.observed && editorSource.observed;
   if (
     observed &&
@@ -902,7 +924,7 @@ async function setupSizing() {
   setInterval(() => void refresh(), 3000);
   for (const aside of document.querySelectorAll<HTMLElement>('main aside')) {
     // Keep the default proportion responsive; only a user resize stores pixels.
-    const sidebarWidth = prefs.sidebar ? prefs.sidebar + 'px' : '38vw';
+    const sidebarWidth = prefs.sidebar ? prefs.sidebar + 'px' : '45.5vw';
     aside.style.width = sidebarWidth;
     document.documentElement.style.setProperty('--info-width', sidebarWidth);
     const grip = node('div', '');
@@ -977,7 +999,7 @@ export function confirmRuleDelete(r: Rule, generation: string) {
   const snapshot = { id: r.id, generation: generation, version: r.version ?? 0 };
   confirmAction(
     'Delete rule',
-    `Delete ${targetLabel(r.filter.process)} · ${r.executable || r.filter.application}? Action: ${r.action}; ${r.filter.direction} ${r.filter.protocol}; remote ${r.filter.remote_address || r.filter.remote || '*'}; ports ${r.filter.local_port || '*'} → ${r.filter.remote_port || '*'}; expiry ${r.expires}; ${r.disabled ? 'disabled' : 'enabled'}. Rule ${snapshot.id}, version ${snapshot.version}, generation ${snapshot.generation}. Existing approved TCP sessions may continue.`,
+    `Delete ${r.filter.all_programs ? 'All programs · ' + (r.filter.all_uids ? 'all users' : 'UID ' + r.filter.uid) : targetLabel(r.filter.process) + ' · ' + (r.executable || r.filter.application)} · ${zoneLabel(r.filter.network_zone)}? Action: ${r.action}; ${r.filter.direction} ${r.filter.protocol}; remote ${r.filter.remote_address || r.filter.remote || '*'}; ports ${r.filter.local_port || '*'} → ${r.filter.remote_port || '*'}; expiry ${r.expires}; ${r.disabled ? 'disabled' : 'enabled'}. Rule ${snapshot.id}, version ${snapshot.version}, generation ${snapshot.generation}. Existing approved TCP sessions may continue.`,
     async () => {
       try {
         status((await window.flowgate.ruleDelete(snapshot)).message);

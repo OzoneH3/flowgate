@@ -1,3 +1,4 @@
+import { ZONE_CAPABILITY, zoneLabel, type NetworkZone } from './network-zones';
 import { popupPosition } from './popup-position';
 import type { PolicyEntry } from './pane-model';
 import { ANY_PROTOCOL_CAPABILITY, PROCESS_CAPABILITY } from './process-rules';
@@ -7,6 +8,7 @@ import type { Row } from './model';
 import {
   POLICY_CAPABILITY,
   authoritativePolicy,
+  authoritativeZonePolicy,
   authoritativeProcessPolicy,
   type PolicyRuleRef,
   type DirectionPolicy,
@@ -58,26 +60,36 @@ export function selectionInventory(row: Row, state: ClientState) {
     ? authoritativeProcessPolicy(row, state)
     : undefined;
   const fallback = ruleStatus(row, state);
-  const rules: PolicyRuleRef[] = authoritative
-    ? directions.flatMap((d) => [
-        ...(processPolicy?.[d].rules || []),
-        ...(processPolicy
-          ? processPolicy[d === 'incoming' ? 'application_incoming' : 'application_outgoing'].rules
-          : app?.[d].rules || []),
-      ])
-    : directions.flatMap((d) =>
-        fallback[d].map((r) => ({
-          id: r.id,
-          version: String(r.version),
-          action: r.action,
-          priority: r.priority,
-          scope: r.filter,
-          disabled: r.disabled,
-          expired: ruleState(r, fallback.now) === 'expired',
-          active: ['allow', 'block'].includes(ruleState(r, fallback.now)),
-          expires: r.expires,
-        })),
-      );
+  const zone = authoritativeZonePolicy(row, state);
+  const zoneIDs = new Set(
+    processPolicy?.zone_fallback_rule_ids || app?.zone_fallback_rule_ids || [],
+  );
+  const zoneFallback = (state.control.policy?.zones || [])
+    .flatMap((z) => [...z.incoming.rules, ...z.outgoing.rules])
+    .filter((r) => zoneIDs.has(r.id));
+  const rules: PolicyRuleRef[] = zone
+    ? [...zone.incoming.rules, ...zone.outgoing.rules]
+    : authoritative
+      ? directions.flatMap((d) => [
+          ...(processPolicy?.[d].rules || []),
+          ...(processPolicy
+            ? processPolicy[d === 'incoming' ? 'application_incoming' : 'application_outgoing']
+                .rules
+            : app?.[d].rules || []),
+        ])
+      : directions.flatMap((d) =>
+          fallback[d].map((r) => ({
+            id: r.id,
+            version: String(r.version),
+            action: r.action,
+            priority: r.priority,
+            scope: r.filter,
+            disabled: r.disabled,
+            expired: ruleState(r, fallback.now) === 'expired',
+            active: ['allow', 'block'].includes(ruleState(r, fallback.now)),
+            expires: r.expires,
+          })),
+        );
   const candidate =
     (app || processPolicy) &&
     row.rows.find(
@@ -91,8 +103,10 @@ export function selectionInventory(row: Row, state: ClientState) {
     authoritative,
     app,
     processPolicy,
+    zone,
+    zoneFallback,
     rules,
-    available: authoritative ? !!app || !!processPolicy : fallback.available,
+    available: authoritative ? !!app || !!processPolicy || !!zone : fallback.available,
     complete: authoritative && !!state.control.policy?.complete,
     reason: authoritative
       ? result.reason
@@ -124,6 +138,8 @@ interface Popup {
   protocol: Protocol;
   lifetime: 'persistent' | 'hour';
   enabled: boolean;
+  networkZone: NetworkZone | '';
+  principal: 'machine' | 'self';
 }
 const SLOTS: { key: string; label: string; glyph: string; direction?: Direction }[] = [
   { key: 'priority', label: 'Priority', glyph: '↑' },
@@ -161,6 +177,8 @@ export class ActivityPolicy {
   private seq = 0;
   private timer?: ReturnType<typeof setInterval>;
   private skew = 0;
+  private checking = false;
+  private openSequence = 0;
   private anchor?: HTMLElement;
   private returnFocus?: HTMLElement;
   private popupContext = '';
@@ -211,13 +229,15 @@ export class ActivityPolicy {
   }
   private defaultTier(): Tier {
     return this.row &&
-      this.row.kind !== 'application' &&
+      !['application', 'network'].includes(this.row.kind) &&
       this.state?.control.capabilities?.includes(PROCESS_CAPABILITY)
       ? 'process'
       : 'application';
   }
   private anyProtocol() {
-    return !!this.state?.control.capabilities?.includes(ANY_PROTOCOL_CAPABILITY);
+    return !!this.state?.control.capabilities?.some((c) =>
+      [ANY_PROTOCOL_CAPABILITY, ZONE_CAPABILITY].includes(c),
+    );
   }
   activate(direction: Direction, tier = this.defaultTier(), anchor?: HTMLElement) {
     if (!this.row || !this.state) return;
@@ -229,16 +249,65 @@ export class ActivityPolicy {
     this.anchor = anchor;
     this.returnFocus = anchor;
     this.popupContext = this.context();
+    this.checking = true;
+    const openSequence = ++this.openSequence;
+    const targetId = this.row.id;
+    const generation = this.state.control.generation;
     const row = this.row;
     const protocol: Protocol = this.anyProtocol()
       ? '*'
       : (row.kind === 'socket' ? row.socket?.socket.protocol : undefined) === 'udp'
         ? 'udp'
         : 'tcp';
-    this.popup = { direction, tier, mode: 'auto', protocol, lifetime: 'persistent', enabled: true };
-    this.refresh();
+    this.popup = {
+      direction,
+      tier,
+      mode: 'auto',
+      protocol,
+      lifetime: 'persistent',
+      enabled: true,
+      networkZone:
+        this.row.kind === 'network' ? (this.row.id === 'network:local' ? 'local' : 'internet') : '',
+      principal: this.state.control.permissions?.can_manage_machine_rules ? 'machine' : 'self',
+    };
+    this.signature = '';
+    this.host.querySelector('.quick-popup')?.remove();
+    this.host.append(this.popupBox(selectionInventory(row, this.state)));
+    this.place();
     // Focus the popup itself, never an action: the key that opened it must not also trigger it.
     this.host.querySelector<HTMLElement>('.quick-popup')?.focus({ preventScroll: true });
+    // Paint the anchored shell first; refresh the existing bounded batch on demand.
+    requestAnimationFrame(
+      () =>
+        void window.flowgate
+          .ruleContext()
+          .then((state) => {
+            if (openSequence !== this.openSequence || !this.popup || this.row?.id !== targetId)
+              return;
+            this.checking = false;
+            if (state.control.generation !== generation || !state.control.connected) {
+              this.close(false);
+              return;
+            }
+            this.popupContext = JSON.stringify([
+              this.row.id,
+              this.row.process?.id,
+              state.control.generation,
+              state.control.policy?.snapshot.token,
+              state.control.connected,
+            ]);
+            this.update(this.row, state);
+          })
+          .catch((error) => {
+            if (openSequence === this.openSequence) {
+              this.checking = false;
+              this.close(false);
+              const feedback =
+                document.getElementById('feedback') || document.getElementById('paneMessage');
+              if (feedback) feedback.textContent = 'Policy refresh unavailable: ' + String(error);
+            }
+          }),
+    );
   }
   private context() {
     return JSON.stringify([
@@ -252,6 +321,8 @@ export class ActivityPolicy {
   private close(restoreFocus: boolean) {
     const p = this.popup;
     this.popup = undefined;
+    this.openSequence++;
+    this.checking = false;
     if (this.pending?.phase === 'error') this.pending = undefined;
     this.refresh();
     if (restoreFocus && this.anchor?.classList.contains('policy-cell') && this.row && p) {
@@ -280,10 +351,15 @@ export class ActivityPolicy {
     }
     this.row = row;
     this.state = state;
-    if (this.popup && this.popupContext !== this.context() && !this.hasOutstandingAction())
+    if (
+      this.popup &&
+      this.popupContext !== this.context() &&
+      !this.checking &&
+      !this.hasOutstandingAction()
+    )
       this.popup = undefined;
     if (Number.isFinite(state.control.serverNow)) this.skew = state.control.serverNow! - Date.now();
-    this.host.hidden = !row || row.kind === 'overview' || row.kind === 'network';
+    this.host.hidden = !row || row.kind === 'overview';
     if (this.host.hidden || !row) return;
     const inv = selectionInventory(row, state),
       c = state.control;
@@ -296,6 +372,8 @@ export class ActivityPolicy {
       inv.complete,
       inv.reason,
       inv.processPolicy,
+      inv.zone,
+      inv.zoneFallback,
       inv.app?.incoming,
       inv.app?.outgoing,
       inv.candidate?.id,
@@ -306,6 +384,7 @@ export class ActivityPolicy {
       c.rule_states,
       c.capabilities,
       this.popup,
+      this.checking,
       this.saved,
       this.pending && { ...this.pending, retry: 0 },
     ]);
@@ -331,6 +410,7 @@ export class ActivityPolicy {
     this.tick();
   }
   private tierSummary(inv: Inventory, tier: Tier, d: Direction): DirectionPolicy | undefined {
+    if (inv.zone) return inv.zone[d];
     if (tier === 'process') return inv.processPolicy?.[d];
     return inv.processPolicy
       ? inv.processPolicy[d === 'incoming' ? 'application_incoming' : 'application_outgoing']
@@ -466,7 +546,7 @@ export class ActivityPolicy {
     const tier = this.defaultTier();
     add.disabled =
       !canManageRules(c) ||
-      !inv.candidate ||
+      (!inv.candidate && !inv.zone) ||
       !c.capabilities?.includes('observed-rule-create-v1') ||
       (tier === 'process' && inv.processPolicy?.state !== 'active');
     add.onclick = () => {
@@ -482,8 +562,9 @@ export class ActivityPolicy {
     const p = inv.processPolicy;
     const notes: string[] = [];
     if (!c.connected) notes.push('Controller disconnected');
-    else if (c.enforcement?.state === 'stopped') notes.push('Stored only · firewall stopped');
-    else if (c.enforcement?.state !== 'active')
+    else if (c.enforcement?.state === 'stopped') {
+      /* overall status already visible */
+    } else if (c.enforcement?.state !== 'active')
       notes.push(`Firewall ${c.enforcement?.state || 'state unknown'}`);
     if (p?.state === 'inactive')
       notes.push(
@@ -501,13 +582,13 @@ export class ActivityPolicy {
       );
       wrap.append(note);
     }
-    if (inv.rules.length) {
+    if (inv.rules.length || inv.zoneFallback.length) {
       const details = el('details', '', 'rule-details');
       details.open = detailsOpen;
       details.append(
         el(
           'summary',
-          `${inv.rules.length} rule${inv.rules.length === 1 ? '' : 's'} for this target`,
+          `${inv.rules.length} rule${inv.rules.length === 1 ? '' : 's'}${inv.zoneFallback.length ? ' + ' + inv.zoneFallback.length + ' zone fallback' : ''}`,
         ),
       );
       const busy = !!this.pending && this.pending.phase !== 'error';
@@ -517,12 +598,15 @@ export class ActivityPolicy {
           inv.rules.filter((r) => !!r.scope.process),
         ],
         [
-          row.kind === 'application' || !p
-            ? 'Application · all instances'
-            : 'Application fallback · all instances',
+          inv.zone
+            ? 'All programs · ' + zoneLabel(inv.zone.zone)
+            : row.kind === 'application' || !p
+              ? 'Application · all instances'
+              : 'Application fallback · all instances',
           inv.rules.filter((r) => !r.scope.process),
         ],
       ];
+      groups.push(['All-program zone fallback', inv.zoneFallback]);
       for (const [name, refs] of groups) {
         if (!refs.length) continue;
         details.append(el('h4', name, 'activity-rule-group'));
@@ -533,7 +617,10 @@ export class ActivityPolicy {
       details.append(
         el(
           'p',
-          'Matching process rules take precedence; application rules are the fallback. “Not set” is no explicit rule, not Allow. In/Out means connection initiation.',
+          p?.precedence ||
+            (inv.zone
+              ? 'Application and process rules are separate overrides. Unknown network membership does not match a zone rule.'
+              : 'Configured inventory, not a per-connection verdict. “Not set” is no explicit rule.'),
           'rule-note',
         ),
       );
@@ -598,6 +685,12 @@ export class ActivityPolicy {
     return card;
   }
   private editable(ref: PolicyRuleRef): Rule | undefined {
+    if (
+      ref.scope.all_programs &&
+      ref.scope.all_uids &&
+      !this.state?.control.permissions?.can_manage_machine_rules
+    )
+      return undefined;
     return this.state?.control.rules?.find(
       (r) =>
         r.id === ref.id && Number.isSafeInteger(r.version) && String(r.version) === ref.version,
@@ -611,7 +704,15 @@ export class ActivityPolicy {
   private blockReason(inv: Inventory, tier: Tier): string {
     const c = this.state!.control;
     if (!canManageRules(c)) return 'Read-only: this connection cannot change rules.';
-    if (!inv.available) return inv.reason;
+    if (!inv.available)
+      return this.row?.kind === 'network'
+        ? 'Backend update required for configured network-zone policy.'
+        : inv.reason;
+    if (
+      inv.zone &&
+      (!c.networkZones || c.policy?.network_zones?.revision !== c.networkZones.revision)
+    )
+      return 'Network-zone definition unavailable or changed; refresh.';
     if (tier === 'process' && (!inv.processPolicy || inv.processPolicy.state !== 'active'))
       return (
         inv.processPolicy?.reason ||
@@ -622,6 +723,17 @@ export class ActivityPolicy {
   private newSource(direction: Direction, tier: Tier, inv: Inventory): RuleSource | undefined {
     const c = this.state!.control,
       candidate = inv.candidate;
+    if (inv.zone && c.networkZones)
+      return {
+        zone: {
+          generation: c.generation,
+          zone: inv.zone.zone,
+          scope:
+            this.popup?.principal || (c.permissions?.can_manage_machine_rules ? 'machine' : 'self'),
+          revision: c.networkZones.revision,
+          direction,
+        },
+      };
     if (!candidate) return;
     return {
       observed: {
@@ -647,14 +759,16 @@ export class ActivityPolicy {
       `${short(direction)} Blocker quick setter · ${tier === 'process' ? 'this process' : 'application'}`,
     );
     const reason = this.blockReason(inv, tier);
-    const busy = !!this.pending && this.pending.phase !== 'error';
+    const busy = this.checking || (!!this.pending && this.pending.phase !== 'error');
+    box.setAttribute('aria-busy', String(this.checking));
     const rules = this.applicable(inv, direction, tier);
     const target =
       tier === 'process'
         ? `This process${inv.processPolicy ? ' · PID ' + inv.processPolicy.target.pid : ''}`
         : 'Application · all instances';
-    const targetShort =
-      tier === 'process'
+    const targetShort = inv.zone
+      ? `All programs · ${pop.principal === 'machine' ? 'all users' : 'current user'}`
+      : tier === 'process'
         ? `Process${inv.processPolicy ? ' ' + inv.processPolicy.target.pid : ''}`
         : 'Application';
     const lifetimeShort = (expires: string) =>
@@ -673,7 +787,7 @@ export class ActivityPolicy {
         box.append(
           el(
             'p',
-            `${short(direction)} · ${targetShort} · ${shortScope(only).split(' · ')[0]} · ${lifetimeShort(only.expires)}`,
+            `${short(direction)} · ${only.scope.all_programs ? 'All programs · ' + (only.scope.all_uids ? 'all users' : 'UID ' + only.scope.uid) : targetShort} · ${zoneLabel(only.scope.network_zone)} · ${shortScope(only).split(' · ')[0]} · ${lifetimeShort(only.expires)}`,
             'qs-scope',
           ),
         );
@@ -725,7 +839,9 @@ export class ActivityPolicy {
       const blocked =
         reason ||
         (!supported ? 'Backend update required to create rules from Activity.' : '') ||
-        (!inv.candidate ? 'No live, uniquely owned native socket to verify this target.' : '');
+        (!inv.candidate && !inv.zone
+          ? 'No live, uniquely owned native socket to verify this target.'
+          : '');
       const lifetime =
         tier === 'process'
           ? 'until this process exits'
@@ -735,12 +851,58 @@ export class ActivityPolicy {
       box.append(
         el(
           'p',
-          `${short(direction)} · ${targetShort} · ${protocolText(pop.protocol)} · ${tier === 'process' ? 'session' : lifetime}${pop.enabled ? '' : ' · stored disabled'}`,
+          `${short(direction)} · ${targetShort} · ${protocolText(pop.protocol)}${tier === 'process' ? ' · session' : ''}${pop.enabled ? '' : ' · stored disabled'}`,
           'qs-scope',
         ),
       );
       const anyEndpoint = el('span', 'Any endpoint', 'qs-endpoint');
       anyEndpoint.title = 'Any remote address · any local port · any remote port';
+      const zoneControl = el('select');
+      zoneControl.dataset.focus = 'qs-zone';
+      zoneControl.setAttribute('aria-label', 'Network zone for new rule');
+      for (const [value, label] of [
+        ['', 'Any network'],
+        ['local', 'Local Network'],
+        ['internet', 'Internet'],
+      ]) {
+        const option = el('option', label);
+        option.value = value;
+        zoneControl.append(option);
+      }
+      zoneControl.value = pop.networkZone;
+      zoneControl.disabled = busy || !!inv.zone || !c.capabilities?.includes(ZONE_CAPABILITY);
+      zoneControl.title = c.capabilities?.includes(ZONE_CAPABILITY)
+        ? 'Configured policy zone; not a connectivity verdict'
+        : 'Backend update required for Local Network / Internet rules';
+      zoneControl.onchange = () => {
+        pop.networkZone = zoneControl.value as NetworkZone | '';
+        this.refresh();
+      };
+      box.append(zoneControl);
+      if (pop.networkZone === 'internet' && c.networkZones?.internet_prefixes.length === 0)
+        box.append(
+          el('p', 'No Internet prefixes configured; no peers currently match.', 'rule-note'),
+        );
+      if (inv.zone && c.permissions?.can_manage_machine_rules) {
+        const who = el('select');
+        who.dataset.focus = 'qs-principal';
+        who.setAttribute('aria-label', 'Programs owned by');
+        for (const [value, label] of [
+          ['machine', 'All users'],
+          ['self', 'Current user'],
+        ]) {
+          const option = el('option', label);
+          option.value = value;
+          who.append(option);
+        }
+        who.value = pop.principal;
+        who.disabled = busy;
+        who.onchange = () => {
+          pop.principal = who.value as 'machine' | 'self';
+          this.refresh();
+        };
+        box.append(who);
+      }
       box.append(anyEndpoint);
       box.append(this.actionRow(undefined, inv, !!blocked || busy));
       const links = el('div', '', 'qs-links');
@@ -795,6 +957,7 @@ export class ActivityPolicy {
         links.append(life);
       }
       box.append(links);
+      if (this.checking) box.append(el('span', 'Checking…', 'qs-checking'));
       if (blocked) box.append(el('p', blocked, 'rule-note'));
     }
     if (this.pending && this.pending.rowId === this.row?.id) box.append(this.reviewBox());
@@ -953,7 +1116,7 @@ export class ActivityPolicy {
   }
   private review_new(inv: Inventory, action: 'allow' | 'block') {
     const pop = this.popup!;
-    const { direction, tier, protocol, lifetime, enabled } = pop;
+    const { direction, tier, protocol, lifetime, enabled, networkZone } = pop;
     const source = this.newSource(direction, tier, inv);
     if (!source) return;
     const expiry: 'hour' | 'permanent' =
@@ -967,6 +1130,7 @@ export class ActivityPolicy {
           p,
           {
             token: draft.token,
+            ...(networkZone ? { network_zone: networkZone } : {}),
             action,
             protocol,
             remote_address: '*',
@@ -986,6 +1150,7 @@ export class ActivityPolicy {
             !rule.filter.local_port &&
             !rule.filter.remote_port &&
             rule.disabled === !enabled &&
+            (rule.filter.network_zone || '') === networkZone &&
             !!rule.filter.process === (tier === 'process') &&
             (expiry === 'permanent'
               ? rule.expires.startsWith('0001-')

@@ -2,6 +2,7 @@ import { ActivityPolicy } from './activity-policy';
 import { TrafficGraph } from './graph';
 import { DISPLAY_UNITS } from './display-units';
 import type { PaneFrame, PolicyEntry } from './pane-model';
+import { zoneLabel } from './network-zones';
 import { initiationPresentation } from './initiation';
 import { trafficDetails, sum } from './model';
 const kind = new URL(location.href).searchParams.get('pane') === 'info' ? 'info' : 'chart';
@@ -101,7 +102,10 @@ function consume(next: PaneFrame) {
         ...(r.kind === 'process' || r.kind === 'socket'
           ? [['Process', `${r.process.pid} · start ${r.process.start_ticks}`] as [string, string]]
           : []),
-        ['Application identity', `${r.process.application.key}\n${r.process.application.revision}`],
+        [
+          'Application identity',
+          `${r.process.application.key}\n${r.process.application.revision}${r.process.application.executable_status === 'deleted' || r.process.executable.endsWith(' (deleted)') ? '\nReplaced/deleted running image; installed icon/name are display metadata only.' : ''}`,
+        ],
       );
     fields.push(['Visible sockets', String(r.rows.length)]);
     const count = sum(r.rows, 'uploaded', p.source);
@@ -115,6 +119,12 @@ function consume(next: PaneFrame) {
         ['Remote endpoint', r.socket.socket.remote],
         ['Initiation', initiationPresentation(r.socket).title],
         ['Ownership', r.socket.ownership],
+        [
+          'Network zone',
+          r.socket.network_scope?.state === 'known'
+            ? zoneLabel(r.socket.network_scope.zone)
+            : r.socket.network_scope?.reason || 'Classification unavailable',
+        ],
         ['Measurements', trafficDetails(r.socket.traffic)],
       );
     if (r.kind === 'network')
@@ -140,7 +150,13 @@ function consume(next: PaneFrame) {
           : r?.kind === 'socket'
             ? 'Connection'
             : r?.label || 'FlowGate Activity';
-    const executable = r?.process?.executable || r?.displayApplication?.executable || '';
+    const appDisplay = r?.process?.application || r?.displayApplication;
+    const executable =
+      appDisplay?.display_executable ||
+      (r?.process?.executable || r?.displayApplication?.executable || '').replace(
+        / \(deleted\)$/,
+        '',
+      );
     document.getElementById('selectedExecutable')!.textContent = executable;
     const dl = document.getElementById('info')!;
     dl.replaceChildren();
@@ -156,16 +172,21 @@ function consume(next: PaneFrame) {
       dl.append(technical);
     }
     const app =
-      r && !r.displayApplication && (!r.socket || r.socket.owners.length === 1)
-        ? r.process?.application
+      r && (!r.socket || r.socket.owners.length === 1)
+        ? r.displayApplication || r.process?.application
         : undefined;
     if (app) {
       const key = JSON.stringify([app.key, app.revision, app.executable]);
       void window.flowgate
-        .applicationIcons([key])
+        .applicationMetadata([key])
         .then((icons) => {
           if (frame?.presentation.selection !== p.selection) return;
-          const url = icons[key];
+          const metadata = icons[key];
+          const url = metadata.icon;
+          if (metadata.name) {
+            const value = document.querySelector('#info dd');
+            if (value) value.textContent = metadata.name;
+          }
           if (url) {
             const img = document.createElement('img');
             img.src = url;

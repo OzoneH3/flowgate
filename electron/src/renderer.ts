@@ -1,9 +1,15 @@
+import { ZONE_CAPABILITY, zoneLabel } from './network-zones';
 import type { Presentation, PaneFrame } from './pane-model';
 import { DISPLAY_UNITS, displayAmount, isDisplayUnit, type DisplayUnit } from './display-units';
 import { initiationPresentation } from './initiation';
 import { ActivityPolicy, STATUS_SLOTS, blockerGlyph } from './activity-policy';
 import { ruleChip, type RuleChip } from './rule-chip';
-import { POLICY_CAPABILITY, authoritativePolicy, authoritativeProcessPolicy } from './policy';
+import {
+  POLICY_CAPABILITY,
+  authoritativePolicy,
+  authoritativeZonePolicy,
+  authoritativeProcessPolicy,
+} from './policy';
 import { ruleStatus, ruleState, ruleDescription, configuredPolicy } from './rule-status';
 import { canDecide } from './protocol';
 import type { Application } from './protocol';
@@ -99,6 +105,7 @@ function rowIcon(kind: Row['kind']) {
   return svg;
 }
 
+const appNames = new Map<string, string>();
 const iconCache = new Map<string, string | null>();
 const iconPending = new Set<string>();
 let iconScheduled = false;
@@ -112,7 +119,7 @@ function installedIcon(app: Application | undefined, kind: Row['kind']) {
     const img = element('img');
     img.src = url;
     img.alt = '';
-    img.width = img.height = 14;
+    img.width = img.height = 16;
     img.onerror = () => {
       if (node.dataset.iconKey) iconCache.set(node.dataset.iconKey, null);
       node.replaceChildren(rowIcon('application'));
@@ -129,8 +136,15 @@ function installedIcon(app: Application | undefined, kind: Row['kind']) {
         const keys = [...iconPending].slice(0, 128);
         keys.forEach((k) => iconPending.delete(k));
         try {
-          const result = await window.flowgate.applicationIcons(keys);
-          for (const [key, url] of Object.entries(result)) {
+          const result = await window.flowgate.applicationMetadata(keys);
+          for (const [key, metadata] of Object.entries(result)) {
+            const url = metadata.icon;
+            if (metadata.name) {
+              if (appNames.size >= 2048) appNames.delete(appNames.keys().next().value!);
+              appNames.set(key, metadata.name);
+              for (const label of document.querySelectorAll<HTMLElement>('[data-display-key]'))
+                if (label.dataset.displayKey === key) label.textContent = metadata.name;
+            }
             if (iconCache.size >= 2048) iconCache.delete(iconCache.keys().next().value!);
             iconCache.set(key, url);
             if (url)
@@ -183,6 +197,33 @@ function showFloatingRuleStatus() {
   }
   floating.append($('infoRules'));
 }
+function statusFamilyGlyph(key: string) {
+  const span = element('span', '', 'slot-icon family-' + key);
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS(svg.namespaceURI, 'path');
+  path.setAttribute(
+    'd',
+    key === 'in-blocker'
+      ? 'M5 8V4a1 1 0 0 1 2 0v3-5a1 1 0 0 1 2 0v5-4a1 1 0 0 1 2 0v5-2a1 1 0 0 1 2 0v4l-2 4H7l-4-4a1 1 0 0 1 1-2l1 1'
+      : key === 'out-blocker'
+        ? 'M3 8l3 3 7-7'
+        : key.includes('quota')
+          ? 'M8 1l6 3v8l-6 3-6-3V4zM8 1v14M2 4l6 4 6-4'
+          : key === 'dl-limit'
+            ? 'M8 3v10M4 9l4 4 4-4'
+            : 'M8 13V3M4 7l4-4 4 4',
+  );
+  path.setAttribute('fill', 'none');
+  path.setAttribute('stroke', 'currentColor');
+  path.setAttribute('stroke-width', '1.3');
+  path.setAttribute('stroke-linecap', 'round');
+  path.setAttribute('stroke-linejoin', 'round');
+  svg.append(path);
+  span.append(svg);
+  return span;
+}
 function statusStrip(r: Row) {
   const cell = element('td', '', 'rule-status');
   const strip = element('span', '', 'status-strip');
@@ -195,10 +236,7 @@ function statusStrip(r: Row) {
   for (const slot of STATUS_SLOTS) {
     if (!slot.direction) {
       const dot = element('span', '', 'status-slot unavailable');
-      dot.append(
-        element('span', '·', 'slot-dot'),
-        element('span', slot.glyph, 'slot-icon family-' + slot.key),
-      );
+      dot.append(element('span', '·', 'slot-dot'), statusFamilyGlyph(slot.key));
       dot.title = `${slot.label}: not a FlowGate feature`;
       strip.append(dot);
       continue;
@@ -206,11 +244,17 @@ function statusStrip(r: Row) {
     const direction = slot.direction;
     const button = element('button', '', 'policy-cell status-slot');
     button.dataset.direction = direction;
-    button.disabled = r.kind === 'overview' || r.kind === 'network';
+    button.disabled =
+      r.kind === 'overview' ||
+      (r.kind === 'network' && !state.control.capabilities?.includes(ZONE_CAPABILITY));
     let chip: RuleChip = { glyph: '', text: 'Not set', tone: 'none', detail: '' };
     let fallbackShown = false;
     let title = '';
-    if (r.kind === 'overview' || r.kind === 'network') {
+    if (r.kind === 'network' && state.control.capabilities?.includes(ZONE_CAPABILITY)) {
+      const zone = authoritativeZonePolicy(r, state);
+      chip = ruleChip(zone?.[direction], false, true);
+      title = `${r.label} · all programs · ${direction}\n${zone?.[direction].reason || 'Policy unavailable'}`;
+    } else if (r.kind === 'overview' || r.kind === 'network') {
       chip = { glyph: '', text: '', tone: 'none', detail: '' };
       title = r.kind === 'network' ? NETWORK_UNAVAILABLE : 'Machine: no rules at this level.';
     } else if (r.kind === 'socket') {
@@ -247,11 +291,7 @@ function statusStrip(r: Row) {
       title = `${slot.label} (compatibility inventory): ${chip.text}\n${chip.detail}`;
     } else title = `${slot.label}: ${status.reason}`;
     if (['allow', 'block', 'mixed', 'off'].includes(chip.tone)) button.append(blockerGlyph(chip));
-    else
-      button.append(
-        element('span', '·', 'slot-dot'),
-        element('span', slot.glyph, 'slot-icon family-' + slot.key),
-      );
+    else button.append(element('span', '·', 'slot-dot'), statusFamilyGlyph(slot.key));
     button.classList.add('tone-' + chip.tone);
     if (fallbackShown) button.classList.add('policy-fallback');
     button.title =
@@ -842,9 +882,13 @@ function renderTree() {
       renderTree();
       renderInfo();
     };
-    let rowLabel = r.label;
+    const displayApp = r.process?.application || r.displayApplication;
+    const displayKey =
+      displayApp && JSON.stringify([displayApp.key, displayApp.revision, displayApp.executable]);
+    let rowLabel =
+      r.kind === 'application' && displayKey ? appNames.get(displayKey) || r.label : r.label;
     let icon: HTMLElement = installedIcon(
-      r.kind === 'socket' ? undefined : rowApplication(r),
+      r.kind !== 'application' ? undefined : r.displayApplication || rowApplication(r),
       r.kind,
     );
     if (r.socket) {
@@ -863,7 +907,9 @@ function renderTree() {
       ? 'Contains an observed established TCP or connected UDP socket. Not a firewall, delivery or reachability verdict.'
       : 'No observed connected peer; listening/bound sockets do not light this indicator.';
     led.setAttribute('aria-hidden', 'true');
-    name.append(led, toggle, icon, document.createTextNode(rowLabel));
+    const textLabel = element('span', rowLabel, 'row-name-text');
+    if (r.kind === 'application' && displayKey) textLabel.dataset.displayKey = displayKey;
+    name.append(led, toggle, icon, textLabel);
     name.title = r.process?.executable || r.socket?.socket.remote || r.label;
     tr.append(name);
     for (const key of rateKeys()) {
@@ -926,6 +972,7 @@ function renderInfo() {
       if (
         [
           'Executable',
+          'Executable status',
           'Identity',
           'Totals',
           'Evidence',
@@ -969,10 +1016,16 @@ function renderInfo() {
         : r?.kind === 'application'
           ? 'Application properties'
           : 'Overview';
-  const pathText = r?.process?.executable || r?.displayApplication?.executable || '';
+  const selectedApp = r?.process?.application || r?.displayApplication;
+  const rawPath = r?.process?.executable || r?.displayApplication?.executable || '';
+  const pathText = selectedApp?.display_executable || rawPath.replace(/ \(deleted\)$/, '');
   if ($('selectedExecutable').textContent !== pathText)
     $('selectedExecutable').textContent = pathText;
-  $('selectedExecutable').title = pathText;
+  $('selectedExecutable').title =
+    rawPath +
+    (rawPath.endsWith(' (deleted)')
+      ? ' · Running replaced/deleted executable; original identity retained.'
+      : '');
   $('selectedExecutable').hidden = !pathText;
   const selectedName = $('selectedName');
   if (selectedName.dataset.identity !== (r?.id || '')) {
@@ -980,7 +1033,7 @@ function renderInfo() {
     // The chart legend names the selected entity (reference), not the type word shown as title.
     selectedName.dataset.label = r?.label || '';
     selectedName.replaceChildren(
-      ...(r ? [installedIcon(rowApplication(r), r.kind)] : []),
+      ...(r ? [installedIcon(r.displayApplication || rowApplication(r), r.kind)] : []),
       document.createTextNode(
         !r
           ? 'FlowGate Activity'
@@ -1015,7 +1068,25 @@ function renderInfo() {
     );
   if (r.kind === 'network') {
     field(info, 'Network', r.label);
-    field(info, 'Coverage', NETWORK_UNAVAILABLE);
+    const config = state.control.networkZones;
+    field(info, 'Target', 'All programs · configured ' + r.label + ' policy zone');
+    field(
+      info,
+      'Coverage',
+      config
+        ? 'Traffic totals unavailable; UDP socket totals may span peers.'
+        : NETWORK_UNAVAILABLE,
+    );
+    if (config) {
+      field(info, 'Definition', config.model);
+      field(
+        info,
+        'Prefixes',
+        (r.id === 'network:local' ? config.local_prefixes : config.internet_prefixes).join(', ') ||
+          'No configured prefixes',
+      );
+    }
+
     commit();
     return;
   }
@@ -1029,6 +1100,14 @@ function renderInfo() {
     );
     field(info, 'Applications', String(r.children.filter((c) => c.kind === 'application').length));
     field(info, 'Sockets', String(r.rows.length));
+    const evidence = state.observation.activity?.tcp_initiation;
+    field(
+      info,
+      'TCP initiation',
+      evidence
+        ? evidence.state + ' · ' + evidence.reason
+        : 'Snapshot evidence only; established direction may be unknown.',
+    );
     field(
       info,
       'Measurement',
@@ -1054,9 +1133,28 @@ function renderInfo() {
     field(
       info,
       'Name',
-      r.kind === 'application' ? r.label : r.process?.application.name || r.label,
+      r.process?.application
+        ? appNames.get(
+            JSON.stringify([
+              r.process.application.key,
+              r.process.application.revision,
+              r.process.application.executable,
+            ]),
+          ) ||
+            r.process.application.display_name ||
+            r.process.application.name.replace(/ \(deleted\)$/, '')
+        : r.label,
     );
   if (r.process) {
+    if (
+      r.process.application.executable_status === 'deleted' ||
+      r.process.executable.endsWith(' (deleted)')
+    )
+      field(
+        info,
+        'Executable status',
+        'Replaced/deleted on disk; this running image retains its original identity. Installed icon/name are display metadata only.',
+      );
     field(info, 'Executable', r.process.executable);
     field(info, 'User ID', String(r.process.uid));
     field(
@@ -1091,6 +1189,12 @@ function renderInfo() {
           ]
         : []),
       ['Evidence', s.evidence],
+      [
+        'Network zone',
+        s.network_scope?.state === 'known'
+          ? zoneLabel(s.network_scope.zone) + ' · configured policy zone'
+          : s.network_scope?.reason || 'Classification unavailable',
+      ],
       ['Measurement', trafficDetails(s.traffic)],
       ['Socket identity', `${s.socket.netns} · ${s.socket.cookie}`],
     ])

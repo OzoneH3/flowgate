@@ -50,6 +50,9 @@ const ruleFields = (r: Rule) => [
   r.filter.local_port || 0,
   r.filter.remote_port || 0,
   r.filter.process,
+  r.filter.network_zone,
+  r.filter.all_programs,
+  r.filter.all_uids,
 ];
 const sameRule = (a: Rule, b: Rule) =>
   JSON.stringify(ruleFields(a)) === JSON.stringify(ruleFields(b));
@@ -175,7 +178,9 @@ export class ObservedRules {
     if (d.generation !== c.generation || d.endpoint !== this.backend.controller)
       throw Error('Generation/endpoint changed; close editor and select again');
     // '*' means TCP + UDP only and must be explicit; it needs the backend's any-protocol capability.
-    const protocols = c.capabilities?.includes(ANY_PROTOCOL_CAPABILITY)
+    const protocols = c.capabilities?.some((cap) =>
+      [ANY_PROTOCOL_CAPABILITY, 'network-zone-policy-v1'].includes(cap),
+    )
       ? ['tcp', 'udp', '*']
       : ['tcp', 'udp'];
     if (!protocols.includes(e.protocol) || e.priority !== 100 || !e.creation_scope)
@@ -201,6 +206,9 @@ export class ObservedRules {
       throw Error('Process capability lost; no fallback');
     const value = {
       ...(c.capabilities?.includes(PROCESS_CAPABILITY) ? { target_scope: d.targetScope } : {}),
+      ...(e.network_zone
+        ? { network_zone: e.network_zone, zone_revision: c.networkZones?.revision }
+        : {}),
       direction: d.target.direction,
       protocol: e.protocol,
       action: e.action,
@@ -215,6 +223,8 @@ export class ObservedRules {
             ? new Date(this.backend.now() + 3600000).toISOString()
             : '0001-01-01T00:00:00Z',
     };
+    if (e.network_zone && !c.capabilities?.includes('network-zone-policy-v1'))
+      throw Error('Backend update required for network-zone scope');
     const r = await call(d.endpoint, {
       operation: 'observed-rule-preview',
       generation: d.generation,
@@ -237,7 +247,8 @@ export class ObservedRules {
       p.rule.filter.revision !== d.rule.filter.revision ||
       p.rule.filter.uid !== d.rule.filter.uid ||
       p.rule.executable !== d.rule.executable ||
-      p.rule.filter.direction !== d.target.direction
+      p.rule.filter.direction !== d.target.direction ||
+      (p.rule.filter.network_zone || '') !== (e.network_zone || '')
     )
       throw Error('Verified identity changed; close editor and select again');
     if (d.targetScope === 'process') {

@@ -31,6 +31,8 @@ await build({
     'src/pane-model.ts',
     'src/chart-view.ts',
     'src/popup-position.ts',
+    'src/network-zones.ts',
+    'src/zone-rules.ts',
     'src/display-units.ts',
     'src/initiation.ts',
     'src/protocol.ts',

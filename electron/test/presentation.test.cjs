@@ -141,3 +141,25 @@ test('configured labels separate broad constraints, scoped, mixed and absent wit
   assert.equal(configuredPolicy([rule('one'), rule('two', 'block')], 10000), 'Mixed · 2');
   assert.equal(configuredPolicy([rule('one'), rule('two')], 10000), 'Scoped · 2');
 });
+
+test('deleted Firefox keeps authoritative identity while resolving installed display metadata', async () => {
+  const icons = new ApplicationIcons();
+  const app = {
+    key: 'old-inode-key',
+    revision: 'old-revision',
+    name: 'firefox (deleted)',
+    executable: '/usr/lib/firefox/firefox (deleted)',
+  };
+  const s = state([]);
+  s.observation.activity.processes = { p: { application: app } };
+  icons.observe(s);
+  const key = iconKey(app),
+    metadata = await icons.metadata([key, 'unobserved']);
+  assert.match(metadata[key].icon, /^flowgate:\/\/app\/icons\/.*\.(png|svg)$/);
+  assert.equal(metadata[key].name, 'Firefox');
+  assert.equal(metadata[key].source, 'desktop-metadata');
+  assert.equal(metadata.unobserved.icon, null);
+  assert.equal(app.key, 'old-inode-key');
+  assert.equal(app.revision, 'old-revision');
+  assert.equal(app.executable, '/usr/lib/firefox/firefox (deleted)');
+});

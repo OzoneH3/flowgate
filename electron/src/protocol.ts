@@ -1,3 +1,9 @@
+import {
+  parseNetworkZones,
+  type NetworkZones,
+  type NetworkZone,
+  type ZoneSource,
+} from './network-zones';
 import { parseProcessTarget, type ProcessTarget } from './process-rules';
 import {
   parseEvaluation,
@@ -13,6 +19,9 @@ export interface Application {
   revision: string;
   name: string;
   executable: string;
+  display_name?: string;
+  display_executable?: string;
+  executable_status?: 'linked' | 'deleted' | 'unavailable';
 }
 export interface Process {
   thread_group_pid?: number;
@@ -37,6 +46,13 @@ export interface Traffic {
   download_bps?: number;
 }
 export interface SocketRow {
+  network_scope?: {
+    state: 'known' | 'unavailable';
+    zone?: NetworkZone;
+    revision: string;
+    source: string;
+    reason: string;
+  };
   ownership_category?: string;
   display_application?: Application;
   id: string;
@@ -45,6 +61,7 @@ export interface SocketRow {
   state: string;
   direction: string;
   initiation?: {
+    generation?: string;
     state: 'known' | 'listening' | 'unconnected' | 'unknown' | 'ambiguous';
     direction?: 'incoming' | 'outgoing';
     source: string;
@@ -64,6 +81,15 @@ export interface SocketRow {
   traffic: Traffic;
 }
 export interface Activity {
+  tcp_initiation?: {
+    state: 'disabled' | 'starting' | 'active' | 'failed' | 'unavailable';
+    generation: string;
+    netns: string;
+    reason: string;
+    partial: boolean;
+    lost_events: number;
+    collected: string;
+  };
   udp?: {
     machine_scope?: boolean;
     state: string;
@@ -126,6 +152,7 @@ export interface ExtendedState {
   partial: boolean;
 }
 export interface Permissions {
+  can_manage_machine_rules?: boolean;
   can_control_evaluation?: boolean;
   can_view_measurements?: boolean;
   can_control_traffic?: boolean;
@@ -136,6 +163,14 @@ export interface Permissions {
   can_decide: boolean;
 }
 export interface Reply {
+  network_zones?: NetworkZones;
+  zone_preview?: {
+    token: string;
+    expires_at: string;
+    rule: Rule;
+    scope_preview: string;
+    network_zones: NetworkZones;
+  };
   evaluation?: DaemonEvaluationStatus;
   decision_log?: unknown;
   decision_record?: unknown;
@@ -200,6 +235,7 @@ export interface ClientState {
     rule_states?: Record<string, RuleTargetState>;
     capabilities?: string[];
     serverNow?: number;
+    networkZones?: NetworkZones;
     policy?: PolicyView;
     policyError?: string;
   };
@@ -220,6 +256,14 @@ export interface Bridge {
   paneRule(action: import('./pane-model').PaneRuleAction): Promise<void>;
   onPaneFrame(fn: (frame: import('./pane-model').PaneFrame) => void): () => void;
   onPaneRule(fn: (action: import('./pane-model').PaneRuleAction) => void): () => void;
+  applicationMetadata(
+    keys: string[],
+  ): Promise<
+    Record<
+      string,
+      { icon: string | null; name?: string; source: 'desktop-metadata' | 'unavailable' }
+    >
+  >;
   applicationIcons(keys: string[]): Promise<Record<string, string | null>>;
   graph(value: { id: string; seconds: number }): Promise<import('./history').GraphView>;
   snapshot(): Promise<ClientState>;
@@ -228,6 +272,7 @@ export interface Bridge {
   onNavigate(fn: (value: { tab: 'requests'; message: string }) => void): () => void;
   extended(action: 'enable' | 'stop'): Promise<void>;
   extendedState(): Promise<ExtendedState>;
+  ruleContext(): Promise<ClientState>;
   ruleDraft(source: RuleSource): Promise<RuleDraft>;
   ruleReconcile(receipt: string): Promise<Attempt>;
   rulePreview(value: RuleEdit): Promise<RulePreview>;
@@ -279,6 +324,11 @@ function application(v: unknown): Application {
     revision: string(a.revision),
     name: string(a.name),
     executable: string(a.executable),
+    display_name: string(a.display_name) || undefined,
+    display_executable: string(a.display_executable) || undefined,
+    executable_status: ['linked', 'deleted', 'unavailable'].includes(string(a.executable_status))
+      ? (a.executable_status as Application['executable_status'])
+      : undefined,
   };
 }
 function process(v: unknown): Process {
@@ -360,7 +410,7 @@ export function parseReply(raw: unknown): Reply {
             .map(([id, value]) => {
               const v = object(value);
               if (
-                !['application', 'process'].includes(string(v.target_scope)) ||
+                !['application', 'process', 'zone'].includes(string(v.target_scope)) ||
                 !['active', 'inactive'].includes(string(v.state))
               )
                 throw Error('Invalid rule target state');
@@ -380,6 +430,7 @@ export function parseReply(raw: unknown): Reply {
     // Validated by decision-log.ts, which owns the decision-log-v1 schema.
     decision_log: r.decision_log,
     decision_record: r.decision_record,
+    network_zones: parseNetworkZones(r.network_zones),
     evaluation: parseEvaluation(r.evaluation),
   };
   if (r.permissions !== undefined || result.capabilities.includes('explicit-administrator-v1')) {
@@ -393,6 +444,7 @@ export function parseReply(raw: unknown): Reply {
     )
       throw Error('Invalid explicit permission metadata');
     result.permissions = {
+      can_manage_machine_rules: p.can_manage_machine_rules === true,
       role: p.role,
       observation_scope: p.observation_scope,
       policy_scope: p.policy_scope,
@@ -435,6 +487,19 @@ export function parseReply(raw: unknown): Reply {
   }
   result.backend_mode = string(r.backend_mode);
   if (r.policy_view) result.policy_view = parsePolicyView(r.policy_view);
+  if (r.zone_preview) {
+    const p = object(r.zone_preview),
+      network_zones = parseNetworkZones(p.network_zones);
+    if (!network_zones || !string(p.token) || !Number.isFinite(Date.parse(string(p.expires_at))))
+      throw Error('Invalid zone preview');
+    result.zone_preview = {
+      token: string(p.token),
+      expires_at: string(p.expires_at),
+      rule: parseRule(p.rule),
+      scope_preview: string(p.scope_preview),
+      network_zones,
+    };
+  }
   if (r.observed_preview) {
     const p = object(r.observed_preview),
       e = object(p.enforcement);
@@ -475,7 +540,24 @@ export function parseReply(raw: unknown): Reply {
       if (Object.keys(processes).length >= 8192) throw Error('Too many processes');
       processes[id] = process(p);
     }
+    const tcp = a.tcp_initiation === undefined ? undefined : object(a.tcp_initiation);
+    if (
+      tcp &&
+      !['disabled', 'starting', 'active', 'failed', 'unavailable'].includes(string(tcp.state))
+    )
+      throw Error('Invalid TCP initiation evidence state');
     result.activity = {
+      tcp_initiation: tcp
+        ? {
+            state: tcp.state as NonNullable<Activity['tcp_initiation']>['state'],
+            generation: string(tcp.generation),
+            netns: string(tcp.netns),
+            reason: string(tcp.reason),
+            partial: tcp.partial === true,
+            lost_events: number(tcp.lost_events),
+            collected: string(tcp.collected),
+          }
+        : undefined,
       udp: a.udp
         ? {
             state: string(object(a.udp).state),
@@ -509,6 +591,24 @@ export function parseReply(raw: unknown): Reply {
           owners: array(row.owners, 2048).map(string),
           state: string(row.state),
           direction: string(row.direction),
+          network_scope: row.network_scope
+            ? (() => {
+                const n = object(row.network_scope),
+                  state = string(n.state);
+                if (
+                  !['known', 'unavailable'].includes(state) ||
+                  (state === 'known' && !['local', 'internet'].includes(string(n.zone)))
+                )
+                  throw Error('Invalid network scope');
+                return {
+                  state: state as 'known' | 'unavailable',
+                  zone: state === 'known' ? (n.zone as NetworkZone) : undefined,
+                  revision: string(n.revision),
+                  source: string(n.source),
+                  reason: string(n.reason),
+                };
+              })()
+            : undefined,
           initiation: row.initiation
             ? (() => {
                 const i = object(row.initiation);
@@ -521,6 +621,7 @@ export function parseReply(raw: unknown): Reply {
                 return {
                   state: state as NonNullable<SocketRow['initiation']>['state'],
                   direction: state === 'known' ? (direction as 'incoming' | 'outgoing') : undefined,
+                  generation: string(i.generation) || undefined,
                   source: string(i.source),
                   reason: string(i.reason),
                   observed_at: string(i.observed_at) || undefined,
@@ -572,6 +673,9 @@ export function validateDecision(v: unknown): Decision {
 }
 
 export interface RuleFilter {
+  network_zone?: NetworkZone;
+  all_programs?: boolean;
+  all_uids?: boolean;
   process?: ProcessTarget;
   application: string;
   revision: string;
@@ -584,7 +688,7 @@ export interface RuleFilter {
   uid: number;
 }
 export interface RuleTargetState {
-  target_scope: 'application' | 'process';
+  target_scope: 'application' | 'process' | 'zone';
   state: 'active' | 'inactive';
   reason: string;
 }
@@ -616,7 +720,12 @@ export interface ObservedSource {
   process_id: string;
   direction: 'incoming' | 'outgoing';
 }
-export type RuleSource = { id?: string; event?: string; observed?: ObservedSource };
+export type RuleSource = {
+  id?: string;
+  event?: string;
+  observed?: ObservedSource;
+  zone?: ZoneSource;
+};
 export interface ObservedPreview {
   token: string;
   expires_at: string;
@@ -645,6 +754,7 @@ export interface RuleEdit {
   priority: number;
   disabled: boolean;
   expiry: 'preserve' | 'hour' | 'permanent';
+  network_zone?: NetworkZone | '';
   creation_scope?: 'application' | 'custom';
 }
 export type EvaluationAction = 'start' | 'stop' | 'status' | 'recover' | 'cancel';
@@ -672,6 +782,11 @@ export interface Preferences {
 function ruleFilter(v: unknown): RuleFilter {
   const f = object(v);
   return {
+    network_zone: ['local', 'internet'].includes(string(f.network_zone))
+      ? (f.network_zone as NetworkZone)
+      : undefined,
+    all_programs: f.all_programs === true || undefined,
+    all_uids: f.all_uids === true || undefined,
     process: parseProcessTarget(f.process),
     application: string(f.application),
     revision: string(f.revision),
@@ -695,7 +810,13 @@ function ruleVersion(v: unknown): number {
 function parseRule(v: unknown): Rule {
   const r = object(v),
     filter = ruleFilter(r.filter);
-  if ((number(r.schema) === 3) !== !!filter.process)
+  if (
+    number(r.schema) > 4 ||
+    (filter.network_zone && number(r.schema) !== 4) ||
+    (filter.all_programs && (!filter.network_zone || filter.application || filter.process))
+  )
+    throw Error('Unsupported zone rule schema');
+  if (number(r.schema) !== 4 && (number(r.schema) === 3) !== !!filter.process)
     throw Error('Process rule requires schema3 and a complete immutable binding');
   return {
     version: ruleVersion(r.version),
@@ -714,12 +835,13 @@ export function validateEdit(v: unknown): RuleEdit {
   const e = object(v);
   if (
     Object.keys(e)
-      .filter((k) => k !== 'creation_scope')
+      .filter((k) => !['creation_scope', 'network_zone'].includes(k))
       .sort()
       .join(',') !==
       'action,disabled,expiry,local_port,priority,protocol,remote_address,remote_port,token' ||
     (e.creation_scope !== undefined &&
       !['application', 'custom'].includes(String(e.creation_scope))) ||
+    (e.network_zone !== undefined && !['', 'local', 'internet'].includes(String(e.network_zone))) ||
     typeof e.token !== 'string' ||
     e.token.length > 128 ||
     !['allow', 'block'].includes(String(e.action)) ||

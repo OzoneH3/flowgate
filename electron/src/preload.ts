@@ -15,6 +15,8 @@ const api: Bridge = {
     ipcRenderer.on('pane:rule-open', listener);
     return () => ipcRenderer.removeListener('pane:rule-open', listener);
   },
+  ruleContext: () => ipcRenderer.invoke('rule:context'),
+  applicationMetadata: (keys: unknown) => ipcRenderer.invoke('application:metadata', keys),
   applicationIcons: (keys) => ipcRenderer.invoke('application:icons', keys),
   graph: (value) => ipcRenderer.invoke('graph', value),
   backgroundStatus: () => ipcRenderer.invoke('background:status'),
