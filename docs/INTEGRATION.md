@@ -1,5 +1,56 @@
 # Integrated desktop and non-enforcing root monitor
 
+## Current: Activity round 4 and verified font delivery
+
+Integrated exact released checkpoint **652dab3fdec0941698bc3d92b4b4f31849197c05**
+by fast-forward from57cfd86, preserving complete UI2 release **f803ce3**, accepted
+review fixes **01e3ab5**, and UI owner's font-delivery correction **652dab3**.
+Backend remains **6c68f8c**; no API, policy, accounting or host deployment changes.
+UI ownership transferred from UI2 to flowgate ui01a1465b at the user's direction;
+the new owner explicitly released this immutable checkpoint before integration.
+It may continue the next visual round independently; do not merge its moving branch.
+
+Whole-window corrections: grouped toolbar and source/layout controls; default
+four-column Status table with optional Details; Rate/Total view; unified footer;
+chart options in its menu with pause/resume; compact Rules columns and popup scope.
+Before-click direction, application/process target, protocol, lifetime and endpoint
+scope remain visible; version, preview and uncertain-response safeguards remain.
+The follow-up fixes preserve current selection on chart resume and reject stale
+in-flight redraws. Stored Ask remains deferred; no working Ask control was added.
+
+Font evidence now distinguishes intended and actual delivery: NetLimiter declares
+Segoe UI explicitly; licensed Selawik is bundled as its metric-compatible alternative.
+The original round4 protocol returned404 for the fonts. UI652dab3 serves exactly
+three known font files with font/ttf and retains sandbox/CSP. Actual sandboxed
+400/600/700 document.fonts.load failed before and succeeds after. Original round4
+screenshots predate this fix and must not be cited as proof of Selawik rendering.
+Corrected native-scale reference/before/after comparison:
+`.workspace/round4-integrated/reference-before-after.png` (fixture content differs).
+
+Reused UI2 build/typecheck,77 unit, synthetic normal/narrow, real private popup
+journey, and populated real TCP chart evidence. New owner's read-only01e3 check
+passed pane close/reopen, presets, Rate/Total, Status/Details, chart source/window,
+pause-selection-resume (legend matches selection), and outside dismissal. Evidence
+in UI worktree `.workspace/rs/r3-panes/result.json`; font probes/screenshots in
+`.workspace/round5/`. New main-checkout build/typecheck and **8 focused tests** pass
+(`.workspace/ui-r4-integration-{build,tests}.log`). No receiver/UDP/watchdog matrix
+was repeated. Fixture rsf-c780 is intentionally retained under the new UI owner's
+exclusive lifecycle responsibility for the next isolated round, not claimed cleaned.
+WinBoat settings/Units/Rate restored and viewer closed by that owner.
+
+Host daemon API remains unavailable after the external reboots; host acceptance
+was not possible. No root daemon restoration, collector action, rule write or
+network change was performed. A separate read-only Firefox investigation observed
+faults with no Electron sampled; that does not establish an Electron cause or
+prove launch safety. No browser restart/profile change was performed here.
+
+Remaining visual differences include menu semantics, connection labels, missing
+filter objects/unsupported rule families, no Undock, and Linux font rasterization.
+No fidelity percentage or design-complete claim. Details: `electron/ACTIVITY-PARITY-R4.md`.
+Basic unprivileged launch: `scripts/run-electron.sh`; daemon-connected launch needs
+separately authorized monitor restoration before using
+`scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock`.
+
 ## Current: UI2 Activity fidelity round 3 (released and integrated)
 
 Released UI **fbe9737e7c65e25743007151ff46545a812a4c99** (including checkpoint
