@@ -299,3 +299,13 @@ The following authoritative status reported the actual failure:
   "collected": "0001-01-01T00:00:00Z"
 }
 ```
+
+
+## Evaluation continuity evidence
+
+The focused real-BPF fixture `.workspace/evaluation-udp-1792313673-2574300` passed
+UDP4/6 accounting continuity across incoming evaluation Start/Stop with the same
+daemon/helper/collector generation and socket baselines. Exact byte counts and
+separate Allow/Block receivers, TCP and Decision Log checks passed; foreign rules
+and routes unchanged. See INTEGRATION.md for the precise source and combined UI
+release. Host accounting remains on its existing build; no rollout occurred.

@@ -1,75 +1,106 @@
 # Integrated desktop and non-enforcing root monitor
 
-## Evaluation integration base and pending real-BPF continuity check
+## Current checkout: evaluation, real UDP continuity and measured Activity integrated
 
-Clean integration base **90cbac500fb96542bb8adcd22d7c2307d8082b1e** includes backend
-**bfa93b6a695fb1928b0f7d55b4aff5cd1d71f626**, full released evaluation UI
-**81c0aaac7a2245d4f0f3737bbcd0698413151c63** (merge6c936d2), and measured reference
-**bf3b79d83aaf60ad4c851bb14d1642b59a643012**. The UI owner advanced independently
-from this base for the Activity visual pass; that moving pass is not integrated.
-No API or enforcement implementation changed in this integration increment.
+Merge **11316c52b5f5f8a341d0f215d49ff2c7ce718072** integrates released visual
+UI **1a53e355dd67933ac8cfc872ed6d4b12202b3bb9** into backendb4aaf82. It retains
+full evaluation UI81c0aaac7a2245d4f0f3737bbcd0698413151c63,
+backendbfa93b6a695fb1928b0f7d55b4aff5cd1d71f626 and measured reference
+bf3b79d83aaf60ad4c851bb14d1642b59a643012. Frontend ownership was explicitly
+released and its exact clean checkpoint checked before merge; no conflicts or API changes.
 
-New focused fixture: `scripts/check-evaluation-udp.sh`. It builds only the separate
-`.workspace/flowgate-eval-udp` binary and reuses the reviewed native helper/UDP
-fixtures. It creates fresh network/PID/private mount namespaces, a separate
-runtime/database, controlled UDP4/6 socket-API transfers, a TCP control connection,
-and veth Allow/Block receivers. It checks daemon/helper/collector identity and
-observed-since baselines across incoming Start/Stop, exact final cumulative fixture
-byte counts, real Decision Log outcomes, TCP availability, unchanged foreign
-rules/routes and owned cleanup. It never opens the host API or restarts its helper.
-The native tracing hooks may attach globally but registration/counters are scoped
-to this fixture's network namespace; the host collector is not reused or stopped.
+### Passed real-BPF continuity (reused, not rerun)
 
-**Kernel result remains unverified.** The one attempted noninteractive launch
-stopped at `sudo: a password is required`, before unshare/fixture/BPF execution.
-Evidence: `.workspace/evaluation-udp-1792310361-2539650/` (source/artifact hashes).
-A sudo command-list query had succeeded; that did not establish permission to
-execute the concrete unshare command. No repeated noninteractive attempts were
-made. Minimum next action, from the main checkout:
+User-run `.workspace/evaluation-udp-1792313673-2574300` tests source
+b4aaf82dcbad77d68819b61a6a8c2ae8ef1956f4. Binary SHA256
+2bc9560ae648b5bbd299ad1764cad01131c43ca9e0adc0d37178c05c1d9a1b87;
+native helper118a8877d7b58dba43f20622064e3b60c38138a3453cf4a9aa87305720ab205c.
+Inspected `continuity.json`, source/artifact hashes, verification log and matching
+route snapshots. Six registered UDP4/6 connected/unconnected socket records retain
+IDs and observed-since baselines before/during/after incoming evaluation. Same daemon
+351e14b015741c69fba93b72b68f11a1, helperPID66 (fixture PID namespace), collector
+b914a94298fdfc998a95dd11501a207f survive Start/Stop. Exact final socket-API totals
+sum to25,668 uploaded and25,668 downloaded bytes; they are not remote-delivery proof.
+Separate incoming receivers show Allow1/Block0. TCP exchange and actual Decision Log
+outcomes remain available. Stop confirms owned-only cleanup; foreign nft objects and
+all route fields are unchanged. No host endpoints, collector or database were used.
+This closes the active-BPF continuity gap; previous syntax and asynchronous IPv6
+setup failures are documented in DAEMON-EVALUATION.md, not passing evidence.
 
-```sh
-cd /home/flowgate-user/Apps/flowgate
-scripts/check-evaluation-udp.sh
-```
+New merge checks: Electron build/typecheck and actual sandboxed Wayland
+`node electron/test/activity-measured.mjs` passed. Its rows/traffic are explicitly
+synthetic; real kernel/receiver evidence above is separate. Reuse exact-release UI,
+five-minute expiry, watchdog, Tailscale-shaped compatibility/refusal and other settled
+matrices. No kernel suite or full acceptance matrix was rerun for this visual merge.
 
-Enter authentication for the existing isolated harness if requested. This is a
-fixture run, **not host activation**. A successful run writes `continuity.json`
-and `verification.log` under the printed fresh workspace evidence path. On failure,
-inspect that path's `daemon.log` and actual error before retrying. The test does not
-repeat the settled300s deadline, broader UDP protocol matrix or visual matrix.
-Until this command passes, active real-BPF continuity is a coverage gap, not a claim
-established by the existing collector-lifecycle model or syntax checks.
+### Host unchanged; future rollout only
 
-New checks: integrated Electron build/typecheck and8 focused evaluation tests
-passed; Python compile and shell syntax passed; separate Go build passed. Reused
-exact-release real Electron journey, evaluation expiry/receiver/watchdog/rollback/
-Tailscale component evidence and previously verified UDP adapter behavior. No new
-kernel counters or receiver results are claimed from the blocked launch.
+Read-only API confirms generation0840f7c256126f1708702f27c5b26551,
+active collector43a091abb81a09901be2c9b460080ee1, enforcement stopped, zero stored
+rules and explicit UID1000 administrator/collector control. The host still runs
+source1732584 and lacks daemon-evaluation-v1. No daemon restart, executable replacement,
+collection interruption, rule write or firewall/routing action occurred in this task.
+Separate combined candidate: `.workspace/flowgate-integrated-candidate` (build with
+scripts/go-env.sh sourced); source/hash manifest is kept beside it.
 
-Read-only host check: daemon generation0840f7c256126f1708702f27c5b26551,
-collector43a091abb81a09901be2c9b460080ee1 active, enforcement stopped, zero stored
-rules. Primary retains UID1000 administrator/machine visibility and explicit
-collector control. Host still advertises Decision Log/policy/creation/UDP capabilities
-but **not daemon-evaluation-v1**. Existing partial/unregistered-cookie UDP coverage
-remains explicitly reported. No daemon restart, executable replacement, collection
-interruption or host firewall/BPF/routing action occurred.
+**Do not execute the following rollout until separately authorized.** It interrupts
+monitoring and UDP collection briefly but does not activate enforcement:
 
-Future deployment requires a separately authorized controlled rollout, using the
-procedure below: verify current generation/configuration; retain the **then-current
-running executable** and arguments for rollback; generation-Stop and wait for
-helper/database release; atomically replace the stopped executable with the prepared
-build; start with the same database, endpoints, UID1000 administrator/helper/control
-settings plus `--allow-evaluation`; restore formerly-active UDP via guarded Start.
-Never copy a live SQLite file without its consistent backup procedure and never
-start a competing database writer. If startup fails, restore the retained exact
-executable/configuration and former collector state. Collector restart has a new
-baseline, not byte continuity. Existing rollback artifacts below refer to the prior
-Decision Log rollout, not a backup of this future rollout's running executable.
+1. Re-read authoritative generation, permissions, stored rule IDs/versions/expiry,
+   collector state/helper identity and actual launch configuration. Require stopped
+   enforcement. Record this state and retain the then-current running executable:
 
-The future serve command is in [DAEMON-EVALUATION.md](DAEMON-EVALUATION.md#future-host-procedure--not-executed).
-**Deploying `--allow-evaluation` grants authority only; it does not start enforcement.**
-A separate deliberate UI review/readiness/Start is required; incoming-only Tailscale
-limitations and original five-minute deadline remain. Neither step was executed here.
+   ```sh
+   mkdir -p .workspace/evaluation-rollout
+   sudo -n /home/flowgate-user/Apps/flowgate/.workspace/flowgate monitor-backup \
+     --generation <verified-current-generation> > .workspace/evaluation-rollout/flowgate-previous
+   ```
+
+   Verify this backup is a nonempty executable and record its hash and exact current
+   arguments. Do not use an older rollback artifact as a substitute. Keep rules.db
+   in place; no live SQLite copy is needed. Any additional backup must use the
+   consistent SQLite backup procedure, not a bare database/WAL file copy.
+
+2. Use generation-checked shutdown; wait for the verified daemon/helper to exit
+   and database lock to release. Atomically replace only the stopped executable:
+
+   ```sh
+   sudo -n /home/flowgate-user/Apps/flowgate/.workspace/flowgate monitor-stop \
+     --generation <verified-current-generation>
+   # Only after confirmed exit and successful candidate/hash checks:
+   cp .workspace/flowgate-integrated-candidate .workspace/flowgate.next
+   chmod 755 .workspace/flowgate.next
+   mv -T .workspace/flowgate.next .workspace/flowgate
+   sudo -n /home/flowgate-user/Apps/flowgate/.workspace/flowgate serve \
+     --socket /run/flowgate-api/daemon.sock --database /var/lib/flowgate/rules.db \
+     --uid 1000 --administrator --allow-evaluation \
+     --udp-helper /home/flowgate-user/Apps/flowgate/.workspace/udp-collector --allow-traffic-control
+   ```
+
+   Run serve under the established owned background launch procedure (or a dedicated
+   terminal), without installing a service. Never launch a second database writer.
+   Startup grants evaluation authority but **does not start interception**. Restore
+   UDP only if active immediately before shutdown, through UID1000 primary API:
+
+   ```json
+   {"version":1,"operation":"traffic-start","generation":"<new verified daemon generation>","collector_generation":"<current traffic_monitor.generation, initially empty>"}
+   ```
+
+   Reconcile by list after ambiguous replies; do not blindly replay. Verify one helper,
+   active UDP, unchanged rules/permissions, stopped enforcement and new capabilities.
+   A new collector generation/baseline and collection gap are expected across restart.
+
+3. On startup failure, inspect the actual error. Stop any verified partial candidate
+   through its generation if it is running; wait for daemon/helper exit. Copy the
+   retained `flowgate-previous` to `.workspace/flowgate.next`, set755 and atomically
+   rename to `.workspace/flowgate`. Launch with the **retained original arguments**
+   (currently without --allow-evaluation), same database/endpoints/UID/admin/helper,
+   and restore prior active UDP through the new generation-checked API. Do not change
+   or delete either database. Rollback is prepared, not executed/tested in this task.
+
+A later explicit UI readiness/review/Start is separate from deployment. Incoming-only
+Tailscale restrictions, unchanged-config-during-session limitation, watchdog and
+five-minute deadline remain. No live encrypted-tailnet enforcement claim is made.
 
 ## Deployed: Decision Log rollout completed
 

@@ -1,15 +1,17 @@
 # Current status
 
-## Integrated evaluation UI; kernel continuity authentication pending
+## Current integration: real UDP continuity passed; measured UI released
 
-Full releases81c0aaa +bf3b79d are integrated with backendbfa93b6 at90cbac5.
-Integrated build/typecheck and8 evaluation tests pass. The focused real-BPF
-continuity fixture is implemented, but its concrete `sudo -n unshare` launch
-required authentication before any fixture execution. Run
-`scripts/check-evaluation-udp.sh` once interactively from this checkout. No real-BPF
-continuity result is claimed yet. Host daemon/active collector remain unchanged;
-no deployment or activation. See [INTEGRATION.md](INTEGRATION.md) for exact evidence,
-current host state, future deployment versus activation and rollback procedure.
+Visual UI1a53e355 integrated as11316c52 atop backendb4aaf82; preserves full evaluation
+UI81c0aaa and referencebf3b79d. User-run real kernel evidence
+`.workspace/evaluation-udp-1792313673-2574300` passed stable IDs/baselines/helper/
+collector generation and exact UDP4/6 totals across evaluation Start/Allow/Block/Stop,
+TCP/Decision Log availability and foreign-rule/route preservation. Inspected and
+reused; no suite rerun. Combined build/typecheck and synthetic sandboxed Wayland
+measured-Activity checks pass. See [INTEGRATION.md](INTEGRATION.md) for exact SHAs,
+source/hash pairing, host state and concrete future rollout/rollback commands.
+Host remains unchanged on1732584 with active UDP and stopped enforcement; this
+combined build is prepared, not deployed. UI ownership released for integration.
 
 ## New backend: daemon-owned incoming evaluation (not deployed)
 

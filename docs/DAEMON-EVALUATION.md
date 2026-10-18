@@ -101,9 +101,9 @@ blanket exemption. Component evidence is not encrypted live-tailnet verification
 
 UDP helper ownership and root observation contexts are independent of the evaluation
 context. Start/Stop/expiry never call collector Start/Stop/Close. No UDP baseline
-reset is intended. Real BPF/active-collector continuity was not re-exercised here:
-user-namespace fixtures keep collector disabled/unavailable; an active collector
-model verifies no lifecycle calls and existing kernel accounting evidence is reused.
+reset is intended. The original user-namespace release had model-only active-collector coverage.
+The later real-BPF continuity case below passed; disabled/unavailable and model
+checks remain separate evidence.
 
 Decision Log opens once in the daemon. Recording health toggles with evaluation;
 records use mode`host-enforcement` and additive `evaluation_id`. Stop finalizes pending
@@ -256,3 +256,17 @@ continuity.json even when the route comparison fails. The isolated regression
 comparison after DAD and confirmed an intentional route addition is still detected.
 This is a fixture fix, not a relaxation of routing checks. Full kernel rerun remains
 required. The wrapper also disables Python bytecode output for privileged runs.
+
+
+## Real-BPF continuity gap closed
+
+User-run `.workspace/evaluation-udp-1792313673-2574300` passed on sourceb4aaf82.
+Inspected continuity.json, artifact hashes, verification log and equal route JSON.
+Six UDP4/6 sockets (connected and unconnected) retain IDs and observed-since, same
+helper and collector generation across evaluation Start/Stop; exact final fixture
+byte totals25,668 sent/received, Allow receiver1 and Block receiver0. TCP and actual
+Decision Log remain available; only owned interception is removed. Foreign rules
+and routes are unchanged. No suite rerun, no host collection/daemon action.
+See INTEGRATION.md for source/hash pairing and combined UI rollout/rollback. This
+supersedes the historical pending statements above; the initial failed runs are
+retained to explain the fixture corrections, not counted as passes.
