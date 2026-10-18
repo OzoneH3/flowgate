@@ -162,11 +162,13 @@ Keep the following future backend work separate from this evaluation integration
 No placeholder controls, new policy actions or accounting/VPN deduplication are
 implemented by listing these gaps. They are optional roadmap items, not activation gates.
 
-### Implemented: explicit process-instance rules (isolated, not deployed)
+### Implemented and deployed: explicit process-instance rules
 
 `process-instance-rules-v1` provides server-pinned native process/session targets,
 process-before-application precedence, schema3 stored inactive-after-restart
 inventory, preview/versioned mutation/reconciliation and Decision Log targets.
 Exact scope, same-executable exec limitation, evidence and reproduction are in
 [PROCESS-RULES.md](PROCESS-RULES.md). It is no longer approximated by an app grant.
-Host deployment remains separate; no host state changed during implementation.
+Deployed in the non-enforcing root monitor (60d35a3, 2026-10-18; see INTEGRATION.md).
+Stored process-rule documents are durable data; downgrade requires a reviewed
+data-preserving migration/restore plan, never deleting or stripping them.

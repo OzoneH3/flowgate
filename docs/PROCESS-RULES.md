@@ -40,9 +40,11 @@ across restart for inventory, versioned cleanup and history; a different daemon
 generation makes it inactive forever. It never rebinds to a reused PID or surviving
 process. Application documents retain their previous schemas and semantics.
 An older backend rejects unsupported schema3 instead of loading it as an app rule.
-After process rules are stored, rolling back to an older binary requires an
-appropriate consistent database backup or a compatible reader; do not widen or
-silently strip the process binding to make an older binary start.
+Stored process-rule documents and their inactive inventory are durable data even
+though enforcement is session-bound. After any are stored, keep a compatible
+executable; downgrading needs a reviewed data-preserving migration/restore plan
+(compatible reader or re-importable export). Never delete, widen or strip the
+process binding to make an older binary start.
 
 Existing admitted TCP connections are not terminated. New admissions and UDP
 leases re-evaluate the winning tier before using a cached decision; a configured

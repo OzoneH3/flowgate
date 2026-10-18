@@ -41,17 +41,25 @@ copy backup to a temp file, chmod 755, rename over `.workspace/flowgate`, launch
 same arguments, restore prior UDP with the new generation.
 
 Schema compatibility: "schema3" is per rule document; the SQLite file stays
-`user_version 1`, and the Decision Log changes are additive JSON fields. The old
-binary therefore reads this database unchanged **while no process rule is stored**.
-If process rules exist, the old binary refuses to start (unsupported schema). Then,
-before rollback and still under the new daemon, delete each process-scoped rule with
-conditional Delete (they are session-bound and become inactive on any restart
-anyway, so nothing durable is lost). If the new daemon has already exited, relaunch
-the new binary with the same arguments only to perform those deletions. Never strip or
-rewrite `filter.process` to make the old binary start. No file-level SQLite copy
-was taken: the DB is root-only and no supported root reader exists; adding one
-would widen the sudo-authorized binary. The consistent logical backup is the
-authoritative inventory snapshot (`rules-inventory-before.json`, empty).
+`user_version 1`, and the Decision Log changes are additive JSON fields. The 1732584
+executable rollback above is valid only **while no process rule is stored**; at this
+rollout the inventory was empty, so it applied, and it was actually exercised.
+
+Process rules are session-bound for **enforcement**, but their stored documents are
+durable user data: definitions, binding metadata and the inactive inventory survive
+restart and are part of the policy record. Deleting them is not a free or routine
+rollback step. Once any process rule is stored, an older executable that rejects
+schema3 must not be installed. Keep the compatible (60d35a3 or later) executable;
+a downgrade first needs a concrete, reviewed data-preserving migration or restore
+plan (for example a compatible reader, or an exported and later re-importable copy
+of every stored document). Never strip or rewrite `filter.process`, and never
+delete user rules automatically, to make an older binary start.
+
+Backup scope: no file-level SQLite backup exists. The DB is root-only, and no
+supported root reader exists; adding one would widen the sudo-authorized binary.
+`rules-inventory-before.json` is only the authoritative `list` API inventory at
+the pre-upgrade generation (zero rules). It records that state; it is not a
+database backup or a restore source.
 
 ## Current integration: native process-instance rules
 

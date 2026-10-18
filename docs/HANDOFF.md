@@ -9,7 +9,13 @@ arguments/UID1000 administrator grants; `can_control_evaluation:false` (no new g
 UDP restored active (collector `ac3056b3b8f3299dce5dc2b57985808f`, helper2847108,
 fresh baseline). Enforcement **stopped**, rules0. First attempt auto-rolled back on
 an over-strict permission check (real rollback exercise); second attempt succeeded.
-Exact record, schema3 rollback rules and evidence: [INTEGRATION.md](INTEGRATION.md).
+Stored process-rule documents and inactive inventory are durable data even though
+enforcement is session-bound: once any exist, do not downgrade to an executable
+that rejects schema3 and do not delete them as a rollback step; a downgrade needs a
+reviewed data-preserving migration/restore plan first. The saved inventory JSON is
+an empty API snapshot, not a SQLite backup. Exact record, rollback limits and
+evidence: [INTEGRATION.md](INTEGRATION.md). Host-state statements in older
+sections below ("deployed1732584 lacks process-instance-rules-v1") are superseded.
 Host UI acceptance stays read-only. Launch:
 `scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock`.
 
