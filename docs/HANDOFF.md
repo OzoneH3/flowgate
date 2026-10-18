@@ -1,5 +1,103 @@
 # Continuation handoff
 
+## Current: configured zone policy, metadata and optional TCP event source integrated
+
+Backend release **b4d4f13238aedc18c52d30d12b6d42df682f6aec** includes zone
+implementation **c0a9543**, optional initiation source **643b872**, metadata
+**4789181**, and focused authorization/identity/restart followups. Explicit clean UI
+release **6f5c5fb54465f4cdbf16934573c651da8d3d3077** merged at
+**bc19358ee858ca5214052c92e235a5b9ba0f233a**, preserving all backend history.
+The separately released presentation-only correction **0fb417db4606ba0c97647c345be4479492836e7c**
+merged at **e0c5641db94e7b6cfa6e5774519a647af41c2226**; it removes a
+hand glyph mistaken from the reference mouse cursor. Followup build/typecheck
+passed (`.workspace/practical-ui-glyph-build.log`), no behavior changed.
+No privileged deployment is included. Source checkout and installed capabilities
+are different; normal GUI against the existing host must retain capability gating.
+
+### Implemented contracts and actual evidence
+
+- `network-zone-policy-v1`, schema4: explicit configured-prefix classification;
+  loopback/link-local built-ins, other peers only via reviewed prefixes. Private
+  routed, global, ULA and VPN addresses are not guessed. Unknown stays unknown;
+  limited broadcast/multicast/unspecified are unclassified. Immutable generation/
+  revision binds previews. Process > application > all-program zone precedence,
+  existing ordering within a tier; exact selected/overridden rules remain visible.
+  Machine mutations require existing administrator authority; ordinary self-UID
+  scope remains available. No zone byte-total claim for multi-peer UDP. See
+  [NETWORK-ZONES.md](NETWORK-ZONES.md).
+- Actual isolated incoming **and outgoing TCP+UDP receiver checks** passed Local
+  IPv4 Allow delivery vs configured Internet IPv6 Deny non-delivery, application/
+  process overrides and same-executable sibling fallback. Explicit routed private
+  unknown did not inherit Local Allow. Evidence `.workspace/zones-receiver-2.log`
+  and `.workspace/zones-unknown-1.log`; namespace cleanup confirmed. Internet in
+  this fixture is an explicit policy label, not physical Internet connectivity.
+- Real isolated Electron zone journey reused: four global/application/process
+  rules, edit/disable, immutable zone, narrow layout, conditional cleanup to0.
+  UI `.workspace/panes-real-71aeVT`; backend independently checked generation
+  197647bf3a4a3ca078c4437653c35d0d/rules0/stopped, then owned quit. Owner log
+  `.workspace/zone-ui-owner.log` confirms CLEANED; both sockets removed.
+- `application-display-metadata-v1`: clean display path/name and separate linked/
+  deleted/unavailable status, without changing identity/revision. Actual Firefox
+  /proc executable is unlinked (Nlink0) and differs from replacement disk inode:
+  `.workspace/firefox-executable-status.json`. UI desktop lookup uses only reliable
+  matching metadata, not new permission authority. Real unlink/replacement tests pass.
+- `activity-initiation-events-v1`: optional cgroup sockops active/passive established
+  events bound by kernel cookie, namespace and collector generation. Bounded map,
+  explicit loss/failure status, stale evidence cleared; snapshot monitoring still
+  works when disabled/failed. **Successful real event-backed arrows and active
+  kernel overhead remain unverified**: userns load EPERM; one initial-root attempt
+  required authentication. Actual fast TCP4/6 sampling misses were reproduced.
+  Protocol/model tests are not kernel proof. See [TCP-INITIATION.md](TCP-INITIATION.md).
+
+New main-checkout UI build/typecheck and **51 focused tests** passed:
+`.workspace/practical-ui-{build,tests}.log`. Reused focused Go race/vet evidence
+for changed identity/policy/daemon/logging/monitor/tcpinit/command paths and exact
+real UI/receiver evidence; no unrelated UDP, firewall or watchdog matrix repeated.
+The older retained identity-change failure remains unresolved and preserved in
+`.workspace/host-practical/first-attempt-decisions.json`; no attribution checks
+were weakened to conceal it.
+
+### Remaining authenticated check; no host deployment
+
+Run this one prepared disposable kernel check, then inspect its result before any
+rerun (it records exact source/diff/artifact hashes):
+
+```sh
+cd /home/flowgate-user/Apps/flowgate
+scripts/check-tcp-initiation.sh
+```
+
+Current host read-only inspection remains PID1113279, generation
+3e696c4462fb777d9be0bc350a56df2e; installed source7ec89ad, SHA256
+761c4991b8047d79680e6fc98f996bd328e401bf68a0ee9ac1b80cc75d5baf0e.
+UDP active generationde1c7cda058de0f47be901dcdf92cfa3; enforcement stopped,
+evaluation cleanup confirmed, no stored rules. `.workspace/practical-host-readonly.json`.
+No daemon/collector restart, rule mutation or host network change in this increment.
+Host incoming-only evaluation remains the supported activation profile; isolated
+outgoing evidence does not grant outgoing host/Tailscale compatibility.
+
+Future deployment is a separate authorized operation: preserve actual running
+executable/configuration, consistent database backup via the existing monitor-backup
+procedure, generation-check Stop, wait for socket/database/helper release, atomically
+install a copy of reviewed candidate (never truncate a live inode), then reuse the
+existing retained `serve` command below. Add reviewed `--zone-local CIDR` /
+`--zone-internet CIDR` definitions explicitly; optional event startup additionally
+requires reviewed `--tcp-initiation-helper ABSOLUTE_PATH --tcp-initiation-cgroup
+/sys/fs/cgroup`. No guessed host prefix configuration is supplied here. Restore UDP
+only if previously enabled, with a new baseline. `--allow-evaluation` grants bounded
+permission; **does not Start enforcement**. Readiness and explicit Start remain
+separate. Never run a competing database writer.
+
+Rollback must preserve schema4 documents: after such rules exist, use a schema4-
+compatible binary/data backup, not an older executable which rejects the inventory.
+Do not strip/delete rules to downgrade. Preserve separate candidate and current
+working executable; the earlier rollback artifacts below predate schema4 support.
+No rollback or host stop is requested now. Launch the unprivileged UI normally:
+
+```sh
+scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock
+```
+
 ## Current: Rule Status popup and chart-detail fixes integrated
 
 Explicitly released clean UI **8ecd71b652353f4af6596e713112d6e2f036366f**,
