@@ -117,7 +117,8 @@ function consume(next: PaneFrame) {
         ['Ownership', r.socket.ownership],
         ['Measurements', trafficDetails(r.socket.traffic)],
       );
-    if (!r.rows.length)
+    if (r.kind === 'network') fields.push(['Coverage', 'Classification unavailable. No configured network-zone attribution; totals are unknown, not zero. Not a firewall target.']);
+    if (!r.rows.length && r.kind !== 'network')
       fields.push([
         'Observation',
         'Selected item is no longer visible. No process or application target is rebound.',

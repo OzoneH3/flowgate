@@ -246,7 +246,7 @@ export class ActivityPolicy {
     this.row = row;
     this.state = state;
     if (Number.isFinite(state.control.serverNow)) this.skew = state.control.serverNow! - Date.now();
-    this.host.hidden = !row || row.kind === 'overview';
+    this.host.hidden = !row || row.kind === 'overview' || row.kind === 'network';
     if (this.host.hidden || !row) return;
     const inv = selectionInventory(row, state),
       c = state.control;

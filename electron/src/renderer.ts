@@ -15,6 +15,8 @@ import {
   hierarchy,
   hasObservedConnection,
   overview,
+  networkOverviews,
+  NETWORK_UNAVAILABLE,
   flatten,
   allRows,
   sum,
@@ -182,13 +184,13 @@ function statusStrip(r: Row) {
     const direction = slot.direction;
     const button = element('button', '', 'policy-cell status-slot');
     button.dataset.direction = direction;
-    button.disabled = r.kind === 'overview';
+    button.disabled = r.kind === 'overview' || r.kind === 'network';
     let chip: RuleChip = { glyph: '', text: 'Not set', tone: 'none', detail: '' };
     let fallbackShown = false;
     let title = '';
-    if (r.kind === 'overview') {
+    if (r.kind === 'overview' || r.kind === 'network') {
       chip = { glyph: '', text: '', tone: 'none', detail: '' };
-      title = 'Machine: no rules at this level.';
+      title = r.kind === 'network' ? NETWORK_UNAVAILABLE : 'Machine: no rules at this level.';
     } else if (r.kind === 'socket') {
       chip = { glyph: '', text: '', tone: 'none', detail: '' };
       title = `${slot.label}: connections carry no rules; see the holder process.`;
@@ -435,7 +437,7 @@ function buildTree() {
     ? hierarchy(a, $<HTMLInputElement>('search').value, $<HTMLSelectElement>('filter').value)
     : [];
   if (a) {
-    const children = roots;
+    const children = [...networkOverviews(), ...roots];
     for (const child of children) child.parent = 'overview';
     roots = [overview(a, children)];
   }
@@ -983,6 +985,12 @@ function renderInfo() {
       'Observation',
       'Selected instance is no longer visible. No target is rebound; reselect a live instance to create a rule.',
     );
+  if (r.kind === 'network') {
+    field(info, 'Network', r.label);
+    field(info, 'Coverage', NETWORK_UNAVAILABLE);
+    commit();
+    return;
+  }
   if (r.kind === 'overview') {
     field(
       info,

@@ -1,5 +1,5 @@
 import { isDisplayUnit, type DisplayUnit } from './display-units';
-import { allRows, hierarchy, overview, type Row } from './model';
+import { allRows, hierarchy, overview, networkOverviews, type Row } from './model';
 import type { ClientState } from './protocol';
 export type PaneKind = 'info' | 'chart';
 export type PaneMode = 'docked' | 'detached' | 'hidden';
@@ -127,7 +127,7 @@ export class PaneModel {
     this.value.generation = g;
     const a = state.observation.activity;
     const row =
-      a && [overview(a), ...allRows(hierarchy(a))].find((r) => r.id === this.value.selection);
+      a && [overview(a), ...networkOverviews(), ...allRows(hierarchy(a))].find((r) => r.id === this.value.selection);
     if (row) this.value.row = { ...row, children: [] };
     else if (this.value.row) this.value.row = { ...this.value.row, rows: [], children: [] };
     this.value.revision++;
@@ -146,7 +146,7 @@ export class PaneModel {
       const a = state.observation.activity;
       if (
         v.selection !== this.value.selection &&
-        (!a || ![overview(a), ...allRows(hierarchy(a))].some((r) => r.id === v.selection))
+        (!a || ![overview(a), ...networkOverviews(), ...allRows(hierarchy(a))].some((r) => r.id === v.selection))
       )
         throw Error('Selection unavailable');
     } else if (v.generation !== undefined) throw Error('Generation without selection');

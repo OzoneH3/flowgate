@@ -38,3 +38,13 @@ Evidence is local, deliberately uncommitted media:
 
 Build/typecheck and focused panes, assets, model, units and history tests pass. Existing
 receiver/process-rule/UDP acceptance is reused. No host lifecycle or rules were changed.
+
+## Pinned network rows
+
+Internet and Local Network stay first beneath All applications, unaffected by sorting.
+They are non-policy overview selections. Measurements are explicitly unavailable, never
+zero or a bucket for unknown sockets. Backend coordination rejected public/private-IP
+guessing: genuine zone totals need explicit configured zone membership, freshness and
+TCP/UDP baseline attribution (UDP counters may span peers). That is a separate agreed
+proposal, not an implemented capability. Final synthetic pane/navigation run:
+`.workspace/panes-synthetic-2O3JKN/` (zero mutations, no renderer errors).

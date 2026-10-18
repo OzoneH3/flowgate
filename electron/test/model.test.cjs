@@ -141,3 +141,13 @@ test('overview/source selection deduplicates sockets and preserves missing-sourc
     count: 2,
   });
 });
+
+test('network rows stay pinned in fixed order and never invent totals', () => {
+  const model = require('../dist/test/model.cjs');
+  const rows = model.networkOverviews();
+  rows.push({id:'app:z',kind:'application',label:'AAA',rows:[],children:[]});
+  for (const key of ['name','upload_bps','download_bps']) for (const descending of [true,false]) {
+    assert.deepEqual(model.flatten(rows,new Set(),key,descending).slice(0,2).map(x=>x.row.id),['network:internet','network:local']);
+  }
+  assert.equal(model.sum(rows[0].rows,'uploaded').value,undefined);
+});
