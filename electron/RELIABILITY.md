@@ -207,13 +207,14 @@ Matched bounded509-socket profiles (ce8bb0f vs final keyed-row treatment):
 | Renderer tasks over50ms |5|1|
 | Total long-task time |303ms|76ms|
 | Frame interval p99 |51ms|25ms|
-| Main-loop maximum |114ms|142ms|
+| Main-loop maximum including trace export (contaminated; see correction) |114ms|142ms|
 
 The one remaining long task is initial **Expand All** (76ms), not a recurring
-refresh. Main peak remains uncorrected. A separate instrumented main IPC pass
+refresh. The main peak was subsequently isolated to diagnostic export overhead
+(see correction below). A separate instrumented main IPC pass
 measured maximum handler duration5.4ms and graph handler0.06ms while event-loop
-maximum116ms remained; CPU profiles do not establish which native/OS wait accounts
-for that peak. Native `perf` is unavailable; no software was installed. Do not call
+maximum116ms remained; this measurement also included trace export. Native `perf`
+is unavailable; no software was installed. Do not call
 this complete elimination of freezing.
 
 Main-repository evidence: `.workspace/lg-before-LG8Lyi/`,
@@ -230,3 +231,84 @@ CLEANED/exit0; `.workspace/daily/large-cleanup.json` in this Electron worktree.
 Deterministic `keyed-rows.test.cjs` reproduces the displaced-sibling negative case;
 `row-structure.test.cjs` verifies traffic changes retain nodes while native
 identity/ownership/state/direction changes invalidate them.
+
+### Main-loop measurement correction
+
+A subsequent phase-isolated experiment identified diagnostic overhead: CDP trace
+export without a requested chunk size caused66.7ms of main-loop delay for a4.96MB
+stream. A comparable5.27MB stream read in64KiB chunks produced10.9ms maximum.
+Idle/pane operations were about10–13ms; Node CPU-profiler Start itself caused25ms.
+Evidence `.workspace/daily/instrumentation-raf.json` and the owned probe script.
+
+Earlier114–142ms main maxima included exporting roughly11MB traces; they are
+**contaminated measurements**, not proof of ordinary UI blocking. The test harness
+now records interaction timing before profiler/trace teardown, records teardown
+separately, and uses bounded64KiB CDP reads. This is a measurement fix, not a claim
+that all historical freezes were caused by instrumentation. Untraced long-session
+measurements below are the runtime evidence; initial509-row Expand All remains a
+measured76ms renderer task.
+
+### Concurrent prompts and ordinary GUI exit
+
+Real isolated candidate `b6aa38191954d538fb4af0bb9b1f5d006fa9dfa4`, binary
+`bc01bada17c01b9e47a1ac21bdbf66e7a3617ed8100fbc510f2b6f8c63511e7c`,
+generation `62e5652843393126f3005e98c71b9d23`, ran the final compiled frontend
+in sandboxed native Wayland. `prompt-soak.mjs` passed15 one-minute cycles with
+30 real requests from two different executable identities. Alternating Allow/Deny,
+open expiry, dismissed views, detached Info, hidden main window, polling, deliberate
+disconnects and dropped acknowledgements produced exactly15 decision writes;
+no automatic replay, renderer errors, accumulated windows or repeated foreground
+activation. Settled window count1, main timers5, main heap8.1–10.0MiB. These are
+bounded observations, not proof of indefinite leak freedom. Once retains its TCP
+admission/UDP tuple-lease semantics; terminal permission is not receiver proof.
+Existing receiver evidence is reused.
+
+Evidence in this worktree: `.workspace/prompt-soak-HwBapl/result.json`.
+An earlier harness attempt `.workspace/prompt-soak-twv7li/` stopped because Escape
+closed the window before Playwright's key-up returned; that harness error is not
+counted as a passing run or a product crash. The corrected run reused the already
+active fixture deliberately, without automatically replaying Start.
+
+`continuous-reopen-real.mjs` then passed ordinary GUI Quit (daemon remains active),
+a held request arriving while GUI was absent and recoverable before its original
+deadline, and an expired absent-GUI attempt never reopened as actionable.
+Evidence `.workspace/gui-reopen-B1XCg7/result.json`. Final explicit Stop/rules0
+verified, all own windows closed; backend cleanup ownership returned with DONE.
+No host operations or receiver/enforcement matrix reruns were performed.
+
+### Completed45-minute monitoring soak
+
+`.workspace/daily-soak-sRHf2o/{result,aggregate}.json` records180 samples over the
+planned45-minute session with89 real socket rows,15 conditional rule cycles,
+45 pane cycles,22 deliberate reconnects and45 bounded native traffic churn cycles.
+The last periodic sample is at2685s; the runner continued to2700s before success.
+The copied build contains the initial clock/graph/publication fixes; later keyed-row
+and continuous changes have the separate final-build real journeys above. Do not
+call this45 minutes of final-build continuous enforcement or pending prompts.
+
+- Renderer tasks over50ms:0;46 frame intervals over50ms among201,916 frames.
+- Main-loop maximum18.68ms, p9910.49ms, without trace-export contamination.
+- Request concurrency at most2; settled window count1 and main timers5 throughout.
+- Warm renderer heap5.8–31.9MiB (median15.9), main heap11.2–39.1MiB (median19.0).
+  Five-minute RSS troughs return around200–212MiB; no sustained resource growth
+  demonstrated. Stable DOM/listener lower envelopes; bounded GC peaks are not leaks.
+- Electron metric median CPU: Browser0.08%, renderer Tab0.41% for this workload.
+
+Owned monitor fixture generation `94aa78527bd7bb23a311c79db0cad259` was independently
+read back as stopped/rules0, quit, supervisor exit0/CLEANED. Cleanup record
+`.workspace/daily/cleanup.json`; own large fixture likewise cleaned. Preferences
+restored by the monitor runner, all own GUI windows closed. Backend independently
+verified the prompt fixture stopped/rules0 and CLEANED after DONE.
+
+Product checkpoints `4e93f8e` and `34b29e0` are integrated by the backend owner.
+Final test/docs follow-up changes no policy or runtime contract. Continuous UI
+requires `continuous-firewall-v1` and explicit `can_control_protection`; Once
+supplied-generation fencing pairs with backend `92d0a04` or descendants. Final real
+prompt/reopen candidate was `b6aa381`; deployment preparation has advanced to
+`d7c969b`, with unchanged consumer contract. Host installation/authentication remains
+pending at this handoff: no host GUI check or host activation is claimed.
+
+Remaining uncertainty: no prolonged lockup was reproduced; initial509-row Expand
+All remains76ms. These bounded runs do not establish that every intermittent freeze
+or indefinite resource leak is resolved. Existing rule-blink ordering safeguards,
+external changes, lost ACK reconciliation and scope/identity semantics remain intact.

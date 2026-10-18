@@ -38,6 +38,7 @@ test('ambiguous acknowledgement locks request, reconnect never replays', async (
   const e = event();
   const endpoint = await fixture(t, (s, q) => {
     if (q.operation === 'decide') {
+      assert.equal(q.generation, 'gen-1');
       decisions++;
       s.end();
     } else s.end(JSON.stringify(response(e)) + '\n');

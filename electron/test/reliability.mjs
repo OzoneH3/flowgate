@@ -298,6 +298,15 @@ try {
     }
   }
   await sleep(1500);
+  result.main = await app.evaluate(() => {
+    const value = {
+      maxMs: __lag.max / 1e6,
+      p99Ms: __lag.percentile(99) / 1e6,
+      meanMs: __lag.mean / 1e6,
+    };
+    __lag.reset();
+    return value;
+  });
   if (process.env.PROFILE_CPU) {
     fs.writeFileSync(
       path.join(run, 'renderer.cpuprofile'),
@@ -324,7 +333,7 @@ try {
   const { stream } = await completed;
   let trace = '';
   for (;;) {
-    const chunk = await cdp.send('IO.read', { handle: stream });
+    const chunk = await cdp.send('IO.read', { handle: stream, size: 65536 });
     trace += chunk.data;
     if (chunk.eof) break;
     if (trace.length > 30 * 1024 * 1024) throw Error('Trace exceeded bound');
@@ -335,7 +344,7 @@ try {
     cancelAnimationFrame(__perf.raf);
     return __perf;
   });
-  result.main = await app.evaluate(() => {
+  result.instrumentationMain = await app.evaluate(() => {
     __lag.disable();
     return { maxMs: __lag.max / 1e6, p99Ms: __lag.percentile(99) / 1e6, meanMs: __lag.mean / 1e6 };
   });
