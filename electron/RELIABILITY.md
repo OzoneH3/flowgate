@@ -184,3 +184,49 @@ checkpoint; final aggregate and cleanup will follow. It uses89 sockets, periodic
 native churn, pane create/close, stored-rule refreshes and deliberate disconnects.
 Prompt/continuous acceptance is the separate real journey above; the monitor soak
 must not be described as enforcement or pending-prompt soak evidence.
+
+### Large-workload follow-up after the implementation checkpoint
+
+At509 rows, the remaining periodic stalls were traced to layout of about20,000
+DOM objects. The cache's old replacement algorithm left an invalidated row in the
+parent until the ordering pass ended: replacing one selected row consequently
+moved every following sibling. Traffic and policy refreshes also invalidated whole
+rows despite unchanged visible structure.
+
+The follow-up replaces an invalidated keyed node **in place**, separates live rate
+cells from native identity/ownership/state structure, and refreshes rule strips
+without replacing unchanged controls. Strip handlers select the stable row ID and
+resolve current identity through Activity/main's existing rule service; no old row
+snapshot grants authority. Rate sorting still uses the newest measurements.
+
+Matched bounded509-socket profiles (ce8bb0f vs final keyed-row treatment):
+
+| Measure | Before | After |
+|---|---:|---:|
+| Body insertions/moves |4628|522|
+| Renderer tasks over50ms |5|1|
+| Total long-task time |303ms|76ms|
+| Frame interval p99 |51ms|25ms|
+| Main-loop maximum |114ms|142ms|
+
+The one remaining long task is initial **Expand All** (76ms), not a recurring
+refresh. Main peak remains uncorrected. A separate instrumented main IPC pass
+measured maximum handler duration5.4ms and graph handler0.06ms while event-loop
+maximum116ms remained; CPU profiles do not establish which native/OS wait accounts
+for that peak. Native `perf` is unavailable; no software was installed. Do not call
+this complete elimination of freezing.
+
+Main-repository evidence: `.workspace/lg-before-LG8Lyi/`,
+`.workspace/lg-keyed-ByixC1/`, `.workspace/lg-phase-fu1Y02/` (CPU profiles/trace/results).
+The copies use identical compiled content, isolated preferences and native scale;
+a separate normal-workload soak ran in the background. These are single bounded
+comparisons. Intermediate investigative profiles are not presented as improvements.
+
+`.workspace/lg-after-67fT2l/` is the focused real follow-up for the row change:
+create/stable refreshes, external enable/disable/delete, app/process/zone selection
+while a read is held, detached Info and lost Save ACK/reconnect with exactly one
+Save. No receiver matrix was repeated. Large fixture zero rules verified, supervisor
+CLEANED/exit0; `.workspace/daily/large-cleanup.json` in this Electron worktree.
+Deterministic `keyed-rows.test.cjs` reproduces the displaced-sibling negative case;
+`row-structure.test.cjs` verifies traffic changes retain nodes while native
+identity/ownership/state/direction changes invalidate them.

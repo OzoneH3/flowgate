@@ -1,3 +1,5 @@
+import { replaceKeyedRow } from './keyed-rows';
+import { rowStructure } from './row-structure';
 import { acceptsPublication } from './publication';
 import { PROTECTION_CAPABILITY, stateProtection } from './protection-model';
 import { advanceClock } from './state-clock';
@@ -900,7 +902,7 @@ function setupPaneControls() {
 }
 const renderedRows = new Map<
   string,
-  { signature: string; presentation: string; node: HTMLTableRowElement }
+  { signature: string; presentation: string; policyRevision: number; node: HTMLTableRowElement }
 >();
 let treePolicyRevision = 0;
 function renderTree() {
@@ -923,41 +925,47 @@ function renderTree() {
   const liveIds = new Set<string>();
   for (const { row: r, depth } of visible) {
     liveIds.add(r.id);
-    const rowSignature = JSON.stringify([
-      r.kind,
-      r.label,
-      r.pid,
-      r.rows,
-      r.socket,
-      r.process,
-      r.displayApplication,
-      r.children.map((c) => c.id),
-      depth,
-      selected === r.id,
-      expanded.has(r.id),
-      treePolicyRevision,
+    const rowSignature = rowStructure(r, depth, selected === r.id, expanded.has(r.id));
+    const rateValues = rateKeys().map((key) => sum(r.rows, key, measurementSource));
+    const totalValues = (['downloaded', 'uploaded'] as Metric[]).map((key) =>
+      sum(r.rows, key, measurementSource),
+    );
+    const cellPresentation = JSON.stringify([
+      measurementSource,
+      displayUnit,
+      rateMode,
+      rateValues,
+      totalValues,
     ]);
-    const cellPresentation = `${measurementSource}:${displayUnit}:${rateMode}`;
     const cached = renderedRows.get(r.id);
     if (cached?.signature === rowSignature) {
       if (cached.presentation !== cellPresentation) {
         for (const [index, key] of rateKeys().entries()) {
-          const value = sum(r.rows, key, measurementSource),
+          const value = rateValues[index],
             cell = cached.node.cells[index + 1];
-          cell.className =
+          const className =
             'numeric ' +
             (value.value && value.value > 0 ? (key.startsWith('download') ? 'down' : 'up') : '');
-          cell.querySelector('.rate-value')!.textContent = displayMetric(
-            value,
-            rateMode === 'rate',
-          );
+          if (cell.className !== className) cell.className = className;
+          const text = displayMetric(value, rateMode === 'rate'),
+            span = cell.querySelector('.rate-value')!;
+          if (span.textContent !== text) span.textContent = text;
           cell.title = `${measurementSource.toUpperCase()} · ${value.known}/${value.count} measured sockets${value.mixed ? ' · incompatible measurement sources' : ''}`;
         }
-        for (const [index, key] of (['downloaded', 'uploaded'] as Metric[]).entries())
-          cached.node.cells[index + 6].textContent = displayMetric(
-            sum(r.rows, key, measurementSource),
-          );
+        for (const [index, key] of (['downloaded', 'uploaded'] as Metric[]).entries()) {
+          const cell = cached.node.cells[index + 6],
+            text = displayMetric(totalValues[index]);
+          if (cell.textContent !== text) cell.textContent = text;
+        }
         cached.presentation = cellPresentation;
+      }
+      if (cached.policyRevision !== treePolicyRevision) {
+        const policy = statusStrip(r),
+          previous = cached.node.querySelector('.rule-status')!;
+        // Keep unchanged controls/focus. Handlers capture only the stable row ID;
+        // current row identity is resolved by renderInfo and the main rule service.
+        if (previous.innerHTML !== policy.innerHTML) previous.replaceWith(policy);
+        cached.policyRevision = treePolicyRevision;
       }
       ordered.push(cached.node);
       continue;
@@ -997,7 +1005,8 @@ function renderTree() {
       e.stopPropagation();
       if (expanded.has(r.id)) {
         expanded.delete(r.id);
-        if (allRows([r]).some((v) => v.id === selected)) selected = r.id;
+        const current = allRows(roots).find((v) => v.id === r.id) || r;
+        if (allRows([current]).some((v) => v.id === selected)) selected = r.id;
       } else expanded.add(r.id);
       renderTree();
       renderInfo();
@@ -1062,7 +1071,15 @@ function renderTree() {
       tr.append(td);
     }
     tr.append(element('td', '', 'filler'));
-    renderedRows.set(r.id, { signature: rowSignature, presentation: cellPresentation, node: tr });
+    // Replace the old keyed node in place before ordering. Leaving it in tbody
+    // shifts every following sibling and turns one selection change into N moves.
+    replaceKeyedRow(cached?.node, tr);
+    renderedRows.set(r.id, {
+      signature: rowSignature,
+      presentation: cellPresentation,
+      policyRevision: treePolicyRevision,
+      node: tr,
+    });
     ordered.push(tr);
   }
   for (const [id, cached] of renderedRows)
