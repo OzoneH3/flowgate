@@ -17,6 +17,7 @@ type ObservedTarget struct {
 // Pointers require explicit wildcard ports/expiry rather than omitted fields
 // silently becoming an application-wide persistent permission.
 type ObservedDraft struct {
+	TargetScope   string     `json:"target_scope,omitempty"`
 	Direction     string     `json:"direction"`
 	Protocol      string     `json:"protocol"`
 	Action        string     `json:"action"`
@@ -50,6 +51,10 @@ type creationPreview struct {
 }
 
 func draftBytes(d ObservedDraft) (string, error) {
+	if !validScope(d) {
+		return "", mutationError("invalid_request", "target_scope must be application or process")
+	}
+	d.TargetScope = processScope(d)
 	if d.LocalPort == nil || d.RemotePort == nil || d.Expires == nil || d.RemoteAddress == "" || len(d.RemoteAddress) > 128 || (d.Direction != "incoming" && d.Direction != "outgoing") || (d.Protocol != "tcp" && d.Protocol != "udp") || (d.Action != "allow" && d.Action != "block") {
 		return "", mutationError("invalid_request", "Explicit direction, protocol, action, remote_address, local_port, remote_port and expires required; zero ports/zero expiry are deliberate wildcard/persistent choices")
 	}
@@ -93,6 +98,7 @@ func (e *Engine) pruneCreationLocked(now time.Time) {
 			delete(e.creationPreviews, token)
 		}
 	}
+	e.pruneHandlesLocked()
 }
 func (e *Engine) PreviewObservedRule(generation string, target ObservedTarget, draft ObservedDraft, uid uint32, admin bool, h *EnforcementStatus) (ObservedPreview, error) {
 	raw, err := draftBytes(draft)
@@ -144,6 +150,7 @@ func (e *Engine) PreviewObservedRule(generation string, target ObservedTarget, d
 	}
 	now = e.Now()
 	e.pruneCreationLocked(now)
+	defer e.pruneHandlesLocked()
 	if e.creationPreviews == nil {
 		e.creationPreviews = map[string]*creationPreview{}
 	}
@@ -160,6 +167,11 @@ func (e *Engine) PreviewObservedRule(generation string, target ObservedTarget, d
 		return ObservedPreview{}, mutationError("limit_exceeded", "Rule capacity reached")
 	}
 	candidate := policy.Rule{ID: "user:" + randomID(), Version: 1, Created: now, Executable: current.Application.Executable, Priority: 100, Action: draft.Action, Disabled: draft.Disabled, Expires: *draft.Expires, Filter: policy.Filter{Application: current.Application.Key, Revision: current.Application.Revision, UID: current.UID, Direction: draft.Direction, Protocol: draft.Protocol, RemoteAddress: draft.RemoteAddress, LocalPort: *draft.LocalPort, RemotePort: *draft.RemotePort}}
+	if processScope(draft) == "process" {
+		if _, err = e.attachProcessTarget(current, &candidate); err != nil {
+			return ObservedPreview{}, err
+		}
+	}
 	if !candidate.Expires.IsZero() && !now.Before(candidate.Expires) {
 		return ObservedPreview{}, mutationError("invalid_request", "Expiry must be in future, or explicit zero for persistent")
 	}
@@ -206,6 +218,17 @@ func (e *Engine) SaveObservedRule(generation, token string, draft ObservedDraft,
 		return policy.Rule{}, "", false, mutationError("replay_conflict", "Previously created rule changed/deleted; inspect authoritative list, do not recreate automatically")
 	}
 	e.mu.Unlock()
+	if !p.View.Rule.Filter.Process.IsZero() {
+		e.mu.Lock()
+		h := e.processHandles[p.View.Rule.Filter.Process]
+		e.mu.Unlock()
+		if h == nil {
+			return policy.Rule{}, "", false, mutationError("target_inactive", "Process preview lifetime ended")
+		}
+		if err := h.Check(); err != nil {
+			return policy.Rule{}, "", false, mutationError("target_inactive", err.Error())
+		}
+	}
 	current, err := e.verifyCreation(p.Target, p.Process, uid, admin)
 	if err != nil {
 		return policy.Rule{}, "", false, err
@@ -223,6 +246,18 @@ func (e *Engine) SaveObservedRule(generation, token string, draft ObservedDraft,
 		return policy.Rule{}, "", false, mutationError("preview_expired", "Preview expired during verification; refresh")
 	}
 	candidate := p.View.Rule
+	if b := candidate.Filter.Process; !b.IsZero() {
+		h := e.processHandles[b]
+		if h == nil {
+			return policy.Rule{}, "", false, mutationError("target_inactive", "Pinned process handle unavailable during save validation")
+		}
+		if err := h.Check(); err != nil {
+			return policy.Rule{}, "", false, mutationError("target_inactive", err.Error())
+		}
+		if !b.Matches(current) {
+			return policy.Rule{}, "", false, mutationError("target_inactive", "Pinned process binding changed during save validation")
+		}
+	}
 	if len(e.rules) >= 256 {
 		return policy.Rule{}, "", false, mutationError("limit_exceeded", "Rule capacity reached")
 	}

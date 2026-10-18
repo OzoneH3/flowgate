@@ -75,6 +75,7 @@ func serveCommand(args []string) error {
 		return err
 	}
 	e := daemon.New(30 * time.Second)
+	defer e.CloseProcessTargets()
 	peer := uint32(*uid)
 	e.APIUID = &peer
 	if *administrator {

@@ -14,6 +14,10 @@ import (
 )
 
 type ActivityProcess struct {
+	BootID      string      `json:"boot_id,omitempty"`
+	NetNS       string      `json:"netns,omitempty"`
+	MountNS     string      `json:"mountns,omitempty"`
+	PIDNS       string      `json:"pidns,omitempty"`
 	ThreadGroup int         `json:"thread_group_pid,omitempty"`
 	ID          string      `json:"id"`
 	PID         int         `json:"pid"`
@@ -290,7 +294,7 @@ func (c *ActivityCollector) Collect() ActivitySnapshot {
 		}
 		seen[pid] = true
 		id := fmt.Sprintf("%d:%s", p.PID, p.Start)
-		out.Processes[id] = ActivityProcess{ID: id, PID: p.PID, Start: p.Start, UID: p.UID, Executable: p.Executable, Application: p.Application, ThreadGroup: t.group}
+		out.Processes[id] = ActivityProcess{BootID: p.BootID, NetNS: p.NetNS, MountNS: p.MountNS, PIDNS: p.PIDNS, ID: id, PID: p.PID, Start: p.Start, UID: p.UID, Executable: p.Executable, Application: p.Application, ThreadGroup: t.group}
 		for index, path := range owned {
 			row := &out.Rows[index]
 			// Process inspection can race close/dup/FD reuse. Recheck the actual FD,

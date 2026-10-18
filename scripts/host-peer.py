@@ -52,6 +52,8 @@ for raw in sys.stdin:
                 try:s.connect(('fd79::1' if v6 else '10.79.0.1',q['port']));s.sendall(b'fixture')
                 except OSError:pass
             threading.Thread(target=send,daemon=True).start();answer={'ok':True}
+        elif op=='close':
+            connections.pop(str(q['port'])+str(v6)).close();answer={'ok':True}
         elif op=='again':connections[str(q['port'])+str(v6)].sendall(b'fixture');answer={'ok':True}
         elif op=='quit':break
         else:raise ValueError(op)

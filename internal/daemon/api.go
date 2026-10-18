@@ -49,12 +49,13 @@ type EnforcementStatus struct {
 	StopsAt time.Time `json:"stops_at"`
 }
 type Response struct {
-	Evaluation      *EvaluationStatus   `json:"evaluation,omitempty"`
-	DecisionLog     *decisionlog.Page   `json:"decision_log,omitempty"`
-	DecisionRecord  *decisionlog.Record `json:"decision_record,omitempty"`
-	TrafficMonitor  *udpaccount.Status  `json:"traffic_monitor,omitempty"`
-	ObservedPreview *ObservedPreview    `json:"observed_preview,omitempty"`
-	Replayed        bool                `json:"replayed,omitempty"`
+	RuleStates      map[string]RuleTargetState `json:"rule_states,omitempty"`
+	Evaluation      *EvaluationStatus          `json:"evaluation,omitempty"`
+	DecisionLog     *decisionlog.Page          `json:"decision_log,omitempty"`
+	DecisionRecord  *decisionlog.Record        `json:"decision_record,omitempty"`
+	TrafficMonitor  *udpaccount.Status         `json:"traffic_monitor,omitempty"`
+	ObservedPreview *ObservedPreview           `json:"observed_preview,omitempty"`
+	Replayed        bool                       `json:"replayed,omitempty"`
 
 	PolicyView         *PolicyView                `json:"policy_view,omitempty"`
 	PolicyExplanations *PolicyExplanations        `json:"policy_explanations,omitempty"`
@@ -157,7 +158,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						}
 					}
 					if !readonly && e.Mode != "host-monitor" {
-						r.Capabilities = append(r.Capabilities, PolicyExplanationCapability, ObservedRuleCapability)
+						r.Capabilities = append(r.Capabilities, PolicyExplanationCapability, ObservedRuleCapability, ProcessRuleCapability)
 					}
 					if e.Evaluation != nil {
 						r.Capabilities = append(r.Capabilities, EvaluationCapability)
@@ -409,7 +410,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 								}
 								if e.Mode != "host-monitor" {
 									r.Events = e.List(cred.Uid, admin)
-									r.Rules = e.Rules(cred.Uid, admin)
+									r.Rules, r.RuleStates = e.RuleInventory(cred.Uid, admin)
 								} else if e.Activity == nil {
 									r.Error = "observer unavailable"
 								}

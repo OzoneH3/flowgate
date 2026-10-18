@@ -9,10 +9,11 @@ import (
 )
 
 type Filter struct {
-	Application string `json:"application"`
-	Revision    string `json:"revision"`
-	Direction   string `json:"direction"`
-	Protocol    string `json:"protocol"`
+	Process     identity.Instance `json:"process,omitzero"`
+	Application string            `json:"application"`
+	Revision    string            `json:"revision"`
+	Direction   string            `json:"direction"`
+	Protocol    string            `json:"protocol"`
 	// Remote retains v1 exact endpoint semantics; new fields are additive (schema 2).
 	RemoteAddress string `json:"remote_address,omitempty"`
 	LocalPort     uint16 `json:"local_port,omitempty"`
@@ -37,10 +38,10 @@ func (r Rule) Validate() error {
 	if len(r.Executable) > 4096 {
 		return fmt.Errorf("executable display path too long")
 	}
-	if r.Schema != 0 && r.Schema != 1 && r.Schema != 2 {
+	if r.Schema != 0 && r.Schema != 1 && r.Schema != 2 && r.Schema != 3 {
 		return fmt.Errorf("unsupported rule schema")
 	}
-	if r.Schema != 2 && (r.Filter.RemoteAddress != "" || r.Filter.LocalPort != 0 || r.Filter.RemotePort != 0) {
+	if r.Schema != 2 && r.Schema != 3 && (r.Filter.RemoteAddress != "" || r.Filter.LocalPort != 0 || r.Filter.RemotePort != 0) {
 		return fmt.Errorf("address/port fields require rule schema 2")
 	}
 	if r.Filter.Remote != "" {
@@ -58,6 +59,14 @@ func (r Rule) Validate() error {
 			}
 		}
 	}
+	if !r.Filter.Process.IsZero() {
+		b := r.Filter.Process
+		if r.Schema != 3 || b.ID == "" || b.Session == "" || b.BootID == "" || b.PID <= 0 || b.Start == "" || b.NetNS == "" || b.MountNS == "" || b.PIDNS == "" || b.Executable == "" || b.Revision != r.Filter.Revision || b.UID != r.Filter.UID {
+			return fmt.Errorf("schema3 complete process identity required")
+		}
+	} else if r.Schema == 3 {
+		return fmt.Errorf("schema3 requires a process binding")
+	}
 	if r.ID == "" || r.Filter.Application == "" || r.Filter.Revision == "" {
 		return fmt.Errorf("rule needs ID, application and revision")
 	}
@@ -73,12 +82,18 @@ func (r Rule) Validate() error {
 	return nil
 }
 func Evaluate(rules []Rule, f identity.Flow, a identity.Attribution, now time.Time) (string, string, []string) {
+	return EvaluateSession(rules, f, a, now, "")
+}
+func EvaluateSession(rules []Rule, f identity.Flow, a identity.Attribution, now time.Time, session string) (string, string, []string) {
 	if a.Application == nil || a.Principal() == nil {
 		return "block", "unsafe-attribution", nil
 	}
 	var matches []Rule
 	for _, r := range rules {
 		x := r.Filter
+		if !x.Process.IsZero() && (session == "" || x.Process.Session != session || !a.VisibilityComplete || len(a.Owners) != 1 || len(a.Sockets) != 1 || !x.Process.Matches(a.Owners[0])) {
+			continue
+		}
 		if r.Disabled {
 			continue
 		}
@@ -113,6 +128,9 @@ func Evaluate(rules []Rule, f identity.Flow, a identity.Attribution, now time.Ti
 		matches = append(matches, r)
 	}
 	sort.Slice(matches, func(i, j int) bool {
+		if matches[i].Filter.Process.IsZero() != matches[j].Filter.Process.IsZero() {
+			return !matches[i].Filter.Process.IsZero()
+		}
 		if matches[i].Priority != matches[j].Priority {
 			return matches[i].Priority > matches[j].Priority
 		}

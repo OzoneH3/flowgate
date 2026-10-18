@@ -1,5 +1,26 @@
 # Continuation handoff
 
+## Current backend release: native process-instance rules
+
+`process-instance-rules-v1` extends existing preview/save/versioned edit/Delete and
+policy-view with pidfd-pinned native targets. Process tier precedes app tier;
+inside tiers priority/ID ordering is preserved. Schema3 survives as inactive
+inventory after session restart; it never rebinds or widens. Exact semantics,
+request/response shapes, same-executable exec limitation and reproduction:
+[PROCESS-RULES.md](PROCESS-RULES.md).
+
+Focused race/vet/API tests pass. Real private receiver suite at
+`.workspace/pr-guard` passes incoming/outgoing TCP/UDP IPv4/6 process Allow/Block,
+sibling isolation, app fallback/override, disable/enable/delete, actual exit/exec,
+inactive restart persistence and Decision Log immutable process snapshots.
+Earlier fixture runs exposed transient-socket selection/unfinished attempt races,
+a process-edit representative selection defect (fixed), and an oversized log query
+(fixture fixed); they are not used as complete acceptance. PID reuse is simulated
+identity-generation coverage, not a forced kernel PID wrap. All fixture processes
+were cleaned. Separate `.workspace/flowgate-process` binary; deployed executable
+and live monitor/UDP/enforcement unchanged. UI consumer owns Electron and is
+awaiting an exact-release held monitor fixture; no unreleased work integrated.
+
 ## Current integration: Activity rules and initiation
 
 Released UId3268a4 fully integrated atop backendb9840d0, retaining4105194.

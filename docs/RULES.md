@@ -1,5 +1,14 @@
 # Saved rule editor contract
 
+## Process-instance extension (not deployed)
+
+Primary capability `process-instance-rules-v1` adds explicit process targets with
+pinned native/session identity, process-tier precedence and inactive lifecycle
+metadata. Application rules remain unchanged. See [PROCESS-RULES.md](PROCESS-RULES.md)
+for schema3 preview/save/edit/delete, inventory, authorization and exact limitations.
+Earlier application-only scope/precedence descriptions below refer to legacy rules.
+
+
 Create from a current pending request; Edit from a saved rule. Ordinary Allow/Block
 stays quick. Once is ephemeral; one-hour remembers an absolute expiry; persistent
 has no expiry. The editor defaults to keeping the original absolute expiry.

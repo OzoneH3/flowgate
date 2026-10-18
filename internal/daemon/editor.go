@@ -40,6 +40,10 @@ func duplicate(rules []policy.Rule, r policy.Rule) string {
 
 func RuleSentence(r policy.Rule) string {
 	f := r.Filter
+	target := "all process instances"
+	if !f.Process.IsZero() {
+		target = processLabel(f.Process)
+	}
 	port := func(p uint16) string {
 		if p == 0 {
 			return "any"
@@ -51,14 +55,21 @@ func RuleSentence(r policy.Rule) string {
 		address = "any address"
 	}
 	expiry := "until disabled/deleted"
+	if !f.Process.IsZero() {
+		expiry = "until process exit/identity change or daemon session ends (not persistent)"
+	}
 	if !r.Expires.IsZero() {
-		expiry = "until " + r.Expires.UTC().Format(time.RFC3339)
+		if f.Process.IsZero() {
+			expiry = "until " + r.Expires.UTC().Format(time.RFC3339)
+		} else {
+			expiry += "; no later than " + r.Expires.UTC().Format(time.RFC3339)
+		}
 	}
 	state := "enabled"
 	if r.Disabled {
 		state = "disabled"
 	}
-	return fmt.Sprintf("%s %s %s for application %s, revision %s, UID %d; remote %s, local port %s, remote port %s; any local address/interface; %s (%s). Priority %d; highest priority wins, then smallest rule ID. Approved TCP connections continue.", strings.ToUpper(r.Action), f.Direction, f.Protocol, f.Application, f.Revision, f.UID, address, port(f.LocalPort), port(f.RemotePort), expiry, state, r.Priority)
+	return fmt.Sprintf("Target: %s. Matching process rules override application rules; within each tier highest priority then smallest ID. %s %s %s for application %s, revision %s, UID %d; remote %s, local port %s, remote port %s; any local address/interface; %s (%s). Priority %d; highest priority wins, then smallest rule ID. Approved TCP connections continue.", target, strings.ToUpper(r.Action), f.Direction, f.Protocol, f.Application, f.Revision, f.UID, address, port(f.LocalPort), port(f.RemotePort), expiry, state, r.Priority)
 }
 
 // EditRule is used for both authoritative preview and commit. Creation derives
@@ -92,8 +103,19 @@ func (e *Engine) EditRule(id, eventID string, expected *uint64, candidate policy
 		if expected == nil || *expected != old.Version {
 			return policy.Rule{}, "", mutationError("version_conflict", "stale rule version; reload before editing")
 		}
-		if candidate.Filter.Application != old.Filter.Application || candidate.Filter.Revision != old.Filter.Revision || candidate.Filter.UID != old.Filter.UID || candidate.Filter.Direction != old.Filter.Direction {
-			return policy.Rule{}, "", fmt.Errorf("application/revision/UID/direction are immutable")
+		if candidate.Filter.Process != old.Filter.Process {
+			return policy.Rule{}, "", mutationError("immutable_target", "Process/application target is immutable; obtain a new creation preview")
+		}
+		if !old.Filter.Process.IsZero() && !candidate.Disabled {
+			if e.targetStateLocked(old).State != "active" {
+				return policy.Rule{}, "", mutationError("target_inactive", "Process target inactive; cannot enable or edit an active permission")
+			}
+			if err := e.verifyProcessEditLocked(old.Filter.Process); err != nil {
+				return policy.Rule{}, "", err
+			}
+		}
+		if candidate.Filter.Application != old.Filter.Application || candidate.Filter.Revision != old.Filter.Revision || candidate.Filter.UID != old.Filter.UID || candidate.Filter.Direction != old.Filter.Direction || candidate.Filter.Process != old.Filter.Process {
+			return policy.Rule{}, "", fmt.Errorf("application/revision/UID/direction/process target are immutable")
 		}
 		if candidate.ID != "" && candidate.ID != id {
 			return policy.Rule{}, "", fmt.Errorf("immutable rule ID")
@@ -128,6 +150,9 @@ func (e *Engine) EditRule(id, eventID string, expected *uint64, candidate policy
 		a := e.Resolve(found.Flow)
 		if !e.Now().Before(found.Deadline) || a.Application == nil || a.Principal() == nil || a.Fingerprint != found.Attribution.Fingerprint {
 			return policy.Rule{}, "", fmt.Errorf("pending application identity changed")
+		}
+		if !candidate.Filter.Process.IsZero() {
+			return policy.Rule{}, "", mutationError("unsupported_process", "Create process rules through verified Activity preview")
 		}
 		basis := policy.Remembered(found.Flow, a)
 		if candidate.Filter.Application != basis.Application || candidate.Filter.Revision != basis.Revision || candidate.Filter.UID != basis.UID || candidate.Filter.Direction != basis.Direction {
@@ -171,7 +196,7 @@ func (e *Engine) EditRule(id, eventID string, expected *uint64, candidate policy
 			delete(e.events, key)
 			continue
 		}
-		action, effective, conflicts := policy.Evaluate(e.rules, v.Flow, a, e.Now())
+		action, effective, conflicts := e.evaluateLocked(e.rules, v.Flow, a, e.Now())
 		v.Conflicts = conflicts
 		if action == "allow" || action == "block" {
 			v.Rule = effective
@@ -202,6 +227,9 @@ func (e *Engine) reviewRuleLocked(candidate policy.Rule, now time.Time, expiryUn
 		return policy.Rule{}, "", fmt.Errorf("remote address must be an IP, CIDR, or explicit * for any")
 	}
 	candidate.Schema = 2
+	if !candidate.Filter.Process.IsZero() {
+		candidate.Schema = 3
+	}
 	candidate.Filter = canonicalFilter(candidate.Filter)
 	if err := candidate.Validate(); err != nil {
 		return policy.Rule{}, "", err
@@ -234,6 +262,9 @@ func filtersOverlap(a, b policy.Filter) bool {
 	if a.Application != b.Application || a.Revision != b.Revision || a.UID != b.UID || a.Direction != b.Direction || a.Protocol != b.Protocol {
 		return false
 	}
+	if !a.Process.IsZero() && !b.Process.IsZero() && a.Process != b.Process {
+		return false
+	}
 	if a.LocalPort != 0 && b.LocalPort != 0 && a.LocalPort != b.LocalPort {
 		return false
 	}
@@ -263,5 +294,6 @@ func (e *Engine) publishRulesLocked(next []policy.Rule) error {
 		return mutationError("persistence_failed", fmt.Sprintf("transaction failed; old policy retained: %v", err))
 	}
 	e.rules = next
+	e.pruneHandlesLocked()
 	return nil
 }

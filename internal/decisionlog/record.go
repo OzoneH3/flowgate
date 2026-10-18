@@ -47,14 +47,15 @@ type Attribution struct {
 // RuleSnapshot is the rule exactly as evaluated at decision time. Version is a
 // decimal string so JavaScript clients keep the exact uint64.
 type RuleSnapshot struct {
-	ID       string        `json:"id"`
-	Version  string        `json:"version"`
-	Action   string        `json:"action"`
-	Priority int           `json:"priority"`
-	Disabled bool          `json:"disabled"`
-	Created  time.Time     `json:"created"`
-	Expires  time.Time     `json:"expires"`
-	Filter   policy.Filter `json:"filter"`
+	TargetScope string        `json:"target_scope"`
+	ID          string        `json:"id"`
+	Version     string        `json:"version"`
+	Action      string        `json:"action"`
+	Priority    int           `json:"priority"`
+	Disabled    bool          `json:"disabled"`
+	Created     time.Time     `json:"created"`
+	Expires     time.Time     `json:"expires"`
+	Filter      policy.Filter `json:"filter"`
 }
 type Decision struct {
 	Action        string        `json:"action"`
@@ -108,5 +109,9 @@ type Record struct {
 }
 
 func Snapshot(r policy.Rule) *RuleSnapshot {
-	return &RuleSnapshot{ID: r.ID, Version: uitoa(r.Version), Action: r.Action, Priority: r.Priority, Disabled: r.Disabled, Created: r.Created, Expires: r.Expires, Filter: r.Filter}
+	scope := "application"
+	if !r.Filter.Process.IsZero() {
+		scope = "process"
+	}
+	return &RuleSnapshot{TargetScope: scope, ID: r.ID, Version: uitoa(r.Version), Action: r.Action, Priority: r.Priority, Disabled: r.Disabled, Created: r.Created, Expires: r.Expires, Filter: r.Filter}
 }

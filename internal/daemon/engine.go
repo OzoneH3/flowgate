@@ -44,6 +44,7 @@ type TrafficManager interface {
 	Stop(...string) (udpaccount.Status, error)
 }
 type Engine struct {
+	processHandles map[identity.Instance]*identity.ProcessHandle
 	// Decisions records decision-time evidence; nil disables recording.
 	Decisions      *decisionlog.Log
 	capacityLogged map[string]*capacityAggregate
@@ -112,18 +113,17 @@ func (e *Engine) Observe(f identity.Flow, token string) Event {
 	key := f.Key() + "|" + token
 	// Every undecided/new attempt and every UDP datagram rechecks actual ownership.
 	a := e.Resolve(f)
+	action, rule, conflicts := e.evaluateLocked(e.rules, f, a, now)
 	if old := e.events[key]; old != nil && now.Before(old.Deadline) && old.Attribution.Fingerprint == a.Fingerprint && a.Application != nil {
-		valid := old.Rule == "default-ask" || strings.HasPrefix(old.Rule, "once:")
-		for _, r := range e.rules {
-			if !r.Disabled && r.ID == old.Rule && (r.Expires.IsZero() || now.Before(r.Expires)) {
-				valid = true
-			}
+		valid := old.Rule == rule && ((old.State == "allowed" && action == "allow") || (old.State == "blocked" && action == "block") || (old.State == "awaiting-decision" && action == "ask"))
+		if strings.HasPrefix(old.Rule, "once:") && action == "ask" {
+			valid = true
 		}
 		if valid {
 			return *old
 		}
 	}
-	action, rule, conflicts := policy.Evaluate(e.rules, f, a, now)
+
 	v := Event{ID: randomID(), Flow: f, Attribution: a, FirstSeen: now, Deadline: now.Add(e.Timeout), Rule: rule, Conflicts: conflicts, Token: token, Permission: "once: this TCP connection or UDP tuple for 30 seconds; exact application and remote endpoint"}
 	v.logAttemptID, v.logDeadline = v.ID, v.Deadline
 	// Unsafe ownership is deliberately re-evaluated for every packet. Preserve
@@ -250,7 +250,7 @@ func (e *Engine) Decide(id, action, scope string, uid uint32, admin bool) (Event
 				if other.ID == v.ID || other.State == "awaiting-decision" {
 					continue
 				}
-				action, effective, _ := policy.Evaluate(e.rules, other.Flow, other.Attribution, now)
+				action, effective, _ := e.evaluateLocked(e.rules, other.Flow, other.Attribution, now)
 				// Unrelated rules must not discard a just-approved one-shot packet.
 				if strings.HasPrefix(other.Rule, "once:") && effective == "default-ask" {
 					continue
@@ -282,6 +282,7 @@ func (e *Engine) SetRules(rules []policy.Rule) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.rules = rules
+	e.pruneHandlesLocked()
 	e.discardPendingLocked("policy replaced; pending request discarded and held packets drop")
 	e.events = map[string]*Event{}
 	return nil
@@ -315,9 +316,18 @@ func (e *Engine) RetainedState(id, fingerprint string) string {
 			e.recordFinal(v, "block", "identity_changed", "", v.Reason+"; held packets drop", nil, nil, "deferred", "")
 			return "drop"
 		}
+		// Current configured Block overrides even a cached Once grant. Process tier
+		// and liveness are always reconsidered before a retained admission.
+		if action, rule, matches := e.evaluateLocked(e.rules, v.Flow, a, e.Now()); action == "block" {
+			v.State, v.Rule, v.Reason = "blocked", rule, "Current configured Block superseded retained admission"
+			v.Conflicts, v.decided = matches, e.ruleLocked(rule)
+			v.finalLogged = false
+			e.recordFinal(v, "block", "policy_change", "", v.Reason, v.decided, nil, "deferred", "")
+			return "drop"
+		}
 		// Once grants use the event lease; remembered grants must still be live.
 		if !strings.HasPrefix(v.Rule, "once:") {
-			act, rule, _ := policy.Evaluate(e.rules, v.Flow, a, e.Now())
+			act, rule, _ := e.evaluateLocked(e.rules, v.Flow, a, e.Now())
 			if act != "allow" || rule != v.Rule {
 				return "drop"
 			}
@@ -363,6 +373,9 @@ func (e *Engine) ChangeRule(id, action string, uid uint32, admin bool) error {
 		}
 		switch action {
 		case "enable":
+			if e.targetStateLocked(r).State != "active" {
+				return mutationError("target_inactive", "Process target is inactive; create a fresh preview for a live instance")
+			}
 			next[i].Disabled = false
 		case "disable":
 			next[i].Disabled = true
@@ -380,6 +393,7 @@ func (e *Engine) ChangeRule(id, action string, uid uint32, admin bool) error {
 		return err
 	}
 	e.rules = next
+	e.pruneHandlesLocked()
 	// Invalidate pending as well as cached verdicts conservatively; retained packets drop.
 	e.discardPendingLocked("rule " + action + " invalidated pending requests; held packets drop")
 	e.events = map[string]*Event{}

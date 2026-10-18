@@ -1,5 +1,14 @@
 # Milestone semantics and safety boundaries
 
+## Process-instance extension (not deployed)
+
+Primary capability `process-instance-rules-v1` adds explicit process targets with
+pinned native/session identity, process-tier precedence and inactive lifecycle
+metadata. Application rules remain unchanged. See [PROCESS-RULES.md](PROCESS-RULES.md)
+for schema3 preview/save/edit/delete, inventory, authorization and exact limitations.
+Earlier application-only scope/precedence descriptions below refer to legacy rules.
+
+
 ## Daemon-owned incoming evaluation (new, isolated verification only)
 
 `daemon-evaluation-v1` adds asynchronous readiness/Start/Stop to the existing root

@@ -51,6 +51,7 @@ func (e *Engine) DeleteRule(generation, id string, expected *uint64, uid uint32,
 			return DeletedRule{}, mutationError("persistence_failed", fmt.Sprintf("delete transaction failed; old policy retained: %v", err))
 		}
 		e.rules = next
+		e.pruneHandlesLocked()
 		// Same conservative invalidation as legacy deletion; held packets drop.
 		e.discardPendingLocked("rule deletion invalidated pending requests; held packets drop")
 		e.events = map[string]*Event{}

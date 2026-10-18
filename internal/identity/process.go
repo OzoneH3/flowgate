@@ -26,6 +26,9 @@ type Application struct {
 	Evidence   []string `json:"evidence"`
 }
 type Process struct {
+	BootID             string      `json:"boot_id,omitempty"`
+	PIDNS              string      `json:"pidns,omitempty"`
+	ThreadGroup        int         `json:"thread_group_pid,omitempty"`
 	ExecutableRevision string      `json:"executable_revision"`
 	PID                int         `json:"pid"`
 	Start              string      `json:"start_ticks"`
@@ -76,7 +79,7 @@ func Inspect(pid int) (Process, error) {
 	if e != nil {
 		return Process{}, e
 	}
-	p := Process{PID: pid, Start: start, Parent: parent, NetNS: link(base + "/ns/net"), MountNS: link(base + "/ns/mnt"), Executable: link(base + "/exe")}
+	p := Process{BootID: BootID(), PIDNS: link(base + "/ns/pid"), ThreadGroup: threadGroup(base), PID: pid, Start: start, Parent: parent, NetNS: link(base + "/ns/net"), MountNS: link(base + "/ns/mnt"), Executable: link(base + "/exe")}
 	if p.Executable == "" {
 		return p, fmt.Errorf("executable unreadable")
 	}
@@ -166,7 +169,7 @@ func Inspect(pid int) (Process, error) {
 func fingerprint(owners []Process, sockets []Socket) string {
 	var f []string
 	for _, p := range owners {
-		f = append(f, fmt.Sprintf("%d:%s:%s:%s", p.PID, p.Start, p.Application.Key, p.Application.Revision+":"+p.ExecutableRevision))
+		f = append(f, fmt.Sprintf("%d:%s:%d:%s:%s:%s:%s:%s:%s", p.PID, p.Start, p.UID, p.BootID, p.PIDNS, p.NetNS, p.MountNS, p.Application.Key, p.Application.Revision+":"+p.ExecutableRevision))
 	}
 	for _, s := range sockets {
 		f = append(f, fmt.Sprintf("%s:%d:%s", s.NetNS, s.Inode, s.Cookie))

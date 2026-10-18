@@ -175,6 +175,7 @@ func serve() error {
 		return err
 	}
 	e := daemon.New(*timeout)
+	defer e.CloseProcessTargets()
 	e.Mode = "isolated-lab"
 	if *decisionPath != "" {
 		if !filepath.IsAbs(*decisionPath) {
@@ -287,6 +288,7 @@ func observe() error {
 		observer.UDP = client.Snapshot
 	}
 	e := daemon.New(15 * time.Second)
+	defer e.CloseProcessTargets()
 	e.Mode = "host-monitor"
 	e.Activity = observer.Snapshot
 	listener, err := daemon.Serve(path, e, true)

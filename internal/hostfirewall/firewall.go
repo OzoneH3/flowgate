@@ -301,6 +301,7 @@ func RunProfileAuthorized(ctx context.Context, dir, socket, database string, uid
 		return err
 	}
 	e := daemon.New(timeout)
+	defer e.CloseProcessTargets()
 	e.Mode = "host-enforcement"
 	decisions, derr := decisionlog.Open(filepath.Join(filepath.Dir(database), "decisions.db"), e.Generation, e.Mode, true)
 	if derr != nil {

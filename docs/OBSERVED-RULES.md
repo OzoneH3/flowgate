@@ -1,5 +1,14 @@
 # Create a rule from Activity
 
+## Process-instance extension (not deployed)
+
+Primary capability `process-instance-rules-v1` adds explicit process targets with
+pinned native/session identity, process-tier precedence and inactive lifecycle
+metadata. Application rules remain unchanged. See [PROCESS-RULES.md](PROCESS-RULES.md)
+for schema3 preview/save/edit/delete, inventory, authorization and exact limitations.
+Earlier application-only scope/precedence descriptions below refer to legacy rules.
+
+
 **Rollout update:** the integrated root monitor now exposes this capability after
 the explicitly authorized restart. See [INTEGRATION.md](INTEGRATION.md) for current
 generation/launch/Stop and host preview-only evidence. Earlier no-restart statements

@@ -153,39 +153,11 @@ Keep the following future backend work separate from this evaluation integration
 No placeholder controls, new policy actions or accounting/VPN deduplication are
 implemented by listing these gaps. They are optional roadmap items, not activation gates.
 
-### Proposed follow-up: explicit process-instance rules
+### Implemented: explicit process-instance rules (isolated, not deployed)
 
-A live NetLimiter5.3.28 fixture inspection in the current Activity UI round showed
-process-node In Allow creating a process-only rule while its parent application
-remained Not set (`rules-reference-process-allow.png` and
-`rules-reference-app-after-process-rule.png`, UI-owned evidence). FlowGate currently
-supports application/revision/UID rules across process instances; the UI must say
-so rather than reproduce process-only semantics with an application-wide grant.
-This is a genuine parity gap, not a blocker for the truthful existing workflow.
-
-Before implementation, agree a bounded additive capability/schema with:
-
-- A backend-verified live exclusive native owner: PID/start ticks, UID, network
-  namespace and executable/application revision, plus boot/session binding. PID/start
-  ticks alone can recur across reboot. A selected row or display association is not
-  permission authority; shared, unknown and unsupported runtime targets reject.
-- Explicit process-only preview, exact-draft/generation binding, versioned mutation
-  and lost-response reconciliation, administrator versus ordinary-UID scope and
-  read-only rejection. No caller-supplied PID/name alone can prove identity.
-- Exit, expiry and restart behavior chosen first. Simplest initial scope is a
-  session-bound permission that becomes inert on process exit or daemon restart;
-  if stored for inspection it must never revive, match a reused PID, or fall back
-  to an application-wide rule. Durable revalidation would additionally require
-  boot identity and a defensible post-restart live-owner check.
-- Pure evaluator/explanation/editor/duplicate-overlap/storage changes together,
-  with explicit interaction with existing application-rule precedence. Do not
-  silently copy NetLimiter weights or assume process rules automatically outrank
-  current stored rules. Existing TCP admission is not forcibly disconnected.
-- Two identical-executable processes in isolated receiver tests: only the selected
-  instance receives permission; PID/socket reuse, exit/restart, ambiguity and
-  read-only access cannot inherit it. Keep identity and counters unchanged.
-
-Dependency estimate: two focused backend increments (settle lifecycle/schema and
-matching/storage; then preview/API/explanations and isolated receiver regressions),
-plus the consumer workflow and one UI acceptance journey. No process-rule action,
-filter, migration or authority change is implemented in this visual round.
+`process-instance-rules-v1` provides server-pinned native process/session targets,
+process-before-application precedence, schema3 stored inactive-after-restart
+inventory, preview/versioned mutation/reconciliation and Decision Log targets.
+Exact scope, same-executable exec limitation, evidence and reproduction are in
+[PROCESS-RULES.md](PROCESS-RULES.md). It is no longer approximated by an app grant.
+Host deployment remains separate; no host state changed during implementation.

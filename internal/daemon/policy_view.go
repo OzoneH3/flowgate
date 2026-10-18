@@ -20,15 +20,18 @@ type PolicyIdentity struct {
 	UID      uint32 `json:"uid"`
 }
 type PolicyRuleRef struct {
-	ID       string        `json:"id"`
-	Version  string        `json:"version"` // exact decimal uint64; never JSON floating point
-	Action   string        `json:"action"`
-	Priority int           `json:"priority"`
-	Scope    policy.Filter `json:"scope"`
-	Disabled bool          `json:"disabled"`
-	Expired  bool          `json:"expired"`
-	Active   bool          `json:"active"`
-	Expires  time.Time     `json:"expires"`
+	TargetScope  string        `json:"target_scope"`
+	TargetState  string        `json:"target_state"`
+	TargetReason string        `json:"target_reason"`
+	ID           string        `json:"id"`
+	Version      string        `json:"version"` // exact decimal uint64; never JSON floating point
+	Action       string        `json:"action"`
+	Priority     int           `json:"priority"`
+	Scope        policy.Filter `json:"scope"`
+	Disabled     bool          `json:"disabled"`
+	Expired      bool          `json:"expired"`
+	Active       bool          `json:"active"`
+	Expires      time.Time     `json:"expires"`
 }
 type PolicyDefault struct {
 	Known  bool   `json:"known"`
@@ -77,6 +80,7 @@ type PolicySnapshot struct {
 	Meaning     string     `json:"meaning"`
 }
 type PolicyView struct {
+	Processes         []ProcessPolicy     `json:"processes"`
 	Snapshot          PolicySnapshot      `json:"snapshot"`
 	ActivitySequence  string              `json:"activity_sequence"`
 	ActivityCollected time.Time           `json:"activity_collected"`
@@ -106,7 +110,7 @@ type PolicyExplanations struct {
 
 func ruleRef(r policy.Rule, now time.Time) PolicyRuleRef {
 	expired := !r.Expires.IsZero() && !now.Before(r.Expires)
-	return PolicyRuleRef{r.ID, strconv.FormatUint(r.Version, 10), r.Action, r.Priority, r.Filter, r.Disabled, expired, !r.Disabled && !expired, r.Expires}
+	return PolicyRuleRef{TargetScope: "application", TargetState: "active", TargetReason: "Application/revision/UID rule; enabled/expiry are separate", ID: r.ID, Version: strconv.FormatUint(r.Version, 10), Action: r.Action, Priority: r.Priority, Scope: r.Filter, Disabled: r.Disabled, Expired: expired, Active: !r.Disabled && !expired, Expires: r.Expires}
 }
 func appPolicyRef(a PolicyIdentity) string {
 	b, _ := json.Marshal(a)
@@ -170,6 +174,9 @@ func summaryFor(a PolicyIdentity, direction, mode string, h *EnforcementStatus, 
 	active := []policy.Rule{}
 	for _, r := range rules {
 		f := r.Filter
+		if !f.Process.IsZero() {
+			continue
+		}
 		if f.Application != a.Key || f.Revision != a.Revision || f.UID != a.UID || f.Direction != direction {
 			continue
 		}
@@ -235,7 +242,7 @@ func (e *Engine) snapshotLocked(uid uint32, admin bool, h *EnforcementStatus, ex
 	refs := make([]PolicyRuleRef, 0, len(rules))
 	var expiry *time.Time
 	for _, r := range rules {
-		refs = append(refs, ruleRef(r, now))
+		refs = append(refs, e.ruleRefLocked(r, now))
 		if now.Before(r.Expires) && (expiry == nil || r.Expires.Before(*expiry)) {
 			t := r.Expires
 			expiry = &t
@@ -285,6 +292,12 @@ func (e *Engine) PolicyView(generation, expected string, uid uint32, admin bool,
 	}
 	out := PolicyView{Snapshot: snapshot, ActivitySequence: strconv.FormatUint(activity.Sequence, 10), ActivityCollected: activity.Collected, Applications: []ApplicationPolicy{}, Rows: []PolicyAssociation{}, Complete: activity.Complete}
 	now := snapshot.EvaluatedAt
+	var processComplete bool
+	out.Processes, processComplete = e.processViewsLocked(activity, rules, h, now)
+	if !processComplete {
+		out.Complete = false
+		out.Reason = "Process summary limit reached"
+	}
 	if e.Activity == nil || activity.Error != "" || activity.Collected.IsZero() || now.Sub(activity.Collected) > 45*time.Second || activity.Collected.After(now.Add(5*time.Second)) {
 		out.Complete = false
 		out.Reason = "Activity unavailable or stale; no supported observed identity supplied"
@@ -386,18 +399,18 @@ func (e *Engine) PolicyExplain(generation, expected string, eventIDs []string, u
 		result.Enforcement, result.RuntimeDefault = coverage(e.Mode, flow.Direction, h)
 		// No Resolve/Observe/expire/RetainedState: read explanation of recorded context
 		// against current stored policy, not an admission or fresh ownership assertion.
-		action, rule, ids := policy.Evaluate(rules, flow, found.Attribution, snapshot.EvaluatedAt)
+		action, rule, ids := e.evaluateLocked(rules, flow, found.Attribution, snapshot.EvaluatedAt)
 		result.Status = "evaluated"
 		result.ConfiguredAction = action
 		result.SelectedRule = rule
-		result.Reason = "Current stored policy evaluated for recorded event identity/endpoints; ownership not revalidated; no historical verdict or live delivery claim. Highest priority wins, then smallest rule ID"
+		result.Reason = "Current stored policy evaluated for recorded event identity/endpoints; ownership not revalidated; no historical verdict or live delivery claim. Matching process tier overrides application tier; within each tier highest priority wins, then smallest rule ID"
 		if a := found.Attribution.Application; a != nil && found.Attribution.Principal() != nil {
 			result.Identity = &PolicyIdentity{a.Key, a.Revision, found.Attribution.Principal().UID}
 		}
 		for _, id := range ids {
 			for _, r := range rules {
 				if r.ID == id {
-					result.Matching = append(result.Matching, ruleRef(r, snapshot.EvaluatedAt))
+					result.Matching = append(result.Matching, e.ruleRefLocked(r, snapshot.EvaluatedAt))
 					break
 				}
 			}
