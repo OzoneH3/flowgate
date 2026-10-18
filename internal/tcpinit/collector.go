@@ -50,7 +50,13 @@ func (b *boundedError) Write(p []byte) (int, error) {
 	return n, nil
 }
 func (b *boundedError) String() string { b.mu.Lock(); defer b.mu.Unlock(); return string(b.b) }
+
+type Options struct{ ObserveShared bool }
+
 func New(parent context.Context, helper, cgroup, pinDir string) *Collector {
+	return NewWithOptions(parent, helper, cgroup, pinDir, Options{})
+}
+func NewWithOptions(parent context.Context, helper, cgroup, pinDir string, options Options) *Collector {
 	ctx, cancel := context.WithCancel(parent)
 	c := &Collector{requests: make(chan query), cancel: cancel, done: make(chan struct{}), state: identity.InitiationEvents{State: "disabled", NetNS: identity.NetNS(), Reason: "Optional event source not configured; snapshot handshake sampling remains available"}}
 	fail := func(err error) *Collector {
@@ -97,7 +103,7 @@ func New(parent context.Context, helper, cgroup, pinDir string) *Collector {
 	c.state.Generation = hex.EncodeToString(nonce[:])
 	c.state.State = "starting"
 	c.state.Reason = "Waiting for actual cgroup sockops load/attach"
-	go c.run(ctx, cgroup)
+	go c.run(ctx, cgroup, options.ObserveShared)
 	return c
 }
 func (c *Collector) status() identity.InitiationEvents {
@@ -162,9 +168,13 @@ func (c *Collector) Close() {
 		os.Remove(c.pinned)
 	}
 }
-func (c *Collector) run(ctx context.Context, cgroup string) {
+func (c *Collector) run(ctx context.Context, cgroup string, shared bool) {
 	defer close(c.done)
-	cmd := exec.CommandContext(ctx, c.pinned, cgroup)
+	args := []string{cgroup}
+	if shared {
+		args = append(args, "--observe-shared")
+	}
+	cmd := exec.CommandContext(ctx, c.pinned, args...)
 	cmd.WaitDelay = 200 * time.Millisecond
 	input, err := cmd.StdinPipe()
 	if err != nil {
@@ -196,7 +206,11 @@ func (c *Collector) run(ctx context.Context, cgroup string) {
 	}
 	c.mu.Lock()
 	c.state.State = "active"
+	c.state.Partial = true
 	c.state.Reason = "Actual sockops established callbacks; only sockets covered by the configured cgroup/current network namespace"
+	if shared {
+		c.state.Reason += "; explicit shared observation, no callback/tuning writes; evidence requires existing lifecycle notifications"
+	}
 	c.mu.Unlock()
 	for {
 		select {

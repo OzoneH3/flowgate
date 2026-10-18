@@ -21,8 +21,10 @@ Kernel mechanism references: [sockops cookie helpers](https://kernel.googlesourc
 and [TCP callback/default handling](https://github.com/torvalds/linux/blob/master/include/net/tcp.h).
 The program requests state notifications and deletes its own record on TCP_CLOSE.
 It never writes reply/tuning fields, sends/drops/redirects packets or changes routing,
-firewall, socket buffer sizes or timeouts. Startup refuses pre-existing effective
+firewall, socket buffer sizes or timeouts. Startup defaults to refusing pre-existing effective
 sockops programs at the configured cgroup rather than altering/detaching them.
+The explicit shared observation mode below has separate, stricter no-field-write
+semantics and remains opt-in.
 External later changes to cgroup attachment/hierarchy are not a supported coverage
 guarantee. Optional UDP tracing is a different mechanism and is not stopped.
 
@@ -141,3 +143,58 @@ or overhead evidence is claimed. Before another full acceptance attempt, obtain 
 read-only `sudo bpftool -j cgroup show /sys/fs/cgroup effective` result and inspect
 which case is actually present. Kernel query contract reference:
 https://github.com/torvalds/linux/blob/master/kernel/bpf/cgroup.c (`__cgroup_bpf_query`).
+
+## Explicit shared-hook observation (bpftune coexistence)
+
+The user's read-only query confirmed actual root-cgroup sockops program109,
+`bpftune_conn_tuner`; sysctl program99 uses a separate hook. No program/service was
+stopped, detached or reconfigured. Thus the default exclusive-source refusal is
+expected on this machine, not a verifier failure. Repeated unchanged runs cannot
+establish active-source evidence.
+
+A separate explicit root startup option, `--tcp-initiation-observe-shared`, selects
+a bounded shared observation mode; default behavior still refuses pre-existing
+sockops. The helper's matching reviewed argument is `--observe-shared`. This does
+not name-match/trust a program as permission authority or create GUI lifecycle
+control. It uses the ordinary independent kernel BPF link; no replacement, override,
+legacy detach fallback, foreign FD ownership or persistent pins.
+
+Shared-mode BPF **does not write callback flags, replies, tuning or packet fields**.
+It records established evidence only when the existing callback flags already
+include STATE notifications, needed to delete its own map entry on close. Otherwise
+it increments loss and leaves that connection unknown. No flags are enabled just to
+make the test pass. Return1 preserves the observational program's neutral result.
+The netns-cookie filter runs before those operations: host sockets outside the
+fresh fixture namespace get no collection or flag changes. Different callback order
+or missing foreign lifecycle subscriptions can reduce coverage; partial/unknown
+remain explicit. Cookie generation/map updates are attribution metadata, not policy.
+
+The pre-attach effective sockops ID set is bounded to63 foreign programs. Immediately
+after attach and on every bounded sample, require exactly those IDs plus the own
+program ID. Any missing/additional program or query failure closes only the own link
+and fails the source; cached evidence is withheld. Another administrator's external
+changes cannot be undone/restored by this collector. The test records before/after
+all effective cgroup program metadata and requires it to match after own cleanup.
+
+Audit references: kernel [cgroup link/query handling](https://github.com/torvalds/linux/blob/master/kernel/bpf/cgroup.c),
+libbpf [independent attach implementation](https://github.com/libbpf/libbpf/blob/master/src/libbpf.c),
+and upstream [bpftune socket callbacks](https://github.com/oracle/bpftune/blob/main/src/tcp_conn_tuner.bpf.c).
+Upstream bpftune already subscribes to STATE callbacks; installed behavior still
+requires real kernel acceptance, not an assumption from a program's displayed name.
+
+Native build and focused tcpinit/identity/monitor/command race+vet passed:
+`.workspace/tcp-initiation-shared-{build,race,vet}.log`. The fake-executable transport
+test proves the shared option is forwarded only by explicit configuration, not
+successful BPF coexistence. Initial active status now correctly reports partial
+coverage even before its first cookie query. **Real shared-source evidence remains
+pending** until this affected case passes:
+
+```sh
+cd /home/flowgate-user/Apps/flowgate
+scripts/check-tcp-initiation.sh --observe-shared
+```
+
+It retains the existing fast TCP4/6, both loopback ends, same-cookie identity,
+closure/new-cookie, restart/old-unknown, helper-failure fallback and bounded overhead
+checks. It additionally verifies foreign program inventory after cleanup. It does
+not restart the host daemon, enable enforcement or stop bpftune/UDP collection.

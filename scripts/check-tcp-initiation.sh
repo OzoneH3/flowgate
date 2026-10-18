@@ -1,6 +1,9 @@
 #!/bin/sh
 # Initial-namespace BPF credentials, collection strictly filtered to a fresh netns.
 set -eu
+if [ "$#" -gt 1 ] || { [ "$#" -eq 1 ] && [ "$1" != "--observe-shared" ]; }; then
+  echo "usage: scripts/check-tcp-initiation.sh [--observe-shared]" >&2; exit 2
+fi
 cd "$(dirname "$0")/.."
 . scripts/go-env.sh
 run="$PWD/.workspace/tcp-initiation-$(date +%s)-$$"
@@ -15,4 +18,4 @@ sha256sum "$run/flowgate" "$run/collector" "$run/native" > "$run/artifacts.sha25
 printf 'EVIDENCE %s\n' "$run"
 parent=$(readlink /proc/self/ns/net)
 parent_mnt=$(readlink /proc/self/ns/mnt)
-exec sudo unshare --net --pid --mount --fork --mount-proc --propagation private env PYTHONDONTWRITEBYTECODE=1 FLOWGATE_PARENT_NETNS="$parent" FLOWGATE_PARENT_MNTNS="$parent_mnt" python3 scripts/tcp-initiation-isolated.py --run "$run" --binary "$run/flowgate" --helper "$run/collector" --native "$run/native"
+exec sudo unshare --net --pid --mount --fork --mount-proc --propagation private env PYTHONDONTWRITEBYTECODE=1 FLOWGATE_PARENT_NETNS="$parent" FLOWGATE_PARENT_MNTNS="$parent_mnt" python3 scripts/tcp-initiation-isolated.py --run "$run" --binary "$run/flowgate" --helper "$run/collector" --native "$run/native" "$@"

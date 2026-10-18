@@ -42,6 +42,7 @@ func serveCommand(args []string) error {
 	uid := fs.Int("uid", -1, "explicit desktop peer UID")
 	administrator := fs.Bool("administrator", false, "root grants that selected UID machine-wide visibility and rule authority")
 	tcpHelper := fs.String("tcp-initiation-helper", "", "optional reviewed sockops initiation helper; no host attach without this explicit root startup option")
+	tcpShared := fs.Bool("tcp-initiation-observe-shared", false, "explicit shared sockops observation; never changes callback/tuning fields; requires foreign close callbacks")
 	tcpCgroup := fs.String("tcp-initiation-cgroup", "/sys/fs/cgroup", "cgroup-v2 observation coverage; current network namespace only")
 	helper := fs.String("udp-helper", "", "reviewed UDP native helper; pinned at startup but never implicitly attached")
 	allowEvaluation := fs.Bool("allow-evaluation", false, "explicit selected administrator authority to start/stop incoming five-minute evaluation")
@@ -125,7 +126,7 @@ func serveCommand(args []string) error {
 	e.Activity = observer.Snapshot
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
-	initiation := tcpinit.New(ctx, *tcpHelper, *tcpCgroup, filepath.Dir(*socket))
+	initiation := tcpinit.NewWithOptions(ctx, *tcpHelper, *tcpCgroup, filepath.Dir(*socket), tcpinit.Options{ObserveShared: *tcpShared})
 	defer initiation.Close()
 	observer.InitiationEvents = initiation.Sample
 	evaluation := hostfirewall.NewEvaluation(ctx, e, *evaluationState, *socket, *database)

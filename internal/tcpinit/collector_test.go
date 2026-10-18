@@ -22,6 +22,10 @@ func init() {
 	if mode == "" {
 		return
 	}
+	if mode == "require-shared" && (len(os.Args) != 3 || os.Args[2] != "--observe-shared") {
+		fmt.Fprintln(os.Stderr, "explicit shared option required")
+		os.Exit(2)
+	}
 	fmt.Println("READY")
 	s := bufio.NewScanner(os.Stdin)
 	for s.Scan() {
@@ -118,4 +122,18 @@ func TestDecodeRejectsUnrequestedDuplicateFutureAndInvalid(t *testing.T) {
 		t.Fatal("disabled source attempted attachment")
 	}
 	c.Close()
+}
+
+func TestSharedObservationRequiresExplicitOption(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FLOWGATE_TEST_INITIATION", "require-shared")
+	strict := New(context.Background(), exe, "/sys/fs/cgroup", t.TempDir())
+	waitState(t, strict, "failed")
+	strict.Close()
+	shared := NewWithOptions(context.Background(), exe, "/sys/fs/cgroup", t.TempDir(), Options{ObserveShared: true})
+	waitState(t, shared, "active")
+	shared.Close()
 }

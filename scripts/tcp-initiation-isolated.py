@@ -2,12 +2,12 @@
 """Disposable current-netns/cgroup-filtered TCP event verification, never host API."""
 import argparse,json,os,pathlib,socket,subprocess,time,signal
 ROOT=pathlib.Path(__file__).resolve().parents[1]
-p=argparse.ArgumentParser();p.add_argument('--run',required=True);p.add_argument('--binary',required=True);p.add_argument('--helper',required=True);p.add_argument('--native',required=True);p.add_argument('--expect-failed',action='store_true');a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--run',required=True);p.add_argument('--binary',required=True);p.add_argument('--helper',required=True);p.add_argument('--native',required=True);p.add_argument('--expect-failed',action='store_true');p.add_argument('--observe-shared',action='store_true');a=p.parse_args()
 assert os.environ['FLOWGATE_PARENT_NETNS']!=os.readlink('/proc/self/ns/net')
 RUN=pathlib.Path(a.run).resolve();assert RUN.is_relative_to(ROOT/'.workspace');RUN.mkdir(mode=0o700,parents=True,exist_ok=True)
 for d in ['api','data']:(RUN/d).mkdir(mode=0o700)
 subprocess.run(['ip','link','set','lo','up'],check=True)
-API=str(RUN/'api/c.sock');DATABASE=str(RUN/'data/rules.db');backend=native=None
+API=str(RUN/'api/c.sock');DATABASE=str(RUN/'data/rules.db');backend=native=None;foreign_before=None;passed=False
 # Initial-root test credentials must retain their authority, but the production
 # daemon refuses a runtime/database beneath user-owned ancestors. Reuse the UDP
 # fixture's PRIVATE mount overlays, backed solely by this workspace's directories.
@@ -17,6 +17,8 @@ if os.geteuid()==0 and pathlib.Path('/proc/self/uid_map').read_text().split()[2]
  subprocess.run(['mount','--bind',str(RUN/'api'),'/run/flowgate-api'],check=True)
  subprocess.run(['mount','--bind',str(RUN/'data'),'/var/lib/flowgate'],check=True)
  API='/run/flowgate-api/c.sock';DATABASE='/var/lib/flowgate/rules.db'
+ foreign_before=json.loads(subprocess.check_output(['bpftool','-j','cgroup','show','/sys/fs/cgroup','effective'],text=True))
+ (RUN/'foreign-programs-before.json').write_text(json.dumps(foreign_before,indent=2))
 def log(message):
  print(message,flush=True)
  with (RUN/'verification.log').open('a') as f:f.write(message+'\n')
@@ -38,6 +40,7 @@ def start(events):
  global backend
  args=[a.binary,'serve','--socket',API,'--database',DATABASE,'--uid','0','--administrator']
  if events:args+=['--tcp-initiation-helper',a.helper,'--tcp-initiation-cgroup','/sys/fs/cgroup']
+ if events and a.observe_shared:args+=['--tcp-initiation-observe-shared']
  backend=subprocess.Popen(args,stdout=(RUN/'daemon.log').open('a'),stderr=subprocess.STDOUT)
  def ready():
   if backend.poll()is not None:raise RuntimeError((RUN/'daemon.log').read_text())
@@ -73,8 +76,14 @@ try:
   children=pathlib.Path(f'/proc/{backend.pid}/task/{backend.pid}/children').read_text().split();owned=[int(pid)for pid in children if '.flowgate-initiation-'in os.readlink(f'/proc/{pid}/exe')];assert len(owned)==1;os.kill(owned[0],signal.SIGTERM)
   wait(lambda:api()['activity']['tcp_initiation']['state']=='failed');assert api()['enforcement']['state']=='stopped';assert api()['activity']['rows'];log('PASS helper crash leaves TCP observation/daemon/rules available; old event evidence withheld')
   (RUN/'overhead.json').write_text(json.dumps({'connections_per_family':8,'baseline_open_ns':before['duration_ns'],'event_open_ns':fresh['duration_ns'],'note':'short loopback sample, includes scheduling/socket setup; not a general benchmark'},indent=2))
- (RUN/'result.json').write_text(json.dumps({'result':'passed-refusal-fallback'if a.expect_failed else'passed-kernel-initiation','source':(RUN/'source.sha').read_text().strip()if(RUN/'source.sha').exists()else None,'host_runtime_untouched':True},indent=2))
+ passed=True
 finally:
  stop()
  if native and native.poll()is None:native.terminate();native.wait(5)
+ if foreign_before is not None:
+  after=json.loads(subprocess.check_output(['bpftool','-j','cgroup','show','/sys/fs/cgroup','effective'],text=True))
+  (RUN/'foreign-programs-after.json').write_text(json.dumps(after,indent=2))
+  assert sorted(foreign_before,key=lambda p:p['id'])==sorted(after,key=lambda p:p['id']),'Foreign cgroup program inventory changed'
+  log('PASS foreign effective cgroup programs preserved exactly after own link/helper cleanup')
  log('CLEANED owned daemon/native helper links/maps; disposable namespace only')
+ if passed:(RUN/'result.json').write_text(json.dumps({'result':'passed-refusal-fallback'if a.expect_failed else'passed-kernel-initiation','source':(RUN/'source.sha').read_text().strip()if(RUN/'source.sha').exists()else None,'shared_observation':a.observe_shared,'foreign_inventory_preserved':foreign_before is not None,'host_runtime_untouched':True},indent=2))

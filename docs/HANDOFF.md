@@ -1,5 +1,29 @@
 # Continuation handoff
 
+## Current: remaining TCP kernel check uses explicit shared-hook observation
+
+Zone-scoped Remember and released UI remain complete atf7b04c49; no receiver/UI
+matrix is repeated. Initial-root fixture path fix40df1fb and diagnostic fix2ef62bb
+preserve the earlier real failures. The user supplied effective sockops id109
+bpftune_conn_tuner (sysctlid99 separate hook): default collector refusal is expected.
+No foreign program, service, host daemon or UDP collector was changed.
+
+The implementation now adds explicit root `--tcp-initiation-observe-shared` mode:
+independent own link, no callback/tuning/reply writes in shared mode, evidence only
+where lifecycle notifications already exist, foreign IDs checked at attach/every
+sample and cleanup. Default refusal remains. Focused native build/race/vet pass;
+real shared-kernel/overhead proof still pending. See TCP-INITIATION.md for bounds,
+source audit and exact affected test (requires terminal authentication):
+
+```sh
+scripts/check-tcp-initiation.sh --observe-shared
+```
+
+Do not detach/disable bpftune or silently switch the running host. After the test,
+inspect saved verifier/result/inventory/overhead evidence before any further edit or
+rerun. A future separately authorized rollout on this machine would require this
+explicit option in addition to the reviewed helper/cgroup flags, only after proof.
+
 ## Current: reviewed zone-scoped pending Remember integrated; kernel proof awaiting authentication
 
 Backend API **ee7ba47**, receiver followup **05c341bf3336fa9c9bd328f493eea38c6fdf71ce**,
