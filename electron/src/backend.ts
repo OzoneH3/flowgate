@@ -132,6 +132,7 @@ export class Backend {
         generation: r.generation,
         activity: r.activity,
         trafficMonitor: r.traffic_monitor,
+        evaluation: r.evaluation,
         permissions: r.permissions,
         capabilities: r.capabilities,
       };
@@ -191,6 +192,7 @@ export class Backend {
       this.state.control = {
         snapshotStarted,
         trafficMonitor: r.traffic_monitor,
+        evaluation: r.evaluation,
         connected: true,
         message:
           r.mode === 'isolated-lab'
@@ -219,6 +221,7 @@ export class Backend {
         policy: undefined,
         policyError: 'Controller disconnected; authoritative policy cleared.',
         trafficMonitor: undefined,
+        evaluation: undefined,
       };
     } finally {
       this.busy.control = false;

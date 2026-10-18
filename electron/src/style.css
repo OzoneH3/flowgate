@@ -993,3 +993,9 @@ td.up { color: #c7daa8; background: #344b20; }
   #logTable th:nth-child(4) { width: 120px; }
   #logApplication { max-width: 180px; }
 }
+
+/* Daemon firewall controls use the existing menu, independent from UDP monitoring. */
+#evaluationChecks { width: 100%; min-width: 0; font-size: 11px; }
+#evaluationCheckText { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 210px; overflow: auto; margin: 5px 0; font: inherit; user-select: text; }
+#confirmation #confirmText { white-space: pre-line; max-width: 480px; line-height: 1.5; }
+#controlMenu > summary { white-space: nowrap; }

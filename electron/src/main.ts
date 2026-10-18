@@ -256,7 +256,7 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('evaluation:state', (e) => {
     trusted(e);
-    return evaluation.state;
+    return evaluation.view();
   });
   ipcMain.handle('background:status', (e) => {
     trusted(e);
