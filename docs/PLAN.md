@@ -1,5 +1,14 @@
 # Authoritative implementation plan
 
+## Follow-up (not started): explicit stored Ask action
+
+NetLimiter Blocker offers a stored per-rule Ask beside Allow/Deny. FlowGate has only
+Allow/Block rules plus unmatched-application prompting during evaluation; these are
+not equivalent. The Activity quick setter (UI round c772f7c2, existing APIs only)
+deliberately omits Ask. Implementing it needs a separate scoped proposal: rule
+schema/action, evaluator semantics versus pending/Once, monitoring-mode meaning,
+Decision Log representation and older-binary compatibility.
+
 ## Completed: direct Activity rule creation
 
 Primary capability `observed-rule-create-v1` adds generation/principal/draft-bound
