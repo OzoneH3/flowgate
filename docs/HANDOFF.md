@@ -1,5 +1,54 @@
 # Continuation handoff
 
+## Current: Activity round 5 (menus, display Units and chart presentation)
+
+Exact clean UI release **f2f9ae43a1d0313fc7c420c46cee0c2107568f78**, based on
+**4422cfa**, is fast-forward integrated with full prior history. Explicit source and
+Windows ownership release was verified first. Backend/API remains **6c68f8c**;
+no privileged deployment or new collection was needed.
+
+Changes: File/Tools/Window/Help use existing operations; persistent display Units
+(byte/bit, explicit decimal SI) are independent of TCP/UDP accounting Source and
+raw sorting. Connection labels use compact endpoints while state/direction evidence
+remains in glyphs/details. Chart legend uses source-specific unique-socket totals;
+rate axes, timestamps, bounded10min window and sample details preserve unavailable,
+partial, restart and discontinuity semantics. This is bounded client observation
+history, not persistent statistics or connection lifecycle history. No incompatible
+TCP/UDP totals, guessed zero counters or historical per-application inventory.
+
+New main-checkout build/typecheck and **18 focused asset/units/history/model tests**
+pass (`.workspace/ui-r5-integration-{build,tests}.log`). Reused exact-release sandboxed
+Wayland real isolated menu/units/pause/selection/popup/narrow journey and real TCP
+socket/application/shared-socket chart comparison. Rule journey evidence in UI
+worktree `.workspace/round5-journey-yNI5mm/` includes `metadata-correction.txt`:
+its original fixture description was stale; the run actually created application
+In Allow and process Out Block via existing preview/save, then exact conditional
+Delete restored0rules. Original results/screenshots are preserved, not silently
+rewritten. TCP chart evidence: UI `.workspace/gr-RBo9Jd/`.
+
+Fixture ownership was explicit: UI alone drove rsf-c780 until DONE. Backend verified
+actual generation dabcebbbaf2bf66829b04c0d416edfa9, daemon-monitor and empty rules,
+then sent only that fixture's quit command. Its supervisor logged CLEANED for daemon,
+instances and peer; both API sockets are removed. TCP fixture/observer/UI cleanup was
+reported by the UI owner. WinBoat Units/Rate/root selection restored, viewer closed,
+preferences restored. No host daemon, UDP collector, policy or networking action.
+The host root API remains unavailable after reboot; no host acceptance claimed.
+
+Before/reference/after complete-window images (native scale, distinct controlled
+Linux versus Windows content):
+`.workspace/netlimiter-reference/rule-status-r5/01-before-reference-after.png`;
+process-popup, real-chart and narrow captures are adjacent. Full account and exact
+remaining work: `electron/ACTIVITY-PARITY-R5.md`. No visual completion score.
+Undock needs a separately bounded shared-selection/window/mutation ownership design;
+chart pan/zoom and richer one-second history remain different. Stored Ask stays
+explicitly deferred; no new capability or working Ask control. Browser fault cause
+is still unproven; readonly monitoring recorded faults even without Electron, with
+no recorded OOM/GPU reset. No browser restart/profile changes were performed.
+
+Basic launch: `scripts/run-electron.sh`. To use the root API after separately
+authorized restoration: `scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock`.
+This task neither restores it nor activates enforcement.
+
 ## Current: Activity round 4 and verified font delivery
 
 Integrated exact released checkpoint **652dab3fdec0941698bc3d92b4b4f31849197c05**
