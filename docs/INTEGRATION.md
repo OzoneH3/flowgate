@@ -1,5 +1,51 @@
 # Integrated desktop and non-enforcing root monitor
 
+## Current: automatic pending permission workflow integrated
+
+Explicit clean UI release **575aca86f6ab013c474c46f4b7700420125471ab**,
+basee2f045a, merged at **599984ae087c48b76dd00f753c2338c3bc81f294**,
+preserving backend fixture release **5c85f1334eb1791151539a1b345f16f1b93ac3fa**.
+Main-checkout build/typecheck and **18 focused checks** passed in
+`.workspace/ui-prompt-integration-{build,tests}.log`. No host deployment or
+interception. Detail: `electron/CONNECTION-PERMISSIONS.md`.
+
+Pending requests now open an independent foreground permission window, one pinned
+request at a time. Queued requests do not silently replace its target; dismissed
+IDs do not automatically reopen. Opening/Enter/dismissal grants nothing; expired,
+disconnected, read-only and submitted requests remain non-actionable. Compact scope
+text distinguishes TCP connection admission from the fixed30-second UDP tuple
+lease. Remember remains exact application/revision/UID/direction/protocol/peer/service,
+Any network, not a process-only or zone grant. Backend scope previews remain
+available. Contextual network classification is not permission scope.
+
+Primary-monitor bottom-right placement uses normal Electron requests plus a narrow
+KDE adapter: temporary script, own Electron PID and fixed prompt caption, numeric
+geometry only; no renderer command bridge, installed rules or preferences. Reviewed
+sender/permission/receipt boundaries remain in the main backend service. Actual KDE
+journal verified2040,980 /520x460 on primary2560x1440; Electron getBounds did not
+reflect native placement. Other Wayland compositors may override placement.
+
+Actual sandboxed UI receiver journey on exact backend5c85f13 passed:
+`.workspace/worktrees/electron/.workspace/connection-real-dQva7j/evidence.json`.
+Incoming UDP4 Allow receiver+1, incoming UDP6 Deny+0; outgoing UDP4 Remember Allow+1,
+sibling same-application remembered+1; nonmatching outgoing TCP4 prompt then Deny+0.
+These are **isolated** results, not outgoing host/Tailscale support. Existing full
+receiver/process/accounting evidence reused. Automatic-window queue/focus/two Enter/
+expiry/disconnect/Escape and final geometry have separately labelled synthetic
+coverage. Live NetLimiter Ask interaction remains unverified; supplied illustration
+and official documentation are labelled accordingly, not passed off as live capture.
+
+First real attempt passed incoming receivers but its runner selected an older event
+before outgoing; it did not establish outgoing success. Corrected exact-direction/
+protocol runner passed the complete final journey. Both fixtures returned explicit
+DONE; backend independently verified exact generations and rules0 before owned quit:
+`.workspace/prompt-ui-{live,final}/cleanup-before.json`. Both owner logs confirm
+CLEANED and processes/sockets removed. No host endpoint, rule, collector or firewall
+operation occurred. The installed host backend and UDP collector are unchanged.
+Event-source authenticated kernel proof remains pending as described below.
+
+Launch: `scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock`.
+
 ## Current: configured zone policy, metadata and optional TCP event source integrated
 
 Backend release **b4d4f13238aedc18c52d30d12b6d42df682f6aec** includes zone
