@@ -20,6 +20,7 @@ import (
 )
 
 type Request struct {
+	NetworkZone         string          `json:"network_zone,omitempty"`
 	ZoneTarget          *ZoneTarget     `json:"zone_target,omitempty"`
 	ZoneRevision        string          `json:"zone_revision,omitempty"`
 	EvaluationID        string          `json:"evaluation_id,omitempty"`
@@ -51,6 +52,8 @@ type EnforcementStatus struct {
 	StopsAt time.Time `json:"stops_at"`
 }
 type Response struct {
+	DecisionPreview *DecisionPreview           `json:"decision_preview,omitempty"`
+	DecisionReceipt *DecisionReceipt           `json:"decision_receipt,omitempty"`
 	NetworkZones    *identity.NetworkZones     `json:"network_zones,omitempty"`
 	ZonePreview     *ZonePreview               `json:"zone_preview,omitempty"`
 	RuleStates      map[string]RuleTargetState `json:"rule_states,omitempty"`
@@ -162,7 +165,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						}
 					}
 					if !readonly && e.Mode != "host-monitor" {
-						r.Capabilities = append(r.Capabilities, PolicyExplanationCapability, ObservedRuleCapability, ProcessRuleCapability, ObservedAnyProtocolCapability)
+						r.Capabilities = append(r.Capabilities, PolicyExplanationCapability, ObservedRuleCapability, ProcessRuleCapability, ObservedAnyProtocolCapability, DecisionZoneCapability)
 					}
 					if e.Evaluation != nil {
 						r.Capabilities = append(r.Capabilities, EvaluationCapability)
@@ -508,6 +511,35 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 							} else if err := e.ChangeRule(q.ID, q.Action, cred.Uid, admin); err != nil {
 								r.Error = err.Error()
 							}
+						case "decision-preview", "decision-status":
+							if readonly || e.Mode == "host-monitor" {
+								r.ErrorCode, r.Error = "forbidden", "Decision previews/receipts require authenticated primary endpoint"
+							} else if q.Operation == "decision-preview" && !permissions.CanDecide {
+								r.ErrorCode, r.Error = "unavailable", "No current decision authority"
+							} else {
+								var err error
+								if q.Operation == "decision-preview" {
+									var v DecisionPreview
+									v, err = e.PreviewDecision(q.Generation, q.ID, q.Action, q.Scope, q.NetworkZone, q.ZoneRevision, cred.Uid, admin)
+									if err == nil {
+										r.DecisionPreview = &v
+									}
+								} else {
+									var v DecisionReceipt
+									v, err = e.DecisionStatus(q.Generation, q.PreviewToken, cred.Uid, admin)
+									if err == nil {
+										r.DecisionReceipt = &v
+									}
+								}
+								if err != nil {
+									r.Error = err.Error()
+									r.ErrorCode = "invalid_request"
+									var typed *RuleMutationError
+									if errors.As(err, &typed) {
+										r.ErrorCode = typed.Code
+									}
+								}
+							}
 						case "decide":
 							if !permissions.CanDecide {
 								r.Error = "decision unavailable in non-enforcing/read-only mode"
@@ -515,9 +547,25 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 							} else if r.ReadOnly {
 								r.Error = "read-only API"
 							} else {
-								v, err := e.Decide(q.ID, q.Action, q.Scope, cred.Uid, admin)
+								var v Event
+								var err error
+								if q.PreviewToken != "" {
+									var rule policy.Rule
+									v, rule, r.Replayed, err = e.DecideReviewed(q.Generation, q.ID, q.Action, q.Scope, q.NetworkZone, q.ZoneRevision, q.PreviewToken, cred.Uid, admin)
+									if err == nil {
+										r.SavedRule = &rule
+									}
+								} else if q.NetworkZone != "" || q.ZoneRevision != "" {
+									err = mutationError("preview_required", "Explicit network scope requires reviewed decision token")
+								} else {
+									v, err = e.Decide(q.ID, q.Action, q.Scope, cred.Uid, admin)
+								}
 								if err != nil {
 									r.Error = err.Error()
+									var typed *RuleMutationError
+									if errors.As(err, &typed) {
+										r.ErrorCode = typed.Code
+									}
 								} else {
 									r.Decision = &v
 								}

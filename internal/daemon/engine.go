@@ -44,9 +44,10 @@ type TrafficManager interface {
 	Stop(...string) (udpaccount.Status, error)
 }
 type Engine struct {
-	Zones          identity.NetworkZones
-	zonePreviews   map[string]*zonePreview
-	processHandles map[identity.Instance]*identity.ProcessHandle
+	Zones            identity.NetworkZones
+	zonePreviews     map[string]*zonePreview
+	decisionPreviews map[string]*decisionPreview
+	processHandles   map[identity.Instance]*identity.ProcessHandle
 	// Decisions records decision-time evidence; nil disables recording.
 	Decisions      *decisionlog.Log
 	capacityLogged map[string]*capacityAggregate
@@ -194,6 +195,10 @@ func owned(a identity.Attribution, uid uint32) bool {
 func (e *Engine) Decide(id, action, scope string, uid uint32, admin bool) (Event, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	return e.decideLocked(id, action, scope, uid, admin, nil, "", time.Time{})
+}
+
+func (e *Engine) decideLocked(id, action, scope string, uid uint32, admin bool, reviewed *policy.Rule, sentence string, reviewDeadline time.Time) (Event, error) {
 	now := e.Now()
 	e.expire(now)
 	if action != "allow" && action != "block" {
@@ -207,20 +212,23 @@ func (e *Engine) Decide(id, action, scope string, uid uint32, admin bool) (Event
 			continue
 		}
 		if !admin && !owned(v.Attribution, uid) {
-			return Event{}, fmt.Errorf("not authorized")
+			return Event{}, mutationError("forbidden", "not authorized")
 		}
 		if v.State != "awaiting-decision" || !now.Before(v.Deadline) {
-			return Event{}, fmt.Errorf("stale decision; retry required")
+			return Event{}, mutationError("stale_decision", "stale decision; retry required")
 		}
 		a := e.Resolve(v.Flow)
+		if reviewed != nil && !e.Now().Before(reviewDeadline) {
+			return Event{}, mutationError("preview_expired", "Preview expired during identity revalidation; review again")
+		}
 		if !e.Now().Before(v.Deadline) || a.Application == nil || a.Fingerprint != v.Attribution.Fingerprint {
 			v.State = "expired"
 			v.Reason = "identity changed before decision"
 			e.recordFinal(v, "block", "identity_changed", "", v.Reason+"; held packets drop", nil, &uid, "deferred", "")
-			return Event{}, fmt.Errorf("identity changed; retry required")
+			return Event{}, mutationError("identity_changed", "identity changed; retry required")
 		}
 		if scope != "once" && len(e.rules) >= 256 {
-			return Event{}, fmt.Errorf("rule capacity reached")
+			return Event{}, mutationError("capacity", "rule capacity reached")
 		}
 		var remembered *policy.Rule
 		if scope != "once" {
@@ -228,13 +236,16 @@ func (e *Engine) Decide(id, action, scope string, uid uint32, admin bool) (Event
 			if scope == "persistent" {
 				r.Expires = time.Time{}
 			}
+			if reviewed != nil {
+				r = *reviewed
+			}
 			if other := duplicate(e.rules, r); other != "" {
 				return Event{}, fmt.Errorf("duplicate scope exists as %s; edit the existing rule", other)
 			}
 			next := append(append([]policy.Rule{}, e.rules...), r)
 			if e.SaveRules != nil {
 				if err := e.SaveRules(next); err != nil {
-					return Event{}, fmt.Errorf("rule persistence failed: %w", err)
+					return Event{}, mutationError("persistence_failed", "rule persistence failed: "+err.Error())
 				}
 			}
 			e.rules = next
@@ -248,6 +259,9 @@ func (e *Engine) Decide(id, action, scope string, uid uint32, admin bool) (Event
 		if remembered != nil {
 			v.Rule = remembered.ID
 			v.Permission = v.ScopePreviews[scope]
+			if reviewed != nil {
+				v.Permission = sentence
+			}
 
 			for key, other := range e.events {
 				if other.ID == v.ID || other.State == "awaiting-decision" {

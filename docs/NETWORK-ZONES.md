@@ -120,3 +120,62 @@ An additional policy regression proves an incomplete non-nil application (missin
 key or revision) cannot gain a global Allow. It is rejected as unsafe attribution;
 existing resolver and retained fingerprint checks remain. Limited IPv4 broadcast is
 also unclassified. These guards do not resolve the older retained-identity failure.
+
+## Pending Remember (`decision-zone-remember-v1`)
+
+Additive capability; legacy Decide and existing Any rules are unchanged. No
+process-only Remember or stored Ask is added. Default UI choice is visibly **Any
+network**, not the displayed connection zone. Once keeps its existing request/
+30-second UDP tuple lease and sends no zone or preview fields.
+
+For one-hour (`application`) or durable (`persistent`) Remember, prepare an
+action-bound preview on the authenticated primary endpoint:
+
+```json
+{"version":1,"operation":"decision-preview","generation":"<daemon>","id":"<pending-event>","action":"allow","scope":"application","network_zone":"local","zone_revision":"<network_zones.revision>"}
+```
+
+`network_zone` is explicitly `any`, `local` or `internet`. Named choices must match
+the held request's **current known** classification. A mismatch/unknown named
+choice returns `zone_mismatch` without saving a rule or deciding the request; no
+silent substitution. Any is available for unknown classification. Preview and
+commit revalidate identity/fingerprint and current classification/revision; stale
+request, identity, generation or definition requires fresh review. Definitions are
+immutable per daemon generation; restarting with new definitions invalidates open
+previews. No second classifier or frontend inference is involved.
+
+`decision_preview` contains `token`, `expires_at`, `generation`, `event_id`, `action`,
+`scope`, `network_zone`, `zone_revision`, `connection_network` (classification),
+`rule` (complete reserved ID/version1/document), `scope_preview` (authoritative prose).
+Rule preserves exact application/revision/UID/protocol/peer/service and chosen
+expiry. Named zone uses schema4 `filter.network_zone`; Any retains schema2. No
+other match restriction broadens. Absolute expiry is frozen at preview. Current
+request admission and future remembered rule are separate; existing admissions are
+not terminated. Precedence remains process > application > all-program zone.
+
+Commit `operation:"decide"` with the **same** generation/id/action/scope/network_zone/
+zone_revision plus `preview_token`. Response contains `decision`, `saved_rule` and
+optional `replayed`. Save transaction precedes publication; failure does not decide
+or publish permission. New scope fields without token return `preview_required`.
+Once/process scopes cannot be smuggled through a Remember token. Older servers may
+ignore unknown fields: clients MUST gate new operations on the capability.
+
+Preview TTL is at most30seconds and the event deadline; bounded16/principal and256
+total. Two action previews per visible selection are supported, not poll-driven
+renewal. Successful receipt retained5minutes, bound to exact authenticated
+UID/administrator role; no durability across daemon restart. `decision-status`
+with generation/preview_token on the primary returns `decision_receipt`:
+`{state:pending|committed,preview,decision?,saved_rule?}`. It is a query, allowed even
+after enforcement stops; observer endpoints refuse it. Committed fields are
+historical snapshots, not a claim the rule remains enabled/present today.
+
+After a lost response, query status; **pending does not prove no operation is in
+flight**, and must not trigger blind replay. Exact successful-token retry can only
+return its original receipt (`replayed:true`), never repeat Decide, packet handling,
+rule creation or Decision Log final record. Other tokens for an already-decided
+request fail. After restart/expired receipt, inspect reserved rule ID/full document
+and Decision Log; never replay an old admission. Errors include generation_conflict,
+zone_conflict, zone_mismatch, preview_required/missing/expired/mismatch,
+identity_changed, stale_decision, forbidden, capacity and persistence_failed.
+Decision Log's immutable rule snapshot carries actual `filter.network_zone`; old
+Any rules are never migrated.
