@@ -1,0 +1,100 @@
+# NetLimiter 5 hands-on reference for FlowGate
+
+## Executive findings
+
+- **Activity is a policy entry point.** Clicking an In/Out Blocker cell on a selected application opens a quick setter; the Advanced route opens a full editor already bound to that application and direction. A pending connection is not required to create a rule. FlowGate now has an equivalent observed-application preview/save route under `observed-rule-create-v1`.
+- **Direction labels are overloaded in NetLimiter.** For Blocker rules, In/Out means connection initiation. For Limit rules, In/Out means data direction. The rate columns are download/upload. Never copy the Limit interpretation into FlowGate’s firewall direction.
+- **A rule-status strip is an inventory of several rule families.** Tooltips identify Priority, DL/UL Limit, In/Out Blocker and In/Out Quota. Blocker details also appear in a separate In/Out matrix. FlowGate should keep its accurate configured-policy summary and enforcement coverage; it must not imitate unsupported Limit/Priority/Quota cells or implement NetLimiter’s weight rules in TypeScript.
+- **FlowGate’s Activity policy is already richer than a screenshot mock.** Current Go-backed summaries distinguish absent, inactive, scoped, mixed and uniform policy; current enforcement coverage and defaults are separately represented. First-rule creation has a backend-authoritative identity check, preview and save. The UI must keep those semantics visible.
+- **NetLimiter’s connection surfaces are three different products:** Connection Log (events), Connection History (aggregated app/remote traffic), and Traffic Statistics (date-range totals). FlowGate’s Decision Log is a decision/event record, not the latter two; its Activity graph is bounded live history.
+- **Several apparent controls are real shaping features, not decoration.** Limit, Priority, Ignore, Quota, filters, zones and schedules change backend behavior. They need backend policy/storage/measurement semantics before FlowGate exposes them.
+- **A real Ask prompt was not produced in this VM.** The Blocker page showed no pending requests. No suitable dedicated fixture executable was present; the available noVNC console had broken shifted-punctuation input and no working clipboard transfer. A rule editor is not prompt evidence.
+
+## Reference version
+
+The functional observations below concern NetLimiter 5.3.28.0.
+
+## C. Interaction catalog
+
+“Observed” is direct GUI interaction. “Docs” is official documentation, not a test. Screenshots referenced below are raw guest captures; the index maps descriptive copies to original captures.
+
+| Starting state → action | Result | Evidence / confidence |
+|---|---|---|
+| Activity, collapsed application → click its expander; select a child process | Application expands into process rows; selection changes Info View and chart scope. Collapsing the parent returns selection to the parent. Double-clicking the application expands it; double-clicking an idle process did not launch it. | Original `10–13-*`; direct, High. |
+| Activity → click a row | Full row becomes cyan; Info View updates identity/rules/tools and chart selection. | Original `10-select-microsoft-edge.png`, curated `activity-normal-selected-root.png`; direct, High. |
+| Activity with nearly all rates zero → first/subsequent DL/UL header clicks | Row order and highlighted header change. Earlier clicks were inconclusive with zero values. In the later brief sample, Internet showed 5 B/s upload while LocalNetwork showed 0; first UL click put Internet ahead of LocalNetwork. This is consistent with descending-first sort (Medium confidence); the display returned to zero before the next capture, so repeated direction/numeric ties remain inconclusive. | `activity-before-sort-visible-rates.png` then `activity-first-upload-sort.png`; direct, Medium for first UL only. |
+| Search empty → type “Microsoft Edge”, Enter | Filtered view contains multiple Microsoft-associated rows, not an exact single match; “The view is filtered” and Clear filter appear. | Original `20–25-*`; direct, High. |
+| Filtered view → unmatched `ping` after short process exits | Empty filtered table; no dedicated empty-state explanation. Search-field X clears the query and restores rows. | `322-commit-search-ping.png`, `324-restored-unfiltered-activity.png`; direct, High. |
+| Status All → Online or Offline | Visible process set changes; All restores the combined view. Hidden is a separate status choice. | Original `32–34-*`; direct, High. |
+| Application row → right-click | Menu includes Expand/Collapse, Info, Traffic stats, Connection history, Add rule, Create filter, Delete rules, Open folder, Kill connections, naming and hidden-list actions. No destructive item invoked. | Original `36-edge-context-menu.png`; direct, High. |
+| Activity In/Out Blocker cell `Not set` → click | Inline quick setter offers enabled checkbox, Ask/Allow/Deny, Advanced, Delete and Weight. Dismissal outside editor left state unchanged. Advanced opens full editor with selected application and direction prefilled. | Original `38–47-*`; direct, High. |
+| Rule Status row → hover glyphs | Tooltips identify Priority, DL Limit, UL Limit, In Blocker, Out Blocker, In Quota and Out Quota. Info View separately shows a four-type Blocker/Limit/Priority/Quota matrix with In/Out cells. | Original `50–57-*`; direct, High. |
+| Activity column edge → drag then reverse drag | Name column widens and adjacent columns move; reversing drag restores it. | Original `93–94-*`; direct, High. |
+| Main pane divider → hover then drag into Info View | Horizontal-resize cursor appears at x≈792, but tested drag did not move the pane and collapsed the Info Tools section. Restore click brought Tools back. Whether the actual splitter is movable via native input is unresolved. | `335-hover-pane-divider.png`, `336-drag-pane-splitter-right.png`; direct, inconclusive. |
+| Activity root → ArrowDown / ArrowUp | Selection moves to the next row and back. | Original `106–107-*`; direct, High. |
+| Activity → switch to another list tab and back | Info View initially retains the previous tab’s selection; selecting an Activity row then replaces it. | `314-end-search-focus.png`, `315-select-activity-root-after-tab-switch.png`; direct, High. |
+| Rate graph → pause/resume button | Tooltip says “Continue refreshing the chart”; updates pause, then resume. Chart is live for selected scope, not the Log or long-range Stats view. | Original `82-pause-activity-chart.png`; direct, High. |
+| Filter List → Add filter | Blank editor says no filter function means the Filter matches all traffic. Filter types: Zone, Filter, Composite. Per-Type: None, Per-Connection, Per-Process, Per-Application. Adding two predicates shows flat rows with no visible Boolean operator; canceled. | `291-open-empty-filter-draft.png`, `299-add-forwarded-condition.png`; direct. |
+| Filter function draft | Catalogue includes application identity/path, domain, forwarded/loopback, local/remote address and port ranges, network zone, transport protocol, user and tags. Composite editor selects reusable base filters in a flat list; no operator exposed in the inspected UI. Draft canceled. | `293-filter-function-options.png`, `307-add-localnetwork-base.png`; direct. |
+| Filter function semantics | Multiple values in one function are OR; multiple functions are AND. Composite type is built from other filters; operator was not established from the inspected GUI/docs. | Official [Filters](https://netlimiter.com/docs/basic-concepts/filters), not an evaluation test. |
+| Rule List → select existing Ignore Limits / open Edit rule, then Cancel | Two saved rules were visible: Ignore Limits and Ignore Traffic, both Active. Editor showed Direction Both, filter Ignore Limits, Ignore limit checked, Ignore data unchecked, Enabled. No changes saved. | `272-rule-list.png`–`275-cancel-existing-ignore-editor.png`; direct. |
+| Rule List → Add rule | Unsaved generic draft defaults to Limit / For Internet / Direction In / 5 KB/s / Enabled. Rule types: Limit, Priority, Blocker, Quota, Ignore. Limit units: B/s, KB/s, MB/s, GB/s, bit/s, Kbit/s, Mbit/s, Gbit/s. Priority values: Low, Normal, High, Critical. Canceled. | `276-open-generic-add-rule.png`–`283-cancel-priority-draft.png`; direct. |
+| Quotas tab → Create Quota | Empty state “There are no Quotas,” central Create Quota and plus. Draft: Internet, Both, 1 MB, reset Never, Enabled. Reset choices Never/Every Day/Days/Once/Day of month. Actions tab sets Blocker/Limit per In/Out and has “Show alert window on overflow” checked. Canceled. | `266–271-*`; direct. |
+| Blocker tab | Green “Blocker is enabled,” no pending requests. Quick zone controls Any/Internet/LocalNetwork each say Unblocked. Rules grouped Weight 1–3; displayed note says greater weight wins, and on equal weight Deny is applied before Allow and Ask. No quick zone/Add button clicked. | `288-blocker-tab.png`; direct. Official [Blocker](https://netlimiter.com/docs/basic-concepts/blocker) describes higher weights; neither the test nor this note is FlowGate policy. |
+| Priorities tab | Priorities Enabled, Reaction speed Normal, adaptive allocation checked, new method (BETA) unchecked, sliders and Apply/Reset controls shown. No values changed. | `289-priorities-tab.png`; direct. |
+| Application List / Network List | Separate alphabetical application catalogue with Description/File Name/Tags and metadata Info View; Network List presents active interface and its settings/rules. VM-specific gateway identifiers are omitted from shared evidence. | `284–287-*`; direct. |
+| Connection Log / History / Traffic Statistics | Log presents event records and filters; History aggregates app/remote endpoints and first/last/traffic totals; Stats has date ranges and Internet/Local/Loopback with Apps/IPs/Ports/Users/Countries groupings. Kept as separate views; no rows cleared/exported. | Original `60–80-*`; direct, with details in the earlier journal. |
+| Window close / tray reopen | Existing settings had Show tray and Close to Tray checked, Minimize to Tray unchecked. Caption X hid main UI; tray icon remained; reopening restored selection/filter/chart. No settings changed. | Earlier captures `116–123` and lifecycle observations; direct. |
+| Built-in loopback ping | Two bounded default `ping 127.0.0.1` runs each completed four local ICMP probes. Console showed replies; post-exit Activity search found no ping row. Root graph/rates also changed during the interval but cannot be attributed to ping from machine aggregate alone. | `316–324-*`, `329-switch-back-during-ping.png`; direct but not TCP/UDP or rule evidence. |
+
+### Behaviors not established by this investigation
+
+- No real Ask prompt or actual prompt timeout/dismissal/repeated-request behavior; no pending request existed and no dedicated safe test executable could be built through the current noVNC input path. Official [Pending connections](https://netlimiter.com/docs/user-gui-client/pending-connections) documentation is not GUI evidence.
+- No actual Allow/Block rule was saved. No traffic limiter, priority, quota overflow, schedule, filter matching or overlapping-rule precedence was exercised.
+- Sort direction is only medium-confidence for first Upload click; repeated direction and numeric behavior remain unverified because the rates quickly returned to zero.
+- Font family remains unknown. The divider cursor was observed but a successful pane resize was not.
+- No service failure was induced.
+
+## D. Feature mapping: NetLimiter vs current FlowGate
+
+Current FlowGate behavior below was checked against the listed source/docs on `milestone/backend` at `ca07b667ec64a96546fa107e6486ddba44c7f89f`; this document adds no source changes.
+
+| Area | NetLimiter: observed / documented | FlowGate: current behavior in source/docs | Frontend-only mapping | Backend capability needed for closer parity / platform difference |
+|---|---|---|---|---|
+| Activity hierarchy | App/process/network tree with selectable details and live graph; optional DL/UL and seven-icon Rule Status column. | `electron/src/model.ts`, `renderer.ts`, `graph.ts`: app/process/socket hierarchy, stable selection, one Unidentified group, bounded graph and TCP/UDP source labels (`docs/TRAFFIC.md`, `docs/UDP.md`). | Keep dense 24-px rows, tree alignment, selected details and compact graph. Preserve truthful missing/partial/source states. | None for current Activity. Windows service/package identity and driver views differ from Linux process/socket attribution; exact Windows icons/fonts are not portable. |
+| In/Out policy | Click a cell to quick-set Blocker; full Rule Editor has action, scope/zone, weight, enable and schedule. Rule Status includes unrelated limit/quota/priority markers. | `electron/src/rule-status.ts`, `policy.ts`: backend policy summary and inventory, no local effective-rule evaluator. `docs/POLICY-EXPLANATIONS.md` describes defaults/coverage. | Keep concise In and Out labels; details show scope, inactive state, overlap and coverage. Keep connection-initiation direction distinct from upload/download. | No new backend API for this workflow. NetLimiter’s weight precedence/defaults are not FlowGate semantics. |
+| First rule | Activity row has Add rule and In/Out cell entry even before a pending connection (documented; editor route inspected). | `electron/src/observed-rules.ts`, `docs/OBSERVED-RULES.md`: capability `observed-rule-create-v1`, live single-holder native target, explicit draft, authoritative preview, generation-bound save/reconciliation. | Keep New incoming/outgoing easy to reach; show any-address/port deliberately, protocol, expiry and exact preview; never silently widen scope. | No current dependency. FlowGate does not offer stored Ask/Once/Both/weights or NetLimiter zones; don’t expose their lookalikes. |
+| Prompt and decision | Ask action can open a prompt before connection creation; docs describe the flow, but this session did not see a real prompt. | Electron uses pending-request API, backend scope previews and Allow/Block; notifications only open current requests. `electron/README.md`, `docs/DAEMON-EVALUATION.md`, `docs/DECISION-LOG.md`. | Use official screenshot only as composition guidance until a real prompt can be captured. Keep exact scope/deadline, backend acknowledgment, and dismissal-without-verdict. | No prompt API gap found. Actual screenshot behavior (focus, duplicate pending, expiry) is still a reference-evidence gap. Windows system notification and service behavior differ from Linux desktop. |
+| Limits / priorities / quotas / schedules | Limit sets rate by direction and filter; Priority dynamically allocates bandwidth; quotas can trigger Blocker/Limit and alert; Rule Editor has scheduler actions Stop/Start/Delete. GUI controls observed, effects not tested. | FlowGate current API is firewall Allow/Block with explicit 5-minute evaluation, not traffic shaping; no quota/priority/scheduler operations are in `docs/API.md` or Electron controls. | Omit these controls. Clearly distinguish explicit monitoring/evaluation states from stored rule cells. | Real backend policy, accounting, persistence and scheduler semantics required if product scope later adds these families; cannot be a CSS-only feature. Linux shaping implementation would be different from NetLimiter’s Windows driver. |
+| Filters and zones | Reusable selectors include app/path/domain/user/tag/protocol/address/ports/network/forwarded/loopback; one function’s values OR, multiple functions AND (official docs); Zones include Internet/LocalNetwork. | FlowGate’s rule schema supports narrower app/revision/UID, direction, protocol and endpoint scope. No reusable expression/composite filter editor. | Present current supported scope plainly; no imitation filter builder or zone dropdown. | A real reusable filter expression/matcher and named-zone model would need backend/API/storage work. Windows Store/service identities and network classification are Windows-specific. |
+| Event log, history, statistics | Connection Log shows lifecycle/events and available rule/filter relations; Connection History aggregates traffic by app/remote; Stats provides date-window groupings. These are distinct. | `docs/DECISION-LOG.md`: durable decision-time pending/final/gap records and rule snapshots. Activity graph retains only bounded in-memory samples; no persistent traffic history/statistics store. | Keep Decision Log as historical decision evidence; never label it connection history or infer delivery from Allow. Graph history must say it starts with observation. | Persistent connection lifecycle history and durable aggregate traffic statistics need new collection/storage/query contracts; neither is a renderer-only addition. |
+| Lifecycle/status | Separate client/service controls and tray behavior; Blocker enabled badge and pending-request count. | Electron tray/background preference and daemon enforcement/UDP/evaluation statuses are separate. `electron/README.md`, `docs/DAEMON-EVALUATION.md`, `docs/UDP.md`. | Keep monitoring, firewall enforcement, and UDP collector status separate and concise. | Linux systemd/tray/window-manager behavior replaces Windows service/taskbar conventions. |
+
+### Genuine optional backend capability gaps for product parity
+
+These are features present in NetLimiter and absent from the current FlowGate API; they are not blockers to the current firewall UI and this investigation does not recommend implementing them automatically:
+
+1. **Connection lifecycle history** separate from decision records (open/update/close plus relationship to the decision, with privacy and retention rules).
+2. **Persistent traffic history/statistics** by selected time range and app/remote/port, distinct from the current live graph.
+3. **Per-direction traffic limits** with precise accounting source and enforcement guarantees.
+4. **Bandwidth priority allocation** with total-capacity estimation, scheduling and starvation behavior.
+5. **Reusable filter/zone, quota and scheduler policy** including explicit condition composition, reset/overflow behavior and durable execution semantics.
+
+There is no newly discovered backend dependency for the existing Activity policy summaries, supported first-rule workflow, current prompt operations, Decision Log, or live graph.
+
+## F. Remaining unknowns
+
+- Whether the 39-px menu/control band differs with other DPI or theme settings.
+- Second/subsequent rate-sort toggle behavior and numeric tie ordering; one first Upload click looked descending, but active rates were brief.
+- Actual filter matching and composite operator semantics (the visible Composite list has no operator; official Filters page defines simple Filter function composition only).
+- Real rule precedence with deliberately overlapping scopes; not tested to avoid saving a rule affecting an existing process.
+- Actual limit enforcement, priority reaction, quota overflow and scheduler execution.
+- Prompt focus-stealing, timeout, duplicate-request behavior, Enter/Escape defaults and rule-change-while-open behavior.
+- Successful pane-splitter movement via native mouse input.
+
+## Official sources consulted
+
+- [Blocker](https://netlimiter.com/docs/basic-concepts/blocker), [Rules](https://netlimiter.com/docs/basic-concepts/rules), [Filters](https://netlimiter.com/docs/basic-concepts/filters), [Limits](https://netlimiter.com/docs/basic-concepts/limits), [Priorities](https://netlimiter.com/docs/basic-concepts/priorities), [Quotas](https://netlimiter.com/docs/basic-concepts/quotas), [Scheduler](https://netlimiter.com/docs/basic-concepts/scheduler).
+- [Connection Log](https://netlimiter.com/docs/user-gui-client/child-windows/connection-log), [Connection History](https://netlimiter.com/docs/user-gui-client/child-windows/connection-history), [Statistics](https://netlimiter.com/docs/stats), [Pending connections / Ask](https://netlimiter.com/docs/user-gui-client/pending-connections).
+
+Documentation informs only the rows labeled Docs; it is not substituted for direct GUI observation.
