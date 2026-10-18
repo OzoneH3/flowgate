@@ -17,3 +17,7 @@ test('only observed supported display choices accepted', () => {
   assert(DISPLAY_UNITS.every(isDisplayUnit));
   for (const v of ['tcp', 'udp', 'Ask', '', null, {}, 1]) assert.equal(isDisplayUnit(v), false);
 });
+test('fixed display units do not round a positive tiny rate to a false zero',()=>{
+ assert.equal(displayAmount(1,true,'Mbit'),'0.000008 Mbit/s');
+ assert.equal(displayAmount(1,false,'GB'),'0.000000001 GB');
+});

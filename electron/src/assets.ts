@@ -3,6 +3,8 @@ const assets: Record<string, string> = {
   'index.html': 'text/html',
   'style.css': 'text/css',
   'renderer.js': 'text/javascript',
+  'pane.html': 'text/html',
+  'pane.js': 'text/javascript',
   'fonts/selawk.ttf': 'font/ttf',
   'fonts/selawksb.ttf': 'font/ttf',
   'fonts/selawkb.ttf': 'font/ttf',

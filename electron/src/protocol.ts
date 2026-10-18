@@ -211,6 +211,15 @@ export interface Decision {
   scope: Scope;
 }
 export interface Bridge {
+  paneSnapshot(): Promise<import('./pane-model').PaneFrame>;
+  paneUpdate(value: import('./pane-model').PresentationPatch): Promise<void>;
+  paneControl(
+    kind: import('./pane-model').PaneKind,
+    action: 'undock' | 'dock' | 'close' | 'open',
+  ): Promise<void>;
+  paneRule(action: import('./pane-model').PaneRuleAction): Promise<void>;
+  onPaneFrame(fn: (frame: import('./pane-model').PaneFrame) => void): () => void;
+  onPaneRule(fn: (action: import('./pane-model').PaneRuleAction) => void): () => void;
   applicationIcons(keys: string[]): Promise<Record<string, string | null>>;
   graph(value: { id: string; seconds: number }): Promise<import('./history').GraphView>;
   snapshot(): Promise<ClientState>;

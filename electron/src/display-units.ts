@@ -34,8 +34,10 @@ export function displayAmount(
     power = labels.indexOf(unit);
     n /= 1000 ** Math.max(0, power);
   }
+  const digits =
+    n > 0 && n < 0.01 ? Math.min(12, Math.ceil(-Math.log10(n)) + 1) : power === 0 && !rate ? 0 : 2;
   return `${n
-    .toFixed(power === 0 && !rate ? 0 : 2)
-    .replace(/\.00$/, '')
-    .replace(/(\.\d)0$/, '$1')} ${labels[power]}${rate ? '/s' : ''}`;
+    .toFixed(digits)
+    .replace(/(\.\d*?[1-9])0+$/, '$1')
+    .replace(/\.0+$/, '')} ${labels[power]}${rate ? '/s' : ''}`;
 }

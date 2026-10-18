@@ -12,6 +12,14 @@ export interface Row {
   displayApplication?: Application;
   socket?: SocketRow;
 }
+// Observation status only: a listening/bound socket is not a connected peer.
+export function hasObservedConnection(row: Row): boolean {
+  return row.rows.some((r) =>
+    r.socket.protocol === 'tcp'
+      ? r.socket.state === 1
+      : r.socket.protocol === 'udp' &&  /:[1-9]\d*$/.test(r.socket.remote),
+  );
+}
 export interface Sum {
   value?: number;
   partial: boolean;

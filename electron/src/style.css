@@ -1331,3 +1331,45 @@ body.preset-status #tree { width: 100%; }
 .graph-values > span { white-space: nowrap; }
 #trafficCanvas:focus-visible { outline: 1px solid var(--fg-selected); outline-offset: -1px; }
 @media (max-width: 1000px) { .toolbar { gap: 5px; } .toolbar #observerStatus { display: none; } .toolbar .brand { margin-right: 0; font-size: 13px; } .toolbar-units select { width: 82px; } }
+
+/* Independent Info View and Traffic Chart docking; one sidebar can hold either. */
+body.hide-info:not(.hide-sidebar) #activityView > aside { display:flex; }
+body.hide-info:not(.hide-sidebar) #activityView > aside > :not(#trafficGraph):not(.sidebar-grip) { display:none; }
+body.hide-info:not(.hide-sidebar) #activityView #trafficGraph { display:block; flex:1; height:auto; }
+body.hide-info:not(.hide-sidebar) #trafficCanvas { height:calc(100% - 86px); min-height:64px; }
+body.hide-sidebar #activityView > aside { display:none; }
+.floating-rule-status { position:fixed; z-index:45; top:110px; right:24px; width:min(450px,calc(100vw - 48px)); max-height:calc(100vh - 140px); overflow:auto; padding:8px; background:var(--fg-content); border:1px solid var(--fg-border); box-shadow:0 4px 16px #0009; }
+.floating-rule-status > header { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+.floating-rule-status #infoRules { min-height:180px; }
+.detached-pane #app { height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+.detached-heading { height:30px; min-height:30px; display:flex; align-items:center; background:var(--fg-section); border-bottom:1px solid var(--fg-border); padding:0 5px; }
+.detached-heading h2 { flex:1; margin:0; padding:3px; font-size:12px; font-weight:400; }
+.detached-heading button { border:0; background:transparent; padding:0 8px; min-height:23px; }
+.pane-presentation { display:flex; gap:12px; padding:4px 8px; border-bottom:1px solid var(--fg-border); }
+.pane-presentation select { min-height:22px; height:22px; }
+#paneMessage { margin:0 8px; font-size:11px; color:var(--fg-muted); }
+#paneMessage:empty { display:none; }
+#paneContent { flex:1; min-height:0; overflow:hidden; position:relative; display:flex; flex-direction:column; }
+#paneContent > #selectedName { margin:8px; color:var(--fg-selected); font-size:14px; font-weight:400; }
+#paneContent #selectedName img { vertical-align:middle; margin-right:5px; }
+#paneContent #selectedExecutable { padding:0 8px 8px; overflow-wrap:anywhere; }
+#paneContent .info-scroll { flex:1; overflow:auto; padding:0 8px; }
+#paneContent #info { display:grid; grid-template-columns:minmax(80px,30%) 1fr; padding:8px; border:1px solid var(--fg-border); margin:4px 0 8px; }
+#paneContent #info dt { font-weight:600; }
+#paneContent #info dd { margin:0 0 6px; overflow-wrap:anywhere; white-space:pre-wrap; }
+.pane-action-hint { margin:4px 8px; font-size:11px; color:var(--fg-muted); }
+.detached-pane #trafficCanvas { height:auto; flex:1; min-height:80px; }
+.detached-pane .graph-heading { display:none; }
+.detached-pane .graph-pause { top:30px; }
+.detached-pane .graph-sample { bottom:80px; }
+.graph-values button { padding:0; background:transparent; border:0; min-height:14px; font-size:inherit; }
+.graph-values button:hover { text-decoration:underline; background:transparent; }
+.graph-values button.series-hidden { opacity:.45; text-decoration:line-through; }
+.graph-live { position:absolute; right:8px; top:77px; width:22px; height:22px; min-height:22px; padding:0; border:0; border-radius:50%; background:var(--fg-selected); color:#fff; line-height:22px; }
+.graph-live:disabled { opacity:.45; color:#fff; }
+.graph-sample > div { display:flex; gap:4px; margin-top:6px; }
+.graph-sample button { min-height:22px; padding:0 10px; }
+.detached-pane .graph-live { top:59px; }
+#paneContent .info-scroll > .info-section-title { color:var(--fg-text); }
+#paneContent #info dt { color:var(--fg-text); }
+#paneContent #info > .info-technical { grid-column:1 / -1; margin-top:6px; }
