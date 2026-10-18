@@ -55,7 +55,7 @@ Run: `scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock`.
 | --- | --- | --- |
 | Slow popups | Fixed poll-bound readiness delay; shell renders from selected snapshot first, actions disabled during one coalesced read refresh. | Existing policy request is joined, then Activity is read after it; no new poll loop. Eight same-host automation samples: baseline shell median14.7/max18.6ms, ready median16.7/max438.4ms; fixed shell15.7/max25.9ms, ready43.4/max71.3ms. Warm readiness includes a new validation cost; these are samples, not guaranteed bounds. |
 | Too much text | Partially fixed. Removed repeated stopped-firewall text; tightened popup rows and duplicate labels; technical identity remains collapsed. | Required target, direction, network/principal and consequential failures remain visible. The setter accommodates the displayed scopes. |
-| Icons/mouseover | Corrected original 12px vector family glyphs, palm/check distinction, hover/pressed/focus treatment and 16px installed app icons. | Unsupported families remain inactive. |
+| Icons/mouseover | Corrected original 12px vector family glyphs, Blocker check glyphs, hover/pressed/focus treatment and 16px installed app icons. | Unsupported families remain inactive. |
 | Proportions | Default Info45.5vw vs old38vw. | Saved pixel widths preserved; normal1280×656 and860×600 checked. Reference currently has chart closed; FlowGate's chart remains independently closeable. |
 | Missing program icons | Reliable installed desktop display associations restored, including deleted/replaced image paths. | Host audit3/14 distinct observed application identities: Firefox, KRdp, KDE Connect resolved. Eleven services/runtimes had no reliable association; neutral fallbacks retained. Actual PNG loading checked in normal and detached Info. |
 | “firefox (deleted)” | Friendly desktop name Firefox and clean display path; deleted-image status moved into identity details. | key/revision/executable and process binding unchanged. Icon/name describe installed desktop metadata, not proof the old running image is the replacement. |
@@ -76,3 +76,5 @@ Focused build/tests include zone principal/revision/expiry/receipt/permission fa
 lost-ACK reconciliation without replay, strict schema4 and exact inventory association;
 labelled synthetic failure/event evidence is separate from kernel proof. Popup/pane
 regression is `electron/test/rule-clicks-workflow.mjs` (zero mutation calls).
+
+Correction: the hand in the hover capture was the pointer cursor, not the In Blocker artwork. The inferred palm glyph was removed; both unset Blocker slots retain the existing check glyph. The obscured screenshot does not establish a distinct underlying In icon.
