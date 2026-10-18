@@ -1,5 +1,14 @@
 # Integrated desktop and non-enforcing root monitor
 
+## Current integration: Activity Rule Status (UI 897cd43)
+
+Released UI 897cd43f937998bb2b9ff4a810cf628caf19b36b fast-forwarded onto 99b13fc;
+electron-only, pairs with the deployed backend 60d35a3 (no backend change). Reused
+UI exact-release real isolated journey; new build/typecheck + 76/76 unit; read-only
+host check and normal launcher run passed with host runtime unchanged. Full scope,
+evidence paths and remaining differences: [HANDOFF.md](HANDOFF.md) and
+`electron/RULE-STATUS.md`.
+
 ## Deployed: process-instance rules monitor upgrade (2026-10-18)
 
 Running source **60d35a366ae0104f9131f36916ff4172ef71ce71** (exact-release

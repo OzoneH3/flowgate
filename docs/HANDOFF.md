@@ -1,5 +1,35 @@
 # Continuation handoff
 
+## Current integration: Activity Rule Status quick-set (UI 897cd43)
+
+Released UI **897cd43f937998bb2b9ff4a810cf628caf19b36b** (UI2 c772f7c2, parent 99b13fc)
+fast-forwarded; electron-only, no backend/API change. Cells show glyph+action+scope;
+process rows show own rules or dimmed backend `application_*` fallback; inline
+setter: Allow/Block click runs the existing preview, inline "Draft · not saved"
+review, explicit Save; one applicable rule edits that exact id/version, several
+require a pick; expired token needs "Review again"; duplicates/errors shown
+verbatim. Contract, discrepancies and remaining gaps: `electron/RULE-STATUS.md`.
+
+Reused UI exact-release evidence (backend 60d35a3 isolated fixtures rsf-c772/c773,
+both cleaned): real `rule-status-workflow.mjs` process CRUD/exit journey, synthetic
+presentation runners. New here: main-checkout build/typecheck and 76/76 unit tests
+(`.workspace/rulestatus-integration.log`). No combined smoke: integrated tree equals
+the released tree. Host read-only check (`.workspace/rulestatus-host/`): sandboxed
+Wayland UID1000 with the launcher's exact arguments; app/process/connection
+selection drives Rule Status, process tier + app fallback rendered, existing host
+sockets explicitly Unknown/Listening/Unconnected, a stalled local loopback SYN shows
+known Outgoing (→). Fast loopback handshakes stay Unknown by design (not sampled).
+Normal `scripts/run-electron.sh --daemon …` rendered sandboxed Wayland and exited0.
+No host rules, previews, collector, evaluation or daemon actions. After: same PID
+2847094/generation/collector ac3056b3…, enforcement stopped, rules0.
+
+Remaining: inline panel vs NetLimiter floating popup; deliberate review step;
+target rows vs NetLimiter rule-family rows; Info View order/Tools; fonts/icons;
+no stored Ask/weights/limits/quotas; host direction known only for sampled handshakes.
+Older runners activity-rules/creation/policy/process-rules-workflow.mjs still use the
+removed setter selectors and need updating before reuse. UI2 round 2 (NetLimiter
+popup composition) is in progress separately; integration owner: backend 01a145f0.
+
 ## Deployed: process-instance rules on the host monitor
 
 Root monitor now runs exact-release **60d35a3** (SHA256 `882556c5…ebd05`), PID
