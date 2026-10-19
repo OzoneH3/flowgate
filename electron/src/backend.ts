@@ -5,6 +5,8 @@ import {
   parseDecisionPreview,
   agreesWithDecision,
   sameRememberedRule,
+  terminalReviewFailure,
+  type DecisionReviewFailure,
   type DecisionPreview,
 } from './decision-remember';
 import { POLICY_CAPABILITY } from './policy';
@@ -18,6 +20,7 @@ import {
   type ClientState,
   type Decision,
   type Attempt,
+  type RequestEvent,
 } from './protocol';
 export function call(path: string, request: object, timeoutMs = 3500): Promise<Reply> {
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 20000)
@@ -77,6 +80,9 @@ export class Backend {
   private reply?: Reply;
   private received = 0;
   private attempts = new Map<string, Attempt>();
+  private reviewFailures = new Map<string, {
+    generation: string; event: RequestEvent; failure: DecisionReviewFailure; until: number;
+  }>();
   private busy = { observer: false, control: false };
   private timers: NodeJS.Timeout[] = [];
   private stopped = false;
@@ -111,6 +117,12 @@ export class Backend {
       : Date.now();
   }
   view(): ClientState {
+    for (const [id, failure] of this.reviewFailures)
+      if (failure.generation !== this.state.control.generation || this.now() >= failure.until)
+        this.reviewFailures.delete(id);
+    const events = [...(this.reply?.events ?? [])];
+    for (const [id, failure] of this.reviewFailures)
+      if (!events.some(e => e.id === id)) events.push(failure.event);
     return {
       ...this.state,
       publication: this.publication,
@@ -122,10 +134,11 @@ export class Backend {
           Date.parse(this.state.control.policy.snapshot.valid_until) <= this.now()
             ? undefined
             : this.state.control.policy,
-        events: (this.reply?.events ?? []).map((e) => ({
+        events: events.map((e) => ({
           ...e,
           remainingMs: Math.max(0, Date.parse(e.deadline) - this.now()),
           attempt: this.attempts.get(e.id),
+          reviewFailure: this.reviewFailures.get(e.id)?.failure,
         })),
       },
     };
@@ -299,6 +312,7 @@ export class Backend {
         throw Error(r.error || 'Not a firewall controller');
       if (this.reply?.generation !== r.generation) {
         this.attempts.clear();
+        this.reviewFailures.clear();
         this.decisionPreviews.clear();
         this.policySequence = -1n;
       }
@@ -476,6 +490,7 @@ export class Backend {
       !canDecide(c) ||
       c.generation !== d.generation ||
       !e ||
+      this.reviewFailures.has(d.id) ||
       e.state !== 'awaiting-decision' ||
       Date.parse(e.deadline) <= this.now() ||
       !e.scope_previews[d.scope]
@@ -511,7 +526,21 @@ export class Backend {
       else if (!v.sent && JSON.stringify(v.choice) === key) return v.preview;
     }
     const r = await call(this.controller!, { operation: 'decision-preview', ...d });
-    if (r.error) throw Error(r.error);
+    if (r.error) {
+      const failure = terminalReviewFailure(r.error_code, r.error);
+      if (failure && r.generation === d.generation && this.state.control.generation === d.generation) {
+        // Retain the original details for a bounded, explicitly non-actionable
+        // future-rule workflow; never bind this refusal to a newer connection.
+        if (this.reviewFailures.size >= 64 && !this.reviewFailures.has(d.id))
+          this.reviewFailures.delete(this.reviewFailures.keys().next().value!);
+        this.reviewFailures.set(d.id, { generation: d.generation, event: e, failure, until: this.now() + 300000 });
+        for (const [token, held] of this.decisionPreviews)
+          if (!held.sent && held.choice.generation === d.generation && held.choice.id === d.id)
+            this.decisionPreviews.delete(token);
+        this.emit();
+      }
+      throw Error(r.error);
+    }
     if (r.generation !== d.generation) throw Error('Daemon generation changed');
     const p = agreesWithDecision(
       parseDecisionPreview(r.decision_preview),
@@ -593,6 +622,7 @@ export class Backend {
       !canDecide(c) ||
       c.generation !== d.generation ||
       !e ||
+      this.reviewFailures.has(d.id) ||
       e.state !== 'awaiting-decision' ||
       Date.parse(e.deadline) <= this.now() ||
       !e.scope_previews[d.scope] ||
