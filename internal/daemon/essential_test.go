@@ -61,6 +61,13 @@ func TestEssentialAPIAtomicReplayStaleRemove(t *testing.T) {
 	if saved.Error != "" || len(saved.EssentialReceipt.Rules) != 2 {
 		t.Fatalf("save %+v", saved)
 	}
+	manager := a.e.Essential
+	a.e.Essential = nil
+	inventory := call("list", "")
+	if !strings.Contains(strings.Join(inventory.Capabilities, ","), EssentialCapability) {
+		t.Fatal("schema5 inventory omitted capability")
+	}
+	a.e.Essential = manager
 	replay := call("essential-apply", p.EssentialPreview.Token)
 	if replay.Error != "" || !replay.Replayed {
 		t.Fatal("replay", replay)

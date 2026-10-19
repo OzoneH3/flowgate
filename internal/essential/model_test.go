@@ -155,3 +155,80 @@ func TestStableOrderingAndRevisionRejection(t *testing.T) {
 		t.Fatal("new native executable revision inherited permission")
 	}
 }
+
+func TestEncryptedDNSDoesNotGrantPlaintextWhenRequired(t *testing.T) {
+	p, _ := identity.Inspect(os.Getpid())
+	env := Default()
+	env.Inspect = func(_ int) (identity.Process, error) {
+		q := p
+		q.Cgroup = "0::/system.slice/systemd-resolved.service"
+		return q, nil
+	}
+	env.Sockets = func() ([]identity.Socket, error) { return nil, nil }
+	env.Run = func(_ context.Context, name string, args ...string) ([]byte, error) {
+		if name == "systemctl" {
+			if args[1] == "systemd-resolved.service" {
+				return []byte("MainPID=" + strconv.Itoa(p.PID) + "\nActiveState=active"), nil
+			}
+			return []byte("MainPID=0\nActiveState=inactive"), nil
+		}
+		if name == "resolvectl" {
+			return []byte(`[{"dnsOverTLS":"yes","servers":[{"addressString":"192.0.2.53","port":53}]}]`), nil
+		}
+		return nil, nil
+	}
+	s := Discover(context.Background(), env)
+	rules, _, err := s.Rules(Options{}, time.Now())
+	if err != nil || len(rules) != 1 || rules[0].Filter.Protocol != "tcp" || rules[0].Filter.RemotePort != 853 {
+		t.Fatal("TLS-only scope broadened", rules, err)
+	}
+}
+
+func TestExplicitUserPolicyOverridesPreset(t *testing.T) {
+	p, _ := identity.Inspect(os.Getpid())
+	s := Snapshot{Collected: time.Now(), NTP: []string{"192.0.2.123"}, Components: []Component{{ID: "time", State: "ready", Service: &p}}}
+	s.Seal()
+	rules, _, err := s.Rules(Options{}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	user := rules[0]
+	user.Preset = nil
+	user.Schema = 2
+	user.ID = "user:explicit"
+	user.Action = "block"
+	f, _ := identity.ParseFlow("udp", "outgoing", "192.0.2.1:40000", "192.0.2.123:123")
+	a := identity.Attribution{Application: &p.Application, Owners: []identity.Process{p}}
+	for _, priority := range []int{100, 0, -1000} {
+		user.Priority = priority
+		action, id, _ := policy.Evaluate(append(rules, user), f, a, time.Now())
+		if action != "block" || id != user.ID {
+			t.Fatalf("user override lost at priority%d: %s %s", priority, action, id)
+		}
+	}
+}
+
+func TestInterfaceIndexReuseDoesNotDuplicateNamedPolicy(t *testing.T) {
+	p, _ := identity.Inspect(os.Getpid())
+	s := Snapshot{Collected: time.Now(), DNS: []DNS{{"192.0.2.53", 53, 2, "test0", false}}, Components: []Component{{ID: "dns", State: "ready", Service: &p}}}
+	s.Seal()
+	first, _, err := s.Rules(Options{}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rev := s.Component("dns").Revision
+	s.DNS[0].Interface = 9
+	s.Seal()
+	second, _, err := s.Rules(Options{}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rev != s.Component("dns").Revision || len(first) != len(second) {
+		t.Fatal("numeric index changed named policy")
+	}
+	for i := range first {
+		if first[i].ID != second[i].ID {
+			t.Fatal("duplicate ID after ifindex change")
+		}
+	}
+}

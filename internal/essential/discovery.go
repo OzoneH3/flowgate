@@ -53,7 +53,13 @@ func service(ctx context.Context, env Environment, unit, id, title string, essen
 		c.Details = append(c.Details, "Live native executable identity unavailable/unsupported; root observer required")
 		return c
 	}
-	if !strings.Contains(p.Cgroup, "/"+unit) {
+	unitBound := false
+	for _, part := range strings.Split(strings.TrimSpace(p.Cgroup), "/") {
+		if part == unit {
+			unitBound = true
+		}
+	}
+	if !unitBound {
 		c.Details = append(c.Details, "Unit/process cgroup binding not verified")
 		return c
 	}
@@ -92,6 +98,13 @@ func Discover(ctx context.Context, env Environment) Snapshot {
 				port := d.Port
 				if port == 0 {
 					port = 53
+				}
+				if link.TLS == "yes" {
+					if port == 53 {
+						port = 853
+					}
+					s.DNS = append(s.DNS, DNS{ip.Unmap().String(), port, link.Ifindex, link.Ifname, true})
+					continue
 				}
 				s.DNS = append(s.DNS, DNS{ip.Unmap().String(), port, link.Ifindex, link.Ifname, false})
 				if tls {
@@ -150,6 +163,10 @@ func Discover(ctx context.Context, env Environment) Snapshot {
 	stub := dns
 	stub.ID = "dns-stub-client"
 	stub.Title = "Local applications to verified DNS stub"
+	if len(s.Stubs) == 0 {
+		stub.State = "unavailable"
+		stub.Details = append(stub.Details, "No verified active loopback DNS stub listener; no client rule generated")
+	}
 	stub.Details = append(append([]string{}, dns.Details...), "All identified programs, only exact observed loopback stubs TCP/UDP53; peer executable verified at decision time; not general loopback access")
 	s.Components = append(s.Components, stub)
 	nm := Component{ID: "dhcp", Title: "Interface-scoped DHCP bootstrap", Essential: true, State: "unavailable", Details: []string{}}

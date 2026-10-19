@@ -9,6 +9,9 @@ import (
 )
 
 func canonicalFilter(f policy.Filter) policy.Filter {
+	if f.InterfaceName != "" {
+		f.InterfaceIndex = 0
+	}
 	if f.Remote != "" {
 		if ep, err := netip.ParseAddrPort(f.Remote); err == nil {
 			f.RemoteAddress = ep.Addr().Unmap().String()

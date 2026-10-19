@@ -179,7 +179,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						r.Capabilities = append(r.Capabilities, EvaluationCapability)
 
 					}
-					if e.Essential != nil {
+					if e.Essential != nil || e.hasPresetRules() {
 						r.Capabilities = append(r.Capabilities, EssentialCapability)
 					}
 					if e.Protection != nil {

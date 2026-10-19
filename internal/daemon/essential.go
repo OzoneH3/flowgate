@@ -336,3 +336,14 @@ func (e *Engine) ApprovedBootstrap() []policy.BootstrapInterface {
 	defer e.mu.Unlock()
 	return policy.BootstrapFrom(e.rules, e.Now())
 }
+
+func (e *Engine) hasPresetRules() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, r := range e.rules {
+		if r.Schema == 5 {
+			return true
+		}
+	}
+	return false
+}

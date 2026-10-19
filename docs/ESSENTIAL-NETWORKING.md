@@ -92,10 +92,16 @@ Rules use schema5 with original application/UID/revision/direction/protocol/peer
 restrictions, plus `preset:{name,component,entry_id,revision,digest}` and explicit
 `interface_name`, resolved `interface_index`, `local_address`, `peer_service` where
 needed. Schema5 All-program rules have no fabricated application and require
-administrator authority. Older readers reject unsupported schema5; do not downgrade
+administrator authority. The capability remains advertised while schema5 inventory exists, even if discovery
+is unavailable, so compatible readers can inspect preserved records. Older readers
+reject unsupported schema5; do not downgrade
 by deleting records. Generic legacy editors cannot strip metadata or widen scope.
 Normal rule views expose component/target state and exact conditional Delete.
 
+Preset priority is -1000; ordinary user application/process rules retain precedence.
+At the same tier and priority, explicit user records win over presets, then existing
+ID ordering applies. Application rules still outrank zone-wide rules as documented;
+creating an essential application permission does not change that tier model.
 Deterministic reserved IDs avoid duplicate apply. Whole inventory and component
 revision are frozen in previews. Exact equivalents/user overrides are preserved;
 disabled/edited owned records are disclosed and excluded from preset removal.
@@ -141,7 +147,8 @@ New evidence under repository `.workspace/`:
 - `essential-dhcp-final.log`: real disposable veth peer; DHCPv4 unicast/broadcast
   and DHCPv6 link-local/multicast request/reply under guard and active rules;
   unapproved lo interface has a real receiver with zero deliveries. No host renewal.
-  It tests UDP protocol bootstrap, not every raw AF_PACKET client implementation.
+  It tests UDP protocol bootstrap, not every raw AF_PACKET client implementation;
+  global-address DHCPv6 relays are outside the selected link-local server scope.
 - `essential-api-cwd-fixed.log`: real Unix API/storage authority, atomic apply,
   receipt replay/read, idempotent duplicates, config-stale rejection, user-edited
   removal preservation, generation conflict, expiry/options/inventory conflicts.

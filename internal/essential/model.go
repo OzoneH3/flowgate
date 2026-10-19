@@ -127,11 +127,15 @@ func (s Snapshot) Rules(o Options, now time.Time) ([]policy.Rule, []string, erro
 		if c == nil || c.State != "ready" {
 			return
 		}
-		r := policy.Rule{Schema: 5, Version: 1, Created: now.UTC(), Priority: 100, Action: "allow", Filter: f, Preset: &policy.Preset{Name: Name, Component: component, Revision: c.Revision}}
+		r := policy.Rule{Schema: 5, Version: 1, Created: now.UTC(), Priority: -1000, Action: "allow", Filter: f, Preset: &policy.Preset{Name: Name, Component: component, Revision: c.Revision}}
 		if !f.AllPrograms {
 			r.Executable = c.Service.Executable
 		}
-		r.Preset.EntryID = Hash([]any{component, f})
+		target := f
+		if target.InterfaceName != "" {
+			target.InterfaceIndex = 0
+		}
+		r.Preset.EntryID = Hash([]any{component, target})
 		r.ID = "preset:" + r.Preset.EntryID[:40]
 		r.Preset.Digest = policy.PresetDigest(r)
 		rules = append(rules, r)

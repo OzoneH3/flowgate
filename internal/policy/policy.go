@@ -169,6 +169,10 @@ func EvaluateSession(rules []Rule, f identity.Flow, a identity.Attribution, now 
 		if matches[i].Priority != matches[j].Priority {
 			return matches[i].Priority > matches[j].Priority
 		}
+		// At equal tier/priority, an explicit user policy overrides a preset.
+		if (matches[i].Preset == nil) != (matches[j].Preset == nil) {
+			return matches[i].Preset == nil
+		}
 		return matches[i].ID < matches[j].ID
 	})
 	var ids []string
