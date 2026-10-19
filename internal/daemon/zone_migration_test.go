@@ -117,3 +117,16 @@ func TestAutomaticRevisionPreservesPendingAndFencesRemember(t *testing.T) {
 		t.Fatal("stale preview saved permission")
 	}
 }
+
+func TestMigrationNormalizesLegacyAnyWithoutChangingMeaning(t *testing.T) {
+	e, r, z := migrationFixture(t)
+	e.rules[0].Filter.RemoteAddress = ""
+	p, err := e.PreviewZoneMigration(e.Generation, r.ID, &r.Version, z.Revision, 1000, false)
+	if err != nil || p.Rule.Filter.RemoteAddress != "*" {
+		t.Fatal(p, err)
+	}
+	saved, _, _, err := e.SaveZoneMigration(e.Generation, r.ID, &r.Version, z.Revision, p.Token, 1000, false)
+	if err != nil || saved.ID != r.ID || saved.Filter.RemoteAddress != "*" {
+		t.Fatal(saved, err)
+	}
+}

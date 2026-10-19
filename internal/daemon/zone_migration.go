@@ -83,6 +83,9 @@ func (e *Engine) PreviewZoneMigration(generation, id string, expected *uint64, r
 		return fail("target_inactive", "Process target ended; do not migrate an active permission")
 	}
 	candidate := *old
+	// Stored legacy empty peer constraints mean Any; make that meaning explicit
+	// before strict creation review without broadening the old predicate.
+	candidate.Filter = canonicalFilter(candidate.Filter)
 	candidate.Schema = 6
 	candidate.Version++
 	candidate.Filter.ZoneModel = identity.AutomaticZoneModel
