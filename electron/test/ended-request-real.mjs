@@ -113,6 +113,13 @@ try {
     ],
     env: { ...process.env, TMPDIR: root + '/.workspace/tmp', XDG_CACHE_HOME: run + '/cache' },
   });
+  // Main-process IPC refusals are invisible to the page; a stale transition
+  // ("Permission presentation is transitioning") must never block a click.
+  app.process().stderr?.on('data', (b) => {
+    for (const line of String(b).split('\n'))
+      if (/presentation is transitioning|Error occurred in handler for 'request-rule/.test(line))
+        evidence.main_refusals = [...(evidence.main_refusals ?? []), line.slice(0, 300)];
+  });
   main = await app.firstWindow();
   main.on('pageerror', (e) => evidence.errors.push(String(e)));
   app.on('window', (w) => w.on('pageerror', (e) => evidence.errors.push(String(e))));
@@ -297,6 +304,8 @@ try {
   step(
     `Save application rule stored ${rule.id}: application-wide Allow (TCP+UDP, any address/port, all zones)`,
   );
+  if ((evidence.main_refusals ?? []).some((l) => /transitioning/.test(l)))
+    finding('Save refused as transitioning by the main process: ' + evidence.main_refusals.join(' | '));
 
   // 6. Ended request still not approved.
   const ended = (await list()).events.find((e) => e.id === requestId);

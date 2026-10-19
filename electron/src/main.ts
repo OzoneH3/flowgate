@@ -187,7 +187,16 @@ function automaticDecision() {
   if (prompt && !prompt.isDestroyed() && !promptIdle) {
     const ref = promptRefs.get(prompt.webContents.id),
       next = ref && automaticPrompts.follow(view, ref);
-    if (!promptDismissed && next?.id === ref?.id) return;
+    if (!promptDismissed && next?.id === ref?.id) {
+      // The same card stays (for example a request that just ended and is now
+      // retained): cancel a transition paced while it was briefly unfollowed,
+      // otherwise its actions stay refused as "transitioning" indefinitely.
+      if (transitionUntil) {
+        transitionUntil = 0;
+        clearTimeout(transitionTimer);
+      }
+      return;
+    }
     if (!transitionUntil) pacePrompt();
     if (
       Date.now() < transitionUntil ||
