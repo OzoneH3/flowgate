@@ -1461,5 +1461,6 @@ body.hide-sidebar #activityView > aside { display:none; }
 
 /* Natural content is measured for native sizing; scroll only at the work-area cap. */
 .prompt-shell > .prompt-heading, .prompt-shell > footer, .prompt-shell > #feedback { flex-shrink:0; }
-#promptBody .decision-controls { position:sticky; bottom:0; background:#222; z-index:2; padding:6px 0; }
+#promptBody .decision-controls { position:sticky; bottom:0; background:#222; z-index:2; padding:3px 0; }
 #promptBody .connection-fields dd, #promptBody .remote-endpoint { overflow-wrap:anywhere; }
+#promptBody .similar-requests { margin-top:2px; margin-bottom:2px; }

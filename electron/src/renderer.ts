@@ -469,6 +469,7 @@ const scopeLabels: Record<Scope, string> = {
 };
 let promptStableAt = performance.now() + 650;
 let pointerDown = false;
+const promptKeysDown = new Set<string>();
 let promptLayoutReady = false;
 let layoutFrame = 0;
 let lastPromptLayout = '';
@@ -485,10 +486,11 @@ function measurePrompt() {
       body.offsetHeight +
       $('requestDetails').getBoundingClientRect().height +
       16;
-    const signature = Math.ceil(height) + ':' + pointerDown;
+    const keysDown = [...promptKeysDown].sort();
+    const signature = Math.ceil(height) + ':' + pointerDown + ':' + keysDown.join(',');
     if (signature === lastPromptLayout) return;
     lastPromptLayout = signature;
-    void window.flowgate.promptLayout({ height, pointerDown }).then(() => {
+    void window.flowgate.promptLayout({ height, pointerDown, keysDown }).then(() => {
       if (!promptLayoutReady) {
         promptLayoutReady = true;
         promptStableAt = performance.now() + 650;
@@ -500,10 +502,22 @@ function measurePrompt() {
   });
 }
 if (promptID) {
+  document.addEventListener(
+    'keyup',
+    (event) => {
+      promptKeysDown.delete(event.key);
+      measurePrompt();
+    },
+    true,
+  );
   // Repeated keys and the second click of a double-click never activate a new card.
   document.addEventListener(
     'keydown',
     (event) => {
+      if (['Enter', ' ', 'Escape'].includes(event.key)) {
+        promptKeysDown.add(event.key);
+        measurePrompt();
+      }
       if (
         ['Enter', ' '].includes(event.key) &&
         (event.repeat || performance.now() < promptStableAt)
