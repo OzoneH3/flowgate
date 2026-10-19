@@ -98,9 +98,10 @@ func main() {
 	scan := bufio.NewScanner(os.Stdin)
 	for scan.Scan() {
 		var q struct {
-			Op       string `json:"op"`
-			Protocol string `json:"protocol"`
-			V6       bool   `json:"v6"`
+			Op        string `json:"op"`
+			TimeoutMS int    `json:"timeout_ms"`
+			Protocol  string `json:"protocol"`
+			V6        bool   `json:"v6"`
 			// Optional explicit destination inside the private fixture prefixes.
 			Host string `json:"host"`
 			Port int    `json:"port"`
@@ -159,15 +160,22 @@ func main() {
 			if net.ParseIP(host) == nil {
 				panic("invalid fixture peer")
 			}
+			sendTimeout := timeout
+			if q.TimeoutMS != 0 {
+				if q.TimeoutMS < 100 || q.TimeoutMS > 60000 {
+					panic("fixture timeout_ms must be 100..60000")
+				}
+				sendTimeout = time.Duration(q.TimeoutMS) * time.Millisecond
+			}
 			jobs.Add(1)
 			go func() {
 				defer jobs.Done()
-				c, e := net.DialTimeout(key, net.JoinHostPort(host, strconv.Itoa(port)), timeout)
+				c, e := net.DialTimeout(key, net.JoinHostPort(host, strconv.Itoa(port)), sendTimeout)
 				if e != nil {
 					return
 				}
 				defer c.Close()
-				c.SetDeadline(time.Now().Add(timeout))
+				c.SetDeadline(time.Now().Add(sendTimeout))
 				c.Write([]byte("process-fixture"))
 				c.Read(make([]byte, 128))
 			}()
