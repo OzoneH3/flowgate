@@ -343,7 +343,7 @@ export interface Bridge {
     preview_token: string;
   }): Promise<Attempt>;
   openPrompt(id: string): Promise<void>;
-  promptLayout(value: { height: number; pointerDown: boolean }): Promise<void>;
+  promptLayout(value: { height: number; pointerDown: boolean; keysDown: string[] }): Promise<void>;
   dismissPrompt(): Promise<void>;
   decisionLog(): Promise<DecisionLogState>;
   decisionLogVisible(visible: boolean): Promise<void>;

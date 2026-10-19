@@ -113,6 +113,7 @@ const TRANSITION_MS = 650;
 let transitionUntil = 0;
 let transitionTimer: ReturnType<typeof setTimeout> | undefined;
 const pressedPromptKeys = new Set<string>();
+const rendererPromptKeys = new Set<string>();
 let promptPointerDown = false;
 let promptDismissed = false;
 let promptIdle = false;
@@ -120,6 +121,7 @@ let promptKDEReady = false;
 const promptReadyAt = new Map<number, number>();
 const promptPlacement = new Map<number, Promise<void>>();
 const promptLayouts = new Map<number, Promise<void>>();
+const promptContentHeights = new Map<number, number>();
 function pacePrompt() {
   transitionUntil = Date.now() + TRANSITION_MS;
   clearTimeout(transitionTimer);
@@ -141,6 +143,7 @@ function retarget(ref: RequestRef) {
     return;
   }
   promptRefs.set(w.webContents.id, ref);
+  promptContentHeights.delete(w.webContents.id);
   promptReadyAt.set(w.webContents.id, Date.now() + TRANSITION_MS);
   const compact = edgePosition(screen.getPrimaryDisplay().workArea, 520, 460);
   w.setBounds(compact);
@@ -184,7 +187,13 @@ function automaticDecision() {
       next = ref && automaticPrompts.follow(view, ref);
     if (!promptDismissed && next?.id === ref?.id) return;
     if (!transitionUntil) pacePrompt();
-    if (Date.now() < transitionUntil || pressedPromptKeys.size || promptPointerDown) return;
+    if (
+      Date.now() < transitionUntil ||
+      pressedPromptKeys.size ||
+      rendererPromptKeys.size ||
+      promptPointerDown
+    )
+      return;
     transitionUntil = 0;
     if (promptDismissed || !next) {
       promptIdle = true;
@@ -197,7 +206,13 @@ function automaticDecision() {
     return;
   }
   const next = automaticPrompts.next(view, false);
-  if (Date.now() < transitionUntil || pressedPromptKeys.size || promptPointerDown) return;
+  if (
+    Date.now() < transitionUntil ||
+    pressedPromptKeys.size ||
+    rendererPromptKeys.size ||
+    promptPointerDown
+  )
+    return;
   transitionUntil = 0;
   if (next && view.control.events.some((e) => e.id === next.id && e.remainingMs > 1000))
     openDecision(next);
@@ -411,8 +426,10 @@ function windowFor(isPrompt = false, id = '', generation = '', group?: string) {
       promptRefs.delete(senderID);
       promptReadyAt.delete(senderID);
       promptLayouts.delete(senderID);
+      promptContentHeights.delete(senderID);
       promptPlacement.delete(senderID);
       pressedPromptKeys.clear();
+      rendererPromptKeys.clear();
       promptPointerDown = false;
       pacePrompt();
     });
@@ -893,11 +910,27 @@ app.whenReady().then(async () => {
       !Number.isFinite(value.height) ||
       value.height < 0 ||
       value.height > 100000 ||
-      typeof value.pointerDown !== 'boolean'
+      typeof value.pointerDown !== 'boolean' ||
+      !Array.isArray(value.keysDown) ||
+      value.keysDown.length > 3 ||
+      value.keysDown.some((k: unknown) => !['Enter', ' ', 'Escape'].includes(String(k)))
     )
       throw Error('Invalid permission layout');
     if (promptIdle) return;
-    const released = promptPointerDown && !value.pointerDown;
+    const senderURL = new URL(e.senderFrame!.url),
+      currentRef = promptRefs.get(e.sender.id)!;
+    if (
+      senderURL.searchParams.get('request') !== currentRef.id ||
+      senderURL.searchParams.get('generation') !== currentRef.generation
+    )
+      return;
+    const contentChanged = promptContentHeights.get(e.sender.id) !== Math.ceil(value.height);
+    promptContentHeights.set(e.sender.id, Math.ceil(value.height));
+    const released =
+      (promptPointerDown && !value.pointerDown) ||
+      (rendererPromptKeys.size > 0 && value.keysDown.length === 0);
+    rendererPromptKeys.clear();
+    for (const key of value.keysDown) rendererPromptKeys.add(key);
     promptPointerDown = value.pointerDown;
     if (released && transitionUntil) pacePrompt();
     const bounds = edgePosition(
@@ -912,7 +945,7 @@ app.whenReady().then(async () => {
       promptLayouts.get(e.sender.id) || promptPlacement.get(e.sender.id) || Promise.resolve();
     const resize = prior.then(async () => {
       if (w.isDestroyed() || w !== prompt || promptRefs.get(e.sender.id) !== ref) return;
-      if (!promptIdle && w.getBounds().height !== bounds.height) {
+      if (!promptIdle && contentChanged && w.getBounds().height !== bounds.height) {
         w.setBounds(bounds);
         await resizeKDEPrompt(profile, process.pid, w.id, bounds);
       }

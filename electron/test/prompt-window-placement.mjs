@@ -229,7 +229,7 @@ try {
   await sleep(1200);
   result.afterPolling = await inspect(prompt, 'stable');
   assert.deepEqual(result.first, result.afterPolling);
-  await prompt.close();
+  await prompt.evaluate(() => window.flowgate.dismissPrompt());
   prompt = await wait(() => app.windows().find((w) => w.url().includes('?request=second')));
   await prompt.locator('#allow').waitFor();
   await sleep(2600);

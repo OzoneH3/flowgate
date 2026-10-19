@@ -19,15 +19,16 @@ const appIdentity = {
   key: 'fixture',
   revision: 'r',
   name: 'SYNTHETIC dedicated app',
-  executable: '/synthetic/fixture',
+  executable: '/synthetic/' + 'long-directory/'.repeat(18) + 'fixture',
   display_name: 'SYNTHETIC dedicated app',
 };
+let queuedExpiry = new Date(Date.now() + 1000).toISOString();
 const deadline = new Date(Date.now() + 120000).toISOString();
 const event = (id) => ({
   id,
   state: resolved ? 'expired' : 'awaiting-decision',
   reason: 'SYNTHETIC presentation fixture',
-  deadline: id === 'expires' ? new Date(Date.now() - 10).toISOString() : deadline,
+  deadline: id === 'expires' ? queuedExpiry : deadline,
   request_group: id.startsWith('repeat') ? 'same-repeat' : id,
   first_seen: new Date().toISOString(),
   flow: {
@@ -123,7 +124,8 @@ const wait = async (fn) => {
 };
 const prefs = path.join(root, '.workspace/electron-preferences.json'),
   oldPrefs = fs.existsSync(prefs) ? fs.readFileSync(prefs) : undefined;
-let app;
+let app, inputDaemon;
+const seenRequests = [];
 const result = { run, synthetic: true };
 let scriptNumber = 0;
 function script(code) {
@@ -167,7 +169,7 @@ try {
   const snapshot = async (label) => {
     const token = 'FLOWGATE_PACING_' + process.pid + '_' + label;
     script(
-      `for(const w of workspace.windowList())if(w.pid===${own.pid})print(${JSON.stringify(token)},JSON.stringify({caption:w.caption,geometry:w.frameGeometry,active:w===workspace.activeWindow,activePID:workspace.activeWindow?.pid,activeCaption:workspace.activeWindow?.caption,area:workspace.clientArea(KWin.PlacementArea,w.output,workspace.currentDesktopForScreen(w.output))}));`,
+      `for(const w of workspace.windowList())if(w.pid===${own.pid})print(${JSON.stringify(token)},JSON.stringify({caption:w.caption,geometry:w.frameGeometry,cursor:workspace.cursorPos,active:w===workspace.activeWindow,activePID:workspace.activeWindow?.pid,activeCaption:workspace.activeWindow?.caption,area:workspace.clientArea(KWin.PlacementArea,w.output,workspace.currentDesktopForScreen(w.output))}));`,
     );
     const logs = execFileSync(
       'journalctl',
@@ -208,12 +210,12 @@ try {
     );
     await sleep(200);
     const inputSocket = path.join(run, 'input.sock');
-    const inputDaemon = spawn('ydotoold', ['--socket-path=' + inputSocket, '--mouse-off'], {
+    inputDaemon = spawn('ydotoold', ['--socket-path=' + inputSocket], {
       stdio: 'ignore',
     });
     await wait(() => fs.existsSync(inputSocket));
     await sleep(600);
-    const text = 'focus remains here 123';
+    const text = 'focus 123';
     const input = spawn('ydotool', ['type', '--key-delay', '120', text], {
       env: { ...process.env, YDOTOOL_SOCKET: inputSocket },
       stdio: 'ignore',
@@ -221,13 +223,16 @@ try {
     showEvents = true;
     ids = ['first'];
     let prompt = await wait(() => app.windows().find((w) => w.url().includes('?request=first')));
+    prompt.on('framenavigated', (frame) => {
+      if (frame === prompt.mainFrame())
+        seenRequests.push(new URL(frame.url()).searchParams.get('request'));
+    });
     await prompt.locator('#allow').waitFor();
     await sleep(3400);
     result.compact = await snapshot('compact');
     assert.equal(result.compact.active, false, 'automatic opening must not activate');
-    await sleep(4000);
     input.kill();
-    inputDaemon.kill();
+
     assert.equal(
       result.compact.activePID,
       otherPID,
@@ -244,6 +249,34 @@ try {
       BrowserWindow.getAllWindows().at(-1).webContents.getLastWebPreferences(),
     );
     assert(prefs.sandbox && prefs.contextIsolation && !prefs.nodeIntegration);
+    // A real pointer click may focus the popup normally.
+    const checkRect = await prompt.locator('#rememberToggle').boundingBox();
+    const target = {
+      x: result.compact.geometry.x + checkRect.x + checkRect.width / 2,
+      y: result.compact.geometry.y + checkRect.y + checkRect.height / 2,
+    };
+    // Relative uinput movement with compositor feedback avoids changing acceleration settings.
+    for (let n = 0; n < 12; n++) {
+      const position = (await snapshot('pointer-' + n)).cursor;
+      const dx = target.x - position.x,
+        dy = target.y - position.y;
+      if (Math.abs(dx) < checkRect.width / 2 && Math.abs(dy) < checkRect.height / 2) break;
+      execFileSync(
+        'ydotool',
+        ['mousemove', '-x', String(Math.round(dx / 2)), '-y', String(Math.round(dy / 2))],
+        { env: { ...process.env, YDOTOOL_SOCKET: inputSocket } },
+      );
+      await sleep(150);
+    }
+    execFileSync('ydotool', ['click', '0xC0'], {
+      env: { ...process.env, YDOTOOL_SOCKET: inputSocket },
+    });
+    await sleep(400);
+    assert.equal(
+      (await snapshot('deliberate-click')).active,
+      true,
+      'deliberate click focuses normally',
+    );
     await prompt.locator('#rememberToggle').check();
     await sleep(700);
     result.expanded = await snapshot('expanded');
@@ -258,6 +291,7 @@ try {
       /SYNTHETIC validation error/,
     );
     await prompt.locator('#rememberDuration').focus();
+    queuedExpiry = new Date(Date.now() + 700).toISOString();
     ids.push(...Array.from({ length: 20 }, (_, i) => 'repeat' + i), 'expires', 'second');
     await sleep(1200);
     assert(prompt.url().includes('?request=first'));
@@ -296,10 +330,22 @@ try {
     assert.equal(result.reset.geometry.width, 520);
     assert.equal(result.reset.geometry.height, 460);
     assert.equal(decisionCalls.length, 1, 'double-click only decided one request');
+    await app.evaluate(({ BrowserWindow }) => {
+      globalThis.popupInputs = [];
+      BrowserWindow.getAllWindows()
+        .find((w) => w.webContents.getURL().includes('?request=repeat0'))
+        .webContents.on('before-input-event', (_, i) =>
+          globalThis.popupInputs.push({ key: i.key, type: i.type, repeat: i.isAutoRepeat }),
+        );
+    });
     await prompt.locator('#allow').focus();
     await prompt.keyboard.down('Enter');
     await sleep(850);
-    assert(prompt.url().includes('?request=repeat0'), 'held Enter delays following card');
+    result.inputEvents = await app.evaluate(() => globalThis.popupInputs);
+    assert(
+      prompt.url().includes('?request=repeat0'),
+      'held Enter delays following card ' + JSON.stringify(result.inputEvents),
+    );
     for (let i = 0; i < 4; i++) await prompt.keyboard.down('Enter');
     assert.equal(decisionCalls.length, 2);
     await prompt.keyboard.up('Enter');
@@ -308,6 +354,8 @@ try {
     await wait(() => Promise.resolve(prompt.url().includes('?request=repeat1')));
     await wait(() => prompt.locator('#allow').isEnabled());
     assert.equal(decisionCalls.length, 2);
+    assert(!seenRequests.includes('expires'), 'queued expiry never presented');
+    result.seenRequests = seenRequests;
     result.decisionCalls = decisionCalls;
     result.transitionMS = 650;
     result.elapsedHandoff = decisionCalls[1].at - decisionAt;
@@ -343,6 +391,7 @@ try {
   result.passed = true;
   console.log('PASS popup pacing/focus/content sizing', run);
 } finally {
+  inputDaemon?.kill();
   if (app) await app.close();
   if (oldPrefs) fs.writeFileSync(prefs, oldPrefs);
   else fs.rmSync(prefs, { force: true });
