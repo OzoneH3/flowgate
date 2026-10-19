@@ -945,8 +945,9 @@ app.whenReady().then(async () => {
       promptLayouts.get(e.sender.id) || promptPlacement.get(e.sender.id) || Promise.resolve();
     const resize = prior.then(async () => {
       if (w.isDestroyed() || w !== prompt || promptRefs.get(e.sender.id) !== ref) return;
-      if (!promptIdle && contentChanged && w.getBounds().height !== bounds.height) {
-        w.setBounds(bounds);
+      if (!promptIdle && contentChanged) {
+        if (w.getBounds().height !== bounds.height || w.getBounds().width !== bounds.width)
+          w.setBounds(bounds);
         await resizeKDEPrompt(profile, process.pid, w.id, bounds);
       }
     });
