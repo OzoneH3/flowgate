@@ -89,4 +89,6 @@ will be allowed" (documented).
   executable prompts, 3 identical attempts = 1 group row/1 window; incoming held (direction separate); scoped
   Deny blocks its destination while app Allow covers others; Out Ask set in place, prompt names the Ask rule,
   Allow once delivers, new attempt re-prompts, Remember(app) replaces Ask → Allow; no stale prompt windows.
+- Electron journey scope note: Deny Once, Ask disable/delete, restart, read-only refusal and out-of-zone
+  Ask were verified with real receivers through the API (`--ask`), not in the Electron journey.
 - Not yet: host deployment of stored Ask (installed c09aae8 predates `stored-ask-v1`; the UI hides Ask there).
