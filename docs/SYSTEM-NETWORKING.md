@@ -1,5 +1,16 @@
 # Essential system networking: review required, protection stays off
 
+## Current Essential preset implementation
+
+The authoritative schema5 preview/apply/status/removal workflow and interface-scoped
+DHCP guard are implemented. See [ESSENTIAL-NETWORKING.md](ESSENTIAL-NETWORKING.md)
+for current permissions, exact API, update semantics and focused evidence. This
+supersedes the historical review-only planner and blanket-DHCP descriptions below.
+Host service currently absent; protection remains off. No preset permissions were
+applied on the host. Exact running service identity export/review, matched install
+in monitoring and focused protected-host usability acceptance remain separate.
+
+
 ## Incident and current recovery state (2026-10-19)
 
 Release04c5159 was installed and its dedicated host acceptance ran, but that did

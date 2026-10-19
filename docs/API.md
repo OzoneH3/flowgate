@@ -374,3 +374,11 @@ Read-only host Firefox inspection found PID3053 running zero-link inode5706575;
 its existing disk path points at inode5959864. No process restart or file change.
 Private evidence: `.workspace/firefox-executable-status.json`. A real isolated
 unlink/replace test proves metadata cleanup retains the running revision and key.
+
+## Essential system networking v1
+
+Capability `essential-system-networking-v1` provides administrator-only reviewed
+preview/apply/status/removal. Schema5 preserves exact service identity and explicit
+interface/stub constraints. See [ESSENTIAL-NETWORKING.md](ESSENTIAL-NETWORKING.md)
+for payloads, authorization, errors, expiry, receipt reconciliation and compatibility.
+No operation activates protection.

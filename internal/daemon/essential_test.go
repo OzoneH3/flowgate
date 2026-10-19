@@ -150,3 +150,38 @@ func TestEssentialOrdinaryClientCannotManageMachinePreset(t *testing.T) {
 		t.Fatal(r)
 	}
 }
+
+func TestEssentialStaleExpiryInventoryAndLegacyEditor(t *testing.T) {
+	env, _ := essentialEnvironment(t)
+	a, _, _, _ := observedAPI(t, func(e *Engine, _ *store.Store) {
+		e.Now = time.Now
+		e.Essential = essential.NewManager(env)
+		e.Essential.Refresh(context.Background())
+	})
+	o := essential.Options{}
+	p, err := a.e.PreviewEssential(a.e.Generation, "apply", o, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := o
+	changed.Tailscale = true
+	if _, _, err = a.e.ApplyEssential(a.e.Generation, p.Token, "apply", changed, 0); err == nil || !strings.Contains(err.Error(), "Options") {
+		t.Fatal("options mismatch", err)
+	}
+	before := a.e.Now
+	a.e.Now = func() time.Time { return p.ExpiresAt.Add(time.Second) }
+	if _, _, err = a.e.ApplyEssential(a.e.Generation, p.Token, "apply", o, 0); err == nil {
+		t.Fatal("expired preview saved")
+	}
+	a.e.Now = before
+	p, err = a.e.PreviewEssential(a.e.Generation, "apply", o, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.e.mu.Lock()
+	a.e.rules = append(a.e.rules, policy.Rule{Schema: 2, ID: "user", Version: 1, Action: "block", Filter: policy.Filter{Application: "a", Revision: "r", Protocol: "tcp", Direction: "outgoing"}})
+	a.e.mu.Unlock()
+	if _, _, err = a.e.ApplyEssential(a.e.Generation, p.Token, "apply", o, 0); err == nil || !strings.Contains(err.Error(), "inventory") {
+		t.Fatal("inventory change accepted", err)
+	}
+}

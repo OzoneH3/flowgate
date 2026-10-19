@@ -78,6 +78,10 @@ func (s *Snapshot) Seal() {
 	sort.Slice(s.Stubs, func(i, j int) bool { return Hash(s.Stubs[i]) < Hash(s.Stubs[j]) })
 	sort.Slice(s.DHCP, func(i, j int) bool { return s.DHCP[i].Name < s.DHCP[j].Name })
 	sort.Strings(s.NTP)
+	s.DNS = unique(s.DNS)
+	s.Stubs = unique(s.Stubs)
+	s.DHCP = unique(s.DHCP)
+	s.NTP = unique(s.NTP)
 	for i := range s.Components {
 		c := &s.Components[i]
 		var service any
@@ -207,4 +211,16 @@ func (s Snapshot) Rules(o Options, now time.Time) ([]policy.Rule, []string, erro
 		}
 	}
 	return rules, issues, nil
+}
+
+func unique[T comparable](in []T) []T {
+	out := make([]T, 0, len(in))
+	seen := map[T]bool{}
+	for _, v := range in {
+		if !seen[v] {
+			out = append(out, v)
+			seen[v] = true
+		}
+	}
+	return out
 }

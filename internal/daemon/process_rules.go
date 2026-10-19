@@ -25,6 +25,9 @@ func (e *Engine) targetStateLocked(r policy.Rule) RuleTargetState {
 		if !e.presetActive(r) {
 			return RuleTargetState{scope, "inactive", "Preset identity/configuration changed or discovery expired; review refresh required"}
 		}
+		if r.Preset.Component == "dhcp" {
+			return RuleTargetState{scope, "active", "Reviewed persistent interface-scoped DHCP protocol exception shared with boot guard; explicit removal in monitoring required"}
+		}
 		return RuleTargetState{scope, "active", presetSentence(r)}
 	}
 	if r.Filter.AllPrograms {

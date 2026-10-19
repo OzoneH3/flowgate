@@ -303,6 +303,12 @@ func (e *Engine) presetActive(r policy.Rule) bool {
 	if r.Preset == nil {
 		return true
 	}
+	// DHCP is a durable reviewed interface/protocol exception shared with the
+	// pre-daemon guard, not a sampled executable permission. It remains limited
+	// to the approved interface and client port pair until explicit removal.
+	if r.Preset.Component == "dhcp" {
+		return policy.UneditedPreset(r) && r.Validate() == nil
+	}
 	if e.Essential == nil {
 		return false
 	}

@@ -3,6 +3,7 @@ package essential
 import (
 	"context"
 	"flowgate/internal/identity"
+	"flowgate/internal/policy"
 	"net/netip"
 	"os"
 	"strconv"
@@ -76,5 +77,81 @@ func TestStructuredDiscoveryNotWrappedOrGuessed(t *testing.T) {
 	}
 	if _, err := netip.ParseAddr(s.DNS[0].Address); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestTimeAndVPNDoNotExemptOtherPrograms(t *testing.T) {
+	p, err := identity.Inspect(os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := Snapshot{Collected: time.Now(), NTP: []string{"192.0.2.123"}, VPNPort: 41641}
+	for _, id := range []string{"time", "tailscale"} {
+		s.Components = append(s.Components, Component{ID: id, State: "ready", Service: &p})
+	}
+	s.Seal()
+	rules, _, err := s.Rules(Options{Tailscale: true}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	attr := identity.Attribution{Application: &p.Application, Owners: []identity.Process{p}}
+	for _, tc := range []struct {
+		proto, dir, local, remote string
+		other                     bool
+		want                      string
+	}{
+		{"udp", "outgoing", "192.0.2.1:40000", "192.0.2.123:123", false, "allow"},
+		{"udp", "incoming", "192.0.2.1:123", "192.0.2.123:40000", false, "ask"},
+		{"udp", "outgoing", "192.0.2.1:40000", "192.0.2.124:123", false, "ask"},
+		{"tcp", "outgoing", "192.0.2.1:40000", "198.51.100.10:443", false, "allow"},
+		{"udp", "outgoing", "192.0.2.1:41641", "198.51.100.10:50000", false, "allow"},
+		{"udp", "outgoing", "192.0.2.1:40000", "198.51.100.10:50000", false, "ask"},
+		{"tcp", "outgoing", "192.0.2.1:40000", "198.51.100.10:443", true, "ask"},
+		{"udp", "outgoing", "192.0.2.1:41641", "198.51.100.10:50000", true, "ask"},
+	} {
+		f, _ := identity.ParseFlow(tc.proto, tc.dir, tc.local, tc.remote)
+		a := attr
+		if tc.other {
+			app := p.Application
+			app.Key = "independent-inner-application"
+			a.Application = &app
+		}
+		action, _, _ := policy.Evaluate(rules, f, a, time.Now())
+		if action != tc.want {
+			t.Fatalf("%+v: %s", tc, action)
+		}
+	}
+}
+
+func TestDiscoveryTimeoutInvalidatesInsteadOfPublishingPartialSuccess(t *testing.T) {
+	env := Default()
+	env.Run = func(ctx context.Context, _ string, _ ...string) ([]byte, error) { <-ctx.Done(); return nil, ctx.Err() }
+	m := NewManager(env)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+	defer cancel()
+	if s := m.Refresh(ctx); s.Revision != "" {
+		t.Fatal("partial discovery claimed fresh")
+	}
+	if m.Snapshot().ValidUntil.After(time.Now()) {
+		t.Fatal("timeout coverage remained active")
+	}
+}
+
+func TestStableOrderingAndRevisionRejection(t *testing.T) {
+	p, _ := identity.Inspect(os.Getpid())
+	s := Snapshot{Collected: time.Now(), DNS: []DNS{{"192.0.2.2", 53, 2, "test0", false}, {"192.0.2.1", 53, 2, "test0", false}}, Components: []Component{{ID: "dns", State: "ready", Service: &p}}}
+	s.Seal()
+	first := s.Revision
+	s.DNS[0], s.DNS[1] = s.DNS[1], s.DNS[0]
+	s.Seal()
+	if first != s.Revision {
+		t.Fatal("order-only change invalidated preview")
+	}
+	old := s.Component("dns").Revision
+	p.Application.Revision = "replacement"
+	p.ExecutableRevision = "replacement"
+	s.Seal()
+	if old == s.Component("dns").Revision {
+		t.Fatal("new native executable revision inherited permission")
 	}
 }
