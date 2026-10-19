@@ -105,7 +105,11 @@ func TestPublicLANRequiresUsableUnambiguousRoute(t *testing.T) {
 
 func TestPublicLANDoesNotGuessMultipath(t *testing.T) {
 	s := automaticFixture()
-	s.Routes[0].Options = "unresolved-nexthops"
+	for i := range s.Routes {
+		if s.Routes[i].Prefix == "9.9.9.0/24" {
+			s.Routes[i].Options = "unresolved-nexthops"
+		}
+	}
 	s.seal()
 	if got := AutomaticNetworkZones(DefaultNetworkZones(), s).Classify(netip.MustParseAddr("9.9.9.4")); got.State != "unavailable" {
 		t.Fatal("multipath LAN guessed into automatic permission", got)
