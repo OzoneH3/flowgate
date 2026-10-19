@@ -110,3 +110,55 @@ Primary documentation:
 - https://www.iana.org/assignments/iana-ipv6-special-registry
 - https://tailscale.com/docs/concepts/tailscale-ip-addresses
 - https://tailscale.com/docs/concepts/ipv6
+
+### Installed reference observations (2026-10-19)
+
+Bounded UDP probes in the WinBoat guest used 1,000-byte payloads at one-second
+intervals, with no NetLimiter rule/filter changes. The guest's local address was
+172.30.0.2; its only active network was Ethernet. Activity's built-in zone
+counters showed routed RFC1918 peer 10.23.45.67 in LocalNetwork (992 B/s on both
+application and LocalNetwork, Internet zero), shared/CGNAT peer 100.101.2.3 in
+Internet (647 B/s on both application and Internet, LocalNetwork zero), and public
+8.8.8.8 in Internet (Internet nonzero, LocalNetwork zero). The directly connected
+gateway 172.30.0.1 also incremented LocalNetwork. Different UI counter smoothing
+means these are membership observations, not accounting equality guarantees.
+Raw captures are under `.workspace/auto-zones-reference/`: `probe5-expand.png`,
+`classification-cgnat.png`, `classification-public-stable.png` and
+`classification-connected.png`. No receiver delivery is claimed for these
+reference probes. No WinBoat rules, filter definitions or network settings were
+changed; probe processes self-exited.
+
+NetLimiter's observed CGNAT result differs from FlowGate's explicit non-public
+peer contract: FlowGate classifies CGNAT as Local to cover routed overlay peers,
+while still requiring permission. This difference is intentional and disclosed;
+VPN/IPv6 reference equivalence is not claimed for the Ethernet-only guest.
+
+## Acceptance and deployment preparation
+
+The integrated implementation passes the full Go suite, targeted race tests and
+`go vet`, plus Electron build/typecheck and 196 tests. The isolated native
+receiver suite (`scripts/process-rules-isolated.py --automatic-zones`) uses real
+IPv4/IPv6 TCP and UDP over a nested GRE tunnel named ppp0. Local-only and
+Internet-only rules prove delivery and non-delivery for routed private, Tailscale
+CGNAT/ULA, public LAN, public routed and public-address tunnel-subnet peers.
+A live route change reclassifies a pending request without changing ID/deadline.
+Rules finish at zero; only fixture-owned resources are removed. This is a GRE
+fixture, not a live Tailscale/work-VPN client or host-protection run.
+
+Sandboxed Wayland UI acceptance covers explicit migration review/checkbox,
+Enter safety, exact schema4-to-6 save acknowledgement, a new observed-application
+schema6 rule and conditional deletion to zero. Actual review captures are
+800×550; requested larger bounds were not settled at capture. Existing native
+popup focus/queue/geometry and ended-Remember acceptance are reused; see
+`electron/PROMPT-PRESENTATION.md` and `electron/REMEMBER-REVALIDATION.md`.
+
+Run `scripts/prepare-automatic-zone-release.sh` on clean master to prepare a
+matched, hash-manifested backend and sandboxed Electron bundle under `.workspace`.
+It installs nothing and never starts host protection. Keep the installed daemon's
+explicit zone-prefix flags during rollout; the legacy definition is still their
+source of truth. The prepared monitoring installer backs up rule storage and
+preserves rules. Review the actual migration preview separately; no migration is
+a rollout prerequisite. Old binaries cannot parse newly created schema6 rules:
+rollback after creating/migrating such rules requires the matching database
+backup or explicitly removing those rules first, with the resulting permission
+change reviewed. Geolocation remains absent and separate.
