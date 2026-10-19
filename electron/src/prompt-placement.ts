@@ -67,7 +67,7 @@ QtObject {
     const correct=w.output===output && ["x","y","width","height"].every(k=>Math.abs(g[k]-desired[k])<=1);
     s.confirmed=correct?s.confirmed+1:0;
     if(s.confirmed>=3) {
-      w.keepAbove=true; w.opacity=${reveal ? 1 : 0}; w.minimized=${!reveal};
+      w.keepAbove=true; w.opacity=${reveal ? 1 : 0}; w.minimized=${!reveal}; w.skipTaskbar=${!reveal}; w.skipSwitcher=${!reveal};
       console.log("FLOWGATE_PROMPT_CONFIRMED",JSON.stringify({pid:${pid},windowID:${windowID},nativeID:nativeID,output:output.name,area:area,geometry:g,attempts:s.applied}));
       clock.stop(); return;
     }
@@ -195,7 +195,7 @@ export async function resizeKDEPrompt(
       file,
       placementScript(pid, windowID, bounds, await configuredPrimaryOutput()).replace(
         ' print(',
-        ` w.opacity=${visible ? 1 : 0}; w.minimized=${!visible}; print(`,
+        ` w.opacity=${visible ? 1 : 0}; w.minimized=${!visible}; w.skipTaskbar=${!visible}; w.skipSwitcher=${!visible}; print(`,
       ),
       { mode: 0o600 },
     );
