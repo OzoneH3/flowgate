@@ -180,7 +180,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 
 					}
 					if e.Essential != nil || e.hasPresetRules() {
-						r.Capabilities = append(r.Capabilities, EssentialCapability)
+						r.Capabilities = append(r.Capabilities, EssentialCapability, EssentialExclusionCapability)
 					}
 					if e.Protection != nil {
 						r.Capabilities = append(r.Capabilities, ProtectionCapability)

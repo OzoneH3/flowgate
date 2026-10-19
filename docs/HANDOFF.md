@@ -1,5 +1,16 @@
 # Continuation handoff
 
+## Current: essentials apply with work-VPN exclusion
+
+Installed 926e64a (generation c4119870…) lacks interface exclusion; ppp0 is the
+user's work VPN and must not be in the preset. Next monitoring-only release adds
+`essential-interface-exclusion-v1`; after installing it, run
+`scripts/apply-essentials.py` (19 reviewed rules, ppp0 excluded, no Tailscale
+transport). Protection stays stopped; activation is a separate step
+(`flowgate-control both`; recovery `sudo /usr/local/sbin/flowgate-recover`).
+UI exclusion support is requested from the UI owner. Details:
+[ESSENTIAL-NETWORKING.md](ESSENTIAL-NETWORKING.md).
+
 ## Current: monitoring service installed; per-entry preset update prepared
 
 Installed by the user (monitoring only): release efc15c7, generation

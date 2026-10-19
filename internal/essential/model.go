@@ -10,6 +10,7 @@ import (
 	"flowgate/internal/policy"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -20,7 +21,50 @@ type Options struct {
 	TailscaleIncoming bool `json:"tailscale_incoming"`
 	TailscaleHTTP     bool `json:"tailscale_http"`
 	Discovery         bool `json:"discovery"`
+	// ExcludedInterfaces removes discovered upstream DNS and DHCP entries on
+	// these interfaces from this review (for example a work VPN). It never
+	// changes host configuration and cannot exclude the loopback stub scopes.
+	ExcludedInterfaces []string `json:"excluded_interfaces,omitempty"`
 }
+
+// Normalized returns a canonical copy (sorted, de-duplicated exclusions).
+func (o Options) Normalized() Options {
+	if len(o.ExcludedInterfaces) == 0 {
+		o.ExcludedInterfaces = nil
+		return o
+	}
+	x := append([]string{}, o.ExcludedInterfaces...)
+	sort.Strings(x)
+	o.ExcludedInterfaces = unique(x)
+	return o
+}
+
+// Equal compares canonical options; previews bind the exact exclusion set.
+func (o Options) Equal(p Options) bool {
+	a, b := o.Normalized(), p.Normalized()
+	if a.Tailscale != b.Tailscale || a.TailscaleIncoming != b.TailscaleIncoming || a.TailscaleHTTP != b.TailscaleHTTP || a.Discovery != b.Discovery || len(a.ExcludedInterfaces) != len(b.ExcludedInterfaces) {
+		return false
+	}
+	for i := range a.ExcludedInterfaces {
+		if a.ExcludedInterfaces[i] != b.ExcludedInterfaces[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func validInterfaceName(n string) bool {
+	if n == "" || len(n) > 15 || n == "." || n == ".." {
+		return false
+	}
+	for _, c := range n {
+		if c <= ' ' || c == '/' || c == ':' || c > '~' {
+			return false
+		}
+	}
+	return true
+}
+
 type Component struct {
 	ID        string            `json:"id"`
 	Title     string            `json:"title"`
@@ -151,8 +195,40 @@ func (s Snapshot) Rules(o Options, now time.Time) ([]policy.Rule, []string, erro
 	if (o.TailscaleIncoming || o.TailscaleHTTP) && !o.Tailscale {
 		return nil, nil, fmt.Errorf("select optional Tailscale before its incoming/HTTP options")
 	}
+	o = o.Normalized()
+	if len(o.ExcludedInterfaces) > 16 {
+		return nil, nil, fmt.Errorf("too many excluded interfaces")
+	}
+	excluded := map[string]bool{}
+	for _, n := range o.ExcludedInterfaces {
+		if !validInterfaceName(n) {
+			return nil, nil, fmt.Errorf("invalid excluded interface name %q", n)
+		}
+		if n == "lo" {
+			return nil, nil, fmt.Errorf("loopback DNS stub scopes cannot be excluded; leave the stub permissions or decline the preset")
+		}
+		excluded[n] = true
+	}
 	rules := []policy.Rule{}
 	issues := append([]string{}, s.Issues...)
+	for _, n := range o.ExcludedInterfaces {
+		var what []string
+		for _, d := range s.DNS {
+			if d.InterfaceName == n {
+				what = append(what, "DNS "+d.Address+":"+fmt.Sprint(d.Port))
+			}
+		}
+		for _, d := range s.DHCP {
+			if d.Name == n {
+				what = append(what, "DHCP")
+			}
+		}
+		if len(what) == 0 {
+			issues = append(issues, "Excluded interface "+n+" has no discovered DNS/DHCP entries now; exclusion recorded for this review only")
+		} else {
+			issues = append(issues, "Excluded by review, not proposed: "+n+" ("+strings.Join(what, ", ")+"); its configuration is unchanged")
+		}
+	}
 	add := func(component string, f policy.Filter) {
 		c := s.Component(component)
 		// Resolver/stub permissions need the verified resolver identity, not a
@@ -191,6 +267,9 @@ func (s Snapshot) Rules(o Options, now time.Time) ([]policy.Rule, []string, erro
 	}
 	if c := s.Component("dns"); c != nil && c.Service != nil {
 		for _, d := range s.DNS {
+			if excluded[d.InterfaceName] {
+				continue
+			}
 			protocols := []string{"udp", "tcp"}
 			if d.TLS {
 				protocols = []string{"tcp"}
@@ -213,6 +292,9 @@ func (s Snapshot) Rules(o Options, now time.Time) ([]policy.Rule, []string, erro
 		}
 	}
 	for _, d := range s.DHCP {
+		if excluded[d.Name] {
+			continue
+		}
 		for _, v6 := range []bool{false, true} {
 			if !v6 && !d.IPv4 || v6 && !d.IPv6 {
 				continue

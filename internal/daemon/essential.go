@@ -11,6 +11,11 @@ import (
 
 const EssentialCapability = "essential-system-networking-v1"
 
+// EssentialExclusionCapability: essential_options.excluded_interfaces is honoured
+// and bound to the preview token. Older daemons silently ignore the field, so
+// clients must require this capability before sending exclusions.
+const EssentialExclusionCapability = "essential-interface-exclusion-v1"
+
 type EssentialPreview struct {
 	Token      string                `json:"token"`
 	ExpiresAt  time.Time             `json:"expires_at"`
@@ -28,6 +33,8 @@ type EssentialReceipt struct {
 	RuleIDs   []string      `json:"rule_ids"`
 	Rules     []policy.Rule `json:"rules"`
 	Removed   []string      `json:"removed_rule_ids"`
+	// Options echoes the exact reviewed choices, including exclusions.
+	Options essential.Options `json:"options"`
 }
 type EssentialStatus struct {
 	Revision   string                `json:"revision"`
@@ -111,6 +118,7 @@ func (e *Engine) PreviewEssential(gen, operation string, o essential.Options, ui
 	if own >= 16 || len(e.essentialPreviews) >= 256 {
 		return EssentialPreview{}, mutationError("limit_exceeded", "Preset preview limit")
 	}
+	o = o.Normalized()
 	v := EssentialPreview{Token: randomID(), ExpiresAt: now.Add(30 * time.Second), Revision: s.Revision, Operation: operation, Options: o, Components: s.Components, Rules: []policy.Rule{}, Preserved: []string{}, Issues: issues}
 	if operation == "remove" {
 		for _, r := range e.rules {
@@ -229,7 +237,7 @@ func (e *Engine) ApplyEssential(gen, token, operation string, o essential.Option
 		e.mu.Unlock()
 		return EssentialReceipt{}, false, mutationError("preview_expired", "Preset preview expired; review again")
 	}
-	if p.View.Options != o || p.View.Operation != operation {
+	if !p.View.Options.Equal(o) || p.View.Operation != operation {
 		e.mu.Unlock()
 		return EssentialReceipt{}, false, mutationError("preview_mismatch", "Options or operation changed")
 	}
@@ -260,7 +268,7 @@ func (e *Engine) ApplyEssential(gen, token, operation string, o essential.Option
 	if !e.Now().Before(p.View.ExpiresAt) {
 		return EssentialReceipt{}, false, mutationError("preview_expired", "Review expired")
 	}
-	receipt := EssentialReceipt{Token: token, Operation: operation, RuleIDs: []string{}, Rules: []policy.Rule{}, Removed: []string{}}
+	receipt := EssentialReceipt{Token: token, Operation: operation, RuleIDs: []string{}, Rules: []policy.Rule{}, Removed: []string{}, Options: p.View.Options}
 	next := append([]policy.Rule{}, e.rules...)
 	for _, r := range p.View.Rules {
 		if operation == "remove" {

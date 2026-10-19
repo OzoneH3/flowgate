@@ -7,6 +7,7 @@ import (
 	"flowgate/internal/policy"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -208,5 +209,44 @@ func TestUnsuccessfulRefreshRetainsSnapshotWithoutExtension(t *testing.T) {
 		if m.Snapshot().EntryActive(r) {
 			t.Fatal("inactive resolver service kept permissions")
 		}
+	}
+}
+
+func TestInterfaceExclusionRemovesOnlyThatInterface(t *testing.T) {
+	p, _ := identity.Inspect(os.Getpid())
+	work := DNS{"192.168.23.221", 53, 11, "ppp0", false}
+	s := snapshot(t, p, lanA, lanB, vpn4, work)
+	s.DHCP = []DHCP{{"enp7s0", 2, true, true}, {"ppp0", 11, true, false}}
+	s.Components = append(s.Components, Component{ID: "dhcp", State: "ready"})
+	s.Seal()
+	all, _, _ := s.Rules(Options{}, time.Now())
+	kept, issues, err := s.Rules(Options{ExcludedInterfaces: []string{"ppp0", "ppp0"}}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{}
+	for _, r := range all {
+		if r.Filter.InterfaceName != "ppp0" {
+			want[r.ID] = r.Preset.Revision
+		}
+	}
+	if len(kept) != len(want) || len(all)-len(kept) != 3 { // ppp0 DNS udp+tcp, ppp0 DHCPv4
+		t.Fatalf("exclusion removed %d of %d", len(all)-len(kept), len(all))
+	}
+	for _, r := range kept {
+		if r.Filter.InterfaceName == "ppp0" || want[r.ID] != r.Preset.Revision {
+			t.Fatalf("unexpected or altered entry %+v", r.Filter)
+		}
+	}
+	if len(issues) == 0 || !strings.Contains(strings.Join(issues, "\n"), "Excluded by review, not proposed: ppp0") {
+		t.Fatalf("exclusion not disclosed: %v", issues)
+	}
+	for _, bad := range [][]string{{"lo"}, {"bad/name"}, {""}, {"a234567890123456"}} {
+		if _, _, err := s.Rules(Options{ExcludedInterfaces: bad}, time.Now()); err == nil {
+			t.Fatalf("accepted exclusion %q", bad)
+		}
+	}
+	if !(Options{ExcludedInterfaces: []string{"ppp0", "wg0", "ppp0"}}).Equal(Options{ExcludedInterfaces: []string{"wg0", "ppp0"}}) || (Options{ExcludedInterfaces: []string{"ppp0"}}).Equal(Options{}) {
+		t.Fatal("option equality not canonical")
 	}
 }

@@ -242,3 +242,58 @@ func TestEssentialVPNDNSRemovalKeepsAppliedLANActive(t *testing.T) {
 		t.Fatalf("unexpected applied set vpn=%d other=%d", vpn, lan)
 	}
 }
+
+// Exclusions are bound to the preview token and echoed in the receipt; the
+// excluded work-VPN entries are never stored, and its later removal leaves the
+// applied LAN entries active.
+func TestEssentialInterfaceExclusionBoundToToken(t *testing.T) {
+	env, _ := essentialEnvironment(t)
+	links := `[{"ifname":"lo","ifindex":1,"servers":[{"addressString":"192.0.2.53","port":53}]},{"ifname":"ppp0","ifindex":11,"servers":[{"addressString":"192.168.23.221","port":53}]}]`
+	run := env.Run
+	env.Run = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if name == "resolvectl" {
+			return []byte(links), nil
+		}
+		return run(ctx, name, args...)
+	}
+	a, _, _, _ := observedAPI(t, func(e *Engine, _ *store.Store) {
+		e.Now = time.Now
+		e.Essential = essential.NewManager(env)
+		e.Essential.Refresh(context.Background())
+	})
+	o := essential.Options{ExcludedInterfaces: []string{"ppp0"}}
+	p, err := a.e.PreviewEssential(a.e.Generation, "apply", o, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range p.Rules {
+		if r.Filter.InterfaceName == "ppp0" {
+			t.Fatal("excluded interface proposed")
+		}
+	}
+	if _, _, err = a.e.ApplyEssential(a.e.Generation, p.Token, "apply", essential.Options{}, 0); err == nil || !strings.Contains(err.Error(), "Options") {
+		t.Fatal("apply without the reviewed exclusion accepted", err)
+	}
+	receipt, _, err := a.e.ApplyEssential(a.e.Generation, p.Token, "apply", essential.Options{ExcludedInterfaces: []string{"ppp0", "ppp0"}}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !receipt.Options.Equal(o) || len(receipt.RuleIDs) != len(p.Rules) {
+		t.Fatalf("receipt does not bind the reviewed exclusion: %+v", receipt.Options)
+	}
+	links = `[{"ifname":"lo","ifindex":1,"servers":[{"addressString":"192.0.2.53","port":53}]}]`
+	a.e.Essential.Refresh(context.Background())
+	stored := 0
+	for _, r := range a.e.rules {
+		if r.Preset == nil {
+			continue
+		}
+		stored++
+		if r.Filter.InterfaceName == "ppp0" || !a.e.presetActive(r) {
+			t.Fatalf("unexpected stored/inactive entry after VPN DNS removal: %+v", r.Filter)
+		}
+	}
+	if stored != len(p.Rules) {
+		t.Fatalf("stored %d, reviewed %d", stored, len(p.Rules))
+	}
+}

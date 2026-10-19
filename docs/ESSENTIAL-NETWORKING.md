@@ -12,6 +12,33 @@ tailscale0 (MagicDNS) stay in the resolver proposal: they permit systemd-resolve
 queries only, not tailscaled coordination/DERP/peer UDP. Acceptance of this preset
 does **not** include or promise VPN connectivity.
 
+### Reviewed interface exclusion (work VPN ppp0)
+
+ppp0 (DNS 192.168.23.221) is the user's work VPN and is **excluded from this
+rollout**; its configuration is untouched. Capability
+`essential-interface-exclusion-v1` adds optional
+`essential_options.excluded_interfaces` (canonical sorted/unique list, max16;
+`lo` and invalid names rejected). Excluded interfaces drop their discovered upstream
+DNS and DHCP entries from the preview only; a preview issue discloses exactly what
+was excluded. The exclusion is bound to the preview token (apply must send equal
+options, else `preview_mismatch`) and echoed in the receipt. Older daemons silently
+ignore the field, so clients must require the capability (the apply script and
+future UI do). Because records are validated per entry, the later disappearance or
+change of ppp0 DNS never affects the applied LAN/Tailscale-resolver/stub records.
+The UI does not yet offer exclusions (UI owner notified); until it does, do not use
+the UI's default Apply on this host, since it would propose ppp0 DNS again.
+
+Host apply path: `scripts/apply-essentials.py` (administrator UID, primary API, no
+sudo). It requires the capability and stopped protection, previews with
+`{all optional false, excluded_interfaces:[ppp0]}`, refuses any rule outside the
+reviewed set below (minus ppp0 rows 9–10), any overlap/issue, or a changed
+resolved/timesyncd identity versus the reviewed host preview; applies exactly once;
+reconciles a lost reply via `essential-status` + token; verifies user rules
+unchanged, stored scopes identical to the preview, all active, protection stopped.
+`--dry-run` stops after the preview check. Focused tests:
+`TestInterfaceExclusionRemovesOnlyThatInterface`,
+`TestEssentialInterfaceExclusionBoundToToken`, `scripts/test-apply-essentials.py`.
+
 ### Exact host proposal for activation review (21 rules, live host preview)
 
 Live read-only daemon preview on the installed monitoring service (release efc15c7,
