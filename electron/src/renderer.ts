@@ -1969,6 +1969,7 @@ function updateDecisions() {
     }
   }
   const locked =
+    (Boolean(promptID) && (!promptLayoutReady || performance.now() < promptStableAt)) ||
     !e ||
     !!e.attempt ||
     localSubmitted.has(state.control.generation + ':' + e.id) ||

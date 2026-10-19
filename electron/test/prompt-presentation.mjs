@@ -362,6 +362,10 @@ try {
     await prompt.locator('#allow').waitFor();
     await sleep(100);
     assert(await prompt.locator('#allow').isDisabled(), 'new presentation starts disabled');
+    assert(
+      await prompt.locator('#rememberToggle').isDisabled(),
+      'new options advertise the same readiness gate',
+    );
     await wait(() => prompt.locator('#allow').isEnabled());
     await sleep(500);
     result.reset = await snapshot('reset');
