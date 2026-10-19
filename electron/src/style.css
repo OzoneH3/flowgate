@@ -1438,6 +1438,11 @@ body.hide-sidebar #activityView > aside { display:none; }
 .remember-panel { margin:7px 0 0; padding:5px 8px; border:1px solid #ffffff33; font-size:12px; }
 .remember-panel[hidden] { display:none; }
 .remember-panel legend { padding:0 4px; }
+.request-rule { margin:7px 0 0; padding:5px 8px; border:1px solid #ffffff55; font-size:12px; display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+.request-rule[hidden] { display:none; }
+.request-rule legend { padding:0 4px; }
+.request-rule-summary { flex-basis:100%; margin:0; }
+.remember-field.instance-ended { opacity:.75; font-style:italic; }
 .remember-heading { margin:2px 0 3px; }
 .remember-field, .remember-duration { display:block; margin:3px 0; }
 .remember-field { display:flex; align-items:center; gap:5px; }

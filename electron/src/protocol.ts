@@ -149,6 +149,8 @@ export interface RequestEvent {
   request_group?: string;
   // stored-ask-v1: the stored Ask rule that caused this prompt (absent = default Ask).
   ask_rule?: { id: string; version: number };
+  // request-application-rule-v1: retained verified identity for a future rule.
+  request_rule?: { available: boolean; process_state: 'running' | 'ended' | 'unknown'; until: string };
 }
 export type Scope = 'once' | 'application' | 'persistent';
 export type Action = 'allow' | 'block';
@@ -226,6 +228,8 @@ export interface Reply {
   decision?: RequestEvent;
   decision_preview?: unknown;
   decision_receipt?: unknown;
+  request_rule_preview?: unknown;
+  replayed?: boolean;
   rules: Rule[];
   rule_states?: Record<string, RuleTargetState>;
   saved_rule?: Rule;
@@ -356,6 +360,8 @@ export interface Bridge {
     preview_token: string;
   }): Promise<Attempt>;
   openPrompt(id: string): Promise<void>;
+  requestRulePreview(value: import('./request-rule').RequestRuleChoice): Promise<import('./request-rule').RequestRulePreview>;
+  requestRuleSave(value: import('./request-rule').RequestRuleChoice): Promise<{ message: string; rule: Rule; replayed: boolean }>;
   openFutureApplicationRule(value: { generation: string; id: string }): Promise<void>;
   onFutureApplicationRule(fn: (source: ObservedSource) => void): () => void;
   promptLayout(value: { height: number; pointerDown: boolean; keysDown: string[] }): Promise<void>;
@@ -469,7 +475,15 @@ function event(v: unknown): RequestEvent {
         ? string(e.request_group)
         : undefined,
     ask_rule: askRule(e.ask_rule),
+    request_rule: requestRuleSource(e.request_rule),
   };
+}
+function requestRuleSource(v: unknown): RequestEvent['request_rule'] {
+  const r = object(v);
+  return r.available === true && ['running', 'ended', 'unknown'].includes(string(r.process_state)) &&
+    Number.isFinite(Date.parse(string(r.until)))
+    ? { available: true, process_state: string(r.process_state) as 'running' | 'ended' | 'unknown', until: string(r.until) }
+    : undefined;
 }
 function askRule(v: unknown): RequestEvent['ask_rule'] {
   const r = object(v);
@@ -539,6 +553,8 @@ export function parseReply(raw: unknown): Reply {
     decision_log: r.decision_log,
     decision_preview: r.decision_preview,
     decision_receipt: r.decision_receipt,
+    request_rule_preview: r.request_rule_preview,
+    replayed: r.replayed === true,
     decision_record: r.decision_record,
     network_zones: parseNetworkZones(r.network_zones),
     zone_migration: r.zone_migration,

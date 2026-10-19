@@ -30,6 +30,7 @@ await build({
     'src/connection-presentation.ts',
     'src/automatic-prompts.ts',
     'src/decision-remember.ts',
+    'src/request-rule.ts',
     'src/prompt-placement.ts',
     'src/assets.ts',
     'src/pane-model.ts',

@@ -37,6 +37,7 @@ import { Evaluation } from './evaluation';
 import type { Preferences } from './protocol';
 import { Backend } from './backend';
 import { validateDecision } from './protocol';
+import { validateRequestRule } from './request-rule';
 if (process.getuid?.() === 0) throw Error('FlowGate Electron must run unprivileged');
 app.enableSandbox();
 // Native Wayland uses the accelerated OpenGL/ANGLE path; Vulkan presentation
@@ -901,6 +902,25 @@ app.whenReady().then(async () => {
     )
       throw Error('Permission presentation is transitioning');
     return backend.decide(boundDecision(value, promptRefs.get(e.sender.id)));
+  });
+  // Future application rule from a retained, ended request. The prompt window
+  // may act only on its own request; saving never decides that request.
+  const ownRequestRule = (e: Electron.IpcMainInvokeEvent, value: unknown, save: boolean) => {
+    const choice = validateRequestRule(value, save), ref = promptRefs.get(e.sender.id);
+    if (e.sender !== main.webContents && !ref) throw Error('Save application rules from a request view');
+    if (ref && (ref.generation !== choice.generation || ref.id !== choice.id))
+      throw Error('Rule request belongs to another permission window');
+    return choice;
+  };
+  ipcMain.handle('request-rule:preview', (e, value) => {
+    trusted(e);
+    return backend.previewRequestRule(ownRequestRule(e, value, false));
+  });
+  ipcMain.handle('request-rule:save', (e, value) => {
+    trusted(e);
+    if (promptRefs.has(e.sender.id) && (promptIdle || promptDismissed || transitionUntil || Date.now() < (promptReadyAt.get(e.sender.id) || 0)))
+      throw Error('Permission presentation is transitioning');
+    return backend.saveRequestRule(ownRequestRule(e, value, true));
   });
   ipcMain.handle('request:future-application', (e, value) => {
     trusted(e);

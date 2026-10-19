@@ -23,7 +23,17 @@ import {
   type Decision,
   type Attempt,
   type RequestEvent,
+  type Rule,
+  canManageRules,
 } from './protocol';
+import {
+  parseRequestRulePreview,
+  requestRuleAvailable,
+  requestRuleKey,
+  validateRequestRule,
+  type RequestRuleChoice,
+  type RequestRulePreview,
+} from './request-rule';
 export function call(path: string, request: object, timeoutMs = 3500): Promise<Reply> {
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 20000)
     throw Error('Invalid backend timeout');
@@ -338,7 +348,13 @@ export class Backend {
       this.reply = r;
       this.received = performance.now();
       for (const event of r.events) {
-        const failure = reviewFailureOf(event);
+        // A timed-out request with a retained verified identity stays visible
+        // (non-actionable) so a future application rule can still be saved.
+        const failure = reviewFailureOf(event) ??
+          (event.state === 'expired' && event.request_rule?.available
+            ? terminalReviewFailure('stale_decision', event.reason) : undefined);
+        const held = this.reviewFailures.get(event.id);
+        if (held && held.generation === r.generation) held.event = { ...event, revalidation: event.revalidation ?? held.event.revalidation };
         if (failure && !this.reviewFailures.has(event.id)) {
           if (this.reviewFailures.size >= 64)
             this.reviewFailures.delete(this.reviewFailures.keys().next().value!);
@@ -566,6 +582,68 @@ export class Backend {
     if (this.decisionPreviews.size >= 64) throw Error('Too many retained decision reviews');
     this.decisionPreviews.set(p.token, { choice: d, preview: p, sent: false });
     return p;
+  }
+  private requestRules = new Map<string, {
+    choice: RequestRuleChoice; preview: RequestRulePreview;
+    phase: 'reviewed' | 'submitting' | 'unknown' | 'saved'; saved?: Rule;
+  }>();
+  private requestRuleEvent(c: RequestRuleChoice) {
+    const state = this.view(), e = state.control.events.find((x) => x.id === c.id);
+    if (!this.controller || !state.control.connected || !canManageRules(state.control) ||
+        state.control.generation !== c.generation || !requestRuleAvailable(e, state.control.capabilities))
+      throw Error('An application rule cannot be saved from this request');
+    return e!;
+  }
+  // Never decides or releases the request; the backend validates the
+  // executable it captured from the verified requester.
+  async previewRequestRule(raw: unknown): Promise<RequestRulePreview> {
+    const c = validateRequestRule(raw);
+    this.requestRuleEvent(c);
+    if (c.zone_revision !== (this.state.control.networkZones?.revision || '')) throw Error('Network definition changed; review again');
+    const key = requestRuleKey(c);
+    for (const [token, v] of this.requestRules) {
+      if (v.phase === 'reviewed' && Date.parse(v.preview.expires_at) <= this.now()) this.requestRules.delete(token);
+      else if (v.phase === 'reviewed' && requestRuleKey(v.choice) === key) return v.preview;
+    }
+    const r = await call(this.controller!, { operation: 'request-rule-preview', ...c });
+    if (r.error) throw Error(r.error);
+    if (r.generation !== c.generation) throw Error('Daemon generation changed');
+    const preview = parseRequestRulePreview(r.request_rule_preview, c);
+    if (this.requestRules.size >= 64) this.requestRules.delete(this.requestRules.keys().next().value!);
+    this.requestRules.set(preview.token, { choice: c, preview, phase: 'reviewed' });
+    return preview;
+  }
+  // Same token only: a repeated click or an unknown acknowledgement re-asks the
+  // backend for this receipt and can never create a second rule.
+  async saveRequestRule(raw: unknown): Promise<{ message: string; rule: Rule; replayed: boolean }> {
+    const c = validateRequestRule(raw, true), held = this.requestRules.get(c.preview_token!);
+    if (!held || requestRuleKey(held.choice) !== requestRuleKey(c)) throw Error('Reviewed rule unavailable; review again');
+    if (held.phase === 'saved' && held.saved)
+      return { message: `Already saved: ${held.preview.summary}. Applies to future connections; the ended request was not allowed.`, rule: held.saved, replayed: true };
+    if (held.phase === 'submitting') throw Error('Saving · waiting for backend acknowledgement');
+    this.requestRuleEvent(c);
+    return this.ruleMutation(async () => {
+      held.phase = 'submitting';
+      let r: Reply;
+      try {
+        r = await call(this.controller!, { operation: 'request-rule-save', ...c });
+      } catch (error) {
+        held.phase = 'unknown';
+        throw Error('Save acknowledgement lost; use Check result (same review, never a new rule). ' + String((error as Error)?.message ?? error));
+      }
+      if (r.error) {
+        held.phase = 'reviewed';
+        throw Error(r.error);
+      }
+      const rule = r.saved_rule;
+      if (!rule || rule.id !== held.preview.rule.id || rule.version !== held.preview.rule.version) {
+        held.phase = 'unknown';
+        throw Error('Unexpected save acknowledgement; inspect Rules');
+      }
+      held.phase = 'saved';
+      held.saved = rule;
+      return { message: `Saved: ${held.preview.summary}. Applies to future connections; the ended request was not allowed.`, rule, replayed: !!r.replayed };
+    });
   }
   // This opens a separate rule editor; it never sends Decide for the old flow.
   futureApplicationSource(value: { generation: string; id: string }) {

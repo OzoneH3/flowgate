@@ -21,6 +21,14 @@ import {
 import { askSource, awaiting, groupKey, requestGroups } from './automatic-prompts';
 import { applicationHeading } from './application-heading';
 import { connectionPresentation, permissionTarget, scopeZoneText } from './connection-presentation';
+import {
+  processInstanceEnded,
+  requestRuleAvailable,
+  requestRuleChoice,
+  requestRuleKey,
+  type RequestRulePreview,
+  type RuleAction,
+} from './request-rule';
 import { ZONE_CAPABILITY, zoneLabel } from './network-zones';
 import type { Presentation, PaneFrame } from './pane-model';
 import { DISPLAY_UNITS, displayAmount, isDisplayUnit, type DisplayUnit } from './display-units';
@@ -103,6 +111,66 @@ let rememberOn = false,
 function rememberMode() {
   return rememberFieldsSupported(state?.control.capabilities);
 }
+// request-application-rule-v1: future application rule from an ended request.
+// Uses the same Remember selections; never decides the ended request.
+let ruleAction: RuleAction = 'allow',
+  ruleReview: RequestRulePreview | undefined,
+  ruleReviewFor = '',
+  ruleChecking = false,
+  ruleMessage = '',
+  ruleMessageFor = '',
+  ruleSequence = 0,
+  ruleTimer: ReturnType<typeof setTimeout> | undefined;
+const ruleSaved = new Map<string, string>();
+function ruleChoice(e: ViewEvent) {
+  return requestRuleChoice(
+    { generation: state.control.generation, id: e.id, action: ruleAction },
+    rememberFields,
+    rememberDuration,
+    state.control.networkZones?.revision || '',
+  );
+}
+function ruleKey(e: ViewEvent | undefined) {
+  if (!e) return '';
+  try {
+    return requestRuleKey(ruleChoice(e));
+  } catch {
+    return '';
+  }
+}
+function scheduleRequestRule(delay = 250) {
+  ++ruleSequence;
+  ruleReview = undefined;
+  ruleReviewFor = '';
+  ruleMessage = '';
+  ruleMessageFor = '';
+  clearTimeout(ruleTimer);
+  ruleTimer = setTimeout(() => void prepareRequestRule(), delay);
+}
+async function prepareRequestRule() {
+  clearTimeout(ruleTimer);
+  const e = currentEvent();
+  if (!e || !requestRuleAvailable(e, state.control.capabilities) || ruleSaved.has(e.id)) return;
+  const seq = ++ruleSequence,
+    key = ruleKey(e);
+  ruleChecking = true;
+  ruleMessageFor = key;
+  updateDecisions();
+  try {
+    const preview = await window.flowgate.requestRulePreview(ruleChoice(e));
+    if (seq === ruleSequence && key === ruleKey(currentEvent())) {
+      ruleReview = preview;
+      ruleReviewFor = key;
+      ruleMessage = '';
+    }
+  } catch (error) {
+    // Exact backend reason; the selections (draft) stay unchanged.
+    if (seq === ruleSequence) ruleMessage = errorText(error);
+  } finally {
+    if (seq === ruleSequence) ruleChecking = false;
+    updateDecisions();
+  }
+}
 function resetRemember() {
   rememberOn = false;
   rememberFields = { ...DEFAULT_REMEMBER };
@@ -166,6 +234,7 @@ function invalidateReview(delay = 250) {
   reviewFor = '';
   reviewMessage = '';
   clearTimeout(reviewTimer);
+  if (requestRuleAvailable(currentEvent(), state.control.capabilities)) scheduleRequestRule(delay);
   updateDecisions();
   reviewTimer = setTimeout(() => void prepareDecisions(), delay);
 }
@@ -1920,6 +1989,46 @@ function renderRequests() {
       }
     };
     container.append(reconcile);
+    const ruleBox = element('fieldset', '', 'request-rule');
+    ruleBox.id = 'requestRuleSection';
+    ruleBox.append(element('legend', 'Rule for future connections'));
+    const actionLabel = element('label', 'Action: ', 'request-rule-action'),
+      actionSelect = element('select');
+    actionSelect.id = 'requestRuleAction';
+    for (const [value, label] of [['allow', 'Allow'], ['block', 'Deny'], ['ask', 'Ask']] as const)
+      actionSelect.append(new Option(label, value));
+    actionSelect.value = ruleAction;
+    actionSelect.onchange = () => {
+      ruleAction = actionSelect.value as RuleAction;
+      scheduleRequestRule(0);
+      updateDecisions();
+    };
+    actionLabel.append(actionSelect);
+    const ruleSummary = element('p', '', 'request-rule-summary');
+    ruleSummary.id = 'requestRuleSummary';
+    ruleSummary.setAttribute('role', 'status');
+    const save = element('button', 'Save application rule', 'save-request-rule');
+    save.id = 'saveRequestRule';
+    save.type = 'button';
+    save.onclick = async () => {
+      const current = currentEvent(), preview = ruleReview;
+      if (!current || !preview || ruleReviewFor !== ruleKey(current) || ruleSaved.has(current.id)) return;
+      save.disabled = true;
+      message('Saving application rule…');
+      try {
+        const result = await window.flowgate.requestRuleSave({ ...ruleChoice(current), preview_token: preview.token });
+        ruleSaved.set(current.id, result.message);
+        message(result.message);
+      } catch (error) {
+        ruleMessage = errorText(error);
+        ruleMessageFor = ruleKey(current);
+        message(ruleMessage);
+      } finally {
+        updateDecisions();
+      }
+    };
+    ruleBox.append(actionLabel, save, ruleSummary);
+    container.append(ruleBox);
     const future = element('button', 'Create application rule for future connections…', 'link-button');
     future.id = 'futureApplicationRule';
     future.type = 'button';
@@ -2008,17 +2117,53 @@ function updateDecisions() {
   if (scope) scope.disabled = locked;
   const toggle = $<HTMLInputElement>('rememberToggle');
   if (toggle) toggle.disabled = locked;
-  const panel = $('rememberPanel');
+  const panel = $('rememberPanel'),
+    ruleMode = requestRuleAvailable(e, state.control.capabilities),
+    ruleDone = !!e && ruleSaved.has(e.id),
+    instanceEnded = processInstanceEnded(e);
   if (panel) {
-    panel.hidden = !remembering || !!reviewFailureOf(e);
-    for (const input of panel.querySelectorAll<HTMLInputElement>('input[data-field]'))
-      if (input.dataset.field !== 'application')
+    // An ended request keeps the selections for its future application rule.
+    panel.hidden = ruleMode ? false : !remembering || !!reviewFailureOf(e);
+    for (const input of panel.querySelectorAll<HTMLInputElement>('input[data-field]')) {
+      if (input.dataset.field === 'application') continue;
+      if (!ruleMode) {
         input.disabled = locked || input.dataset.available !== 'true';
+        continue;
+      }
+      const ended = input.dataset.field === 'process' && instanceEnded;
+      // Never silently unchecked: an ended process stays checked until the user unchecks it.
+      input.disabled = ruleDone || input.dataset.available !== 'true' || (ended && !input.checked);
+      input.parentElement!.title = ended
+        ? 'This process instance has ended, so a process-only rule could never match. Uncheck to save an application rule for future launches.'
+        : input.parentElement!.title;
+      input.parentElement!.classList.toggle('instance-ended', ended);
+    }
     const duration = $<HTMLSelectElement>('rememberDuration');
-    duration.disabled = locked;
+    duration.disabled = ruleMode ? ruleDone : locked;
     // Backend offers persistent only with rule storage; temporary only as "application".
     for (const option of duration.options)
-      option.disabled = !e?.scope_previews[rememberScope(Number(option.value))];
+      option.disabled = !ruleMode && !e?.scope_previews[rememberScope(Number(option.value))];
+  }
+  if ($('requestRuleSection')) {
+    const box = $('requestRuleSection'), key = ruleKey(e), fresh = ruleReviewFor === key && !!ruleReview &&
+      Date.parse(ruleReview.expires_at) > (state.control.serverNow || Date.now());
+    box.hidden = !ruleMode;
+    if (ruleMode && !ruleDone && !ruleChecking && !fresh && ruleMessageFor !== key) scheduleRequestRule(0);
+    $<HTMLSelectElement>('requestRuleAction').disabled = !ruleMode || ruleDone;
+    const save = $<HTMLButtonElement>('saveRequestRule');
+    save.disabled = !ruleMode || ruleDone || ruleChecking || !fresh || !state.control.connected;
+    save.textContent = ruleDone ? 'Application rule saved' : 'Save application rule';
+    $('requestRuleSummary').textContent = !ruleMode
+      ? ''
+      : ruleDone
+        ? ruleSaved.get(e!.id)!
+        : ruleChecking
+          ? 'Checking rule…'
+          : ruleMessage
+            ? ruleMessage + ' · Selections kept.'
+            : fresh
+              ? `${ruleReview!.summary}. Future connections only; this ended request stays ended and was not allowed.`
+              : 'Review required.';
   }
   if ($('rememberSummary'))
     $('rememberSummary').textContent = reviewChecking
@@ -2090,7 +2235,7 @@ function updateDecisions() {
   }
   if ($('futureApplicationRule')) {
     const future = $<HTMLButtonElement>('futureApplicationRule');
-    future.hidden = !reviewFailureOf(e);
+    future.hidden = !reviewFailureOf(e) || requestRuleAvailable(e, state.control.capabilities);
     future.disabled = !state.control.connected || !canManageRules(state.control) ||
       !!e?.attempt && ['unknown', 'submitting'].includes(e.attempt.phase);
     future.textContent = rememberFields.process
@@ -2120,7 +2265,11 @@ function updateDecisions() {
       `Application + peer/service · ${decisionZone === 'any' ? 'Any network' : zoneLabel(decisionZone)} · ${until.startsWith('0001-') ? 'persistent' : 'until ' + new Date(until).toLocaleTimeString()}`;
   }
   measurePrompt();
-  if ($('permissionTarget') && reviewFailureOf(e))
+  if ($('permissionTarget') && requestRuleAvailable(e, state.control.capabilities))
+    $('permissionTarget').textContent = rememberFields.process && processInstanceEnded(e)
+      ? 'Process selected, but this instance has ended. Uncheck Process to save an application rule; your selection is not changed automatically.'
+      : 'Allow/Deny cannot apply to this ended request. Save an application rule for future connections below.';
+  else if ($('permissionTarget') && reviewFailureOf(e))
     $('permissionTarget').textContent = rememberFields.process
       ? 'Process scope was selected · no rule saved. Switching to application scope requires an explicit choice.'
       : 'No rule saved · the original connection was not allowed.';

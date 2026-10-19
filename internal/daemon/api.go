@@ -73,6 +73,7 @@ type Response struct {
 	DecisionRecord   *decisionlog.Record        `json:"decision_record,omitempty"`
 	TrafficMonitor   *udpaccount.Status         `json:"traffic_monitor,omitempty"`
 	ObservedPreview  *ObservedPreview           `json:"observed_preview,omitempty"`
+	RequestRule      *RequestRulePreview        `json:"request_rule_preview,omitempty"`
 	Replayed         bool                       `json:"replayed,omitempty"`
 
 	PolicyView         *PolicyView                `json:"policy_view,omitempty"`
@@ -176,7 +177,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						}
 					}
 					if !readonly && e.Mode != "host-monitor" {
-						r.Capabilities = append(r.Capabilities, PolicyExplanationCapability, ObservedRuleCapability, ProcessRuleCapability, ObservedAnyProtocolCapability, DecisionZoneCapability, ApplicationPolicyCapability, DecisionRememberFieldsCapability, StoredAskCapability)
+						r.Capabilities = append(r.Capabilities, PolicyExplanationCapability, ObservedRuleCapability, ProcessRuleCapability, ObservedAnyProtocolCapability, DecisionZoneCapability, ApplicationPolicyCapability, DecisionRememberFieldsCapability, StoredAskCapability, RequestApplicationRuleCapability)
 					}
 					if e.Evaluation != nil {
 						r.Capabilities = append(r.Capabilities, EvaluationCapability)
@@ -484,6 +485,33 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 									var saved policy.Rule
 									saved, r.ScopePreview, r.Replayed, err = e.SaveObservedRule(q.Generation, q.PreviewToken, *q.ObservedDraft, cred.Uid, admin)
 									if err == nil {
+										r.SavedRule = &saved
+									}
+								}
+								if err != nil {
+									r.ErrorCode, r.Error = "invalid_request", err.Error()
+									var typed *RuleMutationError
+									if errors.As(err, &typed) {
+										r.ErrorCode = typed.Code
+									}
+								}
+							}
+						case "request-rule-preview", "request-rule-save":
+							if readonly || r.ReadOnly || !permissions.CanManageRules || e.Mode == "host-monitor" {
+								r.ErrorCode, r.Error = "read_only", "Rule management unavailable on this endpoint"
+							} else if q.ID == "" || len(q.ID) > 64 || (q.Operation == "request-rule-save" && (q.PreviewToken == "" || len(q.PreviewToken) > 128)) {
+								r.ErrorCode, r.Error = "invalid_request", "Request id and, for save, preview token required"
+							} else {
+								var err error
+								o := RememberOptions{q.Remember, q.DurationSeconds}
+								if q.Operation == "request-rule-preview" {
+									var v RequestRulePreview
+									if v, err = e.PreviewRequestRule(q.Generation, q.ID, q.Action, q.Scope, q.NetworkZone, q.ZoneRevision, cred.Uid, admin, o); err == nil {
+										r.RequestRule = &v
+									}
+								} else {
+									var saved policy.Rule
+									if saved, r.ScopePreview, r.Replayed, err = e.SaveRequestRule(q.Generation, q.PreviewToken, q.ID, q.Action, q.Scope, q.NetworkZone, q.ZoneRevision, cred.Uid, admin, o); err == nil {
 										r.SavedRule = &saved
 									}
 								}

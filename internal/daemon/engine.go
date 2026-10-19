@@ -37,6 +37,9 @@ type Event struct {
 	Token   string          `json:"-"`
 
 	Revalidation *identity.PendingRevalidation `json:"revalidation,omitempty"`
+	// RequestRule reports whether an application rule for future connections
+	// can be saved from this request's retained identity (request-rule-*).
+	RequestRule *RequestRuleSource `json:"request_rule,omitempty"`
 
 	// Decision-log bookkeeping (never serialized): the rule exactly as evaluated,
 	// whether this result was a capacity refusal, and record-once flags so packet
@@ -77,6 +80,11 @@ type Engine struct {
 	creationMu       sync.Mutex // serializes bounded preview/replay lifecycle, never packet processing
 	creationPreviews map[string]*creationPreview
 	verifyObserved   func(string, identity.ActivityProcess) (identity.Process, error) // tests only; production uses identity verifier
+
+	requestRules        map[string]*retainedRequest
+	requestRulePreviews map[string]*requestRulePreview
+	verifyRetained      func(identity.Application, uint32, string) error // tests only
+	instanceRunning     func(int, string) bool                           // tests only
 
 	policyQueryMu      sync.Mutex // serializes metadata health sampling with response ordering
 	policyReadSequence uint64     // read-response ordering only, protected by mu
@@ -198,6 +206,7 @@ func (e *Engine) Observe(f identity.Flow, token string) Event {
 	}
 	e.created++
 	e.events[key] = &v
+	e.retainRequestLocked(&v, a)
 	return v
 }
 func (e *Engine) List(uid uint32, admin bool) []Event {
@@ -210,9 +219,12 @@ func (e *Engine) ListWithZones(uid uint32, admin bool) ([]Event, identity.Networ
 	e.refreshZonesLocked()
 	e.expire(e.Now())
 	out := []Event{}
+	e.pruneRequestRulesLocked(e.Now())
 	for _, v := range e.events {
 		if admin || owned(v.Attribution, uid) {
-			out = append(out, *v)
+			row := *v
+			row.RequestRule = e.requestRuleSourceLocked(v.ID)
+			out = append(out, row)
 		}
 	}
 	return out, e.Zones

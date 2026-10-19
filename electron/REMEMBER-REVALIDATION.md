@@ -87,3 +87,37 @@ No Claude rule was changed. No host protection, daemon or collectors were
 started/restarted/toggled. No host deployment. KWin remember-position script was
 reported disabled by user during this work; placement acceptance is owned by
 popup partner on released5a4ce96, not proof of historical interference.
+
+## Application rule after the requester exits (request-application-rule-v1)
+
+Root cause of “no usable path”: the future-application action was shown only
+after a failed decision review, and it required a *fresh live* Activity
+instance; the daemon dropped the event 5 s after its deadline. A timed-out or
+exited requester therefore left disabled Allow/Deny and nothing else.
+
+* The daemon retains each prompt's identity captured from its verified owner
+  (application key/revision, UID, remembered filter, mount namespace, PID/start)
+  for the deadline + 10 minutes (≤256 entries).
+* `request-rule-preview` / `request-rule-save` (id, action allow|block|ask,
+  explicit Remember fields, duration, zone) build the rule from that identity.
+  No PID, socket or live instance is needed. The executable is validated
+  independently by path against the captured device/inode/size/mtime/ctime;
+  a different file at the same path, a modification, deletion or another mount
+  namespace is refused with the exact reason. A still-pending live request is
+  refused (use Remember); a dead pending binding is ended first. The process
+  scope is refused with an explanation, never silently dropped.
+* Unchecked properties mean any: application-only = whole application for the
+  direction. Same scope updates the existing rule in place; the same token
+  replays its receipt. Save text says future connections only; the ended
+  request stays ended and nothing held is released.
+* UI keeps timed-out requests with a retained identity, keeps the Remember
+  selections editable, disables an ended Process option unless it is still
+  checked (so the user unchecks it), and offers Action + **Save application
+  rule** with the backend summary. Errors are shown verbatim; the draft stays.
+
+Evidence: `scripts/process-rules-isolated.py --request-rule` (unprivileged
+`scripts/lab.sh`, real nft interception, TCP receiver): exit before decision,
+application-wide Allow saved from the retained request, relaunch with new PID
+and source port delivered without prompt, different executable prompted,
+same-path replacement refused, Deny blocks and Ask prompts the next launch,
+replay/repeat review keep one rule, cleanup rules0.

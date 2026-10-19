@@ -355,6 +355,6 @@ func rememberSummary(app string, r policy.Rule, scope string, duration int64) st
 	if scope == "application" {
 		life = "for " + (time.Duration(duration) * time.Second).String()
 	}
-	act := map[string]string{"allow": "Allow", "block": "Deny"}[r.Action]
+	act := map[string]string{"allow": "Allow", "block": "Deny", "ask": "Ask"}[r.Action]
 	return fmt.Sprintf("%s %s · %s · %s · %s · %s · %s · %s", act, app, dir, addr, port, proto, zone, life)
 }
