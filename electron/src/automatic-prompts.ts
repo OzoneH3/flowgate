@@ -6,6 +6,7 @@ import {
   type Rule,
   type ViewEvent,
 } from './protocol';
+import { reviewFailureOf } from './decision-remember';
 import type { RequestRef } from './notifications';
 export interface RequestGroup {
   key: string;
@@ -18,7 +19,7 @@ export interface RequestGroup {
 // Backend `request_group` joins equivalent repeats; without it each event is its own group.
 export const groupKey = (e: { id: string; request_group?: string }) =>
   e.request_group ? 'g:' + e.request_group : 'e:' + e.id;
-export const awaiting = (e: ViewEvent) => e.state === 'awaiting-decision' && e.remainingMs > 0;
+export const awaiting = (e: ViewEvent) => e.state === 'awaiting-decision' && e.remainingMs > 0 && !reviewFailureOf(e);
 const age = (e: ViewEvent) => {
   const t = Date.parse(e.first_seen);
   return Number.isFinite(t) ? t : Date.parse(e.deadline);
@@ -99,7 +100,7 @@ export class AutomaticPrompts {
   follow(state: ClientState, ref: RequestRef): RequestRef | undefined {
     if (state.control.generation !== ref.generation) return;
     const e = state.control.events.find((e) => e.id === ref.id);
-    if (e && (awaiting(e) || e.attempt?.phase === 'unknown' || e.attempt?.phase === 'submitting'))
+    if (e && (reviewFailureOf(e) || awaiting(e) || e.attempt?.phase === 'unknown' || e.attempt?.phase === 'submitting'))
       return ref;
     if (!canDecide(state.control)) return;
     const group = ref.group ?? (e ? groupKey(e) : undefined),

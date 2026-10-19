@@ -6,6 +6,8 @@ import {
   agreesWithDecision,
   sameRememberedRule,
   terminalReviewFailure,
+  freshApplicationRuleSource,
+  reviewFailureOf,
   type DecisionReviewFailure,
   type DecisionPreview,
 } from './decision-remember';
@@ -335,6 +337,14 @@ export class Backend {
       const retainedPolicy = sameGeneration && !authorityChanged ? previousPolicy : undefined;
       this.reply = r;
       this.received = performance.now();
+      for (const event of r.events) {
+        const failure = reviewFailureOf(event);
+        if (failure && !this.reviewFailures.has(event.id)) {
+          if (this.reviewFailures.size >= 64)
+            this.reviewFailures.delete(this.reviewFailures.keys().next().value!);
+          this.reviewFailures.set(event.id, {generation: r.generation, event, failure, until: this.now()+300000});
+        }
+      }
       for (const id of this.attempts.keys())
         if (!r.events.some((e) => e.id === id)) this.attempts.delete(id);
       this.state.control = {
@@ -527,13 +537,18 @@ export class Backend {
     }
     const r = await call(this.controller!, { operation: 'decision-preview', ...d });
     if (r.error) {
-      const failure = terminalReviewFailure(r.error_code, r.error);
+      const reported = r.events.find(event => event.id === d.id);
+      const failure = reviewFailureOf(reported) ?? terminalReviewFailure(r.error_code, r.error);
       if (failure && r.generation === d.generation && this.state.control.generation === d.generation) {
         // Retain the original details for a bounded, explicitly non-actionable
         // future-rule workflow; never bind this refusal to a newer connection.
         if (this.reviewFailures.size >= 64 && !this.reviewFailures.has(d.id))
           this.reviewFailures.delete(this.reviewFailures.keys().next().value!);
-        this.reviewFailures.set(d.id, { generation: d.generation, event: e, failure, until: this.now() + 300000 });
+        const previous = this.reviewFailures.get(d.id);
+        // Paired Allow/Deny previews may race: a later generic stale reply must
+        // not erase the first precise socket/identity failure (or its details).
+        if (!previous || previous.failure.code === 'stale_decision' && failure.code !== 'stale_decision')
+          this.reviewFailures.set(d.id, { generation: d.generation, event: reported?.revalidation ? reported : e, failure, until: this.now() + 300000 });
         for (const [token, held] of this.decisionPreviews)
           if (!held.sent && held.choice.generation === d.generation && held.choice.id === d.id)
             this.decisionPreviews.delete(token);
@@ -551,6 +566,20 @@ export class Backend {
     if (this.decisionPreviews.size >= 64) throw Error('Too many retained decision reviews');
     this.decisionPreviews.set(p.token, { choice: d, preview: p, sent: false });
     return p;
+  }
+  // This opens a separate rule editor; it never sends Decide for the old flow.
+  futureApplicationSource(value: { generation: string; id: string }) {
+    if (!value || typeof value !== 'object' || Object.keys(value).sort().join(',') !== 'generation,id' ||
+        ![value.generation, value.id].every(v => typeof v === 'string' && v.length > 0 && v.length <= 256))
+      throw Error('Invalid original request');
+    const state = this.view(), event = state.control.events.find(e => e.id === value.id);
+    if (!event || value.generation !== state.control.generation ||
+        event.attempt?.phase === 'unknown' || event.attempt?.phase === 'submitting' ||
+        (!this.reviewFailures.has(event.id) && event.state === 'awaiting-decision' && event.remainingMs > 0))
+      throw Error('Resolve the original request or its uncertain result first; no rule opened');
+    const source = freshApplicationRuleSource(state, event);
+    if (!source) throw Error('No fresh independently verified application identity is visible. Open the application in Activity after it reconnects; the ended connection cannot be approved.');
+    return source;
   }
   async reconcileDecision(value: {
     generation: string;

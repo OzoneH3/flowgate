@@ -9,6 +9,8 @@ import {
   DEFAULT_REMEMBER,
   rememberDecision,
   rememberFieldsSupported,
+  reviewFailureOf,
+  reviewFailureSummary,
   rememberKey,
   rememberOptions,
   rememberReviewText,
@@ -32,7 +34,7 @@ import {
   authoritativeProcessPolicy,
 } from './policy';
 import { ruleStatus, ruleState, ruleDescription, ownConfigured } from './rule-status';
-import { canDecide } from './protocol';
+import { canDecide, canManageRules } from './protocol';
 import type { Application } from './protocol';
 import { TrafficGraph } from './graph';
 import { setupWorkflows, updateWorkflows, openRule, resumeRuleEditor } from './workflows';
@@ -641,6 +643,11 @@ if (promptID) {
   });
   setupPaneControls();
   activityPolicy = new ActivityPolicy($('infoRules'));
+  window.flowgate.onFutureApplicationRule((source) => {
+    if (source.generation !== state?.control.generation || source.target_scope !== 'application') return;
+    chooseTab('activity');
+    void openRule({ observed: source }, { activity: true, applicationScope: true, protocol: '*', action: 'allow', futureOnly: true });
+  });
   window.flowgate.onNavigate((v) => {
     chooseTab('requests');
     message(v.message);
@@ -1562,6 +1569,7 @@ function actionable(e: ViewEvent | undefined) {
     e.state === 'awaiting-decision' &&
     e.remainingMs > 0 &&
     !e.attempt &&
+    !reviewFailureOf(e) &&
     !localSubmitted.has(state.control.generation + ':' + e.id) &&
     !!e.scope_previews[chosenScope]
   );
@@ -1590,6 +1598,7 @@ function renderRequests() {
       !(
         awaiting(selected) ||
         selected.attempt ||
+        reviewFailureOf(selected) ||
         localSubmitted.has(state.control.generation + ':' + selected.id)
       )
     ) {
@@ -1913,6 +1922,25 @@ function renderRequests() {
       }
     };
     container.append(reconcile);
+    const future = element('button', 'Create application rule for future connections…', 'link-button');
+    future.id = 'futureApplicationRule';
+    future.type = 'button';
+    future.onclick = async () => {
+      const original = currentEvent();
+      if (!original || !reviewFailureOf(original)) return;
+      future.disabled = true;
+      try {
+        await window.flowgate.openFutureApplicationRule({ generation: state.control.generation, id: original.id });
+        message('Application-rule editor opened. The original connection was not allowed.');
+      } catch (error) { message(errorText(error)); }
+      finally { updateDecisions(); }
+    };
+    container.append(future);
+    const diagnostic = element('details');
+    diagnostic.id = 'pendingRevalidationDetails';
+    diagnostic.append(element('summary', 'Revalidation details'), element('pre', '', 'scope-preview'));
+    container.append(diagnostic);
+
     if (!promptID) {
       const open = element('button', 'Open permission window', 'open-prompt');
       open.onclick = () => void window.flowgate.openPrompt(e.id);
@@ -1936,7 +1964,7 @@ function updateDecisions() {
     ).length;
     $('dismiss').textContent = other
       ? `Next request (${other})`
-      : e?.state === 'awaiting-decision' && e.remainingMs > 0
+      : !reviewFailureOf(e) && e?.state === 'awaiting-decision' && e.remainingMs > 0
         ? 'Decide later'
         : 'Close';
     $('dismiss').title =
@@ -1972,6 +2000,7 @@ function updateDecisions() {
     (Boolean(promptID) && (!promptLayoutReady || performance.now() < promptStableAt)) ||
     !e ||
     !!e.attempt ||
+    !!reviewFailureOf(e) ||
     localSubmitted.has(state.control.generation + ':' + e.id) ||
     !state.control.connected ||
     !canDecide(state.control) ||
@@ -1983,7 +2012,7 @@ function updateDecisions() {
   if (toggle) toggle.disabled = locked;
   const panel = $('rememberPanel');
   if (panel) {
-    panel.hidden = !remembering;
+    panel.hidden = !remembering || !!reviewFailureOf(e);
     for (const input of panel.querySelectorAll<HTMLInputElement>('input[data-field]'))
       if (input.dataset.field !== 'application')
         input.disabled = locked || input.dataset.available !== 'true';
@@ -2022,7 +2051,7 @@ function updateDecisions() {
   }
   if ($('refreshDecision')) {
     const refresh = $<HTMLButtonElement>('refreshDecision');
-    refresh.hidden = !needsDecisionReview();
+    refresh.hidden = !needsDecisionReview() || !!reviewFailureOf(e);
     refresh.disabled = reviewChecking || !actionable(e);
   }
   if ($('decisionReview'))
@@ -2046,12 +2075,31 @@ function updateDecisions() {
     reconcile.hidden = !e?.attempt?.reconcile;
     reconcile.disabled = !state.control.connected;
   }
+  if ($('requestResult')) $('requestResult').hidden = !!reviewFailureOf(e);
   if ($('requestResult') && e)
-    $('requestResult').textContent = !state.control.connected
+    $('requestResult').textContent = reviewFailureOf(e)
+      ? reviewFailureSummary(reviewFailureOf(e)!)
+      : !state.control.connected
       ? 'Disconnected · decisions unavailable. Request details retained; no retry sent.'
       : e.attempt?.phase === 'unknown' && e.state !== 'awaiting-decision'
         ? `Backend now reports ${e.state}. Original acknowledgement remains unknown; no retry sent. ${e.reason}`
         : e.attempt?.message || e.reason;
+  if ($('pendingRevalidationDetails')) {
+    const diagnostic = $('pendingRevalidationDetails');
+    diagnostic.hidden = !reviewFailureOf(e);
+    diagnostic.querySelector('pre')!.textContent = reviewFailureOf(e)?.message || '';
+    diagnostic.title = reviewFailureOf(e)?.code || '';
+  }
+  if ($('futureApplicationRule')) {
+    const future = $<HTMLButtonElement>('futureApplicationRule');
+    future.hidden = !reviewFailureOf(e);
+    future.disabled = !state.control.connected || !canManageRules(state.control) ||
+      !!e?.attempt && ['unknown', 'submitting'].includes(e.attempt.phase);
+    future.textContent = rememberFields.process
+      ? 'Switch to application scope for future connections…'
+      : 'Create application rule for future connections…';
+    future.title = 'Separate application-wide rule, independently verified from fresh Activity. Does not release this request. No automatic scope switch or save.';
+  }
   if ($('permissionTarget'))
     $('permissionTarget').textContent = rememberMode()
       ? remembering
@@ -2074,9 +2122,15 @@ function updateDecisions() {
       `Application + peer/service · ${decisionZone === 'any' ? 'Any network' : zoneLabel(decisionZone)} · ${until.startsWith('0001-') ? 'persistent' : 'until ' + new Date(until).toLocaleTimeString()}`;
   }
   measurePrompt();
+  if ($('permissionTarget') && reviewFailureOf(e))
+    $('permissionTarget').textContent = rememberFields.process
+      ? 'Process scope was selected · no rule saved. Switching to application scope requires an explicit choice.'
+      : 'No rule saved · the original connection was not allowed.';
   const expiry = document.querySelector('.expiry');
   if (expiry)
-    expiry.textContent = e
+    expiry.textContent = reviewFailureOf(e)
+      ? reviewFailureSummary(reviewFailureOf(e)!)
+      : e
       ? e.remainingMs > 0 && e.state === 'awaiting-decision'
         ? `${Math.ceil(e.remainingMs / 1000)} seconds remaining`
         : `Request ${e.state === 'awaiting-decision' ? 'expired' : e.state}`

@@ -890,6 +890,18 @@ app.whenReady().then(async () => {
       throw Error('Permission presentation is transitioning');
     return backend.decide(boundDecision(value, promptRefs.get(e.sender.id)));
   });
+  ipcMain.handle('request:future-application', (e, value) => {
+    trusted(e);
+    const ref = promptRefs.get(e.sender.id);
+    if (e.sender !== main.webContents && !ref) throw Error('Open future rules from a request view');
+    if (ref && (ref.generation !== value?.generation || ref.id !== value?.id))
+      throw Error('Original request differs from this permission window');
+    const source = backend.futureApplicationSource(value);
+    // Explicit user navigation, not automatic queue activation or a decision.
+    main.webContents.send('request:future-application-open', source);
+    if (main.isMinimized()) main.restore();
+    main.show();
+  });
   ipcMain.handle('prompt:open', (e, id) => {
     trusted(e);
     if (e.sender !== main.webContents) throw Error('Open permissions from Activity');
