@@ -2166,7 +2166,10 @@ function updateDecisions() {
               : 'Review required.';
   }
   if ($('rememberSummary'))
-    $('rememberSummary').textContent = reviewChecking
+    // An ended request can never be allowed/denied; its selections feed the future-rule section below.
+    $('rememberSummary').textContent = ruleMode
+      ? 'These selections apply to the application rule for future connections below.'
+      : reviewChecking
       ? 'Checking rule…'
       : (e && !e.scope_previews[chosenScope]
           ? chosenScope === 'persistent'

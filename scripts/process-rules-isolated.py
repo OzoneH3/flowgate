@@ -125,6 +125,12 @@ try:
     result={'started':results}
    elif op=='exit':children[name].terminate();children[name].wait(5);result={'exited':name}
    elif op=='exec':children[name].stdin.write('{"op":"exec"}\n');children[name].stdin.flush();result={'exec':name}
+   elif op=='launch':
+    # Relaunch the same executable as a new process (new PID/ports) for UI journeys.
+    if children[name].poll() is None:children[name].terminate();children[name].wait(5)
+    executable=str(RUN/'native-other')if name=='other'else NATIVE;port=45100+10*len(infos.setdefault('_launches',[]))
+    children[name]=subprocess.Popen([executable,str(port)],env=dict(os.environ,FLOWGATE_FIXTURE_TIMEOUT_SECONDS='60'),stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=(RUN/(name+'.log')).open('a'),text=True)
+    infos[name]=json.loads(children[name].stdout.readline());infos['_launches'].append(infos[name]['pid']);result={'launched':name,'info':infos[name]}
    elif op=='incoming':
     proto=q.get('protocol','udp');v6=q.get('v6',False);port=infos[name]['ports'][proto+('6'if v6 else'4')];result=remote(proto,port=port,v6=v6)
    elif op=='outgoing':result=ask(children[name],'send',protocol=q.get('protocol','udp'),v6=q.get('v6',False),**{k:q[k] for k in('host','port','timeout_ms') if k in q})
