@@ -190,3 +190,21 @@ remain in monitoring. Existing old04c5159 must not be used to read schema5 recor
   [DHCPv6 RFC9915](https://www.rfc-editor.org/rfc/rfc9915.html).
 - [timesyncd](https://www.freedesktop.org/software/systemd/man/latest/systemd-timesyncd.service.html),
   [Tailscale transport ports and variable peers](https://tailscale.com/docs/reference/faq/firewall-ports).
+
+### Integrated checkpoint
+
+Released UI `6d5a1235d98c559456cfa9d2f7f89875e37c5a24` is merged with the
+backend16d50b6 follow-up. Build/typecheck and24 selected UI checks passed in the
+main checkout. The final backend additionally passed
+`.workspace/essential-exact-final.log`: actual private-mount service
+application/process preview/save, real API/SQLite receipt flow, and UDP/TCP DNS
+receiver checks. Those focused checks were rerun for the final override/identity
+refinements, without repeating host/firewall/BPF matrices. Full immutable final
+source and candidate hash are recorded in the inspection artifact's manifest.
+
+The CLI candidate is for **read-only inspection**, not the previous production
+installer's automatic host receiver stage. That installer deliberately exercises
+protection before returning to monitoring; do not run it merely to inspect or
+apply this preset. A later reviewed rollout must restore monitoring first and
+run only the separately approved focused usability check. No deployment command
+has been executed by this task.
