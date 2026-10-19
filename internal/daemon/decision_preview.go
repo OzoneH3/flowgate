@@ -162,8 +162,11 @@ func (e *Engine) PreviewDecision(generation, id, action, scope, zone, revision s
 		return DecisionPreview{}, err
 	}
 	a := e.Resolve(v.Flow)
+	if !e.Now().Before(v.Deadline) {
+		return DecisionPreview{}, e.rejectPendingDeadlineLocked(v)
+	}
 	if a.Application == nil || a.Application.Key == "" || a.Application.Revision == "" || a.Principal() == nil || a.Fingerprint != v.Attribution.Fingerprint {
-		return DecisionPreview{}, mutationError("identity_changed", "Pending identity changed; fresh request required")
+		return DecisionPreview{}, e.rejectPendingBindingLocked(v, a)
 	}
 	rule := policy.Rule{Version: 1, Schema: 2, ID: "user:" + randomID(), Executable: a.Application.Executable, Priority: 100, Action: action, Created: now, Expires: now.Add(time.Duration(o.DurationSeconds) * time.Second), Filter: policy.Remembered(v.Flow, a)}
 	if scope == "persistent" {

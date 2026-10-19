@@ -42,7 +42,7 @@ func clip(s string, n int) string {
 // baseRecord captures flow/identity evidence from the event as observed at
 // decision time. Unknown values stay absent; direction comes only from the hook.
 func (e *Engine) baseRecord(v *Event, kind string) decisionlog.Record {
-	r := decisionlog.Record{ID: decisionlog.NewRecordID(), Time: e.Now(), Generation: e.Generation, Mode: e.Mode, Kind: kind, RequestID: v.ID, Delivery: "not_observed"}
+	r := decisionlog.Record{Revalidation: v.Revalidation, ID: decisionlog.NewRecordID(), Time: e.Now(), Generation: e.Generation, Mode: e.Mode, Kind: kind, RequestID: v.ID, Delivery: "not_observed"}
 	if e.Evaluation != nil {
 		r.Mode = "host-enforcement"
 		r.EvaluationID = e.Evaluation.Status().ID
@@ -112,9 +112,7 @@ func (e *Engine) settlePendingLocked(reason string) {
 			// The attempt ended (socket gone) or its identity changed: it can no
 			// longer be decided, so it must not linger as an actionable prompt.
 			// Same disposition as the decision path; nothing is approved.
-			v.State = "expired"
-			v.Reason = "connection attempt ended or identity changed before policy re-evaluation"
-			e.recordFinal(v, "block", "identity_changed", "", v.Reason+"; held packets drop", nil, nil, "deferred", "")
+			_ = e.rejectPendingBindingLocked(v, a)
 			continue
 		}
 		action, rule, matches := e.evaluateLocked(e.rules, v.Flow, a, now)

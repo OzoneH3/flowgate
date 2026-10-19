@@ -109,6 +109,8 @@ type Record struct {
 	// Delivery is always not_observed: FlowGate never observes receiver delivery.
 	Delivery string `json:"delivery,omitempty"`
 	Gap      *Gap   `json:"gap,omitempty"`
+
+	Revalidation *identity.PendingRevalidation `json:"revalidation,omitempty"`
 }
 
 func Snapshot(r policy.Rule) *RuleSnapshot {

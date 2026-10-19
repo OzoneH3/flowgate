@@ -36,6 +36,8 @@ type Event struct {
 	AskRule *RuleVersionRef `json:"ask_rule,omitempty"`
 	Token   string          `json:"-"`
 
+	Revalidation *identity.PendingRevalidation `json:"revalidation,omitempty"`
+
 	// Decision-log bookkeeping (never serialized): the rule exactly as evaluated,
 	// whether this result was a capacity refusal, and record-once flags so packet
 	// retransmissions and repeated handling never produce duplicate records.
@@ -236,14 +238,14 @@ func (e *Engine) decideLocked(id, action, scope string, uid uint32, admin bool, 
 			return Event{}, mutationError("stale_decision", "stale decision; retry required")
 		}
 		a := e.Resolve(v.Flow)
+		if !e.Now().Before(v.Deadline) {
+			return Event{}, e.rejectPendingDeadlineLocked(v)
+		}
 		if reviewed != nil && !e.Now().Before(reviewDeadline) {
 			return Event{}, mutationError("preview_expired", "Preview expired during identity revalidation; review again")
 		}
-		if !e.Now().Before(v.Deadline) || a.Application == nil || a.Fingerprint != v.Attribution.Fingerprint {
-			v.State = "expired"
-			v.Reason = "identity changed before decision"
-			e.recordFinal(v, "block", "identity_changed", "", v.Reason+"; held packets drop", nil, &uid, "deferred", "")
-			return Event{}, mutationError("identity_changed", "identity changed; retry required")
+		if a.Application == nil || a.Fingerprint != v.Attribution.Fingerprint {
+			return Event{}, e.rejectPendingBindingLocked(v, a)
 		}
 		if scope != "once" && len(e.rules) >= 256 {
 			return Event{}, mutationError("capacity", "rule capacity reached")
