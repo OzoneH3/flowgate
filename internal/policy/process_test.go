@@ -78,5 +78,6 @@ func TestProcessTierIdentityAndFallback(t *testing.T) {
 	p2.ID = "aaa"
 	p2.Action = "allow"
 	rules = []Rule{pr, p2, ar}
-	check("allow")
+	// NetLimiter: on equal weight Deny is applied before Allow (not ID order).
+	check("block")
 }

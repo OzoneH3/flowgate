@@ -160,14 +160,17 @@ func EvaluateSession(rules []Rule, f identity.Flow, a identity.Attribution, now 
 		matches = append(matches, r)
 	}
 	sort.Slice(matches, func(i, j int) bool {
-		if matches[i].Filter.Process.IsZero() != matches[j].Filter.Process.IsZero() {
-			return !matches[i].Filter.Process.IsZero()
+		// NetLimiter Blocker: the rule with the higher weight is applied; on
+		// equal weight Deny is applied before Allow and Ask.
+		if wi, wj := matches[i].Weight(), matches[j].Weight(); wi != wj {
+			return wi > wj
 		}
-		if matches[i].Filter.AllPrograms != matches[j].Filter.AllPrograms {
-			return !matches[i].Filter.AllPrograms
-		}
+		// Explicit legacy priorities keep their stored ordering within a weight.
 		if matches[i].Priority != matches[j].Priority {
 			return matches[i].Priority > matches[j].Priority
+		}
+		if (matches[i].Action == "block") != (matches[j].Action == "block") {
+			return matches[i].Action == "block"
 		}
 		// At equal tier/priority, an explicit user policy overrides a preset.
 		if (matches[i].Preset == nil) != (matches[j].Preset == nil) {
@@ -183,6 +186,21 @@ func EvaluateSession(rules []Rule, f identity.Flow, a identity.Attribution, now 
 		return "ask", "default-ask", ids
 	}
 	return matches[0].Action, matches[0].ID, ids
+}
+
+// Weight is NetLimiter's Blocker precedence by target: whole machine 1, zone 2,
+// application/filter 3. FlowGate process-instance rules (no NetLimiter
+// equivalent) are 4 so an instance override keeps beating its application.
+func (r Rule) Weight() int {
+	switch {
+	case !r.Filter.Process.IsZero():
+		return 4
+	case r.Filter.AllPrograms && r.Filter.NetworkZone != "":
+		return 2
+	case r.Filter.AllPrograms:
+		return 1
+	}
+	return 3
 }
 
 // Remembered defaults to one remote address, not an ephemeral source port.

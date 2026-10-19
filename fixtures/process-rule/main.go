@@ -101,6 +101,9 @@ func main() {
 			Op       string `json:"op"`
 			Protocol string `json:"protocol"`
 			V6       bool   `json:"v6"`
+			// Optional explicit destination inside the private fixture prefixes.
+			Host string `json:"host"`
+			Port int    `json:"port"`
 		}
 		json.Unmarshal(scan.Bytes(), &q)
 		switch q.Op {
@@ -137,6 +140,21 @@ func main() {
 				if q.Protocol == "udp" {
 					port++
 				}
+			}
+			if q.Host != "" {
+				ip := net.ParseIP(q.Host)
+				_, p4, _ := net.ParseCIDR("10.79.0.0/24")
+				_, p6, _ := net.ParseCIDR("fd79::/64")
+				if ip == nil || !(p4.Contains(ip) || p6.Contains(ip)) || (ip.To4() == nil) != q.V6 {
+					panic("fixture destination outside private prefixes")
+				}
+				host = q.Host
+			}
+			if q.Port != 0 {
+				if q.Port < 1024 || q.Port > 65534 {
+					panic("invalid fixture destination port")
+				}
+				port = q.Port
 			}
 			if net.ParseIP(host) == nil {
 				panic("invalid fixture peer")

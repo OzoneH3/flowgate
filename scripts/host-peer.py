@@ -23,16 +23,20 @@ for raw in sys.stdin:
     try:
         q=json.loads(raw);op=q['op'];v6=q.get('v6',False);family=socket.AF_INET6 if v6 else socket.AF_INET
         if op=='setup':
-            for args in [['link','set','lo','up'],['link','set','fgpeer','up'],['addr','add','10.79.0.2/24','dev','fgpeer'],['-6','addr','add','fd79::2/64','dev','fgpeer','nodad'],['-6','addr','add','fe80::2/64','dev','fgpeer','nodad']]:subprocess.run(['ip',*args],check=True)
-            for fam,addr in [(socket.AF_INET,'10.79.0.2'),(socket.AF_INET6,'fd79::2')]:
-                s=socket.socket(fam,socket.SOCK_STREAM);s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);s.bind((addr,43000));s.listen();threading.Thread(target=listen,args=(s,),daemon=True).start()
+            for args in [['link','set','lo','up'],['link','set','fgpeer','up'],['addr','add','10.79.0.2/24','dev','fgpeer'],['addr','add','10.79.0.3/24','dev','fgpeer'],['-6','addr','add','fd79::2/64','dev','fgpeer','nodad'],['-6','addr','add','fd79::3/64','dev','fgpeer','nodad'],['-6','addr','add','fe80::2/64','dev','fgpeer','nodad']]:subprocess.run(['ip',*args],check=True)
+            # Two destinations x two service ports (TCP 43000/44000, UDP 43001/44001).
+            DESTS=[(socket.AF_INET,'10.79.0.2'),(socket.AF_INET6,'fd79::2'),(socket.AF_INET,'10.79.0.3'),(socket.AF_INET6,'fd79::3')]
+            for fam,addr in DESTS:
+                for tcp_port in (43000,44000):
+                    s=socket.socket(fam,socket.SOCK_STREAM);s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);s.bind((addr,tcp_port));s.listen();threading.Thread(target=listen,args=(s,),daemon=True).start()
                         
             def udp_echo(s):
                 while True:
                     try:b,addr=s.recvfrom(1024);record("udp",s);s.sendto(b,addr)
                     except OSError:break
-            for fam,addr in [(socket.AF_INET,'10.79.0.2'),(socket.AF_INET6,'fd79::2')]:
-                u=socket.socket(fam,socket.SOCK_DGRAM);u.bind((addr,43001));threading.Thread(target=udp_echo,args=(u,),daemon=True).start()
+            for fam,addr in DESTS:
+                for udp_port in (43001,44001):
+                    u=socket.socket(fam,socket.SOCK_DGRAM);u.bind((addr,udp_port));threading.Thread(target=udp_echo,args=(u,),daemon=True).start()
             answer={'ok':True}
         elif op=='ping':
             subprocess.run(['ping','-6' if v6 else '-4','-c','1','-W','2','fd79::1' if v6 else '10.79.0.1'],check=True,stdout=subprocess.DEVNULL);answer={'ok':True}
