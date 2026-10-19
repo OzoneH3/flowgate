@@ -59,7 +59,10 @@ export function ruleState(rule: Rule, now: number) {
 }
 export function ruleDescription(rule: Rule, now: number) {
   const f = rule.filter;
-  return `${ruleState(rule, now)} ${rule.action} · ${f.direction} ${f.protocol} · remote ${f.remote_address || f.remote || 'any'} · local port ${f.local_port || 'any'} · remote port ${f.remote_port || 'any'} · expires ${rule.expires && !rule.expires.startsWith('0001-') ? rule.expires : 'never'} · ${rule.id}`;
+  const preset = rule.preset
+    ? `Essential · ${rule.preset.component} · local ${f.local_address || '*'} · interface ${f.interface_name || '*'}/${f.interface_index || '*'}${f.peer_service ? ` · local service ${f.peer_service.application} UID ${f.peer_service.uid}` : ''} · `
+    : '';
+  return `${preset}${ruleState(rule, now)} ${rule.action} · ${f.direction} ${f.protocol} · remote ${f.remote_address || f.remote || 'any'} · local port ${f.local_port || 'any'} · remote port ${f.remote_port || 'any'} · expires ${rule.expires && !rule.expires.startsWith('0001-') ? rule.expires : 'never'} · ${rule.id}`;
 }
 
 // Describe stored filter constraints; this does not evaluate a connection or precedence.

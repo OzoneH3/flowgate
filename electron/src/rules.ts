@@ -49,6 +49,10 @@ export class Rules {
     if (s.id) {
       const r = c.rules?.find((r) => r.id === s.id);
       if (!r) throw Error('Rule no longer exists');
+      if (r.schema === 5 || r.preset)
+        throw Error(
+          'Preset-owned rule: inspect or remove through Essential networking; legacy editing cannot preserve this scope.',
+        );
       rule = structuredClone(r);
     } else {
       const e = c.events.find((e) => e.id === s.event);

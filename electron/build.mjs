@@ -55,6 +55,8 @@ await build({
     'src/row-structure.ts',
     'src/keyed-rows.ts',
     'src/protection-model.ts',
+    'src/essential-model.ts',
+    'src/essential.ts',
     'src/protection.ts',
     'src/extended.ts',
     'src/daemon-monitoring.ts',

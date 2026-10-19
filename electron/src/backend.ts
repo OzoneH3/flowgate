@@ -18,7 +18,9 @@ import {
   type Decision,
   type Attempt,
 } from './protocol';
-export function call(path: string, request: object): Promise<Reply> {
+export function call(path: string, request: object, timeoutMs = 3500): Promise<Reply> {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 20000)
+    throw Error('Invalid backend timeout');
   return new Promise((resolve, reject) => {
     const socket = net.createConnection({ path });
     let chunks: Buffer[] = [];
@@ -27,10 +29,16 @@ export function call(path: string, request: object): Promise<Reply> {
     const done = (error?: Error, value?: Reply) => {
       if (finished) return;
       finished = true;
+      if (deadline) clearTimeout(deadline);
       socket.destroy();
       error ? reject(error) : resolve(value!);
     };
-    socket.setTimeout(3500, () => done(Error('Backend timed out')));
+    // Longer discovery requests also have an absolute bound, not just idle timeout.
+    const deadline =
+      timeoutMs === 3500
+        ? undefined
+        : setTimeout(() => done(Error('Backend timed out')), timeoutMs);
+    socket.setTimeout(timeoutMs, () => done(Error('Backend timed out')));
     socket.on('error', (e) => done(e));
     socket.on('end', () => done(Error('Backend closed without acknowledgement')));
     socket.on('connect', () => socket.write(JSON.stringify({ version: 1, ...request }) + '\n'));

@@ -1,3 +1,4 @@
+import { Essential } from './essential';
 import { Protection } from './protection';
 import { placeKDEPrompt, PROMPT_TITLE, promptTitle } from './prompt-placement';
 import { AutomaticPrompts, edgePosition, boundDecision } from './automatic-prompts';
@@ -614,6 +615,17 @@ app.whenReady().then(async () => {
   ipcMain.handle('extended:state', (e) => {
     trusted(e);
     return extended.view(backend.view().observation.activity?.udp?.state === 'active');
+  });
+  const essential = new Essential(backend);
+  ipcMain.handle('essential:state', (e) => {
+    trusted(e);
+    if (e.sender !== main.webContents) throw Error('Essential networking requires the main window');
+    return essential.view();
+  });
+  ipcMain.handle('essential:action', (e, action, value) => {
+    trusted(e);
+    if (e.sender !== main.webContents) throw Error('Essential networking requires the main window');
+    return essential.action(action, value);
   });
   const protection = new Protection(backend);
   ipcMain.handle('protection:state', (e) => {

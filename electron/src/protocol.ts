@@ -177,6 +177,9 @@ export interface Permissions {
   can_decide: boolean;
 }
 export interface Reply {
+  essential_status?: unknown;
+  essential_preview?: unknown;
+  essential_receipt?: unknown;
   network_zones?: NetworkZones;
   zone_preview?: {
     token: string;
@@ -270,6 +273,15 @@ export interface Decision {
   preview_token?: string;
 }
 export interface Bridge {
+  essentialState(): Promise<import('./essential-model').EssentialView>;
+  essential(
+    action: 'status' | 'preview' | 'apply' | 'remove-preview' | 'remove' | 'reconcile',
+    value: {
+      generation: string;
+      options?: import('./essential-model').EssentialOptions;
+      token?: string;
+    },
+  ): Promise<import('./essential-model').EssentialView>;
   paneSnapshot(): Promise<import('./pane-model').PaneFrame>;
   paneUpdate(value: import('./pane-model').PresentationPatch): Promise<void>;
   paneControl(
@@ -422,6 +434,9 @@ export function parseReply(raw: unknown): Reply {
   )
     throw Error('Invalid v1 backend response');
   const result: Reply = {
+    essential_status: r.essential_status,
+    essential_preview: r.essential_preview,
+    essential_receipt: r.essential_receipt,
     version: 1,
     generation: string(r.generation),
     read_only: r.read_only,
@@ -447,14 +462,14 @@ export function parseReply(raw: unknown): Reply {
             .map(([id, value]) => {
               const v = object(value);
               if (
-                !['application', 'process', 'zone'].includes(string(v.target_scope)) ||
+                !['application', 'process', 'zone', 'system'].includes(string(v.target_scope)) ||
                 !['active', 'inactive'].includes(string(v.state))
               )
                 throw Error('Invalid rule target state');
               return [
                 id,
                 {
-                  target_scope: v.target_scope as 'application' | 'process',
+                  target_scope: v.target_scope as RuleTargetState['target_scope'],
                   state: v.state as 'active' | 'inactive',
                   reason: string(v.reason),
                 },
@@ -737,6 +752,10 @@ export function validateDecision(v: unknown): Decision {
 }
 
 export interface RuleFilter {
+  interface_index?: number;
+  interface_name?: string;
+  local_address?: string;
+  peer_service?: { application: string; revision: string; uid: number };
   network_zone?: NetworkZone;
   all_programs?: boolean;
   all_uids?: boolean;
@@ -752,11 +771,18 @@ export interface RuleFilter {
   uid: number;
 }
 export interface RuleTargetState {
-  target_scope: 'application' | 'process' | 'zone';
+  target_scope: 'application' | 'process' | 'zone' | 'system';
   state: 'active' | 'inactive';
   reason: string;
 }
 export interface Rule {
+  preset?: {
+    name: 'essential-system-networking';
+    component: string;
+    entry_id: string;
+    revision: string;
+    digest: string;
+  };
   version: number;
   executable: string;
   created: string;
@@ -845,7 +871,31 @@ export interface Preferences {
 }
 function ruleFilter(v: unknown): RuleFilter {
   const f = object(v);
+  const peer = f.peer_service === undefined ? undefined : object(f.peer_service);
+  if (
+    peer &&
+    (!string(peer.application) ||
+      !string(peer.revision) ||
+      !Number.isSafeInteger(peer.uid) ||
+      Number(peer.uid) < 0)
+  )
+    throw Error('Invalid local service binding');
+  if (
+    f.interface_index !== undefined &&
+    (!Number.isSafeInteger(f.interface_index) || Number(f.interface_index) < 0)
+  )
+    throw Error('Invalid interface binding');
   return {
+    interface_index: f.interface_index === undefined ? undefined : Number(f.interface_index),
+    interface_name: f.interface_name === undefined ? undefined : string(f.interface_name),
+    local_address: f.local_address === undefined ? undefined : string(f.local_address),
+    peer_service: peer
+      ? {
+          application: string(peer.application),
+          revision: string(peer.revision),
+          uid: Number(peer.uid),
+        }
+      : undefined,
     network_zone: ['local', 'internet'].includes(string(f.network_zone))
       ? (f.network_zone as NetworkZone)
       : undefined,
@@ -874,15 +924,71 @@ function ruleVersion(v: unknown): number {
 export function parseRule(v: unknown): Rule {
   const r = object(v),
     filter = ruleFilter(r.filter);
-  if (
-    number(r.schema) > 4 ||
-    (filter.network_zone && number(r.schema) !== 4) ||
-    (filter.all_programs && (!filter.network_zone || filter.application || filter.process))
-  )
-    throw Error('Unsupported zone rule schema');
-  if (number(r.schema) !== 4 && (number(r.schema) === 3) !== !!filter.process)
-    throw Error('Process rule requires schema3 and a complete immutable binding');
+  let preset: Rule['preset'];
+  if (number(r.schema) === 5) {
+    const rawFilter = object(r.filter);
+    if (
+      !Number.isSafeInteger(rawFilter.uid) ||
+      Number(rawFilter.uid) < 0 ||
+      Number(rawFilter.uid) > 4294967295 ||
+      !['incoming', 'outgoing'].includes(filter.direction) ||
+      !['tcp', 'udp', '*'].includes(filter.protocol) ||
+      !['allow', 'block'].includes(string(r.action))
+    )
+      throw Error('Invalid Essential rule identity or action');
+    const p = object(r.preset);
+    if (
+      p.name !== 'essential-system-networking' ||
+      ['component', 'entry_id', 'revision', 'digest'].some(
+        (k) => !string(p[k]) || string(p[k]).length > 4096,
+      )
+    )
+      throw Error('Invalid Essential rule metadata');
+    const allowed = [
+      'application',
+      'revision',
+      'uid',
+      'direction',
+      'protocol',
+      'remote_address',
+      'remote',
+      'local_port',
+      'remote_port',
+      'network_zone',
+      'all_programs',
+      'all_uids',
+      'process',
+      'interface_index',
+      'interface_name',
+      'local_address',
+      'peer_service',
+    ];
+    if (Object.keys(object(r.filter)).some((k) => !allowed.includes(k)) || filter.process)
+      throw Error('Unsupported Essential rule scope');
+    preset = {
+      name: 'essential-system-networking',
+      component: string(p.component),
+      entry_id: string(p.entry_id),
+      revision: string(p.revision),
+      digest: string(p.digest),
+    };
+  } else {
+    if (
+      number(r.schema) > 4 ||
+      r.preset !== undefined ||
+      filter.peer_service ||
+      filter.interface_index !== undefined ||
+      filter.interface_name !== undefined ||
+      filter.local_address !== undefined ||
+      (filter.network_zone && number(r.schema) !== 4) ||
+      (filter.all_programs && (!filter.network_zone || filter.application || filter.process))
+    )
+      throw Error('Unsupported zone rule schema');
+    if (number(r.schema) !== 4 && (number(r.schema) === 3) !== !!filter.process)
+      throw Error('Process rule requires schema3 and a complete immutable binding');
+  }
   return {
+    ...(preset ? { preset } : {}),
     version: ruleVersion(r.version),
     executable: string(r.executable),
     created: string(r.created),

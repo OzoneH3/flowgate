@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { Bridge, ClientState, Decision } from './protocol';
 const api: Bridge = {
+  essentialState: () => ipcRenderer.invoke('essential:state'),
+  essential: (action, value) => ipcRenderer.invoke('essential:action', action, value),
   paneSnapshot: () => ipcRenderer.invoke('pane:snapshot'),
   paneUpdate: (value) => ipcRenderer.invoke('pane:update', value),
   paneControl: (kind, action) => ipcRenderer.invoke('pane:control', kind, action),
