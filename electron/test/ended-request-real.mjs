@@ -314,6 +314,22 @@ try {
     'ended card must not ask for an Allow/Deny preview',
   );
   await shot(first, '05-saved-ended-not-approved');
+  // Settled geometry after the status line appears: it must sit inside the
+  // framed shell and the native window must match the laid-out viewport.
+  await first.waitForTimeout(900);
+  const settled = await first.evaluate(() => {
+    const r = (s) => document.querySelector(s)?.getBoundingClientRect();
+    const shell = r('.prompt-shell'), feedback = r('#feedback'), footer = r('.prompt-shell > footer');
+    return { innerHeight, shellBottom: shell.bottom, feedbackTop: feedback.top, feedbackBottom: feedback.bottom,
+      footerBottom: footer.bottom, feedbackText: document.querySelector('#feedback').textContent,
+      scrollHeight: document.documentElement.scrollHeight };
+  });
+  evidence.saved_settled_layout = settled;
+  evidence.saved_settled_native = await promptFacts().catch(() => undefined);
+  await shot(first, '05b-saved-settled');
+  if (settled.feedbackText && (settled.feedbackBottom > settled.shellBottom + 1 || settled.scrollHeight > settled.innerHeight + 1))
+    finding('status line renders outside the prompt frame after save: ' + JSON.stringify(settled));
+  else step('settled after save: status line inside the frame, window ' + settled.innerHeight + 'px fits content');
   step(`ended request stays ${ended?.state}, not delivered, card says it was not approved`);
 
   // 8. Other pending requests behind the ended card: reachable from it.

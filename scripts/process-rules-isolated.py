@@ -41,7 +41,7 @@ def activity():return api()['activity']
 def target(name):
  def find():
   s=activity()
-  for row in sorted(s['rows'], key=lambda r:0 if r['socket']['protocol']=='tcp'and r['socket']['state']==10 else 1):
+  for row in sorted(s.get('rows') or [], key=lambda r:0 if r['socket']['protocol']=='tcp'and r['socket']['state']==10 else 1):
    for oid in row['owners']:
     if s['processes'][oid]['pid']==infos[name]['pid']and len(row['owners'])==1 and row['ownership_category']=='visible-holder':return dict(row_id=row['id'],process_id=oid)
  return wait(find)
