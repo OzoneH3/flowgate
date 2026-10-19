@@ -101,12 +101,16 @@ func TestPendingUserTimeoutAndPolicyChangeRecords(t *testing.T) {
 	e.RecordPacketOutcome(v3, VerdictHeld, nil)
 	*now = now.Add(3 * time.Second)
 	e.List(1000, false)
-	// 4: a pending request discarded by a policy replacement.
+	// 4: a policy replacement with no matching rule keeps the request pending
+	// (re-evaluated, not discarded); its later attempt is the same request.
 	v4 := e.Observe(f, "udp")
 	e.RecordPacketOutcome(v4, VerdictHeld, nil)
 	e.SetRules(nil)
 	// 5: identity changed before decision.
 	v5 := e.Observe(f, "udp")
+	if v5.ID != v4.ID {
+		t.Fatal("unmatched pending request was discarded by a policy change")
+	}
 	e.RecordPacketOutcome(v5, VerdictHeld, nil)
 	a.Fingerprint = "replaced"
 	e.Decide(v5.ID, "allow", "once", 1000, false)
@@ -116,8 +120,7 @@ func TestPendingUserTimeoutAndPolicyChangeRecords(t *testing.T) {
 		{"pending", "pending", "default_ask", "", v.ID}, {"final", "allow", "user", "once", v.ID},
 		{"pending", "pending", "default_ask", "", v2.ID}, {"final", "block", "user", "application", v2.ID},
 		{"pending", "pending", "default_ask", "", v3.ID}, {"final", "block", "timeout", "", v3.ID},
-		{"pending", "pending", "default_ask", "", v4.ID}, {"final", "block", "policy_change", "", v4.ID},
-		{"pending", "pending", "default_ask", "", v5.ID}, {"final", "block", "identity_changed", "", v5.ID},
+		{"pending", "pending", "default_ask", "", v4.ID}, {"final", "block", "identity_changed", "", v5.ID},
 	}
 	if len(rs) != len(exp) {
 		for _, r := range rs {

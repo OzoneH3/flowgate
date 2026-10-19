@@ -25,6 +25,8 @@ type Request struct {
 	NetworkZone         string             `json:"network_zone,omitempty"`
 	ZoneTarget          *ZoneTarget        `json:"zone_target,omitempty"`
 	ZoneRevision        string             `json:"zone_revision,omitempty"`
+	Remember            *RememberFields    `json:"remember,omitempty"`
+	DurationSeconds     int64              `json:"duration_seconds,omitempty"`
 	ProtectionID        string             `json:"protection_id,omitempty"`
 	EvaluationID        string             `json:"evaluation_id,omitempty"`
 	RequestID           string             `json:"request_id,omitempty"`
@@ -173,7 +175,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						}
 					}
 					if !readonly && e.Mode != "host-monitor" {
-						r.Capabilities = append(r.Capabilities, PolicyExplanationCapability, ObservedRuleCapability, ProcessRuleCapability, ObservedAnyProtocolCapability, DecisionZoneCapability)
+						r.Capabilities = append(r.Capabilities, PolicyExplanationCapability, ObservedRuleCapability, ProcessRuleCapability, ObservedAnyProtocolCapability, DecisionZoneCapability, ApplicationPolicyCapability, DecisionRememberFieldsCapability)
 					}
 					if e.Evaluation != nil {
 						r.Capabilities = append(r.Capabilities, EvaluationCapability)
@@ -628,7 +630,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 								var err error
 								if q.Operation == "decision-preview" {
 									var v DecisionPreview
-									v, err = e.PreviewDecision(q.Generation, q.ID, q.Action, q.Scope, q.NetworkZone, q.ZoneRevision, cred.Uid, admin)
+									v, err = e.PreviewDecision(q.Generation, q.ID, q.Action, q.Scope, q.NetworkZone, q.ZoneRevision, cred.Uid, admin, RememberOptions{q.Remember, q.DurationSeconds})
 									if err == nil {
 										r.DecisionPreview = &v
 									}
@@ -663,11 +665,11 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 								var err error
 								if q.PreviewToken != "" {
 									var rule policy.Rule
-									v, rule, r.Replayed, err = e.DecideReviewed(q.Generation, q.ID, q.Action, q.Scope, q.NetworkZone, q.ZoneRevision, q.PreviewToken, cred.Uid, admin)
+									v, rule, r.Replayed, err = e.DecideReviewed(q.Generation, q.ID, q.Action, q.Scope, q.NetworkZone, q.ZoneRevision, q.PreviewToken, cred.Uid, admin, RememberOptions{q.Remember, q.DurationSeconds})
 									if err == nil {
 										r.SavedRule = &rule
 									}
-								} else if q.NetworkZone != "" || q.ZoneRevision != "" {
+								} else if q.NetworkZone != "" || q.ZoneRevision != "" || q.Remember != nil || q.DurationSeconds != 0 {
 									err = mutationError("preview_required", "Explicit network scope requires reviewed decision token")
 								} else {
 									v, err = e.Decide(q.ID, q.Action, q.Scope, cred.Uid, admin)

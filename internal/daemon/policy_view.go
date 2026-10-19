@@ -32,6 +32,9 @@ type PolicyRuleRef struct {
 	Expired      bool          `json:"expired"`
 	Active       bool          `json:"active"`
 	Expires      time.Time     `json:"expires"`
+	// Kind: application (whole target, all zones), zone (whole target, one
+	// zone) or scoped (endpoint/protocol/interface restricted).
+	Kind string `json:"kind,omitempty"`
 }
 type PolicyDefault struct {
 	Known  bool   `json:"known"`
@@ -56,6 +59,11 @@ type DirectionPolicy struct {
 	Default            PolicyDefault   `json:"configured_default"`
 	RuntimeDefault     PolicyDefault   `json:"runtime_default"`
 	Enforcement        PolicyCoverage  `json:"enforcement"`
+	// ApplicationRule is the canonical whole-target rule for all zones (the
+	// rule an Application/Process quick setter sets), or null. ScopedRules
+	// counts every other rule in this direction (endpoint/protocol/zone-scoped).
+	ApplicationRule *PolicyRuleRef `json:"application_rule"`
+	ScopedRules     int            `json:"scoped_rules"`
 }
 type ApplicationPolicy struct {
 	ZoneFallbackRuleIDs []string        `json:"zone_fallback_rule_ids"`
@@ -184,7 +192,14 @@ func summaryFor(a PolicyIdentity, direction, mode string, h *EnforcementStatus, 
 			continue
 		}
 		ref := ruleRef(r, now)
+		ref.Kind = ruleKind(f)
 		out.Rules = append(out.Rules, ref)
+		if ref.Kind == "application" {
+			x := ref
+			out.ApplicationRule = &x
+		} else {
+			out.ScopedRules++
+		}
 		if ref.Disabled {
 			out.Disabled++
 		}
@@ -442,4 +457,18 @@ func boundedPolicyResponse(v any) error {
 		return fmt.Errorf("explanation response exceeds 2 MiB")
 	}
 	return nil
+}
+
+// ruleKind: "application" = whole target (TCP+UDP, any address/ports, all
+// zones, no interface/local/peer constraint); "zone" = the same restricted to
+// one zone; otherwise "scoped".
+func ruleKind(f policy.Filter) string {
+	c := canonicalFilter(f)
+	if c.Protocol != "*" || c.RemoteAddress != "*" || c.LocalPort != 0 || c.RemotePort != 0 || c.InterfaceName != "" || c.LocalAddress != "" || c.PeerService != (policy.PeerService{}) || c.AllPrograms {
+		return "scoped"
+	}
+	if c.NetworkZone != "" {
+		return "zone"
+	}
+	return "application"
 }

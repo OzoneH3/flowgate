@@ -60,8 +60,7 @@ func (e *Engine) DeleteRule(generation, id string, expected *uint64, uid uint32,
 		e.rules = next
 		e.pruneHandlesLocked()
 		// Same conservative invalidation as legacy deletion; held packets drop.
-		e.discardPendingLocked("rule deletion invalidated pending requests; held packets drop")
-		e.events = map[string]*Event{}
+		e.resetCachedLocked("rule deleted")
 		return DeletedRule{ID: r.ID, Version: r.Version}, nil
 	}
 	// A missing rule is not idempotent success: its absence alone cannot prove

@@ -25,6 +25,7 @@ type ProcessPolicy struct {
 
 func (e *Engine) ruleRefLocked(r policy.Rule, now time.Time) PolicyRuleRef {
 	v := ruleRef(r, now)
+	v.Kind = ruleKind(r.Filter)
 	state := e.targetStateLocked(r)
 	v.TargetScope = state.TargetScope
 	v.TargetState = state.State

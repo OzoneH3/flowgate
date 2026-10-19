@@ -27,7 +27,11 @@ type Event struct {
 	RememberedFilter *policy.Filter       `json:"remembered_filter,omitempty"`
 	ScopePreviews    map[string]string    `json:"scope_previews,omitempty"`
 	Permission       string               `json:"permission"`
-	Token            string               `json:"-"`
+	// RequestGroup groups equivalent repeated requests (same verified
+	// application identity/UID, direction, protocol, remote address and
+	// service port) for presentation. Decisions still target one event ID.
+	RequestGroup string `json:"request_group,omitempty"`
+	Token        string `json:"-"`
 
 	// Decision-log bookkeeping (never serialized): the rule exactly as evaluated,
 	// whether this result was a capacity refusal, and record-once flags so packet
@@ -145,6 +149,7 @@ func (e *Engine) Observe(f identity.Flow, token string) Event {
 	if a.Principal() != nil {
 		filter := policy.Remembered(f, a)
 		v.RememberedFilter = &filter
+		v.RequestGroup = requestGroup(filter)
 		service := fmt.Sprintf("local service port %d; any remote source port", filter.LocalPort)
 		if f.Direction == "outgoing" {
 			service = fmt.Sprintf("remote service port %d; any local source port", filter.RemotePort)
@@ -249,6 +254,15 @@ func (e *Engine) decideLocked(id, action, scope string, uid uint32, admin bool, 
 				return Event{}, fmt.Errorf("duplicate scope exists as %s; edit the existing rule", other)
 			}
 			next := append(append([]policy.Rule{}, e.rules...), r)
+			for i, old := range e.rules {
+				if reviewed != nil && old.ID == r.ID {
+					if old.Version+1 != r.Version || canonicalFilter(old.Filter) != canonicalFilter(r.Filter) {
+						return Event{}, mutationError("policy_conflict", "The remembered rule changed since review; review again")
+					}
+					next = append([]policy.Rule{}, e.rules...)
+					next[i] = r
+				}
+			}
 			if e.SaveRules != nil {
 				if err := e.SaveRules(next); err != nil {
 					return Event{}, mutationError("persistence_failed", "rule persistence failed: "+err.Error())
@@ -269,6 +283,7 @@ func (e *Engine) decideLocked(id, action, scope string, uid uint32, admin bool, 
 				v.Permission = sentence
 			}
 
+			e.settlePendingLocked("remembered decision " + remembered.ID)
 			for key, other := range e.events {
 				if other.ID == v.ID || other.State == "awaiting-decision" {
 					continue
@@ -306,8 +321,7 @@ func (e *Engine) SetRules(rules []policy.Rule) error {
 	defer e.mu.Unlock()
 	e.rules = rules
 	e.pruneHandlesLocked()
-	e.discardPendingLocked("policy replaced; pending request discarded and held packets drop")
-	e.events = map[string]*Event{}
+	e.resetCachedLocked("policy replaced")
 	return nil
 }
 
@@ -431,8 +445,8 @@ func (e *Engine) ChangeRule(id, action string, uid uint32, admin bool) error {
 	}
 	e.rules = next
 	e.pruneHandlesLocked()
-	// Invalidate pending as well as cached verdicts conservatively; retained packets drop.
-	e.discardPendingLocked("rule " + action + " invalidated pending requests; held packets drop")
-	e.events = map[string]*Event{}
+	// Cached verdicts are invalidated conservatively; awaiting requests are
+	// re-evaluated against the new policy instead of being dropped.
+	e.resetCachedLocked("rule " + action)
 	return nil
 }

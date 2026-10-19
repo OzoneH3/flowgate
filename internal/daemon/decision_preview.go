@@ -9,6 +9,45 @@ import (
 
 const DecisionZoneCapability = "decision-zone-remember-v1"
 
+// DecisionRememberFieldsCapability: NetLimiter Remember chooses which connection
+// properties (source application always; remote address, port, protocol) the
+// remembered rule keeps, and how long a temporary rule lives.
+const DecisionRememberFieldsCapability = "decision-remember-fields-v1"
+
+// RememberFields true = keep that property exactly; false = any.
+type RememberFields struct {
+	Address  bool `json:"address"`
+	Port     bool `json:"port"`
+	Protocol bool `json:"protocol"`
+}
+
+// RememberOptions are bound to the decision preview token.
+type RememberOptions struct {
+	Fields          *RememberFields `json:"remember,omitempty"`
+	DurationSeconds int64           `json:"duration_seconds,omitempty"`
+}
+
+func (o RememberOptions) normalized(scope string) (RememberOptions, error) {
+	if o.Fields == nil {
+		o.Fields = &RememberFields{true, true, true}
+	}
+	if scope == "persistent" && o.DurationSeconds != 0 {
+		return o, mutationError("invalid_request", "Persistent remember has no duration")
+	}
+	if scope == "application" {
+		if o.DurationSeconds == 0 {
+			o.DurationSeconds = 3600
+		}
+		if o.DurationSeconds < 60 || o.DurationSeconds > 365*24*3600 {
+			return o, mutationError("invalid_request", "duration_seconds must be 60..31536000")
+		}
+	}
+	return o, nil
+}
+func (o RememberOptions) equal(p RememberOptions) bool {
+	return o.DurationSeconds == p.DurationSeconds && (o.Fields == nil) == (p.Fields == nil) && (o.Fields == nil || *o.Fields == *p.Fields)
+}
+
 type DecisionPreview struct {
 	Token             string                `json:"token"`
 	ExpiresAt         time.Time             `json:"expires_at"`
@@ -21,6 +60,11 @@ type DecisionPreview struct {
 	ConnectionNetwork identity.NetworkScope `json:"connection_network"`
 	Rule              policy.Rule           `json:"rule"`
 	ScopePreview      string                `json:"scope_preview"`
+	Remember          RememberFields        `json:"remember"`
+	DurationSeconds   int64                 `json:"duration_seconds,omitempty"`
+	// Summary is the compact scope shown before submission.
+	Summary  string          `json:"summary"`
+	Replaces *RuleVersionRef `json:"replaces"`
 }
 type DecisionReceipt struct {
 	State     string          `json:"state"`
@@ -76,7 +120,11 @@ func (e *Engine) decisionClassification(v *Event, revision, zone string) (identi
 	}
 	return current, nil
 }
-func (e *Engine) PreviewDecision(generation, id, action, scope, zone, revision string, uid uint32, admin bool) (DecisionPreview, error) {
+func (e *Engine) PreviewDecision(generation, id, action, scope, zone, revision string, uid uint32, admin bool, opts ...RememberOptions) (DecisionPreview, error) {
+	var o RememberOptions
+	if len(opts) > 0 {
+		o = opts[0]
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if generation != e.Generation {
@@ -87,6 +135,10 @@ func (e *Engine) PreviewDecision(generation, id, action, scope, zone, revision s
 	}
 	if scope == "persistent" && e.SaveRules == nil {
 		return DecisionPreview{}, mutationError("unavailable", "Persistent storage unavailable")
+	}
+	o, err := o.normalized(scope)
+	if err != nil {
+		return DecisionPreview{}, err
 	}
 	now := e.Now()
 	e.pruneDecisionPreviews(now)
@@ -111,13 +163,35 @@ func (e *Engine) PreviewDecision(generation, id, action, scope, zone, revision s
 	if a.Application == nil || a.Application.Key == "" || a.Application.Revision == "" || a.Principal() == nil || a.Fingerprint != v.Attribution.Fingerprint {
 		return DecisionPreview{}, mutationError("identity_changed", "Pending identity changed; fresh request required")
 	}
-	rule := policy.Rule{Version: 1, Schema: 2, ID: "user:" + randomID(), Executable: a.Application.Executable, Priority: 100, Action: action, Created: now, Expires: now.Add(time.Hour), Filter: policy.Remembered(v.Flow, a)}
+	rule := policy.Rule{Version: 1, Schema: 2, ID: "user:" + randomID(), Executable: a.Application.Executable, Priority: 100, Action: action, Created: now, Expires: now.Add(time.Duration(o.DurationSeconds) * time.Second), Filter: policy.Remembered(v.Flow, a)}
 	if scope == "persistent" {
 		rule.Expires = time.Time{}
+	}
+	if !o.Fields.Address {
+		rule.Filter.RemoteAddress = "*"
+	}
+	if !o.Fields.Port {
+		rule.Filter.LocalPort, rule.Filter.RemotePort = 0, 0
+	}
+	if !o.Fields.Protocol {
+		rule.Filter.Protocol = "*"
 	}
 	if zone != "any" {
 		rule.Schema = 4
 		rule.Filter.NetworkZone = zone
+	}
+	// Remembering a scope that already has a user rule updates that exact rule
+	// (same ID, version+1) instead of failing or adding a duplicate.
+	var replaces *RuleVersionRef
+	for _, old := range e.rules {
+		if old.Preset == nil && canonicalFilter(old.Filter) == canonicalFilter(rule.Filter) {
+			if old.Version == ^uint64(0) {
+				return DecisionPreview{}, mutationError("capacity", "Rule version exhausted")
+			}
+			rule.ID, rule.Created, rule.Priority, rule.Version = old.ID, old.Created, old.Priority, old.Version+1
+			replaces = &RuleVersionRef{old.ID, old.Version}
+			break
+		}
 	}
 	expiry := now.Add(30 * time.Second)
 	if v.Deadline.Before(expiry) {
@@ -129,7 +203,14 @@ func (e *Engine) PreviewDecision(generation, id, action, scope, zone, revision s
 		lifetime = "persistent until disabled/deleted"
 	}
 	sentence := fmt.Sprintf("Remember %s; rule applies to %s; application %s revision %s UID %d, %s %s, peer %s local service %d remote service %d; expiry %s. Current held request decided separately; existing admissions unchanged.", lifetime, zoneLabel, rule.Filter.Application, rule.Filter.Revision, rule.Filter.UID, rule.Filter.Direction, rule.Filter.Protocol, rule.Filter.RemoteAddress, rule.Filter.LocalPort, rule.Filter.RemotePort, rule.Expires.Format(time.RFC3339Nano))
-	view := DecisionPreview{Token: randomID(), ExpiresAt: expiry, Generation: generation, EventID: id, Action: action, Scope: scope, NetworkZone: zone, ZoneRevision: revision, ConnectionNetwork: network, Rule: rule, ScopePreview: sentence}
+	if replaces != nil {
+		sentence = fmt.Sprintf("Updates existing rule %s (version %d). ", replaces.ID, replaces.Version) + sentence
+	}
+	duration := int64(0)
+	if scope == "application" {
+		duration = o.DurationSeconds
+	}
+	view := DecisionPreview{Token: randomID(), ExpiresAt: expiry, Generation: generation, EventID: id, Action: action, Scope: scope, NetworkZone: zone, ZoneRevision: revision, ConnectionNetwork: network, Rule: rule, ScopePreview: sentence, Remember: *o.Fields, DurationSeconds: duration, Summary: rememberSummary(a.Application.Name, rule, scope, duration), Replaces: replaces}
 	if e.decisionPreviews == nil {
 		e.decisionPreviews = map[string]*decisionPreview{}
 	}
@@ -153,7 +234,11 @@ func (e *Engine) decisionPreviewFor(generation, token string, uid uint32, admin 
 	}
 	return p, nil
 }
-func (e *Engine) DecideReviewed(generation, id, action, scope, zone, revision, token string, uid uint32, admin bool) (Event, policy.Rule, bool, error) {
+func (e *Engine) DecideReviewed(generation, id, action, scope, zone, revision, token string, uid uint32, admin bool, opts ...RememberOptions) (Event, policy.Rule, bool, error) {
+	var o RememberOptions
+	if len(opts) > 0 {
+		o = opts[0]
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	p, err := e.decisionPreviewFor(generation, token, uid, admin)
@@ -161,7 +246,14 @@ func (e *Engine) DecideReviewed(generation, id, action, scope, zone, revision, t
 		return Event{}, policy.Rule{}, false, err
 	}
 	v := p.View
-	if id != v.EventID || action != v.Action || scope != v.Scope || zone != v.NetworkZone || revision != v.ZoneRevision {
+	o, nerr := o.normalized(scope)
+	if nerr != nil {
+		return Event{}, policy.Rule{}, false, nerr
+	}
+	if scope != "application" {
+		o.DurationSeconds = 0
+	}
+	if id != v.EventID || action != v.Action || scope != v.Scope || zone != v.NetworkZone || revision != v.ZoneRevision || *o.Fields != v.Remember || o.DurationSeconds != v.DurationSeconds {
 		return Event{}, policy.Rule{}, false, mutationError("preview_mismatch", "Decision fields differ from reviewed scope")
 	}
 	if p.Committed != nil {
@@ -200,4 +292,31 @@ func (e *Engine) DecisionStatus(generation, token string, uid uint32, admin bool
 		r.SavedRule = &rule
 	}
 	return r, nil
+}
+
+// rememberSummary is the compact scope shown before a Remember is submitted.
+func rememberSummary(app string, r policy.Rule, scope string, duration int64) string {
+	f := r.Filter
+	dir := map[string]string{"incoming": "In", "outgoing": "Out"}[f.Direction]
+	addr := "any address"
+	if f.RemoteAddress != "*" && f.RemoteAddress != "" {
+		addr = f.RemoteAddress
+	}
+	port := "any port"
+	if f.Direction == "incoming" && f.LocalPort != 0 {
+		port = fmt.Sprintf("local port %d", f.LocalPort)
+	} else if f.Direction == "outgoing" && f.RemotePort != 0 {
+		port = fmt.Sprintf("port %d", f.RemotePort)
+	}
+	proto := map[string]string{"*": "TCP+UDP", "tcp": "TCP", "udp": "UDP"}[f.Protocol]
+	zone := "all zones"
+	if f.NetworkZone != "" {
+		zone = map[string]string{"local": "Local Network", "internet": "Internet"}[f.NetworkZone] + " only"
+	}
+	life := "persistent"
+	if scope == "application" {
+		life = "for " + (time.Duration(duration) * time.Second).String()
+	}
+	act := map[string]string{"allow": "Allow", "block": "Deny"}[r.Action]
+	return fmt.Sprintf("%s %s · %s · %s · %s · %s · %s · %s", act, app, dir, addr, port, proto, zone, life)
 }

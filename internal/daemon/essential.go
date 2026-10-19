@@ -301,8 +301,7 @@ func (e *Engine) ApplyEssential(gen, token, operation string, o essential.Option
 	if err := e.publishRulesLocked(next); err != nil {
 		return receipt, false, err
 	}
-	e.discardPendingLocked("preset policy changed; held requests drop, no automatic approval")
-	e.events = map[string]*Event{}
+	e.resetCachedLocked("essential preset changed")
 	p.Saved = &receipt
 	p.Until = e.Now().Add(5 * time.Minute)
 	return receipt, false, nil

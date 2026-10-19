@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"flowgate/internal/decisionlog"
 	"flowgate/internal/policy"
 	"fmt"
@@ -85,6 +87,53 @@ func (e *Engine) recordFinal(v *Event, action, source, scope, reason string, rul
 		r.Verdict.Detail = "applies to held packets at the next queue flush and to later packets of this flow lease"
 	}
 	e.Decisions.Record(r)
+}
+
+// requestGroup is a stable presentation key for equivalent repeated requests.
+func requestGroup(f policy.Filter) string {
+	h := sha256.Sum256([]byte(fmt.Sprintf("%s|%s|%d|%s|%s|%s|%d|%d", f.Application, f.Revision, f.UID, f.Direction, f.Protocol, f.RemoteAddress, f.LocalPort, f.RemotePort)))
+	return hex.EncodeToString(h[:16])
+}
+
+// settlePendingLocked re-evaluates every awaiting request after a policy change
+// through the normal identity and policy path (NetLimiter: a remembered or
+// newly set rule applies to the following connections). Covered requests are
+// finalized by that rule and leave the queue; uncovered ones keep waiting with
+// their own deadline. Nothing is approved without a matching rule, and a Once
+// decision never reaches here.
+func (e *Engine) settlePendingLocked(reason string) {
+	now := e.Now()
+	for _, v := range e.events {
+		if v.State != "awaiting-decision" || !now.Before(v.Deadline) {
+			continue
+		}
+		a := e.Resolve(v.Flow)
+		if a.Application == nil || a.Fingerprint != v.Attribution.Fingerprint {
+			continue // identity is rechecked at decision/retention time
+		}
+		action, rule, matches := e.evaluateLocked(e.rules, v.Flow, a, now)
+		if action != "allow" && action != "block" {
+			continue
+		}
+		v.State = map[string]string{"allow": "allowed", "block": "blocked"}[action]
+		v.Rule, v.Conflicts, v.decided = rule, matches, e.ruleLocked(rule)
+		v.Reason = "re-evaluated after policy change (" + reason + ")"
+		e.recordFinal(v, action, "rule", "", v.Reason, v.decided, nil, "deferred", "")
+	}
+}
+
+// resetCachedLocked replaces the old discard-everything behaviour: cached
+// verdicts are dropped conservatively, awaiting requests are re-evaluated and
+// kept (decided or still waiting) so the queue never shows obsolete prompts.
+func (e *Engine) resetCachedLocked(reason string) {
+	e.settlePendingLocked(reason)
+	settled := map[string]*Event{}
+	for key, v := range e.events {
+		if v.State == "awaiting-decision" || strings.HasPrefix(v.Reason, "re-evaluated after policy change") {
+			settled[key] = v
+		}
+	}
+	e.events = settled
 }
 
 // discardPendingLocked records pending requests that a policy change discards.

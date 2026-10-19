@@ -137,7 +137,6 @@ func (e *Engine) SaveZoneRule(generation, revision, token string, target ZoneTar
 	p.Saved = true
 	p.Until = now.Add(5 * time.Minute)
 	// Clear previous Once/decided caches. Do not approve or release retained requests.
-	e.discardPendingLocked("zone creation invalidated pending attempts; held packets drop")
-	e.events = map[string]*Event{}
+	e.resetCachedLocked("zone rule created")
 	return p.View.Rule, p.View.ScopePreview, false, nil
 }

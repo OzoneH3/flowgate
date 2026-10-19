@@ -4,11 +4,24 @@ import (
 	"encoding/json"
 	"flowgate/internal/identity"
 	"flowgate/internal/policy"
+	"fmt"
 	"time"
 )
 
 const ObservedRuleCapability = "observed-rule-create-v1"
 const ObservedAnyProtocolCapability = "observed-rule-any-protocol-v1"
+
+// ApplicationPolicyCapability: an Activity application/process setter sets the
+// ONE canonical whole-target rule (TCP+UDP, any address/ports, optional zone)
+// for a direction, creating it or updating it in place. Scoped rules are never
+// selected as its target (NetLimiter Blocker: Allow = all connections).
+const ApplicationPolicyCapability = "application-policy-v1"
+
+// RuleVersionRef identifies the exact stored rule a preview will update.
+type RuleVersionRef struct {
+	ID      string `json:"id"`
+	Version uint64 `json:"version"`
+}
 
 type ObservedTarget struct {
 	RowID     string `json:"row_id"`
@@ -29,6 +42,9 @@ type ObservedDraft struct {
 	RemotePort    *uint16    `json:"remote_port"`
 	Disabled      bool       `json:"disabled"`
 	Expires       *time.Time `json:"expires"`
+	// ApplicationPolicy requests the canonical whole-application (or whole-
+	// process) policy for this direction instead of a scoped rule.
+	ApplicationPolicy bool `json:"application_policy,omitempty"`
 }
 type ObservedPreview struct {
 	Token        string               `json:"token"`
@@ -40,6 +56,8 @@ type ObservedPreview struct {
 	PrincipalUID uint32               `json:"principal_uid"`
 	ScopePreview string               `json:"scope_preview"`
 	Enforcement  PolicyCoverage       `json:"enforcement"`
+	// Replaces is the exact canonical rule this application policy updates.
+	Replaces *RuleVersionRef `json:"replaces"`
 }
 type creationPreview struct {
 	View         ObservedPreview
@@ -60,6 +78,9 @@ func draftBytes(d ObservedDraft) (string, error) {
 	d.TargetScope = processScope(d)
 	if d.LocalPort == nil || d.RemotePort == nil || d.Expires == nil || d.RemoteAddress == "" || len(d.RemoteAddress) > 128 || (d.Direction != "incoming" && d.Direction != "outgoing") || (d.Protocol != "tcp" && d.Protocol != "udp" && d.Protocol != "*") || (d.Action != "allow" && d.Action != "block") {
 		return "", mutationError("invalid_request", "Explicit direction, protocol (tcp, udp, or * for TCP+UDP only), action, remote_address, local_port, remote_port and expires required; zero ports/zero expiry are deliberate wildcard/persistent choices")
+	}
+	if d.ApplicationPolicy && (d.Protocol != "*" || d.RemoteAddress != "*" || *d.LocalPort != 0 || *d.RemotePort != 0) {
+		return "", mutationError("invalid_request", "application_policy requires the whole-target scope: protocol *, remote_address *, ports 0 (zone optional)")
 	}
 	b, _ := json.Marshal(d)
 	return string(b), nil
@@ -181,12 +202,25 @@ func (e *Engine) PreviewObservedRule(generation string, target ObservedTarget, d
 	if !candidate.Expires.IsZero() && !now.Before(candidate.Expires) {
 		return ObservedPreview{}, mutationError("invalid_request", "Expiry must be in future, or explicit zero for persistent")
 	}
+	var replaces *RuleVersionRef
+	if draft.ApplicationPolicy {
+		if old := e.canonicalPolicyRuleLocked(candidate); old != nil {
+			if old.Version == ^uint64(0) {
+				return ObservedPreview{}, mutationError("limit_exceeded", "Rule version exhausted")
+			}
+			candidate.ID, candidate.Created, candidate.Priority, candidate.Version = old.ID, old.Created, old.Priority, old.Version+1
+			replaces = &RuleVersionRef{old.ID, old.Version}
+		}
+	}
 	candidate, sentence, err := e.reviewRuleLocked(candidate, now, false)
 	if err != nil {
 		return ObservedPreview{}, mutationError("invalid_rule", err.Error())
 	}
 	c, _ := coverage(e.Mode, draft.Direction, h)
-	v := ObservedPreview{Token: randomID(), ExpiresAt: now.Add(30 * time.Second), Rule: candidate, Application: current.Application, ProcessID: p.ID, PID: p.PID, PrincipalUID: p.UID, ScopePreview: sentence + " Stored rule only; creation does not approve pending packets or change existing connections.", Enforcement: c}
+	if replaces != nil {
+		sentence = fmt.Sprintf("Updates the existing whole-%s rule %s (version %d). ", processScope(draft), replaces.ID, replaces.Version) + sentence
+	}
+	v := ObservedPreview{Token: randomID(), ExpiresAt: now.Add(30 * time.Second), Rule: candidate, Application: current.Application, ProcessID: p.ID, PID: p.PID, PrincipalUID: p.UID, ScopePreview: sentence + " Stored rule only; matching pending requests are re-evaluated; existing connections unchanged.", Enforcement: c, Replaces: replaces}
 	e.creationPreviews[v.Token] = &creationPreview{View: v, Target: target, Process: p, Verified: current, Draft: raw, UID: uid, Admin: admin}
 	return v, nil
 }
@@ -267,8 +301,27 @@ func (e *Engine) SaveObservedRule(generation, token string, draft ObservedDraft,
 			return policy.Rule{}, "", false, mutationError("target_inactive", "Pinned process binding changed during save validation")
 		}
 	}
-	if len(e.rules) >= 256 {
+	at := -1
+	if ref := p.View.Replaces; ref != nil {
+		for i, r := range e.rules {
+			if r.ID == ref.ID {
+				at = i
+				if r.Version != ref.Version || e.canonicalPolicyRuleLocked(candidate) == nil {
+					at = -2
+				}
+			}
+		}
+		if at < 0 {
+			return policy.Rule{}, "", false, mutationError("policy_conflict", "The application rule changed or was removed since preview; refresh")
+		}
+	} else if len(e.rules) >= 256 {
 		return policy.Rule{}, "", false, mutationError("limit_exceeded", "Rule capacity reached")
+	}
+	if p.View.Replaces == nil && candidate.Version == 1 && p.Draft != "" {
+		var d ObservedDraft
+		if json.Unmarshal([]byte(p.Draft), &d) == nil && d.ApplicationPolicy && e.canonicalPolicyRuleLocked(candidate) != nil {
+			return policy.Rule{}, "", false, mutationError("policy_conflict", "An application rule for this scope was created since preview; refresh")
+		}
 	}
 	if !candidate.Expires.IsZero() && !now.Before(candidate.Expires) {
 		return policy.Rule{}, "", false, mutationError("preview_expired", "Reviewed rule expiry elapsed")
@@ -278,17 +331,42 @@ func (e *Engine) SaveObservedRule(generation, token string, draft ObservedDraft,
 		return policy.Rule{}, "", false, mutationError("policy_conflict", err.Error())
 	}
 	// Overlap text is part of the reviewed scope. New conflicting policy requires review.
-	sentence += " Stored rule only; creation does not approve pending packets or change existing connections."
+	if ref := p.View.Replaces; ref != nil {
+		sentence = fmt.Sprintf("Updates the existing whole-%s rule %s (version %d). ", map[bool]string{true: "process", false: "application"}[!candidate.Filter.Process.IsZero()], ref.ID, ref.Version) + sentence
+	}
+	sentence += " Stored rule only; matching pending requests are re-evaluated; existing connections unchanged."
 	if sentence != p.View.ScopePreview {
 		return policy.Rule{}, "", false, mutationError("policy_conflict", "Overlapping policy changed since preview; review again")
 	}
 	next := append(append([]policy.Rule{}, e.rules...), candidate)
+	if at >= 0 {
+		next = append([]policy.Rule{}, e.rules...)
+		next[at] = candidate
+	}
 	if err = e.publishRulesLocked(next); err != nil {
 		return policy.Rule{}, "", false, err
 	}
+	e.settlePendingLocked("rule " + candidate.ID + " saved")
 	// Existing pending/Once decisions are not consumed or approved. New initiations
 	// evaluate the published rule; retained remembered grants already recheck policy.
 	p.Saved = true
 	p.ReceiptUntil = now.Add(5 * time.Minute)
 	return candidate, p.View.ScopePreview, false, nil
+}
+
+// canonicalPolicyRuleLocked returns the stored user rule with exactly the same
+// whole-target scope (identity, direction, zone, process binding, TCP+UDP, any
+// address/ports). Scoped, preset and zone-wide rules never qualify.
+func (e *Engine) canonicalPolicyRuleLocked(c policy.Rule) *policy.Rule {
+	want := canonicalFilter(c.Filter)
+	if want.Protocol != "*" || want.RemoteAddress != "*" || want.LocalPort != 0 || want.RemotePort != 0 || want.AllPrograms {
+		return nil
+	}
+	for i := range e.rules {
+		r := &e.rules[i]
+		if r.Preset == nil && canonicalFilter(r.Filter) == want {
+			return r
+		}
+	}
+	return nil
 }
