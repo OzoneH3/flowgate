@@ -13,6 +13,7 @@ type Filter struct {
 	InterfaceName  string            `json:"interface_name,omitempty"`
 	LocalAddress   string            `json:"local_address,omitempty"`
 	PeerService    PeerService       `json:"peer_service,omitzero"`
+	ZoneModel      string            `json:"zone_model,omitempty"`
 	NetworkZone    string            `json:"network_zone,omitempty"`
 	AllPrograms    bool              `json:"all_programs,omitempty"`
 	AllUIDs        bool              `json:"all_uids,omitempty"`
@@ -46,10 +47,10 @@ func (r Rule) Validate() error {
 	if len(r.Executable) > 4096 {
 		return fmt.Errorf("executable display path too long")
 	}
-	if r.Schema != 0 && r.Schema != 1 && r.Schema != 2 && r.Schema != 3 && r.Schema != 4 && r.Schema != 5 {
+	if r.Schema != 0 && r.Schema != 1 && r.Schema != 2 && r.Schema != 3 && r.Schema != 4 && r.Schema != 5 && r.Schema != 6 {
 		return fmt.Errorf("unsupported rule schema")
 	}
-	if r.Schema != 2 && r.Schema != 3 && r.Schema != 4 && r.Schema != 5 && (r.Filter.RemoteAddress != "" || r.Filter.LocalPort != 0 || r.Filter.RemotePort != 0) {
+	if r.Schema != 2 && r.Schema != 3 && r.Schema != 4 && r.Schema != 5 && r.Schema != 6 && (r.Filter.RemoteAddress != "" || r.Filter.LocalPort != 0 || r.Filter.RemotePort != 0) {
 		return fmt.Errorf("address/port fields require rule schema 2")
 	}
 	if r.Filter.Remote != "" {
@@ -69,23 +70,26 @@ func (r Rule) Validate() error {
 	}
 	if !r.Filter.Process.IsZero() {
 		b := r.Filter.Process
-		if (r.Schema != 3 && r.Schema != 4) || b.ID == "" || b.Session == "" || b.BootID == "" || b.PID <= 0 || b.Start == "" || b.NetNS == "" || b.MountNS == "" || b.PIDNS == "" || b.Executable == "" || b.Revision != r.Filter.Revision || b.UID != r.Filter.UID {
+		if (r.Schema != 3 && r.Schema != 4 && r.Schema != 6) || b.ID == "" || b.Session == "" || b.BootID == "" || b.PID <= 0 || b.Start == "" || b.NetNS == "" || b.MountNS == "" || b.PIDNS == "" || b.Executable == "" || b.Revision != r.Filter.Revision || b.UID != r.Filter.UID {
 			return fmt.Errorf("schema3 complete process identity required")
 		}
 	} else if r.Schema == 3 {
 		return fmt.Errorf("schema3 requires a process binding")
 	}
+	if (r.Schema == 6 && (r.Filter.ZoneModel != identity.AutomaticZoneModel || r.Filter.NetworkZone == "")) || (r.Schema != 6 && r.Filter.ZoneModel != "") {
+		return fmt.Errorf("automatic zones require explicit schema6 binding")
+	}
 	if r.Filter.NetworkZone != "" && r.Filter.NetworkZone != "local" && r.Filter.NetworkZone != "internet" {
 		return fmt.Errorf("invalid network zone")
 	}
-	if (r.Filter.NetworkZone != "" || r.Filter.AllPrograms || r.Filter.AllUIDs) && r.Schema != 4 && r.Schema != 5 {
+	if (r.Filter.NetworkZone != "" || r.Filter.AllPrograms || r.Filter.AllUIDs) && r.Schema != 4 && r.Schema != 5 && r.Schema != 6 {
 		return fmt.Errorf("zone target fields require schema4")
 	}
 	if r.Filter.AllUIDs && (!r.Filter.AllPrograms || r.Filter.UID != 0) {
 		return fmt.Errorf("machine target requires allprograms and canonical UID0")
 	}
 	if r.Filter.AllPrograms && r.Schema != 5 {
-		if r.Schema != 4 || r.Filter.NetworkZone == "" || r.Filter.Application != "" || r.Filter.Revision != "" || !r.Filter.Process.IsZero() || r.Executable != "" {
+		if (r.Schema != 4 && r.Schema != 6) || r.Filter.NetworkZone == "" || r.Filter.Application != "" || r.Filter.Revision != "" || !r.Filter.Process.IsZero() || r.Executable != "" {
 			return fmt.Errorf("zone-wide rule has no application/process identity")
 		}
 	}
@@ -105,7 +109,7 @@ func (r Rule) Validate() error {
 	if r.Filter.Direction != "incoming" && r.Filter.Direction != "outgoing" {
 		return fmt.Errorf("invalid direction")
 	}
-	if r.Filter.Protocol != "tcp" && r.Filter.Protocol != "udp" && !(r.Filter.Protocol == "*" && (r.Schema == 2 || r.Schema == 3 || r.Schema == 4 || r.Schema == 5)) {
+	if r.Filter.Protocol != "tcp" && r.Filter.Protocol != "udp" && !(r.Filter.Protocol == "*" && (r.Schema == 2 || r.Schema == 3 || r.Schema == 4 || r.Schema == 5 || r.Schema == 6)) {
 		return fmt.Errorf("invalid protocol")
 	}
 	return nil
@@ -132,8 +136,18 @@ func EvaluateSession(rules []Rule, f identity.Flow, a identity.Attribution, now 
 		if (!x.AllPrograms && (x.Application != a.Application.Key || x.Revision != a.Application.Revision)) || (!x.AllUIDs && x.UID != a.Principal().UID) || x.Direction != f.Direction || !ProtocolMatches(x.Protocol, f.Protocol) {
 			continue
 		}
-		if x.NetworkZone != "" && (f.NetworkScope.State != "known" || f.NetworkScope.Zone != x.NetworkZone) {
-			continue
+		if x.NetworkZone != "" {
+			scope := f.NetworkScope
+			if x.ZoneModel == identity.AutomaticZoneModel {
+				if scope.Source != identity.AutomaticZoneModel {
+					continue
+				}
+			} else if scope.Source == identity.AutomaticZoneModel {
+				scope.State, scope.Zone = scope.LegacyState, scope.LegacyZone
+			}
+			if scope.State != "known" || scope.Zone != x.NetworkZone {
+				continue
+			}
 		}
 		if x.Remote != "" && x.Remote != f.Remote.String() {
 			continue

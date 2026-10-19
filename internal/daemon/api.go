@@ -64,6 +64,7 @@ type Response struct {
 	DecisionPreview  *DecisionPreview           `json:"decision_preview,omitempty"`
 	DecisionReceipt  *DecisionReceipt           `json:"decision_receipt,omitempty"`
 	NetworkZones     *identity.NetworkZones     `json:"network_zones,omitempty"`
+	ZoneMigration    *ZoneMigrationPreview      `json:"zone_migration,omitempty"`
 	ZonePreview      *ZonePreview               `json:"zone_preview,omitempty"`
 	RuleStates       map[string]RuleTargetState `json:"rule_states,omitempty"`
 	Protection       *ProtectionStatus          `json:"protection,omitempty"`
@@ -242,8 +243,12 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						r.Error = "invalid v1 request"
 						r.ErrorCode = "invalid_request"
 					} else {
-						r.NetworkZones = &e.Zones
+						zones := e.CurrentZones()
+						r.NetworkZones = &zones
 						r.Capabilities = append(r.Capabilities, NetworkZoneCapability)
+						if zones.Model == identity.AutomaticZoneModel {
+							r.Capabilities = append(r.Capabilities, AutomaticNetworkZoneCapability, ZoneMigrationCapability)
+						}
 						switch q.Operation {
 						case "essential-status", "essential-preview", "essential-apply", "essential-remove-preview", "essential-remove":
 							c.SetDeadline(time.Now().Add(20 * time.Second))
@@ -344,8 +349,12 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 							} else {
 								v := e.Evaluation.Status()
 								var err error
-								r.NetworkZones = &e.Zones
+								zones := e.CurrentZones()
+								r.NetworkZones = &zones
 								r.Capabilities = append(r.Capabilities, NetworkZoneCapability)
+								if zones.Model == identity.AutomaticZoneModel {
+									r.Capabilities = append(r.Capabilities, AutomaticNetworkZoneCapability, ZoneMigrationCapability)
+								}
 								switch q.Operation {
 								case "evaluation-readiness":
 									v = e.Evaluation.Readiness()
@@ -400,8 +409,12 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 							} else {
 								var s udpaccount.Status
 								var err error
-								r.NetworkZones = &e.Zones
+								zones := e.CurrentZones()
+								r.NetworkZones = &zones
 								r.Capabilities = append(r.Capabilities, NetworkZoneCapability)
+								if zones.Model == identity.AutomaticZoneModel {
+									r.Capabilities = append(r.Capabilities, AutomaticNetworkZoneCapability, ZoneMigrationCapability)
+								}
 								switch q.Operation {
 								case "traffic-start":
 									s, err = e.Traffic.Start(q.CollectorGeneration)
@@ -553,17 +566,41 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 								r.ErrorCode = "forbidden"
 							} else {
 								if e.Activity != nil {
-									snapshot := e.Activity()
+									snapshot := ClassifyActivity(e.Activity(), *r.NetworkZones)
 									if e.APIUID != nil {
 										snapshot = activityFor(snapshot, cred.Uid, admin)
 									}
 									r.Activity = &snapshot
 								}
 								if e.Mode != "host-monitor" {
-									r.Events = e.List(cred.Uid, admin)
+									var listZones identity.NetworkZones
+									r.Events, listZones = e.ListWithZones(cred.Uid, admin)
+									r.NetworkZones = &listZones
+									if r.Activity != nil {
+										snapshot := ClassifyActivity(*r.Activity, listZones)
+										r.Activity = &snapshot
+									}
 									r.Rules, r.RuleStates = e.RuleInventory(cred.Uid, admin)
 								} else if e.Activity == nil {
 									r.Error = "observer unavailable"
+								}
+							}
+						case "zone-migration-preview", "zone-migration-save":
+							if readonly || !permissions.CanManageRules {
+								r.ErrorCode, r.Error = "forbidden", "Migration requires current rule-management authority"
+							} else if q.Operation == "zone-migration-preview" {
+								v, err := e.PreviewZoneMigration(q.Generation, q.ID, q.ExpectedVersion, q.ZoneRevision, cred.Uid, admin)
+								decisionError(&r, err)
+								if err == nil {
+									r.ZoneMigration = &v
+								}
+							} else {
+								v, sentence, replayed, err := e.SaveZoneMigration(q.Generation, q.ID, q.ExpectedVersion, q.ZoneRevision, q.PreviewToken, cred.Uid, admin)
+								decisionError(&r, err)
+								if err == nil {
+									r.SavedRule = &v
+									r.ScopePreview = sentence
+									r.Replayed = replayed
 								}
 							}
 						case "rule-preview", "rule-save":

@@ -207,6 +207,7 @@ func (e *Engine) PreviewObservedRule(generation string, target ObservedTarget, d
 	if !candidate.Expires.IsZero() && !now.Before(candidate.Expires) {
 		return ObservedPreview{}, mutationError("invalid_request", "Expiry must be in future, or explicit zero for persistent")
 	}
+	e.bindZoneModel(&candidate)
 	var replaces *RuleVersionRef
 	if draft.ApplicationPolicy {
 		if old := e.canonicalPolicyRuleLocked(candidate); old != nil {

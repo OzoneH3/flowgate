@@ -58,7 +58,9 @@ type Engine struct {
 	essentialPreviews map[string]*essentialPreview
 	Build             *BuildIdentity
 	Zones             identity.NetworkZones
+	ZoneSource        func() identity.NetworkZones
 	zonePreviews      map[string]*zonePreview
+	zoneMigrations    map[string]*zoneMigration
 	decisionPreviews  map[string]*decisionPreview
 	processHandles    map[identity.Instance]*identity.ProcessHandle
 	// Decisions records decision-time evidence; nil disables recording.
@@ -124,9 +126,10 @@ func (e *Engine) expire(now time.Time) {
 	}
 }
 func (e *Engine) Observe(f identity.Flow, token string) Event {
-	f.NetworkScope = e.Zones.Classify(f.Remote.Addr())
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	e.refreshZonesLocked()
+	f.NetworkScope = e.Zones.ClassifyFlow(f)
 	now := e.Now()
 	e.expire(now)
 	key := f.Key() + "|" + token
@@ -198,8 +201,13 @@ func (e *Engine) Observe(f identity.Flow, token string) Event {
 	return v
 }
 func (e *Engine) List(uid uint32, admin bool) []Event {
+	rows, _ := e.ListWithZones(uid, admin)
+	return rows
+}
+func (e *Engine) ListWithZones(uid uint32, admin bool) ([]Event, identity.NetworkZones) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	e.refreshZonesLocked()
 	e.expire(e.Now())
 	out := []Event{}
 	for _, v := range e.events {
@@ -207,7 +215,7 @@ func (e *Engine) List(uid uint32, admin bool) []Event {
 			out = append(out, *v)
 		}
 	}
-	return out
+	return out, e.Zones
 }
 func owned(a identity.Attribution, uid uint32) bool {
 	return a.Principal() != nil && a.Principal().UID == uid
@@ -219,6 +227,7 @@ func (e *Engine) Decide(id, action, scope string, uid uint32, admin bool) (Event
 }
 
 func (e *Engine) decideLocked(id, action, scope string, uid uint32, admin bool, reviewed *policy.Rule, sentence string, reviewDeadline time.Time) (Event, error) {
+	e.refreshZonesLocked()
 	now := e.Now()
 	e.expire(now)
 	if action != "allow" && action != "block" {
@@ -339,6 +348,7 @@ func (e *Engine) SetRules(rules []policy.Rule) error {
 func (e *Engine) RetainedState(id, fingerprint string) string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	e.refreshZonesLocked()
 	now := e.Now()
 	e.expire(now)
 	for _, v := range e.events {

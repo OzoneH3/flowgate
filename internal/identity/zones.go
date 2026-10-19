@@ -11,18 +11,25 @@ import (
 
 // NetworkZones is immutable privileged configuration, not routing inference.
 type NetworkZones struct {
-	Model    string   `json:"model"`
-	Revision string   `json:"revision"`
-	Local    []string `json:"local_prefixes"`
-	Internet []string `json:"internet_prefixes"`
-	Reason   string   `json:"reason"`
+	Model           string           `json:"model"`
+	Revision        string           `json:"revision"`
+	Local           []string         `json:"local_prefixes"`
+	Internet        []string         `json:"internet_prefixes"`
+	Reason          string           `json:"reason"`
+	RegistryVersion string           `json:"registry_version,omitempty"`
+	NetworkRevision string           `json:"network_revision,omitempty"`
+	NetworkState    string           `json:"network_state,omitempty"`
+	Network         *NetworkSnapshot `json:"network,omitempty"`
 }
 type NetworkScope struct {
-	State    string `json:"state"`
-	Zone     string `json:"zone,omitempty"`
-	Revision string `json:"revision"`
-	Source   string `json:"source"`
-	Reason   string `json:"reason"`
+	State          string `json:"state"`
+	Zone           string `json:"zone,omitempty"`
+	Revision       string `json:"revision"`
+	Source         string `json:"source"`
+	Reason         string `json:"reason"`
+	LegacyState    string `json:"legacy_state,omitempty"`
+	LegacyZone     string `json:"legacy_zone,omitempty"`
+	LegacyRevision string `json:"legacy_revision,omitempty"`
 }
 
 func NewNetworkZones(local, internet []string) (NetworkZones, error) {
@@ -65,6 +72,9 @@ func NewNetworkZones(local, internet []string) (NetworkZones, error) {
 }
 func DefaultNetworkZones() NetworkZones { z, _ := NewNetworkZones(nil, nil); return z }
 func (z NetworkZones) Classify(remote netip.Addr) NetworkScope {
+	if z.Model == AutomaticZoneModel {
+		return z.classifyAutomatic(remote)
+	}
 	out := NetworkScope{State: "unavailable", Revision: z.Revision, Source: "configured-prefix-v1", Reason: "Peer has no explicitly configured zone membership"}
 	remote = remote.Unmap().WithZone("")
 	if !remote.IsValid() || remote.IsUnspecified() || remote.IsMulticast() || remote == netip.AddrFrom4([4]byte{255, 255, 255, 255}) {
@@ -101,5 +111,5 @@ func (z NetworkZones) SocketScope(s Socket) NetworkScope {
 		o.Reason = "Listener/unconnected socket has no single peer zone; UDP totals may span peers"
 		return o
 	}
-	return z.Classify(s.Remote.Addr())
+	return z.ClassifyFlow(Flow{Remote: s.Remote, Local: s.Local, NetNS: s.NetNS, Interface: s.Interface})
 }

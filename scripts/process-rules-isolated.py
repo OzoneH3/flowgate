@@ -4,7 +4,7 @@ Run through scripts/lab.sh. Never opens host endpoints or deployed executable.
 """
 import argparse,json,os,pathlib,socket,subprocess,time,sys,shutil
 ROOT=pathlib.Path(__file__).resolve().parents[1]
-p=argparse.ArgumentParser();p.add_argument('--binary',required=True);p.add_argument('--native',required=True);p.add_argument('--run',required=True);p.add_argument('--hold',action='store_true');p.add_argument('--any-protocol',action='store_true');p.add_argument('--zones',action='store_true');p.add_argument('--zones-unknown',action='store_true');p.add_argument('--remember-zones',action='store_true');p.add_argument('--hold-enforcement',action='store_true',help='with --hold, bounded private incoming+outgoing interception for prompt acceptance');p.add_argument('--continuous',action='store_true',help='held daily lifecycle candidate; monitoring initially, UI owns Start/Stop');p.add_argument('--other',action='store_true',help='held third executable identity');p.add_argument('--app-policy',action='store_true',help='NetLimiter application Allow/Deny receiver acceptance');p.add_argument('--remember-ended',action='store_true',help='real outgoing retry/socket-close Remember regression');p.add_argument('--ask',action='store_true',help='stored Ask receiver acceptance');a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--binary',required=True);p.add_argument('--native',required=True);p.add_argument('--run',required=True);p.add_argument('--hold',action='store_true');p.add_argument('--any-protocol',action='store_true');p.add_argument('--zones',action='store_true');p.add_argument('--automatic-zones',action='store_true');p.add_argument('--legacy-zone-fixture',action='store_true');p.add_argument('--zones-unknown',action='store_true');p.add_argument('--remember-zones',action='store_true');p.add_argument('--hold-enforcement',action='store_true',help='with --hold, bounded private incoming+outgoing interception for prompt acceptance');p.add_argument('--continuous',action='store_true',help='held daily lifecycle candidate; monitoring initially, UI owns Start/Stop');p.add_argument('--other',action='store_true',help='held third executable identity');p.add_argument('--app-policy',action='store_true',help='NetLimiter application Allow/Deny receiver acceptance');p.add_argument('--remember-ended',action='store_true',help='real outgoing retry/socket-close Remember regression');p.add_argument('--ask',action='store_true',help='stored Ask receiver acceptance');a=p.parse_args()
 if a.continuous and not a.hold:p.error('--continuous requires --hold')
 if a.hold_enforcement and not a.hold:p.error('--hold-enforcement requires --hold')
 if a.zones_unknown or a.remember_zones or a.app_policy or a.ask:a.zones=True
@@ -99,6 +99,11 @@ try:
   executable=NATIVE
   if name=='other':executable=str(RUN/'native-other');shutil.copy2(NATIVE,executable)
   children[name]=subprocess.Popen([executable,str(port)],env=dict(os.environ,FLOWGATE_FIXTURE_TIMEOUT_SECONDS='60'if a.hold_enforcement or a.continuous else'10'if a.app_policy or a.ask else'2'),stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=(RUN/(name+'.log')).open('w'),text=True);infos[name]=json.loads(children[name].stdout.readline())
+ if a.legacy_zone_fixture:
+  assert a.hold, 'legacy fixture is monitor-only'
+  import sqlite3,datetime
+  r=dict(schema=4,id='user:synthetic-legacy-zone',version=1,priority=0,action='block',disabled=True,created=datetime.datetime.now(datetime.timezone.utc).isoformat(),expires='0001-01-01T00:00:00Z',filter=dict(all_programs=True,uid=0,network_zone='local',direction='outgoing',protocol='*'))
+  db=sqlite3.connect(RUN/'data/rules.db');db.execute('CREATE TABLE rules(id TEXT PRIMARY KEY, document TEXT NOT NULL CHECK(length(document)<=16384))');db.execute('PRAGMA user_version=1');db.execute('INSERT INTO rules VALUES(?,?)',(r['id'],json.dumps(r)));db.commit();db.close();os.chmod(RUN/'data/rules.db',0o600)
  initial=start();generation=initial['generation'];assert 'process-instance-rules-v1'in initial['capabilities']
  ta,tb=target('alpha'),target('beta')
  if a.hold:
@@ -127,6 +132,11 @@ try:
     f=RUN/'peer-received.log';result={'lines':f.read_text().splitlines()if f.exists()else[]}
    else:result=ask(children[name],op)
    (RUN/'command-result.json').write_text(json.dumps(result))
+ elif a.automatic_zones:
+  from automatic_zones_acceptance import check
+  check(globals())
+  stop();assert 'flowgate_host'not in cmd('nft','list','tables')and'unrelated_fixture'in cmd('nft','list','tables')
+  log('PASS owned-only cleanup; unrelated nft table preserved; no host changes')
  elif a.remember_ended:
   from remember_ended_acceptance import check
   check(globals())

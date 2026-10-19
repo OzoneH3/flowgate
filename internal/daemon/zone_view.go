@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"flowgate/internal/identity"
 	"flowgate/internal/policy"
 	"time"
 )
@@ -26,7 +27,7 @@ func (e *Engine) zoneViews(rules []policy.Rule, h *EnforcementStatus, now time.T
 		v := ZonePolicy{Zone: zone}
 		for _, direction := range []string{"incoming", "outgoing"} {
 			c, d := coverage(e.Mode, direction, h)
-			p := DirectionPolicy{Direction: direction, Configured: "absent", Reason: "All-program zone inventory; process and application overrides are separate; unknown peers do not match", Rules: []PolicyRuleRef{}, Default: evaluatorDefault(direction), RuntimeDefault: d, Enforcement: c}
+			p := DirectionPolicy{Direction: direction, Configured: "absent", Reason: "All-program zone inventory; legacy configured-prefix coverage is separate from automatic coverage; process/application overrides apply; unknown peers do not match automatic rules", Rules: []PolicyRuleRef{}, Default: evaluatorDefault(direction), RuntimeDefault: d, Enforcement: c}
 			actions := map[string]bool{}
 			broad := map[string]bool{}
 			for _, r := range rules {
@@ -45,7 +46,7 @@ func (e *Engine) zoneViews(rules []policy.Rule, h *EnforcementStatus, now time.T
 				if ref.Active {
 					p.Active++
 					actions[r.Action] = true
-					if (f.RemoteAddress == "*" || f.RemoteAddress == "") && f.LocalPort == 0 && f.RemotePort == 0 {
+					if (e.Zones.Model != identity.AutomaticZoneModel || f.ZoneModel == identity.AutomaticZoneModel) && (f.RemoteAddress == "*" || f.RemoteAddress == "") && f.LocalPort == 0 && f.RemotePort == 0 {
 						broad[f.Protocol] = true
 						if f.Protocol == "*" {
 							broad["tcp"], broad["udp"] = true, true

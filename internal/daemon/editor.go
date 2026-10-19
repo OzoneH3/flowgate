@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"flowgate/internal/identity"
 	"flowgate/internal/policy"
 	"fmt"
 	"net/netip"
@@ -80,7 +81,10 @@ func RuleSentence(r policy.Rule) string {
 	}
 	zone := "Any network zone"
 	if f.NetworkZone != "" {
-		zone = "configured " + f.NetworkZone + " zone"
+		zone = "legacy configured " + f.NetworkZone + " zone (coverage preserved until explicit migration)"
+		if f.ZoneModel == identity.AutomaticZoneModel {
+			zone = "automatic " + f.NetworkZone + " zone (follows current network configuration and reviewed registry data; Local is not trusted)"
+		}
 	}
 	identityText := fmt.Sprintf("application %s, revision %s, UID %d", f.Application, f.Revision, f.UID)
 	if f.AllPrograms {
@@ -126,7 +130,7 @@ func (e *Engine) EditRule(id, eventID string, expected *uint64, candidate policy
 		if old.Filter.Protocol == "*" && candidate.Filter.Protocol != "*" {
 			return policy.Rule{}, "", mutationError("protocol_scope_changed", "Existing TCP+UDP rule must preserve protocol *; use a fresh observed preview to create a different protocol scope")
 		}
-		if candidate.Filter.NetworkZone != old.Filter.NetworkZone || candidate.Filter.AllPrograms != old.Filter.AllPrograms || candidate.Filter.AllUIDs != old.Filter.AllUIDs {
+		if candidate.Filter.ZoneModel != old.Filter.ZoneModel || candidate.Filter.NetworkZone != old.Filter.NetworkZone || candidate.Filter.AllPrograms != old.Filter.AllPrograms || candidate.Filter.AllUIDs != old.Filter.AllUIDs {
 			return policy.Rule{}, "", mutationError("zone_scope_changed", "Zone and principal scope are immutable on edit; create a fresh reviewed target to change scope")
 		}
 		if candidate.Filter.Process != old.Filter.Process {
@@ -190,6 +194,7 @@ func (e *Engine) EditRule(id, eventID string, expected *uint64, candidate policy
 		candidate.ID = "user:" + randomID()
 		candidate.Created = now
 		candidate.Version = 1
+		e.bindZoneModel(&candidate)
 		candidate.Executable = a.Application.Executable
 		if !candidate.Expires.IsZero() && !now.Before(candidate.Expires) {
 			return policy.Rule{}, "", fmt.Errorf("expiry must be in the future")
@@ -264,6 +269,9 @@ func (e *Engine) reviewRuleLocked(candidate policy.Rule, now time.Time, expiryUn
 	}
 	if candidate.Filter.NetworkZone != "" || candidate.Filter.AllPrograms {
 		candidate.Schema = 4
+		if candidate.Filter.ZoneModel == identity.AutomaticZoneModel {
+			candidate.Schema = 6
+		}
 	}
 	candidate.Filter = canonicalFilter(candidate.Filter)
 	if err := candidate.Validate(); err != nil {
@@ -274,7 +282,7 @@ func (e *Engine) reviewRuleLocked(candidate policy.Rule, now time.Time, expiryUn
 	}
 	sentence := RuleSentence(candidate)
 	if candidate.Filter.NetworkZone != "" {
-		sentence += " Zone definition " + e.Zones.Model + " revision " + e.Zones.Revision + "; rules follow explicitly configured definitions after daemon restart; unknown peers do not match. Zone classification is not zone byte accounting."
+		sentence += " Zone definition " + e.Zones.Model + " revision " + e.Zones.Revision + "; legacy rules retain configured-prefix coverage; automatic rules follow network configuration and registry changes; unclassified peers do not match automatic zones. Zone classification is not zone byte accounting."
 	}
 	count := 0
 	for _, other := range e.rules {

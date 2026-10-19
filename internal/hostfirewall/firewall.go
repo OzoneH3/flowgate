@@ -323,6 +323,12 @@ func RunProfileAuthorized(ctx context.Context, dir, socket, database string, uid
 	}
 	observation := monitor.New(time.Second)
 	observation.Zones = e.Zones
+	if e.Zones.Model == identity.AutomaticZoneModel {
+		manager := identity.NewZoneManager(e.Zones.Legacy())
+		e.ZoneSource = manager.Snapshot
+		observation.ZoneSource = manager.Snapshot
+		go manager.Run(ctx)
+	}
 	observationContext, stopObservation := context.WithCancel(ctx)
 	defer stopObservation()
 	go observation.Run(observationContext)

@@ -31,7 +31,11 @@ func (e *Engine) targetStateLocked(r policy.Rule) RuleTargetState {
 		return RuleTargetState{scope, "active", presetSentence(r)}
 	}
 	if r.Filter.AllPrograms {
-		return RuleTargetState{"zone", "active", "All-program configured zone; process and application tiers override; unsafe attribution still blocks"}
+		model := "Legacy configured-prefix scope; automatic coverage is excluded until explicit migration"
+		if r.Filter.ZoneModel == identity.AutomaticZoneModel {
+			model = "Automatic peer scope follows network/registry revisions; classification itself grants no permission"
+		}
+		return RuleTargetState{"zone", "active", model + "; process/application tiers override; unsafe attribution still blocks"}
 	}
 	b := r.Filter.Process
 	if b.IsZero() {
@@ -78,7 +82,7 @@ func (e *Engine) activeRulesLocked(rules []policy.Rule) []policy.Rule {
 	return out
 }
 func (e *Engine) evaluateLocked(rules []policy.Rule, f identity.Flow, a identity.Attribution, now time.Time) (string, string, []string) {
-	f.NetworkScope = e.Zones.Classify(f.Remote.Addr())
+	f.NetworkScope = e.Zones.ClassifyFlow(f)
 	active := e.activeRulesLocked(rules)
 	for i, r := range active {
 		if r.Filter.PeerService != (policy.PeerService{}) && policy.ProtocolMatches(r.Filter.Protocol, f.Protocol) && f.Direction == r.Filter.Direction && f.Remote.Port() == r.Filter.RemotePort && f.Remote.Addr().String() == r.Filter.RemoteAddress && !e.peerServiceMatches(f, r.Filter.PeerService) {

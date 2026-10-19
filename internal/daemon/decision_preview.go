@@ -107,13 +107,14 @@ func (e *Engine) pendingDecision(id string, uid uint32, admin bool) (*Event, err
 	return nil, mutationError("stale_decision", "Pending request no longer available")
 }
 func (e *Engine) decisionClassification(v *Event, revision, zone string) (identity.NetworkScope, error) {
+	e.refreshZonesLocked()
 	if revision != "" && revision != e.Zones.Revision {
 		return identity.NetworkScope{}, mutationError("zone_conflict", "Network definition changed; review again")
 	}
 	if revision == "" {
 		return identity.NetworkScope{}, mutationError("zone_conflict", "Explicit current zone revision required")
 	}
-	current := e.Zones.Classify(v.Flow.Remote.Addr())
+	current := e.Zones.ClassifyFlow(v.Flow)
 	if current != v.Flow.NetworkScope {
 		return current, mutationError("zone_conflict", "Held request classification changed; fresh request/review required")
 	}
@@ -195,6 +196,7 @@ func (e *Engine) PreviewDecision(generation, id, action, scope, zone, revision s
 	if zone != "any" {
 		rule.Schema = 4
 		rule.Filter.NetworkZone = zone
+		e.bindZoneModel(&rule)
 	}
 	// Remembering a scope that already has a user rule updates that exact rule
 	// (same ID, version+1) instead of failing or adding a duplicate.

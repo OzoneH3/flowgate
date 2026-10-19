@@ -315,6 +315,11 @@ func observe() error {
 	e := daemon.New(15 * time.Second)
 	defer e.CloseProcessTargets()
 	e.Mode = "host-monitor"
+	zoneManager := identity.NewZoneManager(identity.DefaultNetworkZones())
+	e.Zones = zoneManager.Snapshot()
+	e.ZoneSource = zoneManager.Snapshot
+	observer.ZoneSource = zoneManager.Snapshot
+	go zoneManager.Run(ctx)
 	e.Activity = observer.Snapshot
 	listener, err := daemon.Serve(path, e, true)
 	if err != nil {

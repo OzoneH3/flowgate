@@ -146,7 +146,12 @@ func main() {
 				ip := net.ParseIP(q.Host)
 				_, p4, _ := net.ParseCIDR("10.79.0.0/24")
 				_, p6, _ := net.ParseCIDR("fd79::/64")
-				if ip == nil || !(p4.Contains(ip) || p6.Contains(ip)) || (ip.To4() == nil) != q.V6 {
+				privateLab := false
+				if parent := os.Getenv("FLOWGATE_PARENT_NETNS"); parent != "" {
+					current, err := os.Readlink("/proc/self/ns/net")
+					privateLab = err == nil && current != parent
+				}
+				if ip == nil || !(p4.Contains(ip) || p6.Contains(ip) || privateLab) || (ip.To4() == nil) != q.V6 {
 					panic("fixture destination outside private prefixes")
 				}
 				host = q.Host

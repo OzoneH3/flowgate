@@ -81,3 +81,42 @@ func TestGlobalAllowRequiresCompleteApplicationIdentity(t *testing.T) {
 		}
 	}
 }
+
+func TestAutomaticZoneDoesNotBroadenLegacyRules(t *testing.T) {
+	app := identity.Application{Key: "a", Revision: "r", Kind: "native"}
+	a := identity.Attribution{Application: &app, Owners: []identity.Process{{UID: 1000}}, VisibilityComplete: true, Sockets: []identity.Socket{{}}}
+	f, _ := identity.ParseFlow("udp", "outgoing", "10.1.1.1:2000", "10.2.2.2:3000")
+	f.NetworkScope = identity.NetworkScope{State: "known", Zone: "local", Source: identity.AutomaticZoneModel, LegacyState: "unavailable"}
+	old := Rule{Schema: 4, ID: "legacy", Action: "allow", Filter: Filter{AllPrograms: true, AllUIDs: true, NetworkZone: "local", Direction: "outgoing", Protocol: "*"}}
+	if act, _, _ := Evaluate([]Rule{old}, f, a, time.Now()); act != "ask" {
+		t.Fatal("legacy scope broadened", act)
+	}
+	auto := old
+	auto.Schema = 6
+	auto.ID = "automatic"
+	auto.Filter.ZoneModel = identity.AutomaticZoneModel
+	if err := auto.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if act, _, _ := Evaluate([]Rule{auto}, f, a, time.Now()); act != "allow" {
+		t.Fatal("automatic scope did not match", act)
+	}
+	f.NetworkScope.LegacyState = "known"
+	f.NetworkScope.LegacyZone = "internet"
+	if act, _, _ := Evaluate([]Rule{old}, f, a, time.Now()); act != "ask" {
+		t.Fatal("legacy different zone matched", act)
+	}
+	old.Filter.NetworkZone = "internet"
+	if act, _, _ := Evaluate([]Rule{old}, f, a, time.Now()); act != "allow" {
+		t.Fatal("legacy override lost", act)
+	}
+	auto.Filter.ZoneModel = ""
+	if auto.Validate() == nil {
+		t.Fatal("schema6 unversioned scope accepted")
+	}
+	auto.Filter.ZoneModel = identity.AutomaticZoneModel
+	auto.Schema = 4
+	if auto.Validate() == nil {
+		t.Fatal("schema4 silently automatic")
+	}
+}

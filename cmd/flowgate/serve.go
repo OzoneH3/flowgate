@@ -7,6 +7,7 @@ import (
 	"flowgate/internal/decisionlog"
 	"flowgate/internal/essential"
 	"flowgate/internal/hostfirewall"
+	"flowgate/internal/identity"
 	"flowgate/internal/monitor"
 	"flowgate/internal/readiness"
 	"flowgate/internal/store"
@@ -139,6 +140,10 @@ func serveCommand(args []string) error {
 	e.Activity = observer.Snapshot
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
+	zoneManager := identity.NewZoneManager(zones.Legacy())
+	e.ZoneSource = zoneManager.Snapshot
+	observer.ZoneSource = zoneManager.Snapshot
+	go zoneManager.Run(ctx)
 	initiation := tcpinit.NewWithOptions(ctx, *tcpHelper, *tcpCgroup, filepath.Dir(*socket), tcpinit.Options{ObserveShared: *tcpShared})
 	defer initiation.Close()
 	observer.InitiationEvents = initiation.Sample

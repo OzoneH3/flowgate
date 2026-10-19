@@ -12,6 +12,7 @@ import (
 type Observer struct {
 	InitiationEvents func([]identity.Socket) identity.InitiationEvents
 	Zones            identity.NetworkZones
+	ZoneSource       func() identity.NetworkZones
 	UDP              func() identity.UDPSnapshot
 	mu               sync.RWMutex
 	snapshot         identity.ActivitySnapshot
@@ -24,6 +25,9 @@ func New(interval time.Duration) *Observer {
 func (o *Observer) Run(ctx context.Context) {
 	collector := identity.ActivityCollector{UDP: o.UDP, Zones: o.Zones, InitiationEvents: o.InitiationEvents}
 	for {
+		if o.ZoneSource != nil {
+			collector.Zones = o.ZoneSource()
+		}
 		snapshot := collector.Collect()
 		// Cap serialized API retention as well as row/process counts. Never return an
 		// old success as current after a failure or oversized snapshot.

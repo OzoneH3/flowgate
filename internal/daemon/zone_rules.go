@@ -31,6 +31,7 @@ type zonePreview struct {
 }
 
 func (e *Engine) zoneRevision(zone, revision string) error {
+	e.refreshZonesLocked()
 	if zone != "" && zone != "local" && zone != "internet" {
 		return mutationError("invalid_request", "network_zone must be local or internet, or omitted for Any")
 	}
@@ -82,6 +83,7 @@ func (e *Engine) PreviewZoneRule(generation, revision string, target ZoneTarget,
 	if r.Filter.AllUIDs {
 		r.Filter.UID = 0
 	}
+	e.bindZoneModel(&r)
 	r, sentence, err := e.reviewRuleLocked(r, now, false)
 	if err != nil {
 		return ZonePreview{}, mutationError("invalid_rule", err.Error())

@@ -254,6 +254,7 @@ func summaryFor(a PolicyIdentity, direction, mode string, h *EnforcementStatus, 
 // snapshotLocked captures one coherent authorized policy. Sequence orders read
 // responses only; it is not a new policy version or a mutation precondition.
 func (e *Engine) snapshotLocked(uid uint32, admin bool, h *EnforcementStatus, expected string) (PolicySnapshot, []policy.Rule, error) {
+	e.refreshZonesLocked()
 	now := e.Now()
 	rules := []policy.Rule{}
 	for _, r := range e.rules {
@@ -313,6 +314,7 @@ func (e *Engine) PolicyView(generation, expected string, uid uint32, admin bool,
 	if err != nil {
 		return PolicyView{}, err
 	}
+	activity = ClassifyActivity(activity, e.Zones)
 	out := PolicyView{NetworkZones: e.Zones, Zones: e.zoneViews(rules, h, snapshot.EvaluatedAt), Snapshot: snapshot, ActivitySequence: strconv.FormatUint(activity.Sequence, 10), ActivityCollected: activity.Collected, Applications: []ApplicationPolicy{}, Rows: []PolicyAssociation{}, Complete: activity.Complete}
 	now := snapshot.EvaluatedAt
 	var processComplete bool
