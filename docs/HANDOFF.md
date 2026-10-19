@@ -1,5 +1,16 @@
 # Continuation handoff
 
+## Current: essentials-only monitoring rollout prepared
+
+Essential preset rollout scope is DNS/stub/DHCP/time only; Tailscale transport is a
+separate unchecked optional preset outside this rollout (UI section split, backend
+defaults all false, tailscale0 MagicDNS labelled DNS-only). Fixed ifindex-ordering
+revision instability. New monitoring-only installer (no receiver/protection stage,
+no NM Requires= drop-in). Exact 19-rule proposal, refresh behaviour and remaining
+whole-DNS-set revision limitation: [ESSENTIAL-NETWORKING.md](ESSENTIAL-NETWORKING.md);
+installer: [DAILY-DEPLOYMENT.md](DAILY-DEPLOYMENT.md). Host install requires the
+user's terminal sudo; protection stays off; no preset applied.
+
 ## Current Essential preset implementation
 
 The authoritative schema5 preview/apply/status/removal workflow and interface-scoped

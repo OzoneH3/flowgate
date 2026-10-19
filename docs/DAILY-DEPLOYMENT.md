@@ -1,5 +1,36 @@
 # Daily service: prepared candidate, host acceptance pending authentication
 
+## Monitoring-only installation (current rollout path)
+
+`scripts/prepare-daily-release.sh` now bundles `install-monitoring.py` and prints
+only its command. It installs the immutable root-owned release, units and
+recover/control/uninstall tools **without any protection stage**:
+
+- Verifies every bundle hash; reuses an identical existing release, never alters one;
+  keeps previous immutable releases (04c5159, d7c969b) intact.
+- Refuses foreign/modified unit or NetworkManager drop-in content, and refuses to
+  interrupt active protection, before touching runtime.
+- Backs up `rules.db`/`decisions.db` (SQLite online backup), `protection.json`,
+  `/etc/flowgate/*`, previous units/tools/drop-in and the old `current` link under
+  `/var/lib/flowgate/backups/<release>-monitoring-<time>/`. The live database is
+  never replaced or downgraded; schema4/5 records are preserved.
+- Persists `{"mode":"monitoring"}` **before** the first start; preserves zones.json.
+- Installs `flowgate.service`/`flowgate-guard.service` but **not** the NM
+  `Requires=` drop-in (a leftover FlowGate-identical one is backed up and removed).
+  Only flowgate.service is enabled; the guard is pulled in by it and is a no-op in
+  monitoring. NetworkManager startup never depends on FlowGate.
+- Starts once, then requires: matching build source/hash, protection stopped with
+  desired monitoring, enforcement stopped, identical rule IDs/versions, essential
+  capability, one daemon, and no `flowgate_guard`/`flowgate_host` nft tables.
+- Never runs `host-acceptance.py`. On failure: stop+disable the new service and
+  clean only owned objects; data untouched; no older executable/database restored.
+
+Launch keeps the previously authorized configuration (UID1000 administrator,
+traffic/evaluation/protection control grants, restored UDP state, zones).
+`scripts/test-install-monitoring.py` runs the real transaction against a temp root
+with mocked systemd/nft/API (6 cases). The receiver-acceptance `install.py`
+remains in the bundle only for a later separately approved protection stage.
+
 ## Current Essential preset implementation
 
 The authoritative schema5 preview/apply/status/removal workflow and interface-scoped

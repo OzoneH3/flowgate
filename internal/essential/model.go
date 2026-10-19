@@ -99,6 +99,10 @@ func (s *Snapshot) Seal() {
 			for i := range stubs {
 				stubs[i].Interface = 0
 			}
+			// Re-sort after removing kernel indexes: a recreated interface (for
+			// example tailscale0) must not reorder identical named configuration.
+			sort.Slice(dns, func(i, j int) bool { return Hash(dns[i]) < Hash(dns[j]) })
+			sort.Slice(stubs, func(i, j int) bool { return Hash(stubs[i]) < Hash(stubs[j]) })
 			config = []any{dns, stubs}
 		case "dhcp":
 			dhcp := append([]DHCP{}, s.DHCP...)

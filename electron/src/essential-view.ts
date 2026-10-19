@@ -28,9 +28,21 @@ export function setupEssentialNetworking() {
   header.append(subtitle);
   const body = node('section');
   body.className = 'essential-body';
+  // Essential defaults are DNS, DHCP and time only. Tailscale transport is a
+  // separate optional preset: unchecked, never part of the essential rollout.
   const opts = node('fieldset'),
-    legend = node('legend', 'Optional components — off by default');
+    legend = node('legend', 'Optional local discovery — off by default');
   opts.append(legend);
+  const vpn = node('fieldset'),
+    vpnLegend = node('legend', 'Separate optional preset: Tailscale transport — not essential, off');
+  vpn.id = 'essentialTailscale';
+  vpn.append(
+    vpnLegend,
+    node(
+      'p',
+      'Essential networking does not grant tailscaled transport. DNS servers configured on tailscale0 appear above only as resolver DNS queries. VPN connectivity needs these separately reviewed permissions.',
+    ),
+  );
   const choices: Record<keyof EssentialOptions, HTMLInputElement> = {} as Record<
     keyof EssentialOptions,
     HTMLInputElement
@@ -48,7 +60,7 @@ export function setupEssentialNetworking() {
     input.id = 'essential-' + key;
     choices[key] = input;
     label.append(input, document.createTextNode(labels[key]));
-    opts.append(label);
+    (key.startsWith('tailscale') ? vpn : opts).append(label);
     input.onchange = () => {
       if (key === 'tailscale' && !input.checked) {
         choices.tailscale_incoming.checked = false;
@@ -57,7 +69,7 @@ export function setupEssentialNetworking() {
       paint();
     };
   }
-  body.append(opts);
+  body.append(opts, vpn);
   const message = node('p');
   message.id = 'essentialMessage';
   message.role = 'status';

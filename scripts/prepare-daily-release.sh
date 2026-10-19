@@ -20,6 +20,7 @@ cp .workspace/udp-collector "$bundle/udp-collector"
 cp deployment/launch deployment/control.py deployment/recover.py deployment/uninstall.py "$bundle/"
 cp deployment/systemd/* "$bundle/"
 cp scripts/install-daily.py "$bundle/install.py"
+cp scripts/install-monitoring.py "$bundle/install-monitoring.py"
 cp scripts/host-daily-acceptance.py "$bundle/host-acceptance.py"
 python3 - "$bundle" "$revision" <<'PY'
 import hashlib,json,pathlib,sys
@@ -27,10 +28,12 @@ b=pathlib.Path(sys.argv[1]);revision=sys.argv[2]
 # These paths intentionally point to preserved exact acceptance, not a broad rerun.
 root=pathlib.Path.cwd();component=root/'.workspace/continuous-component-f4fozgp6/result.json';adapter=root/'.workspace/daily-adapter-ri9_sdjq/acceptance/result.json';failure=root/'.workspace/daily-adapter-kxiw4xhv/failure-result.json';stop_crash=root/'.workspace/daily-adapter-ofl4hfcl/stop-crash-result.json'
 assert all(json.loads(p.read_text())['passed']for p in [component,adapter,failure,stop_crash])
-executables=['flowgate','native','native-other','tcp-initiation','udp-collector','launch','control.py','recover.py','uninstall.py','install.py','host-acceptance.py']
+executables=['flowgate','native','native-other','tcp-initiation','udp-collector','launch','control.py','recover.py','uninstall.py','install.py','install-monitoring.py','host-acceptance.py']
 m={'release':revision,'source':revision,'isolated_passed':True,'evidence':list(map(str,[component,adapter,failure,stop_crash])),'executables':executables,'files':{p.name:hashlib.sha256(p.read_bytes()).hexdigest()for p in b.iterdir()if p.is_file()}}
 (b/'manifest.json').write_text(json.dumps(m,indent=2))
 print('PREPARED',b)
-print('AUTHENTICATED INSTALL + HOST ACCEPTANCE (one command):')
-print('sudo python3 '+str(b/'install.py')+' --bundle '+str(b))
+# install.py (receiver acceptance activates protection) is retained only for a
+# later separately approved protection stage. The rollout command is monitoring-only.
+print('AUTHENTICATED MONITORING-ONLY INSTALL (one command; does not activate protection):')
+print('sudo python3 '+str(b/'install-monitoring.py')+' --bundle '+str(b))
 PY

@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -230,5 +231,51 @@ func TestInterfaceIndexReuseDoesNotDuplicateNamedPolicy(t *testing.T) {
 		if first[i].ID != second[i].ID {
 			t.Fatal("duplicate ID after ifindex change")
 		}
+	}
+}
+
+// Two links: recreating one (new kernel index) must not reorder identical named
+// configuration into a different revision. Previously sorting used the index.
+func TestDNSRevisionIndependentOfInterfaceIndexOrdering(t *testing.T) {
+	p, _ := identity.Inspect(os.Getpid())
+	build := func(lan, vpn uint32) (string, []string) {
+		s := Snapshot{Collected: time.Now(), DNS: []DNS{{"192.0.2.53", 53, lan, "enp7s0", false}, {"100.100.100.100", 53, vpn, "tailscale0", false}}, Stubs: []Stub{{"127.0.0.53", "udp", 1}}, Components: []Component{{ID: "dns", State: "ready", Service: &p}, {ID: "dns-stub-client", State: "ready", Service: &p}}}
+		s.Seal()
+		rules, _, err := s.Rules(Options{}, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids := []string{}
+		for _, r := range rules {
+			ids = append(ids, r.ID+"@"+r.Preset.Revision)
+		}
+		return s.Component("dns").Revision + s.Component("dns-stub-client").Revision, ids
+	}
+	want, wantIDs := build(2, 3)
+	for vpn := uint32(4); vpn < 200; vpn++ {
+		got, ids := build(2, vpn)
+		if got != want || strings.Join(ids, ",") != strings.Join(wantIDs, ",") {
+			t.Fatalf("tailscale0 index %d changed DNS revision/rules", vpn)
+		}
+	}
+}
+
+// Essentials-only defaults: tailscale0 MagicDNS stays a resolver DNS rule; no
+// tailscaled transport permission exists unless the separate option is chosen.
+func TestEssentialDefaultsCreateNoTailscaleTransport(t *testing.T) {
+	p, _ := identity.Inspect(os.Getpid())
+	s := Snapshot{Collected: time.Now(), DNS: []DNS{{"100.100.100.100", 53, 3, "tailscale0", false}}, VPNPort: 41641, Components: []Component{{ID: "dns", State: "ready", Service: &p}, {ID: "tailscale", State: "ready", Service: &p}}}
+	s.Seal()
+	rules, _, err := s.Rules(Options{}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rules {
+		if r.Preset.Component != "dns" || r.Filter.RemotePort != 53 || r.Filter.InterfaceName != "tailscale0" {
+			t.Fatalf("unexpected default permission %+v", r.Filter)
+		}
+	}
+	if len(rules) != 2 {
+		t.Fatalf("want udp+tcp DNS only, got %d", len(rules))
 	}
 }

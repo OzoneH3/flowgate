@@ -112,6 +112,9 @@ func Discover(ctx context.Context, env Environment) Snapshot {
 				}
 			}
 		}
+		if strings.HasPrefix(link.Ifname, "tailscale") && len(link.Servers) > 0 {
+			dns.Details = append(dns.Details, "DNS servers configured on "+link.Ifname+" (MagicDNS) are resolver DNS queries only; they do not permit tailscaled transport, which is the separate unchecked Tailscale option")
+		}
 		if len(link.Fallback) > 0 {
 			fallback = true
 		}
