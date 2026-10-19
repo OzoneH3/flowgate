@@ -30,6 +30,7 @@ async function setup(
     fields = false,
     replaces = null,
     ignoreFields = false,
+    previewError,
   } = {},
 ) {
   const dir = fs.mkdtempSync(path.resolve(__dirname, '../../.workspace/remember-test-')),
@@ -109,6 +110,10 @@ async function setup(
       sent.push(q);
       if (q.operation === 'decision-preview') {
         previews++;
+        if (previewError) {
+          s.end(JSON.stringify({ ...r, error_code: previewError, error: 'Exact revalidation refusal' }) + '\n');
+          return;
+        }
         const rule = {
           id: 'reserved-' + previews,
           version: 1,
@@ -452,4 +457,36 @@ test('without decision-remember-fields-v1 Remember fields are refused (legacy pa
   const p = await b.previewDecision(d);
   assert.equal((await b.decide({ ...d, preview_token: p.token })).phase, 'acknowledged');
   assert.equal(counts().commits, 1);
+});
+
+test('terminal preview refusal stays bound to original request through stale polling; no Once fallback', async (t) => {
+  const { b, d, counts } = await setup(t, { previewError: 'identity_changed' });
+  await assert.rejects(() => b.previewDecision(d), /Exact revalidation refusal/);
+  let e = b.view().control.events.find(e => e.id === d.id);
+  assert.deepEqual(e.reviewFailure, { code: 'identity_changed', message: 'Exact revalidation refusal', terminal: true });
+  assert.equal(e.attempt, undefined, 'preview failure must not pretend a decision was submitted');
+  await b.pollControl();
+  e = b.view().control.events.find(e => e.id === d.id);
+  assert.equal(e.reviewFailure.code, 'identity_changed');
+  await assert.rejects(() => b.previewDecision(d), /no longer actionable/);
+  await assert.rejects(() => b.decide({ generation: d.generation, id: d.id, action: 'allow', scope: 'once' }));
+  assert.equal(counts().previews, 1);
+  assert.equal(counts().commits, 0);
+  b.reply.events = [];
+  assert.equal(b.view().control.events[0].attribution.application.key, 'app');
+  b.state.control.generation = 'new';
+  assert.equal(b.view().control.events.length, 0, 'no cross-generation old details');
+});
+test('recoverable review conflict does not terminally disable a valid pending request', async (t) => {
+  const { b, d, counts } = await setup(t, { previewError: 'policy_conflict' });
+  await assert.rejects(() => b.previewDecision(d));
+  assert.equal(b.view().control.events[0].reviewFailure, undefined);
+  await assert.rejects(() => b.previewDecision(d));
+  assert.equal(counts().previews, 2);
+});
+test('review lifecycle wording never calls an unknown fingerprint mismatch an executable change', () => {
+  const { terminalReviewFailure, reviewFailureSummary } = require('../dist/test/decision-remember.cjs');
+  assert.match(reviewFailureSummary(terminalReviewFailure('connection_ended', 'Socket closed')), /Connection ended/);
+  assert.match(reviewFailureSummary(terminalReviewFailure('identity_changed', 'Mismatch')), /can no longer be verified/);
+  assert.equal(terminalReviewFailure('zone_conflict', 'Re-review'), undefined);
 });

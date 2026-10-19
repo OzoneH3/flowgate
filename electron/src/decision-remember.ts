@@ -108,6 +108,30 @@ function portOf(endpoint: string) {
   const m = /:(\d+)$/.exec(endpoint);
   return m ? Number(m[1]) : 0;
 }
+// A preview refusal is not a submitted decision. Keep it attached to the exact
+// generation/event, so polling cannot make the same unverified request actionable.
+export interface DecisionReviewFailure {
+  code: string;
+  message: string;
+  terminal: true;
+}
+export function terminalReviewFailure(code: string, message: string): DecisionReviewFailure | undefined {
+  return ['identity_changed', 'stale_decision', 'connection_ended', 'process_exited', 'request_ended'].includes(code)
+    ? { code, message, terminal: true }
+    : undefined;
+}
+export function reviewFailureOf(event: RequestEvent | undefined): DecisionReviewFailure | undefined {
+  return (event as (RequestEvent & { reviewFailure?: DecisionReviewFailure }) | undefined)?.reviewFailure;
+}
+export function reviewFailureSummary(failure: DecisionReviewFailure) {
+  return ['connection_ended', 'request_ended'].includes(failure.code)
+    ? 'Connection ended. No decision was submitted.'
+    : failure.code === 'process_exited'
+      ? 'The requesting process exited. No decision was submitted.'
+      : failure.code === 'stale_decision'
+        ? 'Request no longer pending. No decision was submitted.'
+        : 'This request can no longer be verified. No decision was submitted.';
+}
 export interface DecisionPreview {
   token: string;
   expires_at: string;
