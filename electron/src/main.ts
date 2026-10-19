@@ -2,6 +2,7 @@ import { Essential } from './essential';
 import { Protection } from './protection';
 import { placeKDEPrompt, resizeKDEPrompt, PROMPT_TITLE, promptTitle } from './prompt-placement';
 import { AutomaticPrompts, edgePosition, boundDecision, groupOf } from './automatic-prompts';
+import { leaseHolds } from './process-lease';
 import {
   app,
   BrowserWindow,
@@ -185,8 +186,12 @@ function automaticDecision() {
   if (quitting || !backend || !main) return;
   const view = backend.view();
   if (prompt && !prompt.isDestroyed() && !promptIdle) {
-    const ref = promptRefs.get(prompt.webContents.id),
-      next = ref && automaticPrompts.follow(view, ref);
+    const ref = promptRefs.get(prompt.webContents.id);
+    let next = ref && automaticPrompts.follow(view, ref);
+    // A request just decided "For a while" keeps its card while its lease is
+    // active, so the lease stays inspectable; any other waiting request wins.
+    if (!promptDismissed && !next && ref && leaseHolds(view.control, ref.id))
+      next = automaticPrompts.next(view, false) ?? ref;
     if (!promptDismissed && next?.id === ref?.id) {
       // The same card stays (for example a request that just ended and is now
       // retained): cancel a transition paced while it was briefly unfollowed,

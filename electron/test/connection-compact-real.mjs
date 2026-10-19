@@ -106,7 +106,7 @@ try {
     prompt.on('pageerror', (e) => evidence.errors.push(String(e)));
     await prompt.locator('#allow').waitFor();
     assert.match(
-      await prompt.locator('#requestDetails').innerText(),
+      await prompt.locator('#requestDetails').textContent(),
       op === 'incoming' ? /Remote peer → this program/ : /This program → remote peer/,
     );
     await prompt.locator('#requestDetails').focus();

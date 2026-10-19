@@ -127,7 +127,7 @@ func main() {
 		s := fs.String("socket", ".workspace/run/control.sock", "v1 API socket")
 		id := fs.String("id", "", "request ID")
 		a := fs.String("action", "", "allow/block")
-		scope := fs.String("scope", "once", "once/application (one hour; incoming remote address + local port; outgoing destination)")
+		scope := fs.String("scope", "once", "once/for-a-while/application (for-a-while: this process and direction for 15 seconds, memory only; application: one hour; incoming remote address + local port; outgoing destination)")
 		fs.Parse(os.Args[2:])
 		op := "list"
 		if os.Args[1] == "decide" {

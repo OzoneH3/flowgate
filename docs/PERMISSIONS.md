@@ -32,6 +32,7 @@ will be allowed" (documented).
 | Plain Allow/Deny without Remember creates no rule; does not cover another process's identical request | observed | Once: 30 s tuple lease, never fans out |
 | After a Remember/rule change, following connections use the rule | docs; observed (pending re-evaluation unverified-but-consistent) | Every policy change re-evaluates waiting requests through normal identity/policy: covered ones settle by the rule, ended attempts are finalized, others keep their own deadline |
 | Rule Status cell = the node's own configured rule, not the effective result | observed | policy-view `application_rule` (own rule), `scoped_rules`, per-rule `kind` |
+| "For a while": checkbox beside Remember, "Allow or deny this connection and all subsequent connections created within a short period of time"; no duration control; "active for process from which it originated"; creates no rule | docs + observed 5.3.28 (window measured ≈10–18 s; a new process prompted again) | `decision-for-a-while-v1`: `decide` with `scope:"for-a-while"`, `action` allow/block. Decides the held request exactly like Once and adds an in-memory process lease for a fixed **15 s** (`lease {id,until,seconds}` on the event; `process_leases` in `list`, admin or owning UID). Scope: the exact owning process instance (PID + start ticks + UID + boot ID + pid/mount namespace + application key/revision/executable) **and the same direction**; siblings, relaunches, other users/executables and the other direction prompt. Needs one verified owner with complete visibility, else `process_scope_unavailable`. Leases only fill prompts (default Ask or a stored Ask rule); any configured Allow/Deny rule wins. Waiting requests of the same process/direction settle by the lease. Not a rule, not persisted, lost on daemon restart. Decision Log: the user final has `scope:"for-a-while"` + `lease_id`; covered connections have source `for_a_while` + `lease_id`. Combining with Remember is a UI decision (backend treats them as separate decisions) |
 
 ## Remaining differences (explicit)
 
@@ -46,7 +47,8 @@ will be allowed" (documented).
 - **Ask on the host**: the installed release predates `stored-ask-v1`; the UI shows Ask
   read-only there until the next release is installed.
 - **Custom weights 4+** (Weight control): not implemented; needs storage/schema.
-- **For a while**: not implemented; NetLimiter's duration was not measured.
+- **For a while**: fixed 15 s (NetLimiter fixed, measured ≈10–18 s, not documented); FlowGate
+  additionally scopes the lease to one direction and requires one verified owning process.
 - **Named auto filters** (`<App>-<address>` filter nodes): FlowGate stores the same
   ANDed scope as one rule, without a reusable named filter object.
 - **Duplicate scopes**: NetLimiter adds a second rule; FlowGate updates the existing
@@ -92,3 +94,9 @@ will be allowed" (documented).
 - Electron journey scope note: Deny Once, Ask disable/delete, restart, read-only refusal and out-of-zone
   Ask were verified with real receivers through the API (`--ask`), not in the Electron journey.
 - Not yet: host deployment of stored Ask (installed c09aae8 predates `stored-ask-v1`; the UI hides Ask there).
+- For a while (`decision-for-a-while-v1`): `internal/daemon/for_a_while_test.go`; real receivers
+  `scripts/process-rules-isolated.py --for-a-while` → `scripts/for_a_while_acceptance.py` (run
+  `.workspace/fw1`, all PASS): Allow delivers the prompted TCP and later TCP+UDP IPv4/IPv6 connections of the
+  same process without prompts; sibling instance, incoming direction and a relaunched PID prompt inside the
+  window; after expiry the same process prompts; Deny blocks the current and later connections without
+  prompts; Decision Log `for_a_while`; no rule at any time; no lease after daemon restart.

@@ -74,7 +74,7 @@ func (e *Engine) recordFinal(v *Event, action, source, scope, reason string, rul
 	}
 	v.finalLogged = true
 	r := e.baseRecord(v, decisionlog.KindFinal)
-	r.Decision = &decisionlog.Decision{Action: action, Source: source, Scope: scope, Reason: reason, MatchingRules: v.Conflicts}
+	r.Decision = &decisionlog.Decision{Action: action, Source: source, Scope: scope, Reason: reason, MatchingRules: v.Conflicts, LeaseID: v.leaseID}
 	if rule != nil {
 		r.Decision.Rule = decisionlog.Snapshot(*rule)
 	}
@@ -115,14 +115,20 @@ func (e *Engine) settlePendingLocked(reason string) {
 			_ = e.rejectPendingBindingLocked(v, a)
 			continue
 		}
-		action, rule, matches := e.evaluateLocked(e.rules, v.Flow, a, now)
+		action, rule, matches, lease := e.policyLocked(v.Flow, a, now)
 		if action != "allow" && action != "block" {
 			continue
 		}
 		v.State = map[string]string{"allow": "allowed", "block": "blocked"}[action]
 		v.Rule, v.Conflicts, v.decided = rule, matches, e.ruleLocked(rule)
 		v.Reason = "re-evaluated after policy change (" + reason + ")"
-		e.recordFinal(v, action, "rule", "", v.Reason, v.decided, nil, "deferred", "")
+		source, scope := "rule", ""
+		if lease != nil {
+			v.Reason += "; " + lease.reason()
+			v.leaseID = lease.ID
+			source, scope = ForAWhileSource, ForAWhileScope
+		}
+		e.recordFinal(v, action, source, scope, v.Reason, v.decided, nil, "deferred", "")
 	}
 }
 
@@ -231,14 +237,16 @@ func (e *Engine) RecordPacketOutcome(v Event, verdict string, submitErr error) {
 			return
 		}
 		action := map[string]string{"allowed": "allow", "blocked": "block"}[v.State]
-		source := "rule"
+		source, scope := "rule", ""
 		if v.Rule == "unsafe-attribution" {
 			source = "attribution"
+		} else if leaseIDOf(v.Rule) != "" {
+			source, scope = ForAWhileSource, ForAWhileScope
 		} else if strings.HasPrefix(v.Rule, "once:") || target.decided == nil {
 			return // user/edit dispositions are recorded where they are decided
 		}
 
-		e.recordFinal(target, action, source, "", v.Reason, target.decided, nil, verdict, detail)
+		e.recordFinal(target, action, source, scope, v.Reason, target.decided, nil, verdict, detail)
 	}
 }
 

@@ -167,7 +167,7 @@ try {
   const first = await wait(async () => promptWindow(), 20000, 'first prompt');
   await first.locator('#allow').waitFor();
   assert.match(
-    await first.locator('#requestDetails').innerText(),
+    await first.locator('#requestDetails').textContent(),
     /No matching rule \(default Ask\)/,
   );
   await first.locator('#rememberToggle').check();
@@ -408,7 +408,7 @@ try {
   const askPrompt = await wait(async () => promptWindow());
   await askPrompt.locator('#allow').waitFor();
   await wait(async () =>
-    /Asked by rule/.test(await askPrompt.locator('#requestDetails').innerText()),
+    /Asked by rule/.test(await askPrompt.locator('#requestDetails').textContent()),
   );
   await askPrompt.screenshot({ path: run + '/04-ask-attribution.png' });
   const before = await peerLines();

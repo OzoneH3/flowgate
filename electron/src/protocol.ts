@@ -12,6 +12,7 @@ import {
   type ZoneSource,
 } from './network-zones';
 import { parseProcessTarget, type ProcessTarget } from './process-rules';
+import { parseLeaseRef, parseProcessLeases } from './process-lease';
 import {
   parseEvaluation,
   type DaemonEvaluationStatus,
@@ -151,6 +152,8 @@ export interface RequestEvent {
   ask_rule?: { id: string; version: number };
   // request-application-rule-v1: retained verified identity for a future rule.
   request_rule?: { available: boolean; process_state: 'running' | 'ended' | 'unknown'; until: string };
+  // decision-for-a-while-v1: the lease a For a while decision created.
+  lease?: { id: string; until: string };
 }
 export type Scope = 'once' | 'application' | 'persistent';
 export type Action = 'allow' | 'block';
@@ -229,6 +232,7 @@ export interface Reply {
   decision_preview?: unknown;
   decision_receipt?: unknown;
   request_rule_preview?: unknown;
+  process_leases?: import('./process-lease').ProcessLease[];
   replayed?: boolean;
   rules: Rule[];
   rule_states?: Record<string, RuleTargetState>;
@@ -241,6 +245,8 @@ export interface Attempt {
   message: string;
   rule?: Rule;
   reconcile?: string;
+  // Decided scope of an acknowledged attempt (for the short result text).
+  scope?: Decision['scope'];
 }
 export interface ViewEvent extends RequestEvent {
   reviewFailure?: import('./decision-remember').DecisionReviewFailure;
@@ -281,13 +287,15 @@ export interface ClientState {
     networkZones?: NetworkZones;
     policy?: PolicyView;
     policyError?: string;
+    processLeases?: import('./process-lease').ProcessLease[];
   };
 }
 export interface Decision {
   generation: string;
   id: string;
   action: Action;
-  scope: Scope;
+  // 'for-a-while' (decision-for-a-while-v1): Once plus a 15 s process-instance lease; never a rule.
+  scope: Scope | 'for-a-while';
   network_zone?: 'any' | NetworkZone;
   zone_revision?: string;
   preview_token?: string;
@@ -476,6 +484,7 @@ function event(v: unknown): RequestEvent {
         : undefined,
     ask_rule: askRule(e.ask_rule),
     request_rule: requestRuleSource(e.request_rule),
+    lease: parseLeaseRef(e.lease),
   };
 }
 function requestRuleSource(v: unknown): RequestEvent['request_rule'] {
@@ -554,6 +563,7 @@ export function parseReply(raw: unknown): Reply {
     decision_preview: r.decision_preview,
     decision_receipt: r.decision_receipt,
     request_rule_preview: r.request_rule_preview,
+    process_leases: parseProcessLeases(r.process_leases),
     replayed: r.replayed === true,
     decision_record: r.decision_record,
     network_zones: parseNetworkZones(r.network_zones),
@@ -818,9 +828,16 @@ export function validateDecision(v: unknown): Decision {
     !string(d.generation) ||
     string(d.generation).length > 256 ||
     !['allow', 'block'].includes(string(d.action)) ||
-    !['once', 'application', 'persistent'].includes(string(d.scope))
+    !['once', 'application', 'persistent', 'for-a-while'].includes(string(d.scope))
   )
     throw Error('Invalid decision');
+  if (
+    d.scope === 'for-a-while' &&
+    ['network_zone', 'zone_revision', 'preview_token', 'remember', 'duration_seconds'].some(
+      (k) => d[k] !== undefined,
+    )
+  )
+    throw Error('Invalid For a while decision');
   const zoned =
     d.network_zone !== undefined || d.zone_revision !== undefined || d.preview_token !== undefined;
   if (

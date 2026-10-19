@@ -184,8 +184,17 @@ try {
   await sleep(800);
   const expanded = await promptFacts();
   evidence.expanded_bounds = expanded.bounds;
-  if (expanded.bounds.height <= compact.bounds.height)
-    finding('Remember expansion did not enlarge the prompt window');
+  // Compact layout may already fit the Remember panel; then no growth is needed, but it must be fully visible.
+  const panelFits = await first.evaluate(() =>
+    ['rememberPanel', 'rememberDuration', 'allow', 'block'].every((id) => {
+      const r = document.getElementById(id)?.getBoundingClientRect();
+      return !!r && r.height > 0 && r.top >= 0 && r.bottom <= window.innerHeight;
+    }),
+  );
+  if (expanded.bounds.height <= compact.bounds.height && !panelFits)
+    finding('Remember panel neither fits nor enlarged the prompt window');
+  else if (expanded.bounds.height <= compact.bounds.height)
+    step(`Remember panel, duration and Allow/Deny fit the compact ${compact.bounds.height}px window`);
   else
     step(
       `Remember expansion enlarged prompt ${compact.bounds.height} -> ${expanded.bounds.height}px`,
@@ -257,10 +266,13 @@ try {
     .locator('#permissionTarget')
     .innerText()
     .catch(() => '');
+  // Remember + Allow is the save path; with the ended Process still checked it must not be offered.
   evidence.save_enabled_with_process = await first
-    .locator('#saveRequestRule')
+    .locator('#allow')
     .isEnabled()
     .catch(() => false);
+  if (evidence.save_enabled_with_process)
+    finding('Allow enabled while the ended Process restriction is still checked');
   const bodyText = await first.locator('#requestDetails').innerText();
   evidence.ended_text_process_checked = bodyText.slice(0, 1500);
   assert(/Uncheck Process|instance has ended/i.test(bodyText), 'ended process reason visible');
@@ -270,20 +282,29 @@ try {
   assert(!(await processBox.isChecked()), 'Process unchecked');
   step('Process restriction unchecked by the user');
 
-  // 4. Application-only Allow + Save application rule.
+  // 4. Application-only rule from the ordinary ended card: Remember checked, then Allow.
   for (const f of ['protocol', 'address', 'port'])
     if (await first.locator(`#rememberPanel input[data-field="${f}"]`).isChecked())
       await first.locator(`#rememberPanel input[data-field="${f}"]`).uncheck();
-  await first.locator('#requestRuleAction').selectOption('allow');
-  await wait(() => first.locator('#saveRequestRule').isEnabled(), 15000, 'save enabled');
-  evidence.rule_summary = await first.locator('#requestRuleSummary').innerText();
-  assert(
-    /not allowed|not approved|stays ended/i.test(evidence.rule_summary),
-    'summary says ended request not approved',
-  );
+  // A one-time Allow is never converted into a rule: without Remember it is unavailable.
+  await first.locator('#rememberToggle').uncheck();
+  await sleep(300);
+  evidence.plain_allow_enabled = await first.locator('#allow').isEnabled();
+  evidence.plain_note = await first.locator('#decisionNote').innerText().catch(() => '');
+  if (evidence.plain_allow_enabled) finding('plain Allow enabled on an ended request');
+  assert(/check Remember to save a rule/i.test(evidence.plain_note), 'ended card explains Remember');
+  if (await first.locator('#forAWhileToggle').count())
+    evidence.for_a_while_disabled = await first.locator('#forAWhileToggle').isDisabled();
+  if (evidence.for_a_while_disabled === false) finding('For a while enabled on an ended request');
+  assert.equal((await list()).rules.length, 0, 'no rule from a plain click');
+  await first.locator('#rememberToggle').check();
+  assert(!(await processBox.isChecked()), 'Process stays unchecked after re-checking Remember');
+  await wait(() => first.locator('#allow').isEnabled(), 15000, 'Remember + Allow enabled');
+  evidence.rule_summary = await first.locator('#rememberSummary').innerText();
+  assert(/future connections/i.test(evidence.rule_summary), 'summary names future connections');
   await shot(first, '04-ready-to-save');
   const beforeDelivered = await peerLines();
-  await first.locator('#saveRequestRule').click();
+  await first.locator('#allow').click();
   const rule = await wait(
     async () => (await list()).rules.find((r) => r.action === 'allow'),
     15000,
@@ -298,11 +319,20 @@ try {
   assert(!rule.filter.process && !rule.filter.network_zone, 'application-wide, all zones');
   assert.equal((await list()).rules.length, 1);
   await wait(
-    async () => /Application rule saved/.test(await first.locator('#saveRequestRule').innerText()),
+    async () =>
+      (await first.locator('#requestResult').innerText()) ===
+      'Rule saved for future connections; this request has ended.',
     10000,
+    'exact result text',
   );
+  // A repeated click must not create a second rule.
+  if (await first.locator('#allow').isEnabled()) {
+    await first.locator('#allow').click();
+    await sleep(800);
+  }
+  assert.equal((await list()).rules.length, 1, 'no duplicate rule');
   step(
-    `Save application rule stored ${rule.id}: application-wide Allow (TCP+UDP, any address/port, all zones)`,
+    `Remember + Allow on the ended card stored ${rule.id}: application-wide Allow (TCP+UDP, any address/port, all zones)`,
   );
   if ((evidence.main_refusals ?? []).some((l) => /transitioning/.test(l)))
     finding('Save refused as transitioning by the main process: ' + evidence.main_refusals.join(' | '));
@@ -314,10 +344,8 @@ try {
   assert.equal(await peerLines(), beforeDelivered, 'ended request was not delivered');
   const afterText = await first.locator('#requestDetails').innerText();
   evidence.ended_text_after_save = afterText.slice(0, 1500);
-  assert(
-    /not allowed|not approved|was not/i.test(afterText),
-    'card says the ended request was not approved',
-  );
+  assert(/this request has ended/i.test(afterText), 'card says the request has ended');
+  assert(!/Connection allowed|Allowed once/i.test(afterText), 'never reported as allowed');
   assert(
     !/Rule preview required before Allow\/Deny/.test(afterText),
     'ended card must not ask for an Allow/Deny preview',
@@ -328,9 +356,9 @@ try {
   await first.waitForTimeout(900);
   const settled = await first.evaluate(() => {
     const r = (s) => document.querySelector(s)?.getBoundingClientRect();
-    const shell = r('.prompt-shell'), feedback = r('#feedback'), footer = r('.prompt-shell > footer');
+    const shell = r('.prompt-shell'), feedback = r('#requestResult'), footer = r('.prompt-shell > footer');
     return { innerHeight, shellBottom: shell.bottom, feedbackTop: feedback.top, feedbackBottom: feedback.bottom,
-      footerBottom: footer.bottom, feedbackText: document.querySelector('#feedback').textContent,
+      footerBottom: footer.bottom, feedbackText: document.querySelector('#requestResult').textContent,
       scrollHeight: document.documentElement.scrollHeight };
   });
   evidence.saved_settled_layout = settled;

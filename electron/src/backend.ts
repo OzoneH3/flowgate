@@ -34,6 +34,7 @@ import {
   type RequestRuleChoice,
   type RequestRulePreview,
 } from './request-rule';
+import { forAWhileSupported } from './process-lease';
 export function call(path: string, request: object, timeoutMs = 3500): Promise<Reply> {
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 20000)
     throw Error('Invalid backend timeout');
@@ -77,6 +78,8 @@ export function call(path: string, request: object, timeoutMs = 3500): Promise<R
     });
   });
 }
+// A backend refusal that decided nothing (the request stays answerable).
+class DecisionRefused extends Error {}
 export class Backend {
   state: ClientState = {
     observation: { connected: false, message: 'Activity connecting · read-only', generation: '' },
@@ -393,6 +396,7 @@ export class Backend {
             ? this.state.control.rule_states
             : r.rule_states,
         capabilities: r.capabilities,
+        processLeases: forAWhileSupported(r.capabilities) ? (r.process_leases ?? []) : undefined,
         events: [],
       };
     } catch (e) {
@@ -519,7 +523,7 @@ export class Backend {
       this.reviewFailures.has(d.id) ||
       e.state !== 'awaiting-decision' ||
       Date.parse(e.deadline) <= this.now() ||
-      !e.scope_previews[d.scope]
+      !e.scope_previews[d.scope === 'for-a-while' ? 'once' : d.scope]
     )
       throw Error('Request is no longer actionable');
     return e;
@@ -717,12 +721,18 @@ export class Backend {
   }
   async decide(raw: Decision): Promise<Attempt> {
     const d = validateDecision(raw);
-    return d.scope === 'once' ? this.decideInner(d) : this.ruleMutation(() => this.decideInner(d));
+    // For a while creates an in-memory lease, not a rule: no rule mutation lock.
+    return d.scope === 'once' || d.scope === 'for-a-while'
+      ? this.decideInner(d)
+      : this.ruleMutation(() => this.decideInner(d));
   }
   private async decideInner(raw: Decision): Promise<Attempt> {
     const d = validateDecision(raw);
     const c = this.state.control;
     const e = this.reply?.events.find((e) => e.id === d.id);
+    const temporary = d.scope === 'for-a-while';
+    if (temporary && !forAWhileSupported(c.capabilities))
+      throw Error('For a while unsupported by this backend');
     if (
       !this.controller ||
       !c.connected ||
@@ -732,13 +742,15 @@ export class Backend {
       this.reviewFailures.has(d.id) ||
       e.state !== 'awaiting-decision' ||
       Date.parse(e.deadline) <= this.now() ||
-      !e.scope_previews[d.scope] ||
+      // For a while decides like Once (plus a backend lease); same admission.
+      !e.scope_previews[d.scope === 'for-a-while' ? 'once' : d.scope] ||
       this.attempts.has(d.id) ||
       [...this.attempts.values()].filter((a) => a.phase === 'submitting').length >= 8
     )
       throw Error('Request is no longer actionable; refresh authoritative state');
     const zoned =
       d.scope !== 'once' &&
+      !temporary &&
       (c.capabilities?.includes(REMEMBER_ZONE_CAPABILITY) ||
         c.capabilities?.includes(REMEMBER_FIELDS_CAPABILITY));
     if (d.remember && (!zoned || !c.capabilities?.includes(REMEMBER_FIELDS_CAPABILITY)))
@@ -775,8 +787,17 @@ export class Backend {
         scope: d.scope,
       });
       if (r.generation !== d.generation) throw Error('Backend generation changed');
+      if (r.error && temporary && r.error_code === 'process_scope_unavailable') {
+        // Nothing was decided: the request stays answerable (Once/Remember).
+        this.attempts.delete(d.id);
+        this.emit();
+        throw new DecisionRefused('process_scope_unavailable: ' + r.error);
+      }
       if (r.error) {
-        result = { phase: 'rejected', message: 'Backend rejected: ' + r.error };
+        result = {
+          phase: 'rejected',
+          message: 'Backend rejected: ' + (r.error_code ? r.error_code + ': ' : '') + r.error,
+        };
       } else if (
         r.decision?.id !== d.id ||
         r.decision.state !== (d.action === 'allow' ? 'allowed' : 'blocked') ||
@@ -788,11 +809,13 @@ export class Backend {
           phase: 'acknowledged',
           message: `Backend acknowledged ${r.decision.state} · ${r.decision.reason}`,
           rule: r.saved_rule,
+          scope: d.scope,
         };
         if (this.reply?.generation === d.generation)
           this.reply.events = this.reply.events.map((e) => (e.id === d.id ? r.decision! : e));
       }
     } catch (e) {
+      if (e instanceof DecisionRefused) throw Error(e.message);
       result = {
         phase: 'unknown',
         message:

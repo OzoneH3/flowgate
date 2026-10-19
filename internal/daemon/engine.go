@@ -40,6 +40,8 @@ type Event struct {
 	// RequestRule reports whether an application rule for future connections
 	// can be saved from this request's retained identity (request-rule-*).
 	RequestRule *RequestRuleSource `json:"request_rule,omitempty"`
+	// Lease is set on the request decided For a while (decision-for-a-while-v1).
+	Lease *LeaseRef `json:"lease,omitempty"`
 
 	// Decision-log bookkeeping (never serialized): the rule exactly as evaluated,
 	// whether this result was a capacity refusal, and record-once flags so packet
@@ -50,6 +52,7 @@ type Event struct {
 	finalLogged   bool
 	logAttemptID  string
 	logDeadline   time.Time
+	leaseID       string
 }
 type TrafficManager interface {
 	Status() udpaccount.Status
@@ -83,6 +86,7 @@ type Engine struct {
 
 	requestRules        map[string]*retainedRequest
 	requestRulePreviews map[string]*requestRulePreview
+	processLeases       map[string]*processLease                         // For a while; memory only
 	verifyRetained      func(identity.Application, uint32, string) error // tests only
 	instanceRunning     func(int, string) bool                           // tests only
 
@@ -140,13 +144,17 @@ func (e *Engine) Observe(f identity.Flow, token string) Event {
 	f.NetworkScope = e.Zones.ClassifyFlow(f)
 	now := e.Now()
 	e.expire(now)
+	e.pruneLeasesLocked(now, false)
 	key := f.Key() + "|" + token
 	// Every undecided/new attempt and every UDP datagram rechecks actual ownership.
 	a := e.Resolve(f)
-	action, rule, conflicts := e.evaluateLocked(e.rules, f, a, now)
+	base, rule, conflicts := e.evaluateLocked(e.rules, f, a, now)
+	action, rule, lease := e.leaseOverlayLocked(base, rule, f, a, now)
 	if old := e.events[key]; old != nil && now.Before(old.Deadline) && old.Attribution.Fingerprint == a.Fingerprint && a.Application != nil {
 		valid := old.Rule == rule && ((old.State == "allowed" && action == "allow") || (old.State == "blocked" && action == "block") || (old.State == "awaiting-decision" && action == "ask"))
-		if strings.HasPrefix(old.Rule, "once:") && action == "ask" {
+		// Once and For-a-while flow admissions keep their own flow lease while no
+		// configured rule decides the flow.
+		if (strings.HasPrefix(old.Rule, "once:") || strings.HasPrefix(old.Rule, leaseRulePrefix)) && base == "ask" {
 			valid = true
 		}
 		if valid {
@@ -178,6 +186,10 @@ func (e *Engine) Observe(f identity.Flow, token string) Event {
 			v.ScopePreviews["application"] = strings.Replace(v.ScopePreviews["application"], "memory only", "saved to disk; absolute expiry survives restart", 1)
 			v.ScopePreviews["persistent"] = strings.Replace(v.ScopePreviews["application"], "Remember for one hour (saved to disk; absolute expiry survives restart)", "Persistent until disabled/deleted (saved to disk)", 1)
 		}
+		// Offered only when the request has one verified owning process.
+		if p, err := leaseOwner(a); err == nil {
+			v.ScopePreviews[ForAWhileScope] = forAWhilePreview(f, p)
+		}
 	}
 	switch action {
 	case "allow":
@@ -193,6 +205,15 @@ func (e *Engine) Observe(f identity.Flow, token string) Event {
 			v.AskRule = &RuleVersionRef{v.decided.ID, v.decided.Version}
 			v.Reason = "stored Ask rule " + v.decided.ID + " requires a decision; " + v.Reason
 		}
+	}
+	if lease != nil {
+		v.Reason = lease.reason()
+		v.leaseID = lease.ID
+		v.Permission = "for a while: this connection or UDP tuple for 30 seconds; new connections of the same process and direction until the lease ends"
+		// The admitted connection/UDP tuple keeps a Once-style 30-second flow
+		// lease; only new connections need the process lease to be live.
+		v.Deadline = now.Add(30 * time.Second)
+		v.logAttemptID, v.logDeadline = v.ID, v.Deadline
 	}
 	if now.Sub(e.window) >= time.Second {
 		e.window = now
@@ -245,9 +266,10 @@ func (e *Engine) decideLocked(id, action, scope string, uid uint32, admin bool, 
 	if action != "allow" && action != "block" {
 		return Event{}, fmt.Errorf("action must be allow or block")
 	}
-	if scope != "once" && scope != "application" && !(scope == "persistent" && e.SaveRules != nil) {
-		return Event{}, fmt.Errorf("scope must be once or application")
+	if scope != "once" && scope != ForAWhileScope && scope != "application" && !(scope == "persistent" && e.SaveRules != nil) {
+		return Event{}, fmt.Errorf("scope must be once, for-a-while or application")
 	}
+	remember := scope == "application" || scope == "persistent"
 	for _, v := range e.events {
 		if v.ID != id {
 			continue
@@ -268,11 +290,20 @@ func (e *Engine) decideLocked(id, action, scope string, uid uint32, admin bool, 
 		if a.Application == nil || a.Fingerprint != v.Attribution.Fingerprint {
 			return Event{}, e.rejectPendingBindingLocked(v, a)
 		}
-		if scope != "once" && len(e.rules) >= 256 {
+		if remember && len(e.rules) >= 256 {
 			return Event{}, mutationError("capacity", "rule capacity reached")
 		}
+		var lease *processLease
+		if scope == ForAWhileScope {
+			// Validated before any mutation: refusal leaves the request pending.
+			l, err := e.newLeaseLocked(v, a, action, now)
+			if err != nil {
+				return Event{}, err
+			}
+			lease = l
+		}
 		var remembered *policy.Rule
-		if scope != "once" {
+		if remember {
 			r := policy.Rule{Version: 1, Executable: a.Application.Executable, Schema: 2, ID: "user:" + v.ID, Priority: 100, Action: action, Filter: policy.Remembered(v.Flow, a), Created: now, Expires: now.Add(time.Hour)}
 			if scope == "persistent" {
 				r.Expires = time.Time{}
@@ -305,7 +336,20 @@ func (e *Engine) decideLocked(id, action, scope string, uid uint32, admin bool, 
 		v.Reason = "explicit client decision; FlowGate permission is not proof of network delivery"
 		v.Rule = "once:" + v.ID
 		v.Deadline = now.Add(30 * time.Second)
-		e.recordFinal(v, action, "user", scope, "explicit user decision", remembered, &uid, "deferred", "")
+		reason := "explicit user decision"
+		if lease != nil {
+			e.storeLeaseLocked(lease)
+			v.Lease = lease.ref()
+			v.leaseID = lease.ID
+			v.Permission = v.ScopePreviews[ForAWhileScope]
+			reason = "explicit user decision; " + lease.reason()
+		}
+		e.recordFinal(v, action, "user", scope, reason, remembered, &uid, "deferred", "")
+		if lease != nil {
+			// Other requests of this process and direction that are still waiting
+			// are subsequent connections too; nothing else changes.
+			e.settlePendingLocked("for a while " + lease.ID)
+		}
 		if remembered != nil {
 			v.Rule = remembered.ID
 			v.Permission = v.ScopePreviews[scope]
@@ -402,7 +446,7 @@ func (e *Engine) RetainedState(id, fingerprint string) string {
 		}
 		// Once grants use the event lease; remembered grants must still be live.
 		if !strings.HasPrefix(v.Rule, "once:") {
-			act, rule, _ := e.evaluateLocked(e.rules, v.Flow, a, e.Now())
+			act, rule, _, _ := e.policyLocked(v.Flow, a, e.Now())
 			if act != "allow" || rule != v.Rule {
 				return "drop"
 			}

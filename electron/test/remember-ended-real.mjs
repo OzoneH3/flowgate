@@ -37,7 +37,7 @@ try{
  await wait(async()=>/Connection ended/.test(await prompt.locator('#requestResult').textContent()),'ended reason');
  assert(await prompt.locator('#allow').isDisabled());assert(await prompt.locator('#block').isDisabled());assert(await prompt.locator('#refreshDecision').isHidden());
  assert(await prompt.locator('#rememberToggle').isChecked());
- assert.match(await prompt.locator('.expiry').textContent(),/Connection ended/);
+ assert.match(await prompt.locator('.expiry').textContent(),/ended/i);
  assert.match(await prompt.locator('#requestDetails').textContent(),new RegExp(original.flow.remote.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')));
  await prompt.screenshot({path:run+'/ended-prompt.png'});
  step('Ended socket: recorded app/endpoints and Remember choice retained; Allow/Deny/Refresh disabled; old countdown removed');

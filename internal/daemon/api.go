@@ -96,6 +96,7 @@ type Response struct {
 	ServerTime         time.Time                  `json:"server_time"`
 	PeerUID            uint32                     `json:"peer_uid"`
 	Events             []Event                    `json:"events,omitempty"`
+	ProcessLeases      *[]ProcessLease            `json:"process_leases,omitempty"`
 	Decision           *Event                     `json:"decision,omitempty"`
 	Error              string                     `json:"error,omitempty"`
 }
@@ -177,7 +178,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						}
 					}
 					if !readonly && e.Mode != "host-monitor" {
-						r.Capabilities = append(r.Capabilities, PolicyExplanationCapability, ObservedRuleCapability, ProcessRuleCapability, ObservedAnyProtocolCapability, DecisionZoneCapability, ApplicationPolicyCapability, DecisionRememberFieldsCapability, StoredAskCapability, RequestApplicationRuleCapability)
+						r.Capabilities = append(r.Capabilities, PolicyExplanationCapability, ObservedRuleCapability, ProcessRuleCapability, ObservedAnyProtocolCapability, DecisionZoneCapability, ApplicationPolicyCapability, DecisionRememberFieldsCapability, StoredAskCapability, RequestApplicationRuleCapability, ForAWhileCapability)
 					}
 					if e.Evaluation != nil {
 						r.Capabilities = append(r.Capabilities, EvaluationCapability)
@@ -603,6 +604,8 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 								if e.Mode != "host-monitor" {
 									var listZones identity.NetworkZones
 									r.Events, listZones = e.ListWithZones(cred.Uid, admin)
+									leases := e.ProcessLeases(cred.Uid, admin)
+									r.ProcessLeases = &leases
 									r.NetworkZones = &listZones
 									if r.Activity != nil {
 										snapshot := ClassifyActivity(*r.Activity, listZones)

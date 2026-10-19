@@ -22,7 +22,7 @@ const (
 var Sources = map[string]bool{
 	"rule": true, "attribution": true, "capacity": true, "default_ask": true, "rule_ask": true,
 	"user": true, "timeout": true, "identity_changed": true, "policy_change": true,
-	"rule_edit": true, "shutdown": true,
+	"rule_edit": true, "shutdown": true, "for_a_while": true,
 }
 
 type Flow struct {
@@ -68,6 +68,9 @@ type Decision struct {
 	Rule          *RuleSnapshot `json:"rule,omitempty"`
 	MatchingRules []string      `json:"matching_rules,omitempty"`
 	DecidedByUID  *uint32       `json:"decided_by_uid,omitempty"`
+	// LeaseID names the in-memory For-a-while process lease (source
+	// for_a_while, or the user decision that created it).
+	LeaseID string `json:"lease_id,omitempty"`
 }
 
 // Verdict states: accept_submitted/drop_submitted (kernel verdict call

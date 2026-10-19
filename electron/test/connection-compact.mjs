@@ -155,7 +155,7 @@ try {
     direction = 'outgoing';
     await new Promise((r) => setTimeout(r, 1100));
     await prompt.screenshot({ path: path.join(run, 'outgoing.png') });
-    assert.match(await prompt.locator('#requestDetails').innerText(), /This program → remote peer/);
+    assert.match(await prompt.locator('#requestDetails').textContent(), /This program → remote peer/);
     await prompt.setViewportSize({ width: 480, height: 500 });
     await prompt.screenshot({ path: path.join(run, 'narrow.png') });
     disconnected = true;
