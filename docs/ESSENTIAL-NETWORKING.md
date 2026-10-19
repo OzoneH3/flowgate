@@ -319,3 +319,31 @@ protection before returning to monitoring; do not run it merely to inspect or
 apply this preset. A later reviewed rollout must restore monitoring first and
 run only the separately approved focused usability check. No deployment command
 has been executed by this task.
+
+## Diagnosis 2026-10-19: prompts despite green Allow (generation a1b4472b)
+
+Evidence: `.workspace/prompt-diag/` (list/rules, full Decision Log export, offline
+replay of 159 recorded flows against the stored rules through `policy.Evaluate`:
+158 agree; the one difference is Firefox's first QUIC request recorded 9s before
+its rule existed). No matching, identity, interface, preset-eligibility or policy
+publication defect was found. All prompts were correct for the stored scopes:
+
+- **systemd-resolved:** every DNS query matched an essential rule (172.30.42.128 on
+  enp7s0, Tailscale resolvers on tailscale0, incoming stub). All prompts were
+  **LLMNR multicast** UDP5355 → 224.0.0.252 / ff02::1:3 on enp7s0 and ppp0; local
+  discovery is deliberately not in essentials. mDNS 5353 was blocked as shared
+  ownership (fail closed). No ppp0 DNS (192.168.23.221) query occurred.
+- **Firefox:** identity matched (key/revision/UID1000). Its only outgoing rule was
+  the prompt-created **UDP 173.194.160.2:443** (QUIC, one server). Prompts and
+  timeouts were outgoing TCP to 127.0.0.1:3000 (local server, 51 prompts),
+  172.64.155.209:443, 172.30.42.128:443, 20.250.119.72:443 → blocked tabs. The
+  incoming-only original rule never covered outgoing.
+- NetworkManager connectivity check TCP80, Teams and Codex outgoing TCP likewise
+  had no rules. `policy_change` drops were all the explicit Stop at 15:05:34.
+
+Product gaps (not matching defects): prompt Allow remembers exactly one remote
+address+port+protocol (`policy.Remembered`, also with a zone), so browsers need an
+explicit application-wide rule from the Activity setter; repeated identical attempts
+raise separate prompts; scoped Allow used the same green check as universal Allow.
+Backend fix: policy-view "uniform" now also requires no interface/local-address/
+peer-service constraint (`TestPolicyViewConstrainedRulesAreScopedNotUniform`).

@@ -434,3 +434,29 @@ func TestPolicyMetadataBounds(t *testing.T) {
 		t.Fatal("duplicate contexts accepted")
 	}
 }
+
+// A rule bound to an interface/local address/peer service is not whole-
+// application coverage, even with any remote address and ports.
+func TestPolicyViewConstrainedRulesAreScopedNotUniform(t *testing.T) {
+	a := PolicyIdentity{Key: "app", Revision: "rev", UID: 974}
+	now := time.Now()
+	rule := func(id, proto string, edit func(*policy.Filter)) policy.Rule {
+		r := policy.Rule{Schema: 5, ID: id, Version: 1, Action: "allow", Filter: policy.Filter{Application: "app", Revision: "rev", UID: 974, Direction: "incoming", Protocol: proto, RemoteAddress: "*"}}
+		edit(&r.Filter)
+		return r
+	}
+	for name, edit := range map[string]func(*policy.Filter){
+		"interface":     func(f *policy.Filter) { f.InterfaceName = "lo" },
+		"local address": func(f *policy.Filter) { f.LocalAddress = "127.0.0.53" },
+		"peer service":  func(f *policy.Filter) { f.PeerService = policy.PeerService{Application: "peer", Revision: "r", UID: 1} },
+	} {
+		s := summaryFor(a, "incoming", "daemon-monitor", nil, []policy.Rule{rule("t", "tcp", edit), rule("u", "udp", edit)}, now)
+		if s.Configured != "scoped" {
+			t.Fatalf("%s-bound rules summarised as %q", name, s.Configured)
+		}
+	}
+	plain := func(*policy.Filter) {}
+	if s := summaryFor(a, "incoming", "daemon-monitor", nil, []policy.Rule{rule("t", "tcp", plain), rule("u", "udp", plain)}, now); s.Configured != "uniform" {
+		t.Fatalf("unconstrained rules: %q", s.Configured)
+	}
+}

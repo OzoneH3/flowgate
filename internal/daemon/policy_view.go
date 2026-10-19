@@ -197,7 +197,9 @@ func summaryFor(a PolicyIdentity, direction, mode string, h *EnforcementStatus, 
 		out.Active++
 		actions[r.Action] = true
 		active = append(active, r)
-		if f.NetworkZone == "" && f.Remote == "" && (f.RemoteAddress == "" || f.RemoteAddress == "*") && f.LocalPort == 0 && f.RemotePort == 0 {
+		// Whole-application coverage must also be free of the schema5 interface,
+		// local-address and peer-service constraints; otherwise it is scoped.
+		if f.NetworkZone == "" && f.Remote == "" && (f.RemoteAddress == "" || f.RemoteAddress == "*") && f.LocalPort == 0 && f.RemotePort == 0 && f.InterfaceName == "" && f.InterfaceIndex == 0 && f.LocalAddress == "" && f.PeerService == (policy.PeerService{}) {
 			broad[f.Protocol] = true
 			if f.Protocol == "*" {
 				broad["tcp"], broad["udp"] = true, true
