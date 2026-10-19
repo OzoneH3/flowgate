@@ -93,6 +93,15 @@ class MonitoringInstall(unittest.TestCase):
  def test_running_monitor_is_stopped_through_its_generation(self):
   h=self.host(running=True);self.run_install(h)
   self.assertIn('monitor-stop',[a for c in h.calls for a in c])
+ def test_upgrade_of_installed_monitoring_service_uses_systemctl_stop(self):
+  old=self.base/'usr/local/lib/flowgate/releases/OLD'
+  for u in m.UNITS:(old/u).write_bytes(b'[Unit]\nold '+u.encode()+b'\n');(self.base/'etc/systemd/system'/u).write_bytes((old/u).read_bytes())
+  (self.base/'var/lib/flowgate/protection.json').write_text('{"schema":1,"mode":"monitoring"}')
+  h=self.host(running=True);final,_=self.run_install(h)
+  self.assertIn(('systemctl','stop','flowgate.service'),h.calls)
+  self.assertFalse(any('monitor-stop'in c for c in h.calls))
+  self.assertEqual((self.base/'etc/systemd/system/flowgate.service').read_bytes(),(self.bundle/'flowgate.service').read_bytes())
+  self.assertEqual(final['rules'],[('preset:b',1),('zone:a',3)])
  def test_verification_failures_stop_disable_and_never_restore_old_data(self):
   for kw in[dict(tables=['flowgate_host']),dict(api_rules=[{'id':'zone:a','version':3}]),dict(start_fails=True)]:
    self.tearDown();self.setUp();dbbytes=(self.base/'var/lib/flowgate/rules.db').read_bytes()

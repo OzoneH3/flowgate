@@ -1,15 +1,19 @@
 # Continuation handoff
 
-## Current: essentials-only monitoring rollout prepared
+## Current: monitoring service installed; per-entry preset update prepared
 
-Essential preset rollout scope is DNS/stub/DHCP/time only; Tailscale transport is a
-separate unchecked optional preset outside this rollout (UI section split, backend
-defaults all false, tailscale0 MagicDNS labelled DNS-only). Fixed ifindex-ordering
-revision instability. New monitoring-only installer (no receiver/protection stage,
-no NM Requires= drop-in). Exact 19-rule proposal, refresh behaviour and remaining
-whole-DNS-set revision limitation: [ESSENTIAL-NETWORKING.md](ESSENTIAL-NETWORKING.md);
-installer: [DAILY-DEPLOYMENT.md](DAILY-DEPLOYMENT.md). Host install requires the
-user's terminal sudo; protection stays off; no preset applied.
+Installed by the user (monitoring only): release efc15c7, generation
+99e6953e4833cbc4a1870be3269f72ed, flowgate.service enabled (guard not enabled, no NM
+drop-in), protection/enforcement stopped, no interception, UDP active, 2 user rules
+(Firefox, Codex incoming Allow), no preset applied. Read-only host checks passed
+(`.workspace/essential-host/`): sandboxed Electron Activity + Essential preview (21
+rules, includes new ppp0 DNS), direct API preview equal, private-mount resolved
+`observed-rule-preview` valid (no stale_target), rules/generation unchanged after
+GUI exit. Next build validates preset records per endpoint and retains a still-valid
+snapshot across failed refreshes. Exact proposal/contract:
+[ESSENTIAL-NETWORKING.md](ESSENTIAL-NETWORKING.md); installer:
+[DAILY-DEPLOYMENT.md](DAILY-DEPLOYMENT.md). Upgrade is monitoring-only via
+install-monitoring.py; no preset applied, protection off.
 
 ## Current Essential preset implementation
 

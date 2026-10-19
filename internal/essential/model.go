@@ -58,6 +58,10 @@ type Snapshot struct {
 	DHCP       []DHCP      `json:"dhcp"`
 	NTP        []string    `json:"ntp"`
 	VPNPort    uint16      `json:"vpn_port"`
+	// Failures lists unsuccessful probes (errors/timeouts), not observations.
+	Failures []string `json:"failures,omitempty"`
+	// entries maps every currently derivable preset entry ID to its revision.
+	entries map[string]string
 }
 
 func Hash(v any) string {
@@ -90,7 +94,7 @@ func (s *Snapshot) Seal() {
 		}
 		var config any
 		switch c.ID {
-		case "dns", "dns-stub-client":
+		case "dns":
 			dns := append([]DNS{}, s.DNS...)
 			for i := range dns {
 				dns[i].Interface = 0
@@ -104,6 +108,13 @@ func (s *Snapshot) Seal() {
 			sort.Slice(dns, func(i, j int) bool { return Hash(dns[i]) < Hash(dns[j]) })
 			sort.Slice(stubs, func(i, j int) bool { return Hash(stubs[i]) < Hash(stubs[j]) })
 			config = []any{dns, stubs}
+		case "dns-stub-client":
+			stubs := append([]Stub{}, s.Stubs...)
+			for i := range stubs {
+				stubs[i].Interface = 0
+			}
+			sort.Slice(stubs, func(i, j int) bool { return Hash(stubs[i]) < Hash(stubs[j]) })
+			config = stubs
 		case "dhcp":
 			dhcp := append([]DHCP{}, s.DHCP...)
 			for i := range dhcp {
@@ -119,6 +130,22 @@ func (s *Snapshot) Seal() {
 	}
 	s.Revision = Hash([]any{s.Components, s.DNS, s.Stubs, s.DHCP, s.NTP, s.VPNPort, s.Issues})
 	s.ValidUntil = s.Collected.Add(30 * time.Second)
+	// Index every entry derivable from this snapshot (all options), so stored
+	// preset rules are validated one endpoint/interface at a time.
+	s.entries = map[string]string{}
+	if all, _, err := s.Rules(Options{Tailscale: true, TailscaleIncoming: true, TailscaleHTTP: true}, s.Collected); err == nil {
+		for _, r := range all {
+			s.entries[r.Preset.EntryID] = r.Preset.Revision
+		}
+	}
+}
+
+// EntryActive reports whether this exact stored preset entry (same component,
+// verified service identity and endpoint/interface target) is still derived
+// from the snapshot. Unrelated endpoints changing never affect it; a removed or
+// changed endpoint, or a new service revision/UID, does.
+func (s Snapshot) EntryActive(r policy.Rule) bool {
+	return r.Preset != nil && r.Preset.Revision != "" && s.entries[r.Preset.EntryID] == r.Preset.Revision
 }
 func (s Snapshot) Rules(o Options, now time.Time) ([]policy.Rule, []string, error) {
 	if (o.TailscaleIncoming || o.TailscaleHTTP) && !o.Tailscale {
@@ -128,10 +155,12 @@ func (s Snapshot) Rules(o Options, now time.Time) ([]policy.Rule, []string, erro
 	issues := append([]string{}, s.Issues...)
 	add := func(component string, f policy.Filter) {
 		c := s.Component(component)
-		if c == nil || c.State != "ready" {
+		// Resolver/stub permissions need the verified resolver identity, not a
+		// non-empty upstream set: local stub access survives upstream changes.
+		if c == nil || !(c.State == "ready" || (component == "dns" || component == "dns-stub-client") && c.Service != nil) {
 			return
 		}
-		r := policy.Rule{Schema: 5, Version: 1, Created: now.UTC(), Priority: -1000, Action: "allow", Filter: f, Preset: &policy.Preset{Name: Name, Component: component, Revision: c.Revision}}
+		r := policy.Rule{Schema: 5, Version: 1, Created: now.UTC(), Priority: -1000, Action: "allow", Filter: f, Preset: &policy.Preset{Name: Name, Component: component}}
 		if !f.AllPrograms {
 			r.Executable = c.Service.Executable
 		}
@@ -140,6 +169,12 @@ func (s Snapshot) Rules(o Options, now time.Time) ([]policy.Rule, []string, erro
 			target.InterfaceIndex = 0
 		}
 		r.Preset.EntryID = Hash([]any{component, target})
+		var service any
+		if c.Service != nil {
+			service = []any{c.Service.UID, c.Service.Application, c.Service.ExecutableRevision}
+		}
+		// Per-entry revision: this endpoint/interface plus the verified identity.
+		r.Preset.Revision = Hash([]any{"entry-v2", component, service, r.Preset.EntryID})
 		r.ID = "preset:" + r.Preset.EntryID[:40]
 		r.Preset.Digest = policy.PresetDigest(r)
 		rules = append(rules, r)
@@ -154,7 +189,7 @@ func (s Snapshot) Rules(o Options, now time.Time) ([]policy.Rule, []string, erro
 		}
 		return f
 	}
-	if c := s.Component("dns"); c != nil && c.State == "ready" {
+	if c := s.Component("dns"); c != nil && c.Service != nil {
 		for _, d := range s.DNS {
 			protocols := []string{"udp", "tcp"}
 			if d.TLS {

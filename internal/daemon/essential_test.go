@@ -192,3 +192,53 @@ func TestEssentialStaleExpiryInventoryAndLegacyEditor(t *testing.T) {
 		t.Fatal("inventory change accepted", err)
 	}
 }
+
+// Applied records are validated per endpoint: losing VPN DNS (Tailscale down)
+// deactivates only those records; unchanged LAN DNS stays active without re-apply.
+func TestEssentialVPNDNSRemovalKeepsAppliedLANActive(t *testing.T) {
+	env, _ := essentialEnvironment(t)
+	links := `[{"ifname":"lo","ifindex":1,"servers":[{"addressString":"192.0.2.53","port":53}]},{"ifname":"tailscale0","ifindex":9,"servers":[{"addressString":"100.100.100.100","port":53}]}]`
+	run := env.Run
+	env.Run = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if name == "resolvectl" {
+			return []byte(links), nil
+		}
+		return run(ctx, name, args...)
+	}
+	a, _, _, _ := observedAPI(t, func(e *Engine, _ *store.Store) {
+		e.Now = time.Now
+		e.Essential = essential.NewManager(env)
+		e.Essential.Refresh(context.Background())
+	})
+	p, err := a.e.PreviewEssential(a.e.Generation, "apply", essential.Options{}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = a.e.ApplyEssential(a.e.Generation, p.Token, "apply", essential.Options{}, 0); err != nil {
+		t.Fatal(err)
+	}
+	links = `[{"ifname":"lo","ifindex":1,"servers":[{"addressString":"192.0.2.53","port":53}]}]`
+	if s := a.e.Essential.Refresh(context.Background()); s.Revision == "" {
+		t.Fatal("refresh failed")
+	}
+	vpn, lan := 0, 0
+	for _, r := range a.e.rules {
+		if r.Preset == nil {
+			continue
+		}
+		active := a.e.presetActive(r)
+		if r.Filter.InterfaceName == "tailscale0" {
+			vpn++
+			if active {
+				t.Fatal("removed VPN DNS endpoint still active")
+			}
+		} else if !active {
+			t.Fatalf("unchanged entry deactivated: %+v", r.Filter)
+		} else {
+			lan++
+		}
+	}
+	if vpn != 2 || lan < 2 {
+		t.Fatalf("unexpected applied set vpn=%d other=%d", vpn, lan)
+	}
+}

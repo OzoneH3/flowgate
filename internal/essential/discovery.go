@@ -35,11 +35,17 @@ func properties(b []byte) map[string]string {
 	}
 	return m
 }
-func service(ctx context.Context, env Environment, unit, id, title string, essential bool) Component {
+
+// fail records an unsuccessful probe (command/inspection error or timeout). It is
+// distinct from an explicit observation such as an inactive service or a server
+// absent from a successful resolver report: failed refreshes are never published
+// over a still-valid snapshot.
+func service(ctx context.Context, env Environment, unit, id, title string, essential bool, fail func(string)) Component {
 	c := Component{ID: id, Title: title, State: "unavailable", Essential: essential, Details: []string{}}
 	b, err := env.Run(ctx, "systemctl", "show", unit, "-p", "MainPID", "-p", "ActiveState")
 	if err != nil {
 		c.Details = append(c.Details, "Service inspection unavailable: "+err.Error())
+		fail(unit + " inspection failed")
 		return c
 	}
 	props := properties(b)
@@ -49,7 +55,12 @@ func service(ctx context.Context, env Environment, unit, id, title string, essen
 		return c
 	}
 	p, err := env.Inspect(pid)
-	if err != nil || p.PID != pid || p.Application.Kind != "native" || p.Application.Key == "" || p.Application.Revision == "" || p.ExecutableRevision != p.Application.Revision || p.NetNS != identity.NetNS() {
+	if err != nil {
+		c.Details = append(c.Details, "Live native executable identity unavailable/unsupported; root observer required")
+		fail(unit + " identity inspection failed")
+		return c
+	}
+	if p.PID != pid || p.Application.Kind != "native" || p.Application.Key == "" || p.Application.Revision == "" || p.ExecutableRevision != p.Application.Revision || p.NetNS != identity.NetNS() {
 		c.Details = append(c.Details, "Live native executable identity unavailable/unsupported; root observer required")
 		return c
 	}
@@ -69,8 +80,9 @@ func service(ctx context.Context, env Environment, unit, id, title string, essen
 	return c
 }
 func Discover(ctx context.Context, env Environment) Snapshot {
-	s := Snapshot{Collected: time.Now(), Components: []Component{}, Issues: []string{}, DNS: []DNS{}, Stubs: []Stub{}, DHCP: []DHCP{}, NTP: []string{}}
-	dns := service(ctx, env, "systemd-resolved.service", "dns", "DNS resolver and local stub", true)
+	s := Snapshot{Collected: time.Now(), Components: []Component{}, Issues: []string{}, DNS: []DNS{}, Stubs: []Stub{}, DHCP: []DHCP{}, NTP: []string{}, Failures: []string{}}
+	fail := func(m string) { s.Failures = append(s.Failures, m) }
+	dns := service(ctx, env, "systemd-resolved.service", "dns", "DNS resolver and local stub", true, fail)
 	var status []struct {
 		Ifname  string `json:"ifname"`
 		Ifindex uint32 `json:"ifindex"`
@@ -87,6 +99,7 @@ func Discover(ctx context.Context, env Environment) Snapshot {
 	}
 	b, err := env.Run(ctx, "resolvectl", "--json=short", "status")
 	if err != nil || json.Unmarshal(b, &status) != nil {
+		fail("resolvectl status failed")
 		dns.State = "unavailable"
 		dns.Details = append(dns.Details, "Structured resolved configuration unavailable; other resolvers/direct DNS require a separate adapter")
 	}
@@ -131,6 +144,7 @@ func Discover(ctx context.Context, env Environment) Snapshot {
 	if dns.Service != nil && dns.State == "ready" {
 		sockets, e := env.Sockets()
 		if e != nil {
+			fail("socket inventory failed")
 			dns.State = "unavailable"
 			dns.Details = append(dns.Details, "Stub listener inventory unavailable")
 		}
@@ -174,7 +188,9 @@ func Discover(ctx context.Context, env Environment) Snapshot {
 	s.Components = append(s.Components, stub)
 	nm := Component{ID: "dhcp", Title: "Interface-scoped DHCP bootstrap", Essential: true, State: "unavailable", Details: []string{}}
 	b, err = env.Run(ctx, "nmcli", "-t", "-f", "UUID,DEVICE", "connection", "show", "--active")
-	if err == nil {
+	if err != nil {
+		fail("nmcli active connections failed")
+	} else {
 		for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
 			uuid, name, ok := strings.Cut(line, ":")
 			if !ok || name == "" || name == "lo" {
@@ -186,6 +202,7 @@ func Discover(ctx context.Context, env Environment) Snapshot {
 			}
 			methods, e := env.Run(ctx, "nmcli", "-g", "ipv4.method,ipv6.method", "connection", "show", uuid)
 			if e != nil {
+				fail("nmcli connection methods failed")
 				continue
 			}
 			m := strings.Fields(string(methods))
@@ -203,10 +220,12 @@ func Discover(ctx context.Context, env Environment) Snapshot {
 		nm.Details = append(nm.Details, "Protocol-only client bootstrap on active auto-addressed NM interfaces; UDP68/67 and link-local/multicast DHCPv6 546/547. Raw packet paths are not assigned fictitious process owners.")
 	}
 	s.Components = append(s.Components, nm)
-	ntp := service(ctx, env, "systemd-timesyncd.service", "time", "Time synchronization", true)
+	ntp := service(ctx, env, "systemd-timesyncd.service", "time", "Time synchronization", true, fail)
 	if ntp.State == "ready" {
 		b, e := env.Run(ctx, "timedatectl", "show-timesync", "--all")
-		if e == nil {
+		if e != nil {
+			fail("timedatectl show-timesync failed")
+		} else {
 			p := properties(b)
 			if addr, e := netip.ParseAddr(p["ServerAddress"]); e == nil {
 				s.NTP = append(s.NTP, addr.String())
@@ -222,10 +241,12 @@ func Discover(ctx context.Context, env Environment) Snapshot {
 		ntp.Details = append(ntp.Details, "chronyd/other time clients are detected as unsupported by this first adapter; no inbound time service opened")
 	}
 	s.Components = append(s.Components, ntp)
-	vpn := service(ctx, env, "tailscaled.service", "tailscale", "Optional Tailscale outer transport", false)
+	vpn := service(ctx, env, "tailscaled.service", "tailscale", "Optional Tailscale outer transport", false, fail)
 	if vpn.Service != nil {
 		b, e := env.Read(fmt.Sprintf("/proc/%d/cmdline", vpn.Service.PID))
-		if e == nil {
+		if e != nil {
+			fail("tailscaled arguments unreadable")
+		} else {
 			args := strings.Split(string(b), "\x00")
 			port := uint64(41641)
 			for i, v := range args {
@@ -258,6 +279,7 @@ type Manager struct {
 	mu          sync.RWMutex
 	refreshGate chan struct{}
 	s           Snapshot
+	failure     string
 	Env         Environment
 }
 
@@ -274,18 +296,38 @@ func (m *Manager) Refresh(ctx context.Context) Snapshot {
 	probe, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	s := Discover(probe, m.Env)
-	if probe.Err() != nil {
-		m.mu.Lock()
-		m.s = Snapshot{Components: []Component{}, Issues: []string{"Discovery timed out; preset coverage unavailable"}}
-		m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if probe.Err() != nil || len(s.Failures) > 0 {
+		// Unsuccessful refresh: keep a still-valid successful snapshot with its
+		// ORIGINAL expiry (never extended), so a transient probe error is not an
+		// explicit removal. Without one, fail closed: a timeout publishes nothing.
+		m.failure = "Latest discovery refresh unsuccessful; retained snapshot is not extended"
+		if probe.Err() != nil {
+			m.failure = "Discovery timed out; retained snapshot is not extended"
+		}
+		if m.s.Revision == "" || !time.Now().Before(m.s.ValidUntil) {
+			if probe.Err() != nil {
+				m.s = Snapshot{Components: []Component{}, Issues: []string{"Discovery timed out; preset coverage unavailable"}}
+			} else {
+				m.s = s
+			}
+		}
 		return Snapshot{}
 	}
-	m.mu.Lock()
+	m.failure = ""
 	m.s = s
-	m.mu.Unlock()
 	return s
 }
-func (m *Manager) Snapshot() Snapshot { m.mu.RLock(); defer m.mu.RUnlock(); return m.s }
+func (m *Manager) Snapshot() Snapshot {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	s := m.s
+	if m.failure != "" {
+		s.Issues = append(append([]string{}, s.Issues...), m.failure)
+	}
+	return s
+}
 func (m *Manager) Run(ctx context.Context) {
 	for {
 		m.Refresh(ctx)

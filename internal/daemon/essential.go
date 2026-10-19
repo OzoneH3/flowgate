@@ -316,8 +316,7 @@ func (e *Engine) presetActive(r policy.Rule) bool {
 	if !e.Now().Before(s.ValidUntil) {
 		return false
 	}
-	c := s.Component(r.Preset.Component)
-	return c != nil && c.State == "ready" && c.Revision == r.Preset.Revision
+	return s.EntryActive(r)
 }
 func (e *Engine) peerServiceMatches(f identity.Flow, p policy.PeerService) bool {
 	reverse := f
