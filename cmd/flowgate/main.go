@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"flowgate/internal/daemon"
+	"flowgate/internal/essential"
 	"flowgate/internal/identity"
 	"flowgate/internal/monitor"
 	"flowgate/internal/policy"
@@ -40,6 +41,20 @@ func main() {
 		return
 	}
 	switch os.Args[1] {
+	case "system-networking-inspect":
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		s := essential.Discover(ctx, essential.Default())
+		rules, issues, err := s.Rules(essential.Options{}, time.Now())
+		if err != nil {
+			fatal(err)
+		}
+		output(struct {
+			Discovery  essential.Snapshot `json:"discovery"`
+			Rules      []policy.Rule      `json:"rules"`
+			Issues     []string           `json:"issues"`
+			ReviewOnly bool               `json:"review_only"`
+		}{s, rules, issues, true})
 	case "version":
 		output(buildIdentity())
 	case "protection-guard", "protection-recover":

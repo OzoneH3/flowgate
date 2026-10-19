@@ -23,6 +23,10 @@ type DeletedRule struct {
 // DeleteRule serializes the condition, durable transaction and publication with
 // EditRule/ChangeRule. Generation is immutable for the lifetime of an Engine.
 func (e *Engine) DeleteRule(generation, id string, expected *uint64, uid uint32, admin bool) (DeletedRule, error) {
+	active := false
+	if e.Enforcement != nil {
+		active = e.Enforcement().State != "stopped"
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if generation == "" || generation != e.Generation {
@@ -40,6 +44,9 @@ func (e *Engine) DeleteRule(generation, id string, expected *uint64, uid uint32,
 		}
 		if !admin && (r.Filter.AllUIDs || r.Filter.UID != uid) {
 			return DeletedRule{}, mutationError("forbidden", "not authorized")
+		}
+		if r.Preset != nil && active {
+			return DeletedRule{}, mutationError("protection_active", "Stop protection before removing preset permissions")
 		}
 		if r.Version != *expected {
 			return DeletedRule{}, mutationError("version_conflict", "stale rule version; reload before deleting")

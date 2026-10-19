@@ -4,6 +4,7 @@ import (
 	"flowgate/internal/identity"
 	"flowgate/internal/policy"
 	"fmt"
+	"net"
 	"time"
 )
 
@@ -16,6 +17,16 @@ type RuleTargetState struct {
 }
 
 func (e *Engine) targetStateLocked(r policy.Rule) RuleTargetState {
+	if r.Preset != nil {
+		scope := "application"
+		if r.Filter.AllPrograms {
+			scope = "system"
+		}
+		if !e.presetActive(r) {
+			return RuleTargetState{scope, "inactive", "Preset identity/configuration changed or discovery expired; review refresh required"}
+		}
+		return RuleTargetState{scope, "active", presetSentence(r)}
+	}
 	if r.Filter.AllPrograms {
 		return RuleTargetState{"zone", "active", "All-program configured zone; process and application tiers override; unsafe attribution still blocks"}
 	}
@@ -49,15 +60,32 @@ func (e *Engine) RuleStates(uid uint32, admin bool) map[string]RuleTargetState {
 func (e *Engine) activeRulesLocked(rules []policy.Rule) []policy.Rule {
 	out := append([]policy.Rule{}, rules...)
 	for i := range out {
-		if !out[i].Filter.Process.IsZero() && e.targetStateLocked(out[i]).State != "active" {
+		if (out[i].Preset != nil || !out[i].Filter.Process.IsZero()) && e.targetStateLocked(out[i]).State != "active" {
 			out[i].Disabled = true
+		}
+		if out[i].Filter.InterfaceName != "" {
+			iface, err := net.InterfaceByName(out[i].Filter.InterfaceName)
+			if err != nil {
+				out[i].Disabled = true
+			} else {
+				out[i].Filter.InterfaceIndex = uint32(iface.Index)
+			}
 		}
 	}
 	return out
 }
 func (e *Engine) evaluateLocked(rules []policy.Rule, f identity.Flow, a identity.Attribution, now time.Time) (string, string, []string) {
 	f.NetworkScope = e.Zones.Classify(f.Remote.Addr())
-	return policy.EvaluateSession(e.activeRulesLocked(rules), f, a, now, e.Generation)
+	active := e.activeRulesLocked(rules)
+	for i, r := range active {
+		if r.Filter.PeerService != (policy.PeerService{}) && policy.ProtocolMatches(r.Filter.Protocol, f.Protocol) && f.Direction == r.Filter.Direction && f.Remote.Port() == r.Filter.RemotePort && f.Remote.Addr().String() == r.Filter.RemoteAddress && !e.peerServiceMatches(f, r.Filter.PeerService) {
+			active[i].Disabled = true
+		}
+		if r.Preset != nil && r.Preset.Component == "dhcp" {
+			active[i].Disabled = true
+		}
+	}
+	return policy.EvaluateSession(active, f, a, now, e.Generation)
 }
 func (e *Engine) pruneHandlesLocked() {
 	for b, h := range e.processHandles {

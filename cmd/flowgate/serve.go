@@ -5,6 +5,7 @@ import (
 	"flag"
 	"flowgate/internal/daemon"
 	"flowgate/internal/decisionlog"
+	"flowgate/internal/essential"
 	"flowgate/internal/hostfirewall"
 	"flowgate/internal/monitor"
 	"flowgate/internal/readiness"
@@ -144,6 +145,7 @@ func serveCommand(args []string) error {
 	evaluation := hostfirewall.NewEvaluation(ctx, e, *evaluationState, *socket, *database)
 	e.Evaluation = evaluation
 	if *allowProtection {
+		e.ConfigureEssential(ctx, essential.Default())
 		if err = evaluation.ConfigureProtection(*protectionState); err != nil {
 			return err
 		}

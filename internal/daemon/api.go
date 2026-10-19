@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flowgate/internal/decisionlog"
+	"flowgate/internal/essential"
 	"flowgate/internal/identity"
 	"flowgate/internal/policy"
 	"flowgate/internal/readiness"
@@ -20,19 +21,20 @@ import (
 )
 
 type Request struct {
-	NetworkZone         string          `json:"network_zone,omitempty"`
-	ZoneTarget          *ZoneTarget     `json:"zone_target,omitempty"`
-	ZoneRevision        string          `json:"zone_revision,omitempty"`
-	ProtectionID        string          `json:"protection_id,omitempty"`
-	EvaluationID        string          `json:"evaluation_id,omitempty"`
-	RequestID           string          `json:"request_id,omitempty"`
-	Profile             string          `json:"profile,omitempty"`
-	DecisionQuery       json.RawMessage `json:"decision_query,omitempty"`
-	DecisionID          string          `json:"decision_id,omitempty"`
-	CollectorGeneration string          `json:"collector_generation,omitempty"`
-	ObservedTarget      *ObservedTarget `json:"observed_target,omitempty"`
-	ObservedDraft       *ObservedDraft  `json:"observed_draft,omitempty"`
-	PreviewToken        string          `json:"preview_token,omitempty"`
+	EssentialOptions    *essential.Options `json:"essential_options,omitempty"`
+	NetworkZone         string             `json:"network_zone,omitempty"`
+	ZoneTarget          *ZoneTarget        `json:"zone_target,omitempty"`
+	ZoneRevision        string             `json:"zone_revision,omitempty"`
+	ProtectionID        string             `json:"protection_id,omitempty"`
+	EvaluationID        string             `json:"evaluation_id,omitempty"`
+	RequestID           string             `json:"request_id,omitempty"`
+	Profile             string             `json:"profile,omitempty"`
+	DecisionQuery       json.RawMessage    `json:"decision_query,omitempty"`
+	DecisionID          string             `json:"decision_id,omitempty"`
+	CollectorGeneration string             `json:"collector_generation,omitempty"`
+	ObservedTarget      *ObservedTarget    `json:"observed_target,omitempty"`
+	ObservedDraft       *ObservedDraft     `json:"observed_draft,omitempty"`
+	PreviewToken        string             `json:"preview_token,omitempty"`
 
 	ExpectedPolicyToken string       `json:"expected_policy_token,omitempty"`
 	EventIDs            []string     `json:"event_ids,omitempty"`
@@ -53,19 +55,22 @@ type EnforcementStatus struct {
 	StopsAt time.Time `json:"stops_at"`
 }
 type Response struct {
-	Build           *BuildIdentity             `json:"build,omitempty"`
-	DecisionPreview *DecisionPreview           `json:"decision_preview,omitempty"`
-	DecisionReceipt *DecisionReceipt           `json:"decision_receipt,omitempty"`
-	NetworkZones    *identity.NetworkZones     `json:"network_zones,omitempty"`
-	ZonePreview     *ZonePreview               `json:"zone_preview,omitempty"`
-	RuleStates      map[string]RuleTargetState `json:"rule_states,omitempty"`
-	Protection      *ProtectionStatus          `json:"protection,omitempty"`
-	Evaluation      *EvaluationStatus          `json:"evaluation,omitempty"`
-	DecisionLog     *decisionlog.Page          `json:"decision_log,omitempty"`
-	DecisionRecord  *decisionlog.Record        `json:"decision_record,omitempty"`
-	TrafficMonitor  *udpaccount.Status         `json:"traffic_monitor,omitempty"`
-	ObservedPreview *ObservedPreview           `json:"observed_preview,omitempty"`
-	Replayed        bool                       `json:"replayed,omitempty"`
+	EssentialPreview *EssentialPreview          `json:"essential_preview,omitempty"`
+	EssentialReceipt *EssentialReceipt          `json:"essential_receipt,omitempty"`
+	EssentialStatus  *EssentialStatus           `json:"essential_status,omitempty"`
+	Build            *BuildIdentity             `json:"build,omitempty"`
+	DecisionPreview  *DecisionPreview           `json:"decision_preview,omitempty"`
+	DecisionReceipt  *DecisionReceipt           `json:"decision_receipt,omitempty"`
+	NetworkZones     *identity.NetworkZones     `json:"network_zones,omitempty"`
+	ZonePreview      *ZonePreview               `json:"zone_preview,omitempty"`
+	RuleStates       map[string]RuleTargetState `json:"rule_states,omitempty"`
+	Protection       *ProtectionStatus          `json:"protection,omitempty"`
+	Evaluation       *EvaluationStatus          `json:"evaluation,omitempty"`
+	DecisionLog      *decisionlog.Page          `json:"decision_log,omitempty"`
+	DecisionRecord   *decisionlog.Record        `json:"decision_record,omitempty"`
+	TrafficMonitor   *udpaccount.Status         `json:"traffic_monitor,omitempty"`
+	ObservedPreview  *ObservedPreview           `json:"observed_preview,omitempty"`
+	Replayed         bool                       `json:"replayed,omitempty"`
 
 	PolicyView         *PolicyView                `json:"policy_view,omitempty"`
 	PolicyExplanations *PolicyExplanations        `json:"policy_explanations,omitempty"`
@@ -174,6 +179,9 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						r.Capabilities = append(r.Capabilities, EvaluationCapability)
 
 					}
+					if e.Essential != nil {
+						r.Capabilities = append(r.Capabilities, EssentialCapability)
+					}
 					if e.Protection != nil {
 						r.Capabilities = append(r.Capabilities, ProtectionCapability)
 					}
@@ -235,6 +243,63 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						r.NetworkZones = &e.Zones
 						r.Capabilities = append(r.Capabilities, NetworkZoneCapability)
 						switch q.Operation {
+						case "essential-status", "essential-preview", "essential-apply", "essential-remove-preview", "essential-remove":
+							c.SetDeadline(time.Now().Add(20 * time.Second))
+							if !admin || (q.Operation != "essential-status" && (!permissions.CanManageRules || readonly)) {
+								r.ErrorCode, r.Error = "forbidden", "Essential machine policy requires administrator on primary endpoint"
+							} else if q.Generation != e.Generation {
+								r.ErrorCode, r.Error = "generation_conflict", "Daemon changed"
+							} else {
+								var er error
+								switch q.Operation {
+								case "essential-status":
+									var v EssentialStatus
+									v, er = e.EssentialStatus()
+									r.EssentialStatus = &v
+									if er == nil && q.PreviewToken != "" {
+										var receipt EssentialReceipt
+										receipt, er = e.EssentialReceipt(q.Generation, q.PreviewToken, cred.Uid)
+										if er == nil {
+											r.EssentialReceipt = &receipt
+										}
+									}
+								case "essential-preview", "essential-remove-preview":
+									if q.EssentialOptions == nil {
+										er = mutationError("invalid_request", "Explicit essential_options required")
+									} else {
+										op := "apply"
+										if q.Operation == "essential-remove-preview" {
+											op = "remove"
+										}
+										var v EssentialPreview
+										v, er = e.PreviewEssential(q.Generation, op, *q.EssentialOptions, cred.Uid)
+										if er == nil {
+											r.EssentialPreview = &v
+										}
+									}
+								default:
+									if q.EssentialOptions == nil || q.PreviewToken == "" || len(q.PreviewToken) > 128 {
+										er = mutationError("invalid_request", "Preset token and exact options required")
+									} else {
+										op := "apply"
+										if q.Operation == "essential-remove" {
+											op = "remove"
+										}
+										var v EssentialReceipt
+										v, r.Replayed, er = e.ApplyEssential(q.Generation, q.PreviewToken, op, *q.EssentialOptions, cred.Uid)
+										if er == nil {
+											r.EssentialReceipt = &v
+										}
+									}
+								}
+								if er != nil {
+									r.ErrorCode, r.Error = "preset_conflict", er.Error()
+									var typed *RuleMutationError
+									if errors.As(er, &typed) {
+										r.ErrorCode = typed.Code
+									}
+								}
+							}
 						case "protection-readiness", "protection-start", "protection-stop":
 							if e.Protection == nil {
 								r.ErrorCode, r.Error = "unavailable", "Continuous protection unavailable"

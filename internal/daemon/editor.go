@@ -110,6 +110,9 @@ func (e *Engine) EditRule(id, eventID string, expected *uint64, candidate policy
 			return policy.Rule{}, "", mutationError("not_found", "rule no longer exists")
 		}
 		old := e.rules[index]
+		if old.Preset != nil {
+			return policy.Rule{}, "", mutationError("immutable_target", "Preset rules require Essential review; generic editor cannot strip provenance or scope")
+		}
 		expiryUnchanged = candidate.Expires.Equal(old.Expires)
 		if !admin && (old.Filter.AllUIDs || old.Filter.UID != uid) {
 			return policy.Rule{}, "", mutationError("forbidden", "not authorized")
@@ -234,6 +237,9 @@ func (e *Engine) EditRule(id, eventID string, expected *uint64, candidate policy
 // reviewRuleLocked is shared by pending/editor and observed-application creation.
 // The caller supplies independently verified immutable identity and holds e.mu.
 func (e *Engine) reviewRuleLocked(candidate policy.Rule, now time.Time, expiryUnchanged bool) (policy.Rule, string, error) {
+	if candidate.Schema == 5 || candidate.Preset != nil {
+		return policy.Rule{}, "", fmt.Errorf("preset schema5 is immutable through legacy editor; use Essential preview/removal or exact conditional Delete")
+	}
 	if candidate.Action != "allow" && candidate.Action != "block" {
 		return policy.Rule{}, "", fmt.Errorf("editor action must be allow or block")
 	}

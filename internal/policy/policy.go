@@ -9,14 +9,18 @@ import (
 )
 
 type Filter struct {
-	NetworkZone string            `json:"network_zone,omitempty"`
-	AllPrograms bool              `json:"all_programs,omitempty"`
-	AllUIDs     bool              `json:"all_uids,omitempty"`
-	Process     identity.Instance `json:"process,omitzero"`
-	Application string            `json:"application"`
-	Revision    string            `json:"revision"`
-	Direction   string            `json:"direction"`
-	Protocol    string            `json:"protocol"`
+	InterfaceIndex uint32            `json:"interface_index,omitempty"`
+	InterfaceName  string            `json:"interface_name,omitempty"`
+	LocalAddress   string            `json:"local_address,omitempty"`
+	PeerService    PeerService       `json:"peer_service,omitzero"`
+	NetworkZone    string            `json:"network_zone,omitempty"`
+	AllPrograms    bool              `json:"all_programs,omitempty"`
+	AllUIDs        bool              `json:"all_uids,omitempty"`
+	Process        identity.Instance `json:"process,omitzero"`
+	Application    string            `json:"application"`
+	Revision       string            `json:"revision"`
+	Direction      string            `json:"direction"`
+	Protocol       string            `json:"protocol"`
 	// Remote retains v1 exact endpoint semantics; new fields are additive (schema 2).
 	RemoteAddress string `json:"remote_address,omitempty"`
 	LocalPort     uint16 `json:"local_port,omitempty"`
@@ -25,6 +29,7 @@ type Filter struct {
 	UID           uint32 `json:"uid"`
 }
 type Rule struct {
+	Preset     *Preset   `json:"preset,omitempty"`
 	Version    uint64    `json:"version,omitempty"`
 	Executable string    `json:"executable,omitempty"`
 	Created    time.Time `json:"created"`
@@ -41,10 +46,10 @@ func (r Rule) Validate() error {
 	if len(r.Executable) > 4096 {
 		return fmt.Errorf("executable display path too long")
 	}
-	if r.Schema != 0 && r.Schema != 1 && r.Schema != 2 && r.Schema != 3 && r.Schema != 4 {
+	if r.Schema != 0 && r.Schema != 1 && r.Schema != 2 && r.Schema != 3 && r.Schema != 4 && r.Schema != 5 {
 		return fmt.Errorf("unsupported rule schema")
 	}
-	if r.Schema != 2 && r.Schema != 3 && r.Schema != 4 && (r.Filter.RemoteAddress != "" || r.Filter.LocalPort != 0 || r.Filter.RemotePort != 0) {
+	if r.Schema != 2 && r.Schema != 3 && r.Schema != 4 && r.Schema != 5 && (r.Filter.RemoteAddress != "" || r.Filter.LocalPort != 0 || r.Filter.RemotePort != 0) {
 		return fmt.Errorf("address/port fields require rule schema 2")
 	}
 	if r.Filter.Remote != "" {
@@ -73,16 +78,23 @@ func (r Rule) Validate() error {
 	if r.Filter.NetworkZone != "" && r.Filter.NetworkZone != "local" && r.Filter.NetworkZone != "internet" {
 		return fmt.Errorf("invalid network zone")
 	}
-	if (r.Filter.NetworkZone != "" || r.Filter.AllPrograms || r.Filter.AllUIDs) && r.Schema != 4 {
+	if (r.Filter.NetworkZone != "" || r.Filter.AllPrograms || r.Filter.AllUIDs) && r.Schema != 4 && r.Schema != 5 {
 		return fmt.Errorf("zone target fields require schema4")
 	}
 	if r.Filter.AllUIDs && (!r.Filter.AllPrograms || r.Filter.UID != 0) {
 		return fmt.Errorf("machine target requires allprograms and canonical UID0")
 	}
-	if r.Filter.AllPrograms {
+	if r.Filter.AllPrograms && r.Schema != 5 {
 		if r.Schema != 4 || r.Filter.NetworkZone == "" || r.Filter.Application != "" || r.Filter.Revision != "" || !r.Filter.Process.IsZero() || r.Executable != "" {
 			return fmt.Errorf("zone-wide rule has no application/process identity")
 		}
+	}
+	if r.Schema == 5 {
+		if err := r.validatePreset(); err != nil {
+			return err
+		}
+	} else if r.Preset != nil || r.Filter.PeerService != (PeerService{}) || r.Filter.InterfaceIndex != 0 || r.Filter.InterfaceName != "" || r.Filter.LocalAddress != "" {
+		return fmt.Errorf("preset/interface fields require schema5")
 	}
 	if r.ID == "" || (!r.Filter.AllPrograms && (r.Filter.Application == "" || r.Filter.Revision == "")) {
 		return fmt.Errorf("rule needs ID, application and revision")
@@ -93,7 +105,7 @@ func (r Rule) Validate() error {
 	if r.Filter.Direction != "incoming" && r.Filter.Direction != "outgoing" {
 		return fmt.Errorf("invalid direction")
 	}
-	if r.Filter.Protocol != "tcp" && r.Filter.Protocol != "udp" && !(r.Filter.Protocol == "*" && (r.Schema == 2 || r.Schema == 3 || r.Schema == 4)) {
+	if r.Filter.Protocol != "tcp" && r.Filter.Protocol != "udp" && !(r.Filter.Protocol == "*" && (r.Schema == 2 || r.Schema == 3 || r.Schema == 4 || r.Schema == 5)) {
 		return fmt.Errorf("invalid protocol")
 	}
 	return nil

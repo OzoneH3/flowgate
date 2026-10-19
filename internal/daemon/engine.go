@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"flowgate/internal/decisionlog"
+	"flowgate/internal/essential"
 	"flowgate/internal/identity"
 	"flowgate/internal/policy"
 	"flowgate/internal/udpaccount"
@@ -44,11 +45,13 @@ type TrafficManager interface {
 	Stop(...string) (udpaccount.Status, error)
 }
 type Engine struct {
-	Build            *BuildIdentity
-	Zones            identity.NetworkZones
-	zonePreviews     map[string]*zonePreview
-	decisionPreviews map[string]*decisionPreview
-	processHandles   map[identity.Instance]*identity.ProcessHandle
+	Essential         *essential.Manager
+	essentialPreviews map[string]*essentialPreview
+	Build             *BuildIdentity
+	Zones             identity.NetworkZones
+	zonePreviews      map[string]*zonePreview
+	decisionPreviews  map[string]*decisionPreview
+	processHandles    map[identity.Instance]*identity.ProcessHandle
 	// Decisions records decision-time evidence; nil disables recording.
 	Decisions      *decisionlog.Log
 	capacityLogged map[string]*capacityAggregate
@@ -377,6 +380,10 @@ func (e *Engine) Rules(uid uint32, admin bool) []policy.Rule {
 	return out
 }
 func (e *Engine) ChangeRule(id, action string, uid uint32, admin bool) error {
+	active := false
+	if e.Enforcement != nil {
+		active = e.Enforcement().State != "stopped"
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.SaveRules == nil {
@@ -390,6 +397,9 @@ func (e *Engine) ChangeRule(id, action string, uid uint32, admin bool) error {
 		}
 		if !admin && (r.Filter.AllUIDs || r.Filter.UID != uid) {
 			return fmt.Errorf("not authorized")
+		}
+		if r.Preset != nil && active {
+			return mutationError("protection_active", "Stop protection before changing preset permissions")
 		}
 		found = true
 		if action != "delete" && r.Version == ^uint64(0) {
