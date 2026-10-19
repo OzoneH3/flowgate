@@ -167,3 +167,34 @@ NetworkManager drop-in and reloads the dependency graph **before** stopping the
 guard service. This avoids propagating a Requires stop into NetworkManager.
 `scripts/test-deployment-uninstall.py` checks the exact order with mocked systemd
 calls and preserved immutable artifacts; installed uninstall remains unobserved.
+
+## Installer doctor/activation distinction
+
+The d7c969b installation attempt refused before runtime handoff because its
+predicate rejected every firewall `not_checked` except queue census. Doctor
+intentionally emits `firewall.activation / not_checked / not_attempted`: it never
+binds NFQUEUE or mutates conntrack/rules. This is not an incompatibility finding.
+The root-owned recorded preflight was not readable by the unprivileged agent;
+the exact user-reported diagnostic is preserved in the focused regression.
+
+The corrected installer validates doctor schema1 and presence/uniqueness of
+required firewall/dependency checks. Only the exact activation tuple above and
+`firewall.queue_census / not_checked / probe_failed` are deferred to guarded
+activation. Recognized completed prerequisites retain their ready codes;
+blocked, failed, unknown status/code/ID, missing dependency, incomplete report and
+other unchecked prerequisites refuse before replacing the old runtime. The
+original report remains unchanged; `preflight-disposition.json` records deferred
+checks explicitly, without labelling them ready. Optional collector diagnostics
+are separate from required firewall/dependency prerequisites.
+
+At activation, `queue.RunConfigured` must open the exclusive NFQUEUE socket and
+register callbacks before invoking the ready callback. In `Evaluation.run`, that
+callback performs bounded conntrack snapshot/mark operations, atomic nft rules,
+structural digest and persisted session record before removing the guard and
+publishing active. Failure propagates through the host acceptance stage into the
+installer's prepared recovery path; no successful host acceptance is printed.
+`scripts/test-install-readiness.py` reproduces the exact reported refusal and
+checks real blockers, narrow census deferral, unknown/missing results and the
+actual installer transaction's activation/acceptance failure handlers using
+mocked privileged boundaries. Existing isolated receiver/kernel/UI evidence is
+reused; this correction does not claim a new installed-host pass.

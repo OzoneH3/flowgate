@@ -4,6 +4,37 @@ Requires a prepared immutable-hash bundle and successful isolated acceptance.
 Copies artifacts BEFORE stopping the old writer; no checkout path in the service.
 """
 import argparse,hashlib,json,os,pathlib,shutil,socket,sqlite3,struct,subprocess,sys,tempfile,time
+
+def classify_preflight(report):
+ # Doctor never activates. Recognize its exact versioned prerequisite results;
+ # a deferred result remains not_checked and must succeed at guarded startup.
+ ready_codes={
+  'dependency.ip':'executable_located','dependency.nft':'executable_located',
+  'firewall.interfaces':'interfaces_inspected',
+  'firewall.legacy.ip_tables_names':'legacy_tables_absent',
+  'firewall.legacy.ip6_tables_names':'legacy_tables_absent',
+  'firewall.ruleset':'ruleset_inspected','firewall.queue_census':'queue_census',
+  'firewall.tailscale':'tailscale_client_supported',
+ }
+ deferred_codes={'firewall.activation':'not_attempted','firewall.queue_census':'probe_failed'}
+ if report.get('schema_version')!=1 or not isinstance(report.get('checks'),list):
+  raise ValueError('Unrecognized doctor report schema; old runtime preserved')
+ refused=[];deferred=[];seen=set()
+ for c in report['checks']:
+  if not isinstance(c,dict)or not isinstance(c.get('id'),str):
+   raise ValueError('Malformed doctor check; old runtime preserved')
+  key=c['id']
+  if not key.startswith('firewall.')and key not in ('dependency.ip','dependency.nft'):continue
+  if key in seen:raise ValueError('Duplicate doctor prerequisite '+key)
+  seen.add(key)
+  if c.get('status')=='ready'and ready_codes.get(key)==c.get('code')and key in ready_codes:continue
+  if c.get('status')=='not_checked'and deferred_codes.get(key)==c.get('code')and key in deferred_codes:
+   deferred.append(c)
+  else:refused.append(c)
+ required=(set(ready_codes)-{'firewall.tailscale'})|{'firewall.activation'}
+ if required-seen:raise ValueError('Missing doctor prerequisites: '+','.join(sorted(required-seen)))
+ return refused,deferred
+
 p=argparse.ArgumentParser();p.add_argument('--bundle',required=True);a=p.parse_args()
 if os.geteuid()!=0:raise SystemExit('Run this prepared installer once with terminal sudo')
 bundle=pathlib.Path(a.bundle).resolve(strict=True);manifest=json.loads((bundle/'manifest.json').read_text())
@@ -47,7 +78,8 @@ run=safe_dir('/var/lib/flowgate',0o700);backups=safe_dir(run/'backups',0o700);ba
 # Readiness remains read-only and authoritative, before any runtime handoff.
 report=json.loads(output(str(release/'flowgate'),'doctor','--json','--profile','both','--administrator'))
 (backup/'preflight.json').write_text(json.dumps(report,indent=2))
-refused=[c for c in report['checks']if c['id'].startswith('firewall.')and(c['status']=='blocked'or(c['status']=='not_checked'and c['id']!='firewall.queue_census'))]
+refused,deferred=classify_preflight(report)
+(backup/'preflight-disposition.json').write_text(json.dumps({'refused':refused,'deferred_to_guarded_activation':deferred},indent=2))
 if refused:raise SystemExit('Readiness refused; old daemon preserved: '+json.dumps(refused))
 cred,before=api();assert before['enforcement']['state']=='stopped', 'Stop/review existing enforcement before installing; never silently interrupt it'
 assert before['permissions']['role']=='administrator'
