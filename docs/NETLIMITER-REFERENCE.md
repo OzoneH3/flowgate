@@ -1,5 +1,7 @@
 # NetLimiter 5 hands-on reference for FlowGate
 
+> The current application-permission semantics are documented in [PERMISSIONS.md](PERMISSIONS.md).
+
 ## Executive findings
 
 - **Activity is a policy entry point.** Clicking an In/Out Blocker cell on a selected application opens a quick setter; the Advanced route opens a full editor already bound to that application and direction. A pending connection is not required to create a rule. FlowGate now has an equivalent observed-application preview/save route under `observed-rule-create-v1`.
