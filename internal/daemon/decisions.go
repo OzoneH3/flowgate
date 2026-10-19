@@ -216,6 +216,11 @@ func (e *Engine) RecordPacketOutcome(v Event, verdict string, submitErr error) {
 		target.pendingLogged = true
 		r := e.baseRecord(target, decisionlog.KindPending)
 		r.Decision = &decisionlog.Decision{Action: "pending", Source: "default_ask", Reason: "no matching rule; awaiting a user decision until the deadline", MatchingRules: v.Conflicts}
+		if target.decided != nil && target.decided.Action == "ask" {
+			r.Decision.Source = "rule_ask"
+			r.Decision.Reason = "stored Ask rule " + target.decided.ID + " requires a decision; awaiting it until the deadline"
+			r.Decision.Rule = decisionlog.Snapshot(*target.decided)
+		}
 		r.Verdict = &decisionlog.Verdict{State: verdict, Detail: detail}
 		if verdict == VerdictHeld {
 			r.Verdict.Detail = "initial packet held in the kernel queue until a decision or the deadline " + v.Deadline.UTC().Format(time.RFC3339)

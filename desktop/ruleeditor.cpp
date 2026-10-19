@@ -28,6 +28,9 @@ RuleEditor::RuleEditor(QJsonObject rule, Sender sender, QWidget *parent)
   action->setObjectName("editAction");
   action->addItems({"allow", "block"});
   action->setCurrentText(rule["action"].toString("allow"));
+  unsupported =
+      !QStringList{"allow", "block"}.contains(rule["action"].toString("allow")) ||
+      !QStringList{"tcp", "udp"}.contains(f["protocol"].toString("tcp"));
   form->addRow("Action", action);
   protocol = new QComboBox;
   protocol->addItems({"tcp", "udp"});
@@ -149,6 +152,13 @@ void RuleEditor::changed() {
     debounce.start();
 }
 void RuleEditor::validate() {
+  if (unsupported) {
+    error->setText("This rule uses Ask or TCP+UDP, which this editor cannot "
+                   "represent. It is shown read-only; edit it in the Electron "
+                   "client so its action/protocol are preserved.");
+    save->setEnabled(false);
+    return;
+  }
   if (inFlight || writing) {
     debounce.start();
     return;
@@ -173,6 +183,8 @@ void RuleEditor::validate() {
   });
 }
 void RuleEditor::commit() {
+  if (unsupported)
+    return;
 
   if (writing || !save->isEnabled())
     return;

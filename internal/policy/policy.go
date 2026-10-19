@@ -169,8 +169,9 @@ func EvaluateSession(rules []Rule, f identity.Flow, a identity.Attribution, now 
 		if matches[i].Priority != matches[j].Priority {
 			return matches[i].Priority > matches[j].Priority
 		}
-		if (matches[i].Action == "block") != (matches[j].Action == "block") {
-			return matches[i].Action == "block"
+		// Observed NetLimiter 5.3.28: equal weight applies Deny, then Allow, then Ask.
+		if ri, rj := actionRank(matches[i].Action), actionRank(matches[j].Action); ri != rj {
+			return ri < rj
 		}
 		// At equal tier/priority, an explicit user policy overrides a preset.
 		if (matches[i].Preset == nil) != (matches[j].Preset == nil) {
@@ -186,6 +187,16 @@ func EvaluateSession(rules []Rule, f identity.Flow, a identity.Attribution, now 
 		return "ask", "default-ask", ids
 	}
 	return matches[0].Action, matches[0].ID, ids
+}
+
+func actionRank(a string) int {
+	switch a {
+	case "block":
+		return 0
+	case "allow":
+		return 1
+	}
+	return 2
 }
 
 // Weight is NetLimiter's Blocker precedence by target: whole machine 1, zone 2,

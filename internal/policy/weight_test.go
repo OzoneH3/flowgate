@@ -53,3 +53,34 @@ func TestNetLimiterWeightPrecedence(t *testing.T) {
 		t.Fatalf("application Allow did not cover another destination/port/protocol: %s %s", act, id)
 	}
 }
+
+// Observed NetLimiter 5.3.28: equal weight applies Deny, then Allow, then Ask;
+// weight still dominates the action order.
+func TestStoredAskPrecedence(t *testing.T) {
+	app := identity.Application{Key: "app", Revision: "rev"}
+	a := identity.Attribution{Application: &app, Owners: []identity.Process{{UID: 1000}}}
+	f, _ := identity.ParseFlow("tcp", "outgoing", "192.0.2.1:40000", "198.51.100.7:443")
+	mk := func(id, action string, all bool) Rule {
+		r := Rule{Schema: 2, ID: id, Version: 1, Priority: 100, Action: action, Filter: Filter{Application: "app", Revision: "rev", UID: 1000, Direction: "outgoing", Protocol: "*", RemoteAddress: "*"}}
+		if all {
+			r.Schema, r.Filter = 4, Filter{AllPrograms: true, AllUIDs: true, Direction: "outgoing", Protocol: "*", RemoteAddress: "*"}
+		}
+		return r
+	}
+	ask, allow, deny := mk("a-ask", "ask", false), mk("z-allow", "allow", false), mk("z-deny", "block", false)
+	for _, tc := range []struct {
+		rules   []Rule
+		act, id string
+	}{
+		{[]Rule{ask, allow}, "allow", "z-allow"},
+		{[]Rule{ask, deny}, "block", "z-deny"},
+		{[]Rule{ask, allow, deny}, "block", "z-deny"},
+		{[]Rule{ask}, "ask", "a-ask"},
+		{[]Rule{mk("m-allow", "allow", true), ask}, "ask", "a-ask"}, // application Ask (3) beats machine Allow (1)
+	} {
+		act, id, _ := Evaluate(tc.rules, f, a, time.Now())
+		if act != tc.act || id != tc.id {
+			t.Fatalf("%v: got %s/%s want %s/%s", tc.rules, act, id, tc.act, tc.id)
+		}
+	}
+}

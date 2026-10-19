@@ -17,6 +17,11 @@ const ObservedAnyProtocolCapability = "observed-rule-any-protocol-v1"
 // selected as its target (NetLimiter Blocker: Allow = all connections).
 const ApplicationPolicyCapability = "application-policy-v1"
 
+// StoredAskCapability: Ask is a persisted Blocker action (NetLimiter Ask) for
+// application, process, scoped and zone rules; a winning Ask rule prompts and is
+// recorded as the request's source rule. Equal weight: Deny, Allow, then Ask.
+const StoredAskCapability = "stored-ask-v1"
+
 // RuleVersionRef identifies the exact stored rule a preview will update.
 type RuleVersionRef struct {
 	ID      string `json:"id"`
@@ -76,7 +81,7 @@ func draftBytes(d ObservedDraft) (string, error) {
 		return "", mutationError("invalid_request", "target_scope must be application or process")
 	}
 	d.TargetScope = processScope(d)
-	if d.LocalPort == nil || d.RemotePort == nil || d.Expires == nil || d.RemoteAddress == "" || len(d.RemoteAddress) > 128 || (d.Direction != "incoming" && d.Direction != "outgoing") || (d.Protocol != "tcp" && d.Protocol != "udp" && d.Protocol != "*") || (d.Action != "allow" && d.Action != "block") {
+	if d.LocalPort == nil || d.RemotePort == nil || d.Expires == nil || d.RemoteAddress == "" || len(d.RemoteAddress) > 128 || (d.Direction != "incoming" && d.Direction != "outgoing") || (d.Protocol != "tcp" && d.Protocol != "udp" && d.Protocol != "*") || (d.Action != "allow" && d.Action != "block" && d.Action != "ask") {
 		return "", mutationError("invalid_request", "Explicit direction, protocol (tcp, udp, or * for TCP+UDP only), action, remote_address, local_port, remote_port and expires required; zero ports/zero expiry are deliberate wildcard/persistent choices")
 	}
 	if d.ApplicationPolicy && (d.Protocol != "*" || d.RemoteAddress != "*" || *d.LocalPort != 0 || *d.RemotePort != 0) {

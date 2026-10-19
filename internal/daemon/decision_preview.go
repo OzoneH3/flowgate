@@ -219,6 +219,26 @@ func (e *Engine) PreviewDecision(generation, id, action, scope, zone, revision s
 	if replaces != nil {
 		sentence = fmt.Sprintf("Updates existing rule %s (version %d). ", replaces.ID, replaces.Version) + sentence
 	}
+	// The remembered rule must actually decide this request; otherwise (for
+	// example a higher-weight Ask/Deny keeps winning) it would be a silent no-op.
+	simulated := append([]policy.Rule{}, e.rules...)
+	if replaces != nil {
+		for i := range simulated {
+			if simulated[i].ID == replaces.ID {
+				simulated[i] = rule
+			}
+		}
+	} else {
+		simulated = append(simulated, rule)
+	}
+	if _, winner, _ := e.evaluateLocked(simulated, v.Flow, a, now); winner != rule.ID {
+		w := e.ruleLocked(winner)
+		why := winner
+		if w != nil {
+			why = fmt.Sprintf("%s (%s, weight %d)", w.ID, w.Action, w.Weight())
+		}
+		return DecisionPreview{}, mutationError("policy_conflict", "Remembered rule would not decide this request: "+why+" still wins; change that rule or remember a higher-weight scope")
+	}
 	duration := int64(0)
 	if scope == "application" {
 		duration = o.DurationSeconds

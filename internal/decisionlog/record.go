@@ -20,7 +20,7 @@ const (
 
 // Decision sources recorded by the engine.
 var Sources = map[string]bool{
-	"rule": true, "attribution": true, "capacity": true, "default_ask": true,
+	"rule": true, "attribution": true, "capacity": true, "default_ask": true, "rule_ask": true,
 	"user": true, "timeout": true, "identity_changed": true, "policy_change": true,
 	"rule_edit": true, "shutdown": true,
 }

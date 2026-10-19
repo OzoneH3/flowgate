@@ -214,3 +214,108 @@ func TestRememberProcessBindsRequestingInstance(t *testing.T) {
 		t.Fatal("process remember with zone accepted")
 	}
 }
+
+// A stored Ask rule prompts through the normal pending path and is recorded as
+// the source; Once covers only its own lease; Remember interacts by weight/order.
+func TestStoredAskLifecycle(t *testing.T) {
+	e, f, a, now := fixture()
+	e.Timeout = time.Minute
+	e.SaveRules = func([]policy.Rule) error { return nil }
+	ask := policy.Rule{Schema: 2, ID: "user:ask", Version: 3, Priority: 100, Action: "ask", Filter: policy.Filter{Application: a.Application.Key, Revision: a.Application.Revision, UID: 1000, Direction: "incoming", Protocol: "*", RemoteAddress: "*"}}
+	if err := e.SetRules([]policy.Rule{ask}); err != nil {
+		t.Fatal(err)
+	}
+	v := e.Observe(f, "udp")
+	if v.State != "awaiting-decision" || v.Rule != ask.ID || v.AskRule == nil || v.AskRule.ID != ask.ID || v.AskRule.Version != 3 {
+		t.Fatalf("Ask rule did not produce an attributed pending request: %+v", v)
+	}
+	// Once: this tuple's lease is honoured, the Ask rule stays, a new attempt prompts again.
+	if _, err := e.Decide(v.ID, "allow", "once", 1000, false); err != nil {
+		t.Fatal(err)
+	}
+	if again := e.Observe(f, "udp"); again.State != "allowed" {
+		t.Fatalf("valid Once lease re-prompted: %+v", again)
+	}
+	other, _ := identity.ParseFlow("udp", "incoming", "127.0.0.1:80", "127.0.0.1:9100")
+	v2 := e.Observe(other, "udp")
+	if v2.State != "awaiting-decision" || v2.Rule != ask.ID || len(e.Rules(1000, false)) != 1 || e.Rules(1000, false)[0].Action != "ask" {
+		t.Fatalf("Once replaced the Ask rule or covered an independent attempt: %+v", v2)
+	}
+	// Outgoing is independent of an incoming Ask rule.
+	out, _ := identity.ParseFlow("udp", "outgoing", "127.0.0.1:5000", "127.0.0.1:9000")
+	if o := e.Observe(out, "udp"); o.Rule == ask.ID {
+		t.Fatal("incoming Ask applied to outgoing")
+	}
+	// Narrow Remember (address only) beats the Ask rule at equal weight for its address only.
+	*now = now.Add(time.Second)
+	p, err := e.PreviewDecision(e.Generation, v2.ID, "allow", "persistent", "any", e.Zones.Revision, 1000, false, RememberOptions{Fields: &RememberFields{Address: true, Port: true, Protocol: true}})
+	if err != nil {
+		t.Fatal("narrow remember against broader Ask refused:", err)
+	}
+	if p.Replaces != nil {
+		t.Fatal("narrow remember replaced the Ask rule")
+	}
+	if _, _, _, err := e.DecideReviewed(e.Generation, v2.ID, "allow", "persistent", "any", e.Zones.Revision, p.Token, 1000, false, RememberOptions{Fields: &RememberFields{Address: true, Port: true, Protocol: true}}); err != nil {
+		t.Fatal(err)
+	}
+	third, _ := identity.ParseFlow("udp", "incoming", "127.0.0.1:81", "127.0.0.2:9200")
+	v3 := e.Observe(third, "udp")
+	if v3.State != "awaiting-decision" || v3.Rule != ask.ID {
+		t.Fatalf("narrow remember widened beyond its address: %+v", v3)
+	}
+	// Application-only Remember replaces the Ask rule itself (exposed) and settles waiting requests.
+	twin, _ := identity.ParseFlow("udp", "incoming", "127.0.0.1:82", "127.0.0.3:9300")
+	waiting := e.Observe(twin, "udp")
+	app := RememberOptions{Fields: &RememberFields{}}
+	p3, err := e.PreviewDecision(e.Generation, v3.ID, "allow", "persistent", "any", e.Zones.Revision, 1000, false, app)
+	if err != nil || p3.Replaces == nil || p3.Replaces.ID != ask.ID || p3.Rule.Action != "allow" || p3.Rule.Version != 4 {
+		t.Fatalf("application remember did not replace the Ask rule: %+v %v", p3, err)
+	}
+	if _, _, _, err := e.DecideReviewed(e.Generation, v3.ID, "allow", "persistent", "any", e.Zones.Revision, p3.Token, 1000, false, app); err != nil {
+		t.Fatal(err)
+	}
+	if w := e.Observe(twin, "udp"); w.ID != waiting.ID || w.State != "allowed" {
+		t.Fatalf("waiting request not settled by the replacement: %+v", w)
+	}
+}
+
+// A Remember that a higher-ranked Ask would still override is refused, not
+// reported as success. (Weight-4 process Ask needs a live pinned instance; an
+// explicit legacy priority above the remembered rule gives the same ranking.)
+func TestRememberRefusedWhenAskStillWins(t *testing.T) {
+	e, f, a, _ := fixture()
+	e.Timeout = time.Minute
+	e.SaveRules = func([]policy.Rule) error { return nil }
+	hi := policy.Rule{Schema: 2, ID: "user:hiask", Version: 1, Priority: 500, Action: "ask", Filter: policy.Filter{Application: a.Application.Key, Revision: a.Application.Revision, UID: 1000, Direction: "incoming", Protocol: "udp", RemoteAddress: "*"}}
+	if err := e.SetRules([]policy.Rule{hi}); err != nil {
+		t.Fatal(err)
+	}
+	v := e.Observe(f, "udp")
+	if _, err := e.PreviewDecision(e.Generation, v.ID, "allow", "persistent", "any", e.Zones.Revision, 1000, false, RememberOptions{Fields: &RememberFields{Address: true}}); err == nil {
+		t.Fatal("ineffective remember accepted while a higher-ranked Ask still wins")
+	}
+}
+
+// Ask through the application setter: persisted, summarised as the app's own rule.
+func TestApplicationSetterAsk(t *testing.T) {
+	a, _, _, _ := observedAPI(t)
+	d := appPolicyDraft("outgoing", "ask")
+	p := requirePreview(t, a, d)
+	r := callResponse(a.path, saveRequest(a, p, d))
+	if r.Error != "" || r.SavedRule.Action != "ask" {
+		t.Fatal(r)
+	}
+	view := callResponse(a.path, Request{Version: 1, Operation: "policy-view", Generation: a.e.Generation}).PolicyView
+	out := view.Applications[0].Outgoing
+	if out.ApplicationRule == nil || out.ApplicationRule.Action != "ask" || out.Configured != "uniform" || out.Action != "ask" {
+		t.Fatalf("Ask not shown as the application's own rule: %+v", out)
+	}
+	caps := callResponse(a.path, Request{Version: 1, Operation: "list"}).Capabilities
+	found := false
+	for _, c := range caps {
+		found = found || c == StoredAskCapability
+	}
+	if !found {
+		t.Fatal("stored-ask-v1 not advertised")
+	}
+}

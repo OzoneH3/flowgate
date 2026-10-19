@@ -24,6 +24,8 @@ private:
   QTimer debounce;
   int revision = 0;
   bool inFlight = false, writing = false;
+  // Ask actions / TCP+UDP rules cannot be represented here: never edit them.
+  bool unsupported = false;
   QJsonObject candidate() const;
   void changed();
   void validate();

@@ -243,8 +243,8 @@ func (e *Engine) reviewRuleLocked(candidate policy.Rule, now time.Time, expiryUn
 	if candidate.Schema == 5 || candidate.Preset != nil {
 		return policy.Rule{}, "", fmt.Errorf("preset schema5 is immutable through legacy editor; use Essential preview/removal or exact conditional Delete")
 	}
-	if candidate.Action != "allow" && candidate.Action != "block" {
-		return policy.Rule{}, "", fmt.Errorf("editor action must be allow or block")
+	if candidate.Action != "allow" && candidate.Action != "block" && candidate.Action != "ask" {
+		return policy.Rule{}, "", fmt.Errorf("editor action must be allow, block or ask")
 	}
 	if candidate.Priority < -1000 || candidate.Priority > 1000 {
 		return policy.Rule{}, "", fmt.Errorf("priority must be -1000..1000")

@@ -31,7 +31,10 @@ type Event struct {
 	// application identity/UID, direction, protocol, remote address and
 	// service port) for presentation. Decisions still target one event ID.
 	RequestGroup string `json:"request_group,omitempty"`
-	Token        string `json:"-"`
+	// AskRule identifies the stored Ask rule that caused this prompt (absent
+	// when no rule matched and the default prompted).
+	AskRule *RuleVersionRef `json:"ask_rule,omitempty"`
+	Token   string          `json:"-"`
 
 	// Decision-log bookkeeping (never serialized): the rule exactly as evaluated,
 	// whether this result was a capacity refusal, and record-once flags so packet
@@ -173,6 +176,10 @@ func (e *Engine) Observe(f identity.Flow, token string) Event {
 	default:
 		v.State = "awaiting-decision"
 		v.Reason = "initial packets retained within queue bounds until the decision deadline; excess packets drop"
+		if v.decided != nil && v.decided.Action == "ask" {
+			v.AskRule = &RuleVersionRef{v.decided.ID, v.decided.Version}
+			v.Reason = "stored Ask rule " + v.decided.ID + " requires a decision; " + v.Reason
+		}
 	}
 	if now.Sub(e.window) >= time.Second {
 		e.window = now
@@ -290,7 +297,7 @@ func (e *Engine) decideLocked(id, action, scope string, uid uint32, admin bool, 
 				}
 				action, effective, _ := e.evaluateLocked(e.rules, other.Flow, other.Attribution, now)
 				// Unrelated rules must not discard a just-approved one-shot packet.
-				if strings.HasPrefix(other.Rule, "once:") && effective == "default-ask" {
+				if strings.HasPrefix(other.Rule, "once:") && action == "ask" {
 					continue
 				}
 				if effective == other.Rule && ((other.State == "allowed" && action == "allow") || (other.State == "blocked" && action == "block")) {
