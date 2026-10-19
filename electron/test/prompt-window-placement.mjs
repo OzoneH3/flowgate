@@ -148,7 +148,7 @@ try {
   const outputs = JSON.parse(
     execFileSync('kscreen-doctor', ['-j'], {
       encoding: 'utf8',
-      env: { ...process.env, QT_QPA_PLATFORM: 'wayland', WAYLAND_DISPLAY: 'wayland-0' },
+      env: { ...process.env, QT_QPA_PLATFORM: 'wayland', WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY || 'wayland-0' },
     }),
   )
     .outputs.filter((o) => o.connected && o.priority > 0)

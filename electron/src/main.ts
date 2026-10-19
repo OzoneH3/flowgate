@@ -1,6 +1,6 @@
 import { Essential } from './essential';
 import { Protection } from './protection';
-import { placeKDEPrompt, PROMPT_TITLE, promptTitle } from './prompt-placement';
+import { placeKDEPrompt, resizeKDEPrompt, PROMPT_TITLE, promptTitle } from './prompt-placement';
 import { AutomaticPrompts, edgePosition, boundDecision, groupOf } from './automatic-prompts';
 import {
   app,
@@ -108,6 +108,23 @@ const width = dimension(
 let main: BrowserWindow;
 let prompt: BrowserWindow | undefined;
 const automaticPrompts = new AutomaticPrompts();
+// Keep the old native window until release: its input stream must not reach a new card.
+const TRANSITION_MS = 650;
+let transitionUntil = 0;
+let transitionTimer: ReturnType<typeof setTimeout> | undefined;
+const pressedPromptKeys = new Set<string>();
+let promptPointerDown = false;
+let promptDismissed = false;
+let promptIdle = false;
+let promptKDEReady = false;
+const promptReadyAt = new Map<number, number>();
+const promptPlacement = new Map<number, Promise<void>>();
+const promptLayouts = new Map<number, Promise<void>>();
+function pacePrompt() {
+  transitionUntil = Date.now() + TRANSITION_MS;
+  clearTimeout(transitionTimer);
+  transitionTimer = setTimeout(automaticDecision, TRANSITION_MS + 10);
+}
 const promptRefs = new Map<number, RequestRef>();
 const promptURL = (ref: RequestRef) =>
   'flowgate://app/index.html?request=' +
@@ -124,16 +141,37 @@ function retarget(ref: RequestRef) {
     return;
   }
   promptRefs.set(w.webContents.id, ref);
+  promptReadyAt.set(w.webContents.id, Date.now() + TRANSITION_MS);
+  const compact = edgePosition(screen.getPrimaryDisplay().workArea, 520, 460);
+  w.setBounds(compact);
+  const reset = (
+    promptLayouts.get(w.webContents.id) ||
+    promptPlacement.get(w.webContents.id) ||
+    Promise.resolve()
+  ).then(async () => {
+    if (w.isDestroyed() || promptIdle || promptRefs.get(w.webContents.id)?.id !== ref.id) return;
+    const current = backend.view().control;
+    if (
+      current.generation !== ref.generation ||
+      !current.events.some(
+        (e) => e.id === ref.id && e.state === 'awaiting-decision' && e.remainingMs > TRANSITION_MS,
+      )
+    )
+      return;
+    if (promptKDEReady) await resizeKDEPrompt(profile, process.pid, w.id, compact);
+    else w.showInactive();
+  });
+  promptLayouts.set(w.webContents.id, reset);
   void w.loadURL(promptURL(ref));
 }
 // Closed by FlowGate because its request group is settled: not a user dismissal.
 let promptAutoClosing = false;
 function openDecision(ref: RequestRef) {
+  promptIdle = false;
+  promptDismissed = false;
   ref = { ...ref, group: ref.group ?? groupOf(backend.view(), ref.id) };
   if (prompt && !prompt.isDestroyed()) {
     retarget(ref);
-    prompt.show();
-    prompt.focus();
     return;
   }
   prompt = windowFor(true, ref.id, ref.generation, ref.group);
@@ -141,18 +179,28 @@ function openDecision(ref: RequestRef) {
 function automaticDecision() {
   if (quitting || !backend || !main) return;
   const view = backend.view();
-  if (prompt && !prompt.isDestroyed()) {
+  if (prompt && !prompt.isDestroyed() && !promptIdle) {
     const ref = promptRefs.get(prompt.webContents.id),
       next = ref && automaticPrompts.follow(view, ref);
-    if (next) retarget(next);
-    else {
-      promptAutoClosing = true;
-      prompt.close();
-    }
+    if (!promptDismissed && next?.id === ref?.id) return;
+    if (!transitionUntil) pacePrompt();
+    if (Date.now() < transitionUntil || pressedPromptKeys.size || promptPointerDown) return;
+    transitionUntil = 0;
+    if (promptDismissed || !next) {
+      promptIdle = true;
+      if (promptKDEReady)
+        void resizeKDEPrompt(profile, process.pid, prompt.id, prompt.getBounds(), false);
+      else prompt.hide();
+      pacePrompt();
+    } else if (view.control.events.some((e) => e.id === next.id && e.remainingMs > 1000))
+      retarget(next);
     return;
   }
   const next = automaticPrompts.next(view, false);
-  if (next) openDecision(next);
+  if (Date.now() < transitionUntil || pressedPromptKeys.size || promptPointerDown) return;
+  transitionUntil = 0;
+  if (next && view.control.events.some((e) => e.id === next.id && e.remainingMs > 1000))
+    openDecision(next);
 }
 const windows = new Set<BrowserWindow>();
 let backend: Backend;
@@ -315,6 +363,7 @@ function windowFor(isPrompt = false, id = '', generation = '', group?: string) {
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
+      focusOnNavigation: !isPrompt,
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
@@ -326,6 +375,29 @@ function windowFor(isPrompt = false, id = '', generation = '', group?: string) {
   });
   windows.add(w);
   if (isPrompt) {
+    // Dismiss into the already-mapped native shell. Mapping a new Wayland
+    // toplevel later would let KWin activate it before windowAdded fires.
+    w.on('close', (event) => {
+      if (quitting) return;
+      event.preventDefault();
+      const ref = promptRefs.get(w.webContents.id);
+      if (ref && !promptIdle) automaticPrompts.dismiss(ref);
+      promptDismissed = true;
+      pacePrompt();
+    });
+    promptDismissed = false;
+    promptReadyAt.set(w.webContents.id, Date.now() + TRANSITION_MS);
+    w.webContents.on('before-input-event', (event, input) => {
+      if (!['Enter', ' ', 'Escape'].includes(input.key)) return;
+      if (input.type === 'keyUp') {
+        pressedPromptKeys.delete(input.key);
+        if (transitionUntil) pacePrompt();
+      } else if (input.type === 'keyDown') {
+        if (input.isAutoRepeat || Date.now() < (promptReadyAt.get(w.webContents.id) || 0))
+          event.preventDefault();
+        pressedPromptKeys.add(input.key);
+      }
+    });
     w.setTitle(promptTitle(w.id));
     promptRefs.set(w.webContents.id, { id, generation, group });
     w.on('page-title-updated', (event) => event.preventDefault());
@@ -337,6 +409,12 @@ function windowFor(isPrompt = false, id = '', generation = '', group?: string) {
       if (ref && prompt === w && !promptAutoClosing) automaticPrompts.dismiss(ref);
       if (prompt === w) promptAutoClosing = false;
       promptRefs.delete(senderID);
+      promptReadyAt.delete(senderID);
+      promptLayouts.delete(senderID);
+      promptPlacement.delete(senderID);
+      pressedPromptKeys.clear();
+      promptPointerDown = false;
+      pacePrompt();
     });
   }
   w.setMenu(null);
@@ -359,7 +437,7 @@ function windowFor(isPrompt = false, id = '', generation = '', group?: string) {
     w.setBounds(bounds);
     // Install the native windowAdded hook before mapping. Wayland ignores global
     // setBounds; showing first causes a visible wrong-monitor flash.
-    void placeKDEPrompt(
+    const placement = placeKDEPrompt(
       profile,
       process.pid,
       w.id,
@@ -367,17 +445,19 @@ function windowFor(isPrompt = false, id = '', generation = '', group?: string) {
       () => !w.isDestroyed() && prompt === w,
       (installed) => {
         if (w.isDestroyed() || prompt !== w) return;
-        if (installed)
-          w.showInactive(); // compositor reveals/focuses once confirmed
-        else {
-          w.show();
-          w.focus();
+        promptKDEReady = installed;
+        if (installed) {
+          w.minimize(); // Initial minimized map prevents KWin automatic activation.
+        } else if (!promptIdle) {
+          w.showInactive();
         }
       },
+      id !== '__idle__',
     ).catch((error) => {
       console.info('FlowGate: prompt placement unavailable', String(error));
-      if (!w.isDestroyed()) w.show();
+      if (!w.isDestroyed() && !promptIdle) w.showInactive();
     });
+    promptPlacement.set(w.webContents.id, placement);
   });
   const refresh = () => {
     if (backend && !w.isDestroyed()) {
@@ -783,6 +863,14 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('decide', (e, value) => {
     trusted(e);
+    if (
+      promptRefs.has(e.sender.id) &&
+      (promptIdle ||
+        promptDismissed ||
+        transitionUntil ||
+        Date.now() < (promptReadyAt.get(e.sender.id) || 0))
+    )
+      throw Error('Permission presentation is transitioning');
     return backend.decide(boundDecision(value, promptRefs.get(e.sender.id)));
   });
   ipcMain.handle('prompt:open', (e, id) => {
@@ -796,11 +884,56 @@ app.whenReady().then(async () => {
       throw Error('Unknown request');
     openDecision({ id, generation: backend.view().control.generation });
   });
+  ipcMain.handle('prompt:layout', async (e, value) => {
+    trusted(e);
+    const w = BrowserWindow.fromWebContents(e.sender);
+    if (!w || w !== prompt || !promptRefs.has(e.sender.id)) throw Error('Not a permission window');
+    if (
+      !value ||
+      !Number.isFinite(value.height) ||
+      value.height < 0 ||
+      value.height > 100000 ||
+      typeof value.pointerDown !== 'boolean'
+    )
+      throw Error('Invalid permission layout');
+    if (promptIdle) return;
+    const released = promptPointerDown && !value.pointerDown;
+    promptPointerDown = value.pointerDown;
+    if (released && transitionUntil) pacePrompt();
+    const bounds = edgePosition(
+      screen.getPrimaryDisplay().workArea,
+      w.getBounds().width,
+      Math.max(460, Math.ceil(value.height)),
+    );
+    // Serialize native resizes after the startup handshake; no stale configure
+    // may restore compact geometry over a just-expanded Remember panel.
+    const ref = promptRefs.get(e.sender.id);
+    const prior =
+      promptLayouts.get(e.sender.id) || promptPlacement.get(e.sender.id) || Promise.resolve();
+    const resize = prior.then(async () => {
+      if (w.isDestroyed() || w !== prompt || promptRefs.get(e.sender.id) !== ref) return;
+      if (!promptIdle && w.getBounds().height !== bounds.height) {
+        w.setBounds(bounds);
+        await resizeKDEPrompt(profile, process.pid, w.id, bounds);
+      }
+    });
+    promptLayouts.set(e.sender.id, resize);
+    await resize;
+  });
   ipcMain.handle('prompt:dismiss', (e) => {
     trusted(e);
-    if (prompt && !prompt.isDestroyed() && prompt.webContents === e.sender) prompt.close();
+    if (prompt && !prompt.isDestroyed() && prompt.webContents === e.sender) {
+      const ref = promptRefs.get(e.sender.id);
+      if (ref) automaticPrompts.dismiss(ref);
+      promptDismissed = true;
+      pacePrompt();
+    }
   });
   main = windowFor();
+  // Warm the native shell during application startup; subsequent automatic
+  // requests only reveal it and never map or activate another toplevel.
+  promptIdle = true;
+  prompt = windowFor(true, '__idle__', '__idle__');
   main.on('hide', () => {
     for (const w of detached.values()) if (!w.isDestroyed()) w.hide();
   });

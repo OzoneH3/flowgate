@@ -467,8 +467,87 @@ const scopeLabels: Record<Scope, string> = {
   application: 'Remember · 1 hour',
   persistent: 'Remember · persistent',
 };
+let promptStableAt = performance.now() + 650;
+let pointerDown = false;
+let promptLayoutReady = false;
+let layoutFrame = 0;
+let lastPromptLayout = '';
+function measurePrompt() {
+  if (!promptID || layoutFrame) return;
+  layoutFrame = requestAnimationFrame(() => {
+    layoutFrame = 0;
+    const shell = document.querySelector<HTMLElement>('.prompt-shell');
+    const body = $('promptBody');
+    if (!shell || !body) return;
+    // Natural rendered content, independent of the constrained scrolling viewport.
+    const height =
+      shell.offsetHeight -
+      body.offsetHeight +
+      $('requestDetails').getBoundingClientRect().height +
+      16;
+    const signature = Math.ceil(height) + ':' + pointerDown;
+    if (signature === lastPromptLayout) return;
+    lastPromptLayout = signature;
+    void window.flowgate.promptLayout({ height, pointerDown }).then(() => {
+      if (!promptLayoutReady) {
+        promptLayoutReady = true;
+        promptStableAt = performance.now() + 650;
+        setTimeout(() => {
+          if (state) updateDecisions();
+        }, 670);
+      }
+    });
+  });
+}
 if (promptID) {
+  // Repeated keys and the second click of a double-click never activate a new card.
+  document.addEventListener(
+    'keydown',
+    (event) => {
+      if (
+        ['Enter', ' '].includes(event.key) &&
+        (event.repeat || performance.now() < promptStableAt)
+      ) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    },
+    true,
+  );
+  document.addEventListener(
+    'click',
+    (event) => {
+      if (event.detail > 1 || performance.now() < promptStableAt) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    },
+    true,
+  );
+  document.addEventListener(
+    'pointerdown',
+    () => {
+      pointerDown = true;
+      measurePrompt();
+    },
+    true,
+  );
+  for (const type of ['pointerup', 'pointercancel'])
+    document.addEventListener(
+      type,
+      () => {
+        pointerDown = false;
+        measurePrompt();
+      },
+      true,
+    );
   root.innerHTML = `<section class="prompt-shell"><header class="prompt-heading"><strong>FlowGate Blocker</strong><span id="promptPending">Connection permission</span><button id="closePrompt" aria-label="Dismiss permission window">×</button></header><div id="promptBody"><div id="requestDetails"></div></div><footer><span id="controlStatus"></span><button id="dismiss">Decide later</button></footer><div id="feedback" role="status" aria-live="polite"></div></section>`;
+  new ResizeObserver(measurePrompt).observe($('requestDetails'));
+  new ResizeObserver(measurePrompt).observe($('feedback'));
+  document.addEventListener('toggle', measurePrompt, true);
+  setTimeout(() => {
+    if (state) updateDecisions();
+  }, 670);
   $('dismiss').onclick = () => void window.flowgate.dismissPrompt();
   $('closePrompt').onclick = () => void window.flowgate.dismissPrompt();
   document.addEventListener('keydown', (event) => {
@@ -1697,7 +1776,7 @@ function renderRequests() {
         invalidateReview(0);
       };
       toggle.append(box, ' Remember');
-      controls.append(toggle);
+      container.append(toggle);
       container.append(controls);
       const panel = element('fieldset', '', 'remember-panel');
       panel.id = 'rememberPanel';
@@ -1828,10 +1907,7 @@ function renderRequests() {
     const result = element('p', e.attempt?.message || e.reason, 'request-result');
     result.id = 'requestResult';
     container.append(result);
-    if (promptID && !container.dataset.focused) {
-      container.focus({ preventScroll: true });
-      container.dataset.focused = 'true';
-    }
+    container.append(controls);
   }
   updateDecisions();
 }
@@ -1856,7 +1932,7 @@ function updateDecisions() {
   if ($('similarRequests'))
     $('similarRequests').textContent =
       group && group.count > 1
-        ? `${group.count} similar requests · Allow/Deny answers this one; Remember also settles the others its rule covers.`
+        ? `${group.count} similar requests · Allow/Deny answers this request.`
         : '';
   if ($('askSource') && e) $('askSource').textContent = askSource(e, state.control.rules);
   const remembering = rememberMode() && rememberOn;
@@ -1865,6 +1941,7 @@ function updateDecisions() {
     const review = decisionReviews[id as 'allow' | 'block'];
     if (b) {
       b.disabled =
+        (Boolean(promptID) && (!promptLayoutReady || performance.now() < promptStableAt)) ||
         !actionable(e) ||
         (needsDecisionReview() &&
           (reviewFor !== reviewKey() ||
@@ -1981,6 +2058,7 @@ function updateDecisions() {
     $('permissionTarget').textContent =
       `Application + peer/service · ${decisionZone === 'any' ? 'Any network' : zoneLabel(decisionZone)} · ${until.startsWith('0001-') ? 'persistent' : 'until ' + new Date(until).toLocaleTimeString()}`;
   }
+  measurePrompt();
   const expiry = document.querySelector('.expiry');
   if (expiry)
     expiry.textContent = e
