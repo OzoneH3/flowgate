@@ -27,6 +27,7 @@ type NetworkScope struct {
 	Revision       string `json:"revision"`
 	Source         string `json:"source"`
 	Reason         string `json:"reason"`
+	Basis          string `json:"basis,omitempty"` // automatic or custom (explicit prefix) for known automatic scopes
 	LegacyState    string `json:"legacy_state,omitempty"`
 	LegacyZone     string `json:"legacy_zone,omitempty"`
 	LegacyRevision string `json:"legacy_revision,omitempty"`

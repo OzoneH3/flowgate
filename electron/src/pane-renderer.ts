@@ -4,7 +4,7 @@ import { ActivityPolicy } from './activity-policy';
 import { TrafficGraph } from './graph';
 import { DISPLAY_UNITS } from './display-units';
 import type { PaneFrame, PolicyEntry } from './pane-model';
-import { zoneLabel } from './network-zones';
+import { scopeZoneText } from './connection-presentation';
 import { initiationPresentation } from './initiation';
 import { trafficDetails, sum } from './model';
 const kind = new URL(location.href).searchParams.get('pane') === 'info' ? 'info' : 'chart';
@@ -135,9 +135,7 @@ function consume(next: PaneFrame) {
         ['Ownership', r.socket.ownership],
         [
           'Network zone',
-          r.socket.network_scope?.state === 'known'
-            ? zoneLabel(r.socket.network_scope.zone)
-            : r.socket.network_scope?.reason || 'Classification unavailable',
+          scopeZoneText(r.socket.network_scope),
         ],
         ['Measurements', trafficDetails(r.socket.traffic)],
       );

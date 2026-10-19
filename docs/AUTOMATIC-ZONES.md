@@ -16,16 +16,24 @@ participates in an Allow/Deny decision.
    longest prefix. Equal conflicting prefixes are rejected. Protected loopback
    and link-local cannot be changed into Internet. The existing custom prefix
    lists remain intact; they are not an exhaustive list of Internet addresses.
-4. RFC1918, RFC6598 shared/CGNAT and IPv6 ULA peers are Local even when routed:
-   this includes Tailscale 100.64/10 and fd7a:115c:a1e0::/48 and private work-VPN
-   destinations. Neither their interface nor their scope implies permission.
-5. A globally reachable address on an active non-tunnel interface's assigned
+   Such a match is custom classification: scope `basis` is `custom` and the
+   reason starts “Custom classification”, while every other known scope reports
+   `basis: automatic`. Activity shows “· custom classification”.
+4. RFC1918 and IPv6 ULA peers are Local even when routed, including private
+   work-VPN destinations. Neither their interface nor their scope implies
+   permission.
+5. RFC6598 shared/CGNAT space (including Tailscale 100.64/10) and Tailscale's
+   IPv6 overlay fd7a:115c:a1e0::/48 follow the public-address rule below: Local
+   only on a directly connected non-tunnel LAN, otherwise Internet. This matches
+   NetLimiter's routed CGNAT result. To treat overlay peers as Local, add them as
+   explicit Local prefixes (rule 3), which is reported as custom.
+6. A globally reachable address on an active non-tunnel interface's assigned
    prefix is Local only with an agreeing connected route. Tunnel kinds and
    point-to-point interfaces cannot establish public-address LAN membership.
    A more-specific main-table VPN/gateway route instead yields Internet.
    Conflicting alternative policy tables yield unavailable scope for a public
    LAN candidate: remote-only scope cannot guess packet marks/source routing.
-6. Other globally reachable IPv4/IPv6 unicast peers are Internet, including
+7. Other globally reachable IPv4/IPv6 unicast peers are Internet, including
    public destinations routed through VPNs. No destination entry is required.
    Reserved, documentation and benchmark ranges are unavailable unless an
    explicit custom definition supplies membership. IANA's most-specific
@@ -128,10 +136,12 @@ Raw captures are under `.workspace/auto-zones-reference/`: `probe5-expand.png`,
 reference probes. No WinBoat rules, filter definitions or network settings were
 changed; probe processes self-exited.
 
-NetLimiter's observed CGNAT result differs from FlowGate's explicit non-public
-peer contract: FlowGate classifies CGNAT as Local to cover routed overlay peers,
-while still requiring permission. This difference is intentional and disclosed;
-VPN/IPv6 reference equivalence is not claimed for the Ethernet-only guest.
+FlowGate matches all four observations: routed RFC1918 and the connected
+gateway are Local; routed CGNAT and public peers are Internet. Tailscale's IPv6
+overlay /48 follows its IPv4 CGNAT counterpart. Other routed ULA peers stay Local
+by analogy with RFC1918; that IPv6 case, a CGNAT address on a directly connected
+Ethernet, and VPN topologies were not observable in the Ethernet-only guest, so
+no reference equivalence is claimed for them.
 
 ## Acceptance and deployment preparation
 
@@ -141,6 +151,8 @@ receiver suite (`scripts/process-rules-isolated.py --automatic-zones`) uses real
 IPv4/IPv6 TCP and UDP over a nested GRE tunnel named ppp0. Local-only and
 Internet-only rules prove delivery and non-delivery for routed private, Tailscale
 CGNAT/ULA, public LAN, public routed and public-address tunnel-subnet peers.
+Its expectations now place the GRE-routed CGNAT and Tailscale-ULA peers in
+Internet; that updated run requires root and is listed in the release notes.
 A live route change reclassifies a pending request without changing ID/deadline.
 Rules finish at zero; only fixture-owned resources are removed. This is a GRE
 fixture, not a live Tailscale/work-VPN client or host-protection run.

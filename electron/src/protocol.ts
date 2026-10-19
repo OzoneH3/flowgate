@@ -59,6 +59,8 @@ export interface SocketRow {
     revision: string;
     source: string;
     reason: string;
+    // automatic-peer-v1 only: custom = explicit configured prefix override.
+    basis?: 'automatic' | 'custom';
     legacy_state?: string; legacy_zone?: string; legacy_revision?: string;
   };
   ownership_category?: string;
@@ -726,6 +728,7 @@ export function parseReply(raw: unknown): Reply {
                   revision: string(n.revision),
                   source: string(n.source),
                   reason: string(n.reason),
+                  basis: n.basis === 'custom' || n.basis === 'automatic' ? n.basis : undefined,
                 };
               })()
             : undefined,

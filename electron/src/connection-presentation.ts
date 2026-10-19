@@ -1,4 +1,18 @@
 import type { RequestEvent, Scope, SocketRow } from './protocol';
+import { zoneLabel } from './network-zones';
+// Known zone with its classification basis; a custom prefix override is never
+// presented as if the automatic classifier had chosen it.
+export function scopeZoneText(scope: SocketRow['network_scope']) {
+  if (scope?.state !== 'known') return scope?.reason || 'Classification unavailable';
+  return (
+    zoneLabel(scope.zone) +
+    (scope.basis === 'custom'
+      ? ' · custom classification'
+      : scope.basis === 'automatic'
+        ? ' · automatic'
+        : ' · configured policy zone')
+  );
+}
 // Presentation only. Zone classification never changes the decision's permission scope.
 export function connectionPresentation(flow: RequestEvent['flow']) {
   const direction =
@@ -9,9 +23,8 @@ export function connectionPresentation(flow: RequestEvent['flow']) {
         : 'Unknown direction';
   const zone =
     flow.network_scope?.state === 'known'
-      ? flow.network_scope.zone === 'local'
-        ? 'Local Network'
-        : 'Internet'
+      ? zoneLabel(flow.network_scope.zone) +
+        (flow.network_scope.basis === 'custom' ? ' (custom)' : '')
       : 'Zone unavailable';
   return {
     direction,
@@ -55,5 +68,6 @@ export function parseConnectionZone(value: unknown): SocketRow['network_scope'] 
     revision: typeof n.revision === 'string' ? n.revision : '',
     source: typeof n.source === 'string' ? n.source : '',
     reason: typeof n.reason === 'string' ? n.reason : '',
+    basis: n.basis === 'custom' || n.basis === 'automatic' ? n.basis : undefined,
   };
 }

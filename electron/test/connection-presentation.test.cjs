@@ -4,6 +4,7 @@ const {
   connectionPresentation,
   permissionTarget,
   parseConnectionZone,
+  scopeZoneText,
 } = require('../dist/test/connection-presentation.cjs');
 const { parseReply } = require('../dist/test/protocol.cjs');
 test('direction is evidence, independent of endpoints and byte flow', () => {
@@ -68,4 +69,19 @@ test('pending event parser preserves authoritative classification, no guessed zo
   assert.equal(event.flow.network_scope.state, 'unavailable');
   assert.equal(event.flow.network_scope.zone, undefined);
   assert.equal(event.scope_previews.once, 'Backend text');
+});
+test('custom prefix classification is shown separately from automatic scope', () => {
+  const scope = (basis, zone = 'local') =>
+    parseConnectionZone({ state: 'known', zone, revision: 'r', source: 'automatic-peer-v1', reason: 'x', basis });
+  assert.equal(scopeZoneText(scope('custom')), 'Local Network · custom classification');
+  assert.equal(scopeZoneText(scope('automatic', 'internet')), 'Internet · automatic');
+  assert.equal(scopeZoneText(scope(undefined)), 'Local Network · configured policy zone');
+  assert.equal(scope('bogus').basis, undefined);
+  assert.equal(
+    scopeZoneText(parseConnectionZone({ state: 'unavailable', revision: 'r', source: 's', reason: 'no route' })),
+    'no route',
+  );
+  const flow = { direction: 'outgoing', network_scope: scope('custom') };
+  assert.equal(connectionPresentation(flow).zone, 'Local Network (custom)');
+  assert.equal(connectionPresentation({ ...flow, network_scope: scope('automatic') }).zone, 'Local Network');
 });

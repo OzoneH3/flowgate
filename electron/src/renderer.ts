@@ -20,7 +20,7 @@ import {
 } from './decision-remember';
 import { askSource, awaiting, groupKey, requestGroups } from './automatic-prompts';
 import { applicationHeading } from './application-heading';
-import { connectionPresentation, permissionTarget } from './connection-presentation';
+import { connectionPresentation, permissionTarget, scopeZoneText } from './connection-presentation';
 import { ZONE_CAPABILITY, zoneLabel } from './network-zones';
 import type { Presentation, PaneFrame } from './pane-model';
 import { DISPLAY_UNITS, displayAmount, isDisplayUnit, type DisplayUnit } from './display-units';
@@ -1509,9 +1509,7 @@ function renderInfo() {
       ['Evidence', s.evidence],
       [
         'Network zone',
-        s.network_scope?.state === 'known'
-          ? zoneLabel(s.network_scope.zone) + ' · configured policy zone'
-          : s.network_scope?.reason || 'Classification unavailable',
+        scopeZoneText(s.network_scope),
       ],
       ['Measurement', trafficDetails(s.traffic)],
       ['Socket identity', `${s.socket.netns} · ${s.socket.cookie}`],

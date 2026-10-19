@@ -18,11 +18,17 @@ const AutomaticZoneModel = "automatic-peer-v1"
 var registryJSON []byte
 
 type registryRecord struct {
-	Prefix string `json:"prefix"`
-	Name   string `json:"name"`
-	Global bool   `json:"global_reachable"`
-	Local  bool   `json:"local"`
+	Prefix   string `json:"prefix"`
+	Name     string `json:"name"`
+	Global   bool   `json:"global_reachable"`
+	Local    bool   `json:"local"`
+	Internet bool   `json:"internet"`
 }
+
+// overlayPrefixes are not IANA special blocks but carry a vendor overlay whose
+// IPv4 side is RFC6598 shared space. They follow that Internet classification
+// so one overlay peer cannot be Local on IPv6 and Internet on IPv4.
+var overlayPrefixes = []struct{ Prefix, Name string }{{"fd7a:115c:a1e0::/48", "Tailscale IPv6 overlay"}}
 
 var addressRegistry = func() struct {
 	Version string           `json:"version"`
@@ -45,8 +51,8 @@ func AutomaticNetworkZones(legacy NetworkZones, s NetworkSnapshot) NetworkZones 
 	z.RegistryVersion = addressRegistry.Version
 	z.NetworkRevision = s.Revision
 	z.NetworkState = s.State
-	z.Reason = "Automatic peer scope: IANA private/shared/ULA and local scopes; directly connected non-tunnel LAN; remaining globally reachable unicast Internet. Explicit prefixes override by longest match. Local is not trusted and grants no permission. No geolocation or connectivity claim."
-	b, _ := json.Marshal([]any{z.Model, legacy.Revision, z.RegistryVersion, s.Revision})
+	z.Reason = "Automatic peer scope: IANA private-use/ULA and local scopes; directly connected non-tunnel LAN; shared/CGNAT and overlay peers plus remaining globally reachable unicast Internet. Explicit prefixes are custom classification and override by longest match. Local is not trusted and grants no permission. No geolocation or connectivity claim."
+	b, _ := json.Marshal([]any{z.Model, legacy.Revision, z.RegistryVersion, overlayPrefixes, s.Revision})
 	h := sha256.Sum256(b)
 	z.Revision = hex.EncodeToString(h[:])
 	return z
@@ -96,6 +102,7 @@ func (z NetworkZones) classifyAutomatic(remote netip.Addr) NetworkScope {
 	known := func(zone, reason string) NetworkScope {
 		out.State = "known"
 		out.Zone = zone
+		out.Basis = "automatic"
 		out.Reason = reason + "; classification grants no permission"
 		return out
 	}
@@ -119,7 +126,20 @@ func (z NetworkZones) classifyAutomatic(remote netip.Addr) NetworkScope {
 	// Existing configured prefixes, including protected loopback/link-local builtins,
 	// take priority over automatic inference. New destinations need no manual entry.
 	if legacy.State == "known" {
-		return known(legacy.Zone, "Explicit override: "+legacy.Reason)
+		if remote.IsLoopback() || remote.IsLinkLocalUnicast() {
+			return known(legacy.Zone, legacy.Reason)
+		}
+		v := known(legacy.Zone, "Custom classification (explicit override): "+legacy.Reason)
+		v.Basis = "custom"
+		return v
+	}
+	// Shared/CGNAT and overlay peers use the public-address topology rule below:
+	// Local only on a directly connected non-tunnel LAN, otherwise Internet.
+	remoteKind, overlay := "Globally reachable unicast address", false
+	for _, o := range overlayPrefixes {
+		if netip.MustParsePrefix(o.Prefix).Contains(remote) {
+			remoteKind, overlay = o.Name+" "+o.Prefix+" (same as its IPv4 shared-space peers; a custom Local prefix opts in)", true
+		}
 	}
 	var record *registryRecord
 	bits := -1
@@ -131,14 +151,16 @@ func (z NetworkZones) classifyAutomatic(remote netip.Addr) NetworkScope {
 			record = r
 		}
 	}
-	if record != nil && record.Local {
-		return known("local", "IANA "+record.Name+" "+record.Prefix+" (private/shared scope, including routed VPN peers)")
-	}
-	if record != nil && !record.Global {
+	if overlay {
+		// The overlay /48 lies inside ULA fc00::/7, which would otherwise be Local.
+	} else if record != nil && record.Local {
+		return known("local", "IANA "+record.Name+" "+record.Prefix+" (private scope, including routed VPN peers)")
+	} else if record != nil && record.Internet {
+		remoteKind = "IANA " + record.Name + " " + record.Prefix + " (routed shared/CGNAT peers are Internet, as in NetLimiter; a custom Local prefix opts in)"
+	} else if record != nil && !record.Global {
 		out.Reason = "IANA " + record.Name + " " + record.Prefix + " is not globally reachable; not inferred to be a trusted LAN"
 		return out
-	}
-	if remote.Is6() && record == nil && !netip.MustParsePrefix("2000::/3").Contains(remote) {
+	} else if remote.Is6() && record == nil && !netip.MustParsePrefix("2000::/3").Contains(remote) {
 		out.Reason = "Unallocated/reserved IPv6 address space"
 		return out
 	}
@@ -187,7 +209,7 @@ func (z NetworkZones) classifyAutomatic(remote netip.Addr) NetworkScope {
 		}
 		return known("local", fmt.Sprintf("Directly connected non-tunnel LAN prefix %s on %s", p.Masked(), l.Name)+suffix)
 	}
-	return known("internet", "Globally reachable unicast address; tunnel/default-route use does not make it Local"+suffix)
+	return known("internet", remoteKind+"; tunnel/default-route use does not make it Local"+suffix)
 }
 func (z NetworkZones) ClassifyFlow(f Flow) NetworkScope {
 	if z.Model == AutomaticZoneModel && z.Network != nil && f.NetNS != "" && f.NetNS != z.Network.NetNS {
@@ -201,6 +223,9 @@ func (z NetworkZones) Boundaries() []netip.Prefix {
 	if z.Model == AutomaticZoneModel {
 		for _, r := range addressRegistry.Records {
 			texts = append(texts, r.Prefix)
+		}
+		for _, o := range overlayPrefixes {
+			texts = append(texts, o.Prefix)
 		}
 		texts = append(texts, "224.0.0.0/24", "239.0.0.0/8")
 		for flags := 0; flags < 16; flags++ {
