@@ -19,6 +19,8 @@ type RememberFields struct {
 	Address  bool `json:"address"`
 	Port     bool `json:"port"`
 	Protocol bool `json:"protocol"`
+	// Process binds the rule to the requesting process instance (session-bound).
+	Process bool `json:"process"`
 }
 
 // RememberOptions are bound to the decision preview token.
@@ -29,7 +31,7 @@ type RememberOptions struct {
 
 func (o RememberOptions) normalized(scope string) (RememberOptions, error) {
 	if o.Fields == nil {
-		o.Fields = &RememberFields{true, true, true}
+		o.Fields = &RememberFields{Address: true, Port: true, Protocol: true}
 	}
 	if scope == "persistent" && o.DurationSeconds != 0 {
 		return o, mutationError("invalid_request", "Persistent remember has no duration")
@@ -175,6 +177,17 @@ func (e *Engine) PreviewDecision(generation, id, action, scope, zone, revision s
 	}
 	if !o.Fields.Protocol {
 		rule.Filter.Protocol = "*"
+	}
+	if o.Fields.Process {
+		if zone != "any" {
+			return DecisionPreview{}, mutationError("invalid_request", "Process remember has no zone choice")
+		}
+		if !a.VisibilityComplete || len(a.Owners) != 1 {
+			return DecisionPreview{}, mutationError("unsupported_process", "Process remember needs one verified owning process")
+		}
+		if _, err := e.attachProcessTarget(a.Owners[0], &rule); err != nil {
+			return DecisionPreview{}, err
+		}
 	}
 	if zone != "any" {
 		rule.Schema = 4

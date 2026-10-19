@@ -109,7 +109,13 @@ func (e *Engine) settlePendingLocked(reason string) {
 		}
 		a := e.Resolve(v.Flow)
 		if a.Application == nil || a.Fingerprint != v.Attribution.Fingerprint {
-			continue // identity is rechecked at decision/retention time
+			// The attempt ended (socket gone) or its identity changed: it can no
+			// longer be decided, so it must not linger as an actionable prompt.
+			// Same disposition as the decision path; nothing is approved.
+			v.State = "expired"
+			v.Reason = "connection attempt ended or identity changed before policy re-evaluation"
+			e.recordFinal(v, "block", "identity_changed", "", v.Reason+"; held packets drop", nil, nil, "deferred", "")
+			continue
 		}
 		action, rule, matches := e.evaluateLocked(e.rules, v.Flow, a, now)
 		if action != "allow" && action != "block" {

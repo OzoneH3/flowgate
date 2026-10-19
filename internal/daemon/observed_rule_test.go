@@ -74,18 +74,22 @@ func TestObservedCreationAtomicAPIAndRestart(t *testing.T) {
 	if p.Enforcement.Covered || p.Enforcement.State != "stopped" || p.Rule.Version != 1 || p.Rule.ID == "" || p.Rule.Filter.LocalPort != 8080 || p.Rule.Filter.RemotePort != 0 {
 		t.Fatal(p)
 	}
-	// No pending event is needed, and creation never consumes or releases one.
+	// No pending event is needed, and creation never approves or releases an
+	// unrelated one. (Requests are re-evaluated; one whose identity cannot be
+	// resolved is finalized as ended, never allowed.)
 	a.e.mu.Lock()
-	a.e.events["unrelated"] = &Event{ID: "pending", State: "awaiting-decision", Deadline: clock.Add(time.Minute)}
-	before, _ := json.Marshal(a.e.events)
+	unrelated := &Event{ID: "pending", State: "awaiting-decision", Deadline: clock.Add(time.Minute)}
+	a.e.events["unrelated"] = unrelated
 	a.e.mu.Unlock()
 	saved := callResponse(a.path, saveRequest(a, p, d))
 	if saved.Error != "" || saved.SavedRule == nil || !reflect.DeepEqual(*saved.SavedRule, p.Rule) {
 		t.Fatalf("save: %+v", saved)
 	}
-	after, _ := json.Marshal(a.e.events)
-	if string(before) != string(after) {
-		t.Fatal("creation changed pending decisions")
+	a.e.mu.Lock()
+	state := unrelated.State
+	a.e.mu.Unlock()
+	if state == "allowed" {
+		t.Fatal("creation approved an unrelated pending request")
 	}
 	retry := callResponse(a.path, saveRequest(a, p, d))
 	if retry.Error != "" || !retry.Replayed || retry.SavedRule.ID != p.Rule.ID || len(a.e.Rules(uint32(os.Getuid()), false)) != 1 {

@@ -4,10 +4,11 @@ Run through scripts/lab.sh. Never opens host endpoints or deployed executable.
 """
 import argparse,json,os,pathlib,socket,subprocess,time,sys,shutil
 ROOT=pathlib.Path(__file__).resolve().parents[1]
-p=argparse.ArgumentParser();p.add_argument('--binary',required=True);p.add_argument('--native',required=True);p.add_argument('--run',required=True);p.add_argument('--hold',action='store_true');p.add_argument('--any-protocol',action='store_true');p.add_argument('--zones',action='store_true');p.add_argument('--zones-unknown',action='store_true');p.add_argument('--remember-zones',action='store_true');p.add_argument('--hold-enforcement',action='store_true',help='with --hold, bounded private incoming+outgoing interception for prompt acceptance');p.add_argument('--continuous',action='store_true',help='held daily lifecycle candidate; monitoring initially, UI owns Start/Stop');p.add_argument('--other',action='store_true',help='held third executable identity');a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--binary',required=True);p.add_argument('--native',required=True);p.add_argument('--run',required=True);p.add_argument('--hold',action='store_true');p.add_argument('--any-protocol',action='store_true');p.add_argument('--zones',action='store_true');p.add_argument('--zones-unknown',action='store_true');p.add_argument('--remember-zones',action='store_true');p.add_argument('--hold-enforcement',action='store_true',help='with --hold, bounded private incoming+outgoing interception for prompt acceptance');p.add_argument('--continuous',action='store_true',help='held daily lifecycle candidate; monitoring initially, UI owns Start/Stop');p.add_argument('--other',action='store_true',help='held third executable identity');p.add_argument('--app-policy',action='store_true',help='NetLimiter application Allow/Deny receiver acceptance');a=p.parse_args()
 if a.continuous and not a.hold:p.error('--continuous requires --hold')
 if a.hold_enforcement and not a.hold:p.error('--hold-enforcement requires --hold')
-if a.zones_unknown or a.remember_zones:a.zones=True
+if a.zones_unknown or a.remember_zones or a.app_policy:a.zones=True
+if a.app_policy:a.other=True
 assert os.environ['FLOWGATE_PARENT_NETNS']!=os.readlink('/proc/self/ns/net')
 RUN=pathlib.Path(a.run).resolve();assert RUN.is_relative_to(ROOT/'.workspace');RUN.mkdir(mode=0o700,parents=True)
 for d in ['api','data','state']:(RUN/d).mkdir(mode=0o711 if d=='api' and a.continuous else 0o700)
@@ -72,7 +73,7 @@ def outgoing(name,proto,v6,allowed):
 def start(zone_flip=False):
  global backend
  with (RUN/'daemon.log').open('a')as f:
-  args=[BIN,'serve','--socket',API,'--database',str(RUN/'data/rules.db'),'--uid','0','--administrator']if a.hold and not a.hold_enforcement else[BIN,'host-start','--state',str(RUN/'state'),'--socket',API,'--database',str(RUN/'data/rules.db'),'--uid','0','--administrator','--profile','both','--duration','300s','--timeout','60s'if a.hold_enforcement else'4s']
+  args=[BIN,'serve','--socket',API,'--database',str(RUN/'data/rules.db'),'--uid','0','--administrator']if a.hold and not a.hold_enforcement else[BIN,'host-start','--state',str(RUN/'state'),'--socket',API,'--database',str(RUN/'data/rules.db'),'--uid','0','--administrator','--profile','both','--duration','300s','--timeout','60s'if a.hold_enforcement else'20s'if a.app_policy else'4s']
   if a.continuous:args=[BIN,'serve','--socket',API,'--database',str(RUN/'data/rules.db'),'--uid','0','--administrator','--allow-protection','--protection-state',str(RUN/'data/desired.json'),'--allow-evaluation','--evaluation-state',str(RUN/'state'),'--decision-timeout','12s']
   if a.zones:args+=['--zone-local','fd79::/64'if zone_flip else'10.79.0.0/24','--zone-internet','10.79.0.0/24'if zone_flip else'fd79::/64']
   backend=subprocess.Popen(args,stdout=f,stderr=f)
@@ -97,7 +98,7 @@ try:
  for name,port in [('alpha',45000),('beta',45010)]+([('other',45020)]if a.other else []):
   executable=NATIVE
   if name=='other':executable=str(RUN/'native-other');shutil.copy2(NATIVE,executable)
-  children[name]=subprocess.Popen([executable,str(port)],env=dict(os.environ,FLOWGATE_FIXTURE_TIMEOUT_SECONDS='60'if a.hold_enforcement or a.continuous else'2'),stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=(RUN/(name+'.log')).open('w'),text=True);infos[name]=json.loads(children[name].stdout.readline())
+  children[name]=subprocess.Popen([executable,str(port)],env=dict(os.environ,FLOWGATE_FIXTURE_TIMEOUT_SECONDS='60'if a.hold_enforcement or a.continuous else'10'if a.app_policy else'2'),stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=(RUN/(name+'.log')).open('w'),text=True);infos[name]=json.loads(children[name].stdout.readline())
  initial=start();generation=initial['generation'];assert 'process-instance-rules-v1'in initial['capabilities']
  ta,tb=target('alpha'),target('beta')
  if a.hold:
@@ -113,7 +114,7 @@ try:
     for item in q['items']:
      n=item.get('name','alpha');proto=item.get('protocol','udp');v6=item.get('v6',False)
      if item['op']=='incoming':r=remote(proto,port=infos[n]['ports'][proto+('6'if v6 else'4')],v6=v6)
-     elif item['op']=='outgoing':r=ask(children[n],'send',protocol=proto,v6=v6)
+     elif item['op']=='outgoing':r=ask(children[n],'send',protocol=proto,v6=v6,**{k:item[k] for k in('host','port') if k in item})
      else:raise ValueError('batch accepts incoming/outgoing only')
      results.append(r)
     result={'started':results}
@@ -121,11 +122,16 @@ try:
    elif op=='exec':children[name].stdin.write('{"op":"exec"}\n');children[name].stdin.flush();result={'exec':name}
    elif op=='incoming':
     proto=q.get('protocol','udp');v6=q.get('v6',False);port=infos[name]['ports'][proto+('6'if v6 else'4')];result=remote(proto,port=port,v6=v6)
-   elif op=='outgoing':result=ask(children[name],'send',protocol=q.get('protocol','udp'),v6=q.get('v6',False))
+   elif op=='outgoing':result=ask(children[name],'send',protocol=q.get('protocol','udp'),v6=q.get('v6',False),**{k:q[k] for k in('host','port') if k in q})
    elif op=='peer-counts':
     f=RUN/'peer-received.log';result={'lines':f.read_text().splitlines()if f.exists()else[]}
    else:result=ask(children[name],op)
    (RUN/'command-result.json').write_text(json.dumps(result))
+ elif a.app_policy:
+  from app_policy_acceptance import check
+  check(globals())
+  stop();assert 'flowgate_host'not in cmd('nft','list','tables')and'unrelated_fixture'in cmd('nft','list','tables')
+  log('PASS owned-only cleanup; unrelated nft table preserved; no host changes')
  elif a.remember_zones:
   from remember_zone_acceptance import check
   check(globals())

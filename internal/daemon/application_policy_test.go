@@ -165,3 +165,52 @@ func TestRememberFieldsWidenOnlyChosenProperties(t *testing.T) {
 		t.Fatal("out-of-range duration accepted")
 	}
 }
+
+// A waiting request whose attempt ended (identity gone) is finalized at
+// re-evaluation instead of lingering as an undecidable prompt.
+func TestPolicyChangeExpiresEndedAttempts(t *testing.T) {
+	e, f, a, _ := fixture()
+	e.Timeout = time.Minute
+	v := e.Observe(f, "udp")
+	a.Fingerprint = "socket closed and reused"
+	if err := e.SetRules(nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, x := range e.List(1000, false) {
+		if x.ID == v.ID && x.State == "awaiting-decision" {
+			t.Fatal("ended attempt still actionable after policy change")
+		}
+	}
+}
+
+// Remember "Process" (NetLimiter dialog option) binds the remembered rule to the
+// requesting instance; refused without one verified owner or with a zone.
+func TestRememberProcessBindsRequestingInstance(t *testing.T) {
+	e, f, a, _ := fixture()
+	e.Timeout = time.Minute
+	e.SaveRules = func([]policy.Rule) error { return nil }
+	v := e.Observe(f, "udp")
+	opts := RememberOptions{Fields: &RememberFields{Process: true}}
+	if _, err := e.PreviewDecision(e.Generation, v.ID, "allow", "persistent", "any", e.Zones.Revision, 1000, false, opts); err == nil {
+		t.Fatal("process remember without a verified single owner accepted")
+	}
+	self, err := identity.Inspect(os.Getpid())
+	if err != nil {
+		t.Skip("own process identity unavailable:", err)
+	}
+	a.VisibilityComplete, a.Owners = true, []identity.Process{self}
+	a.Application = &self.Application
+	self.UID = 1000
+	a.Owners[0].UID = 1000
+	v2 := e.Observe(f, "udp")
+	p, err := e.PreviewDecision(e.Generation, v2.ID, "allow", "persistent", "any", e.Zones.Revision, 1000, false, opts)
+	if err != nil {
+		t.Skip("process binding unsupported in this environment:", err)
+	}
+	if p.Rule.Filter.Process.IsZero() || p.Rule.Filter.Process.PID != os.Getpid() || p.Rule.Filter.RemoteAddress != "*" {
+		t.Fatalf("process remember not bound to the requesting instance: %+v", p.Rule.Filter)
+	}
+	if _, err := e.PreviewDecision(e.Generation, v2.ID, "allow", "persistent", "local", e.Zones.Revision, 1000, false, opts); err == nil {
+		t.Fatal("process remember with zone accepted")
+	}
+}
