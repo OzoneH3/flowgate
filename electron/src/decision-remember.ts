@@ -1,5 +1,7 @@
 import { parseConnectionZone } from './connection-presentation';
-import { parseRule, type Decision, type RequestEvent, type Rule } from './protocol';
+import { canManageRules, parseRule, type ClientState, type Decision, type ObservedSource, type RequestEvent, type Rule } from './protocol';
+import { authoritativePolicy } from './policy';
+import type { Row } from './model';
 export const REMEMBER_ZONE_CAPABILITY = 'decision-zone-remember-v1';
 // NetLimiter 5.3.28 Remember: application always; protocol, process, remote
 // address and remote (incoming: local) port optional; optional deletion time.
@@ -121,7 +123,8 @@ export function terminalReviewFailure(code: string, message: string): DecisionRe
     : undefined;
 }
 export function reviewFailureOf(event: RequestEvent | undefined): DecisionReviewFailure | undefined {
-  return (event as (RequestEvent & { reviewFailure?: DecisionReviewFailure }) | undefined)?.reviewFailure;
+  const local = (event as (RequestEvent & { reviewFailure?: DecisionReviewFailure }) | undefined)?.reviewFailure;
+  return local ?? (event?.revalidation ? terminalReviewFailure(event.revalidation.code, event.revalidation.reason) : undefined);
 }
 export function reviewFailureSummary(failure: DecisionReviewFailure) {
   return ['connection_ended', 'request_ended'].includes(failure.code)
@@ -131,6 +134,25 @@ export function reviewFailureSummary(failure: DecisionReviewFailure) {
       : failure.code === 'stale_decision'
         ? 'Request no longer pending. No decision was submitted.'
         : 'This request can no longer be verified. No decision was submitted.';
+}
+// A new Activity observation is only a candidate for the existing authoritative
+// observed-rule preview. No PID, path or displayed application name grants authority.
+export function freshApplicationRuleSource(state: ClientState, original: RequestEvent): ObservedSource | undefined {
+  const c = state.control, activity = state.observation.activity, app = original.attribution.application;
+  const uid = original.remembered_filter?.uid;
+  if (!canManageRules(c) || !c.capabilities?.includes('observed-rule-create-v1') ||
+      !app?.key || !app.revision || !Number.isSafeInteger(uid) || !activity ||
+      !['incoming', 'outgoing'].includes(original.flow.direction)) return;
+  for (const socket of activity.rows) {
+    if (socket.owners.length !== 1 || socket.ownership_category !== 'visible-holder') continue;
+    const process = activity.processes[socket.owners[0]];
+    if (!process || process.uid !== uid || process.application.key !== app.key ||
+        process.application.revision !== app.revision || process.application.executable !== app.executable) continue;
+    const association = authoritativePolicy({ kind: 'socket', socket, process } as Row, state);
+    if (!association.application) continue;
+    return { generation: c.generation, row_id: socket.id, process_id: process.id,
+      direction: original.flow.direction as 'incoming' | 'outgoing', target_scope: 'application' };
+  }
 }
 export interface DecisionPreview {
   token: string;

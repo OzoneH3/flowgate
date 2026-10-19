@@ -111,7 +111,7 @@ async function setup(
       if (q.operation === 'decision-preview') {
         previews++;
         if (previewError) {
-          s.end(JSON.stringify({ ...r, error_code: previewError, error: 'Exact revalidation refusal' }) + '\n');
+          s.end(JSON.stringify({ ...r, error_code: Array.isArray(previewError) ? previewError[Math.min(previews-1, previewError.length-1)] : previewError, error: 'Exact revalidation refusal' }) + '\n');
           return;
         }
         const rule = {
@@ -489,4 +489,48 @@ test('review lifecycle wording never calls an unknown fingerprint mismatch an ex
   assert.match(reviewFailureSummary(terminalReviewFailure('connection_ended', 'Socket closed')), /Connection ended/);
   assert.match(reviewFailureSummary(terminalReviewFailure('identity_changed', 'Mismatch')), /can no longer be verified/);
   assert.equal(terminalReviewFailure('zone_conflict', 'Re-review'), undefined);
+});
+
+test('future application source uses a fresh sibling observation, never the old PID or display label', () => {
+  const { freshApplicationRuleSource } = require('../dist/test/decision-remember.cjs');
+  const now = new Date().toISOString();
+  const app = { key: 'app', revision: 'r', executable: '/test', name: 'original' };
+  const original = {
+    id: 'old', state: 'expired', flow: { direction: 'outgoing' },
+    attribution: { application: app, owners: [{ pid: 10, start_ticks: 'old' }] },
+    remembered_filter: { uid: 1000 },
+  };
+  const p = { id: '20:new', pid: 20, uid: 1000, application: { ...app, name: 'friendly' } };
+  const socket = { id: 'new-socket', owners: [p.id], ownership_category: 'visible-holder' };
+  const state = {
+    observation: { connected: true, generation: 'g', activity: { sequence: 1, collected: now, rows: [socket], processes: { [p.id]: p } } },
+    control: {
+      connected: true, readOnly: false, generation: 'g', mode: 'daemon-monitor', serverNow: Date.parse(now),
+      capabilities: ['explicit-administrator-v1', 'observed-rule-create-v1'],
+      permissions: { role: 'administrator', can_manage_rules: true },
+      policy: {
+        snapshot: { generation: 'g', valid_until: new Date(Date.now()+30000).toISOString() },
+        activity_available: true, activity_sequence: '1', activity_collected: now,
+        applications: [{ ref: 'a', identity: { key: 'app', revision: 'r', uid: 1000 }, process_ids: [p.id] }],
+        rows: [{ row_id: socket.id, status: 'observed_native', application_ref: 'a' }],
+      },
+    },
+  };
+  assert.deepEqual(freshApplicationRuleSource(state, original), {
+    generation: 'g', row_id: 'new-socket', process_id: '20:new', direction: 'outgoing', target_scope: 'application',
+  });
+  p.application = { ...app, revision: 'replacement' };
+  assert.equal(freshApplicationRuleSource(state, original), undefined);
+  p.application = { ...app }; p.uid = 1001;
+  assert.equal(freshApplicationRuleSource(state, original), undefined);
+  p.uid = 1000; socket.owners.push('shared');
+  assert.equal(freshApplicationRuleSource(state, original), undefined);
+  socket.owners.pop(); state.control.policy.snapshot.generation = 'other';
+  assert.equal(freshApplicationRuleSource(state, original), undefined);
+});
+
+test('paired previews retain the precise closure cause instead of a generic subsequent stale reply', async (t) => {
+  const { b, d } = await setup(t, { previewError: ['connection_ended', 'stale_decision'] });
+  await Promise.allSettled([b.previewDecision(d), b.previewDecision({ ...d, action: 'block' })]);
+  assert.equal(b.view().control.events[0].reviewFailure.code, 'connection_ended');
 });

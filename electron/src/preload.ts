@@ -17,6 +17,12 @@ const api: Bridge = {
     ipcRenderer.on('pane:rule-open', listener);
     return () => ipcRenderer.removeListener('pane:rule-open', listener);
   },
+  openFutureApplicationRule: (value) => ipcRenderer.invoke('request:future-application', value),
+  onFutureApplicationRule: (fn) => {
+    const listener = (_e: unknown, source: import('./protocol').ObservedSource) => fn(source);
+    ipcRenderer.on('request:future-application-open', listener);
+    return () => ipcRenderer.removeListener('request:future-application-open', listener);
+  },
   ruleContext: () => ipcRenderer.invoke('rule:context'),
   applicationMetadata: (keys: unknown) => ipcRenderer.invoke('application:metadata', keys),
   applicationIcons: (keys) => ipcRenderer.invoke('application:icons', keys),

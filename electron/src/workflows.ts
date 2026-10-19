@@ -33,8 +33,13 @@ export interface EditorOptions {
   protocol?: string;
   expiry?: 'hour' | 'permanent';
   applicationScope?: boolean;
+  futureOnly?: boolean;
 }
 let previewNeedsRefresh = false;
+let futureOnlyDraft = false;
+const resultMessage = (result: { phase: string; message: string }) => result.phase === 'acknowledged' && futureOnlyDraft
+  ? result.message + ' Rule saved for future matching connections. The original connection was not allowed.'
+  : result.message;
 let previewExpires = 0,
   reconcileReceipt = '';
 let showTab: (s: string) => void = () => {};
@@ -110,6 +115,7 @@ export async function openRule(source: RuleSource, options: EditorOptions = {}) 
   }
   try {
     draft = await window.flowgate.ruleDraft(source);
+    futureOnlyDraft = !!options.futureOnly;
     editorSource = source;
     stayInActivity = !!options.activity;
     $('ruleEditor').classList.toggle('quick-editor', !!options.quick);
@@ -189,7 +195,7 @@ export async function openRule(source: RuleSource, options: EditorOptions = {}) 
     if (options.action) $<HTMLSelectElement>('editAction').value = options.action;
     if (options.disabled !== undefined)
       $<HTMLInputElement>('editEnabled').checked = !options.disabled;
-    if (draft.observed && options.protocol && ['tcp', 'udp'].includes(options.protocol))
+    if (draft.observed && options.protocol && ['tcp', 'udp', '*'].includes(options.protocol))
       $<HTMLSelectElement>('editProtocol').value = options.protocol;
     if (options.expiry) $<HTMLSelectElement>('editExpiry').value = options.expiry;
     if (draft.observed && options.applicationScope) {
@@ -217,6 +223,11 @@ export async function openRule(source: RuleSource, options: EditorOptions = {}) 
           ? 'Observed identity; Preview must verify the live process. Choose explicit scope before reviewing.'
           : 'Fields are validated by Go. Existing identity and absolute expiry are preserved.',
     );
+    if (options.futureOnly) {
+      $('editorMode').textContent = 'Future application rule';
+      $('scopeSummary').textContent = 'Application · all instances · future matching connections only. The ended connection is not approved. Preview independently verifies the current application identity.';
+      editorMessage('Separate stored-rule workflow. No decision is sent for the original connection. Review the explicit scope and lifetime, then preview/save.');
+    }
     $('editAction').focus();
   } catch (e) {
     status(String(e));
@@ -420,7 +431,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
     updateButtons();
     try {
       const result = await window.flowgate.ruleSave(r);
-      editorMessage(result.message);
+      editorMessage(resultMessage(result));
       if (result.phase === 'acknowledged') {
         if (result.rule) {
           selected = result.rule.id;
@@ -434,7 +445,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
         panel.hidden = true;
         $('resumeEditor').hidden = true;
         draft = undefined;
-        status(result.message);
+        status(resultMessage(result));
       }
       if (result.phase === 'unknown') {
         unresolved = true;
@@ -453,7 +464,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
     updateButtons();
     try {
       const result = await window.flowgate.ruleReconcile(reconcileReceipt);
-      editorMessage(result.message);
+      editorMessage(resultMessage(result));
       if (result.phase === 'acknowledged' && result.rule) {
         selected = result.rule.id;
         draft = undefined;
@@ -465,7 +476,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
         else
           window.dispatchEvent(new CustomEvent('activity-rule-saved', { detail: result.rule.id }));
         selectRule();
-        status(result.message);
+        status(resultMessage(result));
       }
     } catch (e) {
       editorMessage(String(e));

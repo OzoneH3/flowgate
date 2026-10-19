@@ -116,6 +116,10 @@ export interface Activity {
   processes: Record<string, Process>;
 }
 export interface RequestEvent {
+  revalidation?: {
+    code: string; reason: string; checked_at: string;
+    changes: { field: string; before: string; after: string }[];
+  };
   id: string;
   state: string;
   reason: string;
@@ -231,6 +235,7 @@ export interface Attempt {
   reconcile?: string;
 }
 export interface ViewEvent extends RequestEvent {
+  reviewFailure?: import('./decision-remember').DecisionReviewFailure;
   remainingMs: number;
   attempt?: Attempt;
 }
@@ -343,6 +348,8 @@ export interface Bridge {
     preview_token: string;
   }): Promise<Attempt>;
   openPrompt(id: string): Promise<void>;
+  openFutureApplicationRule(value: { generation: string; id: string }): Promise<void>;
+  onFutureApplicationRule(fn: (source: ObservedSource) => void): () => void;
   promptLayout(value: { height: number; pointerDown: boolean; keysDown: string[] }): Promise<void>;
   dismissPrompt(): Promise<void>;
   decisionLog(): Promise<DecisionLogState>;
@@ -400,6 +407,21 @@ function process(v: unknown): Process {
     application: application(p.application),
   };
 }
+function pendingRevalidation(raw: unknown): RequestEvent['revalidation'] {
+  if (raw == null) return;
+  const r = object(raw);
+  if (!/^[a-z_]{1,64}$/.test(string(r.code)) || !string(r.reason) ||
+      string(r.reason).length > 4096 || !Number.isFinite(Date.parse(string(r.checked_at))))
+    throw Error('Invalid pending revalidation');
+  return { code: string(r.code), reason: string(r.reason), checked_at: string(r.checked_at),
+    changes: array(r.changes, 128).map(raw => {
+      const c = object(raw);
+      if (!string(c.field) || ['field','before','after'].some(k => typeof c[k] !== 'string' || string(c[k]).length > 4096))
+        throw Error('Invalid pending binding change');
+      return {field: string(c.field), before: string(c.before), after: string(c.after)};
+    }),
+  };
+}
 function event(v: unknown): RequestEvent {
   const e = object(v),
     f = object(e.flow),
@@ -412,6 +434,7 @@ function event(v: unknown): RequestEvent {
     throw Error('Invalid request identity/deadline');
   return {
     id: string(e.id),
+    revalidation: pendingRevalidation(e.revalidation),
     state: string(e.state),
     reason: string(e.reason),
     deadline: string(e.deadline),
