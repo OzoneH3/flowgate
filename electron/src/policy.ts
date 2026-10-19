@@ -167,6 +167,7 @@ function ruleRef(v: unknown): PolicyRuleRef {
     active: bool(r.active),
     expires: date(r.expires),
     scope: {
+      zone_model: f.zone_model === 'automatic-peer-v1' ? 'automatic-peer-v1' : undefined,
       network_zone: ['local', 'internet'].includes(String(f.network_zone))
         ? (f.network_zone as NetworkZone)
         : undefined,

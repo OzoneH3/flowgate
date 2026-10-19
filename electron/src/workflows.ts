@@ -1,6 +1,7 @@
+import { setupZoneMigration } from './zone-migration-view';
 import { setupEssentialNetworking } from './essential-view';
 import { setupProtectionControls } from './protection-view';
-import { ZONE_CAPABILITY, zoneLabel } from './network-zones';
+import { ZONE_CAPABILITY, zoneLabel, zoneRuleLabel, zoneDefinitionDetails } from './network-zones';
 import { ANY_PROTOCOL_CAPABILITY, PROCESS_CAPABILITY, targetLabel } from './process-rules';
 import { renderDaemonEvaluation } from './evaluation-view';
 import { canManageRules, STORED_ASK_CAPABILITY } from './protocol';
@@ -21,6 +22,7 @@ const node = (tag: string, text: string) => {
   n.textContent = text;
   return n;
 };
+let migrationUI: ReturnType<typeof setupZoneMigration> | undefined;
 let editRevision = 0;
 let accessState = '';
 let editorSource: RuleSource = {};
@@ -40,6 +42,7 @@ let futureOnlyDraft = false;
 const resultMessage = (result: { phase: string; message: string }) => result.phase === 'acknowledged' && futureOnlyDraft
   ? result.message + ' Rule saved for future matching connections. The original connection was not allowed.'
   : result.message;
+let previewNetworkRevision = '';
 let previewExpires = 0,
   reconcileReceipt = '';
 let showTab: (s: string) => void = () => {};
@@ -143,7 +146,7 @@ export async function openRule(source: RuleSource, options: EditorOptions = {}) 
     $('editZone').title = source.id
       ? 'Network scope is immutable. Create a new rule to change zone.'
       : state?.control.capabilities?.includes(ZONE_CAPABILITY)
-        ? 'Configured policy zone; unknown peers do not match zone rules.'
+        ? zoneDefinitionDetails(state.control.networkZones)
         : 'Backend update required';
     if (r.filter.all_programs)
       $('editorApplication').textContent =
@@ -280,6 +283,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
   document.querySelector('#controlMenu .menu-panel')!.append(evaluation);
   setupProtectionControls();
   setupEssentialNetworking();
+  migrationUI = setupZoneMigration();
   const confirmation = node('dialog', '');
   confirmation.id = 'confirmation';
   confirmation.innerHTML = `<h2 id="confirmTitle"></h2><p id="confirmText"></p><div class="editor-actions"><button id="confirmNo">Cancel</button><button id="confirmYes">Continue</button></div>`;
@@ -390,6 +394,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
       const r = await window.flowgate.rulePreview(editValue());
       if (revision !== editRevision || !draft || $('ruleEditor').hidden) return;
       receipt = r.receipt;
+      previewNetworkRevision = state?.control.networkZones?.revision || '';
       previewNeedsRefresh = false;
       $('scopeSummary').textContent = r.verifiedRule
         ? reviewedScope(r.verifiedRule)
@@ -731,6 +736,12 @@ function updateButtons() {
     !!editorSource.id ||
     !!editorSource.zone ||
     !state?.control.capabilities?.includes(ZONE_CAPABILITY);
+  if ($<HTMLSelectElement>('editZone').value && receipt &&
+      state?.control.networkZones?.revision !== previewNetworkRevision) {
+    receipt = ''; previewNeedsRefresh = true;
+    $<HTMLButtonElement>('saveRule').disabled = true;
+    if (!saving && !unresolved) editorMessage('Network classification changed. Draft kept; refresh the authoritative preview.');
+  }
   const observed = draft?.observed && editorSource.observed;
   if (
     observed &&
@@ -766,6 +777,7 @@ function updateButtons() {
 }
 export function updateWorkflows(next: ClientState) {
   state = next;
+  migrationUI?.update(next, selected);
   updateButtons();
   const rules = state.control.rules || [],
     sig = JSON.stringify([
@@ -792,7 +804,7 @@ export function updateWorkflows(next: ClientState) {
         r.action,
         r.filter.direction,
         r.filter.protocol,
-        `${r.filter.remote_address || r.filter.remote || '*'} · local ${r.filter.local_port || '*'} / remote ${r.filter.remote_port || '*'}`,
+        `${zoneRuleLabel(r)} · ${r.filter.remote_address || r.filter.remote || '*'} · local ${r.filter.local_port || '*'} / remote ${r.filter.remote_port || '*'}`,
         r.expires.startsWith('0001')
           ? r.filter.process
             ? 'This daemon session / until process exit'
@@ -878,6 +890,7 @@ export function updateWorkflows(next: ClientState) {
   }
 }
 function selectRule() {
+  if (state) migrationUI?.update(state, selected);
   for (const tr of document.querySelectorAll<HTMLTableRowElement>('#ruleRows tr'))
     tr.setAttribute('aria-selected', String(tr.dataset.id === selected));
   const r = state.control.rules?.find((r) => r.id === selected);

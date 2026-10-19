@@ -47,6 +47,9 @@ export function parseConnectionZone(value: unknown): SocketRow['network_scope'] 
   )
     throw Error('Invalid network scope');
   return {
+    legacy_state: typeof n.legacy_state === 'string' ? n.legacy_state.slice(0, 256) : undefined,
+    legacy_zone: typeof n.legacy_zone === 'string' ? n.legacy_zone.slice(0, 256) : undefined,
+    legacy_revision: typeof n.legacy_revision === 'string' ? n.legacy_revision.slice(0, 256) : undefined,
     state: n.state as 'known' | 'unavailable',
     zone: n.state === 'known' ? (n.zone as 'local' | 'internet') : undefined,
     revision: typeof n.revision === 'string' ? n.revision : '',

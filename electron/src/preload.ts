@@ -1,6 +1,10 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { Bridge, ClientState, Decision } from './protocol';
 const api: Bridge = {
+  zoneMigrationState: () => ipcRenderer.invoke('zone-migration:state'),
+  zoneMigrationPreview: (target) => ipcRenderer.invoke('zone-migration:preview', target),
+  zoneMigrationConfirm: (token) => ipcRenderer.invoke('zone-migration:confirm', token),
+  zoneMigrationReconcile: () => ipcRenderer.invoke('zone-migration:reconcile'),
   essentialState: () => ipcRenderer.invoke('essential:state'),
   essential: (action, value) => ipcRenderer.invoke('essential:action', action, value),
   paneSnapshot: () => ipcRenderer.invoke('pane:snapshot'),

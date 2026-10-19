@@ -38,6 +38,7 @@ await build({
     'src/popup-position.ts',
     'src/network-zones.ts',
     'src/zone-rules.ts',
+    'src/zone-migration.ts',
     'src/display-units.ts',
     'src/initiation.ts',
     'src/protocol.ts',
