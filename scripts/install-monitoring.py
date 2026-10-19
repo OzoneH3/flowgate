@@ -97,6 +97,7 @@ def install(h,bundle,stamp):
   for f,want in manifest['files'].items():assert sha((release/f).read_bytes())==want,('installed release differs',f)
  else:
   staging=releases/('.staging-'+name);assert not staging.exists();staging.mkdir(mode=0o755)
+  os.chmod(staging,0o755)  # explicit: the installer umask is 077; releases stay world-readable like earlier ones
   for f,want in manifest['files'].items():
    assert '/'not in f;data=(bundle/f).read_bytes();assert sha(data)==want,(f,'hash mismatch')
    atomic(h,staging/f,data,0o755 if f in manifest['executables']else 0o644)

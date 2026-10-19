@@ -72,6 +72,7 @@ class MonitoringInstall(unittest.TestCase):
   self.assertEqual(json.loads((backup/'protection.json.previous').read_text())['mode'],'both')
   self.assertEqual(json.loads((backup/'install-record.json').read_text())['previous_current'],str(self.base/'usr/local/lib/flowgate/releases/OLD'))
   self.assertTrue((self.base/'usr/local/lib/flowgate/releases/OLD').is_dir(),'old immutable bundle kept')
+  self.assertEqual(oct((self.base/'usr/local/lib/flowgate/releases/SRC').stat().st_mode&0o777),'0o755')
   self.assertEqual(os.readlink(self.base/'usr/local/lib/flowgate/current'),str(self.base/'usr/local/lib/flowgate/releases/SRC'))
   self.assertEqual((self.base/'etc/flowgate/zones.json').read_text(),'{"local":["172.30.42.0/24"],"internet":[]}')
   self.assertEqual(final['owned_tables'],[]);self.assertFalse(final['nm_dropin_installed'])
