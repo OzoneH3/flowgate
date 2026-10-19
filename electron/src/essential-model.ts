@@ -1,17 +1,64 @@
 import { parseRule, type Rule } from './protocol';
 export const ESSENTIAL_CAPABILITY = 'essential-system-networking-v1';
+// Daemons without this capability silently ignore excluded_interfaces, so the
+// field is never sent to them and a reviewed exclusion blocks Apply there.
+export const ESSENTIAL_EXCLUSION_CAPABILITY = 'essential-interface-exclusion-v1';
+export const MAX_EXCLUDED_INTERFACES = 16;
 export interface EssentialOptions {
   tailscale: boolean;
   tailscale_incoming: boolean;
   tailscale_http: boolean;
   discovery: boolean;
+  // Canonical: sorted, de-duplicated, validated; empty = none (omitted on the wire).
+  excluded_interfaces: string[];
 }
+export type EssentialToggle = Exclude<keyof EssentialOptions, 'excluded_interfaces'>;
+export const ESSENTIAL_TOGGLES: EssentialToggle[] = [
+  'tailscale',
+  'tailscale_incoming',
+  'tailscale_http',
+  'discovery',
+];
 export const essentialDefaults = (): EssentialOptions => ({
   tailscale: false,
   tailscale_incoming: false,
   tailscale_http: false,
   discovery: false,
+  excluded_interfaces: [],
 });
+// Mirrors the daemon's interface-name rule (1..15 printable ASCII, no
+// whitespace, '/', ':' or '.'/'..'); loopback stub scopes cannot be excluded.
+export function validExcludedInterface(n: unknown): n is string {
+  return (
+    typeof n === 'string' &&
+    n.length >= 1 &&
+    n.length <= 15 &&
+    n !== '.' &&
+    n !== '..' &&
+    n !== 'lo' &&
+    /^[!-~]+$/.test(n) &&
+    !/[/:]/.test(n)
+  );
+}
+export function canonicalExclusions(v: unknown): string[] {
+  if (v === undefined) return [];
+  if (!Array.isArray(v) || v.length > 64) throw Error('Invalid excluded interfaces');
+  for (const n of v)
+    if (!validExcludedInterface(n)) throw Error(`Invalid excluded interface ${JSON.stringify(n)}`);
+  const out = [...new Set(v as string[])].sort();
+  if (out.length > MAX_EXCLUDED_INTERFACES) throw Error('Too many excluded interfaces');
+  return out;
+}
+// Request body: exclusions are sent only when present and the daemon honours them.
+export function essentialWireOptions(o: EssentialOptions, exclusionSupported: boolean) {
+  const { excluded_interfaces, ...rest } = o;
+  if (!excluded_interfaces.length) return rest;
+  if (!exclusionSupported)
+    throw Error(
+      'This daemon cannot honour interface exclusions (essential-interface-exclusion-v1 missing). Nothing was sent.',
+    );
+  return { ...rest, excluded_interfaces: [...excluded_interfaces] };
+}
 export interface EssentialComponent {
   id: string;
   title: string;
@@ -41,6 +88,7 @@ export interface EssentialReceipt {
   rule_ids: string[];
   rules: Rule[];
   removed_rule_ids: string[];
+  options?: EssentialOptions;
 }
 export interface EssentialView {
   monitoring: boolean;
@@ -55,6 +103,10 @@ export interface EssentialView {
   status?: EssentialStatus;
   preview?: EssentialPreview;
   receipt?: EssentialReceipt;
+  // Daemon honours essential_options.excluded_interfaces.
+  exclusionSupported: boolean;
+  // Persisted reviewed exclusion set (preselected in the view).
+  reviewedExclusions: string[];
   canApply: boolean;
   canReconcile: boolean;
 }
@@ -73,13 +125,19 @@ const list = <T>(v: unknown, fn: (x: unknown) => T, max = 512) => {
 const strings = (v: unknown) => list(v, (x) => text(x));
 export function essentialOptions(v: unknown): EssentialOptions {
   const o = object(v);
-  const keys = Object.keys(essentialDefaults());
+  const keys = Object.keys(o).filter((k) => k !== 'excluded_interfaces');
   if (
-    Object.keys(o).sort().join() !== keys.sort().join() ||
-    keys.some((k) => typeof o[k] !== 'boolean')
+    keys.sort().join() !== [...ESSENTIAL_TOGGLES].sort().join() ||
+    ESSENTIAL_TOGGLES.some((k) => typeof o[k] !== 'boolean')
   )
     throw Error('Invalid Essential options');
-  return Object.fromEntries(keys.map((k) => [k, o[k]])) as unknown as EssentialOptions;
+  return {
+    ...(Object.fromEntries(ESSENTIAL_TOGGLES.map((k) => [k, o[k]])) as Record<
+      EssentialToggle,
+      boolean
+    >),
+    excluded_interfaces: canonicalExclusions(o.excluded_interfaces ?? undefined),
+  };
 }
 function components(v: unknown) {
   return list(v, (x) => {
@@ -140,18 +198,59 @@ export function essentialReceipt(v: unknown): EssentialReceipt {
     rule_ids: strings(r.rule_ids),
     rules: list(r.rules, parseRule),
     removed_rule_ids: strings(r.removed_rule_ids),
+    ...(r.options !== undefined ? { options: essentialOptions(r.options) } : {}),
   };
 }
 export const sameEssentialOptions = (a: EssentialOptions, b: EssentialOptions) =>
-  Object.keys(essentialDefaults()).every(
-    (k) => a[k as keyof EssentialOptions] === b[k as keyof EssentialOptions],
-  );
+  ESSENTIAL_TOGGLES.every((k) => a[k] === b[k]) &&
+  JSON.stringify(a.excluded_interfaces) === JSON.stringify(b.excluded_interfaces);
+export interface ExclusionCandidate {
+  name: string;
+  detail: string;
+}
+const EXCLUDED_ISSUE =
+    /^Excluded by review, not proposed: (\S+) \((.*)\); its configuration is unchanged$/,
+  EXCLUDED_EMPTY = /^Excluded interface (\S+) has no discovered DNS\/DHCP entries now/;
+// Interfaces that carry discovered upstream DNS/DHCP, derived only from the
+// backend review (preset DNS/DHCP rule interface scopes and exclusion issues),
+// plus persisted/selected names so excluded interfaces stay visible.
+export function exclusionCandidates(
+  source: { rules?: Rule[]; issues: string[] } | undefined,
+  keep: string[] = [],
+): ExclusionCandidate[] {
+  const found = new Map<string, Set<string>>();
+  const add = (name: string, what?: string) => {
+    if (!validExcludedInterface(name)) return;
+    const set = found.get(name) || new Set<string>();
+    if (what) set.add(what);
+    found.set(name, set);
+  };
+  for (const r of source?.rules || []) {
+    const f = r.filter,
+      c = r.preset?.component;
+    if (f.direction !== 'outgoing' || !f.interface_name) continue;
+    if (c === 'dns') add(f.interface_name, `DNS ${f.remote_address}:${f.remote_port}`);
+    else if (c === 'dhcp') add(f.interface_name, 'DHCP');
+  }
+  for (const issue of source?.issues || []) {
+    const m = EXCLUDED_ISSUE.exec(issue);
+    if (m) for (const what of m[2].split(', ')) add(m[1], what);
+    const e = EXCLUDED_EMPTY.exec(issue);
+    if (e) add(e[1], 'no DNS/DHCP discovered now');
+  }
+  for (const name of keep) add(name);
+  return [...found]
+    .map(([name, what]) => ({ name, detail: [...what].join(', ') }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+export const exclusionSummary = (x: string[]) => `Excluded: ${x.length ? x.join(', ') : 'none'}`;
 export function agreesWithEssential(p: EssentialPreview, r: EssentialReceipt) {
   const sameIds = (a: string[], b: string[]) =>
     JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
   return (
     r.token === p.token &&
     r.operation === p.operation &&
+    (!r.options || sameEssentialOptions(r.options, p.options)) &&
     (p.operation === 'apply'
       ? sameIds(
           r.rule_ids,

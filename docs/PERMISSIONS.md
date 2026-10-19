@@ -35,11 +35,14 @@ will be allowed" (documented).
 
 ## Remaining differences (explicit)
 
-- **UI not yet updated** (owner flowgate ui, spec
-  `.workspace/coordination/2da01642-permission-contract-v1_1.md`): one-click setter,
-  own-rule cell state, Remember checkboxes and the 8 deletion times, grouped
-  requests, Essential exclusion control. Until released, the old Electron setter
-  remains on master.
+- **Electron UI** (frontend/permission-v1_1, integrated): one-click Ask | Allow | Deny application/process
+  setter via `application-policy-v1` / `stored-ask-v1`; the cell shows the node's own rule only (a process
+  without its own rule shows Not set; the inherited application rule is named in the tooltip and the Info
+  "↳ App" row), scoped rules as "+N scoped" and a separate list; Remember checkboxes (application fixed;
+  protocol, process, remote address, remote port; default application only) and the 8 deletion times;
+  pending requests grouped by `request_group` (one card, count), settled requests removed; Ask source line;
+  Essential `essential-interface-exclusion-v1` with a persisted per-interface exclusion (ppp0).
+  Without the capabilities the UI degrades read-only (Ask never re-saved as Allow/Deny, no exclusions sent).
 - **Ask on the host**: the installed release predates `stored-ask-v1`; the UI shows Ask
   read-only there until the next release is installed.
 - **Custom weights 4+** (Weight control): not implemented; needs storage/schema.
@@ -79,4 +82,11 @@ will be allowed" (documented).
   Deny override; Local-zone-only Allow; application Deny updated in place with 0
   deliveries (incl. the scoped-Allow destination); identical rules after restart;
   owned-only nft cleanup. Run directory `.workspace/app-policy-c38646f-1792425326` (PASS on c38646f).
-- Not yet: real Electron journey (after UI release); host deployment.
+- Real Electron journey (`electron/test/permission-v1_1-real.mjs`, sandboxed GUI, held continuous fixture on exact
+  33966e4, receivers judge delivery; PASS 12/12): Remember protocol+address+port stores udp 10.79.0.2:43001 only;
+  cell Not set +1 scoped; one click Application Out Allow stores TCP+UDP any/any all zones, narrow rule unchanged;
+  TCP/UDP IPv4/IPv6 to 2 destinations × 2 ports delivered with no prompts; cell stable 5 s (no blinking); other
+  executable prompts, 3 identical attempts = 1 group row/1 window; incoming held (direction separate); scoped
+  Deny blocks its destination while app Allow covers others; Out Ask set in place, prompt names the Ask rule,
+  Allow once delivers, new attempt re-prompts, Remember(app) replaces Ask → Allow; no stale prompt windows.
+- Not yet: host deployment of stored Ask (installed c09aae8 predates `stored-ask-v1`; the UI hides Ask there).

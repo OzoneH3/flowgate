@@ -3,7 +3,7 @@ import { setupProtectionControls } from './protection-view';
 import { ZONE_CAPABILITY, zoneLabel } from './network-zones';
 import { ANY_PROTOCOL_CAPABILITY, PROCESS_CAPABILITY, targetLabel } from './process-rules';
 import { renderDaemonEvaluation } from './evaluation-view';
-import { canManageRules } from './protocol';
+import { canManageRules, STORED_ASK_CAPABILITY } from './protocol';
 import { reviewedScope, previewSeconds } from './editor-presentation';
 import type {
   ClientState,
@@ -28,7 +28,7 @@ let stayInActivity = false;
 export interface EditorOptions {
   activity?: boolean;
   quick?: boolean;
-  action?: 'allow' | 'block';
+  action?: 'allow' | 'block' | 'ask';
   disabled?: boolean;
   protocol?: string;
   expiry?: 'hour' | 'permanent';
@@ -74,7 +74,7 @@ function editValue(): RuleEdit {
     throw Error('Enter an IP address/CIDR, or choose Any address.');
   return {
     token: draft!.token,
-    action: $<HTMLSelectElement>('editAction').value as 'allow' | 'block',
+    action: $<HTMLSelectElement>('editAction').value as RuleEdit['action'],
     protocol: $<HTMLSelectElement>('editProtocol').value,
     network_zone: $<HTMLSelectElement>('editZone').value as RuleEdit['network_zone'],
     remote_address: $<HTMLInputElement>('anyAddress').checked
@@ -123,6 +123,12 @@ export async function openRule(source: RuleSource, options: EditorOptions = {}) 
       `${draft.targetScope === 'process' ? 'This process · ' : targetLabel(r.filter.process) + ' · '}${r.executable || r.filter.application} · ${r.filter.direction} · UID ${r.filter.uid}`;
     $('editorIdentity').textContent =
       `${r.executable}\n${r.filter.application} · revision ${r.filter.revision}\n${r.filter.direction} · UID ${r.filter.uid} · ${draft.source}`;
+    // Ask is offered only with stored-ask-v1; an existing Ask rule without it stays read-only.
+    const askWritable = !!state?.control.capabilities?.includes(STORED_ASK_CAPABILITY);
+    const askOption = $('editAction').querySelector<HTMLOptionElement>('option[value=ask]')!;
+    askOption.hidden = askOption.disabled = !askWritable && r.action !== 'ask';
+    $<HTMLSelectElement>('editAction').disabled = !askWritable && r.action === 'ask';
+    $('editAction').title = askWritable ? 'Ask: prompt for each new connection' : '';
     $<HTMLSelectElement>('editAction').value = r.action;
     $<HTMLSelectElement>('editProtocol').value = r.filter.protocol;
     $<HTMLSelectElement>('editZone').value = r.filter.network_zone || '';
@@ -205,9 +211,11 @@ export async function openRule(source: RuleSource, options: EditorOptions = {}) 
         ? `Proposed ${draft.targetScope === 'process' ? 'this process only' : 'application, all instances'} · ${options.protocol?.toUpperCase() || r.filter.protocol.toUpperCase()} · ${r.filter.direction} · all addresses and ports for this protocol. Backend verification required.`
         : `Preserved scope: ${reviewedScope(r)}`;
     editorMessage(
-      draft.observed
-        ? 'Observed identity; Preview must verify the live process. Choose explicit scope before reviewing.'
-        : 'Fields are validated by Go. Existing identity and absolute expiry are preserved.',
+      !askWritable && r.action === 'ask'
+        ? 'Ask rule is read-only: backend update required (stored-ask-v1). It is never re-saved as Allow/Block.'
+        : draft.observed
+          ? 'Observed identity; Preview must verify the live process. Choose explicit scope before reviewing.'
+          : 'Fields are validated by Go. Existing identity and absolute expiry are preserved.',
     );
     $('editAction').focus();
   } catch (e) {
@@ -270,7 +278,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
   panel.hidden = true;
   panel.setAttribute('role', 'dialog');
   panel.setAttribute('aria-label', 'Rule editor');
-  panel.innerHTML = `<header><strong>FlowGate — Rule editor</strong><span><button id="editorMode">Compact editor</button> <button id="minimizeEditor">Minimize</button> <button id="closeEditor">Close</button></span></header><div class="editor-body"><div class="editor-tab">Rule</div><h2>For</h2><details class="editor-identity"><summary id="editorApplication">Application identity</summary><pre id="editorIdentity"></pre></details><h2>Rule and scope</h2><div id="creationScopeFields" hidden><label for="createScope">Scope</label> <select id="createScope"><option value="">Choose scope…</option><option value="custom">Specified address / ports</option><option value="application">All addresses / ports for this protocol</option></select></div><div class="editor-fields"><label for="editAction">Action</label><select id="editAction"><option value="allow">Allow</option><option value="block">Block</option></select><label for="editProtocol">Protocol</label><select id="editProtocol"><option value="tcp">TCP</option><option value="udp">UDP</option><option value="*">Any</option></select><label for="editZone">Network</label><select id="editZone" aria-label="Network zone"><option value="">Any network</option><option value="local">Local Network</option><option value="internet">Internet</option></select><label for="editAddress">Remote address</label><div class="scope-input"><label><input id="anyAddress" type="checkbox">Any address</label><input id="editAddress" maxlength="256" placeholder="IP address or CIDR"></div><label for="editLocal">Local port</label><div class="scope-input"><label><input id="anyLocal" type="checkbox">Any port</label><input id="editLocal" type="number" min="1" max="65535" aria-label="Specific local port"></div><label for="editRemote">Remote port</label><div class="scope-input"><label><input id="anyRemote" type="checkbox">Any port</label><input id="editRemote" type="number" min="1" max="65535" aria-label="Specific remote port"></div><label for="editPriority">Priority</label><input id="editPriority" type="number" min="-1000" max="1000"><label for="editExpiry">Expiry</label><select id="editExpiry"><option value="preserve">Preserve absolute expiry</option><option value="hour">For 1 hour from preview</option><option value="permanent">Persistent (no expiry)</option></select><label for="editEnabled">Enabled</label><input id="editEnabled" type="checkbox"></div><p id="absoluteExpiry"></p><h2>Review scope</h2><p id="scopeSummary"></p><details id="backendScope"><summary>Full backend preview</summary><p id="rulePreview" class="scope-preview"></p></details><p id="editorFeedback" role="status"></p></div><footer><button id="reloadRule">Reload version, keep fields</button><button id="previewRule">Preview</button><button id="saveRule" disabled>Save</button><span id="previewValidity" role="timer"></span><button id="reconcileRule" hidden>Check save result</button></footer>`;
+  panel.innerHTML = `<header><strong>FlowGate — Rule editor</strong><span><button id="editorMode">Compact editor</button> <button id="minimizeEditor">Minimize</button> <button id="closeEditor">Close</button></span></header><div class="editor-body"><div class="editor-tab">Rule</div><h2>For</h2><details class="editor-identity"><summary id="editorApplication">Application identity</summary><pre id="editorIdentity"></pre></details><h2>Rule and scope</h2><div id="creationScopeFields" hidden><label for="createScope">Scope</label> <select id="createScope"><option value="">Choose scope…</option><option value="custom">Specified address / ports</option><option value="application">All addresses / ports for this protocol</option></select></div><div class="editor-fields"><label for="editAction">Action</label><select id="editAction"><option value="allow">Allow</option><option value="block">Block</option><option value="ask">Ask</option></select><label for="editProtocol">Protocol</label><select id="editProtocol"><option value="tcp">TCP</option><option value="udp">UDP</option><option value="*">Any</option></select><label for="editZone">Network</label><select id="editZone" aria-label="Network zone"><option value="">Any network</option><option value="local">Local Network</option><option value="internet">Internet</option></select><label for="editAddress">Remote address</label><div class="scope-input"><label><input id="anyAddress" type="checkbox">Any address</label><input id="editAddress" maxlength="256" placeholder="IP address or CIDR"></div><label for="editLocal">Local port</label><div class="scope-input"><label><input id="anyLocal" type="checkbox">Any port</label><input id="editLocal" type="number" min="1" max="65535" aria-label="Specific local port"></div><label for="editRemote">Remote port</label><div class="scope-input"><label><input id="anyRemote" type="checkbox">Any port</label><input id="editRemote" type="number" min="1" max="65535" aria-label="Specific remote port"></div><label for="editPriority">Priority</label><input id="editPriority" type="number" min="-1000" max="1000"><label for="editExpiry">Expiry</label><select id="editExpiry"><option value="preserve">Preserve absolute expiry</option><option value="hour">For 1 hour from preview</option><option value="permanent">Persistent (no expiry)</option></select><label for="editEnabled">Enabled</label><input id="editEnabled" type="checkbox"></div><p id="absoluteExpiry"></p><h2>Review scope</h2><p id="scopeSummary"></p><details id="backendScope"><summary>Full backend preview</summary><p id="rulePreview" class="scope-preview"></p></details><p id="editorFeedback" role="status"></p></div><footer><button id="reloadRule">Reload version, keep fields</button><button id="previewRule">Preview</button><button id="saveRule" disabled>Save</button><span id="previewValidity" role="timer"></span><button id="reconcileRule" hidden>Check save result</button></footer>`;
   panel.querySelector('header')!.prepend(panel.querySelector('.editor-tab')!);
   const editorFooter = panel.querySelector('footer')!;
   editorFooter.prepend(panel.querySelector('#saveRule')!);
@@ -706,7 +714,8 @@ function updateButtons() {
   $<HTMLButtonElement>('saveRule').disabled = saving || unresolved || !receipt || !writable();
   $<HTMLButtonElement>('reloadRule').hidden = !!draft?.observed;
   $<HTMLButtonElement>('previewRule').disabled ||=
-    !!draft?.observed && !$<HTMLSelectElement>('createScope').value;
+    (!!draft?.observed && !$<HTMLSelectElement>('createScope').value) ||
+    (draft?.rule.action === 'ask' && !state?.control.capabilities?.includes(STORED_ASK_CAPABILITY));
   $<HTMLSelectElement>('editZone').disabled ||=
     !!editorSource.id ||
     !!editorSource.zone ||

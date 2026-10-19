@@ -3,6 +3,9 @@ import { parseProcessTarget, type ProcessTarget } from './process-rules';
 import type { ClientState, RuleFilter } from './protocol';
 import type { Row } from './model';
 export const POLICY_CAPABILITY = 'policy-explanations-v1';
+// Application/process quick setter sets the ONE canonical whole-target rule (create or update in
+// place); never a scoped rule. Without it the direction summary carries no application_rule.
+export const APPLICATION_POLICY_CAPABILITY = 'application-policy-v1';
 export interface PolicyRuleRef {
   id: string;
   version: string;
@@ -16,6 +19,8 @@ export interface PolicyRuleRef {
   target_scope?: 'application' | 'process' | 'zone';
   target_state?: string;
   target_reason?: string;
+  // application = whole target, all zones; zone = whole target, one zone; scoped = restricted.
+  kind?: 'application' | 'zone' | 'scoped';
 }
 export interface PolicyDefault {
   known: boolean;
@@ -35,6 +40,9 @@ export interface DirectionPolicy {
   configured_default: PolicyDefault;
   runtime_default: PolicyDefault;
   enforcement: { state: string; covered: boolean; reason: string };
+  // The node's OWN canonical rule (null = none); undefined = daemon without application-policy-v1.
+  application_rule?: PolicyRuleRef | null;
+  scoped_rules?: number;
 }
 export interface ApplicationPolicy {
   zone_fallback_rule_ids?: string[];
@@ -124,6 +132,65 @@ const def = (v: unknown): PolicyDefault => {
   if (known && !['allow', 'block', 'ask'].includes(action)) throw Error('Invalid known default');
   return { known, action, reason: str(d.reason) };
 };
+function ruleRef(v: unknown): PolicyRuleRef {
+  const r = obj(v),
+    f = obj(r.scope);
+  if (typeof r.priority !== 'number' || !Number.isSafeInteger(r.priority))
+    throw Error('Invalid priority');
+  return {
+    target_scope:
+      r.target_scope === undefined
+        ? undefined
+        : r.target_scope === 'process'
+          ? 'process'
+          : r.target_scope === 'zone'
+            ? 'zone'
+            : r.target_scope === 'application'
+              ? 'application'
+              : (() => {
+                  throw Error('Invalid target scope');
+                })(),
+    target_state: str(r.target_state, true),
+    target_reason: str(r.target_reason, true),
+    kind:
+      r.kind === undefined || r.kind === ''
+        ? undefined
+        : ['application', 'zone'].includes(str(r.kind))
+          ? (r.kind as PolicyRuleRef['kind'])
+          : 'scoped', // unknown kinds are never presented as the node's own rule
+    id: str(r.id),
+    version: decimal(r.version),
+    action: str(r.action),
+    priority: r.priority,
+    disabled: bool(r.disabled),
+    expired: bool(r.expired),
+    active: bool(r.active),
+    expires: date(r.expires),
+    scope: {
+      network_zone: ['local', 'internet'].includes(String(f.network_zone))
+        ? (f.network_zone as NetworkZone)
+        : undefined,
+      all_programs: f.all_programs === true || undefined,
+      all_uids: f.all_uids === true || undefined,
+      process: parseProcessTarget(f.process),
+      application: str(f.application, true),
+      revision: str(f.revision, true),
+      uid: f.uid === undefined && f.all_programs === true ? 0 : num(f.uid),
+      direction: str(f.direction),
+      protocol: str(f.protocol),
+      remote: str(f.remote, true),
+      remote_address: str(f.remote_address, true),
+      local_port: f.local_port === undefined ? 0 : num(f.local_port, 65535),
+      remote_port: f.remote_port === undefined ? 0 : num(f.remote_port, 65535),
+    },
+  };
+}
+// Never accept a non-canonical ref as the node's own rule.
+const ownRef = (r: PolicyRuleRef, expected: string) => {
+  if ((r.kind && r.kind !== 'application') || r.scope.direction !== expected)
+    throw Error('Invalid application rule');
+  return r;
+};
 function direction(v: unknown, expected: string): DirectionPolicy {
   const d = obj(v),
     e = obj(d.enforcement);
@@ -132,7 +199,7 @@ function direction(v: unknown, expected: string): DirectionPolicy {
     !['absent', 'inactive_only', 'scoped', 'mixed', 'uniform'].includes(str(d.configured))
   )
     throw Error('Invalid directional policy');
-  if (d.configured === 'uniform' && !['allow', 'block'].includes(str(d.action)))
+  if (d.configured === 'uniform' && !['allow', 'block', 'ask'].includes(str(d.action)))
     throw Error('Invalid uniform action');
   return {
     direction: expected,
@@ -146,53 +213,14 @@ function direction(v: unknown, expected: string): DirectionPolicy {
     configured_default: def(d.configured_default),
     runtime_default: def(d.runtime_default),
     enforcement: { state: str(e.state), covered: bool(e.covered), reason: str(e.reason) },
-    rules: list(d.rules, 8192).map((v) => {
-      const r = obj(v),
-        f = obj(r.scope);
-      if (typeof r.priority !== 'number' || !Number.isSafeInteger(r.priority))
-        throw Error('Invalid priority');
-      return {
-        target_scope:
-          r.target_scope === undefined
-            ? undefined
-            : r.target_scope === 'process'
-              ? 'process'
-              : r.target_scope === 'zone'
-                ? 'zone'
-                : r.target_scope === 'application'
-                  ? 'application'
-                  : (() => {
-                      throw Error('Invalid target scope');
-                    })(),
-        target_state: str(r.target_state, true),
-        target_reason: str(r.target_reason, true),
-        id: str(r.id),
-        version: decimal(r.version),
-        action: str(r.action),
-        priority: r.priority,
-        disabled: bool(r.disabled),
-        expired: bool(r.expired),
-        active: bool(r.active),
-        expires: date(r.expires),
-        scope: {
-          network_zone: ['local', 'internet'].includes(String(f.network_zone))
-            ? (f.network_zone as NetworkZone)
-            : undefined,
-          all_programs: f.all_programs === true || undefined,
-          all_uids: f.all_uids === true || undefined,
-          process: parseProcessTarget(f.process),
-          application: str(f.application, true),
-          revision: str(f.revision, true),
-          uid: f.uid === undefined && f.all_programs === true ? 0 : num(f.uid),
-          direction: str(f.direction),
-          protocol: str(f.protocol),
-          remote: str(f.remote, true),
-          remote_address: str(f.remote_address, true),
-          local_port: f.local_port === undefined ? 0 : num(f.local_port, 65535),
-          remote_port: f.remote_port === undefined ? 0 : num(f.remote_port, 65535),
-        },
-      };
-    }),
+    rules: list(d.rules, 8192).map((v) => ruleRef(v)),
+    application_rule:
+      d.application_rule === undefined
+        ? undefined
+        : d.application_rule === null
+          ? null
+          : ownRef(ruleRef(d.application_rule), expected),
+    scoped_rules: d.scoped_rules === undefined ? undefined : num(d.scoped_rules),
   };
 }
 export function parsePolicyView(raw: unknown): PolicyView {
@@ -439,7 +467,7 @@ export function authoritativeProcessPolicy(
 }
 export function policyLabel(d: DirectionPolicy) {
   return d.configured === 'uniform'
-    ? `${d.action === 'block' ? 'Block' : d.action === 'allow' ? 'Allow' : d.action}`
+    ? `${d.action === 'block' ? 'Block' : d.action === 'allow' ? 'Allow' : d.action === 'ask' ? 'Ask' : d.action}`
     : d.configured === 'absent'
       ? 'No explicit rule'
       : d.configured === 'inactive_only'

@@ -4,7 +4,14 @@ import { ObservedRules } from './observed-rules';
 import { canManageRules } from './protocol';
 import { randomUUID } from 'node:crypto';
 import { Backend, call } from './backend';
-import { validateEdit, type Rule, type RuleDraft, type RuleEdit, type Attempt } from './protocol';
+import {
+  validateEdit,
+  STORED_ASK_CAPABILITY,
+  type Rule,
+  type RuleDraft,
+  type RuleEdit,
+  type Attempt,
+} from './protocol';
 // Draft identity, generation and version remain in main, never trusted from renderer.
 export class Rules {
   private drafts = new Map<string, RuleDraft & { event?: string; id?: string }>();
@@ -105,6 +112,12 @@ export class Rules {
       c = this.authority();
     if (!d || d.generation !== c.generation)
       throw Error('Generation changed; reopen editor with current rule');
+    // Without stored-ask-v1 an Ask rule is read-only: never written as allow/block, never created.
+    if (
+      (e.action === 'ask' || d.rule.action === 'ask') &&
+      !c.capabilities?.includes(STORED_ASK_CAPABILITY)
+    )
+      throw Error('Ask rule is read-only: backend update required (stored-ask-v1)');
     for (const [k, v] of this.receipts) if (v.draft === e.token) this.receipts.delete(k);
     const rule = structuredClone(d.rule);
     Object.assign(rule, {

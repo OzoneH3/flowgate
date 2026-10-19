@@ -90,3 +90,89 @@ test('expired rule preserves immutable identity/absolute expiry; ambiguous save 
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+test('stored Ask rule is read-only without stored-ask-v1: never re-saved as Allow/Deny; editable as Ask with it', async () => {
+  const dir = fs.mkdtempSync(path.resolve(__dirname, '../../.workspace/ru-')),
+    socket = path.join(dir, 's');
+  const rule = {
+    id: 'ask-rule',
+    version: 2,
+    created: '2020-01-01T00:00:00Z',
+    expires: '0001-01-01T00:00:00Z',
+    schema: 2,
+    executable: '/app',
+    filter: {
+      application: 'key',
+      revision: 'revision',
+      uid: 1000,
+      direction: 'outgoing',
+      protocol: '*',
+      remote_address: '*',
+      local_port: 0,
+      remote_port: 0,
+    },
+    priority: 100,
+    action: 'ask',
+    disabled: false,
+  };
+  const sent = [];
+  const server = net.createServer((s) =>
+    s.once('data', (b) => {
+      const q = JSON.parse(b);
+      sent.push(q);
+      s.end(
+        JSON.stringify({
+          version: 1,
+          generation: 'g',
+          mode: 'host-enforcement',
+          read_only: false,
+          server_time: new Date().toISOString(),
+          saved_rule: { ...q.rule, version: 3 },
+          scope_preview: 'Synthetic',
+        }) + '\n',
+      );
+    }),
+  );
+  await new Promise((r) => server.listen(socket, r));
+  try {
+    const control = {
+      connected: true,
+      readOnly: false,
+      generation: 'g',
+      rules: [rule],
+      events: [],
+      capabilities: [],
+    };
+    const rules = new Rules({
+      controller: socket,
+      pollControl: async () => {},
+      now: () => Date.now(),
+      view: () => ({ control }),
+    });
+    const edit = (token, action, disabled = false) => ({
+      token,
+      action,
+      protocol: '*',
+      remote_address: '*',
+      local_port: 0,
+      remote_port: 0,
+      priority: 100,
+      disabled,
+      expiry: 'preserve',
+    });
+    const d = await rules.draft({ id: 'ask-rule' });
+    for (const [action, disabled] of [
+      ['allow', false],
+      ['block', false],
+      ['ask', true],
+    ])
+      await assert.rejects(() => rules.preview(edit(d.token, action, disabled)), /stored-ask-v1/);
+    assert.equal(sent.length, 0);
+    control.capabilities = ['stored-ask-v1'];
+    await rules.preview(edit(d.token, 'ask', true));
+    assert.equal(sent.at(-1).rule.action, 'ask');
+    assert.equal(sent.at(-1).rule.disabled, true);
+  } finally {
+    await new Promise((r) => server.close(r));
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

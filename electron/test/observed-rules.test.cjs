@@ -15,6 +15,7 @@ async function fixture(t) {
     saves = 0,
     permissions = { can_manage_rules: true, can_decide: false },
     rules = [],
+    requests = [],
     captured;
   const application = { key: 'app', revision: 'rev', executable: '/native/app', name: 'native' },
     process = { id: '1:start', pid: 1, start_ticks: '10', uid: 1000, application };
@@ -61,12 +62,14 @@ async function fixture(t) {
   const server = net.createServer((s) =>
     s.once('data', (b) => {
       const q = JSON.parse(b);
+      requests.push(q);
       if (q.operation === 'observed-rule-preview') {
         previews++;
         const d = q.observed_draft;
+        const replace = ['replace', 'badreplace'].includes(mode);
         const rule = {
-          id: 'created-' + previews,
-          version: 1,
+          id: replace ? 'own' : 'created-' + previews,
+          version: replace ? (mode === 'badreplace' ? 9 : 4) : 1,
           schema: d.target_scope === 'process' ? 3 : 2,
           created: new Date(now).toISOString(),
           executable: application.executable,
@@ -87,7 +90,7 @@ async function fixture(t) {
             revision: mode === 'identity' ? 'changed' : 'rev',
             uid: 1000,
             direction: d.direction,
-            protocol: d.protocol,
+            protocol: mode === 'narrowed' ? 'tcp' : d.protocol,
             remote_address: d.remote_address,
             local_port: d.local_port,
             remote_port: d.remote_port,
@@ -104,6 +107,7 @@ async function fixture(t) {
           principal_uid: 1000,
           scope_preview: 'Synthetic exact scope',
           enforcement: { state: 'stopped', covered: false, reason: 'Stopped' },
+          replaces: replace ? { id: 'own', version: 3 } : null,
         };
         s.end(JSON.stringify(reply({ observed_preview: captured })) + '\n');
       } else if (q.operation === 'observed-rule-save') {
@@ -143,6 +147,7 @@ async function fixture(t) {
     engine: new ObservedRules(backend),
     state,
     counts: () => ({ previews, saves }),
+    requests,
     mode: (v) => (mode = v),
     advance: (ms) => (now += ms),
     changeGeneration: () => {
@@ -266,4 +271,106 @@ test('lost process capability and exited instance send no save and never widen t
   delete f.state.observation.activity.processes['1:start'];
   await assert.rejects(f.engine.save(p.receipt), /no longer available/);
   assert.equal(f.counts().saves, 0);
+});
+// NetLimiter quick setter (application-policy-v1): the canonical own rule, never a scoped rule.
+const policyFields = (token, action = 'allow') => ({
+  token,
+  action,
+  protocol: '*',
+  remote_address: '*',
+  local_port: 0,
+  remote_port: 0,
+  priority: 100,
+  disabled: false,
+  expiry: 'permanent',
+  creation_scope: 'policy',
+});
+test('application policy is capability-gated and sends application_policy with the canonical scope', async (t) => {
+  const f = await fixture(t);
+  // A narrow remembered rule exists; the app-level Allow must not target or edit it.
+  const narrow = {
+    id: 'narrow',
+    version: 1,
+    schema: 2,
+    created: new Date().toISOString(),
+    executable: '/native/app',
+    action: 'block',
+    disabled: false,
+    priority: 100,
+    expires: '0001-01-01T00:00:00Z',
+    filter: {
+      application: 'app',
+      revision: 'rev',
+      uid: 1000,
+      direction: 'outgoing',
+      protocol: 'tcp',
+      remote_address: '1.1.1.1',
+      local_port: 0,
+      remote_port: 0,
+    },
+  };
+  f.state.control.rules = [narrow];
+  let d = await f.engine.draft({ ...f.source, direction: 'outgoing' });
+  await assert.rejects(f.engine.preview(policyFields(d.token)), /application-policy-v1/);
+  f.state.control.capabilities.push('application-policy-v1');
+  for (const bad of [
+    { protocol: 'tcp' },
+    { remote_address: '1.1.1.1' },
+    { remote_port: 443 },
+    { expiry: 'hour' },
+  ])
+    await assert.rejects(
+      f.engine.preview({ ...policyFields(d.token), ...bad }),
+      /TCP\+UDP, any endpoint, persistent/,
+    );
+  assert.equal(f.counts().previews, 0);
+  const p = await f.engine.preview(policyFields(d.token));
+  assert.equal(p.replaces, null);
+  const sent = f.requests.at(-1);
+  assert.equal(sent.operation, 'observed-rule-preview');
+  assert.deepEqual(sent.observed_draft, {
+    direction: 'outgoing',
+    protocol: '*',
+    action: 'allow',
+    remote_address: '*',
+    local_port: 0,
+    remote_port: 0,
+    disabled: false,
+    application_policy: true,
+    expires: '0001-01-01T00:00:00Z',
+  });
+  const result = await f.engine.save(p.receipt);
+  assert.equal(result.phase, 'acknowledged');
+  assert.notEqual(result.rule.id, 'narrow');
+  assert.equal(f.requests.at(-1).observed_draft.application_policy, true);
+  assert(f.requests.every((q) => !JSON.stringify(q).includes('"narrow"')));
+});
+test('application policy updates the own rule in place only as the backend replaces it; non-canonical previews refuse', async (t) => {
+  const f = await fixture(t);
+  f.state.control.capabilities.push('application-policy-v1');
+  f.mode('replace');
+  let d = await f.engine.draft(f.source);
+  const p = await f.engine.preview(policyFields(d.token, 'block'));
+  assert.deepEqual(p.replaces, { id: 'own', version: 3 });
+  assert.equal(p.verifiedRule.id, 'own');
+  assert.equal((await f.engine.save(p.receipt)).phase, 'acknowledged');
+  f.mode('badreplace');
+  d = await f.engine.draft(f.source);
+  await assert.rejects(f.engine.preview(policyFields(d.token)), /not the canonical/);
+  f.mode('narrowed');
+  d = await f.engine.draft(f.source);
+  await assert.rejects(f.engine.preview(policyFields(d.token)), /not the canonical/);
+  assert.equal(f.counts().saves, 1);
+});
+test('stored Ask needs stored-ask-v1; with it the application policy action is ask', async (t) => {
+  const f = await fixture(t);
+  f.state.control.capabilities.push('application-policy-v1');
+  let d = await f.engine.draft(f.source);
+  await assert.rejects(f.engine.preview(policyFields(d.token, 'ask')), /stored-ask-v1/);
+  await assert.rejects(f.engine.preview({ ...fields(d.token), action: 'ask' }), /stored-ask-v1/);
+  assert.equal(f.counts().previews, 0);
+  f.state.control.capabilities.push('stored-ask-v1');
+  const p = await f.engine.preview(policyFields(d.token, 'ask'));
+  assert.equal(f.requests.at(-1).observed_draft.action, 'ask');
+  assert.equal(p.verifiedRule.action, 'ask');
 });

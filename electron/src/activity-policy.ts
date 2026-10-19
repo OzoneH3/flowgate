@@ -4,22 +4,34 @@ import { ZONE_CAPABILITY, zoneLabel, type NetworkZone } from './network-zones';
 import { popupPosition } from './popup-position';
 import type { PolicyEntry } from './pane-model';
 import { ANY_PROTOCOL_CAPABILITY, PROCESS_CAPABILITY } from './process-rules';
-import type { Attempt, ClientState, ObservedSource, Rule, RuleEdit, RuleSource } from './protocol';
-import { canManageRules } from './protocol';
+import type {
+  Attempt,
+  ClientState,
+  ObservedSource,
+  Rule,
+  RuleAction,
+  RuleEdit,
+  RuleSource,
+} from './protocol';
+import { canManageRules, STORED_ASK_CAPABILITY } from './protocol';
 import type { Row } from './model';
 import {
   POLICY_CAPABILITY,
+  APPLICATION_POLICY_CAPABILITY,
   authoritativePolicy,
   authoritativeZonePolicy,
   authoritativeProcessPolicy,
   type PolicyRuleRef,
   type DirectionPolicy,
 } from './policy';
-import { ruleStatus, ruleState } from './rule-status';
+import { ruleStatus, ruleState, ownConfigured } from './rule-status';
 import {
-  ruleChip,
+  ownRuleChip,
+  ownShape,
+  actionGlyph,
+  storedAction,
+  ASK_TOOLTIP,
   actionWord,
-  knownAction,
   refState,
   shortScope,
   type RuleChip,
@@ -163,7 +175,7 @@ export function blockerGlyph(chip: RuleChip) {
         ? '✕'
         : chip.tone === 'mixed'
           ? '±'
-          : chip.tone === 'unavailable'
+          : chip.tone === 'unavailable' || chip.tone === 'ask'
             ? '?'
             : '';
   g.setAttribute('aria-hidden', 'true');
@@ -466,19 +478,24 @@ export class ActivityPolicy {
         const td = el('td');
         const b = button('', `cell:${tier}:${d}`, 'rule-cell');
         if (!inv.authoritative && inv.available && tier === 'application') {
-          const n = inv.fallback[d].length;
-          b.append(blockerGlyph({ glyph: '', text: '', tone: n ? 'mixed' : 'none', detail: '' }));
-          b.append(el('span', n ? `${n} listed` : 'Not set', 'cell-text'));
+          // Compatibility inventory: whole-target rules only; narrower ones are a "+N scoped" hint.
+          const own = ownConfigured(inv.fallback[d], inv.fallback.now);
+          const [word, ...rest] = own.text.split(' +');
+          b.append(blockerGlyph({ glyph: '', text: '', tone: own.tone, detail: '' }));
+          b.append(el('span', word, 'cell-text'));
+          if (rest.length) b.append(el('small', '+' + rest.join(' +'), 'cell-qualifier'));
+          b.classList.add('tone-' + own.tone);
           b.title = 'Compatibility inventory; no backend summary.';
         } else {
-          const chip = ruleChip(
+          // NetLimiter Rule Status: this node's OWN rule; scoped rules never become the state.
+          const chip = ownRuleChip(
             summary,
             tier === 'process' && inv.processPolicy?.state === 'inactive',
           );
           const [word, ...rest] = chip.text.split(' · ');
           b.append(blockerGlyph(chip), el('span', word, 'cell-text'));
-          if (rest.length && !['all', 'ended'].includes(rest.join('')))
-            b.append(el('small', rest.join(' · '), 'cell-qualifier'));
+          const qualifier = rest.filter((part) => !['all', 'ended'].includes(part));
+          if (qualifier.length) b.append(el('small', qualifier.join(' · '), 'cell-qualifier'));
           b.classList.add('tone-' + chip.tone);
           b.title = `${short(d)} Blocker · ${tier === 'process' ? 'this process' : 'application'}\n${chip.detail}${summary ? '\n' + summary.reason : ''}`;
         }
@@ -596,10 +613,12 @@ export class ActivityPolicy {
         ),
       );
       const busy = !!this.pending && this.pending.phase !== 'error';
-      const groups: [string, PolicyRuleRef[]][] = [
+      // Own (whole-target) rules first; scoped rules are a separate list, never the node state.
+      const groups: [string, PolicyRuleRef[], boolean][] = [
         [
           p ? `This process · PID ${p.target.pid}` : 'This process',
           inv.rules.filter((r) => !!r.scope.process),
+          true,
         ],
         [
           inv.zone
@@ -608,14 +627,21 @@ export class ActivityPolicy {
               ? 'Application · all instances'
               : 'Application fallback · all instances',
           inv.rules.filter((r) => !r.scope.process),
+          !inv.zone,
         ],
       ];
-      groups.push(['All-program zone fallback', inv.zoneFallback]);
-      for (const [name, refs] of groups) {
+      groups.push(['All-program zone fallback', inv.zoneFallback, false]);
+      for (const [name, refs, split] of groups) {
         if (!refs.length) continue;
         details.append(el('h4', name, 'activity-rule-group'));
+        const scoped = split ? refs.filter((r) => !ownShape(r)) : [];
         for (const d of directions)
-          for (const ref of refs.filter((r) => r.scope.direction === d))
+          for (const ref of refs.filter((r) => r.scope.direction === d && !scoped.includes(r)))
+            details.append(this.ruleLine(ref, inv, busy));
+        if (!scoped.length) continue;
+        details.append(el('h4', `Scoped rules (${scoped.length})`, 'activity-rule-group scoped'));
+        for (const d of directions)
+          for (const ref of scoped.filter((r) => r.scope.direction === d))
             details.append(this.ruleLine(ref, inv, busy));
       }
       details.append(
@@ -646,12 +672,13 @@ export class ActivityPolicy {
       el('span', short(ref.scope.direction as Direction), 'rule-direction-chip'),
       el(
         'strong',
-        `${ref.action === 'allow' ? '✓' : '✕'} ${actionWord(ref.action)}`,
+        `${actionGlyph(ref.action)} ${actionWord(ref.action)}`,
         `rule-action-${ref.action}`,
       ),
       el('span', shortScope(ref), 'activity-rule-scope'),
       el('span', state, 'rule-enabled-state state-' + state.toLowerCase()),
     );
+    if (ref.action === 'ask') title.title = ASK_TOOLTIP;
     card.append(title);
     const meta = el(
       'p',
@@ -704,6 +731,39 @@ export class ActivityPolicy {
     return inv.rules.filter(
       (r) => r.scope.direction === d && (tier === 'process') === !!r.scope.process,
     );
+  }
+  private askWritable() {
+    return !!this.state?.control.capabilities?.includes(STORED_ASK_CAPABILITY);
+  }
+  // NetLimiter order Ask | Allow | Deny; Ask only where the daemon stores it.
+  private actions(): RuleAction[] {
+    return this.askWritable() ? ['ask', 'allow', 'block'] : ['allow', 'block'];
+  }
+  // application-policy-v1: application/process cells set the ONE canonical own rule.
+  private policyPath(inv: Inventory) {
+    return (
+      !inv.zone &&
+      inv.authoritative &&
+      !!this.state?.control.capabilities?.includes(APPLICATION_POLICY_CAPABILITY)
+    );
+  }
+  // The tier's own rule for the chosen zone (backend application_rule, or the zone's canonical
+  // rule); never a scoped rule.
+  private own(inv: Inventory, d: Direction, tier: Tier): PolicyRuleRef | undefined {
+    const s = this.tierSummary(inv, tier, d),
+      zone = this.popup?.networkZone || '';
+    const ref = zone
+      ? s?.rules.find((r) => r.kind === 'zone' && r.scope.network_zone === zone)
+      : s?.application_rule;
+    return ref ? s!.rules.find((r) => r.id === ref.id) || ref : undefined;
+  }
+  private resync() {
+    void window.flowgate
+      .ruleContext()
+      .then((state) => {
+        if (acceptsPublication(this.state, state)) this.update(this.row, state);
+      })
+      .catch(() => {});
   }
   private blockReason(inv: Inventory, tier: Tier): string {
     const c = this.state!.control;
@@ -770,11 +830,13 @@ export class ActivityPolicy {
     const reason = this.blockReason(inv, tier);
     const busy = this.checking || (!!this.pending && this.pending.phase !== 'error');
     box.setAttribute('aria-busy', String(this.checking));
-    const rules = this.applicable(inv, direction, tier);
-    const target =
-      tier === 'process'
-        ? `This process${inv.processPolicy ? ' · PID ' + inv.processPolicy.target.pid : ''}`
-        : 'Application · all instances';
+    const policy = this.policyPath(inv);
+    const all = this.applicable(inv, direction, tier);
+    const own = policy ? this.own(inv, direction, tier) : undefined;
+    // Never route an application-level action into a scoped rule: the setter acts on the node's
+    // own rule only. Older daemons: endpoint-wide rules stand in for it; scoped ones are listed.
+    const rules = policy ? (own ? [own] : []) : inv.zone ? all : all.filter(ownShape);
+    const scoped = all.filter((r) => r.id !== own?.id && !rules.some((x) => x.id === r.id));
     const targetShort = inv.zone
       ? `All programs · ${pop.principal === 'machine' ? 'all users' : 'current user'}`
       : tier === 'process'
@@ -786,7 +848,8 @@ export class ActivityPolicy {
           ? 'session'
           : 'persistent'
         : `until ${new Date(expires).toLocaleTimeString()}`;
-    if (rules.length && pop.mode === 'auto') {
+    if (policy) this.policySetter(box, inv, own, reason, busy, targetShort);
+    else if (rules.length && pop.mode === 'auto') {
       if (rules.length > 1)
         box.append(
           el('p', `${rules.length} ${short(direction)} rules · ${targetShort}`, 'qs-scope'),
@@ -866,32 +929,7 @@ export class ActivityPolicy {
       );
       const anyEndpoint = el('span', 'Any endpoint', 'qs-endpoint');
       anyEndpoint.title = 'Any remote address · any local port · any remote port';
-      const zoneControl = el('select');
-      zoneControl.dataset.focus = 'qs-zone';
-      zoneControl.setAttribute('aria-label', 'Network zone for new rule');
-      for (const [value, label] of [
-        ['', 'Any network'],
-        ['local', 'Local Network'],
-        ['internet', 'Internet'],
-      ]) {
-        const option = el('option', label);
-        option.value = value;
-        zoneControl.append(option);
-      }
-      zoneControl.value = pop.networkZone;
-      zoneControl.disabled = busy || !!inv.zone || !c.capabilities?.includes(ZONE_CAPABILITY);
-      zoneControl.title = c.capabilities?.includes(ZONE_CAPABILITY)
-        ? 'Configured policy zone; not a connectivity verdict'
-        : 'Backend update required for Local Network / Internet rules';
-      zoneControl.onchange = () => {
-        pop.networkZone = zoneControl.value as NetworkZone | '';
-        this.refresh();
-      };
-      box.append(zoneControl);
-      if (pop.networkZone === 'internet' && c.networkZones?.internet_prefixes.length === 0)
-        box.append(
-          el('p', 'No Internet prefixes configured; no peers currently match.', 'rule-note'),
-        );
+      box.append(this.zoneSelect(inv, busy));
       if (inv.zone && c.permissions?.can_manage_machine_rules) {
         const who = el('select');
         who.dataset.focus = 'qs-principal';
@@ -969,31 +1007,191 @@ export class ActivityPolicy {
       if (this.checking) box.append(el('span', 'Checking…', 'qs-checking'));
       if (blocked) box.append(el('p', blocked, 'rule-note'));
     }
+    if (scoped.length) box.append(this.scopedList(scoped, busy, !!pop.networkZone));
     if (this.pending && this.pending.rowId === this.row?.id) box.append(this.reviewBox());
     return box;
   }
-  // [enabled] [✓ Allow] [✕ Block] — for an existing rule the current action is highlighted and a
-  // click changes only that; for a new rule a click creates exactly the scope shown above.
-  private actionRow(ref: PolicyRuleRef | undefined, inv: Inventory, blocked: boolean) {
+  private zoneSelect(inv: Inventory, busy: boolean) {
+    const pop = this.popup!,
+      c = this.state!.control,
+      frag = document.createDocumentFragment();
+    const zoneControl = el('select');
+    zoneControl.dataset.focus = 'qs-zone';
+    zoneControl.setAttribute('aria-label', 'Network zone for new rule');
+    for (const [value, label] of [
+      ['', 'Any network'],
+      ['local', 'Local Network'],
+      ['internet', 'Internet'],
+    ]) {
+      const option = el('option', label);
+      option.value = value;
+      zoneControl.append(option);
+    }
+    zoneControl.value = pop.networkZone;
+    zoneControl.disabled = busy || !!inv.zone || !c.capabilities?.includes(ZONE_CAPABILITY);
+    zoneControl.title = c.capabilities?.includes(ZONE_CAPABILITY)
+      ? 'Configured policy zone; not a connectivity verdict'
+      : 'Backend update required for Local Network / Internet rules';
+    zoneControl.onchange = () => {
+      pop.networkZone = zoneControl.value as NetworkZone | '';
+      this.refresh();
+    };
+    frag.append(zoneControl);
+    if (pop.networkZone === 'internet' && c.networkZones?.internet_prefixes.length === 0)
+      frag.append(
+        el('p', 'No Internet prefixes configured; no peers currently match.', 'rule-note'),
+      );
+    return frag;
+  }
+  // NetLimiter quick setter: [Enabled] Ask | Allow | Deny, Advanced, Delete — one click sets the
+  // node's own canonical rule (backend creates it or updates it in place); no review step.
+  private policySetter(
+    box: HTMLElement,
+    inv: Inventory,
+    own: PolicyRuleRef | undefined,
+    reason: string,
+    busy: boolean,
+    targetShort: string,
+  ) {
+    const pop = this.popup!,
+      c = this.state!.control;
+    box.append(
+      el(
+        'p',
+        `${short(pop.direction)} · ${targetShort} · TCP + UDP · ${pop.networkZone ? zoneLabel(pop.networkZone) : 'Any network'} · ${pop.tier === 'process' ? 'session' : 'persistent'}`,
+        'qs-scope',
+      ),
+    );
+    box.append(this.zoneSelect(inv, busy));
+    const anyEndpoint = el('span', 'Any endpoint', 'qs-endpoint');
+    anyEndpoint.title = 'Whole target: TCP + UDP, any remote address, any local/remote port';
+    box.append(anyEndpoint);
+    const setBlocked =
+      reason ||
+      (!inv.candidate ? 'No live, uniquely owned native socket to verify this target.' : '');
+    box.append(this.actionRow(own, inv, !!reason || busy, setBlocked));
+    if (own) {
+      const meta = el(
+        'p',
+        `Own rule · ${refState(own)} ${actionWord(own.action)} · ${own.expires.startsWith('0001-') ? (own.scope.process || pop.tier === 'process' ? 'session' : 'persistent') : 'until ' + new Date(own.expires).toLocaleString()}`,
+        'qs-own' + (own.id === this.saved ? ' recently-saved' : ''),
+      );
+      meta.title = `${scopeLabel(own)}\n${own.id} · version ${own.version}`;
+      box.append(meta);
+    }
+    const links = el('div', '', 'qs-links');
+    const advanced = button('Advanced', 'qs-advanced', 'link-button');
+    advanced.disabled = !!reason || busy || own?.target_state === 'inactive';
+    advanced.title = own
+      ? 'Open the full editor for this rule.'
+      : 'Open the full editor for address, port and expiry scope.';
+    advanced.onclick = () => {
+      if (own)
+        return this.delegate
+          ? this.delegate({ kind: 'edit', id: own.id })
+          : void openRule({ id: own.id }, { activity: true });
+      const source = this.newSource(pop.direction, pop.tier, inv);
+      if (source && this.delegate) this.delegate({ kind: 'new' });
+      else if (source) void openRule(source, { activity: true });
+    };
+    // Delete acts on the own rule only (also for an ended process target).
+    const rule = own && this.editable(own);
+    const remove = button('Delete', own ? 'qs-delete' : 'qs-delete-none', 'link-button');
+    remove.disabled =
+      !canManageRules(c) ||
+      busy ||
+      !rule ||
+      !c.capabilities?.includes('conditional-rule-delete-v1');
+    remove.title = own ? 'Delete this rule' : 'No own rule to delete.';
+    const generation = c.generation;
+    remove.onclick = () => {
+      if (rule)
+        this.delegate
+          ? this.delegate({ kind: 'delete', id: rule.id })
+          : confirmRuleDelete(rule, generation);
+    };
+    links.append(advanced, remove);
+    box.append(links);
+    if (this.checking) box.append(el('span', 'Checking…', 'qs-checking'));
+    if (setBlocked) box.append(el('p', setBlocked, 'rule-note'));
+  }
+  // Scoped rules are separate from the node state: inspect, edit (Advanced) or delete each one.
+  private scopedList(refs: PolicyRuleRef[], busy: boolean, zoned: boolean) {
     const c = this.state!.control;
+    const wrap = el('div', '', 'qs-scoped');
+    wrap.append(el('h4', `${zoned ? 'Other' : 'Scoped'} rules (${refs.length})`));
+    for (const ref of refs) {
+      const line = el('div', '', 'qs-scoped-rule');
+      line.dataset.ruleId = ref.id;
+      line.append(
+        el(
+          'span',
+          `${actionGlyph(ref.action)} ${actionWord(ref.action)}`,
+          `rule-action-${ref.action}`,
+        ),
+        el('span', shortScope(ref), 'activity-rule-scope'),
+        el('span', refState(ref), 'rule-enabled-state state-' + refState(ref).toLowerCase()),
+      );
+      line.title = `${scopeLabel(ref)}\n${ref.id} · version ${ref.version}`;
+      const rule = this.editable(ref);
+      const advanced = button('Advanced', `qs-scoped:${ref.id}:advanced`, 'link-button');
+      advanced.disabled = !canManageRules(c) || busy || !rule || ref.target_state === 'inactive';
+      advanced.onclick = () =>
+        this.delegate
+          ? this.delegate({ kind: 'edit', id: ref.id })
+          : void openRule({ id: ref.id }, { activity: true });
+      const remove = button('Delete', `qs-scoped:${ref.id}:delete`, 'link-button');
+      remove.disabled =
+        !canManageRules(c) ||
+        busy ||
+        !rule ||
+        !c.capabilities?.includes('conditional-rule-delete-v1');
+      const generation = c.generation;
+      remove.onclick = () => {
+        if (rule)
+          this.delegate
+            ? this.delegate({ kind: 'delete', id: rule.id })
+            : confirmRuleDelete(rule, generation);
+      };
+      line.append(advanced, remove);
+      wrap.append(line);
+    }
+    return wrap;
+  }
+  // [enabled] [? Ask] [✓ Allow] [✕ Deny] — for an existing rule the current action is highlighted
+  // and a click changes only that; for a new rule a click creates exactly the scope shown above.
+  // policy (application-policy-v1, string = why setting is blocked, '' = allowed): every action
+  // click sets the own canonical rule; the enabled box acts on the own rule only.
+  private actionRow(
+    ref: PolicyRuleRef | undefined,
+    inv: Inventory,
+    blocked: boolean,
+    policy?: string,
+  ) {
+    const c = this.state!.control;
+    const isPolicy = policy !== undefined;
     const row = el('div', '', 'qs-row');
     const inactiveTarget =
       !!ref && (ref.target_state === 'inactive' || c.rule_states?.[ref.id]?.state === 'inactive');
     const editable = !ref || !!this.editable(ref);
-    // A rule whose action this UI does not support (e.g. stored ask) is shown but not changed here.
-    const foreign = !!ref && !knownAction(ref.action);
+    // An action this daemon cannot write (unknown, or Ask without stored-ask-v1) is shown read-only:
+    // never flipped, enabled or re-saved as Allow/Deny here.
+    const foreign =
+      !!ref && (!storedAction(ref.action) || (ref.action === 'ask' && !this.askWritable()));
     const disabled = blocked || foreign || (!!ref && (ref.expired || inactiveTarget || !editable));
     const key = ref ? `qs:${ref.id}` : 'qs:new';
     const enabled = el('input');
     enabled.type = 'checkbox';
     enabled.dataset.focus = `${key}:enabled`;
-    enabled.checked = ref ? !ref.disabled : this.popup!.enabled;
-    enabled.disabled = disabled;
+    enabled.checked = ref ? !ref.disabled : isPolicy || this.popup!.enabled;
+    enabled.disabled = disabled || (isPolicy && !ref);
     enabled.title = ref
       ? ref.disabled
         ? 'Enable this rule'
         : 'Disable this rule (kept, not deleted)'
-      : 'Create the rule enabled (unchecked: stored disabled).';
+      : isPolicy
+        ? 'No own rule yet; Ask, Allow or Deny creates it enabled.'
+        : 'Create the rule enabled (unchecked: stored disabled).';
     enabled.setAttribute('aria-label', ref ? 'Rule enabled' : 'New rule enabled');
     enabled.onchange = () => {
       if (!ref) {
@@ -1001,27 +1199,43 @@ export class ActivityPolicy {
         return;
       }
       this.review_edit(ref, enabled.checked ? 'Enable rule' : 'Disable rule', {
-        action: ref.action === 'allow' ? 'allow' : 'block',
+        action: ref.action as RuleAction,
         disabled: !enabled.checked,
       });
     };
     row.append(enabled);
     if (foreign)
-      row.title = `Action "${ref!.action}" is not editable from this quick setter; use Advanced or the Rule list.`;
-    for (const action of ['allow', 'block'] as const) {
+      row.title =
+        ref!.action === 'ask'
+          ? `${ASK_TOOLTIP}. Read-only: backend update required (stored-ask-v1).`
+          : `Action "${ref!.action}" is not editable from this quick setter; use Advanced or the Rule list.`;
+    for (const action of this.actions()) {
       const b = button(actionWord(action), `${key}:${action}`, `qs-action qs-${action}`);
-      b.prepend(el('span', action === 'allow' ? '✓' : '✕', 'blocker-glyph tone-' + action));
+      b.prepend(el('span', actionGlyph(action), 'blocker-glyph tone-' + action));
       const current = ref?.action === action;
       if (current) b.classList.add('current');
       b.setAttribute('aria-pressed', String(current));
-      b.disabled = disabled || current;
-      b.title = ref
-        ? current
-          ? `Current action: ${action}.`
-          : `Change this rule to ${action}; scope and lifetime stay the same.`
-        : `Create the ${action} rule shown above. The backend verifies the target before storing it.`;
+      // Policy: clicking the current action of a disabled own rule sets it active again.
+      b.disabled = isPolicy
+        ? blocked ||
+          !!policy ||
+          foreign ||
+          inactiveTarget ||
+          (current && !!ref?.active && !ref.disabled && !ref.expired)
+        : disabled || current;
+      const what = action === 'ask' ? ASK_TOOLTIP : actionWord(action);
+      b.title = isPolicy
+        ? current && ref?.active
+          ? `Current action: ${what}.`
+          : `${what}: sets this ${this.popup?.tier === 'process' ? 'process' : 'application'}'s own rule (TCP + UDP, any endpoint) in one step; scoped rules are not changed.`
+        : ref
+          ? current
+            ? `Current action: ${what}.`
+            : `Change this rule to ${actionWord(action)}; scope and lifetime stay the same.`
+          : `Create the ${actionWord(action)} rule shown above. The backend verifies the target before storing it.`;
       b.onclick = () => {
-        if (ref)
+        if (isPolicy) this.review_policy(inv, action);
+        else if (ref)
           this.review_edit(ref, `Change to ${actionWord(action)}`, {
             action,
             disabled: ref.disabled,
@@ -1030,7 +1244,7 @@ export class ActivityPolicy {
       };
       row.append(b);
     }
-    if (ref) {
+    if (ref && !isPolicy) {
       const several =
         this.applicable(
           inv,
@@ -1123,7 +1337,7 @@ export class ActivityPolicy {
   private current(p: Pending) {
     return this.pending?.seq === p.seq;
   }
-  private review_new(inv: Inventory, action: 'allow' | 'block') {
+  private review_new(inv: Inventory, action: RuleAction) {
     const pop = this.popup!;
     const { direction, tier, protocol, lifetime, enabled, networkZone } = pop;
     const source = this.newSource(direction, tier, inv);
@@ -1172,10 +1386,54 @@ export class ActivityPolicy {
     };
     void run();
   }
+  // One click (NetLimiter): preview the canonical own rule and save it immediately; the backend
+  // creates it or updates it in place (preview.replaces) and never selects a scoped rule.
+  private review_policy(inv: Inventory, action: RuleAction) {
+    const { direction, tier, networkZone } = this.popup!;
+    const source = this.newSource(direction, tier, inv);
+    if (!source?.observed) return;
+    const run = async () => {
+      const p = this.begin(
+        `${actionWord(action)} · ${tier === 'process' ? 'this process' : 'application'} ${short(direction)}`,
+      );
+      try {
+        const draft = await window.flowgate.ruleDraft(source);
+        if (!this.current(p)) return;
+        await this.preview(
+          p,
+          {
+            token: draft.token,
+            ...(networkZone ? { network_zone: networkZone } : {}),
+            action,
+            protocol: '*',
+            remote_address: '*',
+            local_port: 0,
+            remote_port: 0,
+            priority: 100,
+            disabled: false,
+            expiry: 'permanent',
+            creation_scope: 'policy',
+          },
+          (rule) =>
+            rule.action === action &&
+            rule.filter.direction === direction &&
+            rule.filter.protocol === '*' &&
+            !rule.disabled &&
+            (rule.filter.network_zone || '') === networkZone &&
+            !!rule.filter.process === (tier === 'process') &&
+            rule.expires.startsWith('0001-'),
+        );
+      } catch (e) {
+        this.fail(p, e);
+      }
+      p.retry = run;
+    };
+    void run();
+  }
   private review_edit(
     ref: PolicyRuleRef,
     title: string,
-    o: { action: 'allow' | 'block'; disabled: boolean },
+    o: { action: RuleAction; disabled: boolean },
   ) {
     const run = async () => {
       const p = this.begin(title);
@@ -1240,6 +1498,7 @@ export class ActivityPolicy {
       ? `${text} Nothing was saved; select the target again to retry.`
       : `${text} Nothing was saved.`;
     this.refresh();
+    if (/conflict/.test(text)) this.resync();
   }
   private discard() {
     if (!this.pending || ['saving', 'previewing'].includes(this.pending.phase)) return;
@@ -1282,9 +1541,15 @@ export class ActivityPolicy {
       this.pending = undefined;
       this.popup = undefined;
       this.saved = result.rule?.id || '';
-      const feedback = document.getElementById('feedback');
-      if (feedback) feedback.textContent = result.message;
+      const feedback =
+        document.getElementById('feedback') || document.getElementById('paneMessage');
+      const r = result.rule;
+      if (feedback)
+        feedback.textContent = r
+          ? `${actionWord(r.action)} · ${reviewedScope(r)} · ${r.id} v${r.version}${r.disabled ? ' · disabled' : ''}. ${result.message}`
+          : result.message;
       this.refresh();
+      this.resync();
       if (pop)
         this.host
           .querySelector<HTMLElement>(`[data-focus="cell:${pop.tier}:${pop.direction}"]`)
@@ -1298,6 +1563,7 @@ export class ActivityPolicy {
     } else {
       p.phase = 'error';
       p.message = result.message;
+      if (/conflict/.test(result.message)) this.resync();
     }
     this.refresh();
   }

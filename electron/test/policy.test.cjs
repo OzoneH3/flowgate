@@ -219,3 +219,60 @@ test('batch transport rejects old generation and sequence, clears disconnect, ne
   assert.equal(b.view().control.policy, undefined);
   assert.equal(b.view().control.connected, false);
 });
+test('application_rule, scoped_rules and rule kind parse; old daemons stay undefined; non-canonical own rule rejects', () => {
+  const ref = (id, action, kind, scope = {}) => ({
+    id,
+    version: '2',
+    action,
+    priority: 100,
+    kind,
+    scope: {
+      application: 'app',
+      revision: 'rev',
+      uid: 1000,
+      direction: 'outgoing',
+      protocol: '*',
+      remote_address: '*',
+      ...scope,
+    },
+    disabled: false,
+    expired: false,
+    active: true,
+    expires: '0001-01-01T00:00:00Z',
+  });
+  const old = parsePolicyView(view());
+  assert.equal(old.applications[0].outgoing.application_rule, undefined);
+  assert.equal(old.applications[0].outgoing.scoped_rules, undefined);
+  const v = view();
+  const own = ref('own', 'ask', 'application');
+  Object.assign(v.applications[0].outgoing, {
+    configured: 'uniform',
+    action: 'ask',
+    rules: [
+      own,
+      ref('narrow', 'block', 'scoped', { remote_address: '1.1.1.1' }),
+      ref('x', 'allow', 'future'),
+    ],
+    application_rule: own,
+    scoped_rules: 2,
+  });
+  v.applications[0].incoming.application_rule = null;
+  v.applications[0].incoming.scoped_rules = 0;
+  const got = parsePolicyView(v).applications[0];
+  assert.equal(got.outgoing.application_rule.id, 'own');
+  assert.equal(got.outgoing.application_rule.action, 'ask');
+  assert.equal(got.outgoing.scoped_rules, 2);
+  assert.deepEqual(
+    got.outgoing.rules.map((r) => r.kind),
+    ['application', 'scoped', 'scoped'],
+    'unknown kinds are never treated as the own rule',
+  );
+  assert.equal(got.incoming.application_rule, null);
+  assert.equal(policyLabel(got.outgoing), 'Ask');
+  v.applications[0].outgoing.application_rule = ref('narrow', 'block', 'scoped');
+  assert.throws(() => parsePolicyView(v), /Invalid application rule/);
+  v.applications[0].outgoing.application_rule = ref('own', 'allow', 'application', {
+    direction: 'incoming',
+  });
+  assert.throws(() => parsePolicyView(v), /Invalid application rule/);
+});

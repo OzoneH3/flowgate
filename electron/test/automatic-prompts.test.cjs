@@ -4,6 +4,8 @@ const {
   AutomaticPrompts,
   edgePosition,
   boundDecision,
+  requestGroups,
+  askSource,
 } = require('../dist/test/automatic-prompts.cjs');
 const state = (ids, generation = 'g') => ({
   control: {
@@ -14,13 +16,118 @@ const state = (ids, generation = 'g') => ({
     events: ids.map((id) => ({ id, state: 'awaiting-decision', remainingMs: 1000 })),
   },
 });
-test('automatic foreground queue pins target, dismissal does not reopen or mutate', () => {
+// 51 identical attempts (same backend request_group), delivered out of order.
+const burst = (n = 51, extra = []) => {
+  const events = [];
+  for (let i = 0; i < n; i++)
+    events.push({
+      id: 'r' + i,
+      request_group: 'same',
+      state: 'awaiting-decision',
+      remainingMs: 30000,
+      first_seen: new Date(Date.UTC(2026, 0, 1, 0, 0, i)).toISOString(),
+      deadline: new Date(Date.UTC(2026, 0, 1, 0, 1, i)).toISOString(),
+    });
+  events.reverse();
+  return {
+    control: {
+      connected: true,
+      readOnly: false,
+      generation: 'g',
+      permissions: { can_decide: true },
+      events: [...events, ...extra],
+    },
+  };
+};
+test('one card per group; dismissal never auto-reopens that group', () => {
   const q = new AutomaticPrompts();
-  assert.equal(q.next(state(['a', 'b']), false).id, 'a');
+  const first = q.next(state(['a', 'b']), false);
+  assert.deepEqual(first, { generation: 'g', id: 'a', group: 'e:a' });
   assert.equal(q.next(state(['a', 'b']), true), undefined);
+  // Not dismissed (e.g. still open elsewhere): the same group stays first.
+  assert.equal(q.next(state(['a', 'b']), false).id, 'a');
+  q.dismiss(first);
   assert.equal(q.next(state(['a', 'b']), false).id, 'b');
+  q.dismiss({ generation: 'g', id: 'b', group: 'e:b' });
   assert.equal(q.next(state(['a', 'b']), false), undefined);
   assert.equal(q.next(state(['a'], 'new'), false).id, 'a');
+});
+test('51 identical attempts are one prompt with a count; decision targets its representative only', () => {
+  const s = burst();
+  const groups = requestGroups(s.control.events);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].count, 51);
+  assert.equal(groups[0].representative.id, 'r0');
+  const q = new AutomaticPrompts();
+  const ref = q.next(s, false);
+  assert.deepEqual(ref, { generation: 'g', id: 'r0', group: 'g:same' });
+  // While that card is open, nothing else opens: no prompt storm.
+  for (let i = 0; i < 51; i++) assert.equal(q.next(s, true), undefined);
+  const d = { generation: 'g', id: 'r0', action: 'allow', scope: 'once' };
+  assert.deepEqual(boundDecision(d, ref), d);
+  for (const other of ['r1', 'r50'])
+    assert.throws(() => boundDecision({ ...d, id: other }, ref), /does not belong/);
+  q.dismiss(ref);
+  assert.equal(q.next(burst(60), false), undefined);
+});
+test('settled requests disappear; the open card advances within its group or closes', () => {
+  const s = burst(3, [
+    {
+      id: 'other',
+      state: 'awaiting-decision',
+      remainingMs: 30000,
+      first_seen: '2027-01-01T00:00:00Z',
+    },
+  ]);
+  const q = new AutomaticPrompts(),
+    ref = q.next(s, false);
+  assert.equal(ref.id, 'r0');
+  // A submitted (not yet acknowledged) decision keeps the card.
+  s.control.events.find((e) => e.id === 'r0').attempt = { phase: 'submitting', message: '' };
+  assert.deepEqual(q.follow(s, ref), ref);
+  // Answered once: next representative of the same group, never a fan-out.
+  Object.assign(
+    s.control.events.find((e) => e.id === 'r0'),
+    { state: 'allowed', attempt: undefined },
+  );
+  assert.deepEqual(q.follow(s, ref), { generation: 'g', id: 'r1', group: 'g:same' });
+  // Remember rule settles the rest by re-evaluation, others finalized/expired.
+  Object.assign(
+    s.control.events.find((e) => e.id === 'r1'),
+    {
+      state: 'allowed',
+      reason: 're-evaluated after policy change',
+    },
+  );
+  Object.assign(
+    s.control.events.find((e) => e.id === 'r2'),
+    { remainingMs: 0 },
+  );
+  assert.deepEqual(
+    requestGroups(s.control.events).map((g) => g.key),
+    ['e:other'],
+  );
+  assert.equal(q.follow(s, { generation: 'g', id: 'r1', group: 'g:same' }), undefined);
+  assert.equal(q.next(s, false).id, 'other');
+  assert.equal(q.follow({ ...s, control: { ...s.control, generation: 'new' } }, ref), undefined);
+});
+test('prompt names the stored Ask rule that asked, else default Ask', () => {
+  const e = { id: 'e', ask_rule: { id: 'user:1', version: 2 } };
+  const rule = (filter) => ({ id: 'user:1', action: 'ask', filter });
+  assert.equal(askSource({ id: 'e' }), 'No matching rule (default Ask)');
+  assert.equal(askSource(e), 'Asked by rule user:1');
+  assert.equal(
+    askSource(e, [rule({ direction: 'outgoing', protocol: '*', remote_address: '*' })]),
+    'Asked by rule user:1 (Ask, application, Out)',
+  );
+  assert.equal(
+    askSource(e, [rule({ direction: 'incoming', protocol: 'tcp', remote_address: '10.0.0.1' })]),
+    'Asked by rule user:1 (Ask, scoped, In)',
+  );
+  assert.equal(
+    askSource(e, [rule({ direction: 'outgoing', protocol: '*', process: { pid: 4 } })]),
+    'Asked by rule user:1 (Ask, process, Out)',
+  );
 });
 test('disconnected/read-only/expired/submitted never auto-open', () => {
   for (const alter of [

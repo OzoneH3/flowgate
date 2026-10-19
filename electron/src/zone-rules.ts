@@ -3,6 +3,7 @@ import { call, type Backend } from './backend';
 import {
   canManageRules,
   validateEdit,
+  STORED_ASK_CAPABILITY,
   type RuleSource,
   type RuleDraft,
   type Rule,
@@ -109,6 +110,11 @@ export class ZoneRules {
     if (!d || d.locked || d.endpoint !== this.backend.controller)
       throw Error('Fresh zone draft required');
     this.authority(d.target);
+    if (
+      e.action === 'ask' &&
+      !this.backend.view().control.capabilities?.includes(STORED_ASK_CAPABILITY)
+    )
+      throw Error('Backend update required for stored Ask (stored-ask-v1)');
     if (e.priority !== 100 || (e.network_zone !== undefined && e.network_zone !== d.target.zone))
       throw Error('Zone target and priority are fixed');
     const observed_draft = {

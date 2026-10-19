@@ -55,7 +55,13 @@ export function ruleState(rule: Rule, now: number) {
   const expiry = rule.expires && !rule.expires.startsWith('0001-') ? Date.parse(rule.expires) : NaN;
   if (Number.isFinite(expiry) && expiry <= now) return 'expired';
   if (rule.disabled) return 'disabled';
-  return rule.action === 'allow' ? 'allow' : rule.action === 'block' ? 'block' : 'unknown';
+  return rule.action === 'allow'
+    ? 'allow'
+    : rule.action === 'block'
+      ? 'block'
+      : rule.action === 'ask'
+        ? 'ask'
+        : 'unknown';
 }
 export function ruleDescription(rule: Rule, now: number) {
   const f = rule.filter;
@@ -68,7 +74,7 @@ export function ruleDescription(rule: Rule, now: number) {
 // Describe stored filter constraints; this does not evaluate a connection or precedence.
 export function configuredPolicy(rules: Rule[], now: number) {
   if (!rules.length) return 'No rule';
-  const active = rules.filter((r) => ['allow', 'block'].includes(ruleState(r, now)));
+  const active = rules.filter((r) => ['allow', 'block', 'ask'].includes(ruleState(r, now)));
   if (!active.length)
     return rules.every((r) => ruleState(r, now) === 'expired')
       ? 'Expired'
@@ -84,5 +90,36 @@ export function configuredPolicy(rules: Rule[], now: number) {
     broad = !f.remote && !f.remote_address && !f.local_port && !f.remote_port;
   const scope =
     broad && f.protocol === '*' ? 'app-wide' : broad ? f.protocol.toUpperCase() : 'scoped';
-  return `${r.action === 'allow' ? 'Allow' : 'Block'} · ${scope}`;
+  return `${r.action === 'allow' ? 'Allow' : r.action === 'ask' ? 'Ask' : 'Block'} · ${scope}`;
+}
+// Compatibility inventory (no backend summary): only whole-target rules (any endpoint, all
+// zones) form the node's own state; narrower rules are counted as "+N scoped", never its state.
+export const wholeTarget = (r: Rule) => {
+  const f = r.filter;
+  return (
+    !f.process &&
+    !f.remote &&
+    (!f.remote_address || f.remote_address === '*') &&
+    !f.local_port &&
+    !f.remote_port &&
+    !f.network_zone &&
+    !f.all_programs &&
+    !f.interface_name &&
+    !f.local_address
+  );
+};
+export function ownConfigured(rules: Rule[], now: number) {
+  const own = rules.filter(wholeTarget),
+    scoped = rules.length - own.length,
+    hint = scoped ? ` +${scoped} scoped` : '';
+  if (!own.length) return { text: 'Not set' + hint, tone: 'none' as const, scoped };
+  const states = new Set(own.map((r) => ruleState(r, now)));
+  const s = states.size === 1 ? [...states][0] : 'mixed';
+  const tone: 'allow' | 'block' | 'ask' | 'mixed' | 'unavailable' | 'off' =
+    s === 'allow' || s === 'block' || s === 'ask' || s === 'mixed'
+      ? s
+      : s === 'unknown'
+        ? 'unavailable'
+        : 'off';
+  return { text: configuredPolicy(own, now) + hint, tone, scoped };
 }

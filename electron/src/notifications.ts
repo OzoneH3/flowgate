@@ -1,8 +1,11 @@
 import { canDecide } from './protocol';
 import type { ClientState, ViewEvent } from './protocol';
+import { requestGroups, type RequestGroup } from './automatic-prompts';
 export interface RequestRef {
   generation: string;
   id: string;
+  // Request group key (automatic-prompts groupKey); the id is its representative.
+  group?: string;
 }
 export interface Notice {
   on(event: 'click' | 'close' | 'failed', fn: (...args: unknown[]) => void): unknown;
@@ -13,7 +16,7 @@ export interface NoticeContent {
   title: string;
   body: string;
 }
-const key = (r: RequestRef) => r.generation + '\0' + r.id;
+const key = (generation: string, group: string) => generation + '\0' + group;
 // Desktop notification daemons may interpret body markup: remove markup delimiters
 // and control characters rather than passing backend text as formatting.
 export const plain = (s: string, max = 110) =>
@@ -38,24 +41,31 @@ export class RequestNotifications {
     private review: (ref?: RequestRef) => void,
     private now = () => Date.now(),
   ) {}
+  // One notice per request group: 51 identical attempts are one request.
   update(state: ClientState, active: boolean) {
-    const events = !canDecide(state.control) ? [] : pending(state).filter((e) => !e.attempt),
-      current = new Map(
-        events.map((e) => [key({ generation: state.control.generation, id: e.id }), e]),
-      );
+    const generation = state.control.generation,
+      groups = !canDecide(state.control)
+        ? []
+        : requestGroups(pending(state)).filter((g) => !g.representative.attempt),
+      current = new Map(groups.map((g) => [key(generation, g.key), g]));
     for (const [n, ref] of this.live)
-      if (!state.control.connected || active || !events.length || (ref && !current.has(key(ref)))) {
+      if (
+        !state.control.connected ||
+        active ||
+        !groups.length ||
+        (ref && !current.has(key(ref.generation, ref.group!)))
+      ) {
         this.live.delete(n);
         n.close();
       }
     for (const k of this.queued.keys()) if (!current.has(k) || active) this.queued.delete(k);
-    for (const e of events) {
-      const ref = { generation: state.control.generation, id: e.id },
-        k = key(ref),
+    for (const g of groups) {
+      const k = key(generation, g.key),
         fresh = !this.seen.has(k);
       this.seen.delete(k);
       this.seen.set(k, true);
-      if (fresh && !active) this.queued.set(k, ref);
+      if (fresh && !active)
+        this.queued.set(k, { generation, id: g.representative.id, group: g.key });
     }
     while (this.seen.size > 512) this.seen.delete(this.seen.keys().next().value!);
     while (this.queued.size > 256) this.queued.delete(this.queued.keys().next().value!);
@@ -68,13 +78,14 @@ export class RequestNotifications {
     const refs = [...this.queued.values()];
     this.queued.clear();
     this.next = this.now() + 3000;
-    const ref = refs.length === 1 ? refs[0] : undefined,
-      e = ref ? current.get(key(ref)) : undefined;
-    const content = e
-      ? this.content(e)
+    const queued = refs.length === 1 ? current.get(key(generation, refs[0].group!)) : undefined,
+      ref = queued && { generation, id: queued.representative.id, group: queued.key },
+      attempts = groups.reduce((n, g) => n + g.count, 0);
+    const content = queued
+      ? this.content(queued)
       : {
-          title: `FlowGate · ${events.length} pending requests`,
-          body: 'Several connections need review. Open the current pending list. No decision has been sent.',
+          title: `FlowGate · ${groups.length} pending requests`,
+          body: `${attempts} connection attempts need review. Open the current pending list. No decision has been sent.`,
         };
     try {
       while (this.live.size >= 3) {
@@ -100,7 +111,8 @@ export class RequestNotifications {
       this.status = 'Desktop notification delivery failed. Requests remain in the pending list.';
     }
   }
-  private content(e: ViewEvent): NoticeContent {
+  private content(g: RequestGroup): NoticeContent {
+    const e: ViewEvent = g.representative;
     return {
       title:
         'FlowGate · ' +
@@ -110,7 +122,7 @@ export class RequestNotifications {
             'Unidentified application',
           70,
         ),
-      body: `${plain(e.flow.direction, 16)} ${plain(e.flow.protocol, 8).toUpperCase()} · ${plain(e.flow.remote, 100)}\nReview this request in FlowGate.`,
+      body: `${plain(e.flow.direction, 16)} ${plain(e.flow.protocol, 8).toUpperCase()} · ${plain(e.flow.remote, 100)}${g.count > 1 ? ` · ${g.count} similar requests` : ''}\nReview this request in FlowGate.`,
     };
   }
   close() {

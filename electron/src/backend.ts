@@ -1,6 +1,7 @@
 import { inventoryStamp } from './inventory-coherence';
 import {
   REMEMBER_ZONE_CAPABILITY,
+  REMEMBER_FIELDS_CAPABILITY,
   parseDecisionPreview,
   agreesWithDecision,
   sameRememberedRule,
@@ -489,7 +490,9 @@ export class Backend {
     if (
       d.scope === 'once' ||
       !!d.preview_token ||
-      !c.capabilities?.includes(REMEMBER_ZONE_CAPABILITY) ||
+      !c.capabilities?.includes(
+        d.remember ? REMEMBER_FIELDS_CAPABILITY : REMEMBER_ZONE_CAPABILITY,
+      ) ||
       !d.network_zone ||
       d.zone_revision !== c.networkZones?.revision
     )
@@ -597,7 +600,12 @@ export class Backend {
       [...this.attempts.values()].filter((a) => a.phase === 'submitting').length >= 8
     )
       throw Error('Request is no longer actionable; refresh authoritative state');
-    const zoned = c.capabilities?.includes(REMEMBER_ZONE_CAPABILITY) && d.scope !== 'once';
+    const zoned =
+      d.scope !== 'once' &&
+      (c.capabilities?.includes(REMEMBER_ZONE_CAPABILITY) ||
+        c.capabilities?.includes(REMEMBER_FIELDS_CAPABILITY));
+    if (d.remember && (!zoned || !c.capabilities?.includes(REMEMBER_FIELDS_CAPABILITY)))
+      throw Error('Remember fields unsupported by this backend');
     const held = d.preview_token ? this.decisionPreviews.get(d.preview_token) : undefined;
     if (zoned) {
       if (!held || held.sent || !d.preview_token) throw Error('Fresh decision preview required');
@@ -621,6 +629,8 @@ export class Backend {
               network_zone: d.network_zone,
               zone_revision: d.zone_revision,
               preview_token: d.preview_token,
+              ...(d.remember ? { remember: d.remember } : {}),
+              ...(d.duration_seconds !== undefined ? { duration_seconds: d.duration_seconds } : {}),
             }
           : {}),
         id: d.id,

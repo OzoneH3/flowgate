@@ -3,7 +3,20 @@ import { rowStructure } from './row-structure';
 import { acceptsPublication } from './publication';
 import { PROTECTION_CAPABILITY, stateProtection } from './protection-model';
 import { advanceClock } from './state-clock';
-import { REMEMBER_ZONE_CAPABILITY, type DecisionPreview } from './decision-remember';
+import {
+  REMEMBER_ZONE_CAPABILITY,
+  REMEMBER_DURATIONS,
+  DEFAULT_REMEMBER,
+  rememberDecision,
+  rememberFieldsSupported,
+  rememberKey,
+  rememberOptions,
+  rememberReviewText,
+  rememberScope,
+  type DecisionPreview,
+  type RememberFields,
+} from './decision-remember';
+import { askSource, awaiting, groupKey, requestGroups } from './automatic-prompts';
 import { applicationHeading } from './application-heading';
 import { connectionPresentation, permissionTarget } from './connection-presentation';
 import { ZONE_CAPABILITY, zoneLabel } from './network-zones';
@@ -11,14 +24,14 @@ import type { Presentation, PaneFrame } from './pane-model';
 import { DISPLAY_UNITS, displayAmount, isDisplayUnit, type DisplayUnit } from './display-units';
 import { initiationPresentation } from './initiation';
 import { ActivityPolicy, STATUS_SLOTS, blockerGlyph } from './activity-policy';
-import { ruleChip, type RuleChip } from './rule-chip';
+import { ruleChip, ownRuleChip, type RuleChip } from './rule-chip';
 import {
   POLICY_CAPABILITY,
   authoritativePolicy,
   authoritativeZonePolicy,
   authoritativeProcessPolicy,
 } from './policy';
-import { ruleStatus, ruleState, ruleDescription, configuredPolicy } from './rule-status';
+import { ruleStatus, ruleState, ruleDescription, ownConfigured } from './rule-status';
 import { canDecide } from './protocol';
 import type { Application } from './protocol';
 import { TrafficGraph } from './graph';
@@ -80,8 +93,26 @@ let reviewSequence = 0,
   reviewChecking = false,
   reviewMessage = '',
   reviewFor = '';
+// decision-remember-fields-v1 (NetLimiter 5.3.28): Remember unchecked = Once.
+let rememberOn = false,
+  rememberFields: RememberFields = { ...DEFAULT_REMEMBER },
+  rememberDuration = 0,
+  reviewTimer: ReturnType<typeof setTimeout> | undefined;
+function rememberMode() {
+  return rememberFieldsSupported(state?.control.capabilities);
+}
+function resetRemember() {
+  rememberOn = false;
+  rememberFields = { ...DEFAULT_REMEMBER };
+  rememberDuration = 0;
+}
+function syncRememberScope() {
+  if (rememberMode()) chosenScope = rememberOn ? rememberScope(rememberDuration) : 'once';
+}
 function needsDecisionReview() {
-  return chosenScope !== 'once' && !!state.control.capabilities?.includes(REMEMBER_ZONE_CAPABILITY);
+  return rememberMode()
+    ? rememberOn
+    : chosenScope !== 'once' && !!state.control.capabilities?.includes(REMEMBER_ZONE_CAPABILITY);
 }
 function reviewKey() {
   return JSON.stringify([
@@ -90,9 +121,55 @@ function reviewKey() {
     chosenScope,
     decisionZone,
     state.control.networkZones?.revision,
+    rememberMode() && rememberOn
+      ? rememberKey({ fields: rememberFields, duration: rememberDuration })
+      : '',
   ]);
 }
+// Backend text verbatim (e.g. policy_conflict "… still wins"), without IPC wrapping.
+function errorText(error: unknown) {
+  return String((error as Error)?.message ?? error)
+    .replace(/^Error invoking remote method '[^']*': /, '')
+    .replace(/^Error: /, '');
+}
+function decisionFor(action: 'allow' | 'block', e: ViewEvent, preview?: DecisionPreview) {
+  const base = { generation: state.control.generation, id: e.id, action };
+  const zoneRevision = preview?.zone_revision ?? (state.control.networkZones?.revision || '');
+  if (rememberMode() && rememberOn)
+    return {
+      ...rememberDecision(
+        base,
+        { fields: rememberFields, duration: rememberDuration },
+        zoneRevision,
+      ),
+      ...(preview ? { preview_token: preview.token } : {}),
+    };
+  return {
+    ...base,
+    scope: chosenScope,
+    ...(needsDecisionReview()
+      ? {
+          network_zone: decisionZone,
+          zone_revision: zoneRevision,
+          ...(preview ? { preview_token: preview.token } : {}),
+        }
+      : {}),
+  };
+}
+// Any change invalidates the shown preview immediately; the fresh review follows
+// shortly so rapid checkbox changes do not exhaust the backend's preview capacity.
+function invalidateReview(delay = 250) {
+  ++reviewSequence;
+  decisionReviews = {};
+  reviewFor = '';
+  reviewMessage = '';
+  clearTimeout(reviewTimer);
+  updateDecisions();
+  reviewTimer = setTimeout(() => void prepareDecisions(), delay);
+}
 async function prepareDecisions() {
+  clearTimeout(reviewTimer);
+  syncRememberScope();
   const e = currentEvent();
   const seq = ++reviewSequence,
     key = reviewKey();
@@ -109,17 +186,7 @@ async function prepareDecisions() {
     const entries = await Promise.all(
       (['allow', 'block'] as const).map(
         async (action) =>
-          [
-            action,
-            await window.flowgate.decisionPreview({
-              generation: state.control.generation,
-              id: e.id,
-              action,
-              scope: chosenScope,
-              network_zone: decisionZone,
-              zone_revision: state.control.networkZones?.revision || '',
-            }),
-          ] as const,
+          [action, await window.flowgate.decisionPreview(decisionFor(action, e))] as const,
       ),
     );
     if (seq === reviewSequence && key === reviewKey()) {
@@ -127,7 +194,7 @@ async function prepareDecisions() {
       reviewFor = key;
     }
   } catch (error) {
-    if (seq === reviewSequence && key === reviewKey()) reviewMessage = String(error);
+    if (seq === reviewSequence && key === reviewKey()) reviewMessage = errorText(error);
   } finally {
     if (seq === reviewSequence) {
       reviewChecking = false;
@@ -242,7 +309,7 @@ function rowApplication(r: Row) {
 }
 
 // Seven-slot Rule Status strip. Slots 4/5 are the In/Out Blocker state for the
-// row's own target (a process without its own rule shows its application fallback dimmed). The
+// row's own target (a process without its own rule shows Not set, like NetLimiter). The
 // other slots are explicitly unavailable rule families, never controls.
 function showFloatingRuleStatus() {
   let floating = $('floatingRuleStatus');
@@ -328,37 +395,43 @@ function statusStrip(r: Row) {
       chip = { glyph: '', text: '', tone: 'none', detail: '' };
       title = `${slot.label}: connections carry no rules; see the holder process.`;
     } else if (authoritative) {
+      // NetLimiter Rule Status: the node's OWN rule; scoped rules only add a "+N scoped" hint.
       const summary = processPolicy?.[direction] || result?.application?.[direction];
       const fallback =
         processPolicy && !processPolicy[direction].rules.length
-          ? processPolicy[
-              direction === 'incoming' ? 'application_incoming' : 'application_outgoing'
-            ]
+          ? ownRuleChip(
+              processPolicy[
+                direction === 'incoming' ? 'application_incoming' : 'application_outgoing'
+              ],
+              false,
+              true,
+            )
           : undefined;
-      const shown = fallback?.rules.length ? fallback : summary;
-      fallbackShown = !!fallback?.rules.length;
-      chip = ruleChip(shown, processPolicy?.state === 'inactive' && shown === summary, true);
+      // NetLimiter shows only the node's own rule; an inherited application rule is named in the tooltip.
+      chip = ownRuleChip(summary, processPolicy?.state === 'inactive', true);
+      const inherited =
+        fallback && fallback.tone !== 'none' ? `\nApplication rule applies: ${fallback.text}` : '';
       title = summary
-        ? `${slot.label}: ${chip.text}${fallbackShown ? ' (application fallback; no own rule)' : ''}\n${chip.detail}\n${summary.reason}\nEnforcement: ${summary.enforcement.state} · ${summary.enforcement.reason}`
+        ? `${slot.label}: ${chip.text}${inherited}\n${chip.detail}\n${summary.reason}\nEnforcement: ${summary.enforcement.state} · ${summary.enforcement.reason}`
         : `${slot.label}: ${result?.reason || 'unavailable'}`;
       if (!summary) chip = { glyph: '', text: 'Unavailable', tone: 'unavailable', detail: '' };
     } else if (status.available) {
-      const rules = status[direction];
+      const rules = status[direction],
+        own = ownConfigured(rules, status.now);
       chip = {
         glyph: '',
-        text: rules.length ? configuredPolicy(rules, status.now) : 'Not set',
-        tone:
-          rules.length === 1
-            ? (ruleState(rules[0], status.now) as RuleChip['tone'])
-            : rules.length
-              ? 'mixed'
-              : 'none',
+        text: own.text,
+        tone: own.tone,
         detail: rules.map((rule) => ruleDescription(rule, status.now)).join('\n'),
+        scoped: own.scoped,
       };
       title = `${slot.label} (compatibility inventory): ${chip.text}\n${chip.detail}`;
     } else title = `${slot.label}: ${status.reason}`;
-    if (['allow', 'block', 'mixed', 'off'].includes(chip.tone)) button.append(blockerGlyph(chip));
+    if (['allow', 'block', 'ask', 'mixed', 'off'].includes(chip.tone))
+      button.append(blockerGlyph(chip));
     else button.append(element('span', '·', 'slot-dot'), statusFamilyGlyph(slot.key));
+    if (chip.scoped && !fallbackShown)
+      button.append(element('span', '+' + chip.scoped, 'scoped-hint'));
     button.classList.add('tone-' + chip.tone);
     if (fallbackShown) button.classList.add('policy-fallback');
     button.title =
@@ -405,7 +478,7 @@ if (promptID) {
     }
   });
 } else {
-  root.innerHTML = `<header class="toolbar"><strong class="brand">FLOWGATE</strong><span id="toolbarUnits" class="toolbar-units"><label for="displayUnits">Units</label><select id="displayUnits" aria-label="Display units" title="Display only: bytes or bits, decimal SI prefixes (1 KB = 1000 B). Accounting sources stay separate."></select></span><span id="observerStatus" class="toolbar-status"></span><span id="controlStatus" class="toolbar-status"></span><span class="toolbar-layout"><select id="layoutPreset" aria-label="Window layout"><option value="chart">Default with Chart</option><option value="plain">Default</option><option value="activity">Activity only</option></select></span><input id="search" type="search" aria-label="Search Activity" placeholder="Search"></header><nav class="tabs" aria-label="Views"><button id="activityTab" aria-selected="true">Activity</button><button id="requestsTab" aria-selected="false">Pending requests <span id="pendingCount">0</span></button><span id="tabsPaneControls" class="pane-controls"></span></nav><main id="activityView"><section class="activity-main"><div class="filterbar"><select id="activitySource" aria-label="Activity measurement source"><option value="tcp">TCP</option><option value="udp">UDP</option></select><button id="rateMode" aria-pressed="false" title="Switch the two traffic columns between current rate and total transferred">Rate</button><select id="columnPreset" aria-label="Column preset"><option value="status">Status</option><option value="details">Details</option></select><select id="filter" aria-label="Socket filter"><option value="all">All sockets</option><option value="active">Active TCP / connected UDP</option><option value="listening">Listening TCP / bound UDP</option></select><span class="filterbar-icons"><button id="expand" class="icon-button" title="Expand all" aria-label="Expand all">⊞</button><button id="collapse" class="icon-button" title="Collapse all" aria-label="Collapse all">⊟</button><button id="refreshNow" class="icon-button" title="Refresh now" aria-label="Refresh now">↻</button></span></div><div class="table-scroll"><table id="tree" role="treegrid" tabindex="0" aria-label="Application process socket activity"><thead><tr id="headers"></tr></thead><tbody id="rows"></tbody></table></div><div id="activitySummary" class="summary"></div></section><aside><h2>Info View<span id="infoPaneControls" class="pane-controls"></span></h2><h3 id="selectedName">FlowGate Activity</h3><div id="selectedExecutable"></div><div class="info-scroll"><h3 id="infoProperties" class="info-section-title">Overview</h3><dl id="info"></dl><section id="infoRules"></section><section class="info-tools"><h3 class="info-section-title">Tools</h3><button id="infoOpenRules">Rule list</button><button id="infoOpenLog">Decision log</button><button id="infoOpenPending">Pending requests</button></section></div><section id="trafficGraph"></section></aside></main><main id="requestsView" hidden><section class="request-list"><h2>Pending &amp; recent requests</h2><p class="hint">Select a request to decide. Dismissal grants nothing. Closing FlowGate leaves an independent controller running.</p><div class="table-scroll"><table id="requests"><thead><tr><th>Application</th><th>Direction</th><th>Protocol</th><th>Remote endpoint</th><th>State</th></tr></thead><tbody id="requestRows"></tbody></table></div></section><aside class="request-sidebar"><h2>Connection permission</h2><div id="requestDetails"></div></aside></main><footer><span id="footerSummary"></span><span id="feedback" role="status" aria-live="polite"></span></footer>`;
+  root.innerHTML = `<header class="toolbar"><strong class="brand">FLOWGATE</strong><span id="toolbarUnits" class="toolbar-units"><label for="displayUnits">Units</label><select id="displayUnits" aria-label="Display units" title="Display only: bytes or bits, decimal SI prefixes (1 KB = 1000 B). Accounting sources stay separate."></select></span><span id="observerStatus" class="toolbar-status"></span><span id="controlStatus" class="toolbar-status"></span><span class="toolbar-layout"><select id="layoutPreset" aria-label="Window layout"><option value="chart">Default with Chart</option><option value="plain">Default</option><option value="activity">Activity only</option></select></span><input id="search" type="search" aria-label="Search Activity" placeholder="Search"></header><nav class="tabs" aria-label="Views"><button id="activityTab" aria-selected="true">Activity</button><button id="requestsTab" aria-selected="false">Pending requests <span id="pendingCount">0</span></button><span id="tabsPaneControls" class="pane-controls"></span></nav><main id="activityView"><section class="activity-main"><div class="filterbar"><select id="activitySource" aria-label="Activity measurement source"><option value="tcp">TCP</option><option value="udp">UDP</option></select><button id="rateMode" aria-pressed="false" title="Switch the two traffic columns between current rate and total transferred">Rate</button><select id="columnPreset" aria-label="Column preset"><option value="status">Status</option><option value="details">Details</option></select><select id="filter" aria-label="Socket filter"><option value="all">All sockets</option><option value="active">Active TCP / connected UDP</option><option value="listening">Listening TCP / bound UDP</option></select><span class="filterbar-icons"><button id="expand" class="icon-button" title="Expand all" aria-label="Expand all">⊞</button><button id="collapse" class="icon-button" title="Collapse all" aria-label="Collapse all">⊟</button><button id="refreshNow" class="icon-button" title="Refresh now" aria-label="Refresh now">↻</button></span></div><div class="table-scroll"><table id="tree" role="treegrid" tabindex="0" aria-label="Application process socket activity"><thead><tr id="headers"></tr></thead><tbody id="rows"></tbody></table></div><div id="activitySummary" class="summary"></div></section><aside><h2>Info View<span id="infoPaneControls" class="pane-controls"></span></h2><h3 id="selectedName">FlowGate Activity</h3><div id="selectedExecutable"></div><div class="info-scroll"><h3 id="infoProperties" class="info-section-title">Overview</h3><dl id="info"></dl><section id="infoRules"></section><section class="info-tools"><h3 class="info-section-title">Tools</h3><button id="infoOpenRules">Rule list</button><button id="infoOpenLog">Decision log</button><button id="infoOpenPending">Pending requests</button></section></div><section id="trafficGraph"></section></aside></main><main id="requestsView" hidden><section class="request-list"><h2>Pending requests</h2><p class="hint">One row per group of identical requests; a decision answers its oldest request. Dismissal grants nothing. Closing FlowGate leaves an independent controller running.</p><div class="table-scroll"><table id="requests"><thead><tr><th>Application</th><th>Direction</th><th>Protocol</th><th>Remote endpoint</th><th>Requests</th><th>State</th></tr></thead><tbody id="requestRows"></tbody></table></div></section><aside class="request-sidebar"><h2>Connection permission</h2><div id="requestDetails"></div></aside></main><footer><span id="footerSummary"></span><span id="feedback" role="status" aria-live="polite"></span></footer>`;
   const columns = [
     ['name', 'Name'],
     ['download_bps', 'DL Rate'],
@@ -1400,34 +1473,77 @@ function actionable(e: ViewEvent | undefined) {
     !!e.scope_previews[chosenScope]
   );
 }
+function selectRequest(id: string) {
+  selectedRequest = id;
+  chosenScope = 'once';
+  decisionZone = 'any';
+  resetRemember();
+  clearTimeout(reviewTimer);
+  decisionReviews = {};
+  reviewFor = '';
+  reviewMessage = '';
+  ++reviewSequence;
+  detailSignature = '';
+}
 function renderRequests() {
-  const events = state.control.events;
+  const events = state.control.events,
+    groups = requestGroups(events);
+  if (!promptID) {
+    // Settled/finalized/expired requests leave at once; selection moves to the
+    // next group unless the user is following their own decision's result.
+    const selected = events.find((e) => e.id === selectedRequest);
+    if (
+      !selected ||
+      !(
+        awaiting(selected) ||
+        selected.attempt ||
+        localSubmitted.has(state.control.generation + ':' + selected.id)
+      )
+    ) {
+      const next = groups[0]?.representative.id ?? '';
+      if (next !== selectedRequest && (next || selected)) selectRequest(next);
+    }
+  }
+  const selectedGroup = (() => {
+    const s = events.find((e) => e.id === selectedRequest);
+    return s ? groupKey(s) : '';
+  })();
   const signature = JSON.stringify([
-    selectedRequest,
+    selectedGroup,
     state.control.generation,
     state.control.connected,
     state.control.readOnly,
     state.control.permissions,
-    events.map((e) => [e.id, e.state, e.attempt]),
+    groups.map((g) => [g.key, g.representative.id, g.count, g.representative.attempt?.phase]),
   ]);
   if (!promptID && signature !== eventSignature) {
     eventSignature = signature;
     const body = $('requestRows');
     body.replaceChildren();
-    for (const e of events) {
-      const tr = element('tr');
+    for (const g of groups) {
+      const e = g.representative,
+        tr = element('tr');
       tr.dataset.id = e.id;
+      tr.dataset.group = g.key;
       tr.tabIndex = 0;
-      tr.setAttribute('aria-selected', String(selectedRequest === e.id));
-      for (const v of [eventName(e), e.flow.direction, e.flow.protocol, e.flow.remote, e.state])
+      tr.setAttribute('aria-selected', String(selectedGroup === g.key));
+      for (const v of [
+        eventName(e),
+        e.flow.direction,
+        e.flow.protocol,
+        e.flow.remote,
+        String(g.count),
+        e.attempt ? e.attempt.phase : 'awaiting decision',
+      ])
         tr.append(element('td', v));
+      tr.title =
+        g.count > 1
+          ? `${g.count} similar requests. A decision answers the oldest one; Remember also settles the others it covers.`
+          : '';
       const select = () => {
-        selectedRequest = e.id;
-        chosenScope = 'once';
-        decisionZone = 'any';
-        decisionReviews = {};
-        ++reviewSequence;
-        detailSignature = '';
+        // Always the group's current representative; a decision never fans out.
+        const current = requestGroups(state.control.events).find((x) => x.key === g.key);
+        selectRequest(current?.representative.id ?? e.id);
         renderRequests();
       };
       tr.onclick = select;
@@ -1439,14 +1555,13 @@ function renderRequests() {
       };
       body.append(tr);
     }
-    if (!selectedRequest && events.length)
-      selectedRequest = events.find((e) => e.state === 'awaiting-decision')?.id ?? events[0].id;
   }
   const e = currentEvent();
   const sig = JSON.stringify([
     selectedRequest,
     state.control.generation,
     e ? [e.id, e.flow, e.attribution, e.deadline, e.scope_previews] : null,
+    rememberMode(),
   ]);
   if (sig !== detailSignature) {
     detailSignature = sig;
@@ -1524,6 +1639,13 @@ function renderRequests() {
         ),
       );
     container.append(element('p', '', 'expiry'));
+    // stored-ask-v1: which rule (if any) asked; default Ask otherwise.
+    const asked = element('p', '', 'ask-source');
+    asked.id = 'askSource';
+    container.append(asked);
+    const similar = element('p', '', 'similar-requests');
+    similar.id = 'similarRequests';
+    container.append(similar);
     const scopeTarget = element('p', '', 'permission-target');
     scopeTarget.id = 'permissionTarget';
     container.append(scopeTarget);
@@ -1535,9 +1657,10 @@ function renderRequests() {
       const button = element('button', label, action);
       button.id = action;
       button.onclick = async () => {
-        if (!actionable(currentEvent()) || currentEvent()?.id !== e.id) return;
-        const generation = state.control.generation,
-          scope = chosenScope;
+        syncRememberScope();
+        const current = currentEvent();
+        if (!actionable(current) || current?.id !== e.id) return;
+        const generation = state.control.generation;
         const preview = decisionReviews[action];
         if (
           needsDecisionReview() &&
@@ -1546,77 +1669,132 @@ function renderRequests() {
             Date.parse(preview.expires_at) <= (state.control.serverNow || Date.now()))
         )
           return;
+        const decision = decisionFor(action, current, needsDecisionReview() ? preview : undefined);
         localSubmitted.add(generation + ':' + e.id);
         updateDecisions();
         message('Submitting decision…');
         try {
-          const result = await window.flowgate.decide({
-            generation,
-            id: e.id,
-            action,
-            scope,
-            ...(needsDecisionReview()
-              ? {
-                  network_zone: decisionZone,
-                  zone_revision: preview!.zone_revision,
-                  preview_token: preview!.token,
-                }
-              : {}),
-          });
+          const result = await window.flowgate.decide(decision);
           message(result.message);
         } catch (error) {
-          message(String(error));
+          message(errorText(error));
         }
         updateDecisions();
       };
       controls.append(button);
     }
-    const scopes = element('select');
-    scopes.id = 'scope';
-    scopes.setAttribute('aria-label', 'Permission scope');
-    const offered = Object.keys(e.scope_previews) as Scope[];
-    if (!offered.includes(chosenScope)) chosenScope = offered[0] ?? 'once';
-    for (const key of offered) {
-      const option = element('option', scopeLabels[key]);
-      option.value = key;
-      scopes.append(option);
+    if (rememberMode()) {
+      // NetLimiter 5.3.28: Remember unchecked = Once (no rule). Checked: choose
+      // properties (application fixed) and an optional deletion time.
+      const toggle = element('label', '', 'remember-toggle'),
+        box = element('input');
+      box.type = 'checkbox';
+      box.id = 'rememberToggle';
+      box.checked = rememberOn;
+      box.onchange = () => {
+        rememberOn = box.checked;
+        syncRememberScope();
+        invalidateReview(0);
+      };
+      toggle.append(box, ' Remember');
+      controls.append(toggle);
+      container.append(controls);
+      const panel = element('fieldset', '', 'remember-panel');
+      panel.id = 'rememberPanel';
+      panel.append(
+        element('legend', "Create rule and don't ask me again"),
+        element('p', 'Create rule for:', 'remember-heading'),
+      );
+      for (const option of rememberOptions(e, eventName(e))) {
+        const label = element('label', '', 'remember-field'),
+          input = element('input');
+        input.type = 'checkbox';
+        input.dataset.field = option.field;
+        input.dataset.available = String(option.available);
+        if (option.field === 'application') {
+          input.checked = true;
+          input.disabled = true;
+          label.title = 'The rule always applies to this application';
+        } else {
+          const field = option.field;
+          input.checked = rememberFields[field];
+          label.title = option.reason || '';
+          input.onchange = () => {
+            rememberFields = { ...rememberFields, [field]: input.checked };
+            invalidateReview();
+          };
+        }
+        label.append(input, ' ' + option.label);
+        panel.append(label);
+      }
+      const durationLabel = element('label', 'Delete the rule after: ', 'remember-duration'),
+        duration = element('select');
+      duration.id = 'rememberDuration';
+      for (const d of REMEMBER_DURATIONS) duration.append(new Option(d.label, String(d.seconds)));
+      duration.value = String(rememberDuration);
+      duration.onchange = () => {
+        rememberDuration = Number(duration.value);
+        syncRememberScope();
+        invalidateReview(0);
+      };
+      durationLabel.append(duration);
+      panel.append(durationLabel);
+      const summary = element('p', '', 'remember-summary');
+      summary.id = 'rememberSummary';
+      summary.setAttribute('role', 'status');
+      const refresh = element('button', 'Refresh review', 'link-button');
+      refresh.id = 'refreshDecision';
+      refresh.onclick = () => void prepareDecisions();
+      panel.append(summary, refresh);
+      container.append(panel);
+    } else {
+      const scopes = element('select');
+      scopes.id = 'scope';
+      scopes.setAttribute('aria-label', 'Permission scope');
+      const offered = Object.keys(e.scope_previews) as Scope[];
+      if (!offered.includes(chosenScope)) chosenScope = offered[0] ?? 'once';
+      for (const key of offered) {
+        const option = element('option', scopeLabels[key]);
+        option.value = key;
+        scopes.append(option);
+      }
+      scopes.value = chosenScope;
+      scopes.onchange = () => {
+        chosenScope = scopes.value as Scope;
+        void prepareDecisions();
+      };
+      controls.append(scopes);
+      container.append(controls);
+      const networks = element('div', '', 'decision-network');
+      const networkLabel = element('label', 'Remember on ');
+      const zone = element('select');
+      zone.id = 'decisionZone';
+      zone.setAttribute('aria-label', 'Remember network scope');
+      zone.append(new Option('Any network', 'any'));
+      if (
+        state.control.capabilities?.includes(REMEMBER_ZONE_CAPABILITY) &&
+        e.flow.network_scope?.state === 'known' &&
+        e.flow.network_scope.revision === state.control.networkZones?.revision
+      )
+        zone.append(new Option(zoneLabel(e.flow.network_scope.zone), e.flow.network_scope.zone));
+      zone.value = decisionZone;
+      if (!zone.value) {
+        decisionZone = 'any';
+        zone.value = 'any';
+        decisionReviews = {};
+      }
+      zone.onchange = () => {
+        decisionZone = zone.value as typeof decisionZone;
+        void prepareDecisions();
+      };
+      networkLabel.append(zone);
+      networks.append(networkLabel);
+      const refresh = element('button', 'Refresh review', 'link-button');
+      refresh.id = 'refreshDecision';
+      refresh.onclick = () => void prepareDecisions();
+      networks.append(refresh);
+      container.append(networks);
     }
-    scopes.value = chosenScope;
-    scopes.onchange = () => {
-      chosenScope = scopes.value as Scope;
-      void prepareDecisions();
-    };
-    controls.append(scopes);
-    container.append(controls);
-    const networks = element('div', '', 'decision-network');
-    const networkLabel = element('label', 'Remember on ');
-    const zone = element('select');
-    zone.id = 'decisionZone';
-    zone.setAttribute('aria-label', 'Remember network scope');
-    zone.append(new Option('Any network', 'any'));
-    if (
-      state.control.capabilities?.includes(REMEMBER_ZONE_CAPABILITY) &&
-      e.flow.network_scope?.state === 'known' &&
-      e.flow.network_scope.revision === state.control.networkZones?.revision
-    )
-      zone.append(new Option(zoneLabel(e.flow.network_scope.zone), e.flow.network_scope.zone));
-    zone.value = decisionZone;
-    if (!zone.value) {
-      decisionZone = 'any';
-      zone.value = 'any';
-      decisionReviews = {};
-    }
-    zone.onchange = () => {
-      decisionZone = zone.value as typeof decisionZone;
-      void prepareDecisions();
-    };
-    networkLabel.append(zone);
-    networks.append(networkLabel);
-    const refresh = element('button', 'Refresh review', 'link-button');
-    refresh.id = 'refreshDecision';
-    refresh.onclick = () => void prepareDecisions();
-    networks.append(refresh);
-    container.append(networks);
     const reviewStatus = element('p', '', 'decision-review');
     reviewStatus.id = 'decisionReview';
     reviewStatus.setAttribute('role', 'status');
@@ -1658,25 +1836,30 @@ function renderRequests() {
   updateDecisions();
 }
 function updateDecisions() {
-  const e = currentEvent();
+  syncRememberScope();
+  const e = currentEvent(),
+    groups = state.control.connected ? requestGroups(state.control.events) : [],
+    group = e ? groups.find((g) => g.key === groupKey(e)) : undefined;
   if (promptID && $('dismiss')) {
-    const other = state.control.connected
-      ? state.control.events.filter(
-          (r) =>
-            r.id !== promptID && r.state === 'awaiting-decision' && r.remainingMs > 0 && !r.attempt,
-        ).length
-      : 0;
+    const other = groups.filter(
+      (g) => !g.representative.attempt && (!e || g.key !== groupKey(e)),
+    ).length;
     $('dismiss').textContent = other
       ? `Next request (${other})`
       : e?.state === 'awaiting-decision' && e.remainingMs > 0
         ? 'Decide later'
         : 'Close';
     $('dismiss').title =
-      'Dismiss this view without Allow or Deny. Unanswered requests retain their original deadlines.';
+      'Dismiss this view without Allow or Deny. Unanswered requests retain their original deadlines; this group does not open again automatically.';
   }
-  if ($('promptPending'))
-    $('promptPending').textContent =
-      `Pending connections (${state.control.events.filter((e) => e.state === 'awaiting-decision' && e.remainingMs > 0).length})`;
+  if ($('promptPending')) $('promptPending').textContent = `Pending requests (${groups.length})`;
+  if ($('similarRequests'))
+    $('similarRequests').textContent =
+      group && group.count > 1
+        ? `${group.count} similar requests · Allow/Deny answers this one; Remember also settles the others its rule covers.`
+        : '';
+  if ($('askSource') && e) $('askSource').textContent = askSource(e, state.control.rules);
+  const remembering = rememberMode() && rememberOn;
   for (const id of ['allow', 'block']) {
     const b = $<HTMLButtonElement>(id);
     const review = decisionReviews[id as 'allow' | 'block'];
@@ -1688,20 +1871,49 @@ function updateDecisions() {
             !review ||
             Date.parse(review.expires_at) <= (state.control.serverNow || Date.now())));
       b.title = needsDecisionReview()
-        ? review?.scope_preview || 'Review required'
-        : e?.scope_previews[chosenScope] || '';
+        ? review?.summary || review?.scope_preview || 'Review required'
+        : rememberMode()
+          ? 'Once: this connection attempt only; creates no rule'
+          : e?.scope_previews[chosenScope] || '';
     }
   }
+  const locked =
+    !e ||
+    !!e.attempt ||
+    localSubmitted.has(state.control.generation + ':' + e.id) ||
+    !state.control.connected ||
+    !canDecide(state.control) ||
+    e.state !== 'awaiting-decision' ||
+    e.remainingMs <= 0;
   const scope = $<HTMLSelectElement>('scope');
-  if (scope)
-    scope.disabled =
-      !e ||
-      !!e.attempt ||
-      localSubmitted.has(state.control.generation + ':' + e.id) ||
-      !state.control.connected ||
-      !canDecide(state.control) ||
-      e.state !== 'awaiting-decision' ||
-      e.remainingMs <= 0;
+  if (scope) scope.disabled = locked;
+  const toggle = $<HTMLInputElement>('rememberToggle');
+  if (toggle) toggle.disabled = locked;
+  const panel = $('rememberPanel');
+  if (panel) {
+    panel.hidden = !remembering;
+    for (const input of panel.querySelectorAll<HTMLInputElement>('input[data-field]'))
+      if (input.dataset.field !== 'application')
+        input.disabled = locked || input.dataset.available !== 'true';
+    const duration = $<HTMLSelectElement>('rememberDuration');
+    duration.disabled = locked;
+    // Backend offers persistent only with rule storage; temporary only as "application".
+    for (const option of duration.options)
+      option.disabled = !e?.scope_previews[rememberScope(Number(option.value))];
+  }
+  if ($('rememberSummary'))
+    $('rememberSummary').textContent = reviewChecking
+      ? 'Checking rule…'
+      : (e && !e.scope_previews[chosenScope]
+          ? chosenScope === 'persistent'
+            ? 'Persistent rules unavailable (no rule storage); choose a deletion time.'
+            : 'This deletion time is unavailable for this request.'
+          : '') ||
+        reviewMessage ||
+        (reviewFor === reviewKey()
+          ? rememberReviewText(decisionReviews.allow, decisionReviews.block, e?.ask_rule)
+          : '') ||
+        'Rule preview required before Allow/Deny.';
   if ($('scopePreview'))
     $('scopePreview').textContent = needsDecisionReview()
       ? Object.entries(decisionReviews)
@@ -1724,14 +1936,19 @@ function updateDecisions() {
   if ($('decisionReview'))
     $('decisionReview').textContent = reviewChecking
       ? 'Checking remembered scope…'
-      : reviewMessage ||
-        (needsDecisionReview() && !decisionReviews.allow
-          ? 'Choose scope, then refresh review.'
-          : needsDecisionReview() &&
-              Date.parse(decisionReviews.allow?.expires_at || '') <=
-                (state.control.serverNow || Date.now())
-            ? 'Review expired · refresh to decide.'
-            : '');
+      : remembering
+        ? Date.parse(decisionReviews.allow?.expires_at || '') <=
+            (state.control.serverNow || Date.now()) && reviewFor === reviewKey()
+          ? 'Review expired · refresh to decide.'
+          : ''
+        : reviewMessage ||
+          (needsDecisionReview() && !decisionReviews.allow
+            ? 'Choose scope, then refresh review.'
+            : needsDecisionReview() &&
+                Date.parse(decisionReviews.allow?.expires_at || '') <=
+                  (state.control.serverNow || Date.now())
+              ? 'Review expired · refresh to decide.'
+              : '');
   if ($('decisionReconcile')) {
     const reconcile = $<HTMLButtonElement>('decisionReconcile');
     reconcile.hidden = !e?.attempt?.reconcile;
@@ -1744,13 +1961,18 @@ function updateDecisions() {
         ? `Backend now reports ${e.state}. Original acknowledgement remains unknown; no retry sent. ${e.reason}`
         : e.attempt?.message || e.reason;
   if ($('permissionTarget'))
-    $('permissionTarget').textContent = permissionTarget(
-      chosenScope,
-      e?.flow.protocol || '',
-      needsDecisionReview() ? decisionZone : 'any',
-    );
+    $('permissionTarget').textContent = rememberMode()
+      ? remembering
+        ? 'Remember: create a rule for the checked properties'
+        : 'Once: this connection attempt only · no rule'
+      : permissionTarget(
+          chosenScope,
+          e?.flow.protocol || '',
+          needsDecisionReview() ? decisionZone : 'any',
+        );
   if (
     $('permissionTarget') &&
+    !rememberMode() &&
     needsDecisionReview() &&
     reviewFor === reviewKey() &&
     decisionReviews.allow
@@ -1792,10 +2014,7 @@ function consume(next: ClientState) {
         : 'Compatibility inventory (listed rules; no backend summary).';
     $('observerStatus').textContent = state.observation.message;
     $('observerStatus').title = state.observation.message;
-    $('pendingCount').textContent = String(
-      state.control.events.filter((e) => e.state === 'awaiting-decision' && e.remainingMs > 0)
-        .length,
-    );
+    $('pendingCount').textContent = String(requestGroups(state.control.events).length);
     const stamp =
       state.observation.generation + ':' + (state.observation.activity?.sequence ?? 'offline');
     if (stamp !== sequence) {

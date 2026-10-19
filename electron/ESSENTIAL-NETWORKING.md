@@ -38,9 +38,36 @@ No frontend preset or policy matcher is implemented.
 
 Essential operations use a fixed20s asynchronous idle/absolute transport budget for
 bounded15s discovery; ordinary API polling retains3.5s. Main accepts only known
-operations and four Boolean options, never renderer-supplied peers/rules/paths.
+operations, four Boolean options and a validated interface-exclusion list, never
+renderer-supplied peers/rules/paths.
 Only the registered main window can invoke the bridge; detached/prompt windows
 cannot mutate the preset.
+
+## Interface exclusions (`essential-interface-exclusion-v1`)
+
+The dialog lists interfaces carrying discovered upstream DNS/DHCP, derived only from
+the backend review (DNS/DHCP preset rule `interface_name`, never `lo`, and the
+"Excluded by review, not proposed: …" / "Excluded interface … has no discovered …"
+issues), with an **Exclude … from this review** checkbox each. Excluded interfaces
+stay listed so they can be re-included. Checkboxes start unchecked except the
+persisted reviewed set, which main stores in `electron-preferences.json` as
+`essential.excluded_interfaces` only after a confirmed Apply receipt (re-validated
+on load; invalid content is ignored). The reviewed host choice is `ppp0` (work VPN)
+excluded, as applied by `scripts/apply-essentials.py`; seed
+`"essential":{"excluded_interfaces":["ppp0"]}` in an existing preferences file to
+preselect it before the first UI Apply.
+
+Main validates names like the daemon (1..15 printable ASCII, no whitespace, `/`,
+`:`, `.`/`..`; `lo` rejected; at most 16) and canonicalizes (sorted, de-duplicated).
+`essential_options.excluded_interfaces` is sent on preview and Apply exactly as
+reviewed (omitted when empty; removal sends none) and the daemon echo/receipt must
+match. Any change of choices disables Apply until a fresh Preview with equal options.
+The review shows `Excluded: ppp0` (or `none`), also on the receipt line.
+
+Daemons without the capability silently ignore the field, so main never sends it
+to them: a preview with exclusions is refused, and while a reviewed exclusion is
+persisted Apply stays disabled with an explicit message (no default Apply that
+re-proposes the excluded DNS/DHCP). Removal is unaffected.
 
 ## Verification
 

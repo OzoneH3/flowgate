@@ -138,9 +138,16 @@ export interface RequestEvent {
   };
   remembered_filter?: RuleFilter;
   scope_previews: Partial<Record<Scope, string>>;
+  // Equivalent repeated requests share a group (backend `request_group`).
+  request_group?: string;
+  // stored-ask-v1: the stored Ask rule that caused this prompt (absent = default Ask).
+  ask_rule?: { id: string; version: number };
 }
 export type Scope = 'once' | 'application' | 'persistent';
 export type Action = 'allow' | 'block';
+// Stored Blocker actions; 'ask' requires stored-ask-v1 (decisions stay allow/block).
+export type RuleAction = Action | 'ask';
+export const STORED_ASK_CAPABILITY = 'stored-ask-v1';
 export interface TrafficMonitor {
   state: 'disabled' | 'starting' | 'active' | 'stopping' | 'failed';
   available: boolean;
@@ -271,6 +278,9 @@ export interface Decision {
   network_zone?: 'any' | NetworkZone;
   zone_revision?: string;
   preview_token?: string;
+  // decision-remember-fields-v1: false = any. Absent = legacy reviewed scope.
+  remember?: { address: boolean; port: boolean; protocol: boolean; process: boolean };
+  duration_seconds?: number;
 }
 export interface Bridge {
   essentialState(): Promise<import('./essential-model').EssentialView>;
@@ -422,7 +432,21 @@ function event(v: unknown): RequestEvent {
     },
     scope_previews: previews,
     remembered_filter: e.remembered_filter ? ruleFilter(e.remembered_filter) : undefined,
+    request_group:
+      string(e.request_group) && string(e.request_group).length <= 256
+        ? string(e.request_group)
+        : undefined,
+    ask_rule: askRule(e.ask_rule),
   };
+}
+function askRule(v: unknown): RequestEvent['ask_rule'] {
+  const r = object(v);
+  return string(r.id) &&
+    string(r.id).length <= 256 &&
+    Number.isSafeInteger(r.version) &&
+    Number(r.version) >= 1
+    ? { id: string(r.id), version: Number(r.version) }
+    : undefined;
 }
 export function parseReply(raw: unknown): Reply {
   const r = object(raw);
@@ -577,6 +601,15 @@ export function parseReply(raw: unknown): Reply {
       principal_uid: number(p.principal_uid),
       scope_preview: string(p.scope_preview),
       enforcement: { state: string(e.state), covered: e.covered, reason: string(e.reason) },
+      replaces:
+        p.replaces === undefined || p.replaces === null
+          ? null
+          : (() => {
+              const x = object(p.replaces);
+              if (!string(x.id) || !Number.isSafeInteger(x.version) || Number(x.version) < 1)
+                throw Error('Invalid observed preview replacement');
+              return { id: string(x.id), version: Number(x.version) };
+            })(),
     };
   }
   if (r.decision) result.decision = event(r.decision);
@@ -726,6 +759,8 @@ export function validateDecision(v: unknown): Decision {
           'network_zone',
           'zone_revision',
           'preview_token',
+          'remember',
+          'duration_seconds',
         ].includes(k),
     ) ||
     !string(d.id) ||
@@ -748,6 +783,21 @@ export function validateDecision(v: unknown): Decision {
         (!string(d.preview_token) || string(d.preview_token).length > 256)))
   )
     throw Error('Invalid decision network scope');
+  if (d.remember !== undefined || d.duration_seconds !== undefined) {
+    const r = object(d.remember),
+      fields = ['address', 'port', 'protocol', 'process'];
+    if (
+      !zoned ||
+      Object.keys(r).sort().join(',') !== [...fields].sort().join(',') ||
+      fields.some((k) => typeof r[k] !== 'boolean') ||
+      (d.scope === 'persistent'
+        ? d.duration_seconds !== undefined
+        : !Number.isSafeInteger(d.duration_seconds) ||
+          Number(d.duration_seconds) < 60 ||
+          Number(d.duration_seconds) > 31536000)
+    )
+      throw Error('Invalid remembered decision fields');
+  }
   return d as unknown as Decision;
 }
 
@@ -826,6 +876,8 @@ export interface ObservedPreview {
   principal_uid: number;
   scope_preview: string;
   enforcement: { state: string; covered: boolean; reason: string };
+  // application-policy-v1: the exact canonical rule this preview updates in place, or null.
+  replaces?: { id: string; version: number } | null;
 }
 export interface RulePreview {
   receipt: string;
@@ -833,10 +885,11 @@ export interface RulePreview {
   expiresAt?: string;
   verifiedRule?: Rule;
   processID?: string;
+  replaces?: { id: string; version: number } | null;
 }
 export interface RuleEdit {
   token: string;
-  action: Action;
+  action: RuleAction;
   protocol: string;
   remote_address: string;
   local_port: number;
@@ -845,7 +898,8 @@ export interface RuleEdit {
   disabled: boolean;
   expiry: 'preserve' | 'hour' | 'permanent';
   network_zone?: NetworkZone | '';
-  creation_scope?: 'application' | 'custom';
+  // 'policy': the canonical whole-target application/process rule (application-policy-v1).
+  creation_scope?: 'application' | 'custom' | 'policy';
 }
 export type EvaluationAction = 'start' | 'stop' | 'status' | 'recover' | 'cancel';
 export interface EvaluationState {
@@ -1010,11 +1064,11 @@ export function validateEdit(v: unknown): RuleEdit {
       .join(',') !==
       'action,disabled,expiry,local_port,priority,protocol,remote_address,remote_port,token' ||
     (e.creation_scope !== undefined &&
-      !['application', 'custom'].includes(String(e.creation_scope))) ||
+      !['application', 'custom', 'policy'].includes(String(e.creation_scope))) ||
     (e.network_zone !== undefined && !['', 'local', 'internet'].includes(String(e.network_zone))) ||
     typeof e.token !== 'string' ||
     e.token.length > 128 ||
-    !['allow', 'block'].includes(String(e.action)) ||
+    !['allow', 'block', 'ask'].includes(String(e.action)) ||
     !['tcp', 'udp', '*'].includes(String(e.protocol)) ||
     typeof e.remote_address !== 'string' ||
     e.remote_address.length > 256 ||

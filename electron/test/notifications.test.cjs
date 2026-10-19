@@ -52,7 +52,7 @@ test('generation identities deduplicate polls/reconnect; expiry and external res
   t.manager.update(state(['a'], 'new'), false);
   assert.equal(t.notices.length, 2);
   t.notices[0].emit('click');
-  assert.deepEqual(t.clicked[0], { generation: 'g', id: 'a' });
+  assert.deepEqual(t.clicked[0], { generation: 'g', id: 'a', group: 'e:a' });
   t.manager.update(state([], 'new'), false);
   assert.equal(t.manager.counts().live, 0);
 });
@@ -93,4 +93,44 @@ test('suppression/failure keeps pending authoritative; metadata never carries ma
   u.advance(10000);
   u.manager.update(s, false);
   assert.equal(u.notices.length, 1);
+});
+
+test('notices summarize by request group: 51 identical attempts are one notice', () => {
+  const t = setup();
+  const burst = (n) => ({
+    control: {
+      connected: true,
+      readOnly: false,
+      generation: 'g',
+      events: Array.from({ length: n }, (_, i) => ({
+        ...event('r' + i),
+        request_group: 'same',
+        first_seen: new Date(Date.UTC(2026, 0, 1, 0, 0, i)).toISOString(),
+      })),
+    },
+  });
+  for (let n = 1; n <= 51; n++) {
+    t.advance(5000);
+    t.manager.update(burst(n), false);
+  }
+  assert.equal(t.notices.length, 1);
+  t.advance(5000);
+  t.manager.update(burst(51), false);
+  assert.equal(t.notices.length, 1);
+  t.notices[0].emit('click');
+  assert.deepEqual(t.clicked[0], { generation: 'g', id: 'r0', group: 'g:same' });
+  const u = setup(),
+    s = burst(51);
+  s.control.events.push(event('x'), event('y'));
+  u.manager.update(s, false);
+  assert.match(u.notices[0].content.title, /3 pending requests/);
+  assert.match(u.notices[0].content.body, /53 connection attempts/);
+  const v = setup();
+  v.manager.update(burst(51), false);
+  assert.match(v.notices[0].content.body, /51 similar requests/);
+  // Settled by policy re-evaluation: the group is gone and its notice closes.
+  const settled = burst(51);
+  for (const e of settled.control.events) e.state = 'allowed';
+  v.manager.update(settled, false);
+  assert.equal(v.manager.counts().live, 0);
 });

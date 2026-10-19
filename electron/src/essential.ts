@@ -1,6 +1,10 @@
 import { call, type Backend } from './backend';
 import {
   ESSENTIAL_CAPABILITY,
+  ESSENTIAL_EXCLUSION_CAPABILITY,
+  canonicalExclusions,
+  essentialWireOptions,
+  exclusionSummary,
   essentialDefaults,
   essentialOptions,
   essentialPreview,
@@ -12,6 +16,15 @@ import {
   type EssentialPreview,
   type EssentialReceipt,
 } from './essential-model';
+// Persisted reviewed exclusion set (Electron preferences, owned by main).
+export interface ExclusionStore {
+  load(): unknown;
+  save(v: string[]): void;
+}
+const memoryStore = (): ExclusionStore => {
+  let v: string[] = [];
+  return { load: () => v, save: (x) => (v = x) };
+};
 // One main-owned review/mutation context. Renderer never supplies rules, peers or executable IDs.
 export class Essential {
   private busy = false;
@@ -22,7 +35,17 @@ export class Essential {
   private status?: EssentialView['status'];
   private preview?: EssentialPreview;
   private receipt?: EssentialReceipt;
-  constructor(private backend: Backend) {}
+  constructor(
+    private backend: Backend,
+    private store: ExclusionStore = memoryStore(),
+  ) {}
+  reviewedExclusions(): string[] {
+    try {
+      return canonicalExclusions(this.store.load());
+    } catch {
+      return [];
+    }
+  }
   view(): EssentialView {
     const snapshot = this.backend.view(),
       c = snapshot.control,
@@ -42,6 +65,10 @@ export class Essential {
         this.message = 'Daemon session changed. Old reviews and actions cannot be replayed.';
     }
     const supported = !!source.capabilities?.includes(ESSENTIAL_CAPABILITY),
+      exclusionSupported = !!source.capabilities?.includes(ESSENTIAL_EXCLUSION_CAPABILITY),
+      reviewedExclusions = this.reviewedExclusions(),
+      // A daemon that ignores exclusions would silently re-propose them: refuse Apply.
+      exclusionBlocked = !exclusionSupported && reviewedExclusions.length > 0,
       readable =
         source.connected &&
         supported &&
@@ -80,12 +107,18 @@ export class Essential {
         (expired ? 'Review expired. Request a new preview; no mutation was sent.' : this.message) +
         (permitted && !monitoring
           ? ' Stop protection explicitly and confirm monitoring before Apply or Remove. No automatic Stop is sent.'
+          : '') +
+        (supported && exclusionBlocked
+          ? ` This daemon cannot honour interface exclusions (essential-interface-exclusion-v1 missing); Apply is disabled so your reviewed exclusion (${exclusionSummary(reviewedExclusions)}) is not silently dropped.`
           : ''),
       status: this.status,
       preview: this.preview,
       receipt: this.receipt,
+      exclusionSupported,
+      reviewedExclusions,
       canApply:
         permitted &&
+        (this.preview?.operation === 'remove' || !exclusionBlocked) &&
         monitoring &&
         !this.busy &&
         this.phase === 'review' &&
@@ -156,18 +189,20 @@ export class Essential {
           this.receipt = receipt;
           this.phase = 'confirmed';
           this.message = 'Authoritative receipt confirmed. No operation replayed.';
+          this.remember(p!);
           await this.backend.pollControl();
           fresh();
         } else if (this.phase !== 'unknown')
           this.message = 'Detected status refreshed. Protection was not started.';
       } else if (action === 'preview' || action === 'remove-preview') {
-        const options = action === 'preview' ? essentialOptions(q.options) : essentialDefaults();
+        const options = action === 'preview' ? essentialOptions(q.options) : essentialDefaults(),
+          wire = essentialWireOptions(options, v.exclusionSupported);
         this.preview = undefined;
         this.receipt = undefined;
         this.phase = 'idle';
         const r = await request(
           action === 'preview' ? 'essential-preview' : 'essential-remove-preview',
-          { essential_options: options },
+          { essential_options: wire },
         );
         if (r.error || r.error_code) throw Error(`${r.error_code}: ${r.error}`);
         const p = essentialPreview(r.essential_preview);
@@ -185,7 +220,7 @@ export class Essential {
         this.phase = 'review';
         this.message =
           p.operation === 'apply'
-            ? 'Review these exact permissions, then Apply. This does not start protection.'
+            ? `Review these exact permissions, then Apply. ${exclusionSummary(p.options.excluded_interfaces)}. This does not start protection.`
             : 'Review these exact unedited preset records, then Remove. Other rules are preserved.';
       } else {
         const p = this.preview;
@@ -204,7 +239,7 @@ export class Essential {
             sent = true;
             const r = await request(action === 'apply' ? 'essential-apply' : 'essential-remove', {
               preview_token: p.token,
-              essential_options: p.options,
+              essential_options: essentialWireOptions(p.options, v.exclusionSupported),
             });
             if (r.error || r.error_code) {
               sent = false;
@@ -219,6 +254,7 @@ export class Essential {
               action === 'apply'
                 ? 'Exact preset permissions saved. Protection state is unchanged.'
                 : 'Exact reviewed preset records removed. Other rules preserved.';
+            this.remember(p);
           });
           fresh();
         } catch (e) {
@@ -235,5 +271,14 @@ export class Essential {
       this.busy = false;
     }
     return this.view();
+  }
+  // Only a confirmed Apply records the reviewed exclusion set.
+  private remember(p: EssentialPreview) {
+    if (p.operation !== 'apply') return;
+    try {
+      this.store.save([...p.options.excluded_interfaces]);
+    } catch (e) {
+      this.message += ` Reviewed exclusions could not be saved: ${String(e)}`;
+    }
   }
 }

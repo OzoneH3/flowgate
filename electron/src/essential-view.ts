@@ -1,9 +1,12 @@
 import {
-  essentialDefaults,
+  ESSENTIAL_TOGGLES,
   sameEssentialOptions,
   essentialRuleLabel,
+  exclusionCandidates,
+  exclusionSummary,
   type EssentialView,
   type EssentialOptions,
+  type EssentialToggle,
 } from './essential-model';
 const node = <K extends keyof HTMLElementTagNameMap>(tag: K, text = '') => {
   const e = document.createElement(tag);
@@ -34,7 +37,10 @@ export function setupEssentialNetworking() {
     legend = node('legend', 'Optional local discovery — off by default');
   opts.append(legend);
   const vpn = node('fieldset'),
-    vpnLegend = node('legend', 'Separate optional preset: Tailscale transport — not essential, off');
+    vpnLegend = node(
+      'legend',
+      'Separate optional preset: Tailscale transport — not essential, off',
+    );
   vpn.id = 'essentialTailscale';
   vpn.append(
     vpnLegend,
@@ -43,17 +49,14 @@ export function setupEssentialNetworking() {
       'Essential networking does not grant tailscaled transport. DNS servers configured on tailscale0 appear above only as resolver DNS queries. VPN connectivity needs these separately reviewed permissions.',
     ),
   );
-  const choices: Record<keyof EssentialOptions, HTMLInputElement> = {} as Record<
-    keyof EssentialOptions,
-    HTMLInputElement
-  >;
-  const labels: Record<keyof EssentialOptions, string> = {
+  const choices = {} as Record<EssentialToggle, HTMLInputElement>;
+  const labels: Record<EssentialToggle, string> = {
     tailscale: 'Tailscale outer transport · variable peers / Any destination',
     tailscale_incoming: 'Tailscale incoming configured port',
     tailscale_http: 'Tailscale HTTP80 (separate permission)',
     discovery: 'LAN discovery · requires trusted-interface configuration',
   };
-  for (const key of Object.keys(essentialDefaults()) as (keyof EssentialOptions)[]) {
+  for (const key of ESSENTIAL_TOGGLES) {
     const label = node('label'),
       input = node('input');
     input.type = 'checkbox';
@@ -69,7 +72,20 @@ export function setupEssentialNetworking() {
       paint();
     };
   }
-  body.append(opts, vpn);
+  // Per-interface exclusions for upstream DNS/DHCP (e.g. a work VPN). Default
+  // unchecked except the persisted reviewed set; excluded names stay listed.
+  const exclusions = node('fieldset');
+  exclusions.id = 'essentialExclusions';
+  const exclusionNote = node('p'),
+    exclusionList = node('div');
+  exclusions.append(
+    node('legend', 'Interfaces carrying discovered upstream DNS/DHCP'),
+    exclusionNote,
+    exclusionList,
+  );
+  let selected = new Set<string>(),
+    exclusionStamp = '';
+  body.append(opts, vpn, exclusions);
   const message = node('p');
   message.id = 'essentialMessage';
   message.role = 'status';
@@ -107,10 +123,54 @@ export function setupEssentialNetworking() {
     error = '',
     stamp = '',
     viewEpoch = 0;
-  const options = () =>
-    Object.fromEntries(
-      Object.entries(choices).map(([k, x]) => [k, x.checked]),
-    ) as unknown as EssentialOptions;
+  const options = (): EssentialOptions => ({
+    ...(Object.fromEntries(ESSENTIAL_TOGGLES.map((k) => [k, choices[k].checked])) as Record<
+      EssentialToggle,
+      boolean
+    >),
+    excluded_interfaces: [...selected].sort(),
+  });
+  function paintExclusions(locked: boolean) {
+    const source = v?.preview?.operation === 'apply' ? v.preview : v?.status,
+      candidates = exclusionCandidates(source, [...(v?.reviewedExclusions || []), ...selected]),
+      p = v?.preview;
+    exclusionNote.textContent = [
+      v && !v.exclusionSupported
+        ? 'This daemon cannot honour interface exclusions (essential-interface-exclusion-v1 missing). Exclusions are never sent to it; with a reviewed exclusion Apply stays disabled.'
+        : 'Excluded interfaces are removed from this review only; their host configuration is unchanged.',
+      candidates.length ? '' : 'Preview permissions to list interfaces with upstream DNS/DHCP.',
+      p?.operation === 'apply' && !sameEssentialOptions(options(), p.options)
+        ? 'Choices changed since this preview; Preview again before Apply.'
+        : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+    const next = JSON.stringify([candidates, [...selected], locked]);
+    if (exclusionStamp === next) return;
+    exclusionStamp = next;
+    exclusionList.replaceChildren(
+      ...candidates.map((c) => {
+        const label = node('label'),
+          input = node('input');
+        input.type = 'checkbox';
+        input.id = 'essential-exclude-' + c.name;
+        input.checked = selected.has(c.name);
+        input.disabled = locked;
+        input.onchange = () => {
+          if (input.checked) selected.add(c.name);
+          else selected.delete(c.name);
+          paint();
+        };
+        label.append(
+          input,
+          document.createTextNode(
+            `Exclude ${c.name} from this review${c.detail ? ` · ${c.detail}` : ''}`,
+          ),
+        );
+        return label;
+      }),
+    );
+  }
   function paint() {
     const available = !!v?.permitted && !working && !v.busy,
       uncertain = v?.phase === 'unknown',
@@ -145,6 +205,7 @@ export function setupEssentialNetworking() {
       input.disabled = !v?.permitted || working || !!v?.busy || uncertain;
     choices.tailscale_incoming.disabled ||= !choices.tailscale.checked;
     choices.tailscale_http.disabled ||= !choices.tailscale.checked;
+    paintExclusions(!v?.permitted || working || !!v?.busy || uncertain);
     controls.close.disabled = false;
     const source = p || v?.status;
     const next = JSON.stringify([source, v?.receipt]);
@@ -185,6 +246,11 @@ export function setupEssentialNetworking() {
             : `Exact removal (${p.rules.length})`,
         ),
       );
+      if (p.operation === 'apply') {
+        const strip = node('p', exclusionSummary(p.options.excluded_interfaces));
+        strip.id = 'essentialExcludedSummary';
+        rules.append(strip);
+      }
       const list = node('ul');
       for (const r of p.rules) {
         const item = node('li', essentialRuleLabel(r));
@@ -209,7 +275,7 @@ export function setupEssentialNetworking() {
       rules.append(
         node(
           'p',
-          `Receipt confirmed · ${v.receipt.operation} · ${v.receipt.rule_ids.length} saved / ${v.receipt.removed_rule_ids.length} removed. Protection state unchanged.`,
+          `Receipt confirmed · ${v.receipt.operation} · ${v.receipt.rule_ids.length} saved / ${v.receipt.removed_rule_ids.length} removed${v.receipt.operation === 'apply' && v.receipt.options ? ` · ${exclusionSummary(v.receipt.options.excluded_interfaces)}` : ''}. Protection state unchanged.`,
         ),
       );
     preserved.textContent = p?.preserved_rule_ids.length
@@ -253,6 +319,8 @@ export function setupEssentialNetworking() {
       const next = await window.flowgate.essentialState();
       if (epoch !== viewEpoch) return;
       v = next;
+      // Preselect only the persisted reviewed choice; everything else unchecked.
+      selected = new Set(v.reviewedExclusions);
       paint();
       if (v.canStatus) await act('status');
     } catch (e) {

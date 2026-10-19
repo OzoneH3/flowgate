@@ -6,9 +6,11 @@ import {
 } from './process-rules';
 import { randomUUID } from 'node:crypto';
 import { call, type Backend } from './backend';
+import { APPLICATION_POLICY_CAPABILITY } from './policy';
 import {
   canManageRules,
   validateEdit,
+  STORED_ASK_CAPABILITY,
   type RuleDraft,
   type ObservedSource,
   type RulePreview,
@@ -179,14 +181,32 @@ export class ObservedRules {
       throw Error('Generation/endpoint changed; close editor and select again');
     // '*' means TCP + UDP only and must be explicit; it needs the backend's any-protocol capability.
     const protocols = c.capabilities?.some((cap) =>
-      [ANY_PROTOCOL_CAPABILITY, 'network-zone-policy-v1'].includes(cap),
+      [ANY_PROTOCOL_CAPABILITY, 'network-zone-policy-v1', APPLICATION_POLICY_CAPABILITY].includes(
+        cap,
+      ),
     )
       ? ['tcp', 'udp', '*']
       : ['tcp', 'udp'];
+    if (e.action === 'ask' && !c.capabilities?.includes(STORED_ASK_CAPABILITY))
+      throw Error('Backend update required for stored Ask (stored-ask-v1)');
+    // NetLimiter quick setter: the ONE canonical whole-target rule, created or updated in place by
+    // the backend (preview.replaces); never a scoped rule.
+    const policy = e.creation_scope === 'policy';
+    if (policy && !c.capabilities?.includes(APPLICATION_POLICY_CAPABILITY))
+      throw Error('Backend update required: application-policy-v1');
     if (!protocols.includes(e.protocol) || e.priority !== 100 || !e.creation_scope)
       throw Error(
         `Choose explicit scope and ${protocols.includes('*') ? 'TCP, UDP or TCP + UDP' : 'TCP or UDP'}; priority is backend-fixed`,
       );
+    if (
+      policy &&
+      (e.protocol !== '*' ||
+        e.remote_address !== '*' ||
+        e.local_port !== 0 ||
+        e.remote_port !== 0 ||
+        e.expiry !== 'permanent')
+    )
+      throw Error('Application policy is TCP+UDP, any endpoint, persistent');
     if (
       e.creation_scope === 'application' &&
       (e.remote_address !== '*' || e.local_port !== 0 || e.remote_port !== 0)
@@ -216,6 +236,7 @@ export class ObservedRules {
       local_port: e.local_port,
       remote_port: e.remote_port,
       disabled: e.disabled,
+      ...(policy ? { application_policy: true } : {}),
       expires:
         e.expiry === 'preserve'
           ? d.rule.expires
@@ -267,6 +288,24 @@ export class ObservedRules {
       d.boundTarget = t;
     } else if (p.rule.filter.process)
       throw Error('Unexpected process target in application preview');
+    const replaces = p.replaces ?? null;
+    if (
+      policy &&
+      (p.rule.action !== e.action ||
+        p.rule.filter.protocol !== '*' ||
+        (p.rule.filter.remote_address || '*') !== '*' ||
+        p.rule.filter.remote ||
+        p.rule.filter.local_port ||
+        p.rule.filter.remote_port ||
+        !p.rule.expires.startsWith('0001-') ||
+        (replaces
+          ? typeof replaces.id !== 'string' ||
+            !Number.isSafeInteger(replaces.version) ||
+            p.rule.id !== replaces.id ||
+            p.rule.version !== replaces.version + 1
+          : p.rule.version !== 1))
+    )
+      throw Error('Backend preview is not the canonical application rule; nothing saved');
     const receipt = randomUUID();
     this.receipts.set(receipt, { draft: d, value, preview: p, sent: false, unresolved: false });
     return {
@@ -275,6 +314,7 @@ export class ObservedRules {
       expiresAt: p.expires_at,
       verifiedRule: p.rule,
       processID: p.process_id,
+      ...(policy ? { replaces } : {}),
     };
   }
   private message(rule: Rule, reconciled = false) {

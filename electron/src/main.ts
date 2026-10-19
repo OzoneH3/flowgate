@@ -1,7 +1,7 @@
 import { Essential } from './essential';
 import { Protection } from './protection';
 import { placeKDEPrompt, PROMPT_TITLE, promptTitle } from './prompt-placement';
-import { AutomaticPrompts, edgePosition, boundDecision } from './automatic-prompts';
+import { AutomaticPrompts, edgePosition, boundDecision, groupOf } from './automatic-prompts';
 import {
   app,
   BrowserWindow,
@@ -85,6 +85,8 @@ let saved: {
   height?: number;
   ui?: Preferences;
   panes?: Partial<Record<PaneKind, Rect>>;
+  // Reviewed Essential interface exclusions; validated by Essential on load.
+  essential?: { excluded_interfaces?: unknown };
 } = {};
 const prefsFile = path.join(workspace, 'electron-preferences.json');
 try {
@@ -107,25 +109,49 @@ let main: BrowserWindow;
 let prompt: BrowserWindow | undefined;
 const automaticPrompts = new AutomaticPrompts();
 const promptRefs = new Map<number, RequestRef>();
-function openDecision(ref: RequestRef) {
-  if (prompt && !prompt.isDestroyed()) {
-    const url = new URL(prompt.webContents.getURL() || 'about:blank');
-    if (
-      url.searchParams.get('request') === ref.id &&
-      url.searchParams.get('generation') === ref.generation
-    ) {
-      prompt.show();
-      prompt.focus();
-      return;
-    }
-    prompt.close();
+const promptURL = (ref: RequestRef) =>
+  'flowgate://app/index.html?request=' +
+  encodeURIComponent(ref.id) +
+  '&generation=' +
+  encodeURIComponent(ref.generation);
+// The one permission window shows one request card. Switching card reuses the
+// window: rebinding promptRefs first makes decisions from the old card fail closed.
+function retarget(ref: RequestRef) {
+  const w = prompt!,
+    current = promptRefs.get(w.webContents.id);
+  if (current?.id === ref.id && current.generation === ref.generation) {
+    promptRefs.set(w.webContents.id, { ...current, group: ref.group ?? current.group });
+    return;
   }
-  automaticPrompts.mark(ref);
-  prompt = windowFor(true, ref.id, ref.generation);
+  promptRefs.set(w.webContents.id, ref);
+  void w.loadURL(promptURL(ref));
+}
+// Closed by FlowGate because its request group is settled: not a user dismissal.
+let promptAutoClosing = false;
+function openDecision(ref: RequestRef) {
+  ref = { ...ref, group: ref.group ?? groupOf(backend.view(), ref.id) };
+  if (prompt && !prompt.isDestroyed()) {
+    retarget(ref);
+    prompt.show();
+    prompt.focus();
+    return;
+  }
+  prompt = windowFor(true, ref.id, ref.generation, ref.group);
 }
 function automaticDecision() {
   if (quitting || !backend || !main) return;
-  const next = automaticPrompts.next(backend.view(), !!prompt && !prompt.isDestroyed());
+  const view = backend.view();
+  if (prompt && !prompt.isDestroyed()) {
+    const ref = promptRefs.get(prompt.webContents.id),
+      next = ref && automaticPrompts.follow(view, ref);
+    if (next) retarget(next);
+    else {
+      promptAutoClosing = true;
+      prompt.close();
+    }
+    return;
+  }
+  const next = automaticPrompts.next(view, false);
   if (next) openDecision(next);
 }
 const windows = new Set<BrowserWindow>();
@@ -239,23 +265,21 @@ function showMain(list = false, message = '') {
 }
 async function review(ref: RequestRef) {
   await backend.pollControl();
-  const c = backend.view().control;
-  const e = c.events.find((e) => e.id === ref.id);
-  if (
-    !c.connected ||
-    c.generation !== ref.generation ||
-    !e ||
-    e.state !== 'awaiting-decision' ||
-    e.remainingMs <= 0 ||
-    e.attempt
-  ) {
+  const view = backend.view(),
+    c = view.control;
+  // A notified group whose representative settled shows its next representative.
+  const next = c.connected
+      ? automaticPrompts.follow(view, { ...ref, group: ref.group ?? groupOf(view, ref.id) })
+      : undefined,
+    e = next && c.events.find((e) => e.id === next.id);
+  if (!next || !e || e.state !== 'awaiting-decision' || e.remainingMs <= 0 || e.attempt) {
     showMain(
       true,
       'Request no longer pending or controller unavailable. Review the current list; no decision was sent.',
     );
     return;
   }
-  openDecision(ref);
+  openDecision(next);
 }
 function trusted(e: IpcMainInvokeEvent, allowPane = false) {
   if (
@@ -277,7 +301,7 @@ function presentationSender(e: IpcMainInvokeEvent) {
   if (e.sender !== main.webContents && !paneRoles.has(e.sender.id))
     throw Error('Presentation operation is unavailable from a prompt');
 }
-function windowFor(isPrompt = false, id = '', generation = '') {
+function windowFor(isPrompt = false, id = '', generation = '', group?: string) {
   const w = new BrowserWindow({
     title: isPrompt ? PROMPT_TITLE : 'FlowGate',
     frame: !isPrompt,
@@ -303,10 +327,17 @@ function windowFor(isPrompt = false, id = '', generation = '') {
   windows.add(w);
   if (isPrompt) {
     w.setTitle(promptTitle(w.id));
-    promptRefs.set(w.webContents.id, { id, generation });
+    promptRefs.set(w.webContents.id, { id, generation, group });
     w.on('page-title-updated', (event) => event.preventDefault());
     const senderID = w.webContents.id;
-    w.on('closed', () => promptRefs.delete(senderID));
+    w.on('closed', () => {
+      // Closing by the user (× / Escape / Decide later) dismisses the group: it
+      // never auto-opens again. Closing because the group settled does not.
+      const ref = promptRefs.get(senderID);
+      if (ref && prompt === w && !promptAutoClosing) automaticPrompts.dismiss(ref);
+      if (prompt === w) promptAutoClosing = false;
+      promptRefs.delete(senderID);
+    });
   }
   w.setMenu(null);
   w.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -359,12 +390,7 @@ function windowFor(isPrompt = false, id = '', generation = '') {
   };
   w.on('show', refresh);
   w.on('restore', refresh);
-  void w.loadURL(
-    'flowgate://app/index.html' +
-      (isPrompt
-        ? '?request=' + encodeURIComponent(id) + '&generation=' + encodeURIComponent(generation)
-        : ''),
-  );
+  void w.loadURL(isPrompt ? promptURL({ id, generation }) : 'flowgate://app/index.html');
   return w;
 }
 app.whenReady().then(async () => {
@@ -616,7 +642,13 @@ app.whenReady().then(async () => {
     trusted(e);
     return extended.view(backend.view().observation.activity?.udp?.state === 'active');
   });
-  const essential = new Essential(backend);
+  const essential = new Essential(backend, {
+    load: () => saved.essential?.excluded_interfaces,
+    save: (excluded_interfaces) => {
+      saved.essential = { excluded_interfaces };
+      persist();
+    },
+  });
   ipcMain.handle('essential:state', (e) => {
     trusted(e);
     if (e.sender !== main.webContents) throw Error('Essential networking requires the main window');
