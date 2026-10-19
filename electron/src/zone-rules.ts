@@ -41,6 +41,8 @@ export class ZoneRules {
       !this.backend.controller
     )
       throw Error('Network-zone rule control unavailable or read-only');
+    if (c.networkZones?.model === 'automatic-peer-v1' && !c.capabilities?.includes('automatic-network-zones-v1'))
+      throw Error('Automatic classification capability missing; no zone mutation sent');
     if (c.generation !== target.generation || c.networkZones?.revision !== target.revision)
       throw Error('Zone definition or generation changed; review again');
     if (target.scope === 'machine' && !c.permissions?.can_manage_machine_rules)
@@ -60,7 +62,7 @@ export class ZoneRules {
       )
     )
       throw Error('Invalid zone target');
-    this.authority(t);
+    const control = this.authority(t);
     if (this.drafts.size >= 32) {
       const stale = [...this.drafts].find(([, value]) => !value.locked);
       if (!stale) throw Error('Resolve outstanding zone saves before opening another');
@@ -75,11 +77,11 @@ export class ZoneRules {
       target: structuredClone(t),
       endpoint: this.backend.controller!,
       locked: false,
-      source: 'Configured policy zone · all programs',
+      source: `${control.networkZones?.model === 'automatic-peer-v1' ? 'Automatic' : 'Configured'} policy zone · all programs`,
       rule: {
         id: '',
         version: 0,
-        schema: 4,
+        schema: control.networkZones?.model === 'automatic-peer-v1' ? 6 : 4,
         executable: '',
         created: '',
         priority: 100,
@@ -93,6 +95,7 @@ export class ZoneRules {
           all_programs: true,
           all_uids: t.scope === 'machine' || undefined,
           network_zone: t.zone,
+          ...(control.networkZones?.model === 'automatic-peer-v1' ? {zone_model: 'automatic-peer-v1' as const} : {}),
           direction: t.direction,
           protocol: '*',
           remote_address: '*',
@@ -149,6 +152,8 @@ export class ZoneRules {
       !f.all_programs ||
       !!f.all_uids !== (d.target.scope === 'machine') ||
       f.network_zone !== d.target.zone ||
+      p.rule.schema !== d.rule.schema ||
+      f.zone_model !== d.rule.filter.zone_model ||
       f.application ||
       f.process ||
       f.direction !== d.target.direction ||

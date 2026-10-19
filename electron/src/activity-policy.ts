@@ -1,6 +1,7 @@
 import { acceptsPublication } from './publication';
 import { applicationHeading } from './application-heading';
-import { ZONE_CAPABILITY, zoneLabel, type NetworkZone } from './network-zones';
+import { openZoneMigration } from './zone-migration-view';
+import { ZONE_MIGRATION_CAPABILITY, zoneDefinitionDetails, ZONE_CAPABILITY, zoneLabel, type NetworkZone } from './network-zones';
 import { popupPosition } from './popup-position';
 import type { PolicyEntry } from './pane-model';
 import { ANY_PROTOCOL_CAPABILITY, PROCESS_CAPABILITY } from './process-rules';
@@ -710,6 +711,13 @@ export class ActivityPolicy {
           ? this.delegate({ kind: 'delete', id: ref.id })
           : confirmRuleDelete(rule, generation);
       actions.append(advanced, remove);
+      if (rule.schema === 4 && rule.filter.network_zone && this.state?.control.capabilities?.includes(ZONE_MIGRATION_CAPABILITY)) {
+        const migrate = button('Review automatic scope…', `list:${ref.id}:migrate`);
+        migrate.disabled = !window.flowgate.zoneMigrationPreview;
+        migrate.title = 'Explicit migration review in the main window; existing scope is unchanged until confirmed.';
+        migrate.onclick = () => openZoneMigration({generation, id:rule.id, version:rule.version});
+        actions.append(migrate);
+      }
       card.append(actions);
     }
     void inv;
@@ -1030,17 +1038,18 @@ export class ActivityPolicy {
     zoneControl.value = pop.networkZone;
     zoneControl.disabled = busy || !!inv.zone || !c.capabilities?.includes(ZONE_CAPABILITY);
     zoneControl.title = c.capabilities?.includes(ZONE_CAPABILITY)
-      ? 'Configured policy zone; not a connectivity verdict'
+      ? zoneDefinitionDetails(c.networkZones)
       : 'Backend update required for Local Network / Internet rules';
     zoneControl.onchange = () => {
       pop.networkZone = zoneControl.value as NetworkZone | '';
       this.refresh();
     };
     frag.append(zoneControl);
-    if (pop.networkZone === 'internet' && c.networkZones?.internet_prefixes.length === 0)
+    if (pop.networkZone === 'internet' && c.networkZones?.model === 'configured-prefix-v1' && c.networkZones.internet_prefixes.length === 0)
       frag.append(
         el('p', 'No Internet prefixes configured; no peers currently match.', 'rule-note'),
       );
+    if (pop.networkZone) frag.append(el('small', zoneDefinitionDetails(c.networkZones), 'rule-note'));
     return frag;
   }
   // NetLimiter quick setter: [Enabled] Ask | Allow | Deny, Advanced, Delete — one click sets the

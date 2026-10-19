@@ -17,7 +17,8 @@ test('zone definitions are bounded configuration, never inferred public-address 
   assert.throws(() => parseNetworkZones({ ...config, model: 'public-ip-guess' }));
   assert.throws(() => parseNetworkZones({ ...config, local_prefixes: Array(513).fill('x') }));
 });
-async function fixture(t) {
+async function fixture(t, automatic = false) {
+  const definition = automatic ? {...config, model: "automatic-peer-v1"} : config;
   const dir = fs.mkdtempSync(path.resolve(__dirname, '../../.workspace/zone-contract-')),
     endpoint = path.join(dir, 's');
   let mode = 'ack',
@@ -31,8 +32,8 @@ async function fixture(t) {
       readOnly: false,
       generation: 'g',
       permissions: { can_manage_rules: true, can_manage_machine_rules: true },
-      capabilities: ['network-zone-policy-v1'],
-      networkZones: config,
+      capabilities: ['network-zone-policy-v1', ...(automatic ? ['automatic-network-zones-v1'] : [])],
+      networkZones: definition,
       rules: [],
     },
   };
@@ -53,7 +54,7 @@ async function fixture(t) {
         saved = {
           id: 'reserved',
           version: 1,
-          schema: 4,
+          schema: automatic ? 6 : 4,
           created: new Date(now).toISOString(),
           executable: '',
           action: d.action,
@@ -66,6 +67,7 @@ async function fixture(t) {
             uid: 0,
             all_programs: true,
             all_uids: true,
+            ...(automatic ? {zone_model: 'automatic-peer-v1'} : {}),
             network_zone: mode === 'mismatch' ? 'internet' : 'local',
             direction: d.direction,
             protocol: d.protocol,
@@ -82,7 +84,7 @@ async function fixture(t) {
                 expires_at: new Date(now + 30000).toISOString(),
                 rule: saved,
                 scope_preview: 'Local Network · all programs / all users',
-                network_zones: config,
+                network_zones: definition,
               },
             }),
           ) + '\n',
@@ -254,4 +256,12 @@ test('initiation event evidence retains explicit generation and never infers unk
     }).direction,
     '',
   );
+});
+
+test('new automatic all-program zone rules use schema6 and never fall back to schema4', async t=>{
+ const f=await fixture(t,true),d=await f.client.draft(source);
+ assert.equal(d.rule.schema,6);assert.equal(d.rule.filter.zone_model,'automatic-peer-v1');
+ const p=await f.client.preview(edit(d.token));assert.equal(p.verifiedRule.schema,6);
+ assert.equal((await f.client.save(p.receipt)).phase,'acknowledged');
+ f.state.control.capabilities=['network-zone-policy-v1'];await assert.rejects(()=>f.client.draft(source),/capability/);
 });

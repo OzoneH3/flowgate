@@ -30,6 +30,7 @@ import type { RequestRef } from './notifications';
 import fs from 'node:fs';
 import { ExtendedMonitoring } from './extended';
 import { Rules } from './rules';
+import { ZoneMigration } from './zone-migration';
 import { sameProcessTarget } from './process-rules';
 import { DecisionLogClient } from './decision-log-client';
 import { Evaluation } from './evaluation';
@@ -755,6 +756,17 @@ app.whenReady().then(async () => {
     trusted(e);
     if (e.sender !== main.webContents) throw Error('Essential networking requires the main window');
     return essential.action(action, value);
+  });
+  const zoneMigration = new ZoneMigration(backend);
+  for (const [channel, action] of Object.entries({
+    'zone-migration:state': () => zoneMigration.view(),
+    'zone-migration:preview': (v: unknown) => zoneMigration.preview(v),
+    'zone-migration:confirm': (v: unknown) => zoneMigration.confirm(v),
+    'zone-migration:reconcile': () => zoneMigration.reconcile(),
+  })) ipcMain.handle(channel, (e, value) => {
+    trusted(e);
+    if (e.sender !== main.webContents) throw Error('Review zone migrations in the main window');
+    return action(value);
   });
   const protection = new Protection(backend);
   ipcMain.handle('protection:state', (e) => {

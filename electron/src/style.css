@@ -1464,3 +1464,8 @@ body.hide-sidebar #activityView > aside { display:none; }
 #promptBody .decision-controls { position:sticky; bottom:0; background:#222; z-index:2; padding:3px 0; }
 #promptBody .connection-fields dd, #promptBody .remote-endpoint { overflow-wrap:anywhere; }
 #promptBody .similar-requests { margin-top:2px; margin-bottom:2px; }
+
+.zone-migration-dialog pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:180px; overflow:auto; }
+.zone-migration-dialog table { width:100%; font-size:11px; }
+.zone-migration-dialog td { white-space:normal; overflow-wrap:anywhere; }
+.zone-migration-dialog .warning { color:#e4bb70; }

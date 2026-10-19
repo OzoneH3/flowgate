@@ -53,6 +53,7 @@ const ruleFields = (r: Rule) => [
   r.filter.remote_port || 0,
   r.filter.process,
   r.filter.network_zone,
+  r.filter.zone_model,
   r.filter.all_programs,
   r.filter.all_uids,
 ];
@@ -244,6 +245,8 @@ export class ObservedRules {
             ? new Date(this.backend.now() + 3600000).toISOString()
             : '0001-01-01T00:00:00Z',
     };
+    if (e.network_zone && c.networkZones?.model === 'automatic-peer-v1' && !c.capabilities?.includes('automatic-network-zones-v1'))
+      throw Error('Automatic classification capability missing; no zone mutation sent');
     if (e.network_zone && !c.capabilities?.includes('network-zone-policy-v1'))
       throw Error('Backend update required for network-zone scope');
     const r = await call(d.endpoint, {
@@ -288,6 +291,10 @@ export class ObservedRules {
       d.boundTarget = t;
     } else if (p.rule.filter.process)
       throw Error('Unexpected process target in application preview');
+    if (e.network_zone &&
+      (p.rule.schema !== (c.networkZones?.model === 'automatic-peer-v1' ? 6 : 4) ||
+       p.rule.filter.zone_model !== (c.networkZones?.model === 'automatic-peer-v1' ? 'automatic-peer-v1' : undefined)))
+      throw Error('Preview changed network classification model; review the current backend definition');
     const replaces = p.replaces ?? null;
     if (
       policy &&

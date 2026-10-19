@@ -121,7 +121,7 @@ export class Rules {
     for (const [k, v] of this.receipts) if (v.draft === e.token) this.receipts.delete(k);
     const rule = structuredClone(d.rule);
     Object.assign(rule, {
-      schema: d.rule.schema === 4 ? 4 : d.rule.filter.process ? 3 : 2,
+      schema: [4, 6].includes(d.rule.schema) ? d.rule.schema : d.rule.filter.process ? 3 : 2,
       action: e.action,
       disabled: e.disabled,
       priority: e.priority,
@@ -144,7 +144,7 @@ export class Rules {
       throw Error('Process-rule backend capability unavailable; no mutation');
     const request = {
       generation: d.generation,
-      ...(rule.schema === 4 ? { zone_revision: c.networkZones?.revision } : {}),
+      ...([4, 6].includes(rule.schema) ? { zone_revision: c.networkZones?.revision } : {}),
       id: d.id || '',
       event_id: d.event || '',
       expected_version: d.id ? d.rule.version : undefined,
@@ -153,6 +153,8 @@ export class Rules {
     const r = await call(this.backend.controller!, { operation: 'rule-preview', ...request });
     if (r.error || !r.saved_rule || !r.scope_preview || r.generation !== d.generation)
       throw Error(r.error || 'Preview not acknowledged');
+    if (r.saved_rule.schema !== rule.schema || r.saved_rule.filter.zone_model !== rule.filter.zone_model || r.saved_rule.filter.network_zone !== rule.filter.network_zone)
+      throw Error('Preview changed immutable network classification; use explicit migration instead');
     if (!sameProcessTarget(r.saved_rule.filter.process, rule.filter.process))
       throw Error('Preview changed immutable process target');
     const receipt = randomUUID();
@@ -161,7 +163,7 @@ export class Rules {
       request,
       rule: r.saved_rule,
       generation: d.generation,
-      ...(rule.schema === 4 ? { zone_revision: c.networkZones?.revision } : {}),
+      ...([4, 6].includes(rule.schema) ? { zone_revision: c.networkZones?.revision } : {}),
       id: d.id,
     });
     return { receipt, preview: r.scope_preview, verifiedRule: r.saved_rule };
@@ -186,6 +188,8 @@ export class Rules {
         c.rule_states?.[p.rule.id]?.state !== 'active')
     )
       throw Error('Process target is inactive or unavailable; no save sent');
+    if (p.rule.filter.network_zone && c.networkZones?.revision !== (p.request as {zone_revision?: string}).zone_revision)
+      throw Error('Network classification changed; preview again before saving');
     this.busy = true;
     try {
       const r = await call(this.backend.controller!, { operation: 'rule-save', ...p.request });
@@ -200,6 +204,9 @@ export class Rules {
         !r.saved_rule ||
         r.generation !== p.generation ||
         r.saved_rule.id !== p.rule.id ||
+        r.saved_rule.schema !== p.rule.schema ||
+        r.saved_rule.filter.zone_model !== p.rule.filter.zone_model ||
+        r.saved_rule.filter.network_zone !== p.rule.filter.network_zone ||
         !sameProcessTarget(r.saved_rule.filter.process, p.rule.filter.process)
       )
         throw Error('Missing save acknowledgement');

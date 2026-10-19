@@ -59,6 +59,7 @@ export interface SocketRow {
     revision: string;
     source: string;
     reason: string;
+    legacy_state?: string; legacy_zone?: string; legacy_revision?: string;
   };
   ownership_category?: string;
   display_application?: Application;
@@ -192,6 +193,7 @@ export interface Reply {
   essential_preview?: unknown;
   essential_receipt?: unknown;
   network_zones?: NetworkZones;
+  zone_migration?: unknown;
   zone_preview?: {
     token: string;
     expires_at: string;
@@ -288,6 +290,10 @@ export interface Decision {
   duration_seconds?: number;
 }
 export interface Bridge {
+  zoneMigrationState(): Promise<import('./zone-migration').MigrationView>;
+  zoneMigrationPreview(target: import('./zone-migration').MigrationTarget): Promise<import('./zone-migration').MigrationView>;
+  zoneMigrationConfirm(token: string): Promise<import('./zone-migration').MigrationView>;
+  zoneMigrationReconcile(): Promise<import('./zone-migration').MigrationView>;
   essentialState(): Promise<import('./essential-model').EssentialView>;
   essential(
     action: 'status' | 'preview' | 'apply' | 'remove-preview' | 'remove' | 'reconcile',
@@ -533,6 +539,7 @@ export function parseReply(raw: unknown): Reply {
     decision_receipt: r.decision_receipt,
     decision_record: r.decision_record,
     network_zones: parseNetworkZones(r.network_zones),
+    zone_migration: r.zone_migration,
     evaluation: parseEvaluation(r.evaluation),
     protection: parseProtection(r.protection),
   };
@@ -831,6 +838,7 @@ export interface RuleFilter {
   local_address?: string;
   peer_service?: { application: string; revision: string; uid: number };
   network_zone?: NetworkZone;
+  zone_model?: 'automatic-peer-v1';
   all_programs?: boolean;
   all_uids?: boolean;
   process?: ProcessTarget;
@@ -949,6 +957,7 @@ export interface Preferences {
 }
 function ruleFilter(v: unknown): RuleFilter {
   const f = object(v);
+  if (f.zone_model !== undefined && f.zone_model !== 'automatic-peer-v1') throw Error('Unsupported immutable zone model');
   const peer = f.peer_service === undefined ? undefined : object(f.peer_service);
   if (
     peer &&
@@ -974,6 +983,7 @@ function ruleFilter(v: unknown): RuleFilter {
           uid: Number(peer.uid),
         }
       : undefined,
+    ...(f.zone_model === 'automatic-peer-v1' ? {zone_model: 'automatic-peer-v1' as const} : {}),
     network_zone: ['local', 'internet'].includes(string(f.network_zone))
       ? (f.network_zone as NetworkZone)
       : undefined,
@@ -1052,17 +1062,19 @@ export function parseRule(v: unknown): Rule {
     };
   } else {
     if (
-      number(r.schema) > 4 ||
+      (number(r.schema) > 4 && number(r.schema) !== 6) ||
       r.preset !== undefined ||
       filter.peer_service ||
       filter.interface_index !== undefined ||
       filter.interface_name !== undefined ||
       filter.local_address !== undefined ||
-      (filter.network_zone && number(r.schema) !== 4) ||
+      (filter.network_zone && ![4, 6].includes(number(r.schema))) ||
+      (number(r.schema) === 6 && (!filter.network_zone || filter.zone_model !== 'automatic-peer-v1')) ||
+      (number(r.schema) !== 6 && filter.zone_model !== undefined) ||
       (filter.all_programs && (!filter.network_zone || filter.application || filter.process))
     )
       throw Error('Unsupported zone rule schema');
-    if (number(r.schema) !== 4 && (number(r.schema) === 3) !== !!filter.process)
+    if (![4, 6].includes(number(r.schema)) && (number(r.schema) === 3) !== !!filter.process)
       throw Error('Process rule requires schema3 and a complete immutable binding');
   }
   return {
