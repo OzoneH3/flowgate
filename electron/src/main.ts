@@ -282,8 +282,8 @@ function windowFor(isPrompt = false, id = '', generation = '') {
     frame: !isPrompt,
     width: isPrompt ? 520 : width,
     height: isPrompt ? 460 : height,
-    minWidth: isPrompt ? 480 : 800,
-    minHeight: isPrompt ? 400 : 550,
+    minWidth: isPrompt ? 320 : 800,
+    minHeight: isPrompt ? 240 : 550,
     backgroundColor: '#222222',
     autoHideMenuBar: true,
     show: false,
@@ -318,24 +318,33 @@ function windowFor(isPrompt = false, id = '', generation = '') {
     }
   });
   w.once('ready-to-show', () => {
-    if (isPrompt) {
-      const area = screen.getPrimaryDisplay().workArea;
-      w.setBounds(edgePosition(area, 520, 460));
+    if (!isPrompt) {
+      w.show();
+      return;
     }
-    w.show();
-    if (isPrompt) {
-      w.focus();
-      setTimeout(() => {
-        if (!w.isDestroyed())
-          void placeKDEPrompt(
-            profile,
-            process.pid,
-            w.id,
-            edgePosition(screen.getPrimaryDisplay().workArea, 520, 460),
-            () => !w.isDestroyed() && prompt === w,
-          ).catch((error) => console.info('FlowGate: prompt placement unavailable', String(error)));
-      }, 100);
-    }
+    const bounds = edgePosition(screen.getPrimaryDisplay().workArea, 520, 460);
+    w.setBounds(bounds);
+    // Install the native windowAdded hook before mapping. Wayland ignores global
+    // setBounds; showing first causes a visible wrong-monitor flash.
+    void placeKDEPrompt(
+      profile,
+      process.pid,
+      w.id,
+      bounds,
+      () => !w.isDestroyed() && prompt === w,
+      (installed) => {
+        if (w.isDestroyed() || prompt !== w) return;
+        if (installed)
+          w.showInactive(); // compositor reveals/focuses once confirmed
+        else {
+          w.show();
+          w.focus();
+        }
+      },
+    ).catch((error) => {
+      console.info('FlowGate: prompt placement unavailable', String(error));
+      if (!w.isDestroyed()) w.show();
+    });
   });
   const refresh = () => {
     if (backend && !w.isDestroyed()) {

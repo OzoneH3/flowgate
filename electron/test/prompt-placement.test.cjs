@@ -58,3 +58,108 @@ test('KDE configured priority overrides Electron output order and uses that outp
   });
   assert.deepEqual({ ...w.frameGeometry }, { x: 4600, y: 932, width: 520, height: 460 });
 });
+
+test('startup handshake waits for native configure and reveals/focuses only once', () => {
+  const { placementQML } = require('../dist/test/prompt-placement.cjs');
+  const qml = placementQML(42, 7, { x: 0, y: 0, width: 520, height: 460 }, 'primary');
+  const body = qml.slice(
+    qml.indexOf('  function tick() {') + '  function tick() {'.length,
+    qml.lastIndexOf('\n  }'),
+  );
+  const output = { name: 'primary' },
+    other = { name: 'secondary' };
+  let requested,
+    focused = 0,
+    stopped = 0;
+  const w = {
+    pid: 42,
+    caption: promptTitle(7),
+    internalId: 'native-A',
+    output: other,
+    opacity: 0,
+    setMaximize() {},
+    get frameGeometry() {
+      return this.actual;
+    },
+    set frameGeometry(v) {
+      requested = v;
+    },
+    actual: { x: 0, y: 0, width: 1280, height: 848 },
+  };
+  const state = {
+    ticks: 0,
+    nativeID: null,
+    previous: '',
+    stable: 0,
+    applied: 0,
+    waited: 0,
+    confirmed: 0,
+  };
+  const workspace = {
+    stackingOrder: [w, { ...w, pid: 43 }],
+    screens: [other, output],
+    sendClientToScreen(win, o) {
+      win.output = o;
+    },
+    currentDesktopForScreen() {
+      return 1;
+    },
+    clientArea() {
+      return { x: 2000, y: 30, width: 900, height: 570 };
+    },
+    set activeWindow(v) {
+      assert.equal(v, w);
+      focused++;
+    },
+  };
+  const context = vm.createContext({
+    state,
+    target: w,
+    workspace,
+    clock: {
+      stop() {
+        stopped++;
+      },
+    },
+    KWin: { PlacementArea: 0 },
+    console: { log() {} },
+  });
+  const tick = () => vm.runInContext(`(function(){${body}})()`, context);
+  for (let i = 0; i < 5; i++) tick();
+  assert.equal(w.opacity, 0);
+  assert.equal(focused, 0);
+  assert(requested);
+  // Requested setBounds is NOT proof; native actual frame remains the restored main size.
+  assert.equal(state.confirmed, 0);
+  w.actual = { ...requested };
+  for (let i = 0; i < 3; i++) tick();
+  assert.equal(w.opacity, 1);
+  assert.equal(focused, 1);
+  assert.equal(stopped, 1);
+  assert.deepEqual({ ...w.actual }, { x: 2380, y: 140, width: 520, height: 460 });
+  assert.match(qml, /windowAdded.connect/);
+  assert.match(qml, /windowAdded.disconnect/);
+});
+test('handshake rejects native-window replacement', () => {
+  const { placementQML } = require('../dist/test/prompt-placement.cjs');
+  const qml = placementQML(42, 7, { x: 0, y: 0, width: 520, height: 460 }, 'primary');
+  const body = qml.slice(
+    qml.indexOf('  function tick() {') + '  function tick() {'.length,
+    qml.lastIndexOf('\n  }'),
+  );
+  const output = { name: 'primary' },
+    w = { pid: 42, caption: promptTitle(7), internalId: 'new-native', output };
+  let stopped = false;
+  const context = vm.createContext({
+    state: { ticks: 0, nativeID: 'old-native' },
+    workspace: { stackingOrder: [w] },
+    clock: {
+      stop() {
+        stopped = true;
+      },
+    },
+  });
+  vm.runInContext(`(function(){${body}})()`, context);
+  assert.equal(stopped, true);
+  assert.equal(w.opacity, undefined);
+});
