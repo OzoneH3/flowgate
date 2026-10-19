@@ -126,7 +126,20 @@ const prefs = path.join(root, '.workspace/electron-preferences.json'),
   oldPrefs = fs.existsSync(prefs) ? fs.readFileSync(prefs) : undefined;
 let app, inputDaemon;
 const seenRequests = [];
-const result = { run, synthetic: true };
+const result = {
+  run,
+  synthetic: true,
+  rememberWindowPositionsLoaded: execFileSync(
+    'qdbus6',
+    [
+      'org.kde.KWin',
+      '/Scripting',
+      'org.kde.kwin.Scripting.isScriptLoaded',
+      'rememberwindowpositions',
+    ],
+    { encoding: 'utf8' },
+  ).trim(),
+};
 let scriptNumber = 0;
 function script(code) {
   const name = 'flowgate-placement-check-' + process.pid + '-' + ++scriptNumber,
@@ -165,11 +178,12 @@ try {
   });
   const main = await app.firstWindow();
   await main.locator('#requestsTab').waitFor();
+  await sleep(3000); // finish application startup before testing an automatic arrival
   const own = await app.evaluate(() => ({ pid: process.pid }));
   const snapshot = async (label) => {
     const token = 'FLOWGATE_PACING_' + process.pid + '_' + label;
     script(
-      `for(const w of workspace.windowList())if(w.pid===${own.pid})print(${JSON.stringify(token)},JSON.stringify({caption:w.caption,geometry:w.frameGeometry,cursor:workspace.cursorPos,active:w===workspace.activeWindow,activePID:workspace.activeWindow?.pid,activeCaption:workspace.activeWindow?.caption,area:workspace.clientArea(KWin.PlacementArea,w.output,workspace.currentDesktopForScreen(w.output))}));`,
+      `for(const w of workspace.windowList())if(w.pid===${own.pid})print(${JSON.stringify(token)},JSON.stringify({caption:w.caption,geometry:w.frameGeometry,cursor:workspace.cursorPos,keepAbove:w.keepAbove,active:w===workspace.activeWindow,activePID:workspace.activeWindow?.pid,activeCaption:workspace.activeWindow?.caption,area:workspace.clientArea(KWin.PlacementArea,w.output,workspace.currentDesktopForScreen(w.output))}));`,
     );
     const logs = execFileSync(
       'journalctl',
@@ -177,13 +191,16 @@ try {
       { encoding: 'utf8' },
     );
     fs.writeFileSync(path.join(run, 'compositor.log'), logs);
-    const line = logs
+    const actual = logs
       .split('\n')
-      .filter((l) => l.startsWith(token + ' ') && l.includes('connection permission'))
-      .at(-1);
-    const actual = JSON.parse(line.slice(token.length + 1));
-    assert.equal(actual.geometry.x + actual.geometry.width, actual.area.x + actual.area.width);
-    assert.equal(actual.geometry.y + actual.geometry.height, actual.area.y + actual.area.height);
+      .filter((l) => l.startsWith(token + ' '))
+      .map((l) => JSON.parse(l.slice(token.length + 1)))
+      .find((w) => w.caption.startsWith('FlowGate — connection permission'));
+    assert(actual, 'native permission window measured');
+    if (label !== 'before-opening')
+      assert.equal(actual.geometry.x + actual.geometry.width, actual.area.x + actual.area.width);
+    if (label !== 'before-opening')
+      assert.equal(actual.geometry.y + actual.geometry.height, actual.area.y + actual.area.height);
     result[label] = actual;
     return actual;
   };
@@ -215,6 +232,16 @@ try {
     });
     await wait(() => fs.existsSync(inputSocket));
     await sleep(600);
+    script(
+      `for(const w of workspace.windowList())if(w.pid===${otherPID})workspace.activeWindow=w;`,
+    );
+    await sleep(200);
+    result.beforeOpening = await snapshot('before-opening');
+    assert.equal(
+      result.beforeOpening.activePID,
+      otherPID,
+      'typing target owns actual focus before arrival',
+    );
     const text = 'focus 123';
     const input = spawn('ydotool', ['type', '--key-delay', '120', text], {
       env: { ...process.env, YDOTOOL_SOCKET: inputSocket },
@@ -243,6 +270,7 @@ try {
       text,
       'actual uinput typing stays in other app during automatic presentation',
     );
+    assert.equal(result.compact.keepAbove, true);
     assert.equal(result.compact.geometry.width, 520);
     assert.equal(result.compact.geometry.height, 460);
     const prefs = await app.evaluate(({ BrowserWindow }) =>
@@ -315,6 +343,16 @@ try {
         .setSize(700, 800),
     );
     await sleep(500);
+    script(
+      `for(const w of workspace.windowList())if(w.pid===${own.pid} && w.caption.includes('connection permission')) {const a=workspace.clientArea(KWin.PlacementArea,w.output,workspace.currentDesktopForScreen(w.output));w.frameGeometry={x:a.x+a.width-700,y:a.y+a.height-800,width:700,height:800};}`,
+    );
+    await sleep(1200);
+    result.manuallyResized = await snapshot('manual-resize');
+    assert.equal(
+      result.manuallyResized.geometry.height,
+      800,
+      'polling preserves user-sized height',
+    );
     const decisionAt = Date.now();
     await prompt.locator('#allow').dblclick({ delay: 80 });
     await sleep(300);
