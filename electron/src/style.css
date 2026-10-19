@@ -1426,3 +1426,15 @@ body.hide-sidebar #activityView > aside { display:none; }
 .decision-network select { min-height:24px; font-size:12px; max-width:150px; margin-left:4px; }
 .decision-network[hidden] { display:none; }
 .decision-review { margin:4px 0; color:#ddc38d; font-size:11px; }
+
+.essential-dialog { width:min(760px,calc(100vw - 24px)); max-width:calc(100vw - 24px); max-height:calc(100vh - 24px); padding:0; overflow:hidden; }
+.essential-dialog[open] { display:flex; flex-direction:column; }
+.essential-dialog header,.essential-dialog footer { padding:10px 14px; flex:0 0 auto; background:#373737; }
+.essential-dialog header h2 { margin:0; font-size:16px; }
+.essential-dialog header p { margin:4px 0 0; }
+.essential-dialog .essential-body { overflow:auto; min-height:0; padding:10px 14px; }
+.essential-dialog fieldset label { display:block; margin:4px 0; }
+.essential-dialog footer { display:flex; flex-wrap:wrap; gap:6px; }
+.essential-dialog details p { margin:4px 0; }
+.essential-dialog pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:11px; }
+.essential-dialog li { margin:5px 0; overflow-wrap:anywhere; }

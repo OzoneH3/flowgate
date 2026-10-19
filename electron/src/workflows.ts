@@ -1,3 +1,4 @@
+import { setupEssentialNetworking } from './essential-view';
 import { setupProtectionControls } from './protection-view';
 import { ZONE_CAPABILITY, zoneLabel } from './network-zones';
 import { ANY_PROTOCOL_CAPABILITY, PROCESS_CAPABILITY, targetLabel } from './process-rules';
@@ -259,6 +260,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
   evaluation.innerHTML = `<select id="evalProfile" aria-label="Evaluation profile"><option value="incoming">Incoming only</option><option value="both" disabled>Both directions · support not advertised</option></select><button id="evalStart">Start 5-minute evaluation…</button><button id="evalStop">Stop evaluation</button><button id="evalCancel" hidden>Cancel authentication</button><button id="evalStatus">Status</button><button id="evalRecover">Recovery…</button><span id="evaluationStatus" role="status"></span>`;
   document.querySelector('#controlMenu .menu-panel')!.append(evaluation);
   setupProtectionControls();
+  setupEssentialNetworking();
   const confirmation = node('dialog', '');
   confirmation.id = 'confirmation';
   confirmation.innerHTML = `<h2 id="confirmTitle"></h2><p id="confirmText"></p><div class="editor-actions"><button id="confirmNo">Cancel</button><button id="confirmYes">Continue</button></div>`;
@@ -764,7 +766,9 @@ export function updateWorkflows(next: ClientState) {
       tr.dataset.id = r.id;
       tr.tabIndex = 0;
       for (const value of [
-        r.executable || r.filter.application,
+        r.preset
+          ? `Essential · ${r.preset.component} · ${r.executable || (r.filter.all_programs ? 'All programs' : r.filter.application)}`
+          : r.executable || r.filter.application,
         r.action,
         r.filter.direction,
         r.filter.protocol,
@@ -804,6 +808,13 @@ export function updateWorkflows(next: ClientState) {
   }
   for (const id of ['editRule', 'toggleRule', 'deleteRule'])
     $<HTMLButtonElement>(id).disabled = !writable() || !rules.some((r) => r.id === selected);
+  const presetSelected = rules.find((r) => r.id === selected)?.schema === 5;
+  for (const id of ['editRule', 'toggleRule']) {
+    $<HTMLButtonElement>(id).disabled ||= presetSelected;
+    $<HTMLButtonElement>(id).title = presetSelected
+      ? 'Preset-owned scope; inspect or remove through Essential networking.'
+      : '';
+  }
   const compatible = state.control.capabilities?.includes('conditional-rule-delete-v1');
   $<HTMLButtonElement>('deleteRule').disabled ||= !compatible;
   $('deleteCompatibility').textContent = compatible
@@ -853,12 +864,46 @@ function selectRule() {
   const info = $('ruleInfo');
   const fields = r
     ? [
-        ['Application', r.executable || r.filter.application],
-        ['Target', targetLabel(r.filter.process)],
+        [
+          'Application',
+          r.filter.all_programs ? 'All programs' : r.executable || r.filter.application,
+        ],
+        [
+          'Target',
+          r.preset
+            ? r.filter.peer_service
+              ? 'All programs → exact local service'
+              : r.filter.all_programs
+                ? 'All programs'
+                : 'Exact application'
+            : targetLabel(r.filter.process),
+        ],
+        ...(r.preset
+          ? [
+              ['Preset', `${r.preset.name} · ${r.preset.component}`],
+              ['Preset revision', r.preset.revision],
+              ['Preset entry', r.preset.entry_id],
+              ['Local address', r.filter.local_address || '*'],
+              [
+                'Interface',
+                `${r.filter.interface_name || 'Any'} · index ${r.filter.interface_index || 'Any'}`,
+              ],
+              [
+                'Local service',
+                r.filter.peer_service
+                  ? `${r.filter.peer_service.application} · revision ${r.filter.peer_service.revision} · UID ${r.filter.peer_service.uid}`
+                  : 'Not constrained',
+              ],
+            ]
+          : []),
         [
           'Target lifetime',
           state.control.rule_states?.[r.id]?.reason ||
-            (r.filter.process ? 'Unavailable; no target rebound' : 'Application-wide'),
+            (r.filter.process
+              ? 'Unavailable; no target rebound'
+              : r.preset
+                ? 'Preset-owned exact scope'
+                : 'Application-wide'),
         ],
         ['Action / direction', r.action + ' · ' + r.filter.direction],
         ['Protocol', r.filter.protocol],
@@ -877,9 +922,13 @@ function selectRule() {
         ],
         ['Enabled', r.disabled ? 'No' : 'Yes (expiry still applies)'],
         ['Priority', String(r.priority)],
-        ['Application identity', r.filter.application],
+        [
+          'Application identity',
+          r.filter.application ||
+            (r.preset ? 'Not application-bound; see exact local-service/interface scope' : ''),
+        ],
         ['Revision', r.filter.revision],
-        ['UID', String(r.filter.uid)],
+        ['UID', r.filter.all_uids ? 'All users' : String(r.filter.uid)],
         ['Edit version', String(r.version)],
       ]
     : [];
