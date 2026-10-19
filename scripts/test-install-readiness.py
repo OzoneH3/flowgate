@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Focused installer regression; AST-load pure checks/transaction, no host actions."""
-import ast,contextlib,copy,io,json,pathlib,subprocess,types,unittest
+import ast,contextlib,copy,io,json,pathlib,subprocess,tempfile,types,unittest
 root=pathlib.Path(__file__).resolve().parents[1]
 tree=ast.parse((root/'scripts/install-daily.py').read_text())
 scope={}
@@ -11,6 +11,20 @@ ready={'dependency.ip':'executable_located','dependency.nft':'executable_located
 def report():return {'schema_version':1,'checks':[dict(id=k,status='ready',code=v,detail='fixture completed check')for k,v in ready.items()]+[copy.deepcopy(activation)]}
 
 class InstallerReadiness(unittest.TestCase):
+ def test_successful_receivers_leave_persisted_monitoring_for_review(self):
+  transaction=next(n for n in tree.body if isinstance(n,ast.Try));calls=[]
+  states=iter([
+   {'generation':'new','protection':{'state':'stopped'},'build':{'source':'fixture','executable_sha256':'hash'},'rules':[]},
+   {'generation':'new','protection':{'state':'active','profile':'both'},'traffic_monitor':{'state':'active'}},
+   {'generation':'recovered','protection':{'state':'stopped','desired_mode':'monitoring'},'traffic_monitor':{'state':'active'}},
+  ])
+  with tempfile.TemporaryDirectory(dir=root/'.workspace')as directory:
+   env={'command':lambda *a,**kw:calls.append(a),'api':lambda:(None,next(states)),'before':{'generation':'old','rules':[]},'manifest':{'release':'fixture','source':'fixture','files':{'flowgate':'hash'}},'release':pathlib.Path('/mock-release'),'backup':pathlib.Path(directory),'sys':types.SimpleNamespace(executable='python3',stderr=io.StringIO()),'subprocess':types.SimpleNamespace(run=lambda *a,**kw:self.fail('success unexpectedly failed')),'json':json}
+   output=io.StringIO()
+   with contextlib.redirect_stdout(output):exec(compile(ast.Module(body=[transaction],type_ignores=[]),'installer-actual-transaction','exec'),env)
+   self.assertEqual(calls[-1],('/usr/local/sbin/flowgate-recover',))
+   self.assertEqual(json.loads((pathlib.Path(directory)/'runtime-final.json').read_text())['protection']['desired_mode'],'monitoring')
+   self.assertIn('MONITORING pending essential-policy review',output.getvalue())
  def test_exact_user_diagnostic_is_deferred_not_ready(self):
   r=report();before=copy.deepcopy(r)
   old_refused=[c for c in r['checks']if c['id'].startswith('firewall.')and(c['status']=='blocked'or(c['status']=='not_checked'and c['id']!='firewall.queue_census'))]

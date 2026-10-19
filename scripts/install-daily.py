@@ -128,8 +128,14 @@ try:
  assert(r.get('rules')or[])==(before.get('rules')or[]),'Policy inventory changed during handoff'
  command(sys.executable,str(release/'host-acceptance.py'),'--release',str(release),'--evidence',str(backup/'acceptance'))
  _,r=api();assert r['protection']['state']=='active'and r['protection']['profile']=='both'and r['traffic_monitor']['state']=='active'
+ (backup/'runtime-acceptance-active.json').write_text(json.dumps(r,indent=2))
+ # Dedicated receiver success does not establish usable first-run system policy.
+ # Leave boot intent and actual state monitoring until the essential preset and
+ # the user's application permissions have been explicitly reviewed.
+ command('/usr/local/sbin/flowgate-recover')
+ _,r=api();assert r['protection']['state']=='stopped'and r['protection']['desired_mode']=='monitoring'and r['traffic_monitor']['state']=='active'
  (backup/'runtime-final.json').write_text(json.dumps(r,indent=2))
- print('INSTALLED AND HOST-ACCEPTED',manifest['release'],r['generation']);print('Reboot acceptance still pending. Recovery: sudo /usr/local/sbin/flowgate-recover')
+ print('INSTALLED; HOST RECEIVERS VERIFIED; MONITORING pending essential-policy review',manifest['release'],r['generation']);print('Do not activate both until essential system policy is reviewed. Reboot protection acceptance remains pending.')
 except Exception:
  # Never downgrade/delete schema4/process inventory. Use the tested new daemon
  # in monitoring mode, retain all evidence and root-owned previous artifact.

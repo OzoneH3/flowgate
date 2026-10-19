@@ -1,5 +1,21 @@
 # Continuation handoff
 
+## Operational incident: protection remains off pending essential policy review
+
+The04c5159 install reached active both-direction protection, but default-deny with
+no approved essential rules disrupted real use. User recovery and uninstall are
+recorded08:24:33–08:24:38; current daemon/units are absent, host DNS works, NM,
+resolved and Tailscale are active. Do not auto-reactivate or describe this as a
+daily-ready installation. See [SYSTEM-NETWORKING.md](SYSTEM-NETWORKING.md).
+
+The failed Activity action was `rule:preview` returning `stale_target`, before Save.
+A real private-mount service rejection is fixed with target-bound namespace
+verification; exact incident PID/executable needs the root-private export. The
+review-only DNS preset grants no permissions automatically. Future installer
+completion returns to persisted monitoring even after receiver checks pass.
+Existing receiver/kernel/UI evidence is reused; host preset activation is pending
+exact identity/VPN evidence, review and focused real DNS/application acceptance.
+
 ### Final accepted desktop verification
 
 Released frontend **1b399257c9dc2acb0162596b21cdd6562340c925** is integrated,
