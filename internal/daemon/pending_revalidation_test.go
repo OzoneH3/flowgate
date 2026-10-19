@@ -93,3 +93,29 @@ func TestRememberPreviewDeadlineIsNotCalledIdentityChange(t *testing.T) {
 		}
 	}
 }
+
+func TestRememberReviewedSocketClosedBeforeCommitDoesNotSave(t *testing.T) {
+	e, f, a, _ := fixture()
+	e.Timeout = time.Minute
+	writes := 0
+	e.SaveRules = func([]policy.Rule) error { writes++; return nil }
+	a.Sockets = []identity.Socket{{Inode: 1, Cookie: "original"}}
+	v := e.Observe(f, "original")
+	p, err := e.PreviewDecision(e.Generation, v.ID, "allow", "persistent", "any", e.Zones.Revision, 1000, false, RememberOptions{Fields: &RememberFields{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	*a = identity.Attribution{Status: "unidentified", Reason: "no visible matching socket"}
+	if _, _, _, err = e.DecideReviewed(e.Generation, v.ID, "allow", "persistent", "any", e.Zones.Revision, p.Token, 1000, false, RememberOptions{Fields: &RememberFields{}}); err == nil {
+		t.Fatal("dead socket committed")
+	}
+	if writes != 0 || len(e.rules) != 0 {
+		t.Fatal("closed request wrote a rule")
+	}
+	if status, err := e.DecisionStatus(e.Generation, p.Token, 1000, false); err != nil || status.State == "committed" {
+		t.Fatal(status, err)
+	}
+	if e.RetainedState(v.ID, v.Attribution.Fingerprint) != "drop" {
+		t.Fatal("dead packet approved")
+	}
+}
