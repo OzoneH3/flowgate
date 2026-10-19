@@ -34,6 +34,8 @@ def proposal(process,servers,existing):
    items.append({'reason':'Configured DNS upstream; TCP fallback and UDP queries. Not incoming permission and not a VPN/systemd exemption.','disposition':'preserve_existing_review_only'if matches else 'proposed_not_saved','existing_rule_ids':[r['id']for r in matches],
     'candidate_rule':{'schema':2,'id':'essential-dns-'+key,'version':1,'created':datetime.datetime.now(datetime.timezone.utc).isoformat(),'disabled':False,'action':'allow','priority':100,'executable':a['executable'],'expires':ZERO,'filter':f}})
  return {'preset':'Essential system networking — observed host DNS','version':1,'review_only':True,'rules_saved':0,'target_scope':'application','network_scope':'Any network, constrained to each exact configured DNS IP and port53','identity':process,
+  'existing_application_rule_ids':[r['id']for r in existing if r.get('filter',{}).get('application')==a['key']],
+  'precedence':'Review all existing application/process/zone rules through authoritative policy previews; this proposal is not an effective-policy matcher.',
   'items':items,'activation':'Keep monitoring. Review each candidate, revalidate live identity and apply through identity-bound preview/save with existing administrator authority; never import this file as authority.',
   'updates':'Executable revision or DNS-server changes require fresh review. Existing rules, including disabled/user-edited rules, are never overwritten or enabled. No automatic startup/update application.',
   'not_included':['UID0 wildcard','systemd or NetworkManager wildcard','unsolicited incoming traffic','Tailscale blanket exemption','public fallback DNS not currently configured','application outbound Internet access']}

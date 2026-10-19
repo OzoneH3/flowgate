@@ -6,6 +6,8 @@ root=pathlib.Path(__file__).resolve().parents[1]
 out=root/'.workspace'/('system-networking-'+str(time.time_ns()))
 out.mkdir(mode=0o700)
 uid=int(os.environ.get('SUDO_UID','1000'));gid=int(os.environ.get('SUDO_GID','1000'))
+os.chown(out,uid,gid)
+print('READ-ONLY EVIDENCE',out,flush=True)
 def save(name,value):
  p=out/name
  with p.open('x')as f:json.dump(value,f,indent=2)
@@ -34,13 +36,17 @@ for name,args in {
 for name in ['protection.json','rules.db','decisions.db']:
  path=pathlib.Path('/var/lib/flowgate')/name
  if not path.exists():save(name+'.json',{'unavailable':'missing'});continue
- if name.endswith('.json'):save(name+'.json',json.loads(path.read_text()));continue
+ if name.endswith('.json'):
+  try:save(name+'.json',json.loads(path.read_text()))
+  except (OSError,ValueError)as e:save(name+'.json',{'unavailable':str(e)})
+  continue
  # SQLite read-only transaction; never open a writer or copy a live database file.
  db=sqlite3.connect('file:'+str(path)+'?mode=ro',uri=True)
  try:
   if name=='rules.db':rows=db.execute('SELECT document FROM rules').fetchall()
   else:rows=db.execute('SELECT document FROM decisions WHERE at>=? ORDER BY seq DESC LIMIT 3000',(int((time.time()-14400)*1_000_000_000),)).fetchall()
   save(name+'.json',[json.loads(row[0])for row in rows])
+ except (sqlite3.Error,ValueError)as e:save(name+'.json',{'unavailable':str(e)})
  finally:db.close()
 for name,path in [('owned-state.json','/run/flowgate-enforcement/instance.json'),('zones.json','/etc/flowgate/zones.json')]:
  try:save(name,json.loads(pathlib.Path(path).read_text()))

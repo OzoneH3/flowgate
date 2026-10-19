@@ -95,3 +95,8 @@ observed only with protection off. After root evidence and review, apply only th
 approved exact rules through preview/save; run one focused DNS/ordinary desktop/
 VPN/nonmatching app/reply journey before an explicit Start. Keep monitoring if any
 step fails. No new broad/persistent service permission is approved by this document.
+
+Current recovered-state checks also returned HTTPS HTTP200 and Tailscale
+BackendState Running. Tailscale reports a separate NM/resolved wiring warning
+(MagicDNS may not work). That configuration was not changed, and this DNS proposal
+does not claim to repair it or prove tailnet reachability.
