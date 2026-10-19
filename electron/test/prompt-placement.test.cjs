@@ -134,6 +134,7 @@ test('startup handshake waits for native configure and reveals/focuses only once
   w.actual = { ...requested };
   for (let i = 0; i < 3; i++) tick();
   assert.equal(w.opacity, 1);
+  assert.equal(w.keepAbove, true);
   assert.equal(focused, 1);
   assert.equal(stopped, 1);
   assert.deepEqual({ ...w.actual }, { x: 2380, y: 140, width: 520, height: 460 });

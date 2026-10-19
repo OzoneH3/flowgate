@@ -32,7 +32,7 @@ QtObject {
   id: root
   property var workspace: Workspace
   property var target: null
-  function added(w) { if(w.pid===${pid} && w.caption===${JSON.stringify(promptTitle(windowID))}) { target=w; w.opacity=0; console.log("FLOWGATE_PROMPT_HELD",${pid},${windowID},w.output.name,w.opacity); } }
+  function added(w) { if(w.pid===${pid} && w.caption===${JSON.stringify(promptTitle(windowID))}) { target=w; w.keepAbove=true; w.opacity=0; console.log("FLOWGATE_PROMPT_HELD",${pid},${windowID},w.output.name,w.opacity); } }
   Component.onCompleted: { workspace.windowAdded.connect(root.added); for(const w of workspace.stackingOrder) added(w); }
   Component.onDestruction: { workspace.windowAdded.disconnect(root.added); if(target) target.opacity=1; }
   property var state: ({ticks:0, nativeID:null, previous:"", stable:0, applied:0, waited:0, confirmed:0})
@@ -61,7 +61,7 @@ QtObject {
     const correct=w.output===output && ["x","y","width","height"].every(k=>Math.abs(g[k]-desired[k])<=1);
     s.confirmed=correct?s.confirmed+1:0;
     if(s.confirmed>=3) {
-      w.opacity=1; workspace.activeWindow=w;
+      w.keepAbove=true; w.opacity=1; workspace.activeWindow=w;
       console.log("FLOWGATE_PROMPT_CONFIRMED",JSON.stringify({pid:${pid},windowID:${windowID},nativeID:nativeID,output:output.name,area:area,geometry:g,attempts:s.applied}));
       clock.stop(); return;
     }

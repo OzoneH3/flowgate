@@ -76,3 +76,10 @@ Existing quick-setter error presentation retains that exact backend error and
 received the evidence and separately fixed private-mount namespace verification.
 The exact historical process/PID remains unconfirmed pending privileged read-only
 export; this document does not identify a particular system service by guess.
+
+## Always-on-top follow-up
+
+Permission windows alone request Electron `alwaysOnTop` and KDE `keepAbove`. The
+compositor flag is set on the bound native prompt and retained after its temporary
+placement script stops. Activity and detached Info/Chart are unaffected. This does
+not add repeated focus activation or change any decision behavior.

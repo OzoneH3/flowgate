@@ -280,6 +280,7 @@ function windowFor(isPrompt = false, id = '', generation = '') {
   const w = new BrowserWindow({
     title: isPrompt ? PROMPT_TITLE : 'FlowGate',
     frame: !isPrompt,
+    alwaysOnTop: isPrompt,
     width: isPrompt ? 520 : width,
     height: isPrompt ? 460 : height,
     minWidth: isPrompt ? 320 : 800,
