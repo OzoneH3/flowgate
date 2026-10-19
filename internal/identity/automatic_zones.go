@@ -166,7 +166,11 @@ func (z NetworkZones) classifyAutomatic(remote netip.Addr) NetworkScope {
 			out.Reason = "Public-address LAN prefix has no agreeing connected route; scope unavailable during route changes"
 			return out
 		}
-		if r.Interface != l.Index || r.Gateway != "" || r.Options != "" || r.Type != unix.RTN_UNICAST && r.Type != unix.RTN_LOCAL {
+		if r.Options != "" {
+			out.Reason = "Public-address LAN has multipath/source-specific routing; remote-only scope cannot select a safe path"
+			return out
+		}
+		if r.Interface != l.Index || r.Gateway != "" || r.Type != unix.RTN_UNICAST && r.Type != unix.RTN_LOCAL {
 			continue
 		}
 		// Remote-only scope must not guess a marked/source-specific policy path.

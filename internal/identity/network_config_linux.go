@@ -40,6 +40,7 @@ type NetworkRoute struct {
 	Scope     uint8  `json:"scope"`
 	Type      uint8  `json:"type"`
 	Options   string `json:"options,omitempty"`
+	Config    string `json:"config,omitempty"`
 }
 type NetworkSnapshot struct {
 	State     string           `json:"state"`
@@ -174,6 +175,24 @@ func collectNetwork() (NetworkSnapshot, error) {
 					continue
 				}
 				v := NetworkRoute{Table: uint32(b[4]), Scope: b[6], Type: b[7]}
+				// Include stable route attributes (preferred source, metrics,
+				// encap, selectors) in revision fences, not expiry countdowns.
+				parts := []string{hex.EncodeToString(b[:12])}
+				for _, attr := range attrs {
+					typ := attr.Type & 0x3fff
+					if typ != unix.RTA_CACHEINFO && typ != 23 /* RTA_EXPIRES */ {
+						parts = append(parts, fmt.Sprintf("%d:%x", typ, attr.Data))
+					}
+					if typ == unix.RTA_SRC {
+						v.Options = "source-specific"
+					}
+				}
+				if b[2] != 0 || b[3] != 0 {
+					v.Options = "source/tos-specific"
+				}
+				sort.Strings(parts)
+				config := sha256.Sum256([]byte(strings.Join(parts, ";")))
+				v.Config = hex.EncodeToString(config[:])
 				addr := "0.0.0.0"
 				if b[0] == unix.AF_INET6 {
 					addr = "::"

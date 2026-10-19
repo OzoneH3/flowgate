@@ -102,3 +102,12 @@ func TestPublicLANRequiresUsableUnambiguousRoute(t *testing.T) {
 		t.Fatal("public over alternative VPN route became Local", got)
 	}
 }
+
+func TestPublicLANDoesNotGuessMultipath(t *testing.T) {
+	s := automaticFixture()
+	s.Routes[0].Options = "unresolved-nexthops"
+	s.seal()
+	if got := AutomaticNetworkZones(DefaultNetworkZones(), s).Classify(netip.MustParseAddr("9.9.9.4")); got.State != "unavailable" {
+		t.Fatal("multipath LAN guessed into automatic permission", got)
+	}
+}
