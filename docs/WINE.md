@@ -292,3 +292,45 @@ remains for old tests, but cannot be combined with `--attach-prefixes`. Source
 `scripts/go-env.sh` before manual Go commands. No additional privileges or runtime
 updates were required. Existing game prefixes and launcher configuration remain
 untouched.
+
+## Launch provenance and permission scope (display; keys unchanged)
+
+Observed host launch (read-only /proc, 2026-10-19): `bash ~/user_config/scripts/lwp
+DS2.exe` → `python3 /usr/bin/umu-run DS2.exe` → srt-bwrap → pv-adverb → `python3
+…/dwproton-11.0-4/proton waitforexitandrun` → Wine (`umu.exe`, `DS2.exe`,
+`crs-handler.exe`, wineserver). `lwp` sets `WINEPREFIX=STEAM_COMPAT_DATA_PATH=
+~/Games/pfx/<exe name without extension and spaces>` (RenPy `#Hv` paths share
+`~/Games/pfx/RenPy`; a third argument overrides). Proton normally runs Wine in
+`$STEAM_COMPAT_DATA_PATH/pfx` (`~/Games/pfx/DS2/pfx` exists; which prefix the
+historical rundll32.exe used was not captured). Per-game by this script's
+convention only — nothing FlowGate can verify.
+
+Remembered rules bind the application key `UID + kind + prefix + executable
+path` (+ file-stamp revision). Consequences, stated in `permission_target`:
+
+- Proton's `rundll32.exe` maps `…/dwproton-11.0-4/files/lib/wine/x86_64-windows/
+  rundll32.exe`. Two games with **different prefixes** produce **different keys**
+  for that same file (tested: `scripts/provenance-wine.py`, real Wine 11.19).
+- In a **shared prefix** (umu default `~/Games/umu/umu-default`, `lwp`'s RenPy
+  prefix, an explicit shared third argument), one Remember on the helper covers
+  every game using that prefix. The UI therefore says "rundll32.exe in prefix X
+  (shared by every game using this prefix)" and never "this game only".
+- Another Proton build is another file path → another key; a Proton update that
+  rewrites the file keeps the key but changes the revision (new prompt).
+- For a while binds PID + start ticks: a relaunch is never covered. Under the
+  broker model (two visible holders) it is unavailable and the target says so.
+
+Provenance groups Activity rows under the game ("DEATH STRANDING 2: ON THE BEACH ·
+DS2.exe", ProductName read from the real DS2.exe) and names the game in the
+prompt ("via rundll32.exe") only for `evidence: verified`. Historical case (b) —
+rundll32.exe PID 1195586, ended, ancestry never captured — stays without a game.
+
+Verification: `go test ./internal/identity -run 'Provenance|Ancestry|Markers|
+WineExe|Environment|PermissionTarget'`; `scripts/lab.sh python3
+scripts/process-rules-isolated.py --binary B --native N --run .workspace/RUN
+--provenance` (SIMULATION: native fixture renamed to Proton paths, fake
+umu-run/pv-adverb/proton scripts in `scripts/provenance-sim`, real receivers);
+`scripts/lab.sh python3 scripts/provenance-wine.py --binary B --run
+.workspace/RUN --prefix-source .workspace/wine-prefix --pe
+.workspace/windows/alpha.exe` (real Wine processes, simulated launcher chain).
+Real UMU/Proton/pressure-vessel launches were not executed.

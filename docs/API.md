@@ -382,3 +382,37 @@ preview/apply/status/removal. Schema5 preserves exact service identity and expli
 interface/stub constraints. See [ESSENTIAL-NETWORKING.md](ESSENTIAL-NETWORKING.md)
 for payloads, authorization, errors, expiry, receipt reconciliation and compatibility.
 No operation activates protection.
+
+## Launch provenance and permission target (display only)
+
+Additive, no capability flag (absent fields mean an older backend). Captured by
+`internal/identity/provenance.go`; never consulted by policy, keys or matching.
+
+- `owners[].provenance`, `activity.processes[id].provenance` and, for the
+  principal owner (single owner or broker client), `attribution.provenance`:
+  `{evidence: verified|unavailable|none, reason, role: launcher|game|runtime|helper,
+  group, stop, ancestry[≤12]: {pid, start_ticks, uid, name, executable, revision,
+  marker}, launch?: {kind: umu|proton|steam|wine, launcher_pid,
+  launcher_start_ticks, launcher_name, game?: {name, title, executable, revision,
+  status: verified-file|not-found, source}, prefix, prefix_id (dev:ino),
+  prefix_source, runtime, steam_app_id, game_id, markers[]}, captured_at}`.
+  `verified` = the /proc parent chain from the owner to the launcher was walked
+  with start-time checks (a parent newer than its child = PID reuse, walk stops;
+  PID 1 ends it; nothing is invented). `none` = complete chain, no launcher.
+  `unavailable` = chain broke first. Markers come from cmdline/exe only
+  (umu-run, `proton run|waitforexitandrun|runinprefix`, srt-bwrap/pv-adverb/
+  pressure-vessel, wineserver, Steam `reaper SteamLaunch`, Wine loader). Only
+  WINEPREFIX, STEAM_COMPAT_DATA_PATH, SteamAppId, SteamGameId, PROTONPATH, UMU_ID
+  and GAMEID are read from environ (owner and ancestors, values ≤1 KiB). `game.title`
+  is the PE version-resource ProductName (bounded). Results are cached per
+  boot/pidns/PID/start while the process lives (≤4096 entries), so a helper keeps
+  what was seen at first sight after reparenting; events keep the attribution
+  captured at request time after the owner exits.
+- `attribution.permission_target`: `{kind: helper|application|interpreter|unavailable,
+  label, once, for_a_while, remember, shared_with_note, key_basis, prefix}`, derived
+  at serialization from the attribution's current identity: Once = this request;
+  For a while = this PID+start only (unavailable unless exactly one visible owner);
+  Remember = the application key (UID + kind + prefix + executable path, revision
+  = file stamp). A Wine/Proton helper's target names its prefix and states it is
+  shared by every game using that prefix; native interpreters state that every
+  script they run is covered. The UI renders these strings verbatim.

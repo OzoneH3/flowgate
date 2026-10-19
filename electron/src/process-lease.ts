@@ -11,6 +11,41 @@ export const FOR_A_WHILE_TOOLTIP =
 export const forAWhileSupported = (capabilities?: string[]) =>
   !!capabilities?.includes(FOR_A_WHILE_CAPABILITY);
 
+// decision-for-a-while-durations-v1 (FlowGate extension; NetLimiter's popup has
+// no duration selector): the backend's exact allowed set. The backend's
+// returned `until` is the authority; local arithmetic is only a preview.
+export const FOR_A_WHILE_DURATIONS_CAPABILITY = 'decision-for-a-while-durations-v1';
+export const FOR_A_WHILE_DURATION_CHOICES = [15, 60, 300, 600, 1800, 3600] as const;
+export function durationLabel(seconds: number) {
+  if (seconds >= 3600 && seconds % 3600 === 0) return seconds === 3600 ? '1 h' : `${seconds / 3600} h`;
+  if (seconds >= 60 && seconds % 60 === 0) return `${seconds / 60} min`;
+  return `${seconds} s`;
+}
+// Durations offered for this backend: its advertised list restricted to the
+// known set; without the capability only the fixed 15 s exists.
+export function forAWhileDurations(control: { capabilities?: string[]; forAWhileDurations?: number[] }) {
+  if (!control.capabilities?.includes(FOR_A_WHILE_DURATIONS_CAPABILITY)) return [FOR_A_WHILE_SECONDS];
+  const offered = (control.forAWhileDurations ?? []).filter((d) =>
+    (FOR_A_WHILE_DURATION_CHOICES as readonly number[]).includes(d),
+  );
+  return offered.length ? offered : [FOR_A_WHILE_SECONDS];
+}
+// The remembered choice when the backend still allows it, else 15 s.
+export function defaultForAWhile(saved: unknown, allowed: number[]) {
+  return typeof saved === 'number' && allowed.includes(saved) ? saved : allowed.includes(FOR_A_WHILE_SECONDS) ? FOR_A_WHILE_SECONDS : allowed[0];
+}
+export const validForAWhileSeconds = (v: unknown) =>
+  typeof v === 'number' && (FOR_A_WHILE_DURATION_CHOICES as readonly number[]).includes(v);
+// Shown before the click: the expiry the selection would produce (preview only).
+export function expiryPreview(seconds: number, now: number) {
+  const until = new Date(now + seconds * 1000),
+    two = (n: number) => String(n).padStart(2, '0');
+  return `until ${two(until.getHours())}:${two(until.getMinutes())}${seconds < 60 ? ':' + two(until.getSeconds()) : ''}`;
+}
+export function forAWhileNote(seconds: number) {
+  return `For ${durationLabel(seconds)} · this process instance · this direction · ends early if it exits · not saved as a rule.`;
+}
+
 // NetLimiter 5.3.28 (observed): "Allow | Deny | ☐ Remember | ☐ For a while";
 // checking either option unchecks the other (and For a while collapses the
 // Remember panel). Kept in this one constant so it can be changed; if it is
@@ -42,6 +77,8 @@ export interface ProcessLease {
   start: string;
   until: string;
   remaining_ms: number;
+  // Authoritative lease duration (seconds) from the backend.
+  seconds: number;
   event_id: string;
 }
 const obj = (v: unknown): Record<string, unknown> =>
@@ -80,6 +117,7 @@ export function parseProcessLeases(raw: unknown): ProcessLease[] | undefined {
       start: text(l.start, 64),
       until,
       remaining_ms: Number.isFinite(l.remaining_ms) ? Math.max(0, Number(l.remaining_ms)) : 0,
+      seconds: Number.isSafeInteger(l.seconds) && Number(l.seconds) > 0 ? Number(l.seconds) : FOR_A_WHILE_SECONDS,
       event_id: text(l.event_id, 256),
     });
   }
@@ -98,8 +136,15 @@ export const leaseRemainingMs = (lease: { until: string }, now: number) =>
 export const activeLeases = (leases: ProcessLease[] | undefined, now: number) =>
   (leases ?? []).filter((l) => leaseRemainingMs(l, now) > 0);
 const shortDirection = (d: string) => (d === 'incoming' ? 'In' : d === 'outgoing' ? 'Out' : d || '?');
+export function remainingText(ms: number) {
+  const s = Math.ceil(ms / 1000);
+  if (s < 120) return `${s} s left`;
+  if (s < 7200) return `${Math.ceil(s / 60)} min left`;
+  return `${Math.ceil(s / 3600)} h left`;
+}
+// Countdown from the backend's `until` (never extended locally).
 export function leaseLine(lease: ProcessLease, now: number) {
-  return `For a while: ${lease.action === 'allow' ? 'Allow' : 'Deny'} · process ${lease.pid} · ${shortDirection(lease.direction)} · ${Math.ceil(leaseRemainingMs(lease, now) / 1000)} s left`;
+  return `For a while: ${lease.action === 'allow' ? 'Allow' : 'Deny'} · process ${lease.pid} · ${shortDirection(lease.direction)} · ${remainingText(leaseRemainingMs(lease, now))}`;
 }
 export function leaseDetails(lease: ProcessLease): [string, string][] {
   const until = new Date(lease.until);
@@ -110,7 +155,8 @@ export function leaseDetails(lease: ProcessLease): [string, string][] {
     ['UID', lease.uid >= 0 ? String(lease.uid) : 'Unknown'],
     ['Direction', lease.direction === 'incoming' ? 'Incoming' : lease.direction === 'outgoing' ? 'Outgoing' : lease.direction || 'Unknown'],
     ['Action', lease.action === 'allow' ? 'Allow' : 'Deny'],
-    ['Expires', `${until.toLocaleTimeString()} (${lease.until})`],
+    ['Duration', durationLabel(lease.seconds)],
+    ['Expires', `${until.toLocaleTimeString()} (${lease.until}) · earlier if the process exits`],
     ['Scope', 'This process instance only, same direction. Not saved as a rule.'],
   ];
 }
@@ -140,7 +186,10 @@ export function leaseHolds(
   now = control.serverNow ?? Date.now(),
 ) {
   const listed = control.processLeases;
-  if (listed?.some((l) => l.event_id === eventID && leaseRemainingMs(l, now) > 0)) return true;
+  // Long leases (up to 1 h) keep the card only for the first 15 s; the lease
+  // stays listed under Temporary decisions for its whole duration.
+  const mine = listed?.find((l) => l.event_id === eventID && leaseRemainingMs(l, now) > 0);
+  if (mine) return Date.parse(mine.until) - mine.seconds * 1000 + FOR_A_WHILE_SECONDS * 1000 > now;
   const own = control.events.find((e) => e.id === eventID)?.lease;
   // Before the first list after the decision, the decided event's lease reference.
   return !!own && leaseRemainingMs(own, now) > 0;

@@ -97,8 +97,19 @@ type Response struct {
 	PeerUID            uint32                     `json:"peer_uid"`
 	Events             []Event                    `json:"events,omitempty"`
 	ProcessLeases      *[]ProcessLease            `json:"process_leases,omitempty"`
-	Decision           *Event                     `json:"decision,omitempty"`
-	Error              string                     `json:"error,omitempty"`
+	// queue-reconcile-v1: other requests this operation settled (left awaiting).
+	Settled []SettledRequest `json:"settled,omitempty"`
+	// request-for-a-while-v1: the lease created from an ended request, which
+	// itself stays ended (request_ended true; never decided or delivered).
+	ProcessLease *ProcessLease `json:"process_lease,omitempty"`
+	RequestEnded bool          `json:"request_ended,omitempty"`
+	// decision-for-a-while-durations-v1: the exact allowed lease durations.
+	ForAWhileDurations []int64 `json:"for_a_while_durations,omitempty"`
+	Decision           *Event  `json:"decision,omitempty"`
+	Error              string  `json:"error,omitempty"`
+
+	// local-pair-v1: decide-pair result (both sides of one local connection).
+	Pair *PairDecision `json:"pair,omitempty"`
 }
 
 func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
@@ -178,7 +189,8 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						}
 					}
 					if !readonly && e.Mode != "host-monitor" {
-						r.Capabilities = append(r.Capabilities, PolicyExplanationCapability, ObservedRuleCapability, ProcessRuleCapability, ObservedAnyProtocolCapability, DecisionZoneCapability, ApplicationPolicyCapability, DecisionRememberFieldsCapability, StoredAskCapability, RequestApplicationRuleCapability, ForAWhileCapability)
+						r.Capabilities = append(r.Capabilities, PolicyExplanationCapability, ObservedRuleCapability, ProcessRuleCapability, ObservedAnyProtocolCapability, DecisionZoneCapability, ApplicationPolicyCapability, DecisionRememberFieldsCapability, StoredAskCapability, RequestApplicationRuleCapability, ForAWhileCapability, ForAWhileDurationsCapability, QueueReconcileCapability, RequestForAWhileCapability, LocalPairCapability, RequestSandboxIdentityCapability)
+						r.ForAWhileDurations = ForAWhileDurations
 					}
 					if e.Evaluation != nil {
 						r.Capabilities = append(r.Capabilities, EvaluationCapability)
@@ -487,6 +499,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 									saved, r.ScopePreview, r.Replayed, err = e.SaveObservedRule(q.Generation, q.PreviewToken, *q.ObservedDraft, cred.Uid, admin)
 									if err == nil {
 										r.SavedRule = &saved
+										r.Settled = e.ObservedSettled(q.PreviewToken)
 									}
 								}
 								if err != nil {
@@ -512,7 +525,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 									}
 								} else {
 									var saved policy.Rule
-									if saved, r.ScopePreview, r.Replayed, err = e.SaveRequestRule(q.Generation, q.PreviewToken, q.ID, q.Action, q.Scope, q.NetworkZone, q.ZoneRevision, cred.Uid, admin, o); err == nil {
+									if saved, r.ScopePreview, r.Replayed, r.Settled, err = e.SaveRequestRuleSettled(q.Generation, q.PreviewToken, q.ID, q.Action, q.Scope, q.NetworkZone, q.ZoneRevision, cred.Uid, admin, o); err == nil {
 										r.SavedRule = &saved
 									}
 								}
@@ -718,6 +731,46 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 									}
 								}
 							}
+						case "request-for-a-while":
+							// For a while from an ended request whose process still runs:
+							// creates the process lease only; the request stays ended.
+							if readonly || r.ReadOnly || e.Mode == "host-monitor" {
+								r.ErrorCode, r.Error = "read_only", "read-only API"
+							} else if !permissions.CanDecide {
+								r.ErrorCode, r.Error = "unavailable", "decision unavailable in non-enforcing/read-only mode"
+							} else if q.ID == "" || len(q.ID) > 64 {
+								r.ErrorCode, r.Error = "invalid_request", "Request id required"
+							} else {
+								l, settled, err := e.ForAWhileFromRequest(q.Generation, q.ID, q.Action, q.DurationSeconds, cred.Uid, admin)
+								if err != nil {
+									r.ErrorCode, r.Error = "invalid_request", err.Error()
+									var typed *RuleMutationError
+									if errors.As(err, &typed) {
+										r.ErrorCode = typed.Code
+									}
+								} else {
+									r.ProcessLease, r.Settled, r.RequestEnded = &l, settled, true
+									r.ScopePreview = endedLeaseSentence(l)
+								}
+							}
+						case "decide-pair":
+							// local-pair-v1: both sides of one verified local connection.
+							if readonly || r.ReadOnly || e.Mode == "host-monitor" {
+								r.ErrorCode, r.Error = "read_only", "read-only API"
+							} else if !permissions.CanDecide {
+								r.ErrorCode, r.Error = "unavailable", "decision unavailable in non-enforcing/read-only mode"
+							} else {
+								v, settled, err := e.DecidePair(q.Generation, q.EventIDs, q.Action, q.Scope, q.DurationSeconds, cred.Uid, admin)
+								if err != nil {
+									r.ErrorCode, r.Error = "invalid_request", err.Error()
+									var typed *RuleMutationError
+									if errors.As(err, &typed) {
+										r.ErrorCode = typed.Code
+									}
+								} else {
+									r.Pair, r.Settled, r.ScopePreview = &v, settled, v.Sentence
+								}
+							}
 						case "decide":
 							if q.Generation != "" && q.Generation != e.Generation {
 								r.ErrorCode, r.Error = "generation_conflict", "Daemon generation changed; request is no longer actionable"
@@ -733,14 +786,15 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 								var err error
 								if q.PreviewToken != "" {
 									var rule policy.Rule
-									v, rule, r.Replayed, err = e.DecideReviewed(q.Generation, q.ID, q.Action, q.Scope, q.NetworkZone, q.ZoneRevision, q.PreviewToken, cred.Uid, admin, RememberOptions{q.Remember, q.DurationSeconds})
+									v, rule, r.Replayed, r.Settled, err = e.DecideReviewedSettled(q.Generation, q.ID, q.Action, q.Scope, q.NetworkZone, q.ZoneRevision, q.PreviewToken, cred.Uid, admin, RememberOptions{q.Remember, q.DurationSeconds})
 									if err == nil {
 										r.SavedRule = &rule
 									}
-								} else if q.NetworkZone != "" || q.ZoneRevision != "" || q.Remember != nil || q.DurationSeconds != 0 {
+								} else if q.NetworkZone != "" || q.ZoneRevision != "" || q.Remember != nil || (q.DurationSeconds != 0 && q.Scope != ForAWhileScope) {
 									err = mutationError("preview_required", "Explicit network scope requires reviewed decision token")
 								} else {
-									v, err = e.Decide(q.ID, q.Action, q.Scope, cred.Uid, admin)
+									// For a while: duration_seconds is the lease duration (absent = 15 s).
+									v, r.Settled, err = e.DecideSettled(q.ID, q.Action, q.Scope, q.DurationSeconds, cred.Uid, admin)
 								}
 								if err != nil {
 									r.Error = err.Error()

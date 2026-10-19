@@ -17,9 +17,30 @@ const ForAWhileCapability = "decision-for-a-while-v1"
 // ForAWhileScope is the decide scope value.
 const ForAWhileScope = "for-a-while"
 
-// ForAWhileDuration is fixed (NetLimiter offers no duration control; its
+// ForAWhileDuration is the default (NetLimiter offers no duration control; its
 // window was measured at roughly 10-18 seconds).
 const ForAWhileDuration = 15 * time.Second
+
+// ForAWhileDurationsCapability (FlowGate extension): decide scope for-a-while
+// and request-for-a-while accept duration_seconds from ForAWhileDurations
+// (absent = 15). A lease still ends early when its process instance exits.
+const ForAWhileDurationsCapability = "decision-for-a-while-durations-v1"
+
+// ForAWhileDurations is the exact allowed set of lease durations in seconds.
+var ForAWhileDurations = []int64{15, 60, 300, 600, 1800, 3600}
+
+// forAWhileDuration validates a requested duration (0 = default 15 s).
+func forAWhileDuration(seconds int64) (time.Duration, error) {
+	if seconds == 0 {
+		return ForAWhileDuration, nil
+	}
+	for _, d := range ForAWhileDurations {
+		if d == seconds {
+			return time.Duration(d) * time.Second, nil
+		}
+	}
+	return 0, mutationError("invalid_request", "duration_seconds for For a while must be one of 15, 60, 300, 600, 1800 or 3600")
+}
 
 // ForAWhileSource is the decision-log source for connections decided by a lease.
 const ForAWhileSource = "for_a_while"
@@ -34,6 +55,7 @@ type processLease struct {
 	PID                            int
 	Start, BootID, PIDNS, MountNS  string
 	Created, Until                 time.Time
+	Duration                       time.Duration
 }
 
 // LeaseRef is attached to the request decided For a while.
@@ -99,7 +121,14 @@ func (l *processLease) reason() string {
 }
 
 func (l *processLease) ref() *LeaseRef {
-	return &LeaseRef{ID: l.ID, Until: l.Until, Seconds: int(ForAWhileDuration / time.Second)}
+	return &LeaseRef{ID: l.ID, Until: l.Until, Seconds: l.seconds()}
+}
+
+func (l *processLease) seconds() int {
+	if l.Duration == 0 {
+		return int(ForAWhileDuration / time.Second)
+	}
+	return int(l.Duration / time.Second)
 }
 
 func leaseIDOf(rule string) string {
@@ -153,13 +182,13 @@ func (e *Engine) leaseOverlayLocked(action, rule string, f identity.Flow, a iden
 }
 
 // newLeaseLocked validates and creates (without storing) a lease for v.
-func (e *Engine) newLeaseLocked(v *Event, a identity.Attribution, action string, now time.Time) (*processLease, error) {
+func (e *Engine) newLeaseLocked(v *Event, a identity.Attribution, action string, now time.Time, d time.Duration) (*processLease, error) {
 	p, err := leaseOwner(a)
 	if err != nil {
 		return nil, err
 	}
 	e.pruneLeasesLocked(now, false)
-	l := &processLease{ID: randomID(), Action: action, Direction: v.Flow.Direction, EventID: v.ID, Application: *a.Application, UID: p.UID, PID: p.PID, Start: p.Start, BootID: p.BootID, PIDNS: p.PIDNS, MountNS: p.MountNS, Created: now, Until: now.Add(ForAWhileDuration)}
+	l := &processLease{ID: randomID(), Action: action, Direction: v.Flow.Direction, EventID: v.ID, Application: *a.Application, UID: p.UID, PID: p.PID, Start: p.Start, BootID: p.BootID, PIDNS: p.PIDNS, MountNS: p.MountNS, Created: now, Until: now.Add(d), Duration: d}
 	replaced := ""
 	for id, o := range e.processLeases {
 		if o.PID == l.PID && o.Start == l.Start && o.Direction == l.Direction {
@@ -196,11 +225,27 @@ func (e *Engine) ProcessLeases(uid uint32, admin bool) []ProcessLease {
 		if !admin && l.UID != uid {
 			continue
 		}
-		out = append(out, ProcessLease{ID: l.ID, Action: l.Action, Direction: l.Direction, Application: l.Application.Key, Name: l.Application.Name, Executable: l.Application.Executable, UID: l.UID, PID: l.PID, Start: l.Start, Created: l.Created, Until: l.Until, RemainingMS: l.Until.Sub(now).Milliseconds(), Seconds: int(ForAWhileDuration / time.Second), EventID: l.EventID})
+		out = append(out, e.leaseViewLocked(l, now))
 	}
 	return out
 }
 
-func forAWhilePreview(f identity.Flow, p identity.Process) string {
-	return fmt.Sprintf("For a while: this connection and new %s connections of this process (PID %d) for %d seconds; no rule is created; not saved, lost on daemon restart. Configured rules still apply first.", f.Direction, p.PID, int(ForAWhileDuration/time.Second))
+func forAWhilePreview(f identity.Flow, p identity.Process, d time.Duration) string {
+	return fmt.Sprintf("For a while: this connection and new %s connections of this process (PID %d) for %s, or until the process exits; no rule is created; not saved, lost on daemon restart. Configured rules still apply first.", f.Direction, p.PID, durationText(d))
+}
+
+func durationText(d time.Duration) string {
+	switch {
+	case d >= time.Hour && d%time.Hour == 0:
+		if d == time.Hour {
+			return "1 hour"
+		}
+		return fmt.Sprintf("%d hours", d/time.Hour)
+	case d >= time.Minute && d%time.Minute == 0:
+		if d == time.Minute {
+			return "1 minute"
+		}
+		return fmt.Sprintf("%d minutes", d/time.Minute)
+	}
+	return fmt.Sprintf("%d seconds", int(d/time.Second))
 }

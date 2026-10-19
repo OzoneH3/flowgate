@@ -1,7 +1,7 @@
 import { Essential } from './essential';
 import { Protection } from './protection';
 import { placeKDEPrompt, resizeKDEPrompt, PROMPT_TITLE, promptTitle } from './prompt-placement';
-import { AutomaticPrompts, edgePosition, boundDecision, groupOf } from './automatic-prompts';
+import { AutomaticPrompts, edgePosition, boundDecision, groupOf, inputSettled } from './automatic-prompts';
 import { leaseHolds } from './process-lease';
 import {
   app,
@@ -39,6 +39,9 @@ import type { Preferences } from './protocol';
 import { Backend } from './backend';
 import { validateDecision } from './protocol';
 import { validateRequestRule } from './request-rule';
+import { validateEndedLease } from './prompt-decision';
+import { validatePairChoice } from './local-pair';
+import { validForAWhileSeconds } from './process-lease';
 if (process.getuid?.() === 0) throw Error('FlowGate Electron must run unprivileged');
 app.enableSandbox();
 // Native Wayland uses the accelerated OpenGL/ANGLE path; Vulkan presentation
@@ -182,6 +185,14 @@ function openDecision(ref: RequestRef) {
   }
   prompt = windowFor(true, ref.id, ref.generation, ref.group);
 }
+const promptInputSettled = () =>
+  inputSettled({
+    now: Date.now(),
+    transitionUntil,
+    keys: pressedPromptKeys.size,
+    rendererKeys: rendererPromptKeys.size,
+    pointerDown: promptPointerDown,
+  });
 function automaticDecision() {
   if (quitting || !backend || !main) return;
   const view = backend.view();
@@ -203,13 +214,7 @@ function automaticDecision() {
       return;
     }
     if (!transitionUntil) pacePrompt();
-    if (
-      Date.now() < transitionUntil ||
-      pressedPromptKeys.size ||
-      rendererPromptKeys.size ||
-      promptPointerDown
-    )
-      return;
+    if (!promptInputSettled()) return;
     transitionUntil = 0;
     if (promptDismissed || !next) {
       promptIdle = true;
@@ -222,13 +227,7 @@ function automaticDecision() {
     return;
   }
   const next = automaticPrompts.next(view, false);
-  if (
-    Date.now() < transitionUntil ||
-    pressedPromptKeys.size ||
-    rendererPromptKeys.size ||
-    promptPointerDown
-  )
-    return;
+  if (!promptInputSettled()) return;
   transitionUntil = 0;
   if (next && view.control.events.some((e) => e.id === next.id && e.remainingMs > 1000))
     openDecision(next);
@@ -831,9 +830,11 @@ app.whenReady().then(async () => {
       if (
         !v ||
         typeof v !== 'object' ||
-        Object.keys(v).some((k) => !['sidebar', 'columns', 'keepInTray', 'displayUnit'].includes(k))
+        Object.keys(v).some((k) => !['sidebar', 'columns', 'keepInTray', 'displayUnit', 'forAWhileSeconds'].includes(k))
       )
         throw Error('Invalid preferences');
+      if (v.forAWhileSeconds !== undefined && !validForAWhileSeconds(v.forAWhileSeconds))
+        throw Error('Invalid For a while duration');
       if (
         v.sidebar !== undefined &&
         (!Number.isInteger(v.sidebar) || v.sidebar < 240 || v.sidebar > 600)
@@ -876,6 +877,7 @@ app.whenReady().then(async () => {
         ...(v.columns !== undefined ? { columns } : {}),
         ...(v.displayUnit !== undefined ? { displayUnit: v.displayUnit } : {}),
         ...(v.keepInTray !== undefined ? { keepInTray: v.keepInTray } : {}),
+        ...(v.forAWhileSeconds !== undefined ? { forAWhileSeconds: v.forAWhileSeconds } : {}),
       };
       persist();
     }
@@ -917,6 +919,19 @@ app.whenReady().then(async () => {
       throw Error('Permission presentation is transitioning');
     return backend.decide(boundDecision(value, promptRefs.get(e.sender.id)));
   });
+  // local-pair-v1: a permission window may decide only the pair of its own request.
+  ipcMain.handle('decide-pair', (e, value) => {
+    trusted(e);
+    const choice = validatePairChoice(value),
+      ref = promptRefs.get(e.sender.id);
+    if (ref) {
+      if (promptIdle || promptDismissed || transitionUntil || Date.now() < (promptReadyAt.get(e.sender.id) || 0))
+        throw Error('Permission presentation is transitioning');
+      if (ref.generation !== choice.generation || !choice.ids.includes(ref.id))
+        throw Error('Pair decision belongs to another permission window');
+    }
+    return backend.decidePair(choice);
+  });
   // Future application rule from a retained, ended request. The prompt window
   // may act only on its own request; saving never decides that request.
   const ownRequestRule = (e: Electron.IpcMainInvokeEvent, value: unknown, save: boolean) => {
@@ -935,6 +950,18 @@ app.whenReady().then(async () => {
     if (promptRefs.has(e.sender.id) && (promptIdle || promptDismissed || transitionUntil || Date.now() < (promptReadyAt.get(e.sender.id) || 0)))
       throw Error('Permission presentation is transitioning');
     return backend.saveRequestRule(ownRequestRule(e, value, true));
+  });
+  // For a while from an ended request whose process still runs: creates the
+  // process lease only; the ended request is never decided or delivered.
+  ipcMain.handle('request:for-a-while', (e, value) => {
+    trusted(e);
+    const choice = validateEndedLease(value), ref = promptRefs.get(e.sender.id);
+    if (e.sender !== main.webContents && !ref) throw Error('Use For a while from a request view');
+    if (ref && (ref.generation !== choice.generation || ref.id !== choice.id))
+      throw Error('Request belongs to another permission window');
+    if (ref && (promptIdle || promptDismissed || transitionUntil || Date.now() < (promptReadyAt.get(e.sender.id) || 0)))
+      throw Error('Permission presentation is transitioning');
+    return backend.requestForAWhile(choice);
   });
   ipcMain.handle('request:future-application', (e, value) => {
     trusted(e);

@@ -806,6 +806,8 @@ td.up { color: #c7daa8; background: #344b20; }
 .identity-details { margin:8px 0; font-size:11px; }
 .identity-details summary { color:#aaa; cursor:pointer; }
 .attribution-warning { margin:6px 0; color:#ddc38d; font-size:11px; }
+.compact-application .launch-via { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#aaa; font-size:11px; }
+.permission-scope { margin:5px 0 2px; font-size:11px; color:#bbb; overflow-wrap:anywhere; }
 #promptBody .expiry { margin:6px 0; font-size:11px; color:#aaa; }
 #promptBody .scope-preview { font-size:11px; padding:5px 0; margin:4px 0; background:transparent; border:0; line-height:1.35; max-height:none; }
 .permission-target { font-size:11px; margin:8px 0 5px; color:#ddd; }
@@ -1480,6 +1482,10 @@ body.hide-sidebar #activityView > aside { display:none; }
 .option-toggle { display:inline-flex; align-items:center; gap:4px; font-size:12px; }
 .option-toggle input[type='checkbox'] { width:13px; min-width:13px; height:13px; min-height:13px; margin:0; flex:none; }
 .option-toggle.unavailable { opacity:.6; }
+.for-a-while-duration { display:inline-flex; align-items:center; gap:4px; font-size:12px; }
+.for-a-while-duration[hidden] { display:none; }
+.for-a-while-expiry { color:#aaa; font-size:11px; white-space:nowrap; }
+.previous-revision { margin:4px 0; font-size:11px; color:#e8c46a; }
 .for-a-while-note, .decision-note { margin:4px 0 0; font-size:11px; line-height:1.35; overflow-wrap:anywhere; }
 .for-a-while-note { color:#aaa; }
 .decision-note { color:#ddc38d; }
@@ -1495,3 +1501,14 @@ body.hide-sidebar #activityView > aside { display:none; }
 .temporary-decisions { padding:4px 8px; font-size:12px; }
 .temporary-decisions[hidden] { display:none; }
 .temporary-decisions h3 { margin:4px 0; font-size:12px; color:#ccc; }
+/* local-pair-v1: both endpoints of a same-host connection. */
+.local-pair { margin:4px 0 2px; font-size:11px; color:#bbb; }
+.local-pair-title { margin:0; font-size:12px; color:#ddd; overflow-wrap:anywhere; }
+.local-pair-line { margin:1px 0 3px; color:#999; }
+.local-peer-unknown { margin:2px 0; color:#e0a040; }
+.local-pair-sides { margin:2px 0; padding-left:14px; }
+.pair-side.pair-blocked .pair-side-status, .pair-side.pair-ended .pair-side-status { color:#e06060; }
+.pair-side.pair-allowed .pair-side-status { color:#7fbf7f; }
+.pair-side.pair-pending .pair-side-status, .pair-side.pair-not-requested .pair-side-status { color:#e0a040; }
+.local-pair-target, .pair-note { margin:2px 0; color:#999; }
+.pair-controls { display:flex; gap:6px; margin-top:3px; }

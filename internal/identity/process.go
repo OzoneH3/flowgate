@@ -15,18 +15,23 @@ import (
 )
 
 type Application struct {
-	DisplayName       string   `json:"display_name,omitempty"`
-	DisplayExecutable string   `json:"display_executable,omitempty"`
-	ExecutableStatus  string   `json:"executable_status,omitempty"`
-	Key               string   `json:"key"`
-	Name              string   `json:"name"`
-	Kind              string   `json:"kind"`
-	Executable        string   `json:"executable"`
-	Revision          string   `json:"revision"`
-	Runtime           string   `json:"runtime,omitempty"`
-	Prefix            string   `json:"prefix,omitempty"`
-	SteamAppID        string   `json:"steam_app_id,omitempty"`
-	Evidence          []string `json:"evidence"`
+	DisplayName       string `json:"display_name,omitempty"`
+	DisplayExecutable string `json:"display_executable,omitempty"`
+	ExecutableStatus  string `json:"executable_status,omitempty"`
+	Key               string `json:"key"`
+	Name              string `json:"name"`
+	Kind              string `json:"kind"`
+	Executable        string `json:"executable"`
+	// HostExecutable is set only for a process in another mount namespace whose
+	// namespace-local Executable is not the same file on the host: the
+	// host-visible backing path proven by device+inode. The key derives from it
+	// so every sandbox instance of that file shares one application identity.
+	HostExecutable string   `json:"host_executable,omitempty"`
+	Revision       string   `json:"revision"`
+	Runtime        string   `json:"runtime,omitempty"`
+	Prefix         string   `json:"prefix,omitempty"`
+	SteamAppID     string   `json:"steam_app_id,omitempty"`
+	Evidence       []string `json:"evidence"`
 }
 type Process struct {
 	BootID             string      `json:"boot_id,omitempty"`
@@ -42,6 +47,8 @@ type Process struct {
 	Executable         string      `json:"executable"`
 	Cgroup             string      `json:"cgroup,omitempty"`
 	Application        Application `json:"application"`
+	// Launch provenance captured at observation time (display only).
+	Provenance *Provenance `json:"provenance,omitempty"`
 }
 
 func readBound(path string, n int64) []byte {
@@ -91,6 +98,7 @@ func Inspect(pid int) (Process, error) {
 		return p, e
 	}
 	p.UID = st.Sys().(*syscall.Stat_t).Uid
+	exeInfo, _ := os.Stat(base + "/exe")
 	p.ExecutableRevision = stamp(base + "/exe")
 	p.Cgroup = strings.TrimSpace(string(readBound(base+"/cgroup", 4096)))
 	a := Application{Kind: "native", Name: filepath.Base(p.Executable), Executable: p.Executable, Revision: stamp(base + "/exe"), Evidence: []string{"proc exe; PID plus start time"}}
@@ -159,8 +167,14 @@ func Inspect(pid int) (Process, error) {
 			}
 		}
 	}
+	if a.Kind == "native" && a.Revision != "" {
+		if host := sandboxKeyPath(pid, p.MountNS, a.Executable, exeInfo); host != "" {
+			a.HostExecutable = host
+			a.Evidence = append(a.Evidence, "sandbox executable; host backing path proven by device/inode")
+		}
+	}
 	if a.Executable != "" && a.Revision != "" {
-		a.Key = digest(fmt.Sprintf("%d|%s|%s|%s", p.UID, a.Kind, a.Prefix, a.Executable))
+		a.Key = ApplicationKey(p.UID, a)
 	}
 	// Display metadata never changes executable/key/revision authority.
 	a.DisplayName, a.DisplayExecutable, a.ExecutableStatus = a.Name, a.Executable, "unavailable"

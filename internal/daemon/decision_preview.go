@@ -82,6 +82,7 @@ type decisionPreview struct {
 	Flow        identity.Flow
 	Until       time.Time
 	Committed   *Event
+	Settled     []SettledRequest
 }
 
 func (e *Engine) pruneDecisionPreviews(now time.Time) {
@@ -273,12 +274,33 @@ func (e *Engine) decisionPreviewFor(generation, token string, uid uint32, admin 
 	return p, nil
 }
 func (e *Engine) DecideReviewed(generation, id, action, scope, zone, revision, token string, uid uint32, admin bool, opts ...RememberOptions) (Event, policy.Rule, bool, error) {
+	v, r, replayed, _, err := e.DecideReviewedSettled(generation, id, action, scope, zone, revision, token, uid, admin, opts...)
+	return v, r, replayed, err
+}
+
+// DecideReviewedSettled also returns the waiting requests the remembered rule
+// settled. A replayed (already committed) decision reports the same list.
+func (e *Engine) DecideReviewedSettled(generation, id, action, scope, zone, revision, token string, uid uint32, admin bool, opts ...RememberOptions) (Event, policy.Rule, bool, []SettledRequest, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	defer e.collectSettledLocked()()
+	v, r, replayed, err := e.decideReviewedLocked(generation, id, action, scope, zone, revision, token, uid, admin, opts...)
+	settled := e.settledLocked()
+	if p := e.decisionPreviews[token]; p != nil && err == nil {
+		if replayed {
+			settled = p.Settled
+		} else {
+			p.Settled = settled
+		}
+	}
+	return v, r, replayed, settled, err
+}
+
+func (e *Engine) decideReviewedLocked(generation, id, action, scope, zone, revision, token string, uid uint32, admin bool, opts ...RememberOptions) (Event, policy.Rule, bool, error) {
 	var o RememberOptions
 	if len(opts) > 0 {
 		o = opts[0]
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
 	p, err := e.decisionPreviewFor(generation, token, uid, admin)
 	if err != nil {
 		return Event{}, policy.Rule{}, false, err
@@ -307,7 +329,7 @@ func (e *Engine) DecideReviewed(generation, id, action, scope, zone, revision, t
 	if _, err = e.decisionClassification(current, revision, zone); err != nil {
 		return Event{}, policy.Rule{}, false, err
 	}
-	out, err := e.decideLocked(id, action, scope, uid, admin, &v.Rule, v.ScopePreview, v.ExpiresAt)
+	out, err := e.decideLocked(id, action, scope, uid, admin, &v.Rule, v.ScopePreview, v.ExpiresAt, ForAWhileDuration)
 	if err != nil {
 		return Event{}, policy.Rule{}, false, err
 	}

@@ -113,6 +113,7 @@ func (e *Engine) settlePendingLocked(reason string) {
 			// longer be decided, so it must not linger as an actionable prompt.
 			// Same disposition as the decision path; nothing is approved.
 			_ = e.rejectPendingBindingLocked(v, a)
+			e.noteSettledLocked(v)
 			continue
 		}
 		action, rule, matches, lease := e.policyLocked(v.Flow, a, now)
@@ -129,17 +130,24 @@ func (e *Engine) settlePendingLocked(reason string) {
 			source, scope = ForAWhileSource, ForAWhileScope
 		}
 		e.recordFinal(v, action, source, scope, v.Reason, v.decided, nil, "deferred", "")
+		e.markRetainedDecidedLocked(v.ID)
+		e.noteSettledLocked(v)
 	}
 }
 
 // resetCachedLocked replaces the old discard-everything behaviour: cached
 // verdicts are dropped conservatively, awaiting requests are re-evaluated and
 // kept (decided or still waiting) so the queue never shows obsolete prompts.
+// Explicit Once / For-a-while flow admissions (rule once:/while:) are kept too:
+// they are not cached rule verdicts, Observe still lets any configured
+// Allow/Block decide the flow first, and dropping them made a retransmitted
+// SYN or a later datagram of an already answered flow prompt again.
 func (e *Engine) resetCachedLocked(reason string) {
 	e.settlePendingLocked(reason)
 	settled := map[string]*Event{}
 	for key, v := range e.events {
-		if v.State == "awaiting-decision" || strings.HasPrefix(v.Reason, "re-evaluated after policy change") {
+		if v.State == "awaiting-decision" || strings.HasPrefix(v.Reason, "re-evaluated after policy change") ||
+			((v.State == "allowed" || v.State == "blocked") && (strings.HasPrefix(v.Rule, "once:") || strings.HasPrefix(v.Rule, leaseRulePrefix))) {
 			settled[key] = v
 		}
 	}

@@ -96,3 +96,10 @@ export function processInstanceEnded(e: RequestEvent | undefined) {
 }
 export const requestRuleKey = (c: RequestRuleChoice) =>
   JSON.stringify([c.generation, c.id, c.action, c.scope, c.zone_revision, c.remember, c.duration_seconds ?? 0]);
+// request-sandbox-identity-v1: a sandboxed (other mount namespace) process
+// exited and its executable has no host-visible backing file, so no reusable
+// identity exists. Permanent for that request: shown once, never re-reviewed.
+export const IDENTITY_UNVERIFIABLE_CODE = 'identity_unverifiable';
+export const IDENTITY_UNVERIFIABLE_TEXT = 'This sandboxed app exited before FlowGate retained a reusable identity.';
+export const identityUnverifiable = (message: string) =>
+  message.startsWith(IDENTITY_UNVERIFIABLE_CODE + ': ') || message.includes('Backend rejected: ' + IDENTITY_UNVERIFIABLE_CODE + ': ');

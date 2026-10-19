@@ -59,7 +59,8 @@ func (e *Engine) DeleteRule(generation, id string, expected *uint64, uid uint32,
 		}
 		e.rules = next
 		e.pruneHandlesLocked()
-		// Same conservative invalidation as legacy deletion; held packets drop.
+		// Same conservative invalidation as legacy deletion: cached rule verdicts
+		// drop; explicit Once/For-a-while answers stay (configured rules still win).
 		e.resetCachedLocked("rule deleted")
 		return DeletedRule{ID: r.ID, Version: r.Version}, nil
 	}

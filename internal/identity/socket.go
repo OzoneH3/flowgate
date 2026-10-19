@@ -233,6 +233,8 @@ func Resolve(f Flow) Attribution {
 			if e != nil {
 				incomplete = true
 			} else {
+				// Captured now, while the owner (and normally its launcher) is alive.
+				p.Provenance = CaptureProvenance(p)
 				a.Owners = append(a.Owners, p)
 			}
 		}

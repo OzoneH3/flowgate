@@ -1,9 +1,12 @@
 import type { Activity, SocketRow, Process, Traffic, Application } from './protocol';
+import { launchProcessLabel, launchTitle, verifiedLaunch } from './provenance';
 export type Metric = 'download_bps' | 'upload_bps' | 'downloaded' | 'uploaded';
 export interface Row {
   id: string;
   parent?: string;
-  kind: 'overview' | 'network' | 'application' | 'process' | 'socket' | 'unidentified';
+  // 'launch': display-only group of processes from one verified game launch
+  // (backend provenance). Never a firewall target; rules stay per process/application.
+  kind: 'overview' | 'network' | 'application' | 'launch' | 'process' | 'socket' | 'unidentified';
   label: string;
   pid?: number;
   rows: SocketRow[];
@@ -120,6 +123,7 @@ export function hierarchy(activity: Activity, query = '', filter = 'all'): Row[]
         p.application.name,
         String(p.pid),
         String(p.thread_group_pid || ''),
+        verifiedLaunch(p.provenance) ? launchTitle(p.provenance!) : '',
       ]),
     ]
       .join(' ')
@@ -151,6 +155,40 @@ export function hierarchy(activity: Activity, query = '', filter = 'all'): Row[]
       }
       a.rows.push(s);
       parent = a;
+    } else if (
+      s.owners.length === 1 &&
+      owners.length === 1 &&
+      verifiedLaunch(owners[0].provenance)
+    ) {
+      // Verified launch: the helper/launcher/game process sits beneath its game node.
+      const p = owners[0],
+        prov = verifiedLaunch(p.provenance)!,
+        key = `launch:${p.uid}:${prov.group}`;
+      let g = apps.get(key);
+      if (!g) {
+        g = { id: key, kind: 'launch', label: launchTitle(prov), children: [], rows: [] };
+        apps.set(key, g);
+        roots.push(g);
+      }
+      const pk = 'process:' + key + ':' + p.id;
+      let pr = procs.get(pk);
+      if (!pr) {
+        pr = {
+          id: pk,
+          parent: g.id,
+          kind: 'process',
+          label: launchProcessLabel(p),
+          pid: p.pid,
+          children: [],
+          rows: [],
+          process: p,
+        };
+        procs.set(pk, pr);
+        g.children.push(pr);
+      }
+      g.rows.push(s);
+      pr.rows.push(s);
+      parent = pr;
     } else if (s.owners.length === 1 && owners.length === 1) {
       const p = owners[0],
         key = p.application.key

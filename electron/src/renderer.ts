@@ -9,7 +9,6 @@ import {
   rememberDecision,
   rememberFieldsSupported,
   reviewFailureOf,
-  reviewFailureSummary,
   rememberKey,
   rememberOptions,
   rememberReviewText,
@@ -20,6 +19,8 @@ import {
 import { askSource, awaiting, groupKey, requestGroups } from './automatic-prompts';
 import { permissionTarget, scopeZoneText } from './connection-presentation';
 import {
+  IDENTITY_UNVERIFIABLE_TEXT,
+  identityUnverifiable,
   processInstanceEnded,
   requestRuleAvailable,
   requestRuleChoice,
@@ -34,19 +35,28 @@ import {
   leasesForRequest,
   toggleDecisionOption,
   FOR_A_WHILE_TOOLTIP,
+  defaultForAWhile,
+  expiryPreview,
+  forAWhileDurations,
+  forAWhileNote,
   type ProcessLease,
 } from './process-lease';
 import {
   EndedRuleFlow,
-  ENDED_FOR_A_WHILE,
   ENDED_NEEDS_REMEMBER,
   ENDED_PROCESS,
   ENDED_RULE_RESULT,
+  ENDED_NEEDS_CHOICE,
+  endedLeaseAvailable,
+  endedLeaseReason,
+  endedLeaseResult,
   endedRequest,
+  endedSummary,
   promptPlan,
   shortError,
 } from './prompt-decision';
 import { buildRequestCard } from './prompt-card';
+import { localPairView, pairSignature } from './local-pair';
 import { ZONE_CAPABILITY, zoneLabel } from './network-zones';
 import type { Presentation, PaneFrame } from './pane-model';
 import { DISPLAY_UNITS, displayAmount, isDisplayUnit, type DisplayUnit } from './display-units';
@@ -128,7 +138,20 @@ let rememberOn = false,
   reviewTimer: ReturnType<typeof setTimeout> | undefined;
 // decision-for-a-while-v1: For a while checkbox (exclusive with Remember, see process-lease).
 let forAWhileOn = false;
-function rememberMode() {
+// decision-for-a-while-durations-v1 (FlowGate extension): the selected lease
+// duration; defaults to the user's last choice when the backend allows it.
+let forAWhileSeconds = 15,
+  savedForAWhile: number | undefined;
+void window.flowgate
+  .preferences()
+  .then((p) => {
+    savedForAWhile = p.forAWhileSeconds;
+    if (state && !forAWhileOn) forAWhileSeconds = defaultForAWhile(savedForAWhile, forAWhileDurations(state.control));
+  })
+  .catch(() => {});
+// request-for-a-while-v1: ended requests whose lease was created / is in flight.
+const endedLeaseBusy = new Set<string>(),
+  endedLeaseDone = new Set<string>();function rememberMode() {
   return rememberFieldsSupported(state?.control.capabilities);
 }
 function forAWhileMode() {
@@ -165,6 +188,9 @@ let ruleChecking = false,
   ruleMessageFor = '',
   ruleSequence = 0,
   ruleTimer: ReturnType<typeof setTimeout> | undefined;
+// Ended requests whose sandboxed process left no reusable identity
+// (identity_unverifiable): permanent, so never re-reviewed; full text in Details.
+const ruleUnverifiable = new Map<string, string>();
 function ruleChoice(e: ViewEvent, action: 'allow' | 'block') {
   return requestRuleChoice(
     { generation: state.control.generation, id: e.id, action },
@@ -195,7 +221,7 @@ function scheduleRequestRule(delay = 250) {
 async function prepareRequestRule() {
   clearTimeout(ruleTimer);
   const e = currentEvent();
-  if (!e || !endedRuleMode(e) || !rememberOn || endedFlow.saved.has(e.id) || endedFlow.pinned.has(e.id)) return;
+  if (!e || !endedRuleMode(e) || !rememberOn || endedFlow.saved.has(e.id) || endedFlow.pinned.has(e.id) || ruleUnverifiable.has(e.id)) return;
   if (rememberFields.process && processInstanceEnded(e)) return;
   const seq = ++ruleSequence,
     key = ruleKey(e);
@@ -211,6 +237,10 @@ async function prepareRequestRule() {
   } catch (error) {
     // Exact backend reason in Details; the selections (draft) stay unchanged.
     if (seq === ruleSequence) ruleMessage = errorText(error);
+    if (identityUnverifiable(errorText(error))) {
+      if (ruleUnverifiable.size >= 64) ruleUnverifiable.delete(ruleUnverifiable.keys().next().value!);
+      ruleUnverifiable.set(e.id, errorText(error));
+    }
   } finally {
     if (seq === ruleSequence) ruleChecking = false;
     updateDecisions();
@@ -219,6 +249,7 @@ async function prepareRequestRule() {
 function resetRemember() {
   rememberOn = false;
   forAWhileOn = false;
+  forAWhileSeconds = defaultForAWhile(savedForAWhile, state ? forAWhileDurations(state.control) : [15]);
   rememberFields = { ...DEFAULT_REMEMBER };
   rememberDuration = 0;
 }
@@ -260,7 +291,15 @@ function decisionFor(action: 'allow' | 'block', e: ViewEvent, preview?: Decision
       ),
       ...(preview ? { preview_token: preview.token } : {}),
     };
-  if (forAWhileOn && forAWhileMode()) return { ...base, scope: 'for-a-while' as const };
+  if (forAWhileOn && forAWhileMode())
+    return {
+      ...base,
+      scope: 'for-a-while' as const,
+      // 15 s is the backend default and stays implicit (older backends).
+      ...(forAWhileSeconds !== 15 && forAWhileDurations(state.control).includes(forAWhileSeconds)
+        ? { duration_seconds: forAWhileSeconds }
+        : {}),
+    };
   return {
     ...base,
     scope: chosenScope,
@@ -347,7 +386,7 @@ function rowIcon(kind: Row['kind']) {
   const path = document.createElementNS(svg.namespaceURI, 'path');
   path.setAttribute(
     'd',
-    kind === 'application' || kind === 'overview'
+    kind === 'application' || kind === 'overview' || kind === 'launch'
       ? 'M2 2h12v9H2zM5 14h6M8 11v3M2 5h12'
       : kind === 'process'
         ? 'M5 3h6v10H5zM2 5h3m6 0h3M2 8h3m6 0h3M2 11h3m6 0h3'
@@ -498,6 +537,7 @@ function statusStrip(r: Row) {
     button.dataset.direction = direction;
     button.disabled =
       r.kind === 'overview' ||
+      r.kind === 'launch' ||
       (r.kind === 'network' && !state.control.capabilities?.includes(ZONE_CAPABILITY));
     let chip: RuleChip = { glyph: '', text: 'Not set', tone: 'none', detail: '' };
     let fallbackShown = false;
@@ -512,6 +552,9 @@ function statusStrip(r: Row) {
     } else if (r.kind === 'socket') {
       chip = { glyph: '', text: '', tone: 'none', detail: '' };
       title = `${slot.label}: connections carry no rules; see the holder process.`;
+    } else if (r.kind === 'launch') {
+      chip = { glyph: '', text: '', tone: 'none', detail: '' };
+      title = `${slot.label}: launch group (display only); rules apply to each process below.`;
     } else if (authoritative) {
       // NetLimiter Rule Status: the node's OWN rule; scoped rules only add a "+N scoped" hint.
       const summary = processPolicy?.[direction] || result?.application?.[direction];
@@ -1449,7 +1492,9 @@ function renderInfo() {
         ? 'Process properties'
         : r?.kind === 'application'
           ? 'Application properties'
-          : 'Overview';
+          : r?.kind === 'launch'
+            ? 'Launch properties'
+            : 'Overview';
   const selectedApp = r?.process?.application || r?.displayApplication;
   const rawPath = r?.process?.executable || r?.displayApplication?.executable || '';
   const pathText = selectedApp?.display_executable || rawPath.replace(/ \(deleted\)$/, '');
@@ -1473,7 +1518,9 @@ function renderInfo() {
           ? 'FlowGate Activity'
           : r.kind === 'application'
             ? 'Application'
-            : r.kind === 'process'
+            : r.kind === 'launch'
+              ? 'Game launch'
+              : r.kind === 'process'
               ? `Process ${r.pid ?? ''}`.trim()
               : r.kind === 'socket'
                 ? 'Connection'
@@ -1521,6 +1568,26 @@ function renderInfo() {
       );
     }
 
+    commit();
+    return;
+  }
+  if (r.kind === 'launch') {
+    const prov = r.children.find((c) => c.process?.provenance)?.process?.provenance;
+    field(info, 'Game', r.label);
+    if (prov?.launch?.game) field(info, 'Executable', prov.launch.game.executable);
+    if (prov?.launch)
+      field(
+        info,
+        'Launch',
+        `${prov.launch.kind} · ${prov.launch.launcher_name} PID ${prov.launch.launcher_pid}${prov.launch.runtime ? ' · ' + prov.launch.runtime : ''}`,
+      );
+    if (prov?.launch?.prefix) field(info, 'Prefix', prov.launch.prefix);
+    field(info, 'Processes', r.children.map((c) => c.label).join('\n'));
+    field(
+      info,
+      'Observation only',
+      'Grouped by verified launch provenance (unbroken parent chain). Not a firewall target: each process keeps its own application identity and rules.',
+    );
     commit();
     return;
   }
@@ -1596,6 +1663,15 @@ function renderInfo() {
       'Identity',
       `${r.process.application.key}\nRevision: ${r.process.application.revision}`,
     );
+    const launch = r.process.provenance;
+    if (launch && launch.evidence !== 'none')
+      field(
+        info,
+        'Launch provenance',
+        launch.evidence === 'verified' && launch.launch
+          ? `${launch.role || 'process'} of ${launch.launch.game?.name || launch.launch.launcher_name} · ${launch.launch.kind} launcher PID ${launch.launch.launcher_pid}${launch.launch.prefix ? '\nPrefix ' + launch.launch.prefix : ''}\nDisplay only; rules use this process's own identity.`
+          : `Unavailable · ${launch.reason}`,
+      );
     if (r.kind === 'process')
       field(
         info,
@@ -1794,6 +1870,9 @@ function renderRequests() {
     e ? [e.id, e.flow, e.attribution, e.deadline, e.scope_previews] : null,
     rememberMode(),
     forAWhileMode(),
+    forAWhileDurations(state.control),
+    e?.previous_revision_rules,
+    e ? pairSignature(e, state.control.events) : null,
   ]);
   if (sig !== detailSignature) {
     detailSignature = sig;
@@ -1823,8 +1902,11 @@ function renderRequests() {
         rememberMode: rememberMode(),
         forAWhile: forAWhileMode(),
         rememberOptions: rememberOptions(e, eventName(e)),
+        forAWhileDurations: forAWhileDurations(state.control),
+        pair: localPairView(e, state.control.events, state.control.capabilities),
       }),
     );
+    wirePairControls(e);
     const controls = $('decisionControls'),
       dock = $('decisionDock');
     for (const action of ['allow', 'block'] as const)
@@ -1838,6 +1920,20 @@ function renderRequests() {
     if (whileBox) {
       whileBox.checked = forAWhileOn;
       whileBox.onchange = () => setOption('forAWhile', whileBox.checked);
+    }
+    const leaseDuration = $<HTMLSelectElement>('forAWhileDuration');
+    if (leaseDuration) {
+      if (!forAWhileDurations(state.control).includes(forAWhileSeconds))
+        forAWhileSeconds = defaultForAWhile(savedForAWhile, forAWhileDurations(state.control));
+      leaseDuration.value = String(forAWhileSeconds);
+      leaseDuration.onchange = () => {
+        const seconds = Number(leaseDuration.value);
+        if (!forAWhileDurations(state.control).includes(seconds)) return;
+        forAWhileSeconds = savedForAWhile = seconds;
+        cardNote = undefined;
+        void window.flowgate.preferences({ forAWhileSeconds: seconds }).catch(() => {});
+        updateDecisions();
+      };
     }
     const panel = $('rememberPanel');
     if (panel) {
@@ -1958,7 +2054,9 @@ function shortAttempt(a: Attempt, e?: ViewEvent) {
   if (a.phase === 'rejected') return 'Not decided: ' + shortError(a.message.replace(/^Backend rejected: /, ''));
   const verdict = /\bblocked\b/.test(a.message) || e?.state === 'blocked' ? 'Denied' : 'Allowed';
   return a.scope === 'for-a-while'
-    ? `${verdict} for a while (15 s).`
+    ? a.leaseUntil
+      ? `${verdict} for a while (until ${new Date(a.leaseUntil).toLocaleTimeString()}).`
+      : `${verdict} for a while.`
     : a.rule
       ? `${verdict} · rule saved.`
       : `${verdict} once.`;
@@ -1973,11 +2071,30 @@ async function decideFromCard(id: string, action: 'allow' | 'block') {
     zoneRevision: state.control.networkZones?.revision || '',
     capabilities: state.control.capabilities,
     forAWhile: forAWhileOn,
+    forAWhileSeconds,
     remember: rememberMode() && rememberOn,
     fields: rememberFields,
     duration: rememberDuration,
   });
   if (plan.kind === 'unavailable') return note(e, plan.note);
+  if (plan.kind === 'ended-lease') {
+    // A process lease only: the ended request is never decided or delivered.
+    if (endedLeaseBusy.has(e.id) || endedLeaseDone.has(e.id)) return;
+    endedLeaseBusy.add(e.id);
+    cardNote = undefined;
+    updateDecisions();
+    try {
+      const r = await window.flowgate.requestForAWhile(plan.choice);
+      endedLeaseDone.add(e.id);
+      cardResults.set(e.id, { text: endedLeaseResult(r.lease), detail: r.message });
+    } catch (error) {
+      note(e, shortError(errorText(error)), errorText(error));
+    } finally {
+      endedLeaseBusy.delete(e.id);
+      updateDecisions();
+    }
+    return;
+  }
   if (plan.kind === 'request-rule') {
     // Never a decision for the ended request: a rule for future connections.
     if (!state.control.connected || !canManageRules(state.control))
@@ -2025,6 +2142,44 @@ async function decideFromCard(id: string, action: 'allow' | 'block') {
   updateDecisions();
 }
 const ruleBusy = new Set<string>();
+// local-pair-v1: one review for both sides of a verified local connection.
+// The backend confirms the exact pair and returns BOTH verdicts.
+const pairResults = new Map<string, string>(),
+  pairBusy = new Set<string>();
+function wirePairControls(e: ViewEvent) {
+  const result = document.getElementById('pairResult');
+  if (result) result.textContent = pairResults.get(e.id) ?? '';
+  for (const [id, action] of [
+    ['pairAllow', 'allow'],
+    ['pairBlock', 'block'],
+  ] as const) {
+    const b = document.getElementById(id) as HTMLButtonElement | null;
+    if (b) b.onclick = () => void decidePairFromCard(e.id, action);
+  }
+}
+async function decidePairFromCard(id: string, action: 'allow' | 'block') {
+  const e = currentEvent();
+  if (!e || e.id !== id || (Boolean(promptID) && (!promptLayoutReady || performance.now() < promptStableAt))) return;
+  const ids = localPairView(e, state.control.events, state.control.capabilities)?.pairIds;
+  if (!ids || pairBusy.has(id) || !state.control.connected || !canDecide(state.control)) return;
+  const generation = state.control.generation;
+  pairBusy.add(id);
+  for (const x of ids) localSubmitted.add(generation + ':' + x);
+  const result = document.getElementById('pairResult');
+  if (result) result.textContent = 'Submitting both sides…';
+  try {
+    const r = await window.flowgate.decidePair({ generation, ids, action, scope: 'once' });
+    for (const x of ids) pairResults.set(x, r.text);
+    cardResults.set(e.id, { text: r.text, detail: r.message });
+  } catch (error) {
+    for (const x of ids) localSubmitted.delete(generation + ':' + x);
+    pairResults.set(e.id, 'Not decided: ' + errorText(error));
+  } finally {
+    pairBusy.delete(id);
+    detailSignature = '';
+    renderRequests();
+  }
+}
 // Temporary decisions (For a while leases), keyed so an open disclosure stays open.
 function renderLeases(container: HTMLElement | null, leases: ProcessLease[], ownEvent = '') {
   if (!container) return;
@@ -2088,8 +2243,24 @@ function updateDecisions() {
     rulePinned = !!e && endedFlow.pinned.has(e.id),
     pacing = Boolean(promptID) && (!promptLayoutReady || performance.now() < promptStableAt),
     remembering = rememberMode() && rememberOn,
-    temporary = forAWhileOn && forAWhileMode() && !remembering;
-  if (ruleMode && remembering && !ruleDone && !rulePinned && !ruleChecking && !(rememberFields.process && instanceEnded)) {
+    temporary = forAWhileOn && forAWhileMode() && !remembering,
+    leaseMode = endedLeaseAvailable(e, state.control.capabilities),
+    leaseDone = !!e && endedLeaseDone.has(e.id),
+    unverifiable = e ? ruleUnverifiable.get(e.id) : undefined;
+  // Pair controls follow the same input-release/pacing guard as Allow/Deny: never clickable
+  // while a click would be refused (a dropped click must not look accepted).
+  for (const id of ['pairAllow', 'pairBlock']) {
+    const b = document.getElementById(id) as HTMLButtonElement | null;
+    if (b)
+      b.disabled =
+        pacing ||
+        !e ||
+        pairBusy.has(e.id) ||
+        !state.control.connected ||
+        !canDecide(state.control) ||
+        !localPairView(e, state.control.events, state.control.capabilities)?.pairIds;
+  }
+  if (ruleMode && remembering && !ruleDone && !rulePinned && !ruleChecking && !unverifiable && !(rememberFields.process && instanceEnded)) {
     // Review (again) when missing or expired; a refusal waits for Refresh review,
     // and re-reviews are spaced so an odd preview can never loop.
     const key = ruleKey(e);
@@ -2106,6 +2277,15 @@ function updateDecisions() {
     const b = $<HTMLButtonElement>(id);
     if (!b) continue;
     const review = decisionReviews[id];
+    if (ended && temporary) {
+      // For a while on an ended request: creates the process lease only.
+      b.disabled =
+        pacing || !leaseMode || leaseDone || endedLeaseBusy.has(e!.id) || !state.control.connected || !canDecide(state.control);
+      b.title = leaseMode
+        ? `${id === 'allow' ? 'Allow' : 'Deny'} new connections of process ${e!.request_rule?.pid ?? ''} for a while; this ended request is not delivered`
+        : endedLeaseReason(e, state.control.capabilities);
+      continue;
+    }
     if (ended) {
       const pinned = e && endedFlow.pinned.get(e.id);
       b.disabled =
@@ -2114,6 +2294,7 @@ function updateDecisions() {
         !remembering ||
         ruleDone ||
         ruleBusy.has(e!.id) ||
+        !!unverifiable ||
         !state.control.connected ||
         !canManageRules(state.control) ||
         (rememberFields.process && instanceEnded) ||
@@ -2153,18 +2334,37 @@ function updateDecisions() {
   const toggle = $<HTMLInputElement>('rememberToggle');
   // An ended request keeps Remember: it is the way to a rule for future connections.
   if (toggle) toggle.disabled = ruleMode ? ruleDone || rulePinned || pacing : locked;
+  const scopeLine = $('permissionScope');
+  if (scopeLine)
+    scopeLine.textContent =
+      (rememberOn ? scopeLine.dataset.remember : forAWhileOn ? scopeLine.dataset.forAWhile : scopeLine.dataset.once) ||
+      scopeLine.textContent;
   const whileBox = $<HTMLInputElement>('forAWhileToggle');
   if (whileBox) {
     const single = e?.attribution.owners.length === 1;
-    whileBox.disabled = locked || !single;
+    // An ended request offers For a while only while its exact process runs.
+    whileBox.disabled = ended
+      ? pacing || !leaseMode || leaseDone || endedLeaseBusy.has(e!.id)
+      : locked || !single;
     whileBox.parentElement!.title = ended
-      ? ENDED_FOR_A_WHILE
+      ? endedLeaseReason(e, state.control.capabilities) || FOR_A_WHILE_TOOLTIP
       : !single && e
         ? 'Unavailable: needs one verified owning process.'
         : FOR_A_WHILE_TOOLTIP;
-    whileBox.parentElement!.classList.toggle('unavailable', ended || (!!e && !single));
+    whileBox.parentElement!.classList.toggle('unavailable', ended ? !leaseMode : !!e && !single);
   }
-  if ($('forAWhileNote')) $('forAWhileNote').hidden = !temporary || ended;
+  const showLease = temporary && (!ended || leaseMode) && !leaseDone;
+  if ($('forAWhileNote')) {
+    $('forAWhileNote').hidden = !showLease;
+    $('forAWhileNote').textContent = forAWhileNote(forAWhileSeconds);
+  }
+  // Duration selector only while For a while is checked; the expiry shown is a
+  // preview, the countdown after the click uses the backend's until.
+  if ($('forAWhileDurationWrap')) {
+    $('forAWhileDurationWrap').hidden = !showLease;
+    $<HTMLSelectElement>('forAWhileDuration').disabled = pacing || endedLeaseBusy.has(e?.id ?? '') || (!ended && locked);
+    $('forAWhileExpiry').textContent = showLease ? expiryPreview(forAWhileSeconds, now) : '';
+  }
   const panel = $('rememberPanel');
   if (panel) {
     panel.hidden = !remembering || (ended && !ruleMode);
@@ -2190,7 +2390,7 @@ function updateDecisions() {
       option.disabled = !ruleMode && !e?.scope_previews[rememberScope(Number(option.value))];
     const allowReview = ruleMode && e ? endedFlow.reviews.allow : undefined;
     $('rememberSummary').textContent = ruleMode
-      ? ruleDone
+      ? ruleDone || unverifiable
         ? ''
         : rememberFields.process && instanceEnded
           ? ''
@@ -2219,7 +2419,7 @@ function updateDecisions() {
     const expired = !ruleMode && reviewFor === reviewKey() && Date.parse(decisionReviews.allow?.expires_at || '') <= now;
     // Legacy scope list keeps its explicit review button; Remember shows it only to recover.
     refresh.hidden = rememberMode()
-      ? (ended && !ruleMode) || !(failed || expired) || ruleDone
+      ? (ended && !ruleMode) || !(failed || expired) || ruleDone || !!unverifiable
       : !needsDecisionReview() || ended;
     refresh.disabled = ruleMode ? ruleChecking || rulePinned : reviewChecking || !actionable(e);
   }
@@ -2275,8 +2475,8 @@ function updateDecisions() {
             ? shortAttempt(e.attempt, e)
             : !state.control.connected
               ? 'Disconnected · decisions unavailable. No retry sent.'
-              : failure && !ruleMode
-                ? reviewFailureSummary(failure)
+              : failure
+                ? endedSummary(failure)
                 : '';
     $('requestResult').hidden = !$('requestResult').textContent;
   }
@@ -2285,10 +2485,16 @@ function updateDecisions() {
     $('decisionNote').textContent = ruleDone
       ? ''
       : own?.text ||
-        (ended && ruleMode && !remembering
-          ? ENDED_NEEDS_REMEMBER
+        (leaseDone
+          ? ''
+          : ended && temporary && !leaseMode
+          ? endedLeaseReason(e, state.control.capabilities)
+          : ended && ruleMode && !remembering && !temporary
+          ? leaseMode ? ENDED_NEEDS_CHOICE : ENDED_NEEDS_REMEMBER
           : ended && ruleMode && rememberFields.process && instanceEnded
             ? ENDED_PROCESS
+            : ruleMode && unverifiable
+              ? IDENTITY_UNVERIFIABLE_TEXT
             : ruleMode && ruleMessage
               ? shortError(ruleMessage) + ' · Selections kept.'
               : remembering && reviewMessage && !ended
@@ -2307,7 +2513,7 @@ function updateDecisions() {
       local?.detail,
       e.attempt?.message,
       own,
-      ruleMode ? ruleMessage : reviewMessage,
+      ruleMode ? ruleMessage || unverifiable : reviewMessage,
       e.attempt?.phase === 'unknown' && e.state !== 'awaiting-decision'
         ? `Backend now reports ${e.state}; the original acknowledgement remains unknown.`
         : '',
@@ -2331,7 +2537,9 @@ function updateDecisions() {
     future.title = 'Separate application-wide rule, independently verified from fresh Activity. Does not release this request. No automatic scope switch or save.';
   }
   if ($('permissionTarget'))
-    $('permissionTarget').textContent = ruleMode
+    $('permissionTarget').textContent = ended && temporary && leaseMode
+      ? `Ended request: For a while covers new ${e!.flow.direction} connections of process ${e!.request_rule?.pid ?? ''} only; this request is not delivered.`
+      : ruleMode
       ? 'Ended request: Allow/Deny with Remember saves a rule for future connections only.'
       : failure
         ? 'No rule saved · the original connection was not allowed.'
@@ -2349,7 +2557,7 @@ function updateDecisions() {
     expiry.textContent = !e
       ? ''
       : ended
-        ? 'Request ended'
+        ? ''
         : e.remainingMs > 0 && e.state === 'awaiting-decision'
           ? `${Math.ceil(e.remainingMs / 1000)} s left`
           : `Request ${e.state === 'awaiting-decision' ? 'expired' : e.state}`;

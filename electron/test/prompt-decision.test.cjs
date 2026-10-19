@@ -246,10 +246,12 @@ test('ended request: Remember + Allow/Deny routes to request-rule with fields an
 
 test('ended request: plain Allow/Deny and For a while never create a rule or a decision', () => {
   const e = endedEvent();
-  for (const action of ['allow', 'block'])
-    for (const forAWhile of [false, true])
-      assert.deepEqual(promptPlan(e, action, choice({ forAWhile })), { kind: 'unavailable', note: ENDED_NEEDS_REMEMBER });
-  assert.equal(ENDED_NEEDS_REMEMBER, 'This request has ended; check Remember to save a rule for future connections');
+  for (const action of ['allow', 'block']) {
+    assert.deepEqual(promptPlan(e, action, choice()), { kind: 'unavailable', note: ENDED_NEEDS_REMEMBER });
+    // Without request-for-a-while-v1 (or with an exited process) For a while is unavailable.
+    assert.deepEqual(promptPlan(e, action, choice({ forAWhile: true })), { kind: 'unavailable', note: 'Unavailable: this request has ended.' });
+  }
+  assert.equal(ENDED_NEEDS_REMEMBER, 'Check Remember to save a rule for future connections.');
   // Without a retained identity nothing at all is possible.
   assert.equal(promptPlan(endedEvent({ request_rule: undefined }), 'allow', choice({ remember: true })).kind, 'unavailable');
 });

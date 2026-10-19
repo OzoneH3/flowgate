@@ -25,6 +25,8 @@ type ActivityProcess struct {
 	UID         uint32      `json:"uid"`
 	Executable  string      `json:"executable"`
 	Application Application `json:"application"`
+	// Display-only launch provenance (captured at first sight, cached per PID+start).
+	Provenance *Provenance `json:"provenance,omitempty"`
 }
 type ActivityRow struct {
 	NetworkScope NetworkScope `json:"network_scope"`
@@ -108,6 +110,7 @@ func (c *ActivityCollector) inspect(pid int, now time.Time) (Process, error) {
 		}
 	}
 	if err == nil {
+		p.Provenance = CaptureProvenance(p)
 		c.cache[pid] = cachedActivityProcess{p, now}
 	} else {
 		delete(c.cache, pid)
@@ -308,7 +311,7 @@ func (c *ActivityCollector) Collect() ActivitySnapshot {
 		}
 		seen[pid] = true
 		id := fmt.Sprintf("%d:%s", p.PID, p.Start)
-		out.Processes[id] = ActivityProcess{BootID: p.BootID, NetNS: p.NetNS, MountNS: p.MountNS, PIDNS: p.PIDNS, ID: id, PID: p.PID, Start: p.Start, UID: p.UID, Executable: p.Executable, Application: p.Application, ThreadGroup: t.group}
+		out.Processes[id] = ActivityProcess{BootID: p.BootID, NetNS: p.NetNS, MountNS: p.MountNS, PIDNS: p.PIDNS, ID: id, PID: p.PID, Start: p.Start, UID: p.UID, Executable: p.Executable, Application: p.Application, ThreadGroup: t.group, Provenance: p.Provenance}
 		for index, path := range owned {
 			row := &out.Rows[index]
 			// Process inspection can race close/dup/FD reuse. Recheck the actual FD,

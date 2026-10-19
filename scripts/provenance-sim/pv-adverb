@@ -1,0 +1,5 @@
+#!/usr/bin/env python3
+"""SIMULATION of pressure-vessel's pv-adverb (argv[0] pv-adverb): runs the command after --."""
+import subprocess, sys
+argv = sys.argv[sys.argv.index('--') + 1:]
+sys.exit(subprocess.Popen(argv).wait())

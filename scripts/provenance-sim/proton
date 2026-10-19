@@ -1,0 +1,37 @@
+#!/usr/bin/env python3
+"""SIMULATION of Proton's argv shape: proton waitforexitandrun GAME.
+Starts the game image and a runtime helper (files/lib/wine/x86_64-windows/
+rundll32.exe) through an intermediate that exits on request (reparenting),
+and optionally an orphaned helper whose parent exits immediately."""
+import os, subprocess, sys, time
+verb, game = sys.argv[1], sys.argv[2]
+assert verb == 'waitforexitandrun'
+here = os.path.dirname(os.path.abspath(__file__))
+helper = os.path.join(here, 'files/lib/wine/x86_64-windows/rundll32.exe')
+log = os.environ['FLOWGATE_SIM_LOG']
+# Optional real Wine loader (scripts/provenance-wine.py): images are PE fixtures
+# started as `wine IMAGE u PORT` (UDP listener mode of fixtures/windows-pe.c).
+wine = os.environ.get('FLOWGATE_SIM_WINE')
+run = (lambda image, port: [wine, image, 'u', port]) if wine else (lambda image, port: [image, port])
+g = subprocess.Popen(run(game, os.environ['FLOWGATE_SIM_GAME_PORT']), stdin=subprocess.PIPE,
+                     stdout=open(log + '-game.json', 'w'))
+orphan = os.environ.get('FLOWGATE_SIM_ORPHAN')
+if orphan:
+    # Double fork: the helper's parent exits at once, so it is adopted by init
+    # before anything could observe its launch.
+    subprocess.Popen([sys.executable, '-c', 'import os,subprocess,sys\n'
+                      'subprocess.Popen(sys.argv[1:], stdin=open(os.environ["FLOWGATE_SIM_ORPHAN"]), stdout=open(os.environ["FLOWGATE_SIM_ORPHAN"]+".out","w"), start_new_session=True)',
+                      os.path.join(here, 'files/lib/wine/x86_64-windows/crs-handler.exe'),
+                      os.environ['FLOWGATE_SIM_ORPHAN_PORT']]).wait()
+# Intermediate (like a Wine service/start process): waits for a release file, then exits.
+h = subprocess.Popen([sys.executable, '-c', 'import os,subprocess,sys,time\n'
+                      'p=subprocess.Popen(sys.argv[2:])\n'
+                      'while not os.path.exists(sys.argv[1]) and p.poll() is None: time.sleep(.05)\n'
+                      'sys.exit(0) if p.poll() is None else sys.exit(p.wait())',
+                      log + '-release', *run(helper, os.environ['FLOWGATE_SIM_HELPER_PORT'])])
+h.wait()
+# waitforexitandrun: stay until the harness stops this launch (or the game exits).
+while g.poll() is None and not os.path.exists(log + '-stop'):
+    time.sleep(.05)
+if g.poll() is None:
+    g.stdin.close(); g.wait()

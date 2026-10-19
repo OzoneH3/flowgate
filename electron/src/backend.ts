@@ -34,7 +34,9 @@ import {
   type RequestRuleChoice,
   type RequestRulePreview,
 } from './request-rule';
-import { forAWhileSupported } from './process-lease';
+import { forAWhileDurations, forAWhileSupported, type ProcessLease } from './process-lease';
+import { endedLeaseAvailable, validateEndedLease, type EndedLeaseChoice } from './prompt-decision';
+import { LOCAL_PAIR_CAPABILITY, pairResultText, validatePairChoice, type PairChoice, type PairResult } from './local-pair';
 export function call(path: string, request: object, timeoutMs = 3500): Promise<Reply> {
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 20000)
     throw Error('Invalid backend timeout');
@@ -80,6 +82,43 @@ export function call(path: string, request: object, timeoutMs = 3500): Promise<R
 }
 // A backend refusal that decided nothing (the request stays answerable).
 class DecisionRefused extends Error {}
+
+// Queue reconciliation (queue-reconcile-v1). A request acknowledged as decided,
+// or reported settled by an acknowledged operation, is remembered per
+// (generation, id) with the sequence number of the last list request issued
+// before that acknowledgement arrived. A list issued at or before that number
+// (a stale poll or reconnect read already in flight) can never reopen it. Only
+// a list issued AFTER the acknowledgement whose server_time is not earlier
+// than the acknowledgement's, and which still shows the request awaiting, is
+// a newer authoritative observation: then the backend wins and it reopens.
+// Other requests are never removed by guessing (application, endpoint): only
+// non-awaiting list states or explicit `settled` ids remove them.
+export interface Settlement {
+  issued: number;
+  serverTime: number;
+  state: string;
+  event?: RequestEvent;
+  until: number;
+}
+export const settlementKey = (generation: string, id: string) => generation + '\0' + id;
+export function reconcileListed(
+  events: RequestEvent[],
+  generation: string,
+  issued: number,
+  serverTime: number,
+  settled: Map<string, Settlement>,
+): RequestEvent[] {
+  return events.map((e) => {
+    const key = settlementKey(generation, e.id),
+      t = settled.get(key);
+    if (!t || e.state !== 'awaiting-decision') return e;
+    if (issued > t.issued && serverTime >= t.serverTime) {
+      settled.delete(key); // newer authoritative observation: the backend wins
+      return e;
+    }
+    return t.event ?? { ...e, state: t.state, reason: `Settled (${t.state}) by an acknowledged operation; awaiting the next list` };
+  });
+}
 export class Backend {
   state: ClientState = {
     observation: { connected: false, message: 'Activity connecting · read-only', generation: '' },
@@ -98,6 +137,12 @@ export class Backend {
   private reviewFailures = new Map<string, {
     generation: string; event: RequestEvent; failure: DecisionReviewFailure; until: number;
   }>();
+  // Queue reconciliation state (see reconcileListed).
+  private settlements = new Map<string, Settlement>();
+  private listIssued = 0;
+  private reconcileAfter?: number;
+  private endedLeases = new Map<string, { message: string; lease: ProcessLease }>();
+  private endedLeaseFlight = new Set<string>();
   private busy = { observer: false, control: false };
   private timers: NodeJS.Timeout[] = [];
   private stopped = false;
@@ -149,6 +194,7 @@ export class Backend {
           Date.parse(this.state.control.policy.snapshot.valid_until) <= this.now()
             ? undefined
             : this.state.control.policy,
+        reconciling: this.reconcileAfter !== undefined,
         events: events.map((e) => ({
           ...e,
           remainingMs: Math.max(0, Date.parse(e.deadline) - this.now()),
@@ -303,7 +349,8 @@ export class Backend {
   private async readControl() {
     if (!this.controller || this.stopped) return;
     const readEpoch = this.mutationEpoch,
-      endpoint = this.controller;
+      endpoint = this.controller,
+      issued = ++this.listIssued;
     this.busy.control = true;
     const snapshotStarted = performance.now();
     try {
@@ -330,7 +377,14 @@ export class Backend {
         this.reviewFailures.clear();
         this.decisionPreviews.clear();
         this.policySequence = -1n;
+        this.settlements.clear();
+        this.endedLeases.clear();
+        this.reconcileAfter = undefined;
       }
+      for (const [key, t] of this.settlements) if (t.until <= performance.now()) this.settlements.delete(key);
+      r.events = reconcileListed(r.events, r.generation, issued, Date.parse(r.server_time), this.settlements);
+      // Lost/rejected outcome: this list was issued after it, so it is authoritative.
+      if (this.reconcileAfter !== undefined && issued > this.reconcileAfter) this.reconcileAfter = undefined;
       const stamp = inventoryStamp(r);
       const sameGeneration = this.state.control.generation === r.generation;
       const previousPolicy = this.state.control.policy;
@@ -397,6 +451,7 @@ export class Backend {
             : r.rule_states,
         capabilities: r.capabilities,
         processLeases: forAWhileSupported(r.capabilities) ? (r.process_leases ?? []) : undefined,
+        forAWhileDurations: r.for_a_while_durations,
         events: [],
       };
     } catch (e) {
@@ -633,6 +688,7 @@ export class Backend {
         r = await call(this.controller!, { operation: 'request-rule-save', ...c });
       } catch (error) {
         held.phase = 'unknown';
+        this.reconcileAfter = this.listIssued;
         throw Error('Save acknowledgement lost; use Check result (same review, never a new rule). ' + String((error as Error)?.message ?? error));
       }
       if (r.error) {
@@ -646,6 +702,7 @@ export class Backend {
       }
       held.phase = 'saved';
       held.saved = rule;
+      this.settle(c.generation, r.settled ?? [], r.server_time);
       return { message: `Saved: ${held.preview.summary}. Applies to future connections; the ended request was not allowed.`, rule, replayed: !!r.replayed };
     });
   }
@@ -733,6 +790,8 @@ export class Backend {
     const temporary = d.scope === 'for-a-while';
     if (temporary && !forAWhileSupported(c.capabilities))
       throw Error('For a while unsupported by this backend');
+    if (temporary && d.duration_seconds !== undefined && !forAWhileDurations(c).includes(d.duration_seconds))
+      throw Error('This For a while duration is not offered by the backend');
     if (
       !this.controller ||
       !c.connected ||
@@ -782,6 +841,7 @@ export class Backend {
               ...(d.duration_seconds !== undefined ? { duration_seconds: d.duration_seconds } : {}),
             }
           : {}),
+        ...(temporary && d.duration_seconds !== undefined ? { duration_seconds: d.duration_seconds } : {}),
         id: d.id,
         action: d.action,
         scope: d.scope,
@@ -798,6 +858,8 @@ export class Backend {
           phase: 'rejected',
           message: 'Backend rejected: ' + (r.error_code ? r.error_code + ': ' : '') + r.error,
         };
+        // The refusal may itself have ended the request: read the list first.
+        this.reconcileAfter = this.listIssued;
       } else if (
         r.decision?.id !== d.id ||
         r.decision.state !== (d.action === 'allow' ? 'allowed' : 'blocked') ||
@@ -810,9 +872,9 @@ export class Backend {
           message: `Backend acknowledged ${r.decision.state} · ${r.decision.reason}`,
           rule: r.saved_rule,
           scope: d.scope,
+          leaseUntil: temporary ? r.decision.lease?.until : undefined,
         };
-        if (this.reply?.generation === d.generation)
-          this.reply.events = this.reply.events.map((e) => (e.id === d.id ? r.decision! : e));
+        this.settle(d.generation, [{ id: d.id, state: r.decision.state, event: r.decision }, ...(r.settled ?? [])], r.server_time);
       }
     } catch (e) {
       if (e instanceof DecisionRefused) throw Error(e.message);
@@ -823,11 +885,127 @@ export class Backend {
           (e as Error).message,
         reconcile: zoned ? d.preview_token : undefined,
       };
+      // No further prompt until a list issued after this point was read.
+      this.reconcileAfter = this.listIssued;
     }
     // A reply from an old connection must never mutate a new session.
     if (this.state.control.generation === d.generation) this.attempts.set(d.id, result);
     this.emit();
-    void this.pollControl();
+    this.reconcileSoon();
     return result;
+  }
+  // local-pair-v1: both sides of one verified local connection. The backend
+  // confirms the exact pair (events referencing each other) and returns BOTH
+  // verdicts; nothing is inferred here and no retry is sent.
+  async decidePair(raw: PairChoice): Promise<{ message: string; text: string; result: PairResult }> {
+    const d = validatePairChoice(raw),
+      c = this.state.control;
+    const listed = d.ids.map((id) => this.reply?.events.find((e) => e.id === id));
+    if (
+      !this.controller ||
+      !c.connected ||
+      !canDecide(c) ||
+      c.generation !== d.generation ||
+      !c.capabilities?.includes(LOCAL_PAIR_CAPABILITY) ||
+      listed.some((e) => !e) ||
+      !listed.some((e) => e!.state === 'awaiting-decision' && Date.parse(e!.deadline) > this.now() && !this.attempts.has(e!.id))
+    )
+      throw Error('Pair is no longer actionable; refresh authoritative state');
+    let r: Reply;
+    try {
+      r = await call(this.controller, { operation: 'decide-pair', generation: d.generation, event_ids: d.ids, action: d.action, scope: d.scope });
+    } catch (error) {
+      this.reconcileAfter = this.listIssued;
+      this.reconcileSoon();
+      throw Error('Acknowledgement lost; outcome unknown. No automatic retry. ' + String((error as Error)?.message ?? error));
+    }
+    if (r.generation !== d.generation) throw Error('Backend generation changed');
+    if (r.error) {
+      this.reconcileSoon();
+      throw Error((r.error_code ? r.error_code + ': ' : '') + r.error);
+    }
+    const p = r.pair;
+    if (!p || p.events.some((e) => !d.ids.includes(e.id)) || p.events.length !== d.ids.length)
+      throw Error('Invalid pair acknowledgement');
+    const text = pairResultText(p);
+    for (const e of p.events)
+      if (e.state === 'allowed' || e.state === 'blocked')
+        this.attempts.set(e.id, { phase: 'acknowledged', message: `Backend acknowledged ${e.state} · ${e.reason}`, scope: 'once' });
+    this.settle(d.generation, [...p.events.map((e) => ({ id: e.id, state: e.state, event: e })), ...(r.settled ?? [])], r.server_time);
+    this.emit();
+    this.reconcileSoon();
+    return { message: r.scope_preview || p.sentence, text, result: p };
+  }
+  // Records acknowledged/settled requests and removes them from the visible
+  // queue at once (only those ids; nothing is inferred).
+  settle(generation: string, entries: { id: string; state: string; event?: RequestEvent }[], serverTime: string) {
+    if (this.reply?.generation !== generation) return;
+    const t = Date.parse(serverTime),
+      until = performance.now() + 600000;
+    for (const x of entries) {
+      if (x.state === 'awaiting-decision') continue;
+      if (this.settlements.size >= 1024) this.settlements.delete(this.settlements.keys().next().value!);
+      this.settlements.set(settlementKey(generation, x.id), {
+        issued: this.listIssued, serverTime: Number.isFinite(t) ? t : 0, state: x.state, event: x.event, until,
+      });
+    }
+    this.reply.events = reconcileListed(this.reply.events, generation, -1, 0, this.settlements);
+  }
+  // Reads an authoritative list issued after now (joins nothing stale).
+  private reconcileSoon() {
+    void this.pollControl().then(() => {
+      if (this.reconcileAfter !== undefined) return this.pollControl();
+    });
+  }
+  // request-for-a-while-v1: a process lease from an ended request; the request
+  // itself stays ended and is never decided or delivered.
+  async requestForAWhile(raw: EndedLeaseChoice): Promise<{ message: string; lease: ProcessLease }> {
+    const c = validateEndedLease(raw),
+      state = this.view(),
+      control = state.control,
+      key = settlementKey(c.generation, c.id),
+      e = control.events.find((x) => x.id === c.id);
+    const done = this.endedLeases.get(key);
+    if (done) return done;
+    if (this.endedLeaseFlight.has(key)) throw Error('Submitting · waiting for backend acknowledgement');
+    if (!this.controller || !control.connected || !canDecide(control) || control.generation !== c.generation ||
+        !endedLeaseAvailable(e, control.capabilities))
+      throw Error('For a while is unavailable for this request');
+    if (c.duration_seconds !== undefined && !forAWhileDurations(control).includes(c.duration_seconds))
+      throw Error('This For a while duration is not offered by the backend');
+    this.endedLeaseFlight.add(key);
+    try {
+      let r: Reply;
+      try {
+        r = await call(this.controller, { operation: 'request-for-a-while', ...c });
+      } catch (error) {
+        this.reconcileAfter = this.listIssued;
+        this.reconcileSoon();
+        throw Error('Acknowledgement lost; outcome unknown. Checking the backend list first. ' + String((error as Error)?.message ?? error));
+      }
+      if (r.generation !== c.generation) throw Error('Daemon generation changed');
+      if (r.error) {
+        this.reconcileSoon();
+        throw Error((r.error_code ? r.error_code + ': ' : '') + r.error);
+      }
+      const lease = r.process_lease;
+      if (!lease || !r.request_ended || lease.event_id !== c.id || (c.duration_seconds ?? 15) !== lease.seconds)
+        throw Error('Invalid For a while acknowledgement');
+      this.settle(c.generation, r.settled ?? [], r.server_time);
+      if (this.state.control.generation === c.generation && this.state.control.processLeases)
+        this.state.control.processLeases = [
+          ...this.state.control.processLeases.filter(
+            (l) => !(l.pid === lease.pid && l.start === lease.start && l.direction === lease.direction),
+          ),
+          lease,
+        ];
+      const out = { message: r.scope_preview || 'For a while lease created; this ended request was not delivered.', lease };
+      this.endedLeases.set(key, out);
+      this.emit();
+      this.reconcileSoon();
+      return out;
+    } finally {
+      this.endedLeaseFlight.delete(key);
+    }
   }
 }

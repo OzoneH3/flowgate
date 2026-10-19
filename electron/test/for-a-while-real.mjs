@@ -229,7 +229,7 @@ try {
   before = await send('other', 'tcp', '10.79.0.3', 44000);
   w = await card(/10\.79\.0\.3:44000/);
   await command({ op: 'exit', name: 'other' });
-  await wait(async () => /has ended/i.test(await prompt().locator('body').innerText()), 40000, 'ended card');
+  await wait(async () => /has ended|no longer pending/i.test(await prompt().locator("body").innerText()), 40000, 'ended card');
   w = prompt();
   assert(await w.locator('#forAWhileToggle').isDisabled(), 'For a while unavailable when ended');
   assert(await w.locator('#allow').isVisible(), 'Allow stays visible');

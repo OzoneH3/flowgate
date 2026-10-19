@@ -155,19 +155,87 @@ export class ApplicationIcons {
     await visit(theme);
     await visit('hicolor');
   }
+  // Steam game: the verified executable's realpath must lie under a library's steamapps/common/<installdir>,
+  // and exactly one app manifest in that library must declare that installdir. The app ID comes only from
+  // that manifest (never from a name); the icon is Steam's own steam_icon_<appid> in the icon theme.
+  private steamLibraries?: Promise<string[]>;
+  private steamManifests = new Map<string, Promise<Map<string, { appid: string; name?: string }>>>();
+  private libraries() {
+    this.steamLibraries ??= (async () => {
+      const roots = new Set<string>();
+      for (const base of [path.join(this.home, '.local/share/Steam'), path.join(this.home, '.steam/steam')])
+        try {
+          const text = (await read(path.join(base, 'steamapps/libraryfolders.vdf'))).toString();
+          for (const m of text.matchAll(/"path"\s+"([^"\r\n]{1,1024})"/g)) {
+            const p = m[1].replace(/\\\\/g, '\\');
+            if (path.isAbsolute(p) && !p.split('/').includes('..')) roots.add(p);
+          }
+        } catch {}
+      return [...roots].slice(0, 64);
+    })();
+    return this.steamLibraries;
+  }
+  private manifests(library: string) {
+    if (!this.steamManifests.has(library))
+      this.steamManifests.set(
+        library,
+        (async () => {
+          const byDir = new Map<string, { appid: string; name?: string }>(),
+            ambiguous = new Set<string>();
+          let files: string[] = [];
+          try {
+            files = await fs.readdir(path.join(library, 'steamapps'));
+          } catch {}
+          for (const file of files.filter((f) => /^appmanifest_\d{1,12}\.acf$/.test(f)).slice(0, 4096))
+            try {
+              const text = (await read(path.join(library, 'steamapps', file))).toString();
+              const appid = text.match(/"appid"\s+"(\d{1,12})"/)?.[1];
+              const dir = text.match(/"installdir"\s+"([^"\r\n/]{1,255})"/)?.[1];
+              if (!appid || !dir || appid !== file.slice(12, -4)) continue;
+              if (byDir.has(dir)) ambiguous.add(dir);
+              const name = text.match(/"name"\s+"([^"\r\n]{1,255})"/)?.[1];
+              byDir.set(dir, { appid, name });
+            } catch {}
+          for (const dir of ambiguous) byDir.delete(dir);
+          return byDir;
+        })(),
+      );
+    return this.steamManifests.get(library)!;
+  }
+  private async steamGame(executable: string) {
+    if (!executable) return undefined;
+    for (const library of await this.libraries())
+      try {
+        const common = await fs.realpath(path.join(library, 'steamapps/common'));
+        if (!executable.startsWith(common + '/')) continue;
+        const installdir = executable.slice(common.length + 1).split('/')[0];
+        const app = (await this.manifests(library)).get(installdir);
+        if (app) return app;
+      } catch {}
+    return undefined;
+  }
   private async resolve(executable: string) {
     const actual = await this.executable(executable);
-    const candidates = this.entries.get(actual);
-    if (candidates?.size !== 1) return null;
+    let candidates = this.entries.get(actual);
+    if (candidates?.size !== 1) {
+      const game = await this.steamGame(actual);
+      if (!game) return null;
+      candidates = new Set(['steam_icon_' + game.appid]);
+    }
     const name = [...candidates][0];
     const files: string[] = [];
     if (path.isAbsolute(name)) files.push(name);
     else if (/^[\w.+-]+$/.test(name)) {
-      for (const theme of this.themes)
+      for (const theme of this.themes) {
+        // Icon theme spec: a theme's Directories apply in every base directory, including user roots
+        // (e.g. ~/.local/share/icons/hicolor holding Steam's steam_icon_<appid>) that ship no index.theme.
+        const dirs =
+          this.iconRoots.map((r) => this.themeDirs.get(path.join(r, theme))).find((d) => d?.length) || [];
         for (const root of this.iconRoots)
-          for (const dir of this.themeDirs.get(path.join(root, theme)) || [])
+          for (const dir of dirs)
             for (const ext of ['.png', '.svg'])
               files.push(path.join(root, theme, dir, name.endsWith(ext) ? name : name + ext));
+      }
       for (const root of this.dataDirs)
         files.push(
           path.join(root, 'pixmaps', name + '.png'),
@@ -220,7 +288,7 @@ export class ApplicationIcons {
     const icons = await this.request(value);
     const result: Record<
       string,
-      { icon: string | null; name?: string; source: 'desktop-metadata' | 'unavailable' }
+      { icon: string | null; name?: string; source: 'desktop-metadata' | 'steam-manifest' | 'unavailable' }
     > = Object.create(null);
     for (const [key, icon] of Object.entries(icons)) {
       const app = this.allowed.get(key);
@@ -230,10 +298,12 @@ export class ApplicationIcons {
           app.display_executable || app.executable.replace(/ \(deleted\)$/, ''),
         ));
       const names = executable ? this.names.get(executable) : undefined;
+      const desktop = this.entries.get(executable || '')?.size === 1 || names?.size === 1;
+      const game = desktop ? undefined : await this.steamGame(executable || '');
       result[key] = {
         icon,
-        name: names?.size === 1 ? [...names][0] : undefined,
-        source: icon || names?.size === 1 ? 'desktop-metadata' : 'unavailable',
+        name: names?.size === 1 ? [...names][0] : game?.name,
+        source: desktop ? 'desktop-metadata' : game ? 'steam-manifest' : icon ? 'desktop-metadata' : 'unavailable',
       };
     }
     return result;

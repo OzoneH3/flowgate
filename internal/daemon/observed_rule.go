@@ -74,6 +74,8 @@ type creationPreview struct {
 	Admin        bool
 	Saved        bool
 	ReceiptUntil time.Time
+	// Settled: waiting requests this save settled (queue-reconcile-v1).
+	Settled []SettledRequest
 }
 
 func draftBytes(d ObservedDraft) (string, error) {
@@ -230,6 +232,20 @@ func (e *Engine) PreviewObservedRule(generation string, target ObservedTarget, d
 	e.creationPreviews[v.Token] = &creationPreview{View: v, Target: target, Process: p, Verified: current, Draft: raw, UID: uid, Admin: admin}
 	return v, nil
 }
+
+// ObservedSettled returns the requests settled by the save of this preview
+// token (empty when unknown or not saved). Same answer for a replayed save.
+func (e *Engine) ObservedSettled(token string) []SettledRequest {
+	e.creationMu.Lock()
+	defer e.creationMu.Unlock()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if p := e.creationPreviews[token]; p != nil && p.Saved {
+		return p.Settled
+	}
+	return nil
+}
+
 func (e *Engine) SaveObservedRule(generation, token string, draft ObservedDraft, uid uint32, admin bool) (policy.Rule, string, bool, error) {
 	if err := e.zoneRevision(draft.NetworkZone, draft.ZoneRevision); err != nil {
 		return policy.Rule{}, "", false, err
@@ -352,7 +368,10 @@ func (e *Engine) SaveObservedRule(generation, token string, draft ObservedDraft,
 	if err = e.publishRulesLocked(next); err != nil {
 		return policy.Rule{}, "", false, err
 	}
+	restore := e.collectSettledLocked()
 	e.settlePendingLocked("rule " + candidate.ID + " saved")
+	p.Settled = e.settledLocked()
+	restore()
 	// Existing pending/Once decisions are not consumed or approved. New initiations
 	// evaluate the published rule; retained remembered grants already recheck policy.
 	p.Saved = true

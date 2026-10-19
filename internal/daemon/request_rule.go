@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"errors"
 	"flowgate/internal/identity"
 	"flowgate/internal/policy"
 	"fmt"
@@ -13,6 +14,20 @@ import (
 // PID, socket or another live instance. It never decides or releases the
 // original request.
 const RequestApplicationRuleCapability = "request-application-rule-v1"
+
+// RequestSandboxIdentityCapability: while a prompted process is alive its
+// executable evidence is retained (opened-file device/inode/stamp, SHA-256 and
+// a host-visible backing path proven by device+inode), so a rule can be saved
+// after it exited even from another mount namespace (Steam pressure-vessel,
+// Flatpak). Without a host-visible backing file the refusal is
+// identity_unverifiable. request_rule.executable_identity reports the state.
+const RequestSandboxIdentityCapability = "request-sandbox-identity-v1"
+
+// identityUnverifiableHint is the actionable part of identity_unverifiable.
+const identityUnverifiableHint = "Start the app again and choose Remember while its request is open."
+
+// retainedEvidenceWait bounds how long a review waits for a pending digest.
+const retainedEvidenceWait = 10 * time.Second
 
 // requestRuleRetention keeps the captured identity this long after the deadline.
 const requestRuleRetention = 10 * time.Minute
@@ -27,6 +42,26 @@ type retainedRequest struct {
 	Start       string
 	FirstSeen   time.Time
 	Until       time.Time
+	// Owner is the single verified owning process (complete visibility) the
+	// request was captured from; nil when For a while could never bind to it.
+	Owner *identity.Process
+	// Decided is set once the request was decided or settled by policy; only
+	// an undecided ended request may start For a while for its live process.
+	Decided bool
+	// Exe is the executable evidence captured while the process was alive
+	// (nil when capture failed: ExeError). Its open reference is released on
+	// digest completion, prune, eviction and save.
+	Exe      *identity.RetainedExecutable
+	ExeError string
+	// Provenance is the owner's launch provenance at request time (display
+	// only), kept for ended cards beyond the event's lifetime.
+	Provenance *identity.Provenance
+}
+
+func (r *retainedRequest) release() {
+	if r != nil {
+		r.Exe.Release()
+	}
 }
 
 // RequestRuleSource tells clients whether an application rule can be saved from
@@ -35,6 +70,17 @@ type RequestRuleSource struct {
 	Available    bool      `json:"available"`
 	ProcessState string    `json:"process_state"` // running, ended or unknown
 	Until        time.Time `json:"until"`
+	// ProcessLeaseAvailable (request-for-a-while-v1): the request is undecided,
+	// had one verified owning process and that exact instance is still running,
+	// so For a while can create a lease for it although this request ended.
+	// Presentation only; request-for-a-while re-verifies everything.
+	ProcessLeaseAvailable bool `json:"process_lease_available"`
+	PID                   int  `json:"pid,omitempty"`
+	// ExecutableIdentity (request-sandbox-identity-v1): verified (host-visible
+	// backing file with digest), pending (digest in progress), sandbox-only
+	// (no persistent identity once the process exits) or unavailable.
+	ExecutableIdentity string               `json:"executable_identity,omitempty"`
+	Provenance         *identity.Provenance `json:"provenance,omitempty"`
 }
 
 type RequestRulePreview struct {
@@ -79,8 +125,34 @@ func (e *Engine) retainRequestLocked(v *Event, a identity.Attribution) {
 	if len(a.Owners) == 1 {
 		r.PID, r.Start = a.Owners[0].PID, a.Owners[0].Start
 	}
+	if p, err := leaseOwner(a); err == nil {
+		r.Owner = &p
+	}
+	// Executable evidence from an owner running exactly this application
+	// revision, while it is alive (bounded; see identity.CaptureExecutable).
+	capture := e.captureExecutable
+	if capture == nil {
+		capture = identity.CaptureExecutable
+	}
+	for _, o := range a.Owners {
+		if o.Application.Key != app.Key || o.Application.Revision != app.Revision || o.UID != r.UID {
+			continue
+		}
+		if r.Provenance == nil {
+			r.Provenance = o.Provenance
+		}
+		x, err := capture(o, *app)
+		if err == nil {
+			r.Exe, r.ExeError = x, ""
+			break
+		}
+		r.ExeError = err.Error()
+	}
 	if e.requestRules == nil {
 		e.requestRules = map[string]*retainedRequest{}
+	}
+	if old := e.requestRules[v.ID]; old != nil {
+		old.release()
 	}
 	if len(e.requestRules) >= 256 {
 		var oldest *retainedRequest
@@ -89,6 +161,7 @@ func (e *Engine) retainRequestLocked(v *Event, a identity.Attribution) {
 				oldest = x
 			}
 		}
+		oldest.release()
 		delete(e.requestRules, oldest.EventID)
 	}
 	e.requestRules[v.ID] = r
@@ -97,6 +170,7 @@ func (e *Engine) retainRequestLocked(v *Event, a identity.Attribution) {
 func (e *Engine) pruneRequestRulesLocked(now time.Time) {
 	for id, r := range e.requestRules {
 		if !now.Before(r.Until) {
+			r.release()
 			delete(e.requestRules, id)
 		}
 	}
@@ -130,18 +204,70 @@ func (e *Engine) requestRuleSourceLocked(id string) *RequestRuleSource {
 	if r == nil || !e.Now().Before(r.Until) {
 		return nil
 	}
-	return &RequestRuleSource{Available: true, ProcessState: e.processStateLocked(r), Until: r.Until}
+	state := e.processStateLocked(r)
+	src := &RequestRuleSource{Available: true, ProcessState: state, Until: r.Until, PID: r.PID}
+	src.ProcessLeaseAvailable = r.Owner != nil && !r.Decided && state == "running"
+	src.Provenance = r.Provenance
+	src.ExecutableIdentity = "unavailable"
+	if r.Exe != nil {
+		switch ev := r.Exe.Evidence(); {
+		case ev.Visibility != identity.VisibilityHost:
+			src.ExecutableIdentity = identity.VisibilitySandboxOnly
+		case ev.DigestState == "pending":
+			src.ExecutableIdentity = "pending"
+		case ev.SHA256 != "":
+			src.ExecutableIdentity = "verified"
+		}
+	}
+	return src
 }
 
+// verifyRetainedLocked re-validates the retained identity without trusting a
+// path string: through the executable evidence captured while the process ran
+// (host-visible backing file: device, inode, stamp and SHA-256), else the
+// same-namespace path check, else the still-running exact instance. A
+// sandbox-only executable of an exited process has no persistent identity.
 func (e *Engine) verifyRetainedLocked(r *retainedRequest) error {
-	verify := e.verifyRetained
-	if verify == nil {
-		verify = identity.VerifyRetainedExecutable
+	var err error
+	switch ev := r.Exe.Evidence(); {
+	case e.verifyRetained != nil: // tests
+		err = e.verifyRetained(r.Application, r.UID, r.MountNS)
+	case r.Exe != nil && ev.Visibility == identity.VisibilityHost:
+		err = identity.VerifyRetainedEvidence(r.Application, r.UID, ev)
+	case r.MountNS != "" && r.MountNS == identity.SelfMountNS():
+		err = identity.VerifyRetainedExecutable(r.Application, r.UID, r.MountNS)
+	case e.processStateLocked(r) == "running":
+		err = identity.VerifyInstanceExecutable(r.PID, r.Start, r.Application)
+	case r.Exe != nil:
+		err = identity.UnverifiableEvidence(r.MountNS, &ev, "")
+	default:
+		why := "no executable evidence was retained while it ran"
+		if r.ExeError != "" {
+			why += " (" + r.ExeError + ")"
+		}
+		err = identity.UnverifiableEvidence(r.MountNS, nil, why)
 	}
-	if err := verify(r.Application, r.UID, r.MountNS); err != nil {
-		return mutationError("executable_changed", "Application identity cannot be validated: "+err.Error()+"; no rule saved")
+	if err == nil {
+		return nil
 	}
-	return nil
+	var re *identity.RetainedError
+	if errors.As(err, &re) && re.Code == identity.CodeIdentityUnverifiable {
+		return mutationError(identity.CodeIdentityUnverifiable, "No reusable application identity: "+err.Error()+". No rule saved. "+identityUnverifiableHint)
+	}
+	return mutationError(identity.CodeExecutableChanged, "Application identity cannot be validated: "+err.Error()+"; no rule saved")
+}
+
+// awaitRetainedEvidence waits (without holding e.mu) for a pending digest of
+// the request's retained executable, so a review never races its capture.
+func (e *Engine) awaitRetainedEvidence(id string) {
+	e.mu.Lock()
+	r := e.requestRules[id]
+	var x *identity.RetainedExecutable
+	if r != nil {
+		x = r.Exe
+	}
+	e.mu.Unlock()
+	x.Wait(retainedEvidenceWait)
 }
 
 // requestRuleLocked validates the shared preview/save inputs and returns the
@@ -208,6 +334,7 @@ func (e *Engine) requestRuleSentence(rule policy.Rule, replaces *RuleVersionRef,
 }
 
 func (e *Engine) PreviewRequestRule(generation, id, action, scope, zone, revision string, uid uint32, admin bool, o RememberOptions) (RequestRulePreview, error) {
+	e.awaitRetainedEvidence(id)
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	r, err := e.requestRuleLocked(generation, id, action, scope, zone, revision, uid, admin, &o)
@@ -282,8 +409,21 @@ func (e *Engine) PreviewRequestRule(generation, id, action, scope, zone, revisio
 // with the same token returns the same receipt (replayed) and never creates a
 // second rule; a later edit/delete of that rule is a replay conflict.
 func (e *Engine) SaveRequestRule(generation, token, id, action, scope, zone, revision string, uid uint32, admin bool, o RememberOptions) (policy.Rule, string, bool, error) {
+	r, s, replayed, _, err := e.SaveRequestRuleSettled(generation, token, id, action, scope, zone, revision, uid, admin, o)
+	return r, s, replayed, err
+}
+
+// SaveRequestRuleSettled also returns the waiting requests the new rule settled.
+func (e *Engine) SaveRequestRuleSettled(generation, token, id, action, scope, zone, revision string, uid uint32, admin bool, o RememberOptions) (policy.Rule, string, bool, []SettledRequest, error) {
+	e.awaitRetainedEvidence(id)
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	defer e.collectSettledLocked()()
+	r, s, replayed, err := e.saveRequestRuleLocked(generation, token, id, action, scope, zone, revision, uid, admin, o)
+	return r, s, replayed, e.settledLocked(), err
+}
+
+func (e *Engine) saveRequestRuleLocked(generation, token, id, action, scope, zone, revision string, uid uint32, admin bool, o RememberOptions) (policy.Rule, string, bool, error) {
 	if generation == "" || generation != e.Generation {
 		return policy.Rule{}, "", false, mutationError("generation_conflict", "Backend changed; reload")
 	}
@@ -360,6 +500,7 @@ func (e *Engine) SaveRequestRule(generation, token, id, action, scope, zone, rev
 	// Pending requests from new launches are re-evaluated; the ended source
 	// request is not pending and is never approved.
 	e.settlePendingLocked("rule " + candidate.ID + " saved from request " + id)
+	r.release() // evidence stays for repeat reviews; no open reference remains
 	p.Saved = true
 	p.ReceiptUntil = now.Add(5 * time.Minute)
 	return candidate, v.ScopePreview, false, nil

@@ -34,6 +34,8 @@ await build({
     'src/process-lease.ts',
     'src/prompt-decision.ts',
     'src/prompt-card.ts',
+    'src/provenance.ts',
+    'src/local-pair.ts',
     'src/prompt-placement.ts',
     'src/assets.ts',
     'src/pane-model.ts',

@@ -42,6 +42,13 @@ type Event struct {
 	RequestRule *RequestRuleSource `json:"request_rule,omitempty"`
 	// Lease is set on the request decided For a while (decision-for-a-while-v1).
 	Lease *LeaseRef `json:"lease,omitempty"`
+	// PreviousRevisionRules lists enabled stored rules of the same application
+	// key, user and direction that are bound to a DIFFERENT revision (for
+	// example the executable was updated). Display only: never applied.
+	PreviousRevisionRules []RevisionRuleRef `json:"previous_revision_rules,omitempty"`
+	// LocalPeer identifies the other endpoint of a same-host connection from
+	// the exact reversed tuple (local-pair-v1). Display/pairing only.
+	LocalPeer *identity.LocalPeer `json:"local_peer,omitempty"`
 
 	// Decision-log bookkeeping (never serialized): the rule exactly as evaluated,
 	// whether this result was a capacity refusal, and record-once flags so packet
@@ -89,6 +96,17 @@ type Engine struct {
 	processLeases       map[string]*processLease                         // For a while; memory only
 	verifyRetained      func(identity.Application, uint32, string) error // tests only
 	instanceRunning     func(int, string) bool                           // tests only
+	inspectProcess      func(int) (identity.Process, error)              // tests only
+	// captureExecutable retains executable evidence for a new prompt (tests
+	// replace it; production uses identity.CaptureExecutable). See request_rule.go.
+	captureExecutable func(identity.Process, identity.Application) (*identity.RetainedExecutable, error)
+	// settledSink, when set by an API operation holding e.mu, collects requests
+	// that leave awaiting-decision through policy re-evaluation (queue-reconcile-v1).
+	settledSink *[]SettledRequest
+	// local-pair-v1: same-host peer identification (nil disables) and
+	// decide-pair admissions for the not-yet-requested incoming side.
+	LocalPeer      func(identity.Flow) *identity.LocalPeer
+	pairAdmissions map[string]*pairAdmission
 
 	policyQueryMu      sync.Mutex // serializes metadata health sampling with response ordering
 	policyReadSequence uint64     // read-response ordering only, protected by mu
@@ -112,7 +130,7 @@ type Engine struct {
 }
 
 func New(timeout time.Duration) *Engine {
-	return &Engine{Zones: identity.DefaultNetworkZones(), Generation: randomID(), events: map[string]*Event{}, Resolve: identity.Resolve, Now: time.Now, Timeout: timeout, Max: 256}
+	return &Engine{Zones: identity.DefaultNetworkZones(), Generation: randomID(), events: map[string]*Event{}, Resolve: identity.Resolve, LocalPeer: identity.ResolveLocalPeer, Now: time.Now, Timeout: timeout, Max: 256}
 }
 func randomID() string {
 	var b [16]byte
@@ -131,11 +149,29 @@ func (e *Engine) expire(now time.Time) {
 				v.Reason = "decision timed out; retry creates a new request"
 				e.recordFinal(v, "block", "timeout", "", "no decision before the deadline; held packets drop", nil, nil, "deferred", "")
 			}
+			// An ended request stays listed (state unchanged, never deliverable) while its
+			// retained record still offers a future rule or For a while, so the card keeps
+			// authoritative process state instead of vanishing 5 s after the deadline.
+			if r := e.requestRules[v.ID]; r != nil && now.Before(r.Until) {
+				continue
+			}
 			if now.Sub(v.Deadline) > 5*time.Second {
 				delete(e.events, key)
 			}
 		}
 	}
+}
+
+// liveEventsLocked counts events that bound new prompts. Ended requests kept listed only
+// for their retained record (bounded separately in requestRules) never consume capacity.
+func (e *Engine) liveEventsLocked() int {
+	now, n := e.Now(), 0
+	for _, v := range e.events {
+		if now.Before(v.Deadline.Add(5 * time.Second)) {
+			n++
+		}
+	}
+	return n
 }
 func (e *Engine) Observe(f identity.Flow, token string) Event {
 	e.mu.Lock()
@@ -169,6 +205,12 @@ func (e *Engine) Observe(f identity.Flow, token string) Event {
 	if old := e.events[key]; old != nil && rule == "unsafe-attribution" && old.Rule == rule && old.Attribution.Fingerprint == a.Fingerprint && now.Before(old.logDeadline) {
 		v.logAttemptID, v.logDeadline, v.finalLogged = old.logAttemptID, old.logDeadline, old.finalLogged
 	}
+	// local-pair-v1: identify the same-host peer; a reviewed pair decision may
+	// answer this (incoming) side when no configured rule decides it.
+	pair := e.observeLocalPairLocked(&v, a, action, now)
+	if pair != nil {
+		action, rule = pair.Action, v.Rule
+	}
 	v.decided = e.ruleLocked(rule)
 	if a.Principal() != nil {
 		filter := policy.Remembered(f, a)
@@ -188,7 +230,7 @@ func (e *Engine) Observe(f identity.Flow, token string) Event {
 		}
 		// Offered only when the request has one verified owning process.
 		if p, err := leaseOwner(a); err == nil {
-			v.ScopePreviews[ForAWhileScope] = forAWhilePreview(f, p)
+			v.ScopePreviews[ForAWhileScope] = forAWhilePreview(f, p, ForAWhileDuration)
 		}
 	}
 	switch action {
@@ -206,6 +248,9 @@ func (e *Engine) Observe(f identity.Flow, token string) Event {
 			v.Reason = "stored Ask rule " + v.decided.ID + " requires a decision; " + v.Reason
 		}
 	}
+	if pair != nil {
+		e.admitPairLocked(&v, pair, now)
+	}
 	if lease != nil {
 		v.Reason = lease.reason()
 		v.leaseID = lease.ID
@@ -219,7 +264,7 @@ func (e *Engine) Observe(f identity.Flow, token string) Event {
 		e.window = now
 		e.created = 0
 	}
-	if len(e.events) >= e.Max || e.created >= 20 {
+	if e.liveEventsLocked() >= e.Max || e.created >= 20 {
 		v.State = "blocked"
 		v.Reason = "pending/history capacity or prompt rate exceeded"
 		v.capacity = true
@@ -245,6 +290,7 @@ func (e *Engine) ListWithZones(uid uint32, admin bool) ([]Event, identity.Networ
 		if admin || owned(v.Attribution, uid) {
 			row := *v
 			row.RequestRule = e.requestRuleSourceLocked(v.ID)
+			row.PreviousRevisionRules = e.previousRevisionRulesLocked(v)
 			out = append(out, row)
 		}
 	}
@@ -254,12 +300,28 @@ func owned(a identity.Attribution, uid uint32) bool {
 	return a.Principal() != nil && a.Principal().UID == uid
 }
 func (e *Engine) Decide(id, action, scope string, uid uint32, admin bool) (Event, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.decideLocked(id, action, scope, uid, admin, nil, "", time.Time{})
+	v, _, err := e.DecideSettled(id, action, scope, 0, uid, admin)
+	return v, err
 }
 
-func (e *Engine) decideLocked(id, action, scope string, uid uint32, admin bool, reviewed *policy.Rule, sentence string, reviewDeadline time.Time) (Event, error) {
+// DecideSettled is Decide plus the other requests the decision settled.
+// leaseSeconds is the For a while duration (0 = 15 s); other scopes need 0.
+func (e *Engine) DecideSettled(id, action, scope string, leaseSeconds int64, uid uint32, admin bool) (Event, []SettledRequest, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	defer e.collectSettledLocked()()
+	if leaseSeconds != 0 && scope != ForAWhileScope {
+		return Event{}, nil, mutationError("invalid_request", "duration_seconds applies to For a while only; Remember durations need a reviewed decision")
+	}
+	d, err := forAWhileDuration(leaseSeconds)
+	if err != nil {
+		return Event{}, nil, err
+	}
+	v, err := e.decideLocked(id, action, scope, uid, admin, nil, "", time.Time{}, d)
+	return v, e.settledLocked(), err
+}
+
+func (e *Engine) decideLocked(id, action, scope string, uid uint32, admin bool, reviewed *policy.Rule, sentence string, reviewDeadline time.Time, leaseDuration time.Duration) (Event, error) {
 	e.refreshZonesLocked()
 	now := e.Now()
 	e.expire(now)
@@ -296,7 +358,7 @@ func (e *Engine) decideLocked(id, action, scope string, uid uint32, admin bool, 
 		var lease *processLease
 		if scope == ForAWhileScope {
 			// Validated before any mutation: refusal leaves the request pending.
-			l, err := e.newLeaseLocked(v, a, action, now)
+			l, err := e.newLeaseLocked(v, a, action, now, leaseDuration)
 			if err != nil {
 				return Event{}, err
 			}
@@ -341,10 +403,13 @@ func (e *Engine) decideLocked(id, action, scope string, uid uint32, admin bool, 
 			e.storeLeaseLocked(lease)
 			v.Lease = lease.ref()
 			v.leaseID = lease.ID
-			v.Permission = v.ScopePreviews[ForAWhileScope]
+			if p, err := leaseOwner(a); err == nil {
+				v.Permission = forAWhilePreview(v.Flow, p, leaseDuration)
+			}
 			reason = "explicit user decision; " + lease.reason()
 		}
 		e.recordFinal(v, action, "user", scope, reason, remembered, &uid, "deferred", "")
+		e.markRetainedDecidedLocked(v.ID)
 		if lease != nil {
 			// Other requests of this process and direction that are still waiting
 			// are subsequent connections too; nothing else changes.
@@ -396,6 +461,13 @@ func (e *Engine) SetRules(rules []policy.Rule) error {
 	e.rules = rules
 	e.pruneHandlesLocked()
 	e.resetCachedLocked("policy replaced")
+	// Wholesale replacement (startup load) also drops explicit Once/lease
+	// admissions: their held packets drop and the client retries.
+	for key, v := range e.events {
+		if v.State != "awaiting-decision" && !strings.HasPrefix(v.Reason, "re-evaluated after policy change") {
+			delete(e.events, key)
+		}
+	}
 	return nil
 }
 

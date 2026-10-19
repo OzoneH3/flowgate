@@ -3,6 +3,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -36,6 +37,9 @@ func main() {
 	}
 	var mu sync.Mutex
 	var jobs sync.WaitGroup
+	// Open outgoing sends; "close" cancels/closes them while the process stays alive.
+	open := map[int]context.CancelFunc{}
+	nextOpen := 0
 	counts := map[string]int{}
 	ports := map[string]int{}
 	count := func(k string) { mu.Lock(); counts[k]++; mu.Unlock() }
@@ -105,6 +109,9 @@ func main() {
 			// Optional explicit destination inside the private fixture prefixes.
 			Host string `json:"host"`
 			Port int    `json:"port"`
+			// UDP only: datagrams on the same socket (same tuple) and their spacing.
+			Repeat     int `json:"repeat"`
+			IntervalMS int `json:"interval_ms"`
 		}
 		json.Unmarshal(scan.Bytes(), &q)
 		switch q.Op {
@@ -112,6 +119,13 @@ func main() {
 			jobs.Wait()
 		case "quit":
 			return
+		case "close":
+			mu.Lock()
+			for id, cancel := range open {
+				cancel()
+				delete(open, id)
+			}
+			mu.Unlock()
 		case "exec":
 			syscall.Exec("/bin/sleep", []string{"sleep", "30"}, os.Environ())
 			return
@@ -172,16 +186,50 @@ func main() {
 				}
 				sendTimeout = time.Duration(q.TimeoutMS) * time.Millisecond
 			}
+			repeat, interval := 1, 300*time.Millisecond
+			if q.Repeat != 0 {
+				if q.Protocol != "udp" || q.Repeat < 1 || q.Repeat > 30 {
+					panic("repeat is for UDP only, 1..30")
+				}
+				repeat = q.Repeat
+			}
+			if q.IntervalMS != 0 {
+				if q.IntervalMS < 50 || q.IntervalMS > 5000 {
+					panic("interval_ms must be 50..5000")
+				}
+				interval = time.Duration(q.IntervalMS) * time.Millisecond
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), sendTimeout)
+			mu.Lock()
+			id := nextOpen
+			nextOpen++
+			open[id] = cancel
+			mu.Unlock()
 			jobs.Add(1)
 			go func() {
 				defer jobs.Done()
-				c, e := net.DialTimeout(key, net.JoinHostPort(host, strconv.Itoa(port)), sendTimeout)
+				defer func() { mu.Lock(); delete(open, id); mu.Unlock(); cancel() }()
+				var d net.Dialer
+				c, e := d.DialContext(ctx, key, net.JoinHostPort(host, strconv.Itoa(port)))
 				if e != nil {
 					return
 				}
 				defer c.Close()
+				// "close" or the timeout ends the socket.
+				go func() { <-ctx.Done(); c.Close() }()
 				c.SetDeadline(time.Now().Add(sendTimeout))
-				c.Write([]byte("process-fixture"))
+				for i := 0; i < repeat; i++ {
+					if i > 0 {
+						select {
+						case <-ctx.Done():
+							return
+						case <-time.After(interval):
+						}
+					}
+					if _, e := c.Write([]byte("process-fixture")); e != nil {
+						return
+					}
+				}
 				c.Read(make([]byte, 128))
 			}()
 		}

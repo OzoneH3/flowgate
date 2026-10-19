@@ -20,10 +20,10 @@ func VerifyRetainedExecutable(a Application, uid uint32, mountNS string) error {
 	if (a.Kind != "native" && a.Kind != "wine") || a.Key == "" || a.Revision == "" || a.Executable == "" {
 		return fmt.Errorf("captured identity is not a verifiable executable (kind %q)", a.Kind)
 	}
-	if mountNS == "" || mountNS != link("/proc/self/ns/mnt") {
-		return fmt.Errorf("the process ran in another mount namespace (container or sandbox); its executable path cannot be validated after exit")
+	if mountNS == "" || mountNS != SelfMountNS() {
+		return UnverifiableEvidence(mountNS, nil, "no reusable executable identity was retained while it ran")
 	}
-	if a.Key != digest(fmt.Sprintf("%d|%s|%s|%s", uid, a.Kind, a.Prefix, a.Executable)) {
+	if a.Key != ApplicationKey(uid, a) {
 		return fmt.Errorf("captured application key does not match its executable, prefix and user")
 	}
 	st, err := os.Stat(a.Executable)

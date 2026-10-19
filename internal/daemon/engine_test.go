@@ -61,15 +61,28 @@ func TestBounds(t *testing.T) {
 		t.Fatal("unbounded state")
 	}
 	*now = now.Add(20 * time.Second)
-	if len(e.List(1000, false)) != 0 {
-		t.Fatal("expired history retained")
+	// Ended requests may stay listed for their retained record, but never as awaiting and
+	// never consuming prompt capacity.
+	for _, v := range e.List(1000, false) {
+		if v.State == "awaiting-decision" || v.RequestRule == nil {
+			t.Fatal("expired history retained", v.State)
+		}
+	}
+	if e.liveEventsLocked() != 0 {
+		t.Fatal("ended requests consume prompt capacity")
 	}
 	e.Max = 256
 	for i := 0; i < 100; i++ {
 		e.Observe(f, string(rune(i)))
 	}
-	if len(e.List(1000, false)) != 20 {
-		t.Fatal("rate bound failed")
+	awaiting := 0
+	for _, v := range e.List(1000, false) {
+		if v.State == "awaiting-decision" {
+			awaiting++
+		}
+	}
+	if awaiting != 20 {
+		t.Fatal("rate bound failed", awaiting)
 	}
 }
 func TestRuleExpiryAndInvalidation(t *testing.T) {

@@ -97,3 +97,17 @@ test('strict IPC payload: explicit fields, no smuggled keys, token only for save
   assert.throws(() => validateRequestRule(ok, true));
   assert.throws(() => validateRequestRule({ ...ok, action: 'once' }));
 });
+
+test('sandbox identity_unverifiable is one permanent concise error (request-sandbox-identity-v1)', () => {
+  const rr = require('../dist/test/request-rule.cjs');
+  const msg = 'identity_unverifiable: No reusable application identity: The process ran in another mount namespace and exited; no host-visible file has device 50 inode 12; mountns: mnt:[4026532900] → daemon mnt:[4026531841]; executable: /tmp/pv/app → not host-visible. No rule saved. Start the app again and choose Remember while its request is open.';
+  assert.equal(rr.IDENTITY_UNVERIFIABLE_TEXT, 'This sandboxed app exited before FlowGate retained a reusable identity.');
+  assert.ok(rr.identityUnverifiable(msg));
+  assert.ok(!rr.identityUnverifiable('executable_changed: Application identity cannot be validated'));
+  const src = fs.readFileSync(path.join(__dirname, '../src/renderer.ts'), 'utf8');
+  // No Refresh review and no automatic re-review for a permanently ended identity.
+  assert.match(src, /refresh\.hidden = rememberMode\(\)\n\s+\? .*\|\| !!unverifiable/);
+  assert.match(src, /!ruleChecking && !unverifiable &&/);
+  assert.match(src, /ruleUnverifiable\.has\(e\.id\)\) return;/);
+  assert.match(src, /ruleMode && unverifiable\n\s+\? IDENTITY_UNVERIFIABLE_TEXT/);
+});

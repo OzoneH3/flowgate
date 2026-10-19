@@ -65,10 +65,12 @@ const api: Bridge = {
     return () => ipcRenderer.removeListener('state:clock', listener);
   },
   decide: (d: Decision) => ipcRenderer.invoke('decide', d),
+  decidePair: (d) => ipcRenderer.invoke('decide-pair', d),
   decisionPreview: (d) => ipcRenderer.invoke('decision:preview', d),
   decisionReconcile: (d) => ipcRenderer.invoke('decision:reconcile', d),
   requestRulePreview: (d) => ipcRenderer.invoke('request-rule:preview', d),
   requestRuleSave: (d) => ipcRenderer.invoke('request-rule:save', d),
+  requestForAWhile: (d) => ipcRenderer.invoke('request:for-a-while', d),
   openPrompt: (id: string) => ipcRenderer.invoke('prompt:open', id),
   promptLayout: (value) => ipcRenderer.invoke('prompt:layout', value),
   dismissPrompt: () => ipcRenderer.invoke('prompt:dismiss'),

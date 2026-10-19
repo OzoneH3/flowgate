@@ -105,6 +105,7 @@ func main() {
 		if e != nil {
 			fatal(e)
 		}
+		p.Provenance = identity.CaptureProvenance(p)
 		output(p)
 	case "attribute":
 		fs := flag.NewFlagSet("attribute", flag.ExitOnError)

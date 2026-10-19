@@ -34,9 +34,11 @@ func TestRequestRuleAfterExitSavesApplicationWideFutureRuleOnly(t *testing.T) {
 	// The process exits; the request times out unanswered.
 	*a = identity.Attribution{Fingerprint: "gone"}
 	*now = now.Add(2 * time.Minute)
-	events := e.List(1000, false)
-	if len(events) != 0 {
-		t.Fatal("expired request not removed from backend events", events)
+	// The ended request stays listed for its retained record: ended, never deliverable.
+	for _, ev := range e.List(1000, false) {
+		if ev.State == "awaiting-decision" || ev.State == "allowed" || ev.RequestRule == nil || !ev.RequestRule.Available {
+			t.Fatal("ended request not retained as ended", ev.State, ev.RequestRule)
+		}
 	}
 	p, err := e.PreviewRequestRule(e.Generation, v.ID, "allow", "persistent", "any", e.Zones.Revision, 1000, false, appOnly())
 	if err != nil {

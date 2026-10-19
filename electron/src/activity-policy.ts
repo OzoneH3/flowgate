@@ -376,7 +376,7 @@ export class ActivityPolicy {
     )
       this.popup = undefined;
     if (Number.isFinite(state.control.serverNow)) this.skew = state.control.serverNow! - Date.now();
-    this.host.hidden = !row || row.kind === 'overview';
+    this.host.hidden = !row || row.kind === 'overview' || row.kind === 'launch';
     if (this.host.hidden || !row) return;
     const inv = selectionInventory(row, state),
       c = state.control;

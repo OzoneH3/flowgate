@@ -1,8 +1,11 @@
 import { applicationHeading } from './application-heading';
 import { connectionPresentation } from './connection-presentation';
 import { REMEMBER_DURATIONS, type RememberOption } from './decision-remember';
-import { FOR_A_WHILE_NOTE, FOR_A_WHILE_TOOLTIP } from './process-lease';
+import { FOR_A_WHILE_NOTE, FOR_A_WHILE_TOOLTIP, durationLabel } from './process-lease';
+import { PREVIOUS_REVISION_NOTICE, previousRevisionTitle } from './prompt-decision';
 import type { ViewEvent } from './protocol';
+import { promptIdentity, provenanceDetails, targetLines } from './provenance';
+import { buildPairPanel, type LocalPairView } from './local-pair';
 
 // The request card shared by the permission window and the Pending requests
 // tab. First view is compact: application,
@@ -14,6 +17,10 @@ export interface CardOptions {
   rememberMode: boolean;
   forAWhile: boolean;
   rememberOptions: RememberOption[];
+  // decision-for-a-while-durations-v1 (FlowGate extension): offered durations.
+  forAWhileDurations?: number[];
+  // local-pair-v1: both endpoints of a same-host connection (renderer computes).
+  pair?: LocalPairView;
 }
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text = '', className = '', id = '') {
   const x = document.createElement(tag);
@@ -40,18 +47,46 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
     protocol = e.flow.protocol.toUpperCase();
   const route = el('div', '', 'connection-route');
   route.title = p.relation;
+  // Verified launch provenance names the game; the socket owner stays visible
+  // as "via <helper>". Display only: the decision target is listed below.
+  const identity = promptIdentity(e);
+  const heading = identity.title
+    ? applicationHeading(
+        { key: '', revision: '', name: identity.title, executable: e.attribution.application?.executable || '' },
+        o.name,
+      )
+    : applicationHeading(e.attribution.application, o.name);
+  if (identity.via) heading.append(el('span', identity.via, 'launch-via', 'launchVia'));
   route.append(
     el('h3', `${p.direction} connection`, 'connection-banner'),
-    applicationHeading(e.attribution.application, o.name),
+    heading,
     el('strong', e.flow.remote, 'remote-endpoint'),
   );
   const nodes: HTMLElement[] = [
     route,
+    ...(o.pair ? [buildPairPanel(o.pair)] : []),
     el('p', `${protocol} · local ${e.flow.local} · ${p.zone}`, 'connection-line', 'connectionLine'),
   ];
+  // Explicit permission target per scope, from the backend, before any decision control.
+  // One line only: the scope of the option currently selected (Once by default, For a while or
+  // Remember when checked); the renderer switches it, so the target is explicit before the click.
+  const lines = targetLines(e.attribution.permission_target);
+  if (lines.length) {
+    const scope = el('p', `${lines[0].label}: ${lines[0].text}`, 'permission-scope', 'permissionScope');
+    for (const line of lines)
+      scope.dataset[line.label === 'Once' ? 'once' : line.label === 'Remember' ? 'remember' : 'forAWhile'] =
+        `${line.label}: ${line.text}`;
+    nodes.push(scope);
+  }
   if (!e.attribution.visibility_complete || e.attribution.status !== 'directly-associated')
     nodes.push(el('p', `Attribution: ${e.attribution.status} · see Details`, 'attribution-warning'));
   const similar = el('p', '', 'similar-requests', 'similarRequests');
+  // A rule exists for an earlier revision of this application: display only.
+  if (e.previous_revision_rules?.length) {
+    const notice = el('p', PREVIOUS_REVISION_NOTICE, 'previous-revision', 'previousRevisionNotice');
+    notice.title = previousRevisionTitle(e.previous_revision_rules);
+    nodes.push(notice);
+  }
   nodes.push(el('p', '', 'expiry'), similar, el('div', '', 'lease-info', 'leaseInfo'));
 
   const details = el('details', '', 'identity-details', 'requestMore');
@@ -70,6 +105,10 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
     e.attribution.owners.map((x) => `PID ${x.pid} · start ${x.start_ticks} · UID ${x.uid}`).join('\n') ||
       'Unavailable',
   );
+  for (const [label, value] of provenanceDetails(e)) row(list, label, value);
+  for (const [label, value] of o.pair?.details ?? []) row(list, label, value);
+  if (e.attribution.permission_target)
+    row(list, 'Rule key', e.attribution.permission_target.key_basis);
   row(list, 'Attribution', `${e.attribution.status}\n${e.attribution.reason}`);
   row(
     list,
@@ -101,6 +140,16 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
   if (o.rememberMode) controls.append(checkbox('rememberToggle', 'Remember', 'remember-toggle'));
   if (o.forAWhile)
     controls.append(checkbox('forAWhileToggle', 'For a while', 'option-toggle for-a-while-toggle', FOR_A_WHILE_TOOLTIP));
+  if (o.forAWhile && (o.forAWhileDurations?.length ?? 0) > 1) {
+    // Shown only while For a while is checked (renderer), beside Allow/Deny.
+    const wrap = el('span', '', 'for-a-while-duration', 'forAWhileDurationWrap'),
+      select = el('select', '', '', 'forAWhileDuration');
+    select.setAttribute('aria-label', 'For a while duration');
+    for (const d of o.forAWhileDurations!) select.append(new Option(durationLabel(d), String(d)));
+    wrap.append(select, el('span', '', 'for-a-while-expiry', 'forAWhileExpiry'));
+    wrap.hidden = true;
+    controls.append(wrap);
+  }
   dock.append(controls);
   if (o.forAWhile) {
     const note = el('p', FOR_A_WHILE_NOTE, 'for-a-while-note', 'forAWhileNote');

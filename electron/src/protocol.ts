@@ -12,7 +12,8 @@ import {
   type ZoneSource,
 } from './network-zones';
 import { parseProcessTarget, type ProcessTarget } from './process-rules';
-import { parseLeaseRef, parseProcessLeases } from './process-lease';
+import { parseLocalPeer, parseOwnSockets, parsePairResult, type LocalPeer, type OwnSocket, type PairChoice, type PairResult } from './local-pair';
+import { parseLeaseRef, parseProcessLeases, validForAWhileSeconds } from './process-lease';
 import {
   parseEvaluation,
   type DaemonEvaluationStatus,
@@ -31,6 +32,58 @@ export interface Application {
   display_executable?: string;
   executable_status?: 'linked' | 'deleted' | 'unavailable';
 }
+// Launch provenance (display only; never a firewall target). See docs/API.md.
+export interface ProvenanceAncestor {
+  pid: number;
+  start_ticks: string;
+  uid: number;
+  name: string;
+  executable: string;
+  revision?: string;
+  marker?: string;
+}
+export interface Launch {
+  kind: 'umu' | 'proton' | 'steam' | 'wine';
+  launcher_pid: number;
+  launcher_start_ticks: string;
+  launcher_name: string;
+  game?: {
+    name: string;
+    title?: string;
+    executable: string;
+    revision?: string;
+    status: 'verified-file' | 'not-found';
+    source: string;
+  };
+  prefix?: string;
+  prefix_id?: string;
+  prefix_source?: string;
+  runtime?: string;
+  steam_app_id?: string;
+  game_id?: string;
+  markers: string[];
+}
+export interface Provenance {
+  evidence: 'verified' | 'unavailable' | 'none';
+  reason: string;
+  role?: 'launcher' | 'game' | 'runtime' | 'helper';
+  group?: string;
+  stop: string;
+  ancestry: ProvenanceAncestor[];
+  launch?: Launch;
+  captured_at?: string;
+}
+// What each decision scope is enforced against today (backend-derived).
+export interface PermissionTarget {
+  kind: 'helper' | 'application' | 'interpreter' | 'unavailable';
+  label: string;
+  once: string;
+  for_a_while: string;
+  remember: string;
+  shared_with_note?: string;
+  key_basis: string;
+  prefix?: string;
+}
 export interface Process {
   thread_group_pid?: number;
   id: string;
@@ -39,6 +92,7 @@ export interface Process {
   uid: number;
   executable: string;
   application: Application;
+  provenance?: Provenance;
 }
 export interface Traffic {
   state?: string;
@@ -143,7 +197,13 @@ export interface RequestEvent {
     visibility_complete: boolean;
     application?: Application;
     owners: Process[];
+    provenance?: Provenance;
+    permission_target?: PermissionTarget;
+    // local-pair-v1: the request's own socket(s) (cookie/inode evidence).
+    sockets?: OwnSocket[];
   };
+  // local-pair-v1: other endpoint of a same-host connection (exact reversed tuple).
+  local_peer?: LocalPeer;
   remembered_filter?: RuleFilter;
   scope_previews: Partial<Record<Scope, string>>;
   // Equivalent repeated requests share a group (backend `request_group`).
@@ -151,9 +211,17 @@ export interface RequestEvent {
   // stored-ask-v1: the stored Ask rule that caused this prompt (absent = default Ask).
   ask_rule?: { id: string; version: number };
   // request-application-rule-v1: retained verified identity for a future rule.
-  request_rule?: { available: boolean; process_state: 'running' | 'ended' | 'unknown'; until: string };
+  // process_lease_available (request-for-a-while-v1): undecided request whose
+  // exact verified process instance still runs; For a while may create a lease.
+  request_rule?: {
+    available: boolean; process_state: 'running' | 'ended' | 'unknown'; until: string;
+    process_lease_available?: boolean; pid?: number;
+  };
   // decision-for-a-while-v1: the lease a For a while decision created.
   lease?: { id: string; until: string };
+  // queue-reconcile-v1: enabled rules for an EARLIER revision of this
+  // application (e.g. updated executable). Display only; never applied.
+  previous_revision_rules?: { id: string; action: string; revision: string }[];
 }
 export type Scope = 'once' | 'application' | 'persistent';
 export type Action = 'allow' | 'block';
@@ -229,10 +297,19 @@ export interface Reply {
   activity?: Activity;
   events: RequestEvent[];
   decision?: RequestEvent;
+  // local-pair-v1: decide-pair result (both sides).
+  pair?: PairResult;
   decision_preview?: unknown;
   decision_receipt?: unknown;
   request_rule_preview?: unknown;
   process_leases?: import('./process-lease').ProcessLease[];
+  // queue-reconcile-v1: other requests the operation settled.
+  settled?: { id: string; state: string; rule: string }[];
+  // request-for-a-while-v1: lease from an ended request (which stays ended).
+  process_lease?: import('./process-lease').ProcessLease;
+  request_ended?: boolean;
+  // decision-for-a-while-durations-v1: allowed For a while durations (seconds).
+  for_a_while_durations?: number[];
   replayed?: boolean;
   rules: Rule[];
   rule_states?: Record<string, RuleTargetState>;
@@ -247,6 +324,8 @@ export interface Attempt {
   reconcile?: string;
   // Decided scope of an acknowledged attempt (for the short result text).
   scope?: Decision['scope'];
+  // For a while: the backend's authoritative lease end.
+  leaseUntil?: string;
 }
 export interface ViewEvent extends RequestEvent {
   reviewFailure?: import('./decision-remember').DecisionReviewFailure;
@@ -288,6 +367,10 @@ export interface ClientState {
     policy?: PolicyView;
     policyError?: string;
     processLeases?: import('./process-lease').ProcessLease[];
+    forAWhileDurations?: number[];
+    // A decision outcome was unknown/rejected: no new prompt is presented until
+    // an authoritative list issued after it was read (queue reconciliation).
+    reconciling?: boolean;
   };
 }
 export interface Decision {
@@ -331,7 +414,7 @@ export interface Bridge {
   ): Promise<
     Record<
       string,
-      { icon: string | null; name?: string; source: 'desktop-metadata' | 'unavailable' }
+      { icon: string | null; name?: string; source: 'desktop-metadata' | 'steam-manifest' | 'unavailable' }
     >
   >;
   applicationIcons(keys: string[]): Promise<Record<string, string | null>>;
@@ -361,6 +444,8 @@ export interface Bridge {
     fn: (clock: { generation: string; serverNow: number; publication?: number }) => void,
   ): () => void;
   decide(value: Decision): Promise<Attempt>;
+  // local-pair-v1: one decision for both sides of a verified local pair.
+  decidePair(value: PairChoice): Promise<{ message: string; text: string; result: PairResult }>;
   decisionPreview(value: Decision): Promise<import('./decision-remember').DecisionPreview>;
   decisionReconcile(value: {
     generation: string;
@@ -370,6 +455,7 @@ export interface Bridge {
   openPrompt(id: string): Promise<void>;
   requestRulePreview(value: import('./request-rule').RequestRuleChoice): Promise<import('./request-rule').RequestRulePreview>;
   requestRuleSave(value: import('./request-rule').RequestRuleChoice): Promise<{ message: string; rule: Rule; replayed: boolean }>;
+  requestForAWhile(value: import('./prompt-decision').EndedLeaseChoice): Promise<{ message: string; lease: import('./process-lease').ProcessLease }>;
   openFutureApplicationRule(value: { generation: string; id: string }): Promise<void>;
   onFutureApplicationRule(fn: (source: ObservedSource) => void): () => void;
   promptLayout(value: { height: number; pointerDown: boolean; keysDown: string[] }): Promise<void>;
@@ -427,6 +513,80 @@ function process(v: unknown): Process {
     uid: number(p.uid),
     executable: string(p.executable),
     application: application(p.application),
+    provenance: parseProvenance(p.provenance),
+  };
+}
+const bounded = (v: unknown, max = 1024) => string(v).slice(0, max);
+export function parseProvenance(raw: unknown): Provenance | undefined {
+  if (raw == null) return;
+  const p = object(raw);
+  if (!['verified', 'unavailable', 'none'].includes(string(p.evidence))) return;
+  const l = p.launch == null ? undefined : object(p.launch);
+  const g = l && l.game != null ? object(l.game) : undefined;
+  const launch: Launch | undefined =
+    l && ['umu', 'proton', 'steam', 'wine'].includes(string(l.kind))
+      ? {
+          kind: string(l.kind) as Launch['kind'],
+          launcher_pid: number(l.launcher_pid),
+          launcher_start_ticks: bounded(l.launcher_start_ticks, 32),
+          launcher_name: bounded(l.launcher_name, 256),
+          game:
+            g && ['verified-file', 'not-found'].includes(string(g.status))
+              ? {
+                  name: bounded(g.name, 256),
+                  title: bounded(g.title, 256) || undefined,
+                  executable: bounded(g.executable),
+                  revision: bounded(g.revision, 256) || undefined,
+                  status: string(g.status) as 'verified-file' | 'not-found',
+                  source: bounded(g.source, 128),
+                }
+              : undefined,
+          prefix: bounded(l.prefix) || undefined,
+          prefix_id: bounded(l.prefix_id, 64) || undefined,
+          prefix_source: bounded(l.prefix_source, 64) || undefined,
+          runtime: bounded(l.runtime, 256) || undefined,
+          steam_app_id: bounded(l.steam_app_id, 64) || undefined,
+          game_id: bounded(l.game_id, 256) || undefined,
+          markers: array(l.markers, 16).map((m) => bounded(m, 32)),
+        }
+      : undefined;
+  return {
+    evidence: string(p.evidence) as Provenance['evidence'],
+    reason: bounded(p.reason),
+    role: ['launcher', 'game', 'runtime', 'helper'].includes(string(p.role))
+      ? (string(p.role) as Provenance['role'])
+      : undefined,
+    group: bounded(p.group, 64) || undefined,
+    stop: bounded(p.stop, 64),
+    ancestry: array(p.ancestry, 32).map((raw) => {
+      const a = object(raw);
+      return {
+        pid: number(a.pid),
+        start_ticks: bounded(a.start_ticks, 32),
+        uid: number(a.uid),
+        name: bounded(a.name, 256),
+        executable: bounded(a.executable),
+        revision: bounded(a.revision, 256) || undefined,
+        marker: bounded(a.marker, 32) || undefined,
+      };
+    }),
+    launch,
+    captured_at: bounded(p.captured_at, 64) || undefined,
+  };
+}
+export function parsePermissionTarget(raw: unknown): PermissionTarget | undefined {
+  if (raw == null) return;
+  const t = object(raw);
+  if (!['helper', 'application', 'interpreter', 'unavailable'].includes(string(t.kind))) return;
+  return {
+    kind: string(t.kind) as PermissionTarget['kind'],
+    label: bounded(t.label),
+    once: bounded(t.once),
+    for_a_while: bounded(t.for_a_while),
+    remember: bounded(t.remember, 2048),
+    shared_with_note: bounded(t.shared_with_note, 2048) || undefined,
+    key_basis: bounded(t.key_basis, 256),
+    prefix: bounded(t.prefix) || undefined,
   };
 }
 function pendingRevalidation(raw: unknown): RequestEvent['revalidation'] {
@@ -475,6 +635,9 @@ function event(v: unknown): RequestEvent {
       visibility_complete: a.visibility_complete === true,
       application: a.application ? application(a.application) : undefined,
       owners: array(a.owners, 2048).map(process),
+      provenance: parseProvenance(a.provenance),
+      permission_target: parsePermissionTarget(a.permission_target),
+      sockets: parseOwnSockets(a.sockets),
     },
     scope_previews: previews,
     remembered_filter: e.remembered_filter ? ruleFilter(e.remembered_filter) : undefined,
@@ -485,13 +648,32 @@ function event(v: unknown): RequestEvent {
     ask_rule: askRule(e.ask_rule),
     request_rule: requestRuleSource(e.request_rule),
     lease: parseLeaseRef(e.lease),
+    previous_revision_rules: previousRevisionRules(e.previous_revision_rules),
+    local_peer: parseLocalPeer(e.local_peer, parseProvenance),
   };
+}
+function previousRevisionRules(v: unknown): RequestEvent['previous_revision_rules'] {
+  if (!Array.isArray(v)) return undefined;
+  const out = v.slice(0, 8).map(object).filter((r) => string(r.id) && string(r.id).length <= 256)
+    .map((r) => ({ id: string(r.id), action: string(r.action).slice(0, 16), revision: string(r.revision).slice(0, 256) }));
+  return out.length ? out : undefined;
+}
+// Invalid entries are ignored; a settled list is advisory and never approves anything.
+function settledList(v: unknown): Reply['settled'] {
+  if (!Array.isArray(v)) return undefined;
+  return v.slice(0, 256).map(object)
+    .filter((x) => string(x.id) && string(x.id).length <= 256 && /^[a-z-]{1,32}$/.test(string(x.state)))
+    .map((x) => ({ id: string(x.id), state: string(x.state), rule: string(x.rule).slice(0, 256) }));
 }
 function requestRuleSource(v: unknown): RequestEvent['request_rule'] {
   const r = object(v);
   return r.available === true && ['running', 'ended', 'unknown'].includes(string(r.process_state)) &&
     Number.isFinite(Date.parse(string(r.until)))
-    ? { available: true, process_state: string(r.process_state) as 'running' | 'ended' | 'unknown', until: string(r.until) }
+    ? {
+        available: true, process_state: string(r.process_state) as 'running' | 'ended' | 'unknown', until: string(r.until),
+        process_lease_available: r.process_lease_available === true,
+        pid: Number.isSafeInteger(r.pid) && Number(r.pid) > 0 ? Number(r.pid) : undefined,
+      }
     : undefined;
 }
 function askRule(v: unknown): RequestEvent['ask_rule'] {
@@ -564,7 +746,14 @@ export function parseReply(raw: unknown): Reply {
     decision_receipt: r.decision_receipt,
     request_rule_preview: r.request_rule_preview,
     process_leases: parseProcessLeases(r.process_leases),
+    settled: settledList(r.settled),
+    process_lease: r.process_lease ? parseProcessLeases([r.process_lease])?.[0] : undefined,
+    request_ended: r.request_ended === true,
+    for_a_while_durations: Array.isArray(r.for_a_while_durations)
+      ? r.for_a_while_durations.slice(0, 16).filter((d): d is number => Number.isSafeInteger(d) && (d as number) > 0)
+      : undefined,
     replayed: r.replayed === true,
+    pair: parsePairResult(r.pair, event),
     decision_record: r.decision_record,
     network_zones: parseNetworkZones(r.network_zones),
     zone_migration: r.zone_migration,
@@ -833,11 +1022,11 @@ export function validateDecision(v: unknown): Decision {
     throw Error('Invalid decision');
   if (
     d.scope === 'for-a-while' &&
-    ['network_zone', 'zone_revision', 'preview_token', 'remember', 'duration_seconds'].some(
-      (k) => d[k] !== undefined,
-    )
+    (['network_zone', 'zone_revision', 'preview_token', 'remember'].some((k) => d[k] !== undefined) ||
+      (d.duration_seconds !== undefined && !validForAWhileSeconds(d.duration_seconds)))
   )
     throw Error('Invalid For a while decision');
+  if (d.scope === 'for-a-while') return d as unknown as Decision;
   const zoned =
     d.network_zone !== undefined || d.zone_revision !== undefined || d.preview_token !== undefined;
   if (
@@ -990,6 +1179,8 @@ export interface Preferences {
   keepInTray?: boolean;
   sidebar?: number;
   columns?: Record<string, number>;
+  // Last chosen For a while duration (seconds), validated against the backend set.
+  forAWhileSeconds?: number;
 }
 function ruleFilter(v: unknown): RuleFilter {
   const f = object(v);
