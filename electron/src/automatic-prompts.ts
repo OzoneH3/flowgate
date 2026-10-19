@@ -99,7 +99,8 @@ export class AutomaticPrompts {
   follow(state: ClientState, ref: RequestRef): RequestRef | undefined {
     if (state.control.generation !== ref.generation) return;
     const e = state.control.events.find((e) => e.id === ref.id);
-    if (e && awaiting(e)) return ref;
+    if (e && (awaiting(e) || e.attempt?.phase === 'unknown' || e.attempt?.phase === 'submitting'))
+      return ref;
     if (!canDecide(state.control)) return;
     const group = ref.group ?? (e ? groupKey(e) : undefined),
       g = requestGroups(state.control.events).find((g) => g.key === group);

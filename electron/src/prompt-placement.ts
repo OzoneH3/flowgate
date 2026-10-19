@@ -19,12 +19,18 @@ export function placementScript(pid: number, windowID: number, bounds: Rect, out
   const placement = outputName
     ? `const output=workspace.screens.find(o=>o.name===${JSON.stringify(outputName)}); if(!output)throw new Error('Configured primary output unavailable'); workspace.sendClientToScreen(w,output); const area=workspace.clientArea(KWin.PlacementArea,output,workspace.currentDesktopForScreen(output)); const width=Math.min(${bounds.width},area.width),height=Math.min(${bounds.height},area.height); w.frameGeometry={x:area.x+area.width-width,y:area.y+area.height-height,width:width,height:height};`
     : `w.frameGeometry = ${JSON.stringify(bounds)};`;
-  return `for (const w of workspace.windowList()) { if (w.pid === ${pid} && w.caption === ${JSON.stringify(promptTitle(windowID))}) { ${placement} workspace.activeWindow = w; print("FLOWGATE_PROMPT_PLACED_${pid}", ${JSON.stringify(outputName || 'native-primary')}, JSON.stringify(w.frameGeometry)); } }`;
+  return `for (const w of workspace.windowList()) { if (w.pid === ${pid} && w.caption === ${JSON.stringify(promptTitle(windowID))}) { ${placement} print("FLOWGATE_PROMPT_PLACED_${pid}", ${JSON.stringify(outputName || 'native-primary')}, JSON.stringify(w.frameGeometry)); } }`;
 }
 // Bounded startup handshake. KWin/Wayland configure is asynchronous and a desktop
 // restore script can overwrite the first request. Bind one native window, settle
 // its initial output/geometry, then verify the compact frame; never run on polls.
-export function placementQML(pid: number, windowID: number, bounds: Rect, outputName?: string) {
+export function placementQML(
+  pid: number,
+  windowID: number,
+  bounds: Rect,
+  outputName?: string,
+  reveal = true,
+) {
   placementScript(pid, windowID, bounds, outputName); // validate fixed numeric input
   return `import QtQuick
 import org.kde.kwin
@@ -34,12 +40,12 @@ QtObject {
   property var target: null
   function added(w) { if(w.pid===${pid} && w.caption===${JSON.stringify(promptTitle(windowID))}) { target=w; w.keepAbove=true; w.opacity=0; console.log("FLOWGATE_PROMPT_HELD",${pid},${windowID},w.output.name,w.opacity); } }
   Component.onCompleted: { workspace.windowAdded.connect(root.added); for(const w of workspace.stackingOrder) added(w); }
-  Component.onDestruction: { workspace.windowAdded.disconnect(root.added); if(target) target.opacity=1; }
+  Component.onDestruction: { workspace.windowAdded.disconnect(root.added); if(target) target.opacity=${reveal ? 1 : 0}; }
   property var state: ({ticks:0, nativeID:null, previous:"", stable:0, applied:0, waited:0, confirmed:0})
   property Timer clock: Timer { interval:50; repeat:true; running:true; onTriggered:root.tick() }
   function tick() {
     const s=state;
-    if (++s.ticks>40) { console.log("FLOWGATE_PROMPT_UNCONFIRMED",${pid},${windowID}); if(target) target.opacity=1; clock.stop(); return; }
+    if (++s.ticks>40) { console.log("FLOWGATE_PROMPT_UNCONFIRMED",${pid},${windowID}); if(target) target.opacity=${reveal ? 1 : 0}; clock.stop(); return; }
     const matches=workspace.stackingOrder.filter(w=>w.pid===${pid} && w.caption===${JSON.stringify(promptTitle(windowID))});
     if(matches.length!==1) return;
     const w=matches[0], nativeID=String(w.internalId);
@@ -61,7 +67,7 @@ QtObject {
     const correct=w.output===output && ["x","y","width","height"].every(k=>Math.abs(g[k]-desired[k])<=1);
     s.confirmed=correct?s.confirmed+1:0;
     if(s.confirmed>=3) {
-      w.keepAbove=true; w.opacity=1; workspace.activeWindow=w;
+      w.keepAbove=true; w.opacity=${reveal ? 1 : 0}; w.minimized=${!reveal};
       console.log("FLOWGATE_PROMPT_CONFIRMED",JSON.stringify({pid:${pid},windowID:${windowID},nativeID:nativeID,output:output.name,area:area,geometry:g,attempts:s.applied}));
       clock.stop(); return;
     }
@@ -127,6 +133,7 @@ export async function placeKDEPrompt(
   bounds: Rect,
   isLive: () => boolean,
   onPrepared: (installed: boolean) => void = () => {},
+  reveal = true,
 ) {
   if (process.platform !== 'linux') {
     onPrepared(false);
@@ -141,7 +148,9 @@ export async function placeKDEPrompt(
     if (!isLive()) return;
     const outputName = await configuredPrimaryOutput();
     if (!isLive()) return;
-    await fs.writeFile(file, placementQML(pid, windowID, bounds, outputName), { mode: 0o600 });
+    await fs.writeFile(file, placementQML(pid, windowID, bounds, outputName, reveal), {
+      mode: 0o600,
+    });
     const id = await dbus([
       '/Scripting',
       'org.kde.kwin.Scripting.loadDeclarativeScript',
@@ -163,6 +172,40 @@ export async function placeKDEPrompt(
     // DBus object can survive and intercept a later reused script ID.
     if (scriptID)
       await dbus([`/Scripting/Script${scriptID}`, 'org.kde.kwin.Script.stop']).catch(() => {});
+    await dbus(['/Scripting', 'org.kde.kwin.Scripting.unloadScript', name]).catch(() => {});
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+}
+
+// Content-driven resize: a one-shot compositor placement, without activation or opacity changes.
+export async function resizeKDEPrompt(
+  profile: string,
+  pid: number,
+  windowID: number,
+  bounds: Rect,
+  visible = true,
+) {
+  if (process.platform !== 'linux') return;
+  const dir = await fs.mkdtemp(path.join(profile, 'prompt-resize-'));
+  const name = `flowgate-resize-${pid}-${path.basename(dir)}`;
+  let id: string | undefined;
+  try {
+    const file = path.join(dir, 'resize.js');
+    await fs.writeFile(
+      file,
+      placementScript(pid, windowID, bounds, await configuredPrimaryOutput()).replace(
+        ' print(',
+        ` w.opacity=${visible ? 1 : 0}; w.minimized=${!visible}; print(`,
+      ),
+      { mode: 0o600 },
+    );
+    id = await dbus(['/Scripting', 'org.kde.kwin.Scripting.loadScript', file, name]);
+    if (!/^\d+$/.test(id)) throw Error('Invalid resize script');
+    await dbus([`/Scripting/Script${id}`, 'org.kde.kwin.Script.run']);
+  } catch (error) {
+    console.info('FlowGate: compositor resize unavailable:', String(error));
+  } finally {
+    if (id) await dbus([`/Scripting/Script${id}`, 'org.kde.kwin.Script.stop']).catch(() => {});
     await dbus(['/Scripting', 'org.kde.kwin.Scripting.unloadScript', name]).catch(() => {});
     await fs.rm(dir, { recursive: true, force: true });
   }

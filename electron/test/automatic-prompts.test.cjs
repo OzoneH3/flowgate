@@ -164,3 +164,15 @@ test('permission sender is frozen to request and daemon, main retains explicit s
   assert.throws(() => boundDecision(d, { generation: 'new', id: 'a' }));
   assert.deepEqual(boundDecision(d), d);
 });
+
+test('unknown acknowledgement stays available for reconciliation even after expiry', () => {
+  const q = new AutomaticPrompts(),
+    s = state(['a', 'b']),
+    ref = q.next(s, false);
+  Object.assign(s.control.events[0], {
+    remainingMs: 0,
+    state: 'expired',
+    attempt: { phase: 'unknown' },
+  });
+  assert.deepEqual(q.follow(s, ref), ref);
+});

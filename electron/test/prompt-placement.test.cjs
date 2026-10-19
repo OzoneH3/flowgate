@@ -17,7 +17,7 @@ test('KDE placement only touches own PID and fixed permission caption', () => {
     print: () => {},
   });
   assert.deepEqual({ ...windows[0].frameGeometry }, desired);
-  assert.equal(workspace.activeWindow, windows[0]);
+  assert.equal(workspace.activeWindow, undefined);
   for (const w of windows.slice(1)) assert.equal(w.frameGeometry, undefined);
   assert.throws(() => placementScript(-1, 7, desired));
   assert.throws(() => placementScript(42, 7, { ...desired, x: NaN }));
@@ -59,7 +59,7 @@ test('KDE configured priority overrides Electron output order and uses that outp
   assert.deepEqual({ ...w.frameGeometry }, { x: 4600, y: 932, width: 520, height: 460 });
 });
 
-test('startup handshake waits for native configure and reveals/focuses only once', () => {
+test('startup handshake waits for native configure and reveals without activation', () => {
   const { placementQML } = require('../dist/test/prompt-placement.cjs');
   const qml = placementQML(42, 7, { x: 0, y: 0, width: 520, height: 460 }, 'primary');
   const body = qml.slice(
@@ -135,7 +135,7 @@ test('startup handshake waits for native configure and reveals/focuses only once
   for (let i = 0; i < 3; i++) tick();
   assert.equal(w.opacity, 1);
   assert.equal(w.keepAbove, true);
-  assert.equal(focused, 1);
+  assert.equal(focused, 0);
   assert.equal(stopped, 1);
   assert.deepEqual({ ...w.actual }, { x: 2380, y: 140, width: 520, height: 460 });
   assert.match(qml, /windowAdded.connect/);
