@@ -164,3 +164,15 @@ func (s *Store) Replace(rules []policy.Rule) error {
 	}
 	return tx.Commit()
 }
+
+// ReadRules does not create state or acquire a writer; the boot guard uses only
+// validated preset protocol scopes from an existing root-owned database.
+func ReadRules(path string) ([]policy.Rule, error) {
+	db, err := sql.Open("sqlite3", "file:"+url.PathEscape(path)+"?mode=ro&_busy_timeout=2000")
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	s := &Store{db: db}
+	return s.Load()
+}

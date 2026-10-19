@@ -8,7 +8,7 @@ Wants=network-pre.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/lib/flowgate/current/flowgate protection-guard --state /run/flowgate-enforcement --desired /var/lib/flowgate/protection.json
+ExecStart=/usr/local/lib/flowgate/current/flowgate protection-guard --state /run/flowgate-enforcement --desired /var/lib/flowgate/protection.json --bootstrap-database /var/lib/flowgate/rules.db
 RemainAfterExit=yes
 TimeoutStartSec=15s
 

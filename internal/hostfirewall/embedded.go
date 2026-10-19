@@ -284,7 +284,7 @@ func (m *Evaluation) run(ctx context.Context, id string) {
 		return
 	}
 	if continuous {
-		if err := InstallGuard(m.dir); err != nil {
+		if err := InstallGuard(m.dir, m.e.ApprovedBootstrap()...); err != nil {
 			m.finish(err, false)
 			return
 		}
@@ -311,7 +311,7 @@ func (m *Evaluation) run(ctx context.Context, id string) {
 		return
 	}
 	s := m.Status()
-	r := Record{Continuous: continuous, Embedded: true, Profile: profile, Token: id, PID: os.Getpid(), Start: startID(os.Getpid()), NetNS: identity.NetNS(), State: "starting", StopsAt: s.StopsAt}
+	r := Record{Bootstrap: m.e.ApprovedBootstrap(), Continuous: continuous, Embedded: true, Profile: profile, Token: id, PID: os.Getpid(), Start: startID(os.Getpid()), NetNS: identity.NetNS(), State: "starting", StopsAt: s.StopsAt}
 	if err = save(m.dir, r); err != nil {
 		finish(err, true)
 		return
@@ -342,7 +342,7 @@ func (m *Evaluation) run(ctx context.Context, id string) {
 			if er := ctx.Err(); er != nil {
 				return er
 			}
-			if er := batch(profileRules(id, profile)); er != nil {
+			if er := batch(profileRules(id, profile, m.e.ApprovedBootstrap()...)); er != nil {
 				return er
 			}
 			if m.afterInstall != nil {
@@ -417,7 +417,7 @@ func (m *Evaluation) run(ctx context.Context, id string) {
 								m.status.Reason = er.Error()
 								m.status.Cleanup = "unconfirmed"
 								m.mu.Unlock()
-								if guardErr := InstallGuard(m.dir); guardErr != nil {
+								if guardErr := InstallGuard(m.dir, m.e.ApprovedBootstrap()...); guardErr != nil {
 									er = fmt.Errorf("%v; guard installation failed: %w", er, guardErr)
 								}
 							}
@@ -463,7 +463,7 @@ func (m *Evaluation) run(ctx context.Context, id string) {
 		deliberate := m.desiredMode == "monitoring"
 		m.mu.Unlock()
 		if !deliberate {
-			guardErr := InstallGuard(m.dir)
+			guardErr := InstallGuard(m.dir, m.e.ApprovedBootstrap()...)
 			if err == nil {
 				err = fmt.Errorf("continuous consumer ended; new admissions fail closed until restart or explicit recovery")
 			}

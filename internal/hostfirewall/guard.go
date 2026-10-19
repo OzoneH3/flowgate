@@ -8,6 +8,7 @@ import (
 	"flowgate/internal/daemon"
 	"flowgate/internal/decisionlog"
 	"flowgate/internal/identity"
+	"flowgate/internal/policy"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -70,8 +71,8 @@ func saveGuard(dir string, r guardRecord) error {
 	return d.Sync()
 }
 
-func guardRules(token string) string {
-	return strings.ReplaceAll(`add table inet flowgate_guard { comment "flowgate:guard:TOKEN"; }
+func guardRules(token string, bootstrap ...policy.BootstrapInterface) string {
+	return scopedBootstrap(strings.ReplaceAll(`add table inet flowgate_guard { comment "flowgate:guard:TOKEN"; }
 add chain inet flowgate_guard input { type filter hook input priority 9; policy accept; }
 add chain inet flowgate_guard output { type filter hook output priority 9; policy accept; }
 add rule inet flowgate_guard input meta nfproto ipv4 udp sport 67 udp dport 68 accept
@@ -84,7 +85,7 @@ add rule inet flowgate_guard input ct state established,related accept
 add rule inet flowgate_guard output ct state established,related accept
 add rule inet flowgate_guard input meta l4proto { tcp, udp } drop
 add rule inet flowgate_guard output meta l4proto { tcp, udp } drop
-`, "TOKEN", token)
+`, "TOKEN", token), GuardTable, bootstrap)
 }
 func guardOwned(dir string) (bool, error) {
 	b, err := nft("-j", "list", "tables")
@@ -140,7 +141,7 @@ func guardOwned(dir string) (bool, error) {
 	}
 	return false, nil
 }
-func InstallGuard(dir string) error {
+func InstallGuard(dir string, bootstrap ...policy.BootstrapInterface) error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
@@ -156,7 +157,7 @@ func InstallGuard(dir string) error {
 		if err = saveGuard(dir, r); err != nil {
 			return err
 		}
-		if err = batch(guardRules(r.Token)); err != nil {
+		if err = batch(guardRules(r.Token, bootstrap...)); err != nil {
 			return err
 		}
 		r.Digest, err = tableDigestFor(GuardTable)
@@ -213,7 +214,7 @@ func RecoverContinuous(dir string) error {
 	if r.Start != "" && startID(r.PID) == r.Start {
 		return fmt.Errorf("continuous consumer still alive; refusing competing owner")
 	}
-	if err = InstallGuard(dir); err != nil {
+	if err = InstallGuard(dir, r.Bootstrap...); err != nil {
 		return err
 	}
 	return Recover(dir, r.Token)

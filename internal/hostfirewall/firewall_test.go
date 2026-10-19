@@ -2,6 +2,7 @@ package hostfirewall
 
 import (
 	"flowgate/internal/daemon"
+	"flowgate/internal/policy"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,7 +10,7 @@ import (
 )
 
 func TestProfileShape(t *testing.T) {
-	r := rules(strings.Repeat("a", 32))
+	r := profileRules(strings.Repeat("a", 32), "incoming", policy.BootstrapInterface{Name: "test0", IPv4: true, IPv6: true})
 	for _, bad := range []string{"flush", "bypass", "hook forward", "ct state established,related accept"} {
 		if strings.Contains(r, bad) {
 			t.Fatalf("unsafe profile %s", bad)

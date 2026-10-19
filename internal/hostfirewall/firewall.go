@@ -12,6 +12,7 @@ import (
 	"flowgate/internal/decisionlog"
 	"flowgate/internal/identity"
 	"flowgate/internal/monitor"
+	"flowgate/internal/policy"
 	"flowgate/internal/queue"
 	"flowgate/internal/readiness"
 	"flowgate/internal/store"
@@ -31,6 +32,7 @@ const Table = readiness.Table
 const Queue = readiness.Queue
 
 type Record struct {
+	Bootstrap    []policy.BootstrapInterface
 	Continuous   bool
 	Embedded     bool
 	Profile      string
@@ -210,7 +212,7 @@ func preflightFor(profile string, administrator bool, zones ...identity.NetworkZ
 }
 
 func rules(token string) string { return profileRules(token, "incoming") }
-func profileRules(token, profile string) string {
+func profileRules(token, profile string, bootstrap ...policy.BootstrapInterface) string {
 	r := fmt.Sprintf(`add table inet %s { comment "flowgate:%s"; }
 add chain inet %s input { type filter hook input priority 10; policy accept; }
 add chain inet %s output { type filter hook output priority 10; policy accept; }
@@ -246,7 +248,7 @@ add rule inet flowgate_host output meta l4proto udp jump inspect
 add rule inet flowgate_host output counter drop
 `
 	}
-	return r
+	return scopedBootstrap(r, Table, bootstrap)
 }
 
 func Run(ctx context.Context, dir, socket, database string, uid uint32, duration, timeout time.Duration) error {

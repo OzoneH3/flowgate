@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"flag"
 	"flowgate/internal/hostfirewall"
+	"flowgate/internal/policy"
+	"flowgate/internal/store"
 	"fmt"
 	"os"
+	"time"
 )
 
 // Local root recovery intentionally does not depend on the GUI or API. Stop the
@@ -13,6 +16,7 @@ import (
 func protectionLocalCommand(op string, args []string) error {
 	fs := flag.NewFlagSet(op, flag.ContinueOnError)
 	state := fs.String("state", "/run/flowgate-enforcement", "private ownership record")
+	database := fs.String("bootstrap-database", "", "root-owned stored preset scopes for interface DHCP bootstrap")
 	desired := fs.String("desired", "", "optional durable mode; monitoring skips boot guard")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -40,7 +44,15 @@ func protectionLocalCommand(op string, args []string) error {
 				return fmt.Errorf("invalid desired mode")
 			}
 		}
-		return hostfirewall.InstallGuard(*state)
+		var bootstrap []policy.BootstrapInterface
+		if *database != "" {
+			rules, err := store.ReadRules(*database)
+			if err != nil {
+				return err
+			}
+			bootstrap = policy.BootstrapFrom(rules, time.Now())
+		}
+		return hostfirewall.InstallGuard(*state, bootstrap...)
 	}
 	if err := hostfirewall.RecoverContinuous(*state); err != nil {
 		return err
