@@ -17,6 +17,7 @@ export function rowStructure(r: Row, depth: number, selected: boolean, expanded:
     r.process,
     r.displayApplication,
     r.inactive,
+    r.requestEvent && [r.requestEvent.id, r.requestEvent.state],
     r.children.map((c) => c.id),
     depth,
     selected,

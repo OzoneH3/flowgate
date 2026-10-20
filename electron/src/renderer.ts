@@ -987,7 +987,7 @@ if (promptID) {
 function buildTree() {
   const a = state?.observation.activity;
   roots = a
-    ? activityTree(a, state.control.rules, $<HTMLInputElement>('search').value, $<HTMLSelectElement>('filter').value, undefined, state.control.capabilities?.includes(ZONE_CAPABILITY)?state.control.networkZones:undefined)
+    ? activityTree(a, state.control.rules, $<HTMLInputElement>('search').value, $<HTMLSelectElement>('filter').value, undefined, state.control.capabilities?.includes(ZONE_CAPABILITY)?state.control.networkZones:undefined, state.control.events)
     : [];
   if (a) {
     const children = [...networkOverviews(), ...roots];
@@ -1465,6 +1465,8 @@ function renderTree() {
     const textLabel = element('span', rowLabel, 'row-name-text');
     if (r.kind === 'application' && displayKey && !r.applicationZone) textLabel.dataset.displayKey = displayKey;
     name.append(led, toggle, icon, textLabel);
+    if (r.requestEvent && !r.process && !r.inactive && !r.rows.length)
+      name.append(element('span', awaiting(r.requestEvent) ? ' · awaiting permission' : ' · recent request, no observed socket', 'row-inactive-note'));
     if (r.inactive)
       name.append(
         element(
@@ -1748,7 +1750,20 @@ function renderInfo() {
     field(info,'Unix socket holder',`wineserver PID ${a.evidence.broker_pid}, start ${a.evidence.broker_start_ticks}; socket cookie ${a.evidence.socket_cookie}`);
     field(info,'Rule identity',`${a.application.key} · revision ${a.application.revision} · UID ${a.uid}`);
   }
-  if (r.displayApplication) {
+  if (r.requestEvent) {
+    const e=r.requestEvent;
+    field(info, 'Last request', `${e.state} · ${e.flow.direction} ${e.flow.protocol} · ${e.flow.remote}`);
+    field(info, 'Request reason', e.reason || 'Awaiting decision');
+    field(info, 'Recorded executable', e.attribution.application?.executable || 'Unknown');
+    field(info, 'Recorded caller', e.attribution.owners.map(p => `${p.pid} · ${p.provenance?.parent?.executable || 'caller unavailable'}`).join('\n'));
+    field(info, 'Observation', 'Request evidence retained by the daemon; absence of a current socket does not establish that the process exited.');
+    if (awaiting(e)) {
+      const review=element('button','Review pending request');
+      review.onclick=()=>{selectRequest(e.id); $('requestsTab').click(); renderRequests();};
+      info.append(review);
+    }
+  }
+  if (r.displayApplication && !r.requestEvent) {
     field(info, 'Display application', r.displayApplication.executable);
     field(
       info,

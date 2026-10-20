@@ -1,6 +1,6 @@
 import { addApplicationZones, type ApplicationZone } from './application-zones';
 import type { NetworkZones } from './network-zones';
-import type { Activity, SocketRow, Process, Traffic, Application, Rule } from './protocol';
+import type { Activity, SocketRow, Process, Traffic, Application, Rule, ViewEvent } from './protocol';
 import { launchProcessLabel, launchTitle, verifiedLaunch } from './provenance';
 export type Metric = 'download_bps' | 'upload_bps' | 'downloaded' | 'uploaded';
 export interface Row {
@@ -18,6 +18,7 @@ export interface Row {
   displayApplication?: Application;
   socket?: SocketRow;
   applicationZone?: ApplicationZone;
+  requestEvent?: ViewEvent;
   policyRows?: SocketRow[];
   // Not running: an application identity that only stored rules name (NetLimiter
   // lists such applications too). No process, sockets or traffic.
@@ -505,8 +506,32 @@ export function shortLocation(path: string) {
   return text.length <= 48 ? text : [dir[0], '…', ...dir.slice(-2)].join('/');
 }
 /** Running applications followed by not-running applications with rules. */
-export function activityTree(activity: Activity, rules: Rule[] | undefined, query = '', filter = 'all', _contextFor?: undefined, zones?: NetworkZones): Row[] {
+export function activityTree(activity: Activity, rules: Rule[] | undefined, query = '', filter = 'all', _contextFor?: undefined, zones?: NetworkZones, events: ViewEvent[] = []): Row[] {
   const live = hierarchy(activity, query, filter);
   const rows=[...live, ...inactiveApplications(rules, live, query, filter)];
+  addRequestApplications(rows, events, query, filter);
   return addApplicationZones(rows,rules||[],zones);
+}
+
+// A held or recently ended request can outlive the socket census. Preserve its
+// exact recorded identity without inventing a live process or traffic totals.
+export function addRequestApplications(rows: Row[], events: ViewEvent[], query = '', filter = 'all') {
+  if (filter !== 'all') return;
+  const byId = new Map(allRows(rows).map(r => [r.id, r]));
+  for (const e of [...events].sort((a,b) => Date.parse(b.first_seen)-Date.parse(a.first_seen))) {
+    const a=e.attribution.application, owners=e.attribution.owners;
+    if (!a?.key || !a.revision || !owners.length || owners.some(p => p.uid !== owners[0].uid)) continue;
+    if (!`${a.name} ${a.executable}`.toLowerCase().includes(query.toLowerCase())) continue;
+    const id=`app:${a.key}|${a.revision}|uid:${owners[0].uid}`;
+    let row=byId.get(id);
+    if (!row) {
+      // A process nested in a launch already represents this exact identity.
+      row=allRows(rows).find(r => r.process?.application.key===a.key && r.process.application.revision===a.revision && r.process.uid===owners[0].uid);
+    }
+    if (!row) {
+      row={id,kind:'application',label:a.display_name||a.name,rows:[],children:[],displayApplication:a};
+      rows.push(row);byId.set(id,row);
+    }
+    if (!row.requestEvent || (e.state==='awaiting-decision' && e.remainingMs>0 && row.requestEvent.state!=='awaiting-decision')) row.requestEvent=e;
+  }
 }

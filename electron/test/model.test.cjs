@@ -174,3 +174,23 @@ test('same verified Windows executable uses one application row for direct and b
   const roots=hierarchy({rows,processes});assert.equal(roots.length,1);assert.equal(roots[0].label,'Alpha.exe');assert.equal(roots[0].rows.length,2);assert.equal(roots[0].runtimeApplication.application.key,'pe');
  }
 });
+
+test('retained requests remain visible without claiming a live socket or merging authority', () => {
+  const { activityTree }=require('../dist/test/model.cjs');
+  const request=(id,key='app',uid=1000)=>({id,state:'awaiting-decision',remainingMs:1000,first_seen:'2026-01-01T00:00:00Z',attribution:{application:{key,revision:'r',name:'Runtime',executable:'/bin/runtime'},owners:[{uid}]}});
+  const a={rows:[],processes:{}};
+  const events=[request('a'),request('b'),request('c','other'),request('d','app',1001)];
+  const rows=activityTree(a,[], '', 'all',undefined,undefined,events);
+  assert.equal(rows.length,3);
+  assert.equal(rows[0].requestEvent.id,'a');
+  assert.equal(rows[0].process,undefined);
+  assert.equal(rows[0].inactive,undefined);
+  assert.equal(rows[0].rows.length,0);
+  assert.equal(activityTree(a,[],'missing','all',undefined,undefined,events).length,0);
+  assert.equal(activityTree(a,[],'','active',undefined,undefined,events).length,0);
+  const rule={filter:{application:'app',revision:'r',uid:1000},executable:'/bin/runtime'};
+  const withRule=activityTree(a,[rule],'','all',undefined,undefined,[request('a')]);
+  assert.equal(withRule.length,1);assert.equal(withRule[0].inactive.rules,1);assert.equal(withRule[0].requestEvent.id,'a');
+  const terminal={...request('old'),state:'expired',remainingMs:0,first_seen:'2026-01-02T00:00:00Z'};
+  assert.equal(activityTree(a,[],'','all',undefined,undefined,[terminal,request('live')])[0].requestEvent.id,'live');
+});
