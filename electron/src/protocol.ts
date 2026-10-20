@@ -28,6 +28,8 @@ export interface Application {
   revision: string;
   name: string;
   executable: string;
+  // Backend-proven host backing file for a sandbox executable.
+  host_executable?: string;
   display_name?: string;
   display_executable?: string;
   executable_status?: 'linked' | 'deleted' | 'unavailable';

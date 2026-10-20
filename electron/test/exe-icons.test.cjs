@@ -75,3 +75,27 @@ test('bounded resource reader handles large EXEs and metadata is revision-keyed'
  assert.equal((await icons.metadata([iconKey(app)]))[iconKey(app)].name,'Second name');
  assert.equal((await icons.metadata(['not-authorized']))['not-authorized'].name,undefined);
 });
+
+test('Flatpak names require exact deployment metadata and remain display-only',async(t)=>{
+ const fs=require('fs'),path=require('path');const {ApplicationIcons,iconKey,flatpakDisplayName}=require('../dist/test/icons.cjs');
+ const root=fs.mkdtempSync(path.resolve(__dirname,'../../.workspace/flatpak-names-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ function fixture(id,name,commit='a'.repeat(64)){
+  const deployment=path.join(root,'app',id,'x86_64','stable',commit),exe=path.join(deployment,'files/bin/runner');
+  fs.mkdirSync(path.dirname(exe),{recursive:true});fs.writeFileSync(exe,'synthetic');
+  fs.writeFileSync(path.join(deployment,'metadata'),`[Application]\nname=${id}\nruntime=example\n\n[Context]\nshared=network;\n`);
+  const desktop=path.join(deployment,'files/share/applications',id+'.desktop');fs.mkdirSync(path.dirname(desktop),{recursive:true});
+  fs.writeFileSync(desktop,`[Desktop Entry]\nType=Application\nName=${name}\nExec=runner\n`);return {exe,deployment,desktop};
+ }
+ const a=fixture('org.example.First','Friendly First'),b=fixture('org.example.Second','Friendly Second');
+ assert.equal(await flatpakDisplayName(a.exe),'Friendly First');assert.equal(await flatpakDisplayName(b.exe),'Friendly Second');
+ const icons=new ApplicationIcons(root,[root],[]),app={key:'exact-first',revision:'revision',kind:'native',name:'runner',executable:'/app/bin/runner',host_executable:a.exe};
+ icons.observe({observation:{activity:{rows:[],processes:{p:{application:app}}}},control:{events:[],rules:[]}});
+ assert.equal((await icons.metadata([iconKey(app)]))[iconKey(app)].name,'Friendly First');assert.equal(app.name,'runner');assert.equal(app.key,'exact-first');
+ assert.equal((await icons.metadata(['unauthorized']))['unauthorized'].name,undefined);
+ const plain={...app,key:'no-backing',host_executable:undefined};icons.observe({observation:{activity:{rows:[],processes:{p:{application:plain}}}},control:{events:[],rules:[]}});
+ assert.equal((await icons.metadata([iconKey(plain)]))[iconKey(plain)].name,undefined);
+ fs.writeFileSync(path.join(a.deployment,'metadata'),'[Application]\nname=org.example.Second\n');assert.equal(await flatpakDisplayName(a.exe),undefined);
+ fs.unlinkSync(b.desktop);fs.symlinkSync(a.desktop,b.desktop);assert.equal(await flatpakDisplayName(b.exe),undefined);
+ const revised=fixture('org.example.First','New deployment','b'.repeat(64));assert.equal(await flatpakDisplayName(revised.exe),'New deployment');
+ fs.writeFileSync(revised.desktop,'[Desktop Entry]\nType=Application\nName=Bad\u202ename\n');assert.equal(await flatpakDisplayName(revised.exe),undefined);
+});

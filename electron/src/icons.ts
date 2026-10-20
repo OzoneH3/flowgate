@@ -63,6 +63,7 @@ export class ApplicationIcons {
   private images = new Map<string, { data: Buffer; type: string }>();
   private ready: Promise<void>;
   private peNames = new Map<string, Promise<string | undefined>>();
+  private flatpakNames = new Map<string, Promise<string | undefined>>();
   private imageBytes = 0;
   private entries = new Map<string, Set<string>>();
   private names = new Map<string, Set<string>>();
@@ -365,6 +366,17 @@ export class ApplicationIcons {
     > = Object.create(null);
     for (const [key, icon] of Object.entries(icons)) {
       const app = this.allowed.get(key);
+      if (app?.kind === 'native' && app.host_executable) {
+        if (!this.flatpakNames.has(key)) {
+          if (this.flatpakNames.size >= 2048) this.flatpakNames.delete(this.flatpakNames.keys().next().value!);
+          this.flatpakNames.set(key, flatpakDisplayName(app.host_executable));
+        }
+        const name = await this.flatpakNames.get(key);
+        if (name) {
+          result[key] = { icon, name, source: 'desktop-metadata' };
+          continue;
+        }
+      }
       if (app?.kind === 'electron') {
         const entry = await this.electronDesktop(app);
         result[key] = { icon, name: entry?.name, source: entry || icon ? 'desktop-metadata' : 'unavailable' };
@@ -397,6 +409,30 @@ export class ApplicationIcons {
   asset(name: string) {
     return this.images.get(name);
   }
+}
+// Use the backend-proven backing file, never argv, a parent process or an
+// unrelated current deployment. This is display metadata, not policy identity.
+export async function flatpakDisplayName(backing: string): Promise<string | undefined> {
+  try {
+    if (!path.isAbsolute(backing)) return;
+    const actual = await fs.realpath(backing);
+    const match = actual.match(/^(.*\/app\/([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+){2,})\/[^/]+\/[^/]+\/[a-f0-9]{64})\/files\/.+$/);
+    if (!match) return;
+    const [, deployment, id] = match;
+    const containedRead = async (file: string) => {
+      const target = await fs.realpath(file);
+      if (!target.startsWith(deployment + '/')) throw Error('Metadata outside deployment');
+      return (await read(target)).toString('utf8');
+    };
+    const metadata = await containedRead(path.join(deployment, 'metadata'));
+    const application = metadata.match(/^\[Application\]\r?\n([\s\S]*?)(?=^\[|(?![\s\S]))/m)?.[1];
+    if (application?.match(/^name=([^\r\n]+)$/m)?.[1] !== id) return;
+    const entry = desktopEntry(await containedRead(path.join(deployment, 'files/share/applications', id + '.desktop')));
+    const name = entry.Name;
+    if (entry.Type !== 'Application' || entry.Hidden === 'true' || !name ||
+        name.length > 255 || /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/.test(name)) return;
+    return name;
+  } catch { return; }
 }
 function score(dir: string) {
   const n = Number(dir.match(/(?:^|\/)(\d+)(?:x\d+)?(?:\/|$)/)?.[1]);
