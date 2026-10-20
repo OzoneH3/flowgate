@@ -35,6 +35,16 @@ func TestMain(m *testing.M) {
 		}
 		time.Sleep(60 * time.Second)
 		os.Exit(0)
+	case "launcher":
+		// Electron main process that starts another program (like Heroic → nile).
+		c := exec.Command(os.Getenv("FLOWGATE_FAKE_HELPER"), "library", "sync")
+		c.Env = append(os.Environ(), "FLOWGATE_FAKE_ELECTRON=child")
+		if err := c.Start(); err != nil {
+			os.Exit(3)
+		}
+		fmt.Println(c.Process.Pid)
+		time.Sleep(60 * time.Second)
+		os.Exit(0)
 	case "child":
 		time.Sleep(60 * time.Second)
 		os.Exit(0)
@@ -210,5 +220,61 @@ func TestElectronRuntimeNames(t *testing.T) {
 		if IsElectronRuntime(exe) != want {
 			t.Errorf("%s: want %v", exe, want)
 		}
+	}
+}
+
+func TestLaunchedByVerifiedElectronApp(t *testing.T) {
+	runtime := fakeRuntime(t, "electron43")
+	helper := fakeRuntime(t, "nile")
+	bundle := filepath.Join(t.TempDir(), "app.asar")
+	writeAsar(t, bundle, `{"name":"heroic"}`, "")
+	mainPID, child := startMain(t, runtime, "launcher", []string{"FLOWGATE_FAKE_HELPER=" + helper}, bundle)
+	p, err := Inspect(child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The helper keeps its own identity for rules.
+	if p.Application.Kind != "native" || p.Application.Executable != helper || p.Application.Hosted != nil {
+		t.Fatalf("helper identity: %+v", p.Application)
+	}
+	prov := CaptureProvenance(p)
+	if prov == nil || prov.Parent == nil {
+		t.Fatalf("no launching parent: %+v", prov)
+	}
+	pa := prov.Parent
+	if pa.PID != mainPID || pa.Depth != 1 || pa.Name != "heroic" || pa.Application == nil || pa.Application.Kind != "electron" || pa.Application.Executable != bundle || pa.Application.Key == "" {
+		t.Fatalf("parent: %+v app %+v", pa, pa.Application)
+	}
+	// Display only: the helper's own key is not the parent's.
+	if pa.Application.Key == p.Application.Key {
+		t.Fatal("parent identity leaked into the helper")
+	}
+	// A cached capture returns the same parent, deep-copied.
+	again := CaptureProvenance(p)
+	again.Parent.Application.Name = "changed"
+	if CaptureProvenance(p).Parent.Application.Name != "heroic" {
+		t.Fatal("cache shares the parent application")
+	}
+}
+
+func TestLaunchedBySkipsInfrastructure(t *testing.T) {
+	owner := Process{PID: 10, Start: "1", UID: 1000, Executable: "/usr/bin/nile"}
+	nodes := []procNode{
+		{pid: 10, start: "1", uid: 1000, exe: "/usr/bin/nile"},
+		{pid: 9, start: "1", uid: 1000, exe: "/usr/bin/fish"},
+		{pid: 8, start: "1", uid: 1000, exe: "/usr/bin/tmux"},
+		{pid: 7, start: "1", uid: 1000, exe: "/usr/bin/konsole"},
+		{pid: 6, start: "1", uid: 1000, exe: "/usr/bin/plasmashell"},
+	}
+	if p := launchedBy(owner, nodes, nil); p != nil {
+		t.Fatalf("infrastructure only: %+v", p)
+	}
+	nodes = append(nodes[:2], procNode{pid: 5, start: "1", uid: 1000, exe: "/usr/bin/python3", argv: []string{"python3", "/opt/x/launcher.py"}})
+	if p := launchedBy(owner, nodes, nil); p == nil || p.Name != "python3 launcher.py" || p.Depth != 2 {
+		t.Fatalf("script launcher: %+v", p)
+	}
+	nodes[1] = procNode{pid: 9, start: "1", uid: 0, exe: "/usr/bin/sudo"}
+	if p := launchedBy(owner, nodes, nil); p != nil {
+		t.Fatalf("another principal never launches as this user: %+v", p)
 	}
 }

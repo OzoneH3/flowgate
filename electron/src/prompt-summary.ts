@@ -48,6 +48,8 @@ export interface PromptSummary {
   note: string;
   /** The title is the application's own identity (icon/desktop name may apply). */
   ownIdentity: boolean;
+  /** The program that started it (e.g. Heroic for nile), display only. */
+  launchedBy: string;
   /** "Local printing service (cupsd)" or the remote endpoint. */
   destination: string;
   /** "127.0.0.1:631" (omitted when it equals destination). */
@@ -69,6 +71,7 @@ export function promptSummary(e: Ev, fallbackName: string): PromptSummary {
       owner: (app.runtime || app.hosted?.runtime || 'electron').split('/').pop()!,
       note: '',
       ownIdentity: true,
+      launchedBy: launchedByName(e),
       destination: service || endpoint,
       endpoint: service ? endpoint : '',
       protocol: e.flow.protocol.toUpperCase(),
@@ -78,6 +81,8 @@ export function promptSummary(e: Ev, fallbackName: string): PromptSummary {
     owner: identity.title && own !== identity.title ? own : '',
     note: app?.hosted?.state === 'unverified' ? 'application unverified' : '',
     ownIdentity: !identity.title,
+    // A verified game launch already names the context; otherwise the parent program.
+    launchedBy: identity.title ? '' : launchedByName(e),
     destination: service || endpoint,
     endpoint: service ? endpoint : '',
     protocol: e.flow.protocol.toUpperCase(),
@@ -204,4 +209,11 @@ export function connectionFields(e: Ev) {
     local: splitEndpoint(e.flow.local),
     remote: splitEndpoint(e.flow.remote),
   };
+}
+
+/** Name of the program that started the socket owner (provenance parent). */
+export function launchedByName(e: Pick<RequestEvent, 'attribution'>): string {
+  const parent = e.attribution.provenance?.parent;
+  if (!parent) return '';
+  return parent.application?.display_name || parent.application?.name || parent.name;
 }

@@ -88,7 +88,18 @@ export interface Provenance {
   stop: string;
   ancestry: ProvenanceAncestor[];
   launch?: Launch;
+  // The program that started the owner (display only; never a rule target).
+  parent?: LaunchParent;
   captured_at?: string;
+}
+export interface LaunchParent {
+  pid: number;
+  start_ticks: string;
+  depth: number;
+  name: string;
+  executable: string;
+  application?: Application;
+  note?: string;
 }
 // What each decision scope is enforced against today (backend-derived).
 export interface PermissionTarget {
@@ -598,6 +609,20 @@ export function parseProvenance(raw: unknown): Provenance | undefined {
       : undefined,
     group: bounded(p.group, 64) || undefined,
     stop: bounded(p.stop, 64),
+    parent: (() => {
+      if (p.parent == null || typeof p.parent !== 'object') return undefined;
+      const a = object(p.parent);
+      if (!number(a.pid) || !bounded(a.name, 256)) return undefined;
+      return {
+        pid: number(a.pid),
+        start_ticks: bounded(a.start_ticks, 32),
+        depth: number(a.depth),
+        name: bounded(a.name, 256),
+        executable: bounded(a.executable),
+        application: a.application != null && typeof a.application === 'object' ? application(a.application) : undefined,
+        note: bounded(a.note, 1024) || undefined,
+      };
+    })(),
     ancestry: array(p.ancestry, 32).map((raw) => {
       const a = object(raw);
       return {

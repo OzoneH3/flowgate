@@ -181,16 +181,7 @@ func Inspect(pid int) (Process, error) {
 		h := ResolveElectronApp(pid, start)
 		a.Hosted = h
 		if h.State == "verified" {
-			a.Kind = "electron"
-			a.Runtime = h.Runtime
-			a.Executable = h.Bundle
-			a.Revision = h.revision
-			a.HostExecutable = ""
-			a.Name = h.ProductName
-			if a.Name == "" {
-				a.Name = h.PackageName
-			}
-			a.Evidence = []string{"Electron runtime " + h.Runtime, h.Reason, "package.json name " + h.PackageName, "bundle " + h.Integrity}
+			a = ElectronApplication(p.UID, h)
 		}
 	}
 	if a.Executable != "" && a.Revision != "" {

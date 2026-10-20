@@ -25,7 +25,7 @@ const ev = (over = {}) => ({
 
 test('first view: game title, actual owner, local service destination', () => {
   const s = ps.promptSummary(ev(), 'rundll32.exe');
-  assert.deepEqual(s, { title: 'Timberborn', owner: 'rundll32.exe', note: '', ownIdentity: false, destination: 'Local printing service (cupsd)', endpoint: '127.0.0.1:631', protocol: 'TCP' });
+  assert.deepEqual(s, { title: 'Timberborn', owner: 'rundll32.exe', note: '', ownIdentity: false, launchedBy: '', destination: 'Local printing service (cupsd)', endpoint: '127.0.0.1:631', protocol: 'TCP' });
   assert.equal(ps.destinationLine(s, 'outgoing'), 'To Local printing service (cupsd) · 127.0.0.1:631 · TCP');
   // Unverified peer: never a guessed service name.
   const unknown = ps.promptSummary(ev({ local_peer: { state: 'unknown', role: 'server', reason: 'gone' } }), 'x');
@@ -152,4 +152,27 @@ test('Electron runtime: verified app is the title with "socket owner electron"; 
   assert.equal(a.kind, 'electron');
   assert.equal(a.runtime, runtime);
   assert.deepEqual([a.hosted.state, a.hosted.package_name, a.hosted.chain.length, a.hosted.chain[1].type], ['verified', 'heroic', 2, 'main']);
+});
+
+test('launched by: a helper started by a verified Electron app names it; display only', () => {
+  const runtime = '/usr/lib/electron43/electron', bundle = '/usr/lib/heroic-games-launcher/app.asar';
+  const nileExe = '/usr/lib/heroic-games-launcher/app.asar.unpacked/build/bin/x64/linux/nile';
+  const nileApp = { key: 'kn', revision: 'r', name: 'nile', executable: nileExe, kind: 'native' };
+  const heroic = { key: 'kh', revision: 'r', name: 'heroic', executable: bundle, kind: 'electron', runtime };
+  const provenance = { evidence: 'none', reason: 'complete parent chain contains no game launcher', stop: 'init', ancestry: [],
+    parent: { pid: 365897, start_ticks: '1', depth: 1, name: 'heroic', executable: runtime, application: heroic } };
+  const nile = { ...ev({ local_peer: undefined, flow: { direction: 'outgoing', protocol: 'tcp', local: '10.0.0.2:40000', remote: '52.94.236.248:443' } }),
+    attribution: { status: 'directly-associated', reason: '', visibility_complete: true, application: nileApp, provenance,
+      owners: [{ pid: 365966, start_ticks: '2', uid: 1000, executable: nileExe, application: nileApp, provenance }] } };
+  const s = ps.promptSummary(nile, 'x');
+  assert.deepEqual([s.title, s.owner, s.launchedBy, s.ownIdentity], ['nile', '', 'heroic', true]);
+  // Rules: the helper's own identity; the parent never becomes the target.
+  assert.equal(ps.connectionFields(nile).application, 'nile');
+  // A verified game launch keeps the game as the context instead.
+  assert.equal(ps.promptSummary(ev(), 'x').launchedBy, '');
+  // Parser keeps the parent bounded.
+  const { parseProvenance } = require('../dist/test/protocol.cjs');
+  const parsed = parseProvenance(provenance);
+  assert.deepEqual([parsed.parent.pid, parsed.parent.name, parsed.parent.application.kind, parsed.parent.application.executable], [365897, 'heroic', 'electron', bundle]);
+  assert.equal(parseProvenance({ ...provenance, parent: { pid: 0, name: '' } }).parent, undefined);
 });

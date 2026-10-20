@@ -71,14 +71,30 @@ type Provenance struct {
 	// verified: unbroken parent chain from the owner to the launcher (start
 	// times checked). unavailable: the chain broke before any launcher was
 	// found. none: the complete chain contains no launcher.
-	Evidence   string               `json:"evidence"`
-	Reason     string               `json:"reason"`
-	Role       string               `json:"role,omitempty"` // launcher | game | runtime | helper
-	Group      string               `json:"group,omitempty"`
-	Stop       string               `json:"stop"`
-	Ancestry   []ProvenanceAncestor `json:"ancestry"`
-	Launch     *Launch              `json:"launch,omitempty"`
-	CapturedAt time.Time            `json:"captured_at"`
+	Evidence string               `json:"evidence"`
+	Reason   string               `json:"reason"`
+	Role     string               `json:"role,omitempty"` // launcher | game | runtime | helper
+	Group    string               `json:"group,omitempty"`
+	Stop     string               `json:"stop"`
+	Ancestry []ProvenanceAncestor `json:"ancestry"`
+	Launch   *Launch              `json:"launch,omitempty"`
+	// Parent: the nearest ancestor that is another program (not session or
+	// shell infrastructure), e.g. Heroic for its nile helper. Display only;
+	// the owner keeps its own application identity for every rule.
+	Parent     *LaunchParent `json:"parent,omitempty"`
+	CapturedAt time.Time     `json:"captured_at"`
+}
+
+// LaunchParent is the program that started the owner, through the verified chain.
+type LaunchParent struct {
+	PID        int    `json:"pid"`
+	Start      string `json:"start_ticks"`
+	Depth      int    `json:"depth"` // ancestors between owner and parent + 1
+	Name       string `json:"name"`
+	Executable string `json:"executable"`
+	// Application: the parent's identity when it is a verified Electron app.
+	Application *Application `json:"application,omitempty"`
+	Note        string       `json:"note,omitempty"`
 }
 
 // procNode is one bounded /proc observation.
@@ -582,6 +598,14 @@ func cloneProvenance(p *Provenance) *Provenance {
 		}
 		c.Launch = &l
 	}
+	if p.Parent != nil {
+		pa := *p.Parent
+		if p.Parent.Application != nil {
+			a := *p.Parent.Application
+			pa.Application = &a
+		}
+		c.Parent = &pa
+	}
 	return &c
 }
 
@@ -603,6 +627,8 @@ func CaptureProvenance(owner Process) *Provenance {
 	if p == nil {
 		p = deriveProvenance(owner, nodes, stop, time.Now())
 	}
+	// Always the owner's own chain (a spliced ancestor provenance carries its parent).
+	p.Parent = launchedBy(owner, nodes, ResolveElectronApp)
 	if p.Evidence == "unavailable" {
 		return p // transient failures are not cached
 	}
@@ -671,4 +697,50 @@ func spliceCached(owner Process, nodes []procNode, stop string) *Provenance {
 		}
 	}
 	return p
+}
+
+// Session, shell and sandbox infrastructure never counts as the launching program.
+var launchInfrastructure = map[string]bool{
+	"init": true, "systemd": true, "sh": true, "bash": true, "dash": true, "zsh": true, "fish": true, "ksh": true, "tcsh": true,
+	"env": true, "sudo": true, "doas": true, "pkexec": true, "setsid": true, "nohup": true, "timeout": true, "systemd-run": true,
+	"bwrap": true, "flatpak-session-helper": true, "xdg-dbus-proxy": true, "dbus-daemon": true, "dbus-broker": true, "dbus-broker-launch": true,
+	"plasmashell": true, "kwin_wayland": true, "kwin_x11": true, "kwin_wayland_wrapper": true, "ksmserver": true, "startplasma-wayland": true,
+	"startplasma-x11": true, "plasma_session": true, "sddm": true, "sddm-helper": true, "gnome-shell": true, "gnome-session-binary": true,
+	"kded5": true, "kded6": true, "krunner": true, "kioworker": true, "kdeinit5": true, "xdg-desktop-portal": true, "xdg-desktop-portal-kde": true,
+	"xdg-desktop-portal-gnome": true, "xdg-desktop-portal-gtk": true, "gamemoded": true,
+	// Terminals and multiplexers: where a command was typed, not what launched it.
+	"tmux": true, "tmux: server": true, "screen": true, "zellij": true, "konsole": true, "yakuake": true, "alacritty": true, "kitty": true,
+	"foot": true, "wezterm-gui": true, "xterm": true, "gnome-terminal-server": true, "ptyxis-agent": true, "ghostty": true,
+}
+
+// launchedBy picks the nearest verified ancestor that is another program. A
+// shared Electron runtime is named by the app it verifiably runs.
+func launchedBy(owner Process, nodes []procNode, resolve func(int, string) *Hosted) *LaunchParent {
+	for i := 1; i < len(nodes); i++ {
+		n := nodes[i]
+		if n.exe == "" || n.exe == owner.Executable || n.uid != owner.UID {
+			if n.uid != owner.UID {
+				return nil // another principal (e.g. a system service) did not launch it as this user's app
+			}
+			continue
+		}
+		base := filepath.Base(strings.TrimSuffix(n.exe, " (deleted)"))
+		if launchInfrastructure[base] {
+			continue
+		}
+		l := &LaunchParent{PID: n.pid, Start: n.start, Depth: i, Name: clip(base), Executable: clip(n.exe)}
+		if len(n.argv) > 1 && (strings.HasPrefix(base, "python") || base == "node" || base == "perl") {
+			l.Name = clip(base + " " + filepath.Base(n.argv[1]))
+		}
+		if IsElectronRuntime(n.exe) && resolve != nil {
+			if h := resolve(n.pid, n.start); h != nil && h.State == "verified" {
+				a := ElectronApplication(n.uid, h)
+				l.Application, l.Name = &a, a.Name
+			} else if h != nil {
+				l.Note = "Electron application unverified: " + h.Reason
+			}
+		}
+		return l
+	}
+	return nil
 }

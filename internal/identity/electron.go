@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 )
 
@@ -187,7 +188,7 @@ func ResolveElectronApp(pid int, start string) *Hosted {
 	h.Bundle = app
 	// The bundle as the main process sees it (its mount namespace).
 	host := base + "/root" + app
-	pkg, revision, integrity, err := readBundlePackage(host)
+	pkg, revision, integrity, err := cachedBundlePackage(host)
 	if err != nil {
 		h.Reason = fmt.Sprintf("application bundle %s: %v", app, err)
 		return h
@@ -220,6 +221,54 @@ func ResolveElectronApp(pid int, start string) *Hosted {
 		h.Reason = fmt.Sprintf("%s process %d → Electron main process %d (parent chain, start times verified) runs bundle %s", h.Chain[0].Type, pid, main, app)
 	}
 	return h
+}
+
+// Bundle parsing is cached by path and file stamp: Activity inspects every
+// Electron process each scan, and an archive index can be hundreds of KB.
+type bundleEntry struct {
+	stamp, revision, integrity string
+	pkg                        []byte
+}
+
+var bundleCache = struct {
+	sync.Mutex
+	m map[string]bundleEntry
+}{m: map[string]bundleEntry{}}
+
+func cachedBundlePackage(path string) ([]byte, string, string, error) {
+	now := stamp(path)
+	if now == "" {
+		return readBundlePackage(path)
+	}
+	bundleCache.Lock()
+	e, ok := bundleCache.m[path]
+	bundleCache.Unlock()
+	if ok && e.stamp == now {
+		return e.pkg, e.revision, e.integrity, nil
+	}
+	pkg, revision, integrity, err := readBundlePackage(path)
+	if err != nil || revision != now {
+		return pkg, revision, integrity, err
+	}
+	bundleCache.Lock()
+	if len(bundleCache.m) >= 64 {
+		bundleCache.m = map[string]bundleEntry{}
+	}
+	bundleCache.m[path] = bundleEntry{stamp: now, revision: revision, integrity: integrity, pkg: pkg}
+	bundleCache.Unlock()
+	return pkg, revision, integrity, nil
+}
+
+// ElectronApplication is the application identity of a verified hosted app.
+func ElectronApplication(uid uint32, h *Hosted) Application {
+	a := Application{Kind: "electron", Runtime: h.Runtime, Executable: h.Bundle, Revision: h.revision, Name: h.ProductName, Hosted: h}
+	if a.Name == "" {
+		a.Name = h.PackageName
+	}
+	a.Evidence = []string{"Electron runtime " + h.Runtime, h.Reason, "package.json name " + h.PackageName, "bundle " + h.Integrity}
+	a.Key = ApplicationKey(uid, a)
+	a.DisplayName, a.DisplayExecutable, a.ExecutableStatus = a.Name, a.Executable, "linked"
+	return a
 }
 
 // readBundlePackage returns package.json of an .asar archive or an app

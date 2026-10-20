@@ -46,3 +46,16 @@ reason. Unverified: `electron` with `application unverified`; Remember is disabl
 backend's reason. The desktop name and icon come from the desktop entry whose launcher script
 names exactly that bundle (`/usr/bin/heroic`), or else a unique `StartupWMClass` equal to the
 package name — display only, never identity.
+
+## Launched by (general reverse chain)
+
+Every socket owner's provenance records its start-time-verified ancestry
+(`provenance.ancestry`). `provenance.parent` names the nearest ancestor that is another
+program: same UID (an ancestor of another user ends the search), not the owner's own
+executable, and not session, shell, terminal or sandbox infrastructure (systemd, shells,
+sudo, bwrap, Plasma/KWin, portals, tmux, Konsole, …). An Electron runtime ancestor is named by
+the app it verifiably runs (`parent.application`, kind `electron`). Example: Heroic's
+`nile` (its own binary in `app.asar.unpacked`) reads **nile · launched by Heroic Games
+Launcher**; Details › Launch › Launched by shows PID, start ticks and depth. Display only —
+rules for nile bind nile's own executable, never Heroic. A verified game launch (Proton/umu)
+keeps the game as the context instead.

@@ -96,6 +96,16 @@ export function provenanceDetails(e: RequestEvent): [string, string][] {
       `${ownerName(owner)} owns this socket\nPID ${owner.pid} · start ${owner.start_ticks} · UID ${owner.uid}\n${owner.application?.executable || owner.executable || 'executable unavailable'}`,
     ]);
   if (!p) return rows;
+  if (p.parent)
+    rows.push([
+      'Launched by',
+      `${p.parent.application?.display_name || p.parent.name} · PID ${p.parent.pid} · start ${p.parent.start_ticks}` +
+        `\n${p.parent.executable}` +
+        (p.parent.depth > 1 ? `\n${p.parent.depth - 1} intermediate process(es) (shells, session)` : '') +
+        (p.parent.application ? '\nVerified Electron app ' + p.parent.application.executable : '') +
+        (p.parent.note ? '\n' + p.parent.note : '') +
+        '\nDisplay only: rules apply to the socket owner itself',
+    ]);
   const l = p.launch;
   if (l) {
     rows.push([

@@ -104,6 +104,23 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
           : `${summary.owner} opened this connection; ${summary.title} is the game it was launched for`;
       cell.append(owner);
     }
+    if (summary.launchedBy) {
+      // Display only: the program that started this one (e.g. Heroic → nile).
+      const parent = e.attribution.provenance?.parent;
+      const by = el('span', '', 'request-owner nl-owner', 'requestLaunchedBy');
+      const label = el('span', summary.launchedBy, 'nl-owner-name');
+      by.append(el('span', 'launched by ', 'nl-owner-label'), label);
+      by.title = `${parent?.name} (PID ${parent?.pid}) started this program; rules still apply to ${summary.owner || summary.title} itself`;
+      if (parent?.application?.key)
+        void window.flowgate
+          .applicationMetadata([JSON.stringify([parent.application.key, parent.application.revision, parent.application.executable])])
+          .then((m) => {
+            const name = Object.values(m)[0]?.name;
+            if (name) label.textContent = name;
+          })
+          .catch(() => {});
+      cell.append(by);
+    }
     if (summary.note) {
       const note = el('span', summary.note, 'request-owner nl-owner nl-unverified', 'requestHostedNote');
       note.title = e.attribution.application?.hosted?.reason || '';

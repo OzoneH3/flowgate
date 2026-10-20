@@ -88,7 +88,12 @@ export class ApplicationIcons {
     };
     for (const p of Object.values(state.observation.activity?.processes || {})) add(p.application);
     for (const r of state.observation.activity?.rows || []) add(r.display_application);
-    for (const e of state.control.events) add(e.attribution.application);
+    for (const e of state.control.events) {
+      add(e.attribution.application);
+      // The launching program (display only), e.g. Heroic for its nile helper.
+      add(e.attribution.provenance?.parent?.application);
+    }
+    for (const p of Object.values(state.observation.activity?.processes || {})) add(p.provenance?.parent?.application);
   }
   private async executable(token: string) {
     for (const p of path.isAbsolute(token)
