@@ -4,7 +4,7 @@ import { REMEMBER_DURATIONS, type RememberOption } from './decision-remember';
 import { FOR_A_WHILE_NOTE, FOR_A_WHILE_TOOLTIP, durationLabel } from './process-lease';
 import { PREVIOUS_REVISION_NOTICE, previousRevisionTitle } from './prompt-decision';
 import type { Application, ViewEvent } from './protocol';
-import { gameIconApplication, provenanceDetails, targetLines } from './provenance';
+import { provenanceDetails, targetLines } from './provenance';
 import { pairDetailRows, type LocalPairView } from './local-pair';
 import { connectionFields, connectionHeader, fromTo, promptSummary, rememberLabel } from './prompt-summary';
 
@@ -82,9 +82,8 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
   const sides = fromTo(e, summary);
   const programCell = () => {
     // The game's own metadata (icon) never renames the verified title.
-    const game = gameIconApplication(e.attribution.provenance) || o.gameApplication;
-    const heading = game
-      ? applicationHeading(game, summary.title, summary.title)
+    const heading = o.gameApplication
+      ? applicationHeading(o.gameApplication, summary.title, summary.title)
       : applicationHeading(
           summary.ownIdentity
             ? e.attribution.application

@@ -1,6 +1,3 @@
-import { icoToPng } from './icon-ico';
-import { desktopGameExecutable } from './desktop-game';
-import { gameIconApplication } from './provenance';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -8,9 +5,9 @@ import { createHash } from 'node:crypto';
 import type { Application, ClientState } from './protocol';
 export const iconKey = (a: Application) => JSON.stringify([a.key, a.revision, a.executable]);
 const MAX_FILE = 256 * 1024;
-async function read(file: string, limit = MAX_FILE) {
+async function read(file: string) {
   const s = await fs.stat(file);
-  if (!s.isFile() || s.size > limit) throw Error('Icon metadata too large');
+  if (!s.isFile() || s.size > MAX_FILE) throw Error('Icon metadata too large');
   return fs.readFile(file);
 }
 export function desktopEntry(text: string): Record<string, string> {
@@ -93,14 +90,10 @@ export class ApplicationIcons {
     for (const r of state.observation.activity?.rows || []) add(r.display_application);
     for (const e of state.control.events) {
       add(e.attribution.application);
-      add(gameIconApplication(e.attribution.provenance));
       // The launching program (display only), e.g. Heroic for its nile helper.
       add(e.attribution.provenance?.parent?.application);
     }
-    for (const p of Object.values(state.observation.activity?.processes || {})) {
-      add(p.provenance?.parent?.application);
-      add(gameIconApplication(p.provenance));
-    }
+    for (const p of Object.values(state.observation.activity?.processes || {})) add(p.provenance?.parent?.application);
     // Not-running applications with stored rules (Activity lists them too).
     for (const r of state.control.rules || [])
       if (r.filter.application && r.filter.revision && r.executable)
@@ -130,7 +123,7 @@ export class ApplicationIcons {
         try {
           const entry = desktopEntry((await read(path.join(dir, 'applications', file))).toString());
           if (entry.Type !== 'Application' || entry.Hidden === 'true' || !entry.Icon) continue;
-          const token = desktopGameExecutable(entry.Exec || '') || execToken(entry.Exec || '');
+          const token = execToken(entry.Exec || '');
           if (!token) continue;
           const executable = await this.executable(token);
           if (!executable) continue;
@@ -265,13 +258,8 @@ export class ApplicationIcons {
     }
     for (const file of files)
       try {
-        let ext = path.extname(file).toLowerCase();
-        let data: Buffer = await read(file, ext === '.ico' ? 1024 * 1024 : MAX_FILE);
-        if (ext === '.ico') {
-          const png = icoToPng(data);
-          if (!png) continue;
-          data = png; ext = '.png';
-        }
+        const data = await read(file),
+          ext = path.extname(file).toLowerCase();
         if (!safeIcon(data, ext)) continue;
         const id = createHash('sha256').update(data).digest('hex') + ext;
         if (!this.images.has(id)) {
