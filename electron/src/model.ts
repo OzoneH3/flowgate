@@ -24,8 +24,10 @@ export interface InactiveApplication {
   uid: number;
   executable: string;
   rules: number;
-  // A running row exists for the same executable with another revision (updated file).
+  // Another revision of the same application is running or has newer rules (updated file).
   earlierVersion: boolean;
+  // Short location shown when another entry has the same name (different program).
+  where?: string;
 }
 // Observation status only: a listening/bound socket is not a connected peer.
 export function hasObservedConnection(row: Row): boolean {
@@ -448,7 +450,35 @@ export function inactiveApplications(rules: Rule[] | undefined, live: Row[], que
     }
     row.inactive!.rules++;
   }
+  // Several revisions of one application (same key and UID): only the newest rules
+  // describe the current file; older ones are marked as an earlier version.
+  const newest = new Map<string, string>();
+  for (const rule of rules) {
+    const f = rule.filter;
+    if (!f.application || !f.revision) continue;
+    const k = `${f.application}|${f.uid}`;
+    if ((newest.get(k) || '') < (rule.created || '')) newest.set(k, rule.created || '');
+  }
+  for (const row of out.values()) {
+    const i = row.inactive!,
+      latest = rules
+        .filter((r) => r.filter.application === i.key && r.filter.revision === i.revision && r.filter.uid === i.uid)
+        .reduce((m, r) => ((r.created || '') > m ? r.created || '' : m), '');
+    const others = [...out.values()].some((o) => o !== row && o.inactive!.key === i.key && o.inactive!.uid === i.uid);
+    if (others && latest < (newest.get(`${i.key}|${i.uid}`) || '')) i.earlierVersion = true;
+  }
+  // Same name, different programs: show where each one lives.
+  const labels = new Map<string, number>();
+  for (const r of [...allRows(live).filter((r) => r.kind === 'application'), ...out.values()])
+    labels.set(r.label, (labels.get(r.label) || 0) + 1);
+  for (const row of out.values()) if ((labels.get(row.label) || 0) > 1) row.inactive!.where = shortLocation(row.inactive!.executable);
   return [...out.values()].sort((a, b) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id));
+}
+/** "~/.codex/…/0.160.0-x86_64-unknown-linux-musl/bin" for an executable path. */
+export function shortLocation(path: string) {
+  const dir = path.replace(/^\/home\/[^/]+/, '~').split('/').slice(0, -1);
+  const text = dir.join('/');
+  return text.length <= 48 ? text : [dir[0], '…', ...dir.slice(-2)].join('/');
 }
 /** Running applications followed by not-running applications with rules. */
 export function activityTree(activity: Activity, rules: Rule[] | undefined, query = '', filter = 'all'): Row[] {

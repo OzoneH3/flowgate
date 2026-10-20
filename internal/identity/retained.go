@@ -13,8 +13,8 @@ import (
 // VerifyRetainedExecutable re-validates an application identity that was
 // captured from a verified owner at request time, after that process may have
 // exited. It needs no PID, socket or live instance: the captured path is
-// inspected directly and must still be the same file (device, inode, size,
-// mtime, ctime) recorded as the application revision. A different file now at
+// inspected directly and must still be the same file (inode, size, mtime,
+// ctime) recorded as the application revision. A different file now at
 // the same path, a modified file or a missing file is refused with its reason.
 func VerifyRetainedExecutable(a Application, uid uint32, mountNS string) error {
 	if (a.Kind != "native" && a.Kind != "wine") || a.Key == "" || a.Revision == "" || a.Executable == "" {
@@ -36,10 +36,11 @@ func VerifyRetainedExecutable(a Application, uid uint32, mountNS string) error {
 	if !st.Mode().IsRegular() {
 		return fmt.Errorf("%s is no longer a regular file", a.Executable)
 	}
-	want := strings.SplitN(a.Revision, ":", 3)
+	// Revision = inode:size:mtime:ctime (device-independent, see statStamp).
+	want := strings.SplitN(a.Revision, ":", 2)
 	s := st.Sys().(*syscall.Stat_t)
-	if len(want) < 2 || want[0] != strconv.FormatUint(s.Dev, 10) || want[1] != strconv.FormatUint(s.Ino, 10) {
-		return fmt.Errorf("a different file now occupies %s (device/inode changed); the requesting executable is gone", a.Executable)
+	if len(want) < 2 || want[0] != strconv.FormatUint(s.Ino, 10) {
+		return fmt.Errorf("a different file now occupies %s (inode changed); the requesting executable is gone", a.Executable)
 	}
 	if stamp(a.Executable) != a.Revision {
 		return fmt.Errorf("%s was modified since the request (size, modification or change time differs)", a.Executable)

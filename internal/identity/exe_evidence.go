@@ -149,9 +149,32 @@ func RetainEvidence(ev ExecutableEvidence) *RetainedExecutable {
 	return &RetainedExecutable{ev: ev, done: d}
 }
 
+// statStamp is a file revision: inode, size, modification and change time.
+// The device number is deliberately excluded: btrfs assigns subvolume device
+// numbers at mount time, so the same unchanged file gets another st_dev after
+// a reboot and every rule for it would stop matching. Device identity is still
+// checked separately where a file must be the very same one (devIno).
 func statStamp(st os.FileInfo) string {
 	s := st.Sys().(*syscall.Stat_t)
-	return fmt.Sprintf("%d:%d:%d:%d:%d", s.Dev, s.Ino, st.Size(), st.ModTime().UnixNano(), s.Ctim.Nano())
+	return fmt.Sprintf("%d:%d:%d:%d", s.Ino, st.Size(), st.ModTime().UnixNano(), s.Ctim.Nano())
+}
+
+// MigrateStamp converts a stored revision of the earlier
+// "dev:ino:size:mtime:ctime" form to the current device-independent form;
+// any other value (already current, or not a file stamp) is returned unchanged.
+func MigrateStamp(s string) string {
+	f := strings.Split(s, ":")
+	if len(f) != 5 {
+		return s
+	}
+	for _, x := range f {
+		if _, err := strconv.ParseInt(x, 10, 64); err != nil {
+			if _, err := strconv.ParseUint(x, 10, 64); err != nil {
+				return s
+			}
+		}
+	}
+	return strings.Join(f[1:], ":")
 }
 
 func devIno(st os.FileInfo) (uint64, uint64) {

@@ -24,7 +24,7 @@ func fileStamp(t *testing.T, p string) (string, uint64, uint64, string) {
 	s := st.Sys().(*syscall.Stat_t)
 	b, _ := os.ReadFile(p)
 	h := sha256.Sum256(b)
-	return fmt.Sprintf("%d:%d:%d:%d:%d", s.Dev, s.Ino, st.Size(), st.ModTime().UnixNano(), s.Ctim.Nano()), uint64(s.Dev), s.Ino, hex.EncodeToString(h[:])
+	return fmt.Sprintf("%d:%d:%d:%d", s.Ino, st.Size(), st.ModTime().UnixNano(), s.Ctim.Nano()), uint64(s.Dev), s.Ino, hex.EncodeToString(h[:])
 }
 
 // sandboxApp is a native executable seen inside a per-instance mount

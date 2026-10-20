@@ -1439,7 +1439,14 @@ function renderTree() {
     if (r.kind === 'application' && displayKey) textLabel.dataset.displayKey = displayKey;
     name.append(led, toggle, icon, textLabel);
     if (r.inactive)
-      name.append(element('span', r.inactive.earlierVersion ? ' · earlier version, not running' : ' · not running', 'row-inactive-note'));
+      name.append(
+        element(
+          'span',
+          (r.inactive.earlierVersion ? ' · earlier version, not running' : ' · not running') +
+            (r.inactive.where ? ' · ' + r.inactive.where : ''),
+          'row-inactive-note',
+        ),
+      );
     name.title = r.process?.executable || r.inactive?.executable || r.socket?.socket.remote || r.label;
     tr.append(name);
     for (const key of rateKeys()) {
@@ -1722,7 +1729,7 @@ function renderInfo() {
     // Not running: only its stored rules are known; nothing is observed or verified now.
     field(info, 'State', 'Not running · listed because stored rules name this application');
     if (r.inactive.earlierVersion)
-      field(info, 'Version', 'Earlier version of a running program (the executable changed); these rules do not apply to the running version');
+      field(info, 'Version', 'Earlier version (the executable changed since these rules were made); they do not apply to the current file');
     field(info, 'Executable', r.inactive.executable);
     field(info, 'User ID', String(r.inactive.uid));
     field(info, 'Identity', `${r.inactive.key}\nRevision: ${r.inactive.revision}`);

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"flowgate/internal/identity"
 	"fmt"
 	"net/netip"
 	"sort"
@@ -112,4 +113,21 @@ func BootstrapFrom(rules []Rule, now time.Time) []BootstrapInterface {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+// MigrateRevisions rewrites file-stamp revisions stored in the earlier
+// device-dependent form (identity.MigrateStamp). An unedited essential preset
+// keeps its unedited state: its digest is re-sealed over the migrated rule.
+func MigrateRevisions(r *Rule) bool {
+	unedited := UneditedPreset(*r)
+	before := [4]string{r.Filter.Revision, r.Filter.Process.Revision, r.Filter.Process.ExecutableRevision, r.Filter.PeerService.Revision}
+	r.Filter.Revision = identity.MigrateStamp(r.Filter.Revision)
+	r.Filter.Process.Revision = identity.MigrateStamp(r.Filter.Process.Revision)
+	r.Filter.Process.ExecutableRevision = identity.MigrateStamp(r.Filter.Process.ExecutableRevision)
+	r.Filter.PeerService.Revision = identity.MigrateStamp(r.Filter.PeerService.Revision)
+	changed := before != [4]string{r.Filter.Revision, r.Filter.Process.Revision, r.Filter.Process.ExecutableRevision, r.Filter.PeerService.Revision}
+	if changed && unedited {
+		r.Preset.Digest = PresetDigest(*r)
+	}
+	return changed
 }

@@ -70,8 +70,7 @@ func stamp(path string) string {
 	if e != nil {
 		return ""
 	}
-	s := st.Sys().(*syscall.Stat_t)
-	return fmt.Sprintf("%d:%d:%d:%d:%d", s.Dev, s.Ino, st.Size(), st.ModTime().UnixNano(), s.Ctim.Nano())
+	return statStamp(st)
 }
 func processStat(base string) (string, int, error) {
 	s := string(readBound(base+"/stat", 8192))

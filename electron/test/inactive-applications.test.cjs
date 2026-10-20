@@ -58,3 +58,21 @@ test('process rows show an inherited application rule muted and not interactive'
   const css = fs.readFileSync(path.join(__dirname, '../src/style.css'), 'utf8');
   assert.match(css, /\.policy-cell\.policy-inherited \{[^}]*pointer-events:none/);
 });
+
+test('same name, different programs show where they live; older revisions are marked', () => {
+  const { inactiveApplications, shortLocation } = require('../dist/test/model.cjs');
+  const r = (id, application, revision, executable, created) => ({ ...rule(id, application, revision, executable), created });
+  const rows = inactiveApplications([
+    r('a', 'k1', 'r1', '/home/u/.vscode-oss/extensions/openai.chatgpt-26.908.40401-linux-x64/bin/linux-x86_64/codex', '2026-10-19T23:41:00Z'),
+    r('b', 'k2', 'r2', '/home/u/.codex/packages/standalone/releases/0.160.0-x86_64-unknown-linux-musl/bin/codex', '2026-10-20T11:17:00Z'),
+    r('c', 'kh', 'old', '/home/u/.var/app/com.hypixel.HytaleLauncher/data/Hytale/hytale-launcher', '2026-10-19T10:00:00Z'),
+    r('d', 'kh', 'new', '/home/u/.var/app/com.hypixel.HytaleLauncher/data/Hytale/hytale-launcher', '2026-10-19T23:35:00Z'),
+  ], []);
+  const codex = rows.filter((x) => x.label === 'codex');
+  assert.equal(codex.length, 2);
+  assert.ok(codex.every((x) => x.inactive.where && !x.inactive.earlierVersion), 'different programs: located, not "earlier"');
+  assert.notEqual(codex[0].inactive.where, codex[1].inactive.where);
+  const hy = rows.filter((x) => x.label === 'hytale-launcher');
+  assert.deepEqual(hy.map((x) => [x.inactive.revision, x.inactive.earlierVersion]).sort(), [['new', false], ['old', true]]);
+  assert.equal(shortLocation('/home/u/.codex/packages/standalone/releases/0.160.0-x86_64-unknown-linux-musl/bin/codex'), '~/…/0.160.0-x86_64-unknown-linux-musl/bin');
+});

@@ -119,6 +119,8 @@ func (s *Store) Load() ([]policy.Rule, error) {
 		if decoder.Decode(new(any)) != io.EOF {
 			return nil, fmt.Errorf("trailing stored data")
 		}
+		// Earlier device-dependent file stamps match again after a reboot.
+		policy.MigrateRevisions(&r)
 		if err = r.Validate(); err != nil {
 			return nil, err
 		}
