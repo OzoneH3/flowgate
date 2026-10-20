@@ -164,12 +164,16 @@ func (m *WineObservers) Resolve(f Flow) Attribution {
 	if !session.current() {
 		return stop("broker generation changed")
 	}
-	// Only rendezvous variables are copied. No inherited preload, DLL search path,
+	// Only rendezvous paths and bounded boolean synchronization settings are copied. No inherited preload, DLL search path,
 	// shell command, launcher arguments or root environment enters the Wine child.
 	tmp := "/tmp"
 	runtime := ""
+	var syncEnv []string
 	for _, pair := range strings.Split(string(readBound(fmt.Sprintf("/proc/%d/environ", broker.PID), 1<<20)), "\x00") {
 		k, v, ok := strings.Cut(pair, "=")
+		if ok && (v == "0" || v == "1") && (k == "WINEESYNC" || k == "WINEFSYNC" || k == "WINE_DISABLE_FAST_SYNC" || k == "WINE_NTSYNC") {
+			syncEnv = append(syncEnv, k+"="+v)
+		}
 		if ok && filepath.IsAbs(v) {
 			if k == "TMPDIR" {
 				tmp = v
@@ -180,6 +184,7 @@ func (m *WineObservers) Resolve(f Flow) Attribution {
 		}
 	}
 	env := []string{"PATH=/usr/bin:/bin", "WINEPREFIX=" + broker.Application.Prefix, "WINESERVER=/usr/bin/false", "WINEDEBUG=-all", "WINEDLLOVERRIDES=mscoree,mshtml=", "DISPLAY=", "WAYLAND_DISPLAY=", "TMPDIR=" + tmp, "HOME=" + m.options.Scratch, "XDG_CACHE_HOME=" + m.options.Scratch, "XDG_CONFIG_HOME=" + m.options.Scratch, "XDG_DATA_HOME=" + m.options.Scratch}
+	env = append(env, syncEnv...)
 	if runtime != "" {
 		env = append(env, "XDG_RUNTIME_DIR="+runtime)
 	}

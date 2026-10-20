@@ -424,7 +424,9 @@ The observer now pins descriptors for the verified broker's mount namespace and
 root. The fixed `/usr/bin/nsenter` command enters that mount namespace and root,
 then changes GID/UID and drops supplementary groups before executing Wine. It
 never enters a user, network or PID namespace, imports the target environment,
-or runs a shell. The broker generation is checked again before/after joining.
+or runs a shell. Only boolean Wine synchronization-mode flags are copied in
+addition to rendezvous directories, so a Proton fsync/esync client can join the
+existing server without copying loader paths or arbitrary environment. The broker generation is checked again before/after joining.
 The implementation reuses executable-evidence mount mappings in reverse: every
 candidate Wine-loader/observer path inside the sandbox must have the configured
 host file's device and inode. This covers host views such as `/run/host/usr/local`

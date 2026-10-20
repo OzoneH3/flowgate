@@ -4,7 +4,7 @@ Uses the production on-demand observer manager; never touches a game prefix.
 """
 import argparse,json,os,pathlib,socket,subprocess,threading,time,signal
 ROOT=pathlib.Path(__file__).resolve().parents[2]
-p=argparse.ArgumentParser();p.add_argument('--binary',required=True);p.add_argument('--run',required=True);p.add_argument('--runtime-bin',required=True);p.add_argument('--prefix-source',required=True);p.add_argument('--mount-namespaces',action='store_true');p.add_argument('--helper-alias',action='store_true');a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--binary',required=True);p.add_argument('--run',required=True);p.add_argument('--runtime-bin',required=True);p.add_argument('--prefix-source',required=True);p.add_argument('--mount-namespaces',action='store_true');p.add_argument('--helper-alias',action='store_true');p.add_argument('--sync',action='store_true');a=p.parse_args()
 if a.helper_alias:a.mount_namespaces=True
 assert os.environ['FLOWGATE_PARENT_NETNS']!=os.readlink('/proc/self/ns/net')
 RUN=pathlib.Path(a.run).resolve();assert RUN.is_relative_to(ROOT/'.workspace');RUN.mkdir(mode=0o700,parents=True)
@@ -15,6 +15,7 @@ for f in prefixes:subprocess.run(['cp','-a','--reflink=auto',str(source),str(f)]
 rt=pathlib.Path(a.runtime_bin).resolve();runner=str(rt/'wine');API=str(RUN/'control.sock');children=[];receivers=[];evidence=[]
 baseenv=dict(os.environ,TMPDIR=str(RUN/'tmp'),WINEDEBUG='-all',WINESERVER=str(rt/'wineserver'),DISPLAY='',WAYLAND_DISPLAY='',XDG_CACHE_HOME=str(RUN/'scratch'),XDG_CONFIG_HOME=str(RUN/'scratch'),XDG_DATA_HOME=str(RUN/'scratch'),WINEDLLOVERRIDES='mscoree,mshtml=')
 for k in ['FLOWGATE_WINE_TABLE_RUNNER','FLOWGATE_WINE_TABLE_HELPER','FLOWGATE_WINE_BROKER']:baseenv.pop(k,None)
+if a.sync:baseenv.update(WINEESYNC='1',WINEFSYNC='1')
 anchors=[]
 if a.helper_alias:
  (RUN/'observer-alias.exe').write_bytes(b'placeholder')
@@ -112,7 +113,7 @@ try:
  c=start('connect-beta.exe',prefix=1);old=pending(c);os.kill(old['attribution']['runtime_table']['broker_pid'],signal.SIGKILL)
  r=call('decide',generation=call()['generation'],id=old['id'],action='allow',scope='once');assert r.get('error')and not c['received'];log('PASS broker exit invalidates held approval')
  r=call('rule-delete',generation=call()['generation'],id=rule['id'],expected_version=rule['version']);assert not r.get('error'),r;assert not call().get('rules')
- (RUN/'result.json').write_text(json.dumps(dict(passed=True,runtime=str(rt),mount_namespaces=a.mount_namespaces,helper_alias=a.helper_alias,events=evidence,final_rules=0),indent=2));log('PASS final rules0; copied prefixes and private namespaces only')
+ (RUN/'result.json').write_text(json.dumps(dict(passed=True,runtime=str(rt),mount_namespaces=a.mount_namespaces,helper_alias=a.helper_alias,sync=a.sync,events=evidence,final_rules=0),indent=2));log('PASS final rules0; copied prefixes and private namespaces only')
 finally:
  for p in children:
   if p.poll()is None:p.terminate()
