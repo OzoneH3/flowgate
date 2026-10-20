@@ -721,7 +721,7 @@ app.whenReady().then(async () => {
           throw Error('Observed target is not the selected identity');
       } else {
         const rule = state.control.rules?.find((r) => r.id === value.id);
-        const app = row.process?.application;
+        const app = row.runtimeApplication?.application || row.process?.application;
         if(row.applicationZone && (!rule || rule.filter.process || !matchesApplicationZone(rule.filter,row.applicationZone)))throw Error('Rule belongs to a different application/zone scope');
         if (rule?.filter.all_programs && row.kind === 'network') {
           if (rule.filter.network_zone !== (row.id === 'network:local' ? 'local' : 'internet'))
@@ -731,7 +731,7 @@ app.whenReady().then(async () => {
           !app ||
           rule.filter.application !== app.key ||
           rule.filter.revision !== app.revision ||
-          rule.filter.uid !== row.process?.uid ||
+          rule.filter.uid !== (row.runtimeApplication?.uid ?? row.process?.uid) ||
           (rule.filter.process &&
             !sameProcessTarget(
               rule.filter.process,
