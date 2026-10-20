@@ -23,7 +23,6 @@ type observedWine struct {
 	broker  Process
 	table   *WineTable
 	failure string
-	scratch *wineNamespace
 }
 type WineObservers struct {
 	mu       sync.Mutex
@@ -73,10 +72,6 @@ func (m *WineObservers) Close() {
 		if s.table != nil {
 			s.table.Close()
 		}
-		if s.scratch != nil {
-			s.scratch.removePrivateScratch()
-			s.scratch.scratchDir.Close()
-		}
 	}
 	m.sessions = nil
 }
@@ -86,7 +81,7 @@ func (m *WineObservers) Resolve(f Flow) Attribution {
 	var bin string
 	for i := range a.Owners {
 		p := &a.Owners[i]
-		if p.UID != m.options.UID || p.Application.Prefix == "" || p.NetNS != NetNS() {
+		if p.UID != m.options.UID || p.Application.Prefix == "" || p.NetNS != NetNS() || p.MountNS != SelfMountNS() {
 			continue
 		}
 		prefixAllowed := false
@@ -138,10 +133,6 @@ func (m *WineObservers) Resolve(f Flow) Attribution {
 			if s.table != nil {
 				s.table.Close()
 			}
-			if s.scratch != nil {
-				s.scratch.removePrivateScratch()
-				s.scratch.scratchDir.Close()
-			}
 			delete(m.sessions, k)
 		}
 	}
@@ -166,16 +157,12 @@ func (m *WineObservers) Resolve(f Flow) Attribution {
 	if !session.current() {
 		return stop("broker generation changed")
 	}
-	// Only rendezvous paths and bounded boolean synchronization settings are copied. No inherited preload, DLL search path,
+	// Only rendezvous variables are copied. No inherited preload, DLL search path,
 	// shell command, launcher arguments or root environment enters the Wine child.
 	tmp := "/tmp"
 	runtime := ""
-	var syncEnv []string
 	for _, pair := range strings.Split(string(readBound(fmt.Sprintf("/proc/%d/environ", broker.PID), 1<<20)), "\x00") {
 		k, v, ok := strings.Cut(pair, "=")
-		if ok && (v == "0" || v == "1") && (k == "WINEESYNC" || k == "WINEFSYNC" || k == "WINE_DISABLE_FAST_SYNC" || k == "WINE_NTSYNC") {
-			syncEnv = append(syncEnv, k+"="+v)
-		}
 		if ok && filepath.IsAbs(v) {
 			if k == "TMPDIR" {
 				tmp = v
@@ -186,7 +173,6 @@ func (m *WineObservers) Resolve(f Flow) Attribution {
 		}
 	}
 	env := []string{"PATH=/usr/bin:/bin", "WINEPREFIX=" + broker.Application.Prefix, "WINESERVER=/usr/bin/false", "WINEDEBUG=-all", "WINEDLLOVERRIDES=mscoree,mshtml=", "DISPLAY=", "WAYLAND_DISPLAY=", "TMPDIR=" + tmp, "HOME=" + m.options.Scratch, "XDG_CACHE_HOME=" + m.options.Scratch, "XDG_CONFIG_HOME=" + m.options.Scratch, "XDG_DATA_HOME=" + m.options.Scratch}
-	env = append(env, syncEnv...)
 	if runtime != "" {
 		env = append(env, "XDG_RUNTIME_DIR="+runtime)
 	}
@@ -201,25 +187,7 @@ func (m *WineObservers) Resolve(f Flow) Attribution {
 		}
 		credential = &syscall.Credential{Uid: broker.UID, Gid: st.Sys().(*syscall.Stat_t).Gid, Groups: []uint32{}}
 	}
-	var namespace *wineNamespace
-	if broker.MountNS != SelfMountNS() {
-		var er error
-		namespace, er = prepareWineNamespace(*broker, session.Runner, m.options.Helper, m.options.Scratch, runtime)
-		if er != nil {
-			return stop(er.Error())
-		}
-		defer namespace.close()
-		if namespace.removeScratch {
-			record.scratch = namespace
-		}
-		for i, pair := range env {
-			k, _, _ := strings.Cut(pair, "=")
-			if k == "HOME" || k == "XDG_CACHE_HOME" || k == "XDG_CONFIG_HOME" || k == "XDG_DATA_HOME" {
-				env[i] = k + "=" + namespace.scratch
-			}
-		}
-	}
-	w, err := newWineTableConfigured(session.Runner, m.options.Helper, filepath.Join(bin, "wineserver"), broker.Application.Prefix, version, env, credential, namespace)
+	w, err := newWineTableAs(session.Runner, m.options.Helper, filepath.Join(bin, "wineserver"), broker.Application.Prefix, version, env, credential)
 	if err != nil {
 		return stop(err.Error())
 	}

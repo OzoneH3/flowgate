@@ -190,27 +190,12 @@ export function hierarchy(activity: Activity, query = '', filter = 'all'): Row[]
         apps.set(key, g);
         roots.push(g);
       }
-      // The launch is only a display group. Its children retain the exact
-      // application identity used by rules and inactive-row reconciliation.
-      const appKey = p.application.key
-        ? `${p.application.key}|${p.application.revision}|uid:${p.uid}`
-        : `unresolved:${p.id}`;
-      let app = apps.get(appKey);
-      if (!app) {
-        app = {
-          id: 'app:' + appKey, parent: g.id, kind: 'application',
-          label: p.application.display_name || p.application.name || p.executable,
-          children: [], rows: [], process: p,
-        };
-        apps.set(appKey, app);
-        g.children.push(app);
-      }
-      const pk = 'process:' + appKey + ':' + p.id;
+      const pk = 'process:' + key + ':' + p.id;
       let pr = procs.get(pk);
       if (!pr) {
         pr = {
           id: pk,
-          parent: app.id,
+          parent: g.id,
           kind: 'process',
           label: launchProcessLabel(p),
           pid: p.pid,
@@ -219,10 +204,9 @@ export function hierarchy(activity: Activity, query = '', filter = 'all'): Row[]
           process: p,
         };
         procs.set(pk, pr);
-        app.children.push(pr);
+        g.children.push(pr);
       }
       g.rows.push(s);
-      app.rows.push(s);
       pr.rows.push(s);
       parent = pr;
     } else if (s.owners.length === 1 && owners.length === 1) {
@@ -438,8 +422,8 @@ export function executableName(path: string) {
   return /\.asar$/.test(base) && parts.length ? parts.pop()! : base;
 }
 /**
- * Applications with stored rules but no observed socket rows: one row per
- * application key/revision/UID with no socket row, listed after observed
+ * Applications that have stored rules but are not running: one row per
+ * application key/revision/UID with no live row, listed after all running
  * applications. Rules with only a process binding, all-programs or zone-wide
  * scope name no application and are not listed here.
  */
@@ -506,7 +490,7 @@ export function shortLocation(path: string) {
   const text = dir.join('/');
   return text.length <= 48 ? text : [dir[0], '…', ...dir.slice(-2)].join('/');
 }
-/** Observed applications followed by stored-rule applications without sockets. */
+/** Running applications followed by not-running applications with rules. */
 export function activityTree(activity: Activity, rules: Rule[] | undefined, query = '', filter = 'all', contextFor?: (key:string,revision:string,uid:number)=>readonly LaunchContext[], zones?: NetworkZones): Row[] {
   const live = hierarchy(activity, query, filter);
   const rows=[...live, ...inactiveApplications(rules, live, query, filter, contextFor)];

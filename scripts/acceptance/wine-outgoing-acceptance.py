@@ -4,32 +4,16 @@ Uses the production on-demand observer manager; never touches a game prefix.
 """
 import argparse,json,os,pathlib,socket,subprocess,threading,time,signal
 ROOT=pathlib.Path(__file__).resolve().parents[2]
-p=argparse.ArgumentParser();p.add_argument('--binary',required=True);p.add_argument('--run',required=True);p.add_argument('--runtime-bin',required=True);p.add_argument('--prefix-source',required=True);p.add_argument('--mount-namespaces',action='store_true');p.add_argument('--helper-alias',action='store_true');p.add_argument('--sync',action='store_true');p.add_argument('--private-runtime',action='store_true');a=p.parse_args()
-if a.helper_alias:a.mount_namespaces=True
+p=argparse.ArgumentParser();p.add_argument('--binary',required=True);p.add_argument('--run',required=True);p.add_argument('--runtime-bin',required=True);p.add_argument('--prefix-source',required=True);a=p.parse_args()
 assert os.environ['FLOWGATE_PARENT_NETNS']!=os.readlink('/proc/self/ns/net')
 RUN=pathlib.Path(a.run).resolve();assert RUN.is_relative_to(ROOT/'.workspace');RUN.mkdir(mode=0o700,parents=True)
 source=pathlib.Path(a.prefix_source).resolve();assert source.is_relative_to(ROOT/'.workspace')
-for d in ['tmp','scratch','runtime','hidden-scratch','private-runtime']:(RUN/d).mkdir(mode=0o700)
+for d in ['tmp','scratch']:(RUN/d).mkdir(mode=0o700)
 prefixes=[RUN/'prefix-a',RUN/'prefix-b']
 for f in prefixes:subprocess.run(['cp','-a','--reflink=auto',str(source),str(f)],check=True)
 rt=pathlib.Path(a.runtime_bin).resolve();runner=str(rt/'wine');API=str(RUN/'control.sock');children=[];receivers=[];evidence=[]
 baseenv=dict(os.environ,TMPDIR=str(RUN/'tmp'),WINEDEBUG='-all',WINESERVER=str(rt/'wineserver'),DISPLAY='',WAYLAND_DISPLAY='',XDG_CACHE_HOME=str(RUN/'scratch'),XDG_CONFIG_HOME=str(RUN/'scratch'),XDG_DATA_HOME=str(RUN/'scratch'),WINEDLLOVERRIDES='mscoree,mshtml=')
 for k in ['FLOWGATE_WINE_TABLE_RUNNER','FLOWGATE_WINE_TABLE_HELPER','FLOWGATE_WINE_BROKER']:baseenv.pop(k,None)
-if a.sync:baseenv.update(WINEESYNC='1',WINEFSYNC='1')
-anchors=[]
-if a.helper_alias:
- (RUN/'observer-alias.exe').write_bytes(b'placeholder')
- (RUN/'decoy.exe').write_bytes(b'not the observer')
- baseenv['XDG_RUNTIME_DIR']=str(RUN/'runtime')
-if a.mount_namespaces:
- for prefix in prefixes:
-  anchorargs=['sleep','180']
-  if a.helper_alias:anchorargs=['sh','-c','mount --bind "$1" "$2"; mount --bind "$3" "$1"; mount --bind "$4" "$5"; mount --bind "$6" "$7"; exec sleep 180','sh',str(ROOT/'.workspace/windows/table-probe.exe'),str(RUN/'observer-alias.exe'),str(RUN/'decoy.exe'),str(RUN/'hidden-scratch'),str(RUN/'scratch'),str(RUN/('private-runtime' if a.private_runtime else 'runtime')),str(RUN/'runtime')]
-  anchor=subprocess.Popen(['unshare','--mount','--propagation','private']+anchorargs);anchors.append(anchor);children.append(anchor)
-  until=time.monotonic()+3
-  while os.readlink('/proc/'+str(anchor.pid)+'/ns/mnt')==os.readlink('/proc/self/ns/mnt'):
-   assert time.monotonic()<until and anchor.poll()is None
-   time.sleep(.02)
 def log(s):print(s,flush=True)
 def call(op='list',**q):
  with socket.socket(socket.AF_UNIX)as s:
@@ -50,7 +34,6 @@ def start(name='connect-alpha.exe',prefix=0,duplicate=False,reuse=False,pollfd=F
   except OSError:pass
  threading.Thread(target=receive,daemon=True).start()
  path=RUN/('client-'+str(port)+'.log');f=path.open('w');args=[runner,str(ROOT/'.workspace/windows'/name),str(port)]+(['d']if duplicate else['r']if reuse else['q']if pollfd else[])
- if a.mount_namespaces:args=['/usr/bin/nsenter','--target',str(anchors[prefix].pid),'--mount','--root','--wdns=/','--']+args
  proc=subprocess.Popen(args,env=dict(baseenv,WINEPREFIX=str(prefixes[prefix]),FLOWGATE_FIXTURE_RELEASE='Z:'+str(RUN/'reuse-release')),stdout=f,stderr=f);children.append(proc)
  return dict(process=proc,port=port,received=received,path=path,name=name,prefix=prefix)
 def event(c):return next((e for e in call().get('events',[])if e['flow']['remote'].endswith(':'+str(c['port']))),None)
@@ -71,7 +54,6 @@ try:
  log('PASS broker-only Linux FD; Windows handle owner+SYN_SENT exact tuple identified before completion; Allow payload reached receiver')
  once(start('connect-beta.exe'),'block');log('PASS independent second executable Deny: receiver empty')
  c=start();e=pending(c);s=call();q=dict(generation=s['generation'],id=e['id'],action='allow',scope='persistent',network_zone='any',zone_revision=s['network_zones']['revision'],remember=dict(address=False,port=False,protocol=False,process=False),duration_seconds=0)
- assert not e['request_rule']['process_lease_available'],e
  pv=call('decision-preview',**q);assert not pv.get('error'),pv
  saved=call('decide',**q,preview_token=pv['decision_preview']['token']);assert not saved.get('error'),saved
  wait(lambda:c['received']);rule=saved['saved_rule'];assert rule['filter']['remote_address']=='*' and not rule['filter'].get('local_port')
@@ -113,7 +95,7 @@ try:
  c=start('connect-beta.exe',prefix=1);old=pending(c);os.kill(old['attribution']['runtime_table']['broker_pid'],signal.SIGKILL)
  r=call('decide',generation=call()['generation'],id=old['id'],action='allow',scope='once');assert r.get('error')and not c['received'];log('PASS broker exit invalidates held approval')
  r=call('rule-delete',generation=call()['generation'],id=rule['id'],expected_version=rule['version']);assert not r.get('error'),r;assert not call().get('rules')
- (RUN/'result.json').write_text(json.dumps(dict(passed=True,runtime=str(rt),mount_namespaces=a.mount_namespaces,helper_alias=a.helper_alias,sync=a.sync,events=evidence,final_rules=0),indent=2));log('PASS final rules0; copied prefixes and private namespaces only')
+ (RUN/'result.json').write_text(json.dumps(dict(passed=True,runtime=str(rt),events=evidence,final_rules=0),indent=2));log('PASS final rules0; copied prefixes and private namespaces only')
 finally:
  for p in children:
   if p.poll()is None:p.terminate()

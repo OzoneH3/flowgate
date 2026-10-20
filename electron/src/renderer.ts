@@ -393,7 +393,6 @@ let visible: { row: Row; depth: number }[] = [];
 let sort = 'name',
   descending = false;
 const expanded = new Set<string>(['overview']);
-const seenLaunchGroups = new Set<string>();
 const localSubmitted = new Set<string>();
 let ruleSignature = '';
 let lastGeneration = '';
@@ -583,14 +582,14 @@ function statusStrip(r: Row) {
       title = `${slot.label}: connections carry no rules; see the holder process.`;
     } else if (r.kind === 'launch') {
       chip = { glyph: '', text: '', tone: 'none', detail: '' };
-      title = `${slot.label}: launch group (display only); expand to edit each application below.`;
+      title = `${slot.label}: launch group (display only); rules apply to each process below.`;
     } else if (r.applicationZone) {
       const rules=status.available?status[direction]:[];
       const own=zoneConfigured(rules,status.now);
       chip={glyph:'',text:own.text,tone:status.available?own.tone:'unavailable',detail:rules.map(rule=>ruleDescription(rule,status.now)).join('\n')};
       title=`${r.label} · ${direction} · exact application/zone stored rules\n${chip.detail}\nConfigured policy, not a connection verdict. Parent application rule and global zone policies remain separate.`;
     } else if (r.inactive) {
-      // No observed sockets: this is not proof that the process exited; list stored rules.
+      // Not running: the backend summarizes live processes only; list its stored rules.
       const rules = status.available ? status[direction] : [],
         own = ownConfigured(rules, status.now);
       chip = {
@@ -600,7 +599,7 @@ function statusStrip(r: Row) {
         detail: rules.map((rule) => ruleDescription(rule, status.now)).join('\n'),
         scoped: own.scoped,
       };
-      title = `${slot.label} (no observed sockets · stored rules): ${chip.text}\n${chip.detail}`;
+      title = `${slot.label} (not running · stored rules): ${chip.text}\n${chip.detail}`;
     } else if (authoritative) {
       // NetLimiter Rule Status: the node's OWN rule; scoped rules only add a "+N scoped" hint.
       const summary = processPolicy?.[direction] || result?.application?.[direction];
@@ -1318,14 +1317,6 @@ const renderedRows = new Map<
 >();
 let treePolicyRevision = 0;
 function renderTree() {
-  const launches = allRows(roots).filter(r => r.kind === 'launch');
-  const launchIds = new Set(launches.map(r => r.id));
-  for (const id of seenLaunchGroups) if (!launchIds.has(id)) seenLaunchGroups.delete(id);
-  for (const r of launches) if (!seenLaunchGroups.has(r.id)) {
-    seenLaunchGroups.add(r.id);
-    expanded.add(r.id);
-  }
-
   for (const th of document.querySelectorAll<HTMLElement>('#headers th')) {
     const key = th.className.replace('col-', '');
     const actual =
@@ -1478,13 +1469,12 @@ function renderTree() {
       name.append(
         element(
           'span',
-          (r.inactive.earlierVersion ? ' · earlier version, no observed sockets' : ' · no observed sockets') +
+          (r.inactive.earlierVersion ? ' · earlier version, not running' : ' · not running') +
             (r.inactive.where ? ' · ' + r.inactive.where : ''),
           'row-inactive-note',
         ),
       );
-    name.title = (r.process?.executable || r.inactive?.executable || r.socket?.socket.remote || r.label) +
-      (r.inactive ? '\nNo sockets for this identity in the Activity snapshot. The process may still be running.' : '');
+    name.title = r.process?.executable || r.inactive?.executable || r.socket?.socket.remote || r.label;
     tr.append(name);
     for (const key of rateKeys()) {
       const s = sum(r.rows, key, measurementSource);
@@ -1698,7 +1688,7 @@ function renderInfo() {
         `${prov.launch.kind} · ${prov.launch.launcher_name} PID ${prov.launch.launcher_pid}${prov.launch.runtime ? ' · ' + prov.launch.runtime : ''}`,
       );
     if (prov?.launch?.prefix) field(info, 'Prefix', prov.launch.prefix);
-    field(info, 'Applications', r.children.map((c) => c.label).join('\n'));
+    field(info, 'Processes', r.children.map((c) => c.label).join('\n'));
     field(
       info,
       'Observation only',

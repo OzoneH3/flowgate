@@ -74,9 +74,6 @@ func newWineTable(runner, helper, broker, prefix, version string, env []string) 
 	return newWineTableAs(runner, helper, broker, prefix, version, env, nil)
 }
 func newWineTableAs(runner, helper, broker, prefix, version string, env []string, credential *syscall.Credential) (*WineTable, error) {
-	return newWineTableConfigured(runner, helper, broker, prefix, version, env, credential, nil)
-}
-func newWineTableConfigured(runner, helper, broker, prefix, version string, env []string, credential *syscall.Credential, namespace *wineNamespace) (*WineTable, error) {
 	if version != "11.19" && version != "11.0" && version != "11.20" {
 		return nil, fmt.Errorf("unsupported experimental runtime version")
 	}
@@ -92,10 +89,6 @@ func newWineTableConfigured(runner, helper, broker, prefix, version string, env 
 		return nil, err
 	}
 	cmd := exec.Command(runner, helper)
-	if namespace != nil {
-		cmd = namespace.command()
-		credential = nil
-	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Credential: credential, Pdeathsig: syscall.SIGKILL}
 	if env == nil {
 		cmd.Env = append(os.Environ(), "WINEPREFIX="+prefix)
@@ -380,10 +373,7 @@ func (w *WineTable) helperPeers(broker *Process) int {
 			continue
 		}
 		p, err := Inspect(pid)
-		if err != nil || p.Application.Prefix != w.prefix || p.UID != broker.UID || p.NetNS != broker.NetNS || p.MountNS != broker.MountNS {
-			continue
-		}
-		if p.Application.Executable != w.helper && !w.mappedObserver(p) {
+		if err != nil || p.Application.Executable != w.helper || p.Application.Prefix != w.prefix || p.UID != broker.UID || p.NetNS != broker.NetNS || p.MountNS != broker.MountNS {
 			continue
 		}
 		fds, err := socketFDs(pid)
