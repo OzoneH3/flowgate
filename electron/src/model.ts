@@ -1,3 +1,5 @@
+import { addApplicationZones, type ApplicationZone } from './application-zones';
+import type { NetworkZones } from './network-zones';
 import type { LaunchContext } from './application-callers';
 import type { Activity, SocketRow, Process, Traffic, Application, Rule } from './protocol';
 import { launchProcessLabel, launchTitle, verifiedLaunch } from './provenance';
@@ -15,6 +17,8 @@ export interface Row {
   process?: Process;
   displayApplication?: Application;
   socket?: SocketRow;
+  applicationZone?: ApplicationZone;
+  policyRows?: SocketRow[];
   // Not running: an application identity that only stored rules name (NetLimiter
   // lists such applications too). No process, sockets or traffic.
   inactive?: InactiveApplication;
@@ -346,6 +350,8 @@ export function flatten(
         if (a.kind !== b.kind) return a.kind === 'network' ? -1 : 1;
         return a.id === b.id ? 0 : a.id === 'network:internet' ? -1 : 1;
       }
+      if (!!a.applicationZone !== !!b.applicationZone) return a.applicationZone ? -1 : 1;
+      if (a.applicationZone && b.applicationZone) return (a.applicationZone.zone === b.applicationZone.zone ? a.id.localeCompare(b.id) : a.applicationZone.zone === 'local' ? -1 : 1);
       // Not-running applications with rules stay at the bottom in every sort order.
       if (!!a.inactive !== !!b.inactive) return a.inactive ? 1 : -1;
       if (a.inactive && b.inactive) return a.label.localeCompare(b.label) || a.id.localeCompare(b.id);
@@ -485,7 +491,8 @@ export function shortLocation(path: string) {
   return text.length <= 48 ? text : [dir[0], '…', ...dir.slice(-2)].join('/');
 }
 /** Running applications followed by not-running applications with rules. */
-export function activityTree(activity: Activity, rules: Rule[] | undefined, query = '', filter = 'all', contextFor?: (key:string,revision:string,uid:number)=>readonly LaunchContext[]): Row[] {
+export function activityTree(activity: Activity, rules: Rule[] | undefined, query = '', filter = 'all', contextFor?: (key:string,revision:string,uid:number)=>readonly LaunchContext[], zones?: NetworkZones): Row[] {
   const live = hierarchy(activity, query, filter);
-  return [...live, ...inactiveApplications(rules, live, query, filter, contextFor)];
+  const rows=[...live, ...inactiveApplications(rules, live, query, filter, contextFor)];
+  return addApplicationZones(rows,rules||[],zones);
 }

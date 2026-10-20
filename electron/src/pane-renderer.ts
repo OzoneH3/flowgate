@@ -1,3 +1,4 @@
+import { zoneLabel } from './network-zones';
 import { acceptsPublication } from './publication';
 import { PROTECTION_CAPABILITY, stateProtection } from './protection-model';
 import { ActivityPolicy } from './activity-policy';
@@ -121,7 +122,10 @@ function consume(next: PaneFrame) {
           `${r.process.application.key}\n${r.process.application.revision}${r.process.application.executable_status === 'deleted' || r.process.executable.endsWith(' (deleted)') ? '\nReplaced/deleted running image; installed icon/name are display metadata only.' : ''}`,
         ],
       );
-    fields.push(['Visible sockets', String(r.rows.length)]);
+    fields.push(['Visible sockets', r.applicationZone?'—':String(r.rows.length)]);
+    if(r.applicationZone){
+      fields.push(['Scope',zoneLabel(r.applicationZone.zone)+' · '+r.applicationZone.model],['Measurement','Zone-attributed measurements are unavailable; parent lifetime counters are not relabelled.']);
+    }
     const count = sum(r.rows, 'uploaded', p.source);
     fields.push([
       'Coverage',
@@ -144,7 +148,7 @@ function consume(next: PaneFrame) {
         'Coverage',
         'Classification unavailable. No configured network-zone attribution; totals are unknown, not zero. Not a firewall target.',
       ]);
-    if (!r.rows.length && r.kind !== 'network')
+    if (!r.rows.length && r.kind !== 'network' && !r.applicationZone)
       fields.push([
         'Observation',
         'Selected item is no longer visible. No process or application target is rebound.',

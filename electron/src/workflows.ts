@@ -28,6 +28,7 @@ let accessState = '';
 let editorSource: RuleSource = {};
 let stayInActivity = false;
 export interface EditorOptions {
+  networkZone?: 'local' | 'internet';
   activity?: boolean;
   quick?: boolean;
   action?: 'allow' | 'block' | 'ask';
@@ -140,7 +141,7 @@ export async function openRule(source: RuleSource, options: EditorOptions = {}) 
     $('editAction').title = askWritable ? 'Ask: prompt for each new connection' : '';
     $<HTMLSelectElement>('editAction').value = r.action;
     $<HTMLSelectElement>('editProtocol').value = r.filter.protocol;
-    $<HTMLSelectElement>('editZone').value = r.filter.network_zone || '';
+    $<HTMLSelectElement>('editZone').value = options.networkZone || r.filter.network_zone || '';
     $<HTMLSelectElement>('editZone').disabled =
       !!source.id || !!source.zone || !state?.control.capabilities?.includes(ZONE_CAPABILITY);
     $('editZone').title = source.id

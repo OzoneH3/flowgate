@@ -1718,3 +1718,7 @@ body.hide-sidebar #activityView > aside { display:none; }
 .inactive-rules-status:empty, .inactive-rules-empty:empty { display:none; }
 .inactive-rules-status { margin:6px 0 0; color:#ddc38d; font-size:11px; }
 .inactive-rules-empty { color:#aaa; margin:2px 0; }
+
+/* App + network-zone filter rows (display scopes; not new program identities). */
+.application-zone-icon { width:16px; height:16px; display:inline-flex; flex:0 0 16px; color:#c5d947; }
+.application-zone-icon svg { width:16px; height:16px; fill:currentColor; }

@@ -1,3 +1,4 @@
+import { matchesApplicationZone } from './application-zones';
 import { Essential } from './essential';
 import { Protection } from './protection';
 import { placeKDEPrompt, resizeKDEPrompt, PROMPT_TITLE, promptTitle } from './prompt-placement';
@@ -672,6 +673,7 @@ app.whenReady().then(async () => {
   // Detached Info can use only drafts/receipts issued to its frozen selection.
   // Rules remains the single main-process mutation/preview service.
   const paneDrafts = new Map<string, { owner: number; selection: string; generation: string }>();
+  const paneZoneDrafts = new Map<string, string>();
   const paneReceipts = new Map<string, { owner: number; selection: string; generation: string }>();
   const paneReconciles = new Map<
     string,
@@ -709,9 +711,10 @@ app.whenReady().then(async () => {
           throw Error('Zone target differs from selection');
       } else if (value.observed) {
         const o = value.observed;
+        if(row.applicationZone && ((o.target_scope && o.target_scope!=='application') || row.applicationZone.model!==state.control.networkZones?.model))throw Error('Application/zone creation scope differs from selection');
         if (
           o.generation !== p.generation ||
-          !row.rows.some(
+          !(row.policyRows || row.rows).some(
             (r) => r.id === o.row_id && r.owners.length === 1 && r.owners[0] === o.process_id,
           )
         )
@@ -719,6 +722,7 @@ app.whenReady().then(async () => {
       } else {
         const rule = state.control.rules?.find((r) => r.id === value.id);
         const app = row.process?.application;
+        if(row.applicationZone && (!rule || rule.filter.process || !matchesApplicationZone(rule.filter,row.applicationZone)))throw Error('Rule belongs to a different application/zone scope');
         if (rule?.filter.all_programs && row.kind === 'network') {
           if (rule.filter.network_zone !== (row.id === 'network:local' ? 'local' : 'internet'))
             throw Error('Zone rule differs from selection');
@@ -740,10 +744,16 @@ app.whenReady().then(async () => {
       const draft = await rules.draft(value);
       if (paneDrafts.size >= 32) paneDrafts.delete(paneDrafts.keys().next().value!);
       paneDrafts.set(draft.token, binding);
+      if(value.observed && row.applicationZone){
+        if(paneZoneDrafts.size>=32)paneZoneDrafts.delete(paneZoneDrafts.keys().next().value!);
+        paneZoneDrafts.set(draft.token,row.applicationZone.zone);
+      }
       return draft;
     }
     if (op === 'preview') {
       owned(paneDrafts, value?.token);
+      const requiredZone=paneZoneDrafts.get(value?.token);
+      if(requiredZone && value?.network_zone!==requiredZone)throw Error('Preview network zone differs from selected child row');
       const preview = await rules.preview(value);
       if (paneReceipts.size >= 32) paneReceipts.delete(paneReceipts.keys().next().value!);
       paneReceipts.set(preview.receipt, binding);
