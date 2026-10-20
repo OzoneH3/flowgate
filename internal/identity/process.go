@@ -167,6 +167,14 @@ func Inspect(pid int) (Process, error) {
 					a.Evidence = []string{"Wine runtime mapping", "argv[0] corroborated by mapped Windows image", "explicit prefix"}
 				}
 			}
+			if a.Kind == "wine-unresolved" && prefix != "" && wineMemfdImage(base, arg, maps, start) {
+				a.Kind = "wine"
+				a.Executable = arg
+				a.Revision = stamp(base + "/root" + arg)
+				a.Name = filepath.Base(arg)
+				a.Evidence = []string{"Wine anonymous PE image: mapped executable memfd and complete PE headers match argv[0] file", "source inode/revision unchanged since before process creation", "explicit prefix; ordinary non-adversarial snapshot model"}
+			}
+
 		}
 	}
 	if a.Kind == "native" && a.Revision != "" {
