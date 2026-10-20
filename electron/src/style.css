@@ -1512,3 +1512,57 @@ body.hide-sidebar #activityView > aside { display:none; }
 .pair-side.pair-pending .pair-side-status, .pair-side.pair-not-requested .pair-side-status { color:#e0a040; }
 .local-pair-target, .pair-note { margin:2px 0; color:#999; }
 .pair-controls { display:flex; gap:6px; margin-top:3px; }
+
+#requestSummary { gap:4px; }
+#requestSummary[hidden], .request-meta[hidden], .request-details-view[hidden] { display:none; }
+#requestSummary .compact-application { margin:4px 0 0; }
+#requestSummary .compact-application strong { font-size:14px; font-weight:600; }
+.request-owner { margin:0 0 0 23px; font-size:11px; color:#9a9a9a; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.request-destination { margin:4px 0 0; font-size:12px; color:#ddd; overflow-wrap:anywhere; }
+.request-meta { display:flex; align-items:baseline; justify-content:space-between; gap:8px; margin:6px 0 4px; }
+#promptBody .request-meta .expiry, .request-meta .expiry { margin:0; font-size:11px; color:#aaa; min-width:0; overflow-wrap:anywhere; }
+.details-link { font-size:11px; flex:none; }
+/* Details: a separate view of short labelled fields in expandable sections. */
+.request-details-view { font-size:11px; }
+.details-head { display:flex; align-items:baseline; gap:10px; margin:0 0 4px; }
+.details-head h4 { margin:0; font-size:12px; color:#ddd; }
+.detail-section { border-top:1px solid #ffffff1a; padding:3px 0; }
+.detail-section > summary { cursor:pointer; color:#bbb; padding:2px 0; }
+.detail-section .connection-fields { grid-template-columns:84px minmax(0,1fr); gap:3px 8px; margin:4px 0 6px; }
+#promptBody .detail-section .connection-fields { grid-template-columns:84px minmax(0,1fr); font-size:11px; margin:4px 0 6px; gap:3px 8px; }
+.detail-section dt { color:#9a9a9a; }
+.detail-section dd { white-space:pre-wrap; color:#ddd; }
+.remember-scope { grid-column:1 / -1; margin:2px 0 4px; font-size:11px; color:#ddd; overflow-wrap:anywhere; }
+
+#promptBody .decision-controls button.allow, #promptBody .decision-controls button.block { min-height:24px; padding:2px 9px; }
+/* Pending requests › Results. */
+.permission-results { padding:4px 8px; font-size:12px; }
+.permission-results[hidden] { display:none; }
+.permission-results h3 { margin:4px 0; font-size:12px; color:#ccc; }
+.permission-results ol { list-style:none; margin:0; padding:0; }
+.permission-result summary { display:flex; gap:8px; align-items:baseline; cursor:pointer; padding:2px 0; }
+.permission-result .result-time, .permission-result .result-destination { color:#999; font-size:11px; }
+.permission-result .result-text { margin-left:auto; text-align:right; }
+.permission-result.result-error .result-text { color:#e06060; }
+.permission-result.result-unknown .result-text, .permission-result.result-warning .result-text { color:#e0a040; }
+.permission-result .result-detail { margin:2px 0 6px 12px; color:#bbb; white-space:pre-wrap; overflow-wrap:anywhere; font-size:11px; }
+.results-attention { color:#e0a040; margin-left:12px; }
+
+#promptBody .decision-controls { gap:10px; }
+#requestDetails .decision-controls button.allow, #requestDetails .decision-controls button.block { min-height:24px; height:24px; padding:0 9px; background:#4a4a4a; border:2px solid #4a4a4a; border-radius:0; color:#f9f9f9; cursor:pointer; }
+#requestDetails .decision-controls button.allow:hover:not(:disabled), #requestDetails .decision-controls button.block:hover:not(:disabled) { background:#565656; border-color:#606060; }
+#requestDetails .decision-controls button.allow:active:not(:disabled), #requestDetails .decision-controls button.block:active:not(:disabled) { background:#606060; border-color:#606060; }
+#requestDetails .decision-controls button:disabled { cursor:default; }
+#requestDetails .decision-controls input[type='checkbox'] { appearance:none; width:16px; min-width:16px; height:16px; min-height:16px; margin:0; border:1px solid #bbb; background:transparent; border-radius:0; cursor:pointer; display:inline-grid; place-content:center; }
+#requestDetails .decision-controls label:hover input[type='checkbox']:not(:disabled) { border-color:#2db5f6; }
+#requestDetails .decision-controls input[type='checkbox']:checked { background:#0ba7f4; border-color:#0ba7f4; }
+#requestDetails .decision-controls input[type='checkbox']:checked::before { content:''; width:9px; height:5px; border:solid #fff; border-width:0 0 2px 2px; transform:translateY(-1px) rotate(-45deg); }
+#requestDetails .decision-controls input[type='checkbox']:disabled { opacity:.5; cursor:default; }
+#requestDetails .decision-controls label { cursor:pointer; }
+
+.prompt-shell { border:1px solid #4a4a4a; }
+.prompt-heading { background:#272727; color:#f9f9f9; }
+.prompt-heading strong { font-size:14px; font-weight:600; }
+.prompt-heading span { color:#ddd; font-size:12px; }
+#closePrompt { color:#ddd; }
+#closePrompt:hover { background:#f44539; color:#fff; }

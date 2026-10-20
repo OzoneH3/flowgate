@@ -75,6 +75,8 @@ await build({
     'src/evaluation-model.ts',
     'src/daemon-evaluation.ts',
     'src/evaluation.ts',
+    'src/prompt-summary.ts',
+    'src/permission-results.ts',
   ],
   bundle: true,
   platform: 'node',

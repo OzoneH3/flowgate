@@ -290,7 +290,7 @@ test('ended card: one short main message; raw connection_ended reasons stay in D
   assert.equal(pd.ENDED_NEEDS_CHOICE, 'Check Remember to save a rule, or For a while for the running process.');
   const src = fs.readFileSync(path.join(__dirname, '../src/renderer.ts'), 'utf8');
   assert.ok(!src.includes('reviewFailureSummary('), 'renderer uses the short ended summary');
-  assert.ok(src.includes("pre.textContent = failure ? `${failure.code}: ${failure.message}` : ''"), 'raw reason in Details');
+  assert.ok(src.includes("$('revalidationDetails').textContent = failure ? `${failure.code}: ${failure.message}` : '—'"), 'raw reason in Details');
 });
 
 test('durations: offered set, saved default, expiry preview, validated decisions, backend until', async (t) => {
@@ -416,8 +416,10 @@ test('card: one short line when a rule exists for an earlier revision (display o
   const plain = card(ev('a'));
   assert.equal(plain.byId('previousRevisionNotice'), undefined);
   const { byId } = card(ev('a', { previous_revision_rules: [{ id: 'user:old', action: 'allow', revision: '1:2:3' }] }));
+  // A Details field (Rule section), not a first-view line.
   const notice = byId('previousRevisionNotice');
-  assert.equal(notice.text, 'A rule exists for an earlier version of this application (updated executable).');
-  assert.match(notice.title, /user:old \(Allow\) · revision 1:2:3/);
-  assert.match(notice.title, /Not applied/);
+  assert.ok(notice.text.startsWith('A rule exists for an earlier version of this application (updated executable).'));
+  assert.match(notice.text, /user:old \(Allow\) · revision 1:2:3/);
+  assert.match(notice.text, /Not applied/);
+  assert.ok([...byId('requestMore').walk()].includes(notice));
 });

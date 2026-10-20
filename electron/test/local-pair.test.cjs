@@ -131,36 +131,52 @@ class El {
   setAttribute(k, v) { this.attrs[k] = String(v); }
   *walk() { yield this; for (const c of this.children) yield* c.walk(); }
 }
-test('request card renders the pair section before the decision controls', () => {
+test('request card: Timberborn -> cupsd first view is short; the pair lives in Details only', () => {
   global.document = { createElement: (t) => new El(t) };
   global.Option = class extends El { constructor(l, v) { super('option'); this.text = l; this.value = v; } };
   global.window = { flowgate: { applicationMetadata: async () => ({}) } };
   const { buildRequestCard } = require('../dist/test/prompt-card.cjs');
-  const out = raw({ id: OUT, direction: 'outgoing', state: 'allowed', owner: rundll, local: '[::1]:44104', remote: '[::1]:631', peer: serverPeer({ correlated_event_id: IN }) });
-  const inc = raw({ id: IN, direction: 'incoming', owner: cupsd, local: '[::1]:631', remote: '[::1]:44104', peer: clientPeer({ correlated_event_id: OUT }) });
-  const r = reply([out, inc]);
-  const e = r.events.find((x) => x.id === IN);
+  const timberborn = { ...ds2, group: 'g-tb', launch: { ...ds2.launch, game: { name: 'Timberborn.exe', title: 'Timberborn', executable: '/g/Timberborn.exe', status: 'verified-file', source: 'proton' } } };
+  const helper = { ...rundll, provenance: timberborn };
+  const out = raw({ id: OUT, direction: 'outgoing', owner: helper, local: '127.0.0.1:44104', remote: '127.0.0.1:631', peer: serverPeer({ socket: { kind: 'listener', protocol: 'tcp', local: '127.0.0.1:631', remote: '0.0.0.0:0', state: 'Listening', cookie: 'beef', inode: 77 } }), sockets: [{ protocol: 'tcp', local: '127.0.0.1:44104', state: 2, cookie: 'c0ffee', inode: 5150 }] });
+  out.attribution.permission_target = { kind: 'helper', label: 'rundll32.exe in prefix ~/pfx (shared by every game using this prefix)', once: 'This connection request only; no rule is saved', for_a_while: 'This process instance only', remember: 'rundll32.exe (/c/rundll32.exe) in prefix ~/pfx, UID 1000, this file revision', shared_with_note: 'Shared by every game using prefix ~/pfx: any program there running this rundll32.exe file is covered, not only Timberborn (Timberborn.exe)', key_basis: 'uid+wine+prefix+executable path; revision = file stamp', prefix: '/home/u/pfx' };
+  const r = reply([out]);
+  const e = r.events[0];
+  const pair = localPairView(e, r.events, caps);
+  assert.deepEqual(pair.pairIds, [OUT], 'plain Allow/Deny answers the exact pair (Once)');
   const root = new El('div');
-  root.append(...buildRequestCard({ ...e, remainingMs: 60000 }, { name: 'cupsd', rememberMode: true, forAWhile: true, rememberOptions: [], pair: localPairView(e, r.events, caps) }));
+  root.append(...buildRequestCard({ ...e, remainingMs: 60000 }, { name: 'rundll32.exe', rememberMode: true, forAWhile: true, rememberOptions: [], pair }));
   const all = [...root.walk()], byId = (id) => all.find((n) => n.id === id);
-  assert.equal(byId('localPairTitle').textContent, 'DEATH STRANDING 2 · DS2.exe (via rundll32.exe) → cupsd');
-  assert.equal(byId('localPairLine').textContent, 'Incoming to cupsd · TCP · local');
-  assert.equal(byId('pairSideOutgoing').textContent, 'Outgoing: rundll32.exe → [::1]:631 — Allowed');
-  assert.equal(byId('pairSideIncoming').textContent, 'Incoming: cupsd ← rundll32.exe ([::1]:44104) — Waiting for a decision');
-  assert.equal(byId('pairSideIncoming').dataset.phase, 'pending');
-  assert.match(byId('localPairTarget').textContent, /incoming to cupsd only/);
-  assert.equal(byId('pairAllow').textContent, 'Allow both');
-  assert.equal(byId('pairBlock').textContent, 'Deny both');
-  assert.ok(byId('pairResult'));
-  const order = all.filter((n) => ['localPair', 'permissionScope', 'allow'].includes(n.id)).map((n) => n.id);
-  assert.deepEqual(order, ['localPair', 'permissionScope', 'allow']);
-  const details = byId('requestMore').textContent;
-  assert.match(details, /Local client.*rundll32\.exe · PID 1195586 · start 4782344/s);
-  assert.match(details, /cookie c0ffee · inode 5150/);
-  assert.match(details, /cupsd owns this socket/);
-  // Not a local request: no pair section.
+  const details = byId('requestMore'), inside = new Set(details.walk());
+  const visible = all.filter((n) => !inside.has(n) && !n.hidden);
+  const text = visible.map((n) => n.text || '').join(' | ');
+  // Required first view.
+  assert.equal(byId('requestApplication').textContent.replace('◇', ''), 'Timberborn');
+  assert.equal(byId('requestOwner').textContent, 'rundll32.exe');
+  assert.equal(byId('requestDestination').textContent, 'To Local printing service (cupsd) · 127.0.0.1:631 · TCP');
+  assert.ok(byId('requestStatusLine'));
+  assert.equal(byId('detailsToggle').text, 'Details');
+  assert.deepEqual(byId('decisionControls').children.map((c) => c.id || c.children.find((x) => x.tagName === 'INPUT')?.id), ['allow', 'block', 'rememberToggle', 'forAWhileToggle']);
+  // Nothing about paired hooks, no raw diagnostics in the first view.
+  for (const gone of ['Allow both', 'Deny both', 'pairAllow', 'pairBlock', 'localPair'])
+    assert.ok(!all.some((n) => n.id === gone || n.text === gone), gone);
+  for (const hidden of ['PID', 'cookie', 'inode', '/c/rundll32.exe', 'Incoming', 'uid+wine', 'This request', 'prefix ~/pfx (shared'])
+    assert.ok(!text.includes(hidden), 'first view hides ' + hidden);
+  // Details: labelled sections; the pair, sockets and rule internals are there.
+  const sections = [...details.walk()].filter((n) => n.tagName === 'DETAILS').map((n) => n.dataset.section);
+  assert.deepEqual(sections, ['connection', 'application', 'launch', 'local-pair', 'rule', 'status']);
+  const d = details.textContent;
+  assert.match(d, /Outgoing side.*rundll32\.exe → 127\.0\.0\.1:631/s);
+  assert.match(d, /Incoming side.*Not requested yet/s);
+  assert.match(d, /cookie c0ffee · inode 5150/);
+  assert.match(d, /uid\+wine\+prefix\+executable path/);
+  assert.match(d, /not only Timberborn/);
+  // Remember is labelled before the click with the helper/prefix scope, never Timberborn-wide.
+  assert.equal(byId('rememberScope').textContent, 'Rule for rundll32.exe in prefix ~/pfx · every game using this prefix');
+  // Not a local request: no pair rows.
   const plain = reply([raw({ id: OUT, direction: 'outgoing', owner: rundll, local: '10.0.0.2:5000', remote: '1.1.1.1:443' })]).events[0];
   const r2 = new El('div');
   r2.append(...buildRequestCard({ ...plain, remainingMs: 1 }, { name: 'x', rememberMode: false, forAWhile: false, rememberOptions: [], pair: localPairView(plain, [], caps) }));
-  assert.ok(![...r2.walk()].some((n) => n.id === 'localPair'));
+  assert.ok(![...r2.walk()].some((n) => n.dataset?.section === 'local-pair'));
+  assert.equal([...r2.walk()].find((n) => n.id === 'requestDestination').textContent, 'To 1.1.1.1:443 · TCP');
 });

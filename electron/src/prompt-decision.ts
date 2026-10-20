@@ -1,5 +1,6 @@
 import { rememberDecision, reviewFailureOf, type RememberFields } from './decision-remember';
 import type { Decision } from './protocol';
+import type { PairChoice } from './local-pair';
 import {
   processInstanceEnded,
   requestRuleAvailable,
@@ -94,9 +95,13 @@ export interface PromptChoice {
   remember: boolean;
   fields: RememberFields;
   duration: number;
+  // local-pair-v1: the backend-verified pair of this connection (outgoing id
+  // first; the incoming id when it exists). Plain Allow/Deny answers exactly it.
+  pairIds?: string[];
 }
 export type PromptPlan =
   | { kind: 'decide'; decision: Decision; review: boolean }
+  | { kind: 'pair'; choice: PairChoice }
   | { kind: 'request-rule'; choice: RequestRuleChoice }
   | { kind: 'ended-lease'; choice: EndedLeaseChoice }
   | { kind: 'unavailable'; note: string };
@@ -145,6 +150,10 @@ export function promptPlan(
       return { kind: 'unavailable', note: 'For a while needs a newer FlowGate backend.' };
     return { kind: 'decide', decision: { ...base, scope: 'for-a-while', ...leaseSeconds(c) }, review: false };
   }
+  // Once on a verified local pair: one click answers both firewall hooks of this
+  // exact connection only (never a rule, never another client or prefix).
+  if (c.pairIds?.length)
+    return { kind: 'pair', choice: { generation: c.generation, ids: [...c.pairIds], action, scope: 'once' } };
   return { kind: 'decide', decision: { ...base, scope: 'once' }, review: false };
 }
 // Backend refusal codes surfaced as "<code>: <backend text>".

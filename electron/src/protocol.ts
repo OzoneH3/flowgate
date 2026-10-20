@@ -189,6 +189,7 @@ export interface RequestEvent {
     protocol: string;
     local: string;
     remote: string;
+    netns?: string;
     network_scope?: SocketRow['network_scope'];
   };
   attribution: {
@@ -371,6 +372,8 @@ export interface ClientState {
     // A decision outcome was unknown/rejected: no new prompt is presented until
     // an authoritative list issued after it was read (queue reconciliation).
     reconciling?: boolean;
+    // Outcomes of permission submissions, newest first (permission-results.ts).
+    permissionResults?: import('./permission-results').PermissionResult[];
   };
 }
 export interface Decision {
@@ -627,6 +630,7 @@ function event(v: unknown): RequestEvent {
       protocol: string(f.protocol),
       local: string(f.local),
       remote: string(f.remote),
+      netns: typeof f.netns === 'string' ? f.netns.slice(0, 128) : undefined,
       network_scope: parseConnectionZone(f.network_scope),
     },
     attribution: {

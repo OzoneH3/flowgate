@@ -228,8 +228,7 @@ export interface LocalPairView {
   details: [string, string][];
 }
 
-export const PAIR_NOT_REQUESTED =
-  'Not requested yet: asked when the outgoing side is allowed (Allow both answers it for this connection)';
+export const PAIR_NOT_REQUESTED = 'Not requested yet (held until the outgoing side is answered)';
 
 function sidePhase(e: Ev): PairSide['phase'] {
   if (e.state === 'awaiting-decision' && (e.remainingMs ?? 1) > 0) return 'pending';
@@ -319,14 +318,15 @@ export function localPairView(e: Ev, events: Ev[], capabilities: string[] = []):
     target,
     details: [],
   };
-  // One review for both permissions: offered only for a backend-confirmed pair.
+  // One Allow/Deny answers both hooks of this exact connection (Once), offered
+  // only for a backend-confirmed pair; the note is a Details field, never the first view.
   if (capabilities.includes(LOCAL_PAIR_CAPABILITY)) {
     if (other && out && inc && [out, inc].some((x) => sidePhase(x) === 'pending')) {
       view.pairIds = [out.id, inc.id];
-      view.pairNote = `Allow both / Deny both answers the waiting side${sidePhase(out) === 'pending' && sidePhase(inc) === 'pending' ? 's' : ''} of this one connection; a side already decided keeps its verdict and is shown above.`;
+      view.pairNote = 'Allow/Deny (Once) answers the waiting side of this one connection; a side already decided keeps its verdict.';
     } else if (!incoming && !other && verified && peer.role === 'server' && sidePhase(e) === 'pending') {
       view.pairIds = [e.id];
-      view.pairNote = `Allow both / Deny both answers outgoing for ${clientShort} now and incoming to ${server} for this same connection when it arrives (Once). A rule that already decides the incoming side is reported, never hidden.`;
+      view.pairNote = `Allow/Deny (Once) also answers the incoming side at ${server} for this same connection only; an existing rule for that side still decides it and is reported.`;
     }
   }
   const sockets = e.attribution.sockets ?? [];
@@ -354,44 +354,15 @@ export function pairResultText(r: PairResult): string {
   return parts.join(' · ');
 }
 
-function el<K extends keyof HTMLElementTagNameMap>(tag: K, text = '', className = '', id = '') {
-  const x = document.createElement(tag);
-  if (text) x.textContent = text;
-  if (className) x.className = className;
-  if (id) x.id = id;
-  return x;
-}
-
-/** The pair section of the request card (structure only; renderer wires buttons). */
-export function buildPairPanel(v: LocalPairView): HTMLElement {
-  const section = el('section', '', 'local-pair', 'localPair');
-  section.append(el('h4', v.title, 'local-pair-title', 'localPairTitle'), el('p', v.line, 'local-pair-line', 'localPairLine'));
-  if (v.unknown) section.append(el('p', v.unknown, 'local-peer-unknown', 'localPeerUnknown'));
-  const list = el('ul', '', 'local-pair-sides', 'localPairSides');
-  for (const s of v.sides) {
-    const li = el('li', '', `pair-side pair-${s.phase}`, s.direction === 'outgoing' ? 'pairSideOutgoing' : 'pairSideIncoming');
-    li.dataset.side = s.direction;
-    li.dataset.phase = s.phase;
-    li.append(el('span', s.label, 'pair-side-label'), el('span', ' — ' + s.status, 'pair-side-status'));
-    list.append(li);
-  }
-  section.append(list, el('p', v.target, 'local-pair-target', 'localPairTarget'));
-  if (v.pairIds) {
-    const controls = el('div', '', 'pair-controls', 'pairControls');
-    for (const [id, label] of [
-      ['pairAllow', 'Allow both'],
-      ['pairBlock', 'Deny both'],
-    ] as const) {
-      const b = el('button', label, 'pair-button', id);
-      b.type = 'button';
-      controls.append(b);
-    }
-    section.append(controls, el('p', v.pairNote || '', 'pair-note', 'pairNote'));
-  }
-  const result = el('p', '', 'pair-result', 'pairResult');
-  result.setAttribute('role', 'status');
-  section.append(result);
-  return section;
+/** Details rows of a local connection: both sides, their states, the evidence. */
+export function pairDetailRows(v: LocalPairView): [string, string][] {
+  return [
+    ['Connection', v.title + (v.unknown ? '\n' + v.unknown : '')],
+    ...v.sides.map((s): [string, string] => [s.direction === 'outgoing' ? 'Outgoing side' : 'Incoming side', `${s.label}\n${s.status}`]),
+    ['This request', v.target],
+    ...(v.pairNote ? [['Once', v.pairNote] as [string, string]] : []),
+    ...v.details,
+  ];
 }
 
 /** Changes that must rebuild the pair section (states of both sides). */

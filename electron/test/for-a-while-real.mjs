@@ -238,17 +238,21 @@ try {
   assert(!(await w.locator('#rememberPanel input[data-field="process"]').isChecked()), 'process not preselected');
   await wait(() => w.locator('#block').isEnabled(), 15000, 'deny enabled');
   await w.locator('#block').click();
+  // The permission window hides on the click; the outcome is listed in the main
+  // window under Pending requests › Results (#permissionResultRows).
   const result = await wait(async () => {
-    const t = await prompt().locator('#requestResult').innerText();
-    return /Rule saved/.test(t) ? t : undefined;
+    const t = await main.evaluate(() =>
+      [...document.querySelectorAll('#permissionResultRows li.permission-result.result-ok .result-text')].map((x) => x.textContent).join('\n'),
+    );
+    return /Rule saved/.test(t) ? t.split('\n').find((x) => /Rule saved/.test(x)) : undefined;
   }, 15000, 'result text');
   evidence.ended_result = result;
-  assert.equal(result.trim(), 'Rule saved for future connections; this request has ended.');
-  await prompt().locator('#block').click({ trial: false }).catch(() => {});
+  assert.equal(result.trim(), 'Rule saved for future connections');
+  await prompt().locator('#block').click({ trial: false, timeout: 2000 }).catch(() => {});
   await sleep(1500);
   const denyRules = (await list()).rules.filter((r) => r.action === 'block');
   assert.equal(denyRules.length, 1, 'exactly one rule after repeated click');
-  await shot(prompt(), '04-ended-remember-deny');
+  await shot(main, '04-ended-remember-deny');
   const relaunch = await command({ op: 'launch', name: 'other' });
   before = await send('other', 'tcp', '10.79.0.3', 44000);
   assert(!(await delivered(before, 2500)), 'relaunch blocked');

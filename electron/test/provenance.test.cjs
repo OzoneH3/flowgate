@@ -179,15 +179,17 @@ test('prompt card: game heading, via hint and explicit scopes precede Allow/Deny
   const root = new El('div');
   root.append(...buildRequestCard(event(owner, helperTarget), { name: 'rundll32.exe', rememberMode: true, forAWhile: true, rememberOptions: [] }));
   const all = [...root.walk()], byId = (id) => all.find((n) => n.id === id);
+  // First view: the game, one quiet owner line; scopes live in Details / the Remember panel.
   const heading = all.find((n) => n.className === 'compact-application');
-  assert.match(heading.textContent, /DEATH STRANDING 2: ON THE BEACH · DS2\.exe/);
-  assert.equal(byId('launchVia').textContent, 'via rundll32.exe');
+  assert.equal(heading.textContent.replace('◇', ''), 'DEATH STRANDING 2: ON THE BEACH');
+  assert.equal(byId('requestOwner').textContent, 'rundll32.exe');
   const scope = byId('permissionScope');
   assert.match(scope.textContent, /^Once: /, 'one line: the selected option (Once by default)');
   assert.match(scope.dataset.remember, /^Remember: .*shared by every game using this prefix/);
   assert.match(scope.dataset.forAWhile, /^For a while: /);
-  const order = all.filter((n) => n.id === 'permissionScope' || n.id === 'allow' || n.id === 'rememberToggle');
-  assert.deepEqual(order.map((n) => n.id), ['permissionScope', 'allow', 'rememberToggle']);
+  assert.ok([...byId('requestMore').walk()].includes(scope), 'scope text is a Details field');
+  assert.match(byId('rememberScope').textContent, /^Rule for rundll32\.exe in prefix .* · every game using this prefix$/);
+  assert.ok(!byId('rememberScope').textContent.includes('DEATH STRANDING'), 'never implies a game-wide grant');
   const details = byId('requestMore').textContent;
   assert.match(details, /rundll32\.exe owns this socket/);
   assert.match(details, /uid\+wine\+prefix\+executable path/);

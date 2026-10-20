@@ -1,3 +1,4 @@
+import { eventLabel, pushResult, type PermissionResult } from './permission-results';
 import { inventoryStamp } from './inventory-coherence';
 import {
   REMEMBER_ZONE_CAPABILITY,
@@ -142,6 +143,10 @@ export class Backend {
   private listIssued = 0;
   private reconcileAfter?: number;
   private endedLeases = new Map<string, { message: string; lease: ProcessLease }>();
+  // Ended requests whose future rule was saved: they leave Pending requests.
+  private closedEnded = new Set<string>();
+  private results: PermissionResult[] = [];
+  private resultSeq = 0;
   private endedLeaseFlight = new Set<string>();
   private busy = { observer: false, control: false };
   private timers: NodeJS.Timeout[] = [];
@@ -180,9 +185,12 @@ export class Backend {
     for (const [id, failure] of this.reviewFailures)
       if (failure.generation !== this.state.control.generation || this.now() >= failure.until)
         this.reviewFailures.delete(id);
-    const events = [...(this.reply?.events ?? [])];
+    const generation = this.state.control.generation;
+    const events = (this.reply?.events ?? []).filter(
+      (e) => e.state === 'awaiting-decision' && !this.reviewFailures.has(e.id) ? true : !this.closedEnded.has(settlementKey(generation, e.id)),
+    );
     for (const [id, failure] of this.reviewFailures)
-      if (!events.some(e => e.id === id)) events.push(failure.event);
+      if (!events.some(e => e.id === id) && !this.closedEnded.has(settlementKey(generation, id))) events.push(failure.event);
     return {
       ...this.state,
       publication: this.publication,
@@ -195,6 +203,7 @@ export class Backend {
             ? undefined
             : this.state.control.policy,
         reconciling: this.reconcileAfter !== undefined,
+        permissionResults: [...this.results],
         events: events.map((e) => ({
           ...e,
           remainingMs: Math.max(0, Date.parse(e.deadline) - this.now()),
@@ -703,6 +712,11 @@ export class Backend {
       held.phase = 'saved';
       held.saved = rule;
       this.settle(c.generation, r.settled ?? [], r.server_time);
+      // The ended request is answered by its saved rule: it leaves the queue.
+      if (this.closedEnded.size >= 1024) this.closedEnded.delete(this.closedEnded.values().next().value!);
+      this.closedEnded.add(settlementKey(c.generation, c.id));
+      this.reviewFailures.delete(c.id);
+      this.emit();
       return { message: `Saved: ${held.preview.summary}. Applies to future connections; the ended request was not allowed.`, rule, replayed: !!r.replayed };
     });
   }
@@ -911,22 +925,41 @@ export class Backend {
       !listed.some((e) => e!.state === 'awaiting-decision' && Date.parse(e!.deadline) > this.now() && !this.attempts.has(e!.id))
     )
       throw Error('Pair is no longer actionable; refresh authoritative state');
+    // Both sides are in flight: never presented again while submitting.
+    const pending = listed.filter((e) => e!.state === 'awaiting-decision').map((e) => e!.id);
+    const mark = (a: Attempt) => {
+      if (this.state.control.generation === d.generation) for (const id of pending) this.attempts.set(id, a);
+      this.emit();
+    };
+    mark({ phase: 'submitting', message: 'Submitting · waiting for backend acknowledgement' });
     let r: Reply;
     try {
       r = await call(this.controller, { operation: 'decide-pair', generation: d.generation, event_ids: d.ids, action: d.action, scope: d.scope });
     } catch (error) {
+      const message = 'Acknowledgement lost; outcome unknown. No automatic retry. ' + String((error as Error)?.message ?? error);
+      mark({ phase: 'unknown', message });
       this.reconcileAfter = this.listIssued;
       this.reconcileSoon();
-      throw Error('Acknowledgement lost; outcome unknown. No automatic retry. ' + String((error as Error)?.message ?? error));
+      throw Error(message);
     }
-    if (r.generation !== d.generation) throw Error('Backend generation changed');
+    if (r.generation !== d.generation) {
+      mark({ phase: 'unknown', message: 'Backend generation changed' });
+      throw Error('Backend generation changed');
+    }
     if (r.error) {
+      // Refused before any change (validation runs first): nothing was decided.
+      if (this.state.control.generation === d.generation) for (const id of pending) this.attempts.delete(id);
+      this.emit();
       this.reconcileSoon();
       throw Error((r.error_code ? r.error_code + ': ' : '') + r.error);
     }
     const p = r.pair;
-    if (!p || p.events.some((e) => !d.ids.includes(e.id)) || p.events.length !== d.ids.length)
-      throw Error('Invalid pair acknowledgement');
+    if (!p || p.events.some((e) => !d.ids.includes(e.id)) || p.events.length !== d.ids.length) {
+      mark({ phase: 'unknown', message: 'Invalid pair acknowledgement; outcome unknown' });
+      this.reconcileAfter = this.listIssued;
+      this.reconcileSoon();
+      throw Error('Invalid pair acknowledgement; outcome unknown');
+    }
     const text = pairResultText(p);
     for (const e of p.events)
       if (e.state === 'allowed' || e.state === 'blocked')
@@ -935,6 +968,19 @@ export class Backend {
     this.emit();
     this.reconcileSoon();
     return { message: r.scope_preview || p.sentence, text, result: p };
+  }
+  /** Keeps a submission outcome for review (newest first, bounded). */
+  noteResult(generation: string, eventId: string, outcome: Pick<PermissionResult, 'severity' | 'text' | 'detail'>) {
+    const e = this.reply?.events.find((x) => x.id === eventId) ?? this.reviewFailures.get(eventId)?.event;
+    pushResult(this.results, {
+      id: String(++this.resultSeq),
+      at: this.now(),
+      generation,
+      eventId,
+      ...eventLabel(e),
+      ...outcome,
+    });
+    this.emit();
   }
   // Records acknowledged/settled requests and removes them from the visible
   // queue at once (only those ids; nothing is inferred).

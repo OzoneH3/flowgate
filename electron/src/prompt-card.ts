@@ -3,15 +3,17 @@ import { connectionPresentation } from './connection-presentation';
 import { REMEMBER_DURATIONS, type RememberOption } from './decision-remember';
 import { FOR_A_WHILE_NOTE, FOR_A_WHILE_TOOLTIP, durationLabel } from './process-lease';
 import { PREVIOUS_REVISION_NOTICE, previousRevisionTitle } from './prompt-decision';
-import type { ViewEvent } from './protocol';
-import { promptIdentity, provenanceDetails, targetLines } from './provenance';
-import { buildPairPanel, type LocalPairView } from './local-pair';
+import type { Application, ViewEvent } from './protocol';
+import { provenanceDetails, targetLines } from './provenance';
+import { pairDetailRows, type LocalPairView } from './local-pair';
+import { destinationLine, promptSummary, rememberLabel } from './prompt-summary';
 
 // The request card shared by the permission window and the Pending requests
-// tab. First view is compact: application,
-// direction, remote endpoint, one local/protocol line, remaining time, then
-// Allow | Deny | Remember | For a while. Everything technical sits behind the
-// single "Details" disclosure. Only structure here; the renderer wires state.
+// tab. First view: application, the actual
+// owner on one quiet line, the destination, one status line, then
+// Allow | Deny | Remember | For a while and a small Details link. Everything
+// technical sits in the separate Details view, as short labelled fields in
+// expandable sections. Only structure here; the renderer wires state.
 export interface CardOptions {
   name: string;
   rememberMode: boolean;
@@ -21,6 +23,11 @@ export interface CardOptions {
   forAWhileDurations?: number[];
   // local-pair-v1: both endpoints of a same-host connection (renderer computes).
   pair?: LocalPairView;
+  // The verified game's own application (icon), when Activity lists it.
+  gameApplication?: Application;
+  // Details view state survives a card rebuild of the same request.
+  detailsOpen?: boolean;
+  onDetails?: (open: boolean) => void;
 }
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text = '', className = '', id = '') {
   const x = document.createElement(tag);
@@ -34,6 +41,9 @@ function row(list: HTMLElement, label: string, value: string, id = '') {
   list.append(el('dt', label), dd);
   return dd;
 }
+function addClass(node: HTMLElement, name: string) {
+  node.className = node.className ? node.className + ' ' + name : name;
+}
 function checkbox(id: string, label: string, className: string, title = '') {
   const wrap = el('label', '', className),
     box = el('input', '', '', id);
@@ -42,89 +52,143 @@ function checkbox(id: string, label: string, className: string, title = '') {
   if (title) wrap.title = title;
   return wrap;
 }
+/** One expandable Details section with its own field list. */
+function section(parent: HTMLElement, title: string, key: string, open = false) {
+  const box = el('details', '', 'detail-section');
+  box.dataset.section = key;
+  box.open = open;
+  box.append(el('summary', title));
+  const list = el('dl', '', 'connection-fields');
+  box.append(list);
+  parent.append(box);
+  return { box, list };
+}
 export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
   const p = connectionPresentation(e.flow),
-    protocol = e.flow.protocol.toUpperCase();
-  const route = el('div', '', 'connection-route');
-  route.title = p.relation;
-  // Verified launch provenance names the game; the socket owner stays visible
-  // as "via <helper>". Display only: the decision target is listed below.
-  const identity = promptIdentity(e);
-  const heading = identity.title
-    ? applicationHeading(
-        { key: '', revision: '', name: identity.title, executable: e.attribution.application?.executable || '' },
-        o.name,
-      )
-    : applicationHeading(e.attribution.application, o.name);
-  if (identity.via) heading.append(el('span', identity.via, 'launch-via', 'launchVia'));
-  route.append(
-    el('h3', `${p.direction} connection`, 'connection-banner'),
-    heading,
-    el('strong', e.flow.remote, 'remote-endpoint'),
+    protocol = e.flow.protocol.toUpperCase(),
+    summary = promptSummary(e, o.name);
+
+  // ---- first view ----------------------------------------------------------
+  const route = el('div', '', 'connection-route', 'requestSummary');
+  // The game's own metadata (icon) never renames the verified title.
+  const heading = o.gameApplication
+    ? applicationHeading(o.gameApplication, summary.title, summary.title)
+    : applicationHeading(
+        summary.owner
+          ? { key: '', revision: '', name: summary.title, executable: e.attribution.application?.executable || '' }
+          : e.attribution.application,
+        summary.title,
+      );
+  heading.id = 'requestApplication';
+  route.append(el('h3', `${p.direction} connection`, 'connection-banner'), heading);
+  if (summary.owner) {
+    const owner = el('p', summary.owner, 'request-owner', 'requestOwner');
+    owner.title = 'Owner of this connection (the process that opened the socket)';
+    route.append(owner);
+  }
+  route.append(el('p', destinationLine(summary, e.flow.direction), 'request-destination', 'requestDestination'));
+  const meta = el('div', '', 'request-meta');
+  const status = el('p', '', 'expiry request-status-line', 'requestStatusLine');
+  status.setAttribute('role', 'status');
+  const more = el('button', 'Details', 'link-button details-link', 'detailsToggle');
+  more.type = 'button';
+  more.setAttribute('aria-expanded', 'false');
+  more.setAttribute('aria-controls', 'requestMore');
+  meta.append(status, more);
+  const nodes: HTMLElement[] = [route, meta];
+
+  // ---- Details view (separate; hidden until Details is clicked) -------------
+  const details = el('section', '', 'request-details-view', 'requestMore');
+  details.hidden = true;
+  details.setAttribute('aria-label', 'Request details');
+  const back = el('button', '‹ Back', 'link-button details-back', 'detailsBack');
+  back.type = 'button';
+  const head = el('div', '', 'details-head');
+  head.append(back, el('h4', 'Details'));
+  details.append(head);
+
+  const conn = section(details, 'Connection', 'connection', true).list;
+  row(
+    conn,
+    'Direction',
+    e.local_peer
+      ? e.flow.direction === 'incoming'
+        ? 'Local program → this program (same host)'
+        : 'This program → local program (same host)'
+      : p.relation,
   );
-  const nodes: HTMLElement[] = [
-    route,
-    ...(o.pair ? [buildPairPanel(o.pair)] : []),
-    el('p', `${protocol} · local ${e.flow.local} · ${p.zone}`, 'connection-line', 'connectionLine'),
-  ];
-  // Explicit permission target per scope, from the backend, before any decision control.
-  // One line only: the scope of the option currently selected (Once by default, For a while or
-  // Remember when checked); the renderer switches it, so the target is explicit before the click.
+  row(conn, 'Remote', e.flow.remote);
+  row(conn, 'Local', e.flow.local);
+  row(conn, 'Protocol', protocol);
+  row(conn, 'Network', p.zone);
+  if (e.flow.network_scope?.reason) row(conn, 'Zone basis', e.flow.network_scope.reason);
+  if (e.flow.netns) row(conn, 'Namespace', e.flow.netns);
+  row(conn, 'Deadline', e.deadline);
+
+  const app = section(details, 'Application', 'application').list;
+  row(app, 'Executable', e.attribution.application?.executable || 'Unavailable');
+  if (e.attribution.permission_target?.prefix) row(app, 'Prefix', e.attribution.permission_target.prefix);
+  row(
+    app,
+    'Process',
+    e.attribution.owners.map((x) => `PID ${x.pid} · start ${x.start_ticks} · UID ${x.uid}`).join('\n') || 'Unavailable',
+  );
+  row(app, 'Attribution', e.attribution.status);
+  row(app, 'Reason', e.attribution.reason);
+  row(
+    app,
+    'Coverage',
+    e.attribution.visibility_complete ? 'Complete visibility' : 'Limited; hidden owners or races may remain',
+  );
+
+  const launch = provenanceDetails(e);
+  if (launch.length) {
+    const l = section(details, 'Launch', 'launch').list;
+    for (const [label, value] of launch) row(l, label, value);
+  }
+  if (o.pair) {
+    const l = section(details, 'Local connection', 'local-pair').list;
+    for (const [label, value] of pairDetailRows(o.pair)) row(l, label, value);
+  }
+
+  const rule = section(details, 'Rule', 'rule').list;
   const lines = targetLines(e.attribution.permission_target);
   if (lines.length) {
-    const scope = el('p', `${lines[0].label}: ${lines[0].text}`, 'permission-scope', 'permissionScope');
+    // Scope of the option currently selected; the renderer switches it.
+    const scope = row(rule, 'Selected', `${lines[0].label}: ${lines[0].text}`, 'permissionScope');
+    addClass(scope, 'permission-scope');
     for (const line of lines)
       scope.dataset[line.label === 'Once' ? 'once' : line.label === 'Remember' ? 'remember' : 'forAWhile'] =
         `${line.label}: ${line.text}`;
-    nodes.push(scope);
   }
-  if (!e.attribution.visibility_complete || e.attribution.status !== 'directly-associated')
-    nodes.push(el('p', `Attribution: ${e.attribution.status} · see Details`, 'attribution-warning'));
-  const similar = el('p', '', 'similar-requests', 'similarRequests');
-  // A rule exists for an earlier revision of this application: display only.
+  if (e.attribution.permission_target) {
+    row(rule, 'Remember', e.attribution.permission_target.remember);
+    if (e.attribution.permission_target.shared_with_note)
+      row(rule, 'Shared', e.attribution.permission_target.shared_with_note);
+    row(rule, 'Rule key', e.attribution.permission_target.key_basis);
+  }
+  row(rule, 'Asked by', '', 'askSource');
+  row(rule, 'Scope', '', 'permissionTarget');
+  addClass(row(rule, 'Preview', '', 'scopePreview'), 'scope-preview');
+  row(rule, 'Overlaps', '', 'ruleOverlaps');
   if (e.previous_revision_rules?.length) {
-    const notice = el('p', PREVIOUS_REVISION_NOTICE, 'previous-revision', 'previousRevisionNotice');
-    notice.title = previousRevisionTitle(e.previous_revision_rules);
-    nodes.push(notice);
+    const notice = row(rule, 'Revision', PREVIOUS_REVISION_NOTICE + '\n' + previousRevisionTitle(e.previous_revision_rules), 'previousRevisionNotice');
+    addClass(notice, 'previous-revision');
   }
-  nodes.push(el('p', '', 'expiry'), similar, el('div', '', 'lease-info', 'leaseInfo'));
 
-  const details = el('details', '', 'identity-details', 'requestMore');
-  details.append(el('summary', 'Details'));
-  const list = el('dl', '', 'connection-fields', 'detailFields');
-  row(list, 'Direction', p.relation);
-  row(list, 'Remote', e.flow.remote);
-  row(list, 'Local', e.flow.local);
-  row(list, 'Protocol', protocol);
-  row(list, 'Network', `${p.zone}${e.flow.network_scope?.reason ? '\n' + e.flow.network_scope.reason : ''}`);
-  row(list, 'Deadline', e.deadline);
-  row(list, 'Executable', e.attribution.application?.executable || 'Unavailable');
-  row(
-    list,
-    'Process',
-    e.attribution.owners.map((x) => `PID ${x.pid} · start ${x.start_ticks} · UID ${x.uid}`).join('\n') ||
-      'Unavailable',
-  );
-  for (const [label, value] of provenanceDetails(e)) row(list, label, value);
-  for (const [label, value] of o.pair?.details ?? []) row(list, label, value);
-  if (e.attribution.permission_target)
-    row(list, 'Rule key', e.attribution.permission_target.key_basis);
-  row(list, 'Attribution', `${e.attribution.status}\n${e.attribution.reason}`);
-  row(
-    list,
-    'Coverage',
-    e.attribution.visibility_complete
-      ? 'Backend reports complete visibility'
-      : 'Limited observation; hidden owners or races may remain',
-  );
-  row(list, 'Asked by', '', 'askSource');
-  row(list, 'Scope', '', 'permissionTarget');
-  row(list, 'Status', e.reason, 'requestStatus');
-  const revalidation = el('pre', '', 'scope-preview', 'revalidationDetails');
-  revalidation.hidden = true;
-  details.append(list, el('p', '', 'scope-preview', 'scopePreview'), revalidation);
+  const statusSection = section(details, 'Status', 'status'),
+    state = statusSection.list;
+  row(state, 'Backend', e.reason, 'requestStatus');
+  row(state, 'Last result', '', 'requestLastResult');
+  row(state, 'Review', '', 'requestReviewDetail');
+  addClass(row(state, 'Similar', '', 'similarRequests'), 'similar-requests');
+  const failure = row(state, 'Failure', '', 'revalidationDetails');
+  addClass(failure, 'scope-preview');
+  const leases = el('div', '', 'lease-info', 'leaseInfo');
+  statusSection.box.append(leases);
   nodes.push(details);
 
+  // ---- decision row ----------------------------------------------------------
   // Sticky at the bottom of the scrolling body: the decision row and the
   // selected option's controls (incl. the deletion time) stay visible.
   const dock = el('div', '', 'decision-dock', 'decisionDock');
@@ -137,7 +201,8 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
     button.type = 'button';
     controls.append(button);
   }
-  if (o.rememberMode) controls.append(checkbox('rememberToggle', 'Remember', 'remember-toggle'));
+  if (o.rememberMode)
+    controls.append(checkbox('rememberToggle', 'Remember', 'remember-toggle', "Create rule and don't ask me again"));
   if (o.forAWhile)
     controls.append(checkbox('forAWhileToggle', 'For a while', 'option-toggle for-a-while-toggle', FOR_A_WHILE_TOOLTIP));
   if (o.forAWhile && (o.forAWhileDurations?.length ?? 0) > 1) {
@@ -160,6 +225,10 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
     const panel = el('fieldset', '', 'remember-panel', 'rememberPanel');
     panel.hidden = true;
     panel.append(el('legend', 'Create rule for:'));
+    // What the rule covers, concisely, before the click (helper/prefix scope).
+    const target = el('p', rememberLabel(e.attribution.permission_target), 'remember-scope', 'rememberScope');
+    if (e.attribution.permission_target?.shared_with_note) target.title = e.attribution.permission_target.shared_with_note;
+    panel.append(target);
     for (const option of o.rememberOptions) {
       const label = el('label', '', 'remember-field'),
         input = el('input');
@@ -197,5 +266,24 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
   reconcile.hidden = future.hidden = true;
   dock.append(note, review, result, reconcile, future);
   nodes.push(dock);
+
+  // Details is a separate view: the first view hides while it is open.
+  const toggle = (open: boolean) => {
+    details.hidden = !open;
+    route.hidden = open;
+    meta.hidden = open;
+    more.setAttribute('aria-expanded', String(open));
+  };
+  more.onclick = () => {
+    toggle(true);
+    back.focus({ preventScroll: true });
+    o.onDetails?.(true);
+  };
+  back.onclick = () => {
+    toggle(false);
+    more.focus({ preventScroll: true });
+    o.onDetails?.(false);
+  };
+  if (o.detailsOpen) toggle(true);
   return nodes;
 }

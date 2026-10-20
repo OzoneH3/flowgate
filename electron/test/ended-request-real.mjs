@@ -5,6 +5,7 @@ import { _electron } from 'playwright-core';
 import fs from 'node:fs';
 import path from 'node:path';
 import net from 'node:net';
+import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 const project = path.resolve(import.meta.dirname, '../..'),
   readyPath = process.env.FLOWGATE_TEST_READY;
@@ -88,6 +89,100 @@ const windows = () =>
 const promptFacts = async () => (await windows()).find((w) => /[?&]request=/.test(w.url));
 const mainFacts = async () => (await windows()).find((w) => w.url.endsWith('/index.html'));
 const shot = (w, name) => w.screenshot({ path: `${run}/${name}.png` }).catch(() => {});
+// Hide measurement. On KDE the main process hides the answered prompt through a KWin script (opacity 0 +
+// minimized; BrowserWindow.isVisible() stays true), elsewhere with BrowserWindow.hide(). A KWin watcher
+// script prints Date.now() on the prompt window's minimizedChanged/opacityChanged/windowRemoved into the
+// user journal; isVisible() is polled in parallel. Latency = first hide - Date.now() just before the click.
+const journalSince = new Date(Date.now() - 2000).toISOString();
+let kwinScript = 0;
+function kwinLoad(code) {
+  const name = `flowgate-erj-watch-${process.pid}-${++kwinScript}`,
+    f = path.join(run, name + '.js');
+  fs.writeFileSync(f, code);
+  const id = execFileSync('qdbus6', ['org.kde.KWin', '/Scripting', 'org.kde.kwin.Scripting.loadScript', f, name], { encoding: 'utf8' }).trim();
+  execFileSync('qdbus6', ['org.kde.KWin', '/Scripting/Script' + id, 'org.kde.kwin.Script.run']);
+  return () => {
+    try {
+      execFileSync('qdbus6', ['org.kde.KWin', '/Scripting/Script' + id, 'org.kde.kwin.Script.stop']);
+    } catch {}
+    try {
+      execFileSync('qdbus6', ['org.kde.KWin', '/Scripting', 'org.kde.kwin.Scripting.unloadScript', name]);
+    } catch {}
+  };
+}
+function kwinLines(token) {
+  return execFileSync('journalctl', ['--user', '-b', '--no-pager', '--since', journalSince, '_COMM=kwin_wayland', '-o', 'cat'], {
+    encoding: 'utf8',
+    maxBuffer: 64 << 20,
+  })
+    .split('\n')
+    .filter((l) => l.startsWith(token + ' '))
+    .map((l) => {
+      try {
+        return JSON.parse(l.slice(token.length + 1));
+      } catch {
+        return undefined;
+      }
+    })
+    .filter(Boolean);
+}
+const hiddenEntry = (x) => x.k === 'removed' || (x.k !== 'armed' && (x.minimized || x.opacity === 0));
+const promptNative = () =>
+  app.evaluate(({ BrowserWindow }) => {
+    const w = BrowserWindow.getAllWindows().find((x) => /[?&]request=/.test(x.webContents.getURL()));
+    return w && { title: w.getTitle(), visible: w.isVisible(), bounds: w.getBounds() };
+  });
+async function clickAndMeasureHide(w, selector, label) {
+  const pid = await app.evaluate(() => process.pid);
+  const before = await promptNative();
+  const token = `FLOWGATE_ERJ_${process.pid}_${label}`;
+  let stop;
+  try {
+    stop = kwinLoad(
+      `const P=${pid},C=${JSON.stringify(before.title)},T=${JSON.stringify(token)};` +
+        `function r(w,k){print(T,JSON.stringify({k:k,t:Date.now(),minimized:w.minimized,opacity:w.opacity}));}` +
+        `for(const w of workspace.windowList())if(w.pid===P&&w.caption===C){w.minimizedChanged.connect(()=>r(w,'minimized'));w.opacityChanged.connect(()=>r(w,'opacity'));r(w,'armed');}` +
+        `workspace.windowRemoved.connect((w)=>{if(w.pid===P&&w.caption===C)r(w,'removed');});`,
+    );
+    await wait(async () => kwinLines(token).some((x) => x.k === 'armed'), 5000, 'kwin watcher armed');
+  } catch {
+    stop?.();
+    stop = undefined;
+  }
+  const t0 = Date.now();
+  await w.locator(selector).click();
+  let visibleFalseAt;
+  await wait(
+    async () => {
+      const n = await promptNative();
+      if (n && !n.visible && !visibleFalseAt) visibleFalseAt = Date.now();
+      return visibleFalseAt || (stop && kwinLines(token).some(hiddenEntry)) ? true : undefined;
+    },
+    5000,
+    'prompt hidden',
+  );
+  await sleep(300);
+  const kwin = stop ? kwinLines(token) : [];
+  stop?.();
+  const k = kwin.find(hiddenEntry);
+  const out = {
+    method: k ? 'kwin-signal' : 'isVisible',
+    kwin_hidden_ms: k ? k.t - t0 : null,
+    is_visible_false_ms: visibleFalseAt ? visibleFalseAt - t0 : null,
+    kwin_events: kwin.map((x) => ({ ...x, dt: x.t - t0 })),
+  };
+  out.hide_ms = k ? out.kwin_hidden_ms : out.is_visible_false_ms;
+  return out;
+}
+const resultRows = () =>
+  main.evaluate(() =>
+    [...document.querySelectorAll('#permissionResultRows li.permission-result')].map((li) => ({
+      event: li.dataset.event,
+      cls: li.className,
+      text: li.querySelector('.result-text')?.textContent ?? '',
+      detail: li.querySelector('.result-detail')?.textContent ?? '',
+    })),
+  );
 try {
   const initial = await list();
   assert.equal(initial.generation, ready.generation);
@@ -304,7 +399,13 @@ try {
   assert(/future connections/i.test(evidence.rule_summary), 'summary names future connections');
   await shot(first, '04-ready-to-save');
   const beforeDelivered = await peerLines();
-  await first.locator('#allow').click();
+  // The permission window hides on the click; the save continues asynchronously.
+  // The card on screen may present a later request of the same group (e.g. a TCP retry) than the first URL.
+  const savedId = requestOf(first);
+  evidence.saved_card = { url: first.url(), first_request: requestId, same: savedId === requestId };
+  evidence.save_hide = await clickAndMeasureHide(first, '#allow', 'ended-save');
+  assert(evidence.save_hide.hide_ms < 1000, `prompt hidden after ${evidence.save_hide.hide_ms} ms`);
+  step(`Remember + Allow hid the permission window after ${evidence.save_hide.hide_ms} ms (${evidence.save_hide.method})`);
   const rule = await wait(
     async () => (await list()).rules.find((r) => r.action === 'allow'),
     15000,
@@ -318,18 +419,35 @@ try {
   );
   assert(!rule.filter.process && !rule.filter.network_zone, 'application-wide, all zones');
   assert.equal((await list()).rules.length, 1);
-  await wait(
-    async () =>
-      (await first.locator('#requestResult').innerText()) ===
-      'Rule saved for future connections; this request has ended.',
+  // Outcome in the main window: Pending requests › Results.
+  const saved = await wait(
+    async () => (evidence.result_rows = await resultRows()).find((r) => r.event === savedId && r.text === 'Rule saved for future connections'),
     10000,
-    'exact result text',
+    'Results entry "Rule saved for future connections"',
   );
-  // A repeated click must not create a second rule.
-  if (await first.locator('#allow').isEnabled()) {
-    await first.locator('#allow').click();
-    await sleep(800);
-  }
+  evidence.saved_result = saved;
+  assert(/\bresult-ok\b/.test(saved.cls), 'Results entry ok');
+  assert(!/Allowed/i.test(saved.text), 'never reported as allowed');
+  // The ended card is removed from Pending requests (rows and details) once its rule is saved.
+  await main.locator('#requestsTab').click();
+  await wait(
+    async () => {
+      const s = await main.evaluate((id) => ({
+        rows: document.getElementById('requestRows').innerText,
+        rowIds: [...document.querySelectorAll('#requestRows [data-id], #requestRows [data-event]')].map((x) => x.dataset.id || x.dataset.event),
+        detailsId: document.getElementById('requestDetails').dataset.eventId || '',
+        details: document.getElementById('requestDetails').innerText,
+      }), savedId);
+      evidence.pending_after_save = s;
+      return !/10\.79\.0\.2:43000/.test(s.rows) && ![requestId, savedId].some((id) => s.rowIds.some((x) => x?.includes(id)) || s.detailsId === id) && !/10\.79\.0\.2:43000/.test(s.details);
+    },
+    10000,
+    'ended card removed from Pending requests',
+  );
+  await shot(main, '04b-main-results-after-save');
+  await main.locator('#activityTab').click();
+  step(`ended card removed from Pending requests rows/details; Results: "${saved.text}"`);
+  await sleep(800);
   assert.equal((await list()).rules.length, 1, 'no duplicate rule');
   step(
     `Remember + Allow on the ended card stored ${rule.id}: application-wide Allow (TCP+UDP, any address/port, all zones)`,
@@ -338,36 +456,11 @@ try {
     finding('Save refused as transitioning by the main process: ' + evidence.main_refusals.join(' | '));
 
   // 6. Ended request still not approved.
-  const ended = (await list()).events.find((e) => e.id === requestId);
+  const ended = (await list()).events.find((e) => e.id === savedId || e.id === requestId);
   evidence.ended_event_state = ended?.state;
   assert.notEqual(ended?.state, 'allowed', 'ended request must not be approved');
   assert.equal(await peerLines(), beforeDelivered, 'ended request was not delivered');
-  const afterText = await first.locator('#requestDetails').innerText();
-  evidence.ended_text_after_save = afterText.slice(0, 1500);
-  assert(/this request has ended/i.test(afterText), 'card says the request has ended');
-  assert(!/Connection allowed|Allowed once/i.test(afterText), 'never reported as allowed');
-  assert(
-    !/Rule preview required before Allow\/Deny/.test(afterText),
-    'ended card must not ask for an Allow/Deny preview',
-  );
-  await shot(first, '05-saved-ended-not-approved');
-  // Settled geometry after the status line appears: it must sit inside the
-  // framed shell and the native window must match the laid-out viewport.
-  await first.waitForTimeout(900);
-  const settled = await first.evaluate(() => {
-    const r = (s) => document.querySelector(s)?.getBoundingClientRect();
-    const shell = r('.prompt-shell'), feedback = r('#requestResult'), footer = r('.prompt-shell > footer');
-    return { innerHeight, shellBottom: shell.bottom, feedbackTop: feedback.top, feedbackBottom: feedback.bottom,
-      footerBottom: footer.bottom, feedbackText: document.querySelector('#requestResult').textContent,
-      scrollHeight: document.documentElement.scrollHeight };
-  });
-  evidence.saved_settled_layout = settled;
-  evidence.saved_settled_native = await promptFacts().catch(() => undefined);
-  await shot(first, '05b-saved-settled');
-  if (settled.feedbackText && (settled.feedbackBottom > settled.shellBottom + 1 || settled.scrollHeight > settled.innerHeight + 1))
-    finding('status line renders outside the prompt frame after save: ' + JSON.stringify(settled));
-  else step('settled after save: status line inside the frame, window ' + settled.innerHeight + 'px fits content');
-  step(`ended request stays ${ended?.state}, not delivered, card says it was not approved`);
+  step(`ended request stays ${ended?.state ?? 'unlisted'}, not delivered, never reported as allowed`);
 
   // 8. Other pending requests behind the ended card: reachable from it.
   await command({
@@ -383,27 +476,16 @@ try {
     15000,
     'other pending',
   );
-  await sleep(800);
-  const footer = await first.locator('#dismiss').innerText();
-  evidence.footer_with_other_pending = footer;
-  let next;
-  if (!/10\.79\.0\.2:43000/.test(await promptWindow().locator('#requestDetails').innerText())) {
-    next = promptWindow();
-    step('next pending request replaced the settled ended card automatically');
-  } else {
-    await first.locator('#dismiss').click();
-    next = await wait(
-      async () => {
-        const w = promptWindow();
-        return w && /10\.79\.0\.3:44000/.test(await w.locator('#requestDetails').innerText())
-          ? w
-          : undefined;
-      },
-      15000,
-      'moved to next request',
-    );
-    step(`moved past the ended request via "${footer}"`);
-  }
+  // The saved ended card is gone; the next pending request is presented in the permission window.
+  const next = await wait(
+    async () => {
+      const w = promptWindow();
+      return w && /10\.79\.0\.3:44000/.test(await w.locator('#requestDetails').innerText()) ? w : undefined;
+    },
+    15000,
+    'next request presented',
+  );
+  step('next pending request presented after the saved ended card was removed');
   await next.locator('#allow').waitFor();
   await sleep(800);
   const nextFacts = await promptFacts();

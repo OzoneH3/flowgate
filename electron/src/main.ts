@@ -39,7 +39,8 @@ import type { Preferences } from './protocol';
 import { Backend } from './backend';
 import { validateDecision } from './protocol';
 import { validateRequestRule } from './request-rule';
-import { validateEndedLease } from './prompt-decision';
+import { endedLeaseResult, validateEndedLease } from './prompt-decision';
+import { attemptResult, failureResult, pairOutcome } from './permission-results';
 import { validatePairChoice } from './local-pair';
 import { validForAWhileSeconds } from './process-lease';
 if (process.getuid?.() === 0) throw Error('FlowGate Electron must run unprivileged');
@@ -141,10 +142,10 @@ const promptURL = (ref: RequestRef) =>
   encodeURIComponent(ref.generation);
 // The one permission window shows one request card. Switching card reuses the
 // window: rebinding promptRefs first makes decisions from the old card fail closed.
-function retarget(ref: RequestRef) {
+function retarget(ref: RequestRef, reload = false) {
   const w = prompt!,
     current = promptRefs.get(w.webContents.id);
-  if (current?.id === ref.id && current.generation === ref.generation) {
+  if (!reload && current?.id === ref.id && current.generation === ref.generation) {
     promptRefs.set(w.webContents.id, { ...current, group: ref.group ?? current.group });
     return;
   }
@@ -173,14 +174,40 @@ function retarget(ref: RequestRef) {
   promptLayouts.set(w.webContents.id, reset);
   void w.loadURL(promptURL(ref));
 }
+// A valid Allow/Deny click hides the permission window at once (NetLimiter);
+// the submission continues asynchronously and its outcome, including refusals
+// and uncertain acknowledgements, is kept in Pending requests › Results. The
+// next waiting request is presented after the usual input-release pacing.
+function promptAnswered(sender: Electron.WebContents) {
+  const w = prompt;
+  if (!w || w.isDestroyed() || w.webContents !== sender || promptIdle) return;
+  promptIdle = true;
+  if (promptKDEReady) void resizeKDEPrompt(profile, process.pid, w.id, w.getBounds(), false);
+  else w.hide();
+  pacePrompt();
+}
+function trackResult<T>(
+  generation: string,
+  id: string,
+  run: Promise<T>,
+  ok: (value: T) => Parameters<Backend['noteResult']>[2],
+): Promise<T> {
+  run.then(
+    (value) => backend.noteResult(generation, id, ok(value)),
+    (error) => backend.noteResult(generation, id, failureResult(error)),
+  );
+  return run;
+}
 // Closed by FlowGate because its request group is settled: not a user dismissal.
 let promptAutoClosing = false;
 function openDecision(ref: RequestRef) {
+  // A hidden window (answered or dismissed) always presents a fresh card.
+  const hidden = promptIdle;
   promptIdle = false;
   promptDismissed = false;
   ref = { ...ref, group: ref.group ?? groupOf(backend.view(), ref.id) };
   if (prompt && !prompt.isDestroyed()) {
-    retarget(ref);
+    retarget(ref, hidden);
     return;
   }
   prompt = windowFor(true, ref.id, ref.generation, ref.group);
@@ -917,7 +944,10 @@ app.whenReady().then(async () => {
         Date.now() < (promptReadyAt.get(e.sender.id) || 0))
     )
       throw Error('Permission presentation is transitioning');
-    return backend.decide(boundDecision(value, promptRefs.get(e.sender.id)));
+    const d = boundDecision(value, promptRefs.get(e.sender.id));
+    const run = backend.decide(d);
+    promptAnswered(e.sender);
+    return trackResult(d.generation, d.id, run, (a) => attemptResult(a, d.action));
   });
   // local-pair-v1: a permission window may decide only the pair of its own request.
   ipcMain.handle('decide-pair', (e, value) => {
@@ -930,7 +960,9 @@ app.whenReady().then(async () => {
       if (ref.generation !== choice.generation || !choice.ids.includes(ref.id))
         throw Error('Pair decision belongs to another permission window');
     }
-    return backend.decidePair(choice);
+    const run = backend.decidePair(choice);
+    promptAnswered(e.sender);
+    return trackResult(choice.generation, ref?.id ?? choice.ids[0], run, (r) => pairOutcome(r.result, choice.action, r.text));
   });
   // Future application rule from a retained, ended request. The prompt window
   // may act only on its own request; saving never decides that request.
@@ -949,7 +981,14 @@ app.whenReady().then(async () => {
     trusted(e);
     if (promptRefs.has(e.sender.id) && (promptIdle || promptDismissed || transitionUntil || Date.now() < (promptReadyAt.get(e.sender.id) || 0)))
       throw Error('Permission presentation is transitioning');
-    return backend.saveRequestRule(ownRequestRule(e, value, true));
+    const choice = ownRequestRule(e, value, true);
+    const run = backend.saveRequestRule(choice);
+    promptAnswered(e.sender);
+    return trackResult(choice.generation, choice.id, run, (r) => ({
+      severity: 'ok',
+      text: r.replayed ? 'Rule already saved for future connections' : 'Rule saved for future connections',
+      detail: r.message,
+    }));
   });
   // For a while from an ended request whose process still runs: creates the
   // process lease only; the ended request is never decided or delivered.
@@ -961,7 +1000,9 @@ app.whenReady().then(async () => {
       throw Error('Request belongs to another permission window');
     if (ref && (promptIdle || promptDismissed || transitionUntil || Date.now() < (promptReadyAt.get(e.sender.id) || 0)))
       throw Error('Permission presentation is transitioning');
-    return backend.requestForAWhile(choice);
+    const run = backend.requestForAWhile(choice);
+    promptAnswered(e.sender);
+    return trackResult(choice.generation, choice.id, run, (r) => ({ severity: 'ok', text: endedLeaseResult(r.lease), detail: r.message }));
   });
   ipcMain.handle('request:future-application', (e, value) => {
     trusted(e);

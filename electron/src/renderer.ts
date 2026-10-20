@@ -57,6 +57,7 @@ import {
 } from './prompt-decision';
 import { buildRequestCard } from './prompt-card';
 import { localPairView, pairSignature } from './local-pair';
+import { splitPreview } from './prompt-summary';
 import { ZONE_CAPABILITY, zoneLabel } from './network-zones';
 import type { Presentation, PaneFrame } from './pane-model';
 import { DISPLAY_UNITS, displayAmount, isDisplayUnit, type DisplayUnit } from './display-units';
@@ -72,6 +73,7 @@ import {
 import { ruleStatus, ruleState, ruleDescription, ownConfigured } from './rule-status';
 import { canDecide, canManageRules } from './protocol';
 import type { Application } from './protocol';
+import { verifiedLaunch } from './provenance';
 import { TrafficGraph } from './graph';
 import { setupWorkflows, updateWorkflows, openRule, resumeRuleEditor } from './workflows';
 import { setupDecisionLog, showDecisionLog, updateDecisionLog } from './decision-log-view';
@@ -732,7 +734,7 @@ if (promptID) {
     }
   });
 } else {
-  root.innerHTML = `<header class="toolbar"><strong class="brand">FLOWGATE</strong><span id="toolbarUnits" class="toolbar-units"><label for="displayUnits">Units</label><select id="displayUnits" aria-label="Display units" title="Display only: bytes or bits, decimal SI prefixes (1 KB = 1000 B). Accounting sources stay separate."></select></span><span id="observerStatus" class="toolbar-status"></span><span id="controlStatus" class="toolbar-status"></span><span class="toolbar-layout"><select id="layoutPreset" aria-label="Window layout"><option value="chart">Default with Chart</option><option value="plain">Default</option><option value="activity">Activity only</option></select></span><input id="search" type="search" aria-label="Search Activity" placeholder="Search"></header><nav class="tabs" aria-label="Views"><button id="activityTab" aria-selected="true">Activity</button><button id="requestsTab" aria-selected="false">Pending requests <span id="pendingCount">0</span></button><span id="tabsPaneControls" class="pane-controls"></span></nav><main id="activityView"><section class="activity-main"><div class="filterbar"><select id="activitySource" aria-label="Activity measurement source"><option value="tcp">TCP</option><option value="udp">UDP</option></select><button id="rateMode" aria-pressed="false" title="Switch the two traffic columns between current rate and total transferred">Rate</button><select id="columnPreset" aria-label="Column preset"><option value="status">Status</option><option value="details">Details</option></select><select id="filter" aria-label="Socket filter"><option value="all">All sockets</option><option value="active">Active TCP / connected UDP</option><option value="listening">Listening TCP / bound UDP</option></select><span class="filterbar-icons"><button id="expand" class="icon-button" title="Expand all" aria-label="Expand all">⊞</button><button id="collapse" class="icon-button" title="Collapse all" aria-label="Collapse all">⊟</button><button id="refreshNow" class="icon-button" title="Refresh now" aria-label="Refresh now">↻</button></span></div><div class="table-scroll"><table id="tree" role="treegrid" tabindex="0" aria-label="Application process socket activity"><thead><tr id="headers"></tr></thead><tbody id="rows"></tbody></table></div><div id="activitySummary" class="summary"></div></section><aside><h2>Info View<span id="infoPaneControls" class="pane-controls"></span></h2><h3 id="selectedName">FlowGate Activity</h3><div id="selectedExecutable"></div><div class="info-scroll"><h3 id="infoProperties" class="info-section-title">Overview</h3><dl id="info"></dl><section id="infoRules"></section><section class="info-tools"><h3 class="info-section-title">Tools</h3><button id="infoOpenRules">Rule list</button><button id="infoOpenLog">Decision log</button><button id="infoOpenPending">Pending requests</button></section></div><section id="trafficGraph"></section></aside></main><main id="requestsView" hidden><section class="request-list"><h2>Pending requests</h2><p class="hint">One row per group of identical requests; a decision answers its oldest request. Dismissal grants nothing. Closing FlowGate leaves an independent controller running.</p><div class="table-scroll"><table id="requests"><thead><tr><th>Application</th><th>Direction</th><th>Protocol</th><th>Remote endpoint</th><th>Requests</th><th>State</th></tr></thead><tbody id="requestRows"></tbody></table></div><section id="temporaryDecisions" class="temporary-decisions" hidden><h3 title="For a while decisions: in memory only, never saved as rules">Temporary decisions</h3><div id="leaseRows"></div></section></section><aside class="request-sidebar"><h2>Connection permission</h2><div id="requestDetails"></div></aside></main><footer><span id="footerSummary"></span><span id="feedback" role="status" aria-live="polite"></span></footer>`;
+  root.innerHTML = `<header class="toolbar"><strong class="brand">FLOWGATE</strong><span id="toolbarUnits" class="toolbar-units"><label for="displayUnits">Units</label><select id="displayUnits" aria-label="Display units" title="Display only: bytes or bits, decimal SI prefixes (1 KB = 1000 B). Accounting sources stay separate."></select></span><span id="observerStatus" class="toolbar-status"></span><span id="controlStatus" class="toolbar-status"></span><span class="toolbar-layout"><select id="layoutPreset" aria-label="Window layout"><option value="chart">Default with Chart</option><option value="plain">Default</option><option value="activity">Activity only</option></select></span><input id="search" type="search" aria-label="Search Activity" placeholder="Search"></header><nav class="tabs" aria-label="Views"><button id="activityTab" aria-selected="true">Activity</button><button id="requestsTab" aria-selected="false">Pending requests <span id="pendingCount">0</span></button><span id="tabsPaneControls" class="pane-controls"></span></nav><main id="activityView"><section class="activity-main"><div class="filterbar"><select id="activitySource" aria-label="Activity measurement source"><option value="tcp">TCP</option><option value="udp">UDP</option></select><button id="rateMode" aria-pressed="false" title="Switch the two traffic columns between current rate and total transferred">Rate</button><select id="columnPreset" aria-label="Column preset"><option value="status">Status</option><option value="details">Details</option></select><select id="filter" aria-label="Socket filter"><option value="all">All sockets</option><option value="active">Active TCP / connected UDP</option><option value="listening">Listening TCP / bound UDP</option></select><span class="filterbar-icons"><button id="expand" class="icon-button" title="Expand all" aria-label="Expand all">⊞</button><button id="collapse" class="icon-button" title="Collapse all" aria-label="Collapse all">⊟</button><button id="refreshNow" class="icon-button" title="Refresh now" aria-label="Refresh now">↻</button></span></div><div class="table-scroll"><table id="tree" role="treegrid" tabindex="0" aria-label="Application process socket activity"><thead><tr id="headers"></tr></thead><tbody id="rows"></tbody></table></div><div id="activitySummary" class="summary"></div></section><aside><h2>Info View<span id="infoPaneControls" class="pane-controls"></span></h2><h3 id="selectedName">FlowGate Activity</h3><div id="selectedExecutable"></div><div class="info-scroll"><h3 id="infoProperties" class="info-section-title">Overview</h3><dl id="info"></dl><section id="infoRules"></section><section class="info-tools"><h3 class="info-section-title">Tools</h3><button id="infoOpenRules">Rule list</button><button id="infoOpenLog">Decision log</button><button id="infoOpenPending">Pending requests</button></section></div><section id="trafficGraph"></section></aside></main><main id="requestsView" hidden><section class="request-list"><h2>Pending requests</h2><p class="hint">One row per group of identical requests; a decision answers its oldest request. Dismissal grants nothing. Closing FlowGate leaves an independent controller running.</p><div class="table-scroll"><table id="requests"><thead><tr><th>Application</th><th>Direction</th><th>Protocol</th><th>Remote endpoint</th><th>Requests</th><th>State</th></tr></thead><tbody id="requestRows"></tbody></table></div><section id="temporaryDecisions" class="temporary-decisions" hidden><h3 title="For a while decisions: in memory only, never saved as rules">Temporary decisions</h3><div id="leaseRows"></div></section><section id="permissionResultsView" class="permission-results" hidden><h3 title="Outcomes of Allow/Deny submissions; the permission window hides on the click">Results</h3><ol id="permissionResultRows"></ol></section></section><aside class="request-sidebar"><h2>Connection permission</h2><div id="requestDetails"></div></aside></main><footer><span id="footerSummary"></span><button id="resultsAttention" class="link-button results-attention" hidden></button><span id="feedback" role="status" aria-live="polite"></span></footer>`;
   const columns = [
     ['name', 'Name'],
     ['download_bps', 'DL Rate'],
@@ -1904,9 +1906,14 @@ function renderRequests() {
         rememberOptions: rememberOptions(e, eventName(e)),
         forAWhileDurations: forAWhileDurations(state.control),
         pair: localPairView(e, state.control.events, state.control.capabilities),
+        gameApplication: gameApplication(e),
+        detailsOpen: detailsOpenFor === e.id,
+        onDetails: (open) => {
+          detailsOpenFor = open ? e.id : '';
+          measurePrompt();
+        },
       }),
     );
-    wirePairControls(e);
     const controls = $('decisionControls'),
       dock = $('decisionDock');
     for (const action of ['allow', 'block'] as const)
@@ -2075,8 +2082,28 @@ async function decideFromCard(id: string, action: 'allow' | 'block') {
     remember: rememberMode() && rememberOn,
     fields: rememberFields,
     duration: rememberDuration,
+    pairIds: localPairView(e, state.control.events, state.control.capabilities)?.pairIds,
   });
   if (plan.kind === 'unavailable') return note(e, plan.note);
+  if (plan.kind === 'pair') {
+    // One click answers both hooks of this exact connection (Once); the backend
+    // confirms the pair and returns both verdicts, or refuses without a change.
+    if (!state.control.connected || !canDecide(state.control)) return;
+    const keys = plan.choice.ids.map((x) => state.control.generation + ':' + x);
+    if (keys.some((k) => localSubmitted.has(k))) return;
+    keys.forEach((k) => localSubmitted.add(k));
+    cardNote = undefined;
+    updateDecisions();
+    try {
+      const r = await window.flowgate.decidePair(plan.choice);
+      cardResults.set(e.id, { text: r.text, detail: r.message });
+    } catch (error) {
+      keys.forEach((k) => localSubmitted.delete(k));
+      note(e, shortError(errorText(error)), errorText(error));
+    }
+    updateDecisions();
+    return;
+  }
   if (plan.kind === 'ended-lease') {
     // A process lease only: the ended request is never decided or delivered.
     if (endedLeaseBusy.has(e.id) || endedLeaseDone.has(e.id)) return;
@@ -2142,43 +2169,16 @@ async function decideFromCard(id: string, action: 'allow' | 'block') {
   updateDecisions();
 }
 const ruleBusy = new Set<string>();
-// local-pair-v1: one review for both sides of a verified local connection.
-// The backend confirms the exact pair and returns BOTH verdicts.
-const pairResults = new Map<string, string>(),
-  pairBusy = new Set<string>();
-function wirePairControls(e: ViewEvent) {
-  const result = document.getElementById('pairResult');
-  if (result) result.textContent = pairResults.get(e.id) ?? '';
-  for (const [id, action] of [
-    ['pairAllow', 'allow'],
-    ['pairBlock', 'block'],
-  ] as const) {
-    const b = document.getElementById(id) as HTMLButtonElement | null;
-    if (b) b.onclick = () => void decidePairFromCard(e.id, action);
-  }
-}
-async function decidePairFromCard(id: string, action: 'allow' | 'block') {
-  const e = currentEvent();
-  if (!e || e.id !== id || (Boolean(promptID) && (!promptLayoutReady || performance.now() < promptStableAt))) return;
-  const ids = localPairView(e, state.control.events, state.control.capabilities)?.pairIds;
-  if (!ids || pairBusy.has(id) || !state.control.connected || !canDecide(state.control)) return;
-  const generation = state.control.generation;
-  pairBusy.add(id);
-  for (const x of ids) localSubmitted.add(generation + ':' + x);
-  const result = document.getElementById('pairResult');
-  if (result) result.textContent = 'Submitting both sides…';
-  try {
-    const r = await window.flowgate.decidePair({ generation, ids, action, scope: 'once' });
-    for (const x of ids) pairResults.set(x, r.text);
-    cardResults.set(e.id, { text: r.text, detail: r.message });
-  } catch (error) {
-    for (const x of ids) localSubmitted.delete(generation + ':' + x);
-    pairResults.set(e.id, 'Not decided: ' + errorText(error));
-  } finally {
-    pairBusy.delete(id);
-    detailSignature = '';
-    renderRequests();
-  }
+// Details view of the request card stays open across rebuilds of the same request.
+let detailsOpenFor = '';
+// The verified game's own Activity application (for its icon), never a target.
+function gameApplication(e: ViewEvent): Application | undefined {
+  const p = verifiedLaunch(e.attribution.provenance);
+  if (!p) return;
+  const game = Object.values(state.observation.activity?.processes || {}).find(
+    (x) => x.provenance?.group === p.group && x.provenance?.role === 'game' && verifiedLaunch(x.provenance),
+  );
+  return game?.application?.key ? game.application : undefined;
 }
 // Temporary decisions (For a while leases), keyed so an open disclosure stays open.
 function renderLeases(container: HTMLElement | null, leases: ProcessLease[], ownEvent = '') {
@@ -2232,7 +2232,7 @@ function updateDecisions() {
   renderLeases($('leaseInfo'), leasesForRequest(state.control.processLeases, e, now), e?.id);
   if ($('similarRequests'))
     $('similarRequests').textContent =
-      group && group.count > 1 ? `+${group.count - 1} similar requests` : '';
+      group && group.count > 1 ? `+${group.count - 1} similar requests` : 'None';
   if ($('similarRequests'))
     $('similarRequests').title = group && group.count > 1 ? 'Allow/Deny answers this request; Remember also settles the others it covers.' : '';
   if ($('askSource') && e) $('askSource').textContent = askSource(e, state.control.rules);
@@ -2247,19 +2247,6 @@ function updateDecisions() {
     leaseMode = endedLeaseAvailable(e, state.control.capabilities),
     leaseDone = !!e && endedLeaseDone.has(e.id),
     unverifiable = e ? ruleUnverifiable.get(e.id) : undefined;
-  // Pair controls follow the same input-release/pacing guard as Allow/Deny: never clickable
-  // while a click would be refused (a dropped click must not look accepted).
-  for (const id of ['pairAllow', 'pairBlock']) {
-    const b = document.getElementById(id) as HTMLButtonElement | null;
-    if (b)
-      b.disabled =
-        pacing ||
-        !e ||
-        pairBusy.has(e.id) ||
-        !state.control.connected ||
-        !canDecide(state.control) ||
-        !localPairView(e, state.control.events, state.control.capabilities)?.pairIds;
-  }
   if (ruleMode && remembering && !ruleDone && !rulePinned && !ruleChecking && !unverifiable && !(rememberFields.process && instanceEnded)) {
     // Review (again) when missing or expired; a refusal waits for Refresh review,
     // and re-reviews are spaced so an odd preview can never loop.
@@ -2397,7 +2384,7 @@ function updateDecisions() {
           : ruleChecking
             ? 'Checking rule…'
             : allowReview && endedFlow.fresh(ruleChoice(e!, 'allow'), now)
-              ? `Rule: ${allowReview.summary.replace(/^(Allow|Deny|Block) /, '')} · future connections`
+              ? 'Future connections only; this request has ended.'
               : ruleMessage
                 ? ''
                 : 'Rule review required.'
@@ -2409,7 +2396,7 @@ function updateDecisions() {
               : 'This deletion time is unavailable for this request.'
             : '') ||
           (reviewFor === reviewKey()
-            ? rememberReviewText(decisionReviews.allow, decisionReviews.block, e?.ask_rule)
+            ? rememberReviewText(decisionReviews.allow, decisionReviews.block, e?.ask_rule).replace(/^Rule: .*? · /, '').replace(/^Rule: .*$/, '')
             : '') ||
           (reviewMessage ? '' : 'Rule review required.');
   }
@@ -2423,18 +2410,17 @@ function updateDecisions() {
       : !needsDecisionReview() || ended;
     refresh.disabled = ruleMode ? ruleChecking || rulePinned : reviewChecking || !actionable(e);
   }
-  if ($('scopePreview'))
-    $('scopePreview').textContent = ruleMode
-      ? (['allow', 'block'] as const)
-          .map((a) => endedFlow.reviews[a])
-          .filter(Boolean)
-          .map((p) => p!.scope_preview)
-          .join('\n')
+  if ($('scopePreview')) {
+    // One preview (the Allow review; Deny differs only in its verb) and its overlap list.
+    const text = ruleMode
+      ? (endedFlow.reviews.allow ?? endedFlow.reviews.block)?.scope_preview || ''
       : needsDecisionReview()
-        ? Object.entries(decisionReviews)
-            .map(([action, p]) => `${action === 'allow' ? 'Allow' : 'Deny'}: ${p.scope_preview}`)
-            .join('\n') || 'Review required'
+        ? (decisionReviews.allow ?? decisionReviews.block)?.scope_preview || 'Review required'
         : e?.scope_previews[chosenScope] || 'Authoritative scope unavailable; decisions disabled.';
+    const split = splitPreview(text);
+    $('scopePreview').textContent = split.preview || '—';
+    if ($('ruleOverlaps')) $('ruleOverlaps').textContent = split.overlaps.join('\n') || 'None reported';
+  }
   const zone = $<HTMLSelectElement>('decisionZone');
   if (zone) {
     zone.disabled = !!scope?.disabled || !needsDecisionReview();
@@ -2462,7 +2448,9 @@ function updateDecisions() {
     reconcile.disabled = !state.control.connected;
   }
   // One short status line; the backend's full text is in Details → Status.
-  const local = e ? cardResults.get(e.id) : undefined,
+  // A submission from a hidden window that did not succeed is shown on its card again.
+  const kept = e && state.control.permissionResults?.find((r) => r.eventId === e.id && r.severity !== 'ok');
+  const local = e ? cardResults.get(e.id) ?? (kept ? { text: kept.text, detail: kept.detail } : undefined) : undefined,
     failure = reviewFailureOf(e);
   if ($('requestResult')) {
     $('requestResult').textContent = !e
@@ -2507,24 +2495,18 @@ function updateDecisions() {
     $('decisionNote').hidden = !$('decisionNote').textContent;
   }
   if ($('requestStatus') && e) {
+    // Short labelled fields; only the latest result, never an older error after a success.
     const own = cardNote && cardNote.id === e.id ? cardNote.detail : '';
-    $('requestStatus').textContent = [
-      e.reason,
-      local?.detail,
-      e.attempt?.message,
-      own,
-      ruleMode ? ruleMessage || unverifiable : reviewMessage,
-      e.attempt?.phase === 'unknown' && e.state !== 'awaiting-decision'
+    $('requestStatus').textContent = e.reason || '—';
+    $('requestLastResult').textContent =
+      (ruleDone ? endedFlow.saved.get(e.id) || local?.detail : local?.detail || own || e.attempt?.message) ||
+      (e.attempt?.phase === 'unknown' && e.state !== 'awaiting-decision'
         ? `Backend now reports ${e.state}; the original acknowledgement remains unknown.`
-        : '',
-    ]
-      .filter((x, i, all) => x && all.indexOf(x) === i)
-      .join('\n');
+        : '—');
+    $('requestReviewDetail').textContent = (ruleDone ? '' : ruleMode ? ruleMessage || unverifiable : reviewMessage) || '—';
   }
   if ($('revalidationDetails')) {
-    const pre = $('revalidationDetails');
-    pre.hidden = !failure;
-    pre.textContent = failure ? `${failure.code}: ${failure.message}` : '';
+    $('revalidationDetails').textContent = failure ? `${failure.code}: ${failure.message}` : '—';
   }
   if ($('futureApplicationRule')) {
     const future = $<HTMLButtonElement>('futureApplicationRule');
@@ -2552,15 +2534,20 @@ function updateDecisions() {
             : needsDecisionReview() && reviewFor === reviewKey() && decisionReviews.allow
               ? `Application + peer/service · ${decisionZone === 'any' ? 'Any network' : zoneLabel(decisionZone)} · ${decisionReviews.allow.rule.expires.startsWith('0001-') ? 'persistent' : 'until ' + new Date(decisionReviews.allow.rule.expires).toLocaleTimeString()}`
               : permissionTarget(chosenScope, e?.flow.protocol || '', needsDecisionReview() ? decisionZone : 'any');
+  // One short status line: the countdown, or what the request is now.
   const expiry = document.querySelector('.expiry');
-  if (expiry)
+  if (expiry) {
+    const limited = !!e && (!e.attribution.visibility_complete || e.attribution.status !== 'directly-associated');
     expiry.textContent = !e
       ? ''
       : ended
-        ? ''
+        ? '' // the result line below states it once
         : e.remainingMs > 0 && e.state === 'awaiting-decision'
-          ? `${Math.ceil(e.remainingMs / 1000)} s left`
+          ? `${Math.ceil(e.remainingMs / 1000)} s left` +
+            (group && group.count > 1 ? ` · +${group.count - 1} similar` : '') +
+            (limited ? ' · limited attribution' : '')
           : `Request ${e.state === 'awaiting-decision' ? 'expired' : e.state}`;
+  }
   measurePrompt();
 }
 function consume(next: ClientState) {
@@ -2634,7 +2621,48 @@ function consume(next: ClientState) {
     details.dataset.eventId = currentEvent()?.id || '';
     updateWorkflows(state);
     updateDecisionLog(state);
+    renderPermissionResults();
   }
+}
+// Pending requests › Results: every submission outcome, newest first; the ones
+// that did not succeed (refused, unknown, conflicting rule) are flagged in the
+// footer until reviewed.
+let resultsSignature = '';
+let resultsSeen = '';
+function renderPermissionResults() {
+  const list = state.control.permissionResults ?? [];
+  const attention = list.filter((r) => r.severity !== 'ok' && Number(r.id) > Number(resultsSeen || 0));
+  const button = $<HTMLButtonElement>('resultsAttention');
+  if (button) {
+    button.hidden = attention.length === 0;
+    button.textContent = `${attention.length} permission result${attention.length === 1 ? '' : 's'} to review`;
+    button.onclick = () => {
+      $('requestsTab').click();
+      $('permissionResultsView')?.scrollIntoView({ block: 'nearest' });
+    };
+  }
+  if (!$('requestsView').hidden && list[0]) resultsSeen = list[0].id;
+  const signature = JSON.stringify(list.map((r) => r.id));
+  if (signature === resultsSignature) return;
+  resultsSignature = signature;
+  const rows = $('permissionResultRows');
+  rows.replaceChildren();
+  for (const r of list.slice(0, 20)) {
+    const li = element('li', '', 'permission-result result-' + r.severity);
+    li.dataset.event = r.eventId;
+    const box = element('details');
+    const summary = element('summary');
+    summary.append(
+      element('span', new Date(r.at).toLocaleTimeString(), 'result-time'),
+      element('strong', r.application),
+      element('span', r.destination, 'result-destination'),
+      element('span', r.text, 'result-text'),
+    );
+    box.append(summary, element('p', r.detail || r.text, 'result-detail'));
+    li.append(box);
+    rows.append(li);
+  }
+  $('permissionResultsView').hidden = list.length === 0;
 }
 function consumePresentation(frame: PaneFrame) {
   if (promptID || (presentation && frame.presentation.revision < presentation.revision)) return;

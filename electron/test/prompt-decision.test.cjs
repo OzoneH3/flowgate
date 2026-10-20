@@ -363,10 +363,13 @@ function card(over = {}, options = {}) {
 
 test('compact card: first view is short, everything technical behind one Details', () => {
   const { root, all, byId, e } = card();
-  const details = all.filter((n) => n.tagName === 'DETAILS');
-  assert.equal(details.length, 1, 'a single Details disclosure');
-  assert.equal(details[0].id, 'requestMore');
-  assert.ok(!details[0].open);
+  // Details is a separate view (hidden section of expandable groups) behind one link.
+  const view = byId('requestMore');
+  assert.equal(view.tagName, 'SECTION');
+  assert.ok(view.hidden);
+  assert.equal(byId('detailsToggle').text, 'Details');
+  assert.ok(all.filter((n) => n.tagName === 'DETAILS').every((d) => [...view.walk()].includes(d)));
+  const details = [view];
   const inside = new Set(details[0].walk());
   const visible = all
     .filter((n) => !inside.has(n))
@@ -377,7 +380,7 @@ test('compact card: first view is short, everything technical behind one Details
   const technical = details[0].textContent;
   for (const shown of [e.attribution.application.executable, 'PID 4242 · start 987654 · UID 1000', e.reason, e.deadline, 'socket inode'])
     assert.ok(technical.includes(shown), `Details lists ${shown}`);
-  for (const shown of ['Outgoing connection', 'curl', '10.1.0.2:443', 'TCP · local 10.1.0.1:40000'])
+  for (const shown of ['Outgoing connection', 'curl', 'To 10.1.0.2:443 · TCP'])
     assert.ok(visible.includes(shown), `compact view shows ${shown}`);
   // Decision order: Allow | Deny | Remember | For a while.
   const controls = byId('decisionControls');
