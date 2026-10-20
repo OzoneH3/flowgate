@@ -1,4 +1,4 @@
-import { peIconToPng } from './icon-pe';
+import { peIconToPng, peDisplayName, readPEResources } from './icon-pe';
 import { icoToPng } from './icon-ico';
 import { desktopGameExecutable } from './desktop-game';
 import { gameIconApplication } from './provenance';
@@ -62,6 +62,7 @@ export class ApplicationIcons {
   private cache = new Map<string, Promise<string | null>>();
   private images = new Map<string, { data: Buffer; type: string }>();
   private ready: Promise<void>;
+  private peNames = new Map<string, Promise<string | undefined>>();
   private imageBytes = 0;
   private entries = new Map<string, Set<string>>();
   private names = new Map<string, Set<string>>();
@@ -288,7 +289,8 @@ export class ApplicationIcons {
   private async embeddedIcon(executable: string) {
     if (!/\.exe$/i.test(executable)) return null;
     try {
-      const data = peIconToPng(await read(executable, 64 * 1024 * 1024));
+      const resource = await readPEResources(executable);
+      const data = peIconToPng(resource);
       if (!data || !safeIcon(data, '.png')) return null;
       const id = createHash('sha256').update(data).digest('hex') + '.png';
       if (!this.images.has(id)) {
@@ -373,13 +375,21 @@ export class ApplicationIcons {
         (await this.executable(
           app.display_executable || app.executable.replace(/ \(deleted\)$/, ''),
         ));
+      let peName: string | undefined;
+      if (executable && /\.exe$/i.test(executable)) {
+        if (!this.peNames.has(key)) {
+          if (this.peNames.size >= 2048) this.peNames.delete(this.peNames.keys().next().value!);
+          this.peNames.set(key, readPEResources(executable).then(peDisplayName).catch(() => undefined));
+        }
+        peName = await this.peNames.get(key);
+      }
       const names = executable ? this.names.get(executable) : undefined;
       const desktop = this.entries.get(executable || '')?.size === 1 || names?.size === 1;
       const game = desktop ? undefined : await this.steamGame(executable || '');
       result[key] = {
         icon,
-        name: names?.size === 1 ? [...names][0] : game?.name,
-        source: desktop ? 'desktop-metadata' : game ? 'steam-manifest' : icon ? 'executable-resource' : 'unavailable',
+        name: peName || (names?.size === 1 ? [...names][0] : game?.name),
+        source: peName ? 'executable-resource' : desktop ? 'desktop-metadata' : game ? 'steam-manifest' : icon ? 'executable-resource' : 'unavailable',
       };
     }
     return result;

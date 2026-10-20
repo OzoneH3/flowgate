@@ -140,8 +140,8 @@ Unsupported Wine/Proton builds still require separate collector support.
 
 Executable artwork uses exact desktop/Steam association first, then a bounded
 read-only PE32/PE32+ RT_GROUP_ICON/RT_ICON resource lookup. No executable is loaded
-or run to obtain its icon. PE input is limited to 64 MiB, resource directories to
-16 MiB, and individual icon frames to 1 MiB; unsupported images retain the neutral
+or run to obtain its icon. The reader loads at most 64 KiB of headers and a 16 MiB resource section,
+with individual icon frames limited to 1 MiB; unsupported images retain the neutral
 fallback. Layout follows Microsoft's PE resource specification:
 https://learn.microsoft.com/en-us/windows/win32/debug/pe-format
 
@@ -152,3 +152,9 @@ size, mtime and ctime, last modified before the Linux process began. A source
 replacement or modification after process creation fails closed. This is the
 ordinary same-user snapshot model, not an attestation against malicious memory
 or timestamp manipulation. The process name alone never supplies authority.
+
+Executable display names use bounded VERSIONINFO FileDescription strings, with
+ProductName as a fallback. They are local-file display metadata, not publisher
+verification or permission authority. Keys, revisions, UID and prefix bindings
+never derive from these labels. Metadata is cached by exact application identity
+and revision; malformed/absent strings retain the normal filename fallback.

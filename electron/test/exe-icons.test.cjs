@@ -35,3 +35,43 @@ test('truncated, cyclic, oversized and unmapped PE resource offsets fail closed'
  const bad=peFixture();bad.writeUInt32LE(0x80000000,532);assert.equal(peIconToPng(bad),undefined);
  const outside=peFixture();outside.writeUInt32LE(0xffffffff,640);assert.equal(peIconToPng(outside),undefined);
 });
+
+const {versionName,peDisplayName,readPEResources}=require('../dist/test/icon-pe.cjs');
+function versionNode(key,value='',children=[],binary=false){
+ const k=Buffer.from(key+'\0','utf16le'),v=binary?Buffer.from(value):Buffer.from(value?value+'\0':'','utf16le');
+ const align=n=>(n+3)&~3,at=align(6+k.length),first=align(at+v.length);
+ let len=first;for(const c of children)len=align(len+c.length);
+ const b=Buffer.alloc(len);b.writeUInt16LE(len);b.writeUInt16LE(binary?v.length:v.length/2,2);b.writeUInt16LE(binary?0:1,4);k.copy(b,6);v.copy(b,at);let off=first;for(const c of children){c.copy(b,off);off=align(off+c.length);}return b;
+}
+function versionResource(desc,product='Example Product'){
+ return versionNode('VS_VERSION_INFO',Buffer.alloc(52),[versionNode('StringFileInfo','',[versionNode('040904B0','',[
+ versionNode('FileDescription',desc),versionNode('ProductName',product)])])],true);
+}
+function versionPE(desc){
+ const b=peFixture(),v=versionResource(desc);b.writeUInt16LE(1,512+14);b.writeUInt32LE(16,512+16);b.writeUInt32LE(0x80000038,512+20);
+ b.writeUInt32LE(v.length,512+148);v.copy(b,512+208);b.writeUInt32LE(1024,152+96+20);b.writeUInt32LE(1024,152+224+16);return b;
+}
+test('version names prefer FileDescription, fall back to ProductName and preserve Unicode',()=>{
+ assert.equal(versionName(versionResource('Friendly application')), 'Friendly application');
+ assert.equal(versionName(versionResource('')), 'Example Product');
+ assert.equal(versionName(versionResource('Éditeur 日本語')), 'Éditeur 日本語');
+ assert.equal(versionName(versionResource('Bad\u202ename')), 'Example Product');
+ assert.equal(peDisplayName(versionPE('Synthetic Beta')), 'Synthetic Beta');
+});
+test('version parser refuses truncated or oversized values and invalid tree lengths',()=>{
+ const good=versionResource('Friendly');for(const n of [0,6,16,good.length-8])assert.equal(versionName(good.subarray(0,n)),undefined);
+ const bad=Buffer.from(good);bad.writeUInt16LE(0);assert.equal(versionName(bad),undefined);
+ assert.equal(versionName(versionResource('x'.repeat(300),'Fallback')), 'Fallback');
+});
+test('bounded resource reader handles large EXEs and metadata is revision-keyed',async(t)=>{
+ const fs=require('fs'),path=require('path');const {ApplicationIcons,iconKey}=require('../dist/test/icons.cjs');
+ const dir=fs.mkdtempSync(path.resolve(__dirname,'../../.workspace/pe-name-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ const exe=path.join(dir,'test.exe');fs.writeFileSync(exe,versionPE('First name'));fs.chmodSync(exe,0o755);fs.truncateSync(exe,100*1024*1024);
+ const resources=await readPEResources(exe);assert.ok(resources.length<100000);assert.equal(peDisplayName(resources),'First name');
+ const icons=new ApplicationIcons(dir,[dir],[]);let app={key:'app',revision:'one',executable:exe,name:'test.exe'};
+ const observe=()=>icons.observe({observation:{activity:{rows:[],processes:{p:{application:app}}}},control:{events:[],rules:[]}});observe();
+ assert.equal((await icons.metadata([iconKey(app)]))[iconKey(app)].name,'First name');
+ fs.writeFileSync(exe,versionPE('Second name'));app={...app,revision:'two'};observe();
+ assert.equal((await icons.metadata([iconKey(app)]))[iconKey(app)].name,'Second name');
+ assert.equal((await icons.metadata(['not-authorized']))['not-authorized'].name,undefined);
+});
