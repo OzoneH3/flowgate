@@ -30,3 +30,10 @@ Regression coverage includes inactive rules, same-folder unrelated binaries,
 wrong UID, changed revision, malformed wrappers and a saved rule alongside a
 live application record. Native-window evidence uses local fixture sockets;
 it does not mutate the host daemon.
+
+Artwork uses the same verified Flatpak deployment association as its name,
+including inactive rules and wrapper targets. Deployment-local hicolor icons
+are searched even when the deployment does not ship an index.theme. Native
+desktop entries with a bounded literal shell `exec` wrapper can match the actual
+executable. PNG/SVG validation, file-size limits and identity allowlisting apply
+to every loaded asset; desktop commands are never executed for metadata.

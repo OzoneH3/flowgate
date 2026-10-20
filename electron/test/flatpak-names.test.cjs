@@ -25,3 +25,17 @@ test('inactive Flatpak names match exact native UID/key/revision and wrapper tar
  const old=rule(native,'/app/bin/runner');fs.writeFileSync(native,'different revision');assert.equal(await name(old),undefined);
  fs.writeFileSync(path.join(bin,'wrapper'),'#!/bin/sh\nexec "$(command)"\n');assert.equal(await name(rule(exe)),undefined);
 });
+test('native literal wrappers and Flatpak deployments provide bounded icon assets',async(t)=>{
+ const home=fs.mkdtempSync(path.resolve(__dirname,'../../.workspace/linux-icon-test-'));t.after(()=>fs.rmSync(home,{recursive:true,force:true}));
+ const svg='<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><path d="M0 0h16v16H0z"/></svg>';
+ const exe=path.join(home,'real-client'),wrapper=path.join(home,'wrapper');fs.writeFileSync(exe,'native');fs.chmodSync(exe,0o755);fs.writeFileSync(wrapper,`#!/bin/sh\nexec ${exe} "$@"\n`);fs.chmodSync(wrapper,0o755);
+ fs.mkdirSync(path.join(home,'applications'));fs.writeFileSync(path.join(home,'native.svg'),svg);fs.writeFileSync(path.join(home,'applications/native.desktop'),`[Desktop Entry]\nType=Application\nName=Native Client\nExec=${wrapper}\nIcon=${home}/native.svg\n`);
+ const id='org.example.Client',deploy=path.join(home,'app',id,'x86_64/stable','c'.repeat(64)),flatExe=path.join(deploy,'files/bin/client');fs.mkdirSync(path.dirname(flatExe),{recursive:true});fs.writeFileSync(flatExe,'flatpak');fs.writeFileSync(path.join(deploy,'metadata'),`[Application]\nname=${id}\n`);
+ const share=path.join(deploy,'files/share');fs.mkdirSync(path.join(share,'applications'),{recursive:true});fs.writeFileSync(path.join(share,'applications',id+'.desktop'),`[Desktop Entry]\nType=Application\nName=Flatpak Client\nIcon=${id}\n`);
+ fs.mkdirSync(path.join(share,'icons/hicolor/scalable/apps'),{recursive:true});fs.writeFileSync(path.join(share,'icons/hicolor/scalable/apps',id+'.svg'),svg);
+ const native={key:'native',revision:'1',name:'client',executable:exe,kind:'native'},flat={key:'flat',revision:'2',name:'client',executable:'/app/bin/client',host_executable:flatExe,kind:'native'};
+ const icons=new ApplicationIcons(home,[home],[]);icons.observe({observation:{activity:{rows:[],processes:{n:{application:native},f:{application:flat}}}},control:{events:[],rules:[]}});
+ const results=await icons.metadata([iconKey(native),iconKey(flat),'unknown']);
+ for(const app of [native,flat]){const result=results[iconKey(app)];assert.ok(result.icon);assert.equal(icons.asset(result.icon.split('/').pop()).data.toString(),svg);}
+ assert.equal(results[iconKey(native)].name,'Native Client');assert.equal(results[iconKey(flat)].name,'Flatpak Client');assert.equal(results.unknown.icon,null);
+});

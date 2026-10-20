@@ -30,8 +30,8 @@ export function wrapperTarget(text: string, dataHome: string): string | undefine
     if (tail.some(line => new RegExp(`\\b${name}\\s*=`).test(line))) return;
   const executions = tail.filter(line => /^exec\s/.test(line));
   if (executions.length !== 1 || executions[0] !== lines.at(-1)) return;
-  const exec = executions[0].match(/^exec "([^"`]+)"(?: "\$@")?$/);
-  const target = exec && expand(exec[1]);
+  const exec = executions[0].match(/^exec (?:"([^"`]+)"|(\/[^\s"'`$;|&<>]+))(?: "\$@")?$/);
+  const target = exec && expand(exec[1] || exec[2]);
   if (!target || !path.isAbsolute(target) || target.split('/').includes('..')) return;
   return target;
 }
@@ -46,16 +46,16 @@ async function matches(app: Application, uid: number, file: string) {
   return st.isFile() && key === app.key && `${st.ino}:${st.size}:${st.mtimeNs}:${st.ctimeNs}` === app.revision;
 }
 
-export async function installedFlatpakName(
+export async function installedFlatpakEntry(
   app: Application, uid: number, roots: string[], home: string,
   deploymentName: (file: string) => Promise<string | undefined>,
-): Promise<string | undefined> {
+): Promise<{ name: string; executable: string } | undefined> {
   if (app.kind && app.kind !== 'native') return;
   const sandbox = app.executable.startsWith('/app/');
   const dataRoot = path.join(home, '.var/app') + '/';
   const privateData = app.executable.startsWith(dataRoot);
   if (!sandbox && !privateData) return;
-  const names = new Set<string>();
+  const names = new Map<string, string>();
   for (const root of roots.filter(path.isAbsolute)) {
     let ids: string[]; try { ids = await fs.readdir(root); } catch { continue; }
     for (const id of ids.slice(0, 256)) {
@@ -68,7 +68,7 @@ export async function installedFlatpakName(
           const candidate = path.join(files, app.executable.slice('/app/'.length));
           if (!(await fs.realpath(candidate)).startsWith(files + '/')) continue;
           if (await matches(app, uid, candidate)) {
-            const name = await deploymentName(candidate); if (name) names.add(name);
+            const name = await deploymentName(candidate); if (name) names.set(name, candidate);
           }
         } else {
           // Match a desktop entry's own wrapper and its exact literal exec
@@ -82,10 +82,11 @@ export async function installedFlatpakName(
           if (!(await fs.realpath(wrapper)).startsWith(files + '/')) continue;
           const target = wrapperTarget(await bounded(wrapper), path.join(home, '.var/app', id, 'data'));
           if (!target || await fs.realpath(target) !== await fs.realpath(app.executable)) continue;
-          const name = await deploymentName(wrapper); if (name) names.add(name);
+          const name = await deploymentName(wrapper); if (name) names.set(name, wrapper);
         }
       } catch { /* Unknown or changed installations keep their executable name. */ }
     }
   }
-  return names.size === 1 ? [...names][0] : undefined;
+  if (names.size === 1) { const [name, executable] = [...names][0]; return { name, executable }; }
+  return undefined;
 }

@@ -1,4 +1,4 @@
-import { installedFlatpakName } from './flatpak-names';
+import { installedFlatpakEntry, wrapperTarget } from './flatpak-names';
 import { peIconToPng, peDisplayName, readPEResources } from './icon-pe';
 import { icoToPng } from './icon-ico';
 import { desktopGameExecutable } from './desktop-game';
@@ -65,7 +65,7 @@ export class ApplicationIcons {
   private images = new Map<string, { data: Buffer; type: string }>();
   private ready: Promise<void>;
   private peNames = new Map<string, Promise<string | undefined>>();
-  private flatpakNames = new Map<string, Promise<string | undefined>>();
+  private flatpakNames = new Map<string, Promise<FlatpakDesktop | undefined>>();
   private imageBytes = 0;
   private entries = new Map<string, Set<string>>();
   private names = new Map<string, Set<string>>();
@@ -145,7 +145,14 @@ export class ApplicationIcons {
           if (entry.Type !== 'Application' || entry.Hidden === 'true' || !entry.Icon) continue;
           const token = desktopGameExecutable((entry.Exec || '').replace(/\\\\/g, '\\')) || execToken(entry.Exec || '');
           if (!token) continue;
-          const executable = await this.executable(token);
+          let executable = await this.executable(token);
+          try {
+            const script = (await read(executable, 65536)).toString('utf8');
+            if (/^#![^\n]*\/(?:ba)?sh(?:\s|$)/.test(script)) {
+              const target = wrapperTarget(script, '');
+              if (target) executable = await this.executable(target) || executable;
+            }
+          } catch {}
           if (!executable) continue;
           const icons = this.entries.get(executable) || new Set<string>();
           icons.add(entry.Icon);
@@ -257,20 +264,29 @@ export class ApplicationIcons {
       candidates = new Set(['steam_icon_' + game.appid]);
     }
     const name = [...candidates][0];
+    return await this.resolveIcon(name) || this.embeddedIcon(actual);
+  }
+  private async resolveIcon(name: string, share?: string) {
     const files: string[] = [];
+    const roots = share ? [path.join(share, 'icons'), ...this.iconRoots] : this.iconRoots;
     if (path.isAbsolute(name)) files.push(name);
     else if (/^[\w.+-]+$/.test(name)) {
+      // Flatpak deployments may provide icons without their own index.theme.
+      if (share)
+        for (const size of ['16x16', '22x22', '24x24', '32x32', '48x48', '64x64', '128x128', '256x256', '512x512', 'scalable'])
+          for (const ext of ['.png', '.svg'])
+            files.push(path.join(share, 'icons/hicolor', size, 'apps', name.endsWith(ext) ? name : name + ext));
       for (const theme of this.themes) {
         // Icon theme spec: a theme's Directories apply in every base directory, including user roots
         // (e.g. ~/.local/share/icons/hicolor holding Steam's steam_icon_<appid>) that ship no index.theme.
         const dirs =
           this.iconRoots.map((r) => this.themeDirs.get(path.join(r, theme))).find((d) => d?.length) || [];
-        for (const root of this.iconRoots)
+        for (const root of roots)
           for (const dir of dirs)
             for (const ext of ['.png', '.svg'])
               files.push(path.join(root, theme, dir, name.endsWith(ext) ? name : name + ext));
       }
-      for (const root of this.dataDirs)
+      for (const root of share ? [share, ...this.dataDirs] : this.dataDirs)
         files.push(
           path.join(root, 'pixmaps', name + '.png'),
           path.join(root, 'pixmaps', name + '.svg'),
@@ -295,7 +311,7 @@ export class ApplicationIcons {
         this.images.set(id, { data, type: ext === '.png' ? 'image/png' : 'image/svg+xml' });
         return 'flowgate://app/icons/' + id;
       } catch {}
-    return this.embeddedIcon(actual);
+    return null;
   }
   private async embeddedIcon(executable: string) {
     if (!/\.exe$/i.test(executable)) return null;
@@ -340,6 +356,20 @@ export class ApplicationIcons {
       (pkg ? unique(this.desktops.filter((d) => d.wmclass?.toLowerCase() === pkg)) : undefined)
     );
   }
+  private async flatpakEntry(app: Application, key: string) {
+    if (!this.flatpakNames.has(key)) {
+      if (this.flatpakNames.size >= 2048) this.flatpakNames.delete(this.flatpakNames.keys().next().value!);
+      this.flatpakNames.set(key, (async () => {
+        const live = app.host_executable && await flatpakDesktopEntry(app.host_executable);
+        if (live) return live;
+        const uid = this.owners.get(key);
+        if (uid === undefined) return;
+        const entry = await installedFlatpakEntry(app, uid, this.flatpakRoots, this.home, flatpakDisplayName);
+        return entry && flatpakDesktopEntry(entry.executable);
+      })());
+    }
+    return this.flatpakNames.get(key);
+  }
   async request(value: unknown) {
     if (
       !Array.isArray(value) ||
@@ -361,7 +391,10 @@ export class ApplicationIcons {
           key,
           a.kind === 'electron'
             ? this.electronDesktop(a).then((d) => (d ? this.resolve(d.executable) : null))
-            : this.resolve(a.display_executable || a.executable.replace(/ \(deleted\)$/, '')),
+            : (async () => {
+                const entry = await this.flatpakEntry(a, key);
+                return (entry?.icon && await this.resolveIcon(entry.icon, entry.share)) || this.resolve(a.display_executable || a.executable.replace(/ \(deleted\)$/, ''));
+              })(),
         );
       }
       result[key] = await this.cache.get(key)!;
@@ -377,16 +410,8 @@ export class ApplicationIcons {
     for (const [key, icon] of Object.entries(icons)) {
       const app = this.allowed.get(key);
       if (app && (!app.kind || app.kind === 'native')) {
-        if (!this.flatpakNames.has(key)) {
-          if (this.flatpakNames.size >= 2048) this.flatpakNames.delete(this.flatpakNames.keys().next().value!);
-          this.flatpakNames.set(key, (async () => {
-            const live = app.host_executable && await flatpakDisplayName(app.host_executable);
-            if (live) return live;
-            const uid = this.owners.get(key);
-            return uid === undefined ? undefined : installedFlatpakName(app, uid, this.flatpakRoots, this.home, flatpakDisplayName);
-          })());
-        }
-        const name = await this.flatpakNames.get(key);
+        const entry = await this.flatpakEntry(app, key);
+        const name = entry?.name;
         if (name) {
           result[key] = { icon, name, source: 'desktop-metadata' };
           continue;
@@ -427,7 +452,11 @@ export class ApplicationIcons {
 }
 // Use the backend-proven backing file, never argv, a parent process or an
 // unrelated current deployment. This is display metadata, not policy identity.
+interface FlatpakDesktop { name: string; icon?: string; share: string }
 export async function flatpakDisplayName(backing: string): Promise<string | undefined> {
+  return (await flatpakDesktopEntry(backing))?.name;
+}
+async function flatpakDesktopEntry(backing: string): Promise<FlatpakDesktop | undefined> {
   try {
     if (!path.isAbsolute(backing)) return;
     const actual = await fs.realpath(backing);
@@ -446,7 +475,7 @@ export async function flatpakDisplayName(backing: string): Promise<string | unde
     const name = entry.Name;
     if (entry.Type !== 'Application' || entry.Hidden === 'true' || !name ||
         name.length > 255 || /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/.test(name)) return;
-    return name;
+    return { name, icon: entry.Icon, share: path.join(deployment, 'files/share') };
   } catch { return; }
 }
 function score(dir: string) {
