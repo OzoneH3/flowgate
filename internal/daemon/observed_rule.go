@@ -114,7 +114,7 @@ func (e *Engine) verifyCreation(target ObservedTarget, p identity.ActivityProces
 		return identity.Process{}, mutationError("stale_target", err.Error())
 	}
 	// Check the verifier's principal/identity even in tests; no metadata provided by caller.
-	if current.PID != p.PID || current.Start != p.Start || current.UID != p.UID || current.Application.Kind != "native" || current.Application.Key == "" || current.Application.Key != p.Application.Key || current.Application.Revision == "" || current.Application.Revision != p.Application.Revision || current.NetNS == "" || current.MountNS == "" {
+	if current.PID != p.PID || current.Start != p.Start || current.UID != p.UID || !identity.LiveRuleable(current.Application) || current.Application.Kind != p.Application.Kind || current.Application.Key == "" || current.Application.Key != p.Application.Key || current.Application.Revision == "" || current.Application.Revision != p.Application.Revision || current.NetNS == "" || current.MountNS == "" {
 		return identity.Process{}, mutationError("stale_target", "Verified process generation/identity/namespace changed")
 	}
 	return current, nil
@@ -170,7 +170,10 @@ func (e *Engine) PreviewObservedRule(generation string, target ObservedTarget, d
 			break
 		}
 	}
-	if !ok || !found || p.ID != target.ProcessID || p.PID <= 0 || p.Start == "" || p.Application.Kind != "native" || p.Application.Key == "" || p.Application.Revision == "" {
+	if !ok || !found || p.ID != target.ProcessID || p.PID <= 0 || p.Start == "" || !identity.LiveRuleable(p.Application) {
+		if why := identity.RuntimeRuleBlocked(&p.Application); ok && found && why != "" {
+			return ObservedPreview{}, mutationError(identity.CodeIdentityUnverifiable, why)
+		}
 		return ObservedPreview{}, mutationError("unsupported_target", "Supported single-holder native Activity context required; unknown/shared/runtime/display-only targets cannot create rules")
 	}
 	current, err := e.verifyCreation(target, p, uid, admin)

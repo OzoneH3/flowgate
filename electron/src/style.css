@@ -1691,3 +1691,4 @@ body.hide-sidebar #activityView > aside { display:none; }
   #promptBody .nl-address { overflow-wrap:anywhere; }
   #promptBody .nl-port-group { display:inline-block; white-space:nowrap; }
 }
+#promptBody .nl-card-top[hidden], #promptBody .nl-links[hidden] { display:none; }

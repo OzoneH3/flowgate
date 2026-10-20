@@ -184,6 +184,9 @@ func (e *Engine) EditRule(id, eventID string, expected *uint64, candidate policy
 		if !candidate.Filter.Process.IsZero() {
 			return policy.Rule{}, "", mutationError("unsupported_process", "Create process rules through verified Activity preview")
 		}
+		if why := identity.RuntimeRuleBlocked(a.Application); why != "" {
+			return policy.Rule{}, "", mutationError(identity.CodeIdentityUnverifiable, why)
+		}
 		basis := policy.Remembered(found.Flow, a)
 		if candidate.Filter.AllPrograms || candidate.Filter.AllUIDs {
 			return policy.Rule{}, "", mutationError("invalid_request", "All-program creation requires a zone preview")

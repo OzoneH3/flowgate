@@ -2320,7 +2320,16 @@ function updateDecisions() {
   if (scope) scope.disabled = locked;
   const toggle = $<HTMLInputElement>('rememberToggle');
   // An ended request keeps Remember: it is the way to a rule for future connections.
-  if (toggle) toggle.disabled = ruleMode ? ruleDone || rulePinned || pacing : locked;
+  // An Electron runtime whose app is unverified: no application-wide rule (backend refuses too).
+  const runtimeUnverified = e?.attribution.permission_target?.kind === 'runtime-unverified';
+  if (toggle) {
+    toggle.disabled = runtimeUnverified || (ruleMode ? ruleDone || rulePinned || pacing : locked);
+    toggle.parentElement!.title = runtimeUnverified
+      ? e!.attribution.permission_target!.remember
+      : "Create rule and don't ask me again";
+    toggle.parentElement!.classList.toggle('unavailable', runtimeUnverified);
+    if (runtimeUnverified && rememberOn) setOption('remember', false);
+  }
   const scopeLine = $('permissionScope');
   if (scopeLine)
     scopeLine.textContent =

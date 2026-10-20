@@ -170,6 +170,10 @@ func (e *Engine) PreviewDecision(generation, id, action, scope, zone, revision s
 	if a.Application == nil || a.Application.Key == "" || a.Application.Revision == "" || a.Principal() == nil || a.Fingerprint != v.Attribution.Fingerprint {
 		return DecisionPreview{}, e.rejectPendingBindingLocked(v, a)
 	}
+	// Never an application-wide rule for a shared runtime whose app is unverified.
+	if why := identity.RuntimeRuleBlocked(a.Application); why != "" {
+		return DecisionPreview{}, mutationError(identity.CodeIdentityUnverifiable, why)
+	}
 	rule := policy.Rule{Version: 1, Schema: 2, ID: "user:" + randomID(), Executable: a.Application.Executable, Priority: 100, Action: action, Created: now, Expires: now.Add(time.Duration(o.DurationSeconds) * time.Second), Filter: policy.Remembered(v.Flow, a)}
 	if scope == "persistent" {
 		rule.Expires = time.Time{}

@@ -366,6 +366,9 @@ func (e *Engine) decideLocked(id, action, scope string, uid uint32, admin bool, 
 		}
 		var remembered *policy.Rule
 		if remember {
+			if why := identity.RuntimeRuleBlocked(a.Application); why != "" {
+				return Event{}, mutationError(identity.CodeIdentityUnverifiable, why)
+			}
 			r := policy.Rule{Version: 1, Executable: a.Application.Executable, Schema: 2, ID: "user:" + v.ID, Priority: 100, Action: action, Filter: policy.Remembered(v.Flow, a), Created: now, Expires: now.Add(time.Hour)}
 			if scope == "persistent" {
 				r.Expires = time.Time{}

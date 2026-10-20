@@ -61,6 +61,9 @@ export class ApplicationIcons {
   private imageBytes = 0;
   private entries = new Map<string, Set<string>>();
   private names = new Map<string, Set<string>>();
+  // Desktop entries (display only) for Electron apps on a shared runtime.
+  private desktops: { executable: string; name?: string; wmclass?: string }[] = [];
+  private scripts = new Map<string, Promise<string>>();
   private themes: string[] = [];
   private iconRoots: string[];
   private themeDirs = new Map<string, string[]>();
@@ -123,6 +126,8 @@ export class ApplicationIcons {
             names.add(entry.Name);
             this.names.set(executable, names);
           }
+          if (this.desktops.length < 2048)
+            this.desktops.push({ executable, name: entry.Name?.slice(0, 255), wmclass: entry.StartupWMClass?.slice(0, 255) });
         } catch {}
       }
     }
@@ -258,6 +263,34 @@ export class ApplicationIcons {
       } catch {}
     return null;
   }
+  // A verified Electron app (executable = its bundle) gets the desktop entry
+  // whose launcher script names exactly that bundle (e.g. /usr/bin/heroic runs
+  // electron43 /usr/lib/heroic-games-launcher/app.asar); otherwise a unique
+  // StartupWMClass equal to the package name. Display only, never identity.
+  private async electronDesktop(a: Application) {
+    const bundle = a.hosted?.state === 'verified' ? a.hosted.bundle || a.executable : '';
+    if (a.kind !== 'electron' || !bundle) return undefined;
+    const script = (exe: string) => {
+      if (!this.scripts.has(exe))
+        this.scripts.set(
+          exe,
+          fs
+            .stat(exe)
+            .then((st) => (st.size <= 65536 ? read(exe).then((b) => b.toString('latin1')) : ''))
+            .catch(() => ''),
+        );
+      return this.scripts.get(exe)!;
+    };
+    const byScript: typeof this.desktops = [];
+    for (const d of this.desktops) if ((await script(d.executable)).includes(bundle)) byScript.push(d);
+    const unique = (list: typeof this.desktops) =>
+      new Set(list.map((d) => d.executable)).size === 1 ? list[0] : undefined;
+    const pkg = a.hosted?.package_name?.toLowerCase();
+    return (
+      unique(byScript) ??
+      (pkg ? unique(this.desktops.filter((d) => d.wmclass?.toLowerCase() === pkg)) : undefined)
+    );
+  }
   async request(value: unknown) {
     if (
       !Array.isArray(value) ||
@@ -277,7 +310,9 @@ export class ApplicationIcons {
         if (this.cache.size >= 2048) this.cache.delete(this.cache.keys().next().value!);
         this.cache.set(
           key,
-          this.resolve(a.display_executable || a.executable.replace(/ \(deleted\)$/, '')),
+          a.kind === 'electron'
+            ? this.electronDesktop(a).then((d) => (d ? this.resolve(d.executable) : null))
+            : this.resolve(a.display_executable || a.executable.replace(/ \(deleted\)$/, '')),
         );
       }
       result[key] = await this.cache.get(key)!;
@@ -292,6 +327,11 @@ export class ApplicationIcons {
     > = Object.create(null);
     for (const [key, icon] of Object.entries(icons)) {
       const app = this.allowed.get(key);
+      if (app?.kind === 'electron') {
+        const entry = await this.electronDesktop(app);
+        result[key] = { icon, name: entry?.name, source: entry || icon ? 'desktop-metadata' : 'unavailable' };
+        continue;
+      }
       const executable =
         app &&
         (await this.executable(

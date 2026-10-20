@@ -109,6 +109,25 @@ func DescribePermissionTarget(a Attribution) *PermissionTarget {
 			game = prov.Launch.Game.Title + " (" + prov.Launch.Game.Name + ")"
 		}
 	}
+	if app.Kind == "electron" {
+		// A verified Electron app: the bundle is the identity, never the runtime.
+		runtime := filepath.Base(app.Runtime)
+		t.Kind = "application"
+		t.KeyBasis = "uid+electron+bundle path; revision = bundle file stamp"
+		t.Label = fmt.Sprintf("%s (Electron app %s)", name, app.Executable)
+		t.Remember = fmt.Sprintf("%s (bundle %s run by %s), UID %d, this bundle revision", name, app.Executable, runtime, uid)
+		t.SharedWithNote = fmt.Sprintf("Only this application bundle; other applications run by %s are not covered", app.Runtime)
+		return t
+	}
+	if why := RuntimeRuleBlocked(app); why != "" {
+		// A shared runtime whose hosted app is not verified: no application-wide rule.
+		t.Kind = "runtime-unverified"
+		t.KeyBasis = "none: application unverified"
+		t.Label = fmt.Sprintf("%s runtime (application unverified)", name)
+		t.Remember = "Unavailable: " + why
+		t.SharedWithNote = fmt.Sprintf("Every Electron application run by %s shares this executable", app.Executable)
+		return t
+	}
 	if app.Kind == "wine" {
 		short := ShortPrefix(app.Prefix)
 		t.Prefix = app.Prefix

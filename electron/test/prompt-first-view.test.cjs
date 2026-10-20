@@ -25,7 +25,7 @@ const ev = (over = {}) => ({
 
 test('first view: game title, actual owner, local service destination', () => {
   const s = ps.promptSummary(ev(), 'rundll32.exe');
-  assert.deepEqual(s, { title: 'Timberborn', owner: 'rundll32.exe', destination: 'Local printing service (cupsd)', endpoint: '127.0.0.1:631', protocol: 'TCP' });
+  assert.deepEqual(s, { title: 'Timberborn', owner: 'rundll32.exe', note: '', ownIdentity: false, destination: 'Local printing service (cupsd)', endpoint: '127.0.0.1:631', protocol: 'TCP' });
   assert.equal(ps.destinationLine(s, 'outgoing'), 'To Local printing service (cupsd) · 127.0.0.1:631 · TCP');
   // Unverified peer: never a guessed service name.
   const unknown = ps.promptSummary(ev({ local_peer: { state: 'unknown', role: 'server', reason: 'gone' } }), 'x');
@@ -127,4 +127,29 @@ test('Permission card: header, IPv6 endpoints verbatim, program side by directio
   assert.deepEqual([f.application, f.executable, f.process], ['rundll32.exe', '/w/rundll32.exe', 'Process 7']);
   assert.deepEqual([f.local, f.remote], [{ address: '127.0.0.1', port: '40000' }, { address: '127.0.0.1', port: '631' }]);
   assert.equal(ps.connectionFields(ev({ attribution: { ...ev().attribution, application: undefined, owners: [] } })).process, 'Unavailable');
+});
+
+test('Electron runtime: verified app is the title with "socket owner electron"; unverified keeps electron and says so', () => {
+  const runtime = '/usr/lib/electron43/electron';
+  const heroic = { key: 'kh', revision: 'r', name: 'heroic', executable: '/usr/lib/heroic-games-launcher/app.asar', kind: 'electron', runtime,
+    hosted: { state: 'verified', runtime, bundle: '/usr/lib/heroic-games-launcher/app.asar', package_name: 'heroic', chain: [{ pid: 332445, start_ticks: '1198413', type: 'utility' }, { pid: 332402, start_ticks: '1198383', type: 'main' }], reason: 'utility process 332445 → Electron main process 332402' } };
+  const owner = { pid: 332445, start_ticks: '1198413', uid: 1000, executable: runtime, application: heroic };
+  const out = { ...ev({ local_peer: undefined, flow: { direction: 'outgoing', protocol: 'tcp', local: '10.0.0.2:40000', remote: '104.18.1.1:443' } }), attribution: { status: 'directly-associated', reason: '', visibility_complete: true, application: heroic, owners: [owner] } };
+  const s = ps.promptSummary(out, 'x');
+  assert.deepEqual([s.title, s.owner, s.note, s.ownIdentity], ['heroic', 'electron', '', true]);
+  const unv = { key: 'kr', revision: 'r', name: 'electron', executable: runtime, kind: 'native', hosted: { state: 'unverified', runtime, chain: [], reason: 'the parent of utility process 42 is gone' } };
+  const u = { ...out, attribution: { ...out.attribution, application: unv, owners: [{ ...owner, application: unv }] } };
+  const su = ps.promptSummary(u, 'x');
+  assert.deepEqual([su.title, su.owner, su.note], ['electron', '', 'application unverified']);
+  assert.match(ps.rememberLabel({ kind: 'runtime-unverified', label: 'electron runtime (application unverified)' }), /^Unavailable: application unverified/);
+  // Parser keeps the hosted evidence, bounded.
+  const { parseReply } = require('../dist/test/protocol.cjs');
+  const r = parseReply({ version: 1, generation: 'g', read_only: false, server_time: new Date().toISOString(), capabilities: [], events: [{
+    id: 'a1', state: 'awaiting-decision', reason: 'r', deadline: new Date(Date.now() + 9000).toISOString(), first_seen: '', permission: '', rule: '',
+    flow: { direction: 'outgoing', protocol: 'tcp', local: '10.0.0.2:40000', remote: '104.18.1.1:443' },
+    attribution: { status: 'directly-associated', reason: '', visibility_complete: true, application: heroic, owners: [owner] }, scope_previews: { once: 'Once' } }] });
+  const a = r.events[0].attribution.application;
+  assert.equal(a.kind, 'electron');
+  assert.equal(a.runtime, runtime);
+  assert.deepEqual([a.hosted.state, a.hosted.package_name, a.hosted.chain.length, a.hosted.chain[1].type], ['verified', 'heroic', 2, 'main']);
 });

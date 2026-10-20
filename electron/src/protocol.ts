@@ -31,6 +31,23 @@ export interface Application {
   display_name?: string;
   display_executable?: string;
   executable_status?: 'linked' | 'deleted' | 'unavailable';
+  // native | wine | electron (verified app bundle on a shared Electron runtime) | ...
+  kind?: string;
+  // Electron app: the runtime binary that runs the bundle (executable = bundle).
+  runtime?: string;
+  // An application hosted by a shared runtime, with its verification.
+  hosted?: Hosted;
+}
+export interface Hosted {
+  state: 'verified' | 'unverified';
+  runtime: string;
+  bundle?: string;
+  package_name?: string;
+  product_name?: string;
+  version?: string;
+  integrity?: string;
+  chain: { pid: number; start_ticks: string; type: string }[];
+  reason: string;
 }
 // Launch provenance (display only; never a firewall target). See docs/API.md.
 export interface ProvenanceAncestor {
@@ -75,7 +92,7 @@ export interface Provenance {
 }
 // What each decision scope is enforced against today (backend-derived).
 export interface PermissionTarget {
-  kind: 'helper' | 'application' | 'interpreter' | 'unavailable';
+  kind: 'helper' | 'application' | 'interpreter' | 'unavailable' | 'runtime-unverified';
   label: string;
   once: string;
   for_a_while: string;
@@ -504,6 +521,26 @@ function application(v: unknown): Application {
     executable_status: ['linked', 'deleted', 'unavailable'].includes(string(a.executable_status))
       ? (a.executable_status as Application['executable_status'])
       : undefined,
+    kind: string(a.kind).slice(0, 32) || undefined,
+    runtime: string(a.runtime) || undefined,
+    hosted: hosted(a.hosted),
+  };
+}
+function hosted(v: unknown): Hosted | undefined {
+  if (v == null || typeof v !== 'object') return;
+  const h = object(v);
+  if (!['verified', 'unverified'].includes(string(h.state))) return;
+  const chain = Array.isArray(h.chain) ? h.chain.slice(0, 8).map(object) : [];
+  return {
+    state: string(h.state) as Hosted['state'],
+    runtime: string(h.runtime),
+    bundle: string(h.bundle) || undefined,
+    package_name: string(h.package_name).slice(0, 256) || undefined,
+    product_name: string(h.product_name).slice(0, 256) || undefined,
+    version: string(h.version).slice(0, 64) || undefined,
+    integrity: string(h.integrity).slice(0, 256) || undefined,
+    chain: chain.map((c) => ({ pid: Number.isSafeInteger(c.pid) ? (c.pid as number) : 0, start_ticks: string(c.start_ticks).slice(0, 32), type: string(c.type).slice(0, 64) })),
+    reason: string(h.reason).slice(0, 1024),
   };
 }
 function process(v: unknown): Process {

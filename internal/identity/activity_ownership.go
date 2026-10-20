@@ -47,7 +47,7 @@ func activityDisplayApplication(row ActivityRow, processes map[string]ActivityPr
 	var first *ActivityProcess
 	for _, id := range row.Owners {
 		p, ok := processes[id]
-		if !ok || p.Application.Kind != "native" || p.Application.Key == "" || p.Application.Revision == "" {
+		if !ok || !LiveRuleable(p.Application) {
 			return nil
 		}
 		if first != nil && (p.UID != first.UID || p.Application.Key != first.Application.Key || p.Application.Revision != first.Application.Revision) {

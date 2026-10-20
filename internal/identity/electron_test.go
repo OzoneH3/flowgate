@@ -1,0 +1,214 @@
+package identity
+
+import (
+	"bufio"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
+	"testing"
+	"time"
+)
+
+// Fake Electron runtime: this test binary copied as ".../electron". Mode "main"
+// starts a "--type=utility" child of itself and prints its PID; "orphan" does
+// the same and exits, so the child loses its verified parent.
+func TestMain(m *testing.M) {
+	switch os.Getenv("FLOWGATE_FAKE_ELECTRON") {
+	case "main", "orphan":
+		c := exec.Command(os.Args[0], "--type=utility", "--utility-sub-type=network.mojom.NetworkService")
+		c.Env = append(os.Environ(), "FLOWGATE_FAKE_ELECTRON=child")
+		if err := c.Start(); err != nil {
+			os.Exit(3)
+		}
+		fmt.Println(c.Process.Pid)
+		if os.Getenv("FLOWGATE_FAKE_ELECTRON") == "orphan" {
+			os.Exit(0)
+		}
+		time.Sleep(60 * time.Second)
+		os.Exit(0)
+	case "child":
+		time.Sleep(60 * time.Second)
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
+
+// writeAsar writes a minimal Electron archive holding package.json.
+func writeAsar(t *testing.T, path string, pkg string, integrity string) {
+	t.Helper()
+	sum := sha256.Sum256([]byte(pkg))
+	if integrity == "" {
+		integrity = hex.EncodeToString(sum[:])
+	}
+	idx, _ := json.Marshal(map[string]any{"files": map[string]any{
+		"package.json": map[string]any{"size": len(pkg), "offset": "0", "integrity": map[string]any{"algorithm": "SHA256", "hash": integrity}},
+	}})
+	jsonLen := uint32(len(idx))
+	pickle := (jsonLen + 4 + 3) &^ 3 // string length prefix + payload, 4-byte aligned
+	buf := make([]byte, 16, 16+int(pickle))
+	binary.LittleEndian.PutUint32(buf[0:], 4)
+	binary.LittleEndian.PutUint32(buf[4:], pickle+4)
+	binary.LittleEndian.PutUint32(buf[8:], pickle)
+	binary.LittleEndian.PutUint32(buf[12:], jsonLen)
+	buf = append(buf, idx...)
+	for uint32(len(buf)) < 8+pickle+4 {
+		buf = append(buf, 0)
+	}
+	buf = append(buf, pkg...)
+	if err := os.WriteFile(path, buf, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func fakeRuntime(t *testing.T, name string) string {
+	t.Helper()
+	self, _ := os.Executable()
+	dst := filepath.Join(t.TempDir(), name)
+	in, err := os.Open(self)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY, 0o755)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		t.Fatal(err)
+	}
+	out.Close()
+	return dst
+}
+
+// startMain runs the fake runtime as an Electron main process and returns the
+// main and utility child PIDs.
+func startMain(t *testing.T, runtime, mode string, env []string, args ...string) (int, int) {
+	t.Helper()
+	c := exec.Command(runtime, args...)
+	c.Env = append(append(os.Environ(), "FLOWGATE_FAKE_ELECTRON="+mode), env...)
+	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	stdout, _ := c.StdoutPipe()
+	if err := c.Start(); err != nil {
+		t.Fatal(err)
+	}
+	line, err := bufio.NewReader(stdout).ReadString('\n')
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, _ := strconv.Atoi(strings.TrimSpace(line))
+	t.Cleanup(func() { _ = syscall.Kill(-c.Process.Pid, syscall.SIGKILL); _ = c.Wait() })
+	if mode == "orphan" {
+		_ = c.Wait()
+		t.Cleanup(func() { _ = syscall.Kill(child, syscall.SIGKILL) })
+	}
+	// Let exec settle (argv of the child is final once it runs Go code).
+	time.Sleep(150 * time.Millisecond)
+	return c.Process.Pid, child
+}
+
+func TestElectronVerifiedAppIsTheBundleNotTheRuntime(t *testing.T) {
+	runtime := fakeRuntime(t, "electron")
+	bundle := filepath.Join(t.TempDir(), "app.asar")
+	writeAsar(t, bundle, `{"name":"heroic","version":"2.22.4","main":"build/main/main.js"}`, "")
+	mainPID, child := startMain(t, runtime, "main", nil, bundle)
+	p, err := Inspect(child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := p.Application
+	if a.Kind != "electron" || a.Name != "heroic" || a.Executable != bundle || a.Runtime != runtime || a.Key == "" || a.Revision == "" {
+		t.Fatalf("verified Electron app identity: %+v", a)
+	}
+	h := a.Hosted
+	if h == nil || h.State != "verified" || len(h.Chain) != 2 || h.Chain[0].PID != child || h.Chain[0].Type != "utility" || h.Chain[1].PID != mainPID || h.Chain[1].Type != "main" {
+		t.Fatalf("chain: %+v", h)
+	}
+	if !strings.Contains(h.Integrity, "SHA-256 matches") || RuntimeRuleBlocked(&a) != "" || !LiveRuleable(a) {
+		t.Fatalf("verified app must be ruleable: %+v", h)
+	}
+	// The key is the bundle's: another app on the same runtime has another key,
+	// and the runtime identity itself is a third one.
+	other := filepath.Join(t.TempDir(), "app.asar")
+	writeAsar(t, other, `{"name":"other-app"}`, "")
+	_, child2 := startMain(t, runtime, "main", nil, other)
+	p2, err := Inspect(child2)
+	if err != nil || p2.Application.Kind != "electron" || p2.Application.Key == a.Key {
+		t.Fatalf("second app must not share the key: %+v %v", p2.Application, err)
+	}
+	runtimeKey := ApplicationKey(p.UID, Application{Kind: "native", Executable: runtime})
+	if a.Key == runtimeKey || p2.Application.Key == runtimeKey {
+		t.Fatal("an Electron app key must never equal the runtime's key")
+	}
+	target := DescribePermissionTarget(Attribution{Application: &a, Owners: []Process{p}, VisibilityComplete: true})
+	if !strings.Contains(target.Remember, "bundle "+bundle) || !strings.Contains(target.SharedWithNote, "not covered") {
+		t.Fatalf("permission target: %+v", target)
+	}
+}
+
+func TestElectronUnverifiedKeepsRuntimeAndBlocksRules(t *testing.T) {
+	runtime := fakeRuntime(t, "electron43")
+	bundle := filepath.Join(t.TempDir(), "app.asar")
+	writeAsar(t, bundle, `{"name":"heroic"}`, "")
+	bad := filepath.Join(t.TempDir(), "app.asar")
+	writeAsar(t, bad, `{"name":"heroic"}`, strings.Repeat("0", 64))
+	cases := []struct {
+		name, mode, want string
+		env              []string
+		args             []string
+	}{
+		{"no bundle argument", "main", "names no application bundle", nil, []string{"--enable-features=X"}},
+		{"inspector", "main", "started with --inspect", nil, []string{"--inspect=9229", bundle}},
+		{"node mode", "main", "Node mode", []string{"ELECTRON_RUN_AS_NODE=1"}, []string{bundle}},
+		{"integrity mismatch", "main", "does not match the archive's SHA-256", nil, []string{bad}},
+		{"missing bundle", "main", "not found", nil, []string{filepath.Join(t.TempDir(), "gone.asar")}},
+		{"parent gone", "orphan", "the parent of utility process", nil, []string{bundle}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, child := startMain(t, runtime, c.mode, c.env, c.args...)
+			p, err := Inspect(child)
+			if err != nil {
+				t.Fatal(err)
+			}
+			a := p.Application
+			if a.Kind != "native" || a.Executable != runtime || a.Hosted == nil || a.Hosted.State != "unverified" || !strings.Contains(a.Hosted.Reason, c.want) {
+				t.Fatalf("want unverified runtime (%s): %+v hosted %+v", c.want, a, a.Hosted)
+			}
+			if why := RuntimeRuleBlocked(&a); why == "" || LiveRuleable(a) {
+				t.Fatal("an unverified runtime must not bind an application-wide rule")
+			}
+			target := DescribePermissionTarget(Attribution{Application: &a, Owners: []Process{p}, VisibilityComplete: true})
+			if target.Kind != "runtime-unverified" || !strings.HasPrefix(target.Remember, "Unavailable: ") || strings.HasPrefix(target.ForAWhile, "Unavailable") {
+				t.Fatalf("permission target: %+v", target)
+			}
+		})
+	}
+}
+
+func TestNonRuntimeExecutableIsUntouched(t *testing.T) {
+	exe := fakeRuntime(t, "heroic-bundled")
+	bundle := filepath.Join(t.TempDir(), "app.asar")
+	writeAsar(t, bundle, `{"name":"heroic"}`, "")
+	_, child := startMain(t, exe, "main", nil, bundle)
+	p, err := Inspect(child)
+	if err != nil || p.Application.Kind != "native" || p.Application.Hosted != nil || !LiveRuleable(p.Application) {
+		t.Fatalf("an app shipping its own executable keeps its executable identity: %+v %v", p.Application, err)
+	}
+}
+
+func TestElectronRuntimeNames(t *testing.T) {
+	for exe, want := range map[string]bool{"/usr/bin/electron": true, "/usr/lib/electron43/electron": true, "/usr/bin/electron43": true, "/opt/Heroic/heroic": false, "/usr/bin/electronic": false} {
+		if IsElectronRuntime(exe) != want {
+			t.Errorf("%s: want %v", exe, want)
+		}
+	}
+}

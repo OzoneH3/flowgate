@@ -44,6 +44,10 @@ export interface PromptSummary {
   title: string;
   /** The process that actually owns the socket, when it differs from the title. */
   owner: string;
+  /** Unverified association (e.g. an Electron runtime whose app is unverified). */
+  note: string;
+  /** The title is the application's own identity (icon/desktop name may apply). */
+  ownIdentity: boolean;
   /** "Local printing service (cupsd)" or the remote endpoint. */
   destination: string;
   /** "127.0.0.1:631" (omitted when it equals destination). */
@@ -57,9 +61,23 @@ export function promptSummary(e: Ev, fallbackName: string): PromptSummary {
   const service = localServiceName(e);
   // Incoming: the endpoint that connects to us is the remote side.
   const endpoint = e.flow.remote;
+  const app = e.attribution.application;
+  // A verified Electron app: the bundle is the application, the runtime owns the socket.
+  if (!identity.title && app?.kind === 'electron')
+    return {
+      title: own,
+      owner: (app.runtime || app.hosted?.runtime || 'electron').split('/').pop()!,
+      note: '',
+      ownIdentity: true,
+      destination: service || endpoint,
+      endpoint: service ? endpoint : '',
+      protocol: e.flow.protocol.toUpperCase(),
+    };
   return {
     title: identity.title ? gameName(e.attribution.provenance) || identity.title : own,
     owner: identity.title && own !== identity.title ? own : '',
+    note: app?.hosted?.state === 'unverified' ? 'application unverified' : '',
+    ownIdentity: !identity.title,
     destination: service || endpoint,
     endpoint: service ? endpoint : '',
     protocol: e.flow.protocol.toUpperCase(),
@@ -86,6 +104,7 @@ export function destinationLine(s: PromptSummary, direction: string): string {
  */
 export function rememberLabel(t?: PermissionTarget): string {
   if (!t || t.kind === 'unavailable') return 'Unavailable: no verified application identity';
+  if (t.kind === 'runtime-unverified') return 'Unavailable: application unverified (the runtime runs many applications)';
   const name = t.label.replace(/ \(.*\)$/, '').replace(/ in prefix .*$/, '');
   const prefix = t.prefix ? shortPrefix(t.prefix) : '';
   switch (t.kind) {
@@ -154,6 +173,8 @@ export interface ProgramSide {
   name: string;
   /** Socket-owning helper when it differs (e.g. rundll32.exe for a Proton game). */
   owner: string;
+  /** Unverified association, shown beside the name. */
+  note?: string;
 }
 export interface PeerSide {
   kind: 'peer';
@@ -162,7 +183,7 @@ export interface PeerSide {
 }
 /** From/To: the program is From for outgoing and To for incoming. */
 export function fromTo(e: Ev, s: PromptSummary): { from: ProgramSide | PeerSide; to: ProgramSide | PeerSide } {
-  const program: ProgramSide = { kind: 'program', name: s.title, owner: s.owner };
+  const program: ProgramSide = { kind: 'program', name: s.title, owner: s.owner, ...(s.note ? { note: s.note } : {}) };
   const service = localServiceName(e);
   const peer: PeerSide = { kind: 'peer', text: service || splitEndpoint(e.flow.remote).address };
   return e.flow.direction === 'incoming' ? { from: peer, to: program } : { from: program, to: peer };
@@ -173,8 +194,11 @@ export function connectionFields(e: Ev) {
   const owners = e.attribution.owners;
   const app = e.attribution.application;
   const executable = app?.display_executable || app?.executable || owners[0]?.executable || '';
+  // An Electron app's identity is its bundle: name the bundle with its folder
+  // ("heroic-games-launcher/app.asar"), never the shared runtime.
+  const application = app?.kind === 'electron' ? executable.split('/').slice(-2).join('/') : executable.split('/').pop();
   return {
-    application: executable.split('/').pop() || 'Unavailable',
+    application: application || 'Unavailable',
     executable,
     process: owners.length ? 'Process ' + owners.map((o) => o.pid).join(', ') : 'Unavailable',
     local: splitEndpoint(e.flow.local),

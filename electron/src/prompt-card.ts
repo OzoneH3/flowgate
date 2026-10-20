@@ -85,9 +85,9 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
     const heading = o.gameApplication
       ? applicationHeading(o.gameApplication, summary.title, summary.title)
       : applicationHeading(
-          summary.owner
-            ? { key: '', revision: '', name: summary.title, executable: e.attribution.application?.executable || '' }
-            : e.attribution.application,
+          summary.ownIdentity
+            ? e.attribution.application
+            : { key: '', revision: '', name: summary.title, executable: e.attribution.application?.executable || '' },
           summary.title,
         );
     heading.id = 'requestApplication';
@@ -98,8 +98,16 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
       // A Proton game is the launch context; the helper owns the socket.
       const owner = el('span', '', 'request-owner nl-owner', 'requestOwner');
       owner.append(el('span', 'socket owner ', 'nl-owner-label'), el('span', summary.owner, 'nl-owner-name'));
-      owner.title = `${summary.owner} opened this connection; ${summary.title} is the game it was launched for`;
+      owner.title =
+        e.attribution.application?.kind === 'electron'
+          ? `${summary.owner} (Electron runtime) opened this connection for this application; verified through its process chain — see Details`
+          : `${summary.owner} opened this connection; ${summary.title} is the game it was launched for`;
       cell.append(owner);
+    }
+    if (summary.note) {
+      const note = el('span', summary.note, 'request-owner nl-owner nl-unverified', 'requestHostedNote');
+      note.title = e.attribution.application?.hosted?.reason || '';
+      cell.append(note);
     }
     return cell;
   };
@@ -204,6 +212,20 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
     e.attribution.visibility_complete ? 'Complete visibility' : 'Limited; hidden owners or races may remain',
   );
 
+  const hosted = e.attribution.application?.hosted;
+  if (hosted) {
+    // Evidence for the hosted application (Electron runtime → main process → bundle).
+    const l = section(details, 'Electron app', 'hosted').list;
+    row(l, 'State', hosted.state === 'verified' ? 'Verified' : 'Unverified — the rule identity stays the runtime; Remember is unavailable');
+    row(l, 'Runtime', hosted.runtime);
+    if (hosted.bundle) row(l, 'Bundle', hosted.bundle);
+    if (hosted.package_name)
+      row(l, 'Package', [hosted.package_name, hosted.product_name, hosted.version].filter(Boolean).join(' · '));
+    if (hosted.integrity) row(l, 'Integrity', hosted.integrity);
+    if (hosted.chain.length)
+      row(l, 'Chain', hosted.chain.map((c) => `PID ${c.pid} · start ${c.start_ticks} · ${c.type}`).join('\n'));
+    row(l, 'Reason', hosted.reason);
+  }
   const launch = provenanceDetails(e);
   if (launch.length) {
     const l = section(details, 'Launch', 'launch').list;

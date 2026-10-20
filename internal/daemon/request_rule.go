@@ -111,7 +111,7 @@ type requestRulePreview struct {
 
 func (e *Engine) retainRequestLocked(v *Event, a identity.Attribution) {
 	app := a.Application
-	if v.State != "awaiting-decision" || app == nil || app.Key == "" || app.Revision == "" || a.Principal() == nil || v.RememberedFilter == nil {
+	if v.State != "awaiting-decision" || app == nil || app.Key == "" || app.Revision == "" || a.Principal() == nil || v.RememberedFilter == nil || identity.RuntimeRuleBlocked(app) != "" {
 		return
 	}
 	r := &retainedRequest{EventID: v.ID, Application: *app, UID: a.Principal().UID, Filter: *v.RememberedFilter, FirstSeen: v.FirstSeen, Until: v.Deadline.Add(requestRuleRetention)}

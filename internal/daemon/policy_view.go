@@ -342,7 +342,7 @@ func (e *Engine) PolicyView(generation, expected string, uid uint32, admin bool,
 			continue
 		}
 		p, ok := activity.Processes[row.Owners[0]]
-		if !ok || p.Start == "" || p.Application.Kind != "native" || p.Application.Key == "" || p.Application.Revision == "" || (!admin && p.UID != uid) {
+		if !ok || p.Start == "" || !identity.LiveRuleable(p.Application) || (!admin && p.UID != uid) {
 			assoc.Reason = "Supported authorized native process identity unavailable"
 			out.Rows = append(out.Rows, assoc)
 			continue

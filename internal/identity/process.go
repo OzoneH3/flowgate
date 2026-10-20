@@ -32,6 +32,9 @@ type Application struct {
 	Prefix         string   `json:"prefix,omitempty"`
 	SteamAppID     string   `json:"steam_app_id,omitempty"`
 	Evidence       []string `json:"evidence"`
+	// Hosted: the application a shared runtime (system Electron) runs, with
+	// its verification. Verified: Kind "electron", Executable = the bundle.
+	Hosted *Hosted `json:"hosted,omitempty"`
 }
 type Process struct {
 	BootID             string      `json:"boot_id,omitempty"`
@@ -173,11 +176,31 @@ func Inspect(pid int) (Process, error) {
 			a.Evidence = append(a.Evidence, "sandbox executable; host backing path proven by device/inode")
 		}
 	}
+	if a.Kind == "native" && IsElectronRuntime(p.Executable) {
+		// The runtime is not the application: identify the hosted bundle.
+		h := ResolveElectronApp(pid, start)
+		a.Hosted = h
+		if h.State == "verified" {
+			a.Kind = "electron"
+			a.Runtime = h.Runtime
+			a.Executable = h.Bundle
+			a.Revision = h.revision
+			a.HostExecutable = ""
+			a.Name = h.ProductName
+			if a.Name == "" {
+				a.Name = h.PackageName
+			}
+			a.Evidence = []string{"Electron runtime " + h.Runtime, h.Reason, "package.json name " + h.PackageName, "bundle " + h.Integrity}
+		}
+	}
 	if a.Executable != "" && a.Revision != "" {
 		a.Key = ApplicationKey(p.UID, a)
 	}
 	// Display metadata never changes executable/key/revision authority.
 	a.DisplayName, a.DisplayExecutable, a.ExecutableStatus = a.Name, a.Executable, "unavailable"
+	if a.Kind == "electron" {
+		a.ExecutableStatus = "linked"
+	}
 	if a.Kind == "native" {
 		if st, err := os.Stat(base + "/exe"); err == nil {
 			a.ExecutableStatus = "linked"
