@@ -1229,8 +1229,9 @@ button.status-slot.policy-fallback .blocker-glyph { opacity: .5; }
 .status-slot .slot-icon { display: none; width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid #8a8a8a; color: #8a8a8a; font-size: 9px; line-height: 11px; align-items: center; justify-content: center; box-sizing: border-box; font-weight: 700; }
 .status-slot .slot-icon.family-dl-limit,.status-slot .slot-icon.family-ul-limit { border-radius: 3px; }
 .status-slot .slot-icon.family-in-quota,.status-slot .slot-icon.family-out-quota { border: 0; font-size: 15px; line-height: 14px; font-weight: 400; }
-#tree tbody tr:hover .status-slot .slot-icon,#tree tbody tr[aria-selected='true'] .status-slot .slot-icon { display: inline-flex; }
-#tree tbody tr:hover .status-slot .slot-dot,#tree tbody tr[aria-selected='true'] .status-slot .slot-dot { display: none; }
+
+#tree tbody tr:hover .status-slot .slot-icon,#tree tbody tr:focus-within .status-slot .slot-icon { display: inline-flex; }
+#tree tbody tr:hover .status-slot .slot-dot,#tree tbody tr:focus-within .status-slot .slot-dot { display: none; }
 #tree tbody tr:hover .status-strip { background: #272727; border-color: #272727; }
 #tree tbody tr[aria-selected='true'] .slot-icon { border-color: #c6c6c6; color: #c6c6c6; }
 .rule-cell.wide { width: 160px; }
