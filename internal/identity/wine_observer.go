@@ -20,10 +20,11 @@ type WineObserverOptions struct {
 	Scratch     string
 }
 type observedWine struct {
-	broker  Process
-	table   *WineTable
-	failure string
-	scratch string
+	broker     Process
+	table      *WineTable
+	failure    string
+	scratch    string
+	scratchDir *os.File
 }
 type WineObservers struct {
 	mu       sync.Mutex
@@ -75,6 +76,7 @@ func (m *WineObservers) Close() {
 		}
 		if s.scratch != "" {
 			os.RemoveAll(s.scratch)
+			s.scratchDir.Close()
 		}
 	}
 	m.sessions = nil
@@ -139,6 +141,7 @@ func (m *WineObservers) Resolve(f Flow) Attribution {
 			}
 			if s.scratch != "" {
 				os.RemoveAll(s.scratch)
+				s.scratchDir.Close()
 			}
 			delete(m.sessions, k)
 		}
@@ -208,7 +211,8 @@ func (m *WineObservers) Resolve(f Flow) Attribution {
 		}
 		defer namespace.close()
 		if namespace.removeScratch {
-			record.scratch = namespace.scratch
+			record.scratch = namespace.cleanupPath
+			record.scratchDir = namespace.scratchDir
 		}
 		for i, pair := range env {
 			k, _, _ := strings.Cut(pair, "=")

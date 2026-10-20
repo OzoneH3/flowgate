@@ -65,10 +65,10 @@ test('verified helper and launcher rows sit beneath one game node; unrelated pyt
   assert.equal(g.process, undefined, 'a launch node is never a policy target');
   assert.equal(g.displayApplication, undefined);
   assert.deepEqual(
-    g.children.map((c) => c.label).sort(),
+    g.children.flatMap((c) => c.children.map(p => p.label)).sort(),
     ['DS2.exe (game) · PID 1197196', 'python3.14 · umu-run launcher · PID 1194845', 'rundll32.exe (helper) · PID 1195586'],
   );
-  assert.ok(g.children.every((c) => c.kind === 'process' && c.process && c.parent === g.id));
+  assert.ok(g.children.every((c) => c.kind === 'application' && c.process && c.parent === g.id));
   assert.equal(g.rows.length, 3);
   const apps = roots.filter((r) => r.kind === 'application');
   assert.equal(apps.length, 2, 'unrelated python and the reparented helper stay separate');
@@ -194,3 +194,16 @@ test('prompt card: game heading, via hint and explicit scopes precede Allow/Deny
   assert.match(details, /rundll32\.exe owns this socket/);
   assert.match(details, /uid\+wine\+prefix\+executable path/);
 });
+
+ test('live launch applications reconcile stored rules without donating launcher permissions', () => {
+  const {inactiveApplications, allRows} = require('../dist/test/model.cjs');
+  const python = proc('launcher', 100, 'python', '/usr/bin/python', prov('launcher'), 'native');
+  const gameProcess = proc('game', 101, 'Game.exe', game, prov('game'));
+  const roots = hierarchy({processes: {launcher: python, game: gameProcess}, rows: [sock('a','launcher','1.1.1.1:443'),sock('b','game','2.2.2.2:12')]});
+  const rule = {id:'r', executable:'/usr/bin/python', filter:{application:python.application.key,revision:'r',uid:1000}};
+  assert.deepEqual(inactiveApplications([rule], roots), []);
+  const apps=allRows(roots).filter(r=>r.kind==='application');
+  assert.equal(apps.length,2);
+  assert.notEqual(apps[0].process.application.key, apps[1].process.application.key);
+  assert.equal(roots[0].process, undefined);
+ });

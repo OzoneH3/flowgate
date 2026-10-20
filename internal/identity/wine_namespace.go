@@ -17,6 +17,8 @@ type wineNamespace struct {
 	mount, root             *os.File
 	runner, helper, scratch string
 	removeScratch           bool
+	scratchDir              *os.File
+	cleanupPath             string
 	uid, gid                uint32
 }
 
@@ -64,7 +66,8 @@ func prepareWineNamespace(b Process, runner, helper, scratch, runtimeDir string)
 		if !ok {
 			allocated.close()
 			if allocated.removeScratch {
-				os.RemoveAll(allocated.scratch)
+				os.RemoveAll(allocated.cleanupPath)
+				allocated.scratchDir.Close()
 			}
 		}
 	}()
@@ -95,24 +98,34 @@ func prepareWineNamespace(b Process, runner, helper, scratch, runtimeDir string)
 	}
 	n.scratch, err = namespaceFile(b.PID, scratch)
 	if err != nil {
-		// Container-private /run may hide the daemon's scratch directory. Use a
-		// private child of the user's shared, verified XDG runtime directory only.
+		// Proton may provide a private XDG runtime directory. Open it within
+		// the pinned root, verify its ownership/mode, and retain its directory
+		// descriptor for cleanup even after the broker exits or paths change.
 		if runtimeDir == "" || !filepath.IsAbs(runtimeDir) {
-			return nil, fmt.Errorf("no shared private observer scratch or XDG runtime directory")
+			return nil, fmt.Errorf("no private observer scratch or XDG runtime directory")
 		}
-		rs, e := os.Stat(runtimeDir)
-		if e != nil || !rs.IsDir() || rs.Sys().(*syscall.Stat_t).Uid != b.UID || rs.Mode().Perm()&0077 != 0 {
-			return nil, fmt.Errorf("unverified user runtime directory")
-		}
-		if shared, e := namespaceFile(b.PID, runtimeDir); e != nil || shared != runtimeDir {
-			return nil, fmt.Errorf("user runtime directory is not shared at the verified absolute path")
-		}
-		n.scratch, e = os.MkdirTemp(runtimeDir, "flowgate-wine-")
+		root, e := os.OpenRoot(fmt.Sprintf("/proc/self/fd/%d", n.root.Fd()))
 		if e != nil {
 			return nil, e
 		}
-		n.removeScratch = true
-		if e = os.Chown(n.scratch, int(n.uid), int(n.gid)); e != nil {
+		dir, e := root.Open(strings.TrimPrefix(filepath.Clean(runtimeDir), "/"))
+		root.Close()
+		if e != nil {
+			return nil, e
+		}
+		rs, e := dir.Stat()
+		if e != nil || !rs.IsDir() || rs.Sys().(*syscall.Stat_t).Uid != b.UID || rs.Mode().Perm()&0077 != 0 {
+			dir.Close()
+			return nil, fmt.Errorf("unverified container user runtime directory")
+		}
+		cleanup, e := os.MkdirTemp(fmt.Sprintf("/proc/self/fd/%d", dir.Fd()), "flowgate-wine-")
+		if e != nil {
+			dir.Close()
+			return nil, e
+		}
+		n.scratchDir, n.cleanupPath, n.removeScratch = dir, cleanup, true
+		n.scratch = filepath.Join(runtimeDir, filepath.Base(cleanup))
+		if e = os.Chown(cleanup, int(n.uid), int(n.gid)); e != nil {
 			return nil, e
 		}
 	}

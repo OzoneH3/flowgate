@@ -190,12 +190,27 @@ export function hierarchy(activity: Activity, query = '', filter = 'all'): Row[]
         apps.set(key, g);
         roots.push(g);
       }
-      const pk = 'process:' + key + ':' + p.id;
+      // The launch is only a display group. Its children retain the exact
+      // application identity used by rules and inactive-row reconciliation.
+      const appKey = p.application.key
+        ? `${p.application.key}|${p.application.revision}|uid:${p.uid}`
+        : `unresolved:${p.id}`;
+      let app = apps.get(appKey);
+      if (!app) {
+        app = {
+          id: 'app:' + appKey, parent: g.id, kind: 'application',
+          label: p.application.display_name || p.application.name || p.executable,
+          children: [], rows: [], process: p,
+        };
+        apps.set(appKey, app);
+        g.children.push(app);
+      }
+      const pk = 'process:' + appKey + ':' + p.id;
       let pr = procs.get(pk);
       if (!pr) {
         pr = {
           id: pk,
-          parent: g.id,
+          parent: app.id,
           kind: 'process',
           label: launchProcessLabel(p),
           pid: p.pid,
@@ -204,9 +219,10 @@ export function hierarchy(activity: Activity, query = '', filter = 'all'): Row[]
           process: p,
         };
         procs.set(pk, pr);
-        g.children.push(pr);
+        app.children.push(pr);
       }
       g.rows.push(s);
+      app.rows.push(s);
       pr.rows.push(s);
       parent = pr;
     } else if (s.owners.length === 1 && owners.length === 1) {

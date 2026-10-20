@@ -453,3 +453,29 @@ applications absent from Activity's socket census. No socket row is not process
 exit evidence. This presentation change grants no traffic permission.
 
 Namespace-entry reference: [util-linux nsenter implementation](https://github.com/util-linux/util-linux/blob/master/sys-utils/nsenter.c).
+
+### Private Proton runtime directories (2026-10-20 follow-up)
+
+The installed `3f869f3` decision log recorded game-server drops with
+`Wine owner observer: user runtime directory is not shared at the verified absolute path`.
+A live pressure-vessel broker confirmed that `/run/user/1000` inside its mount
+namespace was a different filesystem object from the host runtime directory.
+The observer now opens the user-owned, private runtime directory through the
+pinned broker root, creates a private child there, and retains its directory FD
+for cleanup. The host and container directories need not be shared. Executable,
+broker generation, prefix, Windows owner, socket cookie and ambiguity checks
+remain unchanged.
+
+The private-runtime receiver fixture uses different runtime-directory mounts,
+helper aliases and fsync/esync. Allow/Remember deliver real payloads; Deny,
+other executables/prefixes, ambiguous owners and exited generations remain
+separate. Handle/tuple reuse requires fresh evidence. Evidence is preserved in
+`.workspace/poe-private-runtime/result.json` and `.workspace/poe-private-runtime.log`.
+This is isolated receiver evidence; the real game must still be retried after
+installing the matched candidate.
+
+Activity launch groups are presentation containers. They open initially to
+show application children with stable key/revision/UID identities. Rules on a
+Python launcher remain Python rules; they are not a Windows game's permission.
+Live application children now participate in inactive-rule reconciliation, so
+launch grouping cannot itself duplicate a live application as an inactive row.

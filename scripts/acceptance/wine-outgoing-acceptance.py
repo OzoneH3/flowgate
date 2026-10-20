@@ -4,12 +4,12 @@ Uses the production on-demand observer manager; never touches a game prefix.
 """
 import argparse,json,os,pathlib,socket,subprocess,threading,time,signal
 ROOT=pathlib.Path(__file__).resolve().parents[2]
-p=argparse.ArgumentParser();p.add_argument('--binary',required=True);p.add_argument('--run',required=True);p.add_argument('--runtime-bin',required=True);p.add_argument('--prefix-source',required=True);p.add_argument('--mount-namespaces',action='store_true');p.add_argument('--helper-alias',action='store_true');p.add_argument('--sync',action='store_true');a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--binary',required=True);p.add_argument('--run',required=True);p.add_argument('--runtime-bin',required=True);p.add_argument('--prefix-source',required=True);p.add_argument('--mount-namespaces',action='store_true');p.add_argument('--helper-alias',action='store_true');p.add_argument('--sync',action='store_true');p.add_argument('--private-runtime',action='store_true');a=p.parse_args()
 if a.helper_alias:a.mount_namespaces=True
 assert os.environ['FLOWGATE_PARENT_NETNS']!=os.readlink('/proc/self/ns/net')
 RUN=pathlib.Path(a.run).resolve();assert RUN.is_relative_to(ROOT/'.workspace');RUN.mkdir(mode=0o700,parents=True)
 source=pathlib.Path(a.prefix_source).resolve();assert source.is_relative_to(ROOT/'.workspace')
-for d in ['tmp','scratch','runtime','hidden-scratch']:(RUN/d).mkdir(mode=0o700)
+for d in ['tmp','scratch','runtime','hidden-scratch','private-runtime']:(RUN/d).mkdir(mode=0o700)
 prefixes=[RUN/'prefix-a',RUN/'prefix-b']
 for f in prefixes:subprocess.run(['cp','-a','--reflink=auto',str(source),str(f)],check=True)
 rt=pathlib.Path(a.runtime_bin).resolve();runner=str(rt/'wine');API=str(RUN/'control.sock');children=[];receivers=[];evidence=[]
@@ -24,7 +24,7 @@ if a.helper_alias:
 if a.mount_namespaces:
  for prefix in prefixes:
   anchorargs=['sleep','180']
-  if a.helper_alias:anchorargs=['sh','-c','mount --bind "$1" "$2"; mount --bind "$3" "$1"; mount --bind "$4" "$5"; exec sleep 180','sh',str(ROOT/'.workspace/windows/table-probe.exe'),str(RUN/'observer-alias.exe'),str(RUN/'decoy.exe'),str(RUN/'hidden-scratch'),str(RUN/'scratch')]
+  if a.helper_alias:anchorargs=['sh','-c','mount --bind "$1" "$2"; mount --bind "$3" "$1"; mount --bind "$4" "$5"; mount --bind "$6" "$7"; exec sleep 180','sh',str(ROOT/'.workspace/windows/table-probe.exe'),str(RUN/'observer-alias.exe'),str(RUN/'decoy.exe'),str(RUN/'hidden-scratch'),str(RUN/'scratch'),str(RUN/('private-runtime' if a.private_runtime else 'runtime')),str(RUN/'runtime')]
   anchor=subprocess.Popen(['unshare','--mount','--propagation','private']+anchorargs);anchors.append(anchor);children.append(anchor)
   until=time.monotonic()+3
   while os.readlink('/proc/'+str(anchor.pid)+'/ns/mnt')==os.readlink('/proc/self/ns/mnt'):

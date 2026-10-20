@@ -393,6 +393,7 @@ let visible: { row: Row; depth: number }[] = [];
 let sort = 'name',
   descending = false;
 const expanded = new Set<string>(['overview']);
+const seenLaunchGroups = new Set<string>();
 const localSubmitted = new Set<string>();
 let ruleSignature = '';
 let lastGeneration = '';
@@ -582,7 +583,7 @@ function statusStrip(r: Row) {
       title = `${slot.label}: connections carry no rules; see the holder process.`;
     } else if (r.kind === 'launch') {
       chip = { glyph: '', text: '', tone: 'none', detail: '' };
-      title = `${slot.label}: launch group (display only); rules apply to each process below.`;
+      title = `${slot.label}: launch group (display only); expand to edit each application below.`;
     } else if (r.applicationZone) {
       const rules=status.available?status[direction]:[];
       const own=zoneConfigured(rules,status.now);
@@ -1317,6 +1318,14 @@ const renderedRows = new Map<
 >();
 let treePolicyRevision = 0;
 function renderTree() {
+  const launches = allRows(roots).filter(r => r.kind === 'launch');
+  const launchIds = new Set(launches.map(r => r.id));
+  for (const id of seenLaunchGroups) if (!launchIds.has(id)) seenLaunchGroups.delete(id);
+  for (const r of launches) if (!seenLaunchGroups.has(r.id)) {
+    seenLaunchGroups.add(r.id);
+    expanded.add(r.id);
+  }
+
   for (const th of document.querySelectorAll<HTMLElement>('#headers th')) {
     const key = th.className.replace('col-', '');
     const actual =
@@ -1689,7 +1698,7 @@ function renderInfo() {
         `${prov.launch.kind} · ${prov.launch.launcher_name} PID ${prov.launch.launcher_pid}${prov.launch.runtime ? ' · ' + prov.launch.runtime : ''}`,
       );
     if (prov?.launch?.prefix) field(info, 'Prefix', prov.launch.prefix);
-    field(info, 'Processes', r.children.map((c) => c.label).join('\n'));
+    field(info, 'Applications', r.children.map((c) => c.label).join('\n'));
     field(
       info,
       'Observation only',
