@@ -54,6 +54,7 @@ try:
  log('PASS broker-only Linux FD; Windows handle owner+SYN_SENT exact tuple identified before completion; Allow payload reached receiver')
  once(start('connect-beta.exe'),'block');log('PASS independent second executable Deny: receiver empty')
  c=start();e=pending(c);s=call();q=dict(generation=s['generation'],id=e['id'],action='allow',scope='persistent',network_zone='any',zone_revision=s['network_zones']['revision'],remember=dict(address=False,port=False,protocol=False,process=False),duration_seconds=0)
+ assert not e['request_rule']['process_lease_available'],e
  pv=call('decision-preview',**q);assert not pv.get('error'),pv
  saved=call('decide',**q,preview_token=pv['decision_preview']['token']);assert not saved.get('error'),saved
  wait(lambda:c['received']);rule=saved['saved_rule'];assert rule['filter']['remote_address']=='*' and not rule['filter'].get('local_port')

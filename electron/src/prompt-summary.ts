@@ -64,6 +64,14 @@ export function promptSummary(e: Ev, fallbackName: string): PromptSummary {
   // Incoming: the endpoint that connects to us is the remote side.
   const endpoint = e.flow.remote;
   const app = e.attribution.application;
+  // The runtime table identifies this PE itself, independently of launch
+  // ancestry. Do not replace its verified target with a launcher's game label.
+  if (e.attribution.runtime_table && app?.kind === 'wine')
+    return {
+      title: own, owner: '', note: '', ownIdentity: false,
+      launchedBy: launchedByName(e), destination: service || endpoint,
+      endpoint: service ? endpoint : '', protocol: e.flow.protocol.toUpperCase(),
+    };
   // A verified Electron app: the bundle is the application, the runtime owns the socket.
   if (!identity.title && app?.kind === 'electron')
     return {

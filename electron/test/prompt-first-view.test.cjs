@@ -199,3 +199,13 @@ test('ended request whose sandboxed program exited: classified, explained, no fu
   const src = fs.readFileSync(path.join(__dirname, '../src/backend.ts'), 'utf8');
   assert.match(src, /operation: 'request-rule-preview', \.\.\.c \}\);\n\s*\/\/[^\n]*\n\s*if \(r\.error\) throw Error\(\(r\.error_code \? r\.error_code \+ ': ' : ''\) \+ r\.error\);/);
 });
+
+test('verified Wine table target keeps its own name and broker suffix over launch context', () => {
+ const e = ev();
+ e.attribution.runtime_table = { broker_pid: 7 };
+ e.attribution.application = { kind: 'wine', name: 'alpha.exe', display_name: 'Alpha · via wineserver', executable: '/g/alpha.exe' };
+ const s = ps.promptSummary(e, 'fallback');
+ assert.equal(s.title, 'Alpha · via wineserver');
+ assert.equal(s.owner, '');
+ assert.equal(s.ownIdentity, false);
+});

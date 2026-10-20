@@ -334,3 +334,76 @@ umu-run/pv-adverb/proton scripts in `scripts/provenance-sim`, real receivers);
 .workspace/RUN --prefix-source .workspace/wine-prefix --pe
 .workspace/windows/alpha.exe` (real Wine processes, simulated launcher chain).
 Real UMU/Proton/pressure-vessel launches were not executed.
+
+## 2026-10-20: outgoing broker-held TCP sockets
+
+The production observer is opt-in. `serve --wine-helper HELPER` accepts repeated
+`--wine-runtime-bin BIN` and `--wine-prefix PREFIX` selections. The shipped launch
+adapter reads a root-owned, non-group/world-writable `/etc/flowgate/wine.json`:
+
+```json
+{"schema":1,"runtime_bins":["/absolute/runtime/files/bin"],"prefixes":["/absolute/existing/prefix"]}
+```
+
+This config authorizes observation, not network access. No prefix is added by
+inference from a launcher name. The PE observer joins an already running selected
+wineserver as its desktop UID, with a sanitized environment and private scratch
+paths. It cannot start a replacement wineserver. It uses public owner-table APIs;
+there is no injection, game modification, socket operation or permission change.
+
+Protocol 2 uses `GetExtendedTcpTable(TCP_TABLE_OWNER_PID_ALL)` for exact local and
+remote endpoints, including SYN_SENT. Wine 11.0's
+[server socket implementation](https://github.com/wine-mirror/wine/blob/wine-11.0/server/sock.c)
+publishes endpoints before connect completion and enumerates socket handles by
+Windows process. Thus a held connection can be attributed before Allow, even
+when only wineserver has a Unix FD. An empty initial census receives at most two
+20 ms publication retries; it never waits for an FD that needs a successful
+connection. Two family-specific censuses bookend a complete kernel socket-cookie
+and FD census. Windows PID, creation time, image, matching mapped PE revision,
+canonical prefix, UID, broker generation and reciprocal broker-client Unix peer
+channels must agree. Revalidation repeats this evidence before deciding.
+
+The result identifies the sole observed Windows **handle holder**, not an
+original creator or an otherwise unobserved Windows connect requester. A broker
+connect syscall alone is never sufficient. A broker duplicate FD is compatible
+with an established exact client association. Additional distinct Windows handle
+holders are ambiguous even if they never materialize Unix FDs. Missing visibility,
+changed cookie, generation loss, image change and ambiguous tables fail closed.
+The snapshot model does not claim protection against malicious same-user Wine
+runtime tampering or a transfer entirely between observations.
+
+Permission keys remain UID + Wine kind + canonical prefix + verified PE path,
+with a file-stamp revision. Python launchers, other PE paths and other prefixes
+remain independent. The prompt uses the verified PE name with “via wineserver”;
+Details and the Decision Log retain Windows owner/generation and broker/cookie
+proof. A verified matching launch title may improve display only. Remember can
+retain the PE file and its digest using the broker solely as a mount-namespace
+witness. It never binds a game process lease to the broker PID: For a while is
+unavailable without a verified Linux requester generation.
+
+Pinned runtime builds:
+
+| Runtime | wineserver SHA-256 | Evidence |
+| --- | --- | --- |
+| DWProton 11.0-4 | `3f84ad1bc5116a82ec54ee15588f000dbc5d570c9c77c6007d82545d375fd792` | outgoing real receiver matrix |
+| Wine 11.20 | `c9a0c615ddd8ba168b9fdf5efaaa4769cb2369782c766b579157ed0a5520977e` | outgoing real receiver matrix |
+
+The earlier Wine 11.19 pin and its incoming evidence remain unchanged. A new
+binary/version needs explicit source/behavior review and receiver acceptance;
+version strings alone do not authorize observation. The new helper is x86-64.
+Outgoing UDP, scoped link-local IPv6, foreign mount/network namespaces and unknown
+broker builds are not supported by this production path. A stopped/lost observer
+requires an explicit restart rather than silent reattachment. Steam, Heroic and
+umu are not permission selectors: the mechanism applies wherever their launch
+uses a selected supported broker, explicit prefix and compatible namespace.
+Pressure-vessel configurations with a foreign namespace are currently refused.
+
+Reproduce the outgoing matrix with `scripts/wine-outgoing-acceptance.py` inside
+`scripts/lab.sh`, pointing at a copied initialized prefix under `.workspace`.
+Two distinct PE paths and two prefixes verify Allow/receiver payload, Deny/empty
+receiver, persistent Remember/subsequent instance, independent executable and
+prefix, broker+client FD transfer, dormant inherited Windows handle ambiguity,
+client/broker exit, and exact numeric handle plus TCP tuple reuse with a new
+cookie. Production and fixtures use the same on-demand observer manager.
+Successful fixture delivery is not a claim that Path of Exile has been retested;
+that requires a separately authorized bounded host retry with the user.
