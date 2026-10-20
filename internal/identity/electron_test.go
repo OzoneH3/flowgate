@@ -303,3 +303,11 @@ func TestVerifiedElectronProcessInstanceBinds(t *testing.T) {
 		t.Fatal("unverified runtime must not bind a process instance")
 	}
 }
+
+// Large single-file CLIs (codex ~290 MB, claude ~240 MB) run sandboxed in their
+// own mount namespace; their identity must stay re-verifiable after exit.
+func TestDigestCapCoversLargeCLIs(t *testing.T) {
+	if MaxExecutableDigestBytes < 512<<20 || digestBudgetBytes < 2*MaxExecutableDigestBytes {
+		t.Fatalf("digest cap %d / budget %d too small for large CLIs", MaxExecutableDigestBytes, digestBudgetBytes)
+	}
+}

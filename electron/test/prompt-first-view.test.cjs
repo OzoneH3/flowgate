@@ -189,3 +189,13 @@ test('Remember never leaves Allow/Deny disabled without a reason; stale reviews 
   assert.match(src, /if \(!fresh && performance\.now\(\) - autoReviewAt > 2000\)/);
   assert.ok(!src.includes("(reviewMessage ? '' : 'Rule review required.')"), 'no generic "review required" fallback');
 });
+
+test('ended request whose sandboxed program exited: classified, explained, no futile review', () => {
+  const rr = require('../dist/test/request-rule.cjs');
+  const msg = 'identity_unverifiable: No reusable application identity: The process ran in another mount namespace and exited; the executable content digest was not retained (too-large)';
+  assert.equal(rr.identityUnverifiable(msg), true, 'backend code kept on the message');
+  assert.match(pd.shortError(msg), /^No rule can be saved from this ended request/);
+  assert.match(rr.IDENTITY_UNVERIFIABLE_TEXT, /Choose Remember while its next request is still open/);
+  const src = fs.readFileSync(path.join(__dirname, '../src/backend.ts'), 'utf8');
+  assert.match(src, /operation: 'request-rule-preview', \.\.\.c \}\);\n\s*\/\/[^\n]*\n\s*if \(r\.error\) throw Error\(\(r\.error_code \? r\.error_code \+ ': ' : ''\) \+ r\.error\);/);
+});

@@ -35,12 +35,14 @@ import (
 
 const (
 	// MaxExecutableDigestBytes caps the content digest of one executable.
-	MaxExecutableDigestBytes = 256 << 20
+	// Large single-file CLIs (codex ~290 MB, claude ~240 MB) must stay
+	// re-verifiable after a sandboxed process exits; digests are cached per stamp.
+	MaxExecutableDigestBytes = 1 << 30
 	// maxRetainedExecutableRefs bounds open executable references (fds held
 	// only until the digest of that file is known).
 	maxRetainedExecutableRefs = 64
 	// digestBudgetBytes bounds digest work per minute (cache hits are free).
-	digestBudgetBytes = 1 << 30
+	digestBudgetBytes = 2 << 30
 	maxDigestCache    = 256
 	maxHostPathCache  = 512
 )

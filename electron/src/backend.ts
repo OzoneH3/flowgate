@@ -674,7 +674,8 @@ export class Backend {
       else if (v.phase === 'reviewed' && requestRuleKey(v.choice) === key) return v.preview;
     }
     const r = await call(this.controller!, { operation: 'request-rule-preview', ...c });
-    if (r.error) throw Error(r.error);
+    // Keep the backend's code (e.g. identity_unverifiable) so the card can classify it.
+    if (r.error) throw Error((r.error_code ? r.error_code + ': ' : '') + r.error);
     if (r.generation !== c.generation) throw Error('Daemon generation changed');
     const preview = parseRequestRulePreview(r.request_rule_preview, c);
     if (this.requestRules.size >= 64) this.requestRules.delete(this.requestRules.keys().next().value!);
@@ -702,7 +703,7 @@ export class Backend {
       }
       if (r.error) {
         held.phase = 'reviewed';
-        throw Error(r.error);
+        throw Error((r.error_code ? r.error_code + ': ' : '') + r.error);
       }
       const rule = r.saved_rule;
       if (!rule || rule.id !== held.preview.rule.id || rule.version !== held.preview.rule.version) {

@@ -2417,7 +2417,9 @@ function updateDecisions() {
         (pinned ? pinned.action !== id : !endedFlow.fresh(ruleChoice(e!, id), now));
       b.title = !remembering
         ? ENDED_NEEDS_REMEMBER
-        : `${id === 'allow' ? 'Allow' : 'Deny'}: save a rule for future connections; this request stays ended`;
+        : unverifiable
+          ? IDENTITY_UNVERIFIABLE_TEXT
+          : `${id === 'allow' ? 'Allow' : 'Deny'}: save a rule for future connections; this request stays ended`;
       continue;
     }
     b.disabled =

@@ -173,6 +173,8 @@ export function shortError(message: string) {
       return ENDED_PROCESS_EXITED;
     case 'request_decided':
       return 'This request was already decided.';
+    case 'identity_unverifiable':
+      return 'No rule can be saved from this ended request: the sandboxed program exited and FlowGate can no longer verify its file. Choose Remember while its next request is still open.';
   }
   return message.length > 140 ? message.slice(0, 137) + '…' : message;
 }

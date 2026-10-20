@@ -100,6 +100,7 @@ export const requestRuleKey = (c: RequestRuleChoice) =>
 // exited and its executable has no host-visible backing file, so no reusable
 // identity exists. Permanent for that request: shown once, never re-reviewed.
 export const IDENTITY_UNVERIFIABLE_CODE = 'identity_unverifiable';
-export const IDENTITY_UNVERIFIABLE_TEXT = 'This sandboxed app exited before FlowGate retained a reusable identity.';
+export const IDENTITY_UNVERIFIABLE_TEXT =
+  'No rule can be saved from this ended request: the sandboxed program exited and FlowGate can no longer verify its file. Choose Remember while its next request is still open.';
 export const identityUnverifiable = (message: string) =>
   message.startsWith(IDENTITY_UNVERIFIABLE_CODE + ': ') || message.includes('Backend rejected: ' + IDENTITY_UNVERIFIABLE_CODE + ': ');
