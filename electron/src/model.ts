@@ -185,7 +185,7 @@ export function hierarchy(activity: Activity, query = '', filter = 'all'): Row[]
       s.owners.length === 1 &&
       owners.length === 1 &&
       verifiedLaunch(owners[0].provenance) &&
-      !(owners[0].application.key && owners[0].application.revision && (owners[0].provenance?.role === 'game' || owners[0].provenance?.role === 'launcher'))
+      !(owners[0].application.key && owners[0].application.revision)
     ) {
       // Verified launch: the helper/launcher/game process sits beneath its game node.
       const p = owners[0],

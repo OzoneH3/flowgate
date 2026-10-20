@@ -73,6 +73,9 @@ class Host:
     def install(self, backend):
         subprocess.run(['sudo', '-n', sys.executable, str(backend / 'install-monitoring.py'), '--bundle', str(backend)], check=True)
 
+    def configure_wine(self, root):
+        subprocess.run(['sudo', '-n', sys.executable, str(root / 'scripts/lib/configure_wine_discovery.py')], check=True)
+
     def action(self, backend, selected):
         # Existing typed client binds mutations to fresh generation/protection ID.
         subprocess.run([sys.executable, str(backend / 'control.py'), 'stop' if selected == 'monitoring' else selected], check=True)
@@ -147,7 +150,7 @@ def transition(host, backend, selected):
     raise RuntimeError('Protection did not reach ' + selected + '; inspect flowgate-control status. No action was replayed.')
 
 
-def update(host, root, revision, *, dry=False, gui=True, profile="both"):
+def update(host, root, revision, *, dry=False, gui=True, profile="both", wine_discovery=False):
     bundle = root / '.workspace/automatic-zone-releases' / revision
     backend = root / '.workspace/daily-releases' / revision
     manifest = None
@@ -162,13 +165,13 @@ def update(host, root, revision, *, dry=False, gui=True, profile="both"):
         before = None
     previous = mode(before) if before else 'monitoring'
     selected = previous if profile == "preserve" else profile
-    needs_install = before is None or (not matches(before, manifest) if manifest else before.get('build', {}).get('source') != revision)
+    needs_install = wine_discovery or before is None or (not matches(before, manifest) if manifest else before.get('build', {}).get('source') != revision)
     if dry:
         if needs_install:
             say('Would authenticate sudo, stop protection, install and verify ' + revision)
         else:
             say('Matching daemon already running; no daemon restart needed')
-        say('Would preserve existing Wine configuration and stored rules; final protection mode: ' + selected)
+        say(('Would enable generic Wine discovery; stored rules unchanged; final protection mode: ' if wine_discovery else 'Would preserve existing Wine configuration and stored rules; final protection mode: ') + selected)
         if gui:
             say('Would close the old released GUI and launch ' + str(bundle / 'launch-ui'))
         return
@@ -185,6 +188,8 @@ def update(host, root, revision, *, dry=False, gui=True, profile="both"):
                     say('Stopping protection for the update; will restore ' + selected)
                     stopped_for_update = True
                     transition(host, backend, 'monitoring')
+            if wine_discovery:
+                host.configure_wine(root)
             host.install(backend)
             after = host.status()
             if not matches(after, manifest) or not at_mode(after, 'monitoring'):
@@ -215,9 +220,10 @@ if __name__ == '__main__':
     parser.add_argument('--revision', required=True)
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('--no-gui', action='store_true')
+    parser.add_argument('--wine-discovery', action='store_true')
     parser.add_argument('--profile', choices=('preserve', 'monitoring', 'incoming', 'both'), default='both')
     args = parser.parse_args()
     try:
-        update(Host(), args.root.resolve(), args.revision, dry=args.dry_run, gui=not args.no_gui, profile=args.profile)
+        update(Host(), args.root.resolve(), args.revision, dry=args.dry_run, gui=not args.no_gui, profile=args.profile, wine_discovery=args.wine_discovery)
     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
         sys.exit('Update failed: ' + str(error))

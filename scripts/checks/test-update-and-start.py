@@ -52,6 +52,9 @@ class FakeHost:
         if self.install_error:
             raise subprocess.CalledProcessError(1, 'install')
         self.current = status('new', 'monitoring')
+    def configure_wine(self, root):
+        assert m.at_mode(self.current, 'monitoring')
+        self.calls.append('wine-discovery')
     def sleep(self):
         pass
     def switch_gui(self, root, bundle):
@@ -128,6 +131,14 @@ class Update(unittest.TestCase):
         self.run_update(h, profile='preserve')
         self.assertTrue(m.at_mode(h.current, 'incoming'))
         self.assertNotIn('both', h.calls)
+    def test_discovery_is_explicit_and_restarts_even_matching_release(self):
+        h = FakeHost(status(source='new'))
+        self.run_update(h, profile='preserve', wine_discovery=True)
+        self.assertEqual([c for c in h.calls if c != 'status'], ['authenticate', 'monitoring', 'wine-discovery', 'install', 'both', 'gui'])
+    def test_discovery_dry_run_does_not_change_config(self):
+        h = FakeHost()
+        self.run_update(h, dry=True, wine_discovery=True)
+        self.assertEqual(h.calls, ['status'])
     def test_dry_run_is_read_only(self):
         h = FakeHost()
         self.run_update(h, dry=True)

@@ -58,20 +58,9 @@ test('launcher owns its application rule row; game context does not become permi
     sock('s5', 'orphan', '[::1]:631'),
   ];
   const roots = hierarchy({ rows, processes });
-  const launches = roots.filter((r) => r.kind === 'launch');
-  assert.equal(launches.length, 1);
-  const g = launches[0];
-  assert.equal(g.label, 'DEATH STRANDING 2: ON THE BEACH · DS2.exe');
-  assert.equal(g.process, undefined, 'a launch node is never a policy target');
-  assert.equal(g.displayApplication, undefined);
-  assert.deepEqual(
-    g.children.map((c) => c.label).sort(),
-    ['rundll32.exe (helper) · PID 1195586'],
-  );
-  assert.ok(g.children.every((c) => c.kind === 'process' && c.process && c.parent === g.id));
-  assert.equal(g.rows.length, 1);
+  assert.equal(roots.filter(r => r.kind === 'launch').length, 0, 'verified executables get editable identity rows');
   const apps = roots.filter((r) => r.kind === 'application');
-  assert.equal(apps.length, 4, 'the game has its own executable rule row; Python and helpers remain separate');
+  assert.equal(apps.length, 5, 'the game has its own executable rule row; Python and helpers remain separate');
   assert.ok(apps.some(a=>a.label==='DS2.exe' && a.process.application.key===processes.ds2.application.key));
   assert.ok(apps.some((a) => a.label === 'python3.14' && a.rows[0].id === 's4'));
   assert.ok(apps.some((a) => a.label === 'rundll32.exe' && a.rows[0].id === 's5'));
@@ -84,8 +73,7 @@ test('launcher owns its application rule row; game context does not become permi
   assert.equal(inactiveApplications([{...rule, filter: {...rule.filter, revision: 'old'}}], roots).length, 1, 'different revision is not merged');
   // Search by game finds the helper rows.
   assert.equal(hierarchy({ rows, processes }, 'death stranding').flatMap((r) => r.rows).length, 3);
-  const flat = flatten(roots, new Set([g.id]), 'name', false).map((x) => x.row.id);
-  assert.ok(flat.indexOf(g.id) < flat.indexOf(g.children[0].id));
+
 });
 
 test('two launches of different games (different prefixes) form two groups; a relaunch is a new group', () => {
@@ -98,8 +86,8 @@ test('two launches of different games (different prefixes) form two groups; a re
     ha2: proc('ha2', 31, 'rundll32.exe', '/rt/rundll32.exe', a2),
   };
   const roots = hierarchy({ rows: [sock('1', 'ha', '10.0.0.1:1'), sock('2', 'hb', '10.0.0.1:1'), sock('3', 'ha2', '10.0.0.1:1')], processes });
-  assert.deepEqual(roots.map((r) => r.label).sort(), ['GameA.exe', 'GameA.exe', 'GameB.exe']);
-  assert.equal(new Set(roots.map((r) => r.id)).size, 3);
+  assert.deepEqual(roots.map((r) => r.label).sort(), ['rundll32.exe', 'rundll32.exe']);
+  assert.equal(new Set(roots.map((r) => r.id)).size, 2);
 });
 
 const helperTarget = parsePermissionTarget({

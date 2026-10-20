@@ -1,3 +1,4 @@
+import { peIconToPng } from './icon-pe';
 import { icoToPng } from './icon-ico';
 import { desktopGameExecutable } from './desktop-game';
 import { gameIconApplication } from './provenance';
@@ -130,7 +131,7 @@ export class ApplicationIcons {
         try {
           const entry = desktopEntry((await read(path.join(dir, 'applications', file))).toString());
           if (entry.Type !== 'Application' || entry.Hidden === 'true' || !entry.Icon) continue;
-          const token = desktopGameExecutable(entry.Exec || '') || execToken(entry.Exec || '');
+          const token = desktopGameExecutable((entry.Exec || '').replace(/\\\\/g, '\\')) || execToken(entry.Exec || '');
           if (!token) continue;
           const executable = await this.executable(token);
           if (!executable) continue;
@@ -240,7 +241,7 @@ export class ApplicationIcons {
     let candidates = this.entries.get(actual);
     if (candidates?.size !== 1) {
       const game = await this.steamGame(actual);
-      if (!game) return null;
+      if (!game) return this.embeddedIcon(actual);
       candidates = new Set(['steam_icon_' + game.appid]);
     }
     const name = [...candidates][0];
@@ -282,7 +283,21 @@ export class ApplicationIcons {
         this.images.set(id, { data, type: ext === '.png' ? 'image/png' : 'image/svg+xml' });
         return 'flowgate://app/icons/' + id;
       } catch {}
-    return null;
+    return this.embeddedIcon(actual);
+  }
+  private async embeddedIcon(executable: string) {
+    if (!/\.exe$/i.test(executable)) return null;
+    try {
+      const data = peIconToPng(await read(executable, 64 * 1024 * 1024));
+      if (!data || !safeIcon(data, '.png')) return null;
+      const id = createHash('sha256').update(data).digest('hex') + '.png';
+      if (!this.images.has(id)) {
+        if (this.images.size >= 256 || this.imageBytes + data.length > 16 * 1024 * 1024) return null;
+        this.imageBytes += data.length;
+      }
+      this.images.set(id, {data, type: 'image/png'});
+      return 'flowgate://app/icons/' + id;
+    } catch { return null; }
   }
   // A verified Electron app (executable = its bundle) gets the desktop entry
   // whose launcher script names exactly that bundle (e.g. /usr/bin/heroic runs
@@ -344,7 +359,7 @@ export class ApplicationIcons {
     const icons = await this.request(value);
     const result: Record<
       string,
-      { icon: string | null; name?: string; source: 'desktop-metadata' | 'steam-manifest' | 'unavailable' }
+      { icon: string | null; name?: string; source: 'desktop-metadata' | 'steam-manifest' | 'executable-resource' | 'unavailable' }
     > = Object.create(null);
     for (const [key, icon] of Object.entries(icons)) {
       const app = this.allowed.get(key);
@@ -364,7 +379,7 @@ export class ApplicationIcons {
       result[key] = {
         icon,
         name: names?.size === 1 ? [...names][0] : game?.name,
-        source: desktop ? 'desktop-metadata' : game ? 'steam-manifest' : icon ? 'desktop-metadata' : 'unavailable',
+        source: desktop ? 'desktop-metadata' : game ? 'steam-manifest' : icon ? 'executable-resource' : 'unavailable',
       };
     }
     return result;

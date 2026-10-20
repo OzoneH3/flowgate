@@ -32,11 +32,14 @@ if wine_config.exists():
  if st.st_uid!=0 or st.st_mode&0o022:raise SystemExit('Wine observer configuration must be root-owned and non-writable')
  if st.st_size>65536:raise SystemExit('Wine observer configuration exceeds limit')
  wc=json.loads(wine_config.read_text())
- if wc.get('schema')!=1 or not isinstance(wc.get('runtime_bins'),list) or not 1<=len(wc['runtime_bins'])<=4 or not isinstance(wc.get('prefixes'),list) or not 1<=len(wc['prefixes'])<=32:raise SystemExit('Invalid Wine observer configuration')
- for key,flag in [('runtime_bins','--wine-runtime-bin'),('prefixes','--wine-prefix')]:
-  for value in wc[key]:
-   if not isinstance(value,str) or not pathlib.Path(value).is_absolute():raise SystemExit('Absolute Wine observer paths required')
-   args.extend([flag,value])
+ if wc == {'schema': 1, 'mode': 'discover'}:
+  pass # No path restrictions: supported-build discovery for the configured UID.
+ else:
+  if wc.get('schema')!=1 or not isinstance(wc.get('runtime_bins'),list) or not 1<=len(wc['runtime_bins'])<=4 or not isinstance(wc.get('prefixes'),list) or not 1<=len(wc['prefixes'])<=32:raise SystemExit('Invalid Wine observer configuration')
+  for key,flag in [('runtime_bins','--wine-runtime-bin'),('prefixes','--wine-prefix')]:
+   for value in wc[key]:
+    if not isinstance(value,str) or not pathlib.Path(value).is_absolute():raise SystemExit('Absolute Wine observer paths required')
+    args.extend([flag,value])
 for kind,flag in [('local','--zone-local'),('internet','--zone-internet')]:
  for prefix in zones[kind]:args.extend([flag,prefix])
 os.execve(args[0],args,{'PATH':'/usr/sbin:/usr/bin:/sbin:/bin','LANG':'C.UTF-8','NOTIFY_SOCKET':os.environ.get('NOTIFY_SOCKET','')})

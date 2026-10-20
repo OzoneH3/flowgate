@@ -1,16 +1,17 @@
 #!/bin/sh
 # Prepare/install the latest master, start Both protection, switch matching GUI.
 # Usage: scripts/update-and-start.sh [--dry-run] [--no-gui]
-#        [--profile preserve|monitoring|incoming|both]
+#        [--profile preserve|monitoring|incoming|both] [--wine-discovery]
 # Existing rules and Wine observer configuration are preserved. Builds and sudo
 # authentication finish before stopping protection; failed installs stop safely.
 set -eu
 cd "$(dirname "$0")/.."
 root=$PWD
-dry=0 gui=1 profile=both
+dry=0 gui=1 profile=both wine_discovery=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --profile) [ "$#" -gt 1 ] || { echo "--profile needs preserve, monitoring, incoming or both" >&2; exit 2; }; profile=$2; shift 2;;
+    --wine-discovery) wine_discovery=1; shift;;
     --dry-run) dry=1; shift;;
     --no-gui) gui=0; shift;;
     -h|--help) sed -n '2,6p' scripts/update-and-start.sh; exit 0;;
@@ -52,5 +53,6 @@ fi
 set -- --root "$root" --revision "$rev"
 [ "$dry" = 0 ] || set -- "$@" --dry-run
 [ "$gui" = 1 ] || set -- "$@" --no-gui
+[ "$wine_discovery" = 0 ] || set -- "$@" --wine-discovery
 [ -z "$profile" ] || set -- "$@" --profile "$profile"
 exec python3 scripts/lib/update_and_start.py "$@"

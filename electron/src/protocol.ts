@@ -449,7 +449,7 @@ export interface Bridge {
   ): Promise<
     Record<
       string,
-      { icon: string | null; name?: string; source: 'desktop-metadata' | 'steam-manifest' | 'unavailable' }
+      { icon: string | null; name?: string; source: 'desktop-metadata' | 'steam-manifest' | 'executable-resource' | 'unavailable' }
     >
   >;
   applicationIcons(keys: string[]): Promise<Record<string, string | null>>;

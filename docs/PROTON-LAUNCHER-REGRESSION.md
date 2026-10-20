@@ -127,3 +127,20 @@ settles the remaining requests. This distinguishes display grouping from decisio
 scope: this test does **not** certify one prompt per application, nor a native
 popup journey. A Remember-only receiver pass must not be reported as proof that
 ordinary Allow suppresses repeated prompts.
+
+To replace an old explicit Wine-prefix allowlist with supported-build discovery,
+run `scripts/update-and-start.sh --profile preserve --wine-discovery`. This is an
+explicit host update: it backs up the prior `/etc/flowgate/wine.json`, writes
+`{"schema":1,"mode":"discover"}`, installs the matched release, and restores the
+previous protection mode. Subsequent ordinary updates retain discovery mode.
+No game/prefix list is required; only running brokers of the configured desktop
+UID and supported pinned builds are observed. Application/prefix permission keys
+stay independent, and no stored rule is broadened or created by this option.
+Unsupported Wine/Proton builds still require separate collector support.
+
+Executable artwork uses exact desktop/Steam association first, then a bounded
+read-only PE32/PE32+ RT_GROUP_ICON/RT_ICON resource lookup. No executable is loaded
+or run to obtain its icon. PE input is limited to 64 MiB, resource directories to
+16 MiB, and individual icon frames to 1 MiB; unsupported images retain the neutral
+fallback. Layout follows Microsoft's PE resource specification:
+https://learn.microsoft.com/en-us/windows/win32/debug/pe-format
