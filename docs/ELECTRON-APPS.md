@@ -59,3 +59,22 @@ the app it verifiably runs (`parent.application`, kind `electron`). Example: Her
 Launcher**; Details › Launch › Launched by shows PID, start ticks and depth. Display only —
 rules for nile bind nile's own executable, never Heroic. A verified game launch (Proton/umu)
 keeps the game as the context instead.
+
+## Activity grouping (display only)
+
+Verified Electron processes are one application entry (the bundle identity). An application
+whose every visible process has `provenance.parent.application` = the same verified Electron
+application (same UID) is shown beneath that application's row, e.g. **Heroic Games
+Launcher › gogdl, legendary, nile** (`nestLaunchedApplications` in `electron/src/model.ts`).
+Each child keeps its own row id, sockets, totals, Rule Status, Info View and Allow/Deny
+prompts; the parent's totals and rule context are its own sockets only. Nothing is inherited:
+allowing Heroic creates a rule for Heroic's bundle identity only, and its helpers and the
+games it launches stay uncovered. If any process of the helper lacks the verified
+relationship, the relationships differ, the parent is unverified, or the parent has no row,
+the helper is shown separately rather than guessed. Info View shows "Launched by … Display
+only".
+
+Process-scoped rules work for verified Electron app processes: the process binding keeps the
+application (bundle) revision and pins the running runtime file through
+`executable_revision` (empty for native processes, unchanged). Processes of an unverified
+runtime get no Activity rules at all (application or process); Once and For a while remain.

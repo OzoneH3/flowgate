@@ -24,6 +24,18 @@ type Instance struct {
 	PIDNS      string `json:"pidns"`
 	Executable string `json:"executable"`
 	Revision   string `json:"revision"`
+	// ExecutableRevision: the running file's stamp when it differs from the
+	// application revision (a verified Electron app: runtime file vs bundle).
+	// Empty for native processes, whose Revision is the running file's stamp.
+	ExecutableRevision string `json:"executable_revision,omitempty"`
+}
+
+// fileRevision is the stamp the live /proc/PID/exe must have.
+func (i Instance) fileRevision() string {
+	if i.ExecutableRevision != "" {
+		return i.ExecutableRevision
+	}
+	return i.Revision
 }
 
 func (i Instance) IsZero() bool { return i == Instance{} }
@@ -45,13 +57,27 @@ func threadGroup(base string) int {
 	return 0
 }
 func BindInstance(session string, p Process) (Instance, error) {
-	if session == "" || p.PID <= 0 || p.ThreadGroup != p.PID || p.BootID == "" || p.Start == "" || p.PIDNS == "" || p.NetNS == "" || p.MountNS == "" || p.Application.Kind != "native" || p.Application.Revision == "" || p.ExecutableRevision != p.Application.Revision {
+	if session == "" || p.PID <= 0 || p.ThreadGroup != p.PID || p.BootID == "" || p.Start == "" || p.PIDNS == "" || p.NetNS == "" || p.MountNS == "" || !instanceIdentity(p) {
 		return Instance{}, fmt.Errorf("live native thread-group leader with boot/namespace/executable identity required")
 	}
-	return Instance{Session: session, BootID: p.BootID, PID: p.PID, Start: p.Start, UID: p.UID, NetNS: p.NetNS, MountNS: p.MountNS, PIDNS: p.PIDNS, Executable: p.Executable, Revision: p.ExecutableRevision}, nil
+	i := Instance{Session: session, BootID: p.BootID, PID: p.PID, Start: p.Start, UID: p.UID, NetNS: p.NetNS, MountNS: p.MountNS, PIDNS: p.PIDNS, Executable: p.Executable, Revision: p.ExecutableRevision}
+	if p.Application.Kind == "electron" {
+		i.Revision, i.ExecutableRevision = p.Application.Revision, p.ExecutableRevision
+	}
+	return i, nil
 }
 func (i Instance) Matches(p Process) bool {
-	return i.PID == p.PID && i.Start == p.Start && i.UID == p.UID && i.BootID == p.BootID && i.NetNS == p.NetNS && i.MountNS == p.MountNS && i.PIDNS == p.PIDNS && i.Executable == p.Executable && i.Revision == p.ExecutableRevision && p.Application.Kind == "native" && p.Application.Revision == i.Revision && p.ThreadGroup == i.PID
+	return i.PID == p.PID && i.Start == p.Start && i.UID == p.UID && i.BootID == p.BootID && i.NetNS == p.NetNS && i.MountNS == p.MountNS && i.PIDNS == p.PIDNS && i.Executable == p.Executable && i.fileRevision() == p.ExecutableRevision && i.Revision == p.Application.Revision && instanceIdentity(p) && p.ThreadGroup == i.PID
+}
+
+// instanceIdentity: a process whose instance may bind a process rule. Native:
+// the application is the running file (same stamp). Verified Electron app: the
+// instance pins the runtime file's own stamp; the bundle is the application.
+func instanceIdentity(p Process) bool {
+	if p.ExecutableRevision == "" || !LiveRuleable(p.Application) {
+		return false
+	}
+	return p.Application.Kind == "electron" || p.ExecutableRevision == p.Application.Revision
 }
 func (i Instance) Check() error {
 	base := fmt.Sprintf("/proc/%d", i.PID)
@@ -67,7 +93,7 @@ func (i Instance) Check() error {
 	if strings.Contains(status, "State:\tZ") || threadGroup(base) != i.PID {
 		return fmt.Errorf("process leader exited or thread-group identity changed")
 	}
-	if start != i.Start || i.BootID != BootID() || st.Sys().(*syscall.Stat_t).Uid != i.UID || link(base+"/ns/net") != i.NetNS || link(base+"/ns/mnt") != i.MountNS || link(base+"/ns/pid") != i.PIDNS || link(base+"/exe") != i.Executable || stamp(base+"/exe") != i.Revision {
+	if start != i.Start || i.BootID != BootID() || st.Sys().(*syscall.Stat_t).Uid != i.UID || link(base+"/ns/net") != i.NetNS || link(base+"/ns/mnt") != i.MountNS || link(base+"/ns/pid") != i.PIDNS || link(base+"/exe") != i.Executable || stamp(base+"/exe") != i.fileRevision() {
 		return fmt.Errorf("process generation, executable, credentials or namespace changed")
 	}
 	if last, _, err := processStat(base); err != nil || last != i.Start {

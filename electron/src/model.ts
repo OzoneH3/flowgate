@@ -257,7 +257,48 @@ export function hierarchy(activity: Activity, query = '', filter = 'all'): Row[]
       pid: owners.length === 1 ? owners[0].pid : undefined,
     });
   }
-  return roots;
+  return nestLaunchedApplications(roots);
+}
+/** The application row key of a process ("<key>|<revision>|uid:<uid>"). */
+const appRowKey = (a: Pick<Application, 'key' | 'revision'>, uid: number) => `app:${a.key}|${a.revision}|uid:${uid}`;
+/**
+ * The verified application that launched every process of this application row,
+ * or undefined. Only a backend-verified launch parent counts: provenance.parent
+ * with a verified Electron application identity (e.g. Heroic for nile). Any
+ * process without it, or two different parents, leaves the row separate.
+ */
+export function launchingApplication(row: Row): string | undefined {
+  if (row.kind !== 'application' || !row.process?.application.key) return;
+  const processes = row.children.filter((c) => c.kind === 'process').map((c) => c.process!);
+  if (!processes.length) return;
+  let parent: string | undefined;
+  for (const p of processes) {
+    const app = p.provenance?.parent?.application;
+    if (!app?.key || !app.revision || app.kind !== 'electron' || app.hosted?.state !== 'verified') return;
+    const key = appRowKey(app, p.uid);
+    if (parent && parent !== key) return;
+    parent = key;
+  }
+  return parent && parent !== row.id ? parent : undefined;
+}
+/**
+ * Display only: an application launched by another verified application sits
+ * beneath it (Heroic › nile, legendary, gogdl). Both stay separate applications
+ * with their own sockets, totals and rule status; nothing is inherited.
+ */
+export function nestLaunchedApplications(roots: Row[]): Row[] {
+  const byId = new Map(roots.filter((r) => r.kind === 'application').map((r) => [r.id, r]));
+  const moved = new Set<Row>();
+  for (const r of roots) {
+    const parentId = launchingApplication(r);
+    const parent = parentId ? byId.get(parentId) : undefined;
+    // Only beneath a parent that is itself a top-level row (one level, no chains).
+    if (!parent || parent === r || launchingApplication(parent)) continue;
+    r.parent = parent.id;
+    parent.children.push(r);
+    moved.add(r);
+  }
+  return moved.size ? roots.filter((r) => !moved.has(r)) : roots;
 }
 export function flatten(
   roots: Row[],

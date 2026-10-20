@@ -26,7 +26,7 @@ func VerifyObservedNative(rowID string, expected ActivityProcess) (Process, erro
 		}
 		break
 	}
-	if current == nil || current.PID != expected.PID || current.Start != expected.Start || current.UID != expected.UID || current.Application.Kind != "native" || current.Application.Key != expected.Application.Key || current.Application.Revision != expected.Application.Revision {
+	if current == nil || current.PID != expected.PID || current.Start != expected.Start || current.UID != expected.UID || !LiveRuleable(current.Application) || current.Application.Key != expected.Application.Key || current.Application.Revision != expected.Application.Revision {
 		return Process{}, fmt.Errorf("observed native target exited or changed; refresh Activity")
 	}
 	p, err := Inspect(current.PID)

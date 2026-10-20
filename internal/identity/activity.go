@@ -27,6 +27,9 @@ type ActivityProcess struct {
 	Application Application `json:"application"`
 	// Display-only launch provenance (captured at first sight, cached per PID+start).
 	Provenance *Provenance `json:"provenance,omitempty"`
+	// The running executable's own stamp (for an Electron app: the runtime's;
+	// application.revision is the bundle's). Pins process-instance rules.
+	ExecutableRevision string `json:"executable_revision,omitempty"`
 }
 type ActivityRow struct {
 	NetworkScope NetworkScope `json:"network_scope"`
@@ -311,7 +314,7 @@ func (c *ActivityCollector) Collect() ActivitySnapshot {
 		}
 		seen[pid] = true
 		id := fmt.Sprintf("%d:%s", p.PID, p.Start)
-		out.Processes[id] = ActivityProcess{BootID: p.BootID, NetNS: p.NetNS, MountNS: p.MountNS, PIDNS: p.PIDNS, ID: id, PID: p.PID, Start: p.Start, UID: p.UID, Executable: p.Executable, Application: p.Application, ThreadGroup: t.group, Provenance: p.Provenance}
+		out.Processes[id] = ActivityProcess{BootID: p.BootID, NetNS: p.NetNS, MountNS: p.MountNS, PIDNS: p.PIDNS, ID: id, PID: p.PID, Start: p.Start, UID: p.UID, Executable: p.Executable, Application: p.Application, ThreadGroup: t.group, Provenance: p.Provenance, ExecutableRevision: p.ExecutableRevision}
 		for index, path := range owned {
 			row := &out.Rows[index]
 			// Process inspection can race close/dup/FD reuse. Recheck the actual FD,

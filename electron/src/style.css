@@ -1692,3 +1692,6 @@ body.hide-sidebar #activityView > aside { display:none; }
   #promptBody .nl-port-group { display:inline-block; white-space:nowrap; }
 }
 #promptBody .nl-card-top[hidden], #promptBody .nl-links[hidden] { display:none; }
+/* Applications launched by a verified application nest one level deeper (Heroic › nile › process › socket). */
+#tree .name.depth-4 { padding-left: 78px; }
+#tree .name.depth-5 { padding-left: 94px; }

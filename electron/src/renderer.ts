@@ -1601,7 +1601,8 @@ function renderInfo() {
         ? 'Machine · current network namespace'
         : 'Visible sockets · current network namespace',
     );
-    field(info, 'Applications', String(r.children.filter((c) => c.kind === 'application').length));
+    // Nested (launched-by) applications are applications too.
+    field(info, 'Applications', String(allRows(r.children).filter((c) => c.kind === 'application').length));
     field(info, 'Sockets', String(r.rows.length));
     const evidence = state.observation.activity?.tcp_initiation;
     field(
@@ -1648,6 +1649,16 @@ function renderInfo() {
             r.process.application.name.replace(/ \(deleted\)$/, '')
         : r.label,
     );
+  if (r.kind === 'application' && r.parent?.startsWith('app:')) {
+    // Grouped beneath the verified application that launched it (display only).
+    const launcher = r.process?.provenance?.parent;
+    field(
+      info,
+      'Launched by',
+      `${appNames.get(JSON.stringify([launcher?.application?.key, launcher?.application?.revision, launcher?.application?.executable])) || launcher?.application?.display_name || launcher?.name || 'verified application'}` +
+        ' · verified process chain. Display only: its own rules apply; allowing the launcher grants it nothing.',
+    );
+  }
   if (r.process) {
     if (
       r.process.application.executable_status === 'deleted' ||

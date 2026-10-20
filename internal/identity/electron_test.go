@@ -278,3 +278,28 @@ func TestLaunchedBySkipsInfrastructure(t *testing.T) {
 		t.Fatalf("another principal never launches as this user: %+v", p)
 	}
 }
+
+func TestVerifiedElectronProcessInstanceBinds(t *testing.T) {
+	runtime := fakeRuntime(t, "electron")
+	bundle := filepath.Join(t.TempDir(), "app.asar")
+	writeAsar(t, bundle, `{"name":"heroic"}`, "")
+	_, child := startMain(t, runtime, "main", nil, bundle)
+	p, err := Inspect(child)
+	if err != nil || p.Application.Kind != "electron" {
+		t.Fatalf("%+v %v", p.Application, err)
+	}
+	// The instance pins the runtime file's own stamp; the bundle stays the application.
+	b, err := BindInstance("session", p)
+	if err != nil || b.ExecutableRevision != p.ExecutableRevision || b.Revision != p.Application.Revision || b.Revision == b.ExecutableRevision {
+		t.Fatalf("instance: %+v %v", b, err)
+	}
+	if !b.Matches(p) || b.Check() != nil {
+		t.Fatalf("instance must match and re-check its live process: %v", b.Check())
+	}
+	// An unverified runtime process binds no instance (no rules for it at all).
+	_, other := startMain(t, runtime, "main", nil, "--enable-features=X")
+	u, _ := Inspect(other)
+	if _, err := BindInstance("session", u); err == nil {
+		t.Fatal("unverified runtime must not bind a process instance")
+	}
+}
