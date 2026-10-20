@@ -1,3 +1,4 @@
+import { ApplicationCallers } from './application-callers';
 import { replaceKeyedRow } from './keyed-rows';
 import { rowStructure } from './row-structure';
 import { acceptsPublication } from './publication';
@@ -97,6 +98,7 @@ import {
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const promptGeneration = new URL(location.href).searchParams.get('generation');
 const promptID = new URL(location.href).searchParams.get('request');
+const applicationCallers = new ApplicationCallers();
 let state: ClientState;
 let selected = 'overview';
 let presentation: Presentation | undefined;
@@ -669,7 +671,7 @@ function statusStrip(r: Row) {
       if (r.inactive) {
         const status = ruleStatus(r, state);
         openInactiveRules(button, {
-          label: appNames.get(JSON.stringify([r.inactive.key, r.inactive.revision, r.inactive.executable])) || r.label,
+          label: r.inactive.contexts?.length ? r.label : appNames.get(JSON.stringify([r.inactive.key, r.inactive.revision, r.inactive.executable])) || r.label,
           direction,
           rules: status.available ? status[direction] : [],
           generation: state.control.generation,
@@ -980,7 +982,7 @@ if (promptID) {
 function buildTree() {
   const a = state?.observation.activity;
   roots = a
-    ? activityTree(a, state.control.rules, $<HTMLInputElement>('search').value, $<HTMLSelectElement>('filter').value)
+    ? activityTree(a, state.control.rules, $<HTMLInputElement>('search').value, $<HTMLSelectElement>('filter').value, (key,revision,uid)=>applicationCallers.forLaunches(key,revision,uid))
     : [];
   if (a) {
     const children = [...networkOverviews(), ...roots];
@@ -1429,7 +1431,7 @@ function renderTree() {
     const displayKey =
       displayApp && JSON.stringify([displayApp.key, displayApp.revision, displayApp.executable]);
     let rowLabel =
-      r.kind === 'application' && displayKey ? appNames.get(displayKey) || r.label : r.label;
+      r.inactive?.contexts?.length ? r.label : r.kind === 'application' && displayKey ? appNames.get(displayKey) || r.label : r.label;
     let icon: HTMLElement = installedIcon(
       r.kind !== 'application' ? undefined : r.displayApplication || inactiveApp || rowApplication(r),
       r.kind,
@@ -1541,6 +1543,8 @@ function renderInfo() {
         [
           'Executable',
           'Executable status',
+          'Recorded caller paths',
+          'Script',
           'Identity',
           'Totals',
           'Evidence',
@@ -1738,17 +1742,30 @@ function renderInfo() {
             r.process.application.display_name ||
             r.process.application.name.replace(/ \(deleted\)$/, '')
         : r.inactive
-          ? appNames.get(JSON.stringify([r.inactive.key, r.inactive.revision, r.inactive.executable])) || r.label
+          ? (r.inactive.contexts?.length ? r.label : appNames.get(JSON.stringify([r.inactive.key, r.inactive.revision, r.inactive.executable])) || r.label)
           : r.label,
     );
   if (r.inactive) {
-    // Not running: only its stored rules are known; nothing is observed or verified now.
-    field(info, 'State', 'Not running · listed because stored rules name this application');
+    // Stored identity with no live row; recorded launch/caller context is historical only.
+    field(info, 'State', 'Not currently observed · listed because stored rules name this application');
     if (r.inactive.earlierVersion)
       field(info, 'Version', 'Earlier version (the executable changed since these rules were made); they do not apply to the current file');
     field(info, 'Executable', r.inactive.executable);
+    if(r.inactive.contexts?.length){
+      field(info,'Recorded launch context',r.inactive.contexts.map(c=>`${c.title} · ${new Date(c.captured).toLocaleString()}`).join('\n'));
+      field(info,'Permission target',`${r.inactive.executable} · launch names are display context, not game-specific permission. Other programs using this runtime identity may share application rules.`);
+    }
     field(info, 'User ID', String(r.inactive.uid));
     field(info, 'Identity', `${r.inactive.key}\nRevision: ${r.inactive.revision}`);
+    const callers = applicationCallers.forApplication(r.inactive.key,r.inactive.revision,r.inactive.uid);
+    const nodeRuntime = /^(node|nodejs)$/.test(r.inactive.executable.split('/').pop()||'');
+    if(callers.length){
+      field(info,'Recorded callers',callers.map(c=>`${c.name} · ${new Date(c.captured).toLocaleString()}`).join('\n'));
+      field(info,'Caller evidence','Recent connection snapshots, not the creator of this rule. Historical processes may have ended.');
+      field(info,'Recorded caller paths',callers.map(c=>`${c.executable}\nCaller PID ${c.pid} · start ${c.start} · socket-owner PID ${c.ownerPid}\nRequest ${c.request} · captured ${c.captured}`).join('\n\n'));
+    }else if(nodeRuntime)field(info,'Recorded callers','Unavailable: no caller snapshot retained for this identity.');
+    if(nodeRuntime)field(info,'Script','No script path was retained in this stored executable identity.');
+
     const now = state.control.serverNow ?? Date.now();
     const rules = (state.control.rules || []).filter(
       (x) => x.filter.application === r.inactive!.key && x.filter.revision === r.inactive!.revision && x.filter.uid === r.inactive!.uid,
@@ -2681,6 +2698,7 @@ function updateDecisions() {
 function consume(next: ClientState) {
   if (!acceptsPublication(state, next)) return;
   state = next;
+  applicationCallers.observe(next);
   const present = new Set(state.control.events.map((e) => state.control.generation + ':' + e.id));
   for (const key of localSubmitted) if (!present.has(key)) localSubmitted.delete(key);
   // The permission window shows controller status only when it limits decisions.
