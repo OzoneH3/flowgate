@@ -103,3 +103,28 @@ test('main: answering clears the input-release guard (a hidden window never repo
     assert.ok(answered.includes(reset), reset);
   assert.match(main, /if \(promptIdle\) \{\n\s*if \(!value\.pointerDown\) promptPointerDown = false;/, 'release tracked while idle');
 });
+
+test('Permission card: header, IPv6 endpoints verbatim, program side by direction, backend field values', () => {
+  assert.equal(ps.connectionHeader({ direction: 'outgoing', protocol: 'udp' }), 'Outgoing connection - UDP(17)');
+  assert.equal(ps.connectionHeader({ direction: 'incoming', protocol: 'tcp' }), 'Incoming connection - TCP(6)');
+  assert.deepEqual(ps.splitEndpoint('[2a02:810d:4b3f:e100::1a2b]:51234'), { address: '2a02:810d:4b3f:e100::1a2b', port: '51234' });
+  assert.deepEqual(ps.splitEndpoint('[fe80::1%enp5s0]:631'), { address: 'fe80::1%enp5s0', port: '631' });
+  assert.deepEqual(ps.splitEndpoint('172.30.0.1:53'), { address: '172.30.0.1', port: '53' });
+  assert.deepEqual(ps.splitEndpoint('unix'), { address: 'unix', port: '' });
+  // Outgoing Proton helper: game on the From side with its socket owner, the service on To.
+  const out = ev();
+  const s = ps.promptSummary(out, 'x');
+  assert.deepEqual(ps.fromTo(out, s), {
+    from: { kind: 'program', name: 'Timberborn', owner: 'rundll32.exe' },
+    to: { kind: 'peer', text: 'Local printing service (cupsd)' },
+  });
+  // Incoming: the peer is From, the program To.
+  const inc = ev({ flow: { direction: 'incoming', protocol: 'tcp', local: '[::1]:8080', remote: '[::1]:5000' }, local_peer: undefined });
+  const t = ps.fromTo(inc, ps.promptSummary(inc, 'x'));
+  assert.deepEqual(t.from, { kind: 'peer', text: '::1' });
+  assert.equal(t.to.kind, 'program');
+  const f = ps.connectionFields(out);
+  assert.deepEqual([f.application, f.executable, f.process], ['rundll32.exe', '/w/rundll32.exe', 'Process 7']);
+  assert.deepEqual([f.local, f.remote], [{ address: '127.0.0.1', port: '40000' }, { address: '127.0.0.1', port: '631' }]);
+  assert.equal(ps.connectionFields(ev({ attribution: { ...ev().attribution, application: undefined, owners: [] } })).process, 'Unavailable');
+});

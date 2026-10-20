@@ -180,9 +180,9 @@ test('prompt card: game heading, via hint and explicit scopes precede Allow/Deny
   root.append(...buildRequestCard(event(owner, helperTarget), { name: 'rundll32.exe', rememberMode: true, forAWhile: true, rememberOptions: [] }));
   const all = [...root.walk()], byId = (id) => all.find((n) => n.id === id);
   // First view: the game, one quiet owner line; scopes live in Details / the Remember panel.
-  const heading = all.find((n) => n.className === 'compact-application');
+  const heading = byId('requestApplication');
   assert.equal(heading.textContent.replace('◇', ''), 'DEATH STRANDING 2: ON THE BEACH');
-  assert.equal(byId('requestOwner').textContent, 'rundll32.exe');
+  assert.equal(byId('requestOwner').textContent, 'socket owner rundll32.exe', 'the helper is named as socket owner, not the game');
   const scope = byId('permissionScope');
   assert.match(scope.textContent, /^Once: /, 'one line: the selected option (Once by default)');
   assert.match(scope.dataset.remember, /^Remember: .*shared by every game using this prefix/);

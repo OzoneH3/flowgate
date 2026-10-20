@@ -1,7 +1,7 @@
 import { Essential } from './essential';
 import { Protection } from './protection';
 import { placeKDEPrompt, resizeKDEPrompt, PROMPT_TITLE, promptTitle } from './prompt-placement';
-import { AutomaticPrompts, edgePosition, boundDecision, groupOf, inputSettled } from './automatic-prompts';
+import { AutomaticPrompts, PROMPT_HEIGHT, PROMPT_WIDTH, edgePosition, boundDecision, groupOf, inputSettled } from './automatic-prompts';
 import { leaseHolds } from './process-lease';
 import {
   app,
@@ -152,7 +152,7 @@ function retarget(ref: RequestRef, reload = false) {
   promptRefs.set(w.webContents.id, ref);
   promptContentHeights.delete(w.webContents.id);
   promptReadyAt.set(w.webContents.id, Date.now() + TRANSITION_MS);
-  const compact = edgePosition(screen.getPrimaryDisplay().workArea, 520, 460);
+  const compact = edgePosition(screen.getPrimaryDisplay().workArea, PROMPT_WIDTH, PROMPT_HEIGHT);
   w.setBounds(compact);
   const reset = (
     promptLayouts.get(w.webContents.id) ||
@@ -418,8 +418,8 @@ function windowFor(isPrompt = false, id = '', generation = '', group?: string) {
     title: isPrompt ? PROMPT_TITLE : 'FlowGate',
     frame: !isPrompt,
     alwaysOnTop: isPrompt,
-    width: isPrompt ? 520 : width,
-    height: isPrompt ? 460 : height,
+    width: isPrompt ? PROMPT_WIDTH : width,
+    height: isPrompt ? PROMPT_HEIGHT : height,
     minWidth: isPrompt ? 320 : 800,
     minHeight: isPrompt ? 240 : 550,
     backgroundColor: '#222222',
@@ -499,7 +499,7 @@ function windowFor(isPrompt = false, id = '', generation = '', group?: string) {
       w.show();
       return;
     }
-    const bounds = edgePosition(screen.getPrimaryDisplay().workArea, 520, 460);
+    const bounds = edgePosition(screen.getPrimaryDisplay().workArea, PROMPT_WIDTH, PROMPT_HEIGHT);
     w.setBounds(bounds);
     // Install the native windowAdded hook before mapping. Wayland ignores global
     // setBounds; showing first causes a visible wrong-monitor flash.
@@ -1076,7 +1076,7 @@ app.whenReady().then(async () => {
     const bounds = edgePosition(
       screen.getPrimaryDisplay().workArea,
       w.getBounds().width,
-      Math.max(460, Math.ceil(value.height)),
+      Math.max(PROMPT_HEIGHT, Math.ceil(value.height)),
     );
     // Serialize native resizes after the startup handshake; no stale configure
     // may restore compact geometry over a just-expanded Remember panel.

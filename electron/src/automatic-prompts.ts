@@ -134,6 +134,9 @@ export function inputSettled(g: {
 }) {
   return !(g.now < g.transitionUntil || g.keys > 0 || g.rendererKeys > 0 || g.pointerDown);
 }
+// Initial permission window size; content can expand the height.
+export const PROMPT_WIDTH = 745,
+  PROMPT_HEIGHT = 590;
 export function edgePosition(
   area: { x: number; y: number; width: number; height: number },
   width: number,

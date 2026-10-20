@@ -6,7 +6,7 @@ import { PREVIOUS_REVISION_NOTICE, previousRevisionTitle } from './prompt-decisi
 import type { Application, ViewEvent } from './protocol';
 import { provenanceDetails, targetLines } from './provenance';
 import { pairDetailRows, type LocalPairView } from './local-pair';
-import { destinationLine, promptSummary, rememberLabel } from './prompt-summary';
+import { connectionFields, connectionHeader, fromTo, promptSummary, rememberLabel } from './prompt-summary';
 
 // The request card shared by the permission window and the Pending requests
 // tab. First view: application, the actual
@@ -68,34 +68,97 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
     protocol = e.flow.protocol.toUpperCase(),
     summary = promptSummary(e, o.name);
 
-  // ---- first view ----------------------------------------------------------
-  const route = el('div', '', 'connection-route', 'requestSummary');
-  // The game's own metadata (icon) never renames the verified title.
-  const heading = o.gameApplication
-    ? applicationHeading(o.gameApplication, summary.title, summary.title)
-    : applicationHeading(
-        summary.owner
-          ? { key: '', revision: '', name: summary.title, executable: e.attribution.application?.executable || '' }
-          : e.attribution.application,
-        summary.title,
-      );
-  heading.id = 'requestApplication';
-  route.append(el('h3', `${p.direction} connection`, 'connection-banner'), heading);
-  if (summary.owner) {
-    const owner = el('p', summary.owner, 'request-owner', 'requestOwner');
-    owner.title = 'Owner of this connection (the process that opened the socket)';
-    route.append(owner);
+  // ---- first view ----------------------------
+  // Green direction/protocol bar, a two-row From/To box (the program on its own
+  // side: From when outgoing, To when incoming), four aligned field rows from
+  // backend values, then one link row (status + Details) and the decision row.
+  const route = el('div', '', 'connection-route nl-card-top', 'requestSummary');
+  const bar = el('h3', '', 'connection-banner nl-bar', 'connectionHeader');
+  const chevron = el('button', '', 'nl-chevron', 'cardCollapse');
+  chevron.type = 'button';
+  chevron.setAttribute('aria-label', 'Collapse connection details');
+  chevron.setAttribute('aria-expanded', 'true');
+  bar.append(chevron, el('span', '', `nl-direction nl-${e.flow.direction === 'incoming' ? 'in' : 'out'}`), el('span', connectionHeader(e.flow), 'nl-bar-text'));
+  const sides = fromTo(e, summary);
+  const programCell = () => {
+    // The game's own metadata (icon) never renames the verified title.
+    const heading = o.gameApplication
+      ? applicationHeading(o.gameApplication, summary.title, summary.title)
+      : applicationHeading(
+          summary.owner
+            ? { key: '', revision: '', name: summary.title, executable: e.attribution.application?.executable || '' }
+            : e.attribution.application,
+          summary.title,
+        );
+    heading.id = 'requestApplication';
+    addClass(heading, 'nl-program');
+    const cell = el('div', '', 'nl-cell');
+    cell.append(heading);
+    if (summary.owner) {
+      // A Proton game is the launch context; the helper owns the socket.
+      const owner = el('span', '', 'request-owner nl-owner', 'requestOwner');
+      owner.append(el('span', 'socket owner ', 'nl-owner-label'), el('span', summary.owner, 'nl-owner-name'));
+      owner.title = `${summary.owner} opened this connection; ${summary.title} is the game it was launched for`;
+      cell.append(owner);
+    }
+    return cell;
+  };
+  const peerCell = (text: string) => {
+    const cell = el('div', '', 'nl-cell');
+    cell.append(el('span', text, 'nl-peer', 'requestDestination'));
+    return cell;
+  };
+  const box = el('div', '', 'nl-box', 'fromToBox');
+  for (const [label, side] of [
+    ['From', sides.from],
+    ['To', sides.to],
+  ] as const) {
+    const r = el('div', '', 'nl-row');
+    r.append(el('span', label, 'nl-label'), side.kind === 'program' ? programCell() : peerCell(side.text));
+    box.append(r);
   }
-  route.append(el('p', destinationLine(summary, e.flow.direction), 'request-destination', 'requestDestination'));
-  const meta = el('div', '', 'request-meta');
+  const f = connectionFields(e);
+  const fields = el('dl', '', 'nl-fields', 'connectionFields');
+  const empty = (label: string, id: string) => {
+    const dd = el('dd', '', '', id);
+    fields.append(el('dt', label), dd);
+    return dd;
+  };
+  const appField = empty('Application:', 'fieldApplication');
+  appField.append(el('span', f.application, 'nl-link'));
+  appField.title = f.executable;
+  row(fields, 'Process Id:', f.process, 'fieldProcess');
+  for (const [label, id, ep] of [
+    ['Local Address:', 'fieldLocal', f.local],
+    ['Remote Address:', 'fieldRemote', f.remote],
+  ] as const) {
+    const dd = empty(label, id);
+    dd.append(el('span', ep.address, 'nl-address'));
+    if (ep.port) {
+      const group = el('span', '', 'nl-port-group');
+      group.append(el('span', 'Port:', 'nl-port-label'), el('span', ep.port, 'nl-port'));
+      dd.append(group);
+    }
+  }
+  route.append(bar, box, fields);
+  const meta = el('div', '', 'request-meta nl-links');
   const status = el('p', '', 'expiry request-status-line', 'requestStatusLine');
   status.setAttribute('role', 'status');
   const more = el('button', 'Details', 'link-button details-link', 'detailsToggle');
   more.type = 'button';
   more.setAttribute('aria-expanded', 'false');
   more.setAttribute('aria-controls', 'requestMore');
-  meta.append(status, more);
-  const nodes: HTMLElement[] = [route, meta];
+  meta.append(more, status);
+  const card = el('section', '', 'nl-card', 'requestCard');
+  const nodes: HTMLElement[] = [card];
+  card.append(route, meta);
+  // Collapsing keeps the bar and the decision row.
+  chevron.onclick = () => {
+    const collapsed = !box.hidden;
+    box.hidden = fields.hidden = meta.hidden = collapsed;
+    chevron.setAttribute('aria-expanded', String(!collapsed));
+    o.onDetails?.(false);
+  };
 
   // ---- Details view (separate; hidden until Details is clicked) -------------
   const details = el('section', '', 'request-details-view', 'requestMore');
@@ -186,7 +249,7 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
   addClass(failure, 'scope-preview');
   const leases = el('div', '', 'lease-info', 'leaseInfo');
   statusSection.box.append(leases);
-  nodes.push(details);
+  card.append(details);
 
   // ---- decision row ----------------------------------------------------------
   // Sticky at the bottom of the scrolling body: the decision row and the
@@ -265,7 +328,7 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
   reconcile.type = future.type = 'button';
   reconcile.hidden = future.hidden = true;
   dock.append(note, review, result, reconcile, future);
-  nodes.push(dock);
+  card.append(dock);
 
   // Details is a separate view: the first view hides while it is open.
   const toggle = (open: boolean) => {

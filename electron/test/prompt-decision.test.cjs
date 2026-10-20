@@ -380,7 +380,7 @@ test('compact card: first view is short, everything technical behind one Details
   const technical = details[0].textContent;
   for (const shown of [e.attribution.application.executable, 'PID 4242 · start 987654 · UID 1000', e.reason, e.deadline, 'socket inode'])
     assert.ok(technical.includes(shown), `Details lists ${shown}`);
-  for (const shown of ['Outgoing connection', 'curl', 'To 10.1.0.2:443 · TCP'])
+  for (const shown of ['Outgoing connection - TCP(6)', 'curl', '10.1.0.2', 'Port:', '443', 'Process 4242'])
     assert.ok(visible.includes(shown), `compact view shows ${shown}`);
   // Decision order: Allow | Deny | Remember | For a while.
   const controls = byId('decisionControls');

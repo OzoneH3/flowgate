@@ -271,8 +271,8 @@ try {
       'actual uinput typing stays in other app during automatic presentation',
     );
     assert.equal(result.compact.keepAbove, true);
-    assert.equal(result.compact.geometry.width, 520);
-    assert.equal(result.compact.geometry.height, 460);
+    assert.equal(result.compact.geometry.width, 745);
+    assert.equal(result.compact.geometry.height, 590);
     const prefs = await app.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows().at(-1).webContents.getLastWebPreferences(),
     );
@@ -308,7 +308,7 @@ try {
     await prompt.locator('#rememberToggle').check();
     await sleep(700);
     result.expanded = await snapshot('expanded');
-    assert(result.expanded.geometry.height > 460);
+    assert(result.expanded.geometry.height > 590);
     for (const f of ['protocol', 'process', 'address', 'port'])
       await prompt.locator(`[data-field="${f}"]`).check();
     for (const value of ['0', '60', '300', '600', '1800', '3600', '21600', '43200'])
@@ -335,7 +335,7 @@ try {
     await prompt.locator('#rememberToggle').uncheck();
     await sleep(700);
     result.collapsed = await snapshot('collapsed');
-    assert.equal(result.collapsed.geometry.height, 460);
+    assert.equal(result.collapsed.geometry.height, 590);
     // Manual resize of this card must not be inherited by the next one.
     await app.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()
@@ -369,8 +369,8 @@ try {
     await wait(() => prompt.locator('#allow').isEnabled());
     await sleep(500);
     result.reset = await snapshot('reset');
-    assert.equal(result.reset.geometry.width, 520);
-    assert.equal(result.reset.geometry.height, 460);
+    assert.equal(result.reset.geometry.width, 745);
+    assert.equal(result.reset.geometry.height, 590);
     assert.equal(decisionCalls.length, 1, 'double-click only decided one request');
     await app.evaluate(({ BrowserWindow }) => {
       globalThis.popupInputs = [];

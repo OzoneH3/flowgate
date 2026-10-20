@@ -125,3 +125,59 @@ export function splitPreview(text: string): { preview: string; overlaps: string[
     .trim();
   return { preview, overlaps };
 }
+
+// ---- Permission window layout ------------------------------------
+
+/** "Outgoing connection - TCP(6)" (IANA protocol number as NetLimiter shows it). */
+export function connectionHeader(flow: Pick<RequestEvent['flow'], 'direction' | 'protocol'>): string {
+  const dir = flow.direction === 'incoming' ? 'Incoming' : flow.direction === 'outgoing' ? 'Outgoing' : 'Unknown';
+  const proto = flow.protocol.toLowerCase();
+  const number: Record<string, number> = { tcp: 6, udp: 17, icmp: 1, icmpv6: 58, sctp: 132 };
+  return `${dir} connection - ${proto.toUpperCase()}${number[proto] ? `(${number[proto]})` : ''}`;
+}
+
+/**
+ * "[2001:db8::1%eth0]:443" -> { address: "2001:db8::1%eth0", port: "443" }.
+ * The backend's own address text is kept verbatim (IPv6 compression, zone).
+ */
+export function splitEndpoint(endpoint: string): { address: string; port: string } {
+  const v6 = /^\[([^\]]+)\]:(\d+)$/.exec(endpoint);
+  if (v6) return { address: v6[1], port: v6[2] };
+  const v4 = /^([^:\[\]]+):(\d+)$/.exec(endpoint);
+  if (v4) return { address: v4[1], port: v4[2] };
+  return { address: endpoint, port: '' };
+}
+
+export interface ProgramSide {
+  kind: 'program';
+  /** Game or application name (bold, with icon). */
+  name: string;
+  /** Socket-owning helper when it differs (e.g. rundll32.exe for a Proton game). */
+  owner: string;
+}
+export interface PeerSide {
+  kind: 'peer';
+  /** Known local service, verified local program, or the remote address. */
+  text: string;
+}
+/** From/To: the program is From for outgoing and To for incoming. */
+export function fromTo(e: Ev, s: PromptSummary): { from: ProgramSide | PeerSide; to: ProgramSide | PeerSide } {
+  const program: ProgramSide = { kind: 'program', name: s.title, owner: s.owner };
+  const service = localServiceName(e);
+  const peer: PeerSide = { kind: 'peer', text: service || splitEndpoint(e.flow.remote).address };
+  return e.flow.direction === 'incoming' ? { from: peer, to: program } : { from: program, to: peer };
+}
+
+/** The four field rows under the From/To box, from backend values only. */
+export function connectionFields(e: Ev) {
+  const owners = e.attribution.owners;
+  const app = e.attribution.application;
+  const executable = app?.display_executable || app?.executable || owners[0]?.executable || '';
+  return {
+    application: executable.split('/').pop() || 'Unavailable',
+    executable,
+    process: owners.length ? 'Process ' + owners.map((o) => o.pid).join(', ') : 'Unavailable',
+    local: splitEndpoint(e.flow.local),
+    remote: splitEndpoint(e.flow.remote),
+  };
+}

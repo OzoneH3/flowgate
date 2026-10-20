@@ -1,5 +1,9 @@
 # Permission popup presentation acceptance
 
+## Permission card layout
+
+The direction banner, program and peer details, decision buttons, and rule scope controls share one window. On narrow displays the endpoint address and port stay together.
+
 This frontend change resets each newly presented request to 520×460, preserves the current request and its controls during polling and burst arrivals, and measures rendered Remember/Details/error content for native resizing. The primary usable work-area bottom-right remains the anchor. Content scrolls when the available height is exhausted; decision controls remain reachable.
 
 Automatic presentation has no Electron focus call, navigation focus, KWin activation, raise-and-focus, or attention request. A native shell is initialized with the application and kept mapped, transparent, minimized, and excluded from task switching between requests on KDE. Reusing that shell avoids KWin's new-Wayland-toplevel activation before its windowAdded signal. A deliberate pointer click can focus it normally. Other platforms use showInactive. No desktop configuration or persistent window rule is installed.

@@ -152,8 +152,11 @@ test('request card: Timberborn -> cupsd first view is short; the pair lives in D
   const text = visible.map((n) => n.text || '').join(' | ');
   // Required first view.
   assert.equal(byId('requestApplication').textContent.replace('◇', ''), 'Timberborn');
-  assert.equal(byId('requestOwner').textContent, 'rundll32.exe');
-  assert.equal(byId('requestDestination').textContent, 'To Local printing service (cupsd) · 127.0.0.1:631 · TCP');
+  assert.equal(byId('requestOwner').textContent, 'socket owner rundll32.exe');
+  assert.equal(byId('requestDestination').textContent, 'Local printing service (cupsd)');
+  assert.equal(byId('connectionHeader').textContent, 'Outgoing connection - TCP(6)');
+  assert.equal(byId('fieldApplication').textContent, 'rundll32.exe');
+  assert.equal(byId('fieldRemote').textContent, '127.0.0.1Port:631');
   assert.ok(byId('requestStatusLine'));
   assert.equal(byId('detailsToggle').text, 'Details');
   assert.deepEqual(byId('decisionControls').children.map((c) => c.id || c.children.find((x) => x.tagName === 'INPUT')?.id), ['allow', 'block', 'rememberToggle', 'forAWhileToggle']);
@@ -178,5 +181,5 @@ test('request card: Timberborn -> cupsd first view is short; the pair lives in D
   const r2 = new El('div');
   r2.append(...buildRequestCard({ ...plain, remainingMs: 1 }, { name: 'x', rememberMode: false, forAWhile: false, rememberOptions: [], pair: localPairView(plain, [], caps) }));
   assert.ok(![...r2.walk()].some((n) => n.dataset?.section === 'local-pair'));
-  assert.equal([...r2.walk()].find((n) => n.id === 'requestDestination').textContent, 'To 1.1.1.1:443 · TCP');
+  assert.equal([...r2.walk()].find((n) => n.id === 'requestDestination').textContent, '1.1.1.1');
 });

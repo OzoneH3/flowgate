@@ -139,8 +139,8 @@ try {
   await sleep(900);
   const compact = await facts();
   evidence.compact = compact;
-  assert.equal(compact.bounds.width, 520);
-  assert.equal(compact.bounds.height, 460);
+  assert.equal(compact.bounds.width, 745);
+  assert.equal(compact.bounds.height, 590);
   assert(!compact.focused, 'prompt took focus');
   assert(compact.top, 'prompt not always on top');
   const order = await w.locator('#allow, #block, #rememberToggle, #forAWhileToggle').evaluateAll((xs) => xs.map((x) => x.id));
@@ -153,7 +153,7 @@ try {
   assert(!(await w.locator('#rememberToggle').isChecked()), 'For a while unchecks Remember');
   await w.locator('#rememberToggle').check();
   assert(!(await w.locator('#forAWhileToggle').isChecked()), 'Remember unchecks For a while');
-  step(`compact 520x460, unfocused, always-on-top; order Allow|Deny|Remember|For a while; mutually exclusive both ways`);
+  step(`compact 745x590, unfocused, always-on-top; order Allow|Deny|Remember|For a while; mutually exclusive both ways`);
 
   // 800x550: buttons and duration select stay visible.
   await app.evaluate(({ BrowserWindow }) =>
@@ -202,9 +202,9 @@ try {
   w = await card(/10\.79\.0\.2:43000/);
   assert(!(await delivered(before, 1200)), 'sibling not delivered');
   const sib = await facts();
-  assert.equal(sib.bounds.height, 460, 'next request reset to compact');
+  assert.equal(sib.bounds.height, 590, 'next request reset to compact');
   await w.locator('#block').click();
-  step('sibling instance prompted inside the window; new request compact 520x460');
+  step('sibling instance prompted inside the window; new request compact 745x590');
 
   // 4. Expiry: after the lease the same process is prompted again.
   await wait(async () => !(await list()).leases.length, 25000, 'lease expired');

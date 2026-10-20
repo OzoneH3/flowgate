@@ -117,39 +117,110 @@ try {
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().endsWith('/index.html'))?.minimize());
   evidence.idle_shell = kwinProbe(pid);
   const port = alpha.ports.tcp4;
-  for (const round of [1, 2, 3]) {
+  // First view facts, read from the rendered prompt.
+  const view = (w) =>
+    w.evaluate(() => {
+      const t = (id) => document.getElementById(id)?.innerText.trim() ?? null;
+      const rows = [...document.querySelectorAll('#fromToBox .nl-row')].map((r) => ({
+        label: r.querySelector('.nl-label')?.innerText.trim(),
+        program: !!r.querySelector('#requestApplication'),
+        text: r.querySelector('.nl-cell')?.innerText.replace(/\s+/g, ' ').trim(),
+      }));
+      const shown = (id) => {
+        const el = document.getElementById(id);
+        if (!el) return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 && r.right <= innerWidth + 1 && r.bottom <= innerHeight + 1;
+      };
+      const body = document.getElementById('promptBody');
+      return {
+        header: t('connectionHeader'), rows,
+        application: t('fieldApplication'), process: t('fieldProcess'), local: t('fieldLocal'), remote: t('fieldRemote'),
+        detailsHidden: document.getElementById('requestMore')?.hidden,
+        controls: ['allow', 'block', 'rememberToggle', 'forAWhileToggle'].map((id) => shown(id)),
+        overflowX: body.scrollWidth - body.clientWidth, overflowY: body.scrollHeight - body.clientHeight,
+        width: innerWidth, height: innerHeight,
+      };
+    });
+  const rounds = [
+    { label: 'outgoing-ipv4', q: { op: 'outgoing', name: 'beta', protocol: 'tcp', host: '10.79.0.1', port, v6: false, timeout_ms: 30000 }, dir: 'Outgoing', v6: false },
+    { label: 'incoming-ipv4', q: { op: 'incoming', name: 'alpha', protocol: 'tcp', v6: false }, dir: 'Incoming', v6: false },
+    { label: 'outgoing-ipv6', q: { op: 'outgoing', name: 'alpha', protocol: 'tcp', v6: true, timeout_ms: 30000 }, dir: 'Outgoing', v6: true },
+  ];
+  const seen = [];
+  // The fixture runs one command at a time (an incoming send returns when answered).
+  let pendingCommand = Promise.resolve();
+  const issue = (q) => {
+    const run = pendingCommand.then(() => command(q)).catch((e) => ({ error: String(e) }));
+    pendingCommand = run;
+    return run;
+  };
+  for (const [i, r] of rounds.entries()) {
+    const round = i + 1;
     const t0 = Date.now();
-    await command({ op: 'outgoing', name: 'beta', protocol: 'tcp', host: '10.79.0.1', port, v6: false, timeout_ms: 30000 });
+    void issue(r.q);
     const timeline = [];
     let shown;
-    for (const until = Date.now() + 8000; Date.now() < until && !shown; ) {
+    for (const until = Date.now() + 10000; Date.now() < until && !shown; ) {
       const k = kwinProbe(pid);
-      const n = await app.evaluate(({ BrowserWindow }) => {
-        const w = BrowserWindow.getAllWindows().find((x) => /[?&]request=/.test(x.webContents.getURL()));
-        return w && { url: w.webContents.getURL().replace(/.*request=/, '').slice(0, 12), visible: w.isVisible(), minimized: w.isMinimized() };
-      });
-      const pending = (await list()).events.filter((e) => e.state === 'awaiting-decision').length;
-      timeline.push({ dt: Date.now() - t0, kwin: k, native: n, pending });
-      if (onScreen(k)) shown = Date.now() - t0;
-      else await sleep(250);
+      const x = prompt();
+      const id = x ? new URL(x.url()).searchParams.get('request') : '';
+      timeline.push({ dt: Date.now() - t0, kwin: k, id });
+      if (onScreen(k) && id && !seen.includes(id)) shown = { ms: Date.now() - t0, kwin: k, id };
+      else await sleep(200);
     }
-    evidence['round' + round] = { shown_ms: shown ?? null, timeline };
-    if (!shown) {
-      await prompt()?.screenshot({ path: `${run}/round${round}-offscreen.png` }).catch(() => {});
-      throw Error(`round ${round}: permission window never on screen (KWin) within 8 s; last ${JSON.stringify(timeline.at(-1))}`);
-    }
-    step(`round ${round}: permission window on screen after ${shown} ms (KWin opacity/minimized)`);
+    evidence['round' + round] = { label: r.label, shown: shown ?? null, timeline: timeline.slice(-5) };
+    if (!shown) throw Error(`round ${round} (${r.label}): permission window never on screen (KWin) within 10 s; last ${JSON.stringify(timeline.at(-1))}`);
+    seen.push(shown.id);
     const w = await wait(async () => { const x = prompt(); return x && (await x.locator('#allow').isEnabled()) ? x : undefined; }, 10000, 'allow enabled');
-    // A human click: press, hold for a few frames, release (Playwright's click() fits in one frame).
+    const v = await view(w);
+    evidence['round' + round].view = v;
+    await w.screenshot({ path: `${run}/${round}-${r.label}.png` });
+    assert(v.header.startsWith(r.dir + ' connection - TCP(6)'), `${r.label}: header "${v.header}"`);
+    assert.deepEqual(v.rows.map((x) => x.label), ['From', 'To']);
+    assert.equal(v.rows[r.dir === 'Outgoing' ? 0 : 1].program, true, `${r.label}: program on the ${r.dir === 'Outgoing' ? 'From' : 'To'} side`);
+    assert.equal(v.rows[r.dir === 'Outgoing' ? 1 : 0].program, false);
+    assert(v.application && /^Process \d+/.test(v.process), `${r.label}: application/process ${v.application} / ${v.process}`);
+    for (const f of [v.local, v.remote]) {
+      assert(/Port:\s*\d+$/.test(f), `${r.label}: address/port "${f}"`);
+      assert(r.v6 ? /:/.test(f.replace(/Port:.*/, '')) && !/\[|\]/.test(f) : /^\d+\.\d+\.\d+\.\d+/.test(f), `${r.label}: address format "${f}"`);
+    }
+    assert.equal(v.detailsHidden, true);
+    assert.deepEqual(v.controls, [true, true, true, true], `${r.label}: Allow|Deny|Remember|For a while visible`);
+    assert(v.overflowX <= 0 && v.overflowY <= 0, `${r.label}: no scroll at ${v.width}x${v.height} (${v.overflowX}/${v.overflowY})`);
+    assert.equal(Math.round(shown.kwin.w), 745, 'native window width 745');
+    step(`round ${round} ${r.label}: on screen after ${shown.ms} ms (KWin ${Math.round(shown.kwin.w)}x${Math.round(shown.kwin.h)}); "${v.header}" From "${v.rows[0].text}" To "${v.rows[1].text}"; ${v.application} · ${v.process} · local ${v.local} · remote ${v.remote}`);
+    // Human click: press, hold for a few frames, release.
     const box = await w.locator('#allow').boundingBox();
     await w.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await w.mouse.down();
     await sleep(120);
     await w.mouse.up();
     await wait(async () => !onScreen(kwinProbe(pid)), 5000, 'hidden after Allow');
-    step(`round ${round}: hidden after Allow`);
-    await sleep(1500);
+    step(`round ${round}: hidden after press-hold-release Allow`);
+    await sleep(1200);
   }
+  // Narrow window: a fourth request (incoming IPv6) at 420 px wide, answered with Deny.
+  void issue({ op: 'incoming', name: 'alpha', protocol: 'tcp', v6: true });
+  await wait(async () => { const x = prompt(); const id = x && new URL(x.url()).searchParams.get('request'); return id && !seen.includes(id) && onScreen(kwinProbe(pid)) ? x : undefined; }, 10000, 'fourth card');
+  const w4 = await wait(async () => { const x = prompt(); return x && (await x.locator('#allow').isEnabled()) ? x : undefined; }, 10000, 'allow enabled 4');
+  await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows().find((x) => /[?&]request=/.test(x.webContents.getURL())); w.setSize(420, w.getSize()[1]); });
+  await sleep(700);
+  const n = await view(w4);
+  evidence.narrow = n;
+  await w4.screenshot({ path: `${run}/4-narrow-incoming-ipv6.png` });
+  assert(n.width <= 425 && n.overflowX <= 0, `narrow: no horizontal overflow at ${n.width} (${n.overflowX})`);
+  assert.deepEqual(n.controls.slice(0, 2), [true, true], 'narrow: Allow and Deny visible');
+  assert(n.header.startsWith('Incoming connection - TCP(6)') && n.rows[1].program, 'narrow: incoming, program on To');
+  step(`narrow ${n.width}px: no horizontal overflow; controls visible ${JSON.stringify(n.controls)} (vertical scroll ${n.overflowY > 0 ? 'yes' : 'no'})`);
+  const b4 = await w4.locator('#block').boundingBox();
+  await w4.mouse.move(b4.x + b4.width / 2, b4.y + b4.height / 2);
+  await w4.mouse.down();
+  await sleep(120);
+  await w4.mouse.up();
+  await wait(async () => !onScreen(kwinProbe(pid)), 5000, 'hidden after Deny');
+  step('narrow card: hidden after press-hold-release Deny');
+  await Promise.race([pendingCommand, sleep(15000)]);
   assert.deepEqual(evidence.errors, []);
   evidence.pass = true;
 } catch (e) {

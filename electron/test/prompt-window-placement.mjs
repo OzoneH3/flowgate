@@ -216,10 +216,10 @@ try {
     assert.deepEqual(
       { ...actual.geometry },
       {
-        x: actual.area.x + actual.area.width - 520,
-        y: actual.area.y + actual.area.height - 460,
-        width: 520,
-        height: 460,
+        x: actual.area.x + actual.area.width - 745,
+        y: actual.area.y + actual.area.height - 590,
+        width: 745,
+        height: 590,
       },
     );
     await page.screenshot({ path: path.join(run, label + '.png') });

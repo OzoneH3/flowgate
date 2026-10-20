@@ -1566,3 +1566,128 @@ body.hide-sidebar #activityView > aside { display:none; }
 .prompt-heading span { color:#ddd; font-size:12px; }
 #closePrompt { color:#ddd; }
 #closePrompt:hover { background:#f44539; color:#fff; }
+
+
+.prompt-shell { background:#222; border:1px solid #3a3a3a; }
+.prompt-shell > .prompt-heading { background:#222; color:#f8f8f8; padding:19px 40px 0 15px; min-height:0; height:106px; display:flex; flex-direction:column; gap:12px; }
+.prompt-shell > .prompt-heading strong { font-size:var(--nl-title, 23px); font-weight:600; line-height:1.2; }
+.prompt-shell > .prompt-heading span { font-size:var(--nl-sub, 19px); color:#f0f0f0; line-height:1.2; }
+.prompt-shell #closePrompt { top:32px; right:6px; font-size:30px; line-height:1; color:#aeaeae; padding:0 4px; }
+.prompt-shell #promptBody { padding:7px 11px 12px 7px; background:#222; }
+.prompt-shell #promptBody #requestDetails { background:#222; font-size:var(--nl-font, 20px); }
+#promptBody .nl-card { border:1px solid #363636; background:#222; padding:0 0 10px; }
+#promptBody .nl-card-top { display:block; gap:0; }
+#promptBody .nl-bar { display:flex; align-items:center; height:38px; margin:0; padding:0 0 0 10px; background:#689f38; color:#fff; font-size:var(--nl-font, 20px); font-weight:400; border:0; border-radius:0; }
+.nl-chevron { width:20px; height:20px; min-height:0; padding:0; margin:0 10px 0 0; border:0; background:transparent; position:relative; cursor:pointer; }
+.nl-chevron::before { content:''; position:absolute; left:4px; top:3px; width:8px; height:8px; border:solid #fff; border-width:0 3px 3px 0; transform:rotate(45deg); }
+.nl-chevron[aria-expanded='false']::before { transform:rotate(-45deg); left:2px; top:5px; }
+.nl-chevron:hover { background:#2b2b2b55; border-radius:50%; }
+.nl-direction { width:23px; height:23px; border-radius:50%; background:#fff; margin-right:10px; position:relative; flex:none; }
+.nl-direction::before { content:''; position:absolute; left:5px; top:9px; width:9px; height:5px; background:#689f38; }
+.nl-direction::after { content:''; position:absolute; left:12px; top:6px; border:solid transparent; border-width:5.5px 0 5.5px 7px; border-left-color:#689f38; }
+.nl-direction.nl-in { transform:scaleX(-1); }
+#promptBody .nl-box { background:#373737; }
+#promptBody .nl-row { display:grid; grid-template-columns:81px minmax(0,1fr); min-height:53px; }
+#promptBody .nl-row + .nl-row { min-height:56px; border-top:0; }
+#promptBody .nl-label { display:flex; align-items:center; padding-left:16px; background:#333; color:#ababab; border-right:2px solid #2a2a2a; font-weight:600; }
+#promptBody .nl-row + .nl-row .nl-label { border-top:1px solid #2c2c2c; }
+#promptBody .nl-cell { display:flex; align-items:center; flex-wrap:wrap; column-gap:12px; row-gap:0; padding:6px 10px 6px 17px; min-width:0; color:#f2f2f2; }
+#promptBody .nl-program { margin:0; gap:11px; min-width:0; }
+#promptBody .nl-program .application-icon { flex:0 0 27px; width:27px; height:27px; font-size:22px; line-height:27px; text-align:center; }
+#promptBody .nl-program .application-icon img { width:27px; height:27px; }
+#promptBody .nl-program strong { font-size:var(--nl-name, 22px); font-weight:700; color:#fff; }
+#promptBody .nl-owner { margin:0; font-size:calc(var(--nl-font, 20px) - 3px); color:#bdbdbd; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#promptBody .nl-owner-label { color:#8f8f8f; }
+#promptBody .nl-peer { overflow-wrap:anywhere; }
+#promptBody .nl-fields { display:grid; grid-template-columns:181px minmax(0,1fr); grid-auto-rows:32px; align-items:center; margin:10px 0 0; padding:0 12px 0 19px; gap:0; font-size:var(--nl-font, 20px); }
+#promptBody .nl-fields dt { color:#a0a0a0; white-space:nowrap; }
+#promptBody .nl-fields dd { margin:0; color:#f9f9f9; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+#promptBody .nl-link { color:#2db5f6; }
+#promptBody .nl-port-label { color:#a0a0a0; margin:0 8px 0 18px; }
+#promptBody .nl-links { display:flex; align-items:center; gap:40px; margin:14px 0 0; padding:0 12px 0 20px; min-height:32px; }
+#promptBody .nl-links .details-link { color:#2db5f6; font-size:var(--nl-font, 20px); padding:0; min-height:0; }
+#promptBody .nl-links .expiry { margin:0; font-size:calc(var(--nl-font, 20px) - 2px); color:#9a9a9a; }
+#promptBody .nl-card .decision-dock { position:sticky; bottom:0; background:#222; padding:15px 12px 0 23px; margin:0; }
+#promptBody .nl-card .decision-controls { display:flex; flex-wrap:wrap; align-items:center; column-gap:19px; row-gap:8px; padding:0; }
+#promptBody #requestDetails .decision-controls button.allow, #promptBody #requestDetails .decision-controls button.block { height:44px; min-height:44px; width:107px; padding:0 0 0 2px; font-size:var(--nl-font, 20px); background:#484848; border-color:#484848; display:inline-flex; align-items:center; justify-content:center; gap:0; }
+#promptBody .decision-controls .allow:before, #promptBody .decision-controls .block:before { width:22px; height:22px; line-height:22px; font-size:16px; margin-right:9px; }
+#promptBody #requestDetails .decision-controls label { font-size:var(--nl-font, 20px); gap:11px; }
+#promptBody .decision-controls .remember-toggle { margin-left:11px; }
+#promptBody .decision-controls .for-a-while-toggle { margin-left:12px; }
+#promptBody #requestDetails .decision-controls input[type='checkbox'] { width:27px; min-width:27px; height:27px; min-height:27px; border-width:2px; }
+#promptBody #requestDetails .decision-controls input[type='checkbox']:checked::before { width:13px; height:7px; border-width:0 0 3px 3px; }
+#promptBody .decision-controls select { font-size:calc(var(--nl-font, 20px) - 3px); min-height:32px; }
+#promptBody .nl-card .remember-panel, #promptBody .nl-card .for-a-while-note, #promptBody .nl-card .decision-note, #promptBody .nl-card .request-result { font-size:calc(var(--nl-font, 20px) - 4px); }
+#promptBody .nl-card .request-details-view { padding:8px 12px; font-size:calc(var(--nl-font, 20px) - 5px); }
+#promptBody .nl-card .request-details-view .connection-fields { font-size:inherit; grid-template-columns:120px minmax(0,1fr); }
+.prompt-shell > footer { background:#2b2b2b; }
+/* Main-window sidebar: same structure, compact sizes. */
+#requestsView .nl-bar { display:flex; align-items:center; gap:6px; }
+#requestsView .nl-chevron { width:12px; height:12px; }
+#requestsView .nl-chevron::before { width:5px; height:5px; border-width:0 2px 2px 0; left:2px; top:1px; }
+#requestsView .nl-direction { width:14px; height:14px; margin-right:4px; }
+#requestsView .nl-direction::before { left:3px; top:6px; width:5px; height:3px; }
+#requestsView .nl-direction::after { left:7px; top:3.5px; border-width:3.5px 0 3.5px 4px; }
+#requestsView .nl-box { background:#373737; margin-bottom:6px; }
+#requestsView .nl-row { display:grid; grid-template-columns:46px minmax(0,1fr); min-height:30px; }
+#requestsView .nl-label { display:flex; align-items:center; padding-left:8px; background:#333; color:#ababab; }
+#requestsView .nl-cell { display:flex; align-items:center; flex-wrap:wrap; gap:2px 8px; padding:3px 8px; min-width:0; }
+#requestsView .nl-program { margin:0; }
+#requestsView .nl-owner { font-size:11px; color:#aaa; }
+#requestsView .nl-fields { display:grid; grid-template-columns:110px minmax(0,1fr); gap:3px 6px; margin:4px 0; }
+#requestsView .nl-fields dt { color:#a0a0a0; }
+#requestsView .nl-fields dd { margin:0; overflow-wrap:anywhere; }
+#requestsView .nl-link { color:#2db5f6; }
+#requestsView .nl-port-label { color:#a0a0a0; margin:0 4px 0 10px; }
+.nl-box[hidden], .nl-fields[hidden], .nl-links[hidden] { display:none !important; }
+
+.prompt-shell > .prompt-heading { gap:6px; }
+.prompt-shell > .prompt-heading strong { font-size:24.5px; font-weight:700; }
+.prompt-shell > .prompt-heading span { font-size:21.5px; }
+#promptBody .nl-label { padding-left:13px; }
+#promptBody .nl-cell { padding-left:16px; }
+#promptBody .nl-program { gap:11px; }
+#promptBody .nl-program strong { font-size:25px; }
+#promptBody .nl-card .decision-dock { padding-top:20px; }
+#promptBody #requestDetails .decision-controls button.allow, #promptBody #requestDetails .decision-controls button.block { justify-content:flex-start; padding-left:10px; font-weight:400; }
+#promptBody .decision-controls .allow:before, #promptBody .decision-controls .block:before { margin-right:11px; }
+#promptBody #requestDetails .decision-controls label { font-size:21px; }
+
+#promptBody .nl-cell { padding-left:14px; }
+#promptBody .nl-program { gap:9px; }
+#promptBody .decision-controls .remember-toggle { margin-left:4px; }
+#promptBody .decision-controls .for-a-while-toggle { margin-left:6px; }
+#promptBody .nl-fields { margin-top:8px; grid-auto-rows:31.5px; }
+
+#promptBody .nl-fields { padding-left:16px; }
+#promptBody .nl-fields dt { font-size:21px; }
+#promptBody .nl-fields dd { padding-left:3px; }
+#promptBody .decision-controls .remember-toggle { margin-left:7px; position:relative; top:3px; }
+#promptBody .decision-controls .for-a-while-toggle { margin-left:6px; position:relative; top:3px; }
+
+#promptBody .nl-card .decision-dock { padding-top:24px; }
+#promptBody .nl-peer { margin-left:5px; }
+#promptBody .nl-links { margin-top:17px; }
+
+#promptBody .nl-card .decision-dock { padding-top:21px; }
+#promptBody .decision-controls .remember-toggle, #promptBody .decision-controls .for-a-while-toggle { top:0; }
+#promptBody #requestDetails .decision-controls button.allow, #promptBody #requestDetails .decision-controls button.block { padding-left:8px; font-size:21px; }
+/* Labels (21 px) and values (20 px) share one baseline per 31.5 px row. */
+#promptBody .nl-fields { align-items:baseline; }
+#promptBody .nl-fields dt, #promptBody .nl-fields dd { line-height:31.5px; }
+#promptBody .nl-fields { margin-top:3px; grid-auto-rows:32px; }
+#promptBody .nl-fields dt, #promptBody .nl-fields dd { line-height:32px; }
+#promptBody .nl-links { margin-top:15px; }
+#promptBody .nl-links { margin-top:20px; }
+#promptBody .nl-fields, #requestsView .nl-fields { overflow:visible; }
+/* Narrow permission window: never truncate addresses or ports. */
+@media (max-width: 600px) {
+  #promptBody .nl-fields { grid-template-columns:max-content minmax(0,1fr); column-gap:14px; grid-auto-rows:auto; }
+  #promptBody .nl-fields dd { white-space:normal; overflow-wrap:anywhere; overflow:visible; }
+  #promptBody .nl-port-label { margin-left:12px; }
+}
+@media (max-width: 600px) {
+  #promptBody .nl-fields dd { overflow-wrap:normal; }
+  #promptBody .nl-address { overflow-wrap:anywhere; }
+  #promptBody .nl-port-group { display:inline-block; white-space:nowrap; }
+}
