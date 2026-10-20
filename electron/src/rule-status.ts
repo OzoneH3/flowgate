@@ -1,3 +1,4 @@
+import { matchesApplicationZone } from './application-zones';
 import { zoneRuleLabel } from './network-zones';
 import type { ClientState, Rule } from './protocol';
 import type { Row } from './model';
@@ -40,6 +41,7 @@ export function ruleStatus(row: Row, state: ClientState): RuleStatus {
   for (const rule of state.control.rules) {
     const f = rule.filter;
     if (
+      (row.applicationZone && !matchesApplicationZone(f,row.applicationZone)) ||
       f.process ||
       f.application !== process.application.key ||
       f.revision !== process.application.revision ||
@@ -124,4 +126,13 @@ export function ownConfigured(rules: Rule[], now: number) {
         ? 'unavailable'
         : 'off';
   return { text: configuredPolicy(own, now) + hint, tone, scoped };
+}
+
+// Exact stored configuration of a displayed app/zone filter, never an effective
+// verdict. More than one rule always stays an explicit choice.
+export function zoneConfigured(rules: Rule[], now: number) {
+  if (!rules.length) return {text:'Not set',tone:'none' as const};
+  if (rules.length>1) return {text:`Multiple · ${rules.length}`,tone:'mixed' as const};
+  const state=ruleState(rules[0],now);
+  return {text:state==='allow'?'Allow':state==='block'?'Deny':state==='ask'?'Ask':state==='disabled'?'Disabled':state==='expired'?'Expired':'Inactive',tone:state==='allow'?'allow' as const:state==='block'?'block' as const:state==='ask'?'ask' as const:'off' as const};
 }

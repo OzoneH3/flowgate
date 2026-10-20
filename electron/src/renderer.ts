@@ -71,7 +71,7 @@ import {
   authoritativeZonePolicy,
   authoritativeProcessPolicy,
 } from './policy';
-import { ruleStatus, ruleState, ruleDescription, ownConfigured } from './rule-status';
+import { ruleStatus, ruleState, ruleDescription, ownConfigured, zoneConfigured } from './rule-status';
 import { canDecide, canManageRules } from './protocol';
 import type { Application } from './protocol';
 import { verifiedLaunch } from './provenance';
@@ -583,6 +583,11 @@ function statusStrip(r: Row) {
     } else if (r.kind === 'launch') {
       chip = { glyph: '', text: '', tone: 'none', detail: '' };
       title = `${slot.label}: launch group (display only); rules apply to each process below.`;
+    } else if (r.applicationZone) {
+      const rules=status.available?status[direction]:[];
+      const own=zoneConfigured(rules,status.now);
+      chip={glyph:'',text:own.text,tone:status.available?own.tone:'unavailable',detail:rules.map(rule=>ruleDescription(rule,status.now)).join('\n')};
+      title=`${r.label} · ${direction} · exact application/zone stored rules\n${chip.detail}\nConfigured policy, not a connection verdict. Parent application rule and global zone policies remain separate.`;
     } else if (r.inactive) {
       // Not running: the backend summarizes live processes only; list its stored rules.
       const rules = status.available ? status[direction] : [],
@@ -982,7 +987,7 @@ if (promptID) {
 function buildTree() {
   const a = state?.observation.activity;
   roots = a
-    ? activityTree(a, state.control.rules, $<HTMLInputElement>('search').value, $<HTMLSelectElement>('filter').value, (key,revision,uid)=>applicationCallers.forLaunches(key,revision,uid))
+    ? activityTree(a, state.control.rules, $<HTMLInputElement>('search').value, $<HTMLSelectElement>('filter').value, (key,revision,uid)=>applicationCallers.forLaunches(key,revision,uid), state.control.capabilities?.includes(ZONE_CAPABILITY)?state.control.networkZones:undefined)
     : [];
   if (a) {
     const children = [...networkOverviews(), ...roots];
@@ -1431,11 +1436,16 @@ function renderTree() {
     const displayKey =
       displayApp && JSON.stringify([displayApp.key, displayApp.revision, displayApp.executable]);
     let rowLabel =
-      r.inactive?.contexts?.length ? r.label : r.kind === 'application' && displayKey ? appNames.get(displayKey) || r.label : r.label;
+      r.applicationZone ? r.label : r.inactive?.contexts?.length ? r.label : r.kind === 'application' && displayKey ? appNames.get(displayKey) || r.label : r.label;
     let icon: HTMLElement = installedIcon(
       r.kind !== 'application' ? undefined : r.displayApplication || inactiveApp || rowApplication(r),
       r.kind,
     );
+    if(r.applicationZone){
+      icon=element('span','', 'application-zone-icon');
+      icon.innerHTML='<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 2h14L10 8v6l-4-2V8z"/></svg>';
+      icon.title='Application + '+zoneLabel(r.applicationZone.zone)+' filter';
+    }
     if (r.socket) {
       const direction = initiationPresentation(r.socket);
       icon = element('span', direction.glyph, 'connection-direction ' + direction.className);
@@ -1453,7 +1463,7 @@ function renderTree() {
       : 'No observed connected peer; listening/bound sockets do not light this indicator.';
     led.setAttribute('aria-hidden', 'true');
     const textLabel = element('span', rowLabel, 'row-name-text');
-    if (r.kind === 'application' && displayKey) textLabel.dataset.displayKey = displayKey;
+    if (r.kind === 'application' && displayKey && !r.applicationZone) textLabel.dataset.displayKey = displayKey;
     name.append(led, toggle, icon, textLabel);
     if (r.inactive)
       name.append(
@@ -1480,7 +1490,7 @@ function renderTree() {
     }
     tr.append(statusStrip(r));
     tr.append(
-      element('td', String(r.rows.length), 'numeric'),
+      element('td', r.applicationZone?'—':String(r.rows.length), 'numeric'),
       element('td', r.pid === undefined ? '' : String(r.pid), 'numeric'),
     );
     for (const key of ['downloaded', 'uploaded'] as Metric[])
@@ -1718,6 +1728,17 @@ function renderInfo() {
     );
     commit();
     return;
+  }
+  if(r.applicationZone){
+    const status=ruleStatus(r,state);
+    field(info,'Name',r.label);
+    field(info,'Scope',`${zoneLabel(r.applicationZone.zone)} · ${r.applicationZone.model==='automatic-peer-v1'?'automatic':'legacy configured prefixes'}`);
+    field(info,'Target',`${r.process?.application.display_name||r.process?.application.name||r.inactive?.executable||r.applicationZone.parentLabel} · application/revision/user, not all programs`);
+    field(info,'Rules',[...status.incoming,...status.outgoing].map(x=>ruleDescription(x,status.now)).join('\n')||'No own rule in this zone. Parent/application and global policies may still apply.');
+    field(info,'Edit','Use this row’s In or Out control. Multiple rules are listed separately; parent Any-network rules are not edited here.');
+    field(info,'Measurement','Zone-attributed traffic intervals are not supplied by the backend; no lifetime totals are relabelled.');
+    field(info,'Enforcement',state.control.protection?.state||state.control.enforcement?.state||'Unknown');
+    commit();return;
   }
   if (r.displayApplication) {
     field(info, 'Display application', r.displayApplication.executable);
@@ -2744,6 +2765,7 @@ function consume(next: ClientState) {
       state.control.enforcement?.state,
       state.control.rules,
       state.control.rule_states,
+      state.control.networkZones?.revision,
       state.control.policy
         ? [
             state.control.policy.snapshot.token,

@@ -129,13 +129,13 @@ export class PaneModel {
     }
     this.value.generation = g;
     const a = state.observation.activity;
-    const stamp = JSON.stringify([g, state.observation.connected, a?.sequence, a?.collected, state.control.rules?.map((r) => [r.id, r.version])]);
+    const stamp = JSON.stringify([g, state.observation.connected, a?.sequence, a?.collected, state.control.rules?.map((r) => [r.id, r.version]),state.control.networkZones?.revision]);
     const changed = stamp !== this.activityStamp;
     if (changed) {
       this.activityStamp = stamp;
       this.rows = new Map(
         a
-          ? [overview(a), ...networkOverviews(), ...allRows(activityTree(a, state.control.rules))].map((r) => [r.id, r])
+          ? [overview(a), ...networkOverviews(), ...allRows(activityTree(a, state.control.rules, '', 'all', undefined, state.control.capabilities?.includes('network-zone-policy-v1')?state.control.networkZones:undefined))].map((r) => [r.id, r])
           : [],
       );
     }
@@ -162,7 +162,7 @@ export class PaneModel {
       if (
         v.selection !== this.value.selection &&
         (!a ||
-          ![overview(a), ...networkOverviews(), ...allRows(activityTree(a, state.control.rules))].some(
+          ![overview(a), ...networkOverviews(), ...allRows(activityTree(a, state.control.rules, '', 'all', undefined, state.control.capabilities?.includes('network-zone-policy-v1')?state.control.networkZones:undefined))].some(
             (r) => r.id === v.selection,
           ))
       )

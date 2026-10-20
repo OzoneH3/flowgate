@@ -1,3 +1,4 @@
+import { matchesApplicationZone } from './application-zones';
 import { acceptsPublication } from './publication';
 import { applicationHeading } from './application-heading';
 import { openZoneMigration } from './zone-migration-view';
@@ -25,7 +26,7 @@ import {
   type PolicyRuleRef,
   type DirectionPolicy,
 } from './policy';
-import { ruleStatus, ruleState, ownConfigured } from './rule-status';
+import { ruleStatus, ruleState, ownConfigured, zoneConfigured } from './rule-status';
 import {
   ownRuleChip,
   ownShape,
@@ -81,8 +82,8 @@ export function selectionInventory(row: Row, state: ClientState) {
   );
   const zoneFallback = (state.control.policy?.zones || [])
     .flatMap((z) => [...z.incoming.rules, ...z.outgoing.rules])
-    .filter((r) => zoneIDs.has(r.id));
-  const rules: PolicyRuleRef[] = zone
+    .filter((r) => zoneIDs.has(r.id) && (!row.applicationZone || matchesApplicationZone(r.scope,row.applicationZone)));
+  const unfilteredRules: PolicyRuleRef[] = zone
     ? [...zone.incoming.rules, ...zone.outgoing.rules]
     : authoritative
       ? directions.flatMap((d) => [
@@ -105,9 +106,10 @@ export function selectionInventory(row: Row, state: ClientState) {
             expires: r.expires,
           })),
         );
+  const rules = row.applicationZone ? unfilteredRules.filter(r=>matchesApplicationZone(r.scope,row.applicationZone!)) : unfilteredRules;
   const candidate =
     (app || processPolicy) &&
-    row.rows.find(
+    (row.policyRows || row.rows).find(
       (s) =>
         s.owners.length === 1 &&
         s.ownership_category === 'visible-holder' &&
@@ -282,7 +284,7 @@ export class ActivityPolicy {
       lifetime: 'persistent',
       enabled: true,
       networkZone:
-        this.row.kind === 'network' ? (this.row.id === 'network:local' ? 'local' : 'internet') : '',
+        this.row.applicationZone?.zone || (this.row.kind === 'network' ? (this.row.id === 'network:local' ? 'local' : 'internet') : ''),
       principal: this.state.control.permissions?.can_manage_machine_rules ? 'machine' : 'self',
     };
     this.signature = '';
@@ -428,6 +430,11 @@ export class ActivityPolicy {
   }
   private tierSummary(inv: Inventory, tier: Tier, d: Direction): DirectionPolicy | undefined {
     if (inv.zone) return inv.zone[d];
+    if(this.row?.applicationZone){
+      const base=inv.app?.[d];if(!base)return;
+      const rules=inv.rules.filter(r=>r.scope.direction===d);
+      return {...base,rules,application_rule:rules.length===1?rules[0]:null,scoped_rules:rules.length===1?0:rules.length,configured:rules.length?'scoped':'absent',reason:'Exact application/zone stored configuration; parent and global fallback policies remain separate.'} as DirectionPolicy;
+    }
     if (tier === 'process') return inv.processPolicy?.[d];
     return inv.processPolicy
       ? inv.processPolicy[d === 'incoming' ? 'application_incoming' : 'application_outgoing']
@@ -480,7 +487,7 @@ export class ActivityPolicy {
         const b = button('', `cell:${tier}:${d}`, 'rule-cell');
         if (!inv.authoritative && inv.available && tier === 'application') {
           // Compatibility inventory: whole-target rules only; narrower ones are a "+N scoped" hint.
-          const own = ownConfigured(inv.fallback[d], inv.fallback.now);
+          const own = row.applicationZone ? zoneConfigured(inv.fallback[d], inv.fallback.now) : ownConfigured(inv.fallback[d], inv.fallback.now);
           const [word, ...rest] = own.text.split(' +');
           b.append(blockerGlyph({ glyph: '', text: '', tone: own.tone, detail: '' }));
           b.append(el('span', word, 'cell-text'));
@@ -568,6 +575,7 @@ export class ActivityPolicy {
     const tier = this.defaultTier();
     add.disabled =
       !canManageRules(c) ||
+      !!(row.applicationZone && row.applicationZone.model!==c.networkZones?.model) ||
       (!inv.candidate && !inv.zone) ||
       !c.capabilities?.includes('observed-rule-create-v1') ||
       (tier === 'process' && inv.processPolicy?.state !== 'active');
@@ -577,7 +585,7 @@ export class ActivityPolicy {
         return;
       }
       const source = this.newSource('incoming', tier, inv);
-      if (source) void openRule(source, { activity: true });
+      if (source) void openRule(source, { activity: true, networkZone: this.row?.applicationZone?.zone });
     };
     links.append(add);
     wrap.append(links);
@@ -751,6 +759,7 @@ export class ActivityPolicy {
   private policyPath(inv: Inventory) {
     return (
       !inv.zone &&
+      !this.row?.applicationZone &&
       inv.authoritative &&
       !!this.state?.control.capabilities?.includes(APPLICATION_POLICY_CAPABILITY)
     );
@@ -795,6 +804,7 @@ export class ActivityPolicy {
   private newSource(direction: Direction, tier: Tier, inv: Inventory): RuleSource | undefined {
     const c = this.state!.control,
       candidate = inv.candidate;
+    if(this.row?.applicationZone && this.row.applicationZone.model!==c.networkZones?.model)return;
     if (inv.zone && c.networkZones)
       return {
         zone: {
@@ -843,7 +853,7 @@ export class ActivityPolicy {
     const own = policy ? this.own(inv, direction, tier) : undefined;
     // Never route an application-level action into a scoped rule: the setter acts on the node's
     // own rule only. Older daemons: endpoint-wide rules stand in for it; scoped ones are listed.
-    const rules = policy ? (own ? [own] : []) : inv.zone ? all : all.filter(ownShape);
+    const rules = policy ? (own ? [own] : []) : inv.zone || this.row?.applicationZone ? all : all.filter(ownShape);
     const scoped = all.filter((r) => r.id !== own?.id && !rules.some((x) => x.id === r.id));
     const targetShort = inv.zone
       ? `All programs · ${pop.principal === 'machine' ? 'all users' : 'current user'}`
@@ -906,7 +916,7 @@ export class ActivityPolicy {
         links.append(advanced, remove);
       }
       const addNew = button('New rule…', 'qs-new', 'link-button');
-      addNew.disabled = !!reason || busy;
+      addNew.disabled = !!reason || busy || !!(this.row?.applicationZone && this.row.applicationZone.model!==c.networkZones?.model);
       addNew.onclick = () => {
         pop.mode = 'new';
         this.refresh();
@@ -919,6 +929,7 @@ export class ActivityPolicy {
       const blocked =
         reason ||
         (!supported ? 'Backend update required to create rules from Activity.' : '') ||
+        (this.row?.applicationZone && this.row.applicationZone.model!==c.networkZones?.model ? 'Legacy classifier: edit an existing rule or review explicit migration before creating an automatic-zone rule.' : '') ||
         (!inv.candidate && !inv.zone
           ? 'No live, uniquely owned native socket to verify this target.'
           : '');
@@ -971,6 +982,7 @@ export class ActivityPolicy {
           void openRule(source, {
             activity: true,
             protocol: pop.protocol === '*' ? undefined : pop.protocol,
+            networkZone: this.row?.applicationZone?.zone,
           });
       };
       links.append(advanced);
@@ -1036,7 +1048,7 @@ export class ActivityPolicy {
       zoneControl.append(option);
     }
     zoneControl.value = pop.networkZone;
-    zoneControl.disabled = busy || !!inv.zone || !c.capabilities?.includes(ZONE_CAPABILITY);
+    zoneControl.disabled = busy || !!inv.zone || !!this.row?.applicationZone || !c.capabilities?.includes(ZONE_CAPABILITY);
     zoneControl.title = c.capabilities?.includes(ZONE_CAPABILITY)
       ? zoneDefinitionDetails(c.networkZones)
       : 'Backend update required for Local Network / Internet rules';
