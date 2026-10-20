@@ -65,6 +65,9 @@ export function promptSummary(e: Ev, fallbackName: string): PromptSummary {
   const endpoint = e.flow.remote;
   const app = e.attribution.application;
   if (app?.kind === 'wine' && app.key && app.revision && (e.attribution.provenance?.role==='game' || e.attribution.owners.some(p=>p.application.key!==app.key))) return {title:app.name || app.executable.split('/').pop() || own, owner:'',note:'',ownIdentity:true,launchedBy:launchedByName(e),destination:service||endpoint,endpoint:service?endpoint:'',protocol:e.flow.protocol.toUpperCase()};
+  // A launcher socket is permission for the launcher, never its future game.
+  if (app?.key && app.revision && e.attribution.provenance?.role === 'launcher')
+    return {title: own, owner: '', note: 'Launcher connection; permission applies to this executable', ownIdentity: true, launchedBy: launchedByName(e), destination: service || endpoint, endpoint: service ? endpoint : '', protocol: e.flow.protocol.toUpperCase()};
   // A verified Electron app: the bundle is the application, the runtime owns the socket.
   if (!identity.title && app?.kind === 'electron')
     return {

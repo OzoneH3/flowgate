@@ -185,7 +185,7 @@ export function hierarchy(activity: Activity, query = '', filter = 'all'): Row[]
       s.owners.length === 1 &&
       owners.length === 1 &&
       verifiedLaunch(owners[0].provenance) &&
-      !(owners[0].application.kind === 'wine' && owners[0].application.key && owners[0].application.revision && owners[0].provenance?.role==='game')
+      !(owners[0].application.key && owners[0].application.revision && (owners[0].provenance?.role === 'game' || owners[0].provenance?.role === 'launcher'))
     ) {
       // Verified launch: the helper/launcher/game process sits beneath its game node.
       const p = owners[0],
@@ -245,7 +245,9 @@ export function hierarchy(activity: Activity, query = '', filter = 'all'): Row[]
           id: pk,
           parent: a.id,
           kind: 'process',
-          label: p.thread_group_pid
+          label: p.provenance?.role === 'launcher' && verifiedLaunch(p.provenance)
+            ? launchProcessLabel(p)
+            : p.thread_group_pid
             ? `Worker TID ${p.pid} (process ${p.thread_group_pid})`
             : 'Process ' + p.pid,
           pid: p.pid,
@@ -437,7 +439,13 @@ export function executableName(path: string) {
  */
 export function inactiveApplications(rules: Rule[] | undefined, live: Row[], query = '', filter = 'all'): Row[] {
   if (!rules?.length || filter !== 'all') return [];
-  const running = new Set(allRows(live).filter((r) => r.kind === 'application').map((r) => r.id));
+  const running = new Set(allRows(live).flatMap((r) => {
+    const ids = r.kind === 'application' ? [r.id] : [];
+    const p = r.process;
+    if (p?.application.key && p.application.revision)
+      ids.push(`app:${p.application.key}|${p.application.revision}|uid:${p.uid}`);
+    return ids;
+  }));
   const liveExecutables = new Set(
     allRows(live)
       .filter((r) => r.kind === 'application' && r.process)

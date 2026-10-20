@@ -1,7 +1,7 @@
 // Launch provenance grouping and prompt permission-target text (display only).
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { hierarchy, flatten } = require('../dist/test/model.cjs');
+const { hierarchy, flatten, inactiveApplications } = require('../dist/test/model.cjs');
 const { parseProvenance, parsePermissionTarget } = require('../dist/test/protocol.cjs');
 const { promptIdentity, targetLines, provenanceDetails, launchProcessLabel } = require('../dist/test/provenance.cjs');
 
@@ -40,7 +40,7 @@ function sock(id, owner, remote) {
   return { id, owners: [owner], ownership_category: 'visible-holder', state: 'Established', socket: { protocol: 'tcp', state: 1, local: '[::1]:46838', remote }, traffic: { available: false } };
 }
 
-test('verified helper and launcher rows sit beneath one game node; unrelated python stays separate', () => {
+test('launcher owns its application rule row; game context does not become permission identity', () => {
   const processes = {
     rundll: proc('rundll', 1195586, 'rundll32.exe', '/c/dwproton-11.0-4/files/lib/wine/x86_64-windows/rundll32.exe', prov('helper')),
     umu: proc('umu', 1194845, 'python3.14', '/usr/bin/python3.14', prov('launcher'), 'native'),
@@ -66,15 +66,22 @@ test('verified helper and launcher rows sit beneath one game node; unrelated pyt
   assert.equal(g.displayApplication, undefined);
   assert.deepEqual(
     g.children.map((c) => c.label).sort(),
-    ['python3.14 · umu-run launcher · PID 1194845', 'rundll32.exe (helper) · PID 1195586'],
+    ['rundll32.exe (helper) · PID 1195586'],
   );
   assert.ok(g.children.every((c) => c.kind === 'process' && c.process && c.parent === g.id));
-  assert.equal(g.rows.length, 2);
+  assert.equal(g.rows.length, 1);
   const apps = roots.filter((r) => r.kind === 'application');
-  assert.equal(apps.length, 3, 'the game has its own executable rule row; Python and helpers remain separate');
+  assert.equal(apps.length, 4, 'the game has its own executable rule row; Python and helpers remain separate');
   assert.ok(apps.some(a=>a.label==='DS2.exe' && a.process.application.key===processes.ds2.application.key));
   assert.ok(apps.some((a) => a.label === 'python3.14' && a.rows[0].id === 's4'));
   assert.ok(apps.some((a) => a.label === 'rundll32.exe' && a.rows[0].id === 's5'));
+  const launcherApp = apps.find(a => a.process?.id === 'umu');
+  assert.equal(launcherApp.label, 'python3.14');
+  const rule = {executable: processes.umu.executable, filter: {application: processes.umu.application.key, revision: 'r', uid: 1000}};
+  assert.deepEqual(inactiveApplications([rule], roots), [], 'live launcher must not also appear inactive with its rule');
+  const helperRule = {executable: processes.rundll.executable, filter: {application: processes.rundll.application.key, revision: 'r', uid: 1000}};
+  assert.deepEqual(inactiveApplications([helperRule], roots), [], 'grouped live helper also must not appear inactive');
+  assert.equal(inactiveApplications([{...rule, filter: {...rule.filter, revision: 'old'}}], roots).length, 1, 'different revision is not merged');
   // Search by game finds the helper rows.
   assert.equal(hierarchy({ rows, processes }, 'death stranding').flatMap((r) => r.rows).length, 3);
   const flat = flatten(roots, new Set([g.id]), 'name', false).map((x) => x.row.id);
@@ -194,4 +201,13 @@ test('prompt card: game heading, via hint and explicit scopes precede Allow/Deny
   const details = byId('requestMore').textContent;
   assert.match(details, /rundll32\.exe owns this socket/);
   assert.match(details, /uid\+wine\+prefix\+executable path/);
+});
+
+test('launcher prompt names the actual permission target rather than the future game', () => {
+  const { promptSummary } = require('../dist/test/prompt-summary.cjs');
+  const owner = proc('umu', 123, 'python3.14', '/usr/bin/python3.14', prov('launcher'), 'native');
+  const summary = promptSummary(event(owner), 'fallback');
+  assert.equal(summary.title, 'python3.14');
+  assert.equal(summary.ownIdentity, true);
+  assert.match(summary.note, /Launcher connection/);
 });
