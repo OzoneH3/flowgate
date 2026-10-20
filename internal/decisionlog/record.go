@@ -35,7 +35,6 @@ type Flow struct {
 	Interface    uint32                `json:"interface_index"`
 }
 type Application struct {
-	Prefix     string `json:"prefix,omitempty"`
 	Key        string `json:"key"`
 	Name       string `json:"name"`
 	Kind       string `json:"kind"`
@@ -43,9 +42,8 @@ type Application struct {
 	Revision   string `json:"revision"`
 }
 type Attribution struct {
-	RuntimeTable *identity.TableEvidence `json:"runtime_table,omitempty"`
-	Status       string                  `json:"status"`
-	Reason       string                  `json:"reason"`
+	Status string `json:"status"`
+	Reason string `json:"reason"`
 }
 
 // RuleSnapshot is the rule exactly as evaluated at decision time. Version is a

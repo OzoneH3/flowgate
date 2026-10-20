@@ -10,7 +10,6 @@ import (
 	"flowgate/internal/monitor"
 	"flowgate/internal/policy"
 	"flowgate/internal/queue"
-	"flowgate/internal/store"
 	"flowgate/internal/udpaccount"
 	"fmt"
 	"os"
@@ -178,13 +177,10 @@ func serve() error {
 	parent := fs.String("parent-netns", "", "original namespace identity (required)")
 	direction := fs.String("direction", "incoming", "incoming/outgoing")
 	timeout := fs.Duration("timeout", 15*time.Second, "pending timeout")
-	observePrefixes := fs.String("observe-prefixes", "", "comma-separated authorized workspace prefixes for on-demand Wine observer tests")
-	observerScratch := fs.String("observer-scratch", "", "private existing workspace scratch for on-demand observer")
 	prefixes := fs.String("attach-prefixes", "", "comma-separated already-running workspace prefixes")
 	bins := fs.String("runtime-bins", "/usr/bin", "comma-separated trusted runtime bin directories")
 	helper := fs.String("wine-helper", ".workspace/windows/table-probe.exe", "workspace PE census helper")
 	rulepath := fs.String("rules", "", "JSON rule array")
-	labDatabase := fs.String("database", "", "optional private workspace SQLite rules for receiver acceptance")
 	decisionPath := fs.String("decision-log", "", "optional absolute decision log path in a private 0700 directory")
 	fs.Parse(os.Args[2:])
 	if *parent == "" || *parent == identity.NetNS() {
@@ -207,33 +203,6 @@ func serve() error {
 	e := daemon.New(*timeout)
 	defer e.CloseProcessTargets()
 	e.Mode = "isolated-lab"
-	if *labDatabase != "" {
-		if *rulepath != "" {
-			return fmt.Errorf("choose lab database or JSON rules")
-		}
-		dir, er := identity.WorkspaceObserverScratch(filepath.Dir(*labDatabase))
-		if er != nil {
-			return er
-		}
-		st, er := os.Stat(dir)
-		if er != nil || st.Mode().Perm()&0077 != 0 {
-			return fmt.Errorf("private workspace database directory required")
-		}
-		db, er := store.OpenExclusive(*labDatabase)
-		if er != nil {
-			return er
-		}
-		defer db.Close()
-		rules, er := db.Load()
-		if er != nil {
-			return er
-		}
-		if er = e.SetRules(rules); er != nil {
-			return er
-		}
-		e.SaveRules = db.Replace
-	}
-
 	if *decisionPath != "" {
 		if !filepath.IsAbs(*decisionPath) {
 			return fmt.Errorf("--decision-log must be absolute")
@@ -244,22 +213,7 @@ func serve() error {
 		e.Decisions = openDecisionLog(*decisionPath, e.Generation, e.Mode, true)
 		defer func() { e.FinalizePending(); e.Decisions.Close() }()
 	}
-	if *observePrefixes != "" {
-		hp, er := filepath.Abs(*helper)
-		if er != nil {
-			return er
-		}
-		sp, er := identity.WorkspaceObserverScratch(*observerScratch)
-		if er != nil {
-			return er
-		}
-		manager, er := identity.NewWineObservers(identity.WineObserverOptions{Helper: hp, RuntimeBins: strings.Split(*bins, ","), Prefixes: strings.Split(*observePrefixes, ","), Scratch: sp, UID: uint32(os.Geteuid())})
-		if er != nil {
-			return er
-		}
-		defer manager.Close()
-		e.Resolve = manager.Resolve
-	} else if *prefixes != "" {
+	if *prefixes != "" {
 		if os.Getenv("FLOWGATE_WINE_TABLE_RUNNER") != "" {
 			return fmt.Errorf("choose explicit attachment or legacy environment, not both")
 		}

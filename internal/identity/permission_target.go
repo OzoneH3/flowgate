@@ -58,9 +58,6 @@ func ShortPrefix(p string) string {
 
 // principalOwner is the single process the attribution names (broker client or sole owner).
 func (a Attribution) principalOwner() *Process {
-	if a.Table != nil {
-		return nil
-	}
 	if a.Association != nil {
 		for i := range a.Owners {
 			if a.Owners[i].PID == a.Association.ClientPID {
@@ -92,8 +89,6 @@ func DescribePermissionTarget(a Attribution) *PermissionTarget {
 	uid := a.Principal().UID
 	name := app.Name
 	switch {
-	case a.Table != nil:
-		t.ForAWhile = "Unavailable: Windows application identified, but Linux requester generation is not established"
 	case !a.VisibilityComplete:
 		t.ForAWhile = "Unavailable: socket-holder visibility is incomplete"
 	case len(a.Owners) != 1:
@@ -138,15 +133,12 @@ func DescribePermissionTarget(a Attribution) *PermissionTarget {
 		t.Prefix = app.Prefix
 		t.KeyBasis = "uid+wine+prefix+executable path; revision = file stamp"
 		t.Label = fmt.Sprintf("%s in prefix %s", name, short)
-		if a.Table != nil {
-			t.Label = name + " · via wineserver"
-		}
 		t.Remember = fmt.Sprintf("%s (%s) in prefix %s, UID %d, this file revision", name, app.Executable, short, uid)
 		role := ""
 		if prov != nil && prov.Evidence == "verified" {
 			role = prov.Role
 		}
-		if role == "game" || a.Table != nil {
+		if role == "game" {
 			t.Kind = "application"
 			t.SharedWithNote = fmt.Sprintf("Any process running %s from this path in prefix %s is covered; another prefix or a changed file is not", name, short)
 		} else {

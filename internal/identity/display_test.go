@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
-	"time"
 )
 
 func TestDeletedExecutableDisplayRetainsRunningIdentity(t *testing.T) {
@@ -24,19 +23,6 @@ func TestDeletedExecutableDisplayRetainsRunningIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { child.Process.Kill(); child.Wait() }()
-	// Start may return while /proc still exposes the pre-exec child image.
-	// Establish the fixture exec boundary before deleting its executable.
-	until := time.Now().Add(time.Second)
-	for {
-		actual, _ := os.Readlink(fmt.Sprintf("/proc/%d/exe", child.Process.Pid))
-		if actual == path {
-			break
-		}
-		if time.Now().After(until) {
-			t.Fatal("fixture did not exec selected image")
-		}
-		time.Sleep(time.Millisecond)
-	}
 	if err = os.Remove(path); err != nil {
 		t.Fatal(err)
 	}

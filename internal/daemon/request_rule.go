@@ -122,7 +122,7 @@ func (e *Engine) retainRequestLocked(v *Event, a identity.Attribution) {
 			r.MountNS = ""
 		}
 	}
-	if len(a.Owners) == 1 && a.Table == nil {
+	if len(a.Owners) == 1 {
 		r.PID, r.Start = a.Owners[0].PID, a.Owners[0].Start
 	}
 	if p, err := leaseOwner(a); err == nil {

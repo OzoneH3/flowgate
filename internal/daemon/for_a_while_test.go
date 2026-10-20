@@ -352,12 +352,3 @@ func TestForAWhileSettlesWaitingRequestsOfSameProcess(t *testing.T) {
 		}
 	}
 }
-
-func TestWineTableNeverLeasesTheBrokerProcess(t *testing.T) {
-	p := whileOwner(42, "10", 1000)
-	a := whileAttribution(p, "game", "revision", "/games/a.exe")
-	a.Table = &identity.TableEvidence{UID: 1000, Owners: []identity.WindowsOwner{{PID: 7, Created: 1, Image: `Z:\games\a.exe`}}}
-	if _, err := leaseOwner(a); err == nil {
-		t.Fatal("game Windows owner silently became a wineserver process lease")
-	}
-}

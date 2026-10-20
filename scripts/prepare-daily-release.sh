@@ -13,8 +13,6 @@ test ! -f "$bundle/manifest.json" || { echo "Bundle exists; inspect it instead o
 go build -trimpath -ldflags "-X main.sourceRevision=$revision" -o "$bundle/flowgate" ./cmd/flowgate
 go build -trimpath -o "$bundle/native" ./fixtures/process-rule
 cp "$bundle/native" "$bundle/native-other"
-scripts/build-wine-table.sh
-cp .workspace/windows/table-probe.exe "$bundle/wine-owner-observer.exe"
 # Reuse exact accepted native collector binaries; do not reopen kernel acceptance.
 test "$(sha256sum .workspace/tcp-initiation-collector | cut -d' ' -f1)" = 86b6e8844ac8f73c357673471e726e4fdeff5b5edbc59e4331e2ab5e1c5312b3
 cp .workspace/tcp-initiation-collector "$bundle/tcp-initiation"

@@ -222,13 +222,6 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
     'Process',
     e.attribution.owners.map((x) => `PID ${x.pid} · start ${x.start_ticks} · UID ${x.uid}`).join('\n') || 'Unavailable',
   );
-  const table=e.attribution.runtime_table;
-  if(table){
-   row(app,'Windows handle owner',table.windows_handle_holders.map(p=>`Windows PID ${p.pid} · created ${p.creation_time}\n${p.image}\n${p.address}:${p.port} → ${p.remote_address}:${p.remote_port} · TCP state ${p.state}`).join('\n\n')||'Unavailable');
-   row(app,'Wine broker',`PID ${table.broker_pid} · start ${table.broker_start_ticks} · Wine ${table.runtime}`);
-   row(app,'Socket cookie',table.socket_cookie);
-   row(app,'Wine evidence',table.method+'; FD holder, Windows handle owner and socket creator are distinct facts');
-  }
   row(app, 'Attribution', e.attribution.status);
   row(app, 'Reason', e.attribution.reason);
   row(

@@ -26,7 +26,6 @@ type RuntimeSession struct {
 }
 
 var supportedBrokers = map[string]string{
-	"c9a0c615ddd8ba168b9fdf5efaaa4769cb2369782c766b579157ed0a5520977e": "11.20",
 	"b724233cd9e71f529c0ae30c090c862ac0d0ecfe760e604a2e1cdae160ab9fa6": "11.19",
 	"3f84ad1bc5116a82ec54ee15588f000dbc5d570c9c77c6007d82545d375fd792": "11.0",
 }
