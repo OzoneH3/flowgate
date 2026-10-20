@@ -182,6 +182,13 @@ function promptAnswered(sender: Electron.WebContents) {
   const w = prompt;
   if (!w || w.isDestroyed() || w.webContents !== sender || promptIdle) return;
   promptIdle = true;
+  // The click that answered is the release: a hidden window's pointer-up/key-up
+  // report arrives a frame later or never, and must not hold the input-release
+  // guard forever (no further popup would ever appear). The next card is still
+  // paced and ignores input until its own layout settles.
+  promptPointerDown = false;
+  pressedPromptKeys.clear();
+  rendererPromptKeys.clear();
   if (promptKDEReady) void resizeKDEPrompt(profile, process.pid, w.id, w.getBounds(), false);
   else w.hide();
   pacePrompt();
@@ -1042,7 +1049,14 @@ app.whenReady().then(async () => {
       value.keysDown.some((k: unknown) => !['Enter', ' ', 'Escape'].includes(String(k)))
     )
       throw Error('Invalid permission layout');
-    if (promptIdle) return;
+    // Input release is tracked even while hidden (a release after the answering
+    // click must clear the guard); only geometry is ignored when idle.
+    if (promptIdle) {
+      if (!value.pointerDown) promptPointerDown = false;
+      if (value.keysDown.length === 0) rendererPromptKeys.clear();
+      if (transitionUntil) pacePrompt();
+      return;
+    }
     const senderURL = new URL(e.senderFrame!.url),
       currentRef = promptRefs.get(e.sender.id)!;
     if (

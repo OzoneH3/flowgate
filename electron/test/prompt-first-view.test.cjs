@@ -95,3 +95,11 @@ test('main: a valid submission hides the permission window and is tracked; no pa
   const backend = fs.readFileSync(path.join(__dirname, '../src/backend.ts'), 'utf8');
   assert.match(backend, /this\.closedEnded\.add\(settlementKey\(c\.generation, c\.id\)\)/, 'saved ended request leaves the queue');
 });
+
+test('main: answering clears the input-release guard (a hidden window never reports the release)', () => {
+  const main = fs.readFileSync(path.join(__dirname, '../src/main.ts'), 'utf8');
+  const answered = main.slice(main.indexOf('function promptAnswered'), main.indexOf('function trackResult'));
+  for (const reset of ['promptPointerDown = false', 'pressedPromptKeys.clear()', 'rendererPromptKeys.clear()'])
+    assert.ok(answered.includes(reset), reset);
+  assert.match(main, /if \(promptIdle\) \{\n\s*if \(!value\.pointerDown\) promptPointerDown = false;/, 'release tracked while idle');
+});

@@ -73,6 +73,16 @@ fi
 
 # --- GUI ----------------------------------------------------------------------
 [ $gui = 1 ] || exit 0
+# A GUI from an earlier bundle would keep running beside the new one (two
+# permission windows); close it first. The daemon and protection are unaffected.
+old=$(pgrep -u "$(id -u)" -f "$root/.workspace/automatic-zone-releases/[^ ]*/runtime/electron --ozone-platform" || true)
+if [ -n "$old" ]; then
+  say "Closing running FlowGate GUI ($(echo $old | tr '\n' ' '))"
+  if [ $dry = 0 ]; then
+    kill $old 2>/dev/null || true
+    i=0; while [ $i -lt 50 ] && kill -0 $old 2>/dev/null; do sleep 0.1; i=$((i+1)); done
+  fi
+fi
 say "Starting FlowGate GUI ($rev)"
 if [ $dry = 1 ]; then
   printf '    (dry run) %s\n' "$bundle/launch-ui --observer /run/flowgate-api/daemon.sock.monitor --control /run/flowgate-api/daemon.sock"
