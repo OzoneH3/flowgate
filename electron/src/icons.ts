@@ -1,3 +1,4 @@
+import { installedFlatpakName } from './flatpak-names';
 import { peIconToPng, peDisplayName, readPEResources } from './icon-pe';
 import { icoToPng } from './icon-ico';
 import { desktopGameExecutable } from './desktop-game';
@@ -59,6 +60,7 @@ export function safeIcon(data: Buffer, ext: string): boolean {
 }
 export class ApplicationIcons {
   private allowed = new Map<string, Application>();
+  private owners = new Map<string, number>();
   private cache = new Map<string, Promise<string | null>>();
   private images = new Map<string, { data: Buffer; type: string }>();
   private ready: Promise<void>;
@@ -80,6 +82,7 @@ export class ApplicationIcons {
       ...(process.env.XDG_DATA_DIRS || '/usr/local/share:/usr/share').split(':'),
     ],
     private searchPath = (process.env.PATH || '/usr/bin:/bin').split(':'),
+    private flatpakRoots = [path.join(home, '.local/share/flatpak/app'), '/var/lib/flatpak/app'],
   ) {
     this.iconRoots = [
       path.join(home, '.icons'),
@@ -89,15 +92,17 @@ export class ApplicationIcons {
   }
   observe(state: ClientState) {
     this.allowed.clear();
-    const add = (a?: Application) => {
+    this.owners.clear();
+    const add = (a?: Application, uid?: number) => {
       if (a?.key && a.executable && this.allowed.size < 4096) {
         const key = iconKey(a);
+        if (Number.isInteger(uid) && uid! >= 0) this.owners.set(key, uid!);
         // Live application records come first. Later display/rule fallbacks
         // must not discard their verified backing file or hosted identity.
         this.allowed.set(key, { ...a, ...this.allowed.get(key) });
       }
     };
-    for (const p of Object.values(state.observation.activity?.processes || {})) add(p.application);
+    for (const p of Object.values(state.observation.activity?.processes || {})) add(p.application, p.uid);
     for (const r of state.observation.activity?.rows || []) {add(r.display_application); add(r.runtime_application?.application);}
     for (const e of state.control.events) {
       add(e.attribution.application);
@@ -112,7 +117,7 @@ export class ApplicationIcons {
     // Not-running applications with stored rules (Activity lists them too).
     for (const r of state.control.rules || [])
       if (r.filter.application && r.filter.revision && r.executable)
-        add({ key: r.filter.application, revision: r.filter.revision, name: r.executable.split('/').pop() || '', executable: r.executable });
+        add({ key: r.filter.application, revision: r.filter.revision, name: r.executable.split('/').pop() || '', executable: r.executable }, r.filter.uid);
   }
   private async executable(token: string) {
     for (const p of path.isAbsolute(token)
@@ -371,10 +376,15 @@ export class ApplicationIcons {
     > = Object.create(null);
     for (const [key, icon] of Object.entries(icons)) {
       const app = this.allowed.get(key);
-      if (app?.kind === 'native' && app.host_executable) {
+      if (app && (!app.kind || app.kind === 'native')) {
         if (!this.flatpakNames.has(key)) {
           if (this.flatpakNames.size >= 2048) this.flatpakNames.delete(this.flatpakNames.keys().next().value!);
-          this.flatpakNames.set(key, flatpakDisplayName(app.host_executable));
+          this.flatpakNames.set(key, (async () => {
+            const live = app.host_executable && await flatpakDisplayName(app.host_executable);
+            if (live) return live;
+            const uid = this.owners.get(key);
+            return uid === undefined ? undefined : installedFlatpakName(app, uid, this.flatpakRoots, this.home, flatpakDisplayName);
+          })());
         }
         const name = await this.flatpakNames.get(key);
         if (name) {
