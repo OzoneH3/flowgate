@@ -21,6 +21,22 @@ if not source_ready:
  for flag in ['--tcp-initiation-helper','--tcp-initiation-cgroup']:
   n=args.index(flag);del args[n:n+2]
  args.remove('--tcp-initiation-observe-shared')
+
+# Discover only hash-pinned brokers for the API UID. Optional root-owned config
+# restricts observation to explicit runtimes/prefixes. This never creates a rule;
+# helpers join an existing broker as its desktop UID, never as root.
+args.extend(['--wine-helper',str(here/'wine-owner-observer.exe')])
+wine_config=pathlib.Path('/etc/flowgate/wine.json')
+if wine_config.exists():
+ st=wine_config.stat()
+ if st.st_uid!=0 or st.st_mode&0o022:raise SystemExit('Wine observer configuration must be root-owned and non-writable')
+ if st.st_size>65536:raise SystemExit('Wine observer configuration exceeds limit')
+ wc=json.loads(wine_config.read_text())
+ if wc.get('schema')!=1 or not isinstance(wc.get('runtime_bins'),list) or not 1<=len(wc['runtime_bins'])<=4 or not isinstance(wc.get('prefixes'),list) or not 1<=len(wc['prefixes'])<=32:raise SystemExit('Invalid Wine observer configuration')
+ for key,flag in [('runtime_bins','--wine-runtime-bin'),('prefixes','--wine-prefix')]:
+  for value in wc[key]:
+   if not isinstance(value,str) or not pathlib.Path(value).is_absolute():raise SystemExit('Absolute Wine observer paths required')
+   args.extend([flag,value])
 for kind,flag in [('local','--zone-local'),('internet','--zone-internet')]:
  for prefix in zones[kind]:args.extend([flag,prefix])
 os.execve(args[0],args,{'PATH':'/usr/sbin:/usr/bin:/sbin:/bin','LANG':'C.UTF-8','NOTIFY_SOCKET':os.environ.get('NOTIFY_SOCKET','')})

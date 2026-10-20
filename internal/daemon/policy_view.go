@@ -342,7 +342,11 @@ func (e *Engine) PolicyView(generation, expected string, uid uint32, admin bool,
 			continue
 		}
 		p, ok := activity.Processes[row.Owners[0]]
-		if !ok || p.Start == "" || !identity.LiveRuleable(p.Application) || (!admin && p.UID != uid) {
+		runtime := row.RuntimeApplication
+		if runtime != nil && ok && runtime.UID == p.UID && runtime.Application.Kind == "wine" && runtime.Application.Key != "" && runtime.Application.Revision != "" {
+			p.Application = runtime.Application
+		}
+		if !ok || p.Start == "" || (runtime == nil && !identity.LiveRuleable(p.Application)) || (!admin && p.UID != uid) {
 			assoc.Reason = "Supported authorized native process identity unavailable"
 			out.Rows = append(out.Rows, assoc)
 			continue
@@ -370,6 +374,9 @@ func (e *Engine) PolicyView(generation, expected string, uid uint32, admin bool,
 			group.ProcessIDs = append(group.ProcessIDs, p.ID)
 		}
 		assoc.Status = "observed_native"
+		if runtime != nil {
+			assoc.Status = "observed_runtime"
+		}
 		assoc.Reason = "Single visible process association in this Activity snapshot; not enforcement ownership authority"
 		assoc.ApplicationRef = ref
 		out.Rows = append(out.Rows, assoc)

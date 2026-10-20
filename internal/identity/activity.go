@@ -31,9 +31,15 @@ type ActivityProcess struct {
 	// application.revision is the bundle's). Pins process-instance rules.
 	ExecutableRevision string `json:"executable_revision,omitempty"`
 }
+type RuntimeApplication struct {
+	Application Application   `json:"application"`
+	UID         uint32        `json:"uid"`
+	Evidence    TableEvidence `json:"evidence"`
+}
 type ActivityRow struct {
-	NetworkScope NetworkScope `json:"network_scope"`
-	Initiation   Initiation   `json:"initiation"`
+	RuntimeApplication *RuntimeApplication `json:"runtime_application,omitempty"`
+	NetworkScope       NetworkScope        `json:"network_scope"`
+	Initiation         Initiation          `json:"initiation"`
 	// Display-only association; never consulted by Resolve or policy. Owners remain complete.
 	DisplayApplication *Application `json:"display_application,omitempty"`
 	OwnershipCategory  string       `json:"ownership_category"`

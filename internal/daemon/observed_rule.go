@@ -105,6 +105,9 @@ func (e *Engine) verifyCreation(target ObservedTarget, p identity.ActivityProces
 	if !admin && p.UID != uid {
 		return identity.Process{}, mutationError("forbidden", "Target outside authorized UID scope")
 	}
+	if p.Application.Kind == "wine" {
+		return e.verifyRuntimeCreation(target, p)
+	}
 	verify := e.verifyObserved
 	if verify == nil {
 		verify = identity.VerifyObservedNative
@@ -164,13 +167,21 @@ func (e *Engine) PreviewObservedRule(generation string, target ObservedTarget, d
 		return ObservedPreview{}, mutationError("forbidden", "Target outside authorized UID scope")
 	}
 	found := false
+	runtimeTarget := false
 	for _, row := range s.Rows {
 		if row.ID == target.RowID && len(row.Owners) == 1 && row.Owners[0] == target.ProcessID && row.OwnershipCategory == "visible-holder" {
 			found = true
+			if r := row.RuntimeApplication; r != nil && r.UID == p.UID && r.Application.Kind == "wine" && r.Application.Key != "" && r.Application.Revision != "" {
+				if processScope(draft) == "process" {
+					return ObservedPreview{}, mutationError("unsupported_process", "Windows socket owner does not establish a Linux process rule target")
+				}
+				p.Application = r.Application
+				runtimeTarget = true
+			}
 			break
 		}
 	}
-	if !ok || !found || p.ID != target.ProcessID || p.PID <= 0 || p.Start == "" || !identity.LiveRuleable(p.Application) {
+	if !ok || !found || p.ID != target.ProcessID || p.PID <= 0 || p.Start == "" || (!runtimeTarget && !identity.LiveRuleable(p.Application)) {
 		if why := identity.RuntimeRuleBlocked(&p.Application); ok && found && why != "" {
 			return ObservedPreview{}, mutationError(identity.CodeIdentityUnverifiable, why)
 		}
@@ -397,4 +408,36 @@ func (e *Engine) canonicalPolicyRuleLocked(c policy.Rule) *policy.Rule {
 		}
 	}
 	return nil
+}
+
+// Runtime application creation never assigns the broker a Windows process identity.
+// The returned Process retains the broker generation solely as a namespace/file
+// witness; callers prohibit process scope before reaching this path.
+func (e *Engine) verifyRuntimeCreation(target ObservedTarget, expected identity.ActivityProcess) (identity.Process, error) {
+	fail := func() (identity.Process, error) {
+		return identity.Process{}, mutationError("stale_target", "Windows socket owner or broker generation changed; refresh Activity")
+	}
+	if e.Activity == nil {
+		return fail()
+	}
+	s := e.Activity()
+	if s.Error != "" || s.Collected.IsZero() || e.Now().Sub(s.Collected) > 45*time.Second {
+		return fail()
+	}
+	for _, r := range s.Rows {
+		if r.ID != target.RowID || len(r.Owners) != 1 || r.Owners[0] != target.ProcessID || r.RuntimeApplication == nil {
+			continue
+		}
+		a := e.Resolve(identity.Flow{Protocol: r.Socket.Protocol, Direction: "outgoing", NetNS: r.Socket.NetNS, Local: r.Socket.Local, Remote: r.Socket.Remote})
+		if a.Status != "corroborated-runtime-table" || a.Application == nil || a.Table == nil || len(a.Sockets) != 1 || a.Sockets[0].Cookie != r.Socket.Cookie || a.Table.UID != expected.UID || a.Application.Key != expected.Application.Key || a.Application.Revision != expected.Application.Revision {
+			return fail()
+		}
+		for _, p := range a.Owners {
+			if p.PID == expected.PID && p.Start == expected.Start && p.UID == expected.UID && p.PID == a.Table.BrokerPID && p.Start == a.Table.BrokerStart {
+				p.Application = *a.Application
+				return p, nil
+			}
+		}
+	}
+	return fail()
 }

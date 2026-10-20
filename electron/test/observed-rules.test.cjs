@@ -374,3 +374,15 @@ test('stored Ask needs stored-ask-v1; with it the application policy action is a
   assert.equal(f.requests.at(-1).observed_draft.action, 'ask');
   assert.equal(p.verifiedRule.action, 'ask');
 });
+
+test('runtime row drafts bind Windows application and prohibit broker process scope',async(t)=>{
+ const f=await fixture(t);
+ const row=f.state.observation.activity.rows[0];
+ row.runtime_application={uid:1000,application:{key:'windows-image',revision:'pe-stamp',executable:'/prefix/Alpha.exe',name:'Alpha.exe'},evidence:{}};
+ f.state.observation.activity.processes['1:start'].application={key:'',revision:'',executable:'/runtime/wineserver',name:'wineserver'};
+ const d=await f.engine.draft(f.source);
+ assert.equal(d.rule.filter.application,'windows-image');
+ assert.equal(d.rule.executable,'/prefix/Alpha.exe');
+ f.state.control.capabilities.push('process-instance-rules-v1');
+ await assert.rejects(f.engine.draft({...f.source,target_scope:'process'}),/not a Linux process rule/);
+});

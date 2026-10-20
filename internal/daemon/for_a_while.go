@@ -89,6 +89,9 @@ func leaseOwner(a identity.Attribution) (identity.Process, error) {
 	if app == nil || app.Key == "" || app.Revision == "" || a.Principal() == nil {
 		return identity.Process{}, mutationError("process_scope_unavailable", "For a while needs a verified application identity")
 	}
+	if a.Table != nil {
+		return identity.Process{}, mutationError("process_scope_unavailable", "Runtime table identifies a Windows application; no verified Linux requester generation for a process lease")
+	}
 	if !a.VisibilityComplete {
 		return identity.Process{}, mutationError("process_scope_unavailable", "For a while needs complete socket-holder visibility")
 	}

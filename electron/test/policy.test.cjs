@@ -276,3 +276,13 @@ test('application_rule, scoped_rules and rule kind parse; old daemons stay undef
   });
   assert.throws(() => parsePolicyView(v), /Invalid application rule/);
 });
+
+test('runtime application policy uses verified socket association, never broker identity',()=>{
+ const v=view();v.rows[0].status='observed_runtime';
+ const r={kind:'application',runtimeApplication:{application:{key:'app',revision:'rev'},uid:1000},rows:[{id:'socket'}]};
+ assert.equal(authoritativePolicy(r,state(v)).application.ref,'ref');
+ r.runtimeApplication.application.key='another-prefix';
+ assert.equal(authoritativePolicy(r,state(v)).application,undefined);
+ r.runtimeApplication.application.key='app';v.rows[0].status='observed_native';
+ assert.equal(authoritativePolicy(r,state(v)).application,undefined);
+});

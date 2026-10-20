@@ -23,6 +23,7 @@ export function addApplicationZones(roots: Row[], rules: Rule[], definition?: Ne
     const p = row.process,
       identity =
         row.inactive ||
+        (row.runtimeApplication && {...row.runtimeApplication.application,uid:row.runtimeApplication.uid}) ||
         (p && { key: p.application.key, revision: p.application.revision, uid: p.uid });
     if (!identity?.key || !identity.revision) return;
     const own = rules.filter(
@@ -59,6 +60,7 @@ export function addApplicationZones(roots: Row[], rules: Rule[], definition?: Ne
           label: `${row.label}, ${zone === 'local' ? 'Local Network' : 'Internet'}${suffix}`,
           rows: [],
           children: [],
+          runtimeApplication:row.runtimeApplication,
           process: p,
           inactive: row.inactive,
           applicationZone: scope,

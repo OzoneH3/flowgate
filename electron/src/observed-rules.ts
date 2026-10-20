@@ -101,7 +101,9 @@ export class ObservedRules {
     if (!o.connected || c.generation !== s.generation || o.generation !== s.generation)
       throw Error('Generation changed; select the application again');
     const row = o.activity?.rows.find((r) => r.id === s.row_id),
-      p = o.activity?.processes[s.process_id];
+      owner = o.activity?.processes[s.process_id],
+      p = owner && row?.runtime_application ? {...owner,application:row.runtime_application.application} : owner;
+    if(row?.runtime_application && (row.runtime_application.uid!==owner?.uid || s.target_scope==='process')) throw Error('Runtime association supports only this verified Windows application, not a Linux process rule');
     if (
       !row ||
       row.owners.length !== 1 ||

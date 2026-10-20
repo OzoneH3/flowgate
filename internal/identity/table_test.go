@@ -1,6 +1,9 @@
 package identity
 
 import (
+	"bufio"
+	"encoding/json"
+	"io"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -92,5 +95,88 @@ func TestKernelFamilyCandidates(t *testing.T) {
 	s.V6Only = nil
 	if !matches(s, f) {
 		t.Fatal("unknown must remain ambiguous candidate")
+	}
+}
+
+func TestOutgoingTableRequiresExactPeerBeforeCompletion(t *testing.T) {
+	f, _ := ParseFlow("tcp", "outgoing", "127.0.0.1:40000", "127.0.0.1:50000")
+	r := WindowsOwner{PID: 7, Created: 123, Image: `Z:\game.exe`, Address: "127.0.0.1", Port: 40000, RemoteAddress: "127.0.0.1", RemotePort: 50000, State: 3}
+	for _, state := range []uint32{3, 5} {
+		r.State = state
+		rows, err := selectTableRows(tableSnapshot{Schema: 2, Rows: []WindowsOwner{r}}, f)
+		if err != nil || len(rows) != 1 {
+			t.Fatal(rows, err)
+		}
+	}
+	if _, err := selectTableRows(tableSnapshot{Schema: 1, Rows: []WindowsOwner{r}}, f); err == nil {
+		t.Fatal("legacy table acquired outgoing authority")
+	}
+	other := r
+	other.RemotePort++
+	rows, err := selectTableRows(tableSnapshot{Schema: 2, Rows: []WindowsOwner{other}}, f)
+	if err != nil || len(rows) != 0 {
+		t.Fatal("coincident local endpoint borrowed another remote", rows, err)
+	}
+	other = r
+	other.PID++
+	other.Created++
+	other.Image = `Z:\other.exe`
+	rows, err = selectTableRows(tableSnapshot{Schema: 2, Rows: []WindowsOwner{r, other}}, f)
+	if err != nil || len(rows) != 2 {
+		t.Fatal("shared handle hidden", rows, err)
+	}
+	r.Created = 0
+	if _, err = selectTableRows(tableSnapshot{Schema: 2, Rows: []WindowsOwner{r}}, f); err == nil {
+		t.Fatal("missing Windows generation accepted")
+	}
+}
+func TestVisibleBrokerDuplicateIsNotASecondApplication(t *testing.T) {
+	app := Application{Key: "game", Revision: "pe-revision"}
+	broker := Process{PID: 5, Start: "1", UID: 1000, NetNS: "net", MountNS: "mnt", ExecutableRevision: "broker"}
+	client := Process{PID: 6, Start: "2", UID: 1000, NetNS: "net", MountNS: "mnt", Application: app}
+	if !consistentWineHolders([]Process{broker}, broker, app) || !consistentWineHolders([]Process{broker, client}, broker, app) {
+		t.Fatal("broker duplicate invalidated established Windows owner")
+	}
+	client.Application.Key = "other"
+	if consistentWineHolders([]Process{broker, client}, broker, app) {
+		t.Fatal("different client FD holder accepted")
+	}
+	changed := broker
+	changed.Start = "reused"
+	if sameBrokerGeneration(broker, []Process{changed}) {
+		t.Fatal("broker PID reused")
+	}
+}
+
+func TestMissingWindowsOwnerRetriesOnlyWithinBound(t *testing.T) {
+	f, _ := ParseFlow("tcp", "outgoing", "127.0.0.1:40000", "127.0.0.1:50000")
+	for _, publish := range []bool{false, true} {
+		reader, writer := io.Pipe()
+		w := &WineTable{input: writer, output: make(chan []byte, 1), version: "11.0"}
+		done := make(chan int, 1)
+		go func() {
+			sc := bufio.NewScanner(reader)
+			n := 0
+			for sc.Scan() {
+				n++
+				rows := []WindowsOwner{}
+				if publish && n == 3 {
+					rows = append(rows, WindowsOwner{PID: 7, Created: 1, Image: `Z:\a.exe`, Address: "127.0.0.1", Port: 40000, RemoteAddress: "127.0.0.1", RemotePort: 50000, State: 3})
+				}
+				b, _ := json.Marshal(tableSnapshot{Schema: 2, Family: 4, Version: "11.0", Complete: true, Rows: rows})
+				w.output <- b
+			}
+			done <- n
+		}()
+		start := time.Now()
+		_, rows, err := w.snapshotRows(f, 4)
+		writer.Close()
+		if n := <-done; n != 3 {
+			t.Fatal("unexpected query count", n)
+		}
+		reader.Close()
+		if err != nil || len(rows) != map[bool]int{false: 0, true: 1}[publish] || time.Since(start) > 500*time.Millisecond {
+			t.Fatal("missing-owner retry manufactured authority or exceeded bound", rows, err)
+		}
 	}
 }

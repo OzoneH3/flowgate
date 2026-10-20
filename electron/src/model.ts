@@ -13,6 +13,7 @@ export interface Row {
   pid?: number;
   rows: SocketRow[];
   children: Row[];
+  runtimeApplication?: SocketRow["runtime_application"];
   process?: Process;
   displayApplication?: Application;
   socket?: SocketRow;
@@ -153,7 +154,13 @@ export function hierarchy(activity: Activity, query = '', filter = 'all'): Row[]
       s.socket.protocol === 'udp' ? !listening : [1, 2, 3, 12].includes(s.socket.state);
     if ((filter === 'active' && !active) || (filter === 'listening' && !listening)) continue;
     let parent: Row;
-    if (s.display_application?.key && s.owners.length > 1 && owners.length === s.owners.length) {
+    if (s.runtime_application) {
+      const runtime=s.runtime_application, display=runtime.application;
+      const key=`${display.key}|${display.revision}|uid:${runtime.uid}`;
+      let a=apps.get(key);
+      if(!a){ a={id:'app:'+key,kind:'application',label:display.display_name||display.name,children:[],rows:[],runtimeApplication:runtime}; apps.set(key,a);roots.push(a); }
+      a.rows.push(s);parent=a;
+    } else if (s.display_application?.key && s.owners.length > 1 && owners.length === s.owners.length) {
       // Trust only the explicit backend display association; never infer a policy identity.
       const display = s.display_application,
         key = `${display.key}|${display.revision}|uid:${owners[0].uid}`;
@@ -272,6 +279,7 @@ export function hierarchy(activity: Activity, query = '', filter = 'all'): Row[]
       children: [],
       rows: [s],
       socket: s,
+      runtimeApplication:s.runtime_application,
       pid: owners.length === 1 ? owners[0].pid : undefined,
     });
   }

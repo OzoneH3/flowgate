@@ -135,7 +135,10 @@ export interface Traffic {
   upload_bps?: number;
   download_bps?: number;
 }
+export interface RuntimeApplication { application: Application; uid: number; evidence: RuntimeTable; }
+export interface RuntimeTable { runtime: string; prefix: string; broker_pid: number; broker_start_ticks: string; socket_cookie: string; uid: number; method: string; windows_handle_holders: {pid:number; creation_time:string; image:string}[]; }
 export interface SocketRow {
+ runtime_application?: RuntimeApplication;
   network_scope?: {
     state: 'known' | 'unavailable';
     zone?: NetworkZone;
@@ -221,6 +224,7 @@ export interface RequestEvent {
     network_scope?: SocketRow['network_scope'];
   };
   attribution: {
+    runtime_table?: RuntimeTable;
     status: string;
     reason: string;
     visibility_complete: boolean;
@@ -696,6 +700,7 @@ function event(v: unknown): RequestEvent {
       network_scope: parseConnectionZone(f.network_scope),
     },
     attribution: {
+      runtime_table: parseRuntimeTable(a.runtime_table),
       status: string(a.status),
       reason: string(a.reason),
       visibility_complete: a.visibility_complete === true,
@@ -986,6 +991,7 @@ export function parseReply(raw: unknown): Reply {
         if (!string(row.id)) throw Error('Invalid socket identity');
         return {
           id: string(row.id),
+          runtime_application: row.runtime_application ? (()=> {const r=object(row.runtime_application), evidence=parseRuntimeTable(r.evidence); if(!evidence)throw Error("Invalid runtime evidence");return {application:application(r.application),uid:number(r.uid),evidence};})() : undefined,
           ownership: string(row.ownership),
           ownership_category: string(row.ownership_category),
           display_application: row.display_application
@@ -1420,4 +1426,11 @@ export function canManageRules(c: ClientState['control']) {
 }
 export function canDecide(c: ClientState['control']) {
   return c.connected && !c.readOnly && (c.permissions?.can_decide ?? true);
+}
+
+function parseRuntimeTable(value: unknown): RuntimeTable | undefined {
+ if(value===undefined || value===null)return;
+ const r=object(value);
+ const holders=array(r.windows_handle_holders,32).map((v)=>{const h=object(v);return {pid:number(h.pid),creation_time:string(h.creation_time).slice(0,32),image:string(h.image).slice(0,4096)};});
+ return {runtime:string(r.runtime),prefix:string(r.prefix).slice(0,4096),broker_pid:number(r.broker_pid),broker_start_ticks:string(r.broker_start_ticks),socket_cookie:string(r.socket_cookie),uid:number(r.uid),method:string(r.method).slice(0,1024),windows_handle_holders:holders};
 }

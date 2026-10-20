@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Real lwp -> Python/UMU -> pressure-vessel -> Proton -> PE regression.
 
-This reproduces a failure, not passing game enforcement. Only copied prefixes,
+Runs either the preserved failure reproduction or verified connection control. Only copied prefixes,
 runtime data and private network/PID namespaces are used. The Python preflight
 is labelled synthetic; UMU, Proton and the container launcher are unmodified.
 """
@@ -20,6 +20,8 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 p = argparse.ArgumentParser()
+p.add_argument('--verify', action='store_true')
+p.add_argument('--helper')
 p.add_argument('--binary', required=True)
 p.add_argument('--run', required=True)
 p.add_argument('--proton', required=True, help='workspace copy of installed Proton')
@@ -51,7 +53,12 @@ def receive():
     while True:
         try:
             c,_=server.accept()
-            with c: received.append(c.recv(1024).decode())
+            def handle(conn):
+                with conn:
+                    received.append(conn.recv(1024).decode())
+                    try: conn.settimeout(20);conn.recv(1)
+                    except OSError: pass
+            threading.Thread(target=handle,args=(c,),daemon=True).start()
         except OSError:return
 threading.Thread(target=receive,daemon=True).start()
 def wait(fn,seconds=30):
@@ -119,7 +126,11 @@ def launch(name,prefix,token,preflight):
     return c,log
 try:
     log=(RUN/'daemon.log').open('w')
-    daemon=subprocess.Popen([BIN,'serve-lab','--parent-netns',os.environ['FLOWGATE_PARENT_NETNS'],'--direction','outgoing','--socket',API,'--timeout','30s','--decision-log',str(RUN/'decisions.db')],stdout=log,stderr=log);children.append(daemon);log.close()
+    observer_args=[]
+    if a.verify:
+        (RUN/'observer').mkdir(mode=0o700)
+        observer_args=['--policy-store',str(RUN/'rules.db'),'--discover-wine','--observer-scratch',str(RUN/'observer'),'--wine-helper',a.helper]
+    daemon=subprocess.Popen([BIN,'serve-lab','--parent-netns',os.environ['FLOWGATE_PARENT_NETNS'],'--direction','outgoing','--socket',API,'--timeout','30s','--decision-log',str(RUN/'decisions.db')]+observer_args,stdout=log,stderr=log);children.append(daemon);log.close()
     wait(lambda:Path(API).exists())
     python_key=None
     for index,(name,prefix) in enumerate([('SyntheticAlpha.exe',prefixes[0]),('SyntheticBeta.exe',prefixes[0]),('SyntheticAlpha.exe',prefixes[1])]):
@@ -140,6 +151,42 @@ try:
         wait(ready,70)
         pid=wait(lambda:find_pe(name,prefix))
         process=cli('process',pid);save(token+'-process.json',process)
+        if a.verify:
+            e=wait(lambda:next((e for e in call().get('events',[]) if e['state']=='awaiting-decision' and e.get('attribution',{}).get('application',{}).get('kind')=='wine'),None),15)
+            save(token+'-prompt.json',e)
+            def live_row():
+                state=call()
+                return next((r for r in state.get('activity',{}).get('rows',[]) if r.get('runtime_application',{}).get('application',{}).get('key')==process['application']['key']),None)
+            # Runtime association is separate from the original Unix FD holder.
+            row=wait(live_row,5); save(token+'-activity.json',row)
+            assert row['runtime_application']['evidence']['socket_cookie']==row['socket']['cookie']
+
+            assert e['attribution']['application']['key']==process['application']['key'],e
+            action='block' if index==1 else 'allow'
+            ack=call('decide',id=e['id'],action=action,scope='application')
+            save(token+'-decision.json',ack)
+            assert ack.get('decision',{}).get('state')==('blocked' if action=='block' else 'allowed'),ack
+            if action=='allow':wait(lambda:token in received,15)
+            else:
+                time.sleep(3);assert token not in received
+            policy_view=call('policy-view',generation=call()['generation']).get('policy_view',{})
+            assert any(p['identity']['key']==process['application']['key'] and p['outgoing']['active_rules'] for p in policy_view.get('applications',[])),policy_view
+            save(token+'-policy.json',policy_view)
+            save(token+'-state.json',call())
+            if index==0:
+                draft=dict(direction='outgoing',protocol='*',action='allow',remote_address='*',local_port=0,remote_port=0,expires='0001-01-01T00:00:00Z',disabled=False,application_policy=True)
+                target=dict(row_id=row['id'],process_id=row['owners'][0])
+                preview=call('observed-rule-preview',generation=call()['generation'],observed_target=target,observed_draft=draft)
+                assert not preview.get('error'),preview
+                rule_preview=preview['observed_preview']
+                assert rule_preview['rule']['filter']['application']==process['application']['key']
+                saved=call('observed-rule-save',generation=call()['generation'],preview_token=rule_preview['token'],observed_draft=draft)
+                assert not saved.get('error'),saved
+                save('runtime-activity-rule-save.json',saved)
+            print('RECEIVER DECISION',action,name,prefix,flush=True)
+            evidence.append(dict(name=name,prefix=str(prefix),process=process,decision=e))
+            stop_prefix(prefix);child.wait(timeout=10)
+            continue
         dropped=wait(lambda:next((e for e in records() if e['id'] not in before and e.get('flow',{}).get('remote','').endswith(':'+str(port)) and e.get('verdict',{}).get('state')=='drop_submitted'),None),15)
         raw=cli('attribute','--protocol','tcp','--direction','outgoing','--local',dropped['flow']['local'],'--remote',dropped['flow']['remote'])
         timeline=[raw]
@@ -161,8 +208,30 @@ try:
         stop_prefix(prefix)
         child.wait(timeout=10)
     assert len({e['process']['application']['key'] for e in evidence})==3
-    rules=call().get('rules',[]);assert len(rules)==1 and rules[0]['filter']['application']==python_key,rules
+    rules=call().get('rules',[])
+    assert len(rules)==(5 if a.verify else 1),rules
     save('private-rules.json',rules)
+    if a.verify:
+        for index,(name,prefix) in enumerate([('SyntheticAlpha.exe',prefixes[0]),('SyntheticBeta.exe',prefixes[0]),('SyntheticAlpha.exe',prefixes[1])]):
+            token='PE_REMEMBERED_'+str(index); before={d['id'] for d in records()}
+            child,log=launch(name,prefix,token,False)
+            if index!=1:wait(lambda:token in received,70)
+            else:
+                wait(lambda:any(d['id'] not in before and d.get('verdict',{}).get('state')=='drop_submitted' for d in records()),70)
+                assert token not in received
+            decisions=[d for d in records() if d['id'] not in before]
+            save(token+'-decisions.json',decisions)
+            assert not any(e['state']=='awaiting-decision' for e in call().get('events',[]))
+            print('REMEMBERED RECEIVER',name,index!=1,prefix,flush=True)
+            stop_prefix(prefix);child.wait(timeout=10)
+
+    if a.verify:
+        for rule in call().get('rules',[]):
+            reply=call('rule-delete',generation=call()['generation'],id=rule['id'],expected_version=rule['version'])
+            assert not reply.get('error'),reply
+        assert not call().get('rules')
+        with sqlite3.connect('file:'+str(RUN/'rules.db')+'?mode=ro',uri=True) as db:
+            assert db.execute('select count(*) from rules').fetchone()[0]==0
     daemon.terminate();daemon.wait(timeout=10)
     assert subprocess.run(['nft','list','table','inet','flowgate_lab'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode!=0
     # Prove the same Windows clients and launch path actually send data with
@@ -173,7 +242,7 @@ try:
         print('CONTROL RECEIVED',token,flush=True)
         stop_prefix(prefixes[index])
         child.wait(timeout=10)
-    result=dict(reproduced=True,source=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),lwp=str(Path(a.lwp).resolve()),lwp_sha256=digest(a.lwp),proton_sha256=digest(Path(a.proton)/'proton'),broker_sha256=digest(Path(a.proton)/'files/bin/wineserver'),client_sha256=digest(a.pe),python_rule_does_not_target_pe=True,received=received,observations=evidence,host_changed=False)
+    result=dict(reproduced=not a.verify,verified=a.verify,source=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),lwp=str(Path(a.lwp).resolve()),lwp_sha256=digest(a.lwp),proton_sha256=digest(Path(a.proton)/'proton'),broker_sha256=digest(Path(a.proton)/'files/bin/wineserver'),client_sha256=digest(a.pe),python_rule_does_not_target_pe=True,received=received,observations=evidence,host_changed=False)
     save('result.json',result)
 finally:
     try: save('decision-log.json',records())

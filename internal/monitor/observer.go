@@ -10,6 +10,7 @@ import (
 )
 
 type Observer struct {
+	Annotate         func(*identity.ActivitySnapshot)
 	InitiationEvents func([]identity.Socket) identity.InitiationEvents
 	Zones            identity.NetworkZones
 	ZoneSource       func() identity.NetworkZones
@@ -29,6 +30,9 @@ func (o *Observer) Run(ctx context.Context) {
 			collector.Zones = o.ZoneSource()
 		}
 		snapshot := collector.Collect()
+		if o.Annotate != nil {
+			o.Annotate(&snapshot)
+		}
 		// Cap serialized API retention as well as row/process counts. Never return an
 		// old success as current after a failure or oversized snapshot.
 		if b, err := json.Marshal(snapshot); err != nil || len(b) > 3*1024*1024 {

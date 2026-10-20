@@ -223,6 +223,12 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
   );
   row(app, 'Attribution', e.attribution.status);
   row(app, 'Reason', e.attribution.reason);
+  const table=e.attribution.runtime_table;
+  if(table){
+    row(app,'Windows socket owner',table.windows_handle_holders.map(h=>`${h.image} · Windows PID ${h.pid} · creation ${h.creation_time}`).join('\n'));
+    row(app,'Broker / socket',`PID ${table.broker_pid} · start ${table.broker_start_ticks} · cookie ${table.socket_cookie}`);
+    row(app,'Verification',table.method);
+  }
   row(
     app,
     'Coverage',

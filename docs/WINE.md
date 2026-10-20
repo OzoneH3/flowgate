@@ -334,3 +334,13 @@ umu-run/pv-adverb/proton scripts in `scripts/acceptance/provenance-sim`, real re
 .workspace/RUN --prefix-source .workspace/wine-prefix --pe
 .workspace/windows/alpha.exe` (real Wine processes, simulated launcher chain).
 Real UMU/Proton/pressure-vessel launches were not executed.
+
+
+## Current outgoing Proton support
+
+The real `lwp` regression and current collector contract are documented in
+[PROTON-LAUNCHER-REGRESSION.md](PROTON-LAUNCHER-REGRESSION.md). This supersedes the
+older listener-only experiment for outgoing TCP on supported, hash-pinned
+brokers. Windows socket ownership, not Python launch ancestry or a global
+wineserver permission, selects the application rule. Activity carries that
+application separately from its Unix FD-holder evidence.

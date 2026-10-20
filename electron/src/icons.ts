@@ -87,7 +87,7 @@ export class ApplicationIcons {
       if (a?.key && a.executable && this.allowed.size < 4096) this.allowed.set(iconKey(a), a);
     };
     for (const p of Object.values(state.observation.activity?.processes || {})) add(p.application);
-    for (const r of state.observation.activity?.rows || []) add(r.display_application);
+    for (const r of state.observation.activity?.rows || []) {add(r.display_application); add(r.runtime_application?.application);}
     for (const e of state.control.events) {
       add(e.attribution.application);
       // The launching program (display only), e.g. Heroic for its nile helper.

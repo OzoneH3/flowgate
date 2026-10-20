@@ -151,3 +151,15 @@ test('network rows stay pinned in fixed order and never invent totals', () => {
   }
   assert.equal(model.sum(rows[0].rows,'uploaded').value,undefined);
 });
+
+test('Windows runtime application owns its row while broker FD evidence stays intact',()=>{
+ const {inactiveApplications}=require('../dist/test/model.cjs');
+ const app={key:'pe',revision:'pe-rev',name:'Alpha.exe',executable:'/prefix/Alpha.exe'};
+ const r=row('cookie',['broker']);r.runtime_application={application:app,uid:1000,evidence:{broker_pid:42}};
+ const roots=hierarchy({rows:[r],processes:{broker:{id:'broker',uid:1000,pid:42,application:{key:'',revision:'',name:'wineserver'},executable:'/runtime/wineserver'}}});
+ assert.equal(roots[0].id,'app:pe|pe-rev|uid:1000');
+ assert.equal(roots[0].process,undefined);
+ assert.deepEqual(r.owners,['broker']);
+ assert.equal(inactiveApplications([{executable:app.executable,filter:{application:'pe',revision:'pe-rev',uid:1000}}],roots).length,0);
+ assert.equal(inactiveApplications([{executable:'/usr/bin/python',filter:{application:'python',revision:'r',uid:1000}}],roots).length,1);
+});

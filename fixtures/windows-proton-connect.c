@@ -17,5 +17,5 @@ void mainCRTStartup(void) {
     say("SYNTHETIC_CLIENT_READY\n"); Sleep(1500); say("CONNECT_BEGIN\n");
     if(connect(s,(struct sockaddr*)&a,sizeof(a))) {say("CONNECT_FAILED\n");ExitProcess(4);}
     if(send(s,token,len,0)!=(int)len)ExitProcess(5);
-    say("RECEIVER_PAYLOAD_SENT\n"); Sleep(5000); closesocket(s); ExitProcess(0);
+    say("RECEIVER_PAYLOAD_SENT\n"); Sleep(15000); closesocket(s); ExitProcess(0);
 }

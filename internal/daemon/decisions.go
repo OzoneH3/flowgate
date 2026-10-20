@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"flowgate/internal/decisionlog"
+	"flowgate/internal/identity"
 	"flowgate/internal/policy"
 	"fmt"
 	"strings"
@@ -57,8 +58,18 @@ func (e *Engine) baseRecord(v *Event, kind string) decisionlog.Record {
 	r.Flow = &decisionlog.Flow{NetworkScope: v.Flow.NetworkScope, Direction: v.Flow.Direction, Protocol: v.Flow.Protocol, Family: family, Local: v.Flow.Local.String(), Remote: v.Flow.Remote.String(), Interface: v.Flow.Interface}
 	a := v.Attribution
 	r.Attribution = &decisionlog.Attribution{Status: clip(a.Status, 64), Reason: clip(a.Reason, 512)}
+	if a.Table != nil && len(a.Table.Owners) <= 4 {
+		table := *a.Table
+		table.Method = clip(table.Method, 512)
+		table.Prefix = clip(table.Prefix, 4096)
+		table.Owners = append([]identity.WindowsOwner(nil), table.Owners...)
+		for i := range table.Owners {
+			table.Owners[i].Image = clip(table.Owners[i].Image, 4096)
+		}
+		r.Attribution.RuntimeTable = &table
+	}
 	if a.Application != nil {
-		r.Application = &decisionlog.Application{Key: a.Application.Key, Name: clip(a.Application.Name, 256), Kind: a.Application.Kind, Executable: clip(a.Application.Executable, 1024), Revision: clip(a.Application.Revision, 256)}
+		r.Application = &decisionlog.Application{Key: a.Application.Key, Prefix: clip(a.Application.Prefix, 4096), Name: clip(a.Application.Name, 256), Kind: a.Application.Kind, Executable: clip(a.Application.Executable, 1024), Revision: clip(a.Application.Revision, 256)}
 	}
 	if p := a.Principal(); p != nil {
 		uid := p.UID

@@ -378,6 +378,11 @@ export function authoritativePolicy(
     return { reason: 'Policy association awaits its Activity snapshot; no identity is rebound.' };
   if ((c.serverNow ?? Infinity) - Date.parse(v.activity_collected) > 45000)
     return { reason: 'Policy observation association is stale; refreshing.' };
+  if (row.runtimeApplication) {
+    const r=row.runtimeApplication;
+    const a=v.applications.find(a=>a.identity.key===r.application.key && a.identity.revision===r.application.revision && a.identity.uid===r.uid && (row.policyRows||row.rows).some(s=>v.rows.some(p=>p.row_id===s.id && p.status==='observed_runtime' && p.application_ref===a.ref)));
+    return a ? {application:a,reason:v.snapshot.meaning} : {reason:'Runtime application association awaits a fresh policy snapshot.'};
+  }
   if (row.displayApplication || (row.socket?.display_application && row.socket.owners.length > 1))
     return { reason: 'Shared/display-only identity is not a policy target.' };
   const p =

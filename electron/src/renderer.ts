@@ -482,7 +482,7 @@ function installedIcon(app: Application | undefined, kind: Row['kind']) {
 function rowApplication(r: Row) {
   if (r.displayApplication || (r.socket && r.socket.owners.length > 1)) return undefined;
   return (
-    r.process?.application ||
+    r.runtimeApplication?.application || r.process?.application ||
     r.displayApplication ||
     (r.socket?.owners.length === 1
       ? state.observation.activity?.processes[r.socket.owners[0]]?.application
@@ -1432,7 +1432,7 @@ function renderTree() {
       name: r.label,
       executable: r.inactive.executable,
     };
-    const displayApp = r.process?.application || r.displayApplication || inactiveApp;
+    const displayApp = r.runtimeApplication?.application || r.process?.application || r.displayApplication || inactiveApp;
     const displayKey =
       displayApp && JSON.stringify([displayApp.key, displayApp.revision, displayApp.executable]);
     let rowLabel =
@@ -1739,6 +1739,14 @@ function renderInfo() {
     field(info,'Measurement','Zone-attributed traffic intervals are not supplied by the backend; no lifetime totals are relabelled.');
     field(info,'Enforcement',state.control.protection?.state||state.control.enforcement?.state||'Unknown');
     commit();return;
+  }
+  if (r.runtimeApplication) {
+    const a=r.runtimeApplication;
+    field(info,'Windows application',a.application.executable);
+    field(info,'Wine prefix',a.evidence.prefix);
+    field(info,'Windows ownership',a.evidence.windows_handle_holders.map(h=>`PID ${h.pid} · creation ${h.creation_time} · ${h.image}`).join('\n'));
+    field(info,'Unix socket holder',`wineserver PID ${a.evidence.broker_pid}, start ${a.evidence.broker_start_ticks}; socket cookie ${a.evidence.socket_cookie}`);
+    field(info,'Rule identity',`${a.application.key} · revision ${a.application.revision} · UID ${a.uid}`);
   }
   if (r.displayApplication) {
     field(info, 'Display application', r.displayApplication.executable);

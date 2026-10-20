@@ -1,8 +1,8 @@
-# Real lwp / Proton outgoing-connection reproduction
+# Real lwp / Proton connection-control regression
 
-This is a **known-failure reproduction**, not a claim that Proton permission
-control works. A successful run means it reproduced the bug and completed the
-receiver controls. No production attribution or policy code is modified.
+The default run verifies connection control through the actual installed `lwp`
+launcher. The original known-failure mode remains available by invoking the
+Python runner without `--verify`; baseline evidence is described below.
 
 ## Run
 
@@ -34,7 +34,7 @@ firewall changes, real game prefix access or daemon installation occurs.
 
 1. A labelled synthetic Python preflight connects to a local TCP receiver.
    The test approves its real pending request with a one-hour application rule
-   in the private daemon's memory. This models a launcher's network request;
+   in the private daemon's workspace-only SQLite store. This models a launcher's network request;
    it is not presented as an actual UMU update/HTTPS request.
 2. The actual `lwp` script invokes installed Python/UMU, real pressure-vessel,
    copied unmodified Proton, `umu.exe`, and a freestanding Windows GUI-subsystem
@@ -42,10 +42,14 @@ firewall changes, real game prefix access or daemon installation occurs.
    receiver address and port**. No Wine FD-materialization workaround is used.
 3. The matrix covers Alpha and Beta in prefix A, then Alpha in prefix B.
    Executable paths and canonical prefixes produce three separate identities.
-4. Packet-drop evidence comes from the private daemon's SQLite Decision Log.
-   The ordinary-user API correctly withholds unidentified events; waiting only
-   on that API would incorrectly suggest an attribution hang.
-5. After stopping the private interceptor, Alpha and Beta are launched through
+4. Alpha is allowed; Beta in the same prefix is denied; Alpha in another prefix
+   requires an independent decision. New instances repeat these saved decisions.
+   The receiver must receive Allow payloads and never receive Deny payloads.
+5. Fresh Activity contains a separately verified Windows application association,
+   while its original Unix FD holder remains wineserver. A real Activity rule
+   preview/save must target the PE identity. All private rules are conditionally
+   deleted, with the SQLite store checked empty before teardown.
+6. After stopping the private interceptor, Alpha and Beta are launched through
    `lwp` again and must deliver their distinct payloads to the receiver.
 
 Namespaces and UID maps for the daemon, broker and PE client, process generation,
@@ -54,7 +58,7 @@ records, the synthetic Python rule, received payloads, and relevant file hashes
 are retained. The launcher receives no inherited namespace capabilities;
 otherwise bubblewrap refuses to start and the test would not represent a
 normal desktop launch. The test daemon retains capabilities only in its private
-namespace. Test descendants and in-memory rules disappear on namespace teardown.
+namespace. Test descendants disappear on namespace teardown; the private rule database is emptied explicitly.
 
 ## Observed baseline result
 
@@ -75,3 +79,40 @@ It does not prove that launch ancestry identifies the Windows requester, that a
 Python rule should cover a game, or that assigning a rule to wineserver is safe.
 A subsequent fix must supply verified per-socket application evidence and use
 this real launcher test, rather than relying only on direct-Wine fixtures.
+
+## Verified fix and boundaries
+
+DWProton 11.0-4 (broker SHA256
+`3f84ad1bc5116a82ec54ee15588f000dbc5d570c9c77c6007d82545d375fd792`)
+passes the full real-launcher matrix. Wine 11.19 remains a hash-pinned supported
+census version; this regression does not claim all Wine/Proton builds work.
+Steam, Heroic and UMU use the same broker evidence when running a supported build;
+launcher ancestry supplies no permission authority.
+
+The collector joins the existing broker as the desktop user inside its pinned
+mount namespace. It cannot start a replacement wineserver. Two Windows TCP owner
+snapshots (exact local/remote endpoints, Windows PID, creation time and image)
+bookend a kernel socket-cookie census. The broker generation, same-server Unix
+channel, mapped PE image/revision and canonical prefix must agree. A broker's
+extra FD is transport evidence. Conflicting clients or missing evidence reject.
+A bounded 40ms publication retry does not wait for connection completion.
+
+Runtime Activity rows retain their FD-owner list and carry a separate verified
+Windows application. Preview and save re-resolve that socket; reused cookies,
+changed broker generations or different executable/prefix identities reject.
+Process-scoped rules and For-a-while leases remain unavailable for a table-only
+Windows owner: a Windows PID is not a verified Linux requester generation.
+
+The shipped launcher enables discovery of hash-pinned brokers for its configured
+API user. Unsupported builds remain unidentified. Existing `/etc/flowgate/wine.json`
+explicit runtime/prefix allowlists remain authoritative when present; these limit
+observation, never grant permission. No old Python rule is migrated or broadened.
+The permission key is UID + canonical Wine prefix + exact PE executable; file
+revision is matched separately. Socket snapshots are not an adversarial guarantee
+against a hostile same-user program transferring handles between observations.
+Outgoing connected TCP is covered; outgoing unconnected UDP and scoped link-local
+interface mapping are not newly supported by this change.
+
+Host deployment and a real user's game retry are separate from this isolated
+acceptance. Preparing the release does not activate host protection or alter
+stored host rules.

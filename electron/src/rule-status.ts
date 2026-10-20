@@ -27,7 +27,7 @@ export function ruleStatus(row: Row, state: ClientState): RuleStatus {
     result.reason = 'Observation-only display association; no permission identity inferred.';
     return result;
   }
-  const process = row.inactive
+  const process = row.runtimeApplication ? {uid:row.runtimeApplication.uid,application:row.runtimeApplication.application} : row.inactive
     ? { uid: row.inactive.uid, application: { key: row.inactive.key, revision: row.inactive.revision } }
     : row.process ||
       (row.socket?.owners.length === 1
