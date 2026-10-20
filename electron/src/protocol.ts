@@ -228,6 +228,7 @@ export interface RequestEvent {
     owners: Process[];
     provenance?: Provenance;
     permission_target?: PermissionTarget;
+    runtime_table?: WineRuntimeTable;
     // local-pair-v1: the request's own socket(s) (cookie/inode evidence).
     sockets?: OwnSocket[];
   };
@@ -669,6 +670,21 @@ function pendingRevalidation(raw: unknown): RequestEvent['revalidation'] {
     }),
   };
 }
+export interface WineRuntimeTable {
+ runtime:string; prefix:string; broker_pid:number; broker_start_ticks:string; socket_cookie:string; uid:number; method:string;
+ windows_handle_holders:{pid:number;creation_time:string;image:string;address:string;port:number;remote_address:string;remote_port:number;state:number}[];
+}
+/** Read-only diagnostic evidence. It never supplies IPC decision targets. */
+export function parseWineRuntimeTable(raw:unknown):WineRuntimeTable|undefined {
+ if(raw===undefined)return undefined;
+ try {
+  const v=object(raw);
+  const txt=(x:unknown,n=4096)=>{if(typeof x!=='string'||x.length>n)throw Error('Invalid runtime evidence');return x};
+  const num=(x:unknown,n=0xffffffff)=>{if(typeof x!=='number'||!Number.isSafeInteger(x)||x<0||x>n)throw Error('Invalid runtime identity');return x};
+  const stamp=(x:unknown)=>{const t=txt(x,20);if(!/^[1-9][0-9]*$/.test(t))throw Error('Missing generation');return t};
+  return {runtime:txt(v.runtime,64),prefix:txt(v.prefix),broker_pid:num(v.broker_pid),broker_start_ticks:stamp(v.broker_start_ticks),socket_cookie:txt(v.socket_cookie,128),uid:num(v.uid),method:txt(v.method,1024),windows_handle_holders:array(v.windows_handle_holders,4).map(raw=>{const p=object(raw);return {pid:num(p.pid),creation_time:stamp(p.creation_time),image:txt(p.image),address:txt(p.address,128),port:num(p.port,65535),remote_address:txt(p.remote_address,128),remote_port:num(p.remote_port,65535),state:num(p.state)}})};
+ }catch{return undefined;}
+}
 function event(v: unknown): RequestEvent {
   const e = object(v),
     f = object(e.flow),
@@ -704,6 +720,7 @@ function event(v: unknown): RequestEvent {
       provenance: parseProvenance(a.provenance),
       permission_target: parsePermissionTarget(a.permission_target),
       sockets: parseOwnSockets(a.sockets),
+      runtime_table: parseWineRuntimeTable(a.runtime_table),
     },
     scope_previews: previews,
     remembered_filter: e.remembered_filter ? ruleFilter(e.remembered_filter) : undefined,

@@ -38,7 +38,10 @@ func openDecisionLog(path, generation, mode string, recording bool) *decisionlog
 
 func serveCommand(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
-	var localZones, internetZones zonePrefixes
+	var localZones, internetZones, wineBins, winePrefixes zonePrefixes
+	fs.Var(&wineBins, "wine-runtime-bin", "repeatable trusted supported Wine/Proton bin directory")
+	fs.Var(&winePrefixes, "wine-prefix", "repeatable explicitly authorized existing Wine prefix")
+	wineHelper := fs.String("wine-helper", "", "reviewed PE owner observer; opt-in, runs as desktop UID")
 	fs.Var(&localZones, "zone-local", "repeatable administrator-defined Local Network prefix")
 	fs.Var(&internetZones, "zone-internet", "repeatable administrator-defined Internet policy prefix, not connectivity proof")
 	socket := fs.String("socket", "", "existing root-owned API directory + new private socket")
@@ -140,6 +143,23 @@ func serveCommand(args []string) error {
 	e.Activity = observer.Snapshot
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
+	if *wineHelper != "" {
+		scratch := filepath.Join(filepath.Dir(*socket), "wine-observer")
+		if err = os.MkdirAll(scratch, 0700); err != nil {
+			return err
+		}
+		if err = os.Chown(scratch, int(peer), -1); err != nil {
+			return err
+		}
+		wines, er := identity.NewWineObservers(identity.WineObserverOptions{Helper: *wineHelper, RuntimeBins: wineBins, Prefixes: winePrefixes, UID: peer, Scratch: scratch})
+		if er != nil {
+			return er
+		}
+		defer wines.Close()
+		e.Resolve = wines.Resolve
+	} else if len(wineBins) > 0 || len(winePrefixes) > 0 {
+		return fmt.Errorf("Wine runtime/prefix selection requires --wine-helper")
+	}
 	zoneManager := identity.NewZoneManager(zones.Legacy())
 	e.ZoneSource = zoneManager.Snapshot
 	observer.ZoneSource = zoneManager.Snapshot
