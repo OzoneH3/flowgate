@@ -90,7 +90,12 @@ export class ApplicationIcons {
   observe(state: ClientState) {
     this.allowed.clear();
     const add = (a?: Application) => {
-      if (a?.key && a.executable && this.allowed.size < 4096) this.allowed.set(iconKey(a), a);
+      if (a?.key && a.executable && this.allowed.size < 4096) {
+        const key = iconKey(a);
+        // Live application records come first. Later display/rule fallbacks
+        // must not discard their verified backing file or hosted identity.
+        this.allowed.set(key, { ...a, ...this.allowed.get(key) });
+      }
     };
     for (const p of Object.values(state.observation.activity?.processes || {})) add(p.application);
     for (const r of state.observation.activity?.rows || []) {add(r.display_application); add(r.runtime_application?.application);}

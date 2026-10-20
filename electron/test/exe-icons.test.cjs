@@ -91,6 +91,10 @@ test('Flatpak names require exact deployment metadata and remain display-only',a
  const icons=new ApplicationIcons(root,[root],[]),app={key:'exact-first',revision:'revision',kind:'native',name:'runner',executable:'/app/bin/runner',host_executable:a.exe};
  icons.observe({observation:{activity:{rows:[],processes:{p:{application:app}}}},control:{events:[],rules:[]}});
  assert.equal((await icons.metadata([iconKey(app)]))[iconKey(app)].name,'Friendly First');assert.equal(app.name,'runner');assert.equal(app.key,'exact-first');
+ const rule={executable:app.executable,filter:{application:app.key,revision:app.revision}};
+ const withRule=new ApplicationIcons(root,[root],[]);
+ withRule.observe({observation:{activity:{rows:[],processes:{p:{application:app}}}},control:{events:[],rules:[rule]}});
+ assert.equal((await withRule.metadata([iconKey(app)]))[iconKey(app)].name,'Friendly First','stored rule must not erase live backing-file metadata');
  assert.equal((await icons.metadata(['unauthorized']))['unauthorized'].name,undefined);
  const plain={...app,key:'no-backing',host_executable:undefined};icons.observe({observation:{activity:{rows:[],processes:{p:{application:plain}}}},control:{events:[],rules:[]}});
  assert.equal((await icons.metadata([iconKey(plain)]))[iconKey(plain)].name,undefined);
