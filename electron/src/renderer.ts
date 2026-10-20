@@ -589,7 +589,7 @@ function statusStrip(r: Row) {
       chip={glyph:'',text:own.text,tone:status.available?own.tone:'unavailable',detail:rules.map(rule=>ruleDescription(rule,status.now)).join('\n')};
       title=`${r.label} · ${direction} · exact application/zone stored rules\n${chip.detail}\nConfigured policy, not a connection verdict. Parent application rule and global zone policies remain separate.`;
     } else if (r.inactive) {
-      // Not running: the backend summarizes live processes only; list its stored rules.
+      // No observed sockets: this is not proof that the process exited; list stored rules.
       const rules = status.available ? status[direction] : [],
         own = ownConfigured(rules, status.now);
       chip = {
@@ -599,7 +599,7 @@ function statusStrip(r: Row) {
         detail: rules.map((rule) => ruleDescription(rule, status.now)).join('\n'),
         scoped: own.scoped,
       };
-      title = `${slot.label} (not running · stored rules): ${chip.text}\n${chip.detail}`;
+      title = `${slot.label} (no observed sockets · stored rules): ${chip.text}\n${chip.detail}`;
     } else if (authoritative) {
       // NetLimiter Rule Status: the node's OWN rule; scoped rules only add a "+N scoped" hint.
       const summary = processPolicy?.[direction] || result?.application?.[direction];
@@ -1469,12 +1469,13 @@ function renderTree() {
       name.append(
         element(
           'span',
-          (r.inactive.earlierVersion ? ' · earlier version, not running' : ' · not running') +
+          (r.inactive.earlierVersion ? ' · earlier version, no observed sockets' : ' · no observed sockets') +
             (r.inactive.where ? ' · ' + r.inactive.where : ''),
           'row-inactive-note',
         ),
       );
-    name.title = r.process?.executable || r.inactive?.executable || r.socket?.socket.remote || r.label;
+    name.title = (r.process?.executable || r.inactive?.executable || r.socket?.socket.remote || r.label) +
+      (r.inactive ? '\nNo sockets for this identity in the Activity snapshot. The process may still be running.' : '');
     tr.append(name);
     for (const key of rateKeys()) {
       const s = sum(r.rows, key, measurementSource);

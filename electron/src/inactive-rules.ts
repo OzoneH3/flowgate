@@ -2,7 +2,7 @@ import type { Rule } from './protocol';
 import { ruleState } from './rule-status';
 import { confirmRuleDelete, openRule } from './workflows';
 
-// Rules of an application that is not running (Activity › not running). Editing
+// Rules of an application that is no observed sockets (Activity › no observed sockets). Editing
 // a stored rule needs no live process: each change is reviewed by the backend
 // (draft → preview → save, pinned to the rule's version) exactly like the quick
 // setter's in-place edit. New rules still need the running, verified program.
@@ -82,7 +82,7 @@ export function openInactiveRules(anchor: HTMLElement, o: InactiveRulesOptions) 
   root.setAttribute('role', 'dialog');
   root.setAttribute('aria-label', `${o.label} · ${o.direction} rules`);
   root.tabIndex = -1;
-  root.append(el('div', `${o.label} · ${o.direction === 'incoming' ? 'In' : 'Out'} · not running`, 'inactive-rules-title'));
+  root.append(el('div', `${o.label} · ${o.direction === 'incoming' ? 'In' : 'Out'} · no observed sockets`, 'inactive-rules-title'));
   const status = el('p', '', 'inactive-rules-status');
   status.setAttribute('role', 'status');
   let busy = false;

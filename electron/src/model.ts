@@ -422,8 +422,8 @@ export function executableName(path: string) {
   return /\.asar$/.test(base) && parts.length ? parts.pop()! : base;
 }
 /**
- * Applications that have stored rules but are not running: one row per
- * application key/revision/UID with no live row, listed after all running
+ * Applications with stored rules but no observed socket rows: one row per
+ * application key/revision/UID with no socket row, listed after observed
  * applications. Rules with only a process binding, all-programs or zone-wide
  * scope name no application and are not listed here.
  */
@@ -490,7 +490,7 @@ export function shortLocation(path: string) {
   const text = dir.join('/');
   return text.length <= 48 ? text : [dir[0], '…', ...dir.slice(-2)].join('/');
 }
-/** Running applications followed by not-running applications with rules. */
+/** Observed applications followed by stored-rule applications without sockets. */
 export function activityTree(activity: Activity, rules: Rule[] | undefined, query = '', filter = 'all', contextFor?: (key:string,revision:string,uid:number)=>readonly LaunchContext[], zones?: NetworkZones): Row[] {
   const live = hierarchy(activity, query, filter);
   const rows=[...live, ...inactiveApplications(rules, live, query, filter, contextFor)];

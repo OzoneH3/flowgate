@@ -23,7 +23,7 @@ cp docs/WINE.md "$bundle/docs/WINE.md"
 cp docs/AUTOMATIC-ZONES.md "$bundle/docs/backend-zones.md"
 cp electron/AUTOMATIC-ZONES.md "$bundle/docs/electron-zones.md"
 cp electron/PROMPT-PRESENTATION.md electron/REMEMBER-REVALIDATION.md "$bundle/docs/"
-for f in poe-release-race.log poe-release-vet.log poe-release-ui-tests.log poe-release-proton.log poe-outgoing-final-wine.log auto-zones-integrated-go.log auto-zones-final-race.log auto-zones-vet.log auto-zones-integrated-ui-tests.log auto-zones-integrated-receiver.log cgnat-parity-go.log cgnat-parity-race.log cgnat-parity-ui-tests.log automatic-zone-migration-preview.json; do
+for f in poe-namespace-race.log poe-namespace-vet.log poe-namespace-ui-tests.log poe-container-alias.log poe-container-wine.log poe-release-race.log poe-release-vet.log poe-release-ui-tests.log poe-release-proton.log poe-outgoing-final-wine.log auto-zones-integrated-go.log auto-zones-final-race.log auto-zones-vet.log auto-zones-integrated-ui-tests.log auto-zones-integrated-receiver.log cgnat-parity-go.log cgnat-parity-race.log cgnat-parity-ui-tests.log automatic-zone-migration-preview.json; do
  test ! -f ".workspace/$f" || cp ".workspace/$f" "$bundle/evidence/$f"
 done
 cat > "$bundle/launch-ui" <<'LAUNCH'

@@ -23,6 +23,7 @@ type observedWine struct {
 	broker  Process
 	table   *WineTable
 	failure string
+	scratch string
 }
 type WineObservers struct {
 	mu       sync.Mutex
@@ -72,6 +73,9 @@ func (m *WineObservers) Close() {
 		if s.table != nil {
 			s.table.Close()
 		}
+		if s.scratch != "" {
+			os.RemoveAll(s.scratch)
+		}
 	}
 	m.sessions = nil
 }
@@ -81,7 +85,7 @@ func (m *WineObservers) Resolve(f Flow) Attribution {
 	var bin string
 	for i := range a.Owners {
 		p := &a.Owners[i]
-		if p.UID != m.options.UID || p.Application.Prefix == "" || p.NetNS != NetNS() || p.MountNS != SelfMountNS() {
+		if p.UID != m.options.UID || p.Application.Prefix == "" || p.NetNS != NetNS() {
 			continue
 		}
 		prefixAllowed := false
@@ -132,6 +136,9 @@ func (m *WineObservers) Resolve(f Flow) Attribution {
 		if !InstanceRunning(s.broker.PID, s.broker.Start) {
 			if s.table != nil {
 				s.table.Close()
+			}
+			if s.scratch != "" {
+				os.RemoveAll(s.scratch)
 			}
 			delete(m.sessions, k)
 		}
@@ -187,7 +194,25 @@ func (m *WineObservers) Resolve(f Flow) Attribution {
 		}
 		credential = &syscall.Credential{Uid: broker.UID, Gid: st.Sys().(*syscall.Stat_t).Gid, Groups: []uint32{}}
 	}
-	w, err := newWineTableAs(session.Runner, m.options.Helper, filepath.Join(bin, "wineserver"), broker.Application.Prefix, version, env, credential)
+	var namespace *wineNamespace
+	if broker.MountNS != SelfMountNS() {
+		var er error
+		namespace, er = prepareWineNamespace(*broker, session.Runner, m.options.Helper, m.options.Scratch, runtime)
+		if er != nil {
+			return stop(er.Error())
+		}
+		defer namespace.close()
+		if namespace.removeScratch {
+			record.scratch = namespace.scratch
+		}
+		for i, pair := range env {
+			k, _, _ := strings.Cut(pair, "=")
+			if k == "HOME" || k == "XDG_CACHE_HOME" || k == "XDG_CONFIG_HOME" || k == "XDG_DATA_HOME" {
+				env[i] = k + "=" + namespace.scratch
+			}
+		}
+	}
+	w, err := newWineTableConfigured(session.Runner, m.options.Helper, filepath.Join(bin, "wineserver"), broker.Application.Prefix, version, env, credential, namespace)
 	if err != nil {
 		return stop(err.Error())
 	}

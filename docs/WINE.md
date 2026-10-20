@@ -391,12 +391,13 @@ Pinned runtime builds:
 The earlier Wine 11.19 pin and its incoming evidence remain unchanged. A new
 binary/version needs explicit source/behavior review and receiver acceptance;
 version strings alone do not authorize observation. The new helper is x86-64.
-Outgoing UDP, scoped link-local IPv6, foreign mount/network namespaces and unknown
+Outgoing UDP, scoped link-local IPv6, foreign network namespaces and unknown
 broker builds are not supported by this production path. A stopped/lost observer
 requires an explicit restart rather than silent reattachment. Steam, Heroic and
 umu are not permission selectors: the mechanism applies wherever their launch
 uses a selected supported broker, explicit prefix and compatible namespace.
-Pressure-vessel configurations with a foreign namespace are currently refused.
+Pressure-vessel mount namespaces are supported by the pinned namespace-entry
+path described below; foreign network namespaces are still refused.
 
 Reproduce the outgoing matrix with `scripts/acceptance/wine-outgoing-acceptance.py` inside
 `scripts/lab.sh`, pointing at a copied initialized prefix under `.workspace`.
@@ -407,3 +408,46 @@ client/broker exit, and exact numeric handle plus TCP tuple reuse with a new
 cookie. Production and fixtures use the same on-demand observer manager.
 Successful fixture delivery is not a claim that Path of Exile has been retested;
 that requires a separately authorized bounded host retry with the user.
+
+
+### Pressure-vessel mount namespaces: real-launch correction
+
+The first outgoing release deliberately skipped different mount namespaces. The
+real 2026-10-20 UMU/pressure-vessel PoE retry exposed that gap: the configured
+broker and game shared the host network namespace but used another mount
+namespace. Decision Log records 10477 and 10531 still reported unresolved Wine
+ownership and `drop_submitted`. Those records do not prove any game delivery.
+The actual prefix's nested `pfx` was a symlink to `.`; changing the selected
+prefix would not have addressed the namespace mismatch.
+
+The observer now pins descriptors for the verified broker's mount namespace and
+root. The fixed `/usr/bin/nsenter` command enters that mount namespace and root,
+then changes GID/UID and drops supplementary groups before executing Wine. It
+never enters a user, network or PID namespace, imports the target environment,
+or runs a shell. The broker generation is checked again before/after joining.
+The implementation reuses executable-evidence mount mappings in reverse: every
+candidate Wine-loader/observer path inside the sandbox must have the configured
+host file's device and inode. This covers host views such as `/run/host/usr/local`
+without trusting that spelling. The observer PE's mapped file and reciprocal
+broker channel must still be observed in the selected mount namespace.
+
+If container-private `/run` hides daemon scratch, a temporary directory is
+created beneath the user's already shared, verified 0700 XDG runtime directory,
+owned by that UID. It is removed on broker loss or observer shutdown. No prefix
+configuration or game file is modified, and `WINESERVER=/usr/bin/false` still
+prevents starting a different broker. Missing namespace privileges, file
+visibility or verified scratch refuse attribution.
+
+The same receiver matrix passes on DWProton 11.0-4 and Wine 11.20 with
+`--helper-alias`: two prefixes in separate private mount namespaces, the original
+helper path replaced inside each namespace by a decoy, the real helper visible
+only through another bind mount, and normal daemon scratch hidden. Allow,
+Deny, Remember, independent applications/prefixes, dormant handle sharing,
+process exit and reused handle/cookie behavior remain covered. This is isolated
+namespace evidence; the updated real PoE retry requires installing this release.
+
+The UI now says “no observed sockets” instead of “not running” for stored-rule
+applications absent from Activity's socket census. No socket row is not process
+exit evidence. This presentation change grants no traffic permission.
+
+Namespace-entry reference: [util-linux nsenter implementation](https://github.com/util-linux/util-linux/blob/master/sys-utils/nsenter.c).
