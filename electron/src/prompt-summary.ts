@@ -65,7 +65,25 @@ export function promptSummary(e: Ev, fallbackName: string): PromptSummary {
   // Incoming: the endpoint that connects to us is the remote side.
   const endpoint = e.flow.remote;
   const app = e.attribution.application;
-  const invocation = e.attribution.provenance?.invocation;
+  const provenance = e.attribution.provenance;
+  const invocation = provenance?.invocation;
+  // If the socket owner is an interpreter acting as a verified launcher, prefer
+  // the verified executable it launched for the prompt's display context. The
+  // interpreter remains the permission identity; this is deliberately generic
+  // for any verified launcher, not a game-specific rule.
+  if (invocation && provenance?.role === 'launcher' && verifiedLaunch(provenance)) {
+    const interpreter = app?.display_name || app?.name || own;
+    return {
+      title: launchTitle(provenance),
+      owner: interpreter,
+      note: `Verified launch context only. Permission applies to the ${interpreter} interpreter.`,
+      ownIdentity: false,
+      launchedBy: '',
+      destination: service || endpoint,
+      endpoint: service ? endpoint : '',
+      protocol: e.flow.protocol.toUpperCase(),
+    };
+  }
   if (invocation) {
     const interpreter = app?.display_name || app?.name || own;
     const title = invocation.application?.display_name || invocation.application?.name || invocation.name;
