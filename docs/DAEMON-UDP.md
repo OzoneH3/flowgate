@@ -155,9 +155,9 @@ insufficient. Missing/denied support remains explicit; no security-setting bypas
 ## Focused verification and exact next action
 
 ```
-scripts/check-daemon-udp.sh
+scripts/checks/check-daemon-udp.sh
 # Additional initial-user-namespace kernel check; run interactively as desktop user:
-scripts/check-daemon-udp.sh --kernel
+scripts/checks/check-daemon-udp.sh --kernel
 ```
 
 Default run uses disposable user/net/PID/mount namespaces and actual production

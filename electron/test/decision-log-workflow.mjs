@@ -7,7 +7,7 @@ import path from 'node:path';
 import net from 'node:net';
 import assert from 'node:assert/strict';
 const root = path.resolve(import.meta.dirname, '../..');
-// Fixture run directory from scripts/decision-log-isolated.py --hold (fixture owns it).
+// Fixture run directory from scripts/acceptance/decision-log-isolated.py --hold (fixture owns it).
 const fixture = process.env.FLOWGATE_LOG_UI_RUN;
 // Project or worktree .workspace only; never /run host endpoints.
 if (

@@ -74,7 +74,7 @@ const prefFile = path.join(root, '.workspace/electron-preferences.json'),
   oldPrefs = fs.existsSync(prefFile) ? fs.readFileSync(prefFile) : undefined;
 try {
   const text = fs
-    .readFileSync(path.join(root, 'scripts/host-lab.py'), 'utf8')
+    .readFileSync(path.join(root, 'scripts/acceptance/host-lab.py'), 'utf8')
     .replace('ROOT=Path(__file__).resolve().parents[1]', `ROOT=Path(${JSON.stringify(root)})`)
     .replace("start('30s')", "start('120s')");
   fs.writeFileSync(path.join(run, 'harness.py'), text);

@@ -53,7 +53,7 @@ const pref = path.join(root, '.workspace/electron-preferences.json'),
 try {
   fs.writeFileSync(pref, '{}');
   const harness = fs
-    .readFileSync(path.join(root, 'scripts/host-lab.py'), 'utf8')
+    .readFileSync(path.join(root, 'scripts/acceptance/host-lab.py'), 'utf8')
     .replace('ROOT=Path(__file__).resolve().parents[1]', `ROOT=Path(${JSON.stringify(root)})`)
     .replace("start('30s')", "start('120s')")
     .replace("'--timeout','8s'", "'--timeout','30s'");

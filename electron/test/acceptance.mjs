@@ -167,7 +167,7 @@ try {
     'observer',
   );
   await wait(() => existsSync(path.join(run, 'obs.sock')));
-  const lab = start('scripts/lab.sh', ['python3', 'scripts/desktop-lab.py', run, '6s'], 'lab');
+  const lab = start('scripts/lab.sh', ['python3', 'scripts/acceptance/desktop-lab.py', run, '6s'], 'lab');
   await wait(() => existsSync(path.join(run, 'ready')));
   const [gui, page] = await electron(path.join(run, 'obs.sock'), path.join(run, 'control.sock'));
   await wait(async () => {

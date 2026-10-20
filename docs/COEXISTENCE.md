@@ -182,7 +182,7 @@ The read-only frontend cannot transition the daemon into enforcement implicitly.
 
 ## Verification and remaining gap
 
-`scripts/check-tailscale.sh` runs focused parser/race/vet checks and an isolated
+`scripts/checks/check-tailscale.sh` runs focused parser/race/vet checks and an isolated
 component fixture. It uses real kernel TUNs linked by a private userspace L3 relay,
 two network namespaces, actual iptables-nft MARK/CONNMARK rules, routing and the
 actual controller/NFQUEUE/API/receivers. Only Tailscale version/preferences responses

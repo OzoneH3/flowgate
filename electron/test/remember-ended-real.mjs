@@ -1,6 +1,6 @@
 // Real isolated API/native TCP journey; requires an owned disposable held fixture.
 // No host endpoint, daemon lifecycle, or user's rules. Receiver proof is in the
-// paired scripts/remember_ended_acceptance.py; this file checks the actual GUI.
+// paired scripts/acceptance/remember_ended_acceptance.py; this file checks the actual GUI.
 import {_electron} from 'playwright-core';
 import fs from 'node:fs';
 import path from 'node:path';

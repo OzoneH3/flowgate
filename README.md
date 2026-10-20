@@ -210,7 +210,7 @@ history, not an audit log. The backend remains authoritative.
 ## Focused integrated workflow checks
 
 ```sh
-QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=wayland-0 scripts/check-unified.sh
+QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=wayland-0 scripts/checks/check-unified.sh
 ```
 
 The real controller runs only in disposable veth namespaces. Qt exercises the
@@ -223,9 +223,9 @@ for explicit user evaluation. Existing protocol and Wine evidence is reused.
 ## Focused host-monitor checks
 
 ```sh
-QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=wayland-0 scripts/check-monitor.sh
+QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=wayland-0 scripts/checks/check-monitor.sh
 # Automated fallback, not a real display check:
-QT_QPA_PLATFORM=offscreen scripts/check-monitor.sh
+QT_QPA_PLATFORM=offscreen scripts/checks/check-monitor.sh
 ```
 
 Tests use workspace native loopback fixtures for TCP listening/connecting/established,
@@ -237,9 +237,9 @@ matrices are reused. Evidence remains in `.workspace`.
 ## Focused desktop checks
 
 ```sh
-QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=wayland-0 scripts/check-desktop.sh
+QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=wayland-0 scripts/checks/check-desktop.sh
 # Without a graphical session (automated checks only):
-QT_QPA_PLATFORM=offscreen scripts/check-desktop.sh
+QT_QPA_PLATFORM=offscreen scripts/checks/check-desktop.sh
 ```
 
 Qt tests click actual prompt/main-window buttons against the real namespace

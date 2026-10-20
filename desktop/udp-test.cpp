@@ -13,7 +13,7 @@ private slots:
     QVERIFY(QDir().mkpath(run));
     QFile::setPermissions(run, QFile::ReadOwner | QFile::WriteOwner |
                                    QFile::ExeOwner);
-    fixture.start("python3", {"scripts/udp-fixture.py", "4"});
+    fixture.start("python3", {"scripts/acceptance/udp-fixture.py", "4"});
     QVERIFY(fixture.waitForStarted());
     QVERIFY(fixture.waitForReadyRead());
     QVERIFY(fixture.readLine().startsWith("{"));

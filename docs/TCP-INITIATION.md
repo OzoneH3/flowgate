@@ -125,7 +125,7 @@ network changes):
 
 ```sh
 cd /home/flowgate-user/Apps/flowgate
-scripts/check-tcp-initiation.sh
+scripts/checks/check-tcp-initiation.sh
 ```
 
 The script records exact source/diff/artifact hashes. Its intended real checks are
@@ -211,7 +211,7 @@ pending** until this affected case passes:
 
 ```sh
 cd /home/flowgate-user/Apps/flowgate
-scripts/check-tcp-initiation.sh --observe-shared
+scripts/checks/check-tcp-initiation.sh --observe-shared
 ```
 
 It retains the existing fast TCP4/6, both loopback ends, same-cookie identity,
@@ -250,7 +250,7 @@ Passed direction/restart/cleanup cases need not repeat. Run only the remaining
 actual helper-death fallback case:
 
 ```sh
-scripts/check-tcp-initiation.sh --observe-shared --failure-only
+scripts/checks/check-tcp-initiation.sh --observe-shared --failure-only
 ```
 
 It checks an active source, kills only its hash/PPID/path-verified own helper, then

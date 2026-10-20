@@ -16,7 +16,7 @@ signal.signal(signal.SIGTERM, interrupted)
 
 ROOT = Path(__file__).resolve().parents[1]
 run = Path(tempfile.mkdtemp(prefix='desktop-demo-',dir=ROOT/'.workspace'))
-lab = subprocess.Popen([str(ROOT/'scripts/lab.sh'),'python3',str(ROOT/'scripts/desktop-lab.py'),str(run),'60s'])
+lab = subprocess.Popen([str(ROOT/'scripts/lab.sh'),'python3',str(ROOT/'scripts/acceptance/desktop-lab.py'),str(run),'60s'])
 gui = None
 
 def command(value):

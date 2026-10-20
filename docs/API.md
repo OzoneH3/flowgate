@@ -186,7 +186,7 @@ transport result. No controller is started and no privilege elevation occurs.
 go test -race ./internal/daemon ./internal/store ./internal/policy ./cmd/flowgate
 go vet ./...
 go build -o .workspace/flowgate ./cmd/flowgate
-scripts/lab.sh python3 scripts/host-lab.py \
+scripts/lab.sh python3 scripts/acceptance/host-lab.py \
   "$PWD/.workspace/delete-receiver-$(date +%s)" --delete-suite
 ```
 
@@ -291,7 +291,7 @@ executable only as their existing fallback. UDP Start uses the selected executab
 daemon-owned collector/evaluation API paths do not use these legacy bridges.
 No password is collected by Electron, and no privilege configuration is changed.
 
-Focused check: `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check-bridge-backend.py`.
+Focused check: `PYTHONDONTWRITEBYTECODE=1 python3 scripts/checks/check-bridge-backend.py`.
 Four checks cover default/selected builds, pinned preference and invalid argument
 rejection. Authentication/control are explicitly mocked; no host or namespace
 firewall/collector activation is performed or claimed by these tests.
@@ -352,7 +352,7 @@ Real isolated fixture (separate binary/database, no host collection/enforcement)
 ```sh
 . scripts/go-env.sh
 go build -o .workspace/flowgate-direction ./cmd/flowgate
-scripts/lab.sh python3 scripts/activity-direction-isolated.py \
+scripts/lab.sh python3 scripts/acceptance/activity-direction-isolated.py \
  --binary "$PWD/.workspace/flowgate-direction" --run "$PWD/.workspace/direction-FRESH"
 ```
 

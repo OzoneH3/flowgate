@@ -234,9 +234,9 @@ pinned module licenses/source, not a claim that this binary is static/portable.
 ## Reproduce isolated evidence
 
 ```sh
-QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=wayland-0 scripts/check-host.sh
+QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=wayland-0 scripts/checks/check-host.sh
 # Without a display (automated only):
-QT_QPA_PLATFORM=offscreen scripts/check-host.sh
+QT_QPA_PLATFORM=offscreen scripts/checks/check-host.sh
 ```
 
 The new host-start implementation runs in the existing user/net/PID namespace
@@ -254,7 +254,7 @@ the IPv6 tests exercise ordinary NDP on the veth link.
 
 ## Unified desktop evidence
 
-`QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=wayland-0 scripts/check-unified.sh`
+`QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=wayland-0 scripts/checks/check-unified.sh`
 exercises the real controller, private root-in-namespace snapshot, receiver and
 read-only observer together. The C++ test replaces only terminal authentication
 with a private test launcher. `check-control-bridge.py` separately runs the real

@@ -1,5 +1,5 @@
 // Real local-pair popup journey: beta connects to alpha's own listener (10.79.0.1) inside a held disposable
-// fixture (scripts/process-rules-isolated.py --hold --continuous --zones --other; both directions intercepted).
+// fixture (scripts/acceptance/process-rules-isolated.py --hold --continuous --zones --other; both directions intercepted).
 // Simplified permission popup: the first view shows application / owner / destination / status line and
 // Allow | Deny | Remember | For a while; there is no pair panel. A plain Allow/Deny on a backend-verified
 // local pair sends decide-pair (Once) for exactly that connection, the permission window hides at once and

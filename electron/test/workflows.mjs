@@ -151,7 +151,7 @@ if op=='status':
     { mode: 0o700 },
   );
   // Private copy only lengthens this test's evaluation; no product deadline changes.
-  const harness = readFileSync(path.join(root, 'scripts/host-lab.py'), 'utf8')
+  const harness = readFileSync(path.join(root, 'scripts/acceptance/host-lab.py'), 'utf8')
     .replace('ROOT=Path(__file__).resolve().parents[1]', `ROOT=Path(${JSON.stringify(root)})`)
     .replace("start('30s')", "start('120s')");
   writeFileSync(path.join(run, 'harness.py'), harness);

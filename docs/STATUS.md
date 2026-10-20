@@ -311,7 +311,7 @@ Real Activity screenshot: `integrated-activity.png` there. Qt deletion/stale ext
 edit check 3/3 and codec/capability checks 4/4 passed; logs `integration-qt-delete.log`
 and `integration-qt-exact.log` under `.workspace`.
 
-Focused reproduction: `scripts/check-integration.sh`. Existing frontend rule/editor,
+Focused reproduction: `scripts/checks/check-integration.sh`. Existing frontend rule/editor,
 evaluation, notification and ownership evidence is indexed in electron/README.md;
 its focused stale-delete evidence is reused. No privileged UDP/ownership/firewall
 matrix rerun. No host enforcement, privileged host collection, install, service,
@@ -342,7 +342,7 @@ strictly display-only same-native-application association retain every holder.
 Enforcement and frontend files are unchanged. See [native attribution](ATTRIBUTION.md)
 for supported cases, exact host sample counts, limits and focused evidence.
 
-`scripts/check-ownership.sh` passed native fixture/API checks, relevant race tests
+`scripts/checks/check-ownership.sh` passed native fixture/API checks, relevant race tests
 and vet. Before/after host samples each had 29 unresolved nonzero-inode sockets,
 all other creation UIDs; none justify exposing privileged other-user metadata.
 Basic monitoring remains unprivileged via `scripts/run-desktop.sh`. The one
@@ -445,7 +445,7 @@ read-only API), `.workspace/outgoing-last-bridge.log` (both-profile handoff with
 simulated authentication), `.workspace/outgoing-normal-launch.log` (actual read-only
 Wayland launch). Actual UI tests cover outgoing and default
 incoming creation/editing. Reproduce with `QT_QPA_PLATFORM=wayland
-WAYLAND_DISPLAY=wayland-0 scripts/check-outgoing.sh`.
+WAYLAND_DISPLAY=wayland-0 scripts/checks/check-outgoing.sh`.
 
 Real-traffic captures: `.workspace/outgoing-ui-1188339/outgoing-real-prompt.png`,
 `outgoing-real-editor.png`, `incoming-real-prompt.png`. The adjacent

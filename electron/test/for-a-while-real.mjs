@@ -1,5 +1,5 @@
 // Real "For a while" + compact prompt journey: sandboxed GUI against an externally held, disposable fixture
-// (scripts/process-rules-isolated.py --hold --continuous --zones --other; op "launch" relaunches an executable).
+// (scripts/acceptance/process-rules-isolated.py --hold --continuous --zones --other; op "launch" relaunches an executable).
 // Never the host daemon. Private receivers (peer-received.log) judge delivery.
 import { _electron } from 'playwright-core';
 import fs from 'node:fs';

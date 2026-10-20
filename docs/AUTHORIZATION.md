@@ -163,7 +163,7 @@ still refuse; live encrypted Tailscale interception remains unverified. No worka
 
 ## Evidence and limits
 
-`scripts/check-administrator.sh`: role/privacy tests, real ordinary Unix peer
+`scripts/checks/check-administrator.sh`: role/privacy tests, real ordinary Unix peer
 self-grant rejection, SQLite exclusive writer test, race/vet, and isolated root
 namespace non-enforcing daemon with actual UID0 listener and service rule edit/
 conditional delete. Stored Block does not prevent delivery; nft state unchanged.

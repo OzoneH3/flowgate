@@ -108,7 +108,7 @@ traversal is introduced. Basic monitoring needs no new privilege.
 ## Reproduce the focused checks
 
 ```sh
-scripts/check-ownership.sh
+scripts/checks/check-ownership.sh
 scripts/run-desktop.sh
 ```
 

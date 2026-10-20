@@ -58,7 +58,7 @@ private slots:
     QFile::setPermissions(run, QFile::ReadOwner | QFile::WriteOwner |
                                    QFile::ExeOwner);
     lab.setProgram("scripts/lab.sh");
-    lab.setArguments({"python3", "scripts/desktop-lab.py", run, "5s"});
+    lab.setArguments({"python3", "scripts/acceptance/desktop-lab.py", run, "5s"});
     lab.setProcessChannelMode(QProcess::MergedChannels);
     lab.start();
     QVERIFY(lab.waitForStarted());

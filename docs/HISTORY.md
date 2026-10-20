@@ -37,7 +37,7 @@ On both Wine 11.19 and direct dwproton-11.0-4 / Wine 11.0:
   dual-stack wildcard over both wire families; IPv4-mapped IPv6 binds; separate
   IPv6-only/IPv4 applications sharing a service port.
 
-Final reproducible runner: `scripts/check-runtime.sh`, once without Proton env and
+Final reproducible runner: `scripts/checks/check-runtime.sh`, once without Proton env and
 once with the two runtime-selection variables shown in WINE.md. Latest evidence:
 
 - `.workspace/runtime-final-{wine,proton}.log`: sequential builds, race tests, vet,
@@ -107,7 +107,7 @@ Local environment remains CachyOS x86-64, Wine 11.19. Matching wine-11.19 source
 - `.workspace/outgoing-increment.log`: original outgoing TCP/UDP receiver checks passed.
 - `.workspace/increment-unit.log` and `.workspace/increment-unit-final.log`: race-enabled unit/API tests, retention packet/byte bounds, retransmission handling, error/shutdown drains, expiry, stale relationship, rule invalidation, direction-aware scopes and legacy exact endpoint behavior. `go vet ./...` passed.
 
-Reproduce the increment sequentially with `scripts/check-increment.sh`. The original conservative Wine baseline still runs through `scripts/check.sh --wine`; it does not enable the opt-in broker model. Keep generated evidence under `.workspace`; do not run scripts sharing the default API socket concurrently.
+Reproduce the increment sequentially with `scripts/checks/check-increment.sh`. The original conservative Wine baseline still runs through `scripts/check.sh --wine`; it does not enable the opt-in broker model. Keep generated evidence under `.workspace`; do not run scripts sharing the default API socket concurrently.
 
 ## Earlier FD-only observation boundary (still applies without table adapter)
 
@@ -174,7 +174,7 @@ Qt 6.12.0/CachyOS x86-64, **actual Wayland platform**, ordinary UID 1000 client:
 Evidence: `.workspace/desktop-final.log`, `.workspace/desktop-wayland.log`, `.workspace/desktop-go.log`,
 `.workspace/desktop-build.log`, `.workspace/desktop-demo-smoke.log`, and `.workspace/desktop-test-PID/` receiver logs
 and screenshots. Reproduce: `QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=wayland-0
-scripts/check-desktop.sh` (one shell line); offscreen fallback is explicitly labelled.
+scripts/checks/check-desktop.sh` (one shell line); offscreen fallback is explicitly labelled.
 
 Convenience captures: `.workspace/desktop.png`, `.workspace/desktop-prompt.png`
 and `.workspace/desktop-long-ipv6.png`. The standalone demo command was also

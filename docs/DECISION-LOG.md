@@ -149,7 +149,7 @@ to ordinary peers.
 
 ## Real isolated example
 
-`scripts/lab.sh python3 scripts/decision-log-isolated.py --binary <test build> --run <private .workspace dir> [--hold]`
+`scripts/lab.sh python3 scripts/acceptance/decision-log-isolated.py --binary <test build> --run <private .workspace dir> [--hold]`
 runs real `serve-lab` NFQUEUE enforcement with native receivers in a disposable
 namespace. Run `.workspace/decision-log-1792272647`:
 

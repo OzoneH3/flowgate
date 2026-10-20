@@ -115,7 +115,7 @@ exited requester therefore left disabled Allow/Deny and nothing else.
   checked (so the user unchecks it), and offers Action + **Save application
   rule** with the backend summary. Errors are shown verbatim; the draft stays.
 
-Evidence: `scripts/process-rules-isolated.py --request-rule` (unprivileged
+Evidence: `scripts/acceptance/process-rules-isolated.py --request-rule` (unprivileged
 `scripts/lab.sh`, real nft interception, TCP receiver): exit before decision,
 application-wide Allow saved from the retained request, relaunch with new PID
 and source port delivered without prompt, different executable prompted,

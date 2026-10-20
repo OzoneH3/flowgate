@@ -27,7 +27,7 @@ recover/control/uninstall tools **without any protection stage**:
 
 Launch keeps the previously authorized configuration (UID1000 administrator,
 traffic/evaluation/protection control grants, restored UDP state, zones).
-`scripts/test-install-monitoring.py` runs the real transaction against a temp root
+`scripts/checks/test-install-monitoring.py` runs the real transaction against a temp root
 with mocked systemd/nft/API (6 cases). The receiver-acceptance `install.py`
 remains in the bundle only for a later separately approved protection stage.
 
@@ -224,7 +224,7 @@ notification and boot ordering still require the authenticated stage and reboot.
 Uninstall first performs scoped monitoring recovery, removes only its verified
 NetworkManager drop-in and reloads the dependency graph **before** stopping the
 guard service. This avoids propagating a Requires stop into NetworkManager.
-`scripts/test-deployment-uninstall.py` checks the exact order with mocked systemd
+`scripts/checks/test-deployment-uninstall.py` checks the exact order with mocked systemd
 calls and preserved immutable artifacts; installed uninstall remains unobserved.
 
 ## Installer doctor/activation distinction
@@ -252,7 +252,7 @@ callback performs bounded conntrack snapshot/mark operations, atomic nft rules,
 structural digest and persisted session record before removing the guard and
 publishing active. Failure propagates through the host acceptance stage into the
 installer's prepared recovery path; no successful host acceptance is printed.
-`scripts/test-install-readiness.py` reproduces the exact reported refusal and
+`scripts/checks/test-install-readiness.py` reproduces the exact reported refusal and
 checks real blockers, narrow census deferral, unknown/missing results and the
 actual installer transaction's activation/acceptance failure handlers using
 mocked privileged boundaries. Existing isolated receiver/kernel/UI evidence is

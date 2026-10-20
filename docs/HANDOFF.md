@@ -197,7 +197,7 @@ PPID, exact pinned path and helper hash before kill; deterministic Go-thread tes
 passed. No Go/collector behavior changed. Only the affected fault case needs run:
 
 ```sh
-scripts/check-tcp-initiation.sh --observe-shared --failure-only
+scripts/checks/check-tcp-initiation.sh --observe-shared --failure-only
 ```
 
 Do not repeat the passed direction/zone/UDP/firewall matrices. See TCP-INITIATION.md
@@ -219,7 +219,7 @@ real shared-kernel/overhead proof still pending. See TCP-INITIATION.md for bound
 source audit and exact affected test (requires terminal authentication):
 
 ```sh
-scripts/check-tcp-initiation.sh --observe-shared
+scripts/checks/check-tcp-initiation.sh --observe-shared
 ```
 
 Do not detach/disable bpftune or silently switch the running host. After the test,
@@ -292,7 +292,7 @@ requested from the user (fresh netns/cgroup-filtered fixture, no host daemon/API
 
 ```sh
 cd /home/flowgate-user/Apps/flowgate
-scripts/check-tcp-initiation.sh
+scripts/checks/check-tcp-initiation.sh
 ```
 
 Inspect the resulting verifier/error/evidence before any edit or repeat. This
@@ -465,7 +465,7 @@ rerun (it records exact source/diff/artifact hashes):
 
 ```sh
 cd /home/flowgate-user/Apps/flowgate
-scripts/check-tcp-initiation.sh
+scripts/checks/check-tcp-initiation.sh
 ```
 
 Current host read-only inspection remains PID1113279, generation
@@ -1098,7 +1098,7 @@ uses current evaluator, not live/historical admission. No creation authority.
 Root monitor1973082/gen5a559274aa006090cdc4bb5cd8faed47 was preserved on old code;
 no restart or executable-path replacement. New build .workspace/flowgate-policy.
 An eventual deliberate restart is needed to expose the API. Tests reproduce with
-scripts/check-policy-view.sh; reuse settled receiver/accounting/coexistence/UI
+scripts/checks/check-policy-view.sh; reuse settled receiver/accounting/coexistence/UI
 results because no verdict path changed. UI agent owns consumer independently;
 observed-app creation is now supplied by the separate observed-rule-create-v1
 workflow above, never by the read-only associations.
@@ -1168,7 +1168,7 @@ or `scripts/run-desktop.sh` for Qt. Both normally read-only. Both clients migrat
 conditional Delete; read API.md for exact tokens and Electron uint64 limits.
 
 Main integrated smoke and Qt focused checks passed; current STATUS records logs,
-screenshot and scope. `scripts/check-integration.sh` reproduces only these focused
+screenshot and scope. `scripts/checks/check-integration.sh` reproduces only these focused
 paths. Actual KDE tray activation was exercised; Quit confirmation response was
 simulated. Authentication, host coexistence and privileged Electron UDP activation
 are not established. No live host enforcement/collection was performed. Frontend
@@ -1216,7 +1216,7 @@ unprivileged Wayland measured-rate test. Fixed UDP Activity identity changing on
 connect by omitting endpoints from the socket-lifetime key. Source counter logic
 and TCP/firewall behavior did not change.
 
-Still needs desktop authentication: `scripts/check-udp-isolated.sh` (one command,
+Still needs desktop authentication: `scripts/checks/check-udp-isolated.sh` (one command,
 no outer sudo). The only agent noninteractive attempt refused authentication; do
 not retry it repeatedly. The script builds its prerequisites, then starts only a
 disposable namespace and captures all receiver/Wayland/CPU/RSS/loss evidence in
@@ -1232,7 +1232,7 @@ program could be loaded in the available user namespace (EPERM). sudo requires
 interactive authentication. Basic TCP/Unidentified regressions and real Wayland
 failure states passed. This is not receiver-verified UDP support.
 
-Read UDP.md before further work. Next action is `scripts/check-udp-isolated.sh`
+Read UDP.md before further work. Next action is `scripts/checks/check-udp-isolated.sh`
 after reviewing/authorizing its exact sudo/unshare operation; build prerequisites
 are listed there and already present. It loads only namespace/UID-filtered probes
 inside a fresh test namespace, without host firewall/route/security changes.
@@ -1247,7 +1247,7 @@ Read TRAFFIC.md for counter meaning, supported TCP4/6 and explicit UDP limitatio
 Normal launch `scripts/run-desktop.sh` requires no activation. Default refresh is
 now 1 second plus collection. No privileged collector/enforcement was started.
 
-Reproduce with `QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=wayland-0 scripts/check-traffic.sh`.
+Reproduce with `QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=wayland-0 scripts/checks/check-traffic.sh`.
 Current evidence is at the top of STATUS.md. Remaining useful step: choose a narrow
 optional UDP accounting source, with explicit authentication/collection-only API,
 if UDP rates are required; do not repurpose NFQUEUE admission counters or queue
@@ -1296,7 +1296,7 @@ activity and always rejects decisions. Existing enforcement matching is preserve
 The Activity widget is part of the existing frontend, not another application.
 Shared sockets appear once; Unknown initiation is never inferred from ports.
 
-Focused runner: `QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=wayland-0 scripts/check-monitor.sh`.
+Focused runner: `QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=wayland-0 scripts/checks/check-monitor.sh`.
 It checks host loopback TCP/UDP v4/v6, SYN-sent/established/listening states, shared
 holders, path identities, exit, API mutation denial, Qt interaction and one lab
 Allow smoke. Reuse existing accepted desktop and Wine evidence; no full matrix
@@ -1344,7 +1344,7 @@ the executing binary under /run/flowgate; the watchdog uses that snapshot. Exist
 host-start/status/stop/recover commands remain available without Qt.
 
 Reproduce focused evidence with
-`QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=wayland-0 scripts/check-unified.sh`.
+`QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=wayland-0 scripts/checks/check-unified.sh`.
 It uses real namespace enforcement/receiver traffic and read-only observation,
 with an explicit authentication test seam. The separate bridge check simulates sudo
 in that namespace. Reuse the accepted broader native/Wine evidence. STATUS indexes

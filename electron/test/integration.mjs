@@ -63,7 +63,7 @@ const g = (bus, obj, method, ...args) =>
     { encoding: 'utf8', timeout: 4000 },
   ).trim();
 try {
-  lab = start('scripts/lab.sh', ['python3', 'scripts/host-lab.py', run], 'lab');
+  lab = start('scripts/lab.sh', ['python3', 'scripts/acceptance/host-lab.py', run], 'lab');
   await wait(() => fs.existsSync(path.join(run, 'ready')));
   fixture = start(path.join(root, '.workspace/electron-traffic-fixture'), [], 'traffic');
   let info = await wait(() => {

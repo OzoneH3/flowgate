@@ -1,5 +1,5 @@
 // Real ended-request application-rule journey (request-application-rule-v1): sandboxed GUI against an
-// externally held, disposable fixture (scripts/process-rules-isolated.py --hold --continuous --zones --other,
+// externally held, disposable fixture (scripts/acceptance/process-rules-isolated.py --hold --continuous --zones --other,
 // fixture op "launch" relaunches the same executable). Never the host daemon. Receivers judge delivery.
 import { _electron } from 'playwright-core';
 import fs from 'node:fs';

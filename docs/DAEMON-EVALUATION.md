@@ -120,10 +120,10 @@ Build separately, leaving the host executable untouched:
 go build -o .workspace/flowgate-evaluation-test ./cmd/flowgate
 go test -race ./internal/daemon ./internal/hostfirewall ./internal/decisionlog ./internal/queue ./cmd/flowgate
 go vet ./internal/daemon ./internal/hostfirewall ./internal/decisionlog ./internal/queue ./cmd/flowgate
-scripts/lab.sh python3 scripts/daemon-evaluation-isolated.py \
+scripts/lab.sh python3 scripts/acceptance/daemon-evaluation-isolated.py \
   --binary "$PWD/.workspace/flowgate-evaluation-test" --run "$PWD/.workspace/evaluation-check-NEW" --suite
 # Supported Tailscale-shaped component (real TUN/marks/routing, emulated TS metadata):
-scripts/lab.sh python3 scripts/daemon-evaluation-isolated.py \
+scripts/lab.sh python3 scripts/acceptance/daemon-evaluation-isolated.py \
   --binary "$PWD/.workspace/flowgate-evaluation-test" --run "$PWD/.workspace/evaluation-ts-NEW" --suite --tailscale --skip-expiry
 ```
 
@@ -220,7 +220,7 @@ interruption or enforcement was performed.
 ## Integrated UI and focused real-BPF continuity follow-up
 
 UI81c0aaa and referencebf3b79d are integrated at90cbac5. The settled API is unchanged.
-`scripts/check-evaluation-udp.sh` adds one isolated initial-user-namespace BPF
+`scripts/checks/check-evaluation-udp.sh` adds one isolated initial-user-namespace BPF
 continuity journey using the existing adapter/fixtures: continuous controlled UDP4/6
 connected/unconnected transfers, TCP control, incoming evaluation Allow/Block and
 explicit Stop. Same socket IDs, observed-since, helper PID and collector generation
@@ -231,7 +231,7 @@ only the Allow/Block flows. This does not repeat five-minute expiry.
 
 The concrete noninteractive launch was denied authentication before namespace or
 BPF execution. **This new case has not passed against the kernel.** Run exactly
-`scripts/check-evaluation-udp.sh` from the main checkout and authenticate if prompted;
+`scripts/checks/check-evaluation-udp.sh` from the main checkout and authenticate if prompted;
 see [INTEGRATION.md](INTEGRATION.md) for evidence paths and remaining deployment steps.
 Host monitor and active collector were not restarted or interrupted.
 
@@ -240,7 +240,7 @@ Continuity fixture follow-up: the first authenticated run
 its unrelated chain declaration, before daemon startup. The fixture now uses
 newline-delimited nft input. The exact source literal was installed, inspected and
 removed successfully in a disposable user/network namespace. This validates the
-syntax fix only, not BPF continuity. Retry `scripts/check-evaluation-udp.sh` for
+syntax fix only, not BPF continuity. Retry `scripts/checks/check-evaluation-udp.sh` for
 the still-pending full kernel case; no host daemon/collector action is needed.
 
 The next authenticated run `.workspace/evaluation-udp-1792311720-2557445`
@@ -253,7 +253,7 @@ adding the veth IPv6 link-local local-table route after DAD completed. The fixtu
 now waits for IPv6 address setup before taking its baseline, compares canonical
 JSON without omitting any route fields, saves routes-before/after.json, and writes
 continuity.json even when the route comparison fails. The isolated regression
-`scripts/lab.sh python3 scripts/check-evaluation-udp-routes.py` passed stable-route
+`scripts/lab.sh python3 scripts/acceptance/check-evaluation-udp-routes.py` passed stable-route
 comparison after DAD and confirmed an intentional route addition is still detected.
 This is a fixture fix, not a relaxation of routing checks. Full kernel rerun remains
 required. The wrapper also disables Python bytecode output for privileged runs.

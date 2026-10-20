@@ -159,7 +159,7 @@ policy mutex and uses no continuous cache or packet accounting changes.
 ## Reproduce and rollout
 
 ```
-scripts/check-observed-rule.sh
+scripts/checks/check-observed-rule.sh
 ```
 
 Build output **`.workspace/flowgate-creation`** exposes this capability, preserving
@@ -352,7 +352,7 @@ Reproduce only this bounded receiver extension (not the older whole matrix):
 ```sh
 . scripts/go-env.sh
 go build -o .workspace/flowgate-any-protocol ./cmd/flowgate
-scripts/lab.sh python3 scripts/process-rules-isolated.py --binary "$PWD/.workspace/flowgate-any-protocol" --native "$PWD/.workspace/process-fixtures/native" --run "$PWD/.workspace/any-protocol-$(date +%s)" --any-protocol
+scripts/lab.sh python3 scripts/acceptance/process-rules-isolated.py --binary "$PWD/.workspace/flowgate-any-protocol" --native "$PWD/.workspace/process-fixtures/native" --run "$PWD/.workspace/any-protocol-$(date +%s)" --any-protocol
 ```
 
 The running host monitor is unchanged and does not advertise this new capability;

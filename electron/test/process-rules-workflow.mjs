@@ -4,6 +4,6 @@
 // Kept as a thin alias so documented commands still run against a held disposable fixture.
 if (!process.env.FLOWGATE_TEST_READY)
   throw Error(
-    'Superseded by rule-status-workflow.mjs: set FLOWGATE_TEST_READY=<held fixture>/ready.json (scripts/process-rules-isolated.py --hold). Never the host daemon.',
+    'Superseded by rule-status-workflow.mjs: set FLOWGATE_TEST_READY=<held fixture>/ready.json (scripts/acceptance/process-rules-isolated.py --hold). Never the host daemon.',
   );
 await import('./rule-status-workflow.mjs');

@@ -147,7 +147,7 @@ requires clearly labelled fallback/unavailability, not fabricated backend result
 
 ## Verification and rollout
 
-`scripts/check-policy-view.sh` runs focused race/vet and a real UID1000 authenticated
+`scripts/checks/check-policy-view.sh` runs focused race/vet and a real UID1000 authenticated
 Unix API with native UDP Activity/SQLite rules. It writes real response captures
 under `.workspace/policy-api-example.json` and `policy-explanation-api-example.json`.
 The rule and recorded event are seeded test data; no intercepted decision or real

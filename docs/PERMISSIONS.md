@@ -67,7 +67,7 @@ will be allowed" (documented).
 
 - Ask (master fb5b2da): `TestStoredAskPrecedence`, `TestStoredAskLifecycle`,
   `TestRememberRefusedWhenAskStillWins`, `TestApplicationSetterAsk`; real receivers
-  `scripts/process-rules-isolated.py --ask` → `scripts/ask_acceptance.py` (run
+  `scripts/acceptance/process-rules-isolated.py --ask` → `scripts/acceptance/ask_acceptance.py` (run
   `.workspace/ask-1792425996`, all PASS): application Out Ask persisted; TCP+UDP prompts
   attributed to the Ask rule (event + Decision Log `rule_ask`); Allow Once delivers, Deny
   Once does not; next independent attempt re-prompts; incoming, another executable and
@@ -83,7 +83,7 @@ will be allowed" (documented).
   Process binding, pending settle/ended attempts, grouping, Once no fan-out); corrected
   `process_test.go` tie expectation. Race/vet for daemon/policy/essential pass.
 - Real private receivers (unprivileged user/network namespaces, `scripts/lab.sh`):
-  `scripts/process-rules-isolated.py --app-policy` → `scripts/app_policy_acceptance.py`:
+  `scripts/acceptance/process-rules-isolated.py --app-policy` → `scripts/acceptance/app_policy_acceptance.py`:
   application Out Allow delivers TCP/UDP IPv4/6 to 2 destinations × 2 ports with no
   prompts; scoped rule untouched; other executable still prompts; In not covered;
   waiting request settles and delivers after application Allow; equal-weight scoped
@@ -101,11 +101,11 @@ will be allowed" (documented).
   Ask were verified with real receivers through the API (`--ask`), not in the Electron journey.
 - Not yet: host deployment of stored Ask (installed c09aae8 predates `stored-ask-v1`; the UI hides Ask there).
 - For a while (`decision-for-a-while-v1`): `internal/daemon/for_a_while_test.go`; real receivers
-  `scripts/process-rules-isolated.py --for-a-while` → `scripts/for_a_while_acceptance.py` (run
+  `scripts/acceptance/process-rules-isolated.py --for-a-while` → `scripts/acceptance/for_a_while_acceptance.py` (run
   `.workspace/fw1`, all PASS): Allow delivers the prompted TCP and later TCP+UDP IPv4/IPv6 connections of the
   same process without prompts; sibling instance, incoming direction and a relaunched PID prompt inside the
   window; after expiry the same process prompts; Deny blocks the current and later connections without
   prompts; Decision Log `for_a_while`; no rule at any time; no lease after daemon restart.
 - Queue reconciliation / ended-request For a while / durations: `internal/daemon/queue_reconcile_test.go`;
-  Electron `electron/test/queue-reconcile.test.cjs`; real receivers `scripts/process-rules-isolated.py
-  --queue-reconcile` → `scripts/queue_reconcile_acceptance.py` (run `.workspace/q1`, all PASS).
+  Electron `electron/test/queue-reconcile.test.cjs`; real receivers `scripts/acceptance/process-rules-isolated.py
+  --queue-reconcile` → `scripts/acceptance/queue_reconcile_acceptance.py` (run `.workspace/q1`, all PASS).

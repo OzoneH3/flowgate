@@ -85,7 +85,7 @@ FlowGate uses installed application icons when attribution is available and neut
 ## Focused verification
 
 ```sh
-scripts/check-electron.sh
+scripts/checks/check-electron.sh
 ```
 
 This builds native fixtures, runs focused synthetic model/transport checks,
@@ -191,7 +191,7 @@ Backend/Qt/collector/shared bridge implementations are unchanged.
 ### Focused verification
 
 ```sh
-scripts/check-electron-workflows.sh
+scripts/checks/check-electron-workflows.sh
 ```
 
 Actual sandboxed Electron on KDE/Wayland, real Go host-session API and disposable
@@ -249,10 +249,10 @@ figure was summed RSS with the test debugger, not private memory or PSS.
 
 Stay on `frontend/electron`, worktree `.workspace/worktrees/electron`. Integrate
 `electron/`, `scripts/build-electron.sh`, `scripts/run-electron.sh`,
-`scripts/check-electron.sh`, and `scripts/check-electron-workflows.sh`. No API or
+`scripts/checks/check-electron.sh`, and `scripts/checks/check-electron-workflows.sh`. No API or
 shared bridge change is required. Qt remains available. This branch was rebased onto
 `dbe651f9cb6f2fd51ec416113faaf7f4d9ebf55d` to incorporate the additive attribution backend.
-Also integrate `scripts/check-electron-background.sh`.
+Also integrate `scripts/checks/check-electron-background.sh`.
 
 Remaining gaps: real system sudo authentication and privileged extended-monitoring
 Enable/Stop through Electron are unverified; their frontend boundary/status checks
@@ -303,7 +303,7 @@ UDP API-byte/partial-coverage semantics and separate TCP aggregates are unchange
 
 ### Focused evidence
 
-Run `scripts/check-electron-background.sh` on the existing KDE/Wayland session.
+Run `scripts/checks/check-electron-background.sh` on the existing KDE/Wayland session.
 This builds and runs 13 synthetic unit checks, the isolated real-controller
 background test and an explicitly synthetic attribution presentation fixture.
 No UDP kernel matrix, real sudo authentication or live-host enforcement is run.
@@ -379,7 +379,7 @@ rounds a version into a mutation. Use a uint64-capable client for larger version
 A missing stored version is 0; a missing acknowledgement version is invalid.
 No backend wire change is required, and this limitation was coordinated with its owner.
 
-Run `scripts/check-electron-delete.sh` with existing repository-local dependencies.
+Run `scripts/checks/check-electron-delete.sh` with existing repository-local dependencies.
 It builds and runs only focused delete/rule-save checks and sandboxed Wayland
 Electron against the disposable real controller. No package installation, host
 enforcement, privileged collection or broad UDP/tray matrices.
@@ -406,7 +406,7 @@ Evidence: `.workspace/delete-ui.log`, `.workspace/delete-unit.log` and
 Test-owned Electron and namespace supervisor processes exited. No real sudo
 workflow was exercised. Integration files for this increment: four frontend
 modules (`backend`, `protocol`, `rules`, `workflows`), two focused delete tests,
-this README and `scripts/check-electron-delete.sh`.
+this README and `scripts/checks/check-electron-delete.sh`.
 
 ## Live traffic graphs
 
@@ -465,7 +465,7 @@ authentication, tray notifications and firewall behavior are unchanged.
 
 ### Focused verification
 
-`scripts/check-electron-graphs.sh` uses existing dependencies, builds the ordinary
+`scripts/checks/check-electron-graphs.sh` uses existing dependencies, builds the ordinary
 read-only observer/native loopback fixture, and runs only graph/model checks and
 actual sandboxed Electron on KDE/Wayland. No controller, live-host enforcement,
 privileged collection or UDP kernel suite. Existing UDP evidence is reused.
@@ -504,7 +504,7 @@ Latest graph run: `.workspace/gr-Vhk0fS/` (nine synthetic/model checks passed).
 Eight Electron processes in both samples; same retained history and idle fixture.
 This bounded comparison does not establish a leak or a production resource budget.
 Integration adds `electron/src/{history,graph}.ts`, their typed bridge/render hooks,
-focused tests and `scripts/check-electron-graphs.sh`; no backend/Qt changes required.
+focused tests and `scripts/checks/check-electron-graphs.sh`; no backend/Qt changes required.
 
 ## Desktop controls and layout (2026-10-17)
 
@@ -525,7 +525,7 @@ endpoint, deadline, scope and decision controls remain visible. The modeless edi
 keeps its draft and offers pending-request access through Minimize/resume.
 
 See [VISUAL-REVIEW.md](VISUAL-REVIEW.md) for the desktop verification scope.
-Focused reproduction with already-installed dependencies: `scripts/check-electron-visual.sh`.
+Focused reproduction with already-installed dependencies: `scripts/checks/check-electron-visual.sh`.
 It uses real unprivileged host TCP observation and the existing disposable namespace
 controller, never host enforcement or privileged host UDP collection.
 
@@ -814,7 +814,7 @@ retried at that stage (superseded by the kernel-backed check below).
 
 Backend `15d6e1a9762092c86fdb3201ffb7d71c77303eb0` (`daemon-udp-monitor-v1`; fixture
 artifacts reported bit-exact to that source) with this UI. The user ran
-`scripts/check-daemon-udp.sh --kernel --reuse-build --hold --traffic`, a disposable
+`scripts/checks/check-daemon-udp.sh --kernel --reuse-build --hold --traffic`, a disposable
 initial-user-namespace net/pid/mount namespace with continuous native UDP4/6 + TCP.
 No host collector, rule, firewall or route change. Sandboxed Wayland Electron attached:
 
@@ -889,7 +889,7 @@ Real isolated enforcement (no sudo; own `decisions.db`; never the host daemon):
 
 ```sh
 R=$PWD/.workspace/decision-log-ui-fixture-<n>; mkdir -m 700 "$R"
-scripts/lab.sh python3 scripts/decision-log-isolated.py \
+scripts/lab.sh python3 scripts/acceptance/decision-log-isolated.py \
   --binary .workspace/decisionlog-build/flowgate-decisionlog --run "$R" --hold </dev/null &
 FLOWGATE_LOG_UI_RUN=$R node electron/test/decision-log-workflow.mjs
 echo quit > "$R/command"

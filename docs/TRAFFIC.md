@@ -114,7 +114,7 @@ ports, interpreter/Wine labels and inaccessible PIDs are never used to invent ow
 ## Reproduce
 
 ```sh
-QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=wayland-0 scripts/check-traffic.sh
+QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=wayland-0 scripts/checks/check-traffic.sh
 ```
 
 Ordinary workspace loopback fixtures compare exact 262144-byte upload and 131072-byte

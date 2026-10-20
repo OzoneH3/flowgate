@@ -37,7 +37,7 @@ reconciles a lost reply via `essential-status` + token; verifies user rules
 unchanged, stored scopes identical to the preview, all active, protection stopped.
 `--dry-run` stops after the preview check. Focused tests:
 `TestInterfaceExclusionRemovesOnlyThatInterface`,
-`TestEssentialInterfaceExclusionBoundToToken`, `scripts/test-apply-essentials.py`.
+`TestEssentialInterfaceExclusionBoundToToken`, `scripts/checks/test-apply-essentials.py`.
 
 ### Exact host proposal for activation review (21 rules, live host preview)
 

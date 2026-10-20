@@ -1,5 +1,5 @@
 // Real permission v1.1 + stored Ask journey: sandboxed GUI against an externally held, disposable
-// fixture (scripts/process-rules-isolated.py --hold --continuous --zones --other). Never the host daemon.
+// fixture (scripts/acceptance/process-rules-isolated.py --hold --continuous --zones --other). Never the host daemon.
 // Delivery is judged by the fixture's private receivers (peer-received.log), not by API saves.
 import { _electron } from 'playwright-core';
 import fs from 'node:fs';

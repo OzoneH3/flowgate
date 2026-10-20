@@ -147,7 +147,7 @@ no reference equivalence is claimed for them.
 
 The integrated implementation passes the full Go suite, targeted race tests and
 `go vet`, plus Electron build/typecheck and 196 tests. The isolated native
-receiver suite (`scripts/process-rules-isolated.py --automatic-zones`) uses real
+receiver suite (`scripts/acceptance/process-rules-isolated.py --automatic-zones`) uses real
 IPv4/IPv6 TCP and UDP over a nested GRE tunnel named ppp0. Local-only and
 Internet-only rules prove delivery and non-delivery for routed private, Tailscale
 CGNAT/ULA, public LAN, public routed and public-address tunnel-subnet peers.

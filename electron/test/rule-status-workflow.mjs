@@ -1,5 +1,5 @@
 // Real Rule Status journey against an externally held, disposable process-rule fixture
-// (scripts/process-rules-isolated.py --hold). Drives API mutations through the UI popup only.
+// (scripts/acceptance/process-rules-isolated.py --hold). Drives API mutations through the UI popup only.
 // Never point this at the host daemon. Fixture owner quits/cleans after this run.
 import { _electron } from 'playwright-core';
 import fs from 'node:fs';

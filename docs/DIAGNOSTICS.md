@@ -145,7 +145,7 @@ length-bounded and control characters are removed from the support summary.
 Focused command:
 
 ```sh
-scripts/check-doctor.sh
+scripts/checks/check-doctor.sh
 ```
 
 Compiles optional metadata-bearing helper but does not attach it. Go race tests and

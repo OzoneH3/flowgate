@@ -137,7 +137,7 @@ PPID, exact pinned path and helper hash before kill; deterministic Go-thread tes
 passed. No Go/collector behavior changed. Only the affected fault case needs run:
 
 ```sh
-scripts/check-tcp-initiation.sh --observe-shared --failure-only
+scripts/checks/check-tcp-initiation.sh --observe-shared --failure-only
 ```
 
 Do not repeat the passed direction/zone/UDP/firewall matrices. See TCP-INITIATION.md
@@ -159,7 +159,7 @@ real shared-kernel/overhead proof still pending. See TCP-INITIATION.md for bound
 source audit and exact affected test (requires terminal authentication):
 
 ```sh
-scripts/check-tcp-initiation.sh --observe-shared
+scripts/checks/check-tcp-initiation.sh --observe-shared
 ```
 
 Do not detach/disable bpftune or silently switch the running host. After the test,
@@ -232,7 +232,7 @@ requested from the user (fresh netns/cgroup-filtered fixture, no host daemon/API
 
 ```sh
 cd /home/flowgate-user/Apps/flowgate
-scripts/check-tcp-initiation.sh
+scripts/checks/check-tcp-initiation.sh
 ```
 
 Inspect the resulting verifier/error/evidence before any edit or repeat. This
@@ -405,7 +405,7 @@ rerun (it records exact source/diff/artifact hashes):
 
 ```sh
 cd /home/flowgate-user/Apps/flowgate
-scripts/check-tcp-initiation.sh
+scripts/checks/check-tcp-initiation.sh
 ```
 
 Current host read-only inspection remains PID1113279, generation

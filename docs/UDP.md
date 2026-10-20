@@ -181,7 +181,7 @@ Run from your desktop terminal, without prefixing the script itself with sudo:
 
 ```sh
 cd /home/flowgate-user/Apps/flowgate
-scripts/check-udp-isolated.sh
+scripts/checks/check-udp-isolated.sh
 ```
 
 The script requests system sudo only for `unshare --net --pid --fork --mount-proc`

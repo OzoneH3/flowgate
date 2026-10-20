@@ -6,9 +6,9 @@ go test -race ./...
 go build -o .workspace/flowgate ./cmd/flowgate
 go build -o .workspace/native-a ./fixtures/native
 cp .workspace/native-a .workspace/native-b
-scripts/lab.sh python3 scripts/integration.py
-scripts/lab.sh python3 scripts/outgoing.py
+scripts/lab.sh python3 scripts/acceptance/integration.py
+scripts/lab.sh python3 scripts/acceptance/outgoing.py
 if [ "${1:-}" = "--wine" ]; then
  scripts/build-windows.sh
- scripts/lab.sh python3 scripts/wine-integration.py
+ scripts/lab.sh python3 scripts/acceptance/wine-integration.py
 fi

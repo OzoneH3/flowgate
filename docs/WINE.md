@@ -146,7 +146,7 @@ Its third argument accepts an absolute prefix override. Paths containing `#Hv`
 force its shared RenPy prefix; these fixtures do not contain that marker.
 Neither the original launcher nor its existing prefixes were modified/executed.
 
-`scripts/proton-fixture.sh` reproduces the selected Proton setup with a fixed
+`scripts/acceptance/proton-fixture.sh` reproduces the selected Proton setup with a fixed
 workspace-only prefix. It calls Proton's `runinprefix` (direct Wine child) to keep
 helper stdin intact; Proton `run` goes through steam.exe and did not preserve this
 interactive probe channel. `--init` uses Proton getcompatpath/winepath to initialize the prefix without steam.exe. UMU's runtime
@@ -161,13 +161,13 @@ scripts/build-windows.sh
 scripts/build-wine-table.sh
 # Complete Wine prefix setup once, in the disposable namespace:
 scripts/lab.sh sh -c 'export WINEPREFIX="$PWD/.workspace/wine-prefix" TMPDIR="$PWD/.workspace/tmp" XDG_CACHE_HOME="$PWD/.workspace/cache" XDG_CONFIG_HOME="$PWD/.workspace/config" WINEDEBUG=-all WINEDLLOVERRIDES="mscoree,mshtml=" DISPLAY= WAYLAND_DISPLAY=; wineboot -u; wineserver -w'
-scripts/lab.sh python3 scripts/wine-table-test.py
-scripts/lab.sh python3 scripts/wine-table-lifecycle.py
+scripts/lab.sh python3 scripts/acceptance/wine-table-test.py
+scripts/lab.sh python3 scripts/acceptance/wine-table-lifecycle.py
 export FLOWGATE_TEST_PROTON=/home/flowgate-user/.steam/steam/compatibilitytools.d/dwproton-11.0-4
 export FLOWGATE_TEST_STEAM=/home/flowgate-user/.steam/steam
-scripts/lab.sh scripts/proton-fixture.sh --init
-scripts/lab.sh python3 scripts/wine-table-test.py
-scripts/lab.sh python3 scripts/wine-table-lifecycle.py
+scripts/lab.sh scripts/acceptance/proton-fixture.sh --init
+scripts/lab.sh python3 scripts/acceptance/wine-table-test.py
+scripts/lab.sh python3 scripts/acceptance/wine-table-lifecycle.py
 ```
 
 Run these sequentially. Tests set `FLOWGATE_WINE_TABLE_RUNNER`,
@@ -273,9 +273,9 @@ is full UMU/Steam/container integration or permission to touch game prefixes.
 
 ```sh
 # Builds and runs all new tests sequentially in disposable namespaces:
-scripts/check-runtime.sh
+scripts/checks/check-runtime.sh
 FLOWGATE_TEST_PROTON=/home/flowgate-user/.steam/steam/compatibilitytools.d/dwproton-11.0-4 \
-FLOWGATE_TEST_STEAM=/home/flowgate-user/.steam/steam scripts/check-runtime.sh
+FLOWGATE_TEST_STEAM=/home/flowgate-user/.steam/steam scripts/checks/check-runtime.sh
 
 # Inside an existing scripts/lab.sh shell, after fixtures are listening:
 .workspace/flowgate runtime-discover --runtime-bins /usr/bin
@@ -310,7 +310,7 @@ path` (+ file-stamp revision). Consequences, stated in `permission_target`:
 
 - Proton's `rundll32.exe` maps `…/dwproton-11.0-4/files/lib/wine/x86_64-windows/
   rundll32.exe`. Two games with **different prefixes** produce **different keys**
-  for that same file (tested: `scripts/provenance-wine.py`, real Wine 11.19).
+  for that same file (tested: `scripts/acceptance/provenance-wine.py`, real Wine 11.19).
 - In a **shared prefix** (umu default `~/Games/umu/umu-default`, `lwp`'s RenPy
   prefix, an explicit shared third argument), one Remember on the helper covers
   every game using that prefix. The UI therefore says "rundll32.exe in prefix X
@@ -327,10 +327,10 @@ rundll32.exe PID 1195586, ended, ancestry never captured — stays without a gam
 
 Verification: `go test ./internal/identity -run 'Provenance|Ancestry|Markers|
 WineExe|Environment|PermissionTarget'`; `scripts/lab.sh python3
-scripts/process-rules-isolated.py --binary B --native N --run .workspace/RUN
+scripts/acceptance/process-rules-isolated.py --binary B --native N --run .workspace/RUN
 --provenance` (SIMULATION: native fixture renamed to Proton paths, fake
-umu-run/pv-adverb/proton scripts in `scripts/provenance-sim`, real receivers);
-`scripts/lab.sh python3 scripts/provenance-wine.py --binary B --run
+umu-run/pv-adverb/proton scripts in `scripts/acceptance/provenance-sim`, real receivers);
+`scripts/lab.sh python3 scripts/acceptance/provenance-wine.py --binary B --run
 .workspace/RUN --prefix-source .workspace/wine-prefix --pe
 .workspace/windows/alpha.exe` (real Wine processes, simulated launcher chain).
 Real UMU/Proton/pressure-vessel launches were not executed.
@@ -398,7 +398,7 @@ umu are not permission selectors: the mechanism applies wherever their launch
 uses a selected supported broker, explicit prefix and compatible namespace.
 Pressure-vessel configurations with a foreign namespace are currently refused.
 
-Reproduce the outgoing matrix with `scripts/wine-outgoing-acceptance.py` inside
+Reproduce the outgoing matrix with `scripts/acceptance/wine-outgoing-acceptance.py` inside
 `scripts/lab.sh`, pointing at a copied initialized prefix under `.workspace`.
 Two distinct PE paths and two prefixes verify Allow/receiver payload, Deny/empty
 receiver, persistent Remember/subsequent instance, independent executable and

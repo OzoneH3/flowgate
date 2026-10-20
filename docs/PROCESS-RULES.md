@@ -138,7 +138,7 @@ go build -o .workspace/flowgate-process ./cmd/flowgate
 go build -o .workspace/process-fixtures/native ./fixtures/process-rule
 go test -race ./internal/identity ./internal/policy ./internal/daemon ./internal/decisionlog ./internal/store
 go vet ./internal/identity ./internal/policy ./internal/daemon ./internal/decisionlog ./internal/store ./internal/hostfirewall ./cmd/flowgate
-scripts/lab.sh python3 scripts/process-rules-isolated.py --binary "$PWD/.workspace/flowgate-process" --native "$PWD/.workspace/process-fixtures/native" --run "$PWD/.workspace/process-check-$(date +%s)"
+scripts/lab.sh python3 scripts/acceptance/process-rules-isolated.py --binary "$PWD/.workspace/flowgate-process" --native "$PWD/.workspace/process-fixtures/native" --run "$PWD/.workspace/process-check-$(date +%s)"
 ```
 
 Only disposable user/network/PID namespaces and databases are used. Two instances

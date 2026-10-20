@@ -52,7 +52,7 @@ private slots:
                                    QFile::ExeOwner);
     lab.setProgram("scripts/lab.sh");
     lab.setArguments(
-        {"python3", "scripts/host-lab.py", run, "--desktop-workflow"});
+        {"python3", "scripts/acceptance/host-lab.py", run, "--desktop-workflow"});
     lab.setProcessChannelMode(QProcess::MergedChannels);
     lab.start();
     QVERIFY(lab.waitForStarted());
