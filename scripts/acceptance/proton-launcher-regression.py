@@ -1,0 +1,195 @@
+#!/usr/bin/env python3
+"""Real lwp -> Python/UMU -> pressure-vessel -> Proton -> PE regression.
+
+This reproduces a failure, not passing game enforcement. Only copied prefixes,
+runtime data and private network/PID namespaces are used. The Python preflight
+is labelled synthetic; UMU, Proton and the container launcher are unmodified.
+"""
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import signal
+import sqlite3
+import socket
+import subprocess
+import sys
+import threading
+import time
+
+ROOT = Path(__file__).resolve().parents[2]
+p = argparse.ArgumentParser()
+p.add_argument('--binary', required=True)
+p.add_argument('--run', required=True)
+p.add_argument('--proton', required=True, help='workspace copy of installed Proton')
+p.add_argument('--data', required=True, help='workspace data containing copied umu/steamrt4')
+p.add_argument('--prefix-source', required=True, help='initialized workspace Proton compat directory')
+p.add_argument('--pe', required=True)
+p.add_argument('--lwp', required=True, help='actual installed lwp script (read-only)')
+a = p.parse_args()
+assert os.environ['FLOWGATE_PARENT_NETNS'] != os.readlink('/proc/self/ns/net')
+assert os.geteuid() != 0, 'real UMU refuses root; use map-current-user, not lab.sh'
+for value in [a.run,a.proton,a.data,a.prefix_source,a.pe]:
+    assert Path(value).resolve().is_relative_to(ROOT/'.workspace'), value
+RUN=Path(a.run).resolve(); RUN.mkdir(mode=0o700,parents=True)
+BIN=str(Path(a.binary).resolve()); API=str(RUN/'api.sock')
+for d in ['home','tmp','cache','config','runtime','games','steam']:(RUN/d).mkdir(mode=0o700)
+prefixes=[]
+for name in ['prefix-a','prefix-b']:
+    dst=RUN/name
+    subprocess.run(['cp','-a','--reflink=auto',a.prefix_source,str(dst)],check=True)
+    for link in dst.rglob('*'):
+        if link.is_symlink() and 'drive_c/users/' in str(link) and str(link.readlink()).startswith('/home/'):
+            link.unlink(); link.symlink_to(RUN/'home',target_is_directory=True)
+    prefixes.append(dst/'pfx')
+for name in ['SyntheticAlpha.exe','SyntheticBeta.exe']:
+    subprocess.run(['cp',a.pe,str(RUN/'games'/name)],check=True)
+children=[]; received=[]; evidence=[]
+server=socket.socket();server.bind(('127.0.0.1',0));server.listen();port=server.getsockname()[1]
+def receive():
+    while True:
+        try:
+            c,_=server.accept()
+            with c: received.append(c.recv(1024).decode())
+        except OSError:return
+threading.Thread(target=receive,daemon=True).start()
+def wait(fn,seconds=30):
+    end=time.monotonic()+seconds
+    while time.monotonic()<end:
+        v=fn()
+        if v:return v
+        time.sleep(.08)
+    raise AssertionError('timeout: '+str(fn))
+def call(op='list',**kw):
+    with socket.socket(socket.AF_UNIX) as s:
+        s.settimeout(10);s.connect(API)
+        s.sendall((json.dumps(dict(version=1,operation=op,**kw))+'\n').encode())
+        return json.loads(s.makefile('rb').readline())
+def cli(*args):
+    r=subprocess.run([BIN,*map(str,args)],capture_output=True,text=True,timeout=10)
+    if r.returncode:raise RuntimeError(r.stderr)
+    return json.loads(r.stdout)
+def records():
+    db=RUN/'decisions.db'
+    if not db.exists():return []
+    with sqlite3.connect('file:'+str(db)+'?mode=ro',uri=True) as c:
+        return [json.loads(row[0]) for row in c.execute('select document from decisions order by seq')]
+def proc_context(pid):
+    root=Path('/proc')/str(pid)
+    return dict(namespaces={n:os.readlink(root/'ns'/n) for n in ['mnt','net','user','pid']},uid_map=(root/'uid_map').read_text(),gid_map=(root/'gid_map').read_text())
+def digest(path):return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+def save(name,obj): (RUN/name).write_text(json.dumps(obj,indent=2))
+def stop_prefix(prefix):
+    victims=[]
+    for d in Path('/proc').iterdir():
+        if not d.name.isdigit() or int(d.name)==1:continue
+        try:
+            env=(d/'environ').read_bytes().split(b'\0')
+            if any(x.startswith(b'WINEPREFIX=') and Path(x.split(b'=',1)[1].decode()).resolve()==prefix.resolve() for x in env):victims.append(int(d.name))
+        except OSError:pass
+    for pid in victims:
+        try:os.kill(pid,signal.SIGKILL)
+        except ProcessLookupError:pass
+
+def find_pe(name,prefix):
+    for d in Path('/proc').iterdir():
+        if not d.name.isdigit():continue
+        try:
+            cmd=(d/'cmdline').read_bytes().split(b'\0')[0].decode(errors='replace')
+            env=(d/'environ').read_bytes().split(b'\0')
+            if cmd.replace('\\','/').endswith('/'+name) and any(x.startswith(b'WINEPREFIX=') and Path(x.split(b'=',1)[1].decode()).resolve()==prefix.resolve() for x in env):return int(d.name)
+        except OSError:pass
+    return None
+steam=RUN/'home/.steam/steam/compatibilitytools.d'
+steam.mkdir(parents=True)
+subprocess.run(['cp','-a','--reflink=auto',a.proton,str(steam/'dwproton-fixture')],check=True)
+base=dict(PATH='/usr/bin:/bin',LANG='C.UTF-8',USER=os.environ.get('USER','flowgate-user'),LOGNAME=os.environ.get('LOGNAME','flowgate-user'),HOME=str(RUN/'home'),TMPDIR=str(RUN/'tmp'),XDG_RUNTIME_DIR=str(RUN/'runtime'),XDG_DATA_HOME=str(Path(a.data).resolve()),XDG_CACHE_HOME=str(RUN/'cache'),XDG_CONFIG_HOME=str(RUN/'config'),PROTONPATH=str(Path(a.proton).resolve()),UMU_RUNTIME_UPDATE='0',UMU_LOG='1',PROTONFIXES_DISABLE='1',PYTHONDONTWRITEBYTECODE='1',WINEDEBUG='-all',WINEDLLOVERRIDES='mscoree,mshtml=',DISPLAY='',WAYLAND_DISPLAY='',STEAM_COMPAT_CLIENT_INSTALL_PATH=str(RUN/'steam'),FLOWGATE_TEST_PORT=str(port))
+# The extra preflight models a launcher's own network request; the rest of the
+# launch uses the installed Python UMU entrypoint and copied unmodified runtime.
+wrapper=RUN/'python-preflight.py'
+wrapper.write_text('import os,socket,sys\ns=socket.create_connection(("127.0.0.1",int(os.environ["FLOWGATE_TEST_PORT"])),20)\ns.sendall(b"SYNTHETIC_PYTHON_PREFLIGHT")\ns.close()\nos.execv(sys.argv[1],sys.argv[1:])\n')
+def launch(name,prefix,token,preflight):
+    env=dict(base,WINEPREFIX=str(prefix),GAMEID='umu-0',FLOWGATE_TEST_TOKEN=token,FLOWGATE_TEST_TRACE='Z:'+str(RUN/(token+'.trace')).replace('/','\\'))
+    log=RUN/(token+'.log')
+    lwp=[str(Path(a.lwp).resolve()),str(RUN/'games'/name),'%command%',str(prefix)]
+    cmd=[sys.executable,str(wrapper)]+lwp if preflight else lwp
+    cmd=['/usr/bin/setpriv','--inh-caps=-all','--ambient-caps=-all','--']+cmd
+    f=log.open('w');c=subprocess.Popen(cmd,env=env,stdout=f,stderr=f);children.append(c);f.close()
+    return c,log
+try:
+    log=(RUN/'daemon.log').open('w')
+    daemon=subprocess.Popen([BIN,'serve-lab','--parent-netns',os.environ['FLOWGATE_PARENT_NETNS'],'--direction','outgoing','--socket',API,'--timeout','30s','--decision-log',str(RUN/'decisions.db')],stdout=log,stderr=log);children.append(daemon);log.close()
+    wait(lambda:Path(API).exists())
+    python_key=None
+    for index,(name,prefix) in enumerate([('SyntheticAlpha.exe',prefixes[0]),('SyntheticBeta.exe',prefixes[0]),('SyntheticAlpha.exe',prefixes[1])]):
+        token='PE_ENFORCED_'+str(index)
+        before={e['id'] for e in records()}
+        child,log=launch(name,prefix,token,True)
+        if index==0:
+            e=wait(lambda:next((e for e in call().get('events',[]) if e['state']=='awaiting-decision'),None))
+            assert e['attribution']['application']['kind']=='native',e
+            python_key=e['attribution']['application']['key'];save('python-prompt.json',e)
+            ack=call('decide',id=e['id'],action='allow',scope='application');assert ack.get('decision',{}).get('state')=='allowed',ack
+            save('python-decision.json',ack)
+        wait(lambda:received.count('SYNTHETIC_PYTHON_PREFLIGHT')==index+1)
+        def ready():
+            if child.poll() is not None:raise AssertionError('real launcher exited: '+str(log))
+            trace=RUN/(token+'.trace')
+            return trace.exists() and 'SYNTHETIC_CLIENT_READY' in trace.read_text()
+        wait(ready,70)
+        pid=wait(lambda:find_pe(name,prefix))
+        process=cli('process',pid);save(token+'-process.json',process)
+        dropped=wait(lambda:next((e for e in records() if e['id'] not in before and e.get('flow',{}).get('remote','').endswith(':'+str(port)) and e.get('verdict',{}).get('state')=='drop_submitted'),None),15)
+        raw=cli('attribute','--protocol','tcp','--direction','outgoing','--local',dropped['flow']['local'],'--remote',dropped['flow']['remote'])
+        timeline=[raw]
+        for delay in [.1,.3]:
+            time.sleep(delay)
+            timeline.append(cli('attribute','--protocol','tcp','--direction','outgoing','--local',dropped['flow']['local'],'--remote',dropped['flow']['remote']))
+        assert token not in received
+        assert raw['visibility_complete'] and len(raw['owners'])==1,raw
+        assert Path(raw['owners'][0]['executable']).name=='wineserver',raw
+        assert not raw.get('application'),raw
+        assert process['netns']==os.readlink('/proc/self/ns/net')
+        assert process['mountns']!=os.readlink('/proc/self/ns/mnt')
+        assert process.get('provenance',{}).get('evidence')=='verified',process
+        assert {'umu-run','pressure-vessel'} <= set(process['provenance']['launch']['markers'])
+        assert process['application']['kind']=='wine' and process['application']['key']!=python_key
+        evidence.append(dict(name=name,prefix=str(prefix),process=process,decision=dropped,attribution=raw,holder_timeline=timeline,client_context=proc_context(pid),broker_context=proc_context(raw['owners'][0]['pid']),daemon_context=proc_context(daemon.pid)))
+        save(token+'-evidence.json',evidence[-1])
+        print('REPRODUCED',name,str(prefix),dropped['attribution']['status'],dropped['attribution']['reason'],flush=True)
+        stop_prefix(prefix)
+        child.wait(timeout=10)
+    assert len({e['process']['application']['key'] for e in evidence})==3
+    rules=call().get('rules',[]);assert len(rules)==1 and rules[0]['filter']['application']==python_key,rules
+    save('private-rules.json',rules)
+    daemon.terminate();daemon.wait(timeout=10)
+    assert subprocess.run(['nft','list','table','inet','flowgate_lab'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode!=0
+    # Prove the same Windows clients and launch path actually send data with
+    # the isolated interceptor removed; receiver delivery is the assertion.
+    for index,name in enumerate(['SyntheticAlpha.exe','SyntheticBeta.exe']):
+        token='PE_CONTROL_'+str(index);child,log=launch(name,prefixes[index],token,False)
+        wait(lambda:token in received,70)
+        print('CONTROL RECEIVED',token,flush=True)
+        stop_prefix(prefixes[index])
+        child.wait(timeout=10)
+    result=dict(reproduced=True,source=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),lwp=str(Path(a.lwp).resolve()),lwp_sha256=digest(a.lwp),proton_sha256=digest(Path(a.proton)/'proton'),broker_sha256=digest(Path(a.proton)/'files/bin/wineserver'),client_sha256=digest(a.pe),python_rule_does_not_target_pe=True,received=received,observations=evidence,host_changed=False)
+    save('result.json',result)
+finally:
+    try: save('decision-log.json',records())
+    except (OSError,sqlite3.Error): pass
+    try: save('last-state.json',call())
+    except (OSError,ValueError): pass
+    try: save('last-sockets.json',cli('sockets'))
+    except (OSError,ValueError,RuntimeError): pass
+    if sys.exc_info()[0] is not None and 'daemon' in globals() and daemon.poll() is None:
+        daemon.send_signal(signal.SIGQUIT)
+        try: daemon.wait(timeout=3)
+        except subprocess.TimeoutExpired: pass
+    for c in reversed(children):
+        if c.poll() is None:c.terminate()
+    for c in reversed(children):
+        try:c.wait(timeout=5)
+        except subprocess.TimeoutExpired:c.kill();c.wait()
+    server.close()
+    print('CLEANED direct children; private PID/network namespace owns remaining runtime descendants',flush=True)

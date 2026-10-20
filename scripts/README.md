@@ -71,3 +71,11 @@ workflow before activation or GUI switching. The monitoring-only installer itsel
 continues to leave protection stopped; the launcher performs the explicit start.
 Read-only status checks and mocked workflow tests live in
 `lib/update_and_start.py` and `checks/test-update-and-start.py`.
+
+## Real lwp / Proton failure reproduction
+
+`checks/check-proton-launcher.sh` runs two Windows applications through the actual
+`lwp` / Python / UMU / pressure-vessel / Proton chain in private namespaces.
+See [the reproduction guide](../docs/PROTON-LAUNCHER-REGRESSION.md) for inputs and
+meaning of the results. Success means the known attribution failure was
+reproduced and receiver controls passed; it does not mean the failure is fixed.
