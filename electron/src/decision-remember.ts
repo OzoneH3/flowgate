@@ -88,9 +88,9 @@ export function rememberOptions(e: RequestEvent, applicationName: string): Remem
     {
       field: 'process',
       label: owner ? `Process ${owner.pid}` : 'Process',
-      available: !!owner && e.attribution.visibility_complete,
+      available: !!owner && e.attribution.visibility_complete && !e.attribution.runtime_table,
       reason:
-        owner && e.attribution.visibility_complete
+        owner && e.attribution.visibility_complete && !e.attribution.runtime_table
           ? 'Only this process instance; inactive when it exits'
           : 'Needs one verified owning process',
     },

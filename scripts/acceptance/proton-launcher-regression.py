@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import shlex
 import sqlite3
 import socket
 import subprocess
@@ -21,6 +22,7 @@ import time
 ROOT = Path(__file__).resolve().parents[2]
 p = argparse.ArgumentParser()
 p.add_argument('--verify', action='store_true')
+p.add_argument('--burst',action='store_true')
 p.add_argument('--helper')
 p.add_argument('--binary', required=True)
 p.add_argument('--run', required=True)
@@ -36,7 +38,7 @@ for value in [a.run,a.proton,a.data,a.prefix_source,a.pe]:
     assert Path(value).resolve().is_relative_to(ROOT/'.workspace'), value
 RUN=Path(a.run).resolve(); RUN.mkdir(mode=0o700,parents=True)
 BIN=str(Path(a.binary).resolve()); API=str(RUN/'api.sock')
-for d in ['home','tmp','cache','config','runtime','games','steam']:(RUN/d).mkdir(mode=0o700)
+for d in ['home','tmp','cache','config','runtime','games with spaces','steam']:(RUN/d).mkdir(mode=0o700)
 prefixes=[]
 for name in ['prefix-a','prefix-b']:
     dst=RUN/name
@@ -46,7 +48,7 @@ for name in ['prefix-a','prefix-b']:
             link.unlink(); link.symlink_to(RUN/'home',target_is_directory=True)
     prefixes.append(dst/'pfx')
 for name in ['SyntheticAlpha.exe','SyntheticBeta.exe']:
-    subprocess.run(['cp',a.pe,str(RUN/'games'/name)],check=True)
+    subprocess.run(['cp',a.pe,str(RUN/'games with spaces'/name)],check=True)
 children=[]; received=[]; evidence=[]
 server=socket.socket();server.bind(('127.0.0.1',0));server.listen();port=server.getsockname()[1]
 def receive():
@@ -111,7 +113,7 @@ def find_pe(name,prefix):
 steam=RUN/'home/.steam/steam/compatibilitytools.d'
 steam.mkdir(parents=True)
 subprocess.run(['cp','-a','--reflink=auto',a.proton,str(steam/'dwproton-fixture')],check=True)
-base=dict(PATH='/usr/bin:/bin',LANG='C.UTF-8',USER=os.environ.get('USER','flowgate-user'),LOGNAME=os.environ.get('LOGNAME','flowgate-user'),HOME=str(RUN/'home'),TMPDIR=str(RUN/'tmp'),XDG_RUNTIME_DIR=str(RUN/'runtime'),XDG_DATA_HOME=str(Path(a.data).resolve()),XDG_CACHE_HOME=str(RUN/'cache'),XDG_CONFIG_HOME=str(RUN/'config'),PROTONPATH=str(Path(a.proton).resolve()),UMU_RUNTIME_UPDATE='0',UMU_LOG='1',PROTONFIXES_DISABLE='1',PYTHONDONTWRITEBYTECODE='1',WINEDEBUG='-all',WINEDLLOVERRIDES='mscoree,mshtml=',DISPLAY='',WAYLAND_DISPLAY='',STEAM_COMPAT_CLIENT_INSTALL_PATH=str(RUN/'steam'),FLOWGATE_TEST_PORT=str(port))
+base=dict(FLOWGATE_TEST_CONNECTIONS='3' if a.burst else '1',PATH='/usr/bin:/bin',LANG='C.UTF-8',USER=os.environ.get('USER','flowgate-user'),LOGNAME=os.environ.get('LOGNAME','flowgate-user'),HOME=str(RUN/'home'),TMPDIR=str(RUN/'tmp'),XDG_RUNTIME_DIR=str(RUN/'runtime'),XDG_DATA_HOME=str(Path(a.data).resolve()),XDG_CACHE_HOME=str(RUN/'cache'),XDG_CONFIG_HOME=str(RUN/'config'),PROTONPATH=str(Path(a.proton).resolve()),UMU_RUNTIME_UPDATE='0',UMU_LOG='1',PROTONFIXES_DISABLE='1',PYTHONDONTWRITEBYTECODE='1',WINEDEBUG='-all',WINEDLLOVERRIDES='mscoree,mshtml=',DISPLAY='',WAYLAND_DISPLAY='',STEAM_COMPAT_CLIENT_INSTALL_PATH=str(RUN/'steam'),FLOWGATE_TEST_PORT=str(port))
 # The extra preflight models a launcher's own network request; the rest of the
 # launch uses the installed Python UMU entrypoint and copied unmodified runtime.
 wrapper=RUN/'python-preflight.py'
@@ -119,8 +121,9 @@ wrapper.write_text('import os,socket,sys\ns=socket.create_connection(("127.0.0.1
 def launch(name,prefix,token,preflight):
     env=dict(base,WINEPREFIX=str(prefix),GAMEID='umu-0',FLOWGATE_TEST_TOKEN=token,FLOWGATE_TEST_TRACE='Z:'+str(RUN/(token+'.trace')).replace('/','\\'))
     log=RUN/(token+'.log')
-    lwp=[str(Path(a.lwp).resolve()),str(RUN/'games'/name),'%command%',str(prefix)]
-    cmd=[sys.executable,str(wrapper)]+lwp if preflight else lwp
+    lwp=[str(Path(a.lwp).resolve()),str(RUN/'games with spaces'/name),'%command%',str(prefix)]
+    shell_launch=['/bin/bash','-c',shlex.join(lwp)]
+    cmd=[sys.executable,str(wrapper)]+shell_launch if preflight else shell_launch
     cmd=['/usr/bin/setpriv','--inh-caps=-all','--ambient-caps=-all','--']+cmd
     f=log.open('w');c=subprocess.Popen(cmd,env=env,stdout=f,stderr=f);children.append(c);f.close()
     return c,log
@@ -153,6 +156,10 @@ try:
         process=cli('process',pid);save(token+'-process.json',process)
         if a.verify:
             e=wait(lambda:next((e for e in call().get('events',[]) if e['state']=='awaiting-decision' and e.get('attribution',{}).get('application',{}).get('kind')=='wine'),None),15)
+            if a.burst:
+                pending=wait(lambda: (lambda es:es if len(es)==3 else None)([x for x in call().get('events',[]) if x['state']=='awaiting-decision' and x.get('attribution',{}).get('application',{}).get('key')==process['application']['key']]),5)
+                assert len({x['request_group'] for x in pending})==1
+                save(token+'-pending-group.json',pending)
             save(token+'-prompt.json',e)
             def live_row():
                 state=call()
@@ -166,7 +173,7 @@ try:
             ack=call('decide',id=e['id'],action=action,scope='application')
             save(token+'-decision.json',ack)
             assert ack.get('decision',{}).get('state')==('blocked' if action=='block' else 'allowed'),ack
-            if action=='allow':wait(lambda:token in received,15)
+            if action=='allow':wait(lambda:received.count(token)==(3 if a.burst else 1),15)
             else:
                 time.sleep(3);assert token not in received
             policy_view=call('policy-view',generation=call()['generation']).get('policy_view',{})

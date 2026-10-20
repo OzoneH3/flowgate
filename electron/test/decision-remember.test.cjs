@@ -534,3 +534,8 @@ test('paired previews retain the precise closure cause instead of a generic subs
   await Promise.allSettled([b.previewDecision(d), b.previewDecision({ ...d, action: 'block' })]);
   assert.equal(b.view().control.events[0].reviewFailure.code, 'connection_ended');
 });
+
+test('Wine table broker is never offered as the Windows process-scoped target',()=>{
+ const e={flow:{direction:'outgoing',protocol:'tcp',local:'127.0.0.1:4000',remote:'127.0.0.1:80'},attribution:{owners:[{pid:42}],visibility_complete:true,runtime_table:{broker_pid:42}}};
+ assert.equal(rememberOptions(e,'Alpha.exe').find(o=>o.field==='process').available,false);
+});

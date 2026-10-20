@@ -425,7 +425,7 @@ func (e *Engine) verifyRuntimeCreation(target ObservedTarget, expected identity.
 		return fail()
 	}
 	for _, r := range s.Rows {
-		if r.ID != target.RowID || len(r.Owners) != 1 || r.Owners[0] != target.ProcessID || r.RuntimeApplication == nil {
+		if r.ID != target.RowID || len(r.Owners) != 1 || r.Owners[0] != target.ProcessID {
 			continue
 		}
 		a := e.Resolve(identity.Flow{Protocol: r.Socket.Protocol, Direction: "outgoing", NetNS: r.Socket.NetNS, Local: r.Socket.Local, Remote: r.Socket.Remote})

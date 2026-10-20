@@ -90,7 +90,7 @@ export class AutomaticPrompts {
   next(state: ClientState, occupied: boolean): RequestRef | undefined {
     // After an unknown/rejected outcome nothing new is presented until an
     // authoritative list issued after it was read (queue reconciliation).
-    if (occupied || !canDecide(state.control) || state.control.reconciling) return;
+    if (occupied || !canDecide(state.control) || state.control.reconciling || state.control.events.some(e=>e.attempt?.phase==='submitting')) return;
     const g = requestGroups(state.control.events).find(
       (g) =>
         !g.representative.attempt && !this.dismissed.has(this.key(state.control.generation, g.key)),
@@ -102,17 +102,10 @@ export class AutomaticPrompts {
   follow(state: ClientState, ref: RequestRef): RequestRef | undefined {
     if (state.control.generation !== ref.generation) return;
     const e = state.control.events.find((e) => e.id === ref.id);
-    if (e && (reviewFailureOf(e) || awaiting(e) || e.attempt?.phase === 'unknown' || e.attempt?.phase === 'submitting'))
-      return ref;
-    // An ended request whose retained record still offers Remember / For a while keeps its
-    // card until the user moves on (Next request / Close) or the backend stops listing it.
-    // A waiting request always wins (paced): the ended one stays reachable from Pending requests.
-    if (
-      e &&
-      e.request_rule?.available &&
-      !state.control.events.some((x) => x.id !== e.id && awaiting(x))
-    )
-      return ref;
+    if (e && (e.attempt?.phase === 'unknown' || e.attempt?.phase === 'submitting')) return ref;
+    if (e && awaiting(e)) return ref;
+    // Ended/settled cards remain inspectable in Pending requests, but never
+    // occupy the automatic popup with disabled decision controls.
     if (!canDecide(state.control)) return;
     // Never advance to another request before reconciliation completed.
     if (state.control.reconciling) return e ? ref : undefined;

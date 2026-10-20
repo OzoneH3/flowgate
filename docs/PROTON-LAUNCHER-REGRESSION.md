@@ -41,6 +41,9 @@ firewall changes, real game prefix access or daemon installation occurs.
    client. The client opens a plain blocking TCP connection to **the same
    receiver address and port**. No Wine FD-materialization workaround is used.
 3. The matrix covers Alpha and Beta in prefix A, then Alpha in prefix B.
+   Each opens three simultaneous TCP connections. Their exact backend group
+   identity must match, and one remembered decision settles the group. The
+   executable directory contains spaces and `bash -c` invokes the real launcher.
    Executable paths and canonical prefixes produce three separate identities.
 4. Alpha is allowed; Beta in the same prefix is denied; Alpha in another prefix
    requires an independent decision. New instances repeat these saved decisions.

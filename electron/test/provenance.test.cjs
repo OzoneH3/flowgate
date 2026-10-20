@@ -66,12 +66,13 @@ test('verified helper and launcher rows sit beneath one game node; unrelated pyt
   assert.equal(g.displayApplication, undefined);
   assert.deepEqual(
     g.children.map((c) => c.label).sort(),
-    ['DS2.exe (game) · PID 1197196', 'python3.14 · umu-run launcher · PID 1194845', 'rundll32.exe (helper) · PID 1195586'],
+    ['python3.14 · umu-run launcher · PID 1194845', 'rundll32.exe (helper) · PID 1195586'],
   );
   assert.ok(g.children.every((c) => c.kind === 'process' && c.process && c.parent === g.id));
-  assert.equal(g.rows.length, 3);
+  assert.equal(g.rows.length, 2);
   const apps = roots.filter((r) => r.kind === 'application');
-  assert.equal(apps.length, 2, 'unrelated python and the reparented helper stay separate');
+  assert.equal(apps.length, 3, 'the game has its own executable rule row; Python and helpers remain separate');
+  assert.ok(apps.some(a=>a.label==='DS2.exe' && a.process.application.key===processes.ds2.application.key));
   assert.ok(apps.some((a) => a.label === 'python3.14' && a.rows[0].id === 's4'));
   assert.ok(apps.some((a) => a.label === 'rundll32.exe' && a.rows[0].id === 's5'));
   // Search by game finds the helper rows.

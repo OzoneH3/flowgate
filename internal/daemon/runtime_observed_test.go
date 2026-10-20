@@ -19,7 +19,12 @@ func TestRuntimeActivityRuleBindsWindowsImageNotBroker(t *testing.T) {
 	if preview.Rule.Filter.Application != app.Key || !preview.Rule.Filter.Process.IsZero() {
 		t.Fatal(preview)
 	}
+	// Activity's optional annotation may be omitted for one bounded collection.
+	// Save must re-resolve the exact socket, rather than treating that as exit.
+	annotation := s.Rows[0].RuntimeApplication
+	s.Rows[0].RuntimeApplication = nil
 	saved := callResponse(a.path, saveRequest(a, preview, d))
+	s.Rows[0].RuntimeApplication = annotation
 	if saved.Error != "" || saved.SavedRule == nil || saved.SavedRule.Filter.Application != app.Key {
 		t.Fatal(saved)
 	}

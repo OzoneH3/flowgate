@@ -176,3 +176,22 @@ test('unknown acknowledgement stays available for reconciliation even after expi
   });
   assert.deepEqual(q.follow(s, ref), ref);
 });
+
+test('automatic popup closes settled and expired retained cards instead of showing disabled actions',()=>{
+ for(const status of ['allowed','blocked','expired']){
+  const q=new AutomaticPrompts(),s=state(['a']),ref=q.next(s,false);
+  Object.assign(s.control.events[0],{state:status,remainingMs:0,request_rule:{available:true}});
+  assert.equal(q.follow(s,ref),undefined);
+ }
+});
+
+test('a hidden answered popup waits for the in-flight remembered result before presenting another request',()=>{
+ const q=new AutomaticPrompts(),s=state(['a','b','c']);
+ s.control.events[0].attempt={phase:'submitting'};
+ assert.equal(q.next(s,false),undefined);
+ s.control.events[0].attempt={phase:'unknown'};s.control.reconciling=true;
+ assert.equal(q.next(s,false),undefined);
+ s.control.reconciling=false;
+ for(const e of s.control.events){e.state='allowed';e.remainingMs=0;e.attempt=undefined;}
+ assert.equal(q.next(s,false),undefined);
+});

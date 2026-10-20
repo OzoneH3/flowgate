@@ -64,6 +64,7 @@ export function promptSummary(e: Ev, fallbackName: string): PromptSummary {
   // Incoming: the endpoint that connects to us is the remote side.
   const endpoint = e.flow.remote;
   const app = e.attribution.application;
+  if (app?.kind === 'wine' && app.key && app.revision && (e.attribution.provenance?.role==='game' || e.attribution.owners.some(p=>p.application.key!==app.key))) return {title:app.name || app.executable.split('/').pop() || own, owner:'',note:'',ownIdentity:true,launchedBy:launchedByName(e),destination:service||endpoint,endpoint:service?endpoint:'',protocol:e.flow.protocol.toUpperCase()};
   // A verified Electron app: the bundle is the application, the runtime owns the socket.
   if (!identity.title && app?.kind === 'electron')
     return {

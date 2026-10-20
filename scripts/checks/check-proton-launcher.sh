@@ -29,5 +29,5 @@ printf 'Evidence directory: %s\n' "$run"
 unshare --user --map-current-user --keep-caps --net --pid --fork --mount-proc \
  sh -c 'ip link set lo up; exec "$@"' sh \
  python3 scripts/acceptance/proton-launcher-regression.py \
- --verify --helper "$PWD/.workspace/windows/table-probe.exe" --binary "$run/flowgate" --run "$run/evidence" --proton "$run/proton" \
+ --verify --burst --helper "$PWD/.workspace/windows/table-probe.exe" --binary "$run/flowgate" --run "$run/evidence" --proton "$run/proton" \
  --data "$run/data" --prefix-source "$prefix" --pe "$run/client.exe" --lwp "$lwp"

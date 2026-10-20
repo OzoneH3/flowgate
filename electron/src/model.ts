@@ -158,7 +158,8 @@ export function hierarchy(activity: Activity, query = '', filter = 'all'): Row[]
       const runtime=s.runtime_application, display=runtime.application;
       const key=`${display.key}|${display.revision}|uid:${runtime.uid}`;
       let a=apps.get(key);
-      if(!a){ a={id:'app:'+key,kind:'application',label:display.display_name||display.name,children:[],rows:[],runtimeApplication:runtime}; apps.set(key,a);roots.push(a); }
+      if(!a){ a={id:'app:'+key,kind:'application',label:display.name,children:[],rows:[]}; apps.set(key,a);roots.push(a); }
+      a.runtimeApplication=runtime; a.label=display.name||display.executable.split('/').pop()||'Windows application';
       a.rows.push(s);parent=a;
     } else if (s.display_application?.key && s.owners.length > 1 && owners.length === s.owners.length) {
       // Trust only the explicit backend display association; never infer a policy identity.
@@ -183,7 +184,8 @@ export function hierarchy(activity: Activity, query = '', filter = 'all'): Row[]
     } else if (
       s.owners.length === 1 &&
       owners.length === 1 &&
-      verifiedLaunch(owners[0].provenance)
+      verifiedLaunch(owners[0].provenance) &&
+      !(owners[0].application.kind === 'wine' && owners[0].application.key && owners[0].application.revision && owners[0].provenance?.role==='game')
     ) {
       // Verified launch: the helper/launcher/game process sits beneath its game node.
       const p = owners[0],
@@ -225,7 +227,7 @@ export function hierarchy(activity: Activity, query = '', filter = 'all'): Row[]
           id: 'app:' + key,
           kind: 'application',
           label:
-            p.application.display_name ||
+            (p.application.kind==='wine' ? p.application.name : p.application.display_name) ||
             p.application.name.replace(/ \(deleted\)$/, '') ||
             p.executable ||
             'Unknown application',

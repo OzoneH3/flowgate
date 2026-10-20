@@ -1434,7 +1434,7 @@ function renderTree() {
     };
     const displayApp = r.runtimeApplication?.application || r.process?.application || r.displayApplication || inactiveApp;
     const displayKey =
-      displayApp && JSON.stringify([displayApp.key, displayApp.revision, displayApp.executable]);
+      displayApp && !('kind' in displayApp && displayApp.kind === 'wine') && JSON.stringify([displayApp.key, displayApp.revision, displayApp.executable]);
     let rowLabel =
       r.applicationZone ? r.label : r.kind === 'application' && displayKey ? appNames.get(displayKey) || r.label : r.label;
     let icon: HTMLElement = installedIcon(
@@ -2510,7 +2510,7 @@ function updateDecisions() {
       scopeLine.textContent;
   const whileBox = $<HTMLInputElement>('forAWhileToggle');
   if (whileBox) {
-    const single = e?.attribution.owners.length === 1;
+    const single = e?.attribution.owners.length === 1 && !e?.attribution.runtime_table;
     // An ended request offers For a while only while its exact process runs.
     whileBox.disabled = ended
       ? pacing || !leaseMode || leaseDone || endedLeaseBusy.has(e!.id)

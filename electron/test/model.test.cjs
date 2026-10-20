@@ -163,3 +163,14 @@ test('Windows runtime application owns its row while broker FD evidence stays in
  assert.equal(inactiveApplications([{executable:app.executable,filter:{application:'pe',revision:'pe-rev',uid:1000}}],roots).length,0);
  assert.equal(inactiveApplications([{executable:'/usr/bin/python',filter:{application:'python',revision:'r',uid:1000}}],roots).length,1);
 });
+
+test('same verified Windows executable uses one application row for direct and broker sockets',()=>{
+ const app={kind:'wine',key:'pe',revision:'r',name:'Alpha.exe',display_name:'Alpha · via wineserver',executable:'/p/Alpha.exe'};
+ const direct=row('direct',['client']),broker=row('broker',['server']);
+ broker.runtime_application={application:app,uid:1000,evidence:{}};
+ const provenance={evidence:'verified',group:'launch',role:'game',launch:{game:{status:'verified-file',name:'Alpha.exe'},kind:'umu'}};
+ const processes={client:{id:'client',pid:12,uid:1000,application:app,executable:'/runtime/wine',provenance},server:{id:'server',pid:13,uid:1000,application:{name:'wineserver'},executable:'/runtime/wineserver'}};
+ for(const rows of [[direct,broker],[broker,direct]]){
+  const roots=hierarchy({rows,processes});assert.equal(roots.length,1);assert.equal(roots[0].label,'Alpha.exe');assert.equal(roots[0].rows.length,2);assert.equal(roots[0].runtimeApplication.application.key,'pe');
+ }
+});
