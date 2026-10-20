@@ -1695,3 +1695,12 @@ body.hide-sidebar #activityView > aside { display:none; }
 /* Applications launched by a verified application nest one level deeper (Heroic › nile › process › socket). */
 #tree .name.depth-4 { padding-left: 78px; }
 #tree .name.depth-5 { padding-left: 94px; }
+/* Not-running applications with stored rules: listed after running ones, dimmed. */
+#tree tr.inactive-app td { color:#8a8a8a; }
+#tree tr.inactive-app .application-icon { opacity:.55; }
+#tree tr.inactive-app[aria-selected='true'] td { color:#fff; }
+#tree .row-inactive-note { color:#777; font-size:11px; margin-left:4px; }
+#tree tr.inactive-app[aria-selected='true'] .row-inactive-note { color:#e0e0e0; }
+/* Inherited from the application's rule (process row without its own rule): muted, not interactive. */
+#tree .policy-cell.policy-inherited { opacity:1; cursor:default; pointer-events:none; }
+#tree .policy-cell.policy-inherited .status-glyph, #tree .policy-cell.policy-inherited svg, #tree .policy-cell.policy-inherited span { filter:grayscale(1) brightness(.75); opacity:.7; }

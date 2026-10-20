@@ -79,13 +79,13 @@ import { setupWorkflows, updateWorkflows, openRule, resumeRuleEditor } from './w
 import { setupDecisionLog, showDecisionLog, updateDecisionLog } from './decision-log-view';
 import type { Attempt, ClientState, ViewEvent, Scope } from './protocol';
 import {
-  hierarchy,
   hasObservedConnection,
   overview,
   networkOverviews,
   NETWORK_UNAVAILABLE,
   flatten,
   allRows,
+  activityTree,
   sum,
   endpoint,
   trafficDetails,
@@ -543,6 +543,9 @@ function statusStrip(r: Row) {
       (r.kind === 'network' && !state.control.capabilities?.includes(ZONE_CAPABILITY));
     let chip: RuleChip = { glyph: '', text: 'Not set', tone: 'none', detail: '' };
     let fallbackShown = false;
+    // A process row without its own rule shows its application's rule as inherited:
+    // a different colour, not editable here (no hover, no click).
+    let inherited = false;
     let title = '';
     if (r.kind === 'network' && state.control.capabilities?.includes(ZONE_CAPABILITY)) {
       const zone = authoritativeZonePolicy(r, state);
@@ -557,6 +560,18 @@ function statusStrip(r: Row) {
     } else if (r.kind === 'launch') {
       chip = { glyph: '', text: '', tone: 'none', detail: '' };
       title = `${slot.label}: launch group (display only); rules apply to each process below.`;
+    } else if (r.inactive) {
+      // Not running: the backend summarizes live processes only; list its stored rules.
+      const rules = status.available ? status[direction] : [],
+        own = ownConfigured(rules, status.now);
+      chip = {
+        glyph: '',
+        text: own.text,
+        tone: own.tone,
+        detail: rules.map((rule) => ruleDescription(rule, status.now)).join('\n'),
+        scoped: own.scoped,
+      };
+      title = `${slot.label} (not running · stored rules): ${chip.text}\n${chip.detail}`;
     } else if (authoritative) {
       // NetLimiter Rule Status: the node's OWN rule; scoped rules only add a "+N scoped" hint.
       const summary = processPolicy?.[direction] || result?.application?.[direction];
@@ -572,10 +587,22 @@ function statusStrip(r: Row) {
           : undefined;
       // NetLimiter shows only the node's own rule; an inherited application rule is named in the tooltip.
       chip = ownRuleChip(summary, processPolicy?.state === 'inactive', true);
-      const inherited =
+      if (r.kind === 'process' && !processPolicy?.[direction].rules.length) {
+        const app = ownRuleChip(
+          processPolicy?.[direction === 'incoming' ? 'application_incoming' : 'application_outgoing'] ||
+            result?.application?.[direction],
+          false,
+          true,
+        );
+        if (['allow', 'block', 'ask', 'mixed', 'off'].includes(app.tone)) {
+          chip = app;
+          inherited = true;
+        }
+      }
+      const appNote =
         fallback && fallback.tone !== 'none' ? `\nApplication rule applies: ${fallback.text}` : '';
       title = summary
-        ? `${slot.label}: ${chip.text}${inherited}\n${chip.detail}\n${summary.reason}\nEnforcement: ${summary.enforcement.state} · ${summary.enforcement.reason}`
+        ? `${slot.label}: ${chip.text}${appNote}\n${chip.detail}\n${summary.reason}\nEnforcement: ${summary.enforcement.state} · ${summary.enforcement.reason}`
         : `${slot.label}: ${result?.reason || 'unavailable'}`;
       if (!summary) chip = { glyph: '', text: 'Unavailable', tone: 'unavailable', detail: '' };
     } else if (status.available) {
@@ -597,12 +624,17 @@ function statusStrip(r: Row) {
       button.append(element('span', '+' + chip.scoped, 'scoped-hint'));
     button.classList.add('tone-' + chip.tone);
     if (fallbackShown) button.classList.add('policy-fallback');
-    button.title =
-      title +
-      (state.control.enforcement?.state === 'stopped' ? '\nStored only; enforcement stopped.' : '');
-    button.setAttribute('aria-label', `${r.label} · ${slot.label} · ${chip.text || 'none'}`);
+    if (inherited) {
+      button.classList.add('policy-inherited');
+      button.disabled = true;
+    }
+    button.title = inherited
+      ? ''
+      : title + (state.control.enforcement?.state === 'stopped' ? '\nStored only; enforcement stopped.' : '');
+    button.setAttribute('aria-label', `${r.label} · ${slot.label} · ${chip.text || 'none'}${inherited ? ' · inherited from the application rule' : ''}`);
     button.onclick = (event) => {
       event.stopPropagation();
+      if (inherited) return;
       selected = r.id;
       void window.flowgate.paneUpdate({
         selection: selected,
@@ -611,6 +643,9 @@ function statusStrip(r: Row) {
       for (const tr of document.querySelectorAll<HTMLElement>('#rows tr'))
         tr.setAttribute('aria-selected', String(tr.dataset.id === selected));
       renderInfo();
+      // A not-running application has no verified process to create rules from:
+      // its rules are reviewed and edited in Info View / Rules.
+      if (r.inactive) return;
       if (presentation?.panes.info !== 'docked') showFloatingRuleStatus();
       activityPolicy?.activate(direction, undefined, button);
     };
@@ -910,7 +945,7 @@ if (promptID) {
 function buildTree() {
   const a = state?.observation.activity;
   roots = a
-    ? hierarchy(a, $<HTMLInputElement>('search').value, $<HTMLSelectElement>('filter').value)
+    ? activityTree(a, state.control.rules, $<HTMLInputElement>('search').value, $<HTMLSelectElement>('filter').value)
     : [];
   if (a) {
     const children = [...networkOverviews(), ...roots];
@@ -1306,6 +1341,10 @@ function renderTree() {
     }
     const tr = element('tr');
     tr.dataset.id = r.id;
+    if (r.inactive) {
+      tr.classList.add('inactive-app');
+      tr.title = `Not running · ${r.inactive.rules} stored rule${r.inactive.rules === 1 ? '' : 's'}${r.inactive.earlierVersion ? ' · earlier version of a running program' : ''}\n${r.inactive.executable}`;
+    }
     tr.setAttribute('aria-level', String(depth + 1));
     tr.setAttribute('aria-selected', String(selected === r.id));
     if (r.children.length) tr.setAttribute('aria-expanded', String(expanded.has(r.id)));
@@ -1345,13 +1384,19 @@ function renderTree() {
       renderTree();
       renderInfo();
     };
-    const displayApp = r.process?.application || r.displayApplication;
+    const inactiveApp = r.inactive && {
+      key: r.inactive.key,
+      revision: r.inactive.revision,
+      name: r.label,
+      executable: r.inactive.executable,
+    };
+    const displayApp = r.process?.application || r.displayApplication || inactiveApp;
     const displayKey =
       displayApp && JSON.stringify([displayApp.key, displayApp.revision, displayApp.executable]);
     let rowLabel =
       r.kind === 'application' && displayKey ? appNames.get(displayKey) || r.label : r.label;
     let icon: HTMLElement = installedIcon(
-      r.kind !== 'application' ? undefined : r.displayApplication || rowApplication(r),
+      r.kind !== 'application' ? undefined : r.displayApplication || inactiveApp || rowApplication(r),
       r.kind,
     );
     if (r.socket) {
@@ -1373,7 +1418,9 @@ function renderTree() {
     const textLabel = element('span', rowLabel, 'row-name-text');
     if (r.kind === 'application' && displayKey) textLabel.dataset.displayKey = displayKey;
     name.append(led, toggle, icon, textLabel);
-    name.title = r.process?.executable || r.socket?.socket.remote || r.label;
+    if (r.inactive)
+      name.append(element('span', r.inactive.earlierVersion ? ' · earlier version, not running' : ' · not running', 'row-inactive-note'));
+    name.title = r.process?.executable || r.inactive?.executable || r.socket?.socket.remote || r.label;
     tr.append(name);
     for (const key of rateKeys()) {
       const s = sum(r.rows, key, measurementSource);
@@ -1647,8 +1694,25 @@ function renderInfo() {
           ) ||
             r.process.application.display_name ||
             r.process.application.name.replace(/ \(deleted\)$/, '')
-        : r.label,
+        : r.inactive
+          ? appNames.get(JSON.stringify([r.inactive.key, r.inactive.revision, r.inactive.executable])) || r.label
+          : r.label,
     );
+  if (r.inactive) {
+    // Not running: only its stored rules are known; nothing is observed or verified now.
+    field(info, 'State', 'Not running · listed because stored rules name this application');
+    if (r.inactive.earlierVersion)
+      field(info, 'Version', 'Earlier version of a running program (the executable changed); these rules do not apply to the running version');
+    field(info, 'Executable', r.inactive.executable);
+    field(info, 'User ID', String(r.inactive.uid));
+    field(info, 'Identity', `${r.inactive.key}\nRevision: ${r.inactive.revision}`);
+    const now = state.control.serverNow ?? Date.now();
+    const rules = (state.control.rules || []).filter(
+      (x) => x.filter.application === r.inactive!.key && x.filter.revision === r.inactive!.revision && x.filter.uid === r.inactive!.uid,
+    );
+    field(info, 'Rules', rules.map((x) => ruleDescription(x, now)).join('\n') || 'None');
+    field(info, 'Edit', 'Review, change or delete these rules in Rules. New quick rules need the running program.');
+  }
   if (r.kind === 'application' && r.parent?.startsWith('app:')) {
     // Grouped beneath the verified application that launched it (display only).
     const launcher = r.process?.provenance?.parent;

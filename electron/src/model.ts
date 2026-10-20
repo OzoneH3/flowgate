@@ -1,4 +1,4 @@
-import type { Activity, SocketRow, Process, Traffic, Application } from './protocol';
+import type { Activity, SocketRow, Process, Traffic, Application, Rule } from './protocol';
 import { launchProcessLabel, launchTitle, verifiedLaunch } from './provenance';
 export type Metric = 'download_bps' | 'upload_bps' | 'downloaded' | 'uploaded';
 export interface Row {
@@ -14,6 +14,18 @@ export interface Row {
   process?: Process;
   displayApplication?: Application;
   socket?: SocketRow;
+  // Not running: an application identity that only stored rules name (NetLimiter
+  // lists such applications too). No process, sockets or traffic.
+  inactive?: InactiveApplication;
+}
+export interface InactiveApplication {
+  key: string;
+  revision: string;
+  uid: number;
+  executable: string;
+  rules: number;
+  // A running row exists for the same executable with another revision (updated file).
+  earlierVersion: boolean;
 }
 // Observation status only: a listening/bound socket is not a connected peer.
 export function hasObservedConnection(row: Row): boolean {
@@ -330,6 +342,9 @@ export function flatten(
         if (a.kind !== b.kind) return a.kind === 'network' ? -1 : 1;
         return a.id === b.id ? 0 : a.id === 'network:internet' ? -1 : 1;
       }
+      // Not-running applications with rules stay at the bottom in every sort order.
+      if (!!a.inactive !== !!b.inactive) return a.inactive ? 1 : -1;
+      if (a.inactive && b.inactive) return a.label.localeCompare(b.label) || a.id.localeCompare(b.id);
       const av = value(a),
         bv = value(b);
       if (['upload_bps', 'download_bps'].includes(key) && (av === -1 || bv === -1) && av !== bv)
@@ -388,4 +403,55 @@ export function ownershipExplanation(category?: string) {
     descriptions[category || ''] ||
     'No categorized ownership evidence supplied; see the backend ownership and evidence fields.'
   );
+}
+
+/** Display name of an executable path; an Electron bundle is named by its folder. */
+export function executableName(path: string) {
+  const parts = path.replace(/ \(deleted\)$/, '').split('/').filter(Boolean);
+  const base = parts.pop() || path || 'Unknown application';
+  return /\.asar$/.test(base) && parts.length ? parts.pop()! : base;
+}
+/**
+ * Applications that have stored rules but are not running: one row per
+ * application key/revision/UID with no live row, listed after all running
+ * applications. Rules with only a process binding, all-programs or zone-wide
+ * scope name no application and are not listed here.
+ */
+export function inactiveApplications(rules: Rule[] | undefined, live: Row[], query = '', filter = 'all'): Row[] {
+  if (!rules?.length || filter !== 'all') return [];
+  const running = new Set(allRows(live).filter((r) => r.kind === 'application').map((r) => r.id));
+  const liveExecutables = new Set(
+    allRows(live)
+      .filter((r) => r.kind === 'application' && r.process)
+      .map((r) => `${r.process!.application.executable}|${r.process!.uid}`),
+  );
+  const out = new Map<string, Row>();
+  for (const rule of rules) {
+    const f = rule.filter;
+    if (!f.application || !f.revision || f.all_programs || f.uid === undefined || f.uid === null) continue;
+    const id = `app:${f.application}|${f.revision}|uid:${f.uid}`;
+    if (running.has(id)) continue;
+    let row = out.get(id);
+    if (!row) {
+      const executable = rule.executable || '';
+      const label = executableName(executable);
+      if (query && !`${label} ${executable}`.toLowerCase().includes(query.toLowerCase())) continue;
+      row = {
+        id,
+        kind: 'application',
+        label,
+        rows: [],
+        children: [],
+        inactive: { key: f.application, revision: f.revision, uid: f.uid, executable, rules: 0, earlierVersion: liveExecutables.has(`${executable}|${f.uid}`) },
+      };
+      out.set(id, row);
+    }
+    row.inactive!.rules++;
+  }
+  return [...out.values()].sort((a, b) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id));
+}
+/** Running applications followed by not-running applications with rules. */
+export function activityTree(activity: Activity, rules: Rule[] | undefined, query = '', filter = 'all'): Row[] {
+  const live = hierarchy(activity, query, filter);
+  return [...live, ...inactiveApplications(rules, live, query, filter)];
 }

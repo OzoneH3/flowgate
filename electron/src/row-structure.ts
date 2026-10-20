@@ -15,6 +15,7 @@ export function rowStructure(r: Row, depth: number, selected: boolean, expanded:
     r.socket && structure(r.socket),
     r.process,
     r.displayApplication,
+    r.inactive,
     r.children.map((c) => c.id),
     depth,
     selected,

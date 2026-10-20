@@ -78,3 +78,15 @@ Process-scoped rules work for verified Electron app processes: the process bindi
 application (bundle) revision and pins the running runtime file through
 `executable_revision` (empty for native processes, unchanged). Processes of an unverified
 runtime get no Activity rules at all (application or process); Once and For a while remain.
+
+## Rule Status display details
+
+- Not-running applications that stored rules name are listed after all running applications
+  (dimmed, "not running"; `inactiveApplications` in `electron/src/model.ts`), one entry per
+  application key/revision/UID, in every sort order. An entry for an earlier revision of a
+  running program is marked "earlier version". Their Rule Status comes from the stored rule
+  inventory; clicking selects them and Info View lists their rules (edit in Rules). No quick
+  rule can be created there: that needs the running, verified program. Active/Listening
+  filters show sockets only and omit them.
+- A process row without its own rule shows its application's rule as inherited: muted grey,
+  disabled (no hover, tooltip or click). A process with its own rule keeps a normal cell.

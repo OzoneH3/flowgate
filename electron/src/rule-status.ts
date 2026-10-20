@@ -26,11 +26,12 @@ export function ruleStatus(row: Row, state: ClientState): RuleStatus {
     result.reason = 'Observation-only display association; no permission identity inferred.';
     return result;
   }
-  const process =
-    row.process ||
-    (row.socket?.owners.length === 1
-      ? state.observation.activity?.processes[row.socket.owners[0]]
-      : undefined);
+  const process = row.inactive
+    ? { uid: row.inactive.uid, application: { key: row.inactive.key, revision: row.inactive.revision } }
+    : row.process ||
+      (row.socket?.owners.length === 1
+        ? state.observation.activity?.processes[row.socket.owners[0]]
+        : undefined);
   if (!process?.application.key || !process.application.revision) {
     result.reason = 'No unambiguous application/revision/UID identity for rule inventory.';
     return result;
@@ -88,7 +89,7 @@ export function configuredPolicy(rules: Rule[], now: number) {
       : `Scoped · ${rules.length}`;
   const r = active[0],
     f = r.filter,
-    broad = !f.remote && !f.remote_address && !f.local_port && !f.remote_port;
+    broad = !f.remote && (!f.remote_address || f.remote_address === '*') && !f.local_port && !f.remote_port;
   const scope =
     broad && f.protocol === '*' ? 'app-wide' : broad ? f.protocol.toUpperCase() : 'scoped';
   return `${r.action === 'allow' ? 'Allow' : r.action === 'ask' ? 'Ask' : 'Block'} · ${scope}`;

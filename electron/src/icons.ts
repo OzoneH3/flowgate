@@ -94,6 +94,10 @@ export class ApplicationIcons {
       add(e.attribution.provenance?.parent?.application);
     }
     for (const p of Object.values(state.observation.activity?.processes || {})) add(p.provenance?.parent?.application);
+    // Not-running applications with stored rules (Activity lists them too).
+    for (const r of state.control.rules || [])
+      if (r.filter.application && r.filter.revision && r.executable)
+        add({ key: r.filter.application, revision: r.filter.revision, name: r.executable.split('/').pop() || '', executable: r.executable });
   }
   private async executable(token: string) {
     for (const p of path.isAbsolute(token)

@@ -1,5 +1,5 @@
 import { isDisplayUnit, type DisplayUnit } from './display-units';
-import { allRows, hierarchy, overview, networkOverviews, type Row } from './model';
+import { activityTree, allRows, overview, networkOverviews, type Row } from './model';
 import type { ClientState } from './protocol';
 export type PaneKind = 'info' | 'chart';
 export type PaneMode = 'docked' | 'detached' | 'hidden';
@@ -129,13 +129,13 @@ export class PaneModel {
     }
     this.value.generation = g;
     const a = state.observation.activity;
-    const stamp = JSON.stringify([g, state.observation.connected, a?.sequence, a?.collected]);
+    const stamp = JSON.stringify([g, state.observation.connected, a?.sequence, a?.collected, state.control.rules?.map((r) => [r.id, r.version])]);
     const changed = stamp !== this.activityStamp;
     if (changed) {
       this.activityStamp = stamp;
       this.rows = new Map(
         a
-          ? [overview(a), ...networkOverviews(), ...allRows(hierarchy(a))].map((r) => [r.id, r])
+          ? [overview(a), ...networkOverviews(), ...allRows(activityTree(a, state.control.rules))].map((r) => [r.id, r])
           : [],
       );
     }
@@ -162,7 +162,7 @@ export class PaneModel {
       if (
         v.selection !== this.value.selection &&
         (!a ||
-          ![overview(a), ...networkOverviews(), ...allRows(hierarchy(a))].some(
+          ![overview(a), ...networkOverviews(), ...allRows(activityTree(a, state.control.rules))].some(
             (r) => r.id === v.selection,
           ))
       )
