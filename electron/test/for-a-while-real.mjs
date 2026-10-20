@@ -75,7 +75,14 @@ const shot = (w, name) => w?.screenshot({ path: `${run}/${name}.png` }).catch(()
 const card = async (re) =>
   wait(async () => {
     const w = prompt();
-    return w && re.test(await w.locator('body').innerText()) ? w : undefined;
+    if (!w) return undefined;
+    // The permission card shows address and port as separate fields: match "addr:port" on them.
+    const text = await w.evaluate(() => {
+      const f = (id) => document.getElementById(id);
+      const ep = (id) => (f(id) ? f(id).querySelector('.nl-address')?.textContent + ':' + (f(id).querySelector('.nl-port')?.textContent || '') : '');
+      return [document.body.innerText, ep('fieldRemote'), ep('fieldLocal')].join('\n');
+    });
+    return re.test(text) ? w : undefined;
   }, 20000, 'card ' + re);
 // Answer every remaining awaiting request once with Deny (no rule) so the next step starts clean.
 async function drain() {

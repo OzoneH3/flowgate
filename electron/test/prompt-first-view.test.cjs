@@ -176,3 +176,16 @@ test('launched by: a helper started by a verified Electron app names it; display
   assert.deepEqual([parsed.parent.pid, parsed.parent.name, parsed.parent.application.kind, parsed.parent.application.executable], [365897, 'heroic', 'electron', bundle]);
   assert.equal(parseProvenance({ ...provenance, parent: { pid: 0, name: '' } }).parent, undefined);
 });
+
+test('Remember never leaves Allow/Deny disabled without a reason; stale reviews renew', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../src/renderer.ts'), 'utf8');
+  const fn = src.slice(src.indexOf('function rememberBlockReason'), src.indexOf('async function prepareDecisions'));
+  for (const reason of ['Disconnected', 'read-only', 'This request has ended.', 'Already submitted.', 'choose a deletion time', 'Rule not available: ', 'Checking rule…', 'Rule review expired'])
+    assert.ok(fn.includes(reason), reason);
+  // Shown in the Remember panel and on the disabled buttons.
+  assert.match(src, /rememberBlockReason\(e, now\) \|\|\n\s*\(reviewFor === reviewKey\(\)/);
+  assert.match(src, /\? rememberBlockReason\(e, now\) \|\| review\?\.summary/);
+  // A stale or expired review is renewed automatically (throttled), not left disabled.
+  assert.match(src, /if \(!fresh && performance\.now\(\) - autoReviewAt > 2000\)/);
+  assert.ok(!src.includes("(reviewMessage ? '' : 'Rule review required.')"), 'no generic "review required" fallback');
+});

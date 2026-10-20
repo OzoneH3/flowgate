@@ -326,6 +326,26 @@ function invalidateReview(delay = 250) {
   updateDecisions();
   reviewTimer = setTimeout(() => void prepareDecisions(), delay);
 }
+let autoReviewAt = -Infinity;
+/**
+ * Why Allow/Deny are unavailable with Remember on a live request ('' when the
+ * reviewed rule is ready). Never leaves disabled buttons unexplained.
+ */
+function rememberBlockReason(e: ViewEvent | undefined, now: number): string {
+  if (!e || !needsDecisionReview() || reviewFailureOf(e)) return '';
+  if (!state.control.connected) return 'Disconnected · decisions unavailable.';
+  if (!canDecide(state.control)) return 'This connection to FlowGate may not decide requests (read-only).';
+  if (e.state !== 'awaiting-decision' || e.remainingMs <= 0) return 'This request has ended.';
+  if (e.attempt || localSubmitted.has(state.control.generation + ':' + e.id)) return 'Already submitted.';
+  if (!e.scope_previews[chosenScope])
+    return chosenScope === 'persistent'
+      ? 'A permanent rule is not offered for this request; choose a deletion time.'
+      : 'This deletion time is not offered for this request.';
+  if (reviewMessage) return 'Rule not available: ' + shortError(reviewMessage);
+  if (reviewChecking || reviewFor !== reviewKey() || !decisionReviews.allow) return 'Checking rule…';
+  if (Date.parse(decisionReviews.allow.expires_at) <= now) return 'Rule review expired · checking again…';
+  return '';
+}
 async function prepareDecisions() {
   clearTimeout(reviewTimer);
   syncRememberScope();
@@ -2322,6 +2342,17 @@ function updateDecisions() {
     leaseMode = endedLeaseAvailable(e, state.control.capabilities),
     leaseDone = !!e && endedLeaseDone.has(e.id),
     unverifiable = e ? ruleUnverifiable.get(e.id) : undefined;
+  // Live Remember: a review that no longer matches (zones, fields, deletion time
+  // changed) or that expired is renewed automatically, at most every 2 s.
+  if (!ended && remembering && actionable(e) && !reviewChecking && !reviewMessage) {
+    const fresh =
+      reviewFor === reviewKey() && !!decisionReviews.allow && Date.parse(decisionReviews.allow.expires_at) > now + 1000;
+    if (!fresh && performance.now() - autoReviewAt > 2000) {
+      autoReviewAt = performance.now();
+      clearTimeout(reviewTimer);
+      reviewTimer = setTimeout(() => void prepareDecisions(), 0);
+    }
+  }
   if (ruleMode && remembering && !ruleDone && !rulePinned && !ruleChecking && !unverifiable && !(rememberFields.process && instanceEnded)) {
     // Review (again) when missing or expired; a refusal waits for Refresh review,
     // and re-reviews are spaced so an odd preview can never loop.
@@ -2374,7 +2405,7 @@ function updateDecisions() {
           !review ||
           Date.parse(review.expires_at) <= now));
     b.title = needsDecisionReview()
-      ? review?.summary || review?.scope_preview || 'Review required'
+      ? rememberBlockReason(e, now) || review?.summary || review?.scope_preview || 'Review required'
       : temporary
         ? FOR_A_WHILE_TOOLTIP
         : rememberMode()
@@ -2472,17 +2503,11 @@ function updateDecisions() {
               : ruleMessage
                 ? ''
                 : 'Rule review required.'
-      : reviewChecking
-        ? 'Checking rule…'
-        : (e && !e.scope_previews[chosenScope]
-            ? chosenScope === 'persistent'
-              ? 'Persistent rules unavailable; choose a deletion time.'
-              : 'This deletion time is unavailable for this request.'
-            : '') ||
+      : // Live request: one short reason whenever Allow/Deny are not available.
+        rememberBlockReason(e, now) ||
           (reviewFor === reviewKey()
             ? rememberReviewText(decisionReviews.allow, decisionReviews.block, e?.ask_rule).replace(/^Rule: .*? · /, '').replace(/^Rule: .*$/, '')
-            : '') ||
-          (reviewMessage ? '' : 'Rule review required.');
+            : '');
   }
   if ($('refreshDecision')) {
     const refresh = $<HTMLButtonElement>('refreshDecision');
@@ -2569,13 +2594,7 @@ function updateDecisions() {
               ? IDENTITY_UNVERIFIABLE_TEXT
             : ruleMode && ruleMessage
               ? shortError(ruleMessage) + ' · Selections kept.'
-              : remembering && reviewMessage && !ended
-                ? shortError(reviewMessage)
-                : remembering && !ended &&
-                    reviewFor === reviewKey() &&
-                    Date.parse(decisionReviews.allow?.expires_at || '') <= now
-                  ? 'Review expired · refresh to decide.'
-                  : '');
+              : ''); // live Remember: the reason is the panel's summary line
     $('decisionNote').hidden = !$('decisionNote').textContent;
   }
   if ($('requestStatus') && e) {
