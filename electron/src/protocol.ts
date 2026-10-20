@@ -93,6 +93,7 @@ export interface Provenance {
   // The program that started the owner (display only; never a rule target).
   parent?: LaunchParent;
   captured_at?: string;
+  invocation?: Invocation;
 }
 export interface LaunchParent {
   pid: number;
@@ -102,6 +103,15 @@ export interface LaunchParent {
   executable: string;
   application?: Application;
   note?: string;
+  invocation?: Invocation;
+}
+export interface Invocation {
+  mode: string;
+  name: string;
+  path?: string;
+  host_path?: string;
+  revision?: string;
+  application?: Application;
 }
 // What each decision scope is enforced against today (backend-derived).
 export interface PermissionTarget {
@@ -578,6 +588,13 @@ export function parseProvenance(raw: unknown): Provenance | undefined {
   if (raw == null) return;
   const p = object(raw);
   if (!['verified', 'unavailable', 'none'].includes(string(p.evidence))) return;
+  const parseInvocation = (raw: unknown): Invocation | undefined => {
+    if (raw == null || typeof raw !== 'object') return;
+    const i=object(raw), mode=bounded(i.mode,32), name=bounded(i.name,256);
+    if (!mode || !name || !['file','unverified-file','inline','module','stdin'].includes(mode)) return;
+    return {mode,name,path:bounded(i.path),host_path:bounded(i.host_path),revision:bounded(i.revision,256),
+      application:i.application == null ? undefined : application(i.application)};
+  };
   const l = p.launch == null ? undefined : object(p.launch);
   const g = l && l.game != null ? object(l.game) : undefined;
   const launch: Launch | undefined =
@@ -627,6 +644,7 @@ export function parseProvenance(raw: unknown): Provenance | undefined {
         executable: bounded(a.executable),
         application: a.application != null && typeof a.application === 'object' ? application(a.application) : undefined,
         note: bounded(a.note, 1024) || undefined,
+        invocation: parseInvocation(a.invocation),
       };
     })(),
     ancestry: array(p.ancestry, 32).map((raw) => {
@@ -643,6 +661,7 @@ export function parseProvenance(raw: unknown): Provenance | undefined {
     }),
     launch,
     captured_at: bounded(p.captured_at, 64) || undefined,
+    invocation: parseInvocation(p.invocation),
   };
 }
 export function parsePermissionTarget(raw: unknown): PermissionTarget | undefined {

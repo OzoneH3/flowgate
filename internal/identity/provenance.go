@@ -68,6 +68,7 @@ type Launch struct {
 }
 
 type Provenance struct {
+	Invocation *Invocation `json:"invocation,omitempty"`
 	// verified: unbroken parent chain from the owner to the launcher (start
 	// times checked). unavailable: the chain broke before any launcher was
 	// found. none: the complete chain contains no launcher.
@@ -87,11 +88,12 @@ type Provenance struct {
 
 // LaunchParent is the program that started the owner, through the verified chain.
 type LaunchParent struct {
-	PID        int    `json:"pid"`
-	Start      string `json:"start_ticks"`
-	Depth      int    `json:"depth"` // ancestors between owner and parent + 1
-	Name       string `json:"name"`
-	Executable string `json:"executable"`
+	Invocation *Invocation `json:"invocation,omitempty"`
+	PID        int         `json:"pid"`
+	Start      string      `json:"start_ticks"`
+	Depth      int         `json:"depth"` // ancestors between owner and parent + 1
+	Name       string      `json:"name"`
+	Executable string      `json:"executable"`
 	// Application: the parent's identity when it is a verified Electron app.
 	Application *Application `json:"application,omitempty"`
 	Note        string       `json:"note,omitempty"`
@@ -99,6 +101,7 @@ type LaunchParent struct {
 
 // procNode is one bounded /proc observation.
 type procNode struct {
+	invocation *Invocation
 	pid, ppid  int
 	start      string
 	uid        uint32
@@ -135,6 +138,7 @@ func (liveProc) node(pid int) (procNode, error) {
 	n.argv = boundedArgs(readBound(base+"/cmdline", provenanceMaxCmdline))
 	n.env = whitelistedEnv(readBound(base+"/environ", provenanceMaxEnviron))
 	n.foreignMnt = link(base+"/ns/mnt") != link("/proc/self/ns/mnt")
+	n.invocation = captureInvocation(n)
 	again, _, err := processStat(base)
 	if err != nil || again != start {
 		return procNode{}, fmt.Errorf("process changed during provenance read")
@@ -588,6 +592,10 @@ func cloneProvenance(p *Provenance) *Provenance {
 		return nil
 	}
 	c := *p
+	if p.Invocation != nil {
+		v := *p.Invocation
+		c.Invocation = &v
+	}
 	c.Ancestry = append([]ProvenanceAncestor(nil), p.Ancestry...)
 	if p.Launch != nil {
 		l := *p.Launch
@@ -600,6 +608,10 @@ func cloneProvenance(p *Provenance) *Provenance {
 	}
 	if p.Parent != nil {
 		pa := *p.Parent
+		if pa.Invocation != nil {
+			v := *pa.Invocation
+			pa.Invocation = &v
+		}
 		if p.Parent.Application != nil {
 			a := *p.Parent.Application
 			pa.Application = &a
@@ -629,6 +641,9 @@ func CaptureProvenance(owner Process) *Provenance {
 	}
 	// Always the owner's own chain (a spliced ancestor provenance carries its parent).
 	p.Parent = launchedBy(owner, nodes, ResolveElectronApp)
+	if len(nodes) > 0 {
+		p.Invocation = nodes[0].invocation
+	}
 	if p.Evidence == "unavailable" {
 		return p // transient failures are not cached
 	}
@@ -718,7 +733,7 @@ var launchInfrastructure = map[string]bool{
 func launchedBy(owner Process, nodes []procNode, resolve func(int, string) *Hosted) *LaunchParent {
 	for i := 1; i < len(nodes); i++ {
 		n := nodes[i]
-		if n.exe == "" || n.exe == owner.Executable || n.uid != owner.UID {
+		if n.exe == "" || (n.exe == owner.Executable && n.invocation == nil) || n.uid != owner.UID {
 			if n.uid != owner.UID {
 				return nil // another principal (e.g. a system service) did not launch it as this user's app
 			}
@@ -728,7 +743,7 @@ func launchedBy(owner Process, nodes []procNode, resolve func(int, string) *Host
 		if launchInfrastructure[base] {
 			continue
 		}
-		l := &LaunchParent{PID: n.pid, Start: n.start, Depth: i, Name: clip(base), Executable: clip(n.exe)}
+		l := &LaunchParent{Invocation: n.invocation, PID: n.pid, Start: n.start, Depth: i, Name: clip(base), Executable: clip(n.exe)}
 		if len(n.argv) > 1 && (strings.HasPrefix(base, "python") || base == "node" || base == "perl") {
 			l.Name = clip(base + " " + filepath.Base(n.argv[1]))
 		}

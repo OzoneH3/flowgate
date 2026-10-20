@@ -105,6 +105,18 @@ export function provenanceDetails(e: RequestEvent): [string, string][] {
       `${ownerName(owner)} owns this socket\nPID ${owner.pid} · start ${owner.start_ticks} · UID ${owner.uid}\n${owner.application?.executable || owner.executable || 'executable unavailable'}`,
     ]);
   if (!p) return rows;
+  if (p.invocation) rows.push(['Invoked program',
+    `${p.invocation.name} · ${p.invocation.mode}` +
+    (p.invocation.path ? `\nProcess namespace path: ${p.invocation.path}` : '') +
+    (p.invocation.host_path ? `\nVerified host file: ${p.invocation.host_path}\nFile revision: ${p.invocation.revision || 'unavailable'}` : '') +
+    (p.invocation.application ? `\nDisplay metadata identity: ${p.invocation.application.key}` : '') +
+    '\nDisplay context only; permission target remains the interpreter.'
+  ]);
+  if (p.parent?.invocation) rows.push(['Parent invocation',
+    `${p.parent.invocation.name} · ${p.parent.invocation.mode}` +
+    (p.parent.invocation.path ? `\n${p.parent.invocation.path}` : '') +
+    '\nDisplay context only; permission target remains the socket owner.'
+  ]);
   if (p.parent)
     rows.push([
       'Launched by',

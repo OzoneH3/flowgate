@@ -82,8 +82,10 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
   const sides = fromTo(e, summary);
   const programCell = () => {
     // The game's own metadata (icon) never renames the verified title.
-    const game = summary.ownIdentity ? undefined : gameIconApplication(e.attribution.provenance) || o.gameApplication;
-    const heading = game
+    const game = summary.contextApplication || (summary.ownIdentity ? undefined : gameIconApplication(e.attribution.provenance) || o.gameApplication);
+    const heading = summary.contextApplication
+      ? applicationHeading(summary.contextApplication, summary.title)
+      : game
       ? applicationHeading(game, summary.title, summary.title)
       : applicationHeading(
           summary.ownIdentity
@@ -99,8 +101,9 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
       // A Proton game is the launch context; the helper owns the socket.
       const owner = el('span', '', 'request-owner nl-owner', 'requestOwner');
       owner.append(el('span', 'socket owner ', 'nl-owner-label'), el('span', summary.owner, 'nl-owner-name'));
-      owner.title =
-        e.attribution.application?.kind === 'electron'
+      owner.title = summary.contextApplication
+        ? `${summary.title} was invoked through ${summary.owner}; permission still applies to the interpreter itself — see Details`
+        : e.attribution.application?.kind === 'electron'
           ? `${summary.owner} (Electron runtime) opened this connection for this application; verified through its process chain — see Details`
           : `${summary.owner} opened this connection; ${summary.title} is the game it was launched for`;
       cell.append(owner);

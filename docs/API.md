@@ -408,6 +408,11 @@ Additive, no capability flag (absent fields mean an older backend). Captured by
   boot/pidns/PID/start while the process lives (≤4096 entries), so a helper keeps
   what was seen at first sight after reparenting; events keep the attribution
   captured at request time after the owner exits.
+  `invocation?` records a bounded Python/Node entry mode and, for a regular
+  file argument, its process-namespace path and device/inode-proven host path
+  when available. `invocation.application` is display metadata only. Inline
+  source text, arbitrary arguments, and environment values are not retained.
+  The executable permission target remains the interpreter.
 - `attribution.permission_target`: `{kind: helper|application|interpreter|unavailable,
   label, once, for_a_while, remember, shared_with_note, key_basis, prefix}`, derived
   at serialization from the attribution's current identity: Once = this request;

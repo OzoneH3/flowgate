@@ -107,6 +107,8 @@ export class ApplicationIcons {
     for (const e of state.control.events) {
       add(e.attribution.application);
       add(gameIconApplication(e.attribution.provenance));
+      add(e.attribution.provenance?.invocation?.application, e.attribution.owners[0]?.uid);
+      add(e.attribution.provenance?.parent?.invocation?.application, e.attribution.owners[0]?.uid);
       // The launching program (display only), e.g. Heroic for its nile helper.
       add(e.attribution.provenance?.parent?.application);
     }
