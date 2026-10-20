@@ -27,9 +27,9 @@ type Event struct {
 	RememberedFilter *policy.Filter       `json:"remembered_filter,omitempty"`
 	ScopePreviews    map[string]string    `json:"scope_previews,omitempty"`
 	Permission       string               `json:"permission"`
-	// RequestGroup groups equivalent repeated requests (same verified
-	// application identity/UID, direction, protocol, remote address and
-	// service port) for presentation. Decisions still target one event ID.
+	// RequestGroup groups destination bursts (same verified application
+	// identity/UID, direction and protocol) for presentation only.
+	// Decisions still target one event ID, never every group member.
 	RequestGroup string `json:"request_group,omitempty"`
 	// AskRule identifies the stored Ask rule that caused this prompt (absent
 	// when no rule matched and the default prompted).

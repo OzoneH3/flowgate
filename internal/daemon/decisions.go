@@ -100,9 +100,10 @@ func (e *Engine) recordFinal(v *Event, action, source, scope, reason string, rul
 	e.Decisions.Record(r)
 }
 
-// requestGroup is a stable presentation key for equivalent repeated requests.
+// requestGroup is a presentation key for an application/direction/protocol burst.
+// Destinations remain separate events: grouping never widens decision authority.
 func requestGroup(f policy.Filter) string {
-	h := sha256.Sum256([]byte(fmt.Sprintf("%s|%s|%d|%s|%s|%s|%d|%d", f.Application, f.Revision, f.UID, f.Direction, f.Protocol, f.RemoteAddress, f.LocalPort, f.RemotePort)))
+	h := sha256.Sum256([]byte(fmt.Sprintf("%s|%s|%d|%s|%s", f.Application, f.Revision, f.UID, f.Direction, f.Protocol)))
 	return hex.EncodeToString(h[:16])
 }
 

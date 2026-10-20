@@ -101,7 +101,7 @@ func TestOnceSettlesNothingAndRetransmissionsNeverRePrompt(t *testing.T) {
 	x := newQueueFixture(t)
 	p := x.proc(42, "10", 1000)
 	tcp, first := x.flow(t, p, "tcp", "10.0.0.1:40001", "192.0.2.1:443", "seq-1")
-	_, second := x.flow(t, p, "tcp", "10.0.0.1:40002", "192.0.2.1:443", "seq-2") // distinct connection, same destination
+	_, second := x.flow(t, p, "tcp", "10.0.0.1:40002", "198.51.100.2:8443", "seq-2") // distinct connection and destination, same presentation group
 	udp, datagram := x.flow(t, p, "udp", "10.0.0.1:40003", "192.0.2.1:53", "udp")
 	if first.State != "awaiting-decision" || second.State != "awaiting-decision" || first.RequestGroup != second.RequestGroup {
 		t.Fatal("distinct connections must be separate requests in one group", first, second)

@@ -50,3 +50,13 @@ Launch the existing backend with:
 ```sh
 WAYLAND_DISPLAY=wayland-1 scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock
 ```
+
+### Destination bursts
+
+The backend presentation group combines the same verified application key,
+revision, user, direction and protocol across remote endpoints. A game or other
+client contacting many servers therefore occupies one pending group. Individual
+request IDs, endpoint details and deadlines remain independent. Once still
+answers only the selected connection; Remember settles only requests covered by
+the explicitly saved rule. Incoming/outgoing and TCP/UDP groups remain separate.
+This grouping does not promise a single Once decision for an entire application.
