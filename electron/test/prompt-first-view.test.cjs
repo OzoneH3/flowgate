@@ -86,10 +86,12 @@ test('results: a conflicting rule on the other hook is a warning; lost acks are 
   assert.equal(pr.needsReview(list), 25);
 });
 
-test('main: a valid submission hides the permission window and is tracked; no pair buttons remain', () => {
+test('main: temporary submissions hide immediately; remembered saves wait for acknowledgement', () => {
   const main = fs.readFileSync(path.join(__dirname, '../src/main.ts'), 'utf8');
-  for (const op of ['backend.decide(d)', 'backend.decidePair(choice)', 'backend.saveRequestRule(choice)', 'backend.requestForAWhile(choice)'])
+  for (const op of ['backend.decidePair(choice)', 'backend.requestForAWhile(choice)'])
     assert.match(main, new RegExp(op.replace(/[().]/g, '\\$&') + ';\\n\\s*promptAnswered\\(e\\.sender\\);\\n\\s*return trackResult'), op);
+  assert.ok(main.includes("a.phase === 'acknowledged' && ref?.id === d.id"));
+  assert.ok(main.includes("void run.then(() => {"));
   const src = ['renderer.ts', 'prompt-card.ts', 'local-pair.ts'].map((f) => fs.readFileSync(path.join(__dirname, '../src', f), 'utf8')).join('\n');
   for (const gone of ['Allow both', 'Deny both', 'pairAllow', 'pairBlock', 'buildPairPanel']) assert.ok(!src.includes(gone), gone);
   const backend = fs.readFileSync(path.join(__dirname, '../src/backend.ts'), 'utf8');

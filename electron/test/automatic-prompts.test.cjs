@@ -195,3 +195,16 @@ test('a hidden answered popup waits for the in-flight remembered result before p
  for(const e of s.control.events){e.state='allowed';e.remainingMs=0;e.attempt=undefined;}
  assert.equal(q.next(s,false),undefined);
 });
+
+test('explicit Remember review keeps its ended request, without retaining unsolicited expired cards', () => {
+  const auto=new AutomaticPrompts(), s=state(['old','new']);
+  s.control.capabilities=['request-application-rule-v1'];
+  const ended=s.control.events[0];
+  Object.assign(ended,{state:'expired',remainingMs:0,request_rule:{available:true},reviewFailure:{terminal:true,code:'connection_ended',message:'socket gone'}});
+  const ref={generation:'g',id:'old',group:'e:old'};
+  assert.equal(auto.follow(s,ref,true),ref);
+  assert.equal(auto.follow(s,ref,false),undefined);
+  ended.request_rule.available=false;
+  assert.equal(auto.follow(s,ref,true),undefined);
+  assert.equal(auto.follow({...s,control:{...s.control,generation:'new'}},ref,true),undefined);
+});

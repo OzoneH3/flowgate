@@ -6,6 +6,7 @@ import {
   type Rule,
   type ViewEvent,
 } from './protocol';
+import { requestRuleAvailable } from './request-rule';
 import { reviewFailureOf } from './decision-remember';
 import type { RequestRef } from './notifications';
 export interface RequestGroup {
@@ -99,11 +100,14 @@ export class AutomaticPrompts {
   }
   // The open card after a state update: the same ref while its request still
   // awaits; else the group's next representative (advance); else undefined (close).
-  follow(state: ClientState, ref: RequestRef): RequestRef | undefined {
+  follow(state: ClientState, ref: RequestRef, reviewingRemember = false): RequestRef | undefined {
     if (state.control.generation !== ref.generation) return;
     const e = state.control.events.find((e) => e.id === ref.id);
     if (e && (e.attempt?.phase === 'unknown' || e.attempt?.phase === 'submitting')) return ref;
     if (e && awaiting(e)) return ref;
+    // Explicit Remember review survives a short-lived socket. Only future-rule
+    // actions remain possible; the ended flow is never released.
+    if (reviewingRemember && e && requestRuleAvailable(e, state.control.capabilities)) return ref;
     // Ended/settled cards remain inspectable in Pending requests, but never
     // occupy the automatic popup with disabled decision controls.
     if (!canDecide(state.control)) return;

@@ -60,3 +60,14 @@ request IDs, endpoint details and deadlines remain independent. Once still
 answers only the selected connection; Remember settles only requests covered by
 the explicitly saved rule. Incoming/outgoing and TCP/UDP groups remain separate.
 This grouping does not promise a single Once decision for an entire application.
+
+### Short-lived requests during Remember
+
+An explicitly checked Remember review stays on its immutable request when its
+socket ends, while the backend still offers retained executable verification.
+The ended request can only create a reviewed rule for future connections; it
+cannot release the original flow. Unsolicited expired requests still leave the
+automatic queue. Remembered saves hide only after acknowledgement; refusals and
+unknown acknowledgements stay visible without automatic retries. Activity also
+lists retained request identities absent from the socket census, labelled as
+request evidence rather than live processes, with their captured caller details.

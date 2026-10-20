@@ -727,10 +727,10 @@ function measurePrompt() {
       $('requestDetails').getBoundingClientRect().height +
       16;
     const keysDown = [...promptKeysDown].sort();
-    const signature = Math.ceil(height) + ':' + pointerDown + ':' + keysDown.join(',');
+    const signature = Math.ceil(height) + ':' + pointerDown + ':' + keysDown.join(',') + ':' + rememberOn;
     if (signature === lastPromptLayout) return;
     lastPromptLayout = signature;
-    void window.flowgate.promptLayout({ height, pointerDown, keysDown }).then(() => {
+    void window.flowgate.promptLayout({ height, pointerDown, keysDown, remember: rememberOn }).then(() => {
       if (!promptLayoutReady) {
         promptLayoutReady = true;
         promptStableAt = performance.now() + 650;
@@ -1757,8 +1757,8 @@ function renderInfo() {
     field(info, 'Recorded executable', e.attribution.application?.executable || 'Unknown');
     field(info, 'Recorded caller', e.attribution.owners.map(p => `${p.pid} · ${p.provenance?.parent?.executable || 'caller unavailable'}`).join('\n'));
     field(info, 'Observation', 'Request evidence retained by the daemon; absence of a current socket does not establish that the process exited.');
-    if (awaiting(e)) {
-      const review=element('button','Review pending request');
+    if (awaiting(e) || requestRuleAvailable(e, state.control.capabilities)) {
+      const review=element('button', awaiting(e) ? 'Review pending request' : 'Create rule for future connections');
       review.onclick=()=>{selectRequest(e.id); $('requestsTab').click(); renderRequests();};
       info.append(review);
     }
@@ -1981,6 +1981,7 @@ function renderRequests() {
         awaiting(selected) ||
         selected.attempt ||
         reviewFailureOf(selected) ||
+        requestRuleAvailable(selected, state.control.capabilities) ||
         localSubmitted.has(state.control.generation + ':' + selected.id)
       )
     ) {

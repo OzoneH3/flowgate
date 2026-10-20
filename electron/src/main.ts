@@ -122,6 +122,7 @@ const width = dimension(
   );
 let main: BrowserWindow;
 let prompt: BrowserWindow | undefined;
+let promptRemember = false;
 const automaticPrompts = new AutomaticPrompts();
 // Keep the old native window until release: its input stream must not reach a new card.
 const TRANSITION_MS = 650;
@@ -157,6 +158,7 @@ function retarget(ref: RequestRef, reload = false) {
     promptRefs.set(w.webContents.id, { ...current, group: ref.group ?? current.group });
     return;
   }
+  promptRemember = false;
   promptRefs.set(w.webContents.id, ref);
   promptContentHeights.delete(w.webContents.id);
   promptReadyAt.set(w.webContents.id, Date.now() + TRANSITION_MS);
@@ -182,8 +184,8 @@ function retarget(ref: RequestRef, reload = false) {
   promptLayouts.set(w.webContents.id, reset);
   void w.loadURL(promptURL(ref));
 }
-// A valid Allow/Deny click hides the permission window at once (NetLimiter);
-// the submission continues asynchronously and its outcome, including refusals
+// Temporary Allow/Deny hides at once; remembered saves hide after acknowledgement.
+// The submission outcome, including refusals
 // and uncertain acknowledgements, is kept in Pending requests › Results. The
 // next waiting request is presented after the usual input-release pacing.
 function promptAnswered(sender: Electron.WebContents) {
@@ -240,7 +242,7 @@ function automaticDecision() {
   const view = backend.view();
   if (prompt && !prompt.isDestroyed() && !promptIdle) {
     const ref = promptRefs.get(prompt.webContents.id);
-    let next = ref && automaticPrompts.follow(view, ref);
+    let next = ref && automaticPrompts.follow(view, ref, promptRemember);
     // A request just decided "For a while" keeps its card while its lease is
     // active, so the lease stays inspectable; any other waiting request wins.
     if (!promptDismissed && !next && ref && leaseHolds(view.control, ref.id))
@@ -977,7 +979,11 @@ app.whenReady().then(async () => {
       throw Error('Permission presentation is transitioning');
     const d = boundDecision(value, promptRefs.get(e.sender.id));
     const run = backend.decide(d);
-    promptAnswered(e.sender);
+    if (d.scope === 'once' || d.scope === 'for-a-while') promptAnswered(e.sender);
+    else void run.then(a => {
+      const ref=promptRefs.get(e.sender.id);
+      if (a.phase === 'acknowledged' && ref?.id === d.id && ref.generation === d.generation) promptAnswered(e.sender);
+    }, () => {});
     return trackResult(d.generation, d.id, run, (a) => attemptResult(a, d.action));
   });
   // local-pair-v1: a permission window may decide only the pair of its own request.
@@ -1014,7 +1020,11 @@ app.whenReady().then(async () => {
       throw Error('Permission presentation is transitioning');
     const choice = ownRequestRule(e, value, true);
     const run = backend.saveRequestRule(choice);
-    promptAnswered(e.sender);
+    // A failed/unknown save stays visible; clicking Remember is not a save ACK.
+    void run.then(() => {
+      const ref=promptRefs.get(e.sender.id);
+      if (ref?.id === choice.id && ref.generation === choice.generation) promptAnswered(e.sender);
+    }, () => {});
     return trackResult(choice.generation, choice.id, run, (r) => ({
       severity: 'ok',
       text: r.replayed ? 'Rule already saved for future connections' : 'Rule saved for future connections',
@@ -1068,6 +1078,7 @@ app.whenReady().then(async () => {
       value.height < 0 ||
       value.height > 100000 ||
       typeof value.pointerDown !== 'boolean' ||
+      typeof value.remember !== 'boolean' ||
       !Array.isArray(value.keysDown) ||
       value.keysDown.length > 3 ||
       value.keysDown.some((k: unknown) => !['Enter', ' ', 'Escape'].includes(String(k)))
@@ -1088,6 +1099,7 @@ app.whenReady().then(async () => {
       senderURL.searchParams.get('generation') !== currentRef.generation
     )
       return;
+    promptRemember = value.remember;
     const contentChanged = promptContentHeights.get(e.sender.id) !== Math.ceil(value.height);
     promptContentHeights.set(e.sender.id, Math.ceil(value.height));
     const released =
