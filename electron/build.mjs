@@ -53,6 +53,8 @@ await build({
     'src/policy.ts',
     'src/editor-presentation.ts',
     'src/icons.ts',
+    'src/icon-ico.ts',
+    'src/desktop-game.ts',
     'src/rule-status.ts',
     'src/rule-chip.ts',
     'src/backend.ts',

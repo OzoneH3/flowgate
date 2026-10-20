@@ -1,4 +1,4 @@
-import type { PermissionTarget, Process, Provenance, RequestEvent } from './protocol';
+import type { Application, PermissionTarget, Process, Provenance, RequestEvent } from './protocol';
 
 // Launch provenance presentation. Display grouping only: a launch group is
 // never a firewall target; every decision still binds the socket owner's own
@@ -9,6 +9,15 @@ export function verifiedLaunch(p?: Provenance) {
   return p?.evidence === 'verified' && p.group && p.launch?.game?.status === 'verified-file'
     ? p
     : undefined;
+}
+
+// Display metadata identity only: registered from the backend's verified launch,
+// never submitted as a decision/application-policy target.
+export function gameIconApplication(p?: Provenance): Application | undefined {
+  const verified = verifiedLaunch(p), game = verified?.launch?.game;
+  if (!verified || !game?.revision || !game.executable) return;
+  return { key: `launch-artwork:${verified.group}`, revision: game.revision,
+    executable: game.executable, name: game.name };
 }
 
 /** "DEATH STRANDING 2: ON THE BEACH · DS2.exe", or just the executable name. */
