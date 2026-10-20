@@ -1,3 +1,4 @@
+import { ApplicationCallers } from './application-callers';
 import { replaceKeyedRow } from './keyed-rows';
 import { rowStructure } from './row-structure';
 import { acceptsPublication } from './publication';
@@ -97,6 +98,7 @@ import {
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const promptGeneration = new URL(location.href).searchParams.get('generation');
 const promptID = new URL(location.href).searchParams.get('request');
+const applicationCallers = new ApplicationCallers();
 let state: ClientState;
 let selected = 'overview';
 let presentation: Presentation | undefined;
@@ -1541,6 +1543,8 @@ function renderInfo() {
         [
           'Executable',
           'Executable status',
+          'Recorded caller paths',
+          'Script',
           'Identity',
           'Totals',
           'Evidence',
@@ -1743,12 +1747,21 @@ function renderInfo() {
     );
   if (r.inactive) {
     // Not running: only its stored rules are known; nothing is observed or verified now.
-    field(info, 'State', 'Not running · listed because stored rules name this application');
+    field(info, 'State', 'Not currently observed · listed because stored rules name this application');
     if (r.inactive.earlierVersion)
       field(info, 'Version', 'Earlier version (the executable changed since these rules were made); they do not apply to the current file');
     field(info, 'Executable', r.inactive.executable);
     field(info, 'User ID', String(r.inactive.uid));
     field(info, 'Identity', `${r.inactive.key}\nRevision: ${r.inactive.revision}`);
+    const callers = applicationCallers.forApplication(r.inactive.key,r.inactive.revision,r.inactive.uid);
+    const nodeRuntime = /^(node|nodejs)$/.test(r.inactive.executable.split('/').pop()||'');
+    if(callers.length){
+      field(info,'Recorded callers',callers.map(c=>`${c.name} · ${new Date(c.captured).toLocaleString()}`).join('\n'));
+      field(info,'Caller evidence','Recent connection snapshots, not the creator of this rule. Historical processes may have ended.');
+      field(info,'Recorded caller paths',callers.map(c=>`${c.executable}\nCaller PID ${c.pid} · start ${c.start} · socket-owner PID ${c.ownerPid}\nRequest ${c.request} · captured ${c.captured}`).join('\n\n'));
+    }else if(nodeRuntime)field(info,'Recorded callers','Unavailable: no caller snapshot retained for this identity.');
+    if(nodeRuntime)field(info,'Script','No script path was retained in this stored executable identity.');
+
     const now = state.control.serverNow ?? Date.now();
     const rules = (state.control.rules || []).filter(
       (x) => x.filter.application === r.inactive!.key && x.filter.revision === r.inactive!.revision && x.filter.uid === r.inactive!.uid,
@@ -2681,6 +2694,7 @@ function updateDecisions() {
 function consume(next: ClientState) {
   if (!acceptsPublication(state, next)) return;
   state = next;
+  applicationCallers.observe(next);
   const present = new Set(state.control.events.map((e) => state.control.generation + ':' + e.id));
   for (const key of localSubmitted) if (!present.has(key)) localSubmitted.delete(key);
   // The permission window shows controller status only when it limits decisions.
