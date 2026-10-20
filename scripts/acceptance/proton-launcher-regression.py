@@ -169,6 +169,17 @@ try:
             assert row['runtime_application']['evidence']['socket_cookie']==row['socket']['cookie']
 
             assert e['attribution']['application']['key']==process['application']['key'],e
+            if a.burst and index == 0:
+                # Exercise the default popup action, not just remembered decisions.
+                once = call('decide', id=e['id'], action='allow', scope='once')
+                assert once.get('decision', {}).get('state') == 'allowed', once
+                wait(lambda: received.count(token) == 1, 10)
+                remaining = [x for x in call().get('events', []) if x['state'] == 'awaiting-decision' and x.get('attribution', {}).get('application', {}).get('key') == process['application']['key']]
+                assert len(remaining) == 2, remaining
+                assert {x['request_group'] for x in remaining} == {e['request_group']}
+                save('once-burst-prompt-result.json', dict(decision=once, received=1, remaining=remaining))
+                print('ONCE BURST: one payload received; two same-group requests still awaiting', flush=True)
+                e = remaining[0]
             action='block' if index==1 else 'allow'
             ack=call('decide',id=e['id'],action=action,scope='application')
             save(token+'-decision.json',ack)
@@ -180,7 +191,7 @@ try:
             assert any(p['identity']['key']==process['application']['key'] and p['outgoing']['active_rules'] for p in policy_view.get('applications',[])),policy_view
             save(token+'-policy.json',policy_view)
             save(token+'-state.json',call())
-            if index==0:
+            if index==2:
                 draft=dict(direction='outgoing',protocol='*',action='allow',remote_address='*',local_port=0,remote_port=0,expires='0001-01-01T00:00:00Z',disabled=False,application_policy=True)
                 target=dict(row_id=row['id'],process_id=row['owners'][0])
                 preview=call('observed-rule-preview',generation=call()['generation'],observed_target=target,observed_draft=draft)

@@ -119,3 +119,11 @@ interface mapping are not newly supported by this change.
 Host deployment and a real user's game retry are separate from this isolated
 acceptance. Preparing the release does not activate host protection or alter
 stored host rules.
+
+The burst check also exercises ordinary Allow (`scope=once`) before saving the
+application rule: exactly one of three payloads arrives and two requests in the
+same backend group remain awaiting a decision. The application decision then
+settles the remaining requests. This distinguishes display grouping from decision
+scope: this test does **not** certify one prompt per application, nor a native
+popup journey. A Remember-only receiver pass must not be reported as proof that
+ordinary Allow suppresses repeated prompts.
