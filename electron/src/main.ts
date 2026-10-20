@@ -47,6 +47,12 @@ import { validatePairChoice } from './local-pair';
 import { validForAWhileSeconds } from './process-lease';
 if (process.getuid?.() === 0) throw Error('FlowGate Electron must run unprivileged');
 app.enableSandbox();
+// This is a local-only client: assets use flowgate:// and daemon IPC uses Unix
+// sockets. Chromium background services must not create Internet permission
+// prompts (or require a firewall exception for the UI).
+app.commandLine.appendSwitch('disable-background-networking');
+app.commandLine.appendSwitch('disable-component-update');
+app.commandLine.appendSwitch('disable-domain-reliability');
 // Native Wayland uses the accelerated OpenGL/ANGLE path; Vulkan presentation
 // is unsupported by Chromium's Wayland surface factory in this Electron release.
 // WebGPU's Vulkan/GL interop otherwise initializes Vulkan independently of the
@@ -542,6 +548,13 @@ function windowFor(isPrompt = false, id = '', generation = '', group?: string) {
   return w;
 }
 app.whenReady().then(async () => {
+  // webRequest/CSP do not cover Chromium's own DNS-over-HTTPS probes.
+  // Configure before creating any session/window; affects this app only.
+  app.configureHostResolver({ enableBuiltInResolver: false, secureDnsMode: 'off' });
+  // Per-window spellcheck:false does not stop the session's dictionary
+  // downloader. Every fresh UI profile otherwise fetches a Chromium .bdic.
+  session.defaultSession.setSpellCheckerLanguages([]);
+  session.defaultSession.setSpellCheckerEnabled(false);
   const csp =
     "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; frame-ancestors 'none'";
   const icons = new ApplicationIcons();
