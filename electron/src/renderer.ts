@@ -671,7 +671,7 @@ function statusStrip(r: Row) {
       if (r.inactive) {
         const status = ruleStatus(r, state);
         openInactiveRules(button, {
-          label: appNames.get(JSON.stringify([r.inactive.key, r.inactive.revision, r.inactive.executable])) || r.label,
+          label: r.inactive.contexts?.length ? r.label : appNames.get(JSON.stringify([r.inactive.key, r.inactive.revision, r.inactive.executable])) || r.label,
           direction,
           rules: status.available ? status[direction] : [],
           generation: state.control.generation,
@@ -982,7 +982,7 @@ if (promptID) {
 function buildTree() {
   const a = state?.observation.activity;
   roots = a
-    ? activityTree(a, state.control.rules, $<HTMLInputElement>('search').value, $<HTMLSelectElement>('filter').value)
+    ? activityTree(a, state.control.rules, $<HTMLInputElement>('search').value, $<HTMLSelectElement>('filter').value, (key,revision,uid)=>applicationCallers.forLaunches(key,revision,uid))
     : [];
   if (a) {
     const children = [...networkOverviews(), ...roots];
@@ -1431,7 +1431,7 @@ function renderTree() {
     const displayKey =
       displayApp && JSON.stringify([displayApp.key, displayApp.revision, displayApp.executable]);
     let rowLabel =
-      r.kind === 'application' && displayKey ? appNames.get(displayKey) || r.label : r.label;
+      r.inactive?.contexts?.length ? r.label : r.kind === 'application' && displayKey ? appNames.get(displayKey) || r.label : r.label;
     let icon: HTMLElement = installedIcon(
       r.kind !== 'application' ? undefined : r.displayApplication || inactiveApp || rowApplication(r),
       r.kind,
@@ -1742,15 +1742,19 @@ function renderInfo() {
             r.process.application.display_name ||
             r.process.application.name.replace(/ \(deleted\)$/, '')
         : r.inactive
-          ? appNames.get(JSON.stringify([r.inactive.key, r.inactive.revision, r.inactive.executable])) || r.label
+          ? (r.inactive.contexts?.length ? r.label : appNames.get(JSON.stringify([r.inactive.key, r.inactive.revision, r.inactive.executable])) || r.label)
           : r.label,
     );
   if (r.inactive) {
-    // Not running: only its stored rules are known; nothing is observed or verified now.
+    // Stored identity with no live row; recorded launch/caller context is historical only.
     field(info, 'State', 'Not currently observed · listed because stored rules name this application');
     if (r.inactive.earlierVersion)
       field(info, 'Version', 'Earlier version (the executable changed since these rules were made); they do not apply to the current file');
     field(info, 'Executable', r.inactive.executable);
+    if(r.inactive.contexts?.length){
+      field(info,'Recorded launch context',r.inactive.contexts.map(c=>`${c.title} · ${new Date(c.captured).toLocaleString()}`).join('\n'));
+      field(info,'Permission target',`${r.inactive.executable} · launch names are display context, not game-specific permission. Other programs using this runtime identity may share application rules.`);
+    }
     field(info, 'User ID', String(r.inactive.uid));
     field(info, 'Identity', `${r.inactive.key}\nRevision: ${r.inactive.revision}`);
     const callers = applicationCallers.forApplication(r.inactive.key,r.inactive.revision,r.inactive.uid);
