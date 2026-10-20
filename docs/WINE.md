@@ -479,3 +479,30 @@ show application children with stable key/revision/UID identities. Rules on a
 Python launcher remain Python rules; they are not a Windows game's permission.
 Live application children now participate in inactive-rule reconciliation, so
 launch grouping cannot itself duplicate a live application as an inactive row.
+
+#### User-namespace scratch ownership correction
+
+The next real retry on `b171e17` exposed a distinct failure: `mkdir ...:
+value too large for defined data type` (Decision Log sequence 12978). The
+container's tmpfs belongs to a child user namespace in which host root is not
+mapped. Creating its scratch directory as root and then changing ownership is
+therefore invalid. Scratch creation and removal now run as the verified broker
+UID/GID using a pinned directory descriptor and fixed host executables, with a
+two-second bound. The daemon never switches its own credentials or enters the
+child user namespace.
+
+`TestNamespaceScratchUnmappedRoot` reproduces the exact EOVERFLOW before the
+fix and verifies creation, owner/mode, and cleanup after it. It runs without
+host privilege using subordinate IDs:
+
+```sh
+. ./scripts/go-env.sh
+go test -c -o .workspace/identity-scratch.test ./internal/identity
+FLOWGATE_USERNS_SCRATCH=1 unshare --user --map-auto --map-root-user \
+  .workspace/identity-scratch.test -test.run TestNamespaceScratchUnmappedRoot -test.v
+```
+
+The private-runtime real receiver matrix also passes with the corrected scratch
+lifecycle (`.workspace/poe-mapped-scratch/result.json`). This still requires a
+real game retry after installation; the earlier accepted Python HTTPS request
+was never a permission for the Windows executable.

@@ -4,6 +4,8 @@ package identity
 // namespace/root. Network and user namespaces are never entered. nsenter drops
 // supplementary groups and changes GID/UID before it executes the Wine loader.
 import (
+	"context"
+	"crypto/rand"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
 
 type wineNamespace struct {
@@ -66,7 +69,7 @@ func prepareWineNamespace(b Process, runner, helper, scratch, runtimeDir string)
 		if !ok {
 			allocated.close()
 			if allocated.removeScratch {
-				os.RemoveAll(allocated.cleanupPath)
+				allocated.removePrivateScratch()
 				allocated.scratchDir.Close()
 			}
 		}
@@ -118,22 +121,52 @@ func prepareWineNamespace(b Process, runner, helper, scratch, runtimeDir string)
 			dir.Close()
 			return nil, fmt.Errorf("unverified container user runtime directory")
 		}
-		cleanup, e := os.MkdirTemp(fmt.Sprintf("/proc/self/fd/%d", dir.Fd()), "flowgate-wine-")
-		if e != nil {
+		n.scratchDir = dir
+		name := fmt.Sprintf("flowgate-wine-%x", randomScratchID())
+		if e = n.scratchCommand("/usr/bin/mkdir", "-m", "0700", "--", "/proc/self/fd/3/"+name); e != nil {
 			dir.Close()
 			return nil, e
 		}
-		n.scratchDir, n.cleanupPath, n.removeScratch = dir, cleanup, true
-		n.scratch = filepath.Join(runtimeDir, filepath.Base(cleanup))
-		if e = os.Chown(cleanup, int(n.uid), int(n.gid)); e != nil {
-			return nil, e
-		}
+		n.cleanupPath, n.removeScratch = name, true
+		n.scratch = filepath.Join(runtimeDir, name)
+
 	}
 	if s, e := Inspect(b.PID); e != nil || s.Start != b.Start || s.MountNS != b.MountNS || s.ExecutableRevision != b.ExecutableRevision {
 		return nil, fmt.Errorf("broker changed before namespace entry")
 	}
 	ok = true
 	return n, nil
+}
+
+// A tmpfs created in a child user namespace cannot create an inode for an
+// unmapped host-root UID (EOVERFLOW). Create and remove scratch as the broker's
+// mapped desktop UID, without changing the daemon's credentials or entering a
+// user namespace. The only inherited descriptor pins the verified directory.
+func randomScratchID() [16]byte {
+	var id [16]byte
+	if _, err := rand.Read(id[:]); err != nil {
+		panic(err)
+	}
+	return id
+}
+func (n *wineNamespace) scratchCommand(binary string, args ...string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	c := exec.CommandContext(ctx, binary, args...)
+	c.ExtraFiles = []*os.File{n.scratchDir}
+	c.Env = []string{"PATH=/usr/bin:/bin", "LC_ALL=C"}
+	if os.Geteuid() != int(n.uid) {
+		c.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: n.uid, Gid: n.gid, Groups: []uint32{}}}
+	}
+	if out, err := c.CombinedOutput(); err != nil {
+		return fmt.Errorf("private observer scratch: %w: %.512s", err, out)
+	}
+	return nil
+}
+func (n *wineNamespace) removePrivateScratch() {
+	if n.cleanupPath != "" {
+		_ = n.scratchCommand("/usr/bin/rm", "-rf", "--", "/proc/self/fd/3/"+n.cleanupPath)
+	}
 }
 
 // A namespace may expose the observer through /run/host, where Inspect cannot
