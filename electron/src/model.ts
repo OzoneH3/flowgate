@@ -1,6 +1,5 @@
 import { addApplicationZones, type ApplicationZone } from './application-zones';
 import type { NetworkZones } from './network-zones';
-import type { LaunchContext } from './application-callers';
 import type { Activity, SocketRow, Process, Traffic, Application, Rule } from './protocol';
 import { launchProcessLabel, launchTitle, verifiedLaunch } from './provenance';
 export type Metric = 'download_bps' | 'upload_bps' | 'downloaded' | 'uploaded';
@@ -29,7 +28,6 @@ export interface InactiveApplication {
   uid: number;
   executable: string;
   rules: number;
-  contexts?: readonly LaunchContext[];
   // Another revision of the same application is running or has newer rules (updated file).
   earlierVersion: boolean;
   // Short location shown when another entry has the same name (different program).
@@ -427,7 +425,7 @@ export function executableName(path: string) {
  * applications. Rules with only a process binding, all-programs or zone-wide
  * scope name no application and are not listed here.
  */
-export function inactiveApplications(rules: Rule[] | undefined, live: Row[], query = '', filter = 'all', contextFor?: (key:string,revision:string,uid:number)=>readonly LaunchContext[]): Row[] {
+export function inactiveApplications(rules: Rule[] | undefined, live: Row[], query = '', filter = 'all'): Row[] {
   if (!rules?.length || filter !== 'all') return [];
   const running = new Set(allRows(live).filter((r) => r.kind === 'application').map((r) => r.id));
   const liveExecutables = new Set(
@@ -444,17 +442,15 @@ export function inactiveApplications(rules: Rule[] | undefined, live: Row[], que
     let row = out.get(id);
     if (!row) {
       const executable = rule.executable || '';
-      const contexts=contextFor?.(f.application,f.revision,f.uid)||[];
-      const runtime=executableName(executable);
-      const label=contexts.length?`${contexts[0].title} · ${runtime}${contexts.length>1?` · +${contexts.length-1} launch context(s)`:''}`:runtime;
-      if (query && !`${label} ${executable} ${contexts.map(c=>c.title+' '+c.executable).join(' ')}`.toLowerCase().includes(query.toLowerCase())) continue;
+      const label = executableName(executable);
+      if (query && !`${label} ${executable}`.toLowerCase().includes(query.toLowerCase())) continue;
       row = {
         id,
         kind: 'application',
         label,
         rows: [],
         children: [],
-        inactive: { key: f.application, revision: f.revision, uid: f.uid, executable, contexts, rules: 0, earlierVersion: liveExecutables.has(`${executable}|${f.uid}`) },
+        inactive: { key: f.application, revision: f.revision, uid: f.uid, executable, rules: 0, earlierVersion: liveExecutables.has(`${executable}|${f.uid}`) },
       };
       out.set(id, row);
     }
@@ -491,8 +487,8 @@ export function shortLocation(path: string) {
   return text.length <= 48 ? text : [dir[0], '…', ...dir.slice(-2)].join('/');
 }
 /** Running applications followed by not-running applications with rules. */
-export function activityTree(activity: Activity, rules: Rule[] | undefined, query = '', filter = 'all', contextFor?: (key:string,revision:string,uid:number)=>readonly LaunchContext[], zones?: NetworkZones): Row[] {
+export function activityTree(activity: Activity, rules: Rule[] | undefined, query = '', filter = 'all', _contextFor?: undefined, zones?: NetworkZones): Row[] {
   const live = hierarchy(activity, query, filter);
-  const rows=[...live, ...inactiveApplications(rules, live, query, filter, contextFor)];
+  const rows=[...live, ...inactiveApplications(rules, live, query, filter)];
   return addApplicationZones(rows,rules||[],zones);
 }

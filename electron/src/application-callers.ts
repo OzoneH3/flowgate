@@ -1,11 +1,4 @@
-import { verifiedLaunch } from './provenance';
-import type { ClientState, Process } from './protocol';
-export interface LaunchContext {
-  title: string;
-  executable: string;
-  revision: string;
-  captured: string;
-}
+import type { ClientState } from './protocol';
 export interface CallerRecord {
   name: string;
   executable: string;
@@ -17,58 +10,20 @@ export interface CallerRecord {
 }
 const identity = (key: string, revision: string, uid: number) =>
   JSON.stringify([key, revision, uid]);
-// Recorded process/connection ancestry, not rule provenance. Bounded to this GUI session and
+// Connection-time ancestry, not rule provenance. Bounded to this GUI session and
 // daemon generation. No current /proc lookup, script inference or permission use.
 export class ApplicationCallers {
   private generation = '';
   private records = new Map<string, CallerRecord[]>();
-  private launches = new Map<string, LaunchContext[]>();
-  private rememberLaunch(owner: Process) {
-    const p = verifiedLaunch(owner.provenance),
-      game = p?.launch?.game,
-      app = owner.application;
-    if (
-      !app?.key ||
-      !app.revision ||
-      !game?.revision ||
-      !game.executable ||
-      !p?.captured_at ||
-      !Number.isFinite(Date.parse(p.captured_at))
-    )
-      return;
-    const key = identity(app.key, app.revision, owner.uid),
-      prior = this.launches.get(key) || [];
-    const item: LaunchContext = {
-      title: game.title || game.name.replace(/\.exe$/i, ''),
-      executable: game.executable,
-      revision: game.revision,
-      captured: p.captured_at,
-    };
-    const old = prior.find((x) => x.executable === item.executable && x.revision === item.revision);
-    if (old && Date.parse(old.captured) >= Date.parse(item.captured)) return;
-    this.launches.delete(key);
-    this.launches.set(
-      key,
-      [item, ...prior.filter((x) => x !== old)]
-        .sort((a, b) => Date.parse(b.captured) - Date.parse(a.captured))
-        .slice(0, 4),
-    );
-    while (this.launches.size > 128) this.launches.delete(this.launches.keys().next().value!);
-  }
   observe(state: ClientState) {
     const control = state.control;
     if (!control.generation) return;
     if (this.generation !== control.generation) {
       this.records.clear();
-      this.launches.clear();
       this.generation = control.generation;
     }
-    if (state.observation.generation === control.generation)
-      for (const process of Object.values(state.observation.activity?.processes || {}))
-        this.rememberLaunch(process);
     for (const event of control.events) {
       for (const owner of event.attribution.owners) {
-        this.rememberLaunch(owner);
         const app = owner.application,
           provenance = owner.provenance,
           parent = provenance?.parent;
@@ -118,9 +73,6 @@ export class ApplicationCallers {
         while (this.records.size > 128) this.records.delete(this.records.keys().next().value!);
       }
     }
-  }
-  forLaunches(key: string, revision: string, uid: number): readonly LaunchContext[] {
-    return this.launches.get(identity(key, revision, uid)) || [];
   }
   forApplication(key: string, revision: string, uid: number): readonly CallerRecord[] {
     return this.records.get(identity(key, revision, uid)) || [];
