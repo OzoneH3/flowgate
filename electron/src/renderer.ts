@@ -74,6 +74,7 @@ import { ruleStatus, ruleState, ruleDescription, ownConfigured } from './rule-st
 import { canDecide, canManageRules } from './protocol';
 import type { Application } from './protocol';
 import { verifiedLaunch } from './provenance';
+import { openInactiveRules } from './inactive-rules';
 import { TrafficGraph } from './graph';
 import { setupWorkflows, updateWorkflows, openRule, resumeRuleEditor } from './workflows';
 import { setupDecisionLog, showDecisionLog, updateDecisionLog } from './decision-log-view';
@@ -663,9 +664,23 @@ function statusStrip(r: Row) {
       for (const tr of document.querySelectorAll<HTMLElement>('#rows tr'))
         tr.setAttribute('aria-selected', String(tr.dataset.id === selected));
       renderInfo();
-      // A not-running application has no verified process to create rules from:
-      // its rules are reviewed and edited in Info View / Rules.
-      if (r.inactive) return;
+      // Not running: its stored rules can be changed or deleted here (reviewed by
+      // the backend); creating new rules needs the running, verified program.
+      if (r.inactive) {
+        const status = ruleStatus(r, state);
+        openInactiveRules(button, {
+          label: appNames.get(JSON.stringify([r.inactive.key, r.inactive.revision, r.inactive.executable])) || r.label,
+          direction,
+          rules: status.available ? status[direction] : [],
+          generation: state.control.generation,
+          now: status.now,
+          canManage: state.control.connected && canManageRules(state.control),
+          canDelete: !!state.control.capabilities?.includes('conditional-rule-delete-v1'),
+          askWritable: !!state.control.capabilities?.includes('stored-ask-v1'),
+          message,
+        });
+        return;
+      }
       if (presentation?.panes.info !== 'docked') showFloatingRuleStatus();
       activityPolicy?.activate(direction, undefined, button);
     };
@@ -1560,7 +1575,8 @@ function renderInfo() {
     retainedSelection = undefined;
   const retained = !liveRow && retainedSelection?.row;
   const r = liveRow || (retained ? { ...retained, rows: [], children: [] } : undefined);
-  activityPolicy?.update(r, state);
+  // Not running: no live policy summary; its rules are listed in Info View and edited from its In/Out cells.
+  activityPolicy?.update(r?.inactive ? undefined : r, state);
   $('infoProperties').textContent =
     r?.kind === 'socket'
       ? 'Connection properties'
@@ -1738,7 +1754,7 @@ function renderInfo() {
       (x) => x.filter.application === r.inactive!.key && x.filter.revision === r.inactive!.revision && x.filter.uid === r.inactive!.uid,
     );
     field(info, 'Rules', rules.map((x) => ruleDescription(x, now)).join('\n') || 'None');
-    field(info, 'Edit', 'Review, change or delete these rules in Rules. New quick rules need the running program.');
+    field(info, 'Edit', 'Click its In or Out cell in Rule Status to change, disable or delete a rule (or use Rules). New rules need the running program.');
   }
   if (r.kind === 'application' && r.parent?.startsWith('app:')) {
     // Grouped beneath the verified application that launched it (display only).

@@ -1704,3 +1704,16 @@ body.hide-sidebar #activityView > aside { display:none; }
 /* Inherited from the application's rule (process row without its own rule): muted, not interactive. */
 #tree .policy-cell.policy-inherited { opacity:1; cursor:default; pointer-events:none; }
 #tree .policy-cell.policy-inherited .status-glyph, #tree .policy-cell.policy-inherited svg, #tree .policy-cell.policy-inherited span { filter:grayscale(1) brightness(.75); opacity:.7; }
+/* Rules of a not-running application (Activity cell popup). */
+.quick-popup.inactive-rules { position:fixed; z-index:60; min-width:300px; max-width:min(520px,calc(100vw - 8px)); padding:6px 8px; background:#2b2b2b; border:1px solid #cddc39; box-shadow:0 4px 14px #000a; font-size:12px; }
+.inactive-rules.busy { opacity:.7; pointer-events:none; }
+.inactive-rules-title { color:#ddd; font-weight:600; margin:0 0 6px; }
+.inactive-rule-wrap + .inactive-rule-wrap { border-top:1px solid #ffffff1a; margin-top:4px; padding-top:4px; }
+.inactive-rule { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.inactive-rule .qs-action { height:22px; min-height:22px; padding:0 7px; display:inline-flex; align-items:center; gap:4px; }
+.inactive-rule .qs-action.current { outline:1px solid #cddc39; }
+.inactive-rule .qs-row-links { margin-left:auto; display:inline-flex; gap:8px; }
+.inactive-rule-scope { color:#9a9a9a; font-size:11px; margin:2px 0 0 22px; }
+.inactive-rules-status:empty, .inactive-rules-empty:empty { display:none; }
+.inactive-rules-status { margin:6px 0 0; color:#ddc38d; font-size:11px; }
+.inactive-rules-empty { color:#aaa; margin:2px 0; }

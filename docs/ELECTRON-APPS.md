@@ -85,7 +85,11 @@ runtime get no Activity rules at all (application or process); Once and For a wh
   (dimmed, "not running"; `inactiveApplications` in `electron/src/model.ts`), one entry per
   application key/revision/UID, in every sort order. An entry for an earlier revision of a
   running program is marked "earlier version". Their Rule Status comes from the stored rule
-  inventory; clicking selects them and Info View lists their rules (edit in Rules). No quick
+  inventory. Clicking an In/Out cell opens that direction's stored rules
+  (`electron/src/inactive-rules.ts`): enable/disable, Ask/Allow/Deny, Advanced, Delete. Each
+  change is reviewed by the backend (draft → preview → save, pinned to the listed version)
+  and saved only when the reviewed rule is exactly the requested change; delete uses the
+  confirmed conditional delete. When the last rule is deleted the entry disappears. No new
   rule can be created there: that needs the running, verified program. Active/Listening
   filters show sockets only and omit them.
 - A process row without its own rule shows its application's rule as inherited: muted grey,
