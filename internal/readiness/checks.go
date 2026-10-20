@@ -198,7 +198,7 @@ func FirewallFor(ctx context.Context, env Environment, profile string, administr
 			c.Detail = "FlowGate table already exists; table name alone does not prove ownership"
 			c.Next = "Inspect host-status; use scoped Stop/recovery only for a confirmed owned instance"
 		} else if tailscaleLink {
-			ts := Tailscale(ctx, env, b, profile, administrator)
+			ts := observedTailscaleRules(ctx, env, b)
 			out = append(out, ts)
 			if ts.Status != Ready {
 				c.Status = ts.Status
@@ -206,7 +206,7 @@ func FirewallFor(ctx context.Context, env Environment, profile string, administr
 				c.Detail = ts.Detail
 				c.Next = ts.Next
 			} else {
-				c.Detail = "Inspected Tailscale client mark/copy profile; other chains may still deny traffic"
+				c.Detail = "Present mark operations inspected; Tailscale initialization is not a startup prerequisite"
 			}
 		} else {
 			for _, term := range []string{`"mark"`, `"queue"`, `"notrack"`, `"zone"`, `"MARK"`, `"CONNMARK"`, `"NFQUEUE"`, `"CT"`, `"flowtable"`} {

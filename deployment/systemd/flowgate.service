@@ -1,8 +1,8 @@
 [Unit]
 Description=FlowGate application firewall and connection observer
 Requires=flowgate-guard.service
-Wants=NetworkManager.service tailscaled.service bpftune.service
-After=flowgate-guard.service NetworkManager.service tailscaled.service bpftune.service
+Wants=NetworkManager.service bpftune.service
+After=flowgate-guard.service NetworkManager.service bpftune.service
 StartLimitIntervalSec=120
 StartLimitBurst=5
 

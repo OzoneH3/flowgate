@@ -104,6 +104,9 @@ func Tailscale(ctx context.Context, env Environment, nft []byte, profile string,
 	return c
 }
 func tailscaleExport(b []byte, table string) error {
+	return tailscaleExportMode(b, table, true)
+}
+func tailscaleExportMode(b []byte, table string, complete bool) error {
 	expected := map[string]int{}
 	if table == "mangle" {
 		expected["-A PREROUTING -m conntrack --ctstate RELATED,ESTABLISHED -m connmark ! --mark 0x0/0xff0000 -j CONNMARK --restore-mark --nfmask 0xff0000 --ctmask 0xff0000"] = 1
@@ -146,16 +149,19 @@ func tailscaleExport(b []byte, table string) error {
 		}
 	}
 	for line, count := range expected {
-		if seen[line] != count {
+		if seen[line] > count || (complete && seen[line] != count) {
 			return fmt.Errorf("expected mark target absent or duplicated")
 		}
 	}
-	if table == "filter" && (!inputHook || !inputTun || !transport) {
+	if complete && table == "filter" && (!inputHook || !inputTun || !transport) {
 		return fmt.Errorf("Tailscale input hook, tunnel accept or transport listener rule absent")
 	}
 	return nil
 }
 func tailscaleRouting(b []byte, family string) error {
+	return tailscaleRoutingMode(b, family, true)
+}
+func tailscaleRoutingMode(b []byte, family string, complete bool) error {
 	var rows []map[string]any
 	if json.Unmarshal(b, &rows) != nil {
 		return fmt.Errorf("Invalid policy routing response")
@@ -203,7 +209,7 @@ func tailscaleRouting(b []byte, family string) error {
 		got[n] = true
 	}
 	for _, n := range []int{0, 5210, 5230, 5250, 5270, 32766} {
-		if !got[n] {
+		if complete && !got[n] {
 			return fmt.Errorf("%s Tailscale routing priority%d missing", family, n)
 		}
 	}
@@ -213,6 +219,9 @@ func tailscaleRouting(b []byte, family string) error {
 // Validate both kernel-visible matches and the locations/count of opaque xt
 // writers. The companion export validates their hidden masks, not their names.
 func tailscaleNFT(b []byte) error {
+	return tailscaleNFTMode(b, true)
+}
+func tailscaleNFTMode(b []byte, complete bool) error {
 	var n struct {
 		Nftables []map[string]json.RawMessage `json:"nftables"`
 	}
@@ -339,13 +348,13 @@ func tailscaleNFT(b []byte) error {
 		}
 	}
 	for key, count := range expected {
-		if seen[key] != count {
+		if seen[key] > count || (complete && seen[key] != count) {
 			return fmt.Errorf("Missing/duplicated kernel mark operation%s", key)
 		}
 	}
 	for _, family := range []string{"ip", "ip6"} {
 		for _, suffix := range []string{"filter/INPUT", "mangle/OUTPUT", "mangle/PREROUTING"} {
-			if !hooks[family+"/"+suffix] {
+			if complete && !hooks[family+"/"+suffix] {
 				return fmt.Errorf("Required Tailscale hook missing")
 			}
 		}
