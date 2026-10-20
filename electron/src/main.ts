@@ -1,3 +1,4 @@
+import { runtimeWitness } from './protocol';
 import { matchesApplicationZone } from './application-zones';
 import { Essential } from './essential';
 import { Protection } from './protection';
@@ -715,7 +716,7 @@ app.whenReady().then(async () => {
         if (
           o.generation !== p.generation ||
           !(row.policyRows || row.rows).some(
-            (r) => r.id === o.row_id && r.owners.length === 1 && r.owners[0] === o.process_id,
+            (r) => r.id === o.row_id && (r.runtime_application ? runtimeWitness(r, state.observation.activity?.processes || {}) === o.process_id : r.owners.length === 1 && r.owners[0] === o.process_id),
           )
         )
           throw Error('Observed target is not the selected identity');

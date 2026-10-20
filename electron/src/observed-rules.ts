@@ -1,3 +1,4 @@
+import { runtimeWitness } from './protocol';
 import {
   ANY_PROTOCOL_CAPABILITY,
   PROCESS_CAPABILITY,
@@ -106,8 +107,7 @@ export class ObservedRules {
     if(row?.runtime_application && (row.runtime_application.uid!==owner?.uid || s.target_scope==='process')) throw Error('Runtime association supports only this verified Windows application, not a Linux process rule');
     if (
       !row ||
-      row.owners.length !== 1 ||
-      row.owners[0] !== s.process_id ||
+      (row.runtime_application ? runtimeWitness(row, o.activity?.processes || {}) !== s.process_id : row.owners.length !== 1 || row.owners[0] !== s.process_id) ||
       !p?.application.key ||
       !p.application.revision
     )

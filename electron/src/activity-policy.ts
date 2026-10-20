@@ -1,3 +1,4 @@
+import { runtimeWitness } from './protocol';
 import { matchesApplicationZone } from './application-zones';
 import { acceptsPublication } from './publication';
 import { applicationHeading } from './application-heading';
@@ -111,10 +112,11 @@ export function selectionInventory(row: Row, state: ClientState) {
     (app || processPolicy) &&
     (row.policyRows || row.rows).find(
       (s) =>
+        (s.runtime_application ? !!runtimeWitness(s, state.observation.activity?.processes || {}) && !!app?.process_ids.includes(runtimeWitness(s, state.observation.activity?.processes || {})!) :
         s.owners.length === 1 &&
         s.ownership_category === 'visible-holder' &&
         (app?.process_ids.includes(s.owners[0]) || processPolicy?.process_id === s.owners[0]) &&
-        (!row.process || row.kind === 'application' || row.process.id === s.owners[0]),
+        (!row.process || row.kind === 'application' || row.process.id === s.owners[0])),
     );
   return {
     authoritative,
@@ -822,7 +824,7 @@ export class ActivityPolicy {
         ...(c.capabilities?.includes(PROCESS_CAPABILITY) ? { target_scope: tier } : {}),
         generation: c.generation,
         row_id: candidate.id,
-        process_id: candidate.owners[0],
+        process_id: runtimeWitness(candidate, this.state!.observation.activity?.processes || {}) || candidate.owners[0],
         direction,
       } satisfies ObservedSource,
     };

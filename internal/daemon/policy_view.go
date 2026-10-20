@@ -337,17 +337,25 @@ func (e *Engine) PolicyView(generation, expected string, uid uint32, admin bool,
 			break
 		}
 		assoc := PolicyAssociation{RowID: row.ID, Status: "unavailable", Reason: "Unknown, shared or display-only ownership is not an application policy association"}
-		if len(row.Owners) != 1 || row.OwnershipCategory != "visible-holder" {
-			out.Rows = append(out.Rows, assoc)
-			continue
+		p, runtimeOK := runtimeActivityOwner(activity, row)
+		if !runtimeOK {
+			if row.RuntimeApplication != nil {
+				out.Rows = append(out.Rows, assoc)
+				continue
+			}
+			if len(row.Owners) != 1 || row.OwnershipCategory != "visible-holder" {
+				out.Rows = append(out.Rows, assoc)
+				continue
+			}
+			var ok bool
+			p, ok = activity.Processes[row.Owners[0]]
+			if !ok || !identity.LiveRuleable(p.Application) {
+				assoc.Reason = "Supported authorized process identity unavailable"
+				out.Rows = append(out.Rows, assoc)
+				continue
+			}
 		}
-		p, ok := activity.Processes[row.Owners[0]]
-		runtime := row.RuntimeApplication
-		if runtime != nil && ok && runtime.UID == p.UID && runtime.Application.Kind == "wine" && runtime.Application.Key != "" && runtime.Application.Revision != "" {
-			p.Application = runtime.Application
-		}
-		if !ok || p.Start == "" || (runtime == nil && !identity.LiveRuleable(p.Application)) || (!admin && p.UID != uid) {
-			assoc.Reason = "Supported authorized native process identity unavailable"
+		if p.Start == "" || (!admin && p.UID != uid) {
 			out.Rows = append(out.Rows, assoc)
 			continue
 		}
@@ -374,7 +382,7 @@ func (e *Engine) PolicyView(generation, expected string, uid uint32, admin bool,
 			group.ProcessIDs = append(group.ProcessIDs, p.ID)
 		}
 		assoc.Status = "observed_native"
-		if runtime != nil {
+		if runtimeOK {
 			assoc.Status = "observed_runtime"
 		}
 		assoc.Reason = "Single visible process association in this Activity snapshot; not enforcement ownership authority"

@@ -378,11 +378,19 @@ test('stored Ask needs stored-ask-v1; with it the application policy action is a
 test('runtime row drafts bind Windows application and prohibit broker process scope',async(t)=>{
  const f=await fixture(t);
  const row=f.state.observation.activity.rows[0];
- row.runtime_application={uid:1000,application:{key:'windows-image',revision:'pe-stamp',executable:'/prefix/Alpha.exe',name:'Alpha.exe'},evidence:{}};
+ row.socket.cookie='cookie';
+ row.runtime_application={uid:1000,application:{key:'windows-image',revision:'pe-stamp',executable:'/prefix/Alpha.exe',name:'Alpha.exe'},evidence:{broker_pid:1,broker_start_ticks:'10',uid:1000,socket_cookie:'cookie'}};
  f.state.observation.activity.processes['1:start'].application={key:'',revision:'',executable:'/runtime/wineserver',name:'wineserver'};
  const d=await f.engine.draft(f.source);
  assert.equal(d.rule.filter.application,'windows-image');
  assert.equal(d.rule.executable,'/prefix/Alpha.exe');
+ row.owners=['client','1:start']; row.ownership_category='shared';
+ f.state.observation.activity.processes.client={id:'client',pid:2,start_ticks:'20',uid:1000,application:row.runtime_application.application};
+ assert.equal((await f.engine.draft(f.source)).rule.filter.application,'windows-image');
+ await assert.rejects(f.engine.draft({...f.source,process_id:'client'}),/single-holder/);
+ row.runtime_application.evidence.broker_start_ticks='reused';
+ await assert.rejects(f.engine.draft(f.source),/single-holder/);
+ row.runtime_application.evidence.broker_start_ticks='10';
  f.state.control.capabilities.push('process-instance-rules-v1');
  await assert.rejects(f.engine.draft({...f.source,target_scope:'process'}),/not a Linux process rule/);
 });

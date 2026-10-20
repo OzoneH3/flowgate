@@ -1434,3 +1434,14 @@ function parseRuntimeTable(value: unknown): RuntimeTable | undefined {
  const holders=array(r.windows_handle_holders,32).map((v)=>{const h=object(v);return {pid:number(h.pid),creation_time:string(h.creation_time).slice(0,32),image:string(h.image).slice(0,4096)};});
  return {runtime:string(r.runtime),prefix:string(r.prefix).slice(0,4096),broker_pid:number(r.broker_pid),broker_start_ticks:string(r.broker_start_ticks),socket_cookie:string(r.socket_cookie),uid:number(r.uid),method:string(r.method).slice(0,1024),windows_handle_holders:holders};
 }
+
+// Display/edit witness for a backend-verified Windows socket association.
+// The broker generation binds the observation, never the application permission.
+export function runtimeWitness(row: SocketRow, processes: Record<string, Process>): string | undefined {
+  const r = row.runtime_application;
+  if (!r || !row.socket.cookie || r.evidence.socket_cookie !== row.socket.cookie || r.uid !== r.evidence.uid) return;
+  return row.owners.find(id => {
+    const p = processes[id];
+    return p && p.pid === r.evidence.broker_pid && p.start_ticks === r.evidence.broker_start_ticks && p.uid === r.uid;
+  });
+}

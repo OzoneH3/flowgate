@@ -169,15 +169,21 @@ func (e *Engine) PreviewObservedRule(generation string, target ObservedTarget, d
 	found := false
 	runtimeTarget := false
 	for _, row := range s.Rows {
-		if row.ID == target.RowID && len(row.Owners) == 1 && row.Owners[0] == target.ProcessID && row.OwnershipCategory == "visible-holder" {
-			found = true
-			if r := row.RuntimeApplication; r != nil && r.UID == p.UID && r.Application.Kind == "wine" && r.Application.Key != "" && r.Application.Revision != "" {
+		if row.ID == target.RowID {
+			if witness, valid := runtimeActivityOwner(s, row); valid && witness.ID == target.ProcessID {
 				if processScope(draft) == "process" {
 					return ObservedPreview{}, mutationError("unsupported_process", "Windows socket owner does not establish a Linux process rule target")
 				}
-				p.Application = r.Application
-				runtimeTarget = true
+				p, found, runtimeTarget = witness, true, true
+				break
 			}
+		}
+		if row.ID == target.RowID && len(row.Owners) == 1 && row.Owners[0] == target.ProcessID && row.OwnershipCategory == "visible-holder" {
+			found = true
+			if row.RuntimeApplication != nil {
+				found = false
+			}
+
 			break
 		}
 	}
@@ -425,11 +431,11 @@ func (e *Engine) verifyRuntimeCreation(target ObservedTarget, expected identity.
 		return fail()
 	}
 	for _, r := range s.Rows {
-		if r.ID != target.RowID || len(r.Owners) != 1 || r.Owners[0] != target.ProcessID {
+		if r.ID != target.RowID || !containsOwner(r.Owners, target.ProcessID) {
 			continue
 		}
 		a := e.Resolve(identity.Flow{Protocol: r.Socket.Protocol, Direction: "outgoing", NetNS: r.Socket.NetNS, Local: r.Socket.Local, Remote: r.Socket.Remote})
-		if a.Status != "corroborated-runtime-table" || a.Application == nil || a.Table == nil || len(a.Sockets) != 1 || a.Sockets[0].Cookie != r.Socket.Cookie || a.Table.UID != expected.UID || a.Application.Key != expected.Application.Key || a.Application.Revision != expected.Application.Revision {
+		if a.Status != "corroborated-runtime-table" || !a.VisibilityComplete || a.Application == nil || a.Table == nil || len(a.Sockets) != 1 || a.Sockets[0].Cookie != r.Socket.Cookie || a.Table.SocketCookie != r.Socket.Cookie || a.Table.UID != expected.UID || a.Application.Key != expected.Application.Key || a.Application.Revision != expected.Application.Revision {
 			return fail()
 		}
 		for _, p := range a.Owners {
@@ -440,4 +446,13 @@ func (e *Engine) verifyRuntimeCreation(target ObservedTarget, expected identity.
 		}
 	}
 	return fail()
+}
+
+func containsOwner(owners []string, target string) bool {
+	for _, id := range owners {
+		if id == target {
+			return true
+		}
+	}
+	return false
 }
