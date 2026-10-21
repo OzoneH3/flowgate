@@ -206,8 +206,10 @@ directories are explicitly trusted user input, not inferred executable commands.
 Broker hashes are diagnostic evidence, not a build allowlist. Discovery reports
 all matching brokers as candidates; attachment must negotiate a complete schema-2
 owner census from the selected live broker before it can resolve an application.
-The supported contract is currently the Wine 11.x owner-table family, validated
-with Wine 11.19, DWProton 11.0 and GE-Proton11-6 (Wine 11.0). A different family,
+The supported contracts are Wine 10.0 and the Wine 11.x owner-table family.
+Wine 10.0 is validated with GE-Proton10-34; Wine 11 with Wine 11.19, DWProton 11.0
+and GE-Proton11-6 (Wine 11.0). Other Wine 10 releases are not inferred compatible.
+A different version outside those contracts,
 malformed/incomplete census or unavailable helper produces an explicit attribution
 failure. This is version-family compatibility, not proof of every vendor patch.
 The first negotiated version is pinned for the observer generation. Exact broker,

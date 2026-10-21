@@ -66,10 +66,14 @@ type WineTable struct {
 	startupDeadline         time.Time
 }
 
-// supportedCensusVersion describes the validated Wine 11 owner-table family,
-// not a vendor, executable hash, prefix or application allowlist. Unknown
-// families are attempted and reported explicitly, never silently skipped.
+// supportedCensusVersion describes the validated Wine 10.0 and Wine 11
+// owner-table contracts, not a vendor, executable hash, prefix or application
+// allowlist. Unknown versions are attempted and reported explicitly, never
+// silently skipped.
 func supportedCensusVersion(version string) bool {
+	if version == "10.0" {
+		return true
+	}
 	parts := strings.Split(version, ".")
 	if len(parts) != 2 || parts[0] != "11" || len(parts[1]) == 0 || len(parts[1]) > 3 {
 		return false

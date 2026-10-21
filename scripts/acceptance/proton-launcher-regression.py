@@ -28,7 +28,7 @@ p.add_argument('--helper')
 p.add_argument('--binary', required=True)
 p.add_argument('--run', required=True)
 p.add_argument('--proton', required=True, help='workspace copy of installed Proton')
-p.add_argument('--data', required=True, help='workspace data containing copied umu/steamrt4')
+p.add_argument('--data', required=True, help='workspace data containing the copied umu/steamrt3 or steamrt4')
 p.add_argument('--prefix-source', required=True, help='initialized workspace Proton compat directory')
 p.add_argument('--pe', required=True)
 p.add_argument('--lwp', required=True, help='actual installed lwp script (read-only)')
@@ -203,7 +203,12 @@ try:
                 time.sleep(3);assert token not in received
             policy_view=call('policy-view',generation=call()['generation']).get('policy_view',{})
             if a.protocol=='tcp':
-                assert any(p['identity']['key']==process['application']['key'] and p['outgoing']['active_rules'] for p in policy_view.get('applications',[])),policy_view
+                # Activity enrichment and its policy projection are asynchronous.
+                # Wait for the same assertion, without weakening receiver checks.
+                def projected_policy():
+                    view=call('policy-view',generation=call()['generation']).get('policy_view',{})
+                    return view if any(p['identity']['key']==process['application']['key'] and p['outgoing']['active_rules'] for p in view.get('applications',[])) else None
+                policy_view=wait(projected_policy,10)
             else:
                 assert any(r['filter']['application']==process['application']['key'] and r['filter']['direction']=='outgoing' and r['action']==action for r in call().get('rules',[])), 'UDP decision did not save the exact application rule'
             save(token+'-policy.json',policy_view)
@@ -211,8 +216,14 @@ try:
             if index==2 and a.protocol=='tcp':
                 draft=dict(direction='outgoing',protocol='*',action='allow',remote_address='*',local_port=0,remote_port=0,expires='0001-01-01T00:00:00Z',disabled=False,application_policy=True)
                 target=dict(row_id=row['id'],process_id=row['owners'][0])
-                preview=call('observed-rule-preview',generation=call()['generation'],observed_target=target,observed_draft=draft)
-                assert not preview.get('error'),preview
+                def preview_when_enriched():
+                    preview=call('observed-rule-preview',generation=call()['generation'],observed_target=target,observed_draft=draft)
+                    # Nonblocking Activity enrichment can omit the runtime
+                    # association while another census owns the session.
+                    if preview.get('error_code')=='unsupported_target':return None
+                    assert not preview.get('error'),preview
+                    return preview
+                preview=wait(preview_when_enriched,10)
                 rule_preview=preview['observed_preview']
                 assert rule_preview['rule']['filter']['application']==process['application']['key']
                 saved=call('observed-rule-save',generation=call()['generation'],preview_token=rule_preview['token'],observed_draft=draft)

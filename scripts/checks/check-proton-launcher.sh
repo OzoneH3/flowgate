@@ -1,14 +1,14 @@
 #!/bin/sh
 # Verify real lwp/UMU/Proton attribution and receiver control, entirely in a lab.
 # Required: FLOWGATE_TEST_PROTON (installed Proton directory),
-# FLOWGATE_TEST_UMU_RUNTIME (installed steamrt4),
+# FLOWGATE_TEST_UMU_RUNTIME (installed steamrt3 or steamrt4),
 # FLOWGATE_TEST_PREFIX_SOURCE (initialized workspace Proton compat directory).
 set -eu
 cd "$(dirname "$0")/../.."
 . ./scripts/go-env.sh
 export PYTHONDONTWRITEBYTECODE=1
 proton=${FLOWGATE_TEST_PROTON:?select installed Proton}
-runtime=${FLOWGATE_TEST_UMU_RUNTIME:?select installed steamrt4}
+runtime=${FLOWGATE_TEST_UMU_RUNTIME:?select installed steamrt3 or steamrt4}
 prefix=${FLOWGATE_TEST_PREFIX_SOURCE:?select initialized workspace prefix}
 lwp=${FLOWGATE_TEST_LWP:-$(command -v lwp)}
 test -f "$proton/proton"
@@ -16,7 +16,9 @@ test -f "$runtime/umu"
 test -f "$prefix/pfx/system.reg"
 run=$(mktemp -d "$PWD/.workspace/proton-launcher-XXXXXX")
 mkdir -p "$run/data/umu"
-cp -a --reflink=auto "$runtime" "$run/data/umu/steamrt4"
+runtime_name=$(basename "$runtime")
+case "$runtime_name" in steamrt3|steamrt4) ;; *) echo "Expected steamrt3 or steamrt4 runtime directory" >&2; exit 2;; esac
+cp -a --reflink=auto "$runtime" "$run/data/umu/$runtime_name"
 cp -a --reflink=auto "$proton" "$run/proton"
 sh scripts/build-wine-table.sh
 go build -o "$run/flowgate" ./cmd/flowgate

@@ -187,6 +187,10 @@ func TestNegotiatedCensusContract(t *testing.T) {
 		schema        int
 		accepted      bool
 	}{
+		{"wine10", "10.0", 2, true},
+		{"wine10Unvalidated", "10.1", 2, false},
+		{"wine10LegacySchema", "10.0", 1, false},
+		{"wine10Malformed", "10.0-extra", 2, false},
 		{"wine11", "11.0", 2, true},
 		{"wineDevelopment", "11.19", 2, true},
 		{"newBuild", "11.21", 2, true},

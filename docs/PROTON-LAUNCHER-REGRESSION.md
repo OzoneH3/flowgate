@@ -89,10 +89,26 @@ DWProton 11.0-4 (broker SHA256
 `3f84ad1bc5116a82ec54ee15588f000dbc5d570c9c77c6007d82545d375fd792`)
 passes the full real-launcher matrix. GE-Proton11-6 (Wine 11.0) also passes
 the two-application/two-prefix receiver matrix. Discovery negotiates the live
-schema-2 Wine 11.x census contract instead of checking a broker hash allowlist;
+schema-2 Wine 10.0 or Wine 11.x census contract instead of checking a broker hash allowlist;
 this regression does not claim all Wine/Proton versions work.
 Steam, Heroic and UMU use the same broker evidence when running a supported build;
 launcher ancestry supplies no permission authority.
+
+Wine 10.0 was additionally validated with GE-Proton10-34 and Steam Runtime 3
+using the real launcher matrix for outgoing IPv4 TCP and UDP. SyntheticAlpha and
+SyntheticBeta in prefix A and SyntheticAlpha in prefix B have independent keys:
+Allow delivers, Deny does not, and a fresh launch observes each remembered rule.
+The burst check also verifies ordinary Once allows one payload while the other
+two requests remain pending. This does not establish that Once suppresses later
+prompts, that IPv6/incoming works on this version, or that a real game passes EAC.
+Other 10.x versions remain unsupported until validated. Both schema-2 negotiation
+and the existing socket/broker/executable evidence are still required.
+
+Select the matching installed `steamrt3` or `steamrt4` directory through
+`FLOWGATE_TEST_UMU_RUNTIME`. The fixture waits at most ten seconds for asynchronous
+Activity policy enrichment and retries a transient `unsupported_target` preview;
+receiver delivery checks remain separate. It does not prove the UI never exposes
+that transient unavailable state.
 
 The collector joins the existing broker as the desktop user inside its pinned
 mount namespace. It cannot start a replacement wineserver. Two Windows TCP owner
