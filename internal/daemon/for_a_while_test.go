@@ -361,3 +361,36 @@ func TestWineTableNeverLeasesTheBrokerProcess(t *testing.T) {
 		t.Fatal("game Windows owner silently became a wineserver process lease")
 	}
 }
+
+func TestForAWhileHourAllowIsNotBoundToFirstDestination(t *testing.T) {
+	x := newQueueFixture(t)
+	p := x.proc(42, "10", 1000)
+	_, first := x.flow(t, p, "tcp", "10.0.0.1:40001", "192.0.2.1:443", "first")
+	_, queued := x.flow(t, p, "udp", "10.0.0.1:40002", "192.0.2.5:53", "queued")
+	start := *x.now
+	decided, settled, err := x.e.DecideSettled(first.ID, "allow", ForAWhileScope, 3600, 1000, false)
+	if err != nil || decided.Lease == nil || decided.Lease.Seconds != 3600 {
+		t.Fatal(decided, err)
+	}
+	if settledIDs(settled)[queued.ID].State != "allowed" {
+		t.Fatal("other queued IP/port/protocol not covered", settled)
+	}
+	for i, at := range []time.Duration{time.Minute, 30 * time.Minute, time.Hour - time.Second} {
+		*x.now = start.Add(at)
+		for j, destination := range []struct{ protocol, local, remote string }{
+			{"tcp", "10.0.0.1:41001", "198.51.100.7:80"},
+			{"udp", "10.0.0.1:41002", "203.0.113.8:9000"},
+			{"tcp", "[2001:db8::1]:41003", "[2001:db8::2]:8443"},
+		} {
+			_, event := x.flow(t, p, destination.protocol, destination.local, destination.remote, fmt.Sprintf("%d-%d", i, j))
+			if event.State != "allowed" || event.Rule != "while:"+decided.Lease.ID {
+				t.Fatalf("+%s %s %s not lease covered: %+v", at, destination.protocol, destination.remote, event)
+			}
+		}
+	}
+	*x.now = start.Add(time.Hour)
+	_, expired := x.flow(t, p, "tcp", "10.0.0.1:42001", "203.0.113.9:443", "expired")
+	if expired.State != "awaiting-decision" {
+		t.Fatal("hour lease did not expire", expired)
+	}
+}

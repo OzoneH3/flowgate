@@ -37,6 +37,7 @@ import {
   toggleDecisionOption,
   FOR_A_WHILE_TOOLTIP,
   defaultForAWhile,
+  DEFAULT_FOR_A_WHILE_SECONDS,
   expiryPreview,
   forAWhileDurations,
   forAWhileNote,
@@ -145,7 +146,7 @@ let rememberOn = false,
 let forAWhileOn = false;
 // decision-for-a-while-durations-v1 (FlowGate extension): the selected lease
 // duration; defaults to the user's last choice when the backend allows it.
-let forAWhileSeconds = 15,
+let forAWhileSeconds = DEFAULT_FOR_A_WHILE_SECONDS,
   savedForAWhile: number | undefined;
 void window.flowgate
   .preferences()

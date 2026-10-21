@@ -10,15 +10,15 @@ import (
 // ForAWhileCapability: NetLimiter's Ask-window "For a while" checkbox. The
 // current request is decided like Once, and the same action applies to new
 // connections of the same direction created by the exact requesting process
-// instance for a short fixed period. No rule is created; leases live in memory
+// instance for the selected duration. No rule is created; leases live in memory
 // only and are lost when the daemon restarts.
 const ForAWhileCapability = "decision-for-a-while-v1"
 
 // ForAWhileScope is the decide scope value.
 const ForAWhileScope = "for-a-while"
 
-// ForAWhileDuration is the default (NetLimiter offers no duration control; its
-// window was measured at roughly 10-18 seconds).
+// ForAWhileDuration is the legacy wire default when duration_seconds is absent.
+// The current UI selects one hour explicitly when duration selection is supported.
 const ForAWhileDuration = 15 * time.Second
 
 // ForAWhileDurationsCapability (FlowGate extension): decide scope for-a-while
@@ -234,7 +234,7 @@ func (e *Engine) ProcessLeases(uid uint32, admin bool) []ProcessLease {
 }
 
 func forAWhilePreview(f identity.Flow, p identity.Process, d time.Duration) string {
-	return fmt.Sprintf("For a while: this connection and new %s connections of this process (PID %d) for %s, or until the process exits; no rule is created; not saved, lost on daemon restart. Configured rules still apply first.", f.Direction, p.PID, durationText(d))
+	return fmt.Sprintf("For a while: this connection and new %s connections of this process (PID %d) for %s, to any remote address and port (TCP and UDP), or until the process exits; no rule is created; not saved, lost on daemon restart. Configured rules still apply first.", f.Direction, p.PID, durationText(d))
 }
 
 func durationText(d time.Duration) string {

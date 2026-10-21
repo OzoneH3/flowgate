@@ -300,7 +300,9 @@ test('durations: offered set, saved default, expiry preview, validated decisions
   assert.deepEqual(lease.forAWhileDurations({ capabilities: [lease.FOR_A_WHILE_CAPABILITY] }), [15], 'old backend: fixed 15 s');
   assert.equal(lease.defaultForAWhile(300, DURATIONS), 300);
   assert.equal(lease.defaultForAWhile(300, [15]), 15, 'saved choice not offered -> 15 s');
-  assert.equal(lease.defaultForAWhile('x', DURATIONS), 15);
+  assert.equal(lease.defaultForAWhile('x', DURATIONS), 3600);
+  assert.equal(lease.defaultForAWhile(undefined, DURATIONS), 3600);
+  assert.equal(lease.defaultForAWhile(15, DURATIONS), 15, 'explicit shorter choice is preserved');
   assert.ok(lease.validForAWhileSeconds(3600) && !lease.validForAWhileSeconds(20) && !lease.validForAWhileSeconds('60'));
   assert.deepEqual(DURATIONS.map(lease.durationLabel), ['15 s', '1 min', '5 min', '10 min', '30 min', '1 h']);
   const now = new Date(2026, 9, 19, 14, 2, 0).getTime();
@@ -313,6 +315,8 @@ test('durations: offered set, saved default, expiry preview, validated decisions
   const hour = pd.promptPlan(ev('a'), 'block', { ...base, forAWhileSeconds: 3600 }).decision;
   assert.deepEqual(hour, { generation: 'g', id: 'a', action: 'block', scope: 'for-a-while', duration_seconds: 3600 });
   assert.deepEqual(validateDecision(hour), hour);
+  const initial = lease.defaultForAWhile(undefined, lease.forAWhileDurations(control));
+  assert.equal(pd.promptPlan(ev('a'), 'allow', { ...base, forAWhileSeconds: initial }).decision.duration_seconds, 3600, 'first use sends a real one-hour duration rather than the legacy omitted-field default');
   assert.throws(() => validateDecision({ ...hour, duration_seconds: 20 }));
   // Remember stays exclusive with For a while.
   assert.deepEqual(lease.toggleDecisionOption({ forAWhile: true, remember: false }, 'remember', true), { forAWhile: false, remember: true });

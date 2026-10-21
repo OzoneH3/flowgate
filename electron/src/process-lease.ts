@@ -1,13 +1,16 @@
 // decision-for-a-while-v1 (NetLimiter 5.3.28 "For a while"): the backend decides
 // the current request like Once and keeps an in-memory process-instance lease
-// (same direction, exactly this verified process instance, fixed 15 s). It is
+// (same direction, exactly this verified process instance, all addresses and
+// ports). The UI defaults to one hour when duration selection is supported. It is
 // never a rule. The UI only displays leases the backend lists.
 export const FOR_A_WHILE_CAPABILITY = 'decision-for-a-while-v1';
+// Legacy wire default and popup inspection hold; do not change for old backends.
 export const FOR_A_WHILE_SECONDS = 15;
-// One-line explanation shown while For a while is checked (it has no duration control).
-export const FOR_A_WHILE_NOTE = 'For 15 seconds · this process instance · this direction · not saved as a rule.';
+export const DEFAULT_FOR_A_WHILE_SECONDS = 3600;
+// Initial explanation; the renderer fills in the selected duration.
+export const FOR_A_WHILE_NOTE = 'This process instance · all remote addresses and ports · this direction · not saved as a rule.';
 export const FOR_A_WHILE_TOOLTIP =
-  'Allow or deny this connection and new connections from this process for 15 seconds. Not saved as a rule.';
+  'Allow or deny this connection and new TCP/UDP connections from this process to any address and port for the selected duration. Ends if the process exits. Not saved as a rule.';
 export const forAWhileSupported = (capabilities?: string[]) =>
   !!capabilities?.includes(FOR_A_WHILE_CAPABILITY);
 
@@ -30,9 +33,9 @@ export function forAWhileDurations(control: { capabilities?: string[]; forAWhile
   );
   return offered.length ? offered : [FOR_A_WHILE_SECONDS];
 }
-// The remembered choice when the backend still allows it, else 15 s.
+// Preserve an explicit choice; otherwise default to one hour when supported.
 export function defaultForAWhile(saved: unknown, allowed: number[]) {
-  return typeof saved === 'number' && allowed.includes(saved) ? saved : allowed.includes(FOR_A_WHILE_SECONDS) ? FOR_A_WHILE_SECONDS : allowed[0];
+  return typeof saved === 'number' && allowed.includes(saved) ? saved : allowed.includes(DEFAULT_FOR_A_WHILE_SECONDS) ? DEFAULT_FOR_A_WHILE_SECONDS : allowed.includes(FOR_A_WHILE_SECONDS) ? FOR_A_WHILE_SECONDS : allowed[0];
 }
 export const validForAWhileSeconds = (v: unknown) =>
   typeof v === 'number' && (FOR_A_WHILE_DURATION_CHOICES as readonly number[]).includes(v);
@@ -43,7 +46,7 @@ export function expiryPreview(seconds: number, now: number) {
   return `until ${two(until.getHours())}:${two(until.getMinutes())}${seconds < 60 ? ':' + two(until.getSeconds()) : ''}`;
 }
 export function forAWhileNote(seconds: number) {
-  return `For ${durationLabel(seconds)} · this process instance · this direction · ends early if it exits · not saved as a rule.`;
+  return `For ${durationLabel(seconds)} · this process instance · all remote addresses and ports · this direction · ends early if it exits · not saved as a rule.`;
 }
 
 // NetLimiter 5.3.28 (observed): "Allow | Deny | ☐ Remember | ☐ For a while";
@@ -157,7 +160,7 @@ export function leaseDetails(lease: ProcessLease): [string, string][] {
     ['Action', lease.action === 'allow' ? 'Allow' : 'Deny'],
     ['Duration', durationLabel(lease.seconds)],
     ['Expires', `${until.toLocaleTimeString()} (${lease.until}) · earlier if the process exits`],
-    ['Scope', 'This process instance only, same direction. Not saved as a rule.'],
+    ['Scope', 'This process instance only, same direction, all remote addresses and ports, TCP and UDP. Not saved as a rule.'],
   ];
 }
 // Leases relevant to one request card: its own decision, or the same process instance.
