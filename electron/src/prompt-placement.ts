@@ -11,7 +11,7 @@ export function promptTitle(windowID: number) {
 }
 // Shared by startup QML and one-shot resizes. Fullscreen is compositor evidence,
 // independent of application identity. Ignore minimized/other-desktop windows.
-function outputSelection(pid: number, outputName?: string) {
+function outputSelection(pid: number, outputName?: string, retainOutput = false) {
   return `const primary=workspace.screens.find(o=>o.name===${JSON.stringify(outputName || '')}) || workspace.screens[0];
     const candidates=typeof workspace.windowList==='function'?workspace.windowList():workspace.stackingOrder;
     const coversOutput=(c,output)=>{
@@ -19,16 +19,17 @@ function outputSelection(pid: number, outputName?: string) {
       return c.normalWindow && c.noBorder && g && a && ['x','y','width','height'].every(k=>Math.abs(g[k]-a[k])<=1);
     };
     const fullscreenOn=(output)=>candidates.some(c=>c.pid!==${pid} && (c.fullScreen || coversOutput(c,output)) && !c.minimized && c.output===output && (c.onAllDesktops || !c.desktops || c.desktops.length===0 || c.desktops.indexOf(workspace.currentDesktopForScreen(output))>=0));
-    const output=primary && fullscreenOn(primary) ? (workspace.screens.find(o=>o!==primary && !fullscreenOn(o)) || primary) : primary;`;
+    const current=${retainOutput ? "workspace.screens.includes(w.output) && w.output!==primary ? w.output : null" : "null"};
+    const output=current || (primary && fullscreenOn(primary) ? (workspace.screens.find(o=>o!==primary && !fullscreenOn(o)) || primary) : primary);`;
 }
-export function placementScript(pid: number, windowID: number, bounds: Rect, outputName?: string) {
+export function placementScript(pid: number, windowID: number, bounds: Rect, outputName?: string, retainOutput = false) {
   if (
     !Number.isSafeInteger(pid) ||
     pid <= 0 ||
     Object.values(bounds).some((v) => !Number.isFinite(v))
   )
     throw Error('Invalid placement');
-  const routed = `${outputSelection(pid, outputName)} if(!output)throw new Error('Configured primary output unavailable'); workspace.sendClientToScreen(w,output); const area=workspace.clientArea(KWin.PlacementArea,output,workspace.currentDesktopForScreen(output)); const width=Math.min(${bounds.width},area.width),height=Math.min(${bounds.height},area.height); w.frameGeometry={x:area.x+area.width-width,y:area.y+area.height-height,width:width,height:height};`;
+  const routed = `${outputSelection(pid, outputName, retainOutput)} if(!output)throw new Error('Configured primary output unavailable'); workspace.sendClientToScreen(w,output); const area=workspace.clientArea(KWin.PlacementArea,output,workspace.currentDesktopForScreen(output)); const width=Math.min(${bounds.width},area.width),height=Math.min(${bounds.height},area.height); w.frameGeometry={x:area.x+area.width-width,y:area.y+area.height-height,width:width,height:height};`;
   const placement = outputName ? routed : `if(workspace.screens && workspace.screens.length) { ${routed} } else { w.frameGeometry = ${JSON.stringify(bounds)}; }`;
   return `for (const w of workspace.windowList()) { if (w.pid === ${pid} && w.caption === ${JSON.stringify(promptTitle(windowID))}) { ${placement} print("FLOWGATE_PROMPT_PLACED_${pid}", ${JSON.stringify(outputName || 'native-primary')}, JSON.stringify(w.frameGeometry)); } }`;
 }
@@ -52,7 +53,7 @@ QtObject {
   function added(w) { if(w.pid===${pid} && w.caption===${JSON.stringify(promptTitle(windowID))}) { target=w; w.keepAbove=true; w.opacity=0; console.log("FLOWGATE_PROMPT_HELD",${pid},${windowID},w.output.name,w.opacity); } }
   Component.onCompleted: { workspace.windowAdded.connect(root.added); for(const w of workspace.stackingOrder) added(w); }
   Component.onDestruction: { workspace.windowAdded.disconnect(root.added); if(target) target.opacity=${reveal ? 1 : 0}; }
-  property var state: ({ticks:0, nativeID:null, previous:"", stable:0, applied:0, waited:0, confirmed:0})
+  property var state: ({ticks:0, nativeID:null, previous:"", stable:0, applied:0, waited:0, confirmed:0, output:null})
   property Timer clock: Timer { interval:50; repeat:true; running:true; onTriggered:root.tick() }
   function tick() {
     const s=state;
@@ -62,7 +63,9 @@ QtObject {
     const w=matches[0], nativeID=String(w.internalId);
     if(s.nativeID!==null && s.nativeID!==nativeID) { clock.stop(); return; }
     s.nativeID=nativeID;
-    ${outputSelection(pid, outputName)}
+    ${outputSelection(pid, outputName).replace("const output=", "const selectedOutput=")}
+    if(!s.output || !workspace.screens.includes(s.output)) s.output=selectedOutput;
+    const output=s.output;
     if(!output) { clock.stop(); return; }
     const area=workspace.clientArea(KWin.PlacementArea,output,workspace.currentDesktopForScreen(output));
     const width=Math.min(${bounds.width},area.width), height=Math.min(${bounds.height},area.height);
@@ -188,7 +191,8 @@ export async function placeKDEPrompt(
   }
 }
 
-// Content-driven resize: a one-shot compositor placement, without activation or opacity changes.
+// Reused popup resizes retain a connected secondary output after fullscreen ends.
+// A warm popup on primary can still move away when a fullscreen application starts.
 export async function resizeKDEPrompt(
   profile: string,
   pid: number,
@@ -204,7 +208,7 @@ export async function resizeKDEPrompt(
     const file = path.join(dir, 'resize.js');
     await fs.writeFile(
       file,
-      placementScript(pid, windowID, bounds, await configuredPrimaryOutput()).replace(
+      placementScript(pid, windowID, bounds, await configuredPrimaryOutput(), true).replace(
         ' print(',
         ` w.opacity=${visible ? 1 : 0}; w.minimized=${!visible}; w.skipTaskbar=${!visible}; w.skipSwitcher=${!visible}; print(`,
       ),

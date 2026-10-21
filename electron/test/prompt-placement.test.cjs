@@ -202,6 +202,8 @@ test('startup handshake uses fullscreen routing while awaiting native geometry c
   const workspace={screens:[primary,secondary],stackingOrder:[permission,game],currentDesktopForScreen:()=>1,
     sendClientToScreen:(w,output)=>{w.output=output;},clientArea:()=>({x:1920,y:0,width:1600,height:900})};
   const context=vm.createContext({state,target:permission,workspace,clock:{stop(){}},KWin:{PlacementArea:0},console:{log(){}}});
+  vm.runInContext(`(function(){${body}})()`,context);
+  game.fullScreen=false; // Alt-tab during the asynchronous startup handshake.
   for(let i=0;i<12;i++)vm.runInContext(`(function(){${body}})()`,context);
   assert.equal(permission.output,secondary);
   assert.equal(permission.opacity,1);
@@ -226,4 +228,30 @@ test('borderless output-covering windows redirect without treating normal maximi
   assert.equal(run({...primary.geometry},{noBorder:false}),primary);
   assert.equal(run({...primary.geometry},{normalWindow:false}),primary,'panel/desktop surfaces are excluded');
   assert.equal(run({...primary.geometry},{minimized:true}),primary);
+});
+
+
+test('reused popup stays on secondary after alt-tab, but recovers when output disconnects', () => {
+  const primary={name:'DP-1',geometry:{x:0,y:0,width:1920,height:1080}};
+  const secondary={name:'DP-2',geometry:{x:1920,y:0,width:1600,height:900}};
+  const permission={pid:42,caption:promptTitle(7),output:primary};
+  const game={pid:99,fullScreen:true,output:primary};
+  const workspace={screens:[primary,secondary],windowList:()=>[permission,game],
+    currentDesktopForScreen:()=>1, clientArea:(_k,o)=>o.geometry,
+    sendClientToScreen:(w,o)=>{w.output=o;}};
+  const resize=(height=460)=>vm.runInNewContext(
+    placementScript(42,7,{x:0,y:0,width:520,height},'DP-1',true),
+    {workspace,KWin:{PlacementArea:0},print(){}});
+  resize();
+  assert.equal(permission.output,secondary,'warm popup moves away from fullscreen primary');
+  game.fullScreen=false;
+  game.minimized=true;
+  resize(650);
+  assert.equal(permission.output,secondary,'expanding Details after alt-tab retains output');
+  assert.deepEqual({...permission.frameGeometry},{x:3000,y:250,width:520,height:650});
+  resize();
+  assert.equal(permission.output,secondary,'next compact request retains output');
+  workspace.screens=[primary];
+  resize();
+  assert.equal(permission.output,primary,'disconnected output falls back to available primary');
 });

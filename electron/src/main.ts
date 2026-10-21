@@ -167,7 +167,7 @@ function retarget(ref: RequestRef, reload = false) {
   promptRefs.set(w.webContents.id, ref);
   promptContentHeights.delete(w.webContents.id);
   promptReadyAt.set(w.webContents.id, Date.now() + TRANSITION_MS);
-  const compact = edgePosition(screen.getPrimaryDisplay().workArea, PROMPT_WIDTH, PROMPT_HEIGHT);
+  const compact = edgePosition(screen.getDisplayMatching(w.getBounds()).workArea, PROMPT_WIDTH, PROMPT_HEIGHT);
   w.setBounds(compact);
   const reset = (
     promptLayouts.get(w.webContents.id) ||
@@ -1118,7 +1118,7 @@ app.whenReady().then(async () => {
     promptPointerDown = value.pointerDown;
     if (released && transitionUntil) pacePrompt();
     const bounds = edgePosition(
-      screen.getPrimaryDisplay().workArea,
+      screen.getDisplayMatching(w.getBounds()).workArea,
       w.getBounds().width,
       Math.max(PROMPT_HEIGHT, Math.ceil(value.height)),
     );
