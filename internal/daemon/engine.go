@@ -131,7 +131,7 @@ type Engine struct {
 }
 
 func New(timeout time.Duration) *Engine {
-	return &Engine{Zones: identity.DefaultNetworkZones(), Generation: randomID(), events: map[string]*Event{}, Resolve: identity.Resolve, LocalPeer: identity.ResolveLocalPeer, Now: time.Now, Timeout: timeout, Max: 256}
+	return &Engine{Zones: identity.DefaultNetworkZones(), Generation: randomID(), events: map[string]*Event{}, Resolve: identity.NewUDPAttributionReuse(identity.Resolve).Resolve, LocalPeer: identity.ResolveLocalPeer, Now: time.Now, Timeout: timeout, Max: 256}
 }
 func randomID() string {
 	var b [16]byte

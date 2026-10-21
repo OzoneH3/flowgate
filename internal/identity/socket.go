@@ -59,8 +59,14 @@ type Attribution struct {
 func NetNS() string              { return link("/proc/self/ns/net") }
 func Sockets() ([]Socket, error) { return SocketsLimited(0) }
 
+// UDPSockets is the complete UDP census of both families, without TCP rows.
+func UDPSockets() ([]Socket, error) { return socketsFor([]byte{unix.IPPROTO_UDP}, 0) }
+
 // SocketsLimited bounds retained rows; zero preserves the enforcement census.
 func SocketsLimited(limit int) ([]Socket, error) {
+	return socketsFor([]byte{unix.IPPROTO_TCP, unix.IPPROTO_UDP}, limit)
+}
+func socketsFor(protos []byte, limit int) ([]Socket, error) {
 	c, e := netlink.Dial(unix.NETLINK_SOCK_DIAG, nil)
 	if e != nil {
 		return nil, e
@@ -69,7 +75,7 @@ func SocketsLimited(limit int) ([]Socket, error) {
 	c.SetDeadline(time.Now().Add(2 * time.Second))
 	var result []Socket
 	for _, family := range []byte{unix.AF_INET, unix.AF_INET6} {
-		for _, proto := range []byte{unix.IPPROTO_TCP, unix.IPPROTO_UDP} {
+		for _, proto := range protos {
 			req := make([]byte, 56)
 			req[0] = family
 			req[1] = proto

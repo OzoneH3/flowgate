@@ -269,7 +269,7 @@ func serve() error {
 			return err
 		}
 		defer observers.Close()
-		e.Resolve = observers.Resolve
+		e.Resolve = identity.NewUDPAttributionReuse(observers.Resolve).Resolve
 		observer.Annotate = observers.AnnotateActivity
 	} else if *prefixes != "" {
 		if os.Getenv("FLOWGATE_WINE_TABLE_RUNNER") != "" {
@@ -280,7 +280,7 @@ func serve() error {
 			return err
 		}
 		defer observers.Close()
-		e.Resolve = observers.Resolve
+		e.Resolve = identity.NewUDPAttributionReuse(observers.Resolve).Resolve
 		b, _ := json.Marshal(observers.Sessions())
 		fmt.Fprintln(os.Stderr, "ATTACHED", string(b))
 	} else if runner := os.Getenv("FLOWGATE_WINE_TABLE_RUNNER"); runner != "" {
@@ -289,7 +289,7 @@ func serve() error {
 			return err
 		}
 		defer observer.Close()
-		e.Resolve = observer.Resolve
+		e.Resolve = identity.NewUDPAttributionReuse(observer.Resolve).Resolve
 	}
 	go observer.Run(activityCtx)
 	if *rulepath != "" {
