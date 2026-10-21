@@ -20,6 +20,27 @@ Electron emits cache-content revision `current0x2012001` versus cache`0x2012003`
 
 The warning says cache regeneration is skipped. Actual text/icon layout rendered, installed Liberation Sans regular/bold files were opened, and resizing/quit worked. No demonstrated font-rendering failure required a cache fix. System/user/workspace caches were left intact. Do not blindly delete/regenerate system caches or treat the warning as proof that the window failed.
 
+### Private-cache fix (2026-10-22)
+
+The source launcher and prepared `launch-ui` now derive a configuration from the
+system fonts.conf with the same font directories and rendering rules, replacing
+its cache directories with a FlowGate-owned cache separated by Electron runtime
+version. Relative system includes are made absolute. System and user font caches
+are left intact; explicit FONTCONFIG_FILE/FONTCONFIG_PATH overrides are respected.
+Included custom configurations that add their own cache directories are diagnosed
+and preserved, so those custom configurations can still require separate cache
+configuration. Failure to prepare the private configuration falls back visibly to
+the system configuration.
+
+Cold and warm native Wayland launches rendered without the Fontconfig version
+warning. A system-versus-private font probe returned identical measurements for
+all sampled families. The first termination runs were interrupted during cleanup;
+they establish rendering and warning removal, not clean launcher shutdown.
+Configuration and release-packaging tests pass, including the helper's inclusion
+in the matched manifest. Full repository checks pass. Evidence is retained in
+`.workspace/fc-launch-{cold,warm}.log`, `.workspace/fc-probe/` and
+`.workspace/warning-fixes-full-check.log`.
+
 ## Retained diagnostics and build ownership
 
 Each normal run now retains `launch.json`, `electron.log` and `exit.json` alongside observer.log under `.workspace/electron-run-*`, while continuing to echo output. Main logs successful rendering and unexpected renderer/child exits. No remote debugging endpoint is enabled by this change.

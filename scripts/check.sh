@@ -9,7 +9,7 @@ ordinary_peer_tests='^(TestDecisionLogAPIOnReadOnlyEndpoint|TestObservedCreation
 scripts/lab.sh go test -race ./... -skip "$ordinary_peer_tests"
 # These three fixtures intentionally require a non-root Unix peer.
 go test -race ./internal/daemon -run "$ordinary_peer_tests"
-for check in test-update-and-start test-install-monitoring test-install-rollback test-release-preparation test-deployment-recovery test-deployment-uninstall test-script-hardening test-essential-networking test-apply-essentials; do
+for check in test-update-and-start test-install-monitoring test-install-rollback test-release-preparation test-deployment-recovery test-deployment-uninstall test-script-hardening test-essential-networking test-apply-essentials test-electron-fontconfig; do
  python3 "scripts/checks/$check.py"
 done
 FLOWGATE_ESSENTIAL_PLAN="$PWD/.workspace/essential-policy-fixture.json" go test -race ./internal/policy -run '^TestEssentialDNSReviewFiltersAndPersistence$'

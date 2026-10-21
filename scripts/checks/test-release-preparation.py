@@ -42,7 +42,7 @@ class Preparation(unittest.TestCase):
                  'deployment/systemd/flowgate.service', 'deployment/systemd/flowgate-guard.service',
                  'deployment/systemd/50-flowgate-guard.conf', 'docs/PROTON-LAUNCHER-REGRESSION.md',
                  'docs/AUTOMATIC-ZONES.md', 'electron/AUTOMATIC-ZONES.md', 'electron/PROMPT-PRESENTATION.md',
-                 'electron/REMEMBER-REVALIDATION.md', 'internal/identity/data/iana-special.json']
+                 'electron/REMEMBER-REVALIDATION.md', 'electron/fontconfig_isolation.py', 'internal/identity/data/iana-special.json']
         for name in names:
             destination = self.root / name
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -96,6 +96,10 @@ class Preparation(unittest.TestCase):
         self.assertEqual(first.returncode, 0, first.stderr)
         self.assert_manifest(self.gui, 'matched-manifest.json')
         self.assert_manifest(self.gui / 'backend', 'manifest.json')
+        # The GUI launcher's Fontconfig helper ships hashed with the bundle.
+        matched = json.loads((self.gui / 'matched-manifest.json').read_text())
+        self.assertIn('fontconfig_isolation.py', matched['files'])
+        self.assertIn('fontconfig_isolation.py', (self.gui / 'launch-ui').read_text())
         before = self.calls()
         result = self.prepare()
         self.assertEqual(result.returncode, 0, result.stderr)

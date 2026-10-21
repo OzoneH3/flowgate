@@ -9,6 +9,10 @@ import subprocess
 import tempfile
 import time
 ROOT = Path(__file__).resolve().parents[1]
+import sys
+sys.dont_write_bytecode = True  # no electron/__pycache__ when invoked directly
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import fontconfig_isolation  # noqa: E402
 p = argparse.ArgumentParser(description='FlowGate Electron: unprivileged Activity and existing-controller decisions')
 p.add_argument('--daemon', help='Reuse one existing daemon: companion Activity and primary policy; never start/stop it')
 p.add_argument('--observer', help='Reuse an existing read-only observer Unix socket; leave it running on exit')
@@ -52,6 +56,10 @@ try:
                 time.sleep(.05)
             a.observer = str(owned)
         env = os.environ.copy()
+        # Electron's bundled Fontconfig must not share caches with the host's
+        # (possibly newer) Fontconfig; keeps fonts/rules, private versioned cache.
+        fontconfig_isolation.apply(env, env.get('XDG_CACHE_HOME') or str(ROOT/'.workspace/cache'),
+                                   fontconfig_isolation.runtime_version(ROOT/'electron/node_modules/electron/dist'))
         if not env.get('WAYLAND_DISPLAY') and Path('/run/user/'+str(os.getuid())+'/wayland-0').exists():
             env['WAYLAND_DISPLAY'] = 'wayland-0'
         args = [str(ROOT/'electron/node_modules/.bin/electron'), str(ROOT/'electron'), '--observer', a.observer]

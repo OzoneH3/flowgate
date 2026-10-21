@@ -81,11 +81,16 @@ cp docs/PROTON-LAUNCHER-REGRESSION.md "$bundle/docs/"
 cp docs/AUTOMATIC-ZONES.md "$bundle/docs/backend-zones.md"
 cp electron/AUTOMATIC-ZONES.md "$bundle/docs/electron-zones.md"
 cp electron/PROMPT-PRESENTATION.md electron/REMEMBER-REVALIDATION.md "$bundle/docs/"
+cp electron/fontconfig_isolation.py "$bundle/fontconfig_isolation.py"
 cat > "$bundle/launch-ui" <<'LAUNCH'
 #!/bin/sh
 set -eu
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 export TMPDIR="$here/.workspace" XDG_CACHE_HOME="$here/.workspace/cache"
+# Private, runtime-versioned Fontconfig cache for Electron's bundled Fontconfig
+# (keeps system fonts/rules; respects a user FONTCONFIG_FILE/FONTCONFIG_PATH).
+fontconfig=$(python3 "$here/fontconfig_isolation.py" "$XDG_CACHE_HOME" "$here/runtime" || true)
+if [ -n "$fontconfig" ]; then export FONTCONFIG_FILE="$fontconfig"; fi
 exec "$here/runtime/electron" --ozone-platform=wayland "$here/electron" "$@"
 LAUNCH
 chmod 755 "$bundle/launch-ui"
