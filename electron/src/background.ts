@@ -38,6 +38,8 @@ export class Background {
           timeoutType: 'default',
         }),
       (ref) => (ref ? this.review(ref) : this.show(true)),
+      Date.now,
+      false, // Permission popups already alert the user; avoid duplicate desktop banners.
     );
     void this.checkHost();
     this.timer = setInterval(() => void this.checkHost(), 10000);

@@ -40,9 +40,16 @@ export class RequestNotifications {
     private create: (content: NoticeContent) => Notice,
     private review: (ref?: RequestRef) => void,
     private now = () => Date.now(),
-  ) {}
+    private enabled = true,
+  ) {
+    if (!enabled) this.status = 'System notifications off; permission requests use the popup and tray.';
+  }
   // One notice per request group: 51 identical attempts are one request.
   update(state: ClientState, active: boolean) {
+    if (!this.enabled) {
+      this.close();
+      return;
+    }
     const generation = state.control.generation,
       groups = !canDecide(state.control)
         ? []

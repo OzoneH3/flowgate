@@ -12,7 +12,7 @@ const event = (id) => ({
 const state = (ids, generation = 'g') => ({
   control: { connected: true, readOnly: false, generation, events: ids.map(event) },
 });
-function setup() {
+function setup(enabled = true) {
   let time = 0,
     notices = [],
     clicked = [],
@@ -29,6 +29,7 @@ function setup() {
     },
     (r) => clicked.push(r),
     () => time,
+    enabled,
   );
   return {
     manager,
@@ -133,4 +134,17 @@ test('notices summarize by request group: 51 identical attempts are one notice',
   for (const e of settled.control.events) e.state = 'allowed';
   v.manager.update(settled, false);
   assert.equal(v.manager.counts().live, 0);
+});
+
+
+test('popup-only delivery creates no desktop notifications while requests remain pending', () => {
+  const t = setup(false);
+  for (let i = 0; i < 20; i++) {
+    t.manager.update(state(['a','b']), false);
+    t.advance(5000);
+  }
+  assert.equal(t.notices.length,0);
+  assert.deepEqual(t.manager.counts(),{seen:0,queued:0,live:0});
+  assert.equal(pending(state(['a','b'])).length,2,'pending requests still feed tray/popup');
+  assert.match(t.manager.status,/System notifications off/);
 });
