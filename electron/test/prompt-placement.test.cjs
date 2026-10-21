@@ -207,3 +207,23 @@ test('startup handshake uses fullscreen routing while awaiting native geometry c
   assert.equal(permission.opacity,1);
   assert.equal(workspace.activeWindow,undefined);
 });
+
+test('borderless output-covering windows redirect without treating normal maximized windows as fullscreen', () => {
+  const primary={name:'DP-1',geometry:{x:0,y:0,width:1920,height:1080}},secondary={name:'DP-2',geometry:{x:1920,y:0,width:1920,height:1080}};
+  const run=(frame,over={},primaryName='DP-1')=>{
+    const permission={pid:42,caption:promptTitle(7)};
+    const game={pid:100,output:primary,fullScreen:false,normalWindow:true,noBorder:true,frameGeometry:frame,...over};
+    let selected;
+    const workspace={screens:[primary,secondary],windowList:()=>[permission,game],currentDesktopForScreen:()=>1,
+      sendClientToScreen:(w,o)=>{assert.equal(w,permission);selected=o;},clientArea:(_k,o)=>o.geometry};
+    vm.runInNewContext(placementScript(42,7,{x:0,y:0,width:520,height:460},primaryName),{workspace,KWin:{PlacementArea:0},print(){}});
+    return selected;
+  };
+  assert.equal(run({...primary.geometry}),secondary);
+  assert.equal(run({...primary.geometry},{},''),secondary,'discovery failure still uses fullscreen-aware routing');
+  assert.equal(run({...primary.geometry},{},'missing-output'),secondary,'removed configured output has a usable fallback');
+  assert.equal(run({x:0,y:30,width:1920,height:1050}),primary,'maximized workarea leaves panel space');
+  assert.equal(run({...primary.geometry},{noBorder:false}),primary);
+  assert.equal(run({...primary.geometry},{normalWindow:false}),primary,'panel/desktop surfaces are excluded');
+  assert.equal(run({...primary.geometry},{minimized:true}),primary);
+});
