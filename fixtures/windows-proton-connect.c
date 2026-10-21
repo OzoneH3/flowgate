@@ -1,4 +1,4 @@
-/* Labelled outgoing TCP client for the real UMU/Proton launcher regression.
+/* Labelled outgoing TCP/UDP client for the real UMU/Proton launcher regression.
  * No game names, service addresses, or prefix assumptions. */
 #include <winsock2.h>
 #include <windows.h>
@@ -13,11 +13,12 @@ static DWORD WINAPI client(void *unused) {
     while(token[len])len++;
     if(!port || port>65535 || !len)return 2;
     WSADATA w; if(WSAStartup(0x202,&w))return 3;
-    SOCKET s=socket(AF_INET,SOCK_STREAM,0);
+    char protocol[8]; int udp=GetEnvironmentVariableA("FLOWGATE_TEST_PROTOCOL",protocol,sizeof(protocol)) && protocol[0]=='u';
+    SOCKET s=socket(AF_INET,udp?SOCK_DGRAM:SOCK_STREAM,0);
     struct sockaddr_in a; for(unsigned i=0;i<sizeof(a);i++)((volatile char*)&a)[i]=0; a.sin_family=AF_INET; a.sin_port=htons((unsigned short)port); a.sin_addr.s_addr=htonl(0x7f000001);
     say("SYNTHETIC_CLIENT_READY\n"); Sleep(1500); say("CONNECT_BEGIN\n");
-    if(connect(s,(struct sockaddr*)&a,sizeof(a))) {say("CONNECT_FAILED\n");return 4;}
-    if(send(s,token,len,0)!=(int)len)return 5;
+    if(!udp && connect(s,(struct sockaddr*)&a,sizeof(a))) {say("CONNECT_FAILED\n");return 4;}
+    if((udp?sendto(s,token,len,0,(struct sockaddr*)&a,sizeof(a)):send(s,token,len,0))!=(int)len)return 5;
     say("RECEIVER_PAYLOAD_SENT\n"); Sleep(15000); closesocket(s); return 0;
 }
 

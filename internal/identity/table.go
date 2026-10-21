@@ -218,18 +218,23 @@ func selectTableRows(s tableSnapshot, f Flow) ([]WindowsOwner, error) {
 			if f.Remote.Addr().IsLinkLocalUnicast() {
 				return nil, fmt.Errorf("runtime remote interface mapping unavailable")
 			}
-			if f.Protocol != "tcp" || s.Schema != 2 {
-				return nil, fmt.Errorf("outgoing attribution needs protocol2 TCP owner table")
+			if s.Schema != 2 {
+				return nil, fmt.Errorf("outgoing attribution needs schema2 owner table")
 			}
-			remote, e := netip.ParseAddr(r.RemoteAddress)
-			if e != nil {
-				return nil, fmt.Errorf("missing runtime remote endpoint")
-			}
-			if remote.Unmap() != f.Remote.Addr().Unmap() || r.RemotePort != f.Remote.Port() {
-				continue
-			}
-			if r.State != 3 && r.State != 5 {
-				return nil, fmt.Errorf("outgoing runtime socket is neither SYN_SENT nor ESTABLISHED")
+			// UDP owner tables expose the bound local endpoint, not a remote.
+			// Resolve still requires one kernel socket/cookie and one Windows
+			// holder in two censuses; the queued packet supplies the peer.
+			if f.Protocol == "tcp" {
+				remote, e := netip.ParseAddr(r.RemoteAddress)
+				if e != nil {
+					return nil, fmt.Errorf("missing runtime remote endpoint")
+				}
+				if remote.Unmap() != f.Remote.Addr().Unmap() || r.RemotePort != f.Remote.Port() {
+					continue
+				}
+				if r.State != 3 && r.State != 5 {
+					return nil, fmt.Errorf("outgoing runtime socket is neither SYN_SENT nor ESTABLISHED")
+				}
 			}
 		} else if f.Protocol == "tcp" && r.State != 2 {
 			continue

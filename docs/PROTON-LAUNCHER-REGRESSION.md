@@ -188,3 +188,23 @@ separate mount namespaces, with distinct temporary trees backed by one deploymen
 `TestRuntimeContentRuleSurvivesTemporaryHardlinkChurn` verifies saved rule reuse
 and rejection for another deployment, user or revision. These are native identity
 and policy checks, not another end-to-end game receiver test.
+
+
+## Outgoing UDP owner census
+
+Outgoing UDP uses the same schema-2 Windows owner census as incoming UDP. Its
+bound local endpoint identifies candidate Windows holders; the table does not
+supply a remote endpoint. The intercepted packet supplies peer/direction policy
+scope. Attribution still requires exactly one matching kernel socket, a stable
+cookie and broker generation, matching Windows holder sets in two snapshots,
+one Windows process generation/image, verified mapped PE revision and prefix.
+Shared or absent holders remain unresolved. TCP retains its exact remote and
+SYN_SENT/ESTABLISHED requirements. No destination or application exceptions exist.
+
+Run the real isolated launcher matrix with `FLOWGATE_TEST_PROTOCOL=udp` plus the
+usual runtime/prefix environment for `scripts/checks/check-proton-launcher.sh`.
+It covers IPv4 unconnected sendto, Allow/Deny, subsequent-instance Remember,
+two executables and two prefixes, a burst of three distinct sockets, and receiver
+control with enforcement removed. UDP Activity-row rule editing is not asserted
+by this test; current live row enrichment remains TCP-only. IPv6 row selection
+has model checks; this matrix does not prove IPv6 UDP receiver delivery.

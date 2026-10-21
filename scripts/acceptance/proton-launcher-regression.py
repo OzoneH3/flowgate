@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[2]
 p = argparse.ArgumentParser()
 p.add_argument('--verify', action='store_true')
 p.add_argument('--burst',action='store_true')
+p.add_argument('--protocol',choices=['tcp','udp'],default='tcp')
 p.add_argument('--helper')
 p.add_argument('--binary', required=True)
 p.add_argument('--run', required=True)
@@ -51,6 +52,8 @@ for name in ['SyntheticAlpha.exe','SyntheticBeta.exe']:
     subprocess.run(['cp',a.pe,str(RUN/'games with spaces'/name)],check=True)
 children=[]; received=[]; evidence=[]
 server=socket.socket();server.bind(('127.0.0.1',0));server.listen();port=server.getsockname()[1]
+preflight_port=port
+udp_server=None
 def receive():
     while True:
         try:
@@ -63,6 +66,15 @@ def receive():
             threading.Thread(target=handle,args=(c,),daemon=True).start()
         except OSError:return
 threading.Thread(target=receive,daemon=True).start()
+if a.protocol=='udp':
+    udp_server=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+    udp_server.bind(('127.0.0.1',0));port=udp_server.getsockname()[1]
+    def receive_udp():
+        while True:
+            try: received.append(udp_server.recvfrom(1024)[0].decode())
+            except OSError:return
+    threading.Thread(target=receive_udp,daemon=True).start()
+
 def wait(fn,seconds=30):
     end=time.monotonic()+seconds
     while time.monotonic()<end:
@@ -113,11 +125,11 @@ def find_pe(name,prefix):
 steam=RUN/'home/.steam/steam/compatibilitytools.d'
 steam.mkdir(parents=True)
 subprocess.run(['cp','-a','--reflink=auto',a.proton,str(steam/'dwproton-fixture')],check=True)
-base=dict(FLOWGATE_TEST_CONNECTIONS='3' if a.burst else '1',PATH='/usr/bin:/bin',LANG='C.UTF-8',USER=os.environ.get('USER','flowgate-user'),LOGNAME=os.environ.get('LOGNAME','flowgate-user'),HOME=str(RUN/'home'),TMPDIR=str(RUN/'tmp'),XDG_RUNTIME_DIR=str(RUN/'runtime'),XDG_DATA_HOME=str(Path(a.data).resolve()),XDG_CACHE_HOME=str(RUN/'cache'),XDG_CONFIG_HOME=str(RUN/'config'),PROTONPATH=str(Path(a.proton).resolve()),UMU_RUNTIME_UPDATE='0',UMU_LOG='1',PROTONFIXES_DISABLE='1',PYTHONDONTWRITEBYTECODE='1',WINEDEBUG='-all',WINEDLLOVERRIDES='mscoree,mshtml=',DISPLAY='',WAYLAND_DISPLAY='',STEAM_COMPAT_CLIENT_INSTALL_PATH=str(RUN/'steam'),FLOWGATE_TEST_PORT=str(port))
+base=dict(FLOWGATE_TEST_PROTOCOL=a.protocol,FLOWGATE_TEST_PREFLIGHT_PORT=str(preflight_port),FLOWGATE_TEST_CONNECTIONS='3' if a.burst else '1',PATH='/usr/bin:/bin',LANG='C.UTF-8',USER=os.environ.get('USER','flowgate-user'),LOGNAME=os.environ.get('LOGNAME','flowgate-user'),HOME=str(RUN/'home'),TMPDIR=str(RUN/'tmp'),XDG_RUNTIME_DIR=str(RUN/'runtime'),XDG_DATA_HOME=str(Path(a.data).resolve()),XDG_CACHE_HOME=str(RUN/'cache'),XDG_CONFIG_HOME=str(RUN/'config'),PROTONPATH=str(Path(a.proton).resolve()),UMU_RUNTIME_UPDATE='0',UMU_LOG='1',PROTONFIXES_DISABLE='1',PYTHONDONTWRITEBYTECODE='1',WINEDEBUG='-all',WINEDLLOVERRIDES='mscoree,mshtml=',DISPLAY='',WAYLAND_DISPLAY='',STEAM_COMPAT_CLIENT_INSTALL_PATH=str(RUN/'steam'),FLOWGATE_TEST_PORT=str(port))
 # The extra preflight models a launcher's own network request; the rest of the
 # launch uses the installed Python UMU entrypoint and copied unmodified runtime.
 wrapper=RUN/'python-preflight.py'
-wrapper.write_text('import os,socket,sys\ns=socket.create_connection(("127.0.0.1",int(os.environ["FLOWGATE_TEST_PORT"])),20)\ns.sendall(b"SYNTHETIC_PYTHON_PREFLIGHT")\ns.close()\nos.execv(sys.argv[1],sys.argv[1:])\n')
+wrapper.write_text('import os,socket,sys\ns=socket.create_connection(("127.0.0.1",int(os.environ["FLOWGATE_TEST_PREFLIGHT_PORT"])),20)\ns.sendall(b"SYNTHETIC_PYTHON_PREFLIGHT")\ns.close()\nos.execv(sys.argv[1],sys.argv[1:])\n')
 def launch(name,prefix,token,preflight):
     env=dict(base,WINEPREFIX=str(prefix),GAMEID='umu-0',FLOWGATE_TEST_TOKEN=token,FLOWGATE_TEST_TRACE='Z:'+str(RUN/(token+'.trace')).replace('/','\\'))
     log=RUN/(token+'.log')
@@ -165,8 +177,10 @@ try:
                 state=call()
                 return next((r for r in state.get('activity',{}).get('rows',[]) if r.get('runtime_application',{}).get('application',{}).get('key')==process['application']['key']),None)
             # Runtime association is separate from the original Unix FD holder.
-            row=wait(live_row,5); save(token+'-activity.json',row)
-            assert row['runtime_application']['evidence']['socket_cookie']==row['socket']['cookie']
+            row=None
+            if a.protocol=='tcp':
+                row=wait(live_row,5); save(token+'-activity.json',row)
+                assert row['runtime_application']['evidence']['socket_cookie']==row['socket']['cookie']
 
             assert e['attribution']['application']['key']==process['application']['key'],e
             if a.burst and index == 0:
@@ -188,10 +202,13 @@ try:
             else:
                 time.sleep(3);assert token not in received
             policy_view=call('policy-view',generation=call()['generation']).get('policy_view',{})
-            assert any(p['identity']['key']==process['application']['key'] and p['outgoing']['active_rules'] for p in policy_view.get('applications',[])),policy_view
+            if a.protocol=='tcp':
+                assert any(p['identity']['key']==process['application']['key'] and p['outgoing']['active_rules'] for p in policy_view.get('applications',[])),policy_view
+            else:
+                assert any(r['filter']['application']==process['application']['key'] and r['filter']['direction']=='outgoing' and r['action']==action for r in call().get('rules',[])), 'UDP decision did not save the exact application rule'
             save(token+'-policy.json',policy_view)
             save(token+'-state.json',call())
-            if index==2:
+            if index==2 and a.protocol=='tcp':
                 draft=dict(direction='outgoing',protocol='*',action='allow',remote_address='*',local_port=0,remote_port=0,expires='0001-01-01T00:00:00Z',disabled=False,application_policy=True)
                 target=dict(row_id=row['id'],process_id=row['owners'][0])
                 preview=call('observed-rule-preview',generation=call()['generation'],observed_target=target,observed_draft=draft)
@@ -206,11 +223,11 @@ try:
             stop_prefix(prefix);child.wait(timeout=10)
             continue
         dropped=wait(lambda:next((e for e in records() if e['id'] not in before and e.get('flow',{}).get('remote','').endswith(':'+str(port)) and e.get('verdict',{}).get('state')=='drop_submitted'),None),15)
-        raw=cli('attribute','--protocol','tcp','--direction','outgoing','--local',dropped['flow']['local'],'--remote',dropped['flow']['remote'])
+        raw=cli('attribute','--protocol',a.protocol,'--direction','outgoing','--local',dropped['flow']['local'],'--remote',dropped['flow']['remote'])
         timeline=[raw]
         for delay in [.1,.3]:
             time.sleep(delay)
-            timeline.append(cli('attribute','--protocol','tcp','--direction','outgoing','--local',dropped['flow']['local'],'--remote',dropped['flow']['remote']))
+            timeline.append(cli('attribute','--protocol',a.protocol,'--direction','outgoing','--local',dropped['flow']['local'],'--remote',dropped['flow']['remote']))
         assert token not in received
         assert raw['visibility_complete'] and len(raw['owners'])==1,raw
         assert Path(raw['owners'][0]['executable']).name=='wineserver',raw
@@ -227,7 +244,7 @@ try:
         child.wait(timeout=10)
     assert len({e['process']['application']['key'] for e in evidence})==3
     rules=call().get('rules',[])
-    assert len(rules)==(5 if a.verify else 1),rules
+    assert len(rules)==((5 if a.protocol=='tcp' else 4) if a.verify else 1),rules
     save('private-rules.json',rules)
     if a.verify:
         for index,(name,prefix) in enumerate([('SyntheticAlpha.exe',prefixes[0]),('SyntheticBeta.exe',prefixes[0]),('SyntheticAlpha.exe',prefixes[1])]):
@@ -260,7 +277,7 @@ try:
         print('CONTROL RECEIVED',token,flush=True)
         stop_prefix(prefixes[index])
         child.wait(timeout=10)
-    result=dict(reproduced=not a.verify,verified=a.verify,source=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),lwp=str(Path(a.lwp).resolve()),lwp_sha256=digest(a.lwp),proton_sha256=digest(Path(a.proton)/'proton'),broker_sha256=digest(Path(a.proton)/'files/bin/wineserver'),client_sha256=digest(a.pe),python_rule_does_not_target_pe=True,received=received,observations=evidence,host_changed=False)
+    result=dict(protocol=a.protocol,reproduced=not a.verify,verified=a.verify,source=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),lwp=str(Path(a.lwp).resolve()),lwp_sha256=digest(a.lwp),proton_sha256=digest(Path(a.proton)/'proton'),broker_sha256=digest(Path(a.proton)/'files/bin/wineserver'),client_sha256=digest(a.pe),python_rule_does_not_target_pe=True,received=received,observations=evidence,host_changed=False)
     save('result.json',result)
 finally:
     try: save('decision-log.json',records())
@@ -279,4 +296,5 @@ finally:
         try:c.wait(timeout=5)
         except subprocess.TimeoutExpired:c.kill();c.wait()
     server.close()
+    if udp_server:udp_server.close()
     print('CLEANED direct children; private PID/network namespace owns remaining runtime descendants',flush=True)

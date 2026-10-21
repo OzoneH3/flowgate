@@ -221,3 +221,45 @@ func TestNegotiatedCensusContract(t *testing.T) {
 		})
 	}
 }
+
+func TestOutgoingUDPCensusSelectsBoundHolder(t *testing.T) {
+	for _, tc := range []struct {
+		local, remote, bound string
+		family               int
+	}{
+		{"192.0.2.1:40000", "198.51.100.2:7000", "0.0.0.0", 4},
+		{"[2001:db8::1]:40000", "[2001:db8::2]:7000", "::", 6},
+	} {
+		f, _ := ParseFlow("udp", "outgoing", tc.local, tc.remote)
+		a := WindowsOwner{PID: 10, Created: 1, Image: `Z:\alpha.exe`, Address: tc.bound, Port: 40000, Family: tc.family}
+		s := tableSnapshot{Schema: 2, Family: tc.family, Rows: []WindowsOwner{a}}
+		rows, err := selectTableRows(s, f)
+		if err != nil || len(rows) != 1 {
+			t.Fatalf("UDP holder missing: %v %v", rows, err)
+		}
+		// Local ownership may cover multiple peers; peer scope comes from the packet,
+		// not a fabricated remote field in the Windows UDP table.
+		if rows[0].RemoteAddress != "" {
+			t.Fatal("invented remote ownership")
+		}
+		b := a
+		b.PID++
+		b.Created++
+		b.Image = `Z:\beta.exe`
+		s.Rows = append(s.Rows, b)
+		rows, err = selectTableRows(s, f)
+		if err != nil || len(rows) != 2 {
+			t.Fatal("ambiguous Windows holders hidden", rows, err)
+		}
+		s.Rows = []WindowsOwner{a}
+		s.Rows[0].Port++
+		if rows, err = selectTableRows(s, f); err != nil || len(rows) != 0 {
+			t.Fatal("another local socket borrowed authority")
+		}
+		s.Rows = []WindowsOwner{a}
+		s.Rows[0].Created = 0
+		if _, err = selectTableRows(s, f); err == nil {
+			t.Fatal("missing Windows generation accepted")
+		}
+	}
+}
