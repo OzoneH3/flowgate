@@ -8,6 +8,12 @@ scripts/prepare-release.sh --backend-only  # backend only
 scripts/update-and-start.sh                # prepare, install, verify, activate
 ```
 
+Upstream updates are noninteractive and have a 60-second timeout (with up to five
+seconds for forced cleanup). Failure stops before preparation, authentication or
+protection changes. Use `scripts/update-and-start.sh --local` to deliberately skip
+upstream access and install the current committed local master; it still requires
+a clean master branch. Interrupting the fetch does not stop the installed daemon.
+
 Preparation requires clean master, builds collectors from current source, and
 records current race/vet evidence. It never installs or activates protection.
 Bundle paths remain `.workspace/daily-releases/<revision>` and

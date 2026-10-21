@@ -5,6 +5,8 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
+import shutil
 import pathlib
 import subprocess
 import sys
@@ -23,6 +25,72 @@ def status(source='old', selected='both'):
     return dict(generation='g', build=dict(source=source, executable_sha256=hashlib.sha256(b'backend').hexdigest(), modified=False),
                 protection=dict(state='active' if active else 'stopped', desired_mode=selected, profile=selected if active else 'both'),
                 enforcement=dict(state='active' if active else 'stopped', profile=selected if active else 'both'))
+
+
+class SourceStage(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(dir=ROOT / '.workspace')
+        self.addCleanup(self.tmp.cleanup)
+        self.root = pathlib.Path(self.tmp.name)
+        (self.root / 'scripts').mkdir()
+        shutil.copyfile(ROOT / 'scripts/update-and-start.sh', self.root / 'scripts/update-and-start.sh')
+        self.bin = self.root / 'bin'
+        self.bin.mkdir()
+        self.log = self.root / 'calls'
+        self.env = dict(os.environ, PATH=str(self.bin) + ':' + os.environ['PATH'], CALLS=str(self.log))
+        self.tool('git', """#!/bin/sh
+printf '%s\\n' "$*" >> "$CALLS"
+case "$1" in
+ branch) echo "${BRANCH:-master}";;
+ diff) exit "${DIRTY:-0}";;
+ config) exit 1;;
+ rev-parse) if [ "$2" = HEAD ]; then echo revision; fi;;
+ log) echo revision;;
+ -c) if [ "${HANG:-0}" = 1 ]; then sleep 30; else exit "${PULL_EXIT:-0}"; fi;;
+esac
+""")
+        # Use a real process-group timeout, with a short deadline in the fixture.
+        self.tool('timeout', '#!/bin/sh\nshift 2\nexec /usr/bin/timeout --kill-after=1s 0.1s "$@"\n')
+        self.tool('python3', '#!/bin/sh\necho COORDINATOR >> "$CALLS"\n')
+        self.tool('sudo', '#!/bin/sh\necho SUDO >> "$CALLS"\nexit 99\n')
+        (self.root / 'scripts/prepare-release.sh').write_text('#!/bin/sh\necho PREPARE >> "$CALLS"\n')
+        (self.root / 'scripts/prepare-release.sh').chmod(0o755)
+    def tool(self, name, content):
+        p = self.bin / name
+        p.write_text(content)
+        p.chmod(0o755)
+    def run_source(self, *args, **env):
+        return subprocess.run(['sh', str(self.root / 'scripts/update-and-start.sh'), *args],
+                              env=dict(self.env, **env), text=True, capture_output=True, timeout=5)
+    def calls(self):
+        return self.log.read_text() if self.log.exists() else ''
+    def test_hung_fetch_times_out_before_prepare_or_control(self):
+        r = self.run_source(HANG='1')
+        self.assertEqual(r.returncode, 124, r.stderr)
+        self.assertIn('--local', r.stderr)
+        self.assertNotIn('PREPARE', self.calls())
+        self.assertNotIn('COORDINATOR', self.calls())
+        self.assertNotIn('SUDO', self.calls())
+    def test_failed_fetch_never_falls_back_to_local(self):
+        r = self.run_source(PULL_EXIT='17')
+        self.assertEqual(r.returncode, 17)
+        self.assertIn('no installation or protection action', r.stderr)
+        self.assertNotIn('PREPARE', self.calls())
+    def test_explicit_local_skips_fetch_but_keeps_source_guards(self):
+        r = self.run_source('--local')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn('pull', self.calls())
+        self.assertIn('COORDINATOR', self.calls())
+        for env in ({'DIRTY': '1'}, {'BRANCH': 'topic'}):
+            self.log.unlink()
+            r = self.run_source('--local', **env)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertNotIn('COORDINATOR', self.calls())
+    def test_fetch_is_noninteractive_and_bounded(self):
+        self.tool('timeout', '#!/bin/sh\nprintf "%s|%s|%s\\n" "$GIT_TERMINAL_PROMPT" "$GIT_SSH_COMMAND" "$*" >> "$CALLS"\nshift 2\nexec "$@"\n')
+        r = self.run_source()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('0|ssh -oBatchMode=yes -oConnectTimeout=10 -oConnectionAttempts=1|--kill-after=5s 60s git', self.calls())
 
 
 class FakeHost:

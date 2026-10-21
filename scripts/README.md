@@ -80,12 +80,17 @@ and launches the matching GUI. It preserves stored rules and existing Wine
 observer configuration. Running it again with the same healthy daemon skips
 installation and the protection interruption.
 
+Upstream access is noninteractive and limited to 60 seconds, plus up to five
+seconds to kill stuck child processes. A fetch failure stops before preparation
+or any installed-service action; it never silently uses an older local revision.
+
 Options:
 
 - `--profile preserve`: restore the mode selected before the update (including monitoring/off).
 - `--profile incoming` or `--profile monitoring`: select Incoming or leave protection off.
 - `--no-gui`: perform the same update/protection workflow without switching the GUI.
 - `--recover-stopped`: recover an unavailable daemon into monitoring only.
+- `--local`: skip upstream access and use committed local master (still requires a clean tree).
 - `--wine-discovery`: explicitly enable generic supported Wine discovery.
 - `--dry-run`: show the plan without fetching, building, authenticating, changing protection or signalling the GUI.
 
