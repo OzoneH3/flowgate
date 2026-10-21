@@ -421,3 +421,33 @@ Additive, no capability flag (absent fields mean an older backend). Captured by
   = file stamp). A Wine/Proton helper's target names its prefix and states it is
   shared by every game using that prefix; native interpreters state that every
   script they run is covered. The UI renders these strings verbatim.
+
+## Published request lists
+
+`request-list-snapshot-v1` adds `snapshot_revision` (a positive decimal uint64
+**string**, scoped to `generation`) and `snapshot_at` to list replies and
+completed control replies. Clients must compare revisions as integers without
+converting them to floating-point numbers. A daemon generation change resets the
+sequence.
+
+The API reads an immutable publication of events, request-rule metadata, previous
+revision rules, zones, rules, rule states and process leases. Caller ownership
+filtering still applies. A shared per-engine publisher runs every 250 ms while an
+API listener exists and owns deadline expiry and pruning even without a GUI.
+Readers project elapsed deadlines and lease expiry on their own copies. These
+copies never authorize decisions: live mutation handlers validate authority,
+identity, generation, deadlines and the selected scope.
+
+Mutations and revalidating previews publish before their acknowledgement; pure
+status, log and policy queries reuse the last publication. Clients
+ignore older snapshots and lists that were already in flight when a decision
+completed. An acknowledged request must not reopen from the same or an older
+publication. A missing acknowledgement means an unknown outcome; reconcile via a
+fresh list without automatically retrying the decision. Legacy daemons without
+this capability retain the existing request-order reconciliation.
+
+Publication still briefly holds the engine lock to capture and serialize state;
+this is separation of API list reads, not a claim that policy evaluation and all
+filesystem/liveness checks are lock-free. The internal synchronous `ListWithZones`
+helper remains for compatibility. Activity and enforcement health have their own
+sources and are not part of the request snapshot revision.

@@ -97,8 +97,8 @@ func RuleSentence(r policy.Rule) string {
 // immutable identity from a currently attributable pending request. Edits require
 // a version and preserve application/revision/UID/direction, ID and creation time.
 func (e *Engine) EditRule(id, eventID string, expected *uint64, candidate policy.Rule, uid uint32, admin, commit bool) (policy.Rule, string, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	e.lockResolved(e.requestSelection(eventID, uid, admin, false))
+	defer e.unlockResolved()
 	if e.SaveRules == nil {
 		return policy.Rule{}, "", fmt.Errorf("durable rule editing unavailable")
 	}
@@ -177,7 +177,10 @@ func (e *Engine) EditRule(id, eventID string, expected *uint64, candidate policy
 		if !admin && !owned(found.Attribution, uid) {
 			return policy.Rule{}, "", mutationError("forbidden", "not authorized")
 		}
-		a := e.Resolve(found.Flow)
+		a, ok := e.resolvedEventLocked(found)
+		if !ok {
+			return policy.Rule{}, "", retryChangedRequest()
+		}
 		if !e.Now().Before(found.Deadline) || a.Application == nil || a.Principal() == nil || a.Fingerprint != found.Attribution.Fingerprint {
 			return policy.Rule{}, "", fmt.Errorf("pending application identity changed")
 		}
@@ -227,7 +230,10 @@ func (e *Engine) EditRule(id, eventID string, expected *uint64, candidate policy
 			delete(e.events, key)
 			continue
 		}
-		a := e.Resolve(v.Flow)
+		a, ok := e.resolvedEventLocked(v)
+		if !ok {
+			continue // checked again when it is decided
+		}
 		if a.Fingerprint != v.Attribution.Fingerprint || a.Application == nil {
 			e.recordFinal(v, "block", "identity_changed", "", "identity changed during rule edit; held packets drop", nil, nil, "deferred", "")
 			delete(e.events, key)

@@ -125,11 +125,19 @@ type Engine struct {
 	Resolve            func(identity.Flow) identity.Attribution
 	// TryResolve, when set, reports false instead of waiting for a busy runtime census.
 	TryResolve func(identity.Flow) (identity.Attribution, bool)
-	Now        func() time.Time
-	Timeout    time.Duration
-	Max        int
-	window     time.Time
-	created    int
+	// prefetched holds attributions resolved outside mu for the operation that
+	// currently holds mu (see lockResolved); nil otherwise.
+	prefetched      *prefetchSet
+	settleScheduled bool   // a deferred settlePendingLocked is queued (guarded by mu)
+	settleReason    string // settle requested while mu is held; run after release
+	settling        bool   // settleNow is running
+	// listReads publishes immutable API list projections (list_snapshot.go).
+	listReads listReadState
+	Now       func() time.Time
+	Timeout   time.Duration
+	Max       int
+	window    time.Time
+	created   int
 }
 
 func New(timeout time.Duration) *Engine {
@@ -357,8 +365,8 @@ func (e *Engine) Decide(id, action, scope string, uid uint32, admin bool) (Event
 // DecideSettled is Decide plus the other requests the decision settled.
 // leaseSeconds is the For a while duration (0 = 15 s); other scopes need 0.
 func (e *Engine) DecideSettled(id, action, scope string, leaseSeconds int64, uid uint32, admin bool) (Event, []SettledRequest, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	e.lockResolved(e.requestSelection(id, uid, admin, scope != "once"))
+	defer e.unlockResolved()
 	defer e.collectSettledLocked()()
 	if leaseSeconds != 0 && scope != ForAWhileScope {
 		return Event{}, nil, mutationError("invalid_request", "duration_seconds applies to For a while only; Remember durations need a reviewed decision")
@@ -368,6 +376,7 @@ func (e *Engine) DecideSettled(id, action, scope string, leaseSeconds int64, uid
 		return Event{}, nil, err
 	}
 	v, err := e.decideLocked(id, action, scope, uid, admin, nil, "", time.Time{}, d)
+	e.followUpSettleLocked()
 	return v, e.settledLocked(), err
 }
 
@@ -392,7 +401,10 @@ func (e *Engine) decideLocked(id, action, scope string, uid uint32, admin bool, 
 		if v.State != "awaiting-decision" || !now.Before(v.Deadline) {
 			return Event{}, mutationError("stale_decision", "stale decision; retry required")
 		}
-		a := e.Resolve(v.Flow)
+		a, ok := e.resolvedEventLocked(v)
+		if !ok {
+			return Event{}, retryChangedRequest()
+		}
 		if !e.Now().Before(v.Deadline) {
 			return Event{}, e.rejectPendingDeadlineLocked(v)
 		}
@@ -510,7 +522,7 @@ func (e *Engine) SetRules(rules []policy.Rule) error {
 		seen[r.ID] = true
 	}
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlockAndSettle()
 	e.rules = rules
 	e.pruneHandlesLocked()
 	e.resetCachedLocked("policy replaced")
@@ -624,7 +636,7 @@ func (e *Engine) ChangeRule(id, action string, uid uint32, admin bool) error {
 		active = e.Enforcement().State != "stopped"
 	}
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlockAndSettle()
 	if e.SaveRules == nil {
 		return fmt.Errorf("durable rules unavailable")
 	}

@@ -77,6 +77,8 @@ private:
   void confirmDeleteRule();
   bool connected = false, readOnly = true, listing = false;
   int epoch = 0;
+  quint64 mutationEpoch = 0, snapshotRevision = 0;
+  bool snapshotFromAck = false, reconciling = false;
   qint64 serverOffset = 0;
   QList<QLocalSocket *> sockets;
   void request(QJsonObject, std::function<void(QJsonObject, QString)>);

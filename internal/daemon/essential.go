@@ -261,7 +261,7 @@ func (e *Engine) ApplyEssential(gen, token, operation string, o essential.Option
 		}
 	}
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlockAndSettle()
 	if essential.Hash(e.rules) != p.Inventory {
 		return EssentialReceipt{}, false, mutationError("policy_conflict", "Rule inventory changed; refresh review")
 	}

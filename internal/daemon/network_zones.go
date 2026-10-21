@@ -22,7 +22,14 @@ func (e *Engine) refreshZonesLocked() {
 	for _, v := range e.events {
 		v.Flow.NetworkScope = next.ClassifyFlow(v.Flow)
 	}
+	// Cached verdicts are dropped now. Re-settling awaiting requests needs their
+	// ownership, so it runs as its own operation instead of resolving inside
+	// whichever caller (packet, snapshot, API) noticed the revision change.
+	// Requests simply keep waiting meanwhile; nothing is admitted by deferral.
 	e.resetCachedLocked("network classification revision changed")
+	if e.prefetched == nil && !e.settling {
+		e.settleLaterLocked() // noticed outside an interaction operation
+	}
 }
 func (e *Engine) CurrentZones() identity.NetworkZones {
 	e.mu.Lock()

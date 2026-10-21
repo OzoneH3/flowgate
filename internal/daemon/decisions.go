@@ -114,12 +114,22 @@ func requestGroup(f policy.Filter) string {
 // their own deadline. Nothing is approved without a matching rule, and a Once
 // decision never reaches here.
 func (e *Engine) settlePendingLocked(reason string) {
+	if e.prefetched == nil {
+		e.requestSettleLocked(reason) // resolved after e.mu is released
+		return
+	}
 	now := e.Now()
 	for _, v := range e.events {
 		if v.State != "awaiting-decision" || !now.Before(v.Deadline) {
 			continue
 		}
-		a := e.Resolve(v.Flow)
+		a, ok := e.resolvedEventLocked(v)
+		if !ok {
+			if !e.settling {
+				e.requestSettleLocked(reason) // not selected by this operation; settled afterwards
+			}
+			continue
+		}
 		if a.Application == nil || a.Fingerprint != v.Attribution.Fingerprint {
 			// The attempt ended (socket gone) or its identity changed: it can no
 			// longer be decided, so it must not linger as an actionable prompt.
@@ -154,8 +164,17 @@ func (e *Engine) settlePendingLocked(reason string) {
 // they are not cached rule verdicts, Observe still lets any configured
 // Allow/Block decide the flow first, and dropping them made a retransmitted
 // SYN or a later datagram of an already answered flow prompt again.
+//
+// Settling awaiting requests is requested here and runs after e.mu is released
+// (see requestSettleLocked); they keep waiting meanwhile and nothing is admitted.
 func (e *Engine) resetCachedLocked(reason string) {
 	e.settlePendingLocked(reason)
+	e.dropCachedLocked()
+}
+
+// dropCachedLocked discards cached rule verdicts; awaiting requests and explicit
+// Once / For-a-while flow admissions are kept.
+func (e *Engine) dropCachedLocked() {
 	settled := map[string]*Event{}
 	for key, v := range e.events {
 		if v.State == "awaiting-decision" || strings.HasPrefix(v.Reason, "re-evaluated after policy change") ||

@@ -319,7 +319,10 @@ func (e *Engine) requestRuleLocked(generation, id, action, scope, zone, revision
 		if v.ID != id || v.State != "awaiting-decision" || !now.Before(v.Deadline) {
 			continue
 		}
-		a := e.Resolve(v.Flow)
+		a, ok := e.resolvedEventLocked(v)
+		if !ok {
+			return nil, retryChangedRequest() // never infer an ended request from missing evidence
+		}
 		if a.Application != nil && a.Principal() != nil && a.Fingerprint == v.Attribution.Fingerprint {
 			return nil, mutationError("request_pending", "This request is still pending; use Allow or Deny with Remember")
 		}
@@ -339,8 +342,8 @@ func (e *Engine) requestRuleSentence(rule policy.Rule, replaces *RuleVersionRef,
 
 func (e *Engine) PreviewRequestRule(generation, id, action, scope, zone, revision string, uid uint32, admin bool, o RememberOptions) (RequestRulePreview, error) {
 	e.awaitRetainedEvidence(id)
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	e.lockResolved(e.requestSelection(id, uid, admin, false))
+	defer e.unlockResolved()
 	r, err := e.requestRuleLocked(generation, id, action, scope, zone, revision, uid, admin, &o)
 	if err != nil {
 		return RequestRulePreview{}, err
@@ -420,10 +423,11 @@ func (e *Engine) SaveRequestRule(generation, token, id, action, scope, zone, rev
 // SaveRequestRuleSettled also returns the waiting requests the new rule settled.
 func (e *Engine) SaveRequestRuleSettled(generation, token, id, action, scope, zone, revision string, uid uint32, admin bool, o RememberOptions) (policy.Rule, string, bool, []SettledRequest, error) {
 	e.awaitRetainedEvidence(id)
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	e.lockResolved(e.requestSelection(id, uid, admin, true))
+	defer e.unlockResolved()
 	defer e.collectSettledLocked()()
 	r, s, replayed, err := e.saveRequestRuleLocked(generation, token, id, action, scope, zone, revision, uid, admin, o)
+	e.followUpSettleLocked()
 	return r, s, replayed, e.settledLocked(), err
 }
 

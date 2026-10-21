@@ -309,6 +309,8 @@ export interface Permissions {
   can_decide: boolean;
 }
 export interface Reply {
+  snapshot_revision?: string;
+  snapshot_at?: string;
   essential_status?: unknown;
   essential_preview?: unknown;
   essential_receipt?: unknown;
@@ -786,7 +788,17 @@ export function parseReply(raw: unknown): Reply {
     !Number.isFinite(Date.parse(string(r.server_time)))
   )
     throw Error('Invalid v1 backend response');
+  let snapshotRevision: string | undefined;
+  if (array(r.capabilities, 64).includes('request-list-snapshot-v1') && r.snapshot_revision === undefined)
+    throw Error('Invalid request snapshot metadata');
+  if (r.snapshot_revision !== undefined) {
+    if (typeof r.snapshot_revision !== 'string' || !/^[1-9][0-9]{0,19}$/.test(r.snapshot_revision) || BigInt(r.snapshot_revision) > 18446744073709551615n || !Number.isFinite(Date.parse(string(r.snapshot_at))))
+      throw Error('Invalid request snapshot metadata');
+    snapshotRevision = r.snapshot_revision;
+  }
   const result: Reply = {
+    snapshot_revision: snapshotRevision,
+    snapshot_at: snapshotRevision ? string(r.snapshot_at) : undefined,
     essential_status: r.essential_status,
     essential_preview: r.essential_preview,
     essential_receipt: r.essential_receipt,

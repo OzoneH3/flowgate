@@ -3,6 +3,18 @@
 #include "presentation.h"
 #include <algorithm>
 
+// Revisions are decimal strings: JSON doubles cannot preserve all uint64 values.
+static bool snapshotVersion(const QJsonObject &r, quint64 &revision) {
+  revision = 0;
+  if (!r.contains("snapshot_revision"))
+    return !r["capabilities"].toArray().contains("request-list-snapshot-v1");
+  const auto text = r["snapshot_revision"].toString();
+  bool ok = false;
+  revision = text.toULongLong(&ok);
+  return ok && revision > 0 && QString::number(revision) == text &&
+         QDateTime::fromString(r["snapshot_at"].toString(), Qt::ISODateWithMs).isValid();
+}
+
 static QString value(const QJsonObject &o, const char *key) {
   auto s = o.value(key).toString();
   return s.isEmpty() ? QStringLiteral("Unknown") : s;
@@ -473,7 +485,11 @@ void Window::request(QJsonObject q,
   const int requestEpoch = epoch;
   auto buffer = std::make_shared<QByteArray>();
   auto finished = std::make_shared<bool>(false);
-  auto finish = [this, s, done, finished, requestEpoch](QJsonObject obj,
+  const auto operation = q["operation"].toString();
+  const bool mutates = operation == "decide" || operation == "rule" ||
+                       operation == "rule-save" || operation == "rule-delete";
+  const auto submittedGeneration = generation;
+  auto finish = [this, s, done, finished, requestEpoch, mutates, submittedGeneration](QJsonObject obj,
                                                         QString error) {
     if (*finished)
       return;
@@ -481,8 +497,21 @@ void Window::request(QJsonObject q,
     sockets.removeAll(s);
     s->abort();
     s->deleteLater();
-    if (requestEpoch == epoch)
+    if (requestEpoch == epoch) {
+      if (mutates) {
+        ++mutationEpoch;
+        reconciling = true;
+        quint64 revision = 0;
+        if (error.isEmpty() && !snapshotVersion(obj, revision))
+          error = "Invalid snapshot metadata";
+        if (error.isEmpty() && generation == submittedGeneration &&
+            obj["generation"].toString() == submittedGeneration && revision > 0) {
+          snapshotRevision = qMax(snapshotRevision, revision);
+          snapshotFromAck = true;
+        }
+      }
       done(obj, error);
+    }
   };
   connect(timeout, &QTimer::timeout, this,
           [finish] { finish({}, "Backend request timed out"); });
@@ -535,6 +564,9 @@ void Window::reconnect() {
   recentBytes = 0;
   recentOrder.clear();
   generation.clear();
+  snapshotRevision = 0;
+  snapshotFromAck = reconciling = false;
+  ++mutationEpoch;
   notified.clear();
   notifiedOrder.clear();
   prompt->hide();
@@ -548,9 +580,14 @@ void Window::refresh() {
   if (listing)
     return;
   listing = true;
+  const auto issuedEpoch = mutationEpoch;
   request({{"version", 1}, {"operation", "list"}},
-          [this](QJsonObject r, QString error) {
+          [this, issuedEpoch](QJsonObject r, QString error) {
             listing = false;
+            if (issuedEpoch != mutationEpoch) {
+              refresh();
+              return;
+            }
             if (!error.isEmpty() || !r["error"].toString().isEmpty()) {
               connected = false;
               enableRule->setEnabled(false);
@@ -587,6 +624,17 @@ void Window::remember(const QJsonObject &e) {
   }
 }
 void Window::consume(QJsonObject r) {
+  quint64 revision = 0;
+  if (!snapshotVersion(r, revision)) {
+    connected = false;
+    status->setText("Disconnected — invalid snapshot metadata");
+    updateDetails();
+    return;
+  }
+  if (r["generation"].toString() == generation && snapshotRevision > 0 &&
+      (revision < snapshotRevision || (snapshotFromAck && revision == snapshotRevision)))
+    return;
+
   if (r["events"].toArray().size() > 256) {
     connected = false;
     status->setText("Disconnected — event limit exceeded");
@@ -609,6 +657,8 @@ void Window::consume(QJsonObject r) {
     prompt->hide();
     promptID.clear();
   }
+  snapshotRevision = revision;
+  snapshotFromAck = reconciling = false;
   connected = true;
   readOnly = r["read_only"].toBool(true);
   serverOffset = QDateTime::currentDateTimeUtc().msecsTo(
@@ -720,7 +770,7 @@ void Window::consume(QJsonObject r) {
   choosePrompt();
 }
 bool Window::actionable(const QString &id) const {
-  if (!connected || readOnly || submitting.size() >= 8 ||
+  if (!connected || readOnly || reconciling || submitting.size() >= 8 ||
       submitting.contains(id) || !current.contains(id))
     return false;
   auto e = current[id];
@@ -991,6 +1041,17 @@ void Window::submit(const QString &id, const QString &action,
               auto e = r["decision"].toObject();
               current[id] = e;
               remember(e);
+              for (const auto &entry : r["settled"].toArray()) {
+                const auto settled = entry.toObject();
+                const auto settledID = settled["id"].toString();
+                if (!current.contains(settledID))
+                  continue;
+                auto row = current[settledID];
+                row["state"] = settled["state"];
+                row["rule"] = settled["rule"];
+                current[settledID] = row;
+                remember(row);
+              }
               feedback("Backend acknowledged " + value(e, "state") + " — " +
                        value(e, "reason"));
               if (promptID == id)

@@ -162,8 +162,8 @@ func (e *Engine) pruneAdmissionsLocked(now time.Time) {
 // been requested yet (its packet is held behind the outgoing decision), only
 // Once is accepted and the exact connection's incoming side is prepared.
 func (e *Engine) DecidePair(generation string, ids []string, action, scope string, seconds int64, uid uint32, admin bool) (PairDecision, []SettledRequest, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	e.lockResolved(e.pairSelection(ids, uid, admin))
+	defer e.unlockResolved()
 	defer e.collectSettledLocked()()
 	if generation == "" || generation != e.Generation {
 		return PairDecision{}, nil, mutationError("generation_conflict", "Backend changed; reload")
@@ -262,7 +262,10 @@ func (e *Engine) DecidePair(generation string, ids []string, action, scope strin
 	// Validation: identity bindings and leases, before any mutation.
 	attrs := map[*Event]identity.Attribution{}
 	for _, v := range pending {
-		a := e.Resolve(v.Flow)
+		a, ok := e.resolvedEventLocked(v)
+		if !ok {
+			return PairDecision{}, nil, retryChangedRequest()
+		}
 		if !e.Now().Before(v.Deadline) {
 			return PairDecision{}, nil, e.rejectPendingDeadlineLocked(v)
 		}
@@ -300,7 +303,10 @@ func (e *Engine) DecidePair(generation string, ids []string, action, scope strin
 	var adm *pairAdmission
 	var view *PairAdmissionView
 	if in == nil {
-		sa := e.Resolve(inFlow)
+		sa, ok := e.resolvedFlowLocked(inFlow)
+		if !ok {
+			return PairDecision{}, nil, retryChangedRequest()
+		}
 		p := sa.Principal()
 		owner := out.LocalPeer.Owner
 		if sa.Application == nil || p == nil || len(sa.Owners) != 1 || sa.Owners[0].PID != owner.PID || sa.Owners[0].Start != owner.Start {
@@ -370,5 +376,6 @@ func (e *Engine) DecidePair(generation string, ids []string, action, scope strin
 	if view != nil && view.Outcome == "rule" && view.ConfiguredAction != action {
 		result.Sentence += "; the incoming side is " + map[string]string{"allow": "allowed", "block": "denied"}[view.ConfiguredAction] + " by " + view.ConfiguredRule
 	}
+	e.followUpSettleLocked()
 	return result, e.settledLocked(), nil
 }

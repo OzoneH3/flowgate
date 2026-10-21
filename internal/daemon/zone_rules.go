@@ -96,7 +96,7 @@ func (e *Engine) PreviewZoneRule(generation, revision string, target ZoneTarget,
 }
 func (e *Engine) SaveZoneRule(generation, revision, token string, target ZoneTarget, d ObservedDraft, uid uint32, admin bool) (policy.Rule, string, bool, error) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlockAndSettle()
 	if err := e.checkCreationLocked(generation); err != nil {
 		return policy.Rule{}, "", false, err
 	}

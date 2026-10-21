@@ -124,7 +124,7 @@ func (e *Engine) PreviewZoneMigration(generation, id string, expected *uint64, r
 }
 func (e *Engine) SaveZoneMigration(generation, id string, expected *uint64, revision, token string, uid uint32, admin bool) (policy.Rule, string, bool, error) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlockAndSettle()
 	e.refreshZonesLocked()
 	fail := func(code, text string) (policy.Rule, string, bool, error) {
 		return policy.Rule{}, "", false, mutationError(code, text)

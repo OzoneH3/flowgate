@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -11,9 +12,10 @@ import (
 // slowResolver holds attribution of one flow until released; other flows resolve at once.
 func slowResolver(e *Engine, slow identity.Flow, a identity.Attribution) (entered, release chan struct{}) {
 	entered, release = make(chan struct{}), make(chan struct{})
+	var once sync.Once
 	e.Resolve = func(f identity.Flow) identity.Attribution {
 		if f.Key() == slow.Key() {
-			close(entered)
+			once.Do(func() { close(entered) })
 			<-release
 		}
 		return a

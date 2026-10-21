@@ -322,7 +322,7 @@ func (e *Engine) SaveObservedRule(generation, token string, draft ObservedDraft,
 		return policy.Rule{}, "", false, mutationError("stale_target", "Namespace or executable changed since preview")
 	}
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlockAndSettle()
 	if err = e.checkCreationLocked(generation); err != nil {
 		return policy.Rule{}, "", false, err
 	}
@@ -390,6 +390,7 @@ func (e *Engine) SaveObservedRule(generation, token string, draft ObservedDraft,
 	}
 	restore := e.collectSettledLocked()
 	e.settlePendingLocked("rule " + candidate.ID + " saved")
+	e.followUpSettleLocked()
 	p.Settled = e.settledLocked()
 	restore()
 	// Existing pending/Once decisions are not consumed or approved. New initiations

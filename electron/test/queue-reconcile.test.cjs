@@ -9,7 +9,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { Backend, reconcileListed, settlementKey } = require('../dist/test/backend.cjs');
 const { AutomaticPrompts, inputSettled, requestGroups } = require('../dist/test/automatic-prompts.cjs');
-const { validateDecision } = require('../dist/test/protocol.cjs');
+const { validateDecision, parseReply } = require('../dist/test/protocol.cjs');
 const lease = require('../dist/test/process-lease.cjs');
 const pd = require('../dist/test/prompt-decision.cjs');
 const { REMEMBER_FIELDS_CAPABILITY, DEFAULT_REMEMBER } = require('../dist/test/decision-remember.cjs');
@@ -67,7 +67,8 @@ async function fixture(t, { caps = CAPS, handle } = {}) {
     sent = [],
     world = { events: [], leases: [], hold: false, held: [], serverTime: () => new Date().toISOString() };
   const base = (events = world.events) => ({
-    version: 1, generation: 'g', read_only: false, mode: 'daemon-monitor', server_time: world.serverTime(),
+    version: 1, generation: world.generation || 'g', read_only: false, mode: 'daemon-monitor', server_time: world.serverTime(),
+    ...(world.snapshotRevision ? { snapshot_revision: world.snapshotRevision, snapshot_at: world.serverTime() } : {}),
     capabilities: caps, for_a_while_durations: DURATIONS,
     permissions: { role: 'administrator', observation_scope: 'machine', policy_scope: 'machine', can_manage_rules: true, can_decide: true },
     events: JSON.parse(JSON.stringify(events)), process_leases: world.leases,
@@ -422,4 +423,39 @@ test('card: one short line when a rule exists for an earlier revision (display o
   assert.match(notice.text, /user:old \(Allow\) · revision 1:2:3/);
   assert.match(notice.text, /Not applied/);
   assert.ok([...byId('requestMore').walk()].includes(notice));
+});
+
+
+test('snapshot revisions retain full uint64 precision and reject malformed metadata', () => {
+  const base = { version: 1, generation: 'g', read_only: false, server_time: new Date().toISOString(), snapshot_at: new Date().toISOString() };
+  assert.equal(parseReply({ ...base, snapshot_revision: '18446744073709551615' }).snapshot_revision, '18446744073709551615');
+  for (const revision of [0, '0', '01', '-1', '1.5', '18446744073709551616'])
+    assert.throws(() => parseReply({ ...base, snapshot_revision: revision }), /snapshot metadata/);
+  assert.throws(() => parseReply({ ...base, snapshot_revision: '1', snapshot_at: 'bad' }), /snapshot metadata/);
+  assert.equal(parseReply(base).snapshot_revision, undefined, 'legacy server remains supported');
+  assert.throws(() => parseReply({ ...base, capabilities: ['request-list-snapshot-v1'] }), /snapshot metadata/);
+});
+
+test('snapshot revision fences survive polling after an acknowledgement and reset on generation change', async (t) => {
+  const { b, world } = await fixture(t, {
+    handle: (q, w) => {
+      w.snapshotRevision = '9007199254740993';
+      return { decision: { ...w.events[0], state: 'allowed' } };
+    },
+  });
+  world.snapshotRevision = '9007199254740992';
+  world.events = [ev('a')];
+  await b.pollControl();
+  assert.deepEqual(visible(b), ['a']);
+  assert.equal((await b.decide({ generation: 'g', id: 'a', action: 'allow', scope: 'once' })).phase, 'acknowledged');
+  world.snapshotRevision = '9007199254740992';
+  await b.pollControl();
+  assert.deepEqual(visible(b), [], 'older revision issued after ack cannot reopen');
+  world.snapshotRevision = '9007199254740993';
+  await b.pollControl();
+  assert.deepEqual(visible(b), [], 'same published revision cannot undo its acknowledgement');
+  world.generation = 'new-generation';
+  world.snapshotRevision = '1';
+  await b.pollControl();
+  assert.deepEqual(visible(b), ['a'], 'restarted daemon has its own revision sequence');
 });

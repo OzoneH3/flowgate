@@ -28,7 +28,7 @@ func (e *Engine) DeleteRule(generation, id string, expected *uint64, uid uint32,
 		active = e.Enforcement().State != "stopped"
 	}
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlockAndSettle()
 	if generation == "" || generation != e.Generation {
 		return DeletedRule{}, mutationError("generation_conflict", "backend generation changed or missing; reload")
 	}

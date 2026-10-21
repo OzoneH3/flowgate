@@ -57,6 +57,8 @@ type EnforcementStatus struct {
 	StopsAt time.Time `json:"stops_at"`
 }
 type Response struct {
+	SnapshotRevision string                     `json:"snapshot_revision,omitempty"`
+	SnapshotAt       time.Time                  `json:"snapshot_at,omitempty"`
 	EssentialPreview *EssentialPreview          `json:"essential_preview,omitempty"`
 	EssentialReceipt *EssentialReceipt          `json:"essential_receipt,omitempty"`
 	EssentialStatus  *EssentialStatus           `json:"essential_status,omitempty"`
@@ -153,6 +155,11 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 		l.Close()
 		return nil, err
 	}
+	releaseSnapshots, err := e.listReads.acquire(e)
+	if err != nil {
+		l.Close()
+		return nil, err
+	}
 	slots := make(chan struct{}, 16)
 	go func() {
 		for {
@@ -196,7 +203,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						r.Capabilities = append(r.Capabilities, EvaluationCapability)
 
 					}
-					if e.Essential != nil || e.hasPresetRules() {
+					if p := e.listReads.published.Load(); e.Essential != nil || (p != nil && p.hasPresets) {
 						r.Capabilities = append(r.Capabilities, EssentialCapability, EssentialExclusionCapability)
 					}
 					if e.Protection != nil {
@@ -257,7 +264,22 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						r.Error = "invalid v1 request"
 						r.ErrorCode = "invalid_request"
 					} else {
-						zones := e.CurrentZones()
+						var zones identity.NetworkZones
+						var cachedList ListSnapshot
+						if q.Operation == "list" {
+							cachedList, err = e.listReads.read(cred.Uid, admin, time.Now())
+							if err != nil {
+								r.ErrorCode = "snapshot_unavailable"
+								r.Error = err.Error()
+								json.NewEncoder(c).Encode(r)
+								return
+							}
+							zones = cachedList.Zones
+							r.SnapshotRevision, r.SnapshotAt = cachedList.Revision, cachedList.At
+						} else {
+							zones = e.CurrentZones()
+						}
+						r.Capabilities = append(r.Capabilities, ListSnapshotCapability)
 						r.NetworkZones = &zones
 						r.Capabilities = append(r.Capabilities, NetworkZoneCapability)
 						if zones.Model == identity.AutomaticZoneModel {
@@ -615,16 +637,14 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 									r.Activity = &snapshot
 								}
 								if e.Mode != "host-monitor" {
-									var listZones identity.NetworkZones
-									r.Events, listZones = e.ListWithZones(cred.Uid, admin)
-									leases := e.ProcessLeases(cred.Uid, admin)
-									r.ProcessLeases = &leases
-									r.NetworkZones = &listZones
+									r.Events = cachedList.Events
+									r.ProcessLeases = &cachedList.Leases
+									r.NetworkZones = &cachedList.Zones
+									r.Rules, r.RuleStates = cachedList.Rules, cachedList.RuleStates
 									if r.Activity != nil {
-										snapshot := ClassifyActivity(*r.Activity, listZones)
+										snapshot := ClassifyActivity(*r.Activity, cachedList.Zones)
 										r.Activity = &snapshot
 									}
-									r.Rules, r.RuleStates = e.RuleInventory(cred.Uid, admin)
 								} else if e.Activity == nil {
 									r.Error = "observer unavailable"
 								}
@@ -810,6 +830,17 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 							r.Error = "unknown operation"
 						}
 					}
+					if q.Version == 1 && q.Operation != "list" {
+						if publishErr := e.listReads.publishAfter(e, q.Operation); publishErr != nil {
+							r.ErrorCode = "snapshot_unavailable"
+							r.Error = "Operation completed; list publication failed. Refresh before any retry: " + publishErr.Error()
+						}
+						// Keep the error reply decodable if publication failed. The revision
+						// then identifies the last good snapshot, not the failed mutation.
+						if published := e.listReads.published.Load(); published != nil {
+							r.SnapshotRevision, r.SnapshotAt = published.revision, published.at
+						}
+					}
 					json.NewEncoder(c).Encode(r)
 					if stopAfterResponse {
 						e.StopMonitoring()
@@ -820,7 +851,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 			}
 		}
 	}()
-	return l, nil
+	return &snapshotListener{Listener: l, release: releaseSnapshots}, nil
 }
 func baseName(path string) string {
 	for i := len(path) - 1; i >= 0; i-- {

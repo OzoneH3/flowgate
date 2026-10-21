@@ -83,6 +83,9 @@ type decisionPreview struct {
 	Until       time.Time
 	Committed   *Event
 	Settled     []SettledRequest
+	// settledDone closes once Settled is final for a committed decision; the
+	// committing call may still be settling other requests outside e.mu.
+	settledDone chan struct{}
 }
 
 func (e *Engine) pruneDecisionPreviews(now time.Time) {
@@ -100,7 +103,15 @@ func (e *Engine) pendingDecision(id string, uid uint32, admin bool) (*Event, err
 		if !admin && !owned(v.Attribution, uid) {
 			return nil, mutationError("forbidden", "Pending request belongs to another principal")
 		}
-		if v.State != "awaiting-decision" || !e.Now().Before(v.Deadline) {
+		// Ownership is resolved before this lookup, so a deadline that passed during
+		// that resolution is reported as such, not as a generic stale request.
+		if !e.Now().Before(v.Deadline) {
+			if v.State == "awaiting-decision" {
+				return nil, e.rejectPendingDeadlineLocked(v)
+			}
+			return nil, mutationError("stale_decision", "Request deadline passed during revalidation; no decision or rule saved")
+		}
+		if v.State != "awaiting-decision" {
 			return nil, mutationError("stale_decision", "Request is no longer pending; do not replay")
 		}
 		return v, nil
@@ -129,8 +140,8 @@ func (e *Engine) PreviewDecision(generation, id, action, scope, zone, revision s
 	if len(opts) > 0 {
 		o = opts[0]
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	e.lockResolved(e.requestSelection(id, uid, admin, false))
+	defer e.unlockResolved()
 	if generation != e.Generation {
 		return DecisionPreview{}, mutationError("generation_conflict", "Backend changed; reload")
 	}
@@ -163,7 +174,10 @@ func (e *Engine) PreviewDecision(generation, id, action, scope, zone, revision s
 	if err != nil {
 		return DecisionPreview{}, err
 	}
-	a := e.Resolve(v.Flow)
+	a, ok := e.resolvedEventLocked(v)
+	if !ok {
+		return DecisionPreview{}, retryChangedRequest()
+	}
 	if !e.Now().Before(v.Deadline) {
 		return DecisionPreview{}, e.rejectPendingDeadlineLocked(v)
 	}
@@ -285,16 +299,22 @@ func (e *Engine) DecideReviewed(generation, id, action, scope, zone, revision, t
 // DecideReviewedSettled also returns the waiting requests the remembered rule
 // settled. A replayed (already committed) decision reports the same list.
 func (e *Engine) DecideReviewedSettled(generation, id, action, scope, zone, revision, token string, uid uint32, admin bool, opts ...RememberOptions) (Event, policy.Rule, bool, []SettledRequest, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	e.lockResolved(e.requestSelection(id, uid, admin, true))
+	defer e.unlockResolved()
 	defer e.collectSettledLocked()()
 	v, r, replayed, err := e.decideReviewedLocked(generation, id, action, scope, zone, revision, token, uid, admin, opts...)
+	p := e.decisionPreviews[token]
+	if replayed && p != nil && p.settledDone != nil && !e.awaitUnlocked(p.settledDone) {
+		return v, r, true, nil, mutationError("receipt_pending", "Decision committed; its settlement receipt is still being completed. Refresh the list; do not resubmit")
+	}
+	e.followUpSettleLocked()
 	settled := e.settledLocked()
-	if p := e.decisionPreviews[token]; p != nil && err == nil {
+	if p != nil && err == nil {
 		if replayed {
 			settled = p.Settled
-		} else {
+		} else if p.settledDone != nil {
 			p.Settled = settled
+			close(p.settledDone)
 		}
 	}
 	return v, r, replayed, settled, err
@@ -338,6 +358,7 @@ func (e *Engine) decideReviewedLocked(generation, id, action, scope, zone, revis
 		return Event{}, policy.Rule{}, false, err
 	}
 	p.Committed = &out
+	p.settledDone = make(chan struct{})
 	p.Until = e.Now().Add(5 * time.Minute)
 	return out, v.Rule, false, nil
 }

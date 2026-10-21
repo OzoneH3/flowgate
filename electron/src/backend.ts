@@ -95,6 +95,7 @@ class DecisionRefused extends Error {}
 // Other requests are never removed by guessing (application, endpoint): only
 // non-awaiting list states or explicit `settled` ids remove them.
 export interface Settlement {
+  snapshotRevision?: string;
   issued: number;
   serverTime: number;
   state: string;
@@ -108,12 +109,14 @@ export function reconcileListed(
   issued: number,
   serverTime: number,
   settled: Map<string, Settlement>,
+  snapshotRevision?: string,
 ): RequestEvent[] {
   return events.map((e) => {
     const key = settlementKey(generation, e.id),
       t = settled.get(key);
     if (!t || e.state !== 'awaiting-decision') return e;
-    if (issued > t.issued && serverTime >= t.serverTime) {
+    if (issued > t.issued && serverTime >= t.serverTime &&
+        (!t.snapshotRevision || (snapshotRevision !== undefined && BigInt(snapshotRevision) > BigInt(t.snapshotRevision)))) {
       settled.delete(key); // newer authoritative observation: the backend wins
       return e;
     }
@@ -141,6 +144,8 @@ export class Backend {
   // Queue reconciliation state (see reconcileListed).
   private settlements = new Map<string, Settlement>();
   private listIssued = 0;
+  private snapshotGeneration = "";
+  private snapshotRevision = 0n;
   private reconcileAfter?: number;
   private endedLeases = new Map<string, { message: string; lease: ProcessLease }>();
   // Ended requests whose future rule was saved: they leave Pending requests.
@@ -365,6 +370,13 @@ export class Backend {
     try {
       const r = await call(endpoint, { operation: 'list' });
       if (readEpoch !== this.mutationEpoch || this.controller !== endpoint || this.stopped) return;
+      if (this.snapshotGeneration === r.generation && this.snapshotRevision > 0n &&
+          (r.snapshot_revision === undefined || BigInt(r.snapshot_revision) < this.snapshotRevision)) return;
+      if (this.snapshotGeneration !== r.generation) {
+        this.snapshotGeneration = r.generation;
+        this.snapshotRevision = 0n;
+      }
+      if (r.snapshot_revision !== undefined) this.snapshotRevision = BigInt(r.snapshot_revision);
       for (const [token, v] of this.decisionPreviews)
         if (Date.parse(v.preview.expires_at) + 300000 < this.now())
           this.decisionPreviews.delete(token);
@@ -391,7 +403,7 @@ export class Backend {
         this.reconcileAfter = undefined;
       }
       for (const [key, t] of this.settlements) if (t.until <= performance.now()) this.settlements.delete(key);
-      r.events = reconcileListed(r.events, r.generation, issued, Date.parse(r.server_time), this.settlements);
+      r.events = reconcileListed(r.events, r.generation, issued, Date.parse(r.server_time), this.settlements, r.snapshot_revision);
       // Lost/rejected outcome: this list was issued after it, so it is authoritative.
       if (this.reconcileAfter !== undefined && issued > this.reconcileAfter) this.reconcileAfter = undefined;
       const stamp = inventoryStamp(r);
@@ -712,7 +724,7 @@ export class Backend {
       }
       held.phase = 'saved';
       held.saved = rule;
-      this.settle(c.generation, r.settled ?? [], r.server_time);
+      this.settle(c.generation, r.settled ?? [], r.server_time, r.snapshot_revision);
       // The ended request is answered by its saved rule: it leaves the queue.
       if (this.closedEnded.size >= 1024) this.closedEnded.delete(this.closedEnded.values().next().value!);
       this.closedEnded.add(settlementKey(c.generation, c.id));
@@ -889,7 +901,7 @@ export class Backend {
           scope: d.scope,
           leaseUntil: temporary ? r.decision.lease?.until : undefined,
         };
-        this.settle(d.generation, [{ id: d.id, state: r.decision.state, event: r.decision }, ...(r.settled ?? [])], r.server_time);
+        this.settle(d.generation, [{ id: d.id, state: r.decision.state, event: r.decision }, ...(r.settled ?? [])], r.server_time, r.snapshot_revision);
       }
     } catch (e) {
       if (e instanceof DecisionRefused) throw Error(e.message);
@@ -965,7 +977,7 @@ export class Backend {
     for (const e of p.events)
       if (e.state === 'allowed' || e.state === 'blocked')
         this.attempts.set(e.id, { phase: 'acknowledged', message: `Backend acknowledged ${e.state} · ${e.reason}`, scope: 'once' });
-    this.settle(d.generation, [...p.events.map((e) => ({ id: e.id, state: e.state, event: e })), ...(r.settled ?? [])], r.server_time);
+    this.settle(d.generation, [...p.events.map((e) => ({ id: e.id, state: e.state, event: e })), ...(r.settled ?? [])], r.server_time, r.snapshot_revision);
     this.emit();
     this.reconcileSoon();
     return { message: r.scope_preview || p.sentence, text, result: p };
@@ -985,15 +997,20 @@ export class Backend {
   }
   // Records acknowledged/settled requests and removes them from the visible
   // queue at once (only those ids; nothing is inferred).
-  settle(generation: string, entries: { id: string; state: string; event?: RequestEvent }[], serverTime: string) {
+  settle(generation: string, entries: { id: string; state: string; event?: RequestEvent }[], serverTime: string, snapshotRevision?: string) {
     if (this.reply?.generation !== generation) return;
+    if (snapshotRevision !== undefined) {
+      if (this.snapshotGeneration !== generation) this.snapshotRevision = 0n;
+      this.snapshotGeneration = generation;
+      if (BigInt(snapshotRevision) > this.snapshotRevision) this.snapshotRevision = BigInt(snapshotRevision);
+    }
     const t = Date.parse(serverTime),
       until = performance.now() + 600000;
     for (const x of entries) {
       if (x.state === 'awaiting-decision') continue;
       if (this.settlements.size >= 1024) this.settlements.delete(this.settlements.keys().next().value!);
       this.settlements.set(settlementKey(generation, x.id), {
-        issued: this.listIssued, serverTime: Number.isFinite(t) ? t : 0, state: x.state, event: x.event, until,
+        snapshotRevision, issued: this.listIssued, serverTime: Number.isFinite(t) ? t : 0, state: x.state, event: x.event, until,
       });
     }
     this.reply.events = reconcileListed(this.reply.events, generation, -1, 0, this.settlements);
@@ -1038,7 +1055,7 @@ export class Backend {
       const lease = r.process_lease;
       if (!lease || !r.request_ended || lease.event_id !== c.id || (c.duration_seconds ?? 15) !== lease.seconds)
         throw Error('Invalid For a while acknowledgement');
-      this.settle(c.generation, r.settled ?? [], r.server_time);
+      this.settle(c.generation, r.settled ?? [], r.server_time, r.snapshot_revision);
       if (this.state.control.generation === c.generation && this.state.control.processLeases)
         this.state.control.processLeases = [
           ...this.state.control.processLeases.filter(

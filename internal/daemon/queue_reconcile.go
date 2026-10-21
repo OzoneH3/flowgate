@@ -102,8 +102,8 @@ func (e *Engine) previousRevisionRulesLocked(v *Event) []RevisionRuleRef {
 // itself stays ended: nothing is delivered and no rule is created. Other
 // awaiting requests of that process and direction settle by the lease.
 func (e *Engine) ForAWhileFromRequest(generation, id, action string, seconds int64, uid uint32, admin bool) (ProcessLease, []SettledRequest, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	e.lockResolved(e.requestSelection(id, uid, admin, true))
+	defer e.unlockResolved()
 	if generation == "" || generation != e.Generation {
 		return ProcessLease{}, nil, mutationError("generation_conflict", "Backend changed; reload")
 	}
@@ -134,7 +134,10 @@ func (e *Engine) ForAWhileFromRequest(generation, id, action string, seconds int
 			return ProcessLease{}, nil, mutationError("request_decided", "This request was already decided")
 		}
 		if v.State == "awaiting-decision" && now.Before(v.Deadline) {
-			a := e.Resolve(v.Flow)
+			a, ok := e.resolvedEventLocked(v)
+			if !ok {
+				return ProcessLease{}, nil, retryChangedRequest() // never infer an ended request from missing evidence
+			}
 			if a.Application != nil && a.Principal() != nil && a.Fingerprint == v.Attribution.Fingerprint {
 				return ProcessLease{}, nil, mutationError("request_pending", "This request is still pending; use Allow or Deny with For a while")
 			}
@@ -160,7 +163,8 @@ func (e *Engine) ForAWhileFromRequest(generation, id, action string, seconds int
 	e.storeLeaseLocked(l)
 	r.Decided = true // one lease per ended request; a later choice needs a new request
 	e.settlePendingLocked("for a while " + l.ID + " from ended request " + id)
-	return e.leaseViewLocked(l, now), e.settledLocked(), nil
+	e.followUpSettleLocked()
+	return e.leaseViewLocked(l, e.Now()), e.settledLocked(), nil
 }
 
 // verifyLiveOwnerLocked proves the retained owner is the same live process.
