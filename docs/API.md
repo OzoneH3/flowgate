@@ -509,3 +509,18 @@ Electron groups top-level entries with the same exact executable path under one
 visual program when multiple accounts/identities exist. Original account rows,
 rule IDs and request IDs remain children; the visual parent has no rule target.
 Different executable paths are never combined merely because their names match.
+
+### Update verification and stopped-install recovery
+
+The monitoring installer verifies unchanged rule documents, the exact native
+user/root scope migration (including its version increment), and removals backed
+by a new matching cleanup archive. Unexpected mutations or unarchived removals
+still fail verification. Startup can migrate data even if installation later
+fails; failure handling retains the current database and never restores an older
+one automatically.
+
+After an installation failure has stopped the daemon, run
+`scripts/update-and-start.sh --recover-stopped`. Recovery requires no running
+daemon, no FlowGate interception tables, and persisted monitoring intent before
+installation. The installer verifies monitoring first; the updater then restores
+the requested profile (Both by default). `--dry-run` remains read-only.

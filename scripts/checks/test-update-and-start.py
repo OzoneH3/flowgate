@@ -75,6 +75,20 @@ class Update(unittest.TestCase):
     def run_update(self, host, **kw):
         with contextlib.redirect_stdout(io.StringIO()):
             m.update(host, self.root, 'new', **kw)
+    def test_explicit_stopped_recovery_enters_guarded_installer(self):
+        class Stopped(FakeHost):
+            def status(self):
+                if not self.current: raise OSError('stopped')
+                return super().status()
+            def install(self, backend):
+                self.calls.append('install')
+                self.current=status('new','monitoring')
+        h=Stopped();h.current=None
+        with self.assertRaises(RuntimeError):self.run_update(h)
+        self.assertNotIn('authenticate',h.calls)
+        self.run_update(h,recover_stopped=True,gui=False)
+        self.assertEqual([c for c in h.calls if c!='status'],['authenticate','install','both'])
+
     def test_active_update_authenticates_before_stop_then_restores_both_before_gui(self):
         h = FakeHost()
         self.run_update(h)

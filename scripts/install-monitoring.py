@@ -3,7 +3,7 @@
 
 Never starts protection, never runs the receiver/enforcement acceptance stage and
 never installs the NetworkManager Requires= drop-in. Persists desired monitoring
-before the first start, preserves every stored rule/record and all foreign
+before the first start, preserves rules or verifies their explicit startup migration/archive and all foreign
 firewall/routing/Tailscale/bpftune state. Run once with terminal sudo.
 """
 import argparse,hashlib,json,os,pathlib,socket,sqlite3,struct,subprocess,sys,tempfile,time
@@ -70,6 +70,40 @@ def rule_inventory(db):
  finally:c.close()
  return sorted((i,json.loads(d).get('version'))for i,d in rows)
 
+def rule_documents(db):
+ if not db.exists():return {},[]
+ c=sqlite3.connect(f'file:{db}?mode=ro',uri=True)
+ try:
+  c.execute('BEGIN')
+  rules={i:json.loads(d)for i,d in c.execute('SELECT id,document FROM rules')}
+  exists=c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='archived_rules'").fetchone()
+  archived=[(i,json.loads(d),reason)for i,d,reason in c.execute('SELECT rule_id,document,reason FROM archived_rules')]if exists else[]
+  return rules,archived
+ finally:c.close()
+
+def verified_rule_transition(before_db,after_db):
+ """Accept only exact root-scope migrations or losslessly archived cleanup."""
+ before,old_archives=rule_documents(before_db);after,archives=rule_documents(after_db)
+ # Only a new archive from this startup can explain a disappearing active rule.
+ for previous in old_archives:
+  if previous in archives:archives.remove(previous)
+ if set(after)-set(before):raise RuntimeError('Unexpected new rule during installation')
+ for rid,old in before.items():
+  new=after.get(rid)
+  if new is None:
+   if not any(i==rid and d==old and reason in ('expired','replaced executable; no old process found')for i,d,reason in archives):
+    raise RuntimeError('Rule disappeared without matching cleanup archive: '+rid)
+   continue
+  if new==old:continue
+  f=old.get('filter')or{};uid=f.get('uid');path=old.get('executable','')
+  native=lambda u:sha(f'{u}|native||{path}'.encode())
+  eligible=isinstance(uid,int)and uid>0 and path.startswith('/')and f.get('application')==native(uid)and not(old.get('preset')or f.get('process')or f.get('all_programs')or f.get('all_uids'))
+  expected=dict(old)
+  if eligible and not old.get('root_application'):
+   expected['root_application']=native(0);expected['version']=old.get('version',0)+1
+  if not eligible or new!=expected:raise RuntimeError('Unexpected rule mutation during installation: '+rid)
+ return sorted((i,d.get('version'))for i,d in after.items())
+
 def api_inventory(r):return sorted((x['id'],x.get('version'))for x in(r.get('rules')or[]))
 
 def verify_monitoring(r,manifest,before_rules):
@@ -115,6 +149,12 @@ def install(h,bundle,stamp):
   pid,before=h.api()
   if (before.get('protection')or{}).get('state','stopped')!='stopped'or(before.get('enforcement')or{}).get('state')!='stopped':
    raise SystemExit('FlowGate protection is active; stop it explicitly before a monitoring install')
+ # An unavailable stopped daemon can be reinstalled only after proving that
+ # no interception remains and persisted startup intent is monitoring.
+ if not running and (base/'current').exists():
+  state=h.path('/var/lib/flowgate/protection.json')
+  if not state.exists()or json.loads(state.read_text()).get('mode')!='monitoring':raise RuntimeError('Stopped-service recovery requires persisted monitoring mode')
+  if flowgate_tables(h):raise RuntimeError('Stopped-service recovery refused: interception tables remain')
  # 4. Consistent backups of all state that this install touches.
  data=safe_dir(h,'/var/lib/flowgate',0o700);backup=safe_dir(h,'/var/lib/flowgate/backups',0o700)/f'{name}-monitoring-{stamp}'
  backup.mkdir(mode=0o700)
@@ -165,7 +205,8 @@ def install(h,bundle,stamp):
    try:_,r=h.api();break
    except (OSError,ValueError,AssertionError):h.sleep(.25)
   if r is None:raise RuntimeError('API did not become ready')
-  problems=verify_monitoring(r,manifest,before_rules)
+  expected_rules=verified_rule_transition(backup/'rules.db',data/'rules.db')
+  problems=verify_monitoring(r,manifest,expected_rules)
   tables=flowgate_tables(h)
   if tables:problems.append(('owned interception tables present',tables))
   pids=h.daemon_pids()
@@ -177,7 +218,7 @@ def install(h,bundle,stamp):
   print('Protection was NOT activated. No essential permissions were applied.')
   return final
  except Exception:
-  print('MONITORING INSTALL FAILED; stopping the new service, data untouched, no older database/executable restored',file=sys.stderr)
+  print('MONITORING INSTALL FAILED; stopping the new service, current data retained (startup migrations may have run), no older database/executable restored',file=sys.stderr)
   subprocess_safe(h,'systemctl','stop','flowgate.service')
   subprocess_safe(h,'systemctl','disable','flowgate.service')
   subprocess_safe(h,str(release/'flowgate'),'protection-recover','--state','/run/flowgate-enforcement')

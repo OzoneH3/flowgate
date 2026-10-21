@@ -150,7 +150,7 @@ def transition(host, backend, selected):
     raise RuntimeError('Protection did not reach ' + selected + '; inspect flowgate-control status. No action was replayed.')
 
 
-def update(host, root, revision, *, dry=False, gui=True, profile="both", wine_discovery=False):
+def update(host, root, revision, *, dry=False, gui=True, profile="both", wine_discovery=False, recover_stopped=False):
     bundle = root / '.workspace/automatic-zone-releases' / revision
     backend = root / '.workspace/daily-releases' / revision
     manifest = None
@@ -160,8 +160,8 @@ def update(host, root, revision, *, dry=False, gui=True, profile="both", wine_di
     try:
         before = host.status()
     except OSError:
-        if host.installed():
-            raise RuntimeError('Installed daemon status unavailable; no protection or installation action taken')
+        if host.installed() and not recover_stopped:
+            raise RuntimeError('Installed daemon status unavailable; use --recover-stopped for guarded monitoring-only recovery. No action taken')
         before = None
     previous = mode(before) if before else 'monitoring'
     selected = previous if profile == "preserve" else profile
@@ -223,9 +223,10 @@ if __name__ == '__main__':
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('--no-gui', action='store_true')
     parser.add_argument('--wine-discovery', action='store_true')
+    parser.add_argument('--recover-stopped', action='store_true')
     parser.add_argument('--profile', choices=('preserve', 'monitoring', 'incoming', 'both'), default='both')
     args = parser.parse_args()
     try:
-        update(Host(), args.root.resolve(), args.revision, dry=args.dry_run, gui=not args.no_gui, profile=args.profile, wine_discovery=args.wine_discovery)
+        update(Host(), args.root.resolve(), args.revision, dry=args.dry_run, gui=not args.no_gui, profile=args.profile, wine_discovery=args.wine_discovery, recover_stopped=args.recover_stopped)
     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
         sys.exit('Update failed: ' + str(error))
