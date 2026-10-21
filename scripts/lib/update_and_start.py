@@ -171,7 +171,9 @@ def update(host, root, revision, *, dry=False, gui=True, profile="both", wine_di
             say('Would authenticate sudo, stop protection, install and verify ' + revision)
         else:
             say('Matching daemon already running; no daemon restart needed')
-        say(('Would enable generic Wine discovery; stored rules unchanged; final protection mode: ' if wine_discovery else 'Would preserve existing Wine configuration and stored rules; final protection mode: ') + selected)
+        say(('Would enable generic Wine discovery; preserve valid rules; final protection mode: ' if wine_discovery else 'Would preserve existing Wine configuration and valid rules; final protection mode: ') + selected)
+        if needs_install:
+            say('Daemon startup would archive expired and confirmed obsolete native rules')
         if gui:
             say('Would close the old released GUI and launch ' + str(bundle / 'launch-ui'))
         return

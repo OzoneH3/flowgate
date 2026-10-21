@@ -2,7 +2,8 @@
 # Prepare/install the latest master, start Both protection, switch matching GUI.
 # Usage: scripts/update-and-start.sh [--dry-run] [--no-gui]
 #        [--profile preserve|monitoring|incoming|both] [--wine-discovery]
-# Existing rules and Wine observer configuration are preserved. Builds and sudo
+# Valid rules and Wine observer configuration are preserved. Daemon startup
+# archives expired rules and confirmed replaced native versions. Builds and sudo
 # authentication finish before stopping protection; failed installs stop safely.
 set -eu
 cd "$(dirname "$0")/.."
@@ -14,7 +15,7 @@ while [ "$#" -gt 0 ]; do
     --wine-discovery) wine_discovery=1; shift;;
     --dry-run) dry=1; shift;;
     --no-gui) gui=0; shift;;
-    -h|--help) sed -n '2,6p' scripts/update-and-start.sh; exit 0;;
+    -h|--help) sed -n '2,7p' scripts/update-and-start.sh; exit 0;;
     *) echo "unknown option: $1" >&2; exit 2;;
   esac
 done

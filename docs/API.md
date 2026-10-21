@@ -469,3 +469,21 @@ users or Wine prefixes. Distinct same-name identities show their path, UID and
 identity discriminator inline. A single recorded script can label a not-running
 row as `script via interpreter`; mixed contexts keep the interpreter name and
 list the recorded script paths in Details.
+
+### Startup cleanup of obsolete saved rules
+
+The exclusive daemon writer archives expired rules and confirmed replaced native
+executable revisions at startup, including restarts through `update-and-start.sh`.
+The complete rule JSON, reason, and timestamp are retained in `archived_rules` in
+the private policy database, in the same transaction that removes the active rule.
+Failure leaves the active rules unchanged and prevents startup with partial policy.
+
+A replaced version must have the same exact native executable path and user key,
+a different current file stamp, and no old executable inode in the process census.
+Incomplete process visibility or an uncertain alternate root/mount view preserves
+the rule. Missing files, side-by-side executable paths, Wine/Electron/runtime
+identities, and absent script display metadata do not qualify for this cleanup.
+This is a conservative startup snapshot, not a guarantee against later rollback;
+restoring an older binary may require a new decision. Archives are recovery data,
+not active permissions; there is no automatic transfer to the replacement version.
+A matching already-running daemon is not restarted solely to perform cleanup.

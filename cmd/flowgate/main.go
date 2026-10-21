@@ -221,7 +221,7 @@ func serve() error {
 			return err
 		}
 		defer db.Close()
-		rules, err := db.Load()
+		rules, err := db.LoadCurrent(time.Now())
 		if err != nil {
 			return err
 		}
