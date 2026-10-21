@@ -107,6 +107,9 @@ const prefsFile = path.join(workspace, 'electron-preferences.json');
 try {
   saved = JSON.parse(fs.readFileSync(prefsFile, 'utf8'));
 } catch {}
+// New release bundles start without preferences: closing should keep requests
+// monitored in the tray. Preserve an explicit user opt-out.
+saved.ui = { keepInTray: true, ...saved.ui };
 const persist = () => fs.writeFileSync(prefsFile, JSON.stringify(saved), { mode: 0o600 });
 const width = dimension(
     '--width',
