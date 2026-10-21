@@ -59,11 +59,13 @@ func (r *Retainer) Flush(now time.Time, state func(string, string) string, verdi
 	var first error
 	for _, p := range batch {
 		s := "drop"
-		if !stop && now.Before(p.deadline) {
+		// The supplied tick may be stale after an earlier packet's slow check
+		// (or after waiting for another flush). Never resolve an expired packet.
+		if !stop && now.Before(p.deadline) && time.Now().Before(p.deadline) {
 			s = state(p.event, p.fingerprint)
 		}
 		// Deadline is independently checked after potentially slow attribution.
-		if !stop && s == "pending" {
+		if !stop && s == "pending" && time.Now().Before(p.deadline) {
 			remaining = append(remaining, p)
 			continue
 		}

@@ -110,3 +110,46 @@ func TestRetentionAddProgressesDuringSlowRevalidation(t *testing.T) {
 		t.Fatal("concurrent Add lost", r.packets, r.bytes)
 	}
 }
+
+func TestRetentionExpiryDuringRevalidationDrainsPendingAndSkipsLaterLookup(t *testing.T) {
+	r := &Retainer{}
+	first, second := event("first"), event("second")
+	// Long enough to reach the first state callback even under race testing.
+	// The callback explicitly waits for expiry, so no scheduler timing decides
+	// whether the post-resolution check is exercised.
+	first.Deadline = time.Now().Add(200 * time.Millisecond)
+	second.Deadline = first.Deadline
+	second.Token = "second"
+	if !r.Add(1, 100, first) || !r.Add(2, 100, second) {
+		t.Fatal("add")
+	}
+	checks := 0
+	verdicts := map[uint32]int{}
+	err := r.Flush(time.Now(), func(id, fingerprint string) string {
+		checks++
+		if id != "first" {
+			t.Errorf("expired later packet triggered ownership lookup: %s", id)
+			return "pending"
+		}
+		time.Sleep(time.Until(first.Deadline) + time.Millisecond)
+		return "pending"
+	}, func(id uint32, allow bool) error {
+		if allow {
+			t.Error("expired packet allowed")
+		}
+		verdicts[id]++
+		return nil
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if checks != 1 {
+		t.Fatalf("ownership checks: %d, want 1", checks)
+	}
+	if verdicts[1] != 1 || verdicts[2] != 1 {
+		t.Fatalf("expired pending packets not drained exactly once: %v", verdicts)
+	}
+	if len(r.packets) != 0 || r.bytes != 0 {
+		t.Fatal("expired packets still consume retention capacity")
+	}
+}
