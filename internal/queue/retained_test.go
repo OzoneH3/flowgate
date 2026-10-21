@@ -77,3 +77,36 @@ func TestRetentionTimeoutAndTCPDuplicates(t *testing.T) {
 		return nil
 	}, false)
 }
+
+func TestRetentionAddProgressesDuringSlowRevalidation(t *testing.T) {
+	r := &Retainer{}
+	if !r.Add(1, 100, event("first")) {
+		t.Fatal("add")
+	}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- r.Flush(time.Now(), func(string, string) string { close(entered); <-release; return "allow" }, func(uint32, bool) error { return nil }, false)
+	}()
+	<-entered
+	added := make(chan bool, 1)
+	go func() { v := event("second"); v.Token = "second"; added <- r.Add(2, 100, v) }()
+	select {
+	case ok := <-added:
+		if !ok {
+			t.Error("add refused")
+		}
+	case <-time.After(time.Second):
+		t.Error("Add blocked by attribution")
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.packets) != 1 || r.packets[0].id != 2 || r.bytes != 100 {
+		t.Fatal("concurrent Add lost", r.packets, r.bytes)
+	}
+}

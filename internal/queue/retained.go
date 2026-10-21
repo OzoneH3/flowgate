@@ -21,6 +21,7 @@ type held struct {
 	deadline    time.Time
 }
 type Retainer struct {
+	flushMu sync.Mutex // serialize flushes, never block Add on attribution
 	mu      sync.Mutex
 	packets []held
 	bytes   int
@@ -48,11 +49,15 @@ func (r *Retainer) Add(id uint32, size int, v daemon.Event) bool {
 	return true
 }
 func (r *Retainer) Flush(now time.Time, state func(string, string) string, verdict func(uint32, bool) error, stop bool) error {
+	r.flushMu.Lock()
+	defer r.flushMu.Unlock()
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	batch := append([]held(nil), r.packets...)
+	r.mu.Unlock()
 	var remaining []held
+	releasedBytes := 0
 	var first error
-	for _, p := range r.packets {
+	for _, p := range batch {
 		s := "drop"
 		if !stop && now.Before(p.deadline) {
 			s = state(p.event, p.fingerprint)
@@ -65,8 +70,11 @@ func (r *Retainer) Flush(now time.Time, state func(string, string) string, verdi
 		if err := verdict(p.id, s == "allow" && time.Now().Before(p.deadline)); err != nil && first == nil {
 			first = err
 		}
-		r.bytes -= p.size
+		releasedBytes += p.size
 	}
-	r.packets = remaining
+	r.mu.Lock()
+	r.packets = append(remaining, r.packets[len(batch):]...)
+	r.bytes -= releasedBytes
+	r.mu.Unlock()
 	return first
 }

@@ -8,7 +8,9 @@ import (
 	"flowgate/internal/identity"
 	"fmt"
 	nfqueue "github.com/florianl/go-nfqueue/v2"
+	"log"
 	"net/netip"
+	"sync/atomic"
 	"time"
 )
 
@@ -78,36 +80,67 @@ func Run(ctx context.Context, e *daemon.Engine, direction string, ready func() e
 
 // Host mode leaves marks untouched; its post-queue nft chain applies a masked OR.
 func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, number uint16, labMark bool, ready func() error) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	nf, err := nfqueue.Open(&nfqueue.Config{NfQueue: number, MaxQueueLen: 128, MaxPacketLen: 65535, Copymode: nfqueue.NfQnlCopyPacket, Flags: nfqueue.NfQaCfgFlagConntrack, WriteTimeout: time.Second})
 	if err != nil {
 		return err
 	}
 	defer nf.Close()
 	retained := &Retainer{}
-	verdictPacket := func(id uint32, allow bool) error {
-		if allow && labMark {
-			return nf.SetVerdictWithOption(id, nfqueue.NfAccept, nfqueue.WithConnMark(Mark))
-		}
-		if allow {
-			return nf.SetVerdict(id, nfqueue.NfAccept)
-		}
-		return nf.SetVerdict(id, nfqueue.NfDrop)
-	}
-	defer retained.Flush(time.Now(), e.RetainedState, verdictPacket, true)
 	errors := make(chan error, 1)
 	fail := func(err error) {
 		select {
 		case errors <- err:
 		default:
 		}
+		cancel()
 	}
+	submitVerdict := func(id uint32, allow bool) (bool, error) {
+		if allow && ctx.Err() != nil {
+			allow = false
+		}
+		var err error
+		if allow && labMark {
+			err = nf.SetVerdictWithOption(id, nfqueue.NfAccept, nfqueue.WithConnMark(Mark))
+		} else if allow {
+			err = nf.SetVerdict(id, nfqueue.NfAccept)
+		} else {
+			err = nf.SetVerdict(id, nfqueue.NfDrop)
+		}
+		if err != nil {
+			fail(err)
+		}
+		return allow, err
+	}
+	verdictPacket := func(id uint32, allow bool) error {
+		_, err := submitVerdict(id, allow)
+		return err
+	}
+	var overloaded, expired atomic.Uint64
+	processor := packetProcessor{ctx: ctx, observe: e.Observe, retain: retained.Add, record: e.RecordPacketOutcome, verdict: submitVerdict, expired: &expired}
+	workers := newPacketWorkers(AttributionWorkers, processor.process)
+	report := func() {
+		if n := overloaded.Swap(0); n != 0 {
+			log.Printf("queue %d: dropped %d packets: attribution capacity exhausted", number, n)
+		}
+		if n := expired.Swap(0); n != 0 {
+			log.Printf("queue %d: dropped %d packets: attribution deadline or shutdown", number, n)
+		}
+	}
+	defer func() {
+		cancel()
+		workers.stop()
+		if err := retained.Flush(time.Now(), e.RetainedState, verdictPacket, true); err != nil {
+			log.Printf("queue %d: shutdown verdict: %v", number, err)
+		}
+		report()
+	}()
 	err = nf.RegisterWithErrorFunc(ctx, func(a nfqueue.Attribute) int {
 		if a.PacketID == nil {
 			return 0
 		}
-		verdict := nfqueue.NfDrop
-		var observed *daemon.Event
-		if a.Payload != nil {
+		if a.Payload != nil && ctx.Err() == nil {
 			packetDirection := direction
 			if direction == "both" {
 				packetDirection = ""
@@ -131,35 +164,13 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 				if packetDirection == "outgoing" && a.OutDev != nil {
 					f.Interface = *a.OutDev
 				}
-				v := e.Observe(f, token)
-				if v.State == "awaiting-decision" && retained.Add(*a.PacketID, len(*a.Payload), v) {
-					// Logging is a non-blocking enqueue; no log I/O on this path.
-					e.RecordPacketOutcome(v, daemon.VerdictHeld, nil)
+				if workers.submit(packetJob{id: *a.PacketID, size: len(*a.Payload), flow: f, token: token, deadline: time.Now().Add(AttributionTimeout)}) {
 					return 0
 				}
-				if v.State == "allowed" {
-					verdict = nfqueue.NfAccept
-				}
-				observed = &v
+				overloaded.Add(1)
 			}
 		}
-		var err error
-		if verdict == nfqueue.NfAccept && labMark {
-			err = nf.SetVerdictWithOption(*a.PacketID, verdict, nfqueue.WithConnMark(Mark))
-		} else {
-			err = nf.SetVerdict(*a.PacketID, verdict)
-		}
-		if observed != nil {
-			outcome := daemon.VerdictDropped
-			if err != nil {
-				outcome = daemon.VerdictFailed
-			} else if verdict == nfqueue.NfAccept {
-				outcome = daemon.VerdictAccepted
-			}
-			e.RecordPacketOutcome(*observed, outcome, err)
-		}
-		if err != nil {
-			fail(err)
+		if err := verdictPacket(*a.PacketID, false); err != nil {
 			return -1
 		}
 		return 0
@@ -172,12 +183,21 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 	}
 	ticker := time.NewTicker(20 * time.Millisecond)
 	defer ticker.Stop()
+	reporting := time.NewTicker(time.Second)
+	defer reporting.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
+			select {
+			case err := <-errors:
+				return err
+			default:
+				return nil
+			}
 		case err := <-errors:
 			return err
+		case <-reporting.C:
+			report()
 		case now := <-ticker.C:
 			if err := retained.Flush(now, e.RetainedState, verdictPacket, false); err != nil {
 				return err
