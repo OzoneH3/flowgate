@@ -174,6 +174,7 @@ func (e *Engine) liveEventsLocked() int {
 	}
 	return n
 }
+
 // Observe attributes a queued attempt and decides it. Ownership resolution can be
 // slow (process scans, runtime censuses) and runs outside e.mu so prompts, API
 // reads and independent flows are not held behind it.
