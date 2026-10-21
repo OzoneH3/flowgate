@@ -75,3 +75,43 @@ func TestPairedRootApplicationScope(t *testing.T) {
 		t.Fatal("invalid counterpart accepted")
 	}
 }
+
+func TestRootExplicitPolicyOverridesSharedAcrossActionsAndPriorities(t *testing.T) {
+	app := identity.Application{Kind: "native", Executable: "/usr/bin/tool", Revision: "v1"}
+	app.Key = identity.ApplicationKey(0, app)
+	flow, _ := identity.ParseFlow("tcp", "outgoing", "127.0.0.1:1234", "1.2.3.4:443")
+	a := identity.Attribution{Application: &app, Owners: []identity.Process{{UID: 0}}}
+	for _, sharedAction := range []string{"allow", "block", "ask"} {
+		for _, rootAction := range []string{"allow", "block", "ask"} {
+			for _, priority := range []int{-1000, 0, 1000} {
+				shared := Rule{ID: "shared", Executable: app.Executable, RootApplication: app.Key, Action: sharedAction, Priority: priority, Filter: Filter{Application: identity.ApplicationKey(1000, app), Revision: "v1", UID: 1000, Direction: "outgoing", Protocol: "tcp"}}
+				explicit := shared
+				explicit.ID, explicit.RootApplication, explicit.Action, explicit.Priority = "root", "", rootAction, 0
+				explicit.Filter.UID, explicit.Filter.Application = 0, app.Key
+				got, id, _ := Evaluate([]Rule{shared, explicit}, flow, a, time.Now())
+				if got != rootAction || id != "root" {
+					t.Fatalf("shared %s/%d root %s: %s %s", sharedAction, priority, rootAction, got, id)
+				}
+			}
+		}
+	}
+}
+
+func TestInterpreterRootSharingRejectedWithoutBreakingLegacyLoad(t *testing.T) {
+	for _, path := range []string{"/usr/bin/python3.13", "/usr/bin/bash", "/usr/bin/node", "/custom/script-host"} {
+		app := identity.Application{Kind: "native", Executable: path, Revision: "v1"}
+		r := Rule{Schema: 2, ID: "legacy", Executable: path, RootApplication: identity.ApplicationKey(0, app), Action: "allow", Filter: Filter{Application: identity.ApplicationKey(1000, app), UID: 1000, Revision: "v1", Direction: "outgoing", Protocol: "tcp"}}
+		if path == "/custom/script-host" {
+			r.Invocation = &identity.Invocation{Mode: "file", Name: "script"}
+		}
+		if err := r.Validate(); err != nil {
+			t.Fatalf("legacy rule cannot be loaded for revocation: %v", err)
+		}
+		if r.CanShareRoot() || r.MatchesApplication(r.RootApplication, "v1", 0) {
+			t.Fatalf("%s shared with root", path)
+		}
+		if !r.MatchesApplication(r.Filter.Application, "v1", 1000) {
+			t.Fatal("original user permission lost")
+		}
+	}
+}

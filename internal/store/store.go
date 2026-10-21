@@ -21,7 +21,7 @@ type Store struct {
 }
 
 func Open(path string) (*Store, error) {
-	if st, err := os.Lstat(path); err == nil && (!st.Mode().IsRegular() || st.Mode().Perm()&0077 != 0 || st.Size() > 16<<20) {
+	if st, err := os.Lstat(path); err == nil && (!st.Mode().IsRegular() || st.Mode().Perm()&0077 != 0) {
 		return nil, fmt.Errorf("rule database must be a private regular file")
 	}
 	// Precreate without following a symlink. The caller supplies a private owned directory.

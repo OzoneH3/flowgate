@@ -61,3 +61,25 @@ func TestRootScopeMigrationAndPreview(t *testing.T) {
 		t.Fatal("service account shared")
 	}
 }
+
+func TestLegacyInterpreterRootScopeRevokedAndPersisted(t *testing.T) {
+	e := New(time.Second)
+	uid := uint32(1000)
+	e.AdministratorUID = &uid
+	app := identity.Application{Kind: "native", Executable: "/usr/bin/python3.13", Revision: "v1"}
+	r := policy.Rule{Schema: 2, ID: "legacy", Version: 7, Created: time.Now(), Executable: app.Executable, RootApplication: identity.ApplicationKey(0, app), Action: "allow", Filter: policy.Filter{Application: identity.ApplicationKey(uid, app), UID: uid, Revision: "v1", Direction: "outgoing", Protocol: "tcp"}}
+	var saved []policy.Rule
+	e.SaveRules = func(rs []policy.Rule) error { saved = append([]policy.Rule{}, rs...); return nil }
+	if err := e.SetRules([]policy.Rule{r}); err != nil {
+		t.Fatal(err)
+	}
+	if len(saved) != 1 || saved[0].RootApplication != "" || saved[0].Version != 8 {
+		t.Fatal(saved)
+	}
+	if err := e.SetRules(saved); err != nil {
+		t.Fatal(err)
+	}
+	if e.rules[0].Version != 8 {
+		t.Fatal("revocation not idempotent")
+	}
+}

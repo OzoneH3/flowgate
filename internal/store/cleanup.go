@@ -8,6 +8,11 @@ import (
 	"time"
 )
 
+const cleanupBudget = 250 * time.Millisecond
+
+// Recently expired rules remain stored (but do not match) through clock corrections.
+const expiryArchiveGrace = 7 * 24 * time.Hour
+
 // LoadCurrent archives expired and positively obsolete native rules before
 // startup publishes policy. Only the exclusive daemon writer may run cleanup.
 // Archived JSON stays in the private database; it is never evaluated as policy.
@@ -23,6 +28,33 @@ func (s *Store) loadCurrent(now time.Time, obsolete func(string, string, string,
 	if err != nil {
 		return nil, err
 	}
+	// One worker and one total budget, not one goroutine per path. A stuck
+	// remote filesystem cannot prevent READY, and a timed-out census never
+	// mutates the database later. All uncertain rules are retained.
+	results := make(chan map[string]bool, 1)
+	cancel := make(chan struct{})
+	defer close(cancel)
+	go func() {
+		found := map[string]bool{}
+		for _, r := range rules {
+			select {
+			case <-cancel:
+				return
+			default:
+			}
+			if r.Preset == nil && !r.Filter.AllUIDs && obsolete(r.Executable, r.Filter.Application, r.Filter.Revision, r.Filter.UID) {
+				found[r.ID] = true
+			}
+		}
+		results <- found
+	}()
+	var obsoleteRules map[string]bool
+	timer := time.NewTimer(cleanupBudget)
+	defer timer.Stop()
+	select {
+	case obsoleteRules = <-results:
+	case <-timer.C:
+	}
 	type removed struct {
 		rule   policy.Rule
 		reason string
@@ -31,9 +63,9 @@ func (s *Store) loadCurrent(now time.Time, obsolete func(string, string, string,
 	kept := make([]policy.Rule, 0, len(rules))
 	for _, r := range rules {
 		reason := ""
-		if !r.Expires.IsZero() && !now.Before(r.Expires) {
+		if !r.Expires.IsZero() && !now.Before(r.Expires.Add(expiryArchiveGrace)) {
 			reason = "expired"
-		} else if r.Preset == nil && !r.Filter.AllUIDs && obsolete(r.Executable, r.Filter.Application, r.Filter.Revision, r.Filter.UID) {
+		} else if obsoleteRules[r.ID] {
 			reason = "replaced executable; no old process found"
 		}
 		if reason == "" {
@@ -42,9 +74,7 @@ func (s *Store) loadCurrent(now time.Time, obsolete func(string, string, string,
 			archived = append(archived, removed{r, reason})
 		}
 	}
-	if len(archived) == 0 {
-		return kept, nil
-	}
+
 	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, err
@@ -65,8 +95,19 @@ func (s *Store) loadCurrent(now time.Time, obsolete func(string, string, string,
 			return nil, err
 		}
 	}
+	// Preserve at least the latest complete startup batch (at most 256
+	// rules, 16 KiB each). Older recovery history is bounded to 512 entries.
+	pruned, err := tx.Exec("DELETE FROM archived_rules WHERE id NOT IN (SELECT id FROM archived_rules ORDER BY id DESC LIMIT 512)")
+	if err != nil {
+		return nil, err
+	}
 	if err = tx.Commit(); err != nil {
 		return nil, err
+	}
+	if n, _ := pruned.RowsAffected(); n > 0 {
+		if _, err := s.db.Exec("VACUUM"); err != nil {
+			return nil, fmt.Errorf("compact rule archive: %w", err)
+		}
 	}
 	return kept, nil
 }

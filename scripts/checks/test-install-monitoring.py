@@ -161,6 +161,20 @@ class MigrationVerification(unittest.TestCase):
   new=dict(self.rule,version=2,root_application=m.sha(b'0|native||/usr/bin/tool'))
   self.write(self.after,[new]);self.assertEqual(m.verified_rule_transition(self.before,self.after),[('r',2)])
   self.write(self.before,[new]);self.assertEqual(m.verified_rule_transition(self.before,self.after),[('r',2)])
+ def test_interpreter_scope_revocation_and_foreign_uid(self):
+  for name in ['python3.13','bash','node']:
+   path='/usr/bin/'+name
+   old=dict(self.rule,executable=path,root_application=m.sha(f'0|native||{path}'.encode()))
+   old['filter']=dict(self.rule['filter'],application=m.sha(f'1000|native||{path}'.encode()))
+   new=dict(old,version=2);new.pop('root_application')
+   self.write(self.before,[old]);self.write(self.after,[new])
+   self.assertEqual(m.verified_rule_transition(self.before,self.after),[('r',2)])
+   self.write(self.before,[new]);self.write(self.after,[dict(new,version=3,root_application=old['root_application'])])
+   with self.assertRaises(RuntimeError):m.verified_rule_transition(self.before,self.after)
+  old=dict(self.rule,root_application=m.sha(b'0|native||/usr/bin/tool'))
+  new=dict(self.rule,version=2)
+  self.write(self.before,[old]);self.write(self.after,[new])
+  self.assertEqual(m.verified_rule_transition(self.before,self.after,administrator_uid=None),[('r',2)])
  def test_unrelated_mutation_or_missing_rule_rejected(self):
   for new in [dict(self.rule,version=2),dict(self.rule,action='block'),dict(self.rule,version=2,root_application='wrong')]:
    self.write(self.after,[new])

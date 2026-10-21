@@ -472,11 +472,22 @@ list the recorded script paths in Details.
 
 ### Startup cleanup of obsolete saved rules
 
-The exclusive daemon writer archives expired rules and confirmed replaced native
+The exclusive daemon writer archives rules expired for at least seven days and confirmed replaced native
 executable revisions at startup, including restarts through `update-and-start.sh`.
 The complete rule JSON, reason, and timestamp are retained in `archived_rules` in
 the private policy database, in the same transaction that removes the active rule.
-Failure leaves the active rules unchanged and prevents startup with partial policy.
+An archive/delete transaction failure leaves active rules unchanged. The newest
+512 archive entries are retained (at least one complete 256-rule cleanup batch);
+older history is pruned and SQLite pages reclaimed. Existing databases enlarged
+by old unbounded archives can still open for pruning. Active rules retain their
+256-row and 16 KiB-per-document limits.
+
+The executable census has a 250 ms total budget and one worker. On timeout, all
+executable candidates are retained; the late worker cannot mutate policy. An
+unresponsive filesystem may leave that single worker blocked until process exit,
+but cannot hold up daemon readiness. Recently expired rules remain stored for a
+seven-day clock-correction grace period; policy still treats them as expired.
+This grace does not establish trusted time or protect against larger clock errors.
 
 A replaced version must have the same exact native executable path and user key,
 a different current file stamp, and no old executable inode in the process census.
@@ -484,7 +495,7 @@ Incomplete process visibility or an uncertain alternate root/mount view preserve
 the rule. Missing files, side-by-side executable paths, Wine/Electron/runtime
 identities, and absent script display metadata do not qualify for this cleanup.
 This is a conservative startup snapshot, not a guarantee against later rollback;
-restoring an older binary may require a new decision. Archives are recovery data,
+restoring an older binary may require a new decision. Archives are bounded recovery history (there is no restore API),
 not active permissions; there is no automatic transfer to the replacement version.
 A matching already-running daemon is not restarted solely to perform cleanup.
 
@@ -500,10 +511,12 @@ scope. No rule is inferred from a display name, launcher, or sudo command line.
 This scope applies to saved Allow, Block and Ask rules, preserving direction,
 endpoint, expiry, disabled state, priorities and Block precedence. Once and
 process-instance permissions stay unchanged. Other users, Wine/prefix identities,
-Electron hosted identities and native identities whose original key cannot be
+Electron hosted identities, recognized language/shell interpreters, rules carrying
+script invocation metadata, and native identities whose original key cannot be
 verified from their executable path remain separate. Existing root-only rules
-remain explicit root rules and can override a shared Allow through normal policy
-precedence. There is no blanket privilege-based network bypass.
+take precedence over shared rules whenever they match, regardless of the shared
+rule action or priority. Old interpreter root links are revoked and persisted at
+startup; the original user rule is retained. There is no blanket privilege-based network bypass.
 
 Electron groups top-level entries with the same exact executable path under one
 visual program when multiple accounts/identities exist. Original account rows,

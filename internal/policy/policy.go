@@ -47,6 +47,12 @@ type Rule struct {
 }
 
 func (r Rule) CanShareRoot() bool {
+	return r.validRootPair() && r.Invocation == nil && !identity.IsInterpreterExecutable(r.Executable)
+}
+
+// Accept old structurally valid pairs on load so startup can persist revocation.
+// Matching and new scope construction always require CanShareRoot.
+func (r Rule) validRootPair() bool {
 	return r.Preset == nil && r.Filter.UID != 0 && !r.Filter.AllPrograms && !r.Filter.AllUIDs && r.Filter.Process.IsZero() && r.Executable != "" && r.Filter.Application == identity.ApplicationKey(r.Filter.UID, identity.Application{Kind: "native", Executable: r.Executable})
 }
 
@@ -58,7 +64,7 @@ func (r Rule) MatchesApplication(key, revision string, uid uint32) bool {
 }
 
 func (r Rule) Validate() error {
-	if r.RootApplication != "" && (!r.CanShareRoot() || r.RootApplication != identity.ApplicationKey(0, identity.Application{Kind: "native", Executable: r.Executable})) {
+	if r.RootApplication != "" && (!r.validRootPair() || r.RootApplication != identity.ApplicationKey(0, identity.Application{Kind: "native", Executable: r.Executable})) {
 		return fmt.Errorf("invalid paired root application scope")
 	}
 
@@ -193,6 +199,28 @@ func EvaluateSession(rules []Rule, f identity.Flow, a identity.Attribution, now 
 			}
 		}
 		matches = append(matches, r)
+	}
+	// Root sharing is a fallback. Remove inherited candidates only when an
+	// explicit root-principal rule actually matches; preserve normal weighting
+	// for machine-wide AllUIDs policy and for all other principals.
+	if a.Principal().UID == 0 {
+		explicit := false
+		for _, r := range matches {
+			if r.Filter.UID == 0 && !r.Filter.AllUIDs {
+				explicit = true
+				break
+			}
+		}
+		if explicit {
+			kept := matches[:0]
+			for _, r := range matches {
+				if r.Filter.UID != 0 && r.RootApplication != "" {
+					continue
+				}
+				kept = append(kept, r)
+			}
+			matches = kept
+		}
 	}
 	sort.Slice(matches, func(i, j int) bool {
 		// NetLimiter Blocker: the rule with the higher weight is applied; on
