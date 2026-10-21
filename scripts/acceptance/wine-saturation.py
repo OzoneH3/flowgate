@@ -295,7 +295,10 @@ try:
     daemon_log = (RUN / 'daemon.log').read_text(errors='replace')
     drops = {k: sum(int(m) for m in re.findall(r'dropped (\d+) packets: ' + k, daemon_log)) for k in ['census lane capacity exhausted', 'attribution capacity exhausted', 'attribution deadline or shutdown']}
     result.update(native=native, wine=wine, queue_drop_logs=drops, pending_unruled_prefixes=late_pending, daemon_alive=daemon.poll() is None,
-                  daemon_log_tail=daemon_log.splitlines()[-20:], source=subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(), proton=dict(version=(Path(a.proton) / 'version').read_text().strip() if (Path(a.proton) / 'version').exists() else None,
+                  daemon_log_tail=daemon_log.splitlines()[-20:], source=subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+                  # A dirty tree means the tested binary is not exactly the recorded commit.
+                  source_dirty=bool(subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=no'], text=True).strip()),
+                  source_diff_sha256=__import__('hashlib').sha256(subprocess.check_output(['git', 'diff', 'HEAD'])).hexdigest(), proton=dict(version=(Path(a.proton) / 'version').read_text().strip() if (Path(a.proton) / 'version').exists() else None,
                                   proton_sha256=__import__('hashlib').sha256((Path(a.proton) / 'proton').read_bytes()).hexdigest(),
                                   wineserver_sha256=__import__('hashlib').sha256((Path(a.proton) / 'files/bin/wineserver').read_bytes()).hexdigest()),
                   measurement=dict(window='host monotonic just before barrier release .. all apps report SATURATION_SENT', poll_ms=20))
