@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Focused monitoring-only installer checks: real transaction, temp root, mocked systemd/nft/API."""
+from unittest.mock import patch
 import contextlib,hashlib,importlib.util,io,json,os,pathlib,sqlite3,sys,tempfile,unittest
 sys.dont_write_bytecode=True
 root=pathlib.Path(__file__).resolve().parents[2]
@@ -56,6 +57,19 @@ class MonitoringInstall(unittest.TestCase):
   with contextlib.redirect_stdout(io.StringIO())as out,contextlib.redirect_stderr(io.StringIO()):
    r=m.install(h,self.bundle,'T')
   return r,out.getvalue()
+ def test_administrator_selection_preserves_legacy_and_uses_sudo_on_fresh_install(self):
+  h=self.host()
+  with patch.dict(os.environ,{'SUDO_UID':'1234'}):
+   self.assertEqual(m.administrator_uid(h,False),1234)
+   self.assertEqual(m.administrator_uid(h,True),1000)
+  h.path('/etc/flowgate/administrator.json').write_text('{"uid":2345}')
+  self.assertEqual(m.administrator_uid(h,True),2345)
+
+ def test_symlink_parent_refused_before_install(self):
+  target=self.base/'target';target.mkdir()
+  link=self.base/'link';link.symlink_to(target)
+  with self.assertRaises(RuntimeError):m.safe_dir(self.host(),link/'child',0o755)
+
  def test_absent_service_installs_monitoring_without_protection_or_nm_dependency(self):
   dbbytes=(self.base/'var/lib/flowgate/rules.db').read_bytes()
   h=self.host();final,out=self.run_install(h)

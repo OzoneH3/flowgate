@@ -6,6 +6,14 @@ never installs the NetworkManager Requires= drop-in. Persists desired monitoring
 before the first start, preserves rules or verifies their explicit startup migration/archive and all foreign
 firewall/routing/Tailscale/bpftune state. Run once with terminal sudo.
 """
+
+if not __debug__:
+ raise RuntimeError('Optimized Python is unsupported: required verification checks would be disabled')
+
+import sys
+if __name__=='__main__' and not sys.flags.isolated:
+ raise SystemExit('Use scripts/install-prepared.py; direct non-isolated installer execution is unsupported')
+
 import argparse,hashlib,json,os,pathlib,socket,sqlite3,struct,subprocess,sys,tempfile,time
 
 UNITS=['flowgate.service','flowgate-guard.service']
@@ -29,7 +37,9 @@ class Host:
   out=[]
   for p in pathlib.Path('/proc').iterdir():
    if p.name.isdigit():
-    try:a=(p/'cmdline').read_bytes().split(b'\0')
+    try:
+     if p.stat().st_uid!=0:continue
+     a=(p/'cmdline').read_bytes().split(b'\0')
     except OSError:continue
     if len(a)>1 and a[1]==b'serve' and a[0].endswith(b'/flowgate'):out.append(int(p.name))
   return out
@@ -48,9 +58,10 @@ def atomic(h,path,data,mode=0o644):
 
 def safe_dir(h,path,mode):
  p=h.path(path)
- if p.exists():
-  assert p.is_dir()and not p.is_symlink()and h.root_owned(p.lstat()),('unsafe root path',path)
- else:p.mkdir(mode=mode,parents=True)
+ for parent in reversed([p,*p.parents]):
+  if parent.is_symlink():raise RuntimeError('Symlink installation directory: '+str(parent))
+  if not parent.exists():parent.mkdir(mode=mode if parent==p else 0o755)
+  if not parent.is_dir()or not h.root_owned(parent.lstat()):raise RuntimeError('Unsafe installation directory: '+str(parent))
  return p
 
 def known_contents(h,name,release_dir):
@@ -122,16 +133,30 @@ def flowgate_tables(h):
  out=json.loads(h.run('nft','-j','list','tables'))
  return sorted({o['table']['name']for o in out.get('nftables',[])if 'table'in o and o['table']['name']in OWNED_TABLES})
 
+def administrator_uid(h,existing):
+ config=h.path('/etc/flowgate/administrator.json')
+ if config.exists()or config.is_symlink():
+  if config.is_symlink()or not h.root_owned(config.stat()):raise RuntimeError('Unsafe administrator configuration')
+  uid=json.loads(config.read_text()).get('uid')
+ elif existing:
+  uid=1000  # Preserve the administrator of installations predating this config.
+ else:
+  try:uid=int(os.environ.get('SUDO_UID',''))
+  except ValueError:raise RuntimeError('Fresh installation requires sudo from the intended desktop administrator')
+ if type(uid)is not int or not 0<uid<2**32-1:raise RuntimeError('Invalid desktop administrator UID')
+ return uid
+
 def install(h,bundle,stamp):
  manifest=json.loads((bundle/'manifest.json').read_text());assert manifest['isolated_passed']is True
  base=safe_dir(h,'/usr/local/lib/flowgate',0o755);releases=safe_dir(h,'/usr/local/lib/flowgate/releases',0o755)
  name=manifest['release'];assert name and '/'not in name and name not in('.','..')
  release=releases/name
+ admin_uid=administrator_uid(h,(base/'current').exists())
  # 1. Immutable release: verify every bundle hash; an existing identical release is reused, never altered.
  if release.exists():
   for f,want in manifest['files'].items():assert sha((release/f).read_bytes())==want,('installed release differs',f)
  else:
-  staging=releases/('.staging-'+name);assert not staging.exists();staging.mkdir(mode=0o755)
+  staging=pathlib.Path(tempfile.mkdtemp(prefix='.staging-'+name+'-',dir=releases))
   os.chmod(staging,0o755)  # explicit: the installer umask is 077; releases stay world-readable like earlier ones
   for f,want in manifest['files'].items():
    assert '/'not in f;data=(bundle/f).read_bytes();assert sha(data)==want,(f,'hash mismatch')
@@ -176,6 +201,7 @@ def install(h,bundle,stamp):
  atomic(h,backup/'install-record.json',json.dumps(record,indent=2).encode(),0o600)
  # 5. Configuration: preserve zones; persist monitoring BEFORE any start.
  safe_dir(h,'/etc/flowgate',0o755)
+ atomic(h,etc/'administrator.json',json.dumps({'uid':admin_uid}).encode(),0o600)
  if not(etc/'zones.json').exists():
   z=(before or{}).get('network_zones')or{}
   atomic(h,etc/'zones.json',json.dumps({'local':z.get('local_prefixes',[]),'internet':z.get('internet_prefixes',[])}).encode(),0o600)
@@ -206,7 +232,7 @@ def install(h,bundle,stamp):
    try:_,r=h.api();break
    except (OSError,ValueError,AssertionError):h.sleep(.25)
   if r is None:raise RuntimeError('API did not become ready')
-  expected_rules=verified_rule_transition(backup/'rules.db',data/'rules.db')
+  expected_rules=verified_rule_transition(backup/'rules.db',data/'rules.db',admin_uid)
   problems=verify_monitoring(r,manifest,expected_rules)
   tables=flowgate_tables(h)
   if tables:problems.append(('owned interception tables present',tables))
@@ -223,6 +249,7 @@ def install(h,bundle,stamp):
   subprocess_safe(h,'systemctl','stop','flowgate.service')
   subprocess_safe(h,'systemctl','disable','flowgate.service')
   subprocess_safe(h,str(release/'flowgate'),'protection-recover','--state','/run/flowgate-enforcement')
+  print('Protection remains OFF, including after reboot. Recover with scripts/update-and-start.sh --recover-stopped (monitoring only), then explicitly start protection after verification.',file=sys.stderr)
   print('Evidence:',backup,file=sys.stderr)
   raise
 

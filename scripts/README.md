@@ -7,7 +7,7 @@ fixtures belong in `.workspace/`.
 | --- | --- |
 | `build-*.sh` | Build the backend helpers, Windows fixtures or desktop clients. |
 | `run-*.sh`, `demo-desktop.sh` | Launch development clients or the desktop demo. |
-| `check.sh` | Main Go race tests and native isolated receiver checks; `--wine` adds Wine. |
+| `check.sh` | Go, Python, Electron and Qt checks plus isolated receivers; `--wine` adds Wine. |
 | `checks/` | Focused check runners and mocked deployment tests. |
 | `acceptance/` | Isolated integration scenarios, their peers and shared fixture modules. |
 | `prepare-*-release.sh` | Prepare immutable artifacts without installation. |
@@ -79,3 +79,41 @@ Read-only status checks and mocked workflow tests live in
 See [the reproduction guide](../docs/PROTON-LAUNCHER-REGRESSION.md) for inputs and
 meaning of the results. Success means the known attribution failure was
 reproduced and receiver controls passed; it does not mean the failure is fixed.
+
+## Installer trust and recovery
+
+Use `python3 scripts/install-prepared.py --bundle PATH` for a monitoring-only
+installation, or `update-and-start.sh` for the complete update workflow. The
+coordinator snapshots and verifies the selected bundle before authentication.
+Root receives those bytes on stdin, stages them in a private root-owned directory,
+and uses `/usr/bin/python3 -I`. It does not import modules or execute the installer
+from the writable build folder. This trusts the selected local checkout; the
+manifest is an integrity check, **not** a publisher signature. Do not run a bundle's
+Python installer directly with sudo.
+
+`--recover-stopped` recovers an unavailable daemon in monitoring mode only.
+After successful recovery, run the normal update command to start protection.
+If an install fails before replacement and the original daemon generation/build
+is still running, the coordinator restores its prior protection mode. A failed
+verification after replacement leaves protection **off, including after reboot**. Old
+executables/databases are not restored across potentially completed migrations.
+The error identifies the backup/evidence directory. No automatic activation retry
+is performed.
+
+New installations select the invoking sudo user's UID. Existing installations
+retain their configured administrator; installations from before the configuration
+file retain their historical UID 1000. Root-owned
+`/etc/flowgate/administrator.json` records this choice.
+
+Release preparation builds both collectors from source and runs current Go race
+and vet checks. It no longer depends on another developer's historical evidence
+folders or a particular collector binary hash. These checks do not establish
+live-kernel collector compatibility or native desktop behavior on a new host.
+
+`check.sh` now includes Go vet, Go race tests in a private network namespace,
+isolated native receivers, mocked deployment
+checks, Electron build/tests, and Qt offscreen desktop/snapshot tests. Wine remains
+opt-in with `--wine`. Private mount/runtime and essential-networking checks run in private namespaces.
+The subordinate-ID user-namespace fixture is still separate and explicitly
+reported as not covered by the default command. Required build dependencies must be installed; missing
+dependencies fail the command rather than silently skipping a suite.

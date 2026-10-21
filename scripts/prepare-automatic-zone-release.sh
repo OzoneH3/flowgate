@@ -23,9 +23,6 @@ cp docs/PROTON-LAUNCHER-REGRESSION.md "$bundle/docs/"
 cp docs/AUTOMATIC-ZONES.md "$bundle/docs/backend-zones.md"
 cp electron/AUTOMATIC-ZONES.md "$bundle/docs/electron-zones.md"
 cp electron/PROMPT-PRESENTATION.md electron/REMEMBER-REVALIDATION.md "$bundle/docs/"
-for f in proton-one-prompt-spaces2.log proton-one-prompt-go.log proton-one-prompt-ui.log proton-fix-discovery-receiver.log proton-fix-race.log proton-fix-ui-tests.log proton-fix-root-scratch.log proton-fix-ui-real-data.log auto-zones-integrated-go.log auto-zones-final-race.log auto-zones-vet.log auto-zones-integrated-ui-tests.log auto-zones-integrated-receiver.log cgnat-parity-go.log cgnat-parity-race.log cgnat-parity-ui-tests.log automatic-zone-migration-preview.json; do
- test ! -f ".workspace/$f" || cp ".workspace/$f" "$bundle/evidence/$f"
-done
 cat > "$bundle/launch-ui" <<'LAUNCH'
 #!/bin/sh
 set -eu

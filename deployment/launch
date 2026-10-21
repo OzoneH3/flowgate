@@ -2,7 +2,15 @@
 import json,os,pathlib,subprocess,time,sys
 here=pathlib.Path(__file__).resolve().parent
 zones=json.loads(pathlib.Path('/etc/flowgate/zones.json').read_text())
-args=[str(here/'flowgate'),'serve','--socket','/run/flowgate-api/daemon.sock','--database','/var/lib/flowgate/rules.db','--uid','1000','--administrator','--allow-evaluation','--evaluation-state','/run/flowgate-enforcement','--allow-protection','--protection-state','/var/lib/flowgate/protection.json','--allow-traffic-control','--udp-helper',str(here/'udp-collector'),'--restore-udp','--tcp-initiation-helper',str(here/'tcp-initiation'),'--tcp-initiation-cgroup','/sys/fs/cgroup','--tcp-initiation-observe-shared','--systemd-notify']
+admin_config=pathlib.Path('/etc/flowgate/administrator.json')
+admin_uid=1000  # Compatibility with old monitoring/receiver installers.
+if admin_config.exists() or admin_config.is_symlink():
+ if admin_config.is_symlink():raise SystemExit('Unsafe administrator configuration')
+ st=admin_config.stat()
+ if st.st_uid!=0 or st.st_mode&0o022:raise SystemExit('Unsafe administrator configuration')
+ admin_uid=json.loads(admin_config.read_text()).get('uid')
+ if type(admin_uid)is not int or not 0<admin_uid<2**32-1:raise SystemExit('Invalid administrator UID')
+args=[str(here/'flowgate'),'serve','--socket','/run/flowgate-api/daemon.sock','--database','/var/lib/flowgate/rules.db','--uid',str(admin_uid),'--administrator','--allow-evaluation','--evaluation-state','/run/flowgate-enforcement','--allow-protection','--protection-state','/var/lib/flowgate/protection.json','--allow-traffic-control','--udp-helper',str(here/'udp-collector'),'--restore-udp','--tcp-initiation-helper',str(here/'tcp-initiation'),'--tcp-initiation-cgroup','/sys/fs/cgroup','--tcp-initiation-observe-shared','--systemd-notify']
 # bpftune is Type=simple: After= alone does not mean callbacks are installed.
 # Wait for its observed program inventory to settle before optional shared attach.
 # Timeout disables only event collection; firewall readiness remains independent.

@@ -3,6 +3,10 @@
 Requires a prepared immutable-hash bundle and successful isolated acceptance.
 Copies artifacts BEFORE stopping the old writer; no checkout path in the service.
 """
+
+if not __debug__:
+ raise RuntimeError('Optimized Python is unsupported: required verification checks would be disabled')
+
 import argparse,hashlib,json,os,pathlib,shutil,socket,sqlite3,struct,subprocess,sys,tempfile,time
 
 def classify_preflight(report):

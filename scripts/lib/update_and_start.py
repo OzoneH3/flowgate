@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """One-command update orchestration. The installer remains monitoring-only."""
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -50,6 +51,51 @@ def matches(status, manifest):
     return build.get('source') == manifest['source'] and build.get('executable_sha256') == manifest['files']['flowgate'] and build.get('modified') is False
 
 
+# The privileged process receives bytes selected before authentication, never a
+# path into the user's writable build tree. This is a local-source trust model,
+# not a signature or proof that the selected source is trustworthy.
+STAGE_INSTALL = r"""
+import base64, hashlib, json, os, pathlib, subprocess, sys, tempfile
+payload = json.load(sys.stdin)
+base = pathlib.Path('/usr/local/lib/flowgate')
+for path in reversed([base, *base.parents]):
+    if not path.exists(): path.mkdir(mode=0o755)
+    st = path.lstat()
+    if path.is_symlink() or not path.is_dir() or st.st_uid != 0 or st.st_mode & 0o022:
+        raise RuntimeError('Unsafe installation parent: ' + str(path))
+with tempfile.TemporaryDirectory(prefix='.install-', dir=base) as temporary:
+    stage = pathlib.Path(temporary)
+    for name, encoded in payload['files'].items():
+        if name in ('', '.', '..') or '/' in name:
+            raise RuntimeError('Invalid staged filename')
+        data = base64.b64decode(encoded, validate=True)
+        (stage / name).write_bytes(data)
+    manifest = json.loads((stage / 'manifest.json').read_bytes())
+    for name, expected in manifest['files'].items():
+        if name not in payload['files'] or hashlib.sha256((stage / name).read_bytes()).hexdigest() != expected:
+            raise RuntimeError('Staged bundle hash mismatch')
+    subprocess.run(['/usr/bin/python3', '-I', str(stage / 'install-monitoring.py'), '--bundle', str(stage)], check=True)
+"""
+
+
+def snapshot_bundle(backend, expected_manifest=None):
+    manifest_bytes = (backend / 'manifest.json').read_bytes()
+    manifest = json.loads(manifest_bytes)
+    if expected_manifest is not None and manifest != expected_manifest:
+        raise RuntimeError('Bundle manifest changed before authentication')
+    files = {'manifest.json': base64.b64encode(manifest_bytes).decode()}
+    if 'install-monitoring.py' not in manifest['files']:
+        raise RuntimeError('Installer missing from bundle manifest')
+    for name, expected in manifest['files'].items():
+        if name in ('', '.', '..', 'manifest.json') or '/' in name:
+            raise RuntimeError('Invalid backend bundle filename')
+        data = (backend / name).read_bytes()
+        if hashlib.sha256(data).hexdigest() != expected:
+            raise RuntimeError('Bundle changed before authentication: ' + name)
+        files[name] = base64.b64encode(data).decode()
+    return json.dumps({'files': files}).encode()
+
+
 class Host:
     def status(self):
         with socket.socket(socket.AF_UNIX) as client:
@@ -67,14 +113,18 @@ class Host:
     def installed(self):
         return pathlib.Path('/usr/local/lib/flowgate/current').exists()
 
+    def prepare_install(self, backend, root, wine_discovery, expected_manifest=None):
+        self.install_payload = snapshot_bundle(backend, expected_manifest)
+        self.wine_source = (root / 'scripts/lib/configure_wine_discovery.py').read_text() if wine_discovery else None
+
     def authenticate(self):
         subprocess.run(['sudo', '-v'], check=True)
 
     def install(self, backend):
-        subprocess.run(['sudo', '-n', sys.executable, str(backend / 'install-monitoring.py'), '--bundle', str(backend)], check=True)
+        subprocess.run(['sudo', '-n', '/usr/bin/python3', '-I', '-c', STAGE_INSTALL], input=self.install_payload, check=True)
 
     def configure_wine(self, root):
-        subprocess.run(['sudo', '-n', sys.executable, str(root / 'scripts/lib/configure_wine_discovery.py')], check=True)
+        subprocess.run(['sudo', '-n', '/usr/bin/python3', '-I', '-c', self.wine_source], check=True)
 
     def action(self, backend, selected):
         # Existing typed client binds mutations to fresh generation/protection ID.
@@ -163,9 +213,11 @@ def update(host, root, revision, *, dry=False, gui=True, profile="both", wine_di
         if host.installed() and not recover_stopped:
             raise RuntimeError('Installed daemon status unavailable; use --recover-stopped for guarded monitoring-only recovery. No action taken')
         before = None
+    if recover_stopped and before is None:
+        profile = 'monitoring'
     previous = mode(before) if before else 'monitoring'
     selected = previous if profile == "preserve" else profile
-    needs_install = wine_discovery or before is None or (not matches(before, manifest) if manifest else before.get('build', {}).get('source') != revision)
+    needs_install = wine_discovery or before is None or (not matches(before, manifest) if manifest else (before.get('build') or {}).get('source') != revision)
     if dry:
         if needs_install:
             say('Would authenticate sudo, stop protection, install and verify ' + revision)
@@ -178,10 +230,12 @@ def update(host, root, revision, *, dry=False, gui=True, profile="both", wine_di
             say('Would close the old released GUI and launch ' + str(bundle / 'launch-ui'))
         return
     stopped_for_update = False
+    recovery_status = None
     try:
         if needs_install:
             # Authenticate before interrupting a running firewall. Re-read after
             # the password prompt so user changes during authentication win.
+            host.prepare_install(backend, root, wine_discovery, manifest)
             host.authenticate()
             current = host.status() if before is not None else None
             if current is not None:
@@ -189,6 +243,7 @@ def update(host, root, revision, *, dry=False, gui=True, profile="both", wine_di
                 if not at_mode(current, 'monitoring'):
                     say('Stopping protection for the update; will restore ' + selected)
                     stopped_for_update = True
+                    recovery_status = current
                     transition(host, backend, 'monitoring')
             if wine_discovery:
                 host.configure_wine(root)
@@ -209,7 +264,21 @@ def update(host, root, revision, *, dry=False, gui=True, profile="both", wine_di
         say('Update verified; protection mode: ' + selected)
     except Exception:
         if stopped_for_update:
-            say('Update incomplete after requesting a protection stop. No automatic installation or activation retry; inspect flowgate-control status.')
+            restored = False
+            try:
+                current = host.status()
+                # Only a pre-switch failure is reversible: the same daemon must
+                # still own its original generation and executable. Never start
+                # an old executable against a potentially migrated database.
+                if recovery_status and current.get('generation') == recovery_status.get('generation') and current.get('generation') and current.get('build') == recovery_status.get('build') and at_mode(current, 'monitoring'):
+                    transition(host, backend, mode(recovery_status))
+                    restored = True
+            except Exception as recovery_error:
+                say('Previous protection could not be restored: ' + str(recovery_error))
+            if restored:
+                say('Update failed before daemon replacement; restored the original daemon protection mode.')
+            else:
+                say('Update incomplete; protection may remain OFF across reboot. No rollback across daemon generations. Use --recover-stopped for monitoring-only recovery, then explicitly start protection.')
         raise
     if gui:
         say('Switching to the matching GUI')

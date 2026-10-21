@@ -35,6 +35,8 @@ class FakeHost:
         return self.current
     def installed(self):
         return True
+    def prepare_install(self, backend, root, wine_discovery, expected_manifest=None):
+        pass
     def authenticate(self):
         self.calls.append('authenticate')
         if self.auth_error:
@@ -87,7 +89,7 @@ class Update(unittest.TestCase):
         with self.assertRaises(RuntimeError):self.run_update(h)
         self.assertNotIn('authenticate',h.calls)
         self.run_update(h,recover_stopped=True,gui=False)
-        self.assertEqual([c for c in h.calls if c!='status'],['authenticate','install','both'])
+        self.assertEqual([c for c in h.calls if c!='status'],['authenticate','install'])
 
     def test_active_update_authenticates_before_stop_then_restores_both_before_gui(self):
         h = FakeHost()
@@ -106,12 +108,22 @@ class Update(unittest.TestCase):
         self.assertNotIn('monitoring', h.calls)
         self.assertNotIn('install', h.calls)
         self.assertTrue(m.at_mode(h.current, 'both'))
-    def test_failed_install_cannot_reactivate_or_launch_gui(self):
+    def test_pre_switch_failure_restores_original_daemon_without_launching_gui(self):
         h = FakeHost(); h.install_error = True
         with self.assertRaises(subprocess.CalledProcessError): self.run_update(h)
-        self.assertTrue(m.at_mode(h.current, 'monitoring'))
+        self.assertTrue(m.at_mode(h.current, 'both'))
+        self.assertNotIn('gui', h.calls)
+    def test_failed_install_after_daemon_switch_never_restores_old_mode(self):
+        class Switched(FakeHost):
+            def install(self, backend):
+                self.current = status('new', 'monitoring')
+                self.current['generation'] = 'new-generation'
+                raise subprocess.CalledProcessError(1, 'install')
+        h = Switched()
+        with self.assertRaises(subprocess.CalledProcessError): self.run_update(h)
         self.assertNotIn('both', h.calls)
         self.assertNotIn('gui', h.calls)
+
     def test_lost_acknowledgements_are_reconciled_without_replaying_mutations(self):
         h = FakeHost(); h.lost_ack = True
         self.run_update(h)
@@ -153,6 +165,13 @@ class Update(unittest.TestCase):
         h = FakeHost()
         self.run_update(h, dry=True, wine_discovery=True)
         self.assertEqual(h.calls, ['status'])
+    def test_dry_run_missing_manifest_and_null_build(self):
+        import shutil
+        shutil.rmtree(self.root / '.workspace')
+        h = FakeHost(); h.current['build'] = None
+        self.run_update(h, dry=True)
+        self.assertEqual(h.calls, ['status'])
+
     def test_dry_run_is_read_only(self):
         h = FakeHost()
         self.run_update(h, dry=True)

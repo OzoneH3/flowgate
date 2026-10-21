@@ -3,7 +3,11 @@
 No broad policy rules. Deletes only acknowledged test rule IDs and own resources.
 Failure restores monitoring through the installer; never reports ACK as delivery.
 """
-import argparse,json,os,pathlib,signal,socket,struct,subprocess,time,uuid
+
+if not __debug__:
+ raise RuntimeError('Optimized Python is unsupported: required verification checks would be disabled')
+
+import argparse,json,os,pathlib,signal,socket,struct,subprocess,sys,time,uuid
 p=argparse.ArgumentParser();p.add_argument('--release',required=True);p.add_argument('--evidence',required=True);p.add_argument('--isolated',action='store_true',help='test harness only; kernel collectors remain separately accepted');a=p.parse_args()
 if a.isolated:assert os.environ.get('FLOWGATE_PARENT_NETNS')!=os.readlink('/proc/self/ns/net') and pathlib.Path('/proc/self/uid_map').read_text().split()[-1]=='1'
 test_uid=0 if a.isolated else 1000
@@ -128,13 +132,16 @@ finally:
  for saved in list(owned.values()):
   try:api('rule-delete',generation=api()['generation'],id=saved['id'],expected_version=saved['version']);owned.pop(saved['id'])
   except Exception:pass
- for child in children.values():
-  if child.poll()is None:child.terminate()
-  child.wait(5)
- if peer and peer.poll()is None:
-  try:ask(peer,op='quit');peer.wait(6)
-  except Exception:peer.terminate();peer.wait(6)
- write_zones(oldzones)
+ # Always restore zones even if a disposable process refuses to exit.
+ try:
+  for child in [*children.values(),*([peer]if peer else[])]:
+   try:
+    if child.poll()is None:child.terminate()
+    try:child.wait(5)
+    except subprocess.TimeoutExpired:child.kill();child.wait(5)
+   except Exception as error:print('Disposable child cleanup failed:',error,file=sys.stderr)
+ finally:
+  write_zones(oldzones)
  (evidence/'remaining-test-rules.json').write_text(json.dumps(owned,indent=2))
  # Final restart restores original config and desired mode, no disposable resources.
  if not owned:

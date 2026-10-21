@@ -61,13 +61,18 @@ func TestEssentialAPIAtomicReplayStaleRemove(t *testing.T) {
 	if saved.Error != "" || len(saved.EssentialReceipt.Rules) != 2 {
 		t.Fatalf("save %+v", saved)
 	}
-	manager := a.e.Essential
-	a.e.Essential = nil
-	inventory := call("list", "")
+	// Manager configuration is immutable after Serve starts. Use a separate
+	// server to check persisted inventory without racing live API readers.
+	rulesWithoutManager := a.e.Rules(0, true)
+	withoutManager, _, _, _ := observedAPI(t, func(e *Engine, _ *store.Store) {
+		if err := e.SetRules(rulesWithoutManager); err != nil {
+			t.Fatal(err)
+		}
+	})
+	inventory := callResponse(withoutManager.path, Request{Version: 1, Operation: "list"})
 	if !strings.Contains(strings.Join(inventory.Capabilities, ","), EssentialCapability) {
 		t.Fatal("schema5 inventory omitted capability")
 	}
-	a.e.Essential = manager
 	replay := call("essential-apply", p.EssentialPreview.Token)
 	if replay.Error != "" || !replay.Replayed {
 		t.Fatal("replay", replay)

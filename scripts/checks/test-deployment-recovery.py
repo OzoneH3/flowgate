@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 """Unprivileged trace of the fixed local recovery command. No host paths/actions."""
+
+if not __debug__:
+ raise RuntimeError('Optimized Python is unsupported: required verification checks would be disabled')
+
 import json,os,pathlib,subprocess,sys,tempfile,types
 root=pathlib.Path(__file__).resolve().parents[2];run=pathlib.Path(tempfile.mkdtemp(prefix='recovery-trace-',dir=root/'.workspace'))
 release=run/'release';release.mkdir();state=run/'state';state.mkdir();(state/'protection.json').write_text('{"schema":1,"mode":"both"}');(state/'rules.db').write_bytes(b'policy-sentinel')

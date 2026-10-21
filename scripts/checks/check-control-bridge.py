@@ -2,6 +2,10 @@
 """Test the terminal bridge with simulated sudo in a disposable namespace.
 No password/authentication mechanism or real-host activation is exercised.
 """
+
+if not __debug__:
+ raise RuntimeError('Optimized Python is unsupported: required verification checks would be disabled')
+
 import json,os,subprocess,time,sys,tempfile
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2]

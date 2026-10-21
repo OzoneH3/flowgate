@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 """Unprivileged uninstall ordering trace. No systemd calls or host writes."""
+
+if not __debug__:
+ raise RuntimeError('Optimized Python is unsupported: required verification checks would be disabled')
+
 import json,os,pathlib,subprocess,sys,tempfile,types
 root=pathlib.Path(__file__).resolve().parents[2]
 run=pathlib.Path(tempfile.mkdtemp(prefix='uninstall-trace-',dir=root/'.workspace'))

@@ -2,6 +2,10 @@
 """Synthetic helper protocol and actual authenticated API; NO BPF metrics claimed.
 Run with scripts/lab.sh. No firewall calls or root outside the user namespace.
 """
+
+if not __debug__:
+ raise RuntimeError('Optimized Python is unsupported: required verification checks would be disabled')
+
 import json,os,socket,subprocess,tempfile,time
 from pathlib import Path
 root=Path(__file__).resolve().parents[2]
