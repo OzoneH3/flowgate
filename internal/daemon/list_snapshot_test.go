@@ -141,7 +141,13 @@ func TestListLifecycleExpiresWithoutReadersAndStopsWithLastListener(t *testing.T
 func TestListAPIReadsPublishedSnapshotWhileEngineLocked(t *testing.T) {
 	e := New(time.Second)
 	e.LocalPeer = nil
-	dir := t.TempDir()
+	// Keep the Unix socket below sockaddr_un's path limit even when TMPDIR
+	// is a repository-local workspace with a long absolute path.
+	dir, err := os.MkdirTemp("", "list-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
 	if err := os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
 	}

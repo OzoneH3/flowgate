@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -27,7 +28,14 @@ func TestWineMemfdImageProof(t *testing.T) {
 	if err := os.WriteFile(path, header, 0600); err != nil {
 		t.Fatal(err)
 	}
-	cutoff := time.Now().Add(time.Millisecond).UnixNano()
+	// Derive the synthetic start from the source's actual filesystem clock,
+	// not a future wall-clock value (filesystem timestamps can be coarser).
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := info.Sys().(*syscall.Stat_t)
+	cutoff := max(st.Ctim.Nano(), st.Mtim.Nano()) + 1
 	fd, err := unix.MemfdCreate("wine-mapping", 0)
 	if err != nil {
 		t.Fatal(err)
@@ -68,8 +76,13 @@ func TestWineMemfdImageProof(t *testing.T) {
 	if err = os.Rename(path, path+".old"); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(2 * time.Millisecond)
 	if err = os.WriteFile(path, header, 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Explicitly place the replacement at the synthetic start boundary.
+	// Sleeping cannot guarantee that filesystem timestamps have advanced.
+	boundary := time.Unix(0, cutoff)
+	if err = os.Chtimes(path, boundary, boundary); err != nil {
 		t.Fatal(err)
 	}
 	if wineMemfdImageBefore(base, path, maps, cutoff) {
