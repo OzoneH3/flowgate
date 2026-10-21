@@ -201,3 +201,17 @@ test('ended request whose sandboxed program exited: classified, explained, no fu
   const src = fs.readFileSync(path.join(__dirname, '../src/backend.ts'), 'utf8');
   assert.match(src, /operation: 'request-rule-preview', \.\.\.c \}\);\n\s*\/\/[^\n]*\n\s*if \(r\.error\) throw Error\(\(r\.error_code \? r\.error_code \+ ': ' : ''\) \+ r\.error\);/);
 });
+
+test('native application identity wins over a verified launch wrapper title', () => {
+  for (const [name,prefix] of [['AlphaNative','/prefix-a'],['BetaNative','/prefix-b']]) {
+    const application={kind:'native',name,display_name:name,key:`key-${name}`,revision:`rev-${name}`,executable:`/games/${name}`};
+    const provenance={evidence:'verified',role:'helper',group:`launch-${name}`,launch:{kind:'steam',launcher_name:'reaper',prefix,game:{name:'runtime-bootstrap',executable:'/runtime/bootstrap',revision:'bootstrap-revision',status:'verified-file'}}};
+    const event=ev({local_peer:undefined,attribution:{status:'directly-associated',visibility_complete:true,application,owners:[{pid:10,uid:1000,application,executable:application.executable,provenance}],provenance}});
+    const before=JSON.stringify(event);
+    const summary=ps.promptSummary(event,'fallback');
+    assert.equal(summary.title,name);
+    assert.equal(summary.owner,'');
+    assert.equal(summary.ownIdentity,true,'desktop metadata may decorate the actual application');
+    assert.equal(JSON.stringify(event),before,'presentation never rewrites owner, key, revision or prefix');
+  }
+});
