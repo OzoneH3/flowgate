@@ -138,3 +138,189 @@ func TestWorkerByteBound(t *testing.T) {
 		t.Fatal("negative size accepted")
 	}
 }
+
+func waitWorkerState(t *testing.T, w *packetWorkers, ready func() bool) {
+	t.Helper()
+	end := time.Now().Add(2 * time.Second)
+	for time.Now().Before(end) {
+		w.mu.Lock()
+		ok := ready()
+		w.mu.Unlock()
+		if ok {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("worker state deadline")
+}
+
+func TestCensusLaneReservesNativeProgressAndPreservesEndpointOrder(t *testing.T) {
+	release := make(chan struct{})
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	native := make(chan uint32, 1)
+	done := make(chan uint32, 32)
+	var mu sync.Mutex
+	general := map[uint32]int{}
+	w := newPacketLanes(AttributionWorkers, CensusWorkers, func(p packetJob, stop, census bool) bool {
+		if stop {
+			done <- p.id
+			return true
+		}
+		if !census {
+			mu.Lock()
+			general[p.id]++
+			mu.Unlock()
+			if p.id == 100 {
+				native <- p.id
+				return true
+			}
+			return false
+		}
+		<-release
+		done <- p.id
+		return true
+	}, func(p packetJob, _ bool) { t.Errorf("unexpected lane rejection %d", p.id) })
+	defer func() { unblock(); w.stop() }()
+	// More cold sockets than general workers, all parked in the census lane.
+	for i := 1; i <= 12; i++ {
+		if !w.submit(job(uint32(i), 8000+i)) {
+			t.Fatal("submit")
+		}
+	}
+	waitWorkerState(t, w, func() bool { return w.censusCount == 12 })
+	if !w.submit(job(20, 8001)) {
+		t.Fatal("same-endpoint follower")
+	}
+	if !w.submit(job(100, 9000)) {
+		t.Fatal("native capacity lost")
+	}
+	if receiveID(t, native) != 100 {
+		t.Fatal("native stalled behind census")
+	}
+	mu.Lock()
+	followedGeneral := general[20]
+	mu.Unlock()
+	if followedGeneral != 0 {
+		t.Fatal("endpoint follower jumped to general lane")
+	}
+	unblock()
+	order := []uint32{}
+	for i := 0; i < 13; i++ {
+		order = append(order, receiveID(t, done))
+	}
+	first, second := -1, -1
+	for i, id := range order {
+		if id == 1 {
+			first = i
+		}
+		if id == 20 {
+			second = i
+		}
+	}
+	if first < 0 || second <= first {
+		t.Fatalf("same endpoint reordered across lanes: %v", order)
+	}
+	waitWorkerState(t, w, func() bool {
+		return w.count == 0 && w.censusCount == 0 && w.bytes == 0 && w.censusBytes == 0 && len(w.census) == 0
+	})
+}
+
+func TestCensusLaneSaturationDropsOnlyOverflowAndDrains(t *testing.T) {
+	release := make(chan struct{})
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	dropped := make(chan uint32, 64)
+	native := make(chan uint32, 1)
+	var mu sync.Mutex
+	completions := map[uint32]int{}
+	w := newPacketLanes(AttributionWorkers, CensusWorkers, func(p packetJob, stop, census bool) bool {
+		if !stop && !census {
+			if p.id == 100 {
+				native <- p.id
+			} else {
+				return false
+			}
+		}
+		if !stop && census {
+			<-release
+		}
+		mu.Lock()
+		completions[p.id]++
+		mu.Unlock()
+		return true
+	}, func(p packetJob, _ bool) { dropped <- p.id; mu.Lock(); completions[p.id]++; mu.Unlock() })
+	defer func() { unblock(); w.stop() }()
+	for i := 1; i <= MaxCensusPackets; i++ {
+		if !w.submit(job(uint32(i), 8000+i)) {
+			t.Fatal("submit")
+		}
+	}
+	waitWorkerState(t, w, func() bool { return w.censusCount == MaxCensusPackets })
+	// New packets on a pinned endpoint obey the lane subset bound too.
+	if w.submit(job(50, 8001)) {
+		t.Fatal("pinned endpoint bypassed census bound")
+	}
+	if !w.submit(job(51, 8051)) {
+		t.Fatal("general budget incorrectly consumed")
+	}
+	if receiveID(t, dropped) != 51 {
+		t.Fatal("wrong overflow packet")
+	}
+	if !w.submit(job(100, 9000)) {
+		t.Fatal("native budget unavailable")
+	}
+	receiveID(t, native)
+	stopped := make(chan struct{})
+	go func() { w.stop(); close(stopped) }()
+	waitWorkerState(t, w, func() bool { return w.stopped })
+	unblock()
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("lane shutdown stalled")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for i := 1; i <= MaxCensusPackets; i++ {
+		if completions[uint32(i)] != 1 {
+			t.Fatal("packet not completed exactly once", i, completions)
+		}
+	}
+	if completions[51] != 1 || completions[100] != 1 || w.count != 0 || w.bytes != 0 || w.censusCount != 0 || w.censusBytes != 0 {
+		t.Fatal("drop or accounting error", completions)
+	}
+}
+
+func TestCensusLaneByteBound(t *testing.T) {
+	release := make(chan struct{})
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	dropped := make(chan uint32, 2)
+	w := newPacketLanes(2, 1, func(p packetJob, stop, census bool) bool {
+		if stop {
+			return true
+		}
+		if !census {
+			return false
+		}
+		<-release
+		return true
+	}, func(p packetJob, _ bool) { dropped <- p.id })
+	defer func() { unblock(); w.stop() }()
+	p := job(1, 8000)
+	p.size = MaxCensusBytes
+	if !w.submit(p) {
+		t.Fatal("submit")
+	}
+	waitWorkerState(t, w, func() bool { return w.censusBytes == MaxCensusBytes })
+	if w.submit(job(2, 8000)) {
+		t.Fatal("pinned endpoint bypassed byte limit")
+	}
+	if !w.submit(job(3, 8001)) {
+		t.Fatal("remaining general byte budget lost")
+	}
+	if receiveID(t, dropped) != 3 {
+		t.Fatal("byte overflow did not drop")
+	}
+}

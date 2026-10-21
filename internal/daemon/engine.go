@@ -123,11 +123,13 @@ type Engine struct {
 	events             map[string]*Event
 	rules              []policy.Rule
 	Resolve            func(identity.Flow) identity.Attribution
-	Now                func() time.Time
-	Timeout            time.Duration
-	Max                int
-	window             time.Time
-	created            int
+	// TryResolve, when set, reports false instead of waiting for a busy runtime census.
+	TryResolve func(identity.Flow) (identity.Attribution, bool)
+	Now        func() time.Time
+	Timeout    time.Duration
+	Max        int
+	window     time.Time
+	created    int
 }
 
 func New(timeout time.Duration) *Engine {
@@ -181,6 +183,20 @@ func (e *Engine) liveEventsLocked() int {
 func (e *Engine) Observe(f identity.Flow, token string) Event {
 	// Every undecided/new attempt and every UDP datagram rechecks actual ownership.
 	return e.ObserveResolved(f, token, e.Resolve(f))
+}
+
+// TryObserve is Observe without waiting for a busy runtime census. false means
+// attribution needs a census that cannot start now: no event is created and
+// nothing is logged; the caller must use Observe later or drop explicitly.
+func (e *Engine) TryObserve(f identity.Flow, token string) (Event, bool) {
+	if e.TryResolve == nil {
+		return e.Observe(f, token), true
+	}
+	a, ok := e.TryResolve(f)
+	if !ok {
+		return Event{}, false
+	}
+	return e.ObserveResolved(f, token, a), true
 }
 
 // ObserveResolved decides a queued attempt with attribution the trusted caller
@@ -510,9 +526,65 @@ func (e *Engine) SetRules(rules []policy.Rule) error {
 
 // RetainedState is used only for already queued packets, never to create prompts.
 // Unknown/deleted/expired events drop. An Allow always rechecks the relationship.
+//
+// Ownership is resolved outside e.mu; the same event must still be allowed with
+// an unchanged deadline afterwards, so a decision or Block made meanwhile wins.
 func (e *Engine) RetainedState(id, fingerprint string) string {
 	e.mu.Lock()
+	v, state := e.retainedEventLocked(id, fingerprint)
+	if state != "allowed" {
+		e.mu.Unlock()
+		return state
+	}
+	flow, deadline := v.Flow, v.Deadline
+	e.mu.Unlock()
+
+	a := e.Resolve(flow)
+
+	e.mu.Lock()
 	defer e.mu.Unlock()
+	if current, state := e.retainedEventLocked(id, fingerprint); current != v || state != "allowed" || !v.Deadline.Equal(deadline) {
+		if state == "allowed" {
+			return "drop" // replaced or re-leased meanwhile; never reuse this resolution
+		}
+		return state
+	}
+	if !e.Now().Before(v.Deadline) || a.Application == nil || a.Fingerprint != fingerprint {
+		v.State = "expired"
+		v.Reason = "identity changed before retained verdict"
+		if a.Application == nil {
+			v.Reason = fmt.Sprintf("attribution unavailable before retained verdict: %s: %s", a.Status, a.Reason)
+		} else if a.Fingerprint != fingerprint {
+			v.Reason = fmt.Sprintf("identity changed before retained verdict (owners %d to %d, sockets %d to %d)", len(v.Attribution.Owners), len(a.Owners), len(v.Attribution.Sockets), len(a.Sockets))
+		} else {
+			v.Reason = "decision lease expired before retained verdict"
+		}
+		v.finalLogged = false // a revised disposition of an earlier Allow
+		e.recordFinal(v, "block", "identity_changed", "", v.Reason+"; held packets drop", nil, nil, "deferred", "")
+		return "drop"
+	}
+	// Current configured Block overrides even a cached Once grant. Process tier
+	// and liveness are always reconsidered before a retained admission.
+	if action, rule, matches := e.evaluateLocked(e.rules, v.Flow, a, e.Now()); action == "block" {
+		v.State, v.Rule, v.Reason = "blocked", rule, "Current configured Block superseded retained admission"
+		v.Conflicts, v.decided = matches, e.ruleLocked(rule)
+		v.finalLogged = false
+		e.recordFinal(v, "block", "policy_change", "", v.Reason, v.decided, nil, "deferred", "")
+		return "drop"
+	}
+	// Once grants use the event lease; remembered grants must still be live.
+	if !strings.HasPrefix(v.Rule, "once:") {
+		act, rule, _, _ := e.policyLocked(v.Flow, a, e.Now())
+		if act != "allow" || rule != v.Rule {
+			return "drop"
+		}
+	}
+	return "allow"
+}
+
+// retainedEventLocked finds a retained packet's event and reports its current
+// disposition: "pending", "drop", or "allowed" (which still needs ownership).
+func (e *Engine) retainedEventLocked(id, fingerprint string) (*Event, string) {
 	e.refreshZonesLocked()
 	now := e.Now()
 	e.expire(now)
@@ -521,48 +593,17 @@ func (e *Engine) RetainedState(id, fingerprint string) string {
 			continue
 		}
 		if !now.Before(v.Deadline) || v.Attribution.Fingerprint != fingerprint {
-			return "drop"
+			return v, "drop"
 		}
 		if v.State == "awaiting-decision" {
-			return "pending"
+			return v, "pending"
 		}
 		if v.State != "allowed" {
-			return "drop"
+			return v, "drop"
 		}
-		a := e.Resolve(v.Flow)
-		if !e.Now().Before(v.Deadline) || a.Application == nil || a.Fingerprint != fingerprint {
-			v.State = "expired"
-			v.Reason = "identity changed before retained verdict"
-			if a.Application == nil {
-				v.Reason = fmt.Sprintf("attribution unavailable before retained verdict: %s: %s", a.Status, a.Reason)
-			} else if a.Fingerprint != fingerprint {
-				v.Reason = fmt.Sprintf("identity changed before retained verdict (owners %d to %d, sockets %d to %d)", len(v.Attribution.Owners), len(a.Owners), len(v.Attribution.Sockets), len(a.Sockets))
-			} else {
-				v.Reason = "decision lease expired before retained verdict"
-			}
-			v.finalLogged = false // a revised disposition of an earlier Allow
-			e.recordFinal(v, "block", "identity_changed", "", v.Reason+"; held packets drop", nil, nil, "deferred", "")
-			return "drop"
-		}
-		// Current configured Block overrides even a cached Once grant. Process tier
-		// and liveness are always reconsidered before a retained admission.
-		if action, rule, matches := e.evaluateLocked(e.rules, v.Flow, a, e.Now()); action == "block" {
-			v.State, v.Rule, v.Reason = "blocked", rule, "Current configured Block superseded retained admission"
-			v.Conflicts, v.decided = matches, e.ruleLocked(rule)
-			v.finalLogged = false
-			e.recordFinal(v, "block", "policy_change", "", v.Reason, v.decided, nil, "deferred", "")
-			return "drop"
-		}
-		// Once grants use the event lease; remembered grants must still be live.
-		if !strings.HasPrefix(v.Rule, "once:") {
-			act, rule, _, _ := e.policyLocked(v.Flow, a, e.Now())
-			if act != "allow" || rule != v.Rule {
-				return "drop"
-			}
-		}
-		return "allow"
+		return v, "allowed"
 	}
-	return "drop"
+	return nil, "drop"
 }
 
 // Rules returns only the authenticated user's policy unless explicitly admin.

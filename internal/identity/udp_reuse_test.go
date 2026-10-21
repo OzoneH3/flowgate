@@ -209,3 +209,43 @@ func TestUDPReusePassesThroughTCPAndLinkLocal(t *testing.T) {
 		t.Fatalf("TCP and link-local UDP must keep full attribution, censuses=%d", x.calls)
 	}
 }
+
+func TestUDPReuseTryBusyStoresNothingAndLaterResolveSucceeds(t *testing.T) {
+	x, r := newReuseFixture()
+	x.sockets = []Socket{x.socket(34429, 11, "c-alpha")}
+	x.owners["c-alpha"] = syntheticWine("alpha.exe", "/prefixes/alpha")
+	x.running[11] = true
+	busy, tries := true, 0
+	r.Try = func(f Flow) (Attribution, bool) {
+		tries++
+		if busy {
+			return Attribution{}, false
+		}
+		return x.resolve(f), true
+	}
+	f := udpFlow("outgoing", "172.30.42.123:34429", "198.51.100.1:7770")
+	for i := 0; i < 3; i++ {
+		if a, ok := r.TryResolve(f); ok || a.Application != nil {
+			t.Fatalf("busy try: %+v %v", a, ok)
+		}
+	}
+	if len(r.entries) != 0 || x.calls != 0 {
+		t.Fatalf("busy try stored evidence or ran a census: entries=%d calls=%d", len(r.entries), x.calls)
+	}
+	busy = false
+	if a, ok := r.TryResolve(f); !ok || appOf(a) != "alpha.exe" {
+		t.Fatalf("later try must resolve: %+v %v", a, ok)
+	}
+	// Now verified: the next datagram is a reuse hit and needs no census at all.
+	busy = true
+	if a, ok := r.TryResolve(f); !ok || appOf(a) != "alpha.exe" || tries != 4 {
+		t.Fatalf("reuse hit must not call Try: %+v %v tries=%d", a, ok, tries)
+	}
+	// Beta's socket on another port never inherits Alpha's entry while busy.
+	x.sockets = append(x.sockets, x.socket(40001, 22, "c-beta"))
+	x.owners["c-beta"] = syntheticWine("beta.exe", "/prefixes/beta")
+	x.running[22] = true
+	if a, ok := r.TryResolve(udpFlow("outgoing", "172.30.42.123:40001", "198.51.100.1:7770")); ok || a.Application != nil {
+		t.Fatalf("beta must not reuse alpha evidence: %+v %v", a, ok)
+	}
+}

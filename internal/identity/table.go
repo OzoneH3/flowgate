@@ -263,6 +263,19 @@ func selectTableRows(s tableSnapshot, f Flow) ([]WindowsOwner, error) {
 func (w *WineTable) Resolve(f Flow) Attribution {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	return w.resolveLocked(f)
+}
+
+// tryResolve reports false without waiting when another census holds this table.
+func (w *WineTable) tryResolve(f Flow) (Attribution, bool) {
+	if !w.mu.TryLock() {
+		return Attribution{}, false
+	}
+	defer w.mu.Unlock()
+	return w.resolveLocked(f), true
+}
+
+func (w *WineTable) resolveLocked(f Flow) Attribution {
 	a := Resolve(f)
 	if w.session != nil && !w.session.current() {
 		a.Application = nil

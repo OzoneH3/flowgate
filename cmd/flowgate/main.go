@@ -269,7 +269,9 @@ func serve() error {
 			return err
 		}
 		defer observers.Close()
-		e.Resolve = identity.NewUDPAttributionReuse(observers.Resolve).Resolve
+		resolver := identity.NewUDPAttributionReuse(observers.Resolve)
+		resolver.Try = observers.TryResolve
+		e.Resolve, e.TryResolve = resolver.Resolve, resolver.TryResolve
 		observer.Annotate = observers.AnnotateActivity
 	} else if *prefixes != "" {
 		if os.Getenv("FLOWGATE_WINE_TABLE_RUNNER") != "" {

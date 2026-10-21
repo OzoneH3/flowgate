@@ -21,6 +21,8 @@ import (
 // every flow separately.
 type UDPAttributionReuse struct {
 	resolve func(Flow) Attribution
+	// Try, when set, is the non-waiting form of resolve used by TryResolve.
+	Try     func(Flow) (Attribution, bool)
 	Sockets func() ([]Socket, error)
 	Running func(pid int, start string) bool
 	Now     func() time.Time
@@ -74,8 +76,22 @@ func reusable(a Attribution) bool {
 }
 
 func (r *UDPAttributionReuse) Resolve(f Flow) Attribution {
+	a, _ := r.resolveWith(f, func(f Flow) (Attribution, bool) { return r.resolve(f), true })
+	return a
+}
+
+// TryResolve answers from verified reuse, else defers to Try without waiting.
+// false carries no evidence and is never stored.
+func (r *UDPAttributionReuse) TryResolve(f Flow) (Attribution, bool) {
+	if r.Try == nil {
+		return r.Resolve(f), true
+	}
+	return r.resolveWith(f, r.Try)
+}
+
+func (r *UDPAttributionReuse) resolveWith(f Flow, resolve func(Flow) (Attribution, bool)) (Attribution, bool) {
 	if !reuseEligible(f) {
-		return r.resolve(f)
+		return resolve(f)
 	}
 	sockets, err := r.Sockets()
 	if err == nil {
@@ -87,13 +103,15 @@ func (r *UDPAttributionReuse) Resolve(f Flow) Attribution {
 		}
 		if len(current) == 1 {
 			if a, ok := r.reuse(f, reuseKey(f, current[0])); ok {
-				return a
+				return a, true
 			}
 		}
 	}
-	a := r.resolve(f)
-	r.store(f, a)
-	return a
+	a, ok := resolve(f)
+	if ok {
+		r.store(f, a)
+	}
+	return a, ok
 }
 
 func (r *UDPAttributionReuse) reuse(f Flow, key string) (Attribution, bool) {

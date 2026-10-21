@@ -156,7 +156,9 @@ func serveCommand(args []string) error {
 			return er
 		}
 		defer wines.Close()
-		e.Resolve = identity.NewUDPAttributionReuse(wines.Resolve).Resolve
+		resolver := identity.NewUDPAttributionReuse(wines.Resolve)
+		resolver.Try = wines.TryResolve
+		e.Resolve, e.TryResolve = resolver.Resolve, resolver.TryResolve
 		observer.Annotate = wines.AnnotateActivity
 	} else if len(wineBins) > 0 || len(winePrefixes) > 0 {
 		return fmt.Errorf("Wine runtime/prefix selection requires --wine-helper")

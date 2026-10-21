@@ -171,3 +171,28 @@ func TestPacketProcessorChecksAdmissionDeadlineAfterResolution(t *testing.T) {
 		t.Fatal("expired packet not drained")
 	}
 }
+
+func TestPacketProcessorDefersWithoutCreatingOrSubmittingVerdict(t *testing.T) {
+	var expired atomic.Uint64
+	observed, recorded, sent := 0, 0, 0
+	p := packetProcessor{ctx: context.Background(), expired: &expired,
+		tryObserve: func(identity.Flow, string) (daemon.Event, bool) { return daemon.Event{}, false },
+		observe: func(identity.Flow, string) daemon.Event {
+			observed++
+			return daemon.Event{State: "allowed", Deadline: time.Now().Add(time.Minute)}
+		},
+		retain:  func(uint32, int, daemon.Event) bool { t.Fatal("busy result retained as prompt"); return false },
+		record:  func(daemon.Event, string, error) { recorded++ },
+		verdict: func(_ uint32, allow bool) (bool, error) { sent++; return allow, nil },
+	}
+	j := job(1, 8000)
+	if p.processStage(j, false, false) {
+		t.Fatal("busy result reported completed")
+	}
+	if observed != 0 || recorded != 0 || sent != 0 {
+		t.Fatal("busy result gained side effects")
+	}
+	if !p.processStage(j, false, true) || observed != 1 || recorded != 1 || sent != 1 {
+		t.Fatal("census lane did not complete exactly once")
+	}
+}

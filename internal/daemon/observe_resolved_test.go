@@ -79,3 +79,60 @@ func TestObserveResolvedUsesSuppliedAttributionOnly(t *testing.T) {
 		t.Fatal("rule transferred to a different application")
 	}
 }
+
+func TestRetainedStateResolvesOutsideLockAndHonoursBlockMadeMeanwhile(t *testing.T) {
+	for _, block := range []bool{false, true} {
+		e, f, a, _ := fixture()
+		v := e.Observe(f, "udp")
+		if _, err := e.Decide(v.ID, "allow", "once", 1000, false); err != nil {
+			t.Fatal(err)
+		}
+		entered, release := slowResolver(e, f, *a)
+		result := make(chan string, 1)
+		go func() { result <- e.RetainedState(v.ID, a.Fingerprint) }()
+		<-entered
+		within(t, "List during retained recheck", func() { e.List(1000, false) })
+		if block {
+			rule := policy.Rule{ID: "b", Action: "block", Filter: policy.Filter{Application: "app", Revision: "rev", UID: 1000, Protocol: "udp", Direction: "incoming"}}
+			within(t, "rule mutation during retained recheck", func() {
+				if err := e.SetRules([]policy.Rule{rule}); err != nil {
+					t.Error(err)
+				}
+			})
+		}
+		close(release)
+		want := "allow"
+		if block {
+			want = "drop"
+		}
+		if got := <-result; got != want {
+			t.Fatalf("block=%v: retained verdict %q, want %q", block, got, want)
+		}
+	}
+}
+
+func TestTryObserveBusyCreatesNoEventAndSpendsNoPromptBudget(t *testing.T) {
+	e, f, a, _ := fixture()
+	busy := true
+	e.TryResolve = func(identity.Flow) (identity.Attribution, bool) {
+		if busy {
+			return identity.Attribution{}, false
+		}
+		return *a, true
+	}
+	for i := 0; i < 50; i++ {
+		if v, ok := e.TryObserve(f, string(rune('a'+i%26))); ok || v.ID != "" {
+			t.Fatalf("busy census produced an event: %+v %v", v, ok)
+		}
+	}
+	if n := len(e.List(1000, true)); n != 0 {
+		t.Fatalf("busy results left %d events", n)
+	}
+	if e.liveEventsLocked() != 0 || e.created != 0 {
+		t.Fatalf("busy results spent prompt budget: live=%d created=%d", e.liveEventsLocked(), e.created)
+	}
+	busy = false
+	if v, ok := e.TryObserve(f, "udp"); !ok || v.State != "awaiting-decision" {
+		t.Fatalf("later census must decide normally: %+v %v", v, ok)
+	}
+}
