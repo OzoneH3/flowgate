@@ -164,7 +164,6 @@ try {
         BrowserWindow.getAllWindows()[0].webContents.getLastWebPreferences().sandbox,
     ),
   );
-  await page.check('#keepInTray');
   const mainID = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].id);
   const close = () =>
     app.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id).close(), mainID);
@@ -213,6 +212,13 @@ try {
     assert(match, l);
     g(trayBus, menu(), 'com.canonical.dbusmenu.Event', match[1], 'clicked', '<int32 0>', '0');
   };
+  assert.equal(
+    await app.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id).isVisible(), mainID),
+    false, 'startup stays hidden while tray host is available',
+  );
+  menuClick('Open FlowGate');
+  await wait(() => app.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id).isVisible(), mainID));
+  await page.check('#keepInTray');
   await close();
   assert.equal(
     await app.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id).isVisible(), mainID),

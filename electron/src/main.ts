@@ -513,7 +513,8 @@ function windowFor(isPrompt = false, id = '', generation = '', group?: string) {
   });
   w.once('ready-to-show', () => {
     if (!isPrompt) {
-      w.show();
+      // Start in the tray. Background.checkHost reveals a recovery window
+      // only when no usable tray host is available.
       return;
     }
     const bounds = edgePosition(screen.getPrimaryDisplay().workArea, PROMPT_WIDTH, PROMPT_HEIGHT);
