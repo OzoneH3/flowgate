@@ -39,6 +39,9 @@ func (e *Engine) targetStateLocked(r policy.Rule) RuleTargetState {
 	}
 	b := r.Filter.Process
 	if b.IsZero() {
+		if r.RootApplication != "" {
+			return RuleTargetState{"application", "active", "Saved native executable/revision rule shared between its user and root (UID 0); other users remain separate"}
+		}
 		return RuleTargetState{"application", "active", "Application/revision/UID rule, all process instances; enabled and expiry are separate"}
 	}
 	if b.Session != e.Generation {

@@ -438,6 +438,7 @@ func (e *Engine) decideLocked(id, action, scope string, uid uint32, admin bool, 
 			if reviewed != nil {
 				r = *reviewed
 			}
+			r = e.rootScope(r)
 			if other := duplicate(e.rules, r); other != "" {
 				return Event{}, fmt.Errorf("duplicate scope exists as %s; edit the existing rule", other)
 			}
@@ -523,6 +524,24 @@ func (e *Engine) SetRules(rules []policy.Rule) error {
 	}
 	e.mu.Lock()
 	defer e.unlockAndSettle()
+	rules = append([]policy.Rule{}, rules...)
+	changed := false
+	for i := range rules {
+		next := e.rootScope(rules[i])
+		if next.RootApplication != rules[i].RootApplication {
+			changed = true
+			if next.Version == ^uint64(0) {
+				return fmt.Errorf("rule version exhausted during root scope migration")
+			}
+			next.Version++
+		}
+		rules[i] = next
+	}
+	if changed && e.SaveRules != nil {
+		if err := e.SaveRules(rules); err != nil {
+			return err
+		}
+	}
 	e.rules = rules
 	e.pruneHandlesLocked()
 	e.resetCachedLocked("policy replaced")

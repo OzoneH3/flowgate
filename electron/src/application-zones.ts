@@ -29,9 +29,9 @@ export function addApplicationZones(roots: Row[], rules: Rule[], definition?: Ne
     const own = rules.filter(
       (r) =>
         !r.filter.process &&
-        r.filter.application === identity.key &&
         r.filter.revision === identity.revision &&
-        r.filter.uid === identity.uid,
+        ((r.filter.application === identity.key && r.filter.uid === identity.uid) ||
+          (identity.uid === 0 && r.root_application === identity.key)),
     );
     const models = [
       definition.model,

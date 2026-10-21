@@ -7,6 +7,7 @@ export const POLICY_CAPABILITY = 'policy-explanations-v1';
 // place); never a scoped rule. Without it the direction summary carries no application_rule.
 export const APPLICATION_POLICY_CAPABILITY = 'application-policy-v1';
 export interface PolicyRuleRef {
+  root_application?: string;
   id: string;
   version: string;
   action: string;
@@ -150,6 +151,7 @@ function ruleRef(v: unknown): PolicyRuleRef {
               : (() => {
                   throw Error('Invalid target scope');
                 })(),
+    root_application: str(r.root_application, true) || undefined,
     target_state: str(r.target_state, true),
     target_reason: str(r.target_reason, true),
     kind:
@@ -484,7 +486,7 @@ export function policyLabel(d: DirectionPolicy) {
 }
 export function policyRuleDescription(r: PolicyRuleRef) {
   const f = r.scope;
-  return `${r.expired ? 'Expired' : r.disabled ? 'Disabled' : r.active ? 'Enabled' : 'Inactive'} ${r.action} · ${f.direction} ${f.protocol} · remote ${f.remote_address || f.remote || 'any'} · local port ${f.local_port || 'any'} · remote port ${f.remote_port || 'any'} · expires ${r.expires.startsWith('0001-') ? 'never' : r.expires} · ${r.id} v${r.version}`;
+  return `${r.root_application ? `UID ${f.uid} + root · ` : ''}${r.expired ? 'Expired' : r.disabled ? 'Disabled' : r.active ? 'Enabled' : 'Inactive'} ${r.action} · ${f.direction} ${f.protocol} · remote ${f.remote_address || f.remote || 'any'} · local port ${f.local_port || 'any'} · remote port ${f.remote_port || 'any'} · expires ${r.expires.startsWith('0001-') ? 'never' : r.expires} · ${r.id} v${r.version}`;
 }
 
 // Exact backend inventory association only; never classify an endpoint or choose a rule.

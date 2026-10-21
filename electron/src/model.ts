@@ -8,8 +8,9 @@ export interface Row {
   parent?: string;
   // 'launch': display-only group of processes from one verified game launch
   // (backend provenance). Never a firewall target; rules stay per process/application.
-  kind: 'overview' | 'network' | 'application' | 'launch' | 'process' | 'socket' | 'unidentified';
+  kind: 'overview' | 'network' | 'application' | 'program' | 'launch' | 'process' | 'socket' | 'unidentified';
   label: string;
+  program?: { executable: string; inactive: boolean };
   presentationLabel?: string;
   identityNote?: string;
   pid?: number;
@@ -367,7 +368,7 @@ export function flatten(
       if (!!a.applicationZone !== !!b.applicationZone) return a.applicationZone ? -1 : 1;
       if (a.applicationZone && b.applicationZone) return (a.applicationZone.zone === b.applicationZone.zone ? a.id.localeCompare(b.id) : a.applicationZone.zone === 'local' ? -1 : 1);
       // Not-running applications with rules stay at the bottom in every sort order.
-      if (!!a.inactive !== !!b.inactive) return a.inactive ? 1 : -1;
+      if (!!(a.inactive || a.program?.inactive) !== !!(b.inactive || b.program?.inactive)) return (a.inactive || a.program?.inactive) ? 1 : -1;
       if (a.inactive && b.inactive) return a.label.localeCompare(b.label) || a.id.localeCompare(b.id);
       const av = value(a),
         bv = value(b);
@@ -518,7 +519,7 @@ export function activityTree(activity: Activity, rules: Rule[] | undefined, quer
   const live = hierarchy(activity, query, filter);
   const rows=[...live, ...inactiveApplications(rules, live, query, filter)];
   addRequestApplications(rows, events, query, filter);
-  return addApplicationZones(groupApplicationVersions(rows),rules||[],zones);
+  return addApplicationZones(groupProgramAccounts(groupApplicationVersions(rows)),rules||[],zones);
 }
 
 // A held or recently ended request can outlive the socket census. Preserve its
@@ -588,4 +589,39 @@ export function groupApplicationVersions(rows: Row[]): Row[] {
     }
   }
   return result;
+}
+
+// One visual program across accounts. This wrapper deliberately has no application
+// key, process, request or rule target: all actions remain on the original children.
+export function groupProgramAccounts(rows: Row[]): Row[] {
+  const groups = new Map<string, Row[]>();
+  for (const row of rows) {
+    if (row.kind !== 'application') continue;
+    const app = row.process?.application || row.runtimeApplication?.application || row.displayApplication || row.requestEvent?.attribution.application;
+    const path = row.inactive?.executable || app?.executable;
+    if (!path || !path.startsWith('/')) continue;
+    groups.set(path, [...(groups.get(path) || []), row]);
+  }
+  const replacements = new Map<Row, Row>();
+  const removed = new Set<Row>();
+  for (const [path, children] of groups) {
+    if (children.length < 2) continue;
+    const id = `program:${path}`;
+    const group: Row = { id, kind: 'program', label: executableName(path),
+      program: { executable: path, inactive: children.every(r => !!r.inactive) },
+      identityNote: 'Separate permissions by account and identity',
+      rows: sourceRows(allRows(children).flatMap(r => r.rows)), children };
+    for (const child of children) {
+      const app = child.process?.application || child.runtimeApplication?.application || child.displayApplication || child.requestEvent?.attribution.application;
+      const uid = child.inactive?.uid ?? child.process?.uid ?? child.runtimeApplication?.uid ?? child.requestEvent?.attribution.owners[0]?.uid;
+      const prefix = child.process?.provenance?.launch?.prefix;
+      const identity = child.inactive?.key || app?.key;
+      child.parent = id;
+      child.presentationLabel = `${uid === 0 ? 'Root (UID 0)' : uid === undefined ? 'Unknown account' : `User UID ${uid}`}${prefix ? ` · ${prefix}` : ''}`;
+      child.identityNote = `${child.label} · ${child.inactive ? 'Not running' : 'Observed'}${identity ? ` · Identity ${identity.slice(0,12)}` : ''}`;
+      removed.add(child);
+    }
+    replacements.set(children[0], group);
+  }
+  return rows.flatMap(row => replacements.has(row) ? [replacements.get(row)!] : removed.has(row) ? [] : [row]);
 }

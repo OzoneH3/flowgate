@@ -9,6 +9,7 @@ const structure = (r: SocketRow) => {
 export function rowStructure(r: Row, depth: number, selected: boolean, expanded: boolean) {
   return JSON.stringify([
     r.kind,
+    r.program,
     r.applicationZone,
     r.label,
     r.presentationLabel,

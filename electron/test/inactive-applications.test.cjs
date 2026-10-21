@@ -118,6 +118,39 @@ test('saved revisions share one program root; different identities remain visibl
   const distinct = activityTree({processes:{},rows:[]},[old,rule('second','other','v1','/other/tool')]);
   assert.equal(distinct.length,2);
   const users = activityTree({processes:{},rows:[]},[old,rule('another-user','same','v1','/opt/tool',{uid:1001})]);
-  assert.equal(users.length,2, 'different users must retain separate identities');
+  assert.equal(users.length,1, 'accounts share a visual program');
+  assert.equal(users[0].kind,'program');
+  assert.deepEqual(users[0].children.map(r=>r.inactive.uid),[1000,1001]);
+  assert.equal(users[0].inactive,undefined, 'wrapper has no rule target');
   assert.ok(distinct.every(r=>r.identityNote.includes('UID 1000') && r.identityNote.includes(r.inactive.executable)));
+});
+
+
+test('one executable across three accounts has one visual root and intact targets', () => {
+  const rules = [1000,0,970].map(uid => rule(`r${uid}`,`key${uid}`,'v1','/usr/bin/tool',{uid}));
+  const tree = activityTree({processes:{},rows:[]},rules);
+  assert.equal(tree.length,1);
+  const group = tree[0];
+  assert.equal(group.kind,'program');
+  assert.equal(group.label,'tool');
+  assert.equal(group.program.inactive,true);
+  assert.equal(group.process,undefined);
+  assert.equal(group.displayApplication,undefined);
+  assert.equal(group.requestEvent,undefined);
+  assert.deepEqual(group.children.map(r=>r.id).sort(),[1000,0,970].map(uid=>`app:key${uid}|v1|uid:${uid}`).sort());
+  assert.equal(group.children.find(r=>r.inactive.uid===0).presentationLabel,'Root (UID 0)');
+  assert.ok(group.children.every(r=>r.parent===group.id));
+  const different = activityTree({processes:{},rows:[]},[...rules,rule('else','else','v1','/other/tool')]);
+  assert.equal(different.length,2,'same basename elsewhere is not the same program');
+});
+
+test('mixed running and saved accounts keep observed traffic on their original children', () => {
+  const a = app('user-key','v1','/usr/bin/tool');
+  const socket = sock('s','p','1.2.3.4:443');
+  const tree = activityTree({processes:{p:live('p',10,a)},rows:[socket]},[rule('root','root-key','v1',a.executable,{uid:0})]);
+  assert.equal(tree.length,1);
+  assert.equal(tree[0].program.inactive,false);
+  assert.deepEqual(tree[0].rows.map(r=>r.id),['s']);
+  assert.equal(tree[0].children[0].process.application.key,'user-key');
+  assert.equal(tree[0].children[1].inactive.key,'root-key');
 });

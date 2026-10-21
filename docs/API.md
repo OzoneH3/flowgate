@@ -487,3 +487,25 @@ This is a conservative startup snapshot, not a guarantee against later rollback;
 restoring an older binary may require a new decision. Archives are recovery data,
 not active permissions; there is no automatic transfer to the replacement version.
 A matching already-running daemon is not restarted solely to perform cleanup.
+
+### Shared saved native permissions for the administrator and root
+
+Saved native application rules owned by the daemon's configured non-root
+administrator also cover UID 0 for the exact executable and revision. The server
+records the verified counterpart key in `root_application` on the rule and policy
+references. Startup migrates eligible existing rules atomically through the rule
+store and increments changed rule versions; new reviewed rules describe the same
+scope. No rule is inferred from a display name, launcher, or sudo command line.
+
+This scope applies to saved Allow, Block and Ask rules, preserving direction,
+endpoint, expiry, disabled state, priorities and Block precedence. Once and
+process-instance permissions stay unchanged. Other users, Wine/prefix identities,
+Electron hosted identities and native identities whose original key cannot be
+verified from their executable path remain separate. Existing root-only rules
+remain explicit root rules and can override a shared Allow through normal policy
+precedence. There is no blanket privilege-based network bypass.
+
+Electron groups top-level entries with the same exact executable path under one
+visual program when multiple accounts/identities exist. Original account rows,
+rule IDs and request IDs remain children; the visual parent has no rule target.
+Different executable paths are never combined merely because their names match.

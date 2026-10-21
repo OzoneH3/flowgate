@@ -181,8 +181,11 @@ test('retained requests remain visible without claiming a live socket or merging
   const a={rows:[],processes:{}};
   const events=[request('a'),request('b'),request('c','other'),request('d','app',1001)];
   const rows=activityTree(a,[], '', 'all',undefined,undefined,events);
-  assert.equal(rows.length,3);
-  assert.equal(rows[0].requestEvent.id,'a');
+  assert.equal(rows.length,1);
+  assert.equal(rows[0].kind,'program');
+  assert.equal(rows[0].children.length,3);
+  assert.equal(rows[0].requestEvent,undefined);
+  assert.equal(rows[0].children[0].requestEvent.id,'a');
   assert.equal(rows[0].process,undefined);
   assert.equal(rows[0].inactive,undefined);
   assert.equal(rows[0].rows.length,0);

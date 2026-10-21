@@ -30,6 +30,7 @@ type Filter struct {
 	UID           uint32 `json:"uid"`
 }
 type Rule struct {
+	RootApplication string `json:"root_application,omitempty"`
 	// Invocation is historical display context, never a permission matcher.
 	Invocation *identity.Invocation `json:"invocation,omitempty"`
 	Preset     *Preset              `json:"preset,omitempty"`
@@ -45,7 +46,22 @@ type Rule struct {
 	Expires    time.Time            `json:"expires"`
 }
 
+func (r Rule) CanShareRoot() bool {
+	return r.Preset == nil && r.Filter.UID != 0 && !r.Filter.AllPrograms && !r.Filter.AllUIDs && r.Filter.Process.IsZero() && r.Executable != "" && r.Filter.Application == identity.ApplicationKey(r.Filter.UID, identity.Application{Kind: "native", Executable: r.Executable})
+}
+
+func (r Rule) MatchesApplication(key, revision string, uid uint32) bool {
+	if r.Filter.Revision != revision {
+		return false
+	}
+	return (r.Filter.Application == key && r.Filter.UID == uid) || (uid == 0 && r.RootApplication != "" && r.RootApplication == key && r.CanShareRoot())
+}
+
 func (r Rule) Validate() error {
+	if r.RootApplication != "" && (!r.CanShareRoot() || r.RootApplication != identity.ApplicationKey(0, identity.Application{Kind: "native", Executable: r.Executable})) {
+		return fmt.Errorf("invalid paired root application scope")
+	}
+
 	if i := r.Invocation; i != nil && (i.Mode != "file" || len(i.Name) > 256 || len(i.Path) > 4096 || len(i.Revision) > 256 || i.Application != nil) {
 		return fmt.Errorf("invalid invocation display context")
 	}
@@ -138,7 +154,7 @@ func EvaluateSession(rules []Rule, f identity.Flow, a identity.Attribution, now 
 		if !r.Expires.IsZero() && !now.Before(r.Expires) {
 			continue
 		}
-		if (!x.AllPrograms && (x.Application != a.Application.Key || x.Revision != a.Application.Revision)) || (!x.AllUIDs && x.UID != a.Principal().UID) || x.Direction != f.Direction || !ProtocolMatches(x.Protocol, f.Protocol) {
+		if (!x.AllPrograms && !r.MatchesApplication(a.Application.Key, a.Application.Revision, a.Principal().UID)) || (x.AllPrograms && !x.AllUIDs && x.UID != a.Principal().UID) || x.Direction != f.Direction || !ProtocolMatches(x.Protocol, f.Protocol) {
 			continue
 		}
 		if x.NetworkZone != "" {

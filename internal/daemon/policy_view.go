@@ -20,18 +20,19 @@ type PolicyIdentity struct {
 	UID      uint32 `json:"uid"`
 }
 type PolicyRuleRef struct {
-	TargetScope  string        `json:"target_scope"`
-	TargetState  string        `json:"target_state"`
-	TargetReason string        `json:"target_reason"`
-	ID           string        `json:"id"`
-	Version      string        `json:"version"` // exact decimal uint64; never JSON floating point
-	Action       string        `json:"action"`
-	Priority     int           `json:"priority"`
-	Scope        policy.Filter `json:"scope"`
-	Disabled     bool          `json:"disabled"`
-	Expired      bool          `json:"expired"`
-	Active       bool          `json:"active"`
-	Expires      time.Time     `json:"expires"`
+	RootApplication string        `json:"root_application,omitempty"`
+	TargetScope     string        `json:"target_scope"`
+	TargetState     string        `json:"target_state"`
+	TargetReason    string        `json:"target_reason"`
+	ID              string        `json:"id"`
+	Version         string        `json:"version"` // exact decimal uint64; never JSON floating point
+	Action          string        `json:"action"`
+	Priority        int           `json:"priority"`
+	Scope           policy.Filter `json:"scope"`
+	Disabled        bool          `json:"disabled"`
+	Expired         bool          `json:"expired"`
+	Active          bool          `json:"active"`
+	Expires         time.Time     `json:"expires"`
 	// Kind: application (whole target, all zones), zone (whole target, one
 	// zone) or scoped (endpoint/protocol/interface restricted).
 	Kind string `json:"kind,omitempty"`
@@ -121,7 +122,7 @@ type PolicyExplanations struct {
 
 func ruleRef(r policy.Rule, now time.Time) PolicyRuleRef {
 	expired := !r.Expires.IsZero() && !now.Before(r.Expires)
-	return PolicyRuleRef{TargetScope: "application", TargetState: "active", TargetReason: "Application/revision/UID rule; enabled/expiry are separate", ID: r.ID, Version: strconv.FormatUint(r.Version, 10), Action: r.Action, Priority: r.Priority, Scope: r.Filter, Disabled: r.Disabled, Expired: expired, Active: !r.Disabled && !expired, Expires: r.Expires}
+	return PolicyRuleRef{RootApplication: r.RootApplication, TargetScope: "application", TargetState: "active", TargetReason: "Application/revision/UID rule; enabled/expiry are separate", ID: r.ID, Version: strconv.FormatUint(r.Version, 10), Action: r.Action, Priority: r.Priority, Scope: r.Filter, Disabled: r.Disabled, Expired: expired, Active: !r.Disabled && !expired, Expires: r.Expires}
 }
 func appPolicyRef(a PolicyIdentity) string {
 	b, _ := json.Marshal(a)
@@ -188,7 +189,7 @@ func summaryFor(a PolicyIdentity, direction, mode string, h *EnforcementStatus, 
 		if !f.Process.IsZero() || f.AllPrograms {
 			continue
 		}
-		if f.Application != a.Key || f.Revision != a.Revision || f.UID != a.UID || f.Direction != direction {
+		if !r.MatchesApplication(a.Key, a.Revision, a.UID) || f.Direction != direction {
 			continue
 		}
 		ref := ruleRef(r, now)

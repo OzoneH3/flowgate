@@ -1188,6 +1188,7 @@ export interface RuleTargetState {
   reason: string;
 }
 export interface Rule {
+  root_application?: string;
   invocation?: Invocation;
   preset?: {
     name: 'essential-system-networking';
@@ -1419,6 +1420,7 @@ export function parseRule(v: unknown): Rule {
         ? { mode: 'file', name: string(i.name).slice(0, 256), path: string(i.path).slice(0, 4096), revision: string(i.revision) } : undefined;
     })(),
     executable: string(r.executable),
+    root_application: string(r.root_application) || undefined,
     created: string(r.created),
     disabled: r.disabled === true,
     schema: number(r.schema),

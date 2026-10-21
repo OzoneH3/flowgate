@@ -87,6 +87,9 @@ func RuleSentence(r policy.Rule) string {
 		}
 	}
 	identityText := fmt.Sprintf("application %s, revision %s, UID %d", f.Application, f.Revision, f.UID)
+	if r.RootApplication != "" {
+		identityText += " and root (UID 0), same native executable revision"
+	}
 	if f.AllPrograms {
 		identityText = target
 	}
@@ -284,6 +287,7 @@ func (e *Engine) reviewRuleLocked(candidate policy.Rule, now time.Time, expiryUn
 			candidate.Schema = 6
 		}
 	}
+	candidate = e.rootScope(candidate)
 	candidate.Filter = canonicalFilter(candidate.Filter)
 	if err := candidate.Validate(); err != nil {
 		return policy.Rule{}, "", err

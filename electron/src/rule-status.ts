@@ -43,9 +43,8 @@ export function ruleStatus(row: Row, state: ClientState): RuleStatus {
     if (
       (row.applicationZone && !matchesApplicationZone(f,row.applicationZone)) ||
       f.process ||
-      f.application !== process.application.key ||
       f.revision !== process.application.revision ||
-      f.uid !== process.uid
+      !((f.application === process.application.key && f.uid === process.uid) || (process.uid === 0 && rule.root_application === process.application.key))
     )
       continue;
     if (f.direction === 'incoming') result.incoming.push(rule);
@@ -72,7 +71,7 @@ export function ruleDescription(rule: Rule, now: number) {
   const preset = rule.preset
     ? `Essential · ${rule.preset.component} · local ${f.local_address || '*'} · interface ${f.interface_name || '*'}/${f.interface_index || '*'}${f.peer_service ? ` · local service ${f.peer_service.application} UID ${f.peer_service.uid}` : ''} · `
     : '';
-  return `${preset}${zoneRuleLabel(rule)} · ${ruleState(rule, now)} ${rule.action} · ${f.direction} ${f.protocol} · remote ${f.remote_address || f.remote || 'any'} · local port ${f.local_port || 'any'} · remote port ${f.remote_port || 'any'} · expires ${rule.expires && !rule.expires.startsWith('0001-') ? rule.expires : 'never'} · ${rule.id}`;
+  return `${rule.root_application ? `UID ${f.uid} + root · ` : ""}${preset}${zoneRuleLabel(rule)} · ${ruleState(rule, now)} ${rule.action} · ${f.direction} ${f.protocol} · remote ${f.remote_address || f.remote || 'any'} · local port ${f.local_port || 'any'} · remote port ${f.remote_port || 'any'} · expires ${rule.expires && !rule.expires.startsWith('0001-') ? rule.expires : 'never'} · ${rule.id}`;
 }
 
 // Describe stored filter constraints; this does not evaluate a connection or precedence.

@@ -411,7 +411,7 @@ function rowIcon(kind: Row['kind']) {
   const path = document.createElementNS(svg.namespaceURI, 'path');
   path.setAttribute(
     'd',
-    kind === 'application' || kind === 'overview' || kind === 'launch'
+    kind === 'application' || kind === 'program' || kind === 'overview' || kind === 'launch'
       ? 'M2 2h12v9H2zM5 14h6M8 11v3M2 5h12'
       : kind === 'process'
         ? 'M5 3h6v10H5zM2 5h3m6 0h3M2 8h3m6 0h3M2 11h3m6 0h3'
@@ -562,6 +562,7 @@ function statusStrip(r: Row) {
     button.dataset.direction = direction;
     button.disabled =
       r.kind === 'overview' ||
+      r.kind === 'program' ||
       r.kind === 'launch' ||
       (r.kind === 'network' && !state.control.capabilities?.includes(ZONE_CAPABILITY));
     let chip: RuleChip = { glyph: '', text: 'Not set', tone: 'none', detail: '' };
@@ -580,6 +581,9 @@ function statusStrip(r: Row) {
     } else if (r.kind === 'socket') {
       chip = { glyph: '', text: '', tone: 'none', detail: '' };
       title = `${slot.label}: connections carry no rules; see the holder process.`;
+    } else if (r.kind === 'program') {
+      chip = { glyph: '', text: '', tone: 'none', detail: '' };
+      title = 'Expand this program to edit each account’s permissions.';
     } else if (r.kind === 'launch') {
       chip = { glyph: '', text: '', tone: 'none', detail: '' };
       title = `${slot.label}: launch group (display only); rules apply to each process below.`;
@@ -1677,6 +1681,14 @@ function renderInfo() {
       );
     }
 
+    commit();
+    return;
+  }
+  if (r.kind === 'program') {
+    field(info, 'Program', r.label);
+    field(info, 'Executable', r.program?.executable || '');
+    field(info, 'Accounts and identities', r.children.map(c => c.presentationLabel || c.label).join('\n'));
+    field(info, 'Permissions', 'Expand this program to edit each account separately. This group does not grant or combine permissions.');
     commit();
     return;
   }
