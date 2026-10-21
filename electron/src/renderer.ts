@@ -412,7 +412,7 @@ function rowIcon(kind: Row['kind']) {
   const path = document.createElementNS(svg.namespaceURI, 'path');
   path.setAttribute(
     'd',
-    kind === 'application' || kind === 'program' || kind === 'overview' || kind === 'launch'
+    kind === 'inactive-group' || kind === 'application' || kind === 'program' || kind === 'overview' || kind === 'launch'
       ? 'M2 2h12v9H2zM5 14h6M8 11v3M2 5h12'
       : kind === 'process'
         ? 'M5 3h6v10H5zM2 5h3m6 0h3M2 8h3m6 0h3M2 11h3m6 0h3'
@@ -562,6 +562,7 @@ function statusStrip(r: Row) {
     const button = element('button', '', 'policy-cell status-slot');
     button.dataset.direction = direction;
     button.disabled =
+      r.kind === 'inactive-group' ||
       r.kind === 'overview' ||
       r.kind === 'program' ||
       r.kind === 'launch' ||
@@ -582,6 +583,9 @@ function statusStrip(r: Row) {
     } else if (r.kind === 'socket') {
       chip = { glyph: '', text: '', tone: 'none', detail: '' };
       title = `${slot.label}: connections carry no rules; see the holder process.`;
+    } else if (r.kind === 'inactive-group') {
+      chip = { glyph: '', text: '', tone: 'none', detail: '' };
+      title = 'Expand to view saved programs and edit their individual rules.';
     } else if (r.kind === 'program') {
       chip = { glyph: '', text: '', tone: 'none', detail: '' };
       title = 'Expand this program to edit each account’s permissions.';
@@ -1473,11 +1477,11 @@ function renderTree() {
     if (r.identityNote) name.append(element('span', ' · ' + r.identityNote, 'row-inactive-note'));
     if (r.requestEvent && !r.process && !r.inactive && !r.rows.length)
       name.append(element('span', awaiting(r.requestEvent) ? ' · awaiting permission' : ' · recent request, no observed socket', 'row-inactive-note'));
-    if (r.inactive)
+    if (r.inactive && (r.inactive.earlierVersion || r.inactive.where))
       name.append(
         element(
           'span',
-          (r.inactive.earlierVersion ? ' · earlier version, not running' : ' · not running') +
+          (r.inactive.earlierVersion ? ' · earlier version' : '') +
             (r.inactive.where ? ' · ' + r.inactive.where : ''),
           'row-inactive-note',
         ),
@@ -1682,6 +1686,12 @@ function renderInfo() {
       );
     }
 
+    commit();
+    return;
+  }
+  if (r.kind === 'inactive-group') {
+    field(info, 'Programs', String(r.children.length));
+    field(info, 'Status', 'Saved programs without a currently observed running instance. Expand to view or edit their individual rules.');
     commit();
     return;
   }

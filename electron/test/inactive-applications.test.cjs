@@ -23,7 +23,12 @@ test('rules for programs that are not running produce inactive rows at the botto
     rule('r6', '', '', '', { all_programs: true, network_zone: 'local' }), // no application: never listed
   ];
   const roots = activityTree(activity, rules);
-  const inactive = roots.filter((r) => r.inactive);
+  const group = roots.find(r => r.kind === 'inactive-group');
+  const inactive = group.children;
+  assert.equal(group.label, 'Not running (2)');
+  assert.ok(inactive.every(r => r.parent === group.id));
+  assert.equal(flatten(roots,new Set(),'name',false).some(x=>x.row.inactive),false);
+  assert.equal(flatten(roots,new Set([group.id]),'name',false).filter(x=>x.row.inactive).length,2);
   assert.deepEqual(inactive.map((r) => r.label), ['curl', 'heroic-games-launcher']);
   assert.equal(inactive.find((r) => r.label === 'curl').inactive.rules, 2);
   const oldVersion = roots[0].children.find(r => r.id === 'app:kf|r-old|uid:1000');
@@ -33,7 +38,7 @@ test('rules for programs that are not running produce inactive rows at the botto
   // Bottom in every sort order and direction.
   for (const key of ['name', 'download_bps', 'count'])
     for (const desc of [false, true]) {
-      const order = flatten(roots, new Set(), key, desc).map((x) => !!x.row.inactive);
+      const order = flatten(roots, new Set(), key, desc).map((x) => x.row.kind === 'inactive-group');
       assert.deepEqual(order, [...order].sort((a, b) => a - b), `${key} ${desc}`);
     }
 });
@@ -110,14 +115,14 @@ test('script context survives inactive listing without changing interpreter iden
 test('saved revisions share one program root; different identities remain visibly separate', () => {
   const old = {...rule('old','same','v1','/opt/tool'),created:'2025-01-01'};
   const next = {...rule('new','same','v2','/opt/tool'),created:'2026-01-01'};
-  const tree = activityTree({processes:{},rows:[]},[old,next]);
+  const tree = activityTree({processes:{},rows:[]},[old,next])[0].children;
   assert.equal(tree.length,1);
   assert.equal(tree[0].inactive.revision,'v2');
   assert.equal(tree[0].children[0].inactive.revision,'v1');
   assert.equal(tree[0].children[0].presentationLabel,'Earlier saved version');
-  const distinct = activityTree({processes:{},rows:[]},[old,rule('second','other','v1','/other/tool')]);
+  const distinct = activityTree({processes:{},rows:[]},[old,rule('second','other','v1','/other/tool')])[0].children;
   assert.equal(distinct.length,2);
-  const users = activityTree({processes:{},rows:[]},[old,rule('another-user','same','v1','/opt/tool',{uid:1001})]);
+  const users = activityTree({processes:{},rows:[]},[old,rule('another-user','same','v1','/opt/tool',{uid:1001})])[0].children;
   assert.equal(users.length,1, 'accounts share a visual program');
   assert.equal(users[0].kind,'program');
   assert.deepEqual(users[0].children.map(r=>r.inactive.uid),[1000,1001]);
@@ -128,7 +133,7 @@ test('saved revisions share one program root; different identities remain visibl
 
 test('one executable across three accounts has one visual root and intact targets', () => {
   const rules = [1000,0,970].map(uid => rule(`r${uid}`,`key${uid}`,'v1','/usr/bin/tool',{uid}));
-  const tree = activityTree({processes:{},rows:[]},rules);
+  const tree = activityTree({processes:{},rows:[]},rules)[0].children;
   assert.equal(tree.length,1);
   const group = tree[0];
   assert.equal(group.kind,'program');
@@ -140,7 +145,7 @@ test('one executable across three accounts has one visual root and intact target
   assert.deepEqual(group.children.map(r=>r.id).sort(),[1000,0,970].map(uid=>`app:key${uid}|v1|uid:${uid}`).sort());
   assert.equal(group.children.find(r=>r.inactive.uid===0).presentationLabel,'Root (UID 0)');
   assert.ok(group.children.every(r=>r.parent===group.id));
-  const different = activityTree({processes:{},rows:[]},[...rules,rule('else','else','v1','/other/tool')]);
+  const different = activityTree({processes:{},rows:[]},[...rules,rule('else','else','v1','/other/tool')])[0].children;
   assert.equal(different.length,2,'same basename elsewhere is not the same program');
 });
 

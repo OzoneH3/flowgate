@@ -8,7 +8,7 @@ export interface Row {
   parent?: string;
   // 'launch': display-only group of processes from one verified game launch
   // (backend provenance). Never a firewall target; rules stay per process/application.
-  kind: 'overview' | 'network' | 'application' | 'program' | 'launch' | 'process' | 'socket' | 'unidentified';
+  kind: 'inactive-group' | 'overview' | 'network' | 'application' | 'program' | 'launch' | 'process' | 'socket' | 'unidentified';
   label: string;
   program?: { executable: string; inactive: boolean };
   presentationLabel?: string;
@@ -365,6 +365,7 @@ export function flatten(
         if (a.kind !== b.kind) return a.kind === 'network' ? -1 : 1;
         return a.id === b.id ? 0 : a.id === 'network:internet' ? -1 : 1;
       }
+      if (a.kind === 'inactive-group' || b.kind === 'inactive-group') return a.kind === b.kind ? 0 : a.kind === 'inactive-group' ? 1 : -1;
       if (!!a.applicationZone !== !!b.applicationZone) return a.applicationZone ? -1 : 1;
       if (a.applicationZone && b.applicationZone) return (a.applicationZone.zone === b.applicationZone.zone ? a.id.localeCompare(b.id) : a.applicationZone.zone === 'local' ? -1 : 1);
       // Not-running applications with rules stay at the bottom in every sort order.
@@ -519,7 +520,14 @@ export function activityTree(activity: Activity, rules: Rule[] | undefined, quer
   const live = hierarchy(activity, query, filter);
   const rows=[...live, ...inactiveApplications(rules, live, query, filter)];
   addRequestApplications(rows, events, query, filter);
-  return addApplicationZones(groupProgramAccounts(groupApplicationVersions(rows)),rules||[],zones);
+  const grouped = addApplicationZones(groupProgramAccounts(groupApplicationVersions(rows)),rules||[],zones);
+  const inactive = grouped.filter(r => (r.inactive || r.program?.inactive) &&
+    !allRows([r]).some(child => child.requestEvent?.state === 'awaiting-decision'));
+  if (!inactive.length) return grouped;
+  const id = 'inactive-applications';
+  for (const row of inactive) row.parent = id;
+  return [...grouped.filter(r => !inactive.includes(r)),
+    {id, kind: 'inactive-group', label: `Not running (${inactive.length})`, rows: [], children: inactive}];
 }
 
 // A held or recently ended request can outlive the socket census. Preserve its
@@ -618,7 +626,7 @@ export function groupProgramAccounts(rows: Row[]): Row[] {
       const identity = child.inactive?.key || app?.key;
       child.parent = id;
       child.presentationLabel = `${uid === 0 ? 'Root (UID 0)' : uid === undefined ? 'Unknown account' : `User UID ${uid}`}${prefix ? ` · ${prefix}` : ''}`;
-      child.identityNote = `${child.label} · ${child.inactive ? 'Not running' : 'Observed'}${identity ? ` · Identity ${identity.slice(0,12)}` : ''}`;
+      child.identityNote = `${child.label} · ${child.inactive ? 'Saved rules' : 'Observed'}${identity ? ` · Identity ${identity.slice(0,12)}` : ''}`;
       removed.add(child);
     }
     replacements.set(children[0], group);
