@@ -36,13 +36,6 @@ func isInterpreter(name string) bool {
 	return false
 }
 
-// IsInterpreterExecutable identifies shared language/shell hosts using the same
-// generic classifier as permission-target explanations. Unknown invocation
-// metadata is separately excluded by policy.
-func IsInterpreterExecutable(path string) bool {
-	return isInterpreter(filepath.Base(path))
-}
-
 // ShortPrefix abbreviates a prefix for display: home becomes ~, long paths keep
 // their last two components.
 func ShortPrefix(p string) string {

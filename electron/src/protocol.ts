@@ -1189,6 +1189,7 @@ export interface RuleTargetState {
   reason: string;
 }
 export interface Rule {
+  share_with_root?: boolean;
   root_application?: string;
   invocation?: Invocation;
   preset?: {
@@ -1253,6 +1254,7 @@ export interface RulePreview {
   replaces?: { id: string; version: number } | null;
 }
 export interface RuleEdit {
+  share_with_root?: boolean;
   token: string;
   action: RuleAction;
   protocol: string;
@@ -1422,6 +1424,7 @@ export function parseRule(v: unknown): Rule {
     })(),
     executable: string(r.executable),
     root_application: string(r.root_application) || undefined,
+    ...(r.share_with_root === true ? { share_with_root: true } : {}),
     created: string(r.created),
     disabled: r.disabled === true,
     schema: number(r.schema),
@@ -1436,13 +1439,14 @@ export function validateEdit(v: unknown): RuleEdit {
   const e = object(v);
   if (
     Object.keys(e)
-      .filter((k) => !['creation_scope', 'network_zone'].includes(k))
+      .filter((k) => !['creation_scope', 'network_zone', 'share_with_root'].includes(k))
       .sort()
       .join(',') !==
       'action,disabled,expiry,local_port,priority,protocol,remote_address,remote_port,token' ||
     (e.creation_scope !== undefined &&
       !['application', 'custom', 'policy'].includes(String(e.creation_scope))) ||
     (e.network_zone !== undefined && !['', 'local', 'internet'].includes(String(e.network_zone))) ||
+    (e.share_with_root !== undefined && typeof e.share_with_root !== 'boolean') ||
     typeof e.token !== 'string' ||
     e.token.length > 128 ||
     !['allow', 'block', 'ask'].includes(String(e.action)) ||

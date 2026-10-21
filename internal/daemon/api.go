@@ -196,7 +196,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						}
 					}
 					if !readonly && e.Mode != "host-monitor" {
-						r.Capabilities = append(r.Capabilities, PolicyExplanationCapability, ObservedRuleCapability, ProcessRuleCapability, ObservedAnyProtocolCapability, DecisionZoneCapability, ApplicationPolicyCapability, DecisionRememberFieldsCapability, StoredAskCapability, RequestApplicationRuleCapability, ForAWhileCapability, ForAWhileDurationsCapability, QueueReconcileCapability, RequestForAWhileCapability, LocalPairCapability, RequestSandboxIdentityCapability)
+						r.Capabilities = append(r.Capabilities, "explicit-root-sharing-v1", PolicyExplanationCapability, ObservedRuleCapability, ProcessRuleCapability, ObservedAnyProtocolCapability, DecisionZoneCapability, ApplicationPolicyCapability, DecisionRememberFieldsCapability, StoredAskCapability, RequestApplicationRuleCapability, ForAWhileCapability, ForAWhileDurationsCapability, QueueReconcileCapability, RequestForAWhileCapability, LocalPairCapability, RequestSandboxIdentityCapability)
 						r.ForAWhileDurations = ForAWhileDurations
 					}
 					if e.Evaluation != nil {

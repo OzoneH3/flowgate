@@ -120,6 +120,11 @@ export class Rules {
       throw Error('Ask rule is read-only: backend update required (stored-ask-v1)');
     for (const [k, v] of this.receipts) if (v.draft === e.token) this.receipts.delete(k);
     const rule = structuredClone(d.rule);
+    if (e.share_with_root !== undefined) {
+      if (!c.capabilities?.includes('explicit-root-sharing-v1')) throw Error('Backend update required for explicit root sharing');
+      if (e.share_with_root) rule.share_with_root = true;
+      else delete rule.share_with_root;
+    }
     Object.assign(rule, {
       schema: [4, 6].includes(d.rule.schema) ? d.rule.schema : d.rule.filter.process ? 3 : 2,
       action: e.action,

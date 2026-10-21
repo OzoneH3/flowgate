@@ -478,11 +478,14 @@ The complete rule JSON, reason, and timestamp are retained in `archived_rules` i
 the private policy database, in the same transaction that removes the active rule.
 An archive/delete transaction failure leaves active rules unchanged. The newest
 512 archive entries are retained (at least one complete 256-rule cleanup batch);
-older history is pruned and SQLite pages reclaimed. Existing databases enlarged
+older history is pruned and SQLite pages reclaimed. Compaction failure is logged
+and does not abort startup after a successful archive transaction. Existing databases enlarged
 by old unbounded archives can still open for pruning. Active rules retain their
 256-row and 16 KiB-per-document limits.
 
-The executable census has a 250 ms total budget and one worker. On timeout, all
+The executable census has a 250 ms total budget and one worker. All candidates
+share one process census per batch; executable and alternate-root checks remain
+per candidate. On timeout, all
 executable candidates are retained; the late worker cannot mutate policy. An
 unresponsive filesystem may leave that single worker blocked until process exit,
 but cannot hold up daemon readiness. Recently expired rules remain stored for a
@@ -501,22 +504,25 @@ A matching already-running daemon is not restarted solely to perform cleanup.
 
 ### Shared saved native permissions for the administrator and root
 
-Saved native application rules owned by the daemon's configured non-root
-administrator also cover UID 0 for the exact executable and revision. The server
-records the verified counterpart key in `root_application` on the rule and policy
-references. Startup migrates eligible existing rules atomically through the rule
-store and increments changed rule versions; new reviewed rules describe the same
-scope. No rule is inferred from a display name, launcher, or sudo command line.
+Root sharing is **off by default**, including for existing rules. The configured
+administrator may explicitly select “Also apply when run as root” in the rule
+editor and review/save the resulting scope. The `explicit-root-sharing-v1`
+capability advertises this contract. The saved `share_with_root: true` choice
+authorizes only that native executable/revision and the rule's direction, endpoint,
+expiry and action; `root_application` is still derived by the server.
 
-This scope applies to saved Allow, Block and Ask rules, preserving direction,
-endpoint, expiry, disabled state, priorities and Block precedence. Once and
-process-instance permissions stay unchanged. Other users, Wine/prefix identities,
-Electron hosted identities, recognized language/shell interpreters, rules carrying
-script invocation metadata, and native identities whose original key cannot be
-verified from their executable path remain separate. Existing root-only rules
-take precedence over shared rules whenever they match, regardless of the shared
-rule action or priority. Old interpreter root links are revoked and persisted at
-startup; the original user rule is retained. There is no blanket privilege-based network bypass.
+Startup revokes old automatic root links lacking explicit consent, increments
+the changed rule version and persists it atomically. The original user rule
+remains. Ordinary Allow/Remember never opts into root sharing. Other users,
+Wine/prefix identities, hosted Electron identities, process and machine-wide
+rules remain separate. Only the configured administrator can opt in.
+
+This does not attempt to prove a native executable is not an interpreter. If an
+administrator explicitly shares an interpreter rule, all scripts run by that
+interpreter within that rule's scope are covered; the editor states this clearly.
+A display name, command line or missing invocation metadata grants no root scope.
+Matching explicit root-principal rules override shared fallback rules regardless
+of the shared rule's action or priority.
 
 Electron groups top-level entries with the same exact executable path under one
 visual program when multiple accounts/identities exist. Original account rows,

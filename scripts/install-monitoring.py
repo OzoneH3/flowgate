@@ -97,9 +97,7 @@ def verified_rule_transition(before_db,after_db,administrator_uid=1000):
   if new==old:continue
   f=old.get('filter')or{};uid=f.get('uid');path=old.get('executable','')
   native=lambda u:sha(f'{u}|native||{path}'.encode())
-  name=pathlib.PurePosixPath(path).name.lower()
-  interpreter=any(name==n or(name.startswith(n)and not name[len(n):].strip('0123456789.'))for n in ('python','bash','sh','dash','zsh','fish','perl','ruby','node','java','lua','php','mono','dotnet'))
-  eligible=uid==administrator_uid and isinstance(uid,int)and uid>0 and not interpreter and not old.get('invocation') and path.startswith('/')and f.get('application')==native(uid)and not(old.get('preset')or f.get('process')or f.get('all_programs')or f.get('all_uids'))
+  eligible=old.get('share_with_root')is True and uid==administrator_uid and isinstance(uid,int)and uid>0 and path.startswith('/')and f.get('application')==native(uid)and not(old.get('preset')or f.get('process')or f.get('all_programs')or f.get('all_uids'))
   expected=dict(old)
   if eligible:expected['root_application']=native(0)
   else:expected.pop('root_application',None)

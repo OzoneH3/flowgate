@@ -14,7 +14,7 @@ func TestRootScopeMigrationAndPreview(t *testing.T) {
 	e.AdministratorUID = &uid
 	a := identity.Application{Kind: "native", Executable: "/usr/bin/tool", Revision: "v1"}
 	a.Key = identity.ApplicationKey(uid, a)
-	r := policy.Rule{ID: "saved", Version: 1, Schema: 2, Executable: a.Executable, Created: time.Now(), Action: "allow", Filter: policy.Filter{Application: a.Key, Revision: a.Revision, UID: uid, Direction: "outgoing", Protocol: "*", RemoteAddress: "*"}}
+	r := policy.Rule{ShareWithRoot: true, ID: "saved", Version: 1, Schema: 2, Executable: a.Executable, Created: time.Now(), Action: "allow", Filter: policy.Filter{Application: a.Key, Revision: a.Revision, UID: uid, Direction: "outgoing", Protocol: "*", RemoteAddress: "*"}}
 	var saved []policy.Rule
 	e.SaveRules = func(rs []policy.Rule) error { saved = append([]policy.Rule{}, rs...); return nil }
 	if err := e.SetRules([]policy.Rule{r}); err != nil {
@@ -81,5 +81,35 @@ func TestLegacyInterpreterRootScopeRevokedAndPersisted(t *testing.T) {
 	}
 	if e.rules[0].Version != 8 {
 		t.Fatal("revocation not idempotent")
+	}
+}
+
+func TestExplicitRootSharingRequiresAdministratorAndReviewedOptIn(t *testing.T) {
+	e := New(time.Second)
+	uid := uint32(1000)
+	e.AdministratorUID = &uid
+	app := identity.Application{Kind: "native", Executable: "/custom/unknown-host", Revision: "v1"}
+	r := policy.Rule{Schema: 2, ID: "saved", Version: 1, Created: time.Now(), Executable: app.Executable, Action: "allow", Filter: policy.Filter{Application: identity.ApplicationKey(uid, app), UID: uid, Revision: "v1", Direction: "outgoing", Protocol: "tcp", RemoteAddress: "*"}}
+	e.SaveRules = func([]policy.Rule) error { return nil }
+	if err := e.SetRules([]policy.Rule{r}); err != nil {
+		t.Fatal(err)
+	}
+	if e.rules[0].RootApplication != "" {
+		t.Fatal("implicit sharing")
+	}
+	r.ShareWithRoot = true
+	version := uint64(1)
+	if _, _, err := e.EditRule(r.ID, "", &version, r, uid, false, true); err == nil {
+		t.Fatal("unprivileged sharing")
+	}
+	saved, _, err := e.EditRule(r.ID, "", &version, r, uid, true, true)
+	if err != nil || saved.RootApplication == "" || !saved.ShareWithRoot {
+		t.Fatal(saved, err)
+	}
+	version = saved.Version
+	saved.ShareWithRoot = false
+	saved, _, err = e.EditRule(saved.ID, "", &version, saved, uid, true, true)
+	if err != nil || saved.RootApplication != "" {
+		t.Fatal("explicit removal failed", saved, err)
 	}
 }

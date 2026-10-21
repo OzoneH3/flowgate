@@ -227,7 +227,9 @@ export class ObservedRules {
     if (this.receipts.size >= 64) throw Error('Outstanding receipt limit reached');
     if (d.targetScope === 'process' && !c.capabilities?.includes(PROCESS_CAPABILITY))
       throw Error('Process capability lost; no fallback');
+    if (e.share_with_root && !c.capabilities?.includes('explicit-root-sharing-v1')) throw Error('Backend update required for explicit root sharing');
     const value = {
+      ...(e.share_with_root ? { share_with_root: true } : {}),
       ...(c.capabilities?.includes(PROCESS_CAPABILITY) ? { target_scope: d.targetScope } : {}),
       ...(e.network_zone
         ? { network_zone: e.network_zone, zone_revision: c.networkZones?.revision }

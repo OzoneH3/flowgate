@@ -29,6 +29,7 @@ test('expired rule preserves immutable identity/absolute expiry; ambiguous save 
     action: 'allow',
     disabled: true,
   };
+  const capabilities = [];
   let saves = 0,
     preview;
   const server = net.createServer((s) =>
@@ -60,7 +61,7 @@ test('expired rule preserves immutable identity/absolute expiry; ambiguous save 
       pollControl: async () => {},
       now: () => Date.now(),
       view: () => ({
-        control: { connected: true, readOnly: false, generation: 'g', rules: [rule], events: [] },
+        control: { connected: true, readOnly: false, generation: 'g', capabilities, rules: [rule], events: [] },
       }),
     };
     const rules = new Rules(backend),
@@ -77,7 +78,14 @@ test('expired rule preserves immutable identity/absolute expiry; ambiguous save 
       expiry: 'preserve',
     };
     await assert.rejects(() => rules.preview({ ...e, application: 'injected' }));
+    await assert.rejects(() => rules.preview({ ...e, share_with_root: true }), /Backend update/);
+    capabilities.push('explicit-root-sharing-v1');
+    await rules.preview({ ...e, share_with_root: true });
+    assert.equal(preview.rule.share_with_root, true);
+    await rules.preview({ ...e, share_with_root: false });
+    assert.equal(preview.rule.share_with_root, undefined);
     const p = await rules.preview(e);
+    assert.equal(preview.rule.share_with_root, undefined, 'no implicit sharing');
     assert.equal(preview.rule.expires, rule.expires);
     assert.equal(preview.rule.filter.application, 'key');
     assert.equal(preview.expected_version, 4);

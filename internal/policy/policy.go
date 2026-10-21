@@ -30,6 +30,7 @@ type Filter struct {
 	UID           uint32 `json:"uid"`
 }
 type Rule struct {
+	ShareWithRoot   bool   `json:"share_with_root,omitempty"`
 	RootApplication string `json:"root_application,omitempty"`
 	// Invocation is historical display context, never a permission matcher.
 	Invocation *identity.Invocation `json:"invocation,omitempty"`
@@ -47,7 +48,7 @@ type Rule struct {
 }
 
 func (r Rule) CanShareRoot() bool {
-	return r.validRootPair() && r.Invocation == nil && !identity.IsInterpreterExecutable(r.Executable)
+	return r.validRootPair() && r.ShareWithRoot
 }
 
 // Accept old structurally valid pairs on load so startup can persist revocation.

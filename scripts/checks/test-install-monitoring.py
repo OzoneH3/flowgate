@@ -113,7 +113,7 @@ class MonitoringInstall(unittest.TestCase):
    self.assertEqual((self.base/'var/lib/flowgate/rules.db').read_bytes(),dbbytes)
    self.assertEqual(json.loads((self.base/'var/lib/flowgate/protection.json').read_text())['mode'],'monitoring')
  def test_install_accepts_exact_startup_root_migration(self):
-  rule={'id':'user:test','version':1,'executable':'/usr/bin/tool','filter':{'uid':1000,'application':m.sha(b'1000|native||/usr/bin/tool'),'revision':'v1'},'action':'allow'}
+  rule={'id':'user:test','share_with_root':True,'version':1,'executable':'/usr/bin/tool','filter':{'uid':1000,'application':m.sha(b'1000|native||/usr/bin/tool'),'revision':'v1'},'action':'allow'}
   dbpath=self.base/'var/lib/flowgate/rules.db'
   with sqlite3.connect(dbpath)as db:db.execute('INSERT INTO rules VALUES(?,?)',(rule['id'],json.dumps(rule)))
   migrated=dict(rule,version=2,root_application=m.sha(b'0|native||/usr/bin/tool'))
@@ -158,11 +158,13 @@ class MigrationVerification(unittest.TestCase):
    db.execute('CREATE TABLE archived_rules(rule_id TEXT, document TEXT, reason TEXT)')
    db.executemany('INSERT INTO archived_rules VALUES(?,?,?)',[(r['id'],json.dumps(r),reason)for r,reason in archives])
  def test_exact_migration_and_repeat_install(self):
+  self.rule['share_with_root']=True
+  self.write(self.before,[self.rule])
   new=dict(self.rule,version=2,root_application=m.sha(b'0|native||/usr/bin/tool'))
   self.write(self.after,[new]);self.assertEqual(m.verified_rule_transition(self.before,self.after),[('r',2)])
   self.write(self.before,[new]);self.assertEqual(m.verified_rule_transition(self.before,self.after),[('r',2)])
  def test_interpreter_scope_revocation_and_foreign_uid(self):
-  for name in ['python3.13','bash','node']:
+  for name in ['python3.13','bun','tclsh8.6','beam.smp','tool','unknown-host']:
    path='/usr/bin/'+name
    old=dict(self.rule,executable=path,root_application=m.sha(f'0|native||{path}'.encode()))
    old['filter']=dict(self.rule['filter'],application=m.sha(f'1000|native||{path}'.encode()))

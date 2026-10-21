@@ -10,7 +10,7 @@ func TestPairedRootApplicationScope(t *testing.T) {
 	now := time.Now()
 	app := identity.Application{Kind: "native", Executable: "/usr/bin/tool", Revision: "v1"}
 	app.Key = identity.ApplicationKey(1000, app)
-	r := Rule{ID: "user", Schema: 2, Executable: app.Executable, Action: "allow", Created: now, Filter: Filter{Application: app.Key, Revision: app.Revision, UID: 1000, Direction: "outgoing", Protocol: "tcp"}, RootApplication: identity.ApplicationKey(0, app)}
+	r := Rule{ShareWithRoot: true, ID: "user", Schema: 2, Executable: app.Executable, Action: "allow", Created: now, Filter: Filter{Application: app.Key, Revision: app.Revision, UID: 1000, Direction: "outgoing", Protocol: "tcp"}, RootApplication: identity.ApplicationKey(0, app)}
 	if err := r.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestRootExplicitPolicyOverridesSharedAcrossActionsAndPriorities(t *testing.
 	for _, sharedAction := range []string{"allow", "block", "ask"} {
 		for _, rootAction := range []string{"allow", "block", "ask"} {
 			for _, priority := range []int{-1000, 0, 1000} {
-				shared := Rule{ID: "shared", Executable: app.Executable, RootApplication: app.Key, Action: sharedAction, Priority: priority, Filter: Filter{Application: identity.ApplicationKey(1000, app), Revision: "v1", UID: 1000, Direction: "outgoing", Protocol: "tcp"}}
+				shared := Rule{ShareWithRoot: true, ID: "shared", Executable: app.Executable, RootApplication: app.Key, Action: sharedAction, Priority: priority, Filter: Filter{Application: identity.ApplicationKey(1000, app), Revision: "v1", UID: 1000, Direction: "outgoing", Protocol: "tcp"}}
 				explicit := shared
 				explicit.ID, explicit.RootApplication, explicit.Action, explicit.Priority = "root", "", rootAction, 0
 				explicit.Filter.UID, explicit.Filter.Application = 0, app.Key
@@ -97,8 +97,8 @@ func TestRootExplicitPolicyOverridesSharedAcrossActionsAndPriorities(t *testing.
 	}
 }
 
-func TestInterpreterRootSharingRejectedWithoutBreakingLegacyLoad(t *testing.T) {
-	for _, path := range []string{"/usr/bin/python3.13", "/usr/bin/bash", "/usr/bin/node", "/custom/script-host"} {
+func TestAutomaticRootSharingRejectedWithoutBreakingLegacyLoad(t *testing.T) {
+	for _, path := range []string{"/usr/bin/python3.13", "/usr/bin/bun", "/usr/bin/tclsh8.6", "/usr/bin/beam.smp", "/usr/bin/guile", "/custom/unknown", "/usr/bin/tool", "/custom/script-host"} {
 		app := identity.Application{Kind: "native", Executable: path, Revision: "v1"}
 		r := Rule{Schema: 2, ID: "legacy", Executable: path, RootApplication: identity.ApplicationKey(0, app), Action: "allow", Filter: Filter{Application: identity.ApplicationKey(1000, app), UID: 1000, Revision: "v1", Direction: "outgoing", Protocol: "tcp"}}
 		if path == "/custom/script-host" {

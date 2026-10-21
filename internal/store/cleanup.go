@@ -5,6 +5,7 @@ import (
 	"flowgate/internal/identity"
 	"flowgate/internal/policy"
 	"fmt"
+	"log"
 	"time"
 )
 
@@ -17,7 +18,7 @@ const expiryArchiveGrace = 7 * 24 * time.Hour
 // startup publishes policy. Only the exclusive daemon writer may run cleanup.
 // Archived JSON stays in the private database; it is never evaluated as policy.
 func (s *Store) LoadCurrent(now time.Time) ([]policy.Rule, error) {
-	return s.loadCurrent(now, identity.ObsoleteNativeRevision)
+	return s.loadCurrent(now, identity.NewObsoleteNativeChecker())
 }
 
 func (s *Store) loadCurrent(now time.Time, obsolete func(string, string, string, uint32) bool) ([]policy.Rule, error) {
@@ -106,7 +107,7 @@ func (s *Store) loadCurrent(now time.Time, obsolete func(string, string, string,
 	}
 	if n, _ := pruned.RowsAffected(); n > 0 {
 		if _, err := s.db.Exec("VACUUM"); err != nil {
-			return nil, fmt.Errorf("compact rule archive: %w", err)
+			log.Printf("FlowGate: rule archive committed; space reclamation deferred: %v", err)
 		}
 	}
 	return kept, nil

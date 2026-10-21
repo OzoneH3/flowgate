@@ -100,6 +100,9 @@ func RuleSentence(r policy.Rule) string {
 // immutable identity from a currently attributable pending request. Edits require
 // a version and preserve application/revision/UID/direction, ID and creation time.
 func (e *Engine) EditRule(id, eventID string, expected *uint64, candidate policy.Rule, uid uint32, admin, commit bool) (policy.Rule, string, error) {
+	if candidate.ShareWithRoot && !admin {
+		return policy.Rule{}, "", mutationError("forbidden", "Only the configured administrator may share rules with root")
+	}
 	e.lockResolved(e.requestSelection(eventID, uid, admin, false))
 	defer e.unlockResolved()
 	if e.SaveRules == nil {
@@ -288,6 +291,9 @@ func (e *Engine) reviewRuleLocked(candidate policy.Rule, now time.Time, expiryUn
 		}
 	}
 	candidate = e.rootScope(candidate)
+	if candidate.ShareWithRoot && candidate.RootApplication == "" {
+		return policy.Rule{}, "", mutationError("unsupported_target", "Root sharing requires the configured administrator's native application rule")
+	}
 	candidate.Filter = canonicalFilter(candidate.Filter)
 	if err := candidate.Validate(); err != nil {
 		return policy.Rule{}, "", err
