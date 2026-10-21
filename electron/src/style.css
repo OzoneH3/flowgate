@@ -1728,3 +1728,6 @@ body.hide-sidebar #activityView > aside { display:none; }
 #promptBody #requestDetails .decision-controls button.allow:active:not(:disabled), #promptBody #requestDetails .decision-controls button.block:active:not(:disabled) { background:#606060; border-color:#6a6a6a; transform:translateY(1px); }
 #promptBody #requestDetails .decision-controls button.allow:focus-visible, #promptBody #requestDetails .decision-controls button.block:focus-visible { outline:2px solid #2db5f6; outline-offset:1px; }
 #promptBody #requestDetails .decision-controls button.allow:disabled, #promptBody #requestDetails .decision-controls button.block:disabled { cursor:default; }
+
+
+.row-icon.network-filter-icon { fill:#c4dd32; stroke:#a7c52b; stroke-width:.6; }

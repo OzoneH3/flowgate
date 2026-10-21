@@ -404,7 +404,7 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, text = '', class
   e.className = className;
   return e;
 }
-function rowIcon(kind: Row['kind']) {
+function rowIcon(kind: Row['kind'] | 'service' | 'terminal') {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', '0 0 16 16');
   svg.setAttribute('class', 'row-icon');
@@ -412,7 +412,13 @@ function rowIcon(kind: Row['kind']) {
   const path = document.createElementNS(svg.namespaceURI, 'path');
   path.setAttribute(
     'd',
-    kind === 'overview'
+    kind === 'network'
+      ? 'M1 2h14L10 8v6l-4-2V8z'
+      : kind === 'service'
+        ? 'M6.5 1h3l.5 2 1.5 1 2-.5 1.5 2.5-1.5 1v2l1.5 1-1.5 2.5-2-.5-1.5 1-.5 2h-3l-.5-2-1.5-1-2 .5L.5 10l1.5-1V7L.5 6 2 3.5l2 .5 1.5-1z M10.5 8a2.5 2.5 0 1 0-5 0 2.5 2.5 0 1 0 5 0'
+        : kind === 'terminal'
+          ? 'M1 2h14v12H1zM1 5h14M4 7l3 2-3 2M9 11h3'
+          : kind === 'overview'
       ? 'M1 2h14v9H1zM8 11v3M4 14h8'
       : kind === 'inactive-group'
         ? 'M2 3h12v3H2zM3 6v8h10V6M6 9h4'
@@ -424,19 +430,21 @@ function rowIcon(kind: Row['kind']) {
           ? 'M2 5h4v6H2zM10 5h4v6h-4zM6 8h4'
           : 'M3 3h10v10H3zM6 6a2 2 0 1 1 3 2l-1 1M8 11v1',
   );
+  if (kind === 'network') svg.classList.add('network-filter-icon');
   svg.append(path);
   return svg;
 }
 
 const appNames = new Map<string, string>();
+const iconFallbacks = new Map<string, 'service' | 'terminal'>();
 const iconCache = new Map<string, string | null>();
 const iconPending = new Set<string>();
 let iconScheduled = false;
 function installedIcon(app: Application | undefined, kind: Row['kind']) {
   const span = element('span', '', 'application-icon');
-  span.append(rowIcon(kind));
-  if (!app?.key) return span;
-  const key = JSON.stringify([app.key, app.revision, app.executable]);
+  const key = app?.key ? JSON.stringify([app.key, app.revision, app.executable]) : undefined;
+  span.append(rowIcon((key && iconFallbacks.get(key)) || kind));
+  if (!key) return span;
   span.dataset.iconKey = key;
   const paint = (node: HTMLElement, url: string) => {
     const img = element('img');
@@ -445,7 +453,7 @@ function installedIcon(app: Application | undefined, kind: Row['kind']) {
     img.width = img.height = 16;
     img.onerror = () => {
       if (node.dataset.iconKey) iconCache.set(node.dataset.iconKey, null);
-      node.replaceChildren(rowIcon('application'));
+      node.replaceChildren(rowIcon(iconFallbacks.get(node.dataset.iconKey || '') || 'application'));
     };
     node.replaceChildren(img);
   };
@@ -462,6 +470,15 @@ function installedIcon(app: Application | undefined, kind: Row['kind']) {
           const result = await window.flowgate.applicationMetadata(keys);
           for (const [key, metadata] of Object.entries(result)) {
             const url = metadata.icon;
+            if (metadata.fallback) {
+              if (iconFallbacks.size >= 2048) iconFallbacks.delete(iconFallbacks.keys().next().value!);
+              iconFallbacks.set(key, metadata.fallback);
+              for (const node of document.querySelectorAll<HTMLElement>('[data-icon-key]'))
+                if (node.dataset.iconKey === key && !url) {
+                  node.replaceChildren(rowIcon(metadata.fallback));
+                  node.title = metadata.fallback === 'service' ? 'Service executable (installed system service metadata)' : 'Command-line program (terminal or executable-location metadata)';
+                }
+            }
             if (metadata.name) {
               if (appNames.size >= 2048) appNames.delete(appNames.keys().next().value!);
               appNames.set(key, metadata.name);
@@ -1454,7 +1471,8 @@ function renderTree() {
     let rowLabel =
       r.presentationLabel ? r.presentationLabel : r.applicationZone ? r.label : r.kind === 'application' && displayKey ? appNames.get(displayKey) || r.label : r.label;
     let icon: HTMLElement = installedIcon(
-      r.kind !== 'application' ? undefined : r.displayApplication || inactiveApp || rowApplication(r),
+      r.kind === 'application' || r.kind === 'process' ? r.displayApplication || inactiveApp || rowApplication(r)
+        : r.kind === 'program' ? r.children.map(c => c.process?.application || c.displayApplication || (c.inactive && {key:c.inactive.key, revision:c.inactive.revision, executable:c.inactive.executable, name:c.label})).find(Boolean) || undefined : undefined,
       r.kind,
     );
     if(r.applicationZone){

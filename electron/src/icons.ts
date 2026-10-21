@@ -68,6 +68,8 @@ export class ApplicationIcons {
   private flatpakNames = new Map<string, Promise<FlatpakDesktop | undefined>>();
   private imageBytes = 0;
   private entries = new Map<string, Set<string>>();
+  private terminalEntries = new Map<string, Set<boolean>>();
+  private serviceExecutables = new Set<string>();
   private names = new Map<string, Set<string>>();
   // Desktop entries (display only) for Electron apps on a shared runtime.
   private desktops: { executable: string; name?: string; wmclass?: string }[] = [];
@@ -83,6 +85,7 @@ export class ApplicationIcons {
     ],
     private searchPath = (process.env.PATH || '/usr/bin:/bin').split(':'),
     private flatpakRoots = [path.join(home, '.local/share/flatpak/app'), '/var/lib/flatpak/app'],
+    private serviceDirs = ['/etc/systemd/system', '/usr/local/lib/systemd/system', '/usr/lib/systemd/system'],
   ) {
     this.iconRoots = [
       path.join(home, '.icons'),
@@ -144,7 +147,7 @@ export class ApplicationIcons {
         seen.add(file);
         try {
           const entry = desktopEntry((await read(path.join(dir, 'applications', file))).toString());
-          if (entry.Type !== 'Application' || entry.Hidden === 'true' || !entry.Icon) continue;
+          if (entry.Type !== 'Application' || entry.Hidden === 'true') continue;
           const token = desktopGameExecutable((entry.Exec || '').replace(/\\\\/g, '\\')) || execToken(entry.Exec || '');
           if (!token) continue;
           let executable = await this.executable(token);
@@ -157,7 +160,10 @@ export class ApplicationIcons {
           } catch {}
           if (!executable) continue;
           const icons = this.entries.get(executable) || new Set<string>();
-          icons.add(entry.Icon);
+          if (entry.Icon) icons.add(entry.Icon);
+          const terminals = this.terminalEntries.get(executable) || new Set<boolean>();
+          terminals.add(entry.Terminal === 'true');
+          this.terminalEntries.set(executable, terminals);
           this.entries.set(executable, icons);
           if (entry.Name && entry.Name.length < 256) {
             const names = this.names.get(executable) || new Set<string>();
@@ -166,6 +172,23 @@ export class ApplicationIcons {
           }
           if (this.desktops.length < 2048)
             this.desktops.push({ executable, name: entry.Name?.slice(0, 255), wmclass: entry.StartupWMClass?.slice(0, 255) });
+        } catch {}
+      }
+    }
+    // Installed unit metadata is used only for a fallback illustration. Never run ExecStart.
+    for (const dir of this.serviceDirs.filter(path.isAbsolute)) {
+      let files: string[] = [];
+      try { files = await fs.readdir(dir); } catch {}
+      for (const file of files.filter(f => f.endsWith('.service')).slice(0, 2048)) {
+        try {
+          const text = (await read(path.join(dir, file))).toString();
+          const service = text.match(/^\[Service\]\r?\n([\s\S]*?)(?=^\[|(?![\s\S]))/m)?.[1];
+          for (const match of service?.matchAll(/^ExecStart=([-+!:@]*)(.+)$/gm) || []) {
+            const token = execToken(match[2]);
+            if (!token || !path.isAbsolute(token)) continue;
+            const executable = await this.executable(token);
+            if (executable) this.serviceExecutables.add(executable);
+          }
         } catch {}
       }
     }
@@ -407,7 +430,7 @@ export class ApplicationIcons {
     const icons = await this.request(value);
     const result: Record<
       string,
-      { icon: string | null; name?: string; source: 'desktop-metadata' | 'steam-manifest' | 'executable-resource' | 'unavailable' }
+      { icon: string | null; name?: string; fallback?: 'service' | 'terminal'; source: 'desktop-metadata' | 'steam-manifest' | 'executable-resource' | 'unavailable' }
     > = Object.create(null);
     for (const [key, icon] of Object.entries(icons)) {
       const app = this.allowed.get(key);
@@ -442,6 +465,11 @@ export class ApplicationIcons {
       const game = desktop ? undefined : await this.steamGame(executable || '');
       result[key] = {
         icon,
+        fallback: app && (!app.kind || app.kind === 'native') && executable && !/\.exe$/i.test(executable)
+          ? this.serviceExecutables.has(executable) ? 'service'
+            : this.terminalEntries.get(executable)?.size === 1 && this.terminalEntries.get(executable)?.has(true) ? 'terminal'
+              : !this.terminalEntries.has(executable) && !game && this.searchPath.some(dir => path.isAbsolute(dir) && path.dirname(executable) === dir) ? 'terminal' : undefined
+          : undefined,
         name: peName || (names?.size === 1 ? [...names][0] : game?.name),
         source: peName ? 'executable-resource' : desktop ? 'desktop-metadata' : game ? 'steam-manifest' : icon ? 'executable-resource' : 'unavailable',
       };

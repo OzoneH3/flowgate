@@ -103,3 +103,27 @@ test('Flatpak names require exact deployment metadata and remain display-only',a
  const revised=fixture('org.example.First','New deployment','b'.repeat(64));assert.equal(await flatpakDisplayName(revised.exe),'New deployment');
  fs.writeFileSync(revised.desktop,'[Desktop Entry]\nType=Application\nName=Bad\u202ename\n');assert.equal(await flatpakDisplayName(revised.exe),undefined);
 });
+
+
+test('fallback artwork distinguishes installed services, CLI tools and desktop apps without changing identity',async(t)=>{
+ const fs=require('fs'),path=require('path');const {ApplicationIcons,iconKey}=require('../dist/test/icons.cjs');
+ const root=fs.mkdtempSync(path.resolve(__dirname,'../../.workspace/fallback-icons-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ const bin=path.join(root,'bin'),desktop=path.join(root,'applications'),units=path.join(root,'units');
+ for(const dir of [bin,desktop,units])fs.mkdirSync(dir);
+ const make=(name)=>{const executable=path.join(bin,name);fs.writeFileSync(executable,'#!/bin/sh\nexit 0\n');fs.chmodSync(executable,0o755);return {key:name,revision:'r',name,kind:'native',executable};};
+ const service=make('worker'),cli=make('command'),gui=make('desktop'),terminal=make('console'),windows=make('unknown.exe');
+ fs.writeFileSync(path.join(units,'worker.service'),`[Unit]\nDescription=Synthetic\n[Service]\nExecStart=${service.executable} --listen\n`);
+ fs.writeFileSync(path.join(desktop,'desktop.desktop'),`[Desktop Entry]\nType=Application\nName=Desktop\nExec=${gui.executable}\nTerminal=false\n`);
+ fs.writeFileSync(path.join(desktop,'console.desktop'),`[Desktop Entry]\nType=Application\nName=Console\nExec=${terminal.executable}\nTerminal=true\n`);
+ const icons=new ApplicationIcons(root,[root],[bin],[],[units]);
+ const apps=[service,cli,gui,terminal,windows];
+ icons.observe({observation:{activity:{rows:[],processes:Object.fromEntries(apps.map(a=>[a.key,{application:a}]))}},control:{events:[],rules:[]}});
+ const before=JSON.stringify(apps),metadata=await icons.metadata(apps.map(iconKey));
+ assert.equal(metadata[iconKey(service)].fallback,'service');
+ assert.equal(metadata[iconKey(cli)].fallback,'terminal');
+ assert.equal(metadata[iconKey(terminal)].fallback,'terminal');
+ assert.equal(metadata[iconKey(gui)].fallback,undefined,'desktop app lacking artwork is not labelled CLI');
+ assert.equal(metadata[iconKey(windows)].fallback,undefined,'unknown Windows executable is not classified from a native path');
+ assert.equal((await icons.metadata(['unauthorized']))['unauthorized'].fallback,undefined);
+ assert.equal(JSON.stringify(apps),before,'artwork metadata cannot alter permission identities');
+});
