@@ -1,4 +1,4 @@
-// Real KDE tray/notification daemon + isolated Go controller. No host enforcement.
+// Real KDE tray and automatic popup + isolated Go controller. No host enforcement.
 import { _electron as electron } from 'playwright-core';
 import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -120,6 +120,9 @@ try {
   const launcherSource = fs
     .readFileSync(path.join(root, 'electron/launch.py'), 'utf8')
     .replace('ROOT = Path(__file__).resolve().parents[1]', `ROOT = Path(${JSON.stringify(root)})`)
+    // Playwright discovers the debugger endpoint on stderr. The normal
+    // launcher combines it into stdout for logs, so preserve stderr here.
+    .replace('stderr=subprocess.STDOUT', 'stderr=None')
     .replace(
       'a = p.parse_args()',
       `a, diagnostic_flags = p.parse_known_args()\nassert all(x.startswith(('--inspect=', '--remote-debugging-port=')) for x in diagnostic_flags)`,
@@ -131,12 +134,13 @@ try {
   fs.writeFileSync(launchCopy, launcherSource, { mode: 0o700 });
   app = await electron.launch({
     chromiumSandbox: true,
+    timeout: 20000,
+    artifactsDir: run,
     executablePath: launchCopy,
     args: ['--control', path.join(run, 'api/control.sock')],
     cwd: root,
     env: {
       ...process.env,
-      WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY || 'wayland-0',
       XDG_CACHE_HOME: path.join(run, 'cache'),
       TMPDIR: path.join(root, '.workspace/tmp'),
     },
@@ -152,7 +156,7 @@ try {
       .find((pid) => fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes('electron-observer')),
   );
   assert(ownedObserverPID);
-  const page = await app.firstWindow();
+  const page = await wait(() => app.windows().find((p) => p.url() === 'flowgate://app/index.html'));
   await page.waitForFunction(() => !!window.flowgate);
   await wait(
     async () => (await page.evaluate(() => window.flowgate.backgroundStatus())).trayAvailable,
@@ -161,10 +165,17 @@ try {
   assert(
     await app.evaluate(
       ({ BrowserWindow }) =>
-        BrowserWindow.getAllWindows()[0].webContents.getLastWebPreferences().sandbox,
+        BrowserWindow.getAllWindows()
+          .find((w) => w.webContents.getURL() === 'flowgate://app/index.html')
+          .webContents.getLastWebPreferences().sandbox,
     ),
   );
-  const mainID = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].id);
+  const mainID = await app.evaluate(
+    ({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows().find(
+        (w) => w.webContents.getURL() === 'flowgate://app/index.html',
+      ).id,
+  );
   const close = () =>
     app.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id).close(), mainID);
   const trayBus = await wait(() => {
@@ -214,145 +225,64 @@ try {
   };
   assert.equal(
     await app.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id).isVisible(), mainID),
-    false, 'startup stays hidden while tray host is available',
+    false,
+    'startup stays hidden while tray host is available',
   );
   menuClick('Open FlowGate');
-  await wait(() => app.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id).isVisible(), mainID));
-  await page.check('#keepInTray');
+  await wait(() =>
+    app.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id).isVisible(), mainID),
+  );
+  await page.evaluate(() => window.flowgate.preferences({ keepInTray: true }));
   await close();
-  assert.equal(
-    await app.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id).isVisible(), mainID),
-    false,
+  await wait(() =>
+    app.evaluate(({ BrowserWindow }, id) => !BrowserWindow.fromId(id).isVisible(), mainID),
   );
   await command('send', { port: 44001 });
   await wait(() => layout().includes('Pending requests (1)'));
-  await wait(() => {
-    parseBlock(block);
-    return notices.length > 0;
-  });
-  const first = notices.at(-1);
   assert.equal(received(44001), 0);
-  q(
-    'org.freedesktop.Notifications',
-    '/org/freedesktop/Notifications',
-    'org.kde.NotificationManager.InvokeAction',
-    String(first.id),
-    'default',
-  );
   const prompt = await wait(() => app.windows().find((p) => p.url().includes('?request=')));
   await prompt.waitForSelector('#allow');
   assert.equal(received(44001), 0);
+  await prompt.uncheck('#rememberToggle');
+  await prompt.uncheck('#forAWhileToggle');
+  await prompt.screenshot({ path: path.join(run, 'automatic-prompt.png') });
   await prompt.click('#allow');
   await wait(() => received(44001) === 1);
-  await prompt.screenshot({ path: path.join(run, 'notification-prompt.png') });
-  await prompt.click('#dismiss');
-  console.log(
-    'PASS actual KDE Notify + InvokeAction opens matching real request; only explicit Allow delivers UDP',
-  );
+
+  console.log('PASS automatic popup opens without notification; only explicit Allow delivers UDP');
   await close();
-  const count = notices.length;
   await command('send', { port: 44003 });
-  await wait(() => {
-    parseBlock(block);
-    return notices.length > count;
-  });
-  q(
-    'org.freedesktop.Notifications',
-    '/org/freedesktop/Notifications',
-    'org.kde.NotificationManager.InvokeAction',
-    String(notices.at(-1).id),
-    'default',
-  );
   const blockPrompt = await wait(() => app.windows().find((p) => p.url().includes('?request=')));
+  await blockPrompt.uncheck('#rememberToggle');
+  await blockPrompt.uncheck('#forAWhileToggle');
   await blockPrompt.click('#block');
   await sleep(250);
   assert.equal(received(44003), 0);
-  await blockPrompt.click('#dismiss');
-  console.log('PASS Block from notification-opened prompt prevents delivery');
+
+  console.log('PASS Block from automatic popup prevents delivery');
   menuClick('Pending requests');
   await wait(() => page.locator('#requestsView').isVisible());
-  await command('send', { port: 44005 });
-  await wait(async () =>
-    (await page.evaluate(() => window.flowgate.snapshot())).control.events.some(
-      (e) => e.state === 'awaiting-decision',
-    ),
-  );
-  await page.locator('#requestRows tr').last().click();
-  await page.click('#createRule');
-  await page.fill('#editAddress', '2001:db8::1234');
+  await page.click('#activityTab');
+  await page.fill('#search', 'fixture-search');
   for (let i = 0; i < 4; i++) {
     await close();
     menuClick('Open FlowGate');
-    await wait(() => page.locator('#ruleEditor').isVisible());
-    assert.equal(await page.inputValue('#editAddress'), '2001:db8::1234');
+    await wait(() =>
+      app.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id).isVisible(), mainID),
+    );
+    assert.equal(await page.inputValue('#search'), 'fixture-search');
   }
-  assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
-  await page.screenshot({ path: path.join(run, 'tray-preference-editor.png') });
-  console.log('PASS close-to-tray preserves editor through four reopen cycles; one native window');
-  await page.click('#closeEditor');
+  console.log('PASS close-to-tray preserves main-window state through four reopen cycles');
   await close();
-  const n = notices.length;
-  await command('send', { port: 44007 });
-  await wait(() => {
-    parseBlock(block);
-    return notices.length > n;
-  });
-  const stale = notices.at(-1);
-  const snapshot = await call(path.join(run, 'api/control.sock'), { operation: 'list' });
-  const event = snapshot.events.find(
-    (e) => e.state === 'awaiting-decision' && e.flow.local.endsWith(':44007'),
-  );
-  await call(path.join(run, 'api/control.sock'), {
-    operation: 'decide',
-    id: event.id,
-    action: 'block',
-    scope: 'once',
-  });
-  await sleep(900);
-  q(
-    'org.freedesktop.Notifications',
-    '/org/freedesktop/Notifications',
-    'org.kde.NotificationManager.InvokeAction',
-    String(stale.id),
-    'default',
-  );
-  assert.equal(received(44007), 0);
-  menuClick('Pending requests');
-  await wait(() => page.locator('#requestsView').isVisible());
-  console.log('PASS externally resolved notification grants nothing; tray opens current list');
-  await close();
-  const beforeExpiry = notices.length;
-  await command('send', { port: 44005 });
-  await wait(() => {
-    parseBlock(block);
-    return notices.length > beforeExpiry;
-  });
-  const expired = notices.at(-1);
-  await sleep(8500);
-  q(
-    'org.freedesktop.Notifications',
-    '/org/freedesktop/Notifications',
-    'org.kde.NotificationManager.InvokeAction',
-    String(expired.id),
-    'default',
-  );
-  assert.equal(received(44005), 0);
-  assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
-  console.log('PASS expired native notification grants nothing and opens no replacement request');
-  const beforeBurst = notices.length;
+  // Repeated polling and incoming request bursts must not send desktop
+  // notifications: the automatic permission window is the sole prompt.
   for (let i = 0; i < 12; i++) await command('send', { port: [44001, 44003, 44005, 44007][i % 4] });
-  await wait(() => {
-    parseBlock(block);
-    return notices.length > beforeBurst;
-  });
   await sleep(4000);
   parseBlock(block);
-  assert(notices.length - beforeBurst <= 2);
+  assert.equal(notices.length, 0, 'automatic popups must not emit desktop notifications');
   assert.equal(received(44001), 1);
   assert.equal(received(44003), 0);
-  console.log(
-    'PASS real request burst summarized/rate-limited; repeated polling does not continuously notify',
-  );
+  console.log('PASS popup burst emits no desktop notifications or implicit Allows');
   // Inject only host-detection failure, not desktop state or backend responses.
   await app.evaluate(() => {
     const cp = process.getBuiltinModule('node:child_process'),
@@ -388,7 +318,10 @@ try {
   fs.writeFileSync(
     path.join(run, 'desktop-notifications.json'),
     JSON.stringify(
-      { notifications: notices, activation: 'KDE InvokeAction, not physical pointer clicking' },
+      {
+        notifications: notices,
+        activation: 'automatic popup and KDE tray menu; no desktop notifications',
+      },
       null,
       2,
     ),
