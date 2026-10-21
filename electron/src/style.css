@@ -1722,3 +1722,9 @@ body.hide-sidebar #activityView > aside { display:none; }
 /* App + network-zone filter rows (display scopes; not new program identities). */
 .application-zone-icon { width:16px; height:16px; display:inline-flex; flex:0 0 16px; color:#c5d947; }
 .application-zone-icon svg { width:16px; height:16px; fill:currentColor; }
+
+#promptBody #requestDetails .decision-controls button.allow, #promptBody #requestDetails .decision-controls button.block { cursor:pointer; transition:background-color .08s, border-color .08s; }
+#promptBody #requestDetails .decision-controls button.allow:hover:not(:disabled), #promptBody #requestDetails .decision-controls button.block:hover:not(:disabled) { background:#565656; border-color:#606060; }
+#promptBody #requestDetails .decision-controls button.allow:active:not(:disabled), #promptBody #requestDetails .decision-controls button.block:active:not(:disabled) { background:#606060; border-color:#6a6a6a; transform:translateY(1px); }
+#promptBody #requestDetails .decision-controls button.allow:focus-visible, #promptBody #requestDetails .decision-controls button.block:focus-visible { outline:2px solid #2db5f6; outline-offset:1px; }
+#promptBody #requestDetails .decision-controls button.allow:disabled, #promptBody #requestDetails .decision-controls button.block:disabled { cursor:default; }
