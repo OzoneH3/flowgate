@@ -294,7 +294,7 @@ func TestDecisionLogDistinctAttemptsAndLeaseBoundaries(t *testing.T) {
 	}
 }
 
-func TestCapacityProtectionAlsoAppliesToMatchedAllow(t *testing.T) {
+func TestPromptCapacityDoesNotOverrideMatchedAllow(t *testing.T) {
 	for _, limit := range []string{"event-capacity", "admission-rate"} {
 		t.Run(limit, func(t *testing.T) {
 			e, f, _, now := fixture()
@@ -319,8 +319,8 @@ func TestCapacityProtectionAlsoAppliesToMatchedAllow(t *testing.T) {
 			g := f
 			g.Remote = netip.AddrPortFrom(f.Remote.Addr(), 11000)
 			v := e.Observe(g, "udp")
-			if !v.capacity || v.State != "blocked" || v.decided == nil || v.decided.ID != "allow" {
-				t.Fatal("capacity is independent of matching Allow", v)
+			if v.capacity || v.State != "allowed" || v.decided == nil || v.decided.ID != "allow" {
+				t.Fatal("prompt capacity overrode matched Allow", v)
 			}
 			*now = now.Add(e.Timeout + 6*time.Second)
 			if next := e.Observe(g, "udp"); next.State != "allowed" {

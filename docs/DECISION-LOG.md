@@ -50,11 +50,13 @@ Maintenance or the next observation flushes expired buckets, clean shutdown flus
 all, and capacity pressure flushes the oldest bucket. Idle buckets can remain
 volatile beyond five seconds; abrupt exit may lose them without a known count.
 
-The fixture's saved capacity Block on port 24701 is expected **admission protection**:
-the pre-existing engine bounds (256 retained events, 20 new evaluations/second) also
-apply when an Allow rule matches. A matching rule is not permission to exceed those
-bounds. That Block is caused by capacity, not by a Block rule. This logging change
-does not change those limits or packet verdicts.
+Prompt capacity applies to requests requiring retained decisions, not immediate
+configured Allow/Block verdicts. The current engine rate-limits new prompts to
+20/second. At the event bound it evicts replaceable immediate-policy history;
+held requests and Once/process-lease state are not evicted. If no history slot
+is available, an immediate policy verdict is returned and logged without an
+optional event-history entry. Queue packet/byte bounds remain independent.
+Earlier fixture capacity drops despite matching Allow describe superseded behavior.
 
 `verdict.state`: `accept_submitted`/`drop_submitted` (kernel verdict call succeeded),
 `submission_failed` (+detail), `held`, `deferred` (user/timeout/edit outcomes apply to
@@ -198,7 +200,7 @@ writer gate proves that a stalled/failing transaction does not block enqueue:
 persists a gap for 263 known losses. Restart resets volatile counters, retains the
 gap and successful records. Attempt tests distinguish source ports, SYN sequences
 and expired leases, while repeated observations inside a lease remain deduplicated.
-Capacity tests verify both event-capacity and rate refusal despite matching Allow.
+Capacity regression tests now verify that event-history and prompt-rate limits do not override a matched Allow, while unanswered requests remain bounded.
 
 Main-checkout Electron build and 9 focused store tests passed. Actual sandboxed
 Wayland run `.workspace/decision-log-ui-VYyAPS` used the corrected binary against

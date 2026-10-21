@@ -155,7 +155,7 @@ recovery: no software watchdog can survive its own destruction.
 - Local **input TCP/UDP**, IPv4 and IPv6; no forward/container/router coverage.
 - New incoming SYNs and original-direction UDP are evaluated using current native
   attribution. Missing/ambiguous owners block, never generate actionable prompts.
-  History/prompt limits remain 256 entries/20 new events per second; packet and
+  History/prompt limits remain 256 live entries/20 new prompts per second; immediate rule verdicts survive optional history pressure; packet and
   byte retention bounds are unchanged. No-listener attempts produce bounded blocked
   history, not an endless prompt stream; no per-packet disk logging.
 - Outgoing TCP/UDP is permitted by FlowGate. Output original-direction traffic gets

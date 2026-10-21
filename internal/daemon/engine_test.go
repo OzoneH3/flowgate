@@ -184,3 +184,41 @@ func TestRetainedFailureExplainsUnavailableAttribution(t *testing.T) {
 		t.Fatal("missing retained refusal event")
 	}
 }
+
+func TestImmediateTrafficDoesNotStarvePendingDecisions(t *testing.T) {
+	e, f, a, _ := fixture()
+	e.Max = 2
+	pending := e.Observe(f, "pending")
+	allowed := policy.Rule{ID: "allow", Schema: 2, Action: "allow", Filter: policy.Filter{Application: "approved", Revision: "rev", UID: 1000, Direction: "incoming", Protocol: "udp", RemoteAddress: "*"}}
+	if err := e.SetRules([]policy.Rule{allowed}); err != nil {
+		t.Fatal(err)
+	}
+	app := *a.Application
+	app.Key = "approved"
+	a.Application = &app
+	for i := 0; i < 100; i++ {
+		if v := e.Observe(f, string(rune(100+i))); v.State != "allowed" || v.capacity {
+			t.Fatal(v.State, v.Reason)
+		}
+	}
+	if e.liveEventsLocked() > e.Max {
+		t.Fatal("unbounded history")
+	}
+	if e.created != 1 {
+		t.Fatal("rule traffic spent prompt budget", e.created)
+	}
+	if e.RetainedState(pending.ID, pending.Attribution.Fingerprint) != "pending" {
+		t.Fatal("pending request evicted")
+	}
+	app.Key = "other"
+	if v := e.Observe(f, "new-pending"); v.State != "awaiting-decision" {
+		t.Fatal("history starved request", v.Reason)
+	}
+	if v := e.Observe(f, "excess"); !v.capacity {
+		t.Fatal("pending capacity bypassed")
+	}
+	app.Key = "approved"
+	if v := e.Observe(f, "full-pending-allow"); v.State != "allowed" || v.capacity {
+		t.Fatal("full pending queue changed Allow")
+	}
+}

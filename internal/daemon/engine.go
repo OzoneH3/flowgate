@@ -55,6 +55,7 @@ type Event struct {
 	// retransmissions and repeated handling never produce duplicate records.
 	decided       *policy.Rule
 	capacity      bool
+	historyOnly   bool // immediate policy outcome; no held decision or Once lease depends on it
 	pendingLogged bool
 	finalLogged   bool
 	logAttemptID  string
@@ -264,13 +265,35 @@ func (e *Engine) Observe(f identity.Flow, token string) Event {
 		e.window = now
 		e.created = 0
 	}
-	if e.liveEventsLocked() >= e.Max || e.created >= 20 {
+	v.historyOnly = action != "ask" && pair == nil && lease == nil
+	// Immediate verdicts do not spend prompt budget. At capacity, discard only
+	// replaceable policy history; pending and explicitly decided flow leases stay.
+	if e.liveEventsLocked() >= e.Max {
+		oldestKey := ""
+		var oldest *Event
+		for k, event := range e.events {
+			if event.historyOnly && (oldest == nil || event.FirstSeen.Before(oldest.FirstSeen)) {
+				oldestKey, oldest = k, event
+			}
+		}
+		if oldest != nil {
+			delete(e.events, oldestKey)
+		}
+	}
+	if (!v.historyOnly && e.liveEventsLocked() >= e.Max) || (v.State == "awaiting-decision" && e.created >= 20) {
 		v.State = "blocked"
-		v.Reason = "pending/history capacity or prompt rate exceeded"
+		v.Reason = "pending capacity or prompt rate exceeded"
 		v.capacity = true
 		return v
 	}
-	e.created++
+	if e.liveEventsLocked() >= e.Max {
+		// The queue submits this immediate verdict and logs the returned event.
+		// Omit optional history instead of converting an Allow into a drop.
+		return v
+	}
+	if v.State == "awaiting-decision" {
+		e.created++
+	}
 	e.events[key] = &v
 	e.retainRequestLocked(&v, a)
 	return v
