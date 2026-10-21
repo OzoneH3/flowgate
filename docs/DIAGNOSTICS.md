@@ -25,7 +25,7 @@ go build -o .workspace/flowgate ./cmd/flowgate
 .workspace/flowgate doctor
 .workspace/flowgate doctor --json
 # Optional helper build only: does not load or attach BPF.
-scripts/build-udp.sh
+scripts/build.sh udp
 ```
 
 Normal launch remains `scripts/run-electron.sh` or the retained Qt

@@ -3,7 +3,7 @@
 set -eu
 cd "$(dirname "$0")/../.."
 . ./scripts/go-env.sh
-scripts/build-desktop.sh
+scripts/build.sh desktop
 go test -race ./internal/daemon ./internal/policy ./internal/queue ./internal/store ./internal/hostfirewall
 go vet ./internal/daemon ./internal/policy ./internal/queue ./internal/store ./internal/hostfirewall ./cmd/flowgate
 run="$PWD/.workspace/host-check-$$"

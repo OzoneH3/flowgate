@@ -8,7 +8,7 @@ sudo_n=
 case "${1:-}" in --noninteractive) sudo_n=-n;; '') ;; *) echo 'usage: scripts/checks/check-evaluation-udp.sh [--noninteractive]' >&2; exit 2;; esac
 go build -o .workspace/flowgate-eval-udp ./cmd/flowgate
 for f in .workspace/udp-collector .workspace/udp-fixtures/alpha; do
- [ -x "$f" ] || { echo "Missing $f; build with scripts/build-udp.sh or cc -O2 fixtures/udp/fixture.c -o .workspace/udp-fixtures/alpha" >&2; exit 1; }
+ [ -x "$f" ] || { echo "Missing $f; build with scripts/build.sh udp or cc -O2 fixtures/udp/fixture.c -o .workspace/udp-fixtures/alpha" >&2; exit 1; }
 done
 run="$PWD/.workspace/evaluation-udp-$(date +%s)-$$"
 mkdir -m 755 "$run"

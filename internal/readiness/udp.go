@@ -15,7 +15,7 @@ const HelperMarker = "FLOWGATE_UDP_HELPER_PROTOCOL=1"
 // Helper inspects, never executes, the explicitly selected executable. The
 // marker is compatibility metadata, not a signature or code-trust attestation.
 func Helper(path string) Check {
-	c := Check{ID: "udp.helper", Status: Optional, Code: "helper_missing", Detail: "Optional UDP helper unavailable", Next: "Build with scripts/build-udp.sh; basic TCP monitoring remains available"}
+	c := Check{ID: "udp.helper", Status: Optional, Code: "helper_missing", Detail: "Optional UDP helper unavailable", Next: "Build with scripts/build.sh udp; basic TCP monitoring remains available"}
 	st, e := os.Stat(path)
 	if e != nil {
 		return c

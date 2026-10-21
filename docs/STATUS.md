@@ -280,7 +280,7 @@ Read-only firewall inspection is shared with startup. Static prerequisites, actu
 read-only probes, blockers, optional absence and unattempted privileged operations
 are separate; no overall readiness promise. Existing API/bridges remain compatible;
 known startup errors gain `[reason_code]` text. Optional helper metadata now needs
-a rebuild via `scripts/build-udp.sh`; counter/BPF event semantics are unchanged.
+a rebuild via `scripts/build.sh udp`; counter/BPF event semantics are unchanged.
 
 Focused Go race/vet and namespace checks passed without doctor changing rules,
 interfaces or fixture state. One UID-1000 host run took 24 ms: visibility partial,
@@ -378,7 +378,7 @@ copy no longer incorrectly says isolated validation is pending. Kernel measureme
 paths are unchanged; existing TCP/API/UI evidence remains reusable.
 
 Normal launch remains `scripts/run-desktop.sh`; explicitly enable optional UDP
-collection from Activity after `scripts/build-udp.sh`, and use Stop extended
+collection from Activity after `scripts/build.sh udp`, and use Stop extended
 monitoring or `.workspace/flowgate udp-stop`. See UDP.md for exact permissions,
 API-return byte definitions, socket-level peer scope and first-registration gaps.
 Only isolated collection was exercised; live-host authentication/coexistence,

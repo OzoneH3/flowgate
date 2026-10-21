@@ -87,7 +87,7 @@ ActivityView::ActivityView(QWidget *parent) : QWidget(parent) {
         !QFileInfo::exists(helper)) {
       QMessageBox::warning(
           this, "Extended monitoring unavailable",
-          "Build the optional collector first: scripts/build-udp.sh. Konsole, "
+          "Build the optional collector first: scripts/build.sh udp. Konsole, "
           "Python 3 and existing sudo authentication are required. TCP remains "
           "available.");
       return;

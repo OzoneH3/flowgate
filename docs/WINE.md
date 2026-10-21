@@ -157,8 +157,8 @@ installed Proton runtime, not full UMU, pressure-vessel or Steam game integratio
 ```sh
 . scripts/go-env.sh
 go build -o .workspace/flowgate ./cmd/flowgate
-scripts/build-windows.sh
-scripts/build-wine-table.sh
+scripts/build.sh windows
+scripts/build.sh wine-table
 # Complete Wine prefix setup once, in the disposable namespace:
 scripts/lab.sh sh -c 'export WINEPREFIX="$PWD/.workspace/wine-prefix" TMPDIR="$PWD/.workspace/tmp" XDG_CACHE_HOME="$PWD/.workspace/cache" XDG_CONFIG_HOME="$PWD/.workspace/config" WINEDEBUG=-all WINEDLLOVERRIDES="mscoree,mshtml=" DISPLAY= WAYLAND_DISPLAY=; wineboot -u; wineserver -w'
 scripts/lab.sh python3 scripts/acceptance/wine-table-test.py

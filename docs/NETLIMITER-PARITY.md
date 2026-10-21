@@ -201,14 +201,14 @@ Official source for A1-A18: [Activity](https://netlimiter.com/docs/user-gui-clie
 | J6 Reset service configuration | [Reset](https://netlimiter.com/docs/internals/reset-netlimiter-service-configuration) | — | None | Missing | backend | — | missing |
 | J7 Per-user UI layout file | Reset UI layout | Layout restored after tray reopen | Prefs in `.workspace/electron-preferences.json` | Not per-user XDG config | UI | RE panes | divergent |
 | J8 Run client at startup | Options › Client › General | — | None | Missing (XDG autostart) | UI | — | missing |
-| J9 Service autostart; client offers Start | FAQ endpoint error | — | `flowgate.service` WantedBy multi-user (DAILY-DEPLOYMENT.md); no Start button | Host/reboot acceptance pending | backend | lab `test-install-readiness.py` | unverified |
+| J9 Service autostart; client offers Start | FAQ endpoint error | — | `flowgate.service` WantedBy multi-user (DAILY-DEPLOYMENT.md); no Start button | Host/reboot acceptance pending | backend | lab `test-install-monitoring.py` | unverified |
 | J10 Client shows service unreachable | [Debugging](https://netlimiter.com/docs/debugging) | Not induced | Observer/control status shows unavailable | Reference not observed | UI | RE `reliability.mjs` | unverified |
 | J11 Permissions Monitor/Control per user/group | [Permissions](https://netlimiter.com/docs/security/permissions) | Tools › Permissions | One root-configured admin UID; others self scope; read-only companion = Monitor (`internal/daemon/permissions.go:7-47`) | No per-user/group UI | both | RR `--ask` (read-only endpoint refuses) | divergent |
 | J12 OS-account based security | Security | — | SO_PEERCRED, 0700/0600 sockets (`internal/daemon/api.go:122,161`) | — | backend | unit `permissions_test.go` | unverified |
 | J13 Admin privileges | System requirements | — | Daemon root; client unprivileged | Stricter split; intentional | both | — | divergent |
 | J14-J15 Remote connection; host name / File › Connect | [Remote connection](https://netlimiter.com/docs/remote-connection) | File menu connection items | Unix socket only (`api.go:125`); toolbar shows FLOWGATE | Missing | both | — | missing |
 | J17 Version checker | Options › Version checker | Version Checker 5.3.28.0 [04] | `flowgate version` only | Missing | UI | — | missing |
-| J18 Update keeps settings | [Updates](https://netlimiter.com/docs/installation/updates) | — | Immutable releases + atomic `current` swap (`scripts/install-daily.py:68-109`) | Host install not accepted | backend | lab `test-deployment-recovery.py` | unverified |
+| J18 Update keeps settings | [Updates](https://netlimiter.com/docs/installation/updates) | — | Immutable releases + atomic `current` swap (`scripts/install-monitoring.py`) | Host install not accepted | backend | lab `test-deployment-recovery.py` | unverified |
 | J19 Uninstall keep / clean | Command-line options | — | Keeps data; no clean option (`deployment/uninstall.py`) | No clean | backend | lab `test-deployment-uninstall.py` | divergent |
 | J20 Languages, Theme | Options › Languages/Theme | Dark Gray / Light Blue / Lime, font 100% [08] | Fixed dark theme, English | Missing | UI | — | missing |
 
@@ -243,7 +243,7 @@ Official source for A1-A18: [Activity](https://netlimiter.com/docs/user-gui-clie
 
 | Feature | Official source | Observed reference (5.3.28) | FlowGate behaviour | Discrepancy | Owner | Evidence | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| M1 MSI bootstrapper, silent options | [Installation](https://netlimiter.com/docs/installation) | — | `scripts/install-daily.py` hash-bound bundle | No package/silent CLI; no MSI; closest = distro package (PKGBUILD/deb) with non-interactive install | backend | lab `test-install-monitoring.py` | platform deviation (needs user agreement) |
+| M1 MSI bootstrapper, silent options | [Installation](https://netlimiter.com/docs/installation) | — | `scripts/install-monitoring.py` hash-bound bundle | No package/silent CLI; no MSI; closest = distro package (PKGBUILD/deb) with non-interactive install | backend | lab `test-install-monitoring.py` | platform deviation (needs user agreement) |
 | M2 .NET/VC++ prerequisites | Prerequisites | — | Go binaries, python3, nft, bpftool (doctor checks) | Different prerequisites; use distro dependencies | backend | `check-doctor.sh` | platform deviation (needs user agreement) |
 | M3 Base Filtering Engine required | System requirements | — | nftables + NFQUEUE (`internal/hostfirewall/firewall.go`) | Linux equivalent; nftables/NFQUEUE is the closest equivalent | backend | RR receiver suites | platform deviation (needs user agreement) |
 | M4 Services in shared svchost | Services & Store apps | — | Executable+revision+UID identity; no per-unit split | See A19; closest = systemd unit via cgroup | backend | — | platform deviation (needs user agreement) |

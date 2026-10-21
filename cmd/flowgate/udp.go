@@ -71,7 +71,7 @@ func udpCommand() error {
 	// private executable copy so a later workspace rebuild cannot replace it.
 	source, e := os.Open(*helper)
 	if e != nil {
-		return readiness.Fail("helper_missing", "UDP helper could not be opened", "Build scripts/build-udp.sh, then run doctor")
+		return readiness.Fail("helper_missing", "UDP helper could not be opened", "Build scripts/build.sh udp, then run doctor")
 	}
 	defer source.Close()
 	pinned, e := os.CreateTemp(dir, "collector-")

@@ -64,7 +64,7 @@ class Hardening(unittest.TestCase):
             self.assertNotIn('shadow imported', result.stderr)
 
     def test_optimized_checks_fail_before_actions(self):
-        for name in ['install-monitoring.py', 'install-daily.py', 'host-daily-acceptance.py',
+        for name in ['install-monitoring.py', 'host-daily-acceptance.py',
                      'checks/test-deployment-recovery.py', 'checks/test-deployment-uninstall.py',
                      'checks/check-control-bridge.py', 'checks/check-udp-adapter.py']:
             with self.subTest(name=name):

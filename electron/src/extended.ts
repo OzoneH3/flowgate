@@ -39,7 +39,7 @@ export class ExtendedMonitoring {
     if (value === 'enable') {
       if (!fs.existsSync(path.join(this.root, '.workspace/udp-collector')))
         throw Error(
-          'Optional UDP helper is not built. Run scripts/build-udp.sh first. TCP monitoring remains available.',
+          'Optional UDP helper is not built. Run scripts/build.sh udp first. TCP monitoring remains available.',
         );
       this.state = {
         busy: true,

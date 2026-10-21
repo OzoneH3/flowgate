@@ -3,7 +3,7 @@
 set -eu
 cd "$(dirname "$0")/../.."
 export PYTHONDONTWRITEBYTECODE=1
-scripts/build-electron.sh
+scripts/build.sh electron
 . ./scripts/go-env.sh
 go build -o .workspace/flowgate ./cmd/flowgate
 go build -o .workspace/flowgate-demo-receiver ./fixtures/native

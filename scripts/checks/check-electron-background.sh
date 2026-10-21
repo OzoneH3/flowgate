@@ -4,7 +4,7 @@
 set -eu
 cd "$(dirname "$0")/../.."
 export PYTHONDONTWRITEBYTECODE=1
-scripts/build-electron.sh
+scripts/build.sh electron
 (cd electron && npm test)
 node electron/test/background.mjs
 node electron/test/attribution.mjs

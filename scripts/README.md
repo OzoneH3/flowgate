@@ -5,13 +5,13 @@ fixtures belong in `.workspace/`.
 
 | Location | Purpose |
 | --- | --- |
-| `build-*.sh` | Build the backend helpers, Windows fixtures or desktop clients. |
+| `build.sh TARGET` | Build the backend helpers, Windows fixtures or desktop clients. |
 | `run-*.sh`, `demo-desktop.sh` | Launch development clients or the desktop demo. |
 | `check.sh` | Go, Python, Electron and Qt checks plus isolated receivers; `--wine` adds Wine. |
 | `checks/` | Focused check runners and mocked deployment tests. |
 | `acceptance/` | Isolated integration scenarios, their peers and shared fixture modules. |
-| `prepare-*-release.sh` | Prepare immutable artifacts without installation. |
-| `install-*.py`, `update-and-start.sh` | Explicit installation/update operations. |
+| `prepare-release.sh` | Prepare immutable artifacts without installation. |
+| `install-prepared.py`, `update-and-start.sh` | Explicit installation/update operations. |
 | `*-essentials.py`, `*-system-networking.py` | Essential-networking review and diagnostics. |
 | `update-address-registry.py` | Refresh the versioned address registry. |
 | `lab.sh`, `go-env.sh` | Private namespace launcher and workspace cache setup. |
@@ -44,6 +44,28 @@ export PYTHONPYCACHEPREFIX="$PWD/.workspace/python-cache"
 python3 scripts/checks/test-install-monitoring.py
 ```
 
+## Build and prepare
+
+```sh
+scripts/build.sh desktop
+scripts/build.sh electron
+scripts/build.sh windows wine-table
+scripts/build.sh tcp-initiation udp
+scripts/prepare-release.sh                 # matched backend and Electron bundle
+scripts/prepare-release.sh --backend-only  # backend bundle only
+```
+
+The build command accepts one or more explicit targets. Collectors and Wine
+helpers are built only when requested. `--help` lists the targets. Preparation
+requires clean master, checks an existing bundle before reusing it, and never
+installs or activates protection. Backend and GUI bundles retain their existing
+`.workspace/daily-releases/` and `.workspace/automatic-zone-releases/` locations.
+
+The old separate build/release scripts have been replaced by these two entry
+points. The superseded installer that mixed installation and live acceptance,
+and its tests, have been removed. The current monitoring installer, rollback
+tests, and separate acceptance scenarios remain.
+
 ## One-command update and start
 
 ```sh
@@ -63,6 +85,8 @@ Options:
 - `--profile preserve`: restore the mode selected before the update (including monitoring/off).
 - `--profile incoming` or `--profile monitoring`: select Incoming or leave protection off.
 - `--no-gui`: perform the same update/protection workflow without switching the GUI.
+- `--recover-stopped`: recover an unavailable daemon into monitoring only.
+- `--wine-discovery`: explicitly enable generic supported Wine discovery.
 - `--dry-run`: show the plan without fetching, building, authenticating, changing protection or signalling the GUI.
 
 A lost control acknowledgement is checked through a fresh status read; the

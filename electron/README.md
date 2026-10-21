@@ -32,7 +32,7 @@ Electron profile/cache directories remain under `.workspace` for inspection.
 For already-built **production** assets without rebuilding:
 
 ```sh
-scripts/build-electron.sh
+scripts/build.sh electron
 XDG_CACHE_HOME="$PWD/.workspace/cache" TMPDIR="$PWD/.workspace/tmp" python3 electron/launch.py
 ```
 
@@ -173,7 +173,7 @@ Backend/Qt/collector/shared bridge implementations are unchanged.
   across frontend exit; Activity polling continues independently.
 - **Enable extended monitoring…** is separately opt-in and invokes only the
   unchanged `scripts/traffic-control.py`. Build its optional helper first with
-  `scripts/build-udp.sh` (existing build prerequisites required). **Stop extended
+  `scripts/build.sh udp` (existing build prerequisites required). **Stop extended
   monitoring** invokes fixed `.workspace/flowgate udp-stop`; Go authenticates the
   privileged collector and its acknowledgement. Neither operation starts/stops
   firewall evaluation. Closing Electron leaves independently owned collectors alone.
@@ -248,7 +248,7 @@ figure was summed RSS with the test debugger, not private memory or PSS.
 ## Integration and remaining migration gaps
 
 Stay on `frontend/electron`, worktree `.workspace/worktrees/electron`. Integrate
-`electron/`, `scripts/build-electron.sh`, `scripts/run-electron.sh`,
+`electron/`, `scripts/build.sh electron`, `scripts/run-electron.sh`,
 `scripts/checks/check-electron.sh`, and `scripts/checks/check-electron-workflows.sh`. No API or
 shared bridge change is required. Qt remains available. This branch was rebased onto
 `dbe651f9cb6f2fd51ec416113faaf7f4d9ebf55d` to incorporate the additive attribution backend.

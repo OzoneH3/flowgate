@@ -1,37 +1,43 @@
-# Daily service: prepared candidate, host acceptance pending authentication
+# Deployment and release preparation
 
-## Monitoring-only installation (current rollout path)
+The supported deployment commands are:
 
-`scripts/prepare-daily-release.sh` now bundles `install-monitoring.py` and prints
-only its command. It installs the immutable root-owned release, units and
-recover/control/uninstall tools **without any protection stage**:
+```sh
+scripts/prepare-release.sh                 # matched backend and Electron
+scripts/prepare-release.sh --backend-only  # backend only
+scripts/update-and-start.sh                # prepare, install, verify, activate
+```
 
-- Verifies every bundle hash; reuses an identical existing release, never alters one;
-  keeps previous immutable releases (04c5159, d7c969b) intact.
-- Refuses foreign/modified unit or NetworkManager drop-in content, and refuses to
-  interrupt active protection, before touching runtime.
-- Backs up `rules.db`/`decisions.db` (SQLite online backup), `protection.json`,
-  `/etc/flowgate/*`, previous units/tools/drop-in and the old `current` link under
-  `/var/lib/flowgate/backups/<release>-monitoring-<time>/`. The live database is
-  never replaced or downgraded; schema4/5 records are preserved.
-- Persists `{"mode":"monitoring"}` **before** the first start; preserves zones.json.
-- Installs `flowgate.service`/`flowgate-guard.service` but **not** the NM
-  `Requires=` drop-in (a leftover FlowGate-identical one is backed up and removed).
-  Only flowgate.service is enabled; the guard is pulled in by it and is a no-op in
-  monitoring. NetworkManager startup never depends on FlowGate.
-- Starts once, then requires: matching build source/hash, protection stopped with
-  desired monitoring, enforcement stopped, identical rule IDs/versions, essential
-  capability, one daemon, and no `flowgate_guard`/`flowgate_host` nft tables.
-- Never runs `host-acceptance.py`. On failure: stop+disable the new service and
-  clean only owned objects; data untouched; no older executable/database restored.
+Preparation requires clean master, builds collectors from current source, and
+records current race/vet evidence. It never installs or activates protection.
+Bundle paths remain `.workspace/daily-releases/<revision>` and
+`.workspace/automatic-zone-releases/<revision>`. Existing bundles are hash-checked
+before reuse. The old installer that combined installation with host acceptance
+is retired and no longer shipped.
 
-Launch keeps the previously authorized configuration (UID1000 administrator,
-traffic/evaluation/protection control grants, restored UDP state, zones).
-`scripts/checks/test-install-monitoring.py` runs the real transaction against a temp root
-with mocked systemd/nft/API (6 cases). The receiver-acceptance `install.py`
-remains in the bundle only for a later separately approved protection stage.
+For a deliberate monitoring-only install use
+`python3 scripts/install-prepared.py --bundle PATH`. It snapshots selected bytes
+before authentication and uses isolated system Python with root-owned staging.
+It refuses active protection or foreign units, quiesces the old writer, backs up
+state, and verifies the new build in monitoring. Startup migrations are checked
+against exact allowed rule transitions. If replacement fails, a verified previous
+release and its matching database snapshots are restored together. Only a verified
+rollback allows the updater to restore the previously active protection mode.
+A failed rollback leaves explicit recovery instructions and retained evidence.
 
-## Current Essential preset implementation
+See [scripts/README.md](../scripts/README.md) for current command options, trust,
+rollback limits, and test coverage. Monitoring/rollback tests exercise real SQLite
+and files with mocked service/API boundaries. They do not claim a live host
+rollback or reboot test. Live acceptance remains a separate explicit action.
+
+## Historical implementation and incident notes
+
+The notes below describe earlier checkpoints and host states. They are retained
+as evidence, not current commands or rollout instructions. In particular,
+statements about pinned helper binaries, absent host installation, the former
+acceptance installer, and no database rollback have been superseded above.
+
+## Essential preset implementation at the earlier checkpoint
 
 The authoritative schema5 preview/apply/status/removal workflow and interface-scoped
 DHCP guard are implemented. See [ESSENTIAL-NETWORKING.md](ESSENTIAL-NETWORKING.md)
@@ -67,7 +73,7 @@ reused. No host install or reboot is claimed by this preparation document.
 
 ## Installation and exact identity
 
-`scripts/prepare-daily-release.sh` requires a clean master and builds an immutable-
+`scripts/prepare-release.sh --backend-only` requires a clean master and builds an immutable-
 hash bundle under `.workspace/daily-releases/FULL_SHA`. It reuses the accepted UDP
 and TCP helper binaries, compiles native test programs and includes typed control,
 local recovery, unit/configuration and focused host acceptance adapters. The
@@ -252,7 +258,7 @@ callback performs bounded conntrack snapshot/mark operations, atomic nft rules,
 structural digest and persisted session record before removing the guard and
 publishing active. Failure propagates through the host acceptance stage into the
 installer's prepared recovery path; no successful host acceptance is printed.
-`scripts/checks/test-install-readiness.py` reproduces the exact reported refusal and
+The retired installer-readiness fixture reproduced the exact reported refusal and
 checks real blockers, narrow census deferral, unknown/missing results and the
 actual installer transaction's activation/acceptance failure handlers using
 mocked privileged boundaries. Existing isolated receiver/kernel/UI evidence is

@@ -3,7 +3,7 @@ set -eu
 cd "$(dirname "$0")/../.."
 . ./scripts/go-env.sh
 export PYTHONDONTWRITEBYTECODE=1 XDG_CACHE_HOME="$PWD/.workspace/desktop-cache"
-scripts/build-desktop.sh
+scripts/build.sh desktop
 mkdir -p .workspace/monitor-fixtures/a .workspace/monitor-fixtures/b
 cc -Wall -Wextra -O2 fixtures/monitor.c -o .workspace/monitor-fixtures/a/fixture
 cp .workspace/monitor-fixtures/a/fixture .workspace/monitor-fixtures/b/fixture

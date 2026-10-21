@@ -18,7 +18,7 @@ routes. Consolidated UDP display in the UI still needs its isolated Wayland chec
 
 Use `.workspace/flowgate doctor` / `--json` before explicit startup. It inspects
 helper ELF/protocol marker, library names and BTF hook names without executing
-the helper or loading/attaching BPF. Rebuild older helpers with `scripts/build-udp.sh`
+the helper or loading/attaching BPF. Rebuild older helpers with `scripts/build.sh udp`
 to embed protocol marker 1; this changes metadata only, not counted operations.
 See [DIAGNOSTICS.md](DIAGNOSTICS.md) for permissions/unknowns and reason codes.
 
@@ -114,7 +114,7 @@ scripts/run-desktop.sh
 Build the optional collector separately (does not load it):
 
 ```sh
-scripts/build-udp.sh
+scripts/build.sh udp
 ```
 
 Requires clang with BPF target, bpftool, libbpf development headers/pkg-config and

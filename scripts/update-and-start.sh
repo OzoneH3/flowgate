@@ -47,7 +47,7 @@ if [ -f "$bundle/matched-manifest.json" ] && [ -f "$backend/manifest.json" ]; th
   say "Bundle ready: $bundle"
 else
   say "Preparing bundle for $rev (build + isolated release checks; takes a few minutes)"
-  run scripts/prepare-automatic-zone-release.sh
+  run scripts/prepare-release.sh
 fi
 
 # The Python coordinator verifies immutable manifests and handles typed control

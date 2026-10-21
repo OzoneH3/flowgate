@@ -141,7 +141,7 @@ share one collapsible presentation group, with individual evidence in details.
 See [traffic accounting](docs/TRAFFIC.md). An optional
 [UDP collector experiment](docs/UDP.md) and explicit Activity Enable/Stop actions
 are implemented. Isolated UDP4/6 receiver, lifecycle and actual Wayland-rate checks passed.
-Build the optional collector with `scripts/build-udp.sh`, then explicitly enable
+Build the optional collector with `scripts/build.sh udp`, then explicitly enable
 extended monitoring in Activity; Stop affects collection only.
 Read UDP.md before host use. Domain/location data are not invented. See [visual references and differences](docs/VISUAL.md) for the NetLimiter 5
 layout target, recreated with our Qt components and FlowGate branding.
@@ -197,7 +197,7 @@ attribution, deadline and backend-provided permission scope.
 To build and connect to an existing private lab API:
 
 ```sh
-scripts/build-desktop.sh
+scripts/build.sh desktop
 .workspace/desktop/flowgate-desktop --socket /absolute/private/directory/control.sock
 # Use control.sock.monitor for read-only monitoring.
 ```

@@ -5,7 +5,7 @@ cd "$(dirname "$0")/../.."
 go test -race ./internal/...
 go vet ./...
 go build -o .workspace/flowgate ./cmd/flowgate
-scripts/build-windows.sh
+scripts/build.sh windows
 # Sequential: the namespace test clients use the private .workspace/run sockets.
 scripts/lab.sh python3 scripts/acceptance/wine-increment.py
 scripts/lab.sh python3 scripts/acceptance/wine-boundary.py

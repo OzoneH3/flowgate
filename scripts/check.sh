@@ -9,7 +9,7 @@ ordinary_peer_tests='^(TestDecisionLogAPIOnReadOnlyEndpoint|TestObservedCreation
 scripts/lab.sh go test -race ./... -skip "$ordinary_peer_tests"
 # These three fixtures intentionally require a non-root Unix peer.
 go test -race ./internal/daemon -run "$ordinary_peer_tests"
-for check in test-update-and-start test-install-monitoring test-install-rollback test-install-readiness test-deployment-recovery test-deployment-uninstall test-script-hardening test-essential-networking test-apply-essentials; do
+for check in test-update-and-start test-install-monitoring test-install-rollback test-release-preparation test-deployment-recovery test-deployment-uninstall test-script-hardening test-essential-networking test-apply-essentials; do
  python3 "scripts/checks/$check.py"
 done
 FLOWGATE_ESSENTIAL_PLAN="$PWD/.workspace/essential-policy-fixture.json" go test -race ./internal/policy -run '^TestEssentialDNSReviewFiltersAndPersistence$'
@@ -18,7 +18,7 @@ for package in identity daemon hostfirewall; do
  scripts/lab.sh sh -c 'export FLOWGATE_TEST_PRIVATE_MOUNT=1 FLOWGATE_RUNTIME_NAMESPACE_TEST=1 FLOWGATE_ESSENTIAL_PRIVATE_NETNS="$FLOWGATE_PARENT_NETNS"; exec go test -race "$1" -run "Test(ServicePrivateMount|Observed.*Namespace|RuntimeBackingLiveNamespace|Essential)"' sh "./internal/$package"
 done
 (cd electron && npm run build && npm test)
-scripts/build-desktop.sh
+scripts/build.sh desktop
 QT_QPA_PLATFORM=offscreen .workspace/desktop/desktop-test
 QT_QPA_PLATFORM=offscreen .workspace/desktop/snapshot-test
 # These require separate namespace/host fixtures; never report them as covered.
@@ -29,6 +29,6 @@ cp .workspace/native-a .workspace/native-b
 scripts/lab.sh python3 scripts/acceptance/integration.py
 scripts/lab.sh python3 scripts/acceptance/outgoing.py
 if [ "${1:-}" = "--wine" ]; then
- scripts/build-windows.sh
+ scripts/build.sh windows
  scripts/lab.sh python3 scripts/acceptance/wine-integration.py
 fi

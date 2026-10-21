@@ -21,7 +21,7 @@ if [ -z "$reuse" ]; then
  go test -race ./internal/udpaccount ./internal/daemon ./internal/identity ./internal/monitor ./internal/readiness
  go vet ./internal/udpaccount ./internal/daemon ./internal/identity ./internal/monitor ./cmd/flowgate
  go build -o .workspace/flowgate-udp-daemon ./cmd/flowgate
- scripts/build-udp.sh
+ scripts/build.sh udp
  mkdir -p .workspace/udp-fixtures
  cc -Wall -Wextra -O2 fixtures/udp/fixture.c -o .workspace/udp-fixtures/alpha
  cp .workspace/udp-fixtures/alpha .workspace/udp-fixtures/beta

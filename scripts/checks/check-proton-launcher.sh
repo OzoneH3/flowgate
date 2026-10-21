@@ -20,7 +20,7 @@ runtime_name=$(basename "$runtime")
 case "$runtime_name" in steamrt3|steamrt4) ;; *) echo "Expected steamrt3 or steamrt4 runtime directory" >&2; exit 2;; esac
 cp -a --reflink=auto "$runtime" "$run/data/umu/$runtime_name"
 cp -a --reflink=auto "$proton" "$run/proton"
-sh scripts/build-wine-table.sh
+sh scripts/build.sh wine-table
 go build -o "$run/flowgate" ./cmd/flowgate
 clang --target=x86_64-windows-gnu -fuse-ld=lld -fno-stack-protector -nostdlib -nostdinc \
  -I/usr/include/wine/msvcrt -I/usr/include/wine/windows fixtures/windows-proton-connect.c \

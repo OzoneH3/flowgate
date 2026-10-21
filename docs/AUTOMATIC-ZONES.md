@@ -164,7 +164,7 @@ schema6 rule and conditional deletion to zero. Actual review captures are
 popup focus/queue/geometry and ended-Remember acceptance are reused; see
 `electron/PROMPT-PRESENTATION.md` and `electron/REMEMBER-REVALIDATION.md`.
 
-Run `scripts/prepare-automatic-zone-release.sh` on clean master to prepare a
+Run `scripts/prepare-release.sh` on clean master to prepare a
 matched, hash-manifested backend and sandboxed Electron bundle under `.workspace`.
 It installs nothing and never starts host protection. Keep the installed daemon's
 explicit zone-prefix flags during rollout; the legacy definition is still their

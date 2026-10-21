@@ -105,7 +105,7 @@ Network zone and upload/download remain independent.
 
 ## Verification and exact privilege boundary
 
-`scripts/build-tcp-initiation.sh` builds the optional helper to a separate path.
+`scripts/build.sh tcp-initiation` builds the optional helper to a separate path.
 Focused race/vet passes identity/monitor/tcpinit/daemon/command and affected policy/
 logging packages. Labelled synthetic executable-protocol tests cover startup,
 bounded timeout/malformed output/shutdown, generation changes, exact requested

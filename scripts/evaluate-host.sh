@@ -7,7 +7,7 @@ if [ "$(id -u)" = 0 ]; then
   echo 'Run as your desktop user; only the daemon is elevated.' >&2
   exit 1
 fi
-scripts/build-desktop.sh
+scripts/build.sh desktop
 printf '%s\n' 'Explicit incoming-first HOST enforcement evaluation, automatic stop after 5 minutes.' \
  'New incoming TCP/UDP may wait or be blocked. Existing tracked connections are preserved; outgoing is allowed.' \
  'The GUI stays unprivileged. In another terminal run:' \

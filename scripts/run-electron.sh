@@ -6,5 +6,5 @@ export XDG_CACHE_HOME="$PWD/.workspace/cache" TMPDIR="$PWD/.workspace/tmp"
 if [ "${1:-}" = "--help" ]; then
   exec python3 electron/launch.py --help
 fi
-scripts/build-electron.sh
+scripts/build.sh electron
 exec python3 electron/launch.py "$@"
