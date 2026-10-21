@@ -358,7 +358,7 @@ func (e *Engine) PreviewRequestRule(generation, id, action, scope, zone, revisio
 		return RequestRulePreview{}, mutationError("capacity", "Rule preview capacity reached; wait for expiry")
 	}
 	now := e.Now()
-	rule := policy.Rule{Version: 1, Schema: 2, ID: "user:" + randomID(), Executable: r.Application.Executable, Priority: 100, Action: action, Created: now, Filter: r.Filter}
+	rule := policy.Rule{Version: 1, Schema: 2, ID: "user:" + randomID(), Executable: r.Application.Executable, Invocation: ruleInvocation(r.Application, r.Provenance), Priority: 100, Action: action, Created: now, Filter: r.Filter}
 	if scope == "application" {
 		rule.Expires = now.Add(time.Duration(o.DurationSeconds) * time.Second)
 	}

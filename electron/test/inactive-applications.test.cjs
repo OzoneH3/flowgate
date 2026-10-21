@@ -24,10 +24,11 @@ test('rules for programs that are not running produce inactive rows at the botto
   ];
   const roots = activityTree(activity, rules);
   const inactive = roots.filter((r) => r.inactive);
-  assert.deepEqual(inactive.map((r) => r.label), ['curl', 'firefox', 'heroic-games-launcher']);
+  assert.deepEqual(inactive.map((r) => r.label), ['curl', 'heroic-games-launcher']);
   assert.equal(inactive.find((r) => r.label === 'curl').inactive.rules, 2);
-  assert.equal(inactive.find((r) => r.label === 'firefox').inactive.earlierVersion, true);
-  assert.equal(inactive.find((r) => r.label === 'firefox').id, 'app:kf|r-old|uid:1000');
+  const oldVersion = roots[0].children.find(r => r.id === 'app:kf|r-old|uid:1000');
+  assert.equal(oldVersion.inactive.earlierVersion, true);
+  assert.equal(oldVersion.presentationLabel, 'Earlier saved version');
   for (const r of inactive) assert.deepEqual([r.rows.length, r.children.length, r.process], [0, 0, undefined]);
   // Bottom in every sort order and direction.
   for (const key of ['name', 'download_bps', 'count'])
@@ -90,4 +91,33 @@ test('not-running rules popup: reviewed in-place edits only, delete via the conf
   assert.match(src, /confirmRuleDelete\(rule, o\.generation\)/);
   // No creation path: no ruleDraft for a new source, only by id.
   assert.ok(!/ruleDraft\(\{ ?(kind|observed|process)/.test(src));
+});
+
+
+test('script context survives inactive listing without changing interpreter identity', () => {
+  const r = rule('script','python-key','rev','/usr/bin/python3');
+  r.invocation = {mode:'file',name:'alpha.py',path:'/tools/alpha.py',revision:'script-rev'};
+  const rows = inactiveApplications([r], []);
+  assert.equal(rows[0].label, 'alpha.py via python3');
+  assert.equal(rows[0].id, 'app:python-key|rev|uid:1000');
+  assert.match(rows[0].identityNote, /Shared interpreter/);
+  assert.equal(inactiveApplications([r], [], 'alpha').length, 1);
+  const other = {...r,id:'other',invocation:{...r.invocation,name:'beta.py',path:'/tools/beta.py'}};
+  assert.equal(inactiveApplications([r,other],[])[0].label,'python3', 'mixed script contexts must not look script-scoped');
+  assert.equal(inactiveApplications([{...r,invocation:undefined}],[])[0].label,'python3', 'legacy rule has no invented script');
+});
+
+test('saved revisions share one program root; different identities remain visibly separate', () => {
+  const old = {...rule('old','same','v1','/opt/tool'),created:'2025-01-01'};
+  const next = {...rule('new','same','v2','/opt/tool'),created:'2026-01-01'};
+  const tree = activityTree({processes:{},rows:[]},[old,next]);
+  assert.equal(tree.length,1);
+  assert.equal(tree[0].inactive.revision,'v2');
+  assert.equal(tree[0].children[0].inactive.revision,'v1');
+  assert.equal(tree[0].children[0].presentationLabel,'Earlier saved version');
+  const distinct = activityTree({processes:{},rows:[]},[old,rule('second','other','v1','/other/tool')]);
+  assert.equal(distinct.length,2);
+  const users = activityTree({processes:{},rows:[]},[old,rule('another-user','same','v1','/opt/tool',{uid:1001})]);
+  assert.equal(users.length,2, 'different users must retain separate identities');
+  assert.ok(distinct.every(r=>r.identityNote.includes('UID 1000') && r.identityNote.includes(r.inactive.executable)));
 });

@@ -220,7 +220,7 @@ func (e *Engine) PreviewObservedRule(generation string, target ObservedTarget, d
 	if len(e.rules) >= 256 {
 		return ObservedPreview{}, mutationError("limit_exceeded", "Rule capacity reached")
 	}
-	candidate := policy.Rule{ID: "user:" + randomID(), Version: 1, Created: now, Executable: current.Application.Executable, Priority: 100, Action: draft.Action, Disabled: draft.Disabled, Expires: *draft.Expires, Filter: policy.Filter{NetworkZone: draft.NetworkZone, Application: current.Application.Key, Revision: current.Application.Revision, UID: current.UID, Direction: draft.Direction, Protocol: draft.Protocol, RemoteAddress: draft.RemoteAddress, LocalPort: *draft.LocalPort, RemotePort: *draft.RemotePort}}
+	candidate := policy.Rule{ID: "user:" + randomID(), Version: 1, Created: now, Executable: current.Application.Executable, Invocation: ruleInvocation(current.Application, p.Provenance), Priority: 100, Action: draft.Action, Disabled: draft.Disabled, Expires: *draft.Expires, Filter: policy.Filter{NetworkZone: draft.NetworkZone, Application: current.Application.Key, Revision: current.Application.Revision, UID: current.UID, Direction: draft.Direction, Protocol: draft.Protocol, RemoteAddress: draft.RemoteAddress, LocalPort: *draft.LocalPort, RemotePort: *draft.RemotePort}}
 	if processScope(draft) == "process" {
 		if _, err = e.attachProcessTarget(current, &candidate); err != nil {
 			return ObservedPreview{}, err

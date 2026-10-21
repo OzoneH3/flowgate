@@ -153,6 +153,7 @@ func (e *Engine) EditRule(id, eventID string, expected *uint64, candidate policy
 		candidate.ID = id
 		candidate.Created = old.Created
 		candidate.Executable = old.Executable
+		candidate.Invocation = old.Invocation
 		if old.Version == ^uint64(0) {
 			return policy.Rule{}, "", fmt.Errorf("rule version exhausted; delete and create a new rule")
 		}
@@ -202,6 +203,7 @@ func (e *Engine) EditRule(id, eventID string, expected *uint64, candidate policy
 		candidate.Version = 1
 		e.bindZoneModel(&candidate)
 		candidate.Executable = a.Application.Executable
+		candidate.Invocation = attributionInvocation(a)
 		if !candidate.Expires.IsZero() && !now.Before(candidate.Expires) {
 			return policy.Rule{}, "", fmt.Errorf("expiry must be in the future")
 		}

@@ -451,3 +451,21 @@ this is separation of API list reads, not a claim that policy evaluation and all
 filesystem/liveness checks are lock-free. The internal synchronous `ListWithZones`
 helper remains for compatibility. Activity and enforcement health have their own
 sources and are not part of the request snapshot revision.
+
+## Historical script labels and application versions
+
+Rules may retain an optional `invocation` display object (`mode: file`, `name`,
+`path`, `revision`) captured from the verified socket owner's observed invocation.
+It is historical context, not evidence that a script was executed and never a
+permission matcher. Rule edits preserve the backend's stored context; client
+metadata cannot replace it. Interpreter rules still cover the interpreter under
+their explicit rule filters, not only the recorded script. Old rules without
+recorded context keep their executable label.
+
+Activity groups revisions by backend application key and UID. Earlier saved
+versions remain individually accessible beneath the program, with their original
+rule targets. Names alone never merge permissions or different application keys,
+users or Wine prefixes. Distinct same-name identities show their path, UID and
+identity discriminator inline. A single recorded script can label a not-running
+row as `script via interpreter`; mixed contexts keep the interpreter name and
+list the recorded script paths in Details.

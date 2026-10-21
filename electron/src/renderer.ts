@@ -676,7 +676,7 @@ function statusStrip(r: Row) {
       if (r.inactive) {
         const status = ruleStatus(r, state);
         openInactiveRules(button, {
-          label: appNames.get(JSON.stringify([r.inactive.key, r.inactive.revision, r.inactive.executable])) || r.label,
+          label: r.presentationLabel || appNames.get(JSON.stringify([r.inactive.key, r.inactive.revision, r.inactive.executable])) || r.label,
           direction,
           rules: status.available ? status[direction] : [],
           generation: state.control.generation,
@@ -1436,7 +1436,7 @@ function renderTree() {
     const displayKey =
       displayApp && JSON.stringify([displayApp.key, displayApp.revision, displayApp.executable]);
     let rowLabel =
-      r.applicationZone ? r.label : r.kind === 'application' && displayKey ? appNames.get(displayKey) || r.label : r.label;
+      r.presentationLabel ? r.presentationLabel : r.applicationZone ? r.label : r.kind === 'application' && displayKey ? appNames.get(displayKey) || r.label : r.label;
     let icon: HTMLElement = installedIcon(
       r.kind !== 'application' ? undefined : r.displayApplication || inactiveApp || rowApplication(r),
       r.kind,
@@ -1465,6 +1465,7 @@ function renderTree() {
     const textLabel = element('span', rowLabel, 'row-name-text');
     if (r.kind === 'application' && displayKey && !r.applicationZone) textLabel.dataset.displayKey = displayKey;
     name.append(led, toggle, icon, textLabel);
+    if (r.identityNote) name.append(element('span', ' · ' + r.identityNote, 'row-inactive-note'));
     if (r.requestEvent && !r.process && !r.inactive && !r.rows.length)
       name.append(element('span', awaiting(r.requestEvent) ? ' · awaiting permission' : ' · recent request, no observed socket', 'row-inactive-note'));
     if (r.inactive)
@@ -1786,7 +1787,7 @@ function renderInfo() {
             r.process.application.display_name ||
             r.process.application.name.replace(/ \(deleted\)$/, '')
         : r.inactive
-          ? appNames.get(JSON.stringify([r.inactive.key, r.inactive.revision, r.inactive.executable])) || r.label
+          ? r.presentationLabel || appNames.get(JSON.stringify([r.inactive.key, r.inactive.revision, r.inactive.executable])) || r.label
           : r.label,
     );
   if (r.inactive) {
@@ -1795,6 +1796,10 @@ function renderInfo() {
     if (r.inactive.earlierVersion)
       field(info, 'Version', 'Earlier version (the executable changed since these rules were made); they do not apply to the current file');
     field(info, 'Executable', r.inactive.executable);
+    if (r.inactive.invocations?.length) {
+      field(info, 'Recorded scripts', r.inactive.invocations.join('\n'));
+      field(info, 'Permission scope', 'These rules match the interpreter executable, not only the named script. Script context was recorded when the rule was created.');
+    }
     field(info, 'User ID', String(r.inactive.uid));
     field(info, 'Identity', `${r.inactive.key}\nRevision: ${r.inactive.revision}`);
     const callers = applicationCallers.forApplication(r.inactive.key,r.inactive.revision,r.inactive.uid);

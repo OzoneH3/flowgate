@@ -21,7 +21,7 @@ func TestDurableRules(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	r := policy.Rule{Schema: 2, ID: "r", Action: "allow", Created: now, Expires: now.Add(time.Second), Filter: policy.Filter{Application: "app", Revision: "rev", UID: 1000, Direction: "incoming", Protocol: "udp", LocalPort: 80, RemoteAddress: "127.0.0.1"}}
+	r := policy.Rule{Invocation: &identity.Invocation{Mode: "file", Name: "alpha.py", Path: "/scripts/alpha.py", Revision: "script-a"}, Schema: 2, ID: "r", Action: "allow", Created: now, Expires: now.Add(time.Second), Filter: policy.Filter{Application: "app", Revision: "rev", UID: 1000, Direction: "incoming", Protocol: "udp", LocalPort: 80, RemoteAddress: "127.0.0.1"}}
 	if err = s.Replace([]policy.Rule{r}); err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +32,7 @@ func TestDurableRules(t *testing.T) {
 	}
 	defer s.Close()
 	rs, err := s.Load()
-	if err != nil || len(rs) != 1 || !rs[0].Expires.Equal(r.Expires) {
+	if err != nil || len(rs) != 1 || !rs[0].Expires.Equal(r.Expires) || rs[0].Invocation == nil || rs[0].Invocation.Name != "alpha.py" {
 		t.Fatal(rs, err)
 	}
 	f, _ := identity.ParseFlow("udp", "incoming", "127.0.0.1:80", "127.0.0.1:9000")

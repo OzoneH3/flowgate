@@ -11,6 +11,8 @@ export function rowStructure(r: Row, depth: number, selected: boolean, expanded:
     r.kind,
     r.applicationZone,
     r.label,
+    r.presentationLabel,
+    r.identityNote,
     r.pid,
     r.rows.map(structure),
     r.socket && structure(r.socket),

@@ -30,20 +30,25 @@ type Filter struct {
 	UID           uint32 `json:"uid"`
 }
 type Rule struct {
-	Preset     *Preset   `json:"preset,omitempty"`
-	Version    uint64    `json:"version,omitempty"`
-	Executable string    `json:"executable,omitempty"`
-	Created    time.Time `json:"created"`
-	Disabled   bool      `json:"disabled"`
-	Schema     int       `json:"schema,omitempty"`
-	ID         string    `json:"id"`
-	Priority   int       `json:"priority"`
-	Filter     Filter    `json:"filter"`
-	Action     string    `json:"action"`
-	Expires    time.Time `json:"expires"`
+	// Invocation is historical display context, never a permission matcher.
+	Invocation *identity.Invocation `json:"invocation,omitempty"`
+	Preset     *Preset              `json:"preset,omitempty"`
+	Version    uint64               `json:"version,omitempty"`
+	Executable string               `json:"executable,omitempty"`
+	Created    time.Time            `json:"created"`
+	Disabled   bool                 `json:"disabled"`
+	Schema     int                  `json:"schema,omitempty"`
+	ID         string               `json:"id"`
+	Priority   int                  `json:"priority"`
+	Filter     Filter               `json:"filter"`
+	Action     string               `json:"action"`
+	Expires    time.Time            `json:"expires"`
 }
 
 func (r Rule) Validate() error {
+	if i := r.Invocation; i != nil && (i.Mode != "file" || len(i.Name) > 256 || len(i.Path) > 4096 || len(i.Revision) > 256 || i.Application != nil) {
+		return fmt.Errorf("invalid invocation display context")
+	}
 	if len(r.Executable) > 4096 {
 		return fmt.Errorf("executable display path too long")
 	}

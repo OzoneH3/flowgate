@@ -188,7 +188,7 @@ func (e *Engine) PreviewDecision(generation, id, action, scope, zone, revision s
 	if why := identity.RuntimeRuleBlocked(a.Application); why != "" {
 		return DecisionPreview{}, mutationError(identity.CodeIdentityUnverifiable, why)
 	}
-	rule := policy.Rule{Version: 1, Schema: 2, ID: "user:" + randomID(), Executable: a.Application.Executable, Priority: 100, Action: action, Created: now, Expires: now.Add(time.Duration(o.DurationSeconds) * time.Second), Filter: policy.Remembered(v.Flow, a)}
+	rule := policy.Rule{Version: 1, Schema: 2, ID: "user:" + randomID(), Executable: a.Application.Executable, Invocation: attributionInvocation(a), Priority: 100, Action: action, Created: now, Expires: now.Add(time.Duration(o.DurationSeconds) * time.Second), Filter: policy.Remembered(v.Flow, a)}
 	if scope == "persistent" {
 		rule.Expires = time.Time{}
 	}

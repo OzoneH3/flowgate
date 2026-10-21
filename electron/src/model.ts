@@ -10,6 +10,8 @@ export interface Row {
   // (backend provenance). Never a firewall target; rules stay per process/application.
   kind: 'overview' | 'network' | 'application' | 'launch' | 'process' | 'socket' | 'unidentified';
   label: string;
+  presentationLabel?: string;
+  identityNote?: string;
   pid?: number;
   rows: SocketRow[];
   children: Row[];
@@ -30,6 +32,7 @@ export interface InactiveApplication {
   uid: number;
   executable: string;
   rules: number;
+  invocations?: string[];
   // Another revision of the same application is running or has newer rules (updated file).
   earlierVersion: boolean;
   // Short location shown when another entry has the same name (different program).
@@ -461,15 +464,20 @@ export function inactiveApplications(rules: Rule[] | undefined, live: Row[], que
     let row = out.get(id);
     if (!row) {
       const executable = rule.executable || '';
-      const label = executableName(executable);
-      if (query && !`${label} ${executable}`.toLowerCase().includes(query.toLowerCase())) continue;
+      const matching = rules.filter(r => r.filter.application === f.application && r.filter.revision === f.revision && r.filter.uid === f.uid);
+      const contexts = [...new Set(matching.filter(r => r.invocation?.mode === 'file').map(r => r.invocation!.path!))];
+      const oneContext = contexts.length === 1 && matching.every(r => r.invocation?.path === contexts[0]);
+      const label = oneContext ? `${matching[0].invocation!.name} via ${executableName(executable)}` : executableName(executable);
+      if (query && !`${label} ${executable} ${contexts.join(" ")}`.toLowerCase().includes(query.toLowerCase())) continue;
       row = {
         id,
         kind: 'application',
         label,
+        presentationLabel: oneContext ? label : undefined,
+        identityNote: contexts.length ? "Shared interpreter rule" : undefined,
         rows: [],
         children: [],
-        inactive: { key: f.application, revision: f.revision, uid: f.uid, executable, rules: 0, earlierVersion: liveExecutables.has(`${executable}|${f.uid}`) },
+        inactive: { key: f.application, revision: f.revision, uid: f.uid, executable, invocations: contexts, rules: 0, earlierVersion: liveExecutables.has(`${executable}|${f.uid}`) },
       };
       out.set(id, row);
     }
@@ -510,7 +518,7 @@ export function activityTree(activity: Activity, rules: Rule[] | undefined, quer
   const live = hierarchy(activity, query, filter);
   const rows=[...live, ...inactiveApplications(rules, live, query, filter)];
   addRequestApplications(rows, events, query, filter);
-  return addApplicationZones(rows,rules||[],zones);
+  return addApplicationZones(groupApplicationVersions(rows),rules||[],zones);
 }
 
 // A held or recently ended request can outlive the socket census. Preserve its
@@ -534,4 +542,50 @@ export function addRequestApplications(rows: Row[], events: ViewEvent[], query =
     }
     if (!row.requestEvent || (e.state==='awaiting-decision' && e.remainingMs>0 && row.requestEvent.state!=='awaiting-decision')) row.requestEvent=e;
   }
+}
+
+
+// Presentation only: group versions by the backend application key and UID,
+// never by display name. Each child retains its exact rule/decision identity.
+export function groupApplicationVersions(rows: Row[]): Row[] {
+  const keyOf = (r: Row) => {
+    const a = r.process?.application || r.runtimeApplication?.application || r.displayApplication || r.requestEvent?.attribution.application;
+    const key = r.inactive?.key || a?.key;
+    const uid = r.inactive?.uid ?? r.process?.uid ?? r.requestEvent?.attribution.owners[0]?.uid;
+    return key && uid !== undefined ? `${key}|uid:${uid}` : undefined;
+  };
+  const representatives = new Map<string, Row>();
+  for (const r of allRows(rows)) {
+    const key = keyOf(r);
+    if (!key || r.inactive || (r.kind !== 'application' && r.kind !== 'process')) continue;
+    if (!representatives.has(key)) representatives.set(key,r);
+  }
+  const ordered = [...rows].sort((a,b) => Number(!!a.inactive?.earlierVersion)-Number(!!b.inactive?.earlierVersion));
+  const removed = new Set<Row>();
+  for (const r of ordered) {
+    if (r.kind !== 'application') continue;
+    const key = keyOf(r);
+    if (!key) continue;
+    const parent = representatives.get(key);
+    if (!parent) { representatives.set(key,r); continue; }
+    if (parent === r) continue;
+    r.parent = parent.id;
+    r.presentationLabel = r.inactive ? 'Earlier saved version' : r.process || r.rows.length ? 'Another observed version' : 'Recent request from another version';
+    r.identityNote = `Revision ${r.inactive?.revision || r.process?.application.revision || r.displayApplication?.revision || 'unknown'}`;
+    parent.children.push(r);
+    parent.identityNote = [parent.identityNote, 'Includes other versions'].filter(Boolean).join(' · ');
+    removed.add(r);
+  }
+  const result = rows.filter(r => !removed.has(r));
+  const names = new Map<string, Row[]>();
+  for (const r of result) if (r.kind === 'application') names.set(r.label,[...(names.get(r.label)||[]),r]);
+  for (const same of names.values()) if (same.length > 1) {
+    for (const r of same) {
+      const a = r.process?.application || r.displayApplication || r.requestEvent?.attribution.application;
+      const path = r.inactive?.executable || a?.executable || '';
+      const uid = r.inactive?.uid ?? r.process?.uid ?? r.requestEvent?.attribution.owners[0]?.uid;
+      r.identityNote = [r.identityNote, path, r.process?.provenance?.launch?.prefix ? `Prefix ${r.process.provenance.launch.prefix}` : '', `UID ${uid ?? 'unknown'}`, `Identity ${(r.inactive?.key || a?.key || 'unknown').slice(0,12)}`].filter(Boolean).join(' · ');
+    }
+  }
+  return result;
 }
