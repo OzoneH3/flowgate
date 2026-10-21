@@ -364,7 +364,8 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
     const refresh = el('button', 'Refresh review', 'link-button', 'refreshDecision');
     refresh.type = 'button';
     refresh.hidden = true;
-    panel.append(durationLabel, summary, refresh);
+    panel.append(durationLabel, refresh);
+    statusSection.box.append(summary);
     dock.append(panel);
   }
   const note = el('p', '', 'decision-note', 'decisionNote'),
@@ -376,7 +377,8 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
     future = el('button', 'Create application rule for future connections…', 'link-button', 'futureApplicationRule');
   reconcile.type = future.type = 'button';
   reconcile.hidden = future.hidden = true;
-  dock.append(note, review, result, reconcile, future);
+  statusSection.box.append(note, review, result);
+  dock.append(reconcile, future);
   card.append(dock);
 
   // Details is a separate view: the first view hides while it is open.

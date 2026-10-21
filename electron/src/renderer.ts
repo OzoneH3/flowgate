@@ -2656,7 +2656,7 @@ function updateDecisions() {
     reconcile.hidden = !e?.attempt?.reconcile;
     reconcile.disabled = !state.control.connected;
   }
-  // One short status line; the backend's full text is in Details → Status.
+  // Outcome text lives in Details → Status so state changes do not resize the compact card.
   // A submission from a hidden window that did not succeed is shown on its card again.
   const kept = e && state.control.permissionResults?.find((r) => r.eventId === e.id && r.severity !== 'ok');
   const local = e ? cardResults.get(e.id) ?? (kept ? { text: kept.text, detail: kept.detail } : undefined) : undefined,

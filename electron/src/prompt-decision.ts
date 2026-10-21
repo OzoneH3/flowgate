@@ -22,8 +22,8 @@ export const ENDED_NEEDS_CHOICE = 'Check Remember to save a rule, or For a while
 export const ENDED_FOR_A_WHILE = 'Unavailable: this request has ended.';
 export const ENDED_PROCESS =
   'This process has ended; uncheck Process to save a rule for the application.';
-// The one short main-card message for an ended connection; the backend's
-// field-level reasons stay under Details.
+// Short connection outcome shown under Details → Status, alongside the
+// backend's field-level reasons.
 export const ENDED_MESSAGE = 'This connection has ended.';
 export const ENDED_PROCESS_EXITED = 'The process has exited; For a while has nothing to cover.';
 // queue-reconcile-v1: an enabled rule exists for an earlier revision of this

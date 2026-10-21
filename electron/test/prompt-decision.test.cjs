@@ -371,6 +371,8 @@ test('compact card: first view is short, everything technical behind one Details
   assert.ok(all.filter((n) => n.tagName === 'DETAILS').every((d) => [...view.walk()].includes(d)));
   const details = [view];
   const inside = new Set(details[0].walk());
+  for (const id of ['rememberSummary', 'requestResult', 'decisionNote', 'decisionReview'])
+    assert.ok(inside.has(byId(id)), `${id} stays in Details so outcome updates cannot resize the compact card`);
   const visible = all
     .filter((n) => !inside.has(n))
     .map((n) => n.text)
