@@ -87,8 +87,10 @@ this real launcher test, rather than relying only on direct-Wine fixtures.
 
 DWProton 11.0-4 (broker SHA256
 `3f84ad1bc5116a82ec54ee15588f000dbc5d570c9c77c6007d82545d375fd792`)
-passes the full real-launcher matrix. Wine 11.19 remains a hash-pinned supported
-census version; this regression does not claim all Wine/Proton builds work.
+passes the full real-launcher matrix. GE-Proton11-6 (Wine 11.0) also passes
+the two-application/two-prefix receiver matrix. Discovery negotiates the live
+schema-2 Wine 11.x census contract instead of checking a broker hash allowlist;
+this regression does not claim all Wine/Proton versions work.
 Steam, Heroic and UMU use the same broker evidence when running a supported build;
 launcher ancestry supplies no permission authority.
 
@@ -106,8 +108,8 @@ changed broker generations or different executable/prefix identities reject.
 Process-scoped rules and For-a-while leases remain unavailable for a table-only
 Windows owner: a Windows PID is not a verified Linux requester generation.
 
-The shipped launcher enables discovery of hash-pinned brokers for its configured
-API user. Unsupported builds remain unidentified. Existing `/etc/flowgate/wine.json`
+The shipped launcher enables discovery of running brokers for its configured
+API user. Unsupported census contracts remain explicitly unidentified. Existing `/etc/flowgate/wine.json`
 explicit runtime/prefix allowlists remain authoritative when present; these limit
 observation, never grant permission. No old Python rule is migrated or broadened.
 The permission key is UID + canonical Wine prefix + exact PE executable; file
@@ -128,15 +130,15 @@ scope: this test does **not** certify one prompt per application, nor a native
 popup journey. A Remember-only receiver pass must not be reported as proof that
 ordinary Allow suppresses repeated prompts.
 
-To replace an old explicit Wine-prefix allowlist with supported-build discovery,
+To replace an old explicit Wine-prefix allowlist with runtime discovery,
 run `scripts/update-and-start.sh --profile preserve --wine-discovery`. This is an
 explicit host update: it backs up the prior `/etc/flowgate/wine.json`, writes
 `{"schema":1,"mode":"discover"}`, installs the matched release, and restores the
 previous protection mode. Subsequent ordinary updates retain discovery mode.
 No game/prefix list is required; only running brokers of the configured desktop
-UID and supported pinned builds are observed. Application/prefix permission keys
+UID are considered; attribution requires a supported live census contract. Application/prefix permission keys
 stay independent, and no stored rule is broadened or created by this option.
-Unsupported Wine/Proton builds still require separate collector support.
+Other Wine version families still require validation of the collector contract.
 
 Executable artwork uses exact desktop/Steam association first, then a bounded
 read-only PE32/PE32+ RT_GROUP_ICON/RT_ICON resource lookup. No executable is loaded

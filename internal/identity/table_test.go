@@ -180,3 +180,44 @@ func TestMissingWindowsOwnerRetriesOnlyWithinBound(t *testing.T) {
 		}
 	}
 }
+
+func TestNegotiatedCensusContract(t *testing.T) {
+	for _, tc := range []struct {
+		name, version string
+		schema        int
+		accepted      bool
+	}{
+		{"wine11", "11.0", 2, true},
+		{"wineDevelopment", "11.19", 2, true},
+		{"newBuild", "11.21", 2, true},
+		{"unknownFamily", "12.0", 2, false},
+		{"unknown", "unknown", 2, false},
+		{"legacySchema", "11.0", 1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			helper := filepath.Join(dir, "helper.sh")
+			first, _ := json.Marshal(tableSnapshot{Version: tc.version, Schema: tc.schema, Family: 4, Complete: true})
+			second, _ := json.Marshal(tableSnapshot{Version: "11.99", Schema: 2, Family: 4, Complete: true})
+			script := "read line; printf '%s\\n' '" + string(first) + "'; while read line; do printf '%s\\n' '" + string(second) + "'; done\n"
+			if err := os.WriteFile(helper, []byte(script), 0600); err != nil {
+				t.Fatal(err)
+			}
+			w, err := NewWineTable("/bin/sh", helper, "/bin/sh", dir, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer w.Close()
+			_, err = w.snapshot("tcp")
+			if (err == nil) != tc.accepted {
+				t.Fatalf("accepted=%v: %v", tc.accepted, err)
+			}
+			if tc.accepted && w.version != tc.version {
+				t.Fatal("negotiated version not pinned")
+			}
+			if _, err = w.snapshot("tcp"); err == nil {
+				t.Fatal("changed contract or failed observer accepted")
+			}
+		})
+	}
+}

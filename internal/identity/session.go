@@ -25,11 +25,6 @@ type RuntimeSession struct {
 	Reason         string  `json:"reason"`
 }
 
-var supportedBrokers = map[string]string{
-	"b724233cd9e71f529c0ae30c090c862ac0d0ecfe760e604a2e1cdae160ab9fa6": "11.19",
-	"3f84ad1bc5116a82ec54ee15588f000dbc5d570c9c77c6007d82545d375fd792": "11.0",
-}
-
 func fileHash(path string) string {
 	f, e := os.Open(path)
 	if e != nil {
@@ -71,7 +66,7 @@ func DiscoverRuntimes(bins []string, helper string) ([]RuntimeSession, error) {
 			return nil, e
 		}
 		build := fileHash(filepath.Join(bin, "wineserver"))
-		version := supportedBrokers[build]
+		version := "" // Negotiated from the live owner census during attachment.
 		for _, entry := range entries {
 			if time.Now().After(deadline) {
 				return nil, fmt.Errorf("runtime discovery deadline")
@@ -89,14 +84,14 @@ func DiscoverRuntimes(bins []string, helper string) ([]RuntimeSession, error) {
 				continue
 			}
 			seen[pid] = true
-			s := RuntimeSession{Broker: p, Runner: filepath.Join(bin, "wine"), Build: build, Version: version, Supported: version != "", Reason: "read-only broker executable/build and process-generation observation"}
+			s := RuntimeSession{Broker: p, Runner: filepath.Join(bin, "wine"), Build: build, Version: version, Supported: build != "", Reason: "broker observed; owner census compatibility must be validated during attachment"}
 			s.ID = digest(fmt.Sprintf("%d:%s:%s:%s:%s", pid, p.Start, p.NetNS, p.Application.Prefix, p.ExecutableRevision))
 			if p.Application.Prefix == "" || p.NetNS != NetNS() || p.MountNS != link("/proc/self/ns/mnt") {
 				s.Supported = false
 				s.Reason = "missing prefix or foreign namespaces"
 			}
-			if version == "" {
-				s.Reason = "unvalidated broker build"
+			if build == "" {
+				s.Reason = "broker executable could not be read"
 			}
 			if helper != "" {
 				helperPath, _ := filepath.Abs(helper)
@@ -241,6 +236,7 @@ func AttachRuntimes(prefixes, bins []string, helper string) (*RuntimeObservers, 
 			return nil, fmt.Errorf("helper did not join selected live broker: %v", err)
 		}
 		w.startupDeadline = time.Time{}
+		s.Version = w.version
 		m.sessions = append(m.sessions, s)
 		m.observers = append(m.observers, w)
 	}

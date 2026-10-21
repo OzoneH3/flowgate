@@ -61,12 +61,29 @@ type WineTable struct {
 	broker, prefix, version string
 	helper                  string
 	generation              string
+	requiredSchema          int
 	session                 *RuntimeSession
 	startupDeadline         time.Time
 }
 
-// NewWineTable is lab-only. runner and helper are explicitly trusted executable
-// paths; runtime version and broker image are pinned by the operator.
+// supportedCensusVersion describes the validated Wine 11 owner-table family,
+// not a vendor, executable hash, prefix or application allowlist. Unknown
+// families are attempted and reported explicitly, never silently skipped.
+func supportedCensusVersion(version string) bool {
+	parts := strings.Split(version, ".")
+	if len(parts) != 2 || parts[0] != "11" || len(parts[1]) == 0 || len(parts[1]) > 3 {
+		return false
+	}
+	for _, ch := range parts[1] {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// NewWineTable is lab-only. Paths are explicitly trusted; an empty version
+// requests negotiation from the live census rather than an operator pin.
 func NewWineTable(runner, helper, broker, prefix, version string) (*WineTable, error) {
 	return newWineTable(runner, helper, broker, prefix, version, nil)
 }
@@ -77,7 +94,7 @@ func newWineTableAs(runner, helper, broker, prefix, version string, env []string
 	return newWineTableConfigured(runner, helper, broker, prefix, version, env, credential, nil)
 }
 func newWineTableConfigured(runner, helper, broker, prefix, version string, env []string, credential *syscall.Credential, namespace *wineNamespace) (*WineTable, error) {
-	if version != "11.19" && version != "11.0" && version != "11.20" {
+	if version != "" && !supportedCensusVersion(version) {
 		return nil, fmt.Errorf("unsupported experimental runtime version")
 	}
 	prefix, err := filepath.EvalSymlinks(prefix)
@@ -160,9 +177,17 @@ func (w *WineTable) snapshotFamily(proto string, family int) (tableSnapshot, err
 	}
 	select {
 	case b, ok := <-w.output:
-		if w.lost.Load() || !ok || json.Unmarshal(b, &s) != nil || !s.Complete || s.Family != family || (s.Schema != 1 && s.Schema != 2) || s.Error != 0 || s.Version != w.version || len(s.Rows) > 4096 {
+		if w.lost.Load() || !ok || json.Unmarshal(b, &s) != nil || !s.Complete || s.Family != family || (s.Schema != 1 && s.Schema != 2) || (w.requiredSchema != 0 && s.Schema != w.requiredSchema) || s.Error != 0 || (w.version != "" && s.Version != w.version) || len(s.Rows) > 4096 {
 			w.stop()
 			return s, fmt.Errorf("incomplete or unsupported runtime census")
+		}
+		if w.version == "" {
+			if s.Schema != 2 || !supportedCensusVersion(s.Version) {
+				w.stop()
+				return s, fmt.Errorf("runtime owner census %q schema %d is not validated; no application identity inferred", s.Version, s.Schema)
+			}
+			w.requiredSchema = s.Schema
+			w.version = s.Version // Pin the negotiated contract for this generation.
 		}
 	case <-time.After(2 * time.Second):
 		w.stop()

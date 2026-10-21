@@ -178,7 +178,7 @@ func serve() error {
 	parent := fs.String("parent-netns", "", "original namespace identity (required)")
 	direction := fs.String("direction", "incoming", "incoming/outgoing")
 	timeout := fs.Duration("timeout", 15*time.Second, "pending timeout")
-	discoverWine := fs.Bool("discover-wine", false, "discover hash-pinned same-user brokers in this isolated namespace")
+	discoverWine := fs.Bool("discover-wine", false, "discover same-user brokers and validate their live owner census in this isolated namespace")
 	observe := fs.String("observe-prefixes", "", "comma-separated workspace prefixes for on-demand Wine census")
 	scratch := fs.String("observer-scratch", "", "private workspace observer scratch directory")
 	prefixes := fs.String("attach-prefixes", "", "comma-separated already-running workspace prefixes")

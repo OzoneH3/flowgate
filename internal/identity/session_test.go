@@ -33,7 +33,7 @@ func TestWorkspaceAttachmentBoundary(t *testing.T) {
 	if _, err = workspacePath(target); err == nil {
 		t.Fatal("symlink escape accepted")
 	}
-	if supportedBrokers[fileHash("/usr/bin/false")] != "" {
-		t.Fatal("unknown build supported")
+	if supportedCensusVersion("unknown") {
+		t.Fatal("unknown runtime contract supported")
 	}
 }

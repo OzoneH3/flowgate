@@ -35,7 +35,7 @@ type WineObservers struct {
 
 func NewWineObservers(o WineObserverOptions) (*WineObservers, error) {
 	if o.Helper == "" || !filepath.IsAbs(o.Helper) || !filepath.IsAbs(o.Scratch) || (!o.Discover && (len(o.RuntimeBins) == 0 || len(o.Prefixes) == 0)) || len(o.RuntimeBins) > 4 || len(o.Prefixes) > 32 || (o.Discover && (len(o.RuntimeBins) > 0 || len(o.Prefixes) > 0)) {
-		return nil, fmt.Errorf("explicit helper and scratch plus either pinned-build discovery or 1..4 trusted runtime bins and 1..32 authorized prefixes required")
+		return nil, fmt.Errorf("explicit helper and scratch plus either runtime discovery or 1..4 trusted runtime bins and 1..32 authorized prefixes required")
 	}
 	var err error
 	o.Helper, err = filepath.EvalSymlinks(o.Helper)
@@ -105,7 +105,7 @@ func (m *WineObservers) Resolve(f Flow) Attribution {
 		}
 		bins := m.options.RuntimeBins
 		if m.options.Discover {
-			if filepath.Base(p.Executable) != "wineserver" || supportedBrokers[fileHash(fmt.Sprintf("/proc/%d/exe", p.PID))] == "" {
+			if filepath.Base(p.Executable) != "wineserver" {
 				continue
 			}
 			bins = []string{filepath.Dir(p.Executable)}
@@ -166,11 +166,10 @@ func (m *WineObservers) Resolve(f Flow) Attribution {
 	record := &observedWine{broker: *broker}
 	m.sessions[key] = record
 	stop := func(reason string) Attribution { record.failure = reason; return fail(reason) }
-	version := supportedBrokers[fileHash(fmt.Sprintf("/proc/%d/exe", broker.PID))]
-	if version == "" {
-		return stop("unsupported broker build; no executable identity inferred")
-	}
-	session := RuntimeSession{Broker: *broker, Runner: filepath.Join(bin, "wine"), Build: fileHash(filepath.Join(bin, "wineserver")), Version: version, Supported: true}
+	// Discover every broker build. The helper negotiates the supported census
+	// contract after joining this exact generation; a filename is not authority.
+	version := ""
+	session := RuntimeSession{Broker: *broker, Runner: filepath.Join(bin, "wine"), Build: fileHash(filepath.Join(bin, "wineserver"))}
 	if !session.current() {
 		return stop("broker generation changed")
 	}
@@ -233,10 +232,16 @@ func (m *WineObservers) Resolve(f Flow) Attribution {
 	}
 	w.session = &session
 	w.startupDeadline = time.Now().Add(4 * time.Second)
-	if _, err = w.snapshot("tcp"); err != nil || !session.current() || !w.sameServer(broker) {
+	if _, err = w.snapshot("tcp"); err != nil {
+		w.Close()
+		return stop(err.Error())
+	}
+	if !session.current() || !w.sameServer(broker) {
 		w.Close()
 		return stop("helper did not join the selected existing broker")
 	}
+	session.Version = w.version
+	session.Supported = true
 	w.startupDeadline = time.Time{}
 	record.table = w
 	return w.Resolve(f)

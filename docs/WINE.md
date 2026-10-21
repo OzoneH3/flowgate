@@ -203,8 +203,17 @@ without clearing marks on already-approved TCP. See SEMANTICS.md.
 SHA256, prefix, UID, namespaces, process start and helper peer count. It never
 launches Wine or interprets a command from application metadata. Runtime bin
 directories are explicitly trusted user input, not inferred executable commands.
-The two broker hashes above are the supported build allowlist; another build is
-reported unsupported until validated. No claim of general Wine-version support.
+Broker hashes are diagnostic evidence, not a build allowlist. Discovery reports
+all matching brokers as candidates; attachment must negotiate a complete schema-2
+owner census from the selected live broker before it can resolve an application.
+The supported contract is currently the Wine 11.x owner-table family, validated
+with Wine 11.19, DWProton 11.0 and GE-Proton11-6 (Wine 11.0). A different family,
+malformed/incomplete census or unavailable helper produces an explicit attribution
+failure. This is version-family compatibility, not proof of every vendor patch.
+The first negotiated version is pinned for the observer generation. Exact broker,
+UID, prefix, namespace, socket-cookie and executable corroboration remain required;
+launch ancestry never grants permission. A successful census does not itself Allow
+traffic. Read-only discovery cannot claim that attachment has already succeeded.
 
 `serve-lab --attach-prefixes PREFIX[,PREFIX] --runtime-bins DIR[,DIR]` uses the same
 observation pipeline, without per-prefix environment assembly. Each selected
@@ -340,7 +349,6 @@ Real UMU/Proton/pressure-vessel launches were not executed.
 
 The real `lwp` regression and current collector contract are documented in
 [PROTON-LAUNCHER-REGRESSION.md](PROTON-LAUNCHER-REGRESSION.md). This supersedes the
-older listener-only experiment for outgoing TCP on supported, hash-pinned
-brokers. Windows socket ownership, not Python launch ancestry or a global
+older listener-only experiment for outgoing TCP on brokers with a validated live owner-census contract. Windows socket ownership, not Python launch ancestry or a global
 wineserver permission, selects the application rule. Activity carries that
 application separately from its Unix FD-holder evidence.
