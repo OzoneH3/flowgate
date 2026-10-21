@@ -16,6 +16,7 @@ import {
   type IpcMainInvokeEvent,
 } from 'electron';
 import path from 'node:path';
+import os from 'node:os';
 import {
   PaneModel,
   paneKind,
@@ -950,6 +951,10 @@ app.whenReady().then(async () => {
       persist();
     }
     return saved.ui || {};
+  });
+  ipcMain.handle('host:identity', (e) => {
+    trusted(e);
+    return `${os.userInfo().username}@${os.hostname()}`;
   });
   ipcMain.handle('snapshot', (e) => {
     trusted(e);

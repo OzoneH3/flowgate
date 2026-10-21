@@ -72,11 +72,11 @@ export function networkOverviews(): Row[] {
     children: [],
   }));
 }
-export function overview(activity: Activity, children: Row[] = []): Row {
+export function overview(activity: Activity, children: Row[] = [], label = 'All applications'): Row {
   return {
     id: 'overview',
     kind: 'overview',
-    label: 'All applications',
+    label,
     rows: sourceRows(activity.rows),
     children,
   };
@@ -361,6 +361,9 @@ export function flatten(
                   : (sum(r.rows, key as Metric, source).value ?? -1);
   const walk = (rows: Row[], depth: number) => {
     for (const row of [...rows].sort((a, b) => {
+      const categoryOrder = (r: Row) => r.kind === 'overview' ? 0 : r.kind === 'unidentified' ? 1 : r.kind === 'inactive-group' ? 2 : undefined;
+      const ac = categoryOrder(a), bc = categoryOrder(b);
+      if (ac !== undefined && bc !== undefined && ac !== bc) return ac - bc;
       if (a.kind === 'network' || b.kind === 'network') {
         if (a.kind !== b.kind) return a.kind === 'network' ? -1 : 1;
         return a.id === b.id ? 0 : a.id === 'network:internet' ? -1 : 1;

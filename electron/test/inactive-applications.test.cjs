@@ -159,3 +159,13 @@ test('mixed running and saved accounts keep observed traffic on their original c
   assert.equal(tree[0].children[0].process.application.key,'user-key');
   assert.equal(tree[0].children[1].inactive.key,'root-key');
 });
+
+test('computer, unidentified and inactive categories keep their order across table sorts', () => {
+  const {overview}=require('../dist/test/model.cjs');
+  const computer=overview({rows:[]},[],'user@host');
+  assert.equal(computer.label,'user@host');
+  const roots=[{id:'inactive-applications',kind:'inactive-group',label:'Not running',rows:[],children:[]},
+    {id:'unidentified',kind:'unidentified',label:'Unidentified',rows:[],children:[]},computer];
+  for(const key of ['name','download_bps','count']) for(const desc of [false,true])
+    assert.deepEqual(flatten(roots,new Set(),key,desc).map(x=>x.row.id),['overview','unidentified','inactive-applications']);
+});

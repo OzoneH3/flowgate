@@ -436,6 +436,7 @@ export interface Decision {
   duration_seconds?: number;
 }
 export interface Bridge {
+  hostIdentity(): Promise<string>;
   zoneMigrationState(): Promise<import('./zone-migration').MigrationView>;
   zoneMigrationPreview(target: import('./zone-migration').MigrationTarget): Promise<import('./zone-migration').MigrationView>;
   zoneMigrationConfirm(token: string): Promise<import('./zone-migration').MigrationView>;

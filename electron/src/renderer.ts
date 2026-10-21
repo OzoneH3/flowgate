@@ -412,7 +412,11 @@ function rowIcon(kind: Row['kind']) {
   const path = document.createElementNS(svg.namespaceURI, 'path');
   path.setAttribute(
     'd',
-    kind === 'inactive-group' || kind === 'application' || kind === 'program' || kind === 'overview' || kind === 'launch'
+    kind === 'overview'
+      ? 'M1 2h14v9H1zM8 11v3M4 14h8'
+      : kind === 'inactive-group'
+        ? 'M2 3h12v3H2zM3 6v8h10V6M6 9h4'
+        : kind === 'application' || kind === 'program' || kind === 'launch'
       ? 'M2 2h12v9H2zM5 14h6M8 11v3M2 5h12'
       : kind === 'process'
         ? 'M5 3h6v10H5zM2 5h3m6 0h3M2 8h3m6 0h3M2 11h3m6 0h3'
@@ -993,6 +997,7 @@ if (promptID) {
     }
   };
 }
+let hostLabel = 'This computer';
 function buildTree() {
   const a = state?.observation.activity;
   roots = a
@@ -1000,9 +1005,10 @@ function buildTree() {
     : [];
   if (a) {
     const inactive = roots.filter(r => r.kind === 'inactive-group');
-    const children = [...networkOverviews(), ...roots.filter(r => r.kind !== 'inactive-group')];
+    const unidentified = roots.filter(r => r.kind === 'unidentified');
+    const children = [...networkOverviews(), ...roots.filter(r => r.kind !== 'inactive-group' && r.kind !== 'unidentified')];
     for (const child of children) child.parent = 'overview';
-    roots = [overview(a, children), ...inactive];
+    roots = [overview(a, children, hostLabel), ...unidentified, ...inactive];
   }
   const all = allRows(roots);
   const r = all.find((r) => r.id === selected);
@@ -2958,6 +2964,10 @@ if (!promptID) {
     button.click();
   });
 }
+void window.flowgate.hostIdentity?.().then(label => {
+  hostLabel = label;
+  if (state) { buildTree(); renderTree(); }
+}).catch(() => {});
 window.flowgate.subscribe(consume);
 window.flowgate.onClock((clock) => {
   const next = advanceClock(state, clock);
