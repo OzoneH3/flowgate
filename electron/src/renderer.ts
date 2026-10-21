@@ -999,9 +999,10 @@ function buildTree() {
     ? activityTree(a, state.control.rules, $<HTMLInputElement>('search').value, $<HTMLSelectElement>('filter').value, undefined, state.control.capabilities?.includes(ZONE_CAPABILITY)?state.control.networkZones:undefined, state.control.events)
     : [];
   if (a) {
-    const children = [...networkOverviews(), ...roots];
+    const inactive = roots.filter(r => r.kind === 'inactive-group');
+    const children = [...networkOverviews(), ...roots.filter(r => r.kind !== 'inactive-group')];
     for (const child of children) child.parent = 'overview';
-    roots = [overview(a, children)];
+    roots = [overview(a, children), ...inactive];
   }
   const all = allRows(roots);
   const r = all.find((r) => r.id === selected);
