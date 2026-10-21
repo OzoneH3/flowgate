@@ -238,7 +238,7 @@ func captureEvidence(target, nsPath string, owner Process, app Application, aliv
 	}
 	ev := ExecutableEvidence{PID: owner.PID, Start: owner.Start, BootID: owner.BootID, UID: owner.UID, MountNS: owner.MountNS, Path: nsPath, Stamp: statStamp(st), CapturedAt: time.Now()}
 	ev.Dev, ev.Inode = devIno(st)
-	if ev.Stamp != app.Revision {
+	if err := validateApplicationRevision(app, target, st); err != nil {
 		return nil, fmt.Errorf("executable changed since attribution (revision %s, opened file %s)", app.Revision, ev.Stamp)
 	}
 	clean := strings.TrimSuffix(nsPath, " (deleted)")
@@ -493,6 +493,9 @@ func hostBackingPath(pid int, mountNS, nsPath string, dev, ino uint64) (string, 
 	} else {
 		for _, cand := range mountCandidates(nsPath, procInfo, string(readBound("/proc/self/mountinfo", 1<<20))) {
 			if sameFile(cand, dev, ino) {
+				if source := runtimeBackingSource(cand, dev, ino); source != "" {
+					cand = source
+				}
 				host, src = cand, "mountinfo"
 				break
 			}
@@ -591,7 +594,7 @@ func VerifyRetainedEvidence(a Application, uid uint32, ev ExecutableEvidence) er
 	if a.Key != ApplicationKey(uid, a) || ev.UID != uid {
 		return changed(CodeExecutableChanged, "captured application key does not match its executable, prefix and user")
 	}
-	if ev.Stamp != a.Revision {
+	if (!contentRevision(a) && ev.Stamp != a.Revision) || (contentRevision(a) && "sha256:"+ev.SHA256 != a.Revision) {
 		return changed(CodeExecutableChanged, "retained executable evidence differs from the request's revision", BindingChange{"revision", a.Revision, ev.Stamp})
 	}
 	if ev.Visibility != VisibilityHost || ev.HostPath == "" {
@@ -620,7 +623,7 @@ func VerifyRetainedEvidence(a Application, uid uint32, ev ExecutableEvidence) er
 	if dev, ino := devIno(st); dev != ev.Dev || ino != ev.Inode {
 		return changed(CodeExecutableChanged, fmt.Sprintf("a different file now occupies %s (device/inode changed); the requesting executable is gone", p), BindingChange{"device_inode", fmt.Sprintf("%d/%d", ev.Dev, ev.Inode), fmt.Sprintf("%d/%d", dev, ino)})
 	}
-	if now != ev.Stamp {
+	if now != ev.Stamp && !contentRevision(a) {
 		return changed(CodeExecutableChanged, fmt.Sprintf("%s was modified since the request (size, modification or change time differs)", p), BindingChange{"revision", ev.Stamp, now})
 	}
 	sum, ok := cachedDigest(now)
@@ -649,6 +652,9 @@ func VerifyInstanceExecutable(pid int, start string, a Application) error {
 		return changed(CodeIdentityUnverifiable, "the process instance is no longer running")
 	}
 	now := stamp(target)
+	if contentRevision(a) {
+		now = runtimeContentRevision(target)
+	}
 	if s2, _, err := processStat(base); err != nil || s2 != start {
 		return changed(CodeIdentityUnverifiable, "the process instance is no longer running")
 	}

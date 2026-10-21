@@ -91,7 +91,7 @@ func (e *Engine) processViewsLocked(activity identity.ActivitySnapshot, rules []
 				continue
 			}
 			b := identity.Instance{Session: e.Generation, BootID: p.BootID, PID: p.PID, Start: p.Start, UID: p.UID, NetNS: p.NetNS, MountNS: p.MountNS, PIDNS: p.PIDNS, Executable: p.Executable, Revision: p.Application.Revision}
-			if p.Application.Kind == "electron" {
+			if p.ExecutableRevision != p.Application.Revision {
 				b.ExecutableRevision = p.ExecutableRevision // the runtime file; the bundle is the application
 			}
 			if b.BootID == "" || b.NetNS == "" || b.MountNS == "" || b.PIDNS == "" || b.Start == "" || b.Check() != nil {

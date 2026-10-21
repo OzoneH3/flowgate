@@ -181,6 +181,15 @@ func Inspect(pid int) (Process, error) {
 		if host := sandboxKeyPath(pid, p.MountNS, a.Executable, exeInfo); host != "" {
 			a.HostExecutable = host
 			a.Evidence = append(a.Evidence, "sandbox executable; host backing path proven by device/inode")
+			// Only deployment-backed hard links use content revisions. Ordinary
+			// native and Wine identities retain their existing revision contract.
+			dev, ino := devIno(exeInfo)
+			if raw, _, _ := hostBackingPath(pid, p.MountNS, a.Executable, dev, ino); raw == host && isRuntimeDeploymentFile(host) {
+				if rev := runtimeContentRevision(base + "/exe"); rev != "" {
+					a.Revision = rev
+					a.Evidence = append(a.Evidence, "runtime deployment backing inode; content revision independent of temporary hard links")
+				}
+			}
 		}
 	}
 	if a.Kind == "native" && IsElectronRuntime(p.Executable) {

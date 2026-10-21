@@ -160,3 +160,31 @@ ProductName as a fallback. They are local-file display metadata, not publisher
 verification or permission authority. Keys, revisions, UID and prefix bindings
 never derive from these labels. Metadata is cached by exact application identity
 and revision; malformed/absent strings retain the normal filename fallback.
+
+
+## Disposable runtime hard links
+
+Pressure-vessel can run native helpers from a fresh `var/tmp-*/usr/...`
+hard-linked tree on every launch. FlowGate resolves such a file to a runtime
+ deployment's `files/` tree only when device and inode match and the deployment
+has its runtime manifest. Candidate discovery is bounded; a filename, manifest
+or identical content alone is insufficient. This applies to any executable in
+that runtime layout, not a particular interpreter or game.
+
+The application key uses the proven deployment path and UID. Its revision uses
+SHA-256 of the opened executable, with bounded hashing and a cache invalidated
+by inode/size/mtime/ctime. Creating or removing temporary hard links changes
+ctime but no longer changes this application's content revision. Retained
+request verification still requires the same backing device/inode and matching
+content; modified or substituted files fail. Process rules additionally retain
+ the original kernel file stamp and process generation.
+
+Existing rules keyed to temporary paths are not migrated or widened. A new
+Remember decision establishes the stable deployment rule; separate directions
+remain separate. Python/native helper permissions do not authorize Windows games.
+
+Validation: `TestRuntimeBackingLiveNamespace` runs two real native processes in
+separate mount namespaces, with distinct temporary trees backed by one deployment.
+`TestRuntimeContentRuleSurvivesTemporaryHardlinkChurn` verifies saved rule reuse
+and rejection for another deployment, user or revision. These are native identity
+and policy checks, not another end-to-end game receiver test.

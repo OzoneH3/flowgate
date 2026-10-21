@@ -61,7 +61,7 @@ func BindInstance(session string, p Process) (Instance, error) {
 		return Instance{}, fmt.Errorf("live native thread-group leader with boot/namespace/executable identity required")
 	}
 	i := Instance{Session: session, BootID: p.BootID, PID: p.PID, Start: p.Start, UID: p.UID, NetNS: p.NetNS, MountNS: p.MountNS, PIDNS: p.PIDNS, Executable: p.Executable, Revision: p.ExecutableRevision}
-	if p.Application.Kind == "electron" {
+	if p.Application.Kind == "electron" || contentRevision(p.Application) {
 		i.Revision, i.ExecutableRevision = p.Application.Revision, p.ExecutableRevision
 	}
 	return i, nil
@@ -77,7 +77,7 @@ func instanceIdentity(p Process) bool {
 	if p.ExecutableRevision == "" || !LiveRuleable(p.Application) {
 		return false
 	}
-	return p.Application.Kind == "electron" || p.ExecutableRevision == p.Application.Revision
+	return p.Application.Kind == "electron" || contentRevision(p.Application) || p.ExecutableRevision == p.Application.Revision
 }
 func (i Instance) Check() error {
 	base := fmt.Sprintf("/proc/%d", i.PID)

@@ -37,7 +37,7 @@ func VerifyObservedNative(rowID string, expected ActivityProcess) (Process, erro
 	// in the daemon's mount namespace. Sandboxed services may legitimately have a
 	// private mount namespace; bind it to the observed target rather than requiring
 	// the daemon's namespace. Network namespaces remain restricted to our hook scope.
-	if p.Start != expected.Start || p.UID != expected.UID || !LiveRuleable(p.Application) || p.Application.Kind != expected.Application.Kind || p.Application.Key != expected.Application.Key || p.Application.Revision != expected.Application.Revision || (p.Application.Kind == "native" && p.ExecutableRevision != p.Application.Revision) || p.NetNS != NetNS() || p.NetNS != expected.NetNS || p.MountNS == "" || p.MountNS != expected.MountNS || p.PIDNS != expected.PIDNS || p.BootID != expected.BootID {
+	if p.Start != expected.Start || p.UID != expected.UID || !LiveRuleable(p.Application) || p.Application.Kind != expected.Application.Kind || p.Application.Key != expected.Application.Key || p.Application.Revision != expected.Application.Revision || (p.Application.Kind == "native" && !contentRevision(p.Application) && p.ExecutableRevision != p.Application.Revision) || p.NetNS != NetNS() || p.NetNS != expected.NetNS || p.MountNS == "" || p.MountNS != expected.MountNS || p.PIDNS != expected.PIDNS || p.BootID != expected.BootID {
 		return Process{}, fmt.Errorf("process generation, executable, principal or namespace changed/unsupported")
 	}
 	return p, nil

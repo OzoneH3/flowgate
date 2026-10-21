@@ -294,3 +294,49 @@ func TestWineTableRetainsPEFileWithoutBrokerProcessPermission(t *testing.T) {
 		t.Fatal(rule)
 	}
 }
+
+func TestRuntimeContentRuleSurvivesTemporaryHardlinkChurn(t *testing.T) {
+	host := filepath.Join(t.TempDir(), "interpreter")
+	os.WriteFile(host, []byte("verified runtime"), 0700)
+	app := sandboxApp(t, host, "/usr/bin/interpreter", 1000)
+	_, _, _, sum := fileStamp(t, host)
+	app.Revision = "sha256:" + sum
+	a := sandboxAttribution(app, 1000, 42, "mnt:[1001]", "first")
+	s := newSandboxEngine(t, a, host, host)
+	v := s.Observe(s.f, "first")
+	*s.alive = false
+	*s.a = identity.Attribution{Fingerprint: "gone"}
+	*s.now = s.now.Add(2 * time.Minute)
+	s.List(1000, false)
+	// Same deployed file gains a temporary link before the user saves Remember.
+	link := host + ".temporary"
+	if err := os.Link(host, link); err != nil {
+		t.Fatal(err)
+	}
+	rule, err := s.save(t, v.ID, "allow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(link)
+	*s.a = sandboxAttribution(app, 1000, 77, "mnt:[2002]", "next")
+	if n := s.Observe(s.f, "next"); n.State != "allowed" || n.Rule != rule.ID {
+		t.Fatal("remembered runtime reprompted", n)
+	}
+	other := app
+	other.HostExecutable = host + ".other"
+	other.Key = identity.ApplicationKey(1000, other)
+	*s.a = sandboxAttribution(other, 1000, 78, "mnt:[2003]", "other")
+	if n := s.Observe(s.f, "other"); n.State != "awaiting-decision" {
+		t.Fatal("another deployment inherited rule", n)
+	}
+	*s.a = sandboxAttribution(app, 1001, 79, "mnt:[2004]", "uid")
+	if n := s.Observe(s.f, "uid"); n.State != "awaiting-decision" {
+		t.Fatal("another user inherited rule", n)
+	}
+	changed := app
+	changed.Revision = "sha256:" + strings.Repeat("0", 64)
+	*s.a = sandboxAttribution(changed, 1000, 80, "mnt:[2005]", "changed")
+	if n := s.Observe(s.f, "changed"); n.State != "awaiting-decision" {
+		t.Fatal("modified runtime inherited rule", n)
+	}
+}
