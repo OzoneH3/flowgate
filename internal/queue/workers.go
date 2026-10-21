@@ -17,6 +17,7 @@ const CensusWorkers = 2
 const MaxCensusPackets = 24
 const MaxCensusBytes = 1 << 19
 const AttributionTimeout = 5 * time.Second
+const recentCompletionWindow = time.Second
 
 type packetJob struct {
 	id       uint32
@@ -32,18 +33,29 @@ func (p packetJob) key() string {
 	return fmt.Sprintf("%s|%s|%s|%s", p.flow.NetNS, p.flow.Direction, p.flow.Protocol, p.flow.Local)
 }
 
+type rejectionCause uint8
+
+const (
+	rejectCensus rejectionCause = iota
+	rejectShutdown
+	rejectAdmission
+)
+
 type packetWorkers struct {
 	mu                       sync.Mutex
 	wake                     [2]*sync.Cond
 	jobs                     map[string][]packetJob // includes active jobs, even across lane transfer
+	active                   map[string]bool        // heads currently owned by workers cannot be displaced
+	recent                   map[string]time.Time   // bounded scheduling hints, never ownership/policy evidence
 	census                   map[string]bool        // ordering only; never permission authority
 	ready                    [2][]string
 	count, bytes             int
 	censusCount, censusBytes int
 	stopped                  bool
+	displacing               bool // at most one callback-owned displaced packet at a time
 	wg                       sync.WaitGroup
 	process                  func(packetJob, bool, bool) bool // true = completed, false = needs census
-	reject                   func(packetJob, bool)            // lane overflow or shutdown, exactly one drop
+	reject                   func(packetJob, rejectionCause)  // lane overflow or shutdown, exactly one drop
 }
 
 // Single-lane adapter used by ordering/bounds tests.
@@ -51,8 +63,8 @@ func newPacketWorkers(n int, process func(packetJob, bool)) *packetWorkers {
 	return newPacketLanes(n, 0, func(p packetJob, stop, census bool) bool { process(p, stop); return true }, nil)
 }
 
-func newPacketLanes(general, census int, process func(packetJob, bool, bool) bool, reject func(packetJob, bool)) *packetWorkers {
-	w := &packetWorkers{jobs: make(map[string][]packetJob), census: make(map[string]bool), process: process, reject: reject}
+func newPacketLanes(general, census int, process func(packetJob, bool, bool) bool, reject func(packetJob, rejectionCause)) *packetWorkers {
+	w := &packetWorkers{jobs: make(map[string][]packetJob), census: make(map[string]bool), active: make(map[string]bool), recent: make(map[string]time.Time), process: process, reject: reject}
 	for lane, n := range []int{general, census} {
 		w.wake[lane] = sync.NewCond(&w.mu)
 		for i := 0; i < n; i++ {
@@ -63,22 +75,46 @@ func newPacketLanes(general, census int, process func(packetJob, bool, bool) boo
 	return w
 }
 
-// submit never waits for attribution or a worker. The census lane is a subset
-// of the global budget, leaving half the count/bytes available to other flows.
+// submit never waits for attribution or a worker. At capacity, an idle endpoint
+// can displace one queued packet from another endpoint. General-lane followers
+// can also displace waiting census work or a substantially deeper general queue.
+// Recent general progress is preferred over cold work. The displaced packet
+// takes the incoming callback's temporary slot until its drop verdict completes;
+// it is never processed or allowed. Active heads and surviving endpoint FIFO
+// are preserved. Count/byte limits and the census subset do not increase.
 func (w *packetWorkers) submit(p packetJob) bool {
 	w.mu.Lock()
-	defer w.mu.Unlock()
 	key := p.key()
 	q := w.jobs[key]
-	if w.stopped || p.size < 0 || w.count >= MaxAttributionPackets || p.size > MaxAttributionBytes-w.bytes || len(q) >= MaxAttributionPerEndpoint {
+	if w.stopped || p.size < 0 || p.size > MaxAttributionBytes || len(q) >= MaxAttributionPerEndpoint {
+		w.mu.Unlock()
 		return false
 	}
 	lane := 0
 	if w.census[key] {
 		if w.censusCount >= MaxCensusPackets || p.size > MaxCensusBytes-w.censusBytes {
+			w.mu.Unlock()
 			return false
 		}
 		lane = 1
+	}
+	var displaced *packetJob
+	if w.count >= MaxAttributionPackets || p.size > MaxAttributionBytes-w.bytes {
+		// Census followers do not compete for general capacity. Only the
+		// callback owns a displaced drop; concurrent submitters cannot accumulate it.
+		if lane == 1 || w.reject == nil || w.displacing {
+			w.mu.Unlock()
+			return false
+		}
+		displaced = w.displaceLocked(p, key, len(q))
+		if displaced == nil {
+			w.mu.Unlock()
+			return false
+		}
+		w.displacing = true
+		w.wg.Add(1) // shutdown must wait for this drop before closing the queue socket
+	}
+	if lane == 1 {
 		w.censusCount++
 		w.censusBytes += p.size
 	}
@@ -89,7 +125,76 @@ func (w *packetWorkers) submit(p packetJob) bool {
 		w.ready[lane] = append(w.ready[lane], key)
 		w.wake[lane].Signal()
 	}
+	w.mu.Unlock()
+	if displaced != nil {
+		// Netlink I/O and cancellation callbacks run outside the scheduler lock.
+		w.reject(*displaced, rejectAdmission)
+		w.mu.Lock()
+		w.displacing = false
+		w.mu.Unlock()
+		w.wg.Done()
+	}
 	return true
+}
+
+// Prefer waiting census work, then the most backlogged endpoint and its oldest
+// queued tail. A single victim must free enough bytes: no speculative drops and
+// no unbounded sequence of verdict writes in the admission callback.
+func (w *packetWorkers) displaceLocked(incoming packetJob, incomingKey string, incomingDepth int) *packetJob {
+	now := time.Now()
+	incomingRecent := w.recentlyCompletedLocked(incomingKey, now)
+	needed := incoming.size - (MaxAttributionBytes - w.bytes)
+	victimKey := ""
+	var victim packetJob
+	depth := 0
+	for key, q := range w.jobs {
+		if key == incomingKey || len(q) == 0 || (w.active[key] && len(q) == 1) {
+			continue
+		}
+		// General followers may use slow-lane waiting capacity. Against
+		// another general queue they must reduce a backlog imbalance instead
+		// of taking its sole waiting head.
+		victimRecent := w.recentlyCompletedLocked(key, now)
+		// Fresh cold endpoints cannot displace established general progress.
+		// This grants scheduling only, never a policy result or attribution.
+		if victimRecent && !incomingRecent {
+			continue
+		}
+		if !w.census[key] && (!incomingRecent || victimRecent) && incomingDepth > 0 && len(q) <= incomingDepth+1 {
+			continue
+		}
+		tail := q[len(q)-1]
+		if tail.size < needed {
+			continue
+		}
+		if depth == 0 || w.census[key] && !w.census[victimKey] || w.census[key] == w.census[victimKey] && (len(q) > depth || len(q) == depth && tail.deadline.Before(victim.deadline)) {
+			victimKey, victim, depth = key, tail, len(q)
+		}
+	}
+	if depth == 0 {
+		return nil
+	}
+	lane := 0
+	if w.census[victimKey] {
+		lane = 1
+		w.censusCount--
+		w.censusBytes -= victim.size
+	}
+	w.count--
+	w.bytes -= victim.size
+	if depth > 1 {
+		w.jobs[victimKey] = w.jobs[victimKey][:depth-1]
+	} else {
+		delete(w.jobs, victimKey)
+		delete(w.census, victimKey)
+		for i, key := range w.ready[lane] {
+			if key == victimKey {
+				w.ready[lane] = append(w.ready[lane][:i], w.ready[lane][i+1:]...)
+				break
+			}
+		}
+	}
+	return &victim
 }
 
 func (w *packetWorkers) run(lane int) {
@@ -103,14 +208,26 @@ func (w *packetWorkers) run(lane int) {
 			w.mu.Unlock()
 			return
 		}
-		key := w.ready[lane][0]
-		w.ready[lane] = w.ready[lane][1:]
+		next := 0
+		if lane == 0 {
+			now := time.Now()
+			for i, key := range w.ready[lane] {
+				if w.recentlyCompletedLocked(key, now) {
+					next = i
+					break
+				}
+			}
+		}
+		key := w.ready[lane][next]
+		w.ready[lane] = append(w.ready[lane][:next], w.ready[lane][next+1:]...)
 		p := w.jobs[key][0]
+		w.active[key] = true
 		stop := w.stopped
 		w.mu.Unlock()
 		done := w.process(p, stop, lane == 1)
 		w.mu.Lock()
 		if !done {
+			delete(w.recent, key)
 			// Move the entire endpoint, including its active head, without releasing
 			// global accounting. Later packets must not overtake this cold lookup.
 			q := w.jobs[key]
@@ -122,6 +239,7 @@ func (w *packetWorkers) run(lane int) {
 				w.census[key] = true
 				w.censusCount += len(q)
 				w.censusBytes += size
+				delete(w.active, key)
 				w.ready[1] = append(w.ready[1], key)
 				w.wake[1].Signal()
 				w.mu.Unlock()
@@ -129,9 +247,17 @@ func (w *packetWorkers) run(lane int) {
 			}
 			stop = w.stopped
 			w.mu.Unlock()
-			w.reject(p, stop)
+			cause := rejectCensus
+			if stop {
+				cause = rejectShutdown
+			}
+			w.reject(p, cause)
 			w.mu.Lock()
 		}
+		if done && lane == 0 && !w.stopped {
+			w.completedLocked(key, time.Now())
+		}
+		delete(w.active, key)
 		q := w.jobs[key][1:]
 		w.count--
 		w.bytes -= p.size
@@ -149,6 +275,28 @@ func (w *packetWorkers) run(lane int) {
 		}
 		w.mu.Unlock()
 	}
+}
+
+// The hint expires after one second, holds at most the global packet bound,
+// and is revoked as soon as a general lookup needs census. Socket replacement
+// may inherit scheduling priority but never attribution or permission authority.
+func (w *packetWorkers) recentlyCompletedLocked(key string, now time.Time) bool {
+	at, ok := w.recent[key]
+	return ok && !now.Before(at) && now.Sub(at) < recentCompletionWindow
+}
+
+func (w *packetWorkers) completedLocked(key string, now time.Time) {
+	if _, ok := w.recent[key]; !ok && len(w.recent) >= MaxAttributionPackets {
+		oldestKey := ""
+		var oldest time.Time
+		for candidate, at := range w.recent {
+			if oldestKey == "" || at.Before(oldest) {
+				oldestKey, oldest = candidate, at
+			}
+		}
+		delete(w.recent, oldestKey)
+	}
+	w.recent[key] = now
 }
 
 // The owner cancels first; both lanes drain before the queue socket closes.

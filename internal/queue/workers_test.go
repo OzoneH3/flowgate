@@ -180,7 +180,7 @@ func TestCensusLaneReservesNativeProgressAndPreservesEndpointOrder(t *testing.T)
 		<-release
 		done <- p.id
 		return true
-	}, func(p packetJob, _ bool) { t.Errorf("unexpected lane rejection %d", p.id) })
+	}, func(p packetJob, _ rejectionCause) { t.Errorf("unexpected lane rejection %d", p.id) })
 	defer func() { unblock(); w.stop() }()
 	// More cold sockets than general workers, all parked in the census lane.
 	for i := 1; i <= 12; i++ {
@@ -249,7 +249,7 @@ func TestCensusLaneSaturationDropsOnlyOverflowAndDrains(t *testing.T) {
 		completions[p.id]++
 		mu.Unlock()
 		return true
-	}, func(p packetJob, _ bool) { dropped <- p.id; mu.Lock(); completions[p.id]++; mu.Unlock() })
+	}, func(p packetJob, _ rejectionCause) { dropped <- p.id; mu.Lock(); completions[p.id]++; mu.Unlock() })
 	defer func() { unblock(); w.stop() }()
 	for i := 1; i <= MaxCensusPackets; i++ {
 		if !w.submit(job(uint32(i), 8000+i)) {
@@ -306,7 +306,7 @@ func TestCensusLaneByteBound(t *testing.T) {
 		}
 		<-release
 		return true
-	}, func(p packetJob, _ bool) { dropped <- p.id })
+	}, func(p packetJob, _ rejectionCause) { dropped <- p.id })
 	defer func() { unblock(); w.stop() }()
 	p := job(1, 8000)
 	p.size = MaxCensusBytes

@@ -117,17 +117,22 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 		_, err := submitVerdict(id, allow)
 		return err
 	}
-	var overloaded, expired, censusOverflow atomic.Uint64
+	var overloaded, expired, censusOverflow, displaced atomic.Uint64
 	processor := packetProcessor{ctx: ctx, observe: e.Observe, tryObserve: e.TryObserve, retain: retained.Add, record: e.RecordPacketOutcome, verdict: submitVerdict, expired: &expired}
-	workers := newPacketLanes(AttributionWorkers, CensusWorkers, processor.processStage, func(p packetJob, stopping bool) {
-		if stopping {
+	workers := newPacketLanes(AttributionWorkers, CensusWorkers, processor.processStage, func(p packetJob, cause rejectionCause) {
+		if cause == rejectShutdown {
 			expired.Add(1)
+		} else if cause == rejectAdmission {
+			displaced.Add(1)
 		} else {
 			censusOverflow.Add(1)
 		}
 		verdictPacket(p.id, false)
 	})
 	report := func() {
+		if n := displaced.Swap(0); n != 0 {
+			log.Printf("queue %d: dropped %d packets: admission fairness displacement", number, n)
+		}
 		if n := censusOverflow.Swap(0); n != 0 {
 			log.Printf("queue %d: dropped %d packets: census lane capacity exhausted", number, n)
 		}
