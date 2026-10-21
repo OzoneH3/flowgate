@@ -120,6 +120,8 @@ const width = dimension(
     550,
     2160,
   );
+// Application icon (shield with allowed and denied flow; source assets/flowgate.svg).
+const APP_ICON = path.join(__dirname, 'flowgate.png');
 let main: BrowserWindow;
 let prompt: BrowserWindow | undefined;
 let promptRemember = false;
@@ -320,6 +322,7 @@ function paneWindow(kind: PaneKind) {
   );
   const w = new BrowserWindow({
     title: kind === 'info' ? 'FlowGate — Info View' : 'FlowGate — Traffic chart',
+    icon: APP_ICON,
     ...bounds,
     minWidth: 320,
     minHeight: 220,
@@ -426,6 +429,7 @@ function presentationSender(e: IpcMainInvokeEvent) {
 function windowFor(isPrompt = false, id = '', generation = '', group?: string) {
   const w = new BrowserWindow({
     title: isPrompt ? PROMPT_TITLE : 'FlowGate',
+    icon: APP_ICON,
     frame: !isPrompt,
     alwaysOnTop: isPrompt,
     width: isPrompt ? PROMPT_WIDTH : width,

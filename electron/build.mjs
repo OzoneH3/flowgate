@@ -93,6 +93,7 @@ await build({entryPoints:['src/pane-renderer.ts'],bundle:true,platform:'browser'
 for (const file of ['index.html', 'pane.html', 'style.css']) await copyFile(`src/${file}`, `dist/${file}`);
 
 await copyFile('assets/flowgate-tray.png', 'dist/flowgate-tray.png');
+await copyFile('assets/flowgate.png', 'dist/flowgate.png');
 await mkdir('dist/fonts', { recursive: true });
 for (const f of ['selawk.ttf', 'selawkb.ttf', 'selawksb.ttf', 'LICENSE-Selawik-OFL.txt'])
   await copyFile(`assets/fonts/${f}`, `dist/fonts/${f}`);
