@@ -20,8 +20,7 @@ run=$(mktemp -d "$PWD/.workspace/wine-saturation-XXXXXX")
 mkdir -p "$run/data/umu"
 cp -a --reflink=auto "$runtime" "$run/data/umu/$(basename "$runtime")"
 cp -a --reflink=auto "$proton" "$run/proton"
-# Consolidated build entry point when present (scripts/build.sh TARGET).
-if test -f scripts/build.sh; then sh scripts/build.sh wine-table; else sh scripts/build-wine-table.sh; fi
+sh scripts/build.sh wine-table
 go build -o "$run/flowgate" ./cmd/flowgate
 clang --target=x86_64-windows-gnu -fuse-ld=lld -fno-stack-protector -nostdlib -nostdinc \
  -I/usr/include/wine/msvcrt -I/usr/include/wine/windows fixtures/windows-udp-saturation.c \
