@@ -124,6 +124,39 @@ class Update(unittest.TestCase):
         self.assertNotIn('both', h.calls)
         self.assertNotIn('gui', h.calls)
 
+    def test_verified_rollback_can_restore_old_mode_in_a_new_generation(self):
+        class RolledBack(FakeHost):
+            def install(self, backend):
+                self.current = status('old', 'monitoring')
+                self.current['generation'] = 'restored-generation'
+                raise subprocess.CalledProcessError(75, 'install')
+        for selected in ['both', 'incoming']:
+            h = RolledBack(status('old', selected))
+            with self.assertRaises(subprocess.CalledProcessError): self.run_update(h)
+            self.assertTrue(m.at_mode(h.current, selected))
+            self.assertEqual(h.calls.count(selected), 1)
+            self.assertNotIn('gui', h.calls)
+
+    def test_rollback_signal_with_wrong_build_cannot_activate(self):
+        class WrongRollback(FakeHost):
+            def install(self, backend):
+                self.current = status('unexpected', 'monitoring')
+                self.current['generation'] = 'restored-generation'
+                raise subprocess.CalledProcessError(75, 'install')
+        h = WrongRollback()
+        with self.assertRaises(subprocess.CalledProcessError): self.run_update(h)
+        self.assertNotIn('both', h.calls)
+
+    def test_new_generation_without_verified_rollback_cannot_activate(self):
+        class UnverifiedRestart(FakeHost):
+            def install(self, backend):
+                self.current = status('old', 'monitoring')
+                self.current['generation'] = 'unverified-restart'
+                raise subprocess.CalledProcessError(1, 'install')
+        h = UnverifiedRestart()
+        with self.assertRaises(subprocess.CalledProcessError): self.run_update(h)
+        self.assertNotIn('both', h.calls)
+
     def test_lost_acknowledgements_are_reconciled_without_replaying_mutations(self):
         h = FakeHost(); h.lost_ack = True
         self.run_update(h)

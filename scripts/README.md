@@ -94,11 +94,27 @@ Python installer directly with sudo.
 `--recover-stopped` recovers an unavailable daemon in monitoring mode only.
 After successful recovery, run the normal update command to start protection.
 If an install fails before replacement and the original daemon generation/build
-is still running, the coordinator restores its prior protection mode. A failed
-verification after replacement leaves protection **off, including after reboot**. Old
-executables/databases are not restored across potentially completed migrations.
-The error identifies the backup/evidence directory. No automatic activation retry
-is performed.
+is still running, the coordinator restores its prior protection mode.
+
+If startup or verification fails after replacement, the installer stops the
+failed writer and removes its interception. It verifies the retained previous
+release and backup hashes, preserves failed database files under the evidence
+folder, and restores the previous executable, stopped-writer database snapshots,
+configuration and unit files together. Backup failures before replacement restart
+and verify the unchanged old daemon. Stale SQLite WAL/SHM/journal files are
+removed before the old daemon starts. The restored daemon must pass build, rules,
+process and monitoring verification before the updater restores the protection
+mode that was active before the update. A standalone monitoring installer leaves
+the restored daemon in monitoring. The update still exits with failure and does
+not switch the GUI to the failed build.
+
+Concurrent installers are refused. A first installation, an unverifiable previous
+release, failed rollback, or an interruption/power loss can still require manual
+recovery. Failed rollback leaves the service stopped/disabled and reports the
+backup directory. Use `--recover-stopped` for guarded monitoring-only recovery,
+then explicitly start protection. Edits or logs created by the failed new daemon
+remain in `failed-state`; rollback restores the state captured immediately after
+the old daemon stopped.
 
 New installations select the invoking sudo user's UID. Existing installations
 retain their configured administrator; installations from before the configuration

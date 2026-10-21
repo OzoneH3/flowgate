@@ -74,7 +74,8 @@ with tempfile.TemporaryDirectory(prefix='.install-', dir=base) as temporary:
     for name, expected in manifest['files'].items():
         if name not in payload['files'] or hashlib.sha256((stage / name).read_bytes()).hexdigest() != expected:
             raise RuntimeError('Staged bundle hash mismatch')
-    subprocess.run(['/usr/bin/python3', '-I', str(stage / 'install-monitoring.py'), '--bundle', str(stage)], check=True)
+    result = subprocess.run(['/usr/bin/python3', '-I', str(stage / 'install-monitoring.py'), '--bundle', str(stage)], check=False)
+    sys.exit(result.returncode)
 """
 
 
@@ -231,6 +232,7 @@ def update(host, root, revision, *, dry=False, gui=True, profile="both", wine_di
         return
     stopped_for_update = False
     recovery_status = None
+    rollback_verified = False
     try:
         if needs_install:
             # Authenticate before interrupting a running firewall. Re-read after
@@ -247,7 +249,13 @@ def update(host, root, revision, *, dry=False, gui=True, profile="both", wine_di
                     transition(host, backend, 'monitoring')
             if wine_discovery:
                 host.configure_wine(root)
-            host.install(backend)
+            try:
+                host.install(backend)
+            except subprocess.CalledProcessError as install_error:
+                # Only the privileged installer emits 75 after restoring and
+                # verifying the previous build/database pair in monitoring.
+                rollback_verified = install_error.returncode == 75
+                raise
             after = host.status()
             if not matches(after, manifest) or not at_mode(after, 'monitoring'):
                 raise RuntimeError('Installed build/stopped-state verification failed')
@@ -267,18 +275,21 @@ def update(host, root, revision, *, dry=False, gui=True, profile="both", wine_di
             restored = False
             try:
                 current = host.status()
-                # Only a pre-switch failure is reversible: the same daemon must
-                # still own its original generation and executable. Never start
-                # an old executable against a potentially migrated database.
-                if recovery_status and current.get('generation') == recovery_status.get('generation') and current.get('generation') and current.get('build') == recovery_status.get('build') and at_mode(current, 'monitoring'):
+                # Restore only the known original daemon: it must still own
+                # its original generation and executable, or root must
+                # have verified a matched executable/database rollback (exit 75).
+                original_build = recovery_status.get('build') if recovery_status else None
+                same_build = bool(original_build) and current.get('build') == original_build
+                same_generation = recovery_status and current.get('generation') == recovery_status.get('generation')
+                if same_build and current.get('generation') and (same_generation or rollback_verified) and at_mode(current, 'monitoring'):
                     transition(host, backend, mode(recovery_status))
                     restored = True
             except Exception as recovery_error:
                 say('Previous protection could not be restored: ' + str(recovery_error))
             if restored:
-                say('Update failed before daemon replacement; restored the original daemon protection mode.')
+                say('Update failed; previous daemon verified and its original protection mode restored.')
             else:
-                say('Update incomplete; protection may remain OFF across reboot. No rollback across daemon generations. Use --recover-stopped for monitoring-only recovery, then explicitly start protection.')
+                say('Update incomplete; protection may remain OFF across reboot. Previous daemon could not be verified/restored. Use --recover-stopped for monitoring-only recovery, then explicitly start protection.')
         raise
     if gui:
         say('Switching to the matching GUI')
@@ -298,4 +309,6 @@ if __name__ == '__main__':
     try:
         update(Host(), args.root.resolve(), args.revision, dry=args.dry_run, gui=not args.no_gui, profile=args.profile, wine_discovery=args.wine_discovery, recover_stopped=args.recover_stopped)
     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
+        if isinstance(error, subprocess.CalledProcessError):
+            sys.exit('Update failed: command exited ' + str(error.returncode) + '; see verification/recovery status above')
         sys.exit('Update failed: ' + str(error))

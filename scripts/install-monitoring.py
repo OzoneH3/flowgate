@@ -14,6 +14,8 @@ import sys
 if __name__=='__main__' and not sys.flags.isolated:
  raise SystemExit('Use scripts/install-prepared.py; direct non-isolated installer execution is unsupported')
 
+import fcntl,stat
+from contextlib import closing
 import argparse,hashlib,json,os,pathlib,socket,sqlite3,struct,subprocess,sys,tempfile,time
 
 UNITS=['flowgate.service','flowgate-guard.service']
@@ -25,10 +27,10 @@ MONITORING=b'{"schema":1,"mode":"monitoring"}'
 class Host:
  """Every privileged boundary. Tests substitute a temp-root/mocked implementation."""
  def path(self,p):return pathlib.Path(p)
- def run(self,*argv):return subprocess.run(argv,check=True,text=True,capture_output=True).stdout
- def api(self,op='list',**q):
+ def run(self,*argv):return subprocess.run(argv,check=True,text=True,capture_output=True,timeout=90).stdout
+ def api(self,op='list',timeout=5,**q):
   with socket.socket(socket.AF_UNIX)as s:
-   s.settimeout(20);s.connect('/run/flowgate-api/daemon.sock')
+   s.settimeout(timeout);s.connect('/run/flowgate-api/daemon.sock')
    pid,uid,_=struct.unpack('3i',s.getsockopt(socket.SOL_SOCKET,socket.SO_PEERCRED,12));assert uid==0,'API peer is not root'
    s.sendall((json.dumps(dict(version=1,operation=op,**q))+'\n').encode());r=json.loads(s.makefile('rb').readline())
    assert not r.get('error'),r
@@ -136,7 +138,7 @@ def flowgate_tables(h):
 def administrator_uid(h,existing):
  config=h.path('/etc/flowgate/administrator.json')
  if config.exists()or config.is_symlink():
-  if config.is_symlink()or not h.root_owned(config.stat()):raise RuntimeError('Unsafe administrator configuration')
+  if config.is_symlink()or not config.is_file()or not h.root_owned(config.stat()):raise RuntimeError('Unsafe administrator configuration')
   uid=json.loads(config.read_text()).get('uid')
  elif existing:
   uid=1000  # Preserve the administrator of installations predating this config.
@@ -146,7 +148,158 @@ def administrator_uid(h,existing):
  if type(uid)is not int or not 0<uid<2**32-1:raise RuntimeError('Invalid desktop administrator UID')
  return uid
 
-def install(h,bundle,stamp):
+class RollbackComplete(RuntimeError):
+    """Exit 75 means the previous build/database pair is verified in monitoring."""
+
+
+def snapshot_database(source, destination):
+    with closing(sqlite3.connect(f'file:{source}?mode=ro', uri=True)) as src:
+        with closing(sqlite3.connect(destination)) as dst:
+            src.backup(dst)
+    os.chmod(destination, 0o600)
+
+
+def previous_release(h, base, releases):
+    current = base / 'current'
+    if not current.is_symlink():
+        return None
+    release = current.resolve(strict=True)
+    if release.parent != releases or release.is_symlink():
+        raise RuntimeError('Previous release is outside retained releases')
+    manifest = previous_release_for_path(h, base, release)
+    if not all(name in manifest['files'] for name in ['flowgate', 'launch', *UNITS, *TOOLS]):
+        raise RuntimeError('Previous release is incomplete')
+    # Only a managed service can be restarted with a verified old configuration.
+    if not h.path('/etc/systemd/system/flowgate.service').is_file():
+        raise RuntimeError('Previous daemon is not a managed service')
+    return release, manifest
+
+
+def wait_api(h):
+    deadline = time.monotonic() + 50
+    for _ in range(200):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            return h.api(timeout=min(2, remaining))
+        except (OSError, ValueError, AssertionError):
+            h.sleep(min(.25, max(0, deadline - time.monotonic())))
+    raise RuntimeError('Daemon API did not become ready within verification deadline')
+
+
+def wait_monitoring(h, manifest, expected_rules):
+    pid, response = wait_api(h)
+    problems = verify_monitoring(response, manifest, expected_rules)
+    pids = h.daemon_pids()
+    if len(pids) != 1 or pid not in pids:
+        problems.append(('daemon processes', pids))
+    if (response.get('build') or {}).get('modified') is not False:
+        problems.append(('restored executable modified', response.get('build')))
+    if flowgate_tables(h):
+        problems.append(('interception tables remain', True))
+    if problems:
+        raise RuntimeError('Rollback verification failed: ' + json.dumps(problems, default=str))
+    return response
+
+
+def rollback(h, backup, data, base, previous, snapshot, unit_enabled):
+    """Called only after the failed writer is stopped and interception is absent."""
+    release, manifest = previous
+    # Recheck immutable artifacts and every backup before touching any live file.
+    checked = previous_release_for_path(h, base, release)
+    if checked != manifest:
+        raise RuntimeError('Previous release manifest changed during installation')
+    for entry in snapshot.values():
+        if entry and sha((backup / entry['file']).read_bytes()) != entry['sha256']:
+            raise RuntimeError('Rollback backup integrity check failed')
+    failed = backup / 'failed-state'
+    failed.mkdir(mode=0o700)
+    for db in ['rules.db', 'decisions.db']:
+        for suffix in ['', '-wal', '-shm', '-journal']:
+            path = data / (db + suffix)
+            if path.exists():
+                atomic(h, failed / path.name, path.read_bytes(), 0o600)
+    # Stopped writers only: stale WAL/SHM must never accompany the restored DB.
+    for db in ['rules.db', 'decisions.db']:
+        for suffix in ['-wal', '-shm', '-journal']:
+            (data / (db + suffix)).unlink(missing_ok=True)
+    for destination, entry in snapshot.items():
+        path = h.path(destination)
+        if entry is None:
+            path.unlink(missing_ok=True)
+        else:
+            atomic(h, path, (backup / entry['file']).read_bytes(), entry['mode'])
+    # Recovery always starts stopped, even if a pre-install intent was active.
+    atomic(h, data / 'protection.json', MONITORING, 0o600)
+    link = base / '.current-rollback'
+    link.unlink(missing_ok=True)
+    link.symlink_to(release)
+    os.replace(link, base / 'current')
+    h.run('systemctl', 'daemon-reload')
+    h.run('systemd-analyze', 'verify', '/etc/systemd/system/flowgate.service', '/etc/systemd/system/flowgate-guard.service')
+    h.run('systemctl', 'reset-failed', 'flowgate.service', 'flowgate-guard.service')
+    for unit, enabled in unit_enabled.items():
+        h.run('systemctl', 'enable' if enabled else 'disable', unit)
+    h.run('systemctl', 'start', 'flowgate.service')
+    response = wait_monitoring(h, manifest, rule_inventory(backup / 'rules.db'))
+    atomic(h, backup / 'rollback-verified.json', json.dumps(response, indent=2).encode(), 0o600)
+    return response
+
+
+def restart_unchanged(h, base, data, previous):
+    """Backup preparation failed; original executable and DB have never changed."""
+    release, manifest = previous
+    if (base / 'current').resolve(strict=True) != release:
+        raise RuntimeError('Current changed during backup preparation')
+    if previous_release_for_path(h, base, release) != manifest:
+        raise RuntimeError('Original release changed during backup preparation')
+    if h.daemon_pids() or flowgate_tables(h):
+        raise RuntimeError('Cannot restart original daemon while a writer/interception remains')
+    if json.loads((data / 'protection.json').read_bytes()).get('mode') != 'monitoring':
+        raise RuntimeError('Original persisted protection intent is not monitoring')
+    expected = rule_inventory(data / 'rules.db')
+    h.run('systemctl', 'reset-failed', 'flowgate.service', 'flowgate-guard.service')
+    h.run('systemctl', 'start', 'flowgate.service')
+    return wait_monitoring(h, manifest, expected)
+
+
+def previous_release_for_path(h, base, release):
+    # Validate the candidate without changing current (it still points to the new build).
+    releases = safe_dir(h, base / 'releases', 0o755)
+    if release.parent != releases:
+        raise RuntimeError('Invalid rollback release path')
+    safe_dir(h, release, 0o755)
+    path = release / 'manifest.json'
+    if path.is_symlink() or not path.is_file() or not h.root_owned(path.stat()):
+        raise RuntimeError('Unsafe rollback manifest')
+    manifest = json.loads(path.read_bytes())
+    for name, expected in manifest['files'].items():
+        if name in ('', '.', '..') or '/' in name:
+            raise RuntimeError('Invalid rollback filename')
+        path = release / name
+        if path.is_symlink() or not path.is_file() or not h.root_owned(path.stat()) or sha(path.read_bytes()) != expected:
+            raise RuntimeError('Rollback artifact integrity check failed: ' + name)
+    return manifest
+
+
+def install(h, bundle, stamp):
+    base = safe_dir(h, '/usr/local/lib/flowgate', 0o755)
+    descriptor = os.open(base / '.install.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+    try:
+        status = os.fstat(descriptor)
+        if not stat.S_ISREG(status.st_mode) or not h.root_owned(status):
+            raise RuntimeError('Unsafe installation lock')
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise RuntimeError('Another FlowGate installation is in progress')
+        return install_locked(h, bundle, stamp)
+    finally:
+        os.close(descriptor)
+
+
+def install_locked(h,bundle,stamp):
  manifest=json.loads((bundle/'manifest.json').read_text());assert manifest['isolated_passed']is True
  base=safe_dir(h,'/usr/local/lib/flowgate',0o755);releases=safe_dir(h,'/usr/local/lib/flowgate/releases',0o755)
  name=manifest['release'];assert name and '/'not in name and name not in('.','..')
@@ -173,7 +326,7 @@ def install(h,bundle,stamp):
  running=h.daemon_pids();before=None
  if running:
   pid,before=h.api()
-  if (before.get('protection')or{}).get('state','stopped')!='stopped'or(before.get('enforcement')or{}).get('state')!='stopped':
+  if (before.get('protection')or{}).get('state','stopped')!='stopped'or(before.get('protection')or{}).get('desired_mode')!='monitoring'or(before.get('enforcement')or{}).get('state')!='stopped':
    raise SystemExit('FlowGate protection is active; stop it explicitly before a monitoring install')
  # An unavailable stopped daemon can be reinstalled only after proving that
  # no interception remains and persisted startup intent is monitoring.
@@ -181,57 +334,100 @@ def install(h,bundle,stamp):
   state=h.path('/var/lib/flowgate/protection.json')
   if not state.exists()or json.loads(state.read_text()).get('mode')!='monitoring':raise RuntimeError('Stopped-service recovery requires persisted monitoring mode')
   if flowgate_tables(h):raise RuntimeError('Stopped-service recovery refused: interception tables remain')
- # 4. Consistent backups of all state that this install touches.
- data=safe_dir(h,'/var/lib/flowgate',0o700);backup=safe_dir(h,'/var/lib/flowgate/backups',0o700)/f'{name}-monitoring-{stamp}'
- backup.mkdir(mode=0o700)
- for db in['rules.db','decisions.db']:
-  src=data/db
-  if src.exists():
-   s=sqlite3.connect(f'file:{src}?mode=ro',uri=True);d=sqlite3.connect(backup/db);s.backup(d);d.close();s.close();os.chmod(backup/db,0o600)
- before_rules=rule_inventory(backup/'rules.db')
- for src in[data/'protection.json',*[h.path('/etc/systemd/system')/u for u in UNITS],drop,*map(h.path,TOOLS.values())]:
-  if src.exists():atomic(h,backup/(src.name+'.previous'),src.read_bytes(),0o600)
- etc=h.path('/etc/flowgate')
- if etc.exists():
-  for f in etc.iterdir():
-   if f.is_file():atomic(h,backup/('etc-'+f.name),f.read_bytes(),0o600)
  cur=base/'current';old_link=os.readlink(cur)if cur.is_symlink()else None
  if cur.exists()and not cur.is_symlink():raise SystemExit('Unexpected current object; refusing')
- record={'release':name,'source':manifest['source'],'previous_current':old_link,'running_before':running,'runtime_before':before,'rules_before':before_rules,'stamp':stamp}
- atomic(h,backup/'install-record.json',json.dumps(record,indent=2).encode(),0o600)
- # 5. Configuration: preserve zones; persist monitoring BEFORE any start.
- safe_dir(h,'/etc/flowgate',0o755)
- atomic(h,etc/'administrator.json',json.dumps({'uid':admin_uid}).encode(),0o600)
- if not(etc/'zones.json').exists():
-  z=(before or{}).get('network_zones')or{}
-  atomic(h,etc/'zones.json',json.dumps({'local':z.get('local_prefixes',[]),'internet':z.get('internet_prefixes',[])}).encode(),0o600)
- atomic(h,data/'protection.json',MONITORING,0o600)
- # 6. Stop any old writer through its own lifecycle; never two database writers.
- if running:
-  if (h.path('/etc/systemd/system')/'flowgate.service').exists():h.run('systemctl','stop','flowgate.service')
-  else:h.run(str(release/'flowgate'),'monitor-stop','--generation',before['generation'])
-  for _ in range(300):
-   if not h.daemon_pids():break
-   h.sleep(.1)
-  else:raise SystemExit('Old daemon has not exited; no second writer started')
- # 7. Switch artifacts. Units only; the NM Requires= drop-in is deliberately absent.
- link=base/'.current-new'
- if link.is_symlink():link.unlink()
- link.symlink_to(release);os.replace(link,cur)
- for u in UNITS:atomic(h,h.path('/etc/systemd/system')/u,(release/u).read_bytes())
- if drop.exists():drop.unlink()
- for src,dest in TOOLS.items():atomic(h,dest,(release/src).read_bytes(),0o755)
- h.run('systemctl','daemon-reload')
- h.run('systemd-analyze','verify','/etc/systemd/system/flowgate.service','/etc/systemd/system/flowgate-guard.service')
- h.run('systemctl','disable','flowgate-guard.service')  # pulled in by flowgate.service only; never WantedBy network-pre
- h.run('systemctl','enable','flowgate.service')
+ previous=None
+ if old_link:
+  try:
+   previous=previous_release(h,base,releases)
+   if previous and before:
+    old_manifest=previous[1];build=before.get('build')or{}
+    if build.get('source')!=old_manifest['source']or build.get('executable_sha256')!=old_manifest['files']['flowgate']or build.get('modified')is not False:
+     raise RuntimeError('Running daemon does not match the previous release')
+  except (OSError,ValueError,RuntimeError,KeyError)as error:
+   previous=None
+   print('Automatic rollback unavailable:',error,file=sys.stderr)
+ unit_enabled={}
+ for unit in UNITS:
+  try:state=h.run('systemctl','is-enabled',unit).strip()
+  except subprocess.CalledProcessError as error:state=(error.stdout or'').strip()
+  unit_enabled[unit]=state in ('enabled','enabled-runtime','linked','linked-runtime')
+ # Pure validation and backup-directory allocation precede any service stop.
+ data=safe_dir(h,'/var/lib/flowgate',0o700)
+ etc=safe_dir(h,'/etc/flowgate',0o755)
+ backup=safe_dir(h,'/var/lib/flowgate/backups',0o700)/f'{name}-monitoring-{stamp}'
+ backup.mkdir(mode=0o700)
+ snapshot_paths=[data/'rules.db',data/'decisions.db',etc/'zones.json',etc/'administrator.json',*[h.path('/etc/systemd/system')/u for u in UNITS],drop,*map(h.path,TOOLS.values())]
+ for path in [*snapshot_paths,data/'protection.json']:
+  if path.is_symlink()or(path.exists()and not path.is_file()):raise RuntimeError('Unsafe installation state: '+str(path))
+ quiesced=False
  try:
+  # Quiesce the old writer BEFORE taking the rollback database snapshot.
+  if running:
+   if (h.path('/etc/systemd/system')/'flowgate.service').exists():h.run('systemctl','stop','flowgate.service')
+   else:h.run(str(release/'flowgate'),'monitor-stop','--generation',before['generation'])
+   for _ in range(300):
+    if not h.daemon_pids():break
+    h.sleep(.1)
+   else:raise RuntimeError('Old daemon has not exited; no rollback snapshot or second writer started')
+   quiesced=True
+  # 4. Consistent backups of all state that this install touches.
+  for db in['rules.db','decisions.db']:
+   src=data/db
+   if src.exists():
+    snapshot_database(src,backup/db)
+  before_rules=rule_inventory(backup/'rules.db')
+  for src in[data/'protection.json',*[h.path('/etc/systemd/system')/u for u in UNITS],drop,*map(h.path,TOOLS.values())]:
+   if src.exists():atomic(h,backup/(src.name+'.previous'),src.read_bytes(),0o600)
+  if etc.exists():
+   for f in etc.iterdir():
+    if f.is_file():atomic(h,backup/('etc-'+f.name),f.read_bytes(),0o600)
+  record={'release':name,'source':manifest['source'],'previous_current':old_link,'running_before':running,'runtime_before':before,'rules_before':before_rules,'stamp':stamp,'unit_enabled':unit_enabled}
+  atomic(h,backup/'install-record.json',json.dumps(record,indent=2).encode(),0o600)
+  snapshot={}
+  for path in snapshot_paths:
+   destination=str(path)
+   if path.is_symlink():raise RuntimeError('Symlink installation state: '+destination)
+   if not path.exists():snapshot[destination]=None;continue
+   filename='rollback-'+str(len(snapshot))
+   source=backup/path.name if path.name in ('rules.db','decisions.db')else path
+   contents=source.read_bytes()
+   atomic(h,backup/filename,contents,0o600)
+   snapshot[destination]={'file':filename,'sha256':sha(contents),'mode':stat.S_IMODE(path.stat().st_mode)}
+  atomic(h,backup/'rollback-files.json',json.dumps(snapshot,indent=2).encode(),0o600)
+ except Exception as preparation_error:
+  if quiesced and previous:
+   try:
+    response=restart_unchanged(h,base,data,previous)
+   except Exception as recovery_error:
+    print('Original daemon restart failed after backup error:',recovery_error,file=sys.stderr)
+    subprocess_safe(h,'systemctl','stop','flowgate.service')
+    subprocess_safe(h,'systemctl','disable','flowgate.service')
+    raise preparation_error from recovery_error
+   print('PREPARATION FAILED; unchanged original executable/database restarted and verified in monitoring. Evidence:',backup,file=sys.stderr)
+   raise RollbackComplete('Backup preparation failed; unchanged previous daemon verified in monitoring')from preparation_error
+  raise
+ try:
+  # 5. Configuration: preserve zones; persist monitoring BEFORE any start.
+  safe_dir(h,'/etc/flowgate',0o755)
+  atomic(h,etc/'administrator.json',json.dumps({'uid':admin_uid}).encode(),0o600)
+  if not(etc/'zones.json').exists():
+   z=(before or{}).get('network_zones')or{}
+   atomic(h,etc/'zones.json',json.dumps({'local':z.get('local_prefixes',[]),'internet':z.get('internet_prefixes',[])}).encode(),0o600)
+  atomic(h,data/'protection.json',MONITORING,0o600)
+  # 7. Switch artifacts. Units only; the NM Requires= drop-in is deliberately absent.
+  link=base/'.current-new'
+  if link.is_symlink():link.unlink()
+  link.symlink_to(release);os.replace(link,cur)
+  for u in UNITS:atomic(h,h.path('/etc/systemd/system')/u,(release/u).read_bytes())
+  if drop.exists():drop.unlink()
+  for src,dest in TOOLS.items():atomic(h,dest,(release/src).read_bytes(),0o755)
+  h.run('systemctl','daemon-reload')
+  h.run('systemd-analyze','verify','/etc/systemd/system/flowgate.service','/etc/systemd/system/flowgate-guard.service')
+  h.run('systemctl','disable','flowgate-guard.service')  # pulled in by flowgate.service only; never WantedBy network-pre
+  h.run('systemctl','enable','flowgate.service')
   h.run('systemctl','start','flowgate.service')
-  r=None
-  for _ in range(200):
-   try:_,r=h.api();break
-   except (OSError,ValueError,AssertionError):h.sleep(.25)
-  if r is None:raise RuntimeError('API did not become ready')
+  _,r=wait_api(h)
   expected_rules=verified_rule_transition(backup/'rules.db',data/'rules.db',admin_uid)
   problems=verify_monitoring(r,manifest,expected_rules)
   tables=flowgate_tables(h)
@@ -244,14 +440,24 @@ def install(h,bundle,stamp):
   print('INSTALLED IN MONITORING ONLY',name,'generation',r['generation'],'rules',len(final['rules']),'protection stopped; no interception; backup',backup)
   print('Protection was NOT activated. No essential permissions were applied.')
   return final
- except Exception:
-  print('MONITORING INSTALL FAILED; stopping the new service, current data retained (startup migrations may have run), no older database/executable restored',file=sys.stderr)
-  subprocess_safe(h,'systemctl','stop','flowgate.service')
-  subprocess_safe(h,'systemctl','disable','flowgate.service')
-  subprocess_safe(h,str(release/'flowgate'),'protection-recover','--state','/run/flowgate-enforcement')
-  print('Protection remains OFF, including after reboot. Recover with scripts/update-and-start.sh --recover-stopped (monitoring only), then explicitly start protection after verification.',file=sys.stderr)
-  print('Evidence:',backup,file=sys.stderr)
-  raise
+ except Exception as install_error:
+  print('MONITORING INSTALL FAILED; attempting verified executable/database rollback',file=sys.stderr)
+  try:
+   h.run('systemctl','stop','flowgate.service')
+   if h.daemon_pids():raise RuntimeError('Failed daemon still running; refusing database restore')
+   h.run(str(release/'flowgate'),'protection-recover','--state','/run/flowgate-enforcement')
+   if flowgate_tables(h):raise RuntimeError('Interception remains; refusing rollback start')
+   if previous is None:raise RuntimeError('No verified previous managed release')
+   response=rollback(h,backup,data,base,previous,snapshot,unit_enabled)
+   print('ROLLBACK VERIFIED; previous release restored in monitoring:',response['build']['source'],'Evidence:',backup,file=sys.stderr)
+  except Exception as rollback_error:
+   print('ROLLBACK FAILED:',rollback_error,file=sys.stderr)
+   subprocess_safe(h,'systemctl','stop','flowgate.service')
+   subprocess_safe(h,'systemctl','disable','flowgate.service')
+   subprocess_safe(h,str(release/'flowgate'),'protection-recover','--state','/run/flowgate-enforcement')
+   print('Protection remains OFF, including after reboot. Use --recover-stopped for guarded monitoring-only recovery. Evidence:',backup,file=sys.stderr)
+   raise install_error from rollback_error
+  raise RollbackComplete('Update failed; previous executable and database restored and verified in monitoring. Evidence: '+str(backup))from install_error
 
 def subprocess_safe(h,*argv):
  try:h.run(*argv)
@@ -261,4 +467,6 @@ if __name__=='__main__':
  p=argparse.ArgumentParser();p.add_argument('--bundle',required=True);a=p.parse_args()
  if os.geteuid()!=0:raise SystemExit('Run this monitoring-only installer once with terminal sudo')
  os.umask(0o077)
- install(Host(),pathlib.Path(a.bundle).resolve(strict=True),time.strftime('%Y%m%dT%H%M%S'))
+ try:install(Host(),pathlib.Path(a.bundle).resolve(strict=True),time.strftime('%Y%m%dT%H%M%S'))
+ except RollbackComplete as error:
+  print(error,file=sys.stderr);sys.exit(75)
