@@ -161,7 +161,10 @@ func DescribePermissionTarget(a Attribution) *PermissionTarget {
 		return t
 	}
 	t.KeyBasis = "uid+executable path; revision = file stamp"
-	t.Remember = fmt.Sprintf("%s (%s), UID %d, this file revision", name, app.Executable, uid)
+	if contentRevision(*app) {
+		t.KeyBasis = "uid+verified runtime deployment path; revision = SHA-256 of executable content"
+	}
+	t.Remember = fmt.Sprintf("%s (%s), UID %d, this file revision", name, app.KeyPath(), uid)
 	switch {
 	case isInterpreter(name):
 		t.Kind = "interpreter"
@@ -170,14 +173,14 @@ func DescribePermissionTarget(a Attribution) *PermissionTarget {
 		if prov != nil && prov.Role == "launcher" && prov.Launch != nil {
 			script = prov.Launch.LauncherName
 		}
-		t.SharedWithNote = fmt.Sprintf("Every program run by %s for UID %d is covered", app.Executable, uid)
+		t.SharedWithNote = fmt.Sprintf("Every program run by %s for UID %d is covered", app.KeyPath(), uid)
 		if script != "" {
 			t.SharedWithNote += ", not only " + script
 		}
 	case prov != nil && prov.Evidence == "verified" && prov.Role != "game":
 		t.Kind = "helper"
 		t.Label = fmt.Sprintf("%s (every process running %s)", name, filepath.Base(app.Executable))
-		t.SharedWithNote = fmt.Sprintf("Any process running %s for UID %d is covered, in any launch or prefix", app.Executable, uid)
+		t.SharedWithNote = fmt.Sprintf("Any process running %s for UID %d is covered, in any launch or prefix", app.KeyPath(), uid)
 		if game != "" {
 			t.SharedWithNote += ", not only " + game
 		}

@@ -191,12 +191,14 @@ test('prompt card: game heading, via hint and explicit scopes precede Allow/Deny
   assert.match(details, /uid\+wine\+prefix\+executable path/);
 });
 
-test('interpreter launcher prompt shows verified executable context but keeps interpreter as permission target', () => {
+test('interpreter launcher prompt identifies invoked script before its launch target', () => {
   const { promptSummary } = require('../dist/test/prompt-summary.cjs');
   const owner = proc('umu', 123, 'python3.14', '/usr/bin/python3.14', prov('launcher'), 'native');
   owner.provenance.invocation = { mode: 'file', name: 'umu-run', path: '/usr/bin/umu-run', host_path: '/usr/bin/umu-run', revision: 'r', application: { key: 'umu', revision: 'r', name: 'umu-run', executable: '/usr/bin/umu-run', kind: 'native' } };
   const summary = promptSummary(event(owner), 'fallback');
-  assert.equal(summary.title, 'DEATH STRANDING 2: ON THE BEACH · DS2.exe');
+  assert.equal(summary.title, 'umu-run');
+  assert.match(summary.note, /Preparing to launch DEATH STRANDING 2/);
+  assert.equal(summary.contextApplication.name, 'umu-run');
   assert.equal(summary.owner, 'python3.14');
   assert.equal(summary.ownIdentity, false);
   assert.match(summary.note, /Permission applies to the python3\.14 interpreter/);

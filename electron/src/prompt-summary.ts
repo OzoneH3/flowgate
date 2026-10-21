@@ -67,27 +67,11 @@ export function promptSummary(e: Ev, fallbackName: string): PromptSummary {
   const app = e.attribution.application;
   const provenance = e.attribution.provenance;
   const invocation = provenance?.invocation;
-  // If the socket owner is an interpreter acting as a verified launcher, prefer
-  // the verified executable it launched for the prompt's display context. The
-  // interpreter remains the permission identity; this is deliberately generic
-  // for any verified launcher, not a game-specific rule.
-  if (invocation && provenance?.role === 'launcher' && verifiedLaunch(provenance)) {
-    const interpreter = app?.display_name || app?.name || own;
-    return {
-      title: launchTitle(provenance),
-      owner: interpreter,
-      note: `Verified launch context only. Permission applies to the ${interpreter} interpreter.`,
-      ownIdentity: false,
-      launchedBy: '',
-      destination: service || endpoint,
-      endpoint: service ? endpoint : '',
-      protocol: e.flow.protocol.toUpperCase(),
-    };
-  }
   if (invocation) {
     const interpreter = app?.display_name || app?.name || own;
     const title = invocation.application?.display_name || invocation.application?.name || invocation.name;
-    return { title, owner: interpreter, note: `Permission applies to the ${interpreter} interpreter. The invoked program is display context only.`, ownIdentity: false, launchedBy: '', destination: service || endpoint, endpoint: service ? endpoint : '', protocol: e.flow.protocol.toUpperCase(), contextApplication: invocation.application };
+    const context = provenance?.role === 'launcher' && verifiedLaunch(provenance) ? ` Preparing to launch ${launchTitle(provenance)}.` : '';
+    return { title, owner: interpreter, note: `Permission applies to the ${interpreter} interpreter. The invoked program is display context only.${context}`, ownIdentity: false, launchedBy: '', destination: service || endpoint, endpoint: service ? endpoint : '', protocol: e.flow.protocol.toUpperCase(), contextApplication: invocation.application };
   }
   if (app?.kind === 'wine' && app.key && app.revision && (e.attribution.provenance?.role==='game' || e.attribution.owners.some(p=>p.application.key!==app.key))) return {title:app.name || app.executable.split('/').pop() || own, owner:'',note:'',ownIdentity:true,launchedBy:launchedByName(e),destination:service||endpoint,endpoint:service?endpoint:'',protocol:e.flow.protocol.toUpperCase()};
   // A launcher socket is permission for the launcher, never its future game.
