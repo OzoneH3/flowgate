@@ -164,3 +164,46 @@ test('handshake rejects native-window replacement', () => {
   assert.equal(stopped, true);
   assert.equal(w.opacity, undefined);
 });
+
+test('fullscreen primary redirects only the permission window to a free secondary output', () => {
+  const primary={name:'DP-1'},secondary={name:'DP-2'};
+  const desktop={id:1},otherDesktop={id:2};
+  const run=(over={},screens=[primary,secondary],extra=[])=>{
+    const permission={pid:42,caption:promptTitle(7)};
+    const game={pid:99,caption:'Synthetic fullscreen',fullScreen:true,minimized:false,output:primary,desktops:[desktop],...over};
+    let target;
+    const workspace={screens,windowList:()=>[permission,game,...extra],currentDesktopForScreen:()=>desktop,
+      sendClientToScreen:(w,output)=>{assert.equal(w,permission);target=output;},
+      clientArea:(_kind,output)=>output===primary?{x:0,y:0,width:1920,height:1080}:{x:1920,y:0,width:1600,height:900}};
+    vm.runInNewContext(placementScript(42,7,{x:1400,y:620,width:520,height:460},'DP-1'),{workspace,KWin:{PlacementArea:0},print:()=>{}});
+    assert.equal(game.frameGeometry,undefined,'fullscreen application is never moved');
+    assert.equal(workspace.activeWindow,undefined,'placement does not request activation');
+    return {permission,target};
+  };
+  const redirected=run();
+  assert.equal(redirected.target,secondary);
+  assert.deepEqual({...redirected.permission.frameGeometry},{x:3000,y:440,width:520,height:460});
+  assert.equal(run({fullScreen:false}).target,primary);
+  assert.equal(run({minimized:true}).target,primary);
+  assert.equal(run({desktops:[otherDesktop]}).target,primary);
+  assert.equal(run({output:secondary}).target,primary);
+  assert.equal(run({},[primary]).target,primary);
+  assert.equal(run({},[primary,secondary],[{pid:100,fullScreen:true,output:secondary}]).target,primary,'no free secondary preserves primary fallback');
+});
+
+test('startup handshake uses fullscreen routing while awaiting native geometry confirmation', () => {
+  const {placementQML}=require('../dist/test/prompt-placement.cjs');
+  const qml=placementQML(42,7,{x:0,y:0,width:520,height:460},'DP-1');
+  const body=qml.slice(qml.indexOf('  function tick() {')+'  function tick() {'.length,qml.lastIndexOf('\n  }'));
+  const primary={name:'DP-1'},secondary={name:'DP-2'};
+  const permission={pid:42,caption:promptTitle(7),internalId:'one',output:primary,opacity:0,setMaximize(){},frameGeometry:{x:0,y:0,width:1280,height:800}};
+  const game={pid:99,fullScreen:true,output:primary};
+  const state={ticks:0,nativeID:null,previous:'',stable:0,applied:0,waited:0,confirmed:0};
+  const workspace={screens:[primary,secondary],stackingOrder:[permission,game],currentDesktopForScreen:()=>1,
+    sendClientToScreen:(w,output)=>{w.output=output;},clientArea:()=>({x:1920,y:0,width:1600,height:900})};
+  const context=vm.createContext({state,target:permission,workspace,clock:{stop(){}},KWin:{PlacementArea:0},console:{log(){}}});
+  for(let i=0;i<12;i++)vm.runInContext(`(function(){${body}})()`,context);
+  assert.equal(permission.output,secondary);
+  assert.equal(permission.opacity,1);
+  assert.equal(workspace.activeWindow,undefined);
+});

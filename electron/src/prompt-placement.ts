@@ -9,6 +9,14 @@ export function promptTitle(windowID: number) {
   if (!Number.isSafeInteger(windowID) || windowID <= 0) throw Error('Invalid permission window');
   return `${PROMPT_TITLE} · ${windowID}`;
 }
+// Shared by startup QML and one-shot resizes. Fullscreen is compositor evidence,
+// independent of application identity. Ignore minimized/other-desktop windows.
+function outputSelection(pid: number, outputName: string) {
+  return `const primary=workspace.screens.find(o=>o.name===${JSON.stringify(outputName)});
+    const candidates=typeof workspace.windowList==='function'?workspace.windowList():workspace.stackingOrder;
+    const fullscreenOn=(output)=>candidates.some(c=>c.pid!==${pid} && c.fullScreen && !c.minimized && c.output===output && (c.onAllDesktops || !c.desktops || c.desktops.length===0 || c.desktops.indexOf(workspace.currentDesktopForScreen(output))>=0));
+    const output=primary && fullscreenOn(primary) ? (workspace.screens.find(o=>o!==primary && !fullscreenOn(o)) || primary) : primary;`;
+}
 export function placementScript(pid: number, windowID: number, bounds: Rect, outputName?: string) {
   if (
     !Number.isSafeInteger(pid) ||
@@ -17,7 +25,7 @@ export function placementScript(pid: number, windowID: number, bounds: Rect, out
   )
     throw Error('Invalid placement');
   const placement = outputName
-    ? `const output=workspace.screens.find(o=>o.name===${JSON.stringify(outputName)}); if(!output)throw new Error('Configured primary output unavailable'); workspace.sendClientToScreen(w,output); const area=workspace.clientArea(KWin.PlacementArea,output,workspace.currentDesktopForScreen(output)); const width=Math.min(${bounds.width},area.width),height=Math.min(${bounds.height},area.height); w.frameGeometry={x:area.x+area.width-width,y:area.y+area.height-height,width:width,height:height};`
+    ? `${outputSelection(pid, outputName)} if(!output)throw new Error('Configured primary output unavailable'); workspace.sendClientToScreen(w,output); const area=workspace.clientArea(KWin.PlacementArea,output,workspace.currentDesktopForScreen(output)); const width=Math.min(${bounds.width},area.width),height=Math.min(${bounds.height},area.height); w.frameGeometry={x:area.x+area.width-width,y:area.y+area.height-height,width:width,height:height};`
     : `w.frameGeometry = ${JSON.stringify(bounds)};`;
   return `for (const w of workspace.windowList()) { if (w.pid === ${pid} && w.caption === ${JSON.stringify(promptTitle(windowID))}) { ${placement} print("FLOWGATE_PROMPT_PLACED_${pid}", ${JSON.stringify(outputName || 'native-primary')}, JSON.stringify(w.frameGeometry)); } }`;
 }
@@ -51,8 +59,8 @@ QtObject {
     const w=matches[0], nativeID=String(w.internalId);
     if(s.nativeID!==null && s.nativeID!==nativeID) { clock.stop(); return; }
     s.nativeID=nativeID;
-    const output=workspace.screens.find(o=>o.name===${JSON.stringify(outputName || '')}) || workspace.screens[0];
-    if(!output) return;
+    ${outputName ? outputSelection(pid, outputName) : 'const output=workspace.screens[0];'}
+    if(!output) { clock.stop(); return; }
     const area=workspace.clientArea(KWin.PlacementArea,output,workspace.currentDesktopForScreen(output));
     const width=Math.min(${bounds.width},area.width), height=Math.min(${bounds.height},area.height);
     const desired={x:area.x+area.width-width,y:area.y+area.height-height,width:width,height:height};
