@@ -34,12 +34,24 @@ the system configuration.
 
 Cold and warm native Wayland launches rendered without the Fontconfig version
 warning. A system-versus-private font probe returned identical measurements for
-all sampled families. The first termination runs were interrupted during cleanup;
-they establish rendering and warning removal, not clean launcher shutdown.
+all sampled families. A separate ordinary-launch test sent one SIGTERM to the
+launcher alone: it exited zero with no traceback, no Fontconfig warning and no
+remaining Electron processes. Earlier runs used a group-wide timeout signal and
+interrupted cleanup; they are not the shutdown evidence.
 Configuration and release-packaging tests pass, including the helper's inclusion
 in the matched manifest. Full repository checks pass. Evidence is retained in
-`.workspace/fc-launch-{cold,warm}.log`, `.workspace/fc-probe/` and
+`.workspace/fc-launch-{cold,warm,clean-exit}.log`, `.workspace/fc-probe/` and
 `.workspace/warning-fixes-full-check.log`.
+
+Clean shutdown was then verified separately: an ordinary `electron/launch.py`
+run in its own session (native Wayland, no injected `DISPLAY`) rendered, received
+exactly one SIGTERM addressed to the launcher process only, and exited 0 with no
+traceback, no Fontconfig output and no remaining FlowGate Electron process
+(`.workspace/fc-launch-clean-exit.log`, probe `.workspace/fc-probe/clean-exit.py`).
+The earlier interrupted cleanups came from the test harness signalling the whole
+process group, not from the launcher. Separately, `launch.py` only infers
+`wayland-0` when `WAYLAND_DISPLAY` is unset; sessions on another socket must
+export it.
 
 ## Retained diagnostics and build ownership
 
