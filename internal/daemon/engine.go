@@ -174,7 +174,19 @@ func (e *Engine) liveEventsLocked() int {
 	}
 	return n
 }
+// Observe attributes a queued attempt and decides it. Ownership resolution can be
+// slow (process scans, runtime censuses) and runs outside e.mu so prompts, API
+// reads and independent flows are not held behind it.
 func (e *Engine) Observe(f identity.Flow, token string) Event {
+	// Every undecided/new attempt and every UDP datagram rechecks actual ownership.
+	return e.ObserveResolved(f, token, e.Resolve(f))
+}
+
+// ObserveResolved decides a queued attempt with attribution the trusted caller
+// resolved for exactly this flow immediately before the call. Zones and policy
+// are read under e.mu at decision time, so a rule changed during resolution
+// applies to this attempt. Resolve must be safe for concurrent use.
+func (e *Engine) ObserveResolved(f identity.Flow, token string, a identity.Attribution) Event {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.refreshZonesLocked()
@@ -183,8 +195,6 @@ func (e *Engine) Observe(f identity.Flow, token string) Event {
 	e.expire(now)
 	e.pruneLeasesLocked(now, false)
 	key := f.Key() + "|" + token
-	// Every undecided/new attempt and every UDP datagram rechecks actual ownership.
-	a := e.Resolve(f)
 	base, rule, conflicts := e.evaluateLocked(e.rules, f, a, now)
 	action, rule, lease := e.leaseOverlayLocked(base, rule, f, a, now)
 	if old := e.events[key]; old != nil && now.Before(old.Deadline) && old.Attribution.Fingerprint == a.Fingerprint && a.Application != nil {
