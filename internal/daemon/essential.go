@@ -330,8 +330,12 @@ func (e *Engine) peerServiceMatches(f identity.Flow, p policy.PeerService) bool 
 	reverse.Direction = "incoming"
 	reverse.Local = f.Remote
 	reverse.Remote = f.Local
-	a := identity.Resolve(reverse)
-	return a.VisibilityComplete && a.Application != nil && a.Application.Key == p.Application && a.Application.Revision == p.Revision && a.Principal() != nil && a.Principal().UID == p.UID
+	a, ok := e.resolvedFlowLocked(reverse)
+	if e.peerPrefetched != nil {
+		r, found := e.peerPrefetched.flows[reverse.Key()]
+		a, ok = e.fresh(r, found)
+	}
+	return ok && a.VisibilityComplete && a.Application != nil && a.Application.Key == p.Application && a.Application.Revision == p.Revision && a.Principal() != nil && a.Principal().UID == p.UID
 }
 func presetSentence(r policy.Rule) string {
 	return fmt.Sprintf("Essential %s: %s %s %s:%d local%s:%d interface%s; exact application/revision or verified local-service aggregate", r.Preset.Component, r.Filter.Direction, r.Filter.Protocol, r.Filter.RemoteAddress, r.Filter.RemotePort, r.Filter.LocalAddress, r.Filter.LocalPort, r.Filter.InterfaceName)
@@ -352,4 +356,30 @@ func (e *Engine) hasPresetRules() bool {
 		}
 	}
 	return false
+}
+
+// peerFlowsLocked selects only flows constrained by an exact local-service
+// rule. A rule added during resolution has no evidence and cannot allow traffic.
+func (e *Engine) peerFlowsLocked(f identity.Flow) []identity.Flow {
+	for _, r := range e.rules {
+		if r.Filter.PeerService != (policy.PeerService{}) && policy.ProtocolMatches(r.Filter.Protocol, f.Protocol) && f.Direction == r.Filter.Direction && f.Remote.Port() == r.Filter.RemotePort && f.Remote.Addr().String() == r.Filter.RemoteAddress {
+			reverse := f
+			reverse.Direction, reverse.Local, reverse.Remote = "incoming", f.Remote, f.Local
+			return []identity.Flow{reverse}
+		}
+	}
+	return nil
+}
+
+// resolvePeers runs outside the decision lock. Evidence is scoped to this
+// operation, never a persistent service permission or cross-flow cache.
+func (e *Engine) resolvePeers(f identity.Flow) *prefetchSet {
+	e.mu.Lock()
+	flows := e.peerFlowsLocked(f)
+	e.mu.Unlock()
+	set := &prefetchSet{flows: map[string]prefetchedAttribution{}}
+	for _, flow := range flows {
+		set.flows[flow.Key()] = prefetchedAttribution{a: e.Resolve(flow), at: e.Now()}
+	}
+	return set
 }

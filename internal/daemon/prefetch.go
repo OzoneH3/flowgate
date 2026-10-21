@@ -42,9 +42,15 @@ func (e *Engine) lockResolved(selectRequests func() ([]*Event, []identity.Flow))
 	events, flows := selectRequests()
 	var jobs []job
 	for _, f := range flows {
+		for _, peer := range e.peerFlowsLocked(f) {
+			jobs = append(jobs, job{flow: peer})
+		}
 		jobs = append(jobs, job{flow: f})
 	}
 	for _, v := range events {
+		for _, peer := range e.peerFlowsLocked(v.Flow) {
+			jobs = append(jobs, job{flow: peer})
+		}
 		jobs = append(jobs, job{id: v.ID, flow: v.Flow})
 	}
 	e.mu.Unlock()

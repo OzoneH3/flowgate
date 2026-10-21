@@ -173,6 +173,9 @@ func (e *Engine) SaveZoneMigration(generation, id string, expected *uint64, revi
 		if err := e.verifyProcessEditLocked(current.Filter.Process); err != nil {
 			return policy.Rule{}, "", false, err
 		}
+		if !e.Now().Before(p.Until) || (!current.Expires.IsZero() && !e.Now().Before(current.Expires)) {
+			return fail("preview_expired", "Migration expired during process verification")
+		}
 	}
 	if _, _, err := e.reviewRuleLocked(p.View.Rule, e.Now(), true); err != nil {
 		return fail("policy_conflict", err.Error())

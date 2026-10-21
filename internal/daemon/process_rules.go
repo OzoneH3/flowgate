@@ -5,6 +5,7 @@ import (
 	"flowgate/internal/policy"
 	"fmt"
 	"net"
+	"reflect"
 	"time"
 )
 
@@ -167,7 +168,31 @@ func processLabel(b identity.Instance) string {
 	return fmt.Sprintf("only process PID %d, start %s, boot %s, daemon session %s; no siblings/children; inactive on exit/identity change/session end", b.PID, b.Start, b.BootID, b.Session)
 }
 
+// Release the engine lock for the Activity/socket census, then reject any
+// concurrent policy/network change before callers reuse their captured rule/index.
 func (e *Engine) verifyProcessEditLocked(b identity.Instance) error {
+	rules := append([]policy.Rule(nil), e.rules...)
+	generation, zoneRevision := e.Generation, e.Zones.Revision
+	prefetched, sink := e.prefetched, e.settledSink
+	e.prefetched, e.settledSink = nil, nil
+	e.mu.Unlock()
+	err := e.verifyProcessEdit(b)
+	e.mu.Lock()
+	e.prefetched, e.settledSink = prefetched, sink
+	if generation != e.Generation || zoneRevision != e.Zones.Revision || !reflect.DeepEqual(rules, e.rules) {
+		return mutationError("version_conflict", "Policy or network changed during process verification; retry")
+	}
+	if err != nil {
+		return err
+	}
+	h := e.processHandles[b]
+	if h == nil || h.Check() != nil {
+		return mutationError("target_inactive", "Pinned process ended during verification")
+	}
+	return nil
+}
+
+func (e *Engine) verifyProcessEdit(b identity.Instance) error {
 	if e.Activity == nil {
 		return mutationError("target_inactive", "Live Activity required for process edit")
 	}

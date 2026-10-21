@@ -128,9 +128,10 @@ type Engine struct {
 	// prefetched holds attributions resolved outside mu for the operation that
 	// currently holds mu (see lockResolved); nil otherwise.
 	prefetched      *prefetchSet
-	settleScheduled bool   // a deferred settlePendingLocked is queued (guarded by mu)
-	settleReason    string // settle requested while mu is held; run after release
-	settling        bool   // settleNow is running
+	peerPrefetched  *prefetchSet // packet-local peer evidence; not an interaction settlement
+	settleScheduled bool         // a deferred settlePendingLocked is queued (guarded by mu)
+	settleReason    string       // settle requested while mu is held; run after release
+	settling        bool         // settleNow is running
 	// listReads publishes immutable API list projections (list_snapshot.go).
 	listReads listReadState
 	Now       func() time.Time
@@ -212,8 +213,10 @@ func (e *Engine) TryObserve(f identity.Flow, token string) (Event, bool) {
 // are read under e.mu at decision time, so a rule changed during resolution
 // applies to this attempt. Resolve must be safe for concurrent use.
 func (e *Engine) ObserveResolved(f identity.Flow, token string, a identity.Attribution) Event {
+	peers := e.resolvePeers(f)
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	e.peerPrefetched = peers
+	defer func() { e.peerPrefetched = nil; e.mu.Unlock() }()
 	e.refreshZonesLocked()
 	f.NetworkScope = e.Zones.ClassifyFlow(f)
 	now := e.Now()
@@ -570,10 +573,12 @@ func (e *Engine) RetainedState(id, fingerprint string) string {
 	flow, deadline := v.Flow, v.Deadline
 	e.mu.Unlock()
 
+	peers := e.resolvePeers(flow)
 	a := e.Resolve(flow)
 
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	e.peerPrefetched = peers
+	defer func() { e.peerPrefetched = nil; e.mu.Unlock() }()
 	if current, state := e.retainedEventLocked(id, fingerprint); current != v || state != "allowed" || !v.Deadline.Equal(deadline) {
 		if state == "allowed" {
 			return "drop" // replaced or re-leased meanwhile; never reuse this resolution
