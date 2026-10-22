@@ -146,6 +146,13 @@ func socketsFor(protos []byte, limit int) ([]Socket, error) {
 						v6only = &value
 					}
 				}
+				// Linux omits SKV6ONLY on some connected TCP diagnostics.
+				// Concrete IPv4-mapped endpoints on a full IPv6 socket are
+				// themselves kernel evidence that IPv4 delivery is enabled.
+				if v6only == nil && full && binary.NativeEndian.Uint32(b[68:72]) != 0 && family == unix.AF_INET6 && la.Is4In6() && ra.Is4In6() {
+					value := false
+					v6only = &value
+				}
 				result = append(result, Socket{diagObserved: true, diagFull: full, Counters: counters, Interface: iface, Family: family, V6Only: v6only, Protocol: name, Local: netip.AddrPortFrom(la.Unmap(), binary.BigEndian.Uint16(b[4:6])), Remote: netip.AddrPortFrom(ra.Unmap(), binary.BigEndian.Uint16(b[6:8])), State: b[1], Inode: binary.NativeEndian.Uint32(b[68:72]), UID: binary.NativeEndian.Uint32(b[64:68]), Cookie: fmt.Sprintf("%x", b[44:52]), NetNS: NetNS()})
 			}
 			if dumpErr != nil {

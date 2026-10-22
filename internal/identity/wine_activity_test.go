@@ -14,6 +14,8 @@ func TestWineActivityBatchAllStreamsAndIsolation(t *testing.T) {
 		family                     int
 	}{
 		{"tcp4", "tcp", "192.0.2.1", "198.51.100.1:443", 4},
+		{"tcp4-mapped", "tcp", "192.0.2.1", "198.51.100.1:443", 6},
+		{"udp4-mapped", "udp", "192.0.2.1", "198.51.100.1:443", 6},
 		{"udp4-connected", "udp", "192.0.2.1", "198.51.100.1:443", 4},
 		{"udp4-unconnected", "udp", "0.0.0.0", "0.0.0.0:0", 4},
 		{"udp6-connected", "udp", "2001:db8::1", "[2001:db8::2]:443", 6},
@@ -55,6 +57,10 @@ func TestWineActivityBatchAllStreamsAndIsolation(t *testing.T) {
 						socket := Socket{Protocol: mode.proto, Family: 2, Local: netip.AddrPortFrom(netip.MustParseAddr(mode.local), uint16(40000+i)), Remote: netip.MustParseAddrPort(mode.remote), Cookie: fmt.Sprint(i + 1), Inode: uint32(i + 1), NetNS: broker.NetNS, State: 1}
 						if mode.family == 6 {
 							socket.Family = 10
+						}
+						if mode.family == 6 && socket.Local.Addr().Is4() {
+							no := false
+							socket.V6Only = &no
 						}
 						if mode.proto == "udp" {
 							socket.State = 7
