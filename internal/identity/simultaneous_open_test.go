@@ -3,6 +3,7 @@ package identity
 import (
 	"net/netip"
 	"os"
+	"strings"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -134,12 +135,13 @@ func TestTableRowsPreferExactPeerPerPrefix(t *testing.T) {
 		if rows, err = selectTableRows(tableSnapshot{Schema: 2, Rows: []WindowsOwner{exactListener, wildcard}}, f); err != nil || len(rows) != 1 || rows[0].Image != tc.other {
 			t.Fatalf("%s: wildcard connecting row displaced listener: %+v %v", tc.prefix, rows, err)
 		}
-		// A link-local exact remote keeps the interface-mapping refusal.
-		ll, _ := ParseFlow("tcp", "incoming", "[fe80::1]:41000", "[fe80::2]:41000")
+		// A link-local exact remote keeps the interface-mapping refusal. The local
+		// address is global so the remote-only guard is the one exercised.
+		ll, _ := ParseFlow("tcp", "incoming", "[2001:db8::1]:41000", "[fe80::2]:41000")
 		linkLocal := self
-		linkLocal.Address, linkLocal.RemoteAddress, linkLocal.Family = "fe80::1", "fe80::2", 6
-		if _, err = selectTableRows(tableSnapshot{Schema: 2, Rows: []WindowsOwner{linkLocal}}, ll); err == nil {
-			t.Fatalf("%s: link-local exact peer accepted without interface mapping", tc.prefix)
+		linkLocal.Address, linkLocal.RemoteAddress, linkLocal.Family = "2001:db8::1", "fe80::2", 6
+		if _, err = selectTableRows(tableSnapshot{Schema: 2, Rows: []WindowsOwner{linkLocal}}, ll); err == nil || !strings.Contains(err.Error(), "remote interface mapping") {
+			t.Fatalf("%s: link-local exact remote not refused by the remote guard: %v", tc.prefix, err)
 		}
 		// An exact row still needs a Windows process identity.
 		broken := self
