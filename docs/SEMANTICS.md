@@ -419,3 +419,5 @@ continues to use its independent per-request census. Broker groups rotate when
 one refresh's scheduling budget cannot cover them all.
 
 Wine Activity annotation also covers connected and unconnected UDP sockets. Each protocol/address-family table is independently bookended around the fresh kernel ownership census; an unconnected socket identifies no remote peer or direction. Ambiguous Windows holders remain unidentified. These display associations do not grant permissions: observed-rule creation still performs a fresh admission resolution. Closed TCP sockets without userspace owners remain unidentified.
+
+Wine owner-table attribution can corroborate a launcher handoff whose command line still names the earlier executable: only an otherwise unresolved Wine process may use the runtime-reported image, with readable PE-header and nonzero-offset section mappings of that exact file and current revision (device/inode, or `map_files` file identity when the filesystem reports different devices), plus the existing same-prefix broker peer and process-generation rechecks. This does not turn command-line names into permission identities or transfer launcher permissions.

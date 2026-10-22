@@ -498,7 +498,7 @@ func (w *WineTable) imageRevisionVisible(broker *Process, path, revision string)
 		if strings.Contains(maps, path+" (deleted)") {
 			return false
 		}
-		if p.Application.Executable == path && p.Application.Revision == revision && p.Application.Key != "" {
+		if wineTableImageVisible(p, path, revision, maps) {
 			cf, err := socketFDs(p.PID)
 			if err != nil {
 				continue
@@ -519,7 +519,7 @@ func (w *WineTable) imageRevisionVisible(broker *Process, path, revision string)
 				}
 			}
 			current, err := Inspect(p.PID)
-			if err == nil && related && current.Start == p.Start && current.Application.Revision == revision && current.Application.Executable == path {
+			if err == nil && related && current.Start == p.Start && current.UID == p.UID && current.NetNS == p.NetNS && current.MountNS == p.MountNS && current.Application.Prefix == w.prefix && wineTableImageVisible(current, path, revision, string(readBound("/proc/"+e.Name()+"/maps", 2<<20))) {
 				found = true
 			}
 		}
