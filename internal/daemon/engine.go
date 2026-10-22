@@ -468,7 +468,7 @@ func (e *Engine) decideLocked(id, action, scope string, uid uint32, admin bool, 
 				r = *reviewed
 			}
 			r = e.rootScope(r)
-			if other := duplicate(e.rules, r, *a.Application); other != "" {
+			if other := duplicate(e.rules, r, now, *a.Application); other != "" {
 				return Event{}, fmt.Errorf("duplicate scope exists as %s; edit the existing rule", other)
 			}
 			next := append(append([]policy.Rule{}, e.rules...), r)

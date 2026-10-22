@@ -21,8 +21,11 @@ func canonicalRuleFilter(r policy.Rule, current ...identity.Application) policy.
 	return f
 }
 
-func duplicate(rules []policy.Rule, r policy.Rule, current ...identity.Application) string {
-	for _, other := range policy.LatestProgramRules(rules) {
+func duplicate(rules []policy.Rule, r policy.Rule, now time.Time, current ...identity.Application) string {
+	for _, other := range policy.CurrentProgramRules(rules, now) {
+		if !other.Expires.IsZero() && !now.Before(other.Expires) {
+			continue
+		}
 		if other.ID != r.ID && canonicalRuleFilter(other, current...) == canonicalRuleFilter(r, current...) {
 			return other.ID
 		}
@@ -289,7 +292,7 @@ func (e *Engine) reviewRuleLocked(candidate policy.Rule, now time.Time, expiryUn
 	if err := candidate.Validate(); err != nil {
 		return policy.Rule{}, "", err
 	}
-	if other := duplicate(e.rules, candidate); other != "" {
+	if other := duplicate(e.rules, candidate, now); other != "" {
 		return policy.Rule{}, "", fmt.Errorf("duplicate scope already exists as %s; edit that rule explicitly", other)
 	}
 	sentence := RuleSentence(candidate)

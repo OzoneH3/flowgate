@@ -92,7 +92,7 @@ func TestEditorOverlapAndDuplicate(t *testing.T) {
 	if _, _, err = e.EditRule("", v.ID, nil, same, 1000, false, true); err != nil {
 		t.Fatal(err)
 	}
-	if duplicate(e.Rules(1000, false), policy.Rule{Filter: exact.Filter}) == "" {
+	if duplicate(e.Rules(1000, false), policy.Rule{Filter: exact.Filter}, *now) == "" {
 		t.Fatal("duplicate missed")
 	}
 }
