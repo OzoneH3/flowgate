@@ -172,6 +172,29 @@ func (e *Engine) expire(now time.Time) {
 			}
 		}
 	}
+	e.trimEndedHistoryLocked(e.Max, now)
+}
+
+// Display history shares the client event bound with live prompts. Retained
+// future-rule evidence has its own bound/lifetime and must not let ended rows
+// overflow that contract. Never evict a live prompt or admission lease here.
+func (e *Engine) trimEndedHistoryLocked(limit int, now time.Time) {
+	for len(e.events) > limit {
+		oldestKey := ""
+		var oldest *Event
+		for key, event := range e.events {
+			if now.Before(event.Deadline.Add(5 * time.Second)) {
+				continue
+			}
+			if oldest == nil || event.FirstSeen.Before(oldest.FirstSeen) || (event.FirstSeen.Equal(oldest.FirstSeen) && event.ID < oldest.ID) {
+				oldestKey, oldest = key, event
+			}
+		}
+		if oldest == nil {
+			return // live-state admission bounds are enforced separately
+		}
+		delete(e.events, oldestKey) // requestRules and receipts stay intact
+	}
 }
 
 // liveEventsLocked counts events that bound new prompts. Ended requests kept listed only
@@ -331,6 +354,9 @@ func (e *Engine) ObserveResolved(f identity.Flow, token string, a identity.Attri
 	}
 	if v.State == "awaiting-decision" {
 		e.created++
+	}
+	if _, replacing := e.events[key]; !replacing {
+		e.trimEndedHistoryLocked(e.Max-1, now)
 	}
 	e.events[key] = &v
 	e.retainRequestLocked(&v, a)
