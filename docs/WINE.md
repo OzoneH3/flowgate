@@ -203,8 +203,8 @@ without clearing marks on already-approved TCP. See SEMANTICS.md.
 SHA256, prefix, UID, namespaces, process start and helper peer count. It never
 launches Wine or interprets a command from application metadata. Runtime bin
 directories are explicitly trusted user input, not inferred executable commands.
-Broker hashes are diagnostic evidence, not a build allowlist. Discovery reports
-all matching brokers as candidates; attachment must negotiate a complete schema-2
+Broker hashes are diagnostic evidence for public owner-table attribution. The optional private process-PID capability below additionally requires an exact validated broker build. Discovery reports
+all matching brokers as candidates; attachment must negotiate a complete schema-2 or schema-3
 owner census from the selected live broker before it can resolve an application.
 The supported contracts are Wine 10.0 and the Wine 11.x owner-table family.
 Wine 10.0 is validated with GE-Proton10-34; Wine 11 with Wine 11.19, DWProton 11.0
@@ -354,3 +354,5 @@ The real `lwp` regression and current collector contract are documented in
 older listener-only experiment for outgoing TCP on brokers with a validated live owner-census contract. Windows socket ownership, not Python launch ancestry or a global
 wineserver permission, selects the application rule. Activity carries that
 application separately from its Unix FD-holder evidence.
+
+Schema 3 additionally exposes a complete runtime process-image census. This is used only when a sole Linux socket owner is an unresolved Wine client, such as a launcher handoff making native-library DNS requests. The socket need not be a Windows handle: identity instead requires two matching runtime Unix PID/process image/creation-time bindings, the exact mapped PE file in the direct Linux owner, fresh kernel cookie/FD ownership, and the pinned broker Unix peer. A missing, changing or ambiguous candidate remains unidentified. Schema-2 helpers continue ordinary owner-table attribution but do not provide this additional capability. The private read-only `list_processes` ABI is gated to exact tested wineserver SHA256 builds (GE-Proton11-11 Wine 11.0 and native Wine 11.20), plus the exact version and helper build identifier; its rows must agree one-to-one with public Toolhelp process enumeration, image names and creation times. Unknown versions or foreign PID namespaces refuse this optional direct-client capability.

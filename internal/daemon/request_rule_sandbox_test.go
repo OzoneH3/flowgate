@@ -266,32 +266,42 @@ func TestRequestRuleRealCaptureReleasesReferences(t *testing.T) {
 }
 
 func TestWineTableRetainsPEFileWithoutBrokerProcessPermission(t *testing.T) {
-	dir := t.TempDir()
-	pe := filepath.Join(dir, "alpha.exe")
-	os.WriteFile(pe, []byte("verified PE"), 0644)
-	app := sandboxApp(t, pe, pe, 1000)
-	app.Kind, app.Prefix = "wine", dir
-	app.Key = identity.ApplicationKey(1000, app)
-	a := sandboxAttribution(app, 1000, 42, identity.SelfMountNS(), "table")
-	a.Table = &identity.TableEvidence{BrokerPID: 42, BrokerStart: "420", Prefix: dir, UID: 1000}
-	a.Owners[0].Application = identity.Application{Kind: "wine-unresolved", Key: "broker", Revision: "broker-revision"}
-	s := newSandboxEngine(t, a, pe, pe)
-	v := s.Observe(s.f, "held")
-	s.mu.Lock()
-	r := s.requestRules[v.ID]
-	src := s.requestRuleSourceLocked(v.ID)
-	s.mu.Unlock()
-	if r == nil || r.Exe == nil || r.PID != 0 || r.Owner != nil || src.ExecutableIdentity != "verified" || src.ProcessLeaseAvailable {
-		t.Fatalf("PE file must be retained without broker lease: request=%+v source=%+v", r, src)
-	}
-	*s.now = s.now.Add(2 * time.Minute)
-	s.List(1000, false)
-	rule, err := s.save(t, v.ID, "allow")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if rule.Filter.Application != app.Key || !rule.Filter.Process.IsZero() {
-		t.Fatal(rule)
+	for _, mode := range []string{"broker", "direct-client"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := t.TempDir()
+			pe := filepath.Join(dir, "alpha.exe")
+			os.WriteFile(pe, []byte("verified PE"), 0644)
+			app := sandboxApp(t, pe, pe, 1000)
+			app.Kind, app.Prefix = "wine", dir
+			app.Key = identity.ApplicationKey(1000, app)
+			a := sandboxAttribution(app, 1000, 42, identity.SelfMountNS(), "table")
+			a.Table = &identity.TableEvidence{BrokerPID: 42, BrokerStart: "420", Prefix: dir, UID: 1000}
+			if mode == "direct-client" {
+				a.Table.BrokerPID = 99
+				a.Table.BrokerStart = "990"
+				a.Table.DirectPID = 42
+				a.Table.DirectStart = "420"
+			}
+			a.Owners[0].Application = identity.Application{Kind: "wine-unresolved", Key: "broker", Revision: "broker-revision"}
+			s := newSandboxEngine(t, a, pe, pe)
+			v := s.Observe(s.f, "held")
+			s.mu.Lock()
+			r := s.requestRules[v.ID]
+			src := s.requestRuleSourceLocked(v.ID)
+			s.mu.Unlock()
+			if r == nil || r.Exe == nil || r.PID != 0 || r.Owner != nil || src.ExecutableIdentity != "verified" || src.ProcessLeaseAvailable {
+				t.Fatalf("PE file must be retained without broker lease: request=%+v source=%+v", r, src)
+			}
+			*s.now = s.now.Add(2 * time.Minute)
+			s.List(1000, false)
+			rule, err := s.save(t, v.ID, "allow")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rule.Filter.Application != app.Key || !rule.Filter.Process.IsZero() {
+				t.Fatal(rule)
+			}
+		})
 	}
 }
 

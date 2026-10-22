@@ -192,6 +192,7 @@ func TestNegotiatedCensusContract(t *testing.T) {
 		{"wine10LegacySchema", "10.0", 1, false},
 		{"wine10Malformed", "10.0-extra", 2, false},
 		{"wine11", "11.0", 2, true},
+		{"wine11ProcessCapability", "11.0", 3, true},
 		{"wineDevelopment", "11.19", 2, true},
 		{"newBuild", "11.21", 2, true},
 		{"unknownFamily", "12.0", 2, false},
@@ -265,5 +266,35 @@ func TestOutgoingUDPCensusSelectsBoundHolder(t *testing.T) {
 		if _, err = selectTableRows(s, f); err == nil {
 			t.Fatal("missing Windows generation accepted")
 		}
+	}
+}
+
+func TestProcessCensusCapability(t *testing.T) {
+	for _, tc := range []struct {
+		name, response string
+		accepted       bool
+	}{
+		{"valid", `{"schema":3,"kind":"process-images","family":4,"version":"11.0","complete":true,"rows":[]}`, true},
+		{"socket-response", `{"schema":3,"family":4,"version":"11.0","complete":true,"rows":[]}`, false},
+		{"old-schema", `{"schema":2,"kind":"process-images","family":4,"version":"11.0","complete":true,"rows":[]}`, false},
+		{"partial", `{"schema":3,"kind":"process-images","family":4,"version":"11.0","complete":false,"rows":[]}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			helper := filepath.Join(dir, "helper.sh")
+			source := "while read line; do printf '%s\\n' '" + tc.response + "'; done\n"
+			if e := os.WriteFile(helper, []byte(source), 0600); e != nil {
+				t.Fatal(e)
+			}
+			w, e := NewWineTable("/bin/sh", helper, "/bin/sh", dir, "")
+			if e != nil {
+				t.Fatal(e)
+			}
+			defer w.Close()
+			_, e = w.snapshotFamily("process", 4)
+			if (e == nil) != tc.accepted {
+				t.Fatalf("accepted=%v: %v", tc.accepted, e)
+			}
+		})
 	}
 }

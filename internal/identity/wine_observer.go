@@ -156,8 +156,12 @@ func (m *WineObservers) resolve(f Flow, wait bool) (Attribution, bool) {
 	a := Resolve(f)
 	var broker *Process
 	var bin string
-	for i := range a.Owners {
-		p := &a.Owners[i]
+	candidates := append([]Process(nil), a.Owners...)
+	if directUnresolved(a) {
+		candidates = append(candidates, directBrokerCandidates(a)...)
+	}
+	for i := range candidates {
+		p := &candidates[i]
 		if p.UID != m.options.UID || p.Application.Prefix == "" || p.NetNS != NetNS() {
 			continue
 		}

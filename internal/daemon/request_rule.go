@@ -138,7 +138,7 @@ func (e *Engine) retainRequestLocked(v *Event, a identity.Attribution) {
 		// A verified table association already establishes the PE identity.
 		// The broker is only a live mount-namespace witness for opening that
 		// exact stamped file; it must never become the game's process target.
-		tableWitness := a.Table != nil && app.Kind == "wine" && o.PID == a.Table.BrokerPID && o.Start == a.Table.BrokerStart && app.Prefix == a.Table.Prefix
+		tableWitness := a.Table != nil && app.Kind == "wine" && ((o.PID == a.Table.BrokerPID && o.Start == a.Table.BrokerStart) || (o.PID == a.Table.DirectPID && o.Start == a.Table.DirectStart)) && app.Prefix == a.Table.Prefix
 		if o.UID != r.UID || (!tableWitness && (o.Application.Key != app.Key || o.Application.Revision != app.Revision)) {
 			continue
 		}

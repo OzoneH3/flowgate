@@ -21,6 +21,7 @@ import (
 )
 
 type WindowsOwner struct {
+	UnixPID       int    `json:"unix_pid,omitempty"`
 	Family        int    `json:"family"`
 	Scope         uint32 `json:"scope_id"`
 	PID           uint32 `json:"pid"`
@@ -34,6 +35,8 @@ type WindowsOwner struct {
 	RemotePort    uint16 `json:"remote_port,omitempty"`
 }
 type TableEvidence struct {
+	DirectPID    int            `json:"direct_owner_pid,omitempty"`
+	DirectStart  string         `json:"direct_owner_start_ticks,omitempty"`
 	Runtime      string         `json:"runtime"`
 	Prefix       string         `json:"prefix,omitempty"`
 	BrokerStart  string         `json:"broker_start_ticks,omitempty"`
@@ -47,6 +50,7 @@ type TableEvidence struct {
 	Generation string `json:"table_generation,omitempty"`
 }
 type tableSnapshot struct {
+	Kind     string         `json:"kind,omitempty"`
 	Family   int            `json:"family"`
 	Schema   int            `json:"schema"`
 	Version  string         `json:"version"`
@@ -172,7 +176,7 @@ func (w *WineTable) snapshot(proto string) (tableSnapshot, error) {
 }
 func (w *WineTable) snapshotFamily(proto string, family int) (tableSnapshot, error) {
 	var s tableSnapshot
-	if proto != "tcp" && proto != "udp" {
+	if proto != "tcp" && proto != "udp" && proto != "process" {
 		return s, fmt.Errorf("unsupported census protocol")
 	}
 	if w.dead {
@@ -184,12 +188,12 @@ func (w *WineTable) snapshotFamily(proto string, family int) (tableSnapshot, err
 	}
 	select {
 	case b, ok := <-w.output:
-		if w.lost.Load() || !ok || json.Unmarshal(b, &s) != nil || !s.Complete || s.Family != family || (s.Schema != 1 && s.Schema != 2) || (w.requiredSchema != 0 && s.Schema != w.requiredSchema) || s.Error != 0 || (w.version != "" && s.Version != w.version) || len(s.Rows) > 4096 {
+		if w.lost.Load() || !ok || json.Unmarshal(b, &s) != nil || !s.Complete || s.Family != family || (s.Schema != 1 && s.Schema != 2 && s.Schema != 3) || (w.requiredSchema != 0 && s.Schema != w.requiredSchema) || s.Error != 0 || (w.version != "" && s.Version != w.version) || len(s.Rows) > 4096 {
 			w.stop()
 			return s, fmt.Errorf("incomplete or unsupported runtime census")
 		}
 		if w.version == "" {
-			if s.Schema != 2 || !supportedCensusVersion(s.Version) {
+			if (s.Schema != 2 && s.Schema != 3) || !supportedCensusVersion(s.Version) {
 				w.stop()
 				return s, fmt.Errorf("runtime owner census %q schema %d is not validated; no application identity inferred", s.Version, s.Schema)
 			}
@@ -199,6 +203,10 @@ func (w *WineTable) snapshotFamily(proto string, family int) (tableSnapshot, err
 	case <-time.After(2 * time.Second):
 		w.stop()
 		return s, fmt.Errorf("runtime census deadline")
+	}
+	if (proto == "process" && (s.Schema != 3 || s.Kind != "process-images")) || (proto != "process" && s.Kind != "") {
+		w.stop()
+		return s, fmt.Errorf("unexpected runtime census capability")
 	}
 	return s, nil
 }
@@ -228,7 +236,7 @@ func selectTableRows(s tableSnapshot, f Flow) ([]WindowsOwner, error) {
 			if f.Remote.Addr().IsLinkLocalUnicast() {
 				return nil, fmt.Errorf("runtime remote interface mapping unavailable")
 			}
-			if s.Schema != 2 {
+			if s.Schema < 2 {
 				return nil, fmt.Errorf("outgoing attribution needs schema2 owner table")
 			}
 			// UDP owner tables expose the bound local endpoint, not a remote.
@@ -250,7 +258,7 @@ func selectTableRows(s tableSnapshot, f Flow) ([]WindowsOwner, error) {
 			// An exact peer is bound to this concrete local address; the wildcard
 			// allowance above applies to listeners only.
 			remote, e := netip.ParseAddr(r.RemoteAddress)
-			if s.Schema != 2 || e != nil || addr.IsUnspecified() || addr.Unmap() != f.Local.Addr().Unmap() || remote.Unmap() != f.Remote.Addr().Unmap() || r.RemotePort != f.Remote.Port() {
+			if s.Schema < 2 || e != nil || addr.IsUnspecified() || addr.Unmap() != f.Local.Addr().Unmap() || remote.Unmap() != f.Remote.Addr().Unmap() || r.RemotePort != f.Remote.Port() {
 				continue
 			}
 			if f.Remote.Addr().IsLinkLocalUnicast() {
@@ -317,6 +325,9 @@ func (w *WineTable) resolveLocked(f Flow) Attribution {
 		a.Application = nil
 		a.Reason = "configured census broker unavailable"
 		return a
+	}
+	if directUnresolved(a) && w.session != nil {
+		return w.resolveDirect(f, a)
 	}
 	var broker *Process
 	for i := range a.Owners {
