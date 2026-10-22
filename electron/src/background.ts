@@ -1,4 +1,4 @@
-import { PROTECTION_CAPABILITY, stateProtection } from './protection-model';
+import { PROTECTION_CAPABILITY, protectionActive, stateProtection } from './protection-model';
 import { Tray, Menu, Notification, nativeImage, BrowserWindow, dialog } from 'electron';
 import { execFile } from 'node:child_process';
 import path from 'node:path';
@@ -13,6 +13,12 @@ export class Background {
   private menuSignature = '';
   private notifications: RequestNotifications;
   private quittingDialog = false;
+  // Blue shield while protection is active, red otherwise (nothing is being blocked).
+  private icons = {
+    tray: { on: nativeImage.createFromPath(path.join(__dirname, 'flowgate-tray.png')), off: nativeImage.createFromPath(path.join(__dirname, 'flowgate-tray-off.png')) },
+    window: { on: nativeImage.createFromPath(path.join(__dirname, 'flowgate.png')), off: nativeImage.createFromPath(path.join(__dirname, 'flowgate-off.png')) },
+  };
+  private shieldOn?: boolean;
   constructor(
     private main: BrowserWindow,
     private windows: Set<BrowserWindow>,
@@ -23,7 +29,8 @@ export class Background {
   ) {
     const icon = nativeImage.createFromPath(path.join(__dirname, 'flowgate-tray.png'));
     try {
-      this.tray = new Tray(icon);
+      // Red until protection is confirmed active.
+      this.tray = new Tray(this.icons.tray.off);
       this.tray.setToolTip('FlowGate');
       this.tray.on('click', () => this.show());
     } catch {}
@@ -85,6 +92,12 @@ export class Background {
         w.webContents.getURL().startsWith('flowgate://app/index.html'),
     );
     this.notifications.update(state, active);
+    const on = protectionActive(state);
+    if (on !== this.shieldOn) {
+      this.shieldOn = on;
+      if (this.tray && !this.tray.isDestroyed()) this.tray.setImage(on ? this.icons.tray.on : this.icons.tray.off);
+      if (!this.main.isDestroyed()) this.main.setIcon(on ? this.icons.window.on : this.icons.window.off);
+    }
     if (!this.tray || this.tray.isDestroyed()) return;
     const count = pending(state).length,
       c = state.control;

@@ -118,3 +118,14 @@ export function stateProtection(state: ClientState) {
     : state.observation;
   return protectionLabel(source.protection, source.connected);
 }
+
+/**
+ * Is FlowGate currently blocking (protection/enforcement active and confirmed)?
+ * Drives the icon: blue shield when active, red when stopped, failed, starting
+ * or unknown (disconnected) — "no blocks active" is never shown as protected.
+ */
+export function protectionActive(state: ClientState): boolean {
+  if (state.control.capabilities?.includes(PROTECTION_CAPABILITY))
+    return state.control.connected && state.control.protection?.state === 'active';
+  return state.control.connected && state.control.enforcement?.state === 'active';
+}
