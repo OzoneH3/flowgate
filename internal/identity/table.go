@@ -200,7 +200,10 @@ func (w *WineTable) snapshotFamily(proto string, family int) (tableSnapshot, err
 	return s, nil
 }
 func selectTableRows(s tableSnapshot, f Flow) ([]WindowsOwner, error) {
-	var rows []WindowsOwner
+	// exact holds incoming-TCP rows bound to exactly this local/remote pair
+	// (simultaneous open or a socket connecting to its own port). As in the
+	// kernel, such a socket receives the connection instead of any listener.
+	var rows, exact []WindowsOwner
 	for _, r := range s.Rows {
 		addr, err := netip.ParseAddr(r.Address)
 		if err != nil {
@@ -241,6 +244,15 @@ func selectTableRows(s tableSnapshot, f Flow) ([]WindowsOwner, error) {
 				}
 			}
 		} else if f.Protocol == "tcp" && r.State != 2 {
+			remote, e := netip.ParseAddr(r.RemoteAddress)
+			if s.Schema != 2 || e != nil || remote.Unmap() != f.Remote.Addr().Unmap() || r.RemotePort != f.Remote.Port() {
+				continue
+			}
+			if r.PID == 0 || r.Created == 0 || r.Image == "" {
+				return nil, fmt.Errorf("missing Windows process identity")
+			}
+			r.CreationTime = strconv.FormatUint(r.Created, 10)
+			exact = append(exact, r)
 			continue
 		}
 		if r.PID == 0 || r.Created == 0 || r.Image == "" {
@@ -248,6 +260,9 @@ func selectTableRows(s tableSnapshot, f Flow) ([]WindowsOwner, error) {
 		}
 		r.CreationTime = strconv.FormatUint(r.Created, 10)
 		rows = append(rows, r)
+	}
+	if len(exact) != 0 {
+		rows = exact
 	}
 	sort.Slice(rows, func(i, j int) bool {
 		if rows[i].PID != rows[j].PID {

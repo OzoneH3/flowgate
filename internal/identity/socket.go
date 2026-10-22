@@ -177,6 +177,32 @@ func matches(s Socket, f Flow) bool {
 	}
 	return true
 }
+// receivers lists the sockets that can receive f. For incoming TCP the kernel
+// delivers to a full socket bound to exactly this local/remote pair before any
+// listener: a simultaneous open, including a socket connecting to its own port.
+// Only when no such socket exists does a listener receive the connection.
+// Request sockets (half-open entries without an inode) never displace a listener.
+func receivers(sockets []Socket, f Flow) []Socket {
+	var exact, listeners []Socket
+	for _, s := range sockets {
+		if f.Protocol == "tcp" && f.Direction == "incoming" && exactTCPPeer(s, f) {
+			exact = append(exact, s)
+		} else if matches(s, f) {
+			listeners = append(listeners, s)
+		}
+	}
+	if len(exact) != 0 {
+		return exact
+	}
+	return listeners
+}
+
+func exactTCPPeer(s Socket, f Flow) bool {
+	local := netip.AddrPortFrom(f.Local.Addr().Unmap(), f.Local.Port())
+	remote := netip.AddrPortFrom(f.Remote.Addr().Unmap(), f.Remote.Port())
+	return s.Protocol == "tcp" && s.State != 10 && s.Inode != 0 && (!s.diagObserved || s.diagFull) && s.Local == local && s.Remote == remote
+}
+
 func Resolve(f Flow) Attribution {
 	a := Attribution{Status: "unidentified", Reason: "no visible matching socket"}
 	if f.NetNS != NetNS() {
@@ -189,11 +215,9 @@ func Resolve(f Flow) Attribution {
 		return a
 	}
 	wanted := map[string]bool{}
-	for _, s := range sockets {
-		if matches(s, f) {
-			a.Sockets = append(a.Sockets, s)
-			wanted[fmt.Sprintf("socket:[%d]", s.Inode)] = true
-		}
+	for _, s := range receivers(sockets, f) {
+		a.Sockets = append(a.Sockets, s)
+		wanted[fmt.Sprintf("socket:[%d]", s.Inode)] = true
 	}
 	if len(wanted) == 0 {
 		return a
@@ -252,12 +276,7 @@ func Resolve(f Flow) Attribution {
 		a.Reason = "socket recheck unavailable"
 		return a
 	}
-	var current []Socket
-	for _, s := range again {
-		if matches(s, f) {
-			current = append(current, s)
-		}
-	}
+	current := receivers(again, f)
 	if fingerprint(nil, current) != fingerprint(nil, a.Sockets) {
 		a.Reason = "listener changed during attribution"
 		return a

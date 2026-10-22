@@ -95,13 +95,7 @@ func (r *UDPAttributionReuse) resolveWith(f Flow, resolve func(Flow) (Attributio
 	}
 	sockets, err := r.Sockets()
 	if err == nil {
-		var current []Socket
-		for _, s := range sockets {
-			if matches(s, f) {
-				current = append(current, s)
-			}
-		}
-		if len(current) == 1 {
+		if current := receivers(sockets, f); len(current) == 1 {
 			if a, ok := r.reuse(f, reuseKey(f, current[0])); ok {
 				return a, true
 			}
