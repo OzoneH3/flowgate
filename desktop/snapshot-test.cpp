@@ -5,6 +5,49 @@
 class SnapshotTest : public QObject {
   Q_OBJECT
 private slots:
+  // Revisions of one verified program/user share one Activity row; each process
+  // keeps its own exact identity. Different keys (programs, prefixes) and users
+  // never share a row.
+  void revisionsOfOneProgramShareOneRow() {
+    ActivityView view;
+    QJsonObject socket{{"protocol", "tcp"}, {"local", "10.0.0.2:1"},
+                       {"remote", "10.0.0.3:443"}, {"state", 1}};
+    QJsonObject processes;
+    QJsonArray rows;
+    auto add = [&](QString id, int pid, QString key, QString revision, int uid) {
+      processes[id] = QJsonObject{
+          {"id", id}, {"pid", pid}, {"uid", uid}, {"start_ticks", QString::number(pid)},
+          {"executable", "/games/" + key + "/app.exe"},
+          {"application", QJsonObject{{"key", key}, {"revision", revision}, {"name", key}}}};
+      rows.append(QJsonObject{{"id", "s" + id}, {"socket", socket}, {"owners", QJsonArray{id}},
+                              {"traffic", QJsonObject{{"available", false}}},
+                              {"ownership", "visible holder"}, {"evidence", "synthetic"}});
+    };
+    add("p1", 11, "app-a-prefix1", "old", 1000);
+    add("p2", 12, "app-a-prefix1", "new", 1000);
+    add("p3", 13, "app-a-prefix2", "new", 1000);
+    add("p4", 14, "app-b-prefix2", "new", 1000);
+    add("p5", 15, "app-a-prefix1", "new", 1001);
+    view.consume(QJsonObject{{"sequence", 1}, {"rows", rows}, {"processes", processes}}, "synthetic");
+    auto *t = view.findChild<QTreeWidget *>("activityTree");
+    QStringList groups;
+    for (int i = 0; i < t->topLevelItemCount(); i++)
+      groups << t->topLevelItem(i)->data(0, Qt::UserRole).toString();
+    groups.sort();
+    QCOMPARE(groups, (QStringList{"app:app-a-prefix1|uid:1000", "app:app-a-prefix1|uid:1001",
+                                  "app:app-a-prefix2|uid:1000", "app:app-b-prefix2|uid:1000"}));
+    for (int i = 0; i < t->topLevelItemCount(); i++) {
+      auto *g = t->topLevelItem(i);
+      if (g->data(0, Qt::UserRole) != "app:app-a-prefix1|uid:1000")
+        continue;
+      QCOMPARE(g->childCount(), 2);
+      QStringList revisions;
+      for (int c = 0; c < g->childCount(); c++)
+        revisions << (g->child(c)->data(0, Qt::UserRole + 1).toString().contains("Revision: old") ? "old" : "new");
+      revisions.sort();
+      QCOMPARE(revisions, (QStringList{"new", "old"}));
+    }
+  }
   void delayedListsAndUnknownAcknowledgements() {
     QTemporaryDir dir(QDir::currentPath() + "/.workspace/qt-snapshot-XXXXXX");
     QVERIFY(dir.isValid());

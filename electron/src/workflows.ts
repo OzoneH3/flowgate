@@ -6,6 +6,7 @@ import { ANY_PROTOCOL_CAPABILITY, PROCESS_CAPABILITY, targetLabel } from './proc
 import { renderDaemonEvaluation } from './evaluation-view';
 import { canManageRules, STORED_ASK_CAPABILITY } from './protocol';
 import { reviewedScope, previewSeconds } from './editor-presentation';
+import { revisionScope } from './rule-status';
 import type {
   ClientState,
   Rule,
@@ -133,7 +134,7 @@ export async function openRule(source: RuleSource, options: EditorOptions = {}) 
     $('editorApplication').textContent =
       `${draft.targetScope === 'process' ? 'This process · ' : targetLabel(r.filter.process) + ' · '}${r.executable || r.filter.application} · ${r.filter.direction} · UID ${r.filter.uid}`;
     $('editorIdentity').textContent =
-      `${r.executable}\n${r.filter.application} · revision ${r.filter.revision}\n${r.filter.direction} · UID ${r.filter.uid} · ${draft.source}`;
+      `${r.executable}\n${r.filter.application} · ${revisionScope(state?.control.rules?.find((x) => x.id === r.id) || r)}\n${r.filter.direction} · UID ${r.filter.uid} · ${draft.source}`;
     // Ask is offered only with stored-ask-v1; an existing Ask rule without it stays read-only.
     const askWritable = !!state?.control.capabilities?.includes(STORED_ASK_CAPABILITY);
     const askOption = $('editAction').querySelector<HTMLOptionElement>('option[value=ask]')!;
@@ -412,7 +413,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
         $('editorApplication').textContent =
           `Verified · ${rule.filter.all_programs ? 'All programs · ' + (rule.filter.all_uids ? 'all users' : 'UID ' + rule.filter.uid) : targetLabel(rule.filter.process) + ' · ' + rule.executable} · ${zoneLabel(rule.filter.network_zone)} · ${rule.filter.direction}`;
         $('editorIdentity').textContent =
-          `${rule.executable}\n${rule.filter.application} · revision ${rule.filter.revision}\n${rule.filter.direction} · UID ${rule.filter.uid}${r.processID ? ' · observed process ' + r.processID : ''}`;
+          `${rule.executable}\n${rule.filter.application} · ${revisionScope(state?.control.rules?.find((x) => x.id === rule.id) || rule)}\n${rule.filter.direction} · UID ${rule.filter.uid}${r.processID ? ' · observed process ' + r.processID : ''}`;
         $('absoluteExpiry').textContent = rule.expires.startsWith('0001-')
           ? rule.filter.process
             ? 'This daemon session · ends on process exit.'

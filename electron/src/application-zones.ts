@@ -1,5 +1,5 @@
 import type { Row } from './model';
-import type { Rule, RuleFilter } from './protocol';
+import { ruleCoversRevision, type Rule, type RuleFilter } from './protocol';
 import type { NetworkZones } from './network-zones';
 export interface ApplicationZone {
   zone: 'local' | 'internet';
@@ -29,7 +29,7 @@ export function addApplicationZones(roots: Row[], rules: Rule[], definition?: Ne
     const own = rules.filter(
       (r) =>
         !r.filter.process &&
-        r.filter.revision === identity.revision &&
+        ruleCoversRevision(r, identity.revision) &&
         ((r.filter.application === identity.key && r.filter.uid === identity.uid) ||
           (identity.uid === 0 && r.root_application === identity.key)),
     );

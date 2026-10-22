@@ -93,6 +93,7 @@ import {
   endpoint,
   trafficDetails,
   ownershipExplanation,
+  inactiveRuleMatches,
   type Row,
   type Metric,
 } from './model';
@@ -1841,7 +1842,9 @@ function renderInfo() {
   if (r.inactive) {
     // Not running: only its stored rules are known; nothing is observed or verified now.
     field(info, 'State', 'Not currently observed · listed because stored rules name this application');
-    if (r.inactive.earlierVersion)
+    if (r.inactive.followsUpdates)
+      field(info, 'Version', 'Rules follow updates of this program: same verified executable path, user and prefix; any revision. Newest recorded revision is shown below.');
+    else if (r.inactive.earlierVersion)
       field(info, 'Version', 'Earlier version (the executable changed since these rules were made); they do not apply to the current file');
     field(info, 'Executable', r.inactive.executable);
     if (r.inactive.invocations?.length) {
@@ -1860,11 +1863,21 @@ function renderInfo() {
     if(nodeRuntime)field(info,'Script','No script path was retained in this stored executable identity.');
 
     const now = state.control.serverNow ?? Date.now();
-    const rules = (state.control.rules || []).filter(
-      (x) => x.filter.application === r.inactive!.key && x.filter.revision === r.inactive!.revision && x.filter.uid === r.inactive!.uid,
-    );
+    const rules = (state.control.rules || []).filter((x) => inactiveRuleMatches(r.inactive!, x));
     field(info, 'Rules', rules.map((x) => ruleDescription(x, now)).join('\n') || 'None');
     field(info, 'Edit', 'Click its In or Out cell in Rule Status to change, disable or delete a rule (or use Rules). New rules need the running program.');
+  }
+  if (r.revisions && r.revisions.length > 1)
+    field(info, 'Running revisions', r.revisions.join('\n') + '\nSame verified program and user; each process keeps its own exact identity.');
+  if (r.foldedVersions?.length) {
+    // Saved rules of other revisions of this program/user: listed with their exact
+    // scope, never presented as separate programs and never merged into another scope.
+    const now = state.control.serverNow ?? Date.now();
+    field(info, 'Other recorded versions', r.foldedVersions.map((v) => {
+      const rules = (state.control.rules || []).filter((x) => inactiveRuleMatches(v, x));
+      return `${v.followsUpdates ? 'Rules following updates' : `Revision ${v.revision} only`} · ${v.executable}\n` +
+        (rules.map((x) => ruleDescription(x, now)).join('\n') || 'None');
+    }).join('\n\n'));
   }
   if (r.kind === 'application' && r.parent?.startsWith('app:')) {
     // Grouped beneath the verified application that launched it (display only).

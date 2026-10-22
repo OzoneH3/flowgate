@@ -350,17 +350,19 @@ void ActivityView::render() {
     if (owners.size() == 1 && processes.contains(owners.first().toString())) {
       auto p = processes[owners.first().toString()].toObject(),
            a = p["application"].toObject();
+      // One row per verified application key and user; revisions of the same
+      // program are processes beneath it, each keeping its exact identity.
       QString key = a["key"].toString();
       if (key.isEmpty())
         key = "unresolved-process:" + p["id"].toString();
       else
-        key += "|" + a["revision"].toString();
+        key += "|uid:" + QString::number(p["uid"].toInt());
       path = p["executable"].toString();
       pid = QString::number(p["pid"].toInt());
       if (!groups.contains(key))
         groups[key] = make(
             nullptr, "app:" + key, str(a, "name") + " — " + path,
-            procDetails(p) + "\nGrouping: supported application key/revision; "
+            procDetails(p) + "\nGrouping: verified application key and user (revisions as processes); "
                              "visible holder only, not exclusive ownership.",
             path);
       group = groups[key];

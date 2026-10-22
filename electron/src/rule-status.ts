@@ -1,6 +1,6 @@
 import { matchesApplicationZone } from './application-zones';
 import { zoneRuleLabel } from './network-zones';
-import type { ClientState, Rule } from './protocol';
+import { ruleCoversRevision, type ClientState, type Rule } from './protocol';
 import type { Row } from './model';
 export interface RuleStatus {
   available: boolean;
@@ -43,7 +43,7 @@ export function ruleStatus(row: Row, state: ClientState): RuleStatus {
     if (
       (row.applicationZone && !matchesApplicationZone(f,row.applicationZone)) ||
       f.process ||
-      f.revision !== process.application.revision ||
+      !ruleCoversRevision(rule, process.application.revision) ||
       !((f.application === process.application.key && f.uid === process.uid) || (process.uid === 0 && rule.root_application === process.application.key))
     )
       continue;
@@ -51,7 +51,7 @@ export function ruleStatus(row: Row, state: ClientState): RuleStatus {
     if (f.direction === 'outgoing') result.outgoing.push(rule);
   }
   result.reason =
-    'Listed scoped rules for this exact application/revision/UID; not a verdict for any connection. Policy precedence remains in Go.';
+    'Listed scoped rules for this application identity/UID (this revision, or rules following updates of the same verified program); not a verdict for any connection. Policy precedence remains in Go.';
   return result;
 }
 export function ruleState(rule: Rule, now: number) {
@@ -66,12 +66,15 @@ export function ruleState(rule: Rule, now: number) {
         ? 'ask'
         : 'unknown';
 }
+/** Revision wording for a stored rule; following is reported by the daemon, never inferred. */
+export const revisionScope = (rule: Rule) =>
+  `revision ${rule.filter.revision}${rule.follows_updates ? ' (recorded; follows updates of this program)' : ''}`;
 export function ruleDescription(rule: Rule, now: number) {
   const f = rule.filter;
   const preset = rule.preset
     ? `Essential · ${rule.preset.component} · local ${f.local_address || '*'} · interface ${f.interface_name || '*'}/${f.interface_index || '*'}${f.peer_service ? ` · local service ${f.peer_service.application} UID ${f.peer_service.uid}` : ''} · `
     : '';
-  return `${rule.root_application ? `UID ${f.uid} + root · ` : ""}${preset}${zoneRuleLabel(rule)} · ${ruleState(rule, now)} ${rule.action} · ${f.direction} ${f.protocol} · remote ${f.remote_address || f.remote || 'any'} · local port ${f.local_port || 'any'} · remote port ${f.remote_port || 'any'} · expires ${rule.expires && !rule.expires.startsWith('0001-') ? rule.expires : 'never'} · ${rule.id}`;
+  return `${rule.root_application ? `UID ${f.uid} + root · ` : ""}${preset}${zoneRuleLabel(rule)} · ${ruleState(rule, now)} ${rule.action} · ${f.direction} ${f.protocol} · remote ${f.remote_address || f.remote || 'any'} · local port ${f.local_port || 'any'} · remote port ${f.remote_port || 'any'} · expires ${rule.expires && !rule.expires.startsWith('0001-') ? rule.expires : 'never'}${rule.follows_updates ? ' · follows updates' : ''} · ${rule.id}`;
 }
 
 // Describe stored filter constraints; this does not evaluate a connection or precedence.

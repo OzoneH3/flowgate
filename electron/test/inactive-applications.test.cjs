@@ -31,9 +31,10 @@ test('rules for programs that are not running produce inactive rows at the botto
   assert.equal(flatten(roots,new Set([group.id]),'name',false).filter(x=>x.row.inactive).length,2);
   assert.deepEqual(inactive.map((r) => r.label), ['curl', 'heroic-games-launcher']);
   assert.equal(inactive.find((r) => r.label === 'curl').inactive.rules, 2);
-  const oldVersion = roots[0].children.find(r => r.id === 'app:kf|r-old|uid:1000');
-  assert.equal(oldVersion.inactive.earlierVersion, true);
-  assert.equal(oldVersion.presentationLabel, 'Earlier saved version');
+  // Earlier saved version of a running program: folded into its details, no child row.
+  const running = roots.find(r => r.id === 'app:kf|rf|uid:1000');
+  assert.equal(running.children.some(r => r.inactive), false);
+  assert.deepEqual(running.foldedVersions.map(v => [v.revision, v.earlierVersion]), [['r-old', true]]);
   for (const r of inactive) assert.deepEqual([r.rows.length, r.children.length, r.process], [0, 0, undefined]);
   // Bottom in every sort order and direction.
   for (const key of ['name', 'download_bps', 'count'])
@@ -118,8 +119,8 @@ test('saved revisions share one program root; different identities remain visibl
   const tree = activityTree({processes:{},rows:[]},[old,next])[0].children;
   assert.equal(tree.length,1);
   assert.equal(tree[0].inactive.revision,'v2');
-  assert.equal(tree[0].children[0].inactive.revision,'v1');
-  assert.equal(tree[0].children[0].presentationLabel,'Earlier saved version');
+  assert.equal(tree[0].children.length,0,'no separate earlier-version row');
+  assert.deepEqual(tree[0].foldedVersions.map(v=>v.revision),['v1']);
   const distinct = activityTree({processes:{},rows:[]},[old,rule('second','other','v1','/other/tool')])[0].children;
   assert.equal(distinct.length,2);
   const users = activityTree({processes:{},rows:[]},[old,rule('another-user','same','v1','/opt/tool',{uid:1001})])[0].children;
@@ -168,4 +169,86 @@ test('computer, unidentified and inactive categories keep their order across tab
     {id:'unidentified',kind:'unidentified',label:'Unidentified',rows:[],children:[]},computer];
   for(const key of ['name','download_bps','count']) for(const desc of [false,true])
     assert.deepEqual(flatten(roots,new Set(),key,desc).map(x=>x.row.id),['overview','unidentified','inactive-applications']);
+});
+
+
+// Daemon-reported follows_updates (never derived here). Two synthetic Windows
+// programs in two prefixes plus a native one; versions fold per key+UID only.
+test('rules following updates fold per program/user; no transfer across programs, prefixes or users', () => {
+  const { inactiveRuleMatches } = require('../dist/test/model.cjs');
+  const follow = (id, key, rev, exe, extra = {}, created = '2026-01-01') => ({ ...rule(id, key, rev, exe, extra), created, follows_updates: true });
+  const pinned = (id, key, rev, exe, extra = {}, created = '2025-01-01') => ({ ...rule(id, key, rev, exe, extra), created });
+  const rules = [
+    follow('a-new', 'wine-a-prefix1', 'a2', '/games/p1/drive_c/AppA/a.exe'),
+    pinned('a-old', 'wine-a-prefix1', 'a1', '/games/p1/drive_c/AppA/a.exe'),
+    follow('a-p2', 'wine-a-prefix2', 'a2', '/games/p2/drive_c/AppA/a.exe'),
+    follow('b', 'wine-b-prefix2', 'b1', '/games/p2/drive_c/AppB/b.exe'),
+    follow('n', 'native-tool', 'n2', '/opt/tool/tool'),
+    pinned('n-old', 'native-tool', 'n1', '/opt/tool/tool', {}, '2024-01-01'),
+    follow('n-1001', 'native-tool-1001', 'n2', '/opt/tool/tool', { uid: 1001 }),
+  ];
+  const programs = inactiveApplications(rules, []);
+  const ids = programs.map(r => r.id).sort();
+  assert.deepEqual(ids, ['app:native-tool-1001|uid:1001', 'app:native-tool|n1|uid:1000', 'app:native-tool|uid:1000',
+    'app:wine-a-prefix1|a1|uid:1000', 'app:wine-a-prefix1|uid:1000', 'app:wine-a-prefix2|uid:1000', 'app:wine-b-prefix2|uid:1000']);
+  const tree = activityTree({ processes: {}, rows: [] }, rules)[0].children;
+  const all = tree.flatMap(r => r.kind === 'program' ? r.children : [r]);
+  // One row per verified identity; pinned other revision is folded, not a child row.
+  const a1 = all.find(r => r.inactive.key === 'wine-a-prefix1');
+  assert.equal(a1.inactive.followsUpdates, true);
+  assert.deepEqual(a1.foldedVersions.map(v => [v.revision, !!v.followsUpdates]), [['a1', false]]);
+  assert.equal(a1.children.length, 0);
+  // Same program in another prefix, another program, another user: never folded together.
+  for (const key of ['wine-a-prefix2', 'wine-b-prefix2', 'native-tool-1001'])
+    assert.equal(all.filter(r => r.inactive.key === key).length, 1, key);
+  assert.equal(all.length, 5);
+  // Rule listing per row keeps exact scope: following rules vs the pinned revision.
+  const ids2 = (i) => rules.filter(x => inactiveRuleMatches(i, x)).map(x => x.id);
+  assert.deepEqual(ids2(a1.inactive), ['a-new']);
+  assert.deepEqual(ids2(a1.foldedVersions[0]), ['a-old']);
+  assert.deepEqual(ids2(all.find(r => r.inactive.key === 'wine-a-prefix2').inactive), ['a-p2']);
+  // A running newer revision absorbs following rules; the pinned old rule is folded detail.
+  const proc = live('p1', 10, { ...app('native-tool', 'n3', '/opt/tool/tool') });
+  const roots = activityTree({ processes: { p1: proc }, rows: [sock('s1', 'p1', '1.1.1.1:443')] }, rules.filter(r => r.filter.application === 'native-tool'));
+  assert.equal(roots.some(r => r.kind === 'inactive-group'), false);
+  const runningRow = roots.find(r => r.id === 'app:native-tool|n3|uid:1000');
+  assert.deepEqual(runningRow.foldedVersions.map(v => v.revision), ['n1']);
+});
+
+test('running processes of another revision of the same program fold under one row with exact identities', () => {
+  const oldA = live('p1', 10, app('k', 'old', '/opt/tool/tool'));
+  const newA = live('p2', 11, app('k', 'new', '/opt/tool/tool'));
+  const other = live('p3', 12, app('k2', 'new', '/opt/other/tool'));
+  const roots = activityTree({ processes: { p1: oldA, p2: newA, p3: other },
+    rows: [sock('s1', 'p1', '1.1.1.1:443'), sock('s2', 'p2', '1.1.1.2:443'), sock('s3', 'p3', '1.1.1.3:443')] }, []);
+  const apps = roots.filter(r => r.kind === 'application' || r.kind === 'program');
+  const rowsFor = (k) => apps.flatMap(r => r.kind === 'program' ? r.children : [r]).filter(r => r.process?.application.key === k);
+  assert.equal(rowsFor('k').length, 1, 'one program row');
+  const row = rowsFor('k')[0];
+  assert.deepEqual(row.revisions.sort(), ['new', 'old']);
+  const procs = row.children.filter(c => c.kind === 'process');
+  assert.deepEqual(procs.map(c => c.process.application.revision).sort(), ['new', 'old']);
+  assert.ok(procs.every(c => c.parent === row.id));
+  assert.equal(row.rows.length, 2);
+  assert.equal(rowsFor('k2').length, 1, 'different identity stays separate');
+});
+
+test('follows_updates is daemon-reported, literal true only, never on process rules; rule status honours it', () => {
+  const { parseRule, ruleCoversRevision } = require('../dist/test/protocol.cjs');
+  const { ruleStatus } = require('../dist/test/rule-status.cjs');
+  const base = { ...rule('f', 'k', 'v1', '/opt/tool/tool'), version: 1 };
+  assert.equal(parseRule({ ...base, follows_updates: true }).follows_updates, true);
+  assert.equal(parseRule({ ...base, follows_updates: 'true' }).follows_updates, undefined);
+  assert.equal(parseRule(base).follows_updates, undefined);
+  const following = parseRule({ ...base, follows_updates: true }), pinnedRule = parseRule({ ...base, id: 'p' });
+  assert.equal(ruleCoversRevision(following, 'v2'), true);
+  assert.equal(ruleCoversRevision(pinnedRule, 'v2'), false);
+  assert.equal(ruleCoversRevision({ ...following, filter: { ...following.filter, process: { pid: 1 } } }, 'v2'), false);
+  const state = (rules) => ({ control: { connected: true, serverNow: 1, rules }, observation: {} });
+  const proc = (key, revision, uid = 1000) => ({ kind: 'process', process: live('p', 1, app(key, revision, '/opt/tool/tool')), rows: [], children: [], uid });
+  const ids = (row, rules) => ruleStatus(row, state(rules)).outgoing.map(r => r.id);
+  assert.deepEqual(ids(proc('k', 'v2'), [following, pinnedRule]), ['f'], 'pinned v1 rule does not list for v2');
+  assert.deepEqual(ids(proc('other', 'v2'), [following]), [], 'never another program');
+  const otherUser = { ...proc('k', 'v2'), process: { ...live('p', 1, app('k', 'v2', '/opt/tool/tool')), uid: 1001 } };
+  assert.deepEqual(ids(otherUser, [following]), [], 'never another user');
 });

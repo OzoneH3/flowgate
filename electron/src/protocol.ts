@@ -1190,6 +1190,9 @@ export interface RuleTargetState {
 }
 export interface Rule {
   share_with_root?: boolean;
+  // Daemon-derived, read-only (never persisted or sent back): this saved
+  // application rule also covers updated revisions of the same verified program.
+  follows_updates?: boolean;
   root_application?: string;
   invocation?: Invocation;
   preset?: {
@@ -1346,6 +1349,9 @@ function ruleVersion(v: unknown): number {
     );
   return v;
 }
+/** Whether a stored rule applies to this revision of its application, per the daemon. */
+export const ruleCoversRevision = (rule: Rule, revision: string) =>
+  rule.filter.revision === revision || (rule.follows_updates === true && !rule.filter.process);
 export function parseRule(v: unknown): Rule {
   const r = object(v),
     filter = ruleFilter(r.filter);
@@ -1425,6 +1431,7 @@ export function parseRule(v: unknown): Rule {
     executable: string(r.executable),
     root_application: string(r.root_application) || undefined,
     ...(r.share_with_root === true ? { share_with_root: true } : {}),
+    ...(r.follows_updates === true && !preset && !filter.process ? { follows_updates: true } : {}),
     created: string(r.created),
     disabled: r.disabled === true,
     schema: number(r.schema),

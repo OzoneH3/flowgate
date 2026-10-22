@@ -26,6 +26,12 @@ export interface Row {
   // Not running: an application identity that only stored rules name (NetLimiter
   // lists such applications too). No process, sockets or traffic.
   inactive?: InactiveApplication;
+  // Saved-rule entries of other revisions of the same verified program (key+UID),
+  // folded into this row's details instead of separate version rows. Their rules
+  // keep their own exact scope; folding transfers no permission.
+  foldedVersions?: InactiveApplication[];
+  // Revisions of the same program whose running processes are listed under this row.
+  revisions?: string[];
 }
 export interface InactiveApplication {
   key: string;
@@ -36,6 +42,10 @@ export interface InactiveApplication {
   invocations?: string[];
   // Another revision of the same application is running or has newer rules (updated file).
   earlierVersion: boolean;
+  // Daemon-reported: these rules follow updates of this verified program, so the row
+  // stands for the program/user, not one file revision (revision is the newest seen).
+  followsUpdates?: boolean;
+  created?: string;
   // Short location shown when another entry has the same name (different program).
   where?: string;
 }
@@ -440,9 +450,16 @@ export function executableName(path: string) {
   const base = parts.pop() || path || 'Unknown application';
   return /\.asar$/.test(base) && parts.length ? parts.pop()! : base;
 }
+/** Rules listed under an inactive row: its exact revision, or every rule following updates. */
+export function inactiveRuleMatches(i: InactiveApplication, rule: Rule): boolean {
+  const f = rule.filter;
+  return f.application === i.key && f.uid === i.uid && !f.all_programs &&
+    (i.followsUpdates ? rule.follows_updates === true : f.revision === i.revision && rule.follows_updates !== true);
+}
 /**
  * Applications that have stored rules but are not running: one row per
- * application key/revision/UID with no live row, listed after all running
+ * application key/revision/UID with no live row (key/UID for rules the daemon
+ * reports as following updates of the same verified program), listed after all running
  * applications. Rules with only a process binding, all-programs or zone-wide
  * scope name no application and are not listed here.
  */
@@ -452,7 +469,7 @@ export function inactiveApplications(rules: Rule[] | undefined, live: Row[], que
     const ids = r.kind === 'application' ? [r.id] : [];
     const p = r.process;
     if (p?.application.key && p.application.revision)
-      ids.push(`app:${p.application.key}|${p.application.revision}|uid:${p.uid}`);
+      ids.push(`app:${p.application.key}|${p.application.revision}|uid:${p.uid}`, `program:${p.application.key}|uid:${p.uid}`);
     return ids;
   }));
   const liveExecutables = new Set(
@@ -464,12 +481,20 @@ export function inactiveApplications(rules: Rule[] | undefined, live: Row[], que
   for (const rule of rules) {
     const f = rule.filter;
     if (!f.application || !f.revision || f.all_programs || f.uid === undefined || f.uid === null) continue;
-    const id = `app:${f.application}|${f.revision}|uid:${f.uid}`;
+    const follows = rule.follows_updates === true;
+    // A following rule already applies to any running revision of the same program.
+    if (follows && running.has(`program:${f.application}|uid:${f.uid}`)) continue;
+    const id = follows ? `app:${f.application}|uid:${f.uid}` : `app:${f.application}|${f.revision}|uid:${f.uid}`;
     if (running.has(id)) continue;
     let row = out.get(id);
+    if (row && follows && (rule.created || '') > (row.inactive!.created || '')) {
+      row.inactive!.revision = f.revision;
+      row.inactive!.created = rule.created;
+    }
     if (!row) {
       const executable = rule.executable || '';
-      const matching = rules.filter(r => r.filter.application === f.application && r.filter.revision === f.revision && r.filter.uid === f.uid);
+      const scope: InactiveApplication = { key: f.application, revision: f.revision, uid: f.uid, executable, rules: 0, earlierVersion: false, ...(follows ? { followsUpdates: true } : {}) };
+      const matching = rules.filter(r => inactiveRuleMatches(scope, r));
       const contexts = [...new Set(matching.filter(r => r.invocation?.mode === 'file').map(r => r.invocation!.path!))];
       const oneContext = contexts.length === 1 && matching.every(r => r.invocation?.path === contexts[0]);
       const label = oneContext ? `${matching[0].invocation!.name} via ${executableName(executable)}` : executableName(executable);
@@ -482,7 +507,7 @@ export function inactiveApplications(rules: Rule[] | undefined, live: Row[], que
         identityNote: contexts.length ? "Shared interpreter rule" : undefined,
         rows: [],
         children: [],
-        inactive: { key: f.application, revision: f.revision, uid: f.uid, executable, invocations: contexts, rules: 0, earlierVersion: liveExecutables.has(`${executable}|${f.uid}`) },
+        inactive: { ...scope, invocations: contexts, earlierVersion: !follows && liveExecutables.has(`${executable}|${f.uid}`), created: rule.created },
       };
       out.set(id, row);
     }
@@ -498,9 +523,10 @@ export function inactiveApplications(rules: Rule[] | undefined, live: Row[], que
     if ((newest.get(k) || '') < (rule.created || '')) newest.set(k, rule.created || '');
   }
   for (const row of out.values()) {
-    const i = row.inactive!,
-      latest = rules
-        .filter((r) => r.filter.application === i.key && r.filter.revision === i.revision && r.filter.uid === i.uid)
+    const i = row.inactive!;
+    if (i.followsUpdates) continue; // stands for the program, never an earlier version of it
+    const latest = rules
+        .filter((r) => inactiveRuleMatches(i, r))
         .reduce((m, r) => ((r.created || '') > m ? r.created || '' : m), '');
     const others = [...out.values()].some((o) => o !== row && o.inactive!.key === i.key && o.inactive!.uid === i.uid);
     if (others && latest < (newest.get(`${i.key}|${i.uid}`) || '')) i.earlierVersion = true;
@@ -572,8 +598,11 @@ export function groupApplicationVersions(rows: Row[]): Row[] {
     if (!key || r.inactive || (r.kind !== 'application' && r.kind !== 'process')) continue;
     if (!representatives.has(key)) representatives.set(key,r);
   }
-  const ordered = [...rows].sort((a,b) => Number(!!a.inactive?.earlierVersion)-Number(!!b.inactive?.earlierVersion));
+  // Representative among not-running rows: rules following updates, then the newest revision.
+  const rank = (r: Row) => (r.inactive?.followsUpdates ? 0 : r.inactive?.earlierVersion ? 2 : 1);
+  const ordered = [...rows].sort((a,b) => rank(a)-rank(b));
   const removed = new Set<Row>();
+  const revisionOf = (r: Row) => r.inactive?.revision || r.process?.application.revision || r.runtimeApplication?.application.revision || r.displayApplication?.revision;
   for (const r of ordered) {
     if (r.kind !== 'application') continue;
     const key = keyOf(r);
@@ -581,11 +610,33 @@ export function groupApplicationVersions(rows: Row[]): Row[] {
     const parent = representatives.get(key);
     if (!parent) { representatives.set(key,r); continue; }
     if (parent === r) continue;
+    if (r.inactive) {
+      // Saved rules of the same program/user: details of one program row, not a version row.
+      parent.foldedVersions = [...(parent.foldedVersions || []), r.inactive, ...(r.foldedVersions || [])];
+      removed.add(r);
+      continue;
+    }
+    if (r.process || r.rows.length) {
+      // Running processes of another revision: listed under the program; each process
+      // row keeps its exact identity, rule status and actions.
+      const own = revisionOf(parent), other = revisionOf(r);
+      parent.revisions = [...new Set([...(parent.revisions || (own ? [own] : [])), ...(r.revisions || (other ? [other] : []))])];
+      for (const child of r.children) {
+        child.parent = parent.id;
+        if (child.process && other && other !== own) child.identityNote = [child.identityNote, `Revision ${other.slice(0, 12)}`].filter(Boolean).join(' · ');
+        parent.children.push(child);
+      }
+      parent.rows.push(...r.rows);
+      if (r.requestEvent && (!parent.requestEvent || (r.requestEvent.state === 'awaiting-decision' && parent.requestEvent.state !== 'awaiting-decision')))
+        parent.requestEvent = r.requestEvent;
+      removed.add(r);
+      continue;
+    }
+    // A request without an observed process stays visible on its own row.
     r.parent = parent.id;
-    r.presentationLabel = r.inactive ? 'Earlier saved version' : r.process || r.rows.length ? 'Another observed version' : 'Recent request from another version';
-    r.identityNote = `Revision ${r.inactive?.revision || r.process?.application.revision || r.displayApplication?.revision || 'unknown'}`;
+    r.presentationLabel = 'Recent request from another version';
+    r.identityNote = `Revision ${revisionOf(r) || 'unknown'}`;
     parent.children.push(r);
-    parent.identityNote = [parent.identityNote, 'Includes other versions'].filter(Boolean).join(' · ');
     removed.add(r);
   }
   const result = rows.filter(r => !removed.has(r));

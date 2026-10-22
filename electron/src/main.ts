@@ -1,4 +1,4 @@
-import { runtimeWitness } from './protocol';
+import { ruleCoversRevision, runtimeWitness } from './protocol';
 import { matchesApplicationZone } from './application-zones';
 import { Essential } from './essential';
 import { Protection } from './protection';
@@ -755,7 +755,7 @@ app.whenReady().then(async () => {
           !rule ||
           !app ||
           rule.filter.application !== app.key ||
-          rule.filter.revision !== app.revision ||
+          !ruleCoversRevision(rule, app.revision) ||
           rule.filter.uid !== (row.runtimeApplication?.uid ?? row.process?.uid) ||
           (rule.filter.process &&
             !sameProcessTarget(

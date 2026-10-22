@@ -18,8 +18,13 @@ RuleEditor::RuleEditor(QJsonObject rule, Sender sender, QWidget *parent)
                   rule["executable"].toString());
   form->addRow("Application (fixed)", identity);
   auto *revisionValue = new ValueLine;
-  revisionValue->value(f["revision"].toString() + " · UID " +
-                       QString::number(f["uid"].toInt()));
+  // follows_updates is reported by the daemon; the client never infers it.
+  revisionValue->value(
+      f["revision"].toString() +
+      (rule["follows_updates"].toBool()
+           ? " (recorded; follows updates of this program)"
+           : "") +
+      " · UID " + QString::number(f["uid"].toInt()));
   form->addRow("Revision / user (fixed)", revisionValue);
   auto *direction = new QLabel(f["direction"].toString());
   direction->setTextFormat(Qt::PlainText);
@@ -124,6 +129,7 @@ RuleEditor::RuleEditor(QJsonObject rule, Sender sender, QWidget *parent)
 }
 QJsonObject RuleEditor::candidate() const {
   auto r = original;
+  r.remove("follows_updates"); // daemon-derived display metadata, never sent back
   auto f = r["filter"].toObject();
   f.remove("remote");
   f["remote_address"] = address->text().trimmed();

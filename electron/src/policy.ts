@@ -8,6 +8,9 @@ export const POLICY_CAPABILITY = 'policy-explanations-v1';
 export const APPLICATION_POLICY_CAPABILITY = 'application-policy-v1';
 export interface PolicyRuleRef {
   root_application?: string;
+  // Daemon-derived, read-only: this saved application rule also covers updated
+  // revisions of the same verified program. Never computed by the client.
+  follows_updates?: boolean;
   id: string;
   version: string;
   action: string;
@@ -152,6 +155,7 @@ function ruleRef(v: unknown): PolicyRuleRef {
                   throw Error('Invalid target scope');
                 })(),
     root_application: str(r.root_application, true) || undefined,
+    ...(r.follows_updates === true ? { follows_updates: true } : {}),
     target_state: str(r.target_state, true),
     target_reason: str(r.target_reason, true),
     kind:
