@@ -311,7 +311,10 @@ func (w *WineTable) tryResolve(f Flow) (Attribution, bool) {
 }
 
 func (w *WineTable) resolveLocked(f Flow) Attribution {
-	a := Resolve(f)
+	return w.resolveAttributionLocked(f, Resolve(f))
+}
+
+func (w *WineTable) resolveAttributionLocked(f Flow, a Attribution) Attribution {
 	if w.session != nil && !w.session.current() {
 		a.Application = nil
 		a.Association = nil
@@ -326,9 +329,6 @@ func (w *WineTable) resolveLocked(f Flow) Attribution {
 		a.Reason = "configured census broker unavailable"
 		return a
 	}
-	if directUnresolved(a) && w.session != nil {
-		return w.resolveDirect(f, a)
-	}
 	var broker *Process
 	for i := range a.Owners {
 		p := &a.Owners[i]
@@ -338,6 +338,11 @@ func (w *WineTable) resolveLocked(f Flow) Attribution {
 		}
 	}
 	if broker == nil {
+		// A sole unresolved owner can be the broker itself. Only dispatch to
+		// the direct-client capability after checking the pinned executable.
+		if directUnresolved(a) && w.session != nil {
+			return w.resolveDirect(f, a)
+		}
 		for _, p := range a.Owners {
 			if strings.HasPrefix(p.Application.Kind, "wine") && p.Application.Prefix == w.prefix {
 				a.Application = nil

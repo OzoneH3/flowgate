@@ -149,3 +149,38 @@ func TestUnknownRuntimeBuildNeverSendsPrivateRequest(t *testing.T) {
 		t.Fatal("unknown build reached private server call", writer.calls, got)
 	}
 }
+
+// A broker is itself wine-unresolved in the Linux census. That does not make
+// its sockets direct-client sockets, even on builds without the private API.
+func TestUnresolvedBrokerUsesOwnerTableBeforeDirectCapability(t *testing.T) {
+	actual, err := Inspect(os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, prefix := range []string{"/synthetic/prefix-one", "/synthetic/prefix-two"} {
+		for _, app := range []string{"alpha.exe", "beta.exe"} {
+			t.Run(prefix+"/"+app, func(t *testing.T) {
+				owner := actual
+				owner.Application = Application{Kind: "wine-unresolved", Prefix: prefix, Name: app}
+				a := Attribution{VisibilityComplete: true, Owners: []Process{owner}, Sockets: []Socket{{Family: 2}}}
+				if !directUnresolved(a) {
+					t.Fatal("fixture must reproduce ambiguous broker kind")
+				}
+				writer := &rejectedPrivateQuery{}
+				w := WineTable{broker: "/proc/self/exe", prefix: prefix, dead: true, input: writer,
+					session: &RuntimeSession{Broker: actual, Build: "unsupported-private-api"}}
+				got := w.resolveAttributionLocked(Flow{Protocol: "tcp", Direction: "outgoing"}, a)
+				if got.Reason != "observer stopped; explicit restart required" || got.Application != nil || writer.calls != 0 {
+					t.Fatal("broker bypassed ordinary owner-table path", got, writer.calls)
+				}
+				// A different pinned binary cannot lend its broker identity to this
+				// owner, and an unsupported direct capability must grant nothing.
+				w.broker = "/bin/sh"
+				got = w.resolveAttributionLocked(Flow{Protocol: "tcp", Direction: "outgoing"}, a)
+				if got.Application != nil || writer.calls != 0 || got.Reason != "runtime process-image census capability unavailable" {
+					t.Fatal("foreign executable inherited broker evidence", got, writer.calls)
+				}
+			})
+		}
+	}
+}

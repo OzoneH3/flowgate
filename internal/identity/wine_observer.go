@@ -156,47 +156,52 @@ func (m *WineObservers) resolve(f Flow, wait bool) (Attribution, bool) {
 	a := Resolve(f)
 	var broker *Process
 	var bin string
-	candidates := append([]Process(nil), a.Owners...)
-	if directUnresolved(a) {
-		candidates = append(candidates, directBrokerCandidates(a)...)
-	}
-	for i := range candidates {
-		p := &candidates[i]
-		if p.UID != m.options.UID || p.Application.Prefix == "" || p.NetNS != NetNS() {
-			continue
-		}
-		prefixAllowed := m.options.Discover
-		for _, prefix := range m.options.Prefixes {
-			if p.Application.Prefix == prefix {
-				prefixAllowed = true
+	candidates := a.Owners
+	for pass := 0; pass < 2; pass++ {
+		if pass == 1 {
+			if broker != nil || !directUnresolved(a) {
+				break
 			}
+			candidates = directBrokerCandidates(a)
 		}
-		if !prefixAllowed {
-			continue
-		}
-		actual, err := os.Stat(fmt.Sprintf("/proc/%d/exe", p.PID))
-		if err != nil {
-			continue
-		}
-		bins := m.options.RuntimeBins
-		if m.options.Discover {
-			if filepath.Base(p.Executable) != "wineserver" {
+		for i := range candidates {
+			p := &candidates[i]
+			if p.UID != m.options.UID || p.Application.Prefix == "" || p.NetNS != NetNS() {
 				continue
 			}
-			bins = []string{filepath.Dir(p.Executable)}
-		}
-		for _, v := range bins {
-			trusted, err := os.Stat(filepath.Join(v, "wineserver"))
-			if err == nil && os.SameFile(actual, trusted) {
-				if broker != nil {
-					a.Application = nil
-					a.Association = nil
-					a.Reason = "multiple configured Wine brokers hold this socket"
-					return a, true
+			prefixAllowed := m.options.Discover
+			for _, prefix := range m.options.Prefixes {
+				if p.Application.Prefix == prefix {
+					prefixAllowed = true
 				}
-				broker = p
-				bin = v
-				break
+			}
+			if !prefixAllowed {
+				continue
+			}
+			actual, err := os.Stat(fmt.Sprintf("/proc/%d/exe", p.PID))
+			if err != nil {
+				continue
+			}
+			bins := m.options.RuntimeBins
+			if m.options.Discover {
+				if filepath.Base(p.Executable) != "wineserver" {
+					continue
+				}
+				bins = []string{filepath.Dir(p.Executable)}
+			}
+			for _, v := range bins {
+				trusted, err := os.Stat(filepath.Join(v, "wineserver"))
+				if err == nil && os.SameFile(actual, trusted) {
+					if broker != nil {
+						a.Application = nil
+						a.Association = nil
+						a.Reason = "multiple configured Wine brokers hold this socket"
+						return a, true
+					}
+					broker = p
+					bin = v
+					break
+				}
 			}
 		}
 	}
