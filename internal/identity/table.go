@@ -244,9 +244,14 @@ func selectTableRows(s tableSnapshot, f Flow) ([]WindowsOwner, error) {
 				}
 			}
 		} else if f.Protocol == "tcp" && r.State != 2 {
+			// An exact peer is bound to this concrete local address; the wildcard
+			// allowance above applies to listeners only.
 			remote, e := netip.ParseAddr(r.RemoteAddress)
-			if s.Schema != 2 || e != nil || remote.Unmap() != f.Remote.Addr().Unmap() || r.RemotePort != f.Remote.Port() {
+			if s.Schema != 2 || e != nil || addr.IsUnspecified() || addr.Unmap() != f.Local.Addr().Unmap() || remote.Unmap() != f.Remote.Addr().Unmap() || r.RemotePort != f.Remote.Port() {
 				continue
+			}
+			if f.Remote.Addr().IsLinkLocalUnicast() {
+				return nil, fmt.Errorf("runtime remote interface mapping unavailable")
 			}
 			if r.PID == 0 || r.Created == 0 || r.Image == "" {
 				return nil, fmt.Errorf("missing Windows process identity")

@@ -177,6 +177,7 @@ func matches(s Socket, f Flow) bool {
 	}
 	return true
 }
+
 // receivers lists the sockets that can receive f. For incoming TCP the kernel
 // delivers to a full socket bound to exactly this local/remote pair before any
 // listener: a simultaneous open, including a socket connecting to its own port.

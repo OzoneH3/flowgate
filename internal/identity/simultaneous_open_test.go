@@ -49,36 +49,54 @@ func TestReceiversPreferExactTCPPeerOverListener(t *testing.T) {
 // A real socket connecting to its own port: the incoming side resolves to this
 // process instead of "no visible matching socket".
 func TestRealSelfConnectIncomingResolvesToOwner(t *testing.T) {
-	fd, err := unix.Socket(unix.AF_INET, unix.SOCK_STREAM|unix.SOCK_CLOEXEC, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer unix.Close(fd)
-	if err = unix.Bind(fd, &unix.SockaddrInet4{Addr: [4]byte{127, 0, 0, 1}}); err != nil {
-		t.Fatal(err)
-	}
-	sa, err := unix.Getsockname(fd)
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := sa.(*unix.SockaddrInet4).Port
-	if err = unix.Connect(fd, &unix.SockaddrInet4{Addr: [4]byte{127, 0, 0, 1}, Port: port}); err != nil {
-		t.Skip("kernel refused TCP self-connect:", err)
-	}
-	endpoint := netip.AddrPortFrom(netip.MustParseAddr("127.0.0.1"), uint16(port))
-	f, _ := ParseFlow("tcp", "incoming", endpoint.String(), endpoint.String())
-	a := Resolve(f)
-	if len(a.Sockets) != 1 || len(a.Owners) != 1 || a.Owners[0].PID != os.Getpid() {
-		t.Fatalf("self-connect incoming side has no receiving socket/owner: %s %s %+v", a.Status, a.Reason, a.Owners)
-	}
-	// Excluding every other owner needs complete process visibility (root).
-	if os.Geteuid() == 0 && a.Application == nil {
-		t.Fatalf("self-connect incoming side unattributed: %s %s", a.Status, a.Reason)
-	}
-	// The same port with another remote has no receiver (no listener exists).
-	g, _ := ParseFlow("tcp", "incoming", endpoint.String(), "127.0.0.1:1")
-	if b := Resolve(g); len(b.Sockets) != 0 || b.Application != nil {
-		t.Fatalf("unrelated remote matched the self-connected socket: %+v", b.Sockets)
+	for _, family := range []int{unix.AF_INET, unix.AF_INET6} {
+		host, other := "127.0.0.1", "127.0.0.1:1"
+		if family == unix.AF_INET6 {
+			host, other = "::1", "[::1]:1"
+		}
+		t.Run(host, func(t *testing.T) {
+			fd, err := unix.Socket(family, unix.SOCK_STREAM|unix.SOCK_CLOEXEC, 0)
+			if err != nil {
+				t.Skip("socket family unavailable:", err)
+			}
+			defer unix.Close(fd)
+			var local unix.Sockaddr = &unix.SockaddrInet4{Addr: [4]byte{127, 0, 0, 1}}
+			if family == unix.AF_INET6 {
+				local = &unix.SockaddrInet6{Addr: netip.IPv6Loopback().As16()}
+			}
+			if err = unix.Bind(fd, local); err != nil {
+				t.Skip("loopback unavailable:", err)
+			}
+			sa, err := unix.Getsockname(fd)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = unix.Connect(fd, sa); err != nil {
+				t.Skip("kernel refused TCP self-connect:", err)
+			}
+			port := 0
+			switch v := sa.(type) {
+			case *unix.SockaddrInet4:
+				port = v.Port
+			case *unix.SockaddrInet6:
+				port = v.Port
+			}
+			endpoint := netip.AddrPortFrom(netip.MustParseAddr(host), uint16(port))
+			f, _ := ParseFlow("tcp", "incoming", endpoint.String(), endpoint.String())
+			a := Resolve(f)
+			if len(a.Sockets) != 1 || len(a.Owners) != 1 || a.Owners[0].PID != os.Getpid() {
+				t.Fatalf("self-connect incoming side has no receiving socket/owner: %s %s %+v", a.Status, a.Reason, a.Owners)
+			}
+			// Excluding every other owner needs complete process visibility (root).
+			if os.Geteuid() == 0 && a.Application == nil {
+				t.Fatalf("self-connect incoming side unattributed: %s %s", a.Status, a.Reason)
+			}
+			// The same port with another remote has no receiver (no listener exists).
+			g, _ := ParseFlow("tcp", "incoming", endpoint.String(), other)
+			if b := Resolve(g); len(b.Sockets) != 0 || b.Application != nil {
+				t.Fatalf("unrelated remote matched the self-connected socket: %+v", b.Sockets)
+			}
+		})
 	}
 }
 
@@ -106,6 +124,22 @@ func TestTableRowsPreferExactPeerPerPrefix(t *testing.T) {
 		// Schema 1 has no remote endpoint: never an exact peer.
 		if rows, err = selectTableRows(tableSnapshot{Schema: 1, Rows: []WindowsOwner{self}}, f); err != nil || len(rows) != 0 {
 			t.Fatalf("%s: schema1 guessed an exact peer: %+v %v", tc.prefix, rows, err)
+		}
+		// A connecting row bound to the wildcard address is not an exact peer:
+		// it never displaces another program's listener on the concrete address.
+		wildcard := self
+		wildcard.Address = "0.0.0.0"
+		exactListener := listener
+		exactListener.Address = "127.0.0.1"
+		if rows, err = selectTableRows(tableSnapshot{Schema: 2, Rows: []WindowsOwner{exactListener, wildcard}}, f); err != nil || len(rows) != 1 || rows[0].Image != tc.other {
+			t.Fatalf("%s: wildcard connecting row displaced listener: %+v %v", tc.prefix, rows, err)
+		}
+		// A link-local exact remote keeps the interface-mapping refusal.
+		ll, _ := ParseFlow("tcp", "incoming", "[fe80::1]:41000", "[fe80::2]:41000")
+		linkLocal := self
+		linkLocal.Address, linkLocal.RemoteAddress, linkLocal.Family = "fe80::1", "fe80::2", 6
+		if _, err = selectTableRows(tableSnapshot{Schema: 2, Rows: []WindowsOwner{linkLocal}}, ll); err == nil {
+			t.Fatalf("%s: link-local exact peer accepted without interface mapping", tc.prefix)
 		}
 		// An exact row still needs a Windows process identity.
 		broken := self
