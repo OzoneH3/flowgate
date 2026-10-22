@@ -16,6 +16,7 @@ const {
   rememberOptions,
   rememberReviewText,
   rememberFieldsSupported,
+  sameRememberedRule,
 } = require('../dist/test/decision-remember.cjs');
 async function setup(
   t,
@@ -30,6 +31,8 @@ async function setup(
     fields = false,
     replaces = null,
     ignoreFields = false,
+    projected = false,
+    receiptProjected = false,
     previewError,
   } = {},
 ) {
@@ -181,7 +184,7 @@ async function setup(
         commits++;
         const p = issued.get(q.preview_token);
         r.decision = { ...e, state: q.action === 'allow' ? 'allowed' : 'blocked' };
-        r.saved_rule = p?.rule;
+        r.saved_rule = projected ? { ...p?.rule, follows_updates: true } : p?.rule;
         if (lost) {
           s.destroy();
           return;
@@ -193,7 +196,7 @@ async function setup(
           state: status,
           preview: p,
           ...(status === 'committed'
-            ? { decision: { ...e, state: 'allowed' }, saved_rule: p.rule }
+            ? { decision: { ...e, state: 'allowed' }, saved_rule: receiptProjected ? { ...p.rule, follows_updates: true } : p.rule }
             : {}),
         };
       }
@@ -538,4 +541,43 @@ test('paired previews retain the precise closure cause instead of a generic subs
 test('Wine table broker is never offered as the Windows process-scoped target',()=>{
  const e={flow:{direction:'outgoing',protocol:'tcp',local:'127.0.0.1:4000',remote:'127.0.0.1:80'},attribution:{owners:[{pid:42}],visibility_complete:true,runtime_table:{broker_pid:42}}};
  assert.equal(rememberOptions(e,'Alpha.exe').find(o=>o.field==='process').available,false);
+});
+
+test('IP-specific Remember accepts a saved-rule acknowledgement with derived update metadata', async (t) => {
+ const { b, d, counts } = await setup(t, { fields: true, projected: true });
+ const choice = { ...d, remember: { address: true, port: false, protocol: false, process: false }, duration_seconds: 3600 };
+ const p = await b.previewDecision(choice);
+ assert.equal(p.rule.filter.remote_address, '10.1.0.2');
+ const result = await b.decide({ ...choice, preview_token: p.token });
+ assert.equal(result.phase, 'acknowledged', result.message);
+ assert.equal(result.rule.filter.remote_address, '10.1.0.2');
+ assert.equal(result.rule.follows_updates, true);
+ assert.deepEqual(counts(), { commits: 1, previews: 1, queries: 0 });
+});
+
+test('lost IP-specific Remember acknowledgement reconciles projected receipt without another save', async (t) => {
+ const { b, d, counts } = await setup(t, { fields: true, lost: true, receiptProjected: true });
+ const choice = { ...d, remember: { address: true, port: false, protocol: false, process: false }, duration_seconds: 3600 };
+ const p = await b.previewDecision(choice);
+ assert.equal((await b.decide({ ...choice, preview_token: p.token })).phase, 'unknown');
+ const receipt = await b.reconcileDecision({ generation: 'g', id: 'e', preview_token: p.token });
+ assert.equal(receipt.phase, 'acknowledged');
+ assert.equal(receipt.rule.filter.remote_address, '10.1.0.2');
+ assert.deepEqual(counts(), { commits: 1, previews: 1, queries: 1 });
+});
+
+test('Remember acknowledgement comparison ignores only the derived update label', async (t) => {
+ const { b, d } = await setup(t, { fields: true });
+ const p = await b.previewDecision({ ...d, remember: { address: true, port: true, protocol: true, process: false }, duration_seconds: 3600 });
+ const projected = { ...p.rule, follows_updates: true };
+ assert.equal(sameRememberedRule(projected, p.rule), true);
+ for (const patch of [
+  { action: 'block' }, { priority: 101 }, { disabled: true },
+  { expires: '0001-01-01T00:00:00Z' }, { share_with_root: true },
+  { root_application: 'root-key' }, { id: 'other' }, { version: 2 },
+  ...Object.entries({ application: 'other', revision: 'other', uid: 0, direction: 'outgoing', protocol: '*', remote_address: '*', local_port: 0, remote_port: 0, network_zone: 'internet' })
+    .map(([field,value]) => ({ filter: { ...p.rule.filter, [field]: value } })),
+ ]) {
+  assert.equal(sameRememberedRule({ ...projected, ...patch }, p.rule), false, JSON.stringify(patch));
+ }
 });

@@ -317,4 +317,12 @@ export function rememberReviewText(
       : ` · updates existing rule ${r.id}`;
   return `Rule: ${scope}${note}`;
 }
-export const sameRememberedRule = (a: Rule, b: Rule) => JSON.stringify(a) === JSON.stringify(b);
+// The wire may project this read-only label on saved_rule but not on the
+// nested preview/receipt rule. Compare every stored permission field exactly;
+// presentation metadata cannot turn a valid acknowledgement into an unknown save.
+export const sameRememberedRule = (a: Rule, b: Rule) => {
+  const storedA = { ...a }, storedB = { ...b };
+  delete storedA.follows_updates;
+  delete storedB.follows_updates;
+  return JSON.stringify(storedA) === JSON.stringify(storedB);
+};
