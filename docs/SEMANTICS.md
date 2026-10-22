@@ -408,3 +408,12 @@ own SYN admission, and window flags grant no permission. Calls share a one-secon
 deadline and run in the verdict path, not the receive callback. Failures are counted
 and reported at the queue log interval. Kernel regression tests cover IPv4/IPv6
 multi-payload delivery, incoming/outgoing denial, and mismatched connection IDs.
+
+Wine TCP activity association uses per-broker batches, not a fixed first-eight
+socket selection. Each batch brackets a fresh complete kernel descriptor census
+with runtime owner tables, rechecks kernel cookies, and verifies the broker,
+Windows image, UID and prefix for each row. Image evidence is shared only within
+that batch; no previous refresh donates an association. Unix descriptor holders
+remain visible. Busy or incomplete observations stay unidentified, and admission
+continues to use its independent per-request census. Broker groups rotate when
+one refresh's scheduling budget cannot cover them all.

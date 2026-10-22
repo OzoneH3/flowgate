@@ -374,6 +374,11 @@ func (w *WineTable) resolveLocked(f Flow) Attribution {
 		a.Reason = err.Error()
 		return a
 	}
+	return w.finishCensus(f, a, again, broker, first, second, rows, w.imageRevisionVisible)
+}
+
+// Shared final validation for per-admission and batched observation censuses.
+func (w *WineTable) finishCensus(f Flow, a, again Attribution, broker *Process, first, second tableSnapshot, rows []WindowsOwner, imageVisible func(*Process, string, string) bool) Attribution {
 	rows2, err := selectTableRows(second, f)
 	if err != nil {
 		return a
@@ -400,7 +405,7 @@ func (w *WineTable) resolveLocked(f Flow) Attribution {
 		return a
 	}
 	revision := stamp(path)
-	if revision == "" || !w.imageRevisionVisible(broker, path, revision) {
+	if revision == "" || !imageVisible(broker, path, revision) {
 		return a
 	}
 	app := Application{Kind: "wine", Name: filepath.Base(path), Executable: path, Revision: revision, Prefix: w.prefix, Runtime: w.broker, Evidence: []string{"runtime Windows handle-table owner PID plus process creation time and full image path", "one kernel socket cookie and pinned broker image", "snapshot model; not protection against hostile same-user handle transfer"}}

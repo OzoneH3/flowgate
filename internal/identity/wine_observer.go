@@ -380,37 +380,3 @@ func (m *WineObservers) setup(record *observedWine, broker *Process, bin string)
 
 // Lab-only CLI boundary; production configuration is explicit root startup input.
 func WorkspaceObserverScratch(path string) (string, error) { return workspacePath(path) }
-
-// AnnotateActivity keeps the Unix FD holders intact. A separate, freshly
-// corroborated Windows application is the rule identity, never a fabricated PID.
-func (m *WineObservers) AnnotateActivity(s *ActivitySnapshot) {
-	start := time.Now()
-	count := 0
-	for i := range s.Rows {
-		row := &s.Rows[i]
-		if count >= 8 || time.Since(start) > time.Second {
-			break
-		}
-		if row.Socket.Protocol != "tcp" || (row.Socket.State != 1 && row.Socket.State != 2) {
-			continue
-		}
-		candidate := false
-		for _, id := range row.Owners {
-			p := s.Processes[id]
-			if p.UID == m.options.UID && filepath.Base(p.Executable) == "wineserver" {
-				candidate = true
-			}
-		}
-		if !candidate {
-			continue
-		}
-		count++
-		// Presentation does not wait for a busy slot or session; with a slot free it
-		// may run the full bounded setup (up to ~4 s) and census on this goroutine.
-		a, ok := m.TryResolve(Flow{NetNS: row.Socket.NetNS, Protocol: "tcp", Direction: "outgoing", Local: row.Socket.Local, Remote: row.Socket.Remote})
-		if !ok || a.Status != "corroborated-runtime-table" || a.Application == nil || a.Table == nil || len(a.Sockets) != 1 || a.Sockets[0].Cookie != row.Socket.Cookie {
-			continue
-		}
-		row.RuntimeApplication = &RuntimeApplication{Application: *a.Application, UID: a.Table.UID, Evidence: *a.Table}
-	}
-}
