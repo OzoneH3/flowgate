@@ -188,7 +188,7 @@ func (e *Engine) PreviewDecision(generation, id, action, scope, zone, revision s
 	if why := identity.RuntimeRuleBlocked(a.Application); why != "" {
 		return DecisionPreview{}, mutationError(identity.CodeIdentityUnverifiable, why)
 	}
-	rule := policy.Rule{Version: 1, Schema: 2, ID: "user:" + randomID(), Executable: a.Application.Executable, Invocation: attributionInvocation(a), Priority: 100, Action: action, Created: now, Expires: now.Add(time.Duration(o.DurationSeconds) * time.Second), Filter: policy.Remembered(v.Flow, a)}
+	rule := policy.Rule{Version: 1, Schema: 2, ID: "user:" + randomID(), Executable: a.Application.KeyPath(), Invocation: attributionInvocation(a), Priority: 100, Action: action, Created: now, Expires: now.Add(time.Duration(o.DurationSeconds) * time.Second), Filter: policy.Remembered(v.Flow, a)}
 	if scope == "persistent" {
 		rule.Expires = time.Time{}
 	}
@@ -221,7 +221,7 @@ func (e *Engine) PreviewDecision(generation, id, action, scope, zone, revision s
 	// (same ID, version+1) instead of failing or adding a duplicate.
 	var replaces *RuleVersionRef
 	for _, old := range e.rules {
-		if old.Preset == nil && canonicalFilter(old.Filter) == canonicalFilter(rule.Filter) {
+		if old.Preset == nil && canonicalRuleFilter(old, *a.Application) == canonicalRuleFilter(rule, *a.Application) {
 			if old.Version == ^uint64(0) {
 				return DecisionPreview{}, mutationError("capacity", "Rule version exhausted")
 			}
@@ -239,7 +239,7 @@ func (e *Engine) PreviewDecision(generation, id, action, scope, zone, revision s
 	if scope == "persistent" {
 		lifetime = "persistent until disabled/deleted"
 	}
-	sentence := fmt.Sprintf("Remember %s; rule applies to %s; application %s revision %s UID %d, %s %s, peer %s local service %d remote service %d; expiry %s. Current held request decided separately; existing admissions unchanged.", lifetime, zoneLabel, rule.Filter.Application, rule.Filter.Revision, rule.Filter.UID, rule.Filter.Direction, rule.Filter.Protocol, rule.Filter.RemoteAddress, rule.Filter.LocalPort, rule.Filter.RemotePort, rule.Expires.Format(time.RFC3339Nano))
+	sentence := fmt.Sprintf("Remember %s; rule applies to %s; program %s (captured revision %s; saved application permissions follow updates) UID %d, %s %s, peer %s local service %d remote service %d; expiry %s. Current held request decided separately; existing admissions unchanged.", lifetime, zoneLabel, rule.Filter.Application, rule.Filter.Revision, rule.Filter.UID, rule.Filter.Direction, rule.Filter.Protocol, rule.Filter.RemoteAddress, rule.Filter.LocalPort, rule.Filter.RemotePort, rule.Expires.Format(time.RFC3339Nano))
 	if replaces != nil {
 		sentence = fmt.Sprintf("Updates existing rule %s (version %d). ", replaces.ID, replaces.Version) + sentence
 	}

@@ -1,5 +1,33 @@
 # Milestone semantics and safety boundaries
 
+
+## Saved application permissions follow program updates
+
+Ordinary saved application rules, including existing rules, follow a newly
+verified revision of the same program. The stable application key still binds
+user, runtime kind, Wine prefix and executable key path. Every admission needs
+current executable/socket ownership evidence; names, ancestry and launchers do
+not grant permission. Replacing a user-installed program at this same identity
+also retains its saved permissions. A different path, user or prefix does not.
+Actions, directions, protocol/address/port/zone restrictions, disabled state,
+expiry and explicit root-sharing consent remain unchanged. Process rules,
+Once/For-a-while grants and essential presets keep their exact revision and
+lifetime checks. A missing or inconsistent identity never inherits permission.
+
+The captured rule revision remains evidence, rather than a request to reapprove
+each upgrade. Read-only `follows_updates` metadata states this behavior; a client
+cannot write it into permission authority. Native stored paths must hash to the
+stored target key; non-native runtime scopes additionally need a current
+validated identity witness. Native zero-link images retain their stable program
+key using kernel inode evidence, with their original file revision unchanged.
+A linked filename literally ending in ` (deleted)` is a different program.
+
+Startup cleanup retains update-following rules instead of archiving them merely
+because an executable revision changed. Within one exact program/user/direction/endpoint/zone scope, the newest created saved setting wins; a disabled newest setting does not revive an older choice. Equal creation timestamps keep normal priority/deny precedence. Temporary settings only supersede while unexpired, so they cannot erase a persistent fallback. Startup atomically archives an older copy only when the newer setting covers its remaining lifetime, logging the rule ID and retaining its exact document in the bounded private recovery archive. An older setting retained beneath a temporary override remains masked even if edited; it takes effect again only when the newer override expires or is deleted. Different scopes keep normal priority/deny precedence. This does
+not infer authority for a newly versioned installation path or a different
+prefix, and does not restore rules already archived by an earlier release.
+
+
 ## Process-instance extension (not deployed)
 
 Primary capability `process-instance-rules-v1` adds explicit process targets with

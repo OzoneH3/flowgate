@@ -9,33 +9,21 @@ import (
 	"time"
 )
 
-func canonicalFilter(f policy.Filter) policy.Filter {
-	if f.InterfaceName != "" {
-		f.InterfaceIndex = 0
-	}
-	if f.Remote != "" {
-		if ep, err := netip.ParseAddrPort(f.Remote); err == nil {
-			f.RemoteAddress = ep.Addr().Unmap().String()
-			f.RemotePort = ep.Port()
-			f.Remote = ""
-		}
-	}
-	if f.RemoteAddress == "" {
-		f.RemoteAddress = "*"
-	}
-	if a, err := netip.ParseAddr(f.RemoteAddress); err == nil {
-		f.RemoteAddress = a.Unmap().String()
-	} else if p, err := netip.ParsePrefix(f.RemoteAddress); err == nil {
-		f.RemoteAddress = p.Masked().String()
-		if p.Bits() == p.Addr().BitLen() {
-			f.RemoteAddress = p.Addr().Unmap().String()
-		}
+func canonicalFilter(f policy.Filter) policy.Filter { return policy.CanonicalFilter(f) }
+
+// canonicalRuleFilter compares actual saved permission scope; a captured file
+// revision is historical evidence for update-following application rules.
+func canonicalRuleFilter(r policy.Rule, current ...identity.Application) policy.Filter {
+	f := canonicalFilter(r.Filter)
+	if r.FollowsUpdates() {
+		f.Revision = ""
 	}
 	return f
 }
-func duplicate(rules []policy.Rule, r policy.Rule) string {
-	for _, other := range rules {
-		if other.ID != r.ID && canonicalFilter(other.Filter) == canonicalFilter(r.Filter) {
+
+func duplicate(rules []policy.Rule, r policy.Rule, current ...identity.Application) string {
+	for _, other := range policy.LatestProgramRules(rules) {
+		if other.ID != r.ID && canonicalRuleFilter(other, current...) == canonicalRuleFilter(r, current...) {
 			return other.ID
 		}
 	}
@@ -87,8 +75,11 @@ func RuleSentence(r policy.Rule) string {
 		}
 	}
 	identityText := fmt.Sprintf("application %s, revision %s, UID %d", f.Application, f.Revision, f.UID)
+	if r.FollowsUpdates() {
+		identityText = fmt.Sprintf("program %s, UID %d; saved permissions follow program updates", f.Application, f.UID)
+	}
 	if r.RootApplication != "" {
-		identityText += " and root (UID 0), same native executable revision"
+		identityText += " and root (UID 0), same verified native program"
 	}
 	if f.AllPrograms {
 		identityText = target
@@ -208,7 +199,7 @@ func (e *Engine) EditRule(id, eventID string, expected *uint64, candidate policy
 		candidate.Created = now
 		candidate.Version = 1
 		e.bindZoneModel(&candidate)
-		candidate.Executable = a.Application.Executable
+		candidate.Executable = a.Application.KeyPath()
 		candidate.Invocation = attributionInvocation(a)
 		if !candidate.Expires.IsZero() && !now.Before(candidate.Expires) {
 			return policy.Rule{}, "", fmt.Errorf("expiry must be in the future")
@@ -310,7 +301,7 @@ func (e *Engine) reviewRuleLocked(candidate policy.Rule, now time.Time, expiryUn
 		if other.ID == candidate.ID || other.Disabled || (!other.Expires.IsZero() && !now.Before(other.Expires)) {
 			continue
 		}
-		if filtersOverlap(candidate.Filter, other.Filter) {
+		if filtersOverlap(canonicalRuleFilter(candidate), canonicalRuleFilter(other)) {
 			count++
 			if count <= 8 {
 				sentence += fmt.Sprintf(" Overlap: %s (%s, priority %d).", other.ID, other.Action, other.Priority)
@@ -326,7 +317,7 @@ func (e *Engine) reviewRuleLocked(candidate policy.Rule, now time.Time, expiryUn
 func filtersOverlap(a, b policy.Filter) bool {
 	a = canonicalFilter(a)
 	b = canonicalFilter(b)
-	if (!a.AllPrograms && !b.AllPrograms && (a.Application != b.Application || a.Revision != b.Revision)) || (!a.AllUIDs && !b.AllUIDs && a.UID != b.UID) || (a.NetworkZone != "" && b.NetworkZone != "" && a.NetworkZone != b.NetworkZone) || a.Direction != b.Direction || !policy.ProtocolsOverlap(a.Protocol, b.Protocol) {
+	if (!a.AllPrograms && !b.AllPrograms && (a.Application != b.Application || (a.Revision != "" && b.Revision != "" && a.Revision != b.Revision))) || (!a.AllUIDs && !b.AllUIDs && a.UID != b.UID) || (a.NetworkZone != "" && b.NetworkZone != "" && a.NetworkZone != b.NetworkZone) || a.Direction != b.Direction || !policy.ProtocolsOverlap(a.Protocol, b.Protocol) {
 		return false
 	}
 	if !a.Process.IsZero() && !b.Process.IsZero() && a.Process != b.Process {

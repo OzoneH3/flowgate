@@ -4,7 +4,9 @@ import (
 	"flowgate/internal/identity"
 	"fmt"
 	"net/netip"
+	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -57,8 +59,35 @@ func (r Rule) validRootPair() bool {
 	return r.Preset == nil && r.Filter.UID != 0 && !r.Filter.AllPrograms && !r.Filter.AllUIDs && r.Filter.Process.IsZero() && r.Executable != "" && r.Filter.Application == identity.ApplicationKey(r.Filter.UID, identity.Application{Kind: "native", Executable: r.Executable})
 }
 
-func (r Rule) MatchesApplication(key, revision string, uid uint32) bool {
-	if r.Filter.Revision != revision {
+// FollowsUpdates is application permission, not cached executable evidence.
+// The resolver must still prove a stamped executable and its exact stable key
+// (user, runtime kind, prefix and executable path) on every admission. Process
+// grants and presets stay pinned; application keys require matching path evidence.
+func (r Rule) FollowsUpdates() bool {
+	return r.Preset == nil && !r.Filter.AllPrograms && !r.Filter.AllUIDs && r.Filter.Process.IsZero() && r.Filter.Application != "" && r.Filter.Revision != "" && r.Executable != "" && !strings.HasSuffix(r.Executable, " (deleted)")
+}
+
+// updateWitness proves the same stored target from current resolver evidence;
+// the configured scope and its read-only flag never depend on display context.
+func (r Rule) updateWitness(current ...identity.Application) bool {
+	for _, app := range current {
+		path := app.KeyPath()
+		supported := app.Kind == "native" || (app.Kind == "wine" && filepath.IsAbs(app.Prefix)) || (app.Kind == "electron" && app.Hosted != nil && app.Hosted.State == "verified")
+		keyMatches := app.Key == r.Filter.Application || (r.CanShareRoot() && app.Key == r.RootApplication)
+		if supported && keyMatches && app.Revision != "" && identity.RuntimeRuleBlocked(&app) == "" && filepath.IsAbs(path) && filepath.Clean(path) == path && identity.ApplicationKey(r.Filter.UID, app) == r.Filter.Application {
+			return true
+		}
+	}
+	if len(current) != 0 {
+		return false
+	}
+	// Stored native presentation has enough information to check the same key.
+	// Admission evaluation always supplies the current resolver witness instead.
+	return filepath.IsAbs(r.Executable) && filepath.Clean(r.Executable) == r.Executable && identity.ApplicationKey(r.Filter.UID, identity.Application{Kind: "native", Executable: r.Executable}) == r.Filter.Application
+}
+
+func (r Rule) MatchesApplication(key, revision string, uid uint32, current ...identity.Application) bool {
+	if revision == "" || (r.Filter.Revision != revision && (!r.FollowsUpdates() || !r.updateWitness(current...))) {
 		return false
 	}
 	return (r.Filter.Application == key && r.Filter.UID == uid) || (uid == 0 && r.RootApplication != "" && r.RootApplication == key && r.CanShareRoot())
@@ -150,7 +179,7 @@ func EvaluateSession(rules []Rule, f identity.Flow, a identity.Attribution, now 
 		return "block", "unsafe-attribution", nil
 	}
 	var matches []Rule
-	for _, r := range rules {
+	for _, r := range CurrentProgramRules(rules, now) {
 		x := r.Filter
 		if !x.Process.IsZero() && (session == "" || x.Process.Session != session || !a.VisibilityComplete || len(a.Owners) != 1 || len(a.Sockets) != 1 || !x.Process.Matches(a.Owners[0])) {
 			continue
@@ -161,7 +190,7 @@ func EvaluateSession(rules []Rule, f identity.Flow, a identity.Attribution, now 
 		if !r.Expires.IsZero() && !now.Before(r.Expires) {
 			continue
 		}
-		if (!x.AllPrograms && !r.MatchesApplication(a.Application.Key, a.Application.Revision, a.Principal().UID)) || (x.AllPrograms && !x.AllUIDs && x.UID != a.Principal().UID) || x.Direction != f.Direction || !ProtocolMatches(x.Protocol, f.Protocol) {
+		if (!x.AllPrograms && !r.MatchesApplication(a.Application.Key, a.Application.Revision, a.Principal().UID, *a.Application)) || (x.AllPrograms && !x.AllUIDs && x.UID != a.Principal().UID) || x.Direction != f.Direction || !ProtocolMatches(x.Protocol, f.Protocol) {
 			continue
 		}
 		if x.NetworkZone != "" {

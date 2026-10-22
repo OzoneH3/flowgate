@@ -200,10 +200,8 @@ func Inspect(pid int) (Process, error) {
 			a = ElectronApplication(p.UID, h)
 		}
 	}
-	if a.Executable != "" && a.Revision != "" {
-		a.Key = ApplicationKey(p.UID, a)
-	}
-	// Display metadata never changes executable/key/revision authority.
+	// The inode link count distinguishes a replaced native image from a file
+	// literally named with the kernel deletion suffix. Its revision stays exact.
 	a.DisplayName, a.DisplayExecutable, a.ExecutableStatus = a.Name, a.Executable, "unavailable"
 	if a.Kind == "electron" {
 		a.ExecutableStatus = "linked"
@@ -217,6 +215,9 @@ func Inspect(pid int) (Process, error) {
 				a.DisplayName = filepath.Base(a.DisplayExecutable)
 			}
 		}
+	}
+	if a.Executable != "" && a.Revision != "" {
+		a.Key = ApplicationKey(p.UID, a)
 	}
 	p.Application = a
 	end, _, e := processStat(base)

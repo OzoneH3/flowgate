@@ -358,7 +358,7 @@ func (e *Engine) PreviewRequestRule(generation, id, action, scope, zone, revisio
 		return RequestRulePreview{}, mutationError("capacity", "Rule preview capacity reached; wait for expiry")
 	}
 	now := e.Now()
-	rule := policy.Rule{Version: 1, Schema: 2, ID: "user:" + randomID(), Executable: r.Application.Executable, Invocation: ruleInvocation(r.Application, r.Provenance), Priority: 100, Action: action, Created: now, Filter: r.Filter}
+	rule := policy.Rule{Version: 1, Schema: 2, ID: "user:" + randomID(), Executable: r.Application.KeyPath(), Invocation: ruleInvocation(r.Application, r.Provenance), Priority: 100, Action: action, Created: now, Filter: r.Filter}
 	if scope == "application" {
 		rule.Expires = now.Add(time.Duration(o.DurationSeconds) * time.Second)
 	}
@@ -380,7 +380,7 @@ func (e *Engine) PreviewRequestRule(generation, id, action, scope, zone, revisio
 	// never add duplicate rules.
 	var replaces *RuleVersionRef
 	for _, old := range e.rules {
-		if old.Preset == nil && canonicalFilter(old.Filter) == canonicalFilter(rule.Filter) {
+		if old.Preset == nil && canonicalRuleFilter(old, r.Application) == canonicalRuleFilter(rule, r.Application) {
 			if old.Version == ^uint64(0) {
 				return RequestRulePreview{}, mutationError("capacity", "Rule version exhausted")
 			}
@@ -480,7 +480,7 @@ func (e *Engine) saveRequestRuleLocked(generation, token, id, action, scope, zon
 			if x.Version != v.Replaces.Version {
 				at = -2
 			}
-		} else if x.Preset == nil && canonicalFilter(x.Filter) == canonicalFilter(candidate.Filter) {
+		} else if x.Preset == nil && canonicalRuleFilter(x, r.Application) == canonicalRuleFilter(candidate, r.Application) {
 			return policy.Rule{}, "", false, mutationError("policy_conflict", "A rule for this scope was created or changed since review; review again")
 		}
 	}

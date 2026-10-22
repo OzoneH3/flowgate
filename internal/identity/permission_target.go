@@ -141,7 +141,7 @@ func DescribePermissionTarget(a Attribution) *PermissionTarget {
 		if a.Table != nil {
 			t.Label = name + " · via wineserver"
 		}
-		t.Remember = fmt.Sprintf("%s (%s) in prefix %s, UID %d, this file revision", name, app.Executable, short, uid)
+		t.Remember = fmt.Sprintf("%s (%s) in prefix %s, UID %d, saved application permissions follow verified program updates", name, app.Executable, short, uid)
 		role := ""
 		if prov != nil && prov.Evidence == "verified" {
 			role = prov.Role
@@ -164,7 +164,7 @@ func DescribePermissionTarget(a Attribution) *PermissionTarget {
 	if contentRevision(*app) {
 		t.KeyBasis = "uid+verified runtime deployment path; revision = SHA-256 of executable content"
 	}
-	t.Remember = fmt.Sprintf("%s (%s), UID %d, this file revision", name, app.KeyPath(), uid)
+	t.Remember = fmt.Sprintf("%s (%s), UID %d, saved application permissions follow verified program updates", name, app.KeyPath(), uid)
 	switch {
 	case isInterpreter(name):
 		t.Kind = "interpreter"

@@ -43,7 +43,7 @@ func (s *Store) loadCurrent(now time.Time, obsolete func(string, string, string,
 				return
 			default:
 			}
-			if r.Preset == nil && !r.Filter.AllUIDs && obsolete(r.Executable, r.Filter.Application, r.Filter.Revision, r.Filter.UID) {
+			if !r.FollowsUpdates() && r.Preset == nil && !r.Filter.AllUIDs && obsolete(r.Executable, r.Filter.Application, r.Filter.Revision, r.Filter.UID) {
 				found[r.ID] = true
 			}
 		}
@@ -60,11 +60,17 @@ func (s *Store) loadCurrent(now time.Time, obsolete func(string, string, string,
 		rule   policy.Rule
 		reason string
 	}
+	selected := map[string]bool{}
+	for _, r := range policy.LatestProgramRules(rules) {
+		selected[r.ID] = true
+	}
 	var archived []removed
 	kept := make([]policy.Rule, 0, len(rules))
 	for _, r := range rules {
 		reason := ""
-		if !r.Expires.IsZero() && !now.Before(r.Expires.Add(expiryArchiveGrace)) {
+		if !selected[r.ID] {
+			reason = "superseded program scope"
+		} else if !r.Expires.IsZero() && !now.Before(r.Expires.Add(expiryArchiveGrace)) {
 			reason = "expired"
 		} else if obsoleteRules[r.ID] {
 			reason = "replaced executable; no old process found"
@@ -104,6 +110,9 @@ func (s *Store) loadCurrent(now time.Time, obsolete func(string, string, string,
 	}
 	if err = tx.Commit(); err != nil {
 		return nil, err
+	}
+	for _, a := range archived {
+		log.Printf("FlowGate: archived rule %s: %s (disabled=%t); recovery document retained in bounded private archive", a.rule.ID, a.reason, a.rule.Disabled)
 	}
 	if n, _ := pruned.RowsAffected(); n > 0 {
 		if _, err := s.db.Exec("VACUUM"); err != nil {

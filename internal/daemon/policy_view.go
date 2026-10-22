@@ -20,6 +20,7 @@ type PolicyIdentity struct {
 	UID      uint32 `json:"uid"`
 }
 type PolicyRuleRef struct {
+	FollowsUpdates  bool          `json:"follows_updates"`
 	RootApplication string        `json:"root_application,omitempty"`
 	TargetScope     string        `json:"target_scope"`
 	TargetState     string        `json:"target_state"`
@@ -120,9 +121,9 @@ type PolicyExplanations struct {
 	Contexts []PolicyExplanation `json:"contexts"`
 }
 
-func ruleRef(r policy.Rule, now time.Time) PolicyRuleRef {
+func ruleRef(r policy.Rule, now time.Time, current ...identity.Application) PolicyRuleRef {
 	expired := !r.Expires.IsZero() && !now.Before(r.Expires)
-	return PolicyRuleRef{RootApplication: r.RootApplication, TargetScope: "application", TargetState: "active", TargetReason: "Application/revision/UID rule; enabled/expiry are separate", ID: r.ID, Version: strconv.FormatUint(r.Version, 10), Action: r.Action, Priority: r.Priority, Scope: r.Filter, Disabled: r.Disabled, Expired: expired, Active: !r.Disabled && !expired, Expires: r.Expires}
+	return PolicyRuleRef{FollowsUpdates: r.FollowsUpdates(), RootApplication: r.RootApplication, TargetScope: "application", TargetState: "active", TargetReason: "Saved application identity/UID rule; follows_updates states revision handling; enabled/expiry are separate", ID: r.ID, Version: strconv.FormatUint(r.Version, 10), Action: r.Action, Priority: r.Priority, Scope: r.Filter, Disabled: r.Disabled, Expired: expired, Active: !r.Disabled && !expired, Expires: r.Expires}
 }
 func appPolicyRef(a PolicyIdentity) string {
 	b, _ := json.Marshal(a)
@@ -178,21 +179,21 @@ func coverage(mode, direction string, h *EnforcementStatus) (PolicyCoverage, Pol
 	d = evaluatorDefault(direction)
 	return c, d
 }
-func summaryFor(a PolicyIdentity, direction, mode string, h *EnforcementStatus, rules []policy.Rule, now time.Time) DirectionPolicy {
+func summaryFor(a PolicyIdentity, direction, mode string, h *EnforcementStatus, rules []policy.Rule, now time.Time, current ...identity.Application) DirectionPolicy {
 	c, d := coverage(mode, direction, h)
 	out := DirectionPolicy{Direction: direction, Configured: "absent", Reason: "No explicit stored rule for this application/revision/UID and direction", Rules: []PolicyRuleRef{}, Default: evaluatorDefault(direction), RuntimeDefault: d, Enforcement: c}
 	actions := map[string]bool{}
 	broad := map[string]bool{}
 	active := []policy.Rule{}
-	for _, r := range rules {
+	for _, r := range policy.CurrentProgramRules(rules, now) {
 		f := r.Filter
 		if !f.Process.IsZero() || f.AllPrograms {
 			continue
 		}
-		if !r.MatchesApplication(a.Key, a.Revision, a.UID) || f.Direction != direction {
+		if !r.MatchesApplication(a.Key, a.Revision, a.UID, current...) || f.Direction != direction {
 			continue
 		}
-		ref := ruleRef(r, now)
+		ref := ruleRef(r, now, current...)
 		ref.Kind = ruleKind(f)
 		out.Rules = append(out.Rules, ref)
 		if ref.Kind == "application" {
@@ -244,7 +245,7 @@ func summaryFor(a PolicyIdentity, direction, mode string, h *EnforcementStatus, 
 	}
 	for i, r := range active {
 		for _, other := range active[i+1:] {
-			if r.Action != other.Action && filtersOverlap(r.Filter, other.Filter) {
+			if r.Action != other.Action && filtersOverlap(canonicalRuleFilter(r, current...), canonicalRuleFilter(other, current...)) {
 				out.OverlappingActions = true
 			}
 		}
@@ -266,7 +267,7 @@ func (e *Engine) snapshotLocked(uid uint32, admin bool, h *EnforcementStatus, ex
 	sort.Slice(rules, func(i, j int) bool { return rules[i].ID < rules[j].ID })
 	refs := make([]PolicyRuleRef, 0, len(rules))
 	var expiry *time.Time
-	for _, r := range rules {
+	for _, r := range policy.CurrentProgramRules(rules, now) {
 		refs = append(refs, e.ruleRefLocked(r, now))
 		if now.Before(r.Expires) && (expiry == nil || r.Expires.Before(*expiry)) {
 			t := r.Expires
@@ -370,7 +371,7 @@ func (e *Engine) PolicyView(generation, expected string, uid uint32, admin bool,
 				out.Rows = append(out.Rows, assoc)
 				continue
 			}
-			group = &ApplicationPolicy{Ref: ref, Identity: a, ZoneFallbackRuleIDs: zoneFallbackIDs(rules, a.UID), ProcessIDs: []string{}, Incoming: summaryFor(a, "incoming", e.Mode, h, rules, now), Outgoing: summaryFor(a, "outgoing", e.Mode, h, rules, now)}
+			group = &ApplicationPolicy{Ref: ref, Identity: a, ZoneFallbackRuleIDs: zoneFallbackIDs(rules, a.UID), ProcessIDs: []string{}, Incoming: summaryFor(a, "incoming", e.Mode, h, rules, now, p.Application), Outgoing: summaryFor(a, "outgoing", e.Mode, h, rules, now, p.Application)}
 			groups[ref] = group
 		}
 		seen := false
@@ -449,7 +450,7 @@ func (e *Engine) PolicyExplain(generation, expected string, eventIDs []string, u
 			result.Identity = &PolicyIdentity{a.Key, a.Revision, found.Attribution.Principal().UID}
 		}
 		for _, id := range ids {
-			for _, r := range rules {
+			for _, r := range policy.CurrentProgramRules(rules, snapshot.EvaluatedAt) {
 				if r.ID == id {
 					result.Matching = append(result.Matching, e.ruleRefLocked(r, snapshot.EvaluatedAt))
 					break

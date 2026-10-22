@@ -284,7 +284,7 @@ func (e *Engine) ObserveResolved(f identity.Flow, token string, a identity.Attri
 		}
 		v.ScopePreviews = map[string]string{
 			"once":        fmt.Sprintf("Once: %s %s, local %s, remote %s; this application/revision/user only. TCP: one connection (30 seconds to admit); UDP: fixed 30-second flow lease.", f.Direction, f.Protocol, f.Local, f.Remote),
-			"application": fmt.Sprintf("Remember for one hour (memory only): application %s; revision %s; user %d; %s %s; remote address %s; %s. Other local addresses may match. No permission for another application reusing this port.", filter.Application, filter.Revision, filter.UID, filter.Direction, filter.Protocol, filter.RemoteAddress, service),
+			"application": fmt.Sprintf("Remember for one hour (memory only): program %s; captured revision %s; user %d; %s %s; remote address %s; %s. Other local addresses may match. Saved application permissions follow updates of the same verified program; other programs, users and prefixes stay separate.", filter.Application, filter.Revision, filter.UID, filter.Direction, filter.Protocol, filter.RemoteAddress, service),
 		}
 		if e.SaveRules != nil {
 			v.ScopePreviews["application"] = strings.Replace(v.ScopePreviews["application"], "memory only", "saved to disk; absolute expiry survives restart", 1)
@@ -460,7 +460,7 @@ func (e *Engine) decideLocked(id, action, scope string, uid uint32, admin bool, 
 			if why := identity.RuntimeRuleBlocked(a.Application); why != "" {
 				return Event{}, mutationError(identity.CodeIdentityUnverifiable, why)
 			}
-			r := policy.Rule{Version: 1, Executable: a.Application.Executable, Invocation: attributionInvocation(a), Schema: 2, ID: "user:" + v.ID, Priority: 100, Action: action, Filter: policy.Remembered(v.Flow, a), Created: now, Expires: now.Add(time.Hour)}
+			r := policy.Rule{Version: 1, Executable: a.Application.KeyPath(), Invocation: attributionInvocation(a), Schema: 2, ID: "user:" + v.ID, Priority: 100, Action: action, Filter: policy.Remembered(v.Flow, a), Created: now, Expires: now.Add(time.Hour)}
 			if scope == "persistent" {
 				r.Expires = time.Time{}
 			}
@@ -468,13 +468,13 @@ func (e *Engine) decideLocked(id, action, scope string, uid uint32, admin bool, 
 				r = *reviewed
 			}
 			r = e.rootScope(r)
-			if other := duplicate(e.rules, r); other != "" {
+			if other := duplicate(e.rules, r, *a.Application); other != "" {
 				return Event{}, fmt.Errorf("duplicate scope exists as %s; edit the existing rule", other)
 			}
 			next := append(append([]policy.Rule{}, e.rules...), r)
 			for i, old := range e.rules {
 				if reviewed != nil && old.ID == r.ID {
-					if old.Version+1 != r.Version || canonicalFilter(old.Filter) != canonicalFilter(r.Filter) {
+					if old.Version+1 != r.Version || canonicalRuleFilter(old, *a.Application) != canonicalRuleFilter(r, *a.Application) {
 						return Event{}, mutationError("policy_conflict", "The remembered rule changed since review; review again")
 					}
 					next = append([]policy.Rule{}, e.rules...)
@@ -553,7 +553,7 @@ func (e *Engine) SetRules(rules []policy.Rule) error {
 	}
 	e.mu.Lock()
 	defer e.unlockAndSettle()
-	rules = append([]policy.Rule{}, rules...)
+	rules = append([]policy.Rule{}, policy.LatestProgramRules(rules)...)
 	changed := false
 	for i := range rules {
 		next := e.rootScope(rules[i])

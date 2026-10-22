@@ -35,8 +35,8 @@ func TestPairedRootApplicationScope(t *testing.T) {
 	}
 	other = app
 	other.Revision = "v2"
-	if eval([]Rule{r}, 0, other) != "ask" {
-		t.Fatal("different revision allowed")
+	if eval([]Rule{r}, 0, other) != "allow" {
+		t.Fatal("explicitly shared program lost permissions after update")
 	}
 	for _, prefix := range []string{"/prefix-a", "/prefix-b"} {
 		other = app

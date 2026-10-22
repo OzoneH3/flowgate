@@ -299,10 +299,8 @@ func serve() error {
 		if err != nil {
 			return err
 		}
-		var rules []policy.Rule
-		decoder := json.NewDecoder(strings.NewReader(string(b)))
-		decoder.DisallowUnknownFields()
-		if err = decoder.Decode(&rules); err != nil {
+		rules, err := decodeImportedRules(b)
+		if err != nil {
 			return err
 		}
 		if err = e.SetRules(rules); err != nil {

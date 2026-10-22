@@ -362,12 +362,27 @@ touching only that run's `quit`. SYN-ACK holding uses private-namespace fixture 
 rules, deleted before READY. It never starts FlowGate enforcement, loads BPF or
 uses a host endpoint. UI controls only this disposable daemon/database.
 
+## Saved application update scope
+
+Ordinary saved application rules follow new verified revisions of the same stable
+program identity (user, kind, prefix and executable key path). Process grants,
+Once/For-a-while leases and essential presets remain revision/lifetime-bound.
+The original rule revision is retained as capture evidence. All action, direction,
+endpoint, zone, expiry and explicit root-sharing scopes remain intact.
+
+List `rules`, `saved_rule` and policy-view rule references include a read-only
+`follows_updates` boolean. It is derived by the backend; it is absent from stored
+rule JSON and client-supplied values confer no permission. The flag describes configured scope consistently, including rules-only replies; current verified runtime evidence is still required at admission. Older
+clients may ignore the additive property. See SEMANTICS.md for the same-identity
+replacement behavior and its limits.
+
 ## Application display metadata
 
 `application-display-metadata-v1` adds `display_name`, `display_executable` and
 `executable_status` (`linked`, `deleted`, `unavailable`) to application metadata.
 A verified zero-link `/proc/PID/exe` is displayed without its kernel ` (deleted)`
-suffix; legacy name/executable, key and revision stay unchanged. Display paths
+suffix. The running file revision stays exact; native keys normalize this kernel
+suffix only after verified zero-link evidence, retaining the same program identity. Display paths
 may select an installed desktop icon, never authorize a policy or substitute the
 replacement file's identity. The old running image remains a separate revision.
 Read-only host Firefox inspection found PID3053 running zero-link inode5706575;

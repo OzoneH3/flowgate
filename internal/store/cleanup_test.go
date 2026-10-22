@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/json"
+	"flowgate/internal/identity"
 	"flowgate/internal/policy"
 	"os"
 	"path/filepath"
@@ -160,5 +161,91 @@ func TestArchiveBoundAndOversizedLegacyDatabaseRecovery(t *testing.T) {
 	st, err = os.Stat(path)
 	if err != nil || st.Size() >= 16<<20 {
 		t.Fatal("archive pages were not reclaimed", st, err)
+	}
+}
+
+func TestCleanupPreservesSavedProgramPermissionsAcrossUpdates(t *testing.T) {
+	s, err := OpenExclusive(filepath.Join(t.TempDir(), "rules.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.Now().UTC()
+	r := policy.Rule{ID: "program", Schema: 2, Executable: "/opt/program/native", Created: now, Action: "allow", Filter: policy.Filter{Application: identity.ApplicationKey(1000, identity.Application{Kind: "native", Executable: "/opt/program/native"}), Revision: "old", UID: 1000, Direction: "outgoing", Protocol: "*", RemoteAddress: "*"}}
+	if err = s.Replace([]policy.Rule{r}); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	got, err := s.loadCurrent(now, func(string, string, string, uint32) bool { called = true; return true })
+	if err != nil || len(got) != 1 || called {
+		t.Fatal("update discarded program permission", got, err, called)
+	}
+	if !got[0].MatchesApplication(r.Filter.Application, "updated", 1000) {
+		t.Fatal("saved permission does not follow update")
+	}
+	if got[0].MatchesApplication(r.Filter.Application, "updated", 1001) {
+		t.Fatal("update transferred users")
+	}
+}
+
+func TestCleanupArchivesSupersededScopeBeforeExpiredNewest(t *testing.T) {
+	s, err := OpenExclusive(filepath.Join(t.TempDir(), "rules.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.Now().UTC()
+	app := identity.Application{Kind: "native", Executable: "/opt/program/native"}
+	old := policy.Rule{ID: "old", Schema: 2, Executable: app.Executable, Created: now.Add(-time.Hour), Action: "allow", Filter: policy.Filter{Application: identity.ApplicationKey(1000, app), Revision: "old", UID: 1000, Direction: "outgoing", Protocol: "*"}}
+	latest := old
+	latest.ID = "latest"
+	latest.Created = now
+	latest.Filter.Revision = "new"
+	latest.Action = "block"
+	old.Expires = now.Add(-2 * expiryArchiveGrace)
+	latest.Expires = now.Add(-expiryArchiveGrace)
+	if err = s.Replace([]policy.Rule{old, latest}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.db.Exec("CREATE TRIGGER refuse_cleanup BEFORE DELETE ON rules BEGIN SELECT RAISE(ABORT, 'failure'); END"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.loadCurrent(now, func(string, string, string, uint32) bool { return false }); err == nil {
+		t.Fatal("expected transaction failure")
+	}
+	if r, _ := s.Load(); len(r) != 2 {
+		t.Fatal("lost rule on failed archive")
+	}
+	s.db.Exec("DROP TRIGGER refuse_cleanup")
+	got, err := s.loadCurrent(now, func(string, string, string, uint32) bool { return false })
+	if err != nil || len(got) != 0 {
+		t.Fatal("expired latest revived old grant", got, err)
+	}
+	var reason string
+	if err = s.db.QueryRow("SELECT reason FROM archived_rules WHERE rule_id='old'").Scan(&reason); err != nil || reason != "superseded program scope" {
+		t.Fatal(reason, err)
+	}
+}
+
+func TestTemporaryUpdateChoiceDoesNotArchivePersistentRule(t *testing.T) {
+	s, err := OpenExclusive(filepath.Join(t.TempDir(), "rules.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.Now().UTC()
+	r := policy.Rule{ID: "persistent", Executable: "/opt/tool", Schema: 2, Created: now.Add(-time.Hour), Action: "block", Filter: policy.Filter{Application: "app", Revision: "v1", UID: 1000, Direction: "outgoing", Protocol: "*"}}
+	temporary := r
+	temporary.ID = "temporary"
+	temporary.Created = now
+	temporary.Action = "allow"
+	temporary.Filter.Revision = "v2"
+	temporary.Expires = now.Add(time.Hour)
+	if err = s.Replace([]policy.Rule{r, temporary}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.loadCurrent(now, func(string, string, string, uint32) bool { return false })
+	if err != nil || len(got) != 2 {
+		t.Fatal("temporary erased persistent", got, err)
 	}
 }

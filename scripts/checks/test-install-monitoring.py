@@ -197,6 +197,9 @@ class MigrationVerification(unittest.TestCase):
    with self.assertRaises(RuntimeError):m.verified_rule_transition(self.before,self.after)
   self.write(self.after,[])
   with self.assertRaises(RuntimeError):m.verified_rule_transition(self.before,self.after)
+ def test_archived_superseded_scope(self):
+  self.write(self.after,[],[(self.rule,"superseded program scope")])
+  self.assertEqual(m.verified_rule_transition(self.before,self.after),[])
  def test_archived_cleanup_only(self):
   self.write(self.after,[],[(self.rule,'replaced executable; no old process found')])
   self.assertEqual(m.verified_rule_transition(self.before,self.after),[])

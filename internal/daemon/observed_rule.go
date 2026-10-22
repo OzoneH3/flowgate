@@ -224,7 +224,7 @@ func (e *Engine) PreviewObservedRule(generation string, target ObservedTarget, d
 	if len(e.rules) >= 256 {
 		return ObservedPreview{}, mutationError("limit_exceeded", "Rule capacity reached")
 	}
-	candidate := policy.Rule{ShareWithRoot: draft.ShareWithRoot, ID: "user:" + randomID(), Version: 1, Created: now, Executable: current.Application.Executable, Invocation: ruleInvocation(current.Application, p.Provenance), Priority: 100, Action: draft.Action, Disabled: draft.Disabled, Expires: *draft.Expires, Filter: policy.Filter{NetworkZone: draft.NetworkZone, Application: current.Application.Key, Revision: current.Application.Revision, UID: current.UID, Direction: draft.Direction, Protocol: draft.Protocol, RemoteAddress: draft.RemoteAddress, LocalPort: *draft.LocalPort, RemotePort: *draft.RemotePort}}
+	candidate := policy.Rule{ShareWithRoot: draft.ShareWithRoot, ID: "user:" + randomID(), Version: 1, Created: now, Executable: current.Application.KeyPath(), Invocation: ruleInvocation(current.Application, p.Provenance), Priority: 100, Action: draft.Action, Disabled: draft.Disabled, Expires: *draft.Expires, Filter: policy.Filter{NetworkZone: draft.NetworkZone, Application: current.Application.Key, Revision: current.Application.Revision, UID: current.UID, Direction: draft.Direction, Protocol: draft.Protocol, RemoteAddress: draft.RemoteAddress, LocalPort: *draft.LocalPort, RemotePort: *draft.RemotePort}}
 	if processScope(draft) == "process" {
 		if _, err = e.attachProcessTarget(current, &candidate); err != nil {
 			return ObservedPreview{}, err
@@ -236,7 +236,7 @@ func (e *Engine) PreviewObservedRule(generation string, target ObservedTarget, d
 	e.bindZoneModel(&candidate)
 	var replaces *RuleVersionRef
 	if draft.ApplicationPolicy {
-		if old := e.canonicalPolicyRuleLocked(candidate); old != nil {
+		if old := e.canonicalPolicyRuleLocked(candidate, current.Application); old != nil {
 			if old.Version == ^uint64(0) {
 				return ObservedPreview{}, mutationError("limit_exceeded", "Rule version exhausted")
 			}
@@ -352,7 +352,7 @@ func (e *Engine) SaveObservedRule(generation, token string, draft ObservedDraft,
 		for i, r := range e.rules {
 			if r.ID == ref.ID {
 				at = i
-				if r.Version != ref.Version || e.canonicalPolicyRuleLocked(candidate) == nil {
+				if r.Version != ref.Version || e.canonicalPolicyRuleLocked(candidate, p.View.Application) == nil {
 					at = -2
 				}
 			}
@@ -365,7 +365,7 @@ func (e *Engine) SaveObservedRule(generation, token string, draft ObservedDraft,
 	}
 	if p.View.Replaces == nil && candidate.Version == 1 && p.Draft != "" {
 		var d ObservedDraft
-		if json.Unmarshal([]byte(p.Draft), &d) == nil && d.ApplicationPolicy && e.canonicalPolicyRuleLocked(candidate) != nil {
+		if json.Unmarshal([]byte(p.Draft), &d) == nil && d.ApplicationPolicy && e.canonicalPolicyRuleLocked(candidate, p.View.Application) != nil {
 			return policy.Rule{}, "", false, mutationError("policy_conflict", "An application rule for this scope was created since preview; refresh")
 		}
 	}
@@ -407,14 +407,15 @@ func (e *Engine) SaveObservedRule(generation, token string, draft ObservedDraft,
 // canonicalPolicyRuleLocked returns the stored user rule with exactly the same
 // whole-target scope (identity, direction, zone, process binding, TCP+UDP, any
 // address/ports). Scoped, preset and zone-wide rules never qualify.
-func (e *Engine) canonicalPolicyRuleLocked(c policy.Rule) *policy.Rule {
-	want := canonicalFilter(c.Filter)
+func (e *Engine) canonicalPolicyRuleLocked(c policy.Rule, current ...identity.Application) *policy.Rule {
+	want := canonicalRuleFilter(c, current...)
 	if want.Protocol != "*" || want.RemoteAddress != "*" || want.LocalPort != 0 || want.RemotePort != 0 || want.AllPrograms {
 		return nil
 	}
 	for i := range e.rules {
 		r := &e.rules[i]
-		if r.Preset == nil && canonicalFilter(r.Filter) == want {
+		filter := canonicalRuleFilter(*r, current...)
+		if r.Preset == nil && filter == want {
 			return r
 		}
 	}

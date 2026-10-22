@@ -535,6 +535,12 @@ func (a Application) KeyPath() string {
 	if a.HostExecutable != "" {
 		return a.HostExecutable
 	}
+	// A verified unlinked native image is still this program. Only Inspect's
+	// inode link-count evidence grants this normalization; a linked file with
+	// a literal " (deleted)" suffix remains a different program.
+	if a.Kind == "native" && a.ExecutableStatus == "deleted" {
+		return strings.TrimSuffix(a.Executable, " (deleted)")
+	}
 	return a.Executable
 }
 

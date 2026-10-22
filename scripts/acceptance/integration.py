@@ -28,6 +28,26 @@ try:
     ca=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);ca.connect(('127.0.0.1',24109));ca.send(b'first');av=wait(lambda:pending(24109));decide(av,'allow','application')
     cb=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);cb.connect(('127.0.0.1',24110));cb.send(b'first');bv=wait(lambda:pending(24110));assert av['attribution']['application']['key']!=bv['attribution']['application']['key'];decide(bv,'block','application')
     ca.send(b'allowed');cb.send(b'blocked');wait(lambda:delivered(ap));assert not delivered(bp)
+    # Saved program permission survives an atomic executable update. Both the
+    # still-running unlinked image and a fresh process must deliver without a
+    # second prompt; a different executable still cannot reuse that permission.
+    original=av['attribution']['application']
+    previous=ap.read_text().count('RECEIVED')
+    executable=ROOT/'.workspace/native-a'
+    replacement=RUN/'native-update'
+    replacement.write_bytes(executable.read_bytes()+b'\0program-update-fixture')
+    replacement.chmod(0o755)
+    os.replace(replacement,executable)
+    ca.send(b'old-image-after-update')
+    wait(lambda:ap.read_text().count('RECEIVED')>previous)
+    assert not pending(24109),'unlinked running program reprompted'
+    a.terminate();a.wait();a,ap=native('native-a',24109)
+    ca.send(b'updated-program')
+    wait(lambda:delivered(ap))
+    updated=wait(lambda:next((e for e in events() if e['flow']['local'].endswith(':24109') and e['state']=='allowed' and e['attribution'].get('application',{}).get('revision')!=original['revision']),None))
+    assert updated['attribution']['application']['key']==original['key'],'program identity changed during update'
+    assert not pending(24109),'updated program required another decision'
+    print('PASS saved program update delivers for old unlinked and new images without another prompt',flush=True)
     a.terminate();a.wait();a,ap=native('native-b',24109);ca.send(b'not-port-wide');wait(lambda:pending(24109));assert not delivered(ap)
     print('PASS distinct native app rules and cross-application port reuse',flush=True)
     # Kernel SO_REUSEPORT candidates must remain ambiguous, even under one PID.

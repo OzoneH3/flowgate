@@ -80,7 +80,7 @@ func (e *Engine) previousRevisionRulesLocked(v *Event) []RevisionRuleRef {
 	var out []RevisionRuleRef
 	for _, r := range e.rules {
 		f := r.Filter
-		if r.Disabled || r.Preset != nil || f.AllPrograms || !f.Process.IsZero() || (!r.Expires.IsZero() && !now.Before(r.Expires)) {
+		if r.FollowsUpdates() || r.Disabled || r.Preset != nil || f.AllPrograms || !f.Process.IsZero() || (!r.Expires.IsZero() && !now.Before(r.Expires)) {
 			continue
 		}
 		if f.Application != app.Key || f.Revision == "" || f.Revision == app.Revision || f.Direction != v.Flow.Direction || (!f.AllUIDs && f.UID != p.UID) {

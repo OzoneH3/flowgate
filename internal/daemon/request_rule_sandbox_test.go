@@ -147,7 +147,7 @@ func TestSandboxRequestRuleAfterExitBindsVerifiedIdentity(t *testing.T) {
 	if n := s.Observe(s.f, "sibling"); n.State != "awaiting-decision" {
 		t.Fatal("sibling executable inherited the rule", n)
 	}
-	// Replaced file at the reused host path: new revision, prompts again.
+	// An updated file at the same verified host identity inherits saved program scope.
 	tmp := host + ".new"
 	os.WriteFile(tmp, []byte("reporter v2"), 0o755)
 	os.Rename(tmp, host)
@@ -156,8 +156,8 @@ func TestSandboxRequestRuleAfterExitBindsVerifiedIdentity(t *testing.T) {
 		t.Fatal("fixture")
 	}
 	*s.a = sandboxAttribution(replaced, 1000, 80, "mnt:[2005]", "replaced")
-	if n := s.Observe(s.f, "replaced"); n.State != "awaiting-decision" {
-		t.Fatal("replaced executable matched the rule", n)
+	if n := s.Observe(s.f, "replaced"); n.State != "allowed" {
+		t.Fatal("updated verified program lost saved permissions", n)
 	}
 }
 
@@ -336,7 +336,7 @@ func TestRuntimeContentRuleSurvivesTemporaryHardlinkChurn(t *testing.T) {
 	changed := app
 	changed.Revision = "sha256:" + strings.Repeat("0", 64)
 	*s.a = sandboxAttribution(changed, 1000, 80, "mnt:[2005]", "changed")
-	if n := s.Observe(s.f, "changed"); n.State != "awaiting-decision" {
-		t.Fatal("modified runtime inherited rule", n)
+	if n := s.Observe(s.f, "changed"); n.State != "allowed" {
+		t.Fatal("updated verified runtime lost saved program permissions", n)
 	}
 }

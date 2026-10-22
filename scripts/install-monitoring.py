@@ -104,7 +104,7 @@ def verified_rule_transition(before_db,after_db,administrator_uid=1000):
  for rid,old in before.items():
   new=after.get(rid)
   if new is None:
-   if not any(i==rid and d==old and reason in ('expired','replaced executable; no old process found')for i,d,reason in archives):
+   if not any(i==rid and d==old and reason in ('expired','replaced executable; no old process found','superseded program scope')for i,d,reason in archives):
     raise RuntimeError('Rule disappeared without matching cleanup archive: '+rid)
    continue
   if new==old:continue
