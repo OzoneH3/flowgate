@@ -417,3 +417,5 @@ that batch; no previous refresh donates an association. Unix descriptor holders
 remain visible. Busy or incomplete observations stay unidentified, and admission
 continues to use its independent per-request census. Broker groups rotate when
 one refresh's scheduling budget cannot cover them all.
+
+Wine Activity annotation also covers connected and unconnected UDP sockets. Each protocol/address-family table is independently bookended around the fresh kernel ownership census; an unconnected socket identifies no remote peer or direction. Ambiguous Windows holders remain unidentified. These display associations do not grant permissions: observed-rule creation still performs a fresh admission resolution. Closed TCP sockets without userspace owners remain unidentified.

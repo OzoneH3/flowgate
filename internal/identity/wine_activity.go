@@ -7,6 +7,20 @@ import (
 	"time"
 )
 
+// A protocol/family pair names one independent runtime owner table.
+type activityTableKey struct {
+	protocol string
+	family   int
+}
+
+func activityTable(s Socket) activityTableKey {
+	family := 4
+	if s.Family == 10 {
+		family = 6
+	}
+	return activityTableKey{s.Protocol, family}
+}
+
 // AnnotateActivity batches all sockets of a broker, rather than repeatedly
 // spending the refresh budget on the same first eight sockets. No association
 // survives between snapshots. Admission still uses its independent census.
@@ -16,7 +30,7 @@ func (m *WineObservers) AnnotateActivity(s *ActivitySnapshot) {
 	}
 	groups := map[string][]int{}
 	for i, r := range s.Rows {
-		if r.Socket.Protocol != "tcp" || (r.Socket.State != 1 && r.Socket.State != 2) {
+		if r.Socket.Protocol != "udp" && (r.Socket.Protocol != "tcp" || (r.Socket.State != 1 && r.Socket.State != 2)) {
 			continue
 		}
 		for _, id := range r.Owners {
@@ -50,7 +64,7 @@ func (m *WineObservers) AnnotateActivity(s *ActivitySnapshot) {
 		if record == nil {
 			// Discovery/setup remains subject to the normal pinned-broker validation.
 			row := s.Rows[indices[0]]
-			m.TryResolve(Flow{NetNS: row.Socket.NetNS, Protocol: "tcp", Direction: "outgoing", Local: row.Socket.Local, Remote: row.Socket.Remote})
+			m.TryResolve(Flow{NetNS: row.Socket.NetNS, Protocol: row.Socket.Protocol, Direction: "outgoing", Local: row.Socket.Local, Remote: row.Socket.Remote})
 		}
 		select {
 		case m.census <- struct{}{}:
@@ -99,19 +113,16 @@ func (w *WineTable) activityBatch(s *ActivitySnapshot, indices []int, broker *Pr
 	if w.session == nil || !w.session.current() || !w.sameServer(broker) {
 		return nil
 	}
-	first := map[int]tableSnapshot{}
-	second := map[int]tableSnapshot{}
+	first := map[activityTableKey]tableSnapshot{}
+	second := map[activityTableKey]tableSnapshot{}
 	for _, i := range indices {
-		family := 4
-		if s.Rows[i].Socket.Family == 10 {
-			family = 6
-		}
-		if _, ok := first[family]; !ok {
-			v, e := w.snapshotFamily("tcp", family)
+		key := activityTable(s.Rows[i].Socket)
+		if _, ok := first[key]; !ok {
+			v, e := w.snapshotFamily(key.protocol, key.family)
 			if e != nil {
 				return nil
 			}
-			first[family] = v
+			first[key] = v
 		}
 	}
 	c := ActivityCollector{}
@@ -119,12 +130,12 @@ func (w *WineTable) activityBatch(s *ActivitySnapshot, indices []int, broker *Pr
 	if !fresh.Complete {
 		return nil
 	}
-	for family := range first {
-		v, e := w.snapshotFamily("tcp", family)
+	for key := range first {
+		v, e := w.snapshotFamily(key.protocol, key.family)
 		if e != nil {
 			return nil
 		}
-		second[family] = v
+		second[key] = v
 	}
 	sockets, e := SocketsLimited(2048)
 	if e != nil || !w.session.current() || !w.sameServer(broker) {
@@ -157,7 +168,7 @@ func activityAttribution(s *ActivitySnapshot, r ActivityRow) Attribution {
 	return a
 }
 
-func (w *WineTable) annotateCensus(s, fresh *ActivitySnapshot, sockets []Socket, indices []int, broker *Process, first, second map[int]tableSnapshot, visible func(*Process, string, string) bool) map[int]*RuntimeApplication {
+func (w *WineTable) annotateCensus(s, fresh *ActivitySnapshot, sockets []Socket, indices []int, broker *Process, first, second map[activityTableKey]tableSnapshot, visible func(*Process, string, string) bool) map[int]*RuntimeApplication {
 	result := map[int]*RuntimeApplication{}
 	current := map[string]ActivityRow{}
 	for _, r := range fresh.Rows {
@@ -170,7 +181,7 @@ func (w *WineTable) annotateCensus(s, fresh *ActivitySnapshot, sockets []Socket,
 			continue
 		}
 		a, again := activityAttribution(s, row), activityAttribution(fresh, now)
-		f := Flow{NetNS: row.Socket.NetNS, Protocol: "tcp", Direction: "outgoing", Local: row.Socket.Local, Remote: row.Socket.Remote}
+		f := Flow{NetNS: row.Socket.NetNS, Protocol: row.Socket.Protocol, Direction: "outgoing", Local: row.Socket.Local, Remote: row.Socket.Remote}
 		if row.Socket.NetNS != broker.NetNS || !a.VisibilityComplete || !again.VisibilityComplete || !sameBrokerGeneration(*broker, a.Owners) || !sameBrokerGeneration(*broker, again.Owners) || broker.Application.Prefix != w.prefix {
 			continue
 		}
@@ -186,15 +197,12 @@ func (w *WineTable) annotateCensus(s, fresh *ActivitySnapshot, sockets []Socket,
 		if !valid {
 			continue
 		}
-		family := 4
-		if row.Socket.Family == 10 {
-			family = 6
-		}
-		if family == 6 && f.Local.Addr().Is4() && (row.Socket.V6Only == nil || *row.Socket.V6Only) {
+		key := activityTable(row.Socket)
+		if key.family == 6 && f.Local.Addr().Is4() && (row.Socket.V6Only == nil || *row.Socket.V6Only) {
 			continue
 		}
-		before, ok1 := first[family]
-		after, ok2 := second[family]
+		before, ok1 := first[key]
+		after, ok2 := second[key]
 		if !ok1 || !ok2 {
 			continue
 		}
