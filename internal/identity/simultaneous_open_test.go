@@ -88,8 +88,8 @@ func TestRealSelfConnectIncomingResolvesToOwner(t *testing.T) {
 			if len(a.Sockets) != 1 || len(a.Owners) != 1 || a.Owners[0].PID != os.Getpid() {
 				t.Fatalf("self-connect incoming side has no receiving socket/owner: %s %s %+v", a.Status, a.Reason, a.Owners)
 			}
-			// Excluding every other owner needs complete process visibility (root).
-			if os.Geteuid() == 0 && a.Application == nil {
+			// Excluding every other owner needs complete process visibility.
+			if a.VisibilityComplete && a.Application == nil {
 				t.Fatalf("self-connect incoming side unattributed: %s %s", a.Status, a.Reason)
 			}
 			// The same port with another remote has no receiver (no listener exists).

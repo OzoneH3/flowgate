@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -63,6 +64,21 @@ func ComparePendingBinding(before, after Attribution, at time.Time) PendingReval
 		return strings.Join(ids, ",")
 	}
 	add("socket_inode_cookie", sockets(before), sockets(after))
+	// Runtime-table evidence is part of a Wine fingerprint: name which part changed
+	// (holder rows, including transient TCP state, or the census helper instance).
+	if before.Table != nil || after.Table != nil {
+		table := func(a Attribution) (string, string) {
+			if a.Table == nil {
+				return "unavailable", "unavailable"
+			}
+			b, _ := json.Marshal(a.Table.Owners)
+			return string(b), a.Table.Generation
+		}
+		beforeRows, beforeGeneration := table(before)
+		afterRows, afterGeneration := table(after)
+		add("runtime_table_holders", beforeRows, afterRows)
+		add("runtime_table_generation", beforeGeneration, afterGeneration)
+	}
 	add("owner_pid_start_set", owners(before), owners(after))
 	old := map[int]Process{}
 	for _, p := range before.Owners {

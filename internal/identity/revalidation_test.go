@@ -57,3 +57,50 @@ func TestPendingBindingComparisonSeparatesSocketAndProcess(t *testing.T) {
 		t.Fatal("diagnostic failure claimed socket closure")
 	}
 }
+
+// A Wine fingerprint also covers runtime-table holders and the census helper
+// instance. A fingerprint-only mismatch names which of them changed; identical
+// table evidence and native attributions report neither.
+func TestPendingBindingNamesRuntimeTableChanges(t *testing.T) {
+	app := Application{Key: "a", Revision: "r"}
+	holder := WindowsOwner{PID: 20, Created: 2, Image: `Z:\alpha.exe`, Address: "::1", Port: 40000, State: 3, RemoteAddress: "::1", RemotePort: 40000}
+	original := Attribution{Application: &app, VisibilityComplete: true, Fingerprint: "old", Owners: []Process{{PID: 10, Start: "20", UID: 1000, Application: app}}, Sockets: []Socket{{Inode: 123, Cookie: "c", NetNS: "n"}},
+		Table: &TableEvidence{Owners: []WindowsOwner{holder}, Generation: "g1"}}
+	fields := func(next Attribution) map[string]bool {
+		out := map[string]bool{}
+		for _, c := range ComparePendingBinding(original, next, time.Now()).Changes {
+			out[c.Field] = true
+		}
+		return out
+	}
+	changed := func(mutate func(*TableEvidence)) Attribution {
+		next := original
+		table := *original.Table
+		table.Owners = append([]WindowsOwner{}, original.Table.Owners...)
+		mutate(&table)
+		next.Table, next.Fingerprint = &table, "new"
+		return next
+	}
+	if f := fields(changed(func(t *TableEvidence) { t.Owners[0].State = 5 })); !f["runtime_table_holders"] || f["runtime_table_generation"] {
+		t.Fatalf("holder state change not named: %v", f)
+	}
+	if f := fields(changed(func(t *TableEvidence) { t.Generation = "g2" })); !f["runtime_table_generation"] || f["runtime_table_holders"] {
+		t.Fatalf("helper generation change not named: %v", f)
+	}
+	if f := fields(changed(func(*TableEvidence) {})); f["runtime_table_holders"] || f["runtime_table_generation"] {
+		t.Fatalf("identical table evidence reported a change: %v", f)
+	}
+	lost := original
+	lost.Table = nil
+	if f := fields(lost); !f["runtime_table_holders"] || !f["runtime_table_generation"] {
+		t.Fatalf("lost table evidence not named: %v", f)
+	}
+	native := original
+	native.Table = nil
+	r := ComparePendingBinding(native, native, time.Now())
+	for _, c := range r.Changes {
+		if c.Field == "runtime_table_holders" || c.Field == "runtime_table_generation" {
+			t.Fatalf("native attribution reported table fields: %v", r.Changes)
+		}
+	}
+}

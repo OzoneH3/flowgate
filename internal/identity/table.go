@@ -42,6 +42,9 @@ type TableEvidence struct {
 	UID          uint32         `json:"uid"`
 	Owners       []WindowsOwner `json:"windows_handle_holders"`
 	Method       string         `json:"method"`
+	// Generation identifies the census helper instance; it is part of the
+	// attribution fingerprint, so revalidation reports it when it changes.
+	Generation string `json:"table_generation,omitempty"`
 }
 type tableSnapshot struct {
 	Family   int            `json:"family"`
@@ -381,7 +384,7 @@ func (w *WineTable) resolveLocked(f Flow) Attribution {
 		a.Reason = "ownership changed during runtime census"
 		return a
 	}
-	a.Table = &TableEvidence{Runtime: first.Version, Prefix: w.prefix, BrokerPID: broker.PID, BrokerStart: broker.Start, SocketCookie: a.Sockets[0].Cookie, UID: broker.UID, Owners: rows, Method: "two family-specific runtime owner-table snapshots bookending kernel cookie/FD census; ordinary same-user non-adversarial snapshot model"}
+	a.Table = &TableEvidence{Runtime: first.Version, Prefix: w.prefix, BrokerPID: broker.PID, BrokerStart: broker.Start, SocketCookie: a.Sockets[0].Cookie, UID: broker.UID, Owners: rows, Generation: w.generation, Method: "two family-specific runtime owner-table snapshots bookending kernel cookie/FD census; ordinary same-user non-adversarial snapshot model"}
 	a.Fingerprint = digest(fingerprint([]Process{*broker}, a.Sockets) + w.generation + string(b))
 	if len(rows) != 1 {
 		a.Status = "multiple-candidates"
