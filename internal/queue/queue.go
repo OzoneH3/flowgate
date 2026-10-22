@@ -9,8 +9,10 @@ import (
 	"flowgate/internal/identity"
 	"fmt"
 	nfqueue "github.com/florianl/go-nfqueue/v2"
+	"github.com/mdlayher/netlink"
 	"log"
 	"net/netip"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -99,11 +101,28 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 		}
 		cancel()
 	}
+	var selfFailures atomic.Uint64
+	var selfFailureReason atomic.Pointer[string]
+	selfFailure := func(err error) {
+		selfFailures.Add(1)
+		reason := err.Error()
+		selfFailureReason.Store(&reason)
+	}
+	var selfUpdates sync.Map // packet ID -> exact kernel connection update; removed on every verdict
 	submitVerdict := func(id uint32, allow bool) (bool, error) {
 		if allow && ctx.Err() != nil {
 			allow = false
 		}
 		var err error
+		if update, ok := selfUpdates.LoadAndDelete(id); ok && allow {
+			if err = applySelfConnectUpdate(update.(netlink.Message)); err != nil {
+				selfFailure(err)
+				allow = false
+			}
+		}
+		if ctx.Err() != nil {
+			allow = false
+		}
 		if allow && labMark {
 			err = nf.SetVerdictWithOption(id, nfqueue.NfAccept, nfqueue.WithConnMark(Mark))
 		} else if allow {
@@ -137,6 +156,13 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 		verdictPacket(p.id, false)
 	})
 	report := func() {
+		if n := selfFailures.Swap(0); n != 0 {
+			reason := "unknown"
+			if r := selfFailureReason.Load(); r != nil {
+				reason = *r
+			}
+			log.Printf("queue %d: self-connection tracking failures %d: %s", number, n, reason)
+		}
 		if n := receiveOverflow.Swap(0); n != 0 {
 			log.Printf("queue %d: %d netlink receive overflow notifications; packets may have been dropped; continuing protection", number, n)
 		}
@@ -192,6 +218,20 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 				}
 				if packetDirection == "outgoing" && a.OutDev != nil {
 					f.Interface = *a.OutDev
+				}
+				if selfConnect(f) {
+					var raw []byte
+					if a.Ct != nil {
+						raw = *a.Ct
+					}
+					update, updateErr := selfConnectUpdate(f, raw)
+					if updateErr != nil {
+						// Keep ordinary attribution/prompt/logging when this optional
+						// compatibility adjustment cannot be safely prepared.
+						selfFailure(updateErr)
+					} else {
+						selfUpdates.Store(*a.PacketID, update)
+					}
 				}
 				if workers.submitWait(ctx, packetJob{id: *a.PacketID, size: len(*a.Payload), flow: f, token: token, deadline: time.Now().Add(AttributionTimeout)}) {
 					return 0

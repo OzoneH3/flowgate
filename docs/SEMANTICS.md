@@ -389,3 +389,22 @@ unconditional and is explicitly not concurrency-safe. Integrated Qt/Electron Del
 controls now require the conditional capability, freeze confirmation tokens and
 never replay an ambiguous mutation. Qt preserves uint64 tokens; Electron refuses
 versions outside its safe-integer range rather than rounding.
+
+### TCP loopback self-connections
+
+An incoming TCP SYN with identical local and remote loopback address and port,
+on a verified loopback interface, follows normal attribution and incoming policy.
+Only after an Allow, FlowGate may set the two per-connection TCP BE_LIBERAL window
+flags. This avoids conntrack rejecting later self-connection payloads as INVALID.
+No global TCP setting, admission mark, timeout, TCP state, or firewall rule is
+changed. Outgoing permission remains separate. Missing conntrack evidence skips
+this compatibility adjustment and preserves ordinary policy/prompt logging.
+
+The update uses the packet's confirmed original/reply tuple and zone. The kernel
+ignores CTA_ID on UPDATE, so FlowGate checks the connection ID before and after
+with GET and refuses the queued SYN on failure. This is not atomic CAS. The queued
+packet holds its original conntrack reference; a replacement must still pass its
+own SYN admission, and window flags grant no permission. Calls share a one-second
+deadline and run in the verdict path, not the receive callback. Failures are counted
+and reported at the queue log interval. Kernel regression tests cover IPv4/IPv6
+multi-payload delivery, incoming/outgoing denial, and mismatched connection IDs.
