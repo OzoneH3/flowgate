@@ -1,6 +1,7 @@
 package queue
 
 import (
+	"context"
 	"flowgate/internal/identity"
 	"fmt"
 	"sync"
@@ -17,6 +18,7 @@ const CensusWorkers = 2
 const MaxCensusPackets = 24
 const MaxCensusBytes = 1 << 19
 const AttributionTimeout = 5 * time.Second
+const AdmissionWait = 250 * time.Millisecond
 const recentCompletionWindow = time.Second
 
 type packetJob struct {
@@ -52,6 +54,8 @@ type packetWorkers struct {
 	count, bytes             int
 	censusCount, censusBytes int
 	stopped                  bool
+	capacity                 chan struct{}
+	stopping                 chan struct{}
 	displacing               bool // at most one callback-owned displaced packet at a time
 	wg                       sync.WaitGroup
 	process                  func(packetJob, bool, bool) bool // true = completed, false = needs census
@@ -64,7 +68,7 @@ func newPacketWorkers(n int, process func(packetJob, bool)) *packetWorkers {
 }
 
 func newPacketLanes(general, census int, process func(packetJob, bool, bool) bool, reject func(packetJob, rejectionCause)) *packetWorkers {
-	w := &packetWorkers{jobs: make(map[string][]packetJob), census: make(map[string]bool), active: make(map[string]bool), recent: make(map[string]time.Time), process: process, reject: reject}
+	w := &packetWorkers{jobs: make(map[string][]packetJob), census: make(map[string]bool), active: make(map[string]bool), recent: make(map[string]time.Time), capacity: make(chan struct{}, 1), stopping: make(chan struct{}), process: process, reject: reject}
 	for lane, n := range []int{general, census} {
 		w.wake[lane] = sync.NewCond(&w.mu)
 		for i := 0; i < n; i++ {
@@ -73,6 +77,54 @@ func newPacketLanes(general, census int, process func(packetJob, bool, bool) boo
 		}
 	}
 	return w
+}
+
+// submitWait is used only by the single NFQUEUE receive callback. On a short
+// burst, leave subsequent packets in bounded kernel/netlink buffers while workers
+// make room, instead of immediately dropping this connection's SYN. This owns
+// just the callback's existing packet; it creates no goroutines or extra queue.
+// Never renew the packet's attribution deadline, and bound head-of-line delay.
+func (w *packetWorkers) submitWait(ctx context.Context, p packetJob) bool {
+	until := time.Now().Add(AdmissionWait)
+	if p.deadline.Before(until) {
+		until = p.deadline
+	}
+	if p.size < 0 || p.size > MaxAttributionBytes {
+		return false
+	}
+	timer := time.NewTimer(time.Until(until))
+	defer timer.Stop()
+	for {
+		if ctx.Err() != nil || !time.Now().Before(until) {
+			return false
+		}
+		if w.submit(p) {
+			return true
+		}
+		w.mu.Lock()
+		key := p.key()
+		// A single saturated endpoint or census lane must not stall unrelated
+		// traffic in the receive callback. Wait only for global capacity.
+		eligible := !w.stopped && len(w.jobs[key]) < MaxAttributionPerEndpoint &&
+			(!w.census[key] || (w.censusCount < MaxCensusPackets && p.size <= MaxCensusBytes-w.censusBytes))
+		full := w.count >= MaxAttributionPackets || p.size > MaxAttributionBytes-w.bytes
+		w.mu.Unlock()
+		if !eligible {
+			return false
+		}
+		if !full {
+			continue // capacity opened between submit and this inspection
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-w.stopping:
+			return false
+		case <-timer.C:
+			return false
+		case <-w.capacity:
+		}
+	}
 }
 
 // submit never waits for attribution or a worker. At capacity, an idle endpoint
@@ -261,6 +313,10 @@ func (w *packetWorkers) run(lane int) {
 		q := w.jobs[key][1:]
 		w.count--
 		w.bytes -= p.size
+		select {
+		case w.capacity <- struct{}{}:
+		default:
+		}
 		if lane == 1 {
 			w.censusCount--
 			w.censusBytes -= p.size
@@ -302,6 +358,9 @@ func (w *packetWorkers) completedLocked(key string, now time.Time) {
 // The owner cancels first; both lanes drain before the queue socket closes.
 func (w *packetWorkers) stop() {
 	w.mu.Lock()
+	if !w.stopped {
+		close(w.stopping)
+	}
 	w.stopped = true
 	for _, wake := range w.wake {
 		wake.Broadcast()

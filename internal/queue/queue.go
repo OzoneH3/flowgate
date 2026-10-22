@@ -4,6 +4,7 @@ package queue
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"flowgate/internal/daemon"
 	"flowgate/internal/identity"
 	"fmt"
@@ -12,6 +13,8 @@ import (
 	"net/netip"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 const Mark = 0x4647
@@ -117,7 +120,7 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 		_, err := submitVerdict(id, allow)
 		return err
 	}
-	var overloaded, expired, censusOverflow, displaced atomic.Uint64
+	var overloaded, expired, censusOverflow, displaced, receiveOverflow atomic.Uint64
 	// Keep one bounded sample, without packet payload or an inferred owner. A
 	// capacity rejection occurs before attribution and otherwise leaves no way
 	// to distinguish a game's failed admission from unrelated background traffic.
@@ -134,6 +137,9 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 		verdictPacket(p.id, false)
 	})
 	report := func() {
+		if n := receiveOverflow.Swap(0); n != 0 {
+			log.Printf("queue %d: %d netlink receive overflow notifications; packets may have been dropped; continuing protection", number, n)
+		}
 		if n := displaced.Swap(0); n != 0 {
 			log.Printf("queue %d: dropped %d packets: admission fairness displacement", number, n)
 		}
@@ -187,7 +193,7 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 				if packetDirection == "outgoing" && a.OutDev != nil {
 					f.Interface = *a.OutDev
 				}
-				if workers.submit(packetJob{id: *a.PacketID, size: len(*a.Payload), flow: f, token: token, deadline: time.Now().Add(AttributionTimeout)}) {
+				if workers.submitWait(ctx, packetJob{id: *a.PacketID, size: len(*a.Payload), flow: f, token: token, deadline: time.Now().Add(AttributionTimeout)}) {
 					return 0
 				}
 				overloadedSample.CompareAndSwap(nil, &f)
@@ -198,7 +204,7 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 			return -1
 		}
 		return 0
-	}, func(err error) int { fail(err); return -1 })
+	}, func(err error) int { return receiveError(err, &receiveOverflow, fail) })
 	if err != nil {
 		return err
 	}
@@ -228,4 +234,15 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 			}
 		}
 	}
+}
+
+// ENOBUFS reports lost netlink messages, not loss of the queue binding. Continue
+// draining; no missing packet is approved. Other receive failures remain fatal.
+func receiveError(err error, overflow *atomic.Uint64, fail func(error)) int {
+	if errors.Is(err, unix.ENOBUFS) {
+		overflow.Add(1)
+		return 0
+	}
+	fail(err)
+	return -1
 }
