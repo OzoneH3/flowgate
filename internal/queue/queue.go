@@ -118,6 +118,10 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 		return err
 	}
 	var overloaded, expired, censusOverflow, displaced atomic.Uint64
+	// Keep one bounded sample, without packet payload or an inferred owner. A
+	// capacity rejection occurs before attribution and otherwise leaves no way
+	// to distinguish a game's failed admission from unrelated background traffic.
+	var overloadedSample atomic.Pointer[identity.Flow]
 	processor := packetProcessor{ctx: ctx, observe: e.Observe, tryObserve: e.TryObserve, retain: retained.Add, record: e.RecordPacketOutcome, verdict: submitVerdict, expired: &expired}
 	workers := newPacketLanes(AttributionWorkers, CensusWorkers, processor.processStage, func(p packetJob, cause rejectionCause) {
 		if cause == rejectShutdown {
@@ -137,7 +141,11 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 			log.Printf("queue %d: dropped %d packets: census lane capacity exhausted", number, n)
 		}
 		if n := overloaded.Swap(0); n != 0 {
-			log.Printf("queue %d: dropped %d packets: attribution capacity exhausted", number, n)
+			if f := overloadedSample.Swap(nil); f != nil {
+				log.Printf("queue %d: dropped %d packets: attribution capacity exhausted; sample %s %s %s -> %s (local -> remote; ownership not checked)", number, n, f.Protocol, f.Direction, f.Local, f.Remote)
+			} else {
+				log.Printf("queue %d: dropped %d packets: attribution capacity exhausted", number, n)
+			}
 		}
 		if n := expired.Swap(0); n != 0 {
 			log.Printf("queue %d: dropped %d packets: attribution deadline or shutdown", number, n)
@@ -182,6 +190,7 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 				if workers.submit(packetJob{id: *a.PacketID, size: len(*a.Payload), flow: f, token: token, deadline: time.Now().Add(AttributionTimeout)}) {
 					return 0
 				}
+				overloadedSample.CompareAndSwap(nil, &f)
 				overloaded.Add(1)
 			}
 		}

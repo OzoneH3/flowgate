@@ -612,6 +612,13 @@ func (e *Engine) RetainedState(id, fingerprint string) string {
 		return state
 	}
 	if !e.Now().Before(v.Deadline) || a.Application == nil || a.Fingerprint != fingerprint {
+		// Preserve the actual recheck, not just the original successful evidence.
+		// In particular, runtime holder changes otherwise appear as an opaque
+		// fingerprint mismatch after an acknowledged Allow.
+		if e.Now().Before(v.Deadline) {
+			delta := identity.ComparePendingBinding(v.Attribution, a, e.Now())
+			v.Revalidation = &delta
+		}
 		v.State = "expired"
 		v.Reason = "identity changed before retained verdict"
 		if a.Application == nil {
