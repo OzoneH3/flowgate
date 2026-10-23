@@ -25,8 +25,17 @@ port. Outgoing defaults to destination address/service, unrestricted local sourc
 port. Broadening requires an explicit visible scope edit. Persistent application
 identity retains the existing revision policy; it does not grant a runtime/prefix.
 
-Highest numeric priority wins; ties use lexicographically smallest rule ID.
-Allow and Block have no special implicit precedence. Preview lists active overlaps;
+Precedence (`policy.Precedes`, the same comparator the evaluator sorts with, and
+the source of the sentence shown in previews and explanations): among matching
+active rules (the newest saved setting of each program scope), higher target
+weight wins (process 4 › application 3 › zone 2 › all programs 1); then higher
+priority; then Deny › Allow › Ask; then a user rule over a preset; then the
+lexicographically smaller rule ID. No match asks.
+
+Traffic to this machine itself (loopback or this exact host address) is allowed
+by default (`default-localhost-allow`); only rules naming a loopback address or
+this exact host address apply to it, so a rule for any address (`*`) or a LAN
+prefix does not. Preview lists active overlaps with which rule wins and why;
 identical normalized scopes are rejected even if action/state/expiry differ, naming
 the existing rule to edit instead. This includes equivalent host and /32 or /128.
 Rules are bounded to 256, priority -1000..1000. Newly selected expiry must be in the

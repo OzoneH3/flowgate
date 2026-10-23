@@ -259,26 +259,10 @@ func EvaluateSession(rules []Rule, f identity.Flow, a identity.Attribution, now 
 			matches = kept
 		}
 	}
-	sort.Slice(matches, func(i, j int) bool {
-		// NetLimiter Blocker: the rule with the higher weight is applied; on
-		// equal weight Deny is applied before Allow and Ask.
-		if wi, wj := matches[i].Weight(), matches[j].Weight(); wi != wj {
-			return wi > wj
-		}
-		// Explicit legacy priorities keep their stored ordering within a weight.
-		if matches[i].Priority != matches[j].Priority {
-			return matches[i].Priority > matches[j].Priority
-		}
-		// Observed NetLimiter 5.3.28: equal weight applies Deny, then Allow, then Ask.
-		if ri, rj := actionRank(matches[i].Action), actionRank(matches[j].Action); ri != rj {
-			return ri < rj
-		}
-		// At equal tier/priority, an explicit user policy overrides a preset.
-		if (matches[i].Preset == nil) != (matches[j].Preset == nil) {
-			return matches[i].Preset == nil
-		}
-		return matches[i].ID < matches[j].ID
-	})
+	// NetLimiter Blocker: higher weight first; explicit priorities within a
+	// weight; at equal weight Deny, then Allow, then Ask (observed 5.3.28); a
+	// user policy over a preset; then ID. Shared with every explanation.
+	sort.Slice(matches, func(i, j int) bool { return Precedes(matches[i], matches[j]) })
 	var ids []string
 	for _, r := range matches {
 		ids = append(ids, r.ID)

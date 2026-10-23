@@ -80,6 +80,7 @@ import { openInactiveRules } from './inactive-rules';
 import { TrafficGraph } from './graph';
 import { setupWorkflows, updateWorkflows, openRule, resumeRuleEditor } from './workflows';
 import { setupDecisionLog, showDecisionLog, updateDecisionLog } from './decision-log-view';
+import { runtimeDegradation } from './runtime-checks';
 import type { Attempt, ClientState, ViewEvent, Scope } from './protocol';
 import {
   hasObservedConnection,
@@ -2815,15 +2816,18 @@ function consume(next: ClientState) {
   const present = new Set(state.control.events.map((e) => state.control.generation + ':' + e.id));
   for (const key of localSubmitted) if (!present.has(key)) localSubmitted.delete(key);
   // The permission window shows controller status only when it limits decisions.
+  const degraded = state.control.connected ? runtimeDegradation(state.control.runtimeChecks) : undefined;
   $('controlStatus').textContent =
     promptID && state.control.connected && !state.control.readOnly
       ? ''
       : state.control.message +
-        (state.control.connected && state.control.readOnly ? ' · read-only' : '');
+        (state.control.connected && state.control.readOnly ? ' · read-only' : '') +
+        (degraded ? ' · ' + degraded.text : '');
   while (cardResults.size > 128) cardResults.delete(cardResults.keys().next().value!);
   $('controlStatus').title = [
     state.control.message,
     state.control.enforcement?.detail,
+    ...(degraded?.lines || []),
     state.control.permissions
       ? `${state.control.permissions.role} · ${state.control.permissions.policy_scope} policy · rule management ${state.control.permissions.can_manage_rules ? 'permitted' : 'denied'} · decisions ${state.control.permissions.can_decide ? 'permitted' : 'denied'}`
       : 'Legacy permission contract',

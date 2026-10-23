@@ -5,6 +5,7 @@ import {
   type ProtectionView,
 } from './protection-model';
 import { parseConnectionZone } from './connection-presentation';
+import { parseRuntimeChecks } from './runtime-checks';
 import {
   parseNetworkZones,
   type NetworkZones,
@@ -325,6 +326,7 @@ export interface Reply {
   };
   protection?: ProtectionStatus;
   evaluation?: DaemonEvaluationStatus;
+  runtime_checks?: import('./runtime-checks').RuntimeCheck[];
   decision_log?: unknown;
   decision_record?: unknown;
   traffic_monitor?: TrafficMonitor;
@@ -393,6 +395,7 @@ export interface ClientState {
     evaluation?: DaemonEvaluationStatus;
   };
   control: {
+    runtimeChecks?: import('./runtime-checks').RuntimeCheck[];
     trafficMonitor?: TrafficMonitor;
     protection?: ProtectionStatus;
     evaluation?: DaemonEvaluationStatus;
@@ -864,6 +867,7 @@ export function parseReply(raw: unknown): Reply {
     zone_migration: r.zone_migration,
     evaluation: parseEvaluation(r.evaluation),
     protection: parseProtection(r.protection),
+    runtime_checks: parseRuntimeChecks(r.runtime_checks),
   };
   if (r.permissions !== undefined || result.capabilities.includes('explicit-administrator-v1')) {
     const p = object(r.permissions);

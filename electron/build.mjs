@@ -81,6 +81,7 @@ await build({
     'src/evaluation.ts',
     'src/prompt-summary.ts',
     'src/permission-results.ts',
+    'src/runtime-checks.ts',
   ],
   bundle: true,
   platform: 'node',

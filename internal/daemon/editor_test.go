@@ -81,6 +81,21 @@ func TestEditorOverlapAndDuplicate(t *testing.T) {
 	if err != nil || !strings.Contains(sentence, "Overlap:") {
 		t.Fatal(sentence, err)
 	}
+	// Equal weight and priority: the advertised winner is the evaluator's (Deny).
+	if !strings.Contains(sentence, "this rule wins where both match: Deny › Allow › Ask") || !strings.Contains(sentence, policy.PrecedenceSentence) || strings.Contains(sentence, "then smallest ID") {
+		t.Fatal(sentence)
+	}
+	e.mu.Lock()
+	candidate := append([]policy.Rule{}, e.rules...)
+	for i := range candidate {
+		if candidate[i].ID == exactRule.ID {
+			candidate[i].Priority = 90
+		}
+	}
+	e.mu.Unlock()
+	if _, id, _ := policy.Evaluate(candidate, f, e.Resolve(f), *now); id != exactRule.ID {
+		t.Fatal("advertised winner differs from evaluator", id)
+	}
 	// Duplicate semantic host-prefix scope is identified rather than creating two.
 	e.mu.Lock()
 	e.rules = nil

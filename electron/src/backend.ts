@@ -443,6 +443,7 @@ export class Backend {
         if (!r.events.some((e) => e.id === id)) this.attempts.delete(id);
       this.state.control = {
         snapshotStarted,
+        runtimeChecks: r.runtime_checks,
         trafficMonitor: r.traffic_monitor,
         evaluation: r.evaluation,
         protection: r.protection,

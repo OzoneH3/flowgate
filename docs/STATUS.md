@@ -424,8 +424,8 @@ protocol, remote/local address and port, attribution and lifetime fields.
 **Create rule…** opens a real editor with backend scope preview. Saved rules support
 **Edit**, Enable/Disable/Delete, absolute expiry and persistence. Edits use version
 checks, backend validation and SQLite commit before policy publication. Exact
-scope duplicates are rejected; overlapping rules use highest priority then
-lexicographically smallest ID, without implicit Allow/Block preference.
+scope duplicates are rejected; overlapping rules follow `policy.Precedes` (weight,
+priority, Deny › Allow › Ask, user over preset, smallest ID; see RULES.md).
 
 Both profile queues new native outgoing TCP/UDP and retains initial packets;
 unknown/ambiguous ownership fails closed. UDP senders must retain an observable

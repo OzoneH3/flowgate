@@ -87,7 +87,11 @@ func RuleSentence(r policy.Rule) string {
 	if f.AllPrograms {
 		identityText = target
 	}
-	return zone + ". " + fmt.Sprintf("Target: %s. Matching process rules override application rules, which override all-program zone rules; within each tier highest priority then smallest ID. %s %s %s for %s; remote %s, local port %s, remote port %s; any local address/interface; %s (%s). Priority %d; highest priority wins, then smallest rule ID. Approved TCP connections continue.", target, strings.ToUpper(r.Action), f.Direction, protocolLabel(f.Protocol), identityText, address, port(f.LocalPort), port(f.RemotePort), expiry, state, r.Priority)
+	loopback := ""
+	if !f.TargetsLoopback() {
+		loopback = " " + policy.LoopbackSentence
+	}
+	return zone + ". " + fmt.Sprintf("Target: %s. %s %s %s for %s; remote %s, local port %s, remote port %s; any local address/interface; %s (%s). Priority %d. %s%s Approved TCP connections continue.", target, strings.ToUpper(r.Action), f.Direction, protocolLabel(f.Protocol), identityText, address, port(f.LocalPort), port(f.RemotePort), expiry, state, r.Priority, policy.PrecedenceSentence, loopback)
 }
 
 // EditRule is used for both authoritative preview and commit. Creation derives
@@ -378,7 +382,14 @@ func (e *Engine) reviewRuleLocked(candidate policy.Rule, now time.Time, expiryUn
 		if filtersOverlap(canonicalRuleFilter(candidate), canonicalRuleFilter(other)) {
 			count++
 			if count <= 8 {
-				sentence += fmt.Sprintf(" Overlap: %s (%s, priority %d).", other.ID, other.Action, other.Priority)
+				winner, verdict := "this rule wins", ""
+				if policy.Precedes(other, candidate) {
+					winner = "that rule wins"
+					verdict = policy.DecidingFactor(other, candidate)
+				} else {
+					verdict = policy.DecidingFactor(candidate, other)
+				}
+				sentence += fmt.Sprintf(" Overlap: %s (%s, priority %d; %s where both match: %s).", other.ID, other.Action, other.Priority, winner, verdict)
 			}
 		}
 	}

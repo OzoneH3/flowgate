@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -445,7 +446,10 @@ func (e *Engine) PolicyExplain(generation, expected string, eventIDs []string, u
 		result.Status = "evaluated"
 		result.ConfiguredAction = action
 		result.SelectedRule = rule
-		result.Reason = "Current stored policy evaluated for recorded event identity/endpoints; ownership not revalidated; no historical verdict or live delivery claim. Matching process tier overrides application tier, which overrides all-program zone tier; within each tier highest priority wins, then smallest rule ID"
+		result.Reason = "Current stored policy evaluated for recorded event identity/endpoints; ownership not revalidated; no historical verdict or live delivery claim. " + strings.TrimSuffix(policy.PrecedenceSentence, ".")
+		if identity.IsLoopbackFlow(flow) {
+			result.Reason += "; " + strings.TrimSuffix(policy.LoopbackSentence, ".")
+		}
 		if a := found.Attribution.Application; a != nil && found.Attribution.Principal() != nil {
 			result.Identity = &PolicyIdentity{a.Key, a.Revision, found.Attribution.Principal().UID}
 		}
