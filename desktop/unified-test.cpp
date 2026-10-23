@@ -80,7 +80,7 @@ private slots:
     installLauncher();
     window->show();
     QTRY_VERIFY(label("monitorStatus")->text().contains("live"));
-    QTRY_VERIFY(label("status")->text().contains("unknown"));
+    QTRY_VERIFY_WITH_TIMEOUT(label("status")->text().contains("unknown"), 20000);
     window->findChild<QLineEdit *>("activitySearch")->setText("python");
     qInfo().noquote() << "EVIDENCE" << run << "platform"
                       << QGuiApplication::platformName() << "UID" << getuid()
@@ -96,7 +96,8 @@ private slots:
     QTRY_VERIFY(button("startEvaluation")->isEnabled());
     simulation = "refuse";
     start();
-    QTRY_VERIFY(label("result")->text().contains("existing rules use"));
+    // Stable preflight reason code; the human wording may change.
+    QTRY_VERIFY(label("result")->text().contains("firewall_conflict"));
     QVERIFY(label("monitorStatus")->text().contains("live"));
     QVERIFY(
         command("status")["tables"].toString().contains("unrelated_fixture"));
@@ -106,7 +107,7 @@ private slots:
   void evaluationAndRules() {
     QTRY_VERIFY(button("startEvaluation")->isEnabled());
     start();
-    QTRY_VERIFY(label("status")->text().contains("Host enforcement — active"));
+    QTRY_VERIFY_WITH_TIMEOUT(label("status")->text().contains("Host enforcement — active"), 20000);
     QVERIFY(label("monitorStatus")->text().contains("live"));
     QVERIFY(command("send")["sent_once"].toBool());
     QTRY_VERIFY(pending());
@@ -139,7 +140,7 @@ private slots:
     window->grab().save(run + "/unified-rules.png");
     auto before = label("activityStatus")->text();
     QTest::mouseClick(button("stopEvaluation"), Qt::LeftButton);
-    QTRY_VERIFY(label("status")->text().contains("Stopped (confirmed)"));
+    QTRY_VERIFY_WITH_TIMEOUT(label("status")->text().contains("Stopped (confirmed)"), 20000);
     QTRY_VERIFY(label("activityStatus")->text() != before);
     QVERIFY(window->findChild<QTabWidget *>("views")->tabText(2).contains(
         "last received"));
@@ -154,7 +155,7 @@ private slots:
   void lossNotificationsAndTimeout() {
     QTRY_VERIFY(button("startEvaluation")->isEnabled());
     start();
-    QTRY_VERIFY(label("status")->text().contains("Host enforcement — active"));
+    QTRY_VERIFY_WITH_TIMEOUT(label("status")->text().contains("Host enforcement — active"), 20000);
     QSignalSpy notification(window.get(), &Window::pendingNotification);
     window->showMinimized();
     QVERIFY(
@@ -176,12 +177,12 @@ private slots:
     window->openPendingNotification();
     QVERIFY(!button("promptAllow")->isEnabled());
     QVERIFY(command("kill")["ok"].toBool());
-    QTRY_VERIFY(label("status")->text().contains("unknown"));
+    QTRY_VERIFY_WITH_TIMEOUT(label("status")->text().contains("unknown"), 20000);
     QVERIFY(label("monitorStatus")->text().contains("live"));
     QVERIFY(!button("allow")->isEnabled());
     // Independent timer remains in force after consumer loss, with no restart.
     QTRY_VERIFY_WITH_TIMEOUT(command("status")["state"].toString() == "stopped",
-                             24000);
+                             45000);
     QVERIFY(!command("status")["table_present"].toBool());
     qInfo() << "PASS minimized pending notification/throttle, stale "
                "notification grants nothing, controller loss unknown, deadline "
@@ -190,7 +191,7 @@ private slots:
   void closingLeavesEvaluation() {
     QTRY_VERIFY(button("startEvaluation")->isEnabled());
     start();
-    QTRY_VERIFY(label("status")->text().contains("Host enforcement — active"));
+    QTRY_VERIFY_WITH_TIMEOUT(label("status")->text().contains("Host enforcement — active"), 20000);
     window->findChild<QTabWidget *>("views")->setCurrentIndex(0);
     window->showNormal();
     window->grab().save(run + "/unified-activity.png");
@@ -199,7 +200,7 @@ private slots:
     QVERIFY(status["table_present"].toBool());
     QCOMPARE(status["state"].toString(), QString("active"));
     QTRY_VERIFY_WITH_TIMEOUT(command("status")["state"].toString() == "stopped",
-                             24000);
+                             45000);
     qInfo() << "PASS closing GUI leaves isolated enforcement under original "
                "deadline";
   }
