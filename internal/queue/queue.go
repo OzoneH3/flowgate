@@ -144,8 +144,8 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 	// capacity rejection occurs before attribution and otherwise leaves no way
 	// to distinguish a game's failed admission from unrelated background traffic.
 	var overloadedSample atomic.Pointer[identity.Flow]
-	processor := packetProcessor{ctx: ctx, observe: e.Observe, tryObserve: e.TryObserve, retain: retained.Add, record: e.RecordPacketOutcome, verdict: submitVerdict, expired: &expired}
-	workers := newPacketLanes(AttributionWorkers, CensusWorkers, processor.processStage, func(p packetJob, cause rejectionCause) {
+	processor := packetProcessor{batchObserve: e.PrepareUDPBatch, ctx: ctx, observe: e.Observe, tryObserve: e.TryObserve, retain: retained.Add, record: e.RecordPacketOutcome, verdict: submitVerdict, expired: &expired}
+	workers := newPacketBatchLanes(AttributionWorkers, CensusWorkers, processor.processStage, processor.processBatch, func(p packetJob, cause rejectionCause) {
 		if cause == rejectShutdown {
 			expired.Add(1)
 		} else if cause == rejectAdmission {

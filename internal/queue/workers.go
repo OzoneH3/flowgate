@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"flowgate/internal/daemon"
 	"flowgate/internal/identity"
 	"fmt"
 	"sync"
@@ -50,9 +51,10 @@ type packetWorkers struct {
 	mu                       sync.Mutex
 	wake                     [2]*sync.Cond
 	jobs                     map[string][]packetJob // includes active jobs, even across lane transfer
-	active                   map[string]bool        // heads currently owned by workers cannot be displaced
-	recent                   map[string]time.Time   // bounded scheduling hints, never ownership/policy evidence
-	census                   map[string]bool        // ordering only; never permission authority
+	activeBatch              map[string]int
+	active                   map[string]bool      // heads currently owned by workers cannot be displaced
+	recent                   map[string]time.Time // bounded scheduling hints, never ownership/policy evidence
+	census                   map[string]bool      // ordering only; never permission authority
 	ready                    [2][]string
 	count, bytes             int
 	censusCount, censusBytes int
@@ -63,6 +65,7 @@ type packetWorkers struct {
 	stopping                 chan struct{}
 	displacing               bool // at most one callback-owned displaced packet at a time
 	wg                       sync.WaitGroup
+	processBatch             func([]packetJob, bool, bool) bool
 	process                  func(packetJob, bool, bool) bool // true = completed, false = needs census
 	reject                   func(packetJob, rejectionCause)  // lane overflow or shutdown, exactly one drop
 }
@@ -73,7 +76,11 @@ func newPacketWorkers(n int, process func(packetJob, bool)) *packetWorkers {
 }
 
 func newPacketLanes(general, census int, process func(packetJob, bool, bool) bool, reject func(packetJob, rejectionCause)) *packetWorkers {
-	w := &packetWorkers{jobs: make(map[string][]packetJob), census: make(map[string]bool), active: make(map[string]bool), recent: make(map[string]time.Time), capacity: make(chan struct{}, 1), stopping: make(chan struct{}), process: process, reject: reject}
+	return newPacketBatchLanes(general, census, process, nil, reject)
+}
+
+func newPacketBatchLanes(general, census int, process func(packetJob, bool, bool) bool, batch func([]packetJob, bool, bool) bool, reject func(packetJob, rejectionCause)) *packetWorkers {
+	w := &packetWorkers{jobs: make(map[string][]packetJob), census: make(map[string]bool), active: make(map[string]bool), activeBatch: make(map[string]int), recent: make(map[string]time.Time), capacity: make(chan struct{}, 1), stopping: make(chan struct{}), process: process, processBatch: batch, reject: reject}
 	for lane, n := range []int{general, census} {
 		w.wake[lane] = sync.NewCond(&w.mu)
 		for i := 0; i < n; i++ {
@@ -109,14 +116,14 @@ func (w *packetWorkers) submitWait(ctx context.Context, p packetJob) bool {
 		}
 		w.mu.Lock()
 		key := p.key()
-		// A recently progressing general endpoint may absorb a short burst,
+		// An active or recently progressing general endpoint may absorb a short burst,
 		// but never use the much longer global-pressure wait for its own cap.
 		// This is scheduling only: every admitted packet still gets a fresh
 		// attribution/policy check, and neither queue bound is increased.
 		endpointFull := len(w.jobs[key]) >= MaxAttributionPerEndpoint
 		now := time.Now()
 		remaining := w.endpointWaitBudgetLocked(now)
-		burst := endpointFull && !w.census[key] && w.recentlyCompletedLocked(key, now) && remaining > 0
+		burst := endpointFull && !w.census[key] && (w.active[key] || w.recentlyCompletedLocked(key, now)) && remaining > 0
 		eligible := !w.stopped && (!endpointFull || burst) &&
 			(!w.census[key] || (w.censusCount < MaxCensusPackets && p.size <= MaxCensusBytes-w.censusBytes))
 		full := endpointFull || w.count >= MaxAttributionPackets || p.size > MaxAttributionBytes-w.bytes
@@ -239,7 +246,7 @@ func (w *packetWorkers) displaceLocked(incoming packetJob, incomingKey string, i
 	var victim packetJob
 	depth := 0
 	for key, q := range w.jobs {
-		if key == incomingKey || len(q) == 0 || (w.active[key] && len(q) == 1) {
+		if key == incomingKey || len(q) == 0 || (w.active[key] && len(q) <= max(1, w.activeBatch[key])) {
 			continue
 		}
 		// General followers may use slow-lane waiting capacity. Against
@@ -312,10 +319,25 @@ func (w *packetWorkers) run(lane int) {
 		key := w.ready[lane][next]
 		w.ready[lane] = append(w.ready[lane][:next], w.ready[lane][next+1:]...)
 		p := w.jobs[key][0]
+		n := 1
+		if w.processBatch != nil && p.flow.Protocol == "udp" {
+			for n < daemon.MaxUDPObservationBatch && n < len(w.jobs[key]) && w.jobs[key][n].flow == p.flow && w.jobs[key][n].token == p.token {
+				n++
+			}
+		}
+		// Freeze membership before the fresh check. No later arrival may share
+		// its evidence, and all frozen packet IDs remain charged and protected.
+		batch := append([]packetJob(nil), w.jobs[key][:n]...)
+		w.activeBatch[key] = n
 		w.active[key] = true
 		stop := w.stopped
 		w.mu.Unlock()
-		done := w.process(p, stop, lane == 1)
+		var done bool
+		if n > 1 {
+			done = w.processBatch(batch, stop, lane == 1)
+		} else {
+			done = w.process(p, stop, lane == 1)
+		}
 		w.mu.Lock()
 		if !done {
 			delete(w.recent, key)
@@ -331,6 +353,7 @@ func (w *packetWorkers) run(lane int) {
 				w.censusCount += len(q)
 				w.censusBytes += size
 				delete(w.active, key)
+				delete(w.activeBatch, key)
 				w.ready[1] = append(w.ready[1], key)
 				w.wake[1].Signal()
 				w.mu.Unlock()
@@ -342,23 +365,30 @@ func (w *packetWorkers) run(lane int) {
 			if stop {
 				cause = rejectShutdown
 			}
-			w.reject(p, cause)
+			for _, item := range batch {
+				w.reject(item, cause)
+			}
 			w.mu.Lock()
 		}
 		if done && lane == 0 && !w.stopped {
 			w.completedLocked(key, time.Now())
 		}
 		delete(w.active, key)
-		q := w.jobs[key][1:]
-		w.count--
-		w.bytes -= p.size
+		delete(w.activeBatch, key)
+		q := w.jobs[key][n:]
+		size := 0
+		for _, item := range batch {
+			size += item.size
+		}
+		w.count -= n
+		w.bytes -= size
 		select {
 		case w.capacity <- struct{}{}:
 		default:
 		}
 		if lane == 1 {
-			w.censusCount--
-			w.censusBytes -= p.size
+			w.censusCount -= n
+			w.censusBytes -= size
 		}
 		if len(q) == 0 {
 			delete(w.jobs, key)

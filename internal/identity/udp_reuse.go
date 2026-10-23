@@ -6,13 +6,13 @@ import (
 	"time"
 )
 
-// Every queued UDP datagram rechecks ownership, and the queue answers datagrams
-// one at a time. Full attribution scans every process and, for Wine sockets,
-// takes two runtime owner-table censuses: hundreds of milliseconds, so one
-// socket's datagrams back up behind each other and drop at the queue bound.
+// Every queued UDP datagram requires fresh ownership evidence. The queue may
+// share a fresh observation across a frozen batch that predates the check;
+// subsequent arrivals require another check. Full attribution scans every process
+// and, for Wine sockets, takes two runtime owner-table censuses.
 //
 // A complete positive attribution is therefore reused for one kernel socket.
-// Each datagram still needs a fresh UDP census showing exactly that one
+// Each ownership observation still needs a fresh UDP census showing exactly that one
 // matching socket (netns, inode, cookie) on the same local endpoint and
 // direction, and every recorded owner must still be the same process instance.
 // Full attribution re-runs in the background after Refresh and is required

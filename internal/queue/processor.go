@@ -11,13 +11,14 @@ import (
 // Function boundaries allow testing packet lifetime without a privileged queue.
 // Only observe may create a prompt; verdict reports the action actually sent.
 type packetProcessor struct {
-	ctx        context.Context
-	observe    func(identity.Flow, string) daemon.Event
-	tryObserve func(identity.Flow, string) (daemon.Event, bool)
-	retain     func(uint32, int, daemon.Event) bool
-	record     func(daemon.Event, string, error)
-	verdict    func(uint32, bool) (bool, error)
-	expired    *atomic.Uint64
+	batchObserve func(identity.Flow, string, int, bool) (func() daemon.Event, bool)
+	ctx          context.Context
+	observe      func(identity.Flow, string) daemon.Event
+	tryObserve   func(identity.Flow, string) (daemon.Event, bool)
+	retain       func(uint32, int, daemon.Event) bool
+	record       func(daemon.Event, string, error)
+	verdict      func(uint32, bool) (bool, error)
+	expired      *atomic.Uint64
 }
 
 func (p *packetProcessor) process(j packetJob, stopping bool) {
@@ -44,10 +45,15 @@ func (p *packetProcessor) processStage(j packetJob, stopping, census bool) bool 
 			return false
 		}
 	}
+	p.finish(j, v)
+	return true
+}
+
+func (p *packetProcessor) finish(j packetJob, v daemon.Event) {
 	live := p.ctx.Err() == nil && time.Now().Before(j.deadline) && time.Now().Before(v.Deadline)
 	if live && v.State == "awaiting-decision" && p.retain(j.id, j.size, v) {
 		p.record(v, daemon.VerdictHeld, nil)
-		return true
+		return
 	}
 	if !live {
 		p.expired.Add(1)
@@ -60,5 +66,32 @@ func (p *packetProcessor) processStage(j packetJob, stopping, census bool) bool 
 		outcome = daemon.VerdictAccepted
 	}
 	p.record(v, outcome, err)
+}
+
+func (p *packetProcessor) processBatch(jobs []packetJob, stopping, census bool) bool {
+	live := make([]packetJob, 0, len(jobs))
+	for _, j := range jobs {
+		if !stopping && p.ctx.Err() == nil && time.Now().Before(j.deadline) {
+			live = append(live, j)
+		}
+	}
+	var decide func() daemon.Event
+	if len(live) != 0 {
+		var ok bool
+		decide, ok = p.batchObserve(live[0].flow, live[0].token, len(live), census)
+		if !ok {
+			return false
+		} // no side effects, including for expired members
+	}
+	index := 0
+	for _, j := range jobs {
+		if index < len(live) && live[index].id == j.id {
+			p.finish(j, decide())
+			index++
+		} else {
+			p.expired.Add(1)
+			p.verdict(j.id, false)
+		}
+	}
 	return true
 }

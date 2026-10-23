@@ -240,6 +240,39 @@ func (e *Engine) TryObserve(f identity.Flow, token string) (Event, bool) {
 	return e.ObserveResolved(f, token, a), true
 }
 
+// MaxUDPObservationBatch bounds a frozen group independently of queue capacity.
+const MaxUDPObservationBatch = 16
+
+// PrepareUDPBatch is for a frozen group of identical-flow datagrams already
+// queued before this call. The caller must never add arrivals during resolution.
+// One fresh ownership observation covers the group. The returned bounded
+// decision function reads current policy immediately before each packet's verdict;
+// it must not be stored or used for a subsequent group.
+func (e *Engine) PrepareUDPBatch(f identity.Flow, token string, count int, census bool) (func() Event, bool) {
+	if f.Protocol != "udp" || count < 1 || count > MaxUDPObservationBatch {
+		return nil, false
+	}
+	var a identity.Attribution
+	if e.defaultLoopback(f) {
+		a = identity.Attribution{Status: "localhost", Reason: "Localhost communication is allowed by default"}
+	} else if !census && e.TryResolve != nil {
+		var ok bool
+		a, ok = e.TryResolve(f)
+		if !ok {
+			return nil, false
+		}
+	} else {
+		a = e.Resolve(f)
+	}
+	return func() Event {
+		if count == 0 {
+			return Event{}
+		}
+		count--
+		return e.ObserveResolved(f, token, a)
+	}, true
+}
+
 // ObserveResolved decides a queued attempt with attribution the trusted caller
 // resolved for exactly this flow immediately before the call. Zones and policy
 // are read under e.mu at decision time, so a rule changed during resolution
