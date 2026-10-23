@@ -14,6 +14,18 @@ import (
 const MaxAttributionPackets = 48
 const MaxAttributionBytes = 1 << 20
 const MaxAttributionPerEndpoint = 16
+
+// SharedAttributionReserve is the part of MaxAttributionPackets an endpoint may
+// not use for packets queued behind its own in-flight batch. Waiting packets,
+// not the frozen active batch, count toward MaxAttributionPerEndpoint, so a busy
+// endpoint can prepare its next batch while one resolves; that second batch only
+// uses global capacity above this reserve, which stays available to endpoints
+// within their base per-endpoint allowance. Global count/byte bounds are unchanged.
+const SharedAttributionReserve = MaxAttributionPerEndpoint
+
+// SharedAttributionByteReserve is the matching share of MaxAttributionBytes
+// that packets queued behind an endpoint's own active batch may not use.
+const SharedAttributionByteReserve = MaxAttributionBytes * SharedAttributionReserve / MaxAttributionPackets
 const AttributionWorkers = 8
 const CensusWorkers = 2
 const MaxCensusPackets = 24
@@ -119,8 +131,9 @@ func (w *packetWorkers) submitWait(ctx context.Context, p packetJob) bool {
 		// An active or recently progressing general endpoint may absorb a short burst,
 		// but never use the much longer global-pressure wait for its own cap.
 		// This is scheduling only: every admitted packet still gets a fresh
-		// attribution/policy check, and neither queue bound is increased.
-		endpointFull := len(w.jobs[key]) >= MaxAttributionPerEndpoint
+		// attribution/policy check. Global count/byte bounds never increase; the
+		// per-endpoint bound counts waiting packets (see endpointFullLocked).
+		endpointFull := w.endpointFullLocked(key, p.size)
 		now := time.Now()
 		remaining := w.endpointWaitBudgetLocked(now)
 		burst := endpointFull && !w.census[key] && (w.active[key] || w.recentlyCompletedLocked(key, now)) && remaining > 0
@@ -166,6 +179,22 @@ func (w *packetWorkers) submitWait(ctx context.Context, p packetJob) bool {
 	}
 }
 
+// endpointFullLocked applies the per-endpoint bound to packets waiting behind
+// the frozen active batch. Beyond the base allowance (active plus waiting), the
+// endpoint is also limited to global packet and byte capacity above the shared
+// reserves, which stay available to endpoints within their base allowance.
+func (w *packetWorkers) endpointFullLocked(key string, size int) bool {
+	total := len(w.jobs[key])
+	waiting := total
+	if w.active[key] {
+		waiting -= w.activeBatch[key]
+	}
+	if waiting >= MaxAttributionPerEndpoint {
+		return true
+	}
+	return total >= MaxAttributionPerEndpoint && (w.count >= MaxAttributionPackets-SharedAttributionReserve || size > MaxAttributionBytes-SharedAttributionByteReserve-w.bytes)
+}
+
 func (w *packetWorkers) endpointWaitBudgetLocked(now time.Time) time.Duration {
 	if w.burstWindow.IsZero() || now.Sub(w.burstWindow) >= endpointStallWindow {
 		w.burstWindow, w.burstSpent = now, 0
@@ -179,12 +208,12 @@ func (w *packetWorkers) endpointWaitBudgetLocked(now time.Time) time.Duration {
 // Recent general progress is preferred over cold work. The displaced packet
 // takes the incoming callback's temporary slot until its drop verdict completes;
 // it is never processed or allowed. Active heads and surviving endpoint FIFO
-// are preserved. Count/byte limits and the census subset do not increase.
+// are preserved. Global count/byte limits and the census subset do not increase.
 func (w *packetWorkers) submit(p packetJob) bool {
 	w.mu.Lock()
 	key := p.key()
 	q := w.jobs[key]
-	if w.stopped || p.size < 0 || p.size > MaxAttributionBytes || len(q) >= MaxAttributionPerEndpoint {
+	if w.stopped || p.size < 0 || p.size > MaxAttributionBytes || w.endpointFullLocked(key, p.size) {
 		w.mu.Unlock()
 		return false
 	}
@@ -343,20 +372,45 @@ func (w *packetWorkers) run(lane int) {
 			delete(w.recent, key)
 			// Move the entire endpoint, including its active head, without releasing
 			// global accounting. Later packets must not overtake this cold lookup.
+			// Packets beyond the base per-endpoint allowance (a waiting second
+			// batch) may not fit the census subset. Keep the frozen batch, the base
+			// allowance and FIFO order; refuse only that extra tail, as base
+			// admission would have. Within the base allowance nothing changes.
 			q := w.jobs[key]
-			size := 0
+			keep, size := len(q), 0
 			for _, j := range q {
 				size += j.size
 			}
-			if lane == 0 && !w.stopped && len(q) <= MaxCensusPackets-w.censusCount && size <= MaxCensusBytes-w.censusBytes {
+			for keep > MaxAttributionPerEndpoint && keep > n && (keep > MaxCensusPackets-w.censusCount || size > MaxCensusBytes-w.censusBytes) {
+				keep--
+				size -= q[keep].size
+			}
+			if lane == 0 && !w.stopped && keep <= MaxCensusPackets-w.censusCount && size <= MaxCensusBytes-w.censusBytes {
+				// The trimmed tail is detached from the endpoint but stays charged
+				// against the global count/byte bounds until its drop verdict is done.
+				tail := append([]packetJob(nil), q[keep:]...)
+				w.jobs[key] = q[:keep]
 				w.census[key] = true
-				w.censusCount += len(q)
+				w.censusCount += keep
 				w.censusBytes += size
 				delete(w.active, key)
 				delete(w.activeBatch, key)
 				w.ready[1] = append(w.ready[1], key)
 				w.wake[1].Signal()
 				w.mu.Unlock()
+				for _, item := range tail {
+					if w.reject != nil {
+						w.reject(item, rejectCensus)
+					}
+					w.mu.Lock()
+					w.count--
+					w.bytes -= item.size
+					w.mu.Unlock()
+					select {
+					case w.capacity <- struct{}{}:
+					default:
+					}
+				}
 				continue
 			}
 			stop = w.stopped

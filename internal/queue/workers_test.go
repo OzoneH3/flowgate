@@ -77,7 +77,9 @@ func TestWorkerBoundsIncludeActiveAndStopDrains(t *testing.T) {
 		t.Fatal("submit")
 	}
 	receiveID(t, started)
-	for i := 1; i < MaxAttributionPerEndpoint; i++ {
+	// The frozen active packet stays charged globally; the per-endpoint bound
+	// applies to packets waiting behind it.
+	for i := 1; i <= MaxAttributionPerEndpoint; i++ {
 		if !w.submit(job(uint32(i), 8000)) {
 			t.Fatal("flow cap early")
 		}
@@ -85,7 +87,7 @@ func TestWorkerBoundsIncludeActiveAndStopDrains(t *testing.T) {
 	if w.submit(job(99, 8000)) {
 		t.Fatal("flow cap exceeded")
 	}
-	for i := MaxAttributionPerEndpoint; i < MaxAttributionPackets; i++ {
+	for i := MaxAttributionPerEndpoint + 1; i < MaxAttributionPackets; i++ {
 		if !w.submit(job(uint32(i), 8000+i)) {
 			t.Fatal("global cap early")
 		}
