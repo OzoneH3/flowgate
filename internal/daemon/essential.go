@@ -6,6 +6,7 @@ import (
 	"flowgate/internal/identity"
 	"flowgate/internal/policy"
 	"fmt"
+	"log"
 	"slices"
 	"time"
 )
@@ -361,8 +362,18 @@ func presetSentence(r policy.Rule) string {
 
 func (e *Engine) ApprovedBootstrap() []policy.BootstrapInterface {
 	e.mu.Lock()
-	defer e.mu.Unlock()
-	return policy.BootstrapFrom(e.rules, e.Now())
+	saved := policy.BootstrapFrom(e.rules, e.Now())
+	e.mu.Unlock()
+	if e.Essential == nil {
+		return saved
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	bootstrap, err := essential.AutomaticBootstrap(ctx, e.Essential.Env, saved)
+	if err != nil {
+		log.Printf("WARNING: automatic DHCP bootstrap discovery unavailable; retaining saved scopes: %v", err)
+	}
+	return bootstrap
 }
 
 func (e *Engine) hasPresetRules() bool {

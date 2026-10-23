@@ -140,8 +140,15 @@ traffic only with an approved or preserved mark. New SYNs precede mark fast path
 An approved TCP connection continues without continuous accepted-socket ownership
 checks; edits do not terminate it. UDP keeps current ownership/lease checks.
 Both profile does not exempt generic DNS, interpreters, Wine or common ports.
-TCP/UDP DHCP exceptions remain IPv4 client68→server67 and IPv6 client546→server547
-only to fe80::/10 or ff02::1:2. ICMP/ICMPv6 and non-TCP/UDP remain outside this
+UDP DHCP bootstrap is automatically scoped to current NetworkManager active
+auto-addressed interfaces when protection starts (IPv6 also accepts method dhcp).
+The pre-NetworkManager boot guard permits these DHCP pairs on current non-loopback
+interfaces; active protection replaces that boot-only set with profile scopes.
+Saved DHCP scopes remain supported. Active discovery is bounded to three seconds; on
+failure only saved scopes remain. No permission records are written. IPv4 is
+client68→server67; IPv6 client546→server547 only to fe80::/10 or ff02::1:2.
+Guard and active hooks share one activation snapshot; profile/interface changes
+are picked up on the next activation. ICMP/ICMPv6 and non-TCP/UDP remain outside this
 application policy. No forwarding coverage is claimed.
 
 Unknown/ambiguous ownership, timeout and overload drop. A one-shot UDP datagram

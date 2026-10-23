@@ -59,7 +59,7 @@ export class Rules {
       if (!r) throw Error('Rule no longer exists');
       if (r.schema === 5 || r.preset)
         throw Error(
-          'Preset-owned rule: inspect or remove through Essential networking; legacy editing cannot preserve this scope.',
+          'Preset-owned rule: manage through the administrative Essential API; this editor cannot preserve its scope.',
         );
       rule = structuredClone(r);
     } else {

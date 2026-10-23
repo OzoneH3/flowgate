@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"flowgate/internal/essential"
 	"flowgate/internal/hostfirewall"
 	"flowgate/internal/policy"
 	"flowgate/internal/store"
@@ -51,6 +52,10 @@ func protectionLocalCommand(op string, args []string) error {
 				return err
 			}
 			bootstrap = policy.BootstrapFrom(rules, time.Now())
+		}
+		bootstrap, err := essential.GuardBootstrap(bootstrap)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "WARNING: automatic DHCP bootstrap discovery unavailable; retaining saved scopes:", err)
 		}
 		return hostfirewall.InstallGuard(*state, bootstrap...)
 	}

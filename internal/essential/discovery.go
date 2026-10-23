@@ -188,33 +188,9 @@ func Discover(ctx context.Context, env Environment) Snapshot {
 	stub.Details = append(append([]string{}, dns.Details...), "No new localhost permissions proposed; discovery retained only to validate existing saved stub permissions")
 	s.Components = append(s.Components, stub)
 	nm := Component{ID: "dhcp", Title: "Interface-scoped DHCP bootstrap", Essential: true, State: "unavailable", Details: []string{}}
-	b, err = env.Run(ctx, "nmcli", "-t", "-f", "UUID,DEVICE", "connection", "show", "--active")
+	s.DHCP, err = discoverDHCP(ctx, env, net.InterfaceByName)
 	if err != nil {
-		fail("nmcli active connections failed")
-	} else {
-		for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
-			uuid, name, ok := strings.Cut(line, ":")
-			if !ok || name == "" || name == "lo" {
-				continue
-			}
-			iface, e := net.InterfaceByName(name)
-			if e != nil {
-				continue
-			}
-			methods, e := env.Run(ctx, "nmcli", "-g", "ipv4.method,ipv6.method", "connection", "show", uuid)
-			if e != nil {
-				fail("nmcli connection methods failed")
-				continue
-			}
-			m := strings.Fields(string(methods))
-			if len(m) != 2 {
-				continue
-			}
-			d := DHCP{name, uint32(iface.Index), m[0] == "auto", m[1] == "auto"}
-			if d.IPv4 || d.IPv6 {
-				s.DHCP = append(s.DHCP, d)
-			}
-		}
+		fail(err.Error())
 	}
 	if len(s.DHCP) > 0 {
 		nm.State = "ready"

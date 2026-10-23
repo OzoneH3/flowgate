@@ -1,6 +1,8 @@
 package hostfirewall
 
 import (
+	"context"
+	"flowgate/internal/essential"
 	"flowgate/internal/identity"
 	"flowgate/internal/policy"
 	"fmt"
@@ -155,12 +157,28 @@ func TestEssentialDHCPBootstrapKernel(t *testing.T) {
 			lo.WriteTo(b[:n], a)
 		}
 	}()
+	bootstrap, err := essential.AutomaticBootstrap(context.Background(), essential.Environment{Run: func(_ context.Context, command string, args ...string) ([]byte, error) {
+		if command != "nmcli" {
+			t.Fatalf("unexpected command %s", command)
+		}
+		if args[0] == "-t" {
+			return []byte("fixture:fgclient"), nil
+		}
+		return []byte("auto\nauto"), nil
+	}}, nil)
+	if err != nil || len(bootstrap) != 1 {
+		t.Fatalf("automatic bootstrap: %+v %v", bootstrap, err)
+	}
+	guardBootstrap, err := essential.GuardBootstrap(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, mode := range []string{"guard", "active"} {
-		r := guardRules("test", policy.BootstrapInterface{Name: "fgclient", IPv4: true, IPv6: true})
+		r := guardRules("test", guardBootstrap...)
 		table := GuardTable
 		if mode == "active" {
 			table = Table
-			r = profileRules("test", "both", policy.BootstrapInterface{Name: "fgclient", IPv4: true, IPv6: true})
+			r = profileRules("test", "both", bootstrap...)
 		}
 		nftScript(r)
 		for _, q := range []struct{ proto, local, remote string }{{"udp4", "192.0.2.1:68", "192.0.2.2:67"}, {"udp4", "192.0.2.1:68", "192.0.2.255:67"}, {"udp6", "[fe80::1%fgclient]:546", "[fe80::2%fgclient]:547"}, {"udp6", "[fe80::1%fgclient]:546", "[ff02::1:2%fgclient]:547"}} {

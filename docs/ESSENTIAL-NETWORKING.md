@@ -1,36 +1,37 @@
-# Essential system networking: reviewed permissions, never automatic protection
+# Essential networking: automatic DHCP, optional service assistance
 
-## Current setup behavior (2026-10-23 simplification)
+## Current behavior: automatic DHCP bootstrap
 
-New Essential previews default to **interface-scoped DHCP bootstrap only**.
-These reviewed IPv4/IPv6 port-pair exceptions are used by both the startup guard
-and active firewall; ordinary NetworkManager permissions do not replace them.
+DHCP bootstrap is automatic. The startup guard runs before NetworkManager, so
+it permits only the existing DHCP port pairs on current non-loopback kernel
+interfaces, including interfaces with static profiles. This boot-only exception
+is replaced on activation by narrower profile-derived scopes.
 
-Optional **DNS/time service assistance** (`service_assistance: true`, capability
-`essential-optional-services-v1`) proposes discovered upstream resolver and time
-service permissions. A durable ordinary Allow covering the complete proposed
-scope suppresses a duplicate. Disabled, temporary, different-identity, narrower
-or differently scoped rules do not count as complete coverage. An existing Allow
-is coverage evidence, not a promise that it wins against every other user rule.
-Preview/apply remains bound to the full rule inventory and the chosen options.
+For active protection, NetworkManager active connection profiles and current kernel
+interfaces determine the exact interface and address families: IPv4 `auto`,
+IPv6 `auto` or `dhcp`. Loopback and static-only interfaces are excluded.
+The existing client/server port-pair rules remain unchanged; there is no generic
+DNS, time-service, LAN or Internet allowance.
 
-No new localhost permissions are proposed, even with service assistance enabled.
-Existing saved presets are neither removed nor invalidated by this change:
-legacy derivation remains available for exact-scope validation and metadata repair.
-Explicit localhost Ask/Block policies require separately reviewed local Allows;
-this setup assistant does not override them. This includes applications reaching
-a local DNS stub: an explicit localhost Ask/Block also applies to that traffic.
-Optional Tailscale transport remains
+Discovery has a three-second deadline and is independent of optional service
+inspection. Failure logs a warning and retains only existing saved DHCP scopes.
+The boot guard needs no NetworkManager command or saved preset. A protection activation uses one snapshot for its guard, active rules, ownership
+record and failure guard. New interfaces/profile changes are picked up at the
+next activation; this does not dynamically rewrite a running firewall.
+
+The Essential networking GUI menu is removed. No approval dialog or database
+write is needed for automatic DHCP. Existing saved rules are neither removed nor
+invalidated, and protection is never started just to apply essentials.
+
+The administrative Essential API and reviewed script remain available for legacy
+preset management and optional DNS/time assistance. Assistance is off by default,
+skips durable ordinary Allows that cover the complete proposed scope, and never
+proposes localhost permissions. Explicit localhost Ask/Block also applies to
+applications reaching a local DNS stub. Optional Tailscale transport remains
 separate and off by default.
 
-The Electron dialog offers the assistance checkbox only with the matching
-capability and warns about older backend defaults. The reviewed host script
-`scripts/apply-essentials.py` now defaults to DHCP; `--services` explicitly opts
-into DNS/time. Neither path starts/stops protection or deletes existing rules.
-
-The rollout inventories and measurements below are historical evidence from
-before this simplification, not the current default proposal.
-
+The inventories and GUI measurements below are historical evidence, not current
+setup steps.
 
 ## Rollout scope (2026-10-19): essentials only, Tailscale outside
 

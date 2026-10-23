@@ -1,5 +1,4 @@
 import { setupZoneMigration } from './zone-migration-view';
-import { setupEssentialNetworking } from './essential-view';
 import { setupProtectionControls } from './protection-view';
 import { ZONE_CAPABILITY, zoneLabel, zoneRuleLabel, zoneDefinitionDetails } from './network-zones';
 import { ANY_PROTOCOL_CAPABILITY, PROCESS_CAPABILITY, targetLabel } from './process-rules';
@@ -288,7 +287,6 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
   evaluation.innerHTML = `<select id="evalProfile" aria-label="Evaluation profile"><option value="incoming">Incoming only</option><option value="both" disabled>Both directions · support not advertised</option></select><button id="evalStart">Start 5-minute evaluation…</button><button id="evalStop">Stop evaluation</button><button id="evalCancel" hidden>Cancel authentication</button><button id="evalStatus">Status</button><button id="evalRecover">Recovery…</button><span id="evaluationStatus" role="status"></span>`;
   document.querySelector('#controlMenu .menu-panel')!.append(evaluation);
   setupProtectionControls();
-  setupEssentialNetworking();
   migrationUI = setupZoneMigration();
   const confirmation = node('dialog', '');
   confirmation.id = 'confirmation';
@@ -850,7 +848,7 @@ export function updateWorkflows(next: ClientState) {
   for (const id of ['editRule', 'toggleRule']) {
     $<HTMLButtonElement>(id).disabled ||= presetSelected;
     $<HTMLButtonElement>(id).title = presetSelected
-      ? 'Preset-owned scope; inspect or remove through Essential networking.'
+      ? 'Legacy preset scope; manage through the administrative Essential API.'
       : '';
   }
   const compatible = state.control.capabilities?.includes('conditional-rule-delete-v1');
