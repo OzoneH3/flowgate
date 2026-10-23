@@ -14,7 +14,7 @@ try:
     print('PASS observed distinct PE identities, same runtime and prefix; shared wineserver retained',flush=True)
     for p in (SOCK,SOCK+'.monitor'):
         if os.path.exists(p):os.unlink(p)
-    log=(RUN/'wine-daemon.log').open('w');d=subprocess.Popen([BIN,'serve-lab','--parent-netns',os.environ['FLOWGATE_PARENT_NETNS'],'--socket',SOCK],stdout=log,stderr=log);children.append(d)
+    log=(RUN/'wine-daemon.log').open('w');d=subprocess.Popen([BIN,'serve-lab','--rules',localhost_ask_rules('incoming'),'--parent-netns',os.environ['FLOWGATE_PARENT_NETNS'],'--socket',SOCK],stdout=log,stderr=log);children.append(d)
     wait(lambda:'READY' in (RUN/'wine-daemon.log').read_text())
     for port in [24201,24202]:
         c=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);c.sendto(b'test',('127.0.0.1',port));c.close()

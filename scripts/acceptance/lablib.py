@@ -34,3 +34,13 @@ def server(port,udp=False,v6=False):
 def client(port,udp=False,v6=False):
     code='import socket,sys;s=socket.socket(int(sys.argv[1]),int(sys.argv[2]));s.settimeout(4);s.connect((sys.argv[3],int(sys.argv[4])));s.send(b"test")'
     p=subprocess.Popen([sys.executable,'-c',code,'10' if v6 else '2','2' if udp else '1','::1' if v6 else '127.0.0.1',str(port)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);children.append(p);return p
+
+def localhost_ask_rules(direction):
+    """Explicitly opt prompt/identity fixtures into localhost filtering."""
+    RUN.mkdir(parents=True,exist_ok=True)
+    path=RUN/f'localhost-ask-{direction}.json'
+    path.write_text(json.dumps([{'schema':4,'id':f'localhost-fixture-{i}','version':1,'created':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),
+        'action':'ask','filter':{'all_programs':True,'all_uids':True,'uid':0,
+        'network_zone':'local','direction':direction,'protocol':'*','remote_address':address}}
+        for i,address in enumerate(('127.0.0.0/8','::1/128'))]))
+    return str(path)

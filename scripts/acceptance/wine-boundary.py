@@ -25,7 +25,7 @@ try:
     old=os.environ['FLOWGATE_WINE_BROKER'];os.environ['FLOWGATE_WINE_BROKER']='/usr/bin/false';a=attr(24602);assert not a.get('application');os.environ['FLOWGATE_WINE_BROKER']=old
     for pth in (SOCK,SOCK+'.monitor'):
         if os.path.exists(pth):os.unlink(pth)
-    log=(RUN/'wine-boundary-daemon.log').open('w');d=subprocess.Popen([BIN,'serve-lab','--parent-netns',os.environ['FLOWGATE_PARENT_NETNS'],'--socket',SOCK,'--timeout','5s'],stdout=log,stderr=log);children.append(d);wait(lambda:'READY' in (RUN/'wine-boundary-daemon.log').read_text())
+    log=(RUN/'wine-boundary-daemon.log').open('w');d=subprocess.Popen([BIN,'serve-lab','--rules',localhost_ask_rules('incoming'),'--parent-netns',os.environ['FLOWGATE_PARENT_NETNS'],'--socket',SOCK,'--timeout','5s'],stdout=log,stderr=log);children.append(d);wait(lambda:'READY' in (RUN/'wine-boundary-daemon.log').read_text())
     c=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);c.sendto(b'shared',('127.0.0.1',24601))
     wait(lambda:any(e['flow']['local'].endswith(':24601') and e['state']=='blocked' for e in events()));assert not delivered(RUN/'boundary-24601.log')
     release.unlink();p,path=start('d',24603);wait(lambda:'DORMANT' in path.read_text());c.sendto(b'stale',('127.0.0.1',24603));v=wait(lambda:pending(24603));release.touch();wait(lambda:'MATERIALIZED' in path.read_text())

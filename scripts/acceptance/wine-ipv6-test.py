@@ -19,7 +19,7 @@ try:
     start('alpha.exe','U',25100)
     for p in (SOCK,SOCK+'.monitor'):
         if os.path.exists(p):os.unlink(p)
-    logpath=RUN/f'{label}-v6-daemon.log';log=logpath.open('w');d=subprocess.Popen([BIN,'serve-lab','--parent-netns',os.environ['FLOWGATE_PARENT_NETNS'],'--socket',SOCK,'--attach-prefixes',prefix,'--runtime-bins',bins],env=env,stdout=log,stderr=log);children.append(d);wait(lambda:'READY' in logpath.read_text() or d.poll() is not None,15);assert d.poll() is None,logpath.read_text()
+    logpath=RUN/f'{label}-v6-daemon.log';log=logpath.open('w');d=subprocess.Popen([BIN,'serve-lab','--rules',localhost_ask_rules('incoming'),'--parent-netns',os.environ['FLOWGATE_PARENT_NETNS'],'--socket',SOCK,'--attach-prefixes',prefix,'--runtime-bins',bins],env=env,stdout=log,stderr=log);children.append(d);wait(lambda:'READY' in logpath.read_text() or d.poll() is not None,15);assert d.poll() is None,logpath.read_text()
     port=25101
     for udp in [False,True]:
         for reverse in [False,True]:

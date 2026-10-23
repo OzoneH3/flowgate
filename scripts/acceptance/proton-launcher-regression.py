@@ -18,6 +18,7 @@ import subprocess
 import sys
 import threading
 import time
+from lablib import localhost_ask_rules
 
 ROOT = Path(__file__).resolve().parents[2]
 p = argparse.ArgumentParser()
@@ -145,7 +146,7 @@ try:
     if a.verify:
         (RUN/'observer').mkdir(mode=0o700)
         observer_args=['--policy-store',str(RUN/'rules.db'),'--discover-wine','--observer-scratch',str(RUN/'observer'),'--wine-helper',a.helper]
-    daemon=subprocess.Popen([BIN,'serve-lab','--parent-netns',os.environ['FLOWGATE_PARENT_NETNS'],'--direction','outgoing','--socket',API,'--timeout','30s','--decision-log',str(RUN/'decisions.db')]+observer_args,stdout=log,stderr=log);children.append(daemon);log.close()
+    daemon=subprocess.Popen([BIN,'serve-lab','--rules',localhost_ask_rules('outgoing'),'--parent-netns',os.environ['FLOWGATE_PARENT_NETNS'],'--direction','outgoing','--socket',API,'--timeout','30s','--decision-log',str(RUN/'decisions.db')]+observer_args,stdout=log,stderr=log);children.append(daemon);log.close()
     wait(lambda:Path(API).exists())
     python_key=None
     for index,(name,prefix) in enumerate([('SyntheticAlpha.exe',prefixes[0]),('SyntheticBeta.exe',prefixes[0]),('SyntheticAlpha.exe',prefixes[1])]):
@@ -255,7 +256,7 @@ try:
         child.wait(timeout=10)
     assert len({e['process']['application']['key'] for e in evidence})==3
     rules=call().get('rules',[])
-    assert len(rules)==((5 if a.protocol=='tcp' else 4) if a.verify else 1),rules
+    assert len(rules)==2+((5 if a.protocol=='tcp' else 4) if a.verify else 1),rules
     save('private-rules.json',rules)
     if a.verify:
         for index,(name,prefix) in enumerate([('SyntheticAlpha.exe',prefixes[0]),('SyntheticBeta.exe',prefixes[0]),('SyntheticAlpha.exe',prefixes[1])]):

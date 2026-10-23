@@ -68,7 +68,7 @@ try:
     for p in (SOCK,SOCK+'.monitor'):
         if os.path.exists(p):os.unlink(p)
     log=(RUN/f'{label}-table-life-daemon.log').open('w')
-    daemon=subprocess.Popen([BIN,'serve-lab','--parent-netns',os.environ['FLOWGATE_PARENT_NETNS'],'--socket',SOCK,'--timeout','5s'],stdout=log,stderr=log);children.append(daemon)
+    daemon=subprocess.Popen([BIN,'serve-lab','--rules',localhost_ask_rules('incoming'),'--parent-netns',os.environ['FLOWGATE_PARENT_NETNS'],'--socket',SOCK,'--timeout','5s'],stdout=log,stderr=log);children.append(daemon)
     wait(lambda:'READY' in (RUN/f'{label}-table-life-daemon.log').read_text())
     # Replacement while a packet is held cannot inherit the pending approval.
     p,path=start('alpha.exe','t',24805);c=client(24805);old=wait(lambda:pending(24805));stop_parent('t',24805)

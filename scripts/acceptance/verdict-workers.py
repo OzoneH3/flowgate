@@ -3,6 +3,7 @@
 Writes evidence only under .workspace. Does not exercise native Qt or Wine.
 """
 import argparse,json,os,pathlib,socket,subprocess,threading,time
+from lablib import localhost_ask_rules
 p=argparse.ArgumentParser();p.add_argument('--binary',required=True);p.add_argument('--run',required=True);a=p.parse_args()
 root=pathlib.Path.cwd();run=pathlib.Path(a.run).resolve();assert run.is_relative_to(root/'.workspace')
 assert os.environ['FLOWGATE_PARENT_NETNS']!=os.readlink('/proc/self/ns/net')
@@ -33,7 +34,7 @@ def pending(s):
 def decide(e,action,scope):
  r=api('decide',id=e['id'],action=action,scope=scope);assert r.get('decision',{}).get('state')==('allowed' if action=='allow' else 'blocked'),r
 log=(run/'daemon.log').open('w')
-daemon=subprocess.Popen([str(pathlib.Path(a.binary).resolve()),'serve-lab','--parent-netns',os.environ['FLOWGATE_PARENT_NETNS'],'--direction','outgoing','--socket',api_path,'--timeout','30s'],stdout=log,stderr=log)
+daemon=subprocess.Popen([str(pathlib.Path(a.binary).resolve()),'serve-lab','--rules',localhost_ask_rules('outgoing'),'--parent-netns',os.environ['FLOWGATE_PARENT_NETNS'],'--direction','outgoing','--socket',api_path,'--timeout','30s'],stdout=log,stderr=log)
 def poll():
  global poll_count
  while not poll_stop.is_set():

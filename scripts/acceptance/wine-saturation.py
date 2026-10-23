@@ -32,6 +32,7 @@ import subprocess
 import sys
 import threading
 import time
+from lablib import localhost_ask_rules
 
 if not __debug__:
     raise SystemExit('Optimized Python is unsupported: acceptance checks would be disabled')
@@ -202,7 +203,7 @@ log.close()
 result = dict(passed=False, sockets_per_app=a.sockets, datagrams_per_socket=a.datagrams, interval_ms=a.interval_ms, native_pps=a.native_pps)
 try:
     log = (RUN / 'daemon.log').open('w')
-    daemon = subprocess.Popen([BIN, 'serve-lab', '--parent-netns', os.environ['FLOWGATE_PARENT_NETNS'], '--direction', 'outgoing', '--socket', API,
+    daemon = subprocess.Popen([BIN, 'serve-lab','--rules',localhost_ask_rules('outgoing'), '--parent-netns', os.environ['FLOWGATE_PARENT_NETNS'], '--direction', 'outgoing', '--socket', API,
                                '--timeout', '30s', '--decision-log', str(RUN / 'decisions.db'), '--policy-store', str(RUN / 'rules.db'),
                                '--discover-wine', '--observer-scratch', str(RUN / 'observer'), '--wine-helper', a.helper], stdout=log, stderr=log)
     children.append(daemon); log.close()

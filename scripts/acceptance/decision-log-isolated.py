@@ -13,6 +13,7 @@ import argparse, json, os, socket, subprocess, sys, time, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import lablib
 from lablib import wait, delivered, children
+from lablib import localhost_ask_rules
 
 a = argparse.ArgumentParser()
 a.add_argument('--binary', required=True); a.add_argument('--run', required=True); a.add_argument('--hold', action='store_true')
@@ -42,7 +43,7 @@ def start():
     for p in (SOCK, SOCK + '.monitor'):
         if os.path.exists(p): os.unlink(p)
     out = (run / 'daemon.log').open('a')
-    daemon = subprocess.Popen([lablib.BIN, 'serve-lab', '--parent-netns', os.environ['FLOWGATE_PARENT_NETNS'], '--socket', SOCK, '--timeout', '2s', '--decision-log', DB], stdout=out, stderr=out)
+    daemon = subprocess.Popen([lablib.BIN, 'serve-lab','--rules',localhost_ask_rules('incoming'), '--parent-netns', os.environ['FLOWGATE_PARENT_NETNS'], '--socket', SOCK, '--timeout', '2s', '--decision-log', DB], stdout=out, stderr=out)
     wait(lambda: os.path.exists(SOCK) and api('list').get('generation'), 8)
     return api('list')['generation']
 def stop():

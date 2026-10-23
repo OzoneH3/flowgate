@@ -223,6 +223,13 @@ func TestEssentialDNSKernelReceivers(t *testing.T) {
 	if _, _, err = e.ApplyEssential(e.Generation, preview.Token, "apply", essential.Options{}, 0); err != nil {
 		t.Fatal(err)
 	}
+	// This fixture tests exact DNS presets, so explicitly opt localhost into
+	// filtering rather than relying on the general application default.
+	rules := e.Rules(0, true)
+	rules = append(rules, policy.Rule{Schema: 4, ID: "fixture-localhost-block", Action: "block", Filter: policy.Filter{AllPrograms: true, AllUIDs: true, NetworkZone: "local", Direction: "outgoing", Protocol: "*", RemoteAddress: "127.0.0.54"}})
+	if err = e.SetRules(rules); err != nil {
+		t.Fatal(err)
+	}
 	queueReady := make(chan error, 1)
 	go func() {
 		err := queue.RunConfigured(ctx, e, "outgoing", 101, false, func() error { queueReady <- nil; return nil })

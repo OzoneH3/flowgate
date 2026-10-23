@@ -26,6 +26,7 @@ echo 'Additional opt-in coverage: --wine; subordinate-ID user namespace coverage
 go build -o .workspace/flowgate ./cmd/flowgate
 go build -o .workspace/native-a ./fixtures/native
 cp .workspace/native-a .workspace/native-b
+scripts/lab.sh python3 scripts/acceptance/localhost.py
 scripts/lab.sh python3 scripts/acceptance/integration.py
 scripts/lab.sh python3 scripts/acceptance/outgoing.py
 if [ "${1:-}" = "--wine" ]; then

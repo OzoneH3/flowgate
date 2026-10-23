@@ -214,6 +214,9 @@ func (e *Engine) liveEventsLocked() int {
 // reads and independent flows are not held behind it.
 func (e *Engine) Observe(f identity.Flow, token string) Event {
 	// Every undecided/new attempt and every UDP datagram rechecks actual ownership.
+	if e.defaultLoopback(f) {
+		return e.ObserveResolved(f, token, identity.Attribution{Status: "localhost", Reason: "Localhost communication is allowed by default"})
+	}
 	return e.ObserveResolved(f, token, e.Resolve(f))
 }
 
@@ -221,6 +224,9 @@ func (e *Engine) Observe(f identity.Flow, token string) Event {
 // attribution needs a census that cannot start now: no event is created and
 // nothing is logged; the caller must use Observe later or drop explicitly.
 func (e *Engine) TryObserve(f identity.Flow, token string) (Event, bool) {
+	if e.defaultLoopback(f) {
+		return e.Observe(f, token), true
+	}
 	if e.TryResolve == nil {
 		return e.Observe(f, token), true
 	}
@@ -236,7 +242,10 @@ func (e *Engine) TryObserve(f identity.Flow, token string) (Event, bool) {
 // are read under e.mu at decision time, so a rule changed during resolution
 // applies to this attempt. Resolve must be safe for concurrent use.
 func (e *Engine) ObserveResolved(f identity.Flow, token string, a identity.Attribution) Event {
-	peers := e.resolvePeers(f)
+	var peers *prefetchSet
+	if !e.defaultLoopback(f) {
+		peers = e.resolvePeers(f)
+	}
 	e.mu.Lock()
 	e.peerPrefetched = peers
 	defer func() { e.peerPrefetched = nil; e.mu.Unlock() }()
@@ -269,7 +278,10 @@ func (e *Engine) ObserveResolved(f identity.Flow, token string, a identity.Attri
 	}
 	// local-pair-v1: identify the same-host peer; a reviewed pair decision may
 	// answer this (incoming) side when no configured rule decides it.
-	pair := e.observeLocalPairLocked(&v, a, action, now)
+	var pair *pairHit
+	if rule != policy.DefaultLoopback {
+		pair = e.observeLocalPairLocked(&v, a, action, now)
+	}
 	if pair != nil {
 		action, rule = pair.Action, v.Rule
 	}
@@ -299,6 +311,9 @@ func (e *Engine) ObserveResolved(f identity.Flow, token string, a identity.Attri
 	case "allow":
 		v.State = "allowed"
 		v.Reason = "allowed by rule; other firewall chains may still deny delivery"
+		if rule == policy.DefaultLoopback {
+			v.Reason = "Localhost communication is allowed by default; explicit localhost address rules can override"
+		}
 	case "block":
 		v.State = "blocked"
 		v.Reason = "blocked by rule or unresolved ownership"

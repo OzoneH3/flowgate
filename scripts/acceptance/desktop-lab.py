@@ -9,6 +9,7 @@ import struct
 import subprocess
 import sys
 import time
+from lablib import localhost_ask_rules
 
 ROOT = Path(__file__).resolve().parents[2]
 RUN = Path(sys.argv[1]).resolve()
@@ -36,7 +37,7 @@ def start_backend():
     global backend
     for name in ('control.sock', 'control.sock.monitor'):
         (RUN / name).unlink(missing_ok=True)
-    backend = spawn([str(ROOT / '.workspace/flowgate'), 'serve-lab', '--socket', str(RUN / 'control.sock'),
+    backend = spawn([str(ROOT / '.workspace/flowgate'), 'serve-lab','--rules',localhost_ask_rules('incoming'), '--socket', str(RUN / 'control.sock'),
                      '--parent-netns', os.environ['FLOWGATE_PARENT_NETNS'], '--timeout', TIMEOUT], 'backend.log')
     end = time.monotonic() + 8
     while time.monotonic() < end:

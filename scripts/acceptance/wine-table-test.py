@@ -14,7 +14,7 @@ def start(name,proto,port):
 try:
     for p in (SOCK,SOCK+'.monitor'):
         if os.path.exists(p):os.unlink(p)
-    log=(RUN/'wine-increment-daemon.log').open('w');d=subprocess.Popen([BIN,'serve-lab','--parent-netns',os.environ['FLOWGATE_PARENT_NETNS'],'--socket',SOCK,'--timeout','5s'],stdout=log,stderr=log);children.append(d);wait(lambda:'READY' in (RUN/'wine-increment-daemon.log').read_text())
+    log=(RUN/'wine-increment-daemon.log').open('w');d=subprocess.Popen([BIN,'serve-lab','--rules',localhost_ask_rules('incoming'),'--parent-netns',os.environ['FLOWGATE_PARENT_NETNS'],'--socket',SOCK,'--timeout','5s'],stdout=log,stderr=log);children.append(d);wait(lambda:'READY' in (RUN/'wine-increment-daemon.log').read_text())
     evidence=[]
     for udp,base in [(True,24400),(False,24410)]:
         for reverse in [False,True]:

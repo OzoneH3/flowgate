@@ -390,10 +390,43 @@ controls now require the conditional capability, freeze confirmation tokens and
 never replay an ambiguous mutation. Qt preserves uint64 tokens; Electron refuses
 versions outside its safe-integer range rather than rounding.
 
+### Localhost policy default
+
+TCP/UDP between loopback addresses is allowed by default when the packet's
+interface is a kernel loopback device in the daemon's network namespace.
+This covers IPv4 127.0.0.0/8 and IPv6 ::1, including mapped IPv4 addresses.
+LAN, link-local, the machine's non-loopback addresses, and forwarded traffic
+are not exempt. Interface names and application/launcher names are not evidence.
+
+This also allows an Internet-blocked application to contact a local proxy or
+relay. The proxy's own outbound connections remain subject to its own policy;
+localhost access does not inherit the proxy's permissions.
+
+Broad application, process, machine and Local Network zone rules do not block
+or prompt for localhost. To filter localhost explicitly, scope a rule's remote
+address to a loopback IP/subnet (IPv4 /8 or narrower, IPv6 ::1/128), or use a
+legacy exact loopback remote endpoint. Those rules keep ordinary executable,
+UID, prefix, process, direction, protocol, port, expiry and precedence checks.
+A port-only scope or a subnet that includes non-loopback addresses is not an
+explicit localhost target. Existing rules with an explicit loopback address
+continue to apply; they are not silently removed or broadened.
+Only loopback-scoped rules participate for localhost: a broad application Allow
+does not override an all-program localhost Ask/Block; use an application Allow
+with an explicit loopback address scope for that exception.
+
+With no possible explicit target, admission skips runtime attribution and does
+not create a prompt or saved application permission. If an explicit target
+might apply, ownership is resolved normally; missing/ambiguous evidence still
+fails closed. A rule for another verified application cannot grant or deny this
+one. Localhost Allow reports `default-localhost-allow`; other firewall chains
+and queue/packet bounds can still prevent delivery. As elsewhere, edits control
+new TCP admissions and future UDP checks, not already admitted TCP payloads.
+
 ### TCP loopback self-connections
 
 An incoming TCP SYN with identical local and remote loopback address and port,
-on a verified loopback interface, follows normal attribution and incoming policy.
+on a verified loopback interface, follows the localhost default above unless an
+explicit localhost rule applies.
 Only after an Allow, FlowGate may set the two per-connection TCP BE_LIBERAL window
 flags. This avoids conntrack rejecting later self-connection payloads as INVALID.
 No global TCP setting, admission mark, timeout, TCP state, or firewall rule is

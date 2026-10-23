@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Private-namespace receiver regression: prompt history cannot override rules."""
 import json,os,pathlib,socket,subprocess,sys,threading,time
+from lablib import localhost_ask_rules
 root=pathlib.Path.cwd();run=pathlib.Path(sys.argv[1]).resolve()
 assert run.is_relative_to(root/'.workspace')
 assert os.environ['FLOWGATE_PARENT_NETNS']!=os.readlink('/proc/self/ns/net')
@@ -23,7 +24,7 @@ def wait(fn,seconds=5):
   time.sleep(.002)
  raise AssertionError('receiver/API deadline')
 log=(run/'daemon.log').open('w')
-daemon=subprocess.Popen([str(root/'.workspace/flowgate-capacity'),'serve-lab','--parent-netns',os.environ['FLOWGATE_PARENT_NETNS'],'--direction','outgoing','--socket',api_path,'--timeout','60s'],stdout=log,stderr=log)
+daemon=subprocess.Popen([str(root/'.workspace/flowgate-capacity'),'serve-lab','--rules',localhost_ask_rules('outgoing'),'--parent-netns',os.environ['FLOWGATE_PARENT_NETNS'],'--direction','outgoing','--socket',api_path,'--timeout','60s'],stdout=log,stderr=log)
 try:
  wait(lambda:pathlib.Path(api_path).exists() and 'READY:' in (run/'daemon.log').read_text())
  def send(i):

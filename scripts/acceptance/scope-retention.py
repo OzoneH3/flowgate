@@ -5,7 +5,7 @@ def send(port,source='127.0.0.1',data=b'ONCE'):
 try:
     for p in (SOCK,SOCK+'.monitor'):
         if os.path.exists(p):os.unlink(p)
-    log=(RUN/'scope-retention-daemon.log').open('w');d=subprocess.Popen([BIN,'serve-lab','--parent-netns',os.environ['FLOWGATE_PARENT_NETNS'],'--socket',SOCK,'--timeout','2s'],stdout=log,stderr=log);children.append(d);wait(lambda:'READY' in (RUN/'scope-retention-daemon.log').read_text())
+    log=(RUN/'scope-retention-daemon.log').open('w');d=subprocess.Popen([BIN,'serve-lab','--rules',localhost_ask_rules('incoming'),'--parent-netns',os.environ['FLOWGATE_PARENT_NETNS'],'--socket',SOCK,'--timeout','2s'],stdout=log,stderr=log);children.append(d);wait(lambda:'READY' in (RUN/'scope-retention-daemon.log').read_text())
     # One-shot datagrams: approval, block, expiry, and stale listener replacement.
     for port,action in [(24501,'allow'),(24502,'block'),(24503,'timeout'),(24504,'replacement')]:
         p,path=server(port,True);c=send(port);c.close();v=wait(lambda:pending(port));assert not delivered(path)

@@ -23,7 +23,7 @@ def discovery():return cli('runtime-discover','--runtime-bins',binpath)
 def daemon():
     for p in (SOCK,SOCK+'.monitor'):
         if os.path.exists(p):os.unlink(p)
-    path=RUN/f'{label}-attach-daemon.log';f=path.open('w');p=subprocess.Popen([BIN,'serve-lab','--parent-netns',os.environ['FLOWGATE_PARENT_NETNS'],'--socket',SOCK,'--attach-prefixes',','.join(map(str,prefixes)),'--runtime-bins',binpath],env=envs[0],stdout=f,stderr=f);children.append(p)
+    path=RUN/f'{label}-attach-daemon.log';f=path.open('w');p=subprocess.Popen([BIN,'serve-lab','--rules',localhost_ask_rules('incoming'),'--parent-netns',os.environ['FLOWGATE_PARENT_NETNS'],'--socket',SOCK,'--attach-prefixes',','.join(map(str,prefixes)),'--runtime-bins',binpath],env=envs[0],stdout=f,stderr=f);children.append(p)
     wait(lambda:'READY' in path.read_text() or p.poll() is not None,15);assert p.poll() is None,path.read_text();return p
 
 evidence={}

@@ -37,7 +37,7 @@ try:
     helper.wait(timeout=5)
     for p in (SOCK,SOCK+'.monitor'):
         if os.path.exists(p):os.unlink(p)
-    log=(RUN/f'{label}-dup-daemon.log').open('w');d=subprocess.Popen([BIN,'serve-lab','--parent-netns',os.environ['FLOWGATE_PARENT_NETNS'],'--socket',SOCK],stdout=log,stderr=log);children.append(d);wait(lambda:'READY' in (RUN/f'{label}-dup-daemon.log').read_text())
+    log=(RUN/f'{label}-dup-daemon.log').open('w');d=subprocess.Popen([BIN,'serve-lab','--rules',localhost_ask_rules('incoming'),'--parent-netns',os.environ['FLOWGATE_PARENT_NETNS'],'--socket',SOCK],stdout=log,stderr=log);children.append(d);wait(lambda:'READY' in (RUN/f'{label}-dup-daemon.log').read_text())
     folder,path=start('d',24902);c.sendto(b'pending',('127.0.0.1',24902));v=wait(lambda:checked_pending(24902));(folder/'prepare').touch();wait(lambda:'PREPARED' in path.read_text())
     q=subprocess.run([BIN,'decide','--socket',SOCK,'--id',v['id'],'--action','allow'],capture_output=True);assert q.returncode;assert not delivered(path);evidence['stale_duplication']=v
     (folder/'materialize').touch();wait(lambda:'CONSTRUCTED' in path.read_text());(folder/'receive').touch();c.sendto(b'shared',('127.0.0.1',24902));blocked=wait(lambda:next((e for e in events() if e['flow']['local'].endswith(':24902') and e['state']=='blocked'),None));assert blocked['attribution'].get('application') is None,blocked;time.sleep(.15);assert not delivered(path);evidence['shared_transition_denied']=blocked

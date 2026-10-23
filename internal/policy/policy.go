@@ -175,6 +175,13 @@ func Evaluate(rules []Rule, f identity.Flow, a identity.Attribution, now time.Ti
 	return EvaluateSession(rules, f, a, now, "")
 }
 func EvaluateSession(rules []Rule, f identity.Flow, a identity.Attribution, now time.Time, session string) (string, string, []string) {
+	localhost := identity.IsLoopbackFlow(f)
+	if localhost {
+		rules = LoopbackRules(rules, f, now)
+		if len(rules) == 0 {
+			return "allow", DefaultLoopback, nil
+		}
+	}
 	if a.Application == nil || a.Application.Key == "" || a.Application.Revision == "" || a.Principal() == nil {
 		return "block", "unsafe-attribution", nil
 	}
@@ -277,6 +284,9 @@ func EvaluateSession(rules []Rule, f identity.Flow, a identity.Attribution, now 
 		ids = append(ids, r.ID)
 	}
 	if len(matches) == 0 {
+		if localhost {
+			return "allow", DefaultLoopback, ids
+		}
 		return "ask", "default-ask", ids
 	}
 	return matches[0].Action, matches[0].ID, ids
