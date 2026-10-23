@@ -83,6 +83,7 @@ import { setupWorkflows, updateWorkflows, openRule, resumeRuleEditor } from './w
 import { setupDecisionLog, showDecisionLog, updateDecisionLog } from './decision-log-view';
 import { runtimeDegradation } from './runtime-checks';
 import type { Attempt, ClientState, ViewEvent, Scope } from './protocol';
+import { recordDecisionResult, showsLocalResult, type CardResult } from './card-result';
 import {
   hasObservedConnection,
   overview,
@@ -180,7 +181,7 @@ function setOption(option: 'forAWhile' | 'remember', checked: boolean) {
 }
 // Short inline text for one request card; technical detail lives in Details.
 let cardNote: { id: string; text: string; detail?: string } | undefined;
-const cardResults = new Map<string, { text: string; detail: string }>();
+const cardResults = new Map<string, CardResult>();
 function note(e: ViewEvent, text: string, detail = '') {
   cardNote = { id: e.id, text, detail };
   updateDecisions();
@@ -2294,13 +2295,14 @@ function renderRequests() {
         token = current?.attempt?.reconcile;
       if (!current || !token) return;
       reconcile.disabled = true;
+      const submitted = state.control.generation;
       try {
         const result = await window.flowgate.decisionReconcile({
-          generation: state.control.generation,
+          generation: submitted,
           id: current.id,
           preview_token: token,
         });
-        cardResults.set(current.id, { text: shortAttempt(result, current), detail: result.message });
+        recordDecisionResult(cardResults, current.id, submitted, state.control.generation, { text: shortAttempt(result, current), detail: result.message, phase: result.phase });
       } catch (error) {
         note(current, shortError(errorText(error)), errorText(error));
       } finally {
@@ -2435,7 +2437,7 @@ async function decideFromCard(id: string, action: 'allow' | 'block') {
   updateDecisions();
   try {
     const result = await window.flowgate.decide(decision);
-    cardResults.set(e.id, { text: shortAttempt(result, e), detail: result.message });
+    recordDecisionResult(cardResults, e.id, decision.generation, state.control.generation, { text: shortAttempt(result, e), detail: result.message, phase: result.phase });
   } catch (error) {
     // Thrown before or instead of a decision (e.g. For a while refused): nothing
     // was decided, so the request stays answerable with another choice.
@@ -2749,8 +2751,8 @@ function updateDecisions() {
       ? ''
       : ruleDone
         ? ENDED_RULE_RESULT
-        : local && (e.attempt?.phase !== 'unknown' || !e.attempt)
-          ? local.text
+        : showsLocalResult(local, e.attempt, state.control.generation)
+          ? local!.text
           : e.attempt
             ? shortAttempt(e.attempt, e)
             : !state.control.connected
@@ -2785,7 +2787,7 @@ function updateDecisions() {
     const own = cardNote && cardNote.id === e.id ? cardNote.detail : '';
     $('requestStatus').textContent = e.reason || '—';
     $('requestLastResult').textContent =
-      (ruleDone ? endedFlow.saved.get(e.id) || local?.detail : local?.detail || own || e.attempt?.message) ||
+      (ruleDone ? endedFlow.saved.get(e.id) || (showsLocalResult(local, e.attempt, state.control.generation) ? local?.detail : undefined) : (showsLocalResult(local, e.attempt, state.control.generation) ? local?.detail : undefined) || own || e.attempt?.message) ||
       (e.attempt?.phase === 'unknown' && e.state !== 'awaiting-decision'
         ? `Backend now reports ${e.state}; the original acknowledgement remains unknown.`
         : '—');

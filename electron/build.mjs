@@ -82,6 +82,7 @@ await build({
     'src/prompt-summary.ts',
     'src/permission-results.ts',
     'src/runtime-checks.ts',
+    'src/card-result.ts',
   ],
   bundle: true,
   platform: 'node',
