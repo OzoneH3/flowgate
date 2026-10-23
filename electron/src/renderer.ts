@@ -1,3 +1,4 @@
+import { matchesApplicationZone } from './application-zones';
 import { ApplicationCallers } from './application-callers';
 import { replaceKeyedRow } from './keyed-rows';
 import { rowStructure } from './row-structure';
@@ -703,27 +704,8 @@ function statusStrip(r: Row) {
       for (const tr of document.querySelectorAll<HTMLElement>('#rows tr'))
         tr.setAttribute('aria-selected', String(tr.dataset.id === selected));
       renderInfo();
-      // Not running: its stored rules can be changed or deleted here (reviewed by
-      // the backend); creating new rules needs the running, verified program.
       if (r.inactive) {
-        const status = ruleStatus(r, state);
-        openInactiveRules(button, {
-          label: r.presentationLabel || appNames.get(JSON.stringify([r.inactive.key, r.inactive.revision, r.inactive.executable])) || r.label,
-          direction,
-          rules: status.available ? status[direction] : [],
-          generation: state.control.generation,
-          now: status.now,
-          canManage: state.control.connected && canManageRules(state.control),
-          canDelete: !!state.control.capabilities?.includes('conditional-rule-delete-v1'),
-          askWritable: !!state.control.capabilities?.includes('stored-ask-v1'),
-          message,
-          // New rules reuse the identity of one of this program's own stored rules.
-          basisRuleId: state.control.capabilities?.includes('rule-from-basis-v1')
-            ? [...(status.available ? [...status.incoming, ...status.outgoing] : [])].find(
-                (x) => !x.preset && !x.filter.process && !x.filter.all_programs && !x.filter.all_uids,
-              )?.id
-            : undefined,
-        });
+        showInactiveRules(button, r, direction);
         return;
       }
       if (presentation?.panes.info !== 'docked') showFloatingRuleStatus();
@@ -733,6 +715,29 @@ function statusStrip(r: Row) {
   }
   cell.append(strip);
   return cell;
+}
+function showInactiveRules(anchor: HTMLElement, r: Row, direction: 'incoming' | 'outgoing') {
+  if (!r.inactive || !state) return;
+  const status = ruleStatus(r, state);
+  const allStatus = ruleStatus({...r, applicationZone: undefined}, state);
+  openInactiveRules(anchor, {
+    label: r.applicationZone ? r.label : r.presentationLabel || appNames.get(JSON.stringify([r.inactive.key, r.inactive.revision, r.inactive.executable])) || r.label,
+    direction,
+    rules: status.available ? status[direction] : [],
+    generation: state.control.generation,
+    now: status.now,
+    canManage: state.control.connected && canManageRules(state.control),
+    canDelete: !!state.control.capabilities?.includes('conditional-rule-delete-v1'),
+    askWritable: !!state.control.capabilities?.includes('stored-ask-v1'),
+    message,
+    // New rules reuse the identity of one of this program's own stored rules.
+    networkZone: r.applicationZone?.zone,
+    basisRuleId: (!r.applicationZone || r.applicationZone.model === state.control.networkZones?.model) && state.control.capabilities?.includes('rule-from-basis-v1')
+      ? [...(allStatus.available ? [...allStatus.incoming, ...allStatus.outgoing] : [])].find(
+          (x) => !x.preset && !x.filter.process && !x.filter.all_programs && !x.filter.all_uids,
+        )?.id
+      : undefined,
+  });
 }
 function field(container: HTMLElement, label: string, value: string) {
   container.append(element('dt', label), element('dd', value || 'Unknown'));
@@ -1870,9 +1875,17 @@ function renderInfo() {
     if(nodeRuntime)field(info,'Script','No script path was retained in this stored executable identity.');
 
     const now = state.control.serverNow ?? Date.now();
-    const rules = (state.control.rules || []).filter((x) => inactiveRuleMatches(r.inactive!, x));
+    const rules = (state.control.rules || []).filter((x) => inactiveRuleMatches(r.inactive!, x) && (!r.applicationZone || matchesApplicationZone(x.filter, r.applicationZone)));
     field(info, 'Rules', rules.map((x) => ruleDescription(x, now)).join('\n') || 'None');
-    field(info, 'Edit', 'Click its In or Out cell in Rule Status to change, disable or delete a rule (or use Rules). New rules need the running program.');
+    field(info, 'Edit', 'Add or edit saved rules without starting the program. Select its Local Network or Internet row for network-specific permissions.');
+    const controls = element('dd');
+    for (const direction of ['incoming', 'outgoing'] as const) {
+      const edit = element('button', direction === 'incoming' ? 'Incoming rules…' : 'Outgoing rules…');
+      edit.type = 'button';
+      edit.onclick = () => showInactiveRules(edit, r, direction);
+      controls.append(edit);
+    }
+    info.append(element('dt', 'Manage rules'), controls);
   }
   if (r.revisions && r.revisions.length > 1)
     field(info, 'Running revisions', r.revisions.join('\n') + '\nSame verified program and user; each process keeps its own exact identity.');

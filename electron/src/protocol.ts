@@ -1237,7 +1237,7 @@ export type RuleSource = {
   id?: string;
   event?: string;
   // rule-from-basis-v1: new rule for the identity of an existing stored rule.
-  basis?: { rule: string; direction: 'incoming' | 'outgoing' };
+  basis?: { rule: string; direction: 'incoming' | 'outgoing'; networkZone?: 'local' | 'internet' };
   observed?: ObservedSource;
   zone?: ZoneSource;
 };

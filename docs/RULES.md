@@ -66,3 +66,19 @@ Legacy `rule`/`delete` is still unconditional for older third-party callers; a
 frontend precheck does not close its race. The integrated Qt/Electron Delete
 controls have migrated and require the conditional capability.
 No storage schema/table migration is required.
+
+## Rules for applications that are not running
+
+In Electron, expand **Not running**, then select the saved application or its
+**Local Network** / **Internet** child. Use the **In/Out** status cell or the
+**Incoming rules… / Outgoing rules…** buttons in Info View to add, edit, disable
+or delete rules. The application does not need to be running.
+
+For LAN-only access, keep a Local Network Allow and change the Internet rule to
+Deny. If the Internet rule does not exist, add Deny from the Internet child.
+New rules use the exact application/revision/user identity of an existing saved
+rule, and inherit its priority; no process or launcher identity is guessed.
+At equal priority, Internet Deny wins over an application-wide Allow for Internet
+traffic. Other explicit higher-priority rules still follow normal precedence.
+Existing rule edits preserve their network scope; Advanced creation can select a
+new scope. Apps with no saved identity still require a verified observed target.

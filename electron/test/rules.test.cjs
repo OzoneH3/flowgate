@@ -184,3 +184,45 @@ test('stored Ask rule is read-only without stored-ask-v1: never re-saved as Allo
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('closed application: create Internet Deny from saved identity, preserve LAN rule, reject stale classification', async () => {
+  const dir = fs.mkdtempSync(path.resolve(__dirname, '../../.workspace/offline-rule-'));
+  const socket = path.join(dir, 'api');
+  const basis = {id:'basis', version:3, schema:2, created:'2026-01-01T00:00:00Z', expires:'0001-01-01T00:00:00Z', executable:'/prefix-a/Alpha.exe', action:'allow', disabled:false, priority:100,
+    filter:{application:'alpha-prefix-a',revision:'rev-a',uid:1000,direction:'outgoing',protocol:'*',remote_address:'*'}};
+  const control = {connected:true,readOnly:false,generation:'g',capabilities:['rule-from-basis-v1','network-zone-policy-v1','automatic-network-zones-v1'], networkZones:{model:'automatic-peer-v1',revision:'z1'},rules:[basis],events:[]};
+  let sent=[];
+  const server=net.createServer(s=>s.once('data',b=>{
+    const q=JSON.parse(b); sent.push(q);
+    s.end(JSON.stringify({version:1,generation:'g',mode:'host-enforcement',read_only:false,server_time:new Date().toISOString(),saved_rule:{...q.rule,id:q.id||'new',version:q.id?4:1},scope_preview:'fixture'})+'\n');
+  }));
+  await new Promise(r=>server.listen(socket,r));
+  try {
+    const rules=new Rules({controller:socket,pollControl:async()=>{},now:()=>Date.now(),view:()=>({control})});
+    const d=await rules.draft({basis:{rule:'basis',direction:'outgoing',networkZone:'internet'}});
+    assert.equal(d.rule.priority,100,'same priority lets Deny take precedence over broad Allow');
+    const edit={token:d.token,action:'block',protocol:'*',remote_address:'*',local_port:0,remote_port:0,priority:d.rule.priority,disabled:false,expiry:'permanent',network_zone:'internet'};
+    const p=await rules.preview(edit);
+    assert.equal(p.verifiedRule.schema,6);
+    assert.deepEqual(JSON.parse(JSON.stringify(p.verifiedRule.filter)),{...basis.filter,network_zone:'internet',zone_model:'automatic-peer-v1',remote:'',local_port:0,remote_port:0});
+    assert.equal(sent.at(-1).basis_rule_id,'basis');
+    assert.equal(sent.at(-1).zone_revision,'z1');
+    assert.equal(basis.action,'allow');assert.equal(basis.filter.network_zone,undefined);
+    control.networkZones.revision='z2';
+    const before=sent.length;
+    await assert.rejects(()=>rules.save(p.receipt),/classification changed/);
+    await assert.rejects(()=>rules.preview(edit),/classification changed/);
+    assert.equal(sent.length,before,'stale preview/save sends nothing');
+    // Existing zone rules remain editable without any live process/event.
+    const existing={...basis,id:'internet',schema:6,filter:{...basis.filter,network_zone:'internet',zone_model:'automatic-peer-v1'}};
+    control.rules.push(existing);
+    const saved=await rules.draft({id:'internet'});
+    const edited=await rules.preview({...edit,token:saved.token,expiry:'preserve'});
+    assert.equal(sent.at(-1).id,'internet');
+    assert.equal(sent.at(-1).expected_version,3);
+    assert.equal(sent.at(-1).rule.filter.network_zone,'internet');
+    await assert.rejects(()=>rules.preview({...edit,token:saved.token,network_zone:'local'}),/immutable/);
+    const finalPreview=await rules.preview({...edit,token:saved.token,expiry:'preserve'});
+    assert.equal((await rules.save(finalPreview.receipt)).phase,'acknowledged');
+  } finally { await new Promise(r=>server.close(r));fs.rmSync(dir,{recursive:true,force:true}); }
+});

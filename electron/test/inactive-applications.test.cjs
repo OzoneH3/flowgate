@@ -61,8 +61,8 @@ test('process rows show an inherited application rule muted and not interactive'
   assert.match(src, /if \(inherited\) \{\n\s*button\.classList\.add\('policy-inherited'\);\n\s*button\.disabled = true;/);
   assert.match(src, /button\.title = inherited\n\s*\? ''/, 'no tooltip on inherited cells');
   assert.match(src, /event\.stopPropagation\(\);\n\s*if \(inherited\) return;/, 'no click on inherited cells');
-  // Not running: its own stored-rules popup, never the quick setter (that would create rules).
-  assert.match(src, /if \(r\.inactive\) \{\n\s*const status = ruleStatus\(r, state\);\n\s*openInactiveRules\(button,[\s\S]*?\n\s*return;\n\s*\}/);
+  // Not running: stored identity popup, without a live observed target.
+  assert.match(src, /if \(r\.inactive\) \{\n\s*showInactiveRules\(button, r, direction\);\n\s*return;\n\s*\}/);
   const css = fs.readFileSync(path.join(__dirname, '../src/style.css'), 'utf8');
   assert.match(css, /\.policy-cell\.policy-inherited \{[^}]*pointer-events:none/);
 });
@@ -264,6 +264,6 @@ test('adding a rule for a not-running program: same identity only; new-rule save
   assert.equal(sameNewRule({ ...reviewed, filter: { ...reviewed.filter, uid: 0 } }, reviewed), false);
   const fs = require('node:fs'), path = require('node:path');
   const src = fs.readFileSync(path.join(__dirname, '../src/inactive-rules.ts'), 'utf8');
-  assert.match(src, /ruleDraft\(\{ basis: \{ rule: basisId, direction \} \}\)/);
+  assert.match(src, /ruleDraft\(\{ basis: \{ rule: basisId, direction,/);
   assert.match(src, /v\.filter\.application !== f\.application \|\| v\.filter\.revision !== f\.revision \|\| v\.filter\.uid !== f\.uid/);
 });

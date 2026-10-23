@@ -3,6 +3,8 @@ package daemon
 import (
 	"flowgate/internal/identity"
 	"flowgate/internal/policy"
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -65,4 +67,77 @@ func TestCreateRuleFromBasis(t *testing.T) {
 		t.Errorf("preset basis: %v", err)
 	}
 	_ = time.Second
+}
+
+// Stored Wine identities remain sufficient to manage policy after all processes
+// exit. A zone edit changes neither the sibling LAN rule nor another identity.
+func TestOfflineApplicationZoneEditingIsolation(t *testing.T) {
+	for _, app := range []string{"Alpha.exe", "Beta.exe"} {
+		for _, prefix := range []string{"prefix-a", "prefix-b"} {
+			t.Run(app+"/"+prefix, func(t *testing.T) {
+				e, _, _, now := fixture()
+				e.SaveRules = func([]policy.Rule) error { return nil }
+				key := prefix + "/" + app
+				basis := policy.Rule{ID: "basis", Version: 1, Schema: 2, Action: "allow", Priority: 100, Executable: "/fixture/" + key,
+					Filter: policy.Filter{Application: key, Revision: "rev", UID: 1000, Direction: "outgoing", Protocol: "*", RemoteAddress: "*"}}
+				e.rules = []policy.Rule{basis}
+				candidate := basis
+				candidate.ID = ""
+				candidate.Schema = 4
+				candidate.Filter.NetworkZone = "internet"
+				internet, _, err := e.CreateRuleFromBasis("basis", candidate, 1000, false, true)
+				if err != nil {
+					t.Fatal(err)
+				}
+				candidate.Filter.NetworkZone = "local"
+				lan, _, err := e.CreateRuleFromBasis("basis", candidate, 1000, false, true)
+				if err != nil {
+					t.Fatal(err)
+				}
+				changed := internet
+				changed.Action = "block"
+				edited, _, err := e.EditRule(internet.ID, "", &internet.Version, changed, 1000, false, true)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(edited.Filter, internet.Filter) {
+					t.Fatal("editing action changed scope")
+				}
+				for _, zone := range []string{"internet", "local"} {
+					flow, _ := identity.ParseFlow("tcp", "outgoing", "192.0.2.1:40000", "198.51.100.1:443")
+					flow.NetworkScope = identity.NetworkScope{State: "known", Zone: zone, Source: identity.AutomaticZoneModel, LegacyState: "known", LegacyZone: zone}
+					attribution := identity.Attribution{Application: &identity.Application{Key: key, Revision: "rev"}, Owners: []identity.Process{{UID: 1000}}}
+					action, _, _ := policy.Evaluate(e.rules, flow, attribution, *now)
+					want := "allow"
+					if zone == "internet" {
+						want = "block"
+					}
+					if action != want {
+						t.Fatalf("%s: %s want %s", zone, action, want)
+					}
+					for _, otherApp := range []string{"Alpha.exe", "Beta.exe"} {
+						for _, otherPrefix := range []string{"prefix-a", "prefix-b"} {
+							other := otherPrefix + "/" + otherApp
+							if other == key {
+								continue
+							}
+							attribution.Application.Key = other
+							action, _, _ = policy.Evaluate(e.rules, flow, attribution, *now)
+							if action != "ask" {
+								t.Fatal(fmt.Sprintf("permissions transferred from %s to %s", key, other))
+							}
+						}
+					}
+				}
+				for _, r := range e.rules {
+					if (r.ID == basis.ID || r.ID == lan.ID) && r.Action != "allow" {
+						t.Fatal("unrelated rule modified")
+					}
+				}
+				if _, _, err := e.EditRule(internet.ID, "", &internet.Version, changed, 1000, false, true); err == nil {
+					t.Fatal("stale edit accepted")
+				}
+			})
+		}
+	}
 }

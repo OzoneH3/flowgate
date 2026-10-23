@@ -1,3 +1,4 @@
+import { AUTOMATIC_ZONE_CAPABILITY, ZONE_CAPABILITY } from './network-zones';
 import { ZoneRules } from './zone-rules';
 import { PROCESS_CAPABILITY, sameProcessTarget } from './process-rules';
 import { ObservedRules } from './observed-rules';
@@ -14,7 +15,7 @@ import {
 } from './protocol';
 // Draft identity, generation and version remain in main, never trusted from renderer.
 export class Rules {
-  private drafts = new Map<string, RuleDraft & { event?: string; id?: string; basis?: string }>();
+  private drafts = new Map<string, RuleDraft & { event?: string; id?: string; basis?: string; zoneRevision?: string }>();
   private receipts = new Map<
     string,
     { draft: string; request: object; rule: Rule; generation: string; id?: string }
@@ -106,9 +107,10 @@ export class Rules {
   // rule-from-basis-v1: a new, separate rule for the exact identity (application,
   // revision, UID) of an existing stored rule — e.g. a program that is not running.
   private async basisDraft(raw: unknown): Promise<RuleDraft> {
-    const b = (raw && typeof raw === 'object' ? raw : {}) as { rule?: unknown; direction?: unknown };
+    const b = (raw && typeof raw === 'object' ? raw : {}) as { rule?: unknown; direction?: unknown; networkZone?: unknown };
     if (
-      Object.keys(b).sort().join(',') !== 'direction,rule' ||
+      !['direction,rule', 'direction,networkZone,rule'].includes(Object.keys(b).sort().join(',')) ||
+      (b.networkZone !== undefined && b.networkZone !== 'local' && b.networkZone !== 'internet') ||
       typeof b.rule !== 'string' || !b.rule || b.rule.length > 256 ||
       (b.direction !== 'incoming' && b.direction !== 'outgoing')
     )
@@ -116,6 +118,8 @@ export class Rules {
     await this.backend.pollControl();
     const c = this.authority();
     if (!c.capabilities?.includes(RULE_FROM_BASIS_CAPABILITY)) throw Error('Backend update required to add rules for a program that is not running');
+    if (b.networkZone && (!c.capabilities?.includes(ZONE_CAPABILITY) || !c.networkZones))
+      throw Error('Network-zone rule control unavailable');
     const basis = c.rules?.find((r) => r.id === b.rule);
     if (!basis) throw Error('Rule no longer exists');
     const f = basis.filter;
@@ -130,11 +134,16 @@ export class Rules {
       filter: { application: f.application, revision: f.revision, uid: f.uid, direction: b.direction, protocol: '*', remote_address: '*' } as Rule['filter'],
       action: 'allow',
       disabled: false,
-      priority: 0,
+      priority: basis.priority,
       expires: '0001-01-01T00:00:00Z',
     };
+    if (b.networkZone) {
+      rule.filter.network_zone = b.networkZone;
+      rule.schema = c.networkZones?.model === 'automatic-peer-v1' ? 6 : 4;
+      if (rule.schema === 6) rule.filter.zone_model = 'automatic-peer-v1';
+    }
     const token = randomUUID(),
-      draft = { token, generation: c.generation, rule, source: 'Saved rule identity', basis: basis.id };
+      draft = { token, generation: c.generation, rule, source: 'Saved rule identity', basis: basis.id, zoneRevision: c.networkZones?.revision };
     if (this.drafts.size >= 64) {
       const old = this.drafts.keys().next().value!;
       this.drafts.delete(old);
@@ -179,7 +188,23 @@ export class Rules {
       remote_port: e.remote_port,
       remote: '',
     });
-    if (e.network_zone !== undefined && e.network_zone !== (rule.filter.network_zone || ''))
+    if (d.basis) {
+      const zone = e.network_zone ?? rule.filter.network_zone ?? '';
+      if (zone && (!c.capabilities?.includes(ZONE_CAPABILITY) || !c.networkZones || c.networkZones.revision !== d.zoneRevision))
+        throw Error('Network classification changed or unavailable; reopen editor');
+      if (zone && c.networkZones?.model === 'automatic-peer-v1' && !c.capabilities?.includes(AUTOMATIC_ZONE_CAPABILITY))
+        throw Error('Automatic classification capability missing');
+      if (zone) {
+        rule.filter.network_zone = zone;
+        rule.schema = c.networkZones?.model === 'automatic-peer-v1' ? 6 : 4;
+        if (rule.schema === 6) rule.filter.zone_model = 'automatic-peer-v1';
+        else delete rule.filter.zone_model;
+      } else {
+        delete rule.filter.network_zone;
+        delete rule.filter.zone_model;
+        rule.schema = 2;
+      }
+    } else if (e.network_zone !== undefined && e.network_zone !== (rule.filter.network_zone || ''))
       throw Error('Network zone is immutable; create a new rule to change it');
     if (e.expiry !== 'preserve')
       rule.expires =

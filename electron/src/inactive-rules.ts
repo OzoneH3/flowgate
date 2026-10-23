@@ -5,7 +5,7 @@ import { confirmRuleDelete, openRule } from './workflows';
 // Rules of an application that is not running (Activity › not running). Editing
 // a stored rule needs no live process: each change is reviewed by the backend
 // (draft → preview → save, pinned to the rule's version) exactly like the quick
-// setter's in-place edit. New rules still need the running, verified program.
+// setter's in-place edit. New rules reuse a stored application's exact identity.
 
 export interface InactiveRulesOptions {
   label: string;
@@ -20,6 +20,7 @@ export interface InactiveRulesOptions {
   // rule-from-basis-v1: any stored rule of this application identity; a new
   // rule reuses exactly its identity (application, revision, UID).
   basisRuleId?: string;
+  networkZone?: 'local' | 'internet';
 }
 
 type Action = 'allow' | 'block' | 'ask';
@@ -73,8 +74,8 @@ export async function changeStoredRule(rule: Rule, action: Action, disabled: boo
 }
 
 /** Reviewed creation of a new application rule for the basis rule's identity. */
-export async function addStoredRule(basisId: string, direction: 'incoming' | 'outgoing', action: Action): Promise<string> {
-  const draft = await window.flowgate.ruleDraft({ basis: { rule: basisId, direction } });
+export async function addStoredRule(basisId: string, direction: 'incoming' | 'outgoing', action: Action, networkZone?: 'local' | 'internet'): Promise<string> {
+  const draft = await window.flowgate.ruleDraft({ basis: { rule: basisId, direction, ...(networkZone ? { networkZone } : {}) } });
   const preview = await window.flowgate.rulePreview({
     token: draft.token,
     action,
@@ -85,16 +86,17 @@ export async function addStoredRule(basisId: string, direction: 'incoming' | 'ou
     priority: draft.rule.priority,
     disabled: false,
     expiry: 'permanent',
+    network_zone: networkZone || '',
   });
   const v = preview.verifiedRule;
   const f = draft.rule.filter;
   if (
     !v || v.action !== action || v.disabled || v.filter.direction !== direction || v.filter.process ||
-    v.filter.application !== f.application || v.filter.revision !== f.revision || v.filter.uid !== f.uid
+    v.filter.application !== f.application || v.filter.revision !== f.revision || v.filter.uid !== f.uid || v.filter.network_zone !== f.network_zone || v.filter.zone_model !== f.zone_model
   )
     throw Error('The backend reviewed a different rule than requested; nothing was saved.');
   const result = await window.flowgate.ruleSave(preview.receipt);
-  if (result.phase === 'acknowledged') return `${word(action)} rule added (${direction === 'incoming' ? 'In' : 'Out'}, TCP + UDP, any endpoint).`;
+  if (result.phase === 'acknowledged') return `${word(action)} rule added (${direction === 'incoming' ? 'In' : 'Out'}, TCP + UDP, ${networkZone || 'all networks'}).`;
   if (result.phase === 'unknown') return 'Save result unknown; check Rules before adding it again.';
   throw Error(result.message || 'Not saved.');
 }
@@ -191,8 +193,8 @@ export function openInactiveRules(anchor: HTMLElement, o: InactiveRulesOptions) 
       b.type = 'button';
       b.append(el('span', glyph(action), 'blocker-glyph tone-' + action), ' ' + word(action));
       b.disabled = !o.canManage;
-      b.title = `Add a ${word(action)} rule for ${o.direction === 'incoming' ? 'incoming' : 'outgoing'} TCP + UDP to any endpoint, for this program only.`;
-      b.onclick = () => void run(() => addStoredRule(o.basisRuleId!, o.direction, action));
+      b.title = `Add a ${word(action)} rule for ${o.direction === 'incoming' ? 'incoming' : 'outgoing'} TCP + UDP on ${o.networkZone || 'all networks'}, for this program only.`;
+      b.onclick = () => void run(() => addStoredRule(o.basisRuleId!, o.direction, action, o.networkZone));
       add.append(b);
     }
     const advanced = el('button', 'Advanced…', 'link-button');
@@ -201,7 +203,7 @@ export function openInactiveRules(anchor: HTMLElement, o: InactiveRulesOptions) 
     advanced.title = 'New rule with protocol, address, port and lifetime';
     advanced.onclick = () => {
       close();
-      void openRule({ basis: { rule: o.basisRuleId!, direction: o.direction } }, { activity: true });
+      void openRule({ basis: { rule: o.basisRuleId!, direction: o.direction, ...(o.networkZone ? { networkZone: o.networkZone } : {}) } }, { activity: true, networkZone: o.networkZone });
     };
     const links = el('span', '', 'qs-row-links');
     links.append(advanced);
