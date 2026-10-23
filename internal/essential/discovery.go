@@ -82,7 +82,7 @@ func service(ctx context.Context, env Environment, unit, id, title string, essen
 func Discover(ctx context.Context, env Environment) Snapshot {
 	s := Snapshot{Collected: time.Now(), Components: []Component{}, Issues: []string{}, DNS: []DNS{}, Stubs: []Stub{}, DHCP: []DHCP{}, NTP: []string{}, Failures: []string{}}
 	fail := func(m string) { s.Failures = append(s.Failures, m) }
-	dns := service(ctx, env, "systemd-resolved.service", "dns", "DNS resolver and local stub", true, fail)
+	dns := service(ctx, env, "systemd-resolved.service", "dns", "Optional DNS resolver assistance", false, fail)
 	var status []struct {
 		Ifname  string `json:"ifname"`
 		Ifindex uint32 `json:"ifindex"`
@@ -179,12 +179,13 @@ func Discover(ctx context.Context, env Environment) Snapshot {
 	s.Components = append(s.Components, dns)
 	stub := dns
 	stub.ID = "dns-stub-client"
-	stub.Title = "Local applications to verified DNS stub"
+	stub.Title = "Local DNS stub (default localhost trust)"
+	stub.Essential = false
 	if len(s.Stubs) == 0 {
 		stub.State = "unavailable"
 		stub.Details = append(stub.Details, "No verified active loopback DNS stub listener; no client rule generated")
 	}
-	stub.Details = append(append([]string{}, dns.Details...), "All identified programs, only exact observed loopback stubs TCP/UDP53; peer executable verified at decision time; not general loopback access")
+	stub.Details = append(append([]string{}, dns.Details...), "No new localhost permissions proposed; discovery retained only to validate existing saved stub permissions")
 	s.Components = append(s.Components, stub)
 	nm := Component{ID: "dhcp", Title: "Interface-scoped DHCP bootstrap", Essential: true, State: "unavailable", Details: []string{}}
 	b, err = env.Run(ctx, "nmcli", "-t", "-f", "UUID,DEVICE", "connection", "show", "--active")
@@ -220,7 +221,7 @@ func Discover(ctx context.Context, env Environment) Snapshot {
 		nm.Details = append(nm.Details, "Protocol-only client bootstrap on active auto-addressed NM interfaces; UDP68/67 and link-local/multicast DHCPv6 546/547. Raw packet paths are not assigned fictitious process owners.")
 	}
 	s.Components = append(s.Components, nm)
-	ntp := service(ctx, env, "systemd-timesyncd.service", "time", "Time synchronization", true, fail)
+	ntp := service(ctx, env, "systemd-timesyncd.service", "time", "Optional time synchronization assistance", false, fail)
 	if ntp.State == "ready" {
 		b, e := env.Run(ctx, "timedatectl", "show-timesync", "--all")
 		if e != nil {

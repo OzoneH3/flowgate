@@ -27,7 +27,7 @@ func TestEssentialMigrationRepairPersistsBeforeActivation(t *testing.T) {
 			}
 		}
 		old.Seal()
-		rules, _, err := old.Rules(essential.Options{}, time.Now())
+		rules, _, err := old.Rules(essential.Options{ServiceAssistance: true}, time.Now())
 		if err != nil || len(rules) == 0 {
 			t.Fatal(err)
 		}
@@ -68,7 +68,7 @@ func TestEssentialMigrationRepairPersistsBeforeActivation(t *testing.T) {
 			if err = e.RepairMigratedEssential(); err != nil || calls != 1 {
 				t.Fatal("repair persisted twice")
 			}
-			preview, err := e.PreviewEssential(e.Generation, "apply", essential.Options{}, 0)
+			preview, err := e.PreviewEssential(e.Generation, "apply", essential.Options{ServiceAssistance: true}, 0)
 			if err != nil || len(preview.Rules) != 0 {
 				t.Fatalf("reapply duplicates repaired scope: %+v %v", preview, err)
 			}

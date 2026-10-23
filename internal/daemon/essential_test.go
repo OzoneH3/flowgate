@@ -49,7 +49,7 @@ func TestEssentialAPIAtomicReplayStaleRemove(t *testing.T) {
 		e.Essential = essential.NewManager(env)
 		e.Essential.Refresh(context.Background())
 	})
-	options := essential.Options{}
+	options := essential.Options{ServiceAssistance: true}
 	call := func(op, token string) Response {
 		return callResponse(a.path, Request{Version: 1, Operation: op, Generation: a.e.Generation, PreviewToken: token, EssentialOptions: &options})
 	}
@@ -129,7 +129,7 @@ func TestEssentialScopeGuardsAndPersistenceFailure(t *testing.T) {
 		e.Essential = essential.NewManager(env)
 		e.Essential.Refresh(context.Background())
 	})
-	o := essential.Options{}
+	o := essential.Options{ServiceAssistance: true}
 	p, err := a.e.PreviewEssential(a.e.Generation, "apply", o, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -156,7 +156,7 @@ func TestEssentialOrdinaryClientCannotManageMachinePreset(t *testing.T) {
 		e.Essential = essential.NewManager(env)
 		e.Essential.Refresh(context.Background())
 	})
-	o := essential.Options{}
+	o := essential.Options{ServiceAssistance: true}
 	r := callResponse(a.path, Request{Version: 1, Operation: "essential-preview", Generation: a.e.Generation, EssentialOptions: &o})
 	if r.ErrorCode != "forbidden" || r.EssentialPreview != nil {
 		t.Fatal(r)
@@ -170,7 +170,7 @@ func TestEssentialStaleExpiryInventoryAndLegacyEditor(t *testing.T) {
 		e.Essential = essential.NewManager(env)
 		e.Essential.Refresh(context.Background())
 	})
-	o := essential.Options{}
+	o := essential.Options{ServiceAssistance: true}
 	p, err := a.e.PreviewEssential(a.e.Generation, "apply", o, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -215,11 +215,11 @@ func TestEssentialVPNDNSRemovalKeepsAppliedLANActive(t *testing.T) {
 		e.Essential = essential.NewManager(env)
 		e.Essential.Refresh(context.Background())
 	})
-	p, err := a.e.PreviewEssential(a.e.Generation, "apply", essential.Options{}, 0)
+	p, err := a.e.PreviewEssential(a.e.Generation, "apply", essential.Options{ServiceAssistance: true}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = a.e.ApplyEssential(a.e.Generation, p.Token, "apply", essential.Options{}, 0); err != nil {
+	if _, _, err = a.e.ApplyEssential(a.e.Generation, p.Token, "apply", essential.Options{ServiceAssistance: true}, 0); err != nil {
 		t.Fatal(err)
 	}
 	links = `[{"ifname":"lo","ifindex":1,"servers":[{"addressString":"192.0.2.53","port":53}]}]`
@@ -266,7 +266,7 @@ func TestEssentialInterfaceExclusionBoundToToken(t *testing.T) {
 		e.Essential = essential.NewManager(env)
 		e.Essential.Refresh(context.Background())
 	})
-	o := essential.Options{ExcludedInterfaces: []string{"ppp0"}}
+	o := essential.Options{ServiceAssistance: true, ExcludedInterfaces: []string{"ppp0"}}
 	p, err := a.e.PreviewEssential(a.e.Generation, "apply", o, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -276,10 +276,10 @@ func TestEssentialInterfaceExclusionBoundToToken(t *testing.T) {
 			t.Fatal("excluded interface proposed")
 		}
 	}
-	if _, _, err = a.e.ApplyEssential(a.e.Generation, p.Token, "apply", essential.Options{}, 0); err == nil || !strings.Contains(err.Error(), "Options") {
+	if _, _, err = a.e.ApplyEssential(a.e.Generation, p.Token, "apply", essential.Options{ServiceAssistance: true}, 0); err == nil || !strings.Contains(err.Error(), "Options") {
 		t.Fatal("apply without the reviewed exclusion accepted", err)
 	}
-	receipt, _, err := a.e.ApplyEssential(a.e.Generation, p.Token, "apply", essential.Options{ExcludedInterfaces: []string{"ppp0", "ppp0"}}, 0)
+	receipt, _, err := a.e.ApplyEssential(a.e.Generation, p.Token, "apply", essential.Options{ServiceAssistance: true, ExcludedInterfaces: []string{"ppp0", "ppp0"}}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

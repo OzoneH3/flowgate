@@ -6,8 +6,11 @@ import (
 	"flowgate/internal/identity"
 	"flowgate/internal/policy"
 	"fmt"
+	"slices"
 	"time"
 )
+
+const EssentialAssistanceCapability = "essential-optional-services-v1"
 
 const EssentialCapability = "essential-system-networking-v1"
 
@@ -95,7 +98,7 @@ func (e *Engine) PreviewEssential(gen, operation string, o essential.Options, ui
 		return EssentialPreview{}, err
 	}
 	now := e.Now()
-	candidates, issues, err := s.Rules(o, now)
+	candidates, issues, err := s.Proposals(o, now)
 	if err != nil {
 		return EssentialPreview{}, mutationError("invalid_request", err.Error())
 	}
@@ -133,6 +136,21 @@ func (e *Engine) PreviewEssential(gen, operation string, o essential.Options, ui
 		}
 	} else {
 		for _, r := range candidates {
+			if r.Preset.Component == "dns" || r.Preset.Component == "time" {
+				covered := false
+				for _, existing := range e.rules {
+					if serviceAssistanceCovered(existing, r) {
+						if !slices.Contains(v.Preserved, existing.ID) {
+							v.Preserved = append(v.Preserved, existing.ID)
+						}
+						covered = true
+						break
+					}
+				}
+				if covered {
+					continue
+				}
+			}
 			var old *policy.Rule
 			for i := range e.rules {
 				other := &e.rules[i]

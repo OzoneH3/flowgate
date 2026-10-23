@@ -26,15 +26,15 @@ export function setupEssentialNetworking() {
   header.append(title);
   const subtitle = node(
     'p',
-    'Review exact detected permissions. Applying never starts protection; held requests may be dropped when policy changes.',
+    'DHCP bootstrap keeps address configuration working during startup and protection. DNS/time assistance is optional; existing Allows are preserved and localhost needs no preset. Applying never starts protection.',
   );
   header.append(subtitle);
   const body = node('section');
   body.className = 'essential-body';
-  // Essential defaults are DNS, DHCP and time only. Tailscale transport is a
+  // DHCP is the baseline; DNS/time assistance is optional. Tailscale transport is a
   // separate optional preset: unchecked, never part of the essential rollout.
   const opts = node('fieldset'),
-    legend = node('legend', 'Optional local discovery — off by default');
+    legend = node('legend', 'Optional service assistance — off by default');
   opts.append(legend);
   const vpn = node('fieldset'),
     vpnLegend = node(
@@ -51,6 +51,7 @@ export function setupEssentialNetworking() {
   );
   const choices = {} as Record<EssentialToggle, HTMLInputElement>;
   const labels: Record<EssentialToggle, string> = {
+    service_assistance: 'DNS and time services · propose only permissions not already covered',
     tailscale: 'Tailscale outer transport · variable peers / Any destination',
     tailscale_incoming: 'Tailscale incoming configured port',
     tailscale_http: 'Tailscale HTTP80 (separate permission)',
@@ -203,6 +204,8 @@ export function setupEssentialNetworking() {
     controls.reconcile.disabled = !available || !v?.canReconcile;
     for (const input of Object.values(choices))
       input.disabled = !v?.permitted || working || !!v?.busy || uncertain;
+    choices.service_assistance.disabled ||= !v?.assistanceSupported;
+    choices.service_assistance.title = v?.assistanceSupported ? '' : 'Backend upgrade required; older backends include DNS/time by default.';
     choices.tailscale_incoming.disabled ||= !choices.tailscale.checked;
     choices.tailscale_http.disabled ||= !choices.tailscale.checked;
     paintExclusions(!v?.permitted || working || !!v?.busy || uncertain);

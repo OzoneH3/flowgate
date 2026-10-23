@@ -209,7 +209,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 
 					}
 					if p := e.listReads.published.Load(); e.Essential != nil || (p != nil && p.hasPresets) {
-						r.Capabilities = append(r.Capabilities, EssentialCapability, EssentialExclusionCapability)
+						r.Capabilities = append(r.Capabilities, EssentialCapability, EssentialExclusionCapability, EssentialAssistanceCapability)
 					}
 					if e.Protection != nil {
 						r.Capabilities = append(r.Capabilities, ProtectionCapability)

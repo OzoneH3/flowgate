@@ -4,6 +4,7 @@ import {
   ESSENTIAL_EXCLUSION_CAPABILITY,
   canonicalExclusions,
   essentialWireOptions,
+  ESSENTIAL_ASSISTANCE_CAPABILITY,
   exclusionSummary,
   essentialDefaults,
   essentialOptions,
@@ -65,6 +66,7 @@ export class Essential {
         this.message = 'Daemon session changed. Old reviews and actions cannot be replayed.';
     }
     const supported = !!source.capabilities?.includes(ESSENTIAL_CAPABILITY),
+      assistanceSupported = !!source.capabilities?.includes(ESSENTIAL_ASSISTANCE_CAPABILITY),
       exclusionSupported = !!source.capabilities?.includes(ESSENTIAL_EXCLUSION_CAPABILITY),
       reviewedExclusions = this.reviewedExclusions(),
       // A daemon that ignores exclusions would silently re-propose them: refuse Apply.
@@ -108,6 +110,7 @@ export class Essential {
         (permitted && !monitoring
           ? ' Stop protection explicitly and confirm monitoring before Apply or Remove. No automatic Stop is sent.'
           : '') +
+        (supported && !assistanceSupported ? ' Older backend: DNS/time are included by default; upgrade for DHCP-only setup.' : '') +
         (supported && exclusionBlocked
           ? ` This daemon cannot honour interface exclusions (essential-interface-exclusion-v1 missing); Apply is disabled so your reviewed exclusion (${exclusionSummary(reviewedExclusions)}) is not silently dropped.`
           : ''),
@@ -115,6 +118,7 @@ export class Essential {
       preview: this.preview,
       receipt: this.receipt,
       exclusionSupported,
+      assistanceSupported,
       reviewedExclusions,
       canApply:
         permitted &&
@@ -196,7 +200,7 @@ export class Essential {
           this.message = 'Detected status refreshed. Protection was not started.';
       } else if (action === 'preview' || action === 'remove-preview') {
         const options = action === 'preview' ? essentialOptions(q.options) : essentialDefaults(),
-          wire = essentialWireOptions(options, v.exclusionSupported);
+          wire = essentialWireOptions(options, v.exclusionSupported, v.assistanceSupported);
         this.preview = undefined;
         this.receipt = undefined;
         this.phase = 'idle';
@@ -239,7 +243,7 @@ export class Essential {
             sent = true;
             const r = await request(action === 'apply' ? 'essential-apply' : 'essential-remove', {
               preview_token: p.token,
-              essential_options: essentialWireOptions(p.options, v.exclusionSupported),
+              essential_options: essentialWireOptions(p.options, v.exclusionSupported, v.assistanceSupported),
             });
             if (r.error || r.error_code) {
               sent = false;

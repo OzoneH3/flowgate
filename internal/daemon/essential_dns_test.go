@@ -109,7 +109,7 @@ func TestEssentialDNSNativeHelper(t *testing.T) {
 		t.Skip("helper only")
 	}
 	if mode == "server" {
-		dnsListen(t, "127.0.0.54:53", func(_ string, b []byte) []byte {
+		dnsListen(t, "192.0.2.53:53", func(_ string, b []byte) []byte {
 			b[2] = 0x81
 			b[3] = 0x80
 			b[7] = 1
@@ -136,6 +136,10 @@ func TestEssentialDNSKernelReceivers(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	if out, err := exec.Command("ip", "addr", "add", "192.0.2.53/32", "dev", "lo").CombinedOutput(); err != nil {
+		t.Fatalf("private fixture address: %v %s", err, out)
+	}
+	defer exec.Command("ip", "addr", "del", "192.0.2.53/32", "dev", "lo").Run()
 	dir := t.TempDir()
 	binaryPath, err := os.Executable()
 	if err != nil {
@@ -170,7 +174,7 @@ func TestEssentialDNSKernelReceivers(t *testing.T) {
 	}
 	var delivered atomic.Int32
 	dnsListen(t, "127.0.0.53:53", func(proto string, b []byte) []byte {
-		out, e := dnsExchange(proto, "127.0.0.54:53", b)
+		out, e := dnsExchange(proto, "192.0.2.53:53", b)
 		if e != nil {
 			return nil
 		}
@@ -205,28 +209,33 @@ func TestEssentialDNSKernelReceivers(t *testing.T) {
 			}
 			return []byte("ActiveState=inactive\nMainPID=0"), nil
 		case "resolvectl":
-			return []byte(`[{"ifname":"lo","ifindex":1,"servers":[{"addressString":"127.0.0.54","port":53}]}]`), nil
+			return []byte(`[{"ifname":"lo","ifindex":1,"servers":[{"addressString":"192.0.2.53","port":53}]}]`), nil
 		}
 		return nil, nil
 	}
 	e := daemon.New(time.Second)
-	defer e.CloseProcessTargets()
-	e.ConfigureEssential(ctx, env)
-	e.SaveRules = func([]policy.Rule) error { return nil }
-	preview, err := e.PreviewEssential(e.Generation, "apply", essential.Options{}, 0)
+	zones, err := identity.NewNetworkZones([]string{"192.0.2.53/32"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(preview.Rules) != 6 {
-		t.Fatalf("expected 6 exact DNS rules, got %d %+v", len(preview.Rules), preview.Components)
+	e.ZoneSource = func() identity.NetworkZones { return zones }
+	defer e.CloseProcessTargets()
+	e.ConfigureEssential(ctx, env)
+	e.SaveRules = func([]policy.Rule) error { return nil }
+	preview, err := e.PreviewEssential(e.Generation, "apply", essential.Options{ServiceAssistance: true}, 0)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, _, err = e.ApplyEssential(e.Generation, preview.Token, "apply", essential.Options{}, 0); err != nil {
+	if len(preview.Rules) != 2 {
+		t.Fatalf("expected 2 upstream DNS rules, got %d %+v", len(preview.Rules), preview.Components)
+	}
+	if _, _, err = e.ApplyEssential(e.Generation, preview.Token, "apply", essential.Options{ServiceAssistance: true}, 0); err != nil {
 		t.Fatal(err)
 	}
 	// This fixture tests exact DNS presets, so explicitly opt localhost into
 	// filtering rather than relying on the general application default.
 	rules := e.Rules(0, true)
-	rules = append(rules, policy.Rule{Schema: 4, ID: "fixture-localhost-block", Action: "block", Filter: policy.Filter{AllPrograms: true, AllUIDs: true, NetworkZone: "local", Direction: "outgoing", Protocol: "*", RemoteAddress: "127.0.0.54"}})
+	rules = append(rules, policy.Rule{Schema: 4, ID: "fixture-localhost-block", Action: "block", Filter: policy.Filter{AllPrograms: true, AllUIDs: true, NetworkZone: "local", Direction: "outgoing", Protocol: "*", RemoteAddress: "192.0.2.53"}})
 	if err = e.SetRules(rules); err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +274,7 @@ func TestEssentialDNSKernelReceivers(t *testing.T) {
 		for _, direct := range []bool{false, true} {
 			mode, address := "allow", "127.0.0.53:53"
 			if direct {
-				mode, address = "deny", "127.0.0.54:53"
+				mode, address = "deny", "192.0.2.53:53"
 			}
 			c := exec.Command(client, "-test.run=^TestEssentialDNSNativeHelper$")
 			c.Env = append(os.Environ(), "ESSENTIAL_DNS_HELPER="+mode, "ESSENTIAL_DNS_PROTO="+proto, "ESSENTIAL_DNS_ADDR="+address)
@@ -278,5 +287,5 @@ func TestEssentialDNSKernelReceivers(t *testing.T) {
 	if delivered.Load() != 2 {
 		t.Fatal("receiver count", delivered.Load())
 	}
-	t.Log("PASS real native UDP+TCP client→verified stub→configured upstream DNS responses; unrelated direct DNS attempts blocked; exact executable scopes")
+	t.Log("PASS real native UDP+TCP client→default-trusted localhost stub→configured upstream DNS responses; explicit host-scope block denies unrelated direct DNS attempts")
 }

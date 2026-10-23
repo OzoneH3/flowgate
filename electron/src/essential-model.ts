@@ -1,10 +1,12 @@
 import { parseRule, type Rule } from './protocol';
+export const ESSENTIAL_ASSISTANCE_CAPABILITY = 'essential-optional-services-v1';
 export const ESSENTIAL_CAPABILITY = 'essential-system-networking-v1';
 // Daemons without this capability silently ignore excluded_interfaces, so the
 // field is never sent to them and a reviewed exclusion blocks Apply there.
 export const ESSENTIAL_EXCLUSION_CAPABILITY = 'essential-interface-exclusion-v1';
 export const MAX_EXCLUDED_INTERFACES = 16;
 export interface EssentialOptions {
+  service_assistance: boolean;
   tailscale: boolean;
   tailscale_incoming: boolean;
   tailscale_http: boolean;
@@ -14,12 +16,14 @@ export interface EssentialOptions {
 }
 export type EssentialToggle = Exclude<keyof EssentialOptions, 'excluded_interfaces'>;
 export const ESSENTIAL_TOGGLES: EssentialToggle[] = [
+  'service_assistance',
   'tailscale',
   'tailscale_incoming',
   'tailscale_http',
   'discovery',
 ];
 export const essentialDefaults = (): EssentialOptions => ({
+  service_assistance: false,
   tailscale: false,
   tailscale_incoming: false,
   tailscale_http: false,
@@ -50,8 +54,10 @@ export function canonicalExclusions(v: unknown): string[] {
   return out;
 }
 // Request body: exclusions are sent only when present and the daemon honours them.
-export function essentialWireOptions(o: EssentialOptions, exclusionSupported: boolean) {
-  const { excluded_interfaces, ...rest } = o;
+export function essentialWireOptions(o: EssentialOptions, exclusionSupported: boolean, assistanceSupported = false) {
+  const { excluded_interfaces, service_assistance, ...legacy } = o;
+  if (service_assistance && !assistanceSupported) throw Error('Optional DNS/time assistance requires a matching backend. Nothing was sent.');
+  const rest = assistanceSupported ? { ...legacy, service_assistance } : legacy;
   if (!excluded_interfaces.length) return rest;
   if (!exclusionSupported)
     throw Error(
@@ -105,6 +111,7 @@ export interface EssentialView {
   receipt?: EssentialReceipt;
   // Daemon honours essential_options.excluded_interfaces.
   exclusionSupported: boolean;
+  assistanceSupported: boolean;
   // Persisted reviewed exclusion set (preselected in the view).
   reviewedExclusions: string[];
   canApply: boolean;
@@ -124,7 +131,8 @@ const list = <T>(v: unknown, fn: (x: unknown) => T, max = 512) => {
 };
 const strings = (v: unknown) => list(v, (x) => text(x));
 export function essentialOptions(v: unknown): EssentialOptions {
-  const o = object(v);
+  const raw = object(v);
+  const o: Record<string, unknown> = { service_assistance: false, ...raw };
   const keys = Object.keys(o).filter((k) => k !== 'excluded_interfaces');
   if (
     keys.sort().join() !== [...ESSENTIAL_TOGGLES].sort().join() ||

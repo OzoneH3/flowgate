@@ -547,3 +547,16 @@ test('persisted ppp0 is preselected and stays visible as an exclusion candidate'
   assert.equal(candidates[0].detail, 'DNS 192.0.2.53:53');
   assert.deepEqual(exclusionCandidates(undefined, ['ppp0']), [{ name: 'ppp0', detail: '' }]);
 });
+
+test('service assistance defaults off, normalizes older replies, and requires capability before sending', () => {
+ const { essentialWireOptions } = require('../dist/test/essential-model.cjs');
+ const defaults=essentialDefaults();
+ assert.equal(defaults.service_assistance,false);
+ const legacy={...defaults}; delete legacy.service_assistance;
+ assert.deepEqual(essentialOptions(legacy),defaults);
+ assert.equal(essentialWireOptions(defaults,true,true).service_assistance,false);
+ assert.equal('service_assistance' in essentialWireOptions(defaults,true,false),false);
+ assert.throws(()=>essentialWireOptions({...defaults,service_assistance:true},true,false),/matching backend/);
+ assert.equal(essentialWireOptions({...defaults,service_assistance:true},true,true).service_assistance,true);
+ assert.throws(()=>essentialOptions({...defaults,service_assistance:'true'}));
+});

@@ -4,16 +4,15 @@
 Runs as the administrator UID (no sudo). Excludes the work VPN interface, never
 selects Tailscale transport/discovery, refuses anything outside the reviewed
 proposal, applies exactly once and reconciles a lost reply by receipt (no replay).
-Never starts protection. Usage: scripts/apply-essentials.py [--dry-run]
+Never starts protection. Usage: scripts/apply-essentials.py [--dry-run] [--services]
 """
 import argparse,json,pathlib,socket,sys,time
 
 SOCK='/run/flowgate-api/daemon.sock'
-OPTIONS={'tailscale':False,'tailscale_incoming':False,'tailscale_http':False,'discovery':False,'excluded_interfaces':['ppp0']}
+OPTIONS={'service_assistance':False,'tailscale':False,'tailscale_incoming':False,'tailscale_http':False,'discovery':False,'excluded_interfaces':['ppp0']}
 RESOLVED,TIMESYNCD='/usr/lib/systemd/systemd-resolved','/usr/lib/systemd/systemd-timesyncd'
 # Reviewed semantic proposal (docs/ESSENTIAL-NETWORKING.md), work VPN ppp0 excluded.
 UPSTREAM={('172.30.42.128','enp7s0'),('172.30.42.250','enp7s0'),('100.100.100.100','tailscale0'),('fd7a:115c:a1e0::53','tailscale0')}
-STUBS={'127.0.0.53','127.0.0.54'}
 NTP={'162.159.200.123'}
 DHCP={('enp7s0',68,67),('enp7s0',546,547)}
 
@@ -32,14 +31,11 @@ def key(r):
 
 def reviewed():
  out=set()
- for addr,ifn in UPSTREAM:
-  for p in('udp','tcp'):out.add(('dns',RESOLVED,'outgoing',p,addr,53,'',0,ifn,974,False,None))
- for stub in STUBS:
-  for p in('udp','tcp'):
-   out.add(('dns',RESOLVED,'incoming',p,'127.0.0.0/8',0,stub,53,'lo',974,False,None))
-   out.add(('dns-stub-client','ALL','outgoing',p,stub,53,'',0,'lo',0,True,974))
+ if OPTIONS['service_assistance']:
+  for addr,ifn in UPSTREAM:
+   for proto in ('udp','tcp'):out.add(('dns',RESOLVED,'outgoing',proto,addr,53,'',0,ifn,974,False,None))
+  for addr in NTP:out.add(('time',TIMESYNCD,'outgoing','udp',addr,123,'',0,'',973,False,None))
  for ifn,lp,rp in DHCP:out.add(('dhcp','ALL','outgoing','udp','*',rp,'',lp,ifn,0,True,None))
- for addr in NTP:out.add(('time',TIMESYNCD,'outgoing','udp',addr,123,'',0,'',973,False,None))
  return out
 
 def check_preview(v,identity=None):
@@ -61,10 +57,21 @@ def check_preview(v,identity=None):
  missing=allowed-seen
  return problems,sorted(missing,key=str)
 
+def verify_applied(before_rules, after_rules, proposed):
+ """Apply is additive: old unreviewed records must survive byte-for-byte."""
+ before={r['id']:r for r in before_rules};after={r['id']:r for r in after_rules};plan={r['id']:r for r in proposed}
+ if set(after)!=set(before)|set(plan):raise RuntimeError('stored inventory differs from additive reviewed apply')
+ for rid,r in before.items():
+  if rid not in plan and after[rid]!=r:raise RuntimeError('unreviewed rule changed: '+rid)
+ for rid,r in plan.items():
+  if any(after[rid].get(k)!=r.get(k) for k in ('filter','executable','action','schema')):raise RuntimeError('stored scope/action differs: '+rid)
+  if any((after[rid].get('preset')or{}).get(k)!=(r.get('preset')or{}).get(k) for k in ('name','component')):raise RuntimeError('stored preset differs: '+rid)
+
 def main():
- ap=argparse.ArgumentParser();ap.add_argument('--dry-run',action='store_true');ap.add_argument('--evidence',default=str(pathlib.Path(__file__).resolve().parents[1]/'.workspace/essential-apply'))
- a=ap.parse_args();ev=pathlib.Path(a.evidence);ev.mkdir(parents=True,exist_ok=True)
+ ap=argparse.ArgumentParser();ap.add_argument('--dry-run',action='store_true');ap.add_argument('--services',action='store_true',help='also review upstream DNS/time assistance; localhost omitted');ap.add_argument('--evidence',default=str(pathlib.Path(__file__).resolve().parents[1]/'.workspace/essential-apply'))
+ a=ap.parse_args();OPTIONS['service_assistance']=a.services;ev=pathlib.Path(a.evidence);ev.mkdir(parents=True,exist_ok=True)
  before=api('list')
+ if 'essential-optional-services-v1' not in before.get('capabilities',[]):raise SystemExit('Matching backend required for DHCP-only defaults. Nothing applied.')
  if 'essential-interface-exclusion-v1'not in before.get('capabilities',[]):raise SystemExit('Installed daemon does not support reviewed interface exclusion; install the matching monitoring update first. Nothing applied.')
  if before['protection']['state']!='stopped'or before['enforcement']['state']!='stopped':raise SystemExit('Protection is not stopped; refusing.')
  if before['permissions'].get('role')!='administrator'or not before['permissions'].get('can_manage_rules'):raise SystemExit('Not the authorized administrator endpoint.')
@@ -99,9 +106,7 @@ def main():
  after=api('list');(ev/'list-after.json').write_text(json.dumps(after,indent=1))
  preset=[x for x in after.get('rules')or[]if x.get('preset')];user_after=[x for x in after.get('rules')or[]if not x.get('preset')]
  assert user_after==user_before,'existing user rules changed'
- assert sorted(x['id']for x in preset)==sorted(x['id']for x in v['rules']),'stored preset set differs from reviewed preview'
- byid={x['id']:x for x in v['rules']}
- for x in preset:assert x['filter']==byid[x['id']]['filter']and x.get('executable')==byid[x['id']].get('executable'),('stored scope differs',x['id'])
+ verify_applied(before.get('rules')or[],after.get('rules')or[],v['rules'])
  states=after.get('rule_states')or{}
  inactive=[x['id']for x in preset if(states.get(x['id'])or{}).get('state','active')!='active']
  assert after['protection']['state']=='stopped'and after['enforcement']['state']=='stopped'

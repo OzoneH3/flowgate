@@ -1,5 +1,37 @@
 # Essential system networking: reviewed permissions, never automatic protection
 
+## Current setup behavior (2026-10-23 simplification)
+
+New Essential previews default to **interface-scoped DHCP bootstrap only**.
+These reviewed IPv4/IPv6 port-pair exceptions are used by both the startup guard
+and active firewall; ordinary NetworkManager permissions do not replace them.
+
+Optional **DNS/time service assistance** (`service_assistance: true`, capability
+`essential-optional-services-v1`) proposes discovered upstream resolver and time
+service permissions. A durable ordinary Allow covering the complete proposed
+scope suppresses a duplicate. Disabled, temporary, different-identity, narrower
+or differently scoped rules do not count as complete coverage. An existing Allow
+is coverage evidence, not a promise that it wins against every other user rule.
+Preview/apply remains bound to the full rule inventory and the chosen options.
+
+No new localhost permissions are proposed, even with service assistance enabled.
+Existing saved presets are neither removed nor invalidated by this change:
+legacy derivation remains available for exact-scope validation and metadata repair.
+Explicit localhost Ask/Block policies require separately reviewed local Allows;
+this setup assistant does not override them. This includes applications reaching
+a local DNS stub: an explicit localhost Ask/Block also applies to that traffic.
+Optional Tailscale transport remains
+separate and off by default.
+
+The Electron dialog offers the assistance checkbox only with the matching
+capability and warns about older backend defaults. The reviewed host script
+`scripts/apply-essentials.py` now defaults to DHCP; `--services` explicitly opts
+into DNS/time. Neither path starts/stops protection or deletes existing rules.
+
+The rollout inventories and measurements below are historical evidence from
+before this simplification, not the current default proposal.
+
+
 ## Rollout scope (2026-10-19): essentials only, Tailscale outside
 
 The rollout preset is DNS, local DNS stub, DHCP and time synchronization only:

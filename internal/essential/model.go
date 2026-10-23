@@ -17,6 +17,7 @@ import (
 const Name = "essential-system-networking"
 
 type Options struct {
+	ServiceAssistance bool `json:"service_assistance,omitempty"` // Optional upstream DNS/time setup; DHCP remains the baseline.
 	Tailscale         bool `json:"tailscale"`
 	TailscaleIncoming bool `json:"tailscale_incoming"`
 	TailscaleHTTP     bool `json:"tailscale_http"`
@@ -42,7 +43,7 @@ func (o Options) Normalized() Options {
 // Equal compares canonical options; previews bind the exact exclusion set.
 func (o Options) Equal(p Options) bool {
 	a, b := o.Normalized(), p.Normalized()
-	if a.Tailscale != b.Tailscale || a.TailscaleIncoming != b.TailscaleIncoming || a.TailscaleHTTP != b.TailscaleHTTP || a.Discovery != b.Discovery || len(a.ExcludedInterfaces) != len(b.ExcludedInterfaces) {
+	if a.ServiceAssistance != b.ServiceAssistance || a.Tailscale != b.Tailscale || a.TailscaleIncoming != b.TailscaleIncoming || a.TailscaleHTTP != b.TailscaleHTTP || a.Discovery != b.Discovery || len(a.ExcludedInterfaces) != len(b.ExcludedInterfaces) {
 		return false
 	}
 	for i := range a.ExcludedInterfaces {
@@ -191,6 +192,24 @@ func (s *Snapshot) Seal() {
 func (s Snapshot) EntryActive(r policy.Rule) bool {
 	return r.Preset != nil && r.Preset.Revision != "" && s.entries[r.Preset.EntryID] == r.Preset.Revision
 }
+
+// Proposals is the user-facing setup plan. Rules retains the full historical
+// derivation for validating and repairing already saved permissions.
+func (s Snapshot) Proposals(o Options, now time.Time) ([]policy.Rule, []string, error) {
+	all, issues, err := s.Rules(o, now)
+	if err != nil {
+		return nil, issues, err
+	}
+	out := []policy.Rule{}
+	for _, r := range all {
+		if r.Filter.TargetsLoopback() || (!o.ServiceAssistance && (r.Preset.Component == "dns" || r.Preset.Component == "time")) {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out, issues, nil
+}
+
 func (s Snapshot) Rules(o Options, now time.Time) ([]policy.Rule, []string, error) {
 	if (o.TailscaleIncoming || o.TailscaleHTTP) && !o.Tailscale {
 		return nil, nil, fmt.Errorf("select optional Tailscale before its incoming/HTTP options")

@@ -18,8 +18,13 @@ def preview(extra=(),issues=(EXCL,)):
  return {'rules':[rule(k)for k in sorted(m.reviewed(),key=str)]+list(extra),'preserved_rule_ids':[],'issues':list(issues)}
 
 class Gate(unittest.TestCase):
- def test_reviewed_19_accepted(self):
-  v=preview();self.assertEqual(len(v['rules']),19);self.assertEqual(m.check_preview(v),([],[]))
+ def test_dhcp_only_default_accepted(self):
+  v=preview();self.assertEqual(len(v['rules']),2);self.assertEqual(m.check_preview(v),([],[]))
+ def test_services_are_opt_in_without_localhost(self):
+  self.addCleanup(m.OPTIONS.update, service_assistance=False)
+  m.OPTIONS['service_assistance']=True
+  v=preview();self.assertEqual(len(v['rules']),11);self.assertEqual(m.check_preview(v),([],[]))
+  self.assertFalse(any(r['filter']['remote_address'].startswith('127.') for r in v['rules']))
  def test_work_vpn_tailscaled_and_broad_rules_refused(self):
   for k in[('dns',m.RESOLVED,'outgoing','udp','192.168.23.221',53,'',0,'ppp0',974,False,None),
            ('tailscale','/usr/bin/tailscaled','outgoing','tcp','*',443,'',0,'',0,False,None),
@@ -31,7 +36,25 @@ class Gate(unittest.TestCase):
   self.assertTrue(m.check_preview(preview(issues=(EXCL,'Time synchronization: unavailable')))[0])
  def test_overlap_and_identity_drift_refused(self):
   v=preview();v['preserved_rule_ids']=['user:x'];self.assertTrue(m.check_preview(v)[0])
+  self.addCleanup(m.OPTIONS.update, service_assistance=False)
+  m.OPTIONS['service_assistance']=True
   ident={m.RESOLVED:('app-'+m.RESOLVED,'older-revision')};self.assertTrue(m.check_preview(preview(),ident)[0])
+ def test_dhcp_apply_preserves_existing_dns_and_stub_records(self):
+  dns=rule(('dns',m.RESOLVED,'outgoing','udp','192.0.2.53',53,'',0,'test0',974,False,None))
+  stub=rule(('dns-stub-client','ALL','outgoing','udp','127.0.0.53',53,'',0,'lo',0,True,974))
+  plan=preview()['rules'];before=[dns,stub];after=before+plan
+  m.verify_applied(before,after,plan)
+  with self.assertRaises(RuntimeError):m.verify_applied(before,plan,plan)
+  changed=json.loads(json.dumps(after));changed[0]['filter']['remote_address']='*'
+  with self.assertRaises(RuntimeError):m.verify_applied(before,changed,plan)
+ def test_reviewed_action_and_preset_must_match(self):
+  plan=preview()['rules']
+  for field,value in [('action','block'),('schema',99)]:
+   changed=json.loads(json.dumps(plan));changed[0][field]=value
+   with self.assertRaises(RuntimeError):m.verify_applied([],changed,plan)
+  for field in ('name','component'):
+   changed=json.loads(json.dumps(plan));changed[0]['preset'][field]='other'
+   with self.assertRaises(RuntimeError):m.verify_applied([],changed,plan)
  def test_narrower_preview_reports_missing_not_problem(self):
   v=preview();v['rules']=v['rules'][1:];p,miss=m.check_preview(v);self.assertEqual(p,[]);self.assertEqual(len(miss),1)
 
