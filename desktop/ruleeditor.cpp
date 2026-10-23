@@ -86,9 +86,11 @@ RuleEditor::RuleEditor(QJsonObject rule, Sender sender, QWidget *parent)
   form->addRow("Absolute expiry", expiry);
   auto *note = new QLabel(
       "Identity and direction stay fixed. Any port / * / CIDR are deliberate "
-      "scope changes. Highest priority wins, then smallest rule ID. Existing "
-      "approved TCP connections continue. Expired rules stay expired unless "
-      "you explicitly change expiry.");
+      "scope changes.\n"
+      // Kept identical to policy.PrecedenceSentence (checked by a Go test).
+      "Among matching active rules (the newest saved setting of each program scope): higher target weight wins (process 4 › application 3 › zone 2 › all programs 1); then higher priority; then Deny › Allow › Ask; then a user rule over a preset; then the smaller rule ID."
+      "\nExisting approved TCP connections continue. Expired rules stay expired "
+      "unless you explicitly change expiry.");
   note->setWordWrap(true);
   layout->addWidget(note);
   preview = new QPlainTextEdit;
