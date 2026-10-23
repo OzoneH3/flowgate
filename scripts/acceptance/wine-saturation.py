@@ -46,6 +46,7 @@ p.add_argument('--data', required=True)
 p.add_argument('--prefix-source', required=True)
 p.add_argument('--pe', required=True)
 p.add_argument('--lwp', required=True)
+p.add_argument('--activity-poll-ms', type=int, default=0, help='Poll full Activity snapshots during launch load; 0 disables')
 p.add_argument('--sockets', type=int, default=24)
 p.add_argument('--datagrams', type=int, default=60)
 p.add_argument('--interval-ms', type=int, default=50)
@@ -60,6 +61,7 @@ def require(condition, message):
     if not condition: raise RuntimeError(message)
 
 
+require(a.activity_poll_ms == 0 or 100 <= a.activity_poll_ms <= 10000, 'activity poll interval must be 0 or 100..10000ms')
 require(1 <= a.sockets <= 64, '--sockets must be 1..64')
 require(1 <= a.datagrams <= 100000, '--datagrams must be 1..100000')
 require(1 <= a.interval_ms <= 10000, '--interval-ms must be 1..10000')
@@ -135,6 +137,21 @@ def call(op='list', **kw):
         return json.loads(s.makefile('rb').readline())
 
 
+activity_stop = threading.Event()
+activity_counts = dict(snapshots=0, errors=0)
+def poll_activity():
+    while not activity_stop.is_set():
+        try:
+            response = call()
+            if response.get('error') or not response.get('activity'):
+                activity_counts['errors'] += 1
+            else:
+                activity_counts['snapshots'] += 1
+        except (OSError, ValueError):
+            activity_counts['errors'] += 1
+        activity_stop.wait(a.activity_poll_ms / 1000)
+
+
 def save(name, obj): (RUN / name).write_text(json.dumps(obj, indent=2))
 
 
@@ -208,6 +225,9 @@ try:
                                '--discover-wine', '--observer-scratch', str(RUN / 'observer'), '--wine-helper', a.helper], stdout=log, stderr=log)
     children.append(daemon); log.close()
     wait(lambda: Path(API).exists())
+
+    if a.activity_poll_ms:
+        threading.Thread(target=poll_activity, daemon=True).start()
 
     # Phase 1a: native sender permission through a real prompt.
     stopfile = RUN / 'native.stop'; sendlog = RUN / 'native-sent.log'
@@ -295,7 +315,7 @@ try:
                            first_delivery_ms=dict(min=first[0] if first else None, median=statistics.median(first) if first else None, max=first[-1] if first else None))
     daemon_log = (RUN / 'daemon.log').read_text(errors='replace')
     drops = {k: sum(int(m) for m in re.findall(r'dropped (\d+) packets: ' + k, daemon_log)) for k in ['census lane capacity exhausted', 'attribution capacity exhausted', 'attribution deadline or shutdown']}
-    result.update(native=native, wine=wine, queue_drop_logs=drops, pending_unruled_prefixes=late_pending, daemon_alive=daemon.poll() is None,
+    result.update(activity=dict(activity_counts, interval_ms=a.activity_poll_ms), native=native, wine=wine, queue_drop_logs=drops, pending_unruled_prefixes=late_pending, daemon_alive=daemon.poll() is None,
                   daemon_log_tail=daemon_log.splitlines()[-20:], source=subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
                   # A dirty tree means the tested binary is not exactly the recorded commit.
                   source_dirty=bool(subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=no'], text=True).strip()),
@@ -322,6 +342,8 @@ try:
 
     # Hard assertions.
     failures = list(coverage_failures)
+    if a.activity_poll_ms and (not activity_counts['snapshots'] or activity_counts['errors']):
+        failures.append('Activity polling missing snapshots or returned errors')
     if wine['SAT_BETA_A']['datagrams']: failures.append('blocked Beta/A delivered %d datagrams' % wine['SAT_BETA_A']['datagrams'])
     for t in ['SAT_ALPHA_B1', 'SAT_ALPHA_B2']:
         if wine[t]['datagrams']: failures.append('unruled Alpha/B (other prefix) delivered %d datagrams in %s' % (wine[t]['datagrams'], t))
@@ -337,6 +359,7 @@ try:
     print(json.dumps(dict(native=native, wine=wine, queue_drop_logs=drops), indent=2), flush=True)
     print('PASS' if not failures else 'FAIL: ' + '; '.join(failures), flush=True)
 finally:
+    activity_stop.set()
     with lock: save('raw-native-rx.json', native_rx); save('raw-wine-rx.json', wine_rx)
     save('result.json', result)
     try:
