@@ -1,8 +1,11 @@
 package identity
 
 import (
+	"encoding/hex"
 	"path"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // applyServiceDisplay is presentation only. A service cgroup is not evidence
@@ -27,8 +30,8 @@ func applyServiceDisplay(a *Application, cgroup string) {
 		if !strings.HasSuffix(unit, ".service") {
 			continue
 		}
-		candidate := strings.TrimSuffix(unit, ".service")
-		if candidate == "" || len(candidate) > 240 || strings.ContainsAny(candidate, "\x00\r\n\t") {
+		candidate, ok := serviceDisplayUnit(strings.TrimSuffix(unit, ".service"))
+		if !ok {
 			return
 		}
 		if name != "" && name != candidate {
@@ -40,4 +43,36 @@ func applyServiceDisplay(a *Application, cgroup string) {
 		return
 	}
 	a.DisplayName = name + " (" + a.DisplayName + ")"
+}
+
+func serviceDisplayUnit(unit string) (string, bool) {
+	var name strings.Builder
+	for i := 0; i < len(unit); {
+		if unit[i] != '\\' {
+			name.WriteByte(unit[i])
+			i++
+			continue
+		}
+		if i+4 > len(unit) || unit[i+1] != 'x' {
+			return "", false
+		}
+		b, err := hex.DecodeString(unit[i+2 : i+4])
+		if err != nil {
+			return "", false
+		}
+		name.WriteByte(b[0])
+		i += 4
+	}
+	n := name.String()
+	// XDG launches, D-Bus activation and user managers are launch context,
+	// not service names for every descendant executable in their cgroup.
+	if n == "" || len(n) > 240 || !utf8.ValidString(n) || strings.HasPrefix(n, "app-") || strings.HasPrefix(n, "dbus-") || strings.HasPrefix(n, "user@") || strings.HasSuffix(n, "@autostart") {
+		return "", false
+	}
+	for _, r := range n {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == '/' || r == '\\' {
+			return "", false
+		}
+	}
+	return n, true
 }

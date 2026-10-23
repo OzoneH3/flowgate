@@ -33,3 +33,23 @@ func TestServiceDisplayRefusesUnrelatedOrAmbiguousCgroups(t *testing.T) {
 		}
 	}
 }
+
+func TestServiceDisplayExcludesDesktopLaunchers(t *testing.T) {
+	for _, unit := range []string{"app-synthetic@0123456789", "app-terminal@autostart", "dbus-:1.1-org.example.Service@0", "synthetic@autostart", "user@1000", `app\x2dsynthetic@123`, `bad\x0aname`, `bad\xff`, `bad\xZZ`, `bad\x2fname`} {
+		for _, executable := range []string{"synthetic-game", "synthetic-command"} {
+			a := Application{Kind: "native", DisplayName: executable}
+			applyServiceDisplay(&a, "0::/user.slice/app.slice/"+unit+".service")
+			if a.DisplayName != executable {
+				t.Fatalf("launcher %q renamed child: %s", unit, a.DisplayName)
+			}
+		}
+	}
+}
+
+func TestServiceDisplayDecodesEscapedName(t *testing.T) {
+	a := Application{Kind: "native", DisplayName: "runtime"}
+	applyServiceDisplay(&a, `0::/user.slice/app.slice/synthetic\x2dworker.service`)
+	if a.DisplayName != "synthetic-worker (runtime)" {
+		t.Fatal(a.DisplayName)
+	}
+}
