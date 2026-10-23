@@ -15,9 +15,9 @@ usage accounting are still separate, substantial missing subsystems.
 ## Follow-up status — 23 October 2026, after installation
 
 The original audit below is a dated baseline at **0842059**, not the current
-outstanding-task list. Source reviewed for this follow-up: **3e6fdcf** (including service labels through
+outstanding-task list. Source reviewed for this follow-up: **b8ee85e** (including service labels through
 8fa7081). Installed
-and queried live: **298852b**, protection **active both**. No fresh NetLimiter
+and queried live: **ad30add** (unmodified build), protection **active both**. No fresh NetLimiter
 experiment was performed for this update; original reference claims are unchanged.
 
 | Finding | Follow-up status | Evidence and remaining boundary |
@@ -27,15 +27,15 @@ experiment was performed for this update; original reference claims are unchange
 | A03 localhost | Same-host defect fixed and installed | `9b1684a`: own assigned v4/v6 addresses on verified loopback device/netns; 48 isolated receiver cases for default/Ask/Block. Separate reusable loopback filter remains absent. |
 | A04 startup guard | Intentional fail-closed boundary documented | No blanket guard bypass; explicit local Deny must not be lost during failure. |
 | A05 weights | Deferred feature/migration | No change to permission ordering or custom-weight support. |
-| A06 Qt workflows | Feature gaps remain; Stop race fixed in source | `3e6fdcf`: queue shutdown wakeup no longer reports failure. Four unmodified unified-test runs pass (6/6 cases each); not installed in 298852b. |
+| A06 Qt workflows | Feature gaps remain; Stop race fixed and installed | `3e6fdcf` (in installed `ad30add`): queue shutdown wakeup no longer reports failure. Four unmodified isolated unified-test runs pass (6/6 cases each); the user reported a live Stop then Start working after installation (user-reported; build not independently pinned). Qt editor limits unchanged: allow/block only, Ask/TCP+UDP refused (`desktop/ruleeditor.cpp:34,164`). |
 | A07 temporary Wine grants | Deferred feature | Native process lease exists; runtime-table Wine lease remains refused. |
 | A08 accounting/contention | Accounting gap remains; contention reduced | `7c1fbca`: release broker mutex for process collection, TryLock resume, generation/session rechecks and admission-demand yield. A census slot remains held; no latency guarantee. |
 | A09 traffic control | Deferred features | Rate limits, QoS, quotas and recurring schedules remain absent. |
 | A10 filters | Deferred features | No general named/composite filter model added. |
 | A11 lifecycle history | Gap remains | Decision history is not a complete connection/usage ledger. |
 | A12 documentation | Current status and key stale claims reconciled here | Historical matrix evidence is not promoted to equivalence. |
-| A13 runtime readiness | Fixed and installed; host capability restored | `9b1684a`, `49aa610`: active Unix-peer probe, module-tree warning, cached runtime checks and Electron advisory display. Host rebooted into 7.3.0-3; probe now passes. |
-| A14 VPN integration | Deferred integration | Generic tunnel refusals remain; zone labels do not establish enforcement support. |
+| A13 runtime readiness | Fixed and installed; host capability restored | `9b1684a`, `49aa610`: active Unix-peer probe, module-tree warning, cached runtime checks and Electron advisory display. Host rebooted into 7.3.0-3; live query of `ad30add` reports both checks ready, so the degraded notice was verified only by Electron model tests, not on screen. |
+| A14 VPN integration | Deferred integration | Generic TUN compatibility via mark checks (`c483eb6`); WireGuard/XFRM remain refused. A tunnel gets no policy exemption; its traffic follows ordinary per-application rules. Zone labels do not establish enforcement support. |
 
 Additional outage fix: **f4ae7af + 298852b** repair only unchanged Essential
 preset metadata after fresh discovery and permit that exact transition during
@@ -64,8 +64,10 @@ Complete live Activity snapshots showed only ownerless TCP TIME_WAIT rows under
 Unidentified; the live port-3000 listener and connections had executable owners.
 **424ec14 + 8fa7081** add native named-service display labels while excluding
 XDG/D-Bus/autostart launcher units. Display labels never alter executable keys,
-UID/prefix scope or permission authority. These two commits are not installed in
-298852b; the direct process probe is not a native GUI acceptance test.
+UID/prefix scope or permission authority. Both commits are included in installed
+ad30add; the user reported the yacwu label displaying correctly after installation
+(user-reported; build not independently pinned). The direct process probe is not a
+native GUI acceptance test.
 
 The first since-install history capture had four outgoing UDP attempts with no
 visible matching socket (three broadcasts, one unicast). A later capture added
@@ -81,7 +83,33 @@ application's permission. Two launch-period capacity bursts (5 and 63 dropped
 packets) remain a performance follow-up, not an explanation established for every
 unidentified record. No attribution bypass or destination-specific Allow was added.
 
-Remaining correctness work: install and verify the queue cancellation repair;
+### UI and updater follow-up
+
+- **Installed release `ad30add`:** the agent update verified the backend and
+  restored protection `both` (`.workspace/agent-update.log`), but the GUI relaunch
+  failed: the updater's environment had no `WAYLAND_DISPLAY`, so Electron exited
+  after the old GUI was closed. A manual launch with the user's session variables
+  loaded the main window (`.workspace/agent-update-gui.log`).
+- **`b8ee85e` (not installed):** the updater resolves and verifies the desktop
+  session before closing the old GUI. Its sources, in order, are the replaced
+  GUI's own session, then the updater's session, then the single user-owned
+  Wayland socket that accepts a connection. Ambiguous or missing evidence keeps
+  the old GUI. The new GUI is supervised until it reports its main window loaded.
+  A GUI failure exits 3 as "Backend update verified; GUI not switched".
+  Evidence: 42 hermetic updater tests and a read-only discovery on this host,
+  which resolved the session with `WAYLAND_DISPLAY` unset. No live update or
+  relaunch was run.
+- **Electron work included in `ad30add`:**
+  - `49aa610`: precedence and localhost explanations, and the runtime-check notice;
+  - `96ed62e` and `a18f2aa`: adding and editing rules for programs that are not running;
+  - `252199f`: artwork lookup.
+  Their tests are model, harness and API-level; no native-screen journey is
+  claimed for this release.
+- **Unresolved report:** after Allow with Remember, the request was allowed and
+  its rule saved, but the popup stayed open with disabled actions. Not
+  re-reproduced; no fix has been made.
+
+Remaining correctness work: resolve the Allow+Remember popup report;
 capture short-lived UDP failures with contemporaneous socket/process evidence; measure
 real launch behavior under load. New parity features remain deferred by the user.
 
