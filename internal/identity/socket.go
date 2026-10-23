@@ -230,14 +230,13 @@ func Resolve(f Flow) Attribution {
 	if len(wanted) == 0 {
 		return a
 	}
-	census := CensusHolders(wanted)
-	resolved := inspectHolderIdentities(census, func(pid int) (Process, error) {
+	_, resolved := resolveHolderIdentities(wanted, func(pid int) (Process, error) {
 		p, err := Inspect(pid)
 		if err == nil {
 			p.Provenance = CaptureProvenance(p)
 		}
 		return p, err
-	})
+	}, nil)
 	covered := map[string]bool{}
 	incomplete := !resolved.Complete
 	seen := map[string]bool{}

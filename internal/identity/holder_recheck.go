@@ -86,7 +86,9 @@ func (c HolderCensus) RecheckDetail() HolderRecheck {
 	}
 	p := c.src
 	global := func(code string) {
-		if d.Err == nil {
+		// A directly observed global failure must not be hidden by the initial
+		// census marker, which may describe only a retryable topology change.
+		if d.Err == nil || d.Err.Error() == "census_incomplete" {
 			d.Err = errors.New(code)
 		}
 	}
@@ -104,7 +106,10 @@ func (c HolderCensus) RecheckDetail() HolderRecheck {
 		global("time_limit")
 		return d
 	}
-	total, fdCount := 0, 0
+	budget := c.budget
+	if budget == nil {
+		budget = &holderBudget{deadline: c.deadline}
+	}
 	for tgid, old := range c.groups {
 		if len(old.paths) == 0 {
 			continue
@@ -125,7 +130,7 @@ func (c HolderCensus) RecheckDetail() HolderRecheck {
 		}
 		// A full rescan proves no table was omitted. Its generation must still be
 		// the original group's, and only non-holder topology is allowed to differ.
-		fresh, code := p.scanStableGroup(tgid, c.wanted, c.lim, &total, &fdCount)
+		fresh, code := p.scanStableGroup(tgid, c.wanted, c.lim, &budget.tasks, &budget.fds)
 		if code == "stop" {
 			global("recheck_budget")
 			return d
@@ -170,7 +175,7 @@ func (c HolderCensus) RecheckDetail() HolderRecheck {
 		if known && p.sameTopology(tgid, old) == nil {
 			continue
 		}
-		fresh, code := p.scanStableGroup(tgid, c.wanted, c.lim, &total, &fdCount)
+		fresh, code := p.scanStableGroup(tgid, c.wanted, c.lim, &budget.tasks, &budget.fds)
 		if code == "stop" {
 			global("recheck_budget")
 			return d

@@ -92,11 +92,12 @@ type inspectedHolder struct {
 }
 
 type holderIdentities struct {
-	Owners       map[string][]Process
-	Complete     bool
-	Issues       []string
-	SocketIssues map[string]string
-	Unavailable  int
+	Owners        map[string][]Process
+	Complete      bool
+	Issues        []string
+	SocketIssues  map[string]string
+	Unavailable   int
+	retryTopology bool
 }
 
 // inspectHolderIdentities verifies every member with cheap raw proc facts,
@@ -121,8 +122,10 @@ func inspectHolderIdentitiesWith(c HolderCensus, inspect func(int) (Process, err
 		}
 	}
 	late := func() bool { return c.src.late() }
+	identityFailed := false
 	failedTasks := map[int]bool{}
 	failSocket := func(h Holder, code string) {
+		identityFailed = true
 		fail(code)
 		out.SocketIssues[h.Socket] = code
 		for _, m := range h.Members {
@@ -206,7 +209,9 @@ func inspectHolderIdentitiesWith(c HolderCensus, inspect func(int) (Process, err
 	// Recheck failures are local where the census can name the changed group.
 	// Unknown completeness keeps locally read metadata but cannot advertise an
 	// application association or authorize any Resolve result.
+	identityClean := !identityFailed
 	detail := recheck()
+	out.retryTopology = identityClean && retryableHolderTopology(c, detail)
 	if detail.Err != nil {
 		fail("holder_census_incomplete")
 		for socket := range classes {

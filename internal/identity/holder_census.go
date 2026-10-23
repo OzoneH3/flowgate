@@ -69,6 +69,7 @@ type HolderCensus struct {
 	wanted       map[string]bool
 	lim          holderLimits
 	deadline     time.Time
+	budget       *holderBudget
 	groups       map[int]*holderGroup // every scanned group, with or without holders
 }
 
@@ -117,9 +118,20 @@ func CensusHolders(wanted map[string]bool) HolderCensus {
 	return procHolders().census(wanted, defaultHolderLimits)
 }
 
+// holderBudget charges full-table scans across initial scans, topology rescans
+// and the one complete retry. Rechecks/identity reads also share its deadline.
+type holderBudget struct {
+	deadline   time.Time
+	tasks, fds int
+}
+
 func (p holderProc) census(wanted map[string]bool, lim holderLimits) HolderCensus {
-	p.deadline = p.now().Add(lim.Time)
-	c := HolderCensus{Complete: true, SocketIssues: map[string][]string{}, src: p, wanted: wanted, lim: lim, deadline: p.deadline, groups: map[int]*holderGroup{}}
+	return p.censusBudget(wanted, lim, &holderBudget{deadline: p.now().Add(lim.Time)})
+}
+
+func (p holderProc) censusBudget(wanted map[string]bool, lim holderLimits, budget *holderBudget) HolderCensus {
+	p.deadline = budget.deadline
+	c := HolderCensus{Complete: true, SocketIssues: map[string][]string{}, src: p, wanted: wanted, lim: lim, deadline: p.deadline, budget: budget, groups: map[int]*holderGroup{}}
 	omitted := func(socket, code string) {
 		if !slices.Contains(c.SocketIssues[socket], code) {
 			c.SocketIssues[socket] = append(c.SocketIssues[socket], code)
@@ -140,17 +152,16 @@ func (p holderProc) census(wanted map[string]bool, lim holderLimits) HolderCensu
 		issue("group_limit")
 		return c
 	}
-	total, fdCount := 0, 0
 	perSocket := map[string]int{}
 	for _, tgid := range groups {
 		if p.late() {
 			issue("time_limit")
 			break
 		}
-		g, code := p.scanStableGroup(tgid, wanted, lim, &total, &fdCount)
+		g, code := p.scanStableGroup(tgid, wanted, lim, &budget.tasks, &budget.fds)
 		stopAll := code == "stop" || code == "time_limit" // census-wide budget exhausted
 		if code == "stop" {
-			code = map[bool]string{true: "fd_limit", false: "task_limit"}[fdCount >= lim.FDs]
+			code = map[bool]string{true: "fd_limit", false: "task_limit"}[budget.fds >= lim.FDs]
 		}
 		if code != "" {
 			issue(code)

@@ -162,7 +162,7 @@ func TestMappedIPv6OwnershipUsesSocketIdentity(t *testing.T) {
 			t.Fatal("mapped IPv6 address not unmapped")
 		}
 		if len(r.Owners) != 1 || s.Processes[r.Owners[0]].PID != os.Getpid() {
-			t.Fatal("mapped socket lost FD owner")
+			t.Fatalf("mapped socket lost FD owner: complete=%v issues=%v row=%+v processes=%+v", s.Complete, s.Issues, r, s.Processes)
 		}
 		found = true
 	}

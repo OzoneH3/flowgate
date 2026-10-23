@@ -182,8 +182,9 @@ func (c *ActivityCollector) Collect() ActivitySnapshot {
 		for key := range wanted {
 			inodes[key] = true
 		}
-		census := CensusHolders(inodes)
-		resolved := inspectHolderIdentities(census, func(pid int) (Process, error) { return c.inspect(pid, out.Started) })
+		census, resolved := resolveHolderIdentities(inodes,
+			func(pid int) (Process, error) { return c.inspect(pid, out.Started) },
+			func() { c.cache = map[int]cachedActivityProcess{} })
 		if !resolved.Complete {
 			out.Complete = false
 			out.Issues = append(out.Issues, resolved.Issues...)
