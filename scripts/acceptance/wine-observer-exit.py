@@ -3,8 +3,44 @@
 import argparse,json,os,pathlib,select,subprocess,tempfile,time
 ROOT=pathlib.Path(__file__).resolve().parents[2]
 p=argparse.ArgumentParser();p.add_argument('--bin',default='/usr/bin');a=p.parse_args()
-bin=pathlib.Path(a.bin);runner=(bin/'../lib/wine/x86_64-unix/wine').resolve();server=bin/'wineserver'
-if (runner.parent/'wine64').exists():runner=runner.parent/'wine64'
+import stat,struct
+def direct_loader(path):
+ """True for an executable regular ELF64 x86-64 file (header fields only;
+ not equivalent to Go's debug/elf parser used by identity.observerRunner)."""
+ try:
+  st=path.stat()
+  if not stat.S_ISREG(st.st_mode) or st.st_mode&0o111==0:return False
+  with open(path,'rb') as f:h=f.read(64)
+ except OSError:return False
+ if len(h)<64 or h[:4]!=b'\x7fELF' or h[4]!=2 or h[5] not in (1,2) or h[6]!=1:return False
+ return struct.unpack(('<' if h[5]==1 else '>')+'H',h[18:20])[0]==62
+def observer_runner(bin):
+ # Same candidate order as identity.observerRunner.
+ for c in (bin/'../lib/wine/x86_64-unix/wine64',bin/'../lib64/wine/x86_64-unix/wine64',bin/'wine64',bin/'../lib/wine/x86_64-unix/wine',bin/'../lib64/wine/x86_64-unix/wine'):
+  if direct_loader(c):return c.resolve()
+ return None
+def check_runner_selection():
+ import shutil,sys
+ good=pathlib.Path(sys.executable).resolve()
+ with tempfile.TemporaryDirectory(dir=ROOT/'.workspace') as d:
+  b=pathlib.Path(d)/'bin';b.mkdir();u=pathlib.Path(d)/'lib/wine/x86_64-unix';u.mkdir(parents=True)
+  def put(p,data,mode=0o755):p.write_bytes(data);p.chmod(mode)
+  elf=bytearray(good.read_bytes()[:64])
+  put(u/'wine64',bytes(elf),0o644)                       # not executable
+  bad32=bytearray(elf);bad32[4]=1;put(b/'wine64',bytes(bad32))                  # ELFCLASS32
+  badm=bytearray(elf);badm[18:20]=struct.pack('<H',183);put(u/'wine',bytes(badm))  # aarch64 machine
+  assert observer_runner(b) is None,'accepted non-executable, 32-bit or wrong-machine loader'
+  put(u/'wine',b'\x7fELF\x02\x01')                     # truncated header
+  assert observer_runner(b) is None,'accepted truncated loader'
+  shutil.copy(good,u/'wine');(u/'wine').chmod(0o755)
+  assert observer_runner(b)==(u/'wine').resolve(),'valid lowest-priority loader not selected'
+  (u/'wine64').chmod(0o755);shutil.copy(good,u/'wine64');(u/'wine64').chmod(0o755)
+  assert observer_runner(b)==(u/'wine64').resolve(),'candidate order not respected'
+ print('PASS runner selection negatives: non-executable, 32-bit, wrong machine, truncated; order respected',flush=True)
+check_runner_selection()
+bin=pathlib.Path(a.bin);server=bin/'wineserver';runner=observer_runner(bin)
+assert runner,'no direct x86-64 observer loader'
+print('RUNNER',runner,flush=True)
 run=pathlib.Path(tempfile.mkdtemp(prefix='observer-exit-',dir=ROOT/'.workspace'));print('EVIDENCE',run,flush=True)
 children=[]
 def wait(fn,seconds=30):
