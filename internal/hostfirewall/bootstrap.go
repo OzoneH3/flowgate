@@ -25,7 +25,12 @@ func scopedBootstrap(r, table string, ifs []policy.BootstrapInterface) string {
 	in := "add rule inet " + table + " input "
 	out := "add rule inet " + table + " output "
 	chains := fmt.Sprintf("add chain inet %s dhcp_input\nadd chain inet %s dhcp_output\n", table, table)
-	r = strings.Replace(r, in, chains+input+output+"add rule inet "+table+" input jump dhcp_input\n"+in, 1)
+	// Incoming-only output marking precedes the first input rule. Declare both
+	// DHCP chains before the first rule in any chain, so neither jump is a
+	// forward reference in the kernel transaction.
+	firstRule := "add rule inet " + table + " "
+	r = strings.Replace(r, firstRule, chains+input+output+firstRule, 1)
+	r = strings.Replace(r, in, "add rule inet "+table+" input jump dhcp_input\n"+in, 1)
 	return strings.Replace(r, out, "add rule inet "+table+" output jump dhcp_output\n"+out, 1)
 }
 
