@@ -1,44 +1,69 @@
 # FlowGate
 
-## Tailscale evaluation compatibility
+FlowGate is an application firewall and socket monitor with an independent Go
+backend, an Electron desktop, and a Qt development client. The installed root
+service supports continuous incoming or incoming-and-outgoing protection;
+desktop clients run unprivileged. Saved permissions belong to verified
+applications, users and supported Wine prefixes, not their launchers.
 
-A bounded incoming-only1.104.1 iptables-nft client profile now passes the sampled
-host's read-only checks. No live enforcement was enabled. See
-[COEXISTENCE.md](docs/COEXISTENCE.md) for masks, limits, isolated receiver evidence
-and the explicit five-minute evaluation procedure with monitor/database handoff.
-Read-only inspection: `sudo -n "$PWD/.workspace/flowgate" tailscale-inspect`.
-Combined incoming/outgoing Tailscale evaluation remains unsupported.
+## Install or update a release
 
+Run from a clean, committed `master` checkout:
 
-## Use the authorized root Activity monitor
-
+```sh
+# Preview a local update without preparing or installing a bundle:
+./scripts/update-and-start.sh --local --profile preserve --dry-run
+# Prepare, check, install, verify, and relaunch the GUI:
+./scripts/update-and-start.sh --local --profile preserve
 ```
+
+`--local` skips upstream access. `--profile preserve` keeps the existing protection
+mode; on a new installation it selects monitoring. Omitting `--profile` selects
+`both`, so the default updater also requests protection. Preparation and candidate
+compatibility checks precede stopping the current protection. Authentication uses
+sudo or the optional [passwordless local update helper](#passwordless-local-updates).
+
+To prepare without installing, use `scripts/prepare-release.sh`. Its matched
+backend and Electron bundles live under `.workspace/`. For a deliberate
+monitoring-only installation, use `python3 scripts/install-prepared.py --bundle PATH`
+with the backend bundle printed by preparation. See
+[deployment and rollback](docs/DAILY-DEPLOYMENT.md) and
+[current command options](scripts/README.md).
+
+The installer provides `flowgate.service` and its startup guard. Protection state
+is separate from service state: a running daemon can be monitoring, active,
+starting or degraded. Check the GUI's reported state rather than assuming that a
+running service means protection is active. Closing the GUI does not stop the
+installed daemon or its protection. Explicit Stop returns to monitoring; a
+failure can retain fail-closed interception until recovery.
+
+Source HEAD, the installed daemon and the running GUI may differ. The GUI header
+shows its release and recorded build date/time and flags a different daemon
+build. Use `flowgate version` on the specific binary being inspected; historical
+host states in the linked evidence documents are not current status reports.
+
+## Connect to the installed daemon
+
+```sh
 scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock
 ```
 
-The independent root monitor is running with enforcement **stopped**. Electron
-stays unprivileged; closing it leaves the monitor running. The integrated client
-loads live Activity, authoritative In/Out summaries and authorized stored-rule
-creation/edit/conditional Delete through the primary endpoint. Stored rules do not
-control traffic while enforcement is stopped. Decision Log is available with
-healthy empty/non-recording history; user-enabled UDP monitoring was restored after
-the controlled upgrade with a fresh accounting baseline. Rollout evidence/current Stop:
-[INTEGRATION.md](docs/INTEGRATION.md). Setup/manual root startup:
-[AUTHORIZATION.md](docs/AUTHORIZATION.md).
-Ordinary launch without this argument remains the original unprivileged observer.
+This development launcher builds the checkout's Electron client and attaches to
+the existing daemon and companion monitor socket. It does not install a release
+or start protection. The released GUI is launched by the updater. Activity,
+prompts and stored-rule operations depend on the authenticated account's
+capabilities. The root daemon grants machine administration to its configured
+administrator UID; clients do not gain authority from their display labels.
+See [authorization](docs/AUTHORIZATION.md).
 
+## Network compatibility
 
-## Root daemon architecture
-
-Production targets one root Go daemon with an unprivileged desktop. New `serve`
-mode observes and manages stored rules without enforcement; root-configured
-`--administrator` grants one authenticated UID machine-wide native visibility and
-service-rule authority. Existing launchers remain unchanged/read-only normally.
-See [AUTHORIZATION.md](docs/AUTHORIZATION.md) for secure paths, commands, role
-limits and the remaining separate UDP prototype. No root service is installed.
-
-
-A native Qt 6 desktop application with an independent Go backend. **Normal launch shows real host application/socket activity read-only.** No firewall rules, interception or host protection. The accepted prompt workflow remains a separate isolated lab.
+Compatibility checks inspect live interfaces, firewall rules, queues and routing
+marks without vendor-specific exemptions. TUN traffic remains subject to ordinary
+application rules. WireGuard and XFRM interfaces are currently refused; conflicting
+or unprovable mark operations also refuse activation. Passing preflight is not a
+guarantee for every VPN configuration or a forwarded-traffic enforcement claim.
+The old `tailscale-inspect` command has been removed. Use the diagnostics below.
 
 ## Diagnose before explicit activation
 
@@ -51,33 +76,36 @@ go build -o .workspace/flowgate ./cmd/flowgate
 
 Doctor is read-only, never requests sudo or starts enforcement/collection.
 “Ready” applies only to the named completed check; “Not checked” includes privilege
-and intentionally unattempted queue/BPF attachment. On the sampled host the current
-profile now supports the bounded incoming-only Tailscale client case described in
-COEXISTENCE.md; other configurations still refuse.
+and intentionally unattempted queue/BPF attachment. Activation additionally requires the selected profile to pass live compatibility
+checks. A read-only diagnostic result does not itself activate protection.
 See [diagnostics and actionable startup errors](docs/DIAGNOSTICS.md) for the exact
 optional user-run privileged inspection command and existing Stop/recovery paths.
 
-## Integrated Electron alternative
-
-From `/home/flowgate-user/Apps/flowgate`:
+## Development desktop clients
 
 ```sh
 scripts/run-electron.sh
+# Qt observer / bounded evaluation client:
+scripts/run-desktop.sh
 ```
 
-Sandboxed, unprivileged Electron provides Activity, prompts, saved-rule editing,
-explicit evaluation/monitoring controls, opt-in tray and bounded native notifications.
-Normal launch is read-only and starts no enforcement or privileged collector.
-**Keep running in the tray** makes window close hide it; **Quit FlowGate…** exits
-and cleans up its owned observer. An independent controller keeps its deadline.
-See [Electron behavior and verification](electron/README.md).
+Without an existing daemon/controller argument, these launchers start their own
+read-only observer. They do not install a service or automatically enable
+protection. Electron provides Activity, live charts, pending requests, saved-rule
+editing, decision history, and capability-gated protection controls.
 
-`scripts/run-desktop.sh` remains the unchanged default Qt entry point and fallback.
-Both clients use capability-gated conditional Delete. Qt preserves exact uint64
-versions; Electron explicitly refuses versions above JavaScript's safe integer
-range rather than submitting a rounded value. Neither retries deletion automatically.
-Live sudo/host coexistence and privileged Electron monitoring activation remain
-unverified; development enforcement checks use disposable namespaces only.
+**Keep running in the tray** defaults to enabled for new preferences; an explicit
+opt-out is preserved. With it enabled, closing the main window hides it.
+**Quit FlowGate…** exits the client and cleans up its owned observer, while an
+independent daemon continues running. See [Electron behavior](electron/README.md).
+
+The Qt client has a smaller workflow set; it is not feature-equivalent to
+Electron. Both clients use conditional rule deletion. Qt preserves exact uint64
+versions; Electron refuses versions above JavaScript's safe integer range rather
+than submitting rounded values. Neither automatically retries deletion.
+
+The following observer and Qt evaluation instructions describe development and
+isolated test workflows, separately from the installed service above.
 
 ## One window: Activity and optional five-minute control
 
@@ -100,8 +128,7 @@ and reports stopped only after confirmed cleanup. Closing the window leaves an
 active evaluation running under its original deadline. **Status / recovery…**
 provides the independent privileged check/recovery path; disconnect means unknown.
 
-**Normal launch activates nothing. Live host evaluation was not run during
-implementation.** Start requires installed Konsole, Python 3 and an existing sudo
+**This development launcher activates nothing until explicitly requested.** Start requires installed Konsole, Python 3 and an existing sudo
 policy permitting the controller command. Qt never collects a password. Refusals
 and cancelled authentication leave Activity available. See
 [the exact activation, Stop and recovery contract](docs/HOST-CONTROL.md).
@@ -268,11 +295,13 @@ port, unrestricted client source port; outgoing rules preserve destination scope
 TCP authorization controls connection initiation, not continuous ownership or
 forced disconnection of admitted connections. See [semantics](docs/SEMANTICS.md).
 
-The optional existing Wine/Proton owner-table adapter is preserved. Ordinary
-IPv4/IPv6 TCP/UDP fixtures, dormant handles, duplication and explicit test-session
-attachment were verified on the builds documented in [WINE.md](docs/WINE.md).
-It is disabled by default; real games and full UMU/Steam/container integration
-remain unverified. This desktop increment does not launch Wine or games.
+The packaged daemon includes the Wine/Proton owner observer. Its runtime and
+prefix selection follows the installed configuration; supported runtime discovery
+can launch an observer in an existing prefix. The standalone read-only observer
+launcher is a separate mode. Runtime support is capability/build-gated, and
+missing or ambiguous ownership remains explicit. Helper lifecycle coverage does
+not prove every runtime's full attribution path or every game launch. See the
+current integration and observer-lifetime sections of [WINE.md](docs/WINE.md).
 
 [Current status](docs/STATUS.md) · [Plan](docs/PLAN.md) ·
 [Handoff](docs/HANDOFF.md) · [Historical evidence](docs/HISTORY.md)
@@ -280,8 +309,11 @@ remain unverified. This desktop increment does not launch Wine or games.
 Desktop branding: CMake `-DFLOWGATE_PRODUCT_NAME=NewName`. CLI branding:
 `go build -ldflags '-X main.productName=NewName'`. Binaries use native shared
 libraries; no static/portable deployment claim. Other distributions and arm64
-remain unvalidated. Durable rules and bounded manual host enforcement are now implemented; production
-service integration, wider coexistence, packaging, charts and bandwidth control remain deferred.
+remain unvalidated. Durable rules, continuous service protection, matched release
+packaging and live charts are implemented. Charts contain bounded observation
+history, not a durable usage ledger. Bandwidth rate limits, QoS, quotas and
+recurring schedules remain unimplemented. TCP rules govern new admissions;
+changing a rule to Block does not terminate already-admitted TCP connections.
 
 ### Passwordless local updates
 
@@ -297,8 +329,11 @@ a release or change protection. After setup, the ordinary updater automatically
 uses the helper without a password, including when run by an agent:
 
 ```sh
-./scripts/update-and-start.sh --recover-stopped --local
+./scripts/update-and-start.sh --local --profile preserve
 ```
+
+If an installed daemon cannot be queried, `--recover-stopped` explicitly permits
+monitoring-only recovery. It is a recovery option, not the normal update path.
 
 **Trust boundary:** authorizing local updates grants the selected account the
 ability to install code that runs as root. Bundle hashes check consistency, not
