@@ -6,7 +6,10 @@ export PYTHONDONTWRITEBYTECODE=1
 go vet ./...
 # Real socket fixtures must not be blocked by the host's active application policy.
 ordinary_peer_tests='^(TestDecisionLogAPIOnReadOnlyEndpoint|TestObservedCreationAuthorizationAndPersistence|TestTrafficAPIPermissionsAndProjection)$'
-scripts/lab.sh go test -race ./... -skip "$ordinary_peer_tests"
+# Packages share this lab namespace. Serialize their kernel fixtures so one
+# package's protection queue cannot change another package's baseline traffic.
+# The explicit flag also overrides an inherited GOFLAGS package count.
+scripts/lab.sh go test -race -p=1 ./... -skip "$ordinary_peer_tests"
 # These three fixtures intentionally require a non-root Unix peer.
 go test -race ./internal/daemon -run "$ordinary_peer_tests"
 for check in test-passwordless-update test-update-and-start test-install-monitoring test-install-rollback test-release-preparation test-deployment-recovery test-deployment-uninstall test-script-hardening test-essential-networking test-apply-essentials test-electron-fontconfig test-clear-rules; do

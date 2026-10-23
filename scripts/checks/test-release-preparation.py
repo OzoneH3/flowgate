@@ -36,7 +36,7 @@ class Preparation(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(dir=ROOT / '.workspace')
         self.root = Path(self.temp.name)
-        names = ['scripts/prepare-release.sh', 'scripts/build.sh', 'scripts/go-env.sh',
+        names = ['scripts/prepare-release.sh', 'scripts/check.sh', 'scripts/build.sh', 'scripts/go-env.sh',
                  'scripts/lib/update_and_start.py', 'scripts/lib/build_progress.py', 'scripts/install-monitoring.py', 'scripts/host-daily-acceptance.py',
                  'deployment/launch', 'deployment/control.py', 'deployment/recover.py', 'deployment/uninstall.py',
                  'deployment/systemd/flowgate.service', 'deployment/systemd/flowgate-guard.service',
@@ -129,6 +129,36 @@ class Preparation(unittest.TestCase):
         self.assertIn('Build log:', result.stderr)
         self.assertFalse((self.backend / 'manifest.json').exists())
         self.assertFalse((self.gui / 'matched-manifest.json').exists())
+
+    def assert_serial_namespace_checks(self):
+        checks = [call for call in self.calls() if call[:2] == ['go', 'test'] and './...' in call]
+        self.assertEqual(len(checks), 1, checks)
+        isolated = checks[0]
+        self.assertIn('-race', isolated)
+        self.assertIn('-p=1', isolated, 'kernel fixtures share one namespace and must not run packages concurrently')
+        self.assertEqual(isolated[isolated.index('-skip') + 1],
+                         '^(TestDecisionLogAPIOnReadOnlyEndpoint|TestObservedCreationAuthorizationAndPersistence|TestTrafficAPIPermissionsAndProjection)$')
+        return isolated
+
+    def test_release_serializes_shared_namespace_and_retains_ordinary_peer_checks(self):
+        result = self.prepare('--backend-only', GOFLAGS='-p=8 -count=1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        isolated = self.assert_serial_namespace_checks()
+        peer = [call for call in self.calls() if call[:2] == ['go', 'test'] and './internal/daemon' in call]
+        self.assertEqual(len(peer), 1, peer)
+        self.assertIn('-race', peer[0])
+        self.assertEqual(peer[0][peer[0].index('-run') + 1], isolated[isolated.index('-skip') + 1])
+
+    def test_check_entrypoint_serializes_and_preserves_failure_exit(self):
+        # Stop at the first real test invocation: no desktop/receiver or host actions
+        # run in this fake-toolchain check. The full real suite is a separate check.
+        result = subprocess.run(['sh', 'scripts/check.sh'], cwd=self.root,
+                                env=dict(self.env, FAKE_GO_FAIL='1', GOFLAGS='-p=8 -count=1'),
+                                text=True, capture_output=True)
+        self.assertEqual(result.returncode, 93, result.stderr)
+        self.assert_serial_namespace_checks()
+        self.assertFalse((self.backend / 'manifest.json').exists())
+        self.assertFalse(any(call[0] in ('npm', 'sudo', 'systemctl', 'nft') for call in self.calls()))
     def test_invalid_build_request_is_refused_before_any_target_runs(self):
         result = subprocess.run(['sh', 'scripts/build.sh', 'desktop', 'typo'], cwd=self.root, env=self.env, capture_output=True)
         self.assertEqual(result.returncode, 2)
