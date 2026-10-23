@@ -19,6 +19,9 @@ const MaxCensusPackets = 24
 const MaxCensusBytes = 1 << 19
 const AttributionTimeout = 5 * time.Second
 const AdmissionWait = 250 * time.Millisecond
+const EndpointBurstWait = 2 * time.Millisecond
+const endpointStallWindow = 100 * time.Millisecond
+const endpointStallBudget = 10 * time.Millisecond
 const recentCompletionWindow = time.Second
 
 type packetJob struct {
@@ -53,6 +56,8 @@ type packetWorkers struct {
 	ready                    [2][]string
 	count, bytes             int
 	censusCount, censusBytes int
+	burstWindow              time.Time
+	burstSpent               time.Duration
 	stopped                  bool
 	capacity                 chan struct{}
 	stopping                 chan struct{}
@@ -85,7 +90,8 @@ func newPacketLanes(general, census int, process func(packetJob, bool, bool) boo
 // just the callback's existing packet; it creates no goroutines or extra queue.
 // Never renew the packet's attribution deadline, and bound head-of-line delay.
 func (w *packetWorkers) submitWait(ctx context.Context, p packetJob) bool {
-	until := time.Now().Add(AdmissionWait)
+	started := time.Now()
+	until := started.Add(AdmissionWait)
 	if p.deadline.Before(until) {
 		until = p.deadline
 	}
@@ -103,28 +109,61 @@ func (w *packetWorkers) submitWait(ctx context.Context, p packetJob) bool {
 		}
 		w.mu.Lock()
 		key := p.key()
-		// A single saturated endpoint or census lane must not stall unrelated
-		// traffic in the receive callback. Wait only for global capacity.
-		eligible := !w.stopped && len(w.jobs[key]) < MaxAttributionPerEndpoint &&
+		// A recently progressing general endpoint may absorb a short burst,
+		// but never use the much longer global-pressure wait for its own cap.
+		// This is scheduling only: every admitted packet still gets a fresh
+		// attribution/policy check, and neither queue bound is increased.
+		endpointFull := len(w.jobs[key]) >= MaxAttributionPerEndpoint
+		now := time.Now()
+		remaining := w.endpointWaitBudgetLocked(now)
+		burst := endpointFull && !w.census[key] && w.recentlyCompletedLocked(key, now) && remaining > 0
+		eligible := !w.stopped && (!endpointFull || burst) &&
 			(!w.census[key] || (w.censusCount < MaxCensusPackets && p.size <= MaxCensusBytes-w.censusBytes))
-		full := w.count >= MaxAttributionPackets || p.size > MaxAttributionBytes-w.bytes
+		full := endpointFull || w.count >= MaxAttributionPackets || p.size > MaxAttributionBytes-w.bytes
 		w.mu.Unlock()
 		if !eligible {
 			return false
 		}
+		if burst {
+			limit := started.Add(EndpointBurstWait)
+			if budgetLimit := now.Add(remaining); budgetLimit.Before(limit) {
+				limit = budgetLimit
+			}
+			if limit.Before(until) {
+				until = limit
+				timer.Reset(time.Until(until))
+			}
+		}
 		if !full {
 			continue // capacity opened between submit and this inspection
 		}
+		waitStart := time.Now()
+		resume := false
 		select {
 		case <-ctx.Done():
-			return false
 		case <-w.stopping:
-			return false
 		case <-timer.C:
-			return false
 		case <-w.capacity:
+			resume = true
+		}
+		if burst {
+			// Only the single receive callback spends this budget. Count actual
+			// blocked time, including scheduler delay, on every exit path.
+			w.mu.Lock()
+			w.burstSpent += time.Since(waitStart)
+			w.mu.Unlock()
+		}
+		if !resume {
+			return false
 		}
 	}
+}
+
+func (w *packetWorkers) endpointWaitBudgetLocked(now time.Time) time.Duration {
+	if w.burstWindow.IsZero() || now.Sub(w.burstWindow) >= endpointStallWindow {
+		w.burstWindow, w.burstSpent = now, 0
+	}
+	return endpointStallBudget - w.burstSpent
 }
 
 // submit never waits for attribution or a worker. At capacity, an idle endpoint

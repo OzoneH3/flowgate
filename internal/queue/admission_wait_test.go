@@ -179,3 +179,59 @@ func TestAdmissionWaitInterruptsAnAlreadyWaitingCallback(t *testing.T) {
 		w.stop()
 	}
 }
+
+func TestEndpointBurstWaitEligibilityAndAccounting(t *testing.T) {
+	for _, mode := range []string{"recent", "stale", "census", "budget"} {
+		t.Run(mode, func(t *testing.T) {
+			w := newPacketWorkers(0, func(packetJob, bool) {})
+			defer w.stop()
+			p := job(100, 8000)
+			for i := 0; i < MaxAttributionPerEndpoint; i++ {
+				if !w.submit(job(uint32(i), 8000)) {
+					t.Fatal("fill")
+				}
+			}
+			now := time.Now()
+			w.recent[p.key()] = now
+			w.burstWindow = now
+			switch mode {
+			case "stale":
+				w.recent[p.key()] = now.Add(-2 * recentCompletionWindow)
+			case "census":
+				w.census[p.key()] = true
+			case "budget":
+				w.burstSpent = endpointStallBudget
+			}
+			before := w.burstSpent
+			if w.submitWait(context.Background(), p) {
+				t.Fatal("exceeded endpoint bound")
+			}
+			if mode == "recent" {
+				if w.burstSpent < EndpointBurstWait {
+					t.Fatal("wait not accounted", w.burstSpent)
+				}
+			} else if w.burstSpent != before {
+				t.Fatal("ineligible endpoint waited", w.burstSpent)
+			}
+			if !w.submitWait(context.Background(), job(101, 8001)) {
+				t.Fatal("unrelated endpoint refused")
+			}
+		})
+	}
+}
+
+func TestEndpointStallBudgetWindow(t *testing.T) {
+	w := newPacketWorkers(0, func(packetJob, bool) {})
+	defer w.stop()
+	now := time.Now()
+	if got := w.endpointWaitBudgetLocked(now); got != endpointStallBudget {
+		t.Fatal(got)
+	}
+	w.burstSpent = endpointStallBudget
+	if got := w.endpointWaitBudgetLocked(now.Add(endpointStallWindow - time.Nanosecond)); got != 0 {
+		t.Fatal(got)
+	}
+	if got := w.endpointWaitBudgetLocked(now.Add(endpointStallWindow)); got != endpointStallBudget {
+		t.Fatal(got)
+	}
+}
