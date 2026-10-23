@@ -302,3 +302,12 @@ func TestEssentialInterfaceExclusionBoundToToken(t *testing.T) {
 		t.Fatalf("stored %d, reviewed %d", stored, len(p.Rules))
 	}
 }
+
+func TestDHCPRefreshDiscoveryReportsFailure(t *testing.T) {
+	e := &Engine{Now: time.Now}
+	failed := errors.New("NetworkManager temporarily unavailable")
+	e.Essential = essential.NewManager(essential.Environment{Run: func(context.Context, string, ...string) ([]byte, error) { return nil, failed }})
+	if _, err := e.DiscoverBootstrap(context.Background()); !errors.Is(err, failed) {
+		t.Fatalf("refresh must expose discovery failure, not publish an empty successful snapshot: %v", err)
+	}
+}

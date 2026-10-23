@@ -361,19 +361,25 @@ func presetSentence(r policy.Rule) string {
 }
 
 func (e *Engine) ApprovedBootstrap() []policy.BootstrapInterface {
-	e.mu.Lock()
-	saved := policy.BootstrapFrom(e.rules, e.Now())
-	e.mu.Unlock()
-	if e.Essential == nil {
-		return saved
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	bootstrap, err := essential.AutomaticBootstrap(ctx, e.Essential.Env, saved)
+	bootstrap, err := e.DiscoverBootstrap(context.Background())
 	if err != nil {
 		log.Printf("WARNING: automatic DHCP bootstrap discovery unavailable; retaining saved scopes: %v", err)
 	}
 	return bootstrap
+}
+
+// Discovery errors are exposed so a running firewall can retain its last
+// verified snapshot instead of flapping its DHCP permission during an NM restart.
+func (e *Engine) DiscoverBootstrap(parent context.Context) ([]policy.BootstrapInterface, error) {
+	e.mu.Lock()
+	saved := policy.BootstrapFrom(e.rules, e.Now())
+	e.mu.Unlock()
+	if e.Essential == nil {
+		return saved, nil
+	}
+	ctx, cancel := context.WithTimeout(parent, 3*time.Second)
+	defer cancel()
+	return essential.AutomaticBootstrap(ctx, e.Essential.Env, saved)
 }
 
 func (e *Engine) hasPresetRules() bool {

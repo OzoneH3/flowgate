@@ -15,9 +15,18 @@ DNS, time-service, LAN or Internet allowance.
 
 Discovery has a three-second deadline and is independent of optional service
 inspection. Failure logs a warning and retains only existing saved DHCP scopes.
-The boot guard needs no NetworkManager command or saved preset. A protection activation uses one snapshot for its guard, active rules, ownership
-record and failure guard. New interfaces/profile changes are picked up at the
-next activation; this does not dynamically rewrite a running firewall.
+The boot guard needs no NetworkManager command or saved preset. Active continuous
+protection refreshes profile-derived DHCP scopes every 30 seconds (plus bounded
+discovery time). It atomically replaces only dedicated DHCP chains, verifying
+ownership and the prior table digest under the cleanup lock, then persists the
+new digest and scopes. New interfaces and profile changes need no protection
+restart; DHCP retries may wait for the next refresh. Saved DHCP permissions
+remain included. At activation, discovery failure falls back to saved scopes. During a run, failed
+discovery retains the current scopes and retries at the next interval. Discovery
+runs off the integrity-audit loop. A failed atomic nft transaction is retried only
+if the table is unchanged; changed or unverifiable tables enter the guarded
+failure path. Unrelated rules and chain definitions must remain unchanged across
+a refresh.
 
 The Essential networking GUI menu is removed. No approval dialog or database
 write is needed for automatic DHCP. Existing saved rules are neither removed nor

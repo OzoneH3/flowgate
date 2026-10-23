@@ -546,8 +546,12 @@ func tableDigestFor(table string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return digestTableJSON(b)
+}
+
+func digestTableJSON(b []byte) (string, error) {
 	var v any
-	if err = json.Unmarshal(b, &v); err != nil {
+	if err := json.Unmarshal(b, &v); err != nil {
 		return "", err
 	}
 	var clean func(any)

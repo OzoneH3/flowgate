@@ -8,13 +8,16 @@ import (
 	"flowgate/internal/daemon"
 	"flowgate/internal/decisionlog"
 	"flowgate/internal/identity"
+	"flowgate/internal/policy"
 	"flowgate/internal/queue"
 	"flowgate/internal/readiness"
 	"fmt"
 	"golang.org/x/sys/unix"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sync"
 	"syscall"
 	"time"
@@ -390,6 +393,13 @@ func (m *Evaluation) run(ctx context.Context, id string) {
 			m.mu.Unlock()
 			expectedDigest := r.TableDigest
 			lastSafety := time.Now()
+			lastBootstrap := time.Now()
+			type bootstrapResult struct {
+				scopes []policy.BootstrapInterface
+				err    error
+			}
+			bootstrapResults := make(chan bootstrapResult, 1)
+			bootstrapPending := false
 			auditDone = make(chan struct{})
 			go func(record Record) {
 				defer close(auditDone)
@@ -414,6 +424,27 @@ func (m *Evaluation) run(ctx context.Context, id string) {
 						if er == nil && continuous && time.Since(lastSafety) >= 10*time.Second {
 							er = m.auditEnvironment(runctx, profile)
 							lastSafety = time.Now()
+						}
+						if er == nil && continuous {
+							select {
+							case result := <-bootstrapResults:
+								bootstrapPending = false
+								if result.err != nil {
+									log.Printf("WARNING: DHCP refresh discovery failed; retaining active scopes: %v", result.err)
+								} else if !slices.Equal(result.scopes, bootstrap) {
+									er = refreshBootstrap(runctx, m.dir, &record, result.scopes)
+									if er == nil {
+										bootstrap = record.Bootstrap
+										expectedDigest = record.TableDigest
+									}
+								}
+							default:
+							}
+							if !bootstrapPending && time.Since(lastBootstrap) >= 30*time.Second {
+								bootstrapPending = true
+								lastBootstrap = time.Now()
+								go func() { scopes, err := m.e.DiscoverBootstrap(runctx); bootstrapResults <- bootstrapResult{scopes, err} }()
+							}
 						}
 						if er != nil {
 							if runctx.Err() != nil {

@@ -178,9 +178,41 @@ func TestEssentialDHCPBootstrapKernel(t *testing.T) {
 		table := GuardTable
 		if mode == "active" {
 			table = Table
-			r = profileRules("test", "both", bootstrap...)
+			r = profileRules("test", "both")
 		}
 		nftScript(r)
+		if mode == "active" {
+			dir := t.TempDir()
+			digest, err := tableDigest()
+			if err != nil {
+				t.Fatal(err)
+			}
+			record := Record{Token: "test", TableDigest: digest}
+			cancelled, cancel := context.WithCancel(context.Background())
+			cancel()
+			if refreshBootstrap(cancelled, dir, &record, bootstrap) == nil {
+				t.Fatal("cancelled refresh accepted")
+			}
+			if err := refreshBootstrap(context.Background(), dir, &record, bootstrap); err != nil {
+				t.Fatal(err)
+			}
+			// Removal and re-addition must work without replacing the host table.
+			if err := refreshBootstrap(context.Background(), dir, &record, nil); err != nil {
+				t.Fatal(err)
+			}
+			dump, err := nft("list", "chain", "inet", Table, "dhcp_input")
+			if err != nil || strings.Contains(string(dump), "accept") {
+				t.Fatalf("removed DHCP scope persists: %s %v", dump, err)
+			}
+			if err := refreshBootstrap(context.Background(), dir, &record, bootstrap); err != nil {
+				t.Fatal(err)
+			}
+			stale := record
+			stale.TableDigest = "changed"
+			if refreshBootstrap(context.Background(), dir, &stale, nil) == nil {
+				t.Fatal("changed table accepted")
+			}
+		}
 		for _, q := range []struct{ proto, local, remote string }{{"udp4", "192.0.2.1:68", "192.0.2.2:67"}, {"udp4", "192.0.2.1:68", "192.0.2.255:67"}, {"udp6", "[fe80::1%fgclient]:546", "[fe80::2%fgclient]:547"}, {"udp6", "[fe80::1%fgclient]:546", "[ff02::1:2%fgclient]:547"}} {
 			l, _ := net.ResolveUDPAddr(q.proto, q.local)
 			d, _ := net.ResolveUDPAddr(q.proto, q.remote)
@@ -216,4 +248,39 @@ func TestEssentialDHCPBootstrapKernel(t *testing.T) {
 		nftScript("delete table inet " + table + "\n")
 	}
 	t.Log("PASS interface-scoped DHCPv4 unicast+broadcast and DHCPv6 link-local+multicast request/reply under boot guard and active hooks; no host lease changes")
+}
+
+func TestDHCPRefreshCannotAbsorbUnrelatedChanges(t *testing.T) {
+	base := `{"nftables":[{"chain":{"name":"dhcp_input"}},{"rule":{"chain":"dhcp_input","expr":[{"accept":null}]}},{"rule":{"chain":"input","expr":[{"drop":null}]}}]}`
+	original, err := nonDHCPDigest([]byte(base))
+	if err != nil {
+		t.Fatal(err)
+	}
+	changedDHCP := strings.Replace(base, `"chain":"dhcp_input","expr":[{"accept":null}]`, `"chain":"dhcp_input","expr":[{"drop":null}]`, 1)
+	digest, err := nonDHCPDigest([]byte(changedDHCP))
+	if err != nil || digest != original {
+		t.Fatal("DHCP rule change should be excluded", err)
+	}
+	for _, changed := range []string{
+		strings.Replace(base, `"chain":"input","expr":[{"drop":null}]`, `"chain":"input","expr":[{"accept":null}]`, 1),
+		strings.Replace(base, `"name":"dhcp_input"`, `"name":"dhcp_input","policy":"accept"`, 1),
+	} {
+		digest, err := nonDHCPDigest([]byte(changed))
+		if err != nil || digest == original {
+			t.Fatal("unrelated mutation was absorbed", err)
+		}
+	}
+}
+
+func TestDHCPRefreshRejectsUnexpectedRules(t *testing.T) {
+	raw := []byte(`{"nftables":[{"rule":{"chain":"dhcp_input"}},{"rule":{"chain":"dhcp_output"}}]}`)
+	if err := verifyDHCPRuleCounts(raw, 1, 1); err != nil {
+		t.Fatal(err)
+	}
+	if verifyDHCPRuleCounts(raw, 0, 1) == nil {
+		t.Fatal("additional input rule accepted")
+	}
+	if verifyDHCPRuleCounts(raw, 1, 2) == nil {
+		t.Fatal("missing output rule accepted")
+	}
 }
