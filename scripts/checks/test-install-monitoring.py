@@ -141,6 +141,22 @@ class MonitoringInstall(unittest.TestCase):
   final,_=self.run_install(h)
   self.assertIn(('user:test',2),final['rules'])
   self.assertNotIn(('systemctl','disable','flowgate.service'),h.calls)
+ def test_install_accepts_startup_preset_metadata_repair(self):
+  rule={'id':'preset:test','schema':5,'version':1,'action':'allow','filter':{'application':'resolver','revision':'v1','direction':'outgoing','protocol':'udp','remote_address':'192.0.2.53','remote_port':53,'uid':974},'preset':{'name':'essential-system-networking','component':'dns','entry_id':'a'*64,'revision':'b'*64,'digest':'c'*64}}
+  repaired=json.loads(json.dumps(rule));repaired['version']=2
+  repaired['preset'].update(entry_id=m.sha(json.dumps(['dns',rule['filter']],separators=(',',':')).encode()),revision='d'*64,digest='e'*64)
+  dbpath=self.base/'var/lib/flowgate/rules.db'
+  with sqlite3.connect(dbpath)as db:db.execute('INSERT INTO rules VALUES(?,?)',(rule['id'],json.dumps(rule)))
+  h=self.host(api_rules=[{'id':'zone:a','version':3},{'id':'preset:b','version':1},repaired]);run=h.run
+  def start_repair(*args):
+   out=run(*args)
+   if args==('systemctl','start','flowgate.service'):
+    with sqlite3.connect(dbpath)as db:db.execute('UPDATE rules SET document=? WHERE id=?',(json.dumps(repaired),rule['id']))
+   return out
+  h.run=start_repair
+  final,_=self.run_install(h)
+  self.assertIn(('preset:test',2),final['rules'])
+  self.assertNotIn(('systemctl','disable','flowgate.service'),h.calls)
  def test_stopped_recovery_requires_monitoring_and_no_interception(self):
   (self.base/'var/lib/flowgate/protection.json').write_text('{"mode":"both"}')
   h=self.host()
@@ -157,6 +173,31 @@ class MonitoringInstall(unittest.TestCase):
 
 
 class MigrationVerification(unittest.TestCase):
+ def test_preset_metadata_repair_preserves_entire_permission(self):
+  import copy
+  old=copy.deepcopy(self.rule)
+  old['schema']=5
+  old['filter'].update(direction='outgoing',protocol='udp',remote_address='192.0.2.53',remote_port=53)
+  old['preset']={'name':'essential-system-networking','component':'dns','entry_id':'a'*64,'revision':'b'*64,'digest':'c'*64}
+  new=copy.deepcopy(old);new['version']+=1
+  # Match Go Filter declaration order, independently of the source JSON order.
+  f=old['filter'];target={k:f[k]for k in ('application','revision','direction','protocol','remote_address','remote_port','uid')}
+  new['preset'].update(entry_id=m.sha(json.dumps(['dns',target],separators=(',',':')).encode()),revision='d'*64,digest='e'*64)
+  self.write(self.before,[old]);self.write(self.after,[new])
+  self.assertEqual(m.verified_rule_transition(self.before,self.after),[('r',2)])
+  for key,value in [('action','block'),('executable','/other'),('disabled',True),('version',3),('created','changed')]:
+   bad=copy.deepcopy(new);bad[key]=value;self.write(self.after,[bad])
+   with self.assertRaises(RuntimeError):m.verified_rule_transition(self.before,self.after)
+  for key,value in [('uid',0),('application','other'),('revision','new'),('direction','incoming'),('remote_address','198.51.100.53'),('remote_port',54),('local_address','127.0.0.1'),('interface_name','eth0')]:
+   bad=copy.deepcopy(new);bad['filter'][key]=value;self.write(self.after,[bad])
+   with self.assertRaises(RuntimeError):m.verified_rule_transition(self.before,self.after)
+  for key,value in [('component','dhcp'),('name','other'),('entry_id','f'*64),('digest','invalid')]:
+   bad=copy.deepcopy(new);bad['preset'][key]=value;self.write(self.after,[bad])
+   with self.assertRaises(RuntimeError):m.verified_rule_transition(self.before,self.after)
+  # Ordinary metadata churn on an already repaired preset is not a migration.
+  self.write(self.before,[new]);bad=copy.deepcopy(new);bad['version']+=1;bad['preset']['digest']='f'*64
+  self.write(self.after,[bad])
+  with self.assertRaises(RuntimeError):m.verified_rule_transition(self.before,self.after)
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory(dir=root/'.workspace');self.base=pathlib.Path(self.tmp.name)
   self.before=self.base/'before.db';self.after=self.base/'after.db'

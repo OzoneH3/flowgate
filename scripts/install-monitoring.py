@@ -94,8 +94,38 @@ def rule_documents(db):
   return rules,archived
  finally:c.close()
 
+def repaired_preset_metadata(old,new):
+ """Recognize metadata-only startup repair; never permit a policy-field change.
+
+ Fresh discovery and intact preset digests are checked by the daemon. Here the
+ independent installer checks the unchanged permission and its derived target.
+ Unknown filter fields fail closed if the schema evolves.
+ """
+ p=old.get('preset');q=new.get('preset')
+ if not isinstance(p,dict)or not isinstance(q,dict):return False
+ if set(p)!=set(q)or set(p)!={'name','component','entry_id','revision','digest'}:return False
+ if p['name']!='essential-system-networking'or q['name']!=p['name']or q['component']!=p['component']:return False
+ if old.get('schema')!=5 or type(old.get('version'))is not int or not 0<old['version']<2**64-1:return False
+ if type(new.get('version'))is not int or new['version']!=old['version']+1:return False
+ for value in [p[k]for k in ('entry_id','revision','digest')]+[q[k]for k in ('entry_id','revision','digest')]:
+  if not isinstance(value,str)or len(value)!=64 or any(c not in '0123456789abcdef'for c in value):return False
+ if {k:v for k,v in old.items()if k not in ('preset','version')}!={k:v for k,v in new.items()if k not in ('preset','version')}:return False
+ f=old.get('filter')
+ fields='interface_index interface_name local_address peer_service zone_model network_zone all_programs all_uids application revision direction protocol remote_address local_port remote_port remote uid'.split()
+ if not isinstance(f,dict)or set(f)-set(fields):return False
+ target={k:f[k]for k in fields if k in f}
+ if target.get('interface_name'):target.pop('interface_index',None)
+ if 'peer_service'in target:
+  peer=target['peer_service']
+  if not isinstance(peer,dict)or set(peer)!={'application','revision','uid'}:return False
+  target['peer_service']={k:peer[k]for k in ('application','revision','uid')}
+ encoded=json.dumps([p['component'],target],ensure_ascii=False,separators=(',',':'))
+ for char,escape in [('&','\\u0026'),('<','\\u003c'),('>','\\u003e'),('\u2028','\\u2028'),('\u2029','\\u2029')]:encoded=encoded.replace(char,escape)
+ entry=sha(encoded.encode())
+ return p['entry_id']!=entry and q['entry_id']==entry and p['digest']!=q['digest']
+
 def verified_rule_transition(before_db,after_db,administrator_uid=1000):
- """Accept only exact root-scope migrations or losslessly archived cleanup."""
+ """Accept exact scope migrations, preset metadata repair or archived cleanup."""
  before,old_archives=rule_documents(before_db);after,archives=rule_documents(after_db)
  # Only a new archive from this startup can explain a disappearing active rule.
  for previous in old_archives:
@@ -108,6 +138,7 @@ def verified_rule_transition(before_db,after_db,administrator_uid=1000):
     raise RuntimeError('Rule disappeared without matching cleanup archive: '+rid)
    continue
   if new==old:continue
+  if repaired_preset_metadata(old,new):continue
   f=old.get('filter')or{};uid=f.get('uid');path=old.get('executable','')
   native=lambda u:sha(f'{u}|native||{path}'.encode())
   eligible=old.get('share_with_root')is True and uid==administrator_uid and isinstance(uid,int)and uid>0 and path.startswith('/')and f.get('application')==native(uid)and not(old.get('preset')or f.get('process')or f.get('all_programs')or f.get('all_uids'))
