@@ -37,6 +37,9 @@ type Application struct {
 	Hosted *Hosted `json:"hosted,omitempty"`
 }
 type Process struct {
+	// HolderWitness pins a newly supported worker/private-table owner set.
+	// It is snapshot evidence, never an application or process permission key.
+	HolderWitness      string      `json:"holder_witness,omitempty"`
 	BootID             string      `json:"boot_id,omitempty"`
 	PIDNS              string      `json:"pidns,omitempty"`
 	ThreadGroup        int         `json:"thread_group_pid,omitempty"`
@@ -237,6 +240,9 @@ func fingerprint(owners []Process, sockets []Socket) string {
 	var f []string
 	for _, p := range owners {
 		f = append(f, fmt.Sprintf("%d:%s:%d:%s:%s:%s:%s:%s:%s", p.PID, p.Start, p.UID, p.BootID, p.PIDNS, p.NetNS, p.MountNS, p.Application.Key, p.Application.Revision+":"+p.ExecutableRevision))
+		if p.HolderWitness != "" {
+			f = append(f, "holder:"+p.HolderWitness)
+		}
 	}
 	for _, s := range sockets {
 		f = append(f, fmt.Sprintf("%s:%d:%s", s.NetNS, s.Inode, s.Cookie))

@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net/netip"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -231,50 +230,24 @@ func Resolve(f Flow) Attribution {
 	if len(wanted) == 0 {
 		return a
 	}
-	entries, _ := os.ReadDir("/proc")
+	census := CensusHolders(wanted)
+	resolved := inspectHolderIdentities(census, func(pid int) (Process, error) {
+		p, err := Inspect(pid)
+		if err == nil {
+			p.Provenance = CaptureProvenance(p)
+		}
+		return p, err
+	})
 	covered := map[string]bool{}
-	incomplete := false
-	for _, entry := range entries {
-		pid, e := strconv.Atoi(entry.Name())
-		if e != nil {
-			continue
-		}
-		base := "/proc/" + entry.Name()
-		ns := link(base + "/ns/net")
-		if ns == "" {
-			status := string(readBound(base+"/status", 4096))
-			if status == "" {
-				if _, err := os.Stat(base); os.IsNotExist(err) {
-					continue
-				}
-			}
-			if strings.Contains(status, "State:\tZ") {
-				continue
-			}
-			incomplete = true
-			continue
-		}
-		fds, e := os.ReadDir(base + "/fd")
-		if e != nil {
-			incomplete = true
-			continue
-		}
-		owns := false
-		for _, fd := range fds {
-			s := link(base + "/fd/" + fd.Name())
-			if wanted[s] {
-				owns = true
-				covered[s] = true
-			}
-		}
-		if owns {
-			p, e := Inspect(pid)
-			if e != nil {
-				incomplete = true
-			} else {
-				// Captured now, while the owner (and normally its launcher) is alive.
-				p.Provenance = CaptureProvenance(p)
+	incomplete := !resolved.Complete
+	seen := map[string]bool{}
+	for socket, owners := range resolved.Owners {
+		for _, p := range owners {
+			covered[socket] = true
+			key := fmt.Sprintf("%d:%s:%s", p.PID, p.Start, p.HolderWitness)
+			if !seen[key] {
 				a.Owners = append(a.Owners, p)
+				seen[key] = true
 			}
 		}
 	}

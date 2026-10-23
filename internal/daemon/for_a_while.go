@@ -102,8 +102,8 @@ func leaseOwner(a identity.Attribution) (identity.Process, error) {
 		return identity.Process{}, mutationError("process_scope_unavailable", fmt.Sprintf("For a while needs exactly one verified owning process (%d visible)", len(a.Owners)))
 	}
 	p := a.Owners[0]
-	if p.ThreadGroup != 0 && p.ThreadGroup != p.PID {
-		return identity.Process{}, mutationError("process_scope_unavailable", "For a while requires a live process leader; a worker descriptor does not establish process-instance authority")
+	if p.HolderWitness != "" || (p.ThreadGroup != 0 && p.ThreadGroup != p.PID) {
+		return identity.Process{}, mutationError("process_scope_unavailable", "For a while requires a live process leader; worker or merged descriptor evidence does not establish process-instance authority")
 	}
 	if p.PID <= 0 || p.Start == "" || p.BootID == "" || p.UID != a.Principal().UID {
 		return identity.Process{}, mutationError("process_scope_unavailable", "For a while needs the owner's PID, start time and boot identity")

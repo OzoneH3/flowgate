@@ -83,7 +83,7 @@ func (e *Engine) processViewsLocked(activity identity.ActivitySnapshot, rules []
 	}
 	if activity.Error == "" && !activity.Collected.IsZero() && now.Sub(activity.Collected) <= 45*time.Second {
 		for _, row := range activity.Rows {
-			if len(row.Owners) != 1 || row.OwnershipCategory != "visible-holder" {
+			if row.HolderWitness != "" || len(row.Owners) != 1 || row.OwnershipCategory != "visible-holder" {
 				continue
 			}
 			p, ok := activity.Processes[row.Owners[0]]

@@ -33,7 +33,7 @@ func TestProcessTierIdentityAndFallback(t *testing.T) {
 	if act != "block" {
 		t.Fatal("legacy evaluator granted process authority")
 	}
-	for _, what := range []string{"sibling", "start", "uid", "namespace", "revision", "shared", "incomplete", "session"} {
+	for _, what := range []string{"sibling", "start", "uid", "namespace", "revision", "shared", "incomplete", "session", "holder-witness"} {
 		t.Run(what, func(t *testing.T) {
 			x := a
 			x.Owners = append([]identity.Process{}, a.Owners...)
@@ -55,6 +55,8 @@ func TestProcessTierIdentityAndFallback(t *testing.T) {
 				x.VisibilityComplete = false
 			case "session":
 				s = "new"
+			case "holder-witness":
+				x.Owners[0].HolderWitness = "merged"
 			}
 			act, id, _ := EvaluateSession(rules, f, x, time.Now(), s)
 			if id == pr.ID || act == "allow" {

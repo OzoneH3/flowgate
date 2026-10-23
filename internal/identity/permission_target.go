@@ -100,8 +100,8 @@ func DescribePermissionTarget(a Attribution) *PermissionTarget {
 		t.ForAWhile = fmt.Sprintf("Unavailable: %d visible socket holders (needs exactly one owning process)", len(a.Owners))
 	case owner == nil || owner.BootID == "":
 		t.ForAWhile = "Unavailable: owner PID/start/boot identity missing"
-	case owner.ThreadGroup != 0 && owner.ThreadGroup != owner.PID:
-		t.ForAWhile = "Unavailable: worker descriptor holder is not a live process leader"
+	case owner.HolderWitness != "" || (owner.ThreadGroup != 0 && owner.ThreadGroup != owner.PID):
+		t.ForAWhile = "Unavailable: worker or merged descriptor evidence does not establish process-instance authority"
 	default:
 		t.ForAWhile = fmt.Sprintf("This process instance only: %s PID %d, same direction; a relaunch or another %s process is not covered", name, owner.PID, name)
 	}

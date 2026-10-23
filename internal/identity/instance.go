@@ -70,11 +70,12 @@ func (i Instance) Matches(p Process) bool {
 	return i.PID == p.PID && i.Start == p.Start && i.UID == p.UID && i.BootID == p.BootID && i.NetNS == p.NetNS && i.MountNS == p.MountNS && i.PIDNS == p.PIDNS && i.Executable == p.Executable && i.fileRevision() == p.ExecutableRevision && i.Revision == p.Application.Revision && instanceIdentity(p) && p.ThreadGroup == i.PID
 }
 
-// instanceIdentity: a process whose instance may bind a process rule. Native:
+// instanceIdentity excludes merged/private holder evidence, even if its canonical
+// representative is the leader. A process whose instance may bind a process rule. Native:
 // the application is the running file (same stamp). Verified Electron app: the
 // instance pins the runtime file's own stamp; the bundle is the application.
 func instanceIdentity(p Process) bool {
-	if p.ExecutableRevision == "" || !LiveRuleable(p.Application) {
+	if p.HolderWitness != "" || p.ExecutableRevision == "" || !LiveRuleable(p.Application) {
 		return false
 	}
 	return p.Application.Kind == "electron" || contentRevision(p.Application) || p.ExecutableRevision == p.Application.Revision

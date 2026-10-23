@@ -68,6 +68,14 @@ func TestLeaseOwnerRefusesWorkerAndLegacyHostedAuthority(t *testing.T) {
 	if _, err := leaseOwner(*a); err != nil {
 		t.Fatalf("ordinary native control: %v", err)
 	}
+	p.HolderWitness = "merged-tables"
+	a.Owners[0] = p
+	if _, err := leaseOwner(*a); code(err) != "process_scope_unavailable" {
+		t.Fatalf("merged leader lease: %v", err)
+	}
+	p.HolderWitness = ""
+	a.Owners[0] = p
+
 	for _, kind := range []string{"native", "electron"} {
 		for _, state := range []string{"unverified", "verified"} {
 			a.Application.Kind = kind
@@ -81,5 +89,22 @@ func TestLeaseOwnerRefusesWorkerAndLegacyHostedAuthority(t *testing.T) {
 				t.Fatal("stored lease revived hosted authority")
 			}
 		}
+	}
+}
+
+func TestStoredLeaseCannotAuthorizeMergedLeaderEvidence(t *testing.T) {
+	_, f, a, _ := fixture()
+	a.VisibilityComplete = true
+	p := a.Owners[0]
+	p.PID, p.ThreadGroup, p.Start, p.BootID = 101, 101, "11", "boot"
+	a.Owners = []identity.Process{p}
+	now := time.Now()
+	l := processLease{PID: p.PID, Start: p.Start, UID: p.UID, BootID: p.BootID, Application: *a.Application, Direction: f.Direction, Until: now.Add(time.Hour)}
+	if !l.matches(f, *a, now) {
+		t.Fatal("ordinary leader lease control failed")
+	}
+	a.Owners[0].HolderWitness = "merged-tables"
+	if l.matches(f, *a, now) {
+		t.Fatal("existing lease authorized merged holder set")
 	}
 }

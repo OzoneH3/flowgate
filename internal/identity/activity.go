@@ -4,10 +4,8 @@ package identity
 // and visible descriptor holders; it never grants an application permission.
 import (
 	"fmt"
-	"io"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -37,6 +35,9 @@ type RuntimeApplication struct {
 	Evidence    TableEvidence `json:"evidence"`
 }
 type ActivityRow struct {
+	// Per-socket snapshot witness; never a permission key. A process may also
+	// hold other sockets through only its leader table.
+	HolderWitness      string              `json:"holder_witness,omitempty"`
 	RuntimeApplication *RuntimeApplication `json:"runtime_application,omitempty"`
 	NetworkScope       NetworkScope        `json:"network_scope"`
 	Initiation         Initiation          `json:"initiation"`
@@ -175,181 +176,58 @@ func (c *ActivityCollector) Collect() ActivitySnapshot {
 			wanted[key] = append(wanted[key], len(out.Rows)-1)
 		}
 	}
-	entries, err := os.ReadDir("/proc")
-	if err != nil {
-		out.Error = err.Error()
-		out.Complete = false
-		out.Rows = nil
-		return finish()
-	}
 	seen := map[int]bool{}
-	fdCount := 0
-	unreadableFDs := 0
-	processCount := 0
-	type target struct {
-		pid, group int
-		groupStart string
-	}
-	targets := []target{}
-	for _, entry := range entries {
-		pid, e := strconv.Atoi(entry.Name())
-		if e == nil {
-			if len(targets) == 8192 {
-				out.Complete = false
-				out.Issues = append(out.Issues, "Process census limit reached")
-				break
-			}
-			targets = append(targets, target{pid: pid})
+	if len(wanted) > 0 {
+		inodes := map[string]bool{}
+		for key := range wanted {
+			inodes[key] = true
 		}
-	}
-	for cursor := 0; cursor < len(targets); cursor++ {
-		t := targets[cursor]
-		pid := t.pid
-		processCount++
-		if processCount > 8192 || fdCount >= 131072 || time.Since(out.Started) > 2*time.Second {
+		census := CensusHolders(inodes)
+		resolved := inspectHolderIdentities(census, func(pid int) (Process, error) { return c.inspect(pid, out.Started) })
+		if !resolved.Complete {
 			out.Complete = false
-			out.Issues = append(out.Issues, "Process/descriptor/time census limit reached")
-			break
+			out.Issues = append(out.Issues, resolved.Issues...)
 		}
-		base := fmt.Sprintf("/proc/%d", pid)
-		if t.group != 0 {
-			base = fmt.Sprintf("/proc/%d/task/%d", t.group, pid)
-			groupStart, _, e := processStat(fmt.Sprintf("/proc/%d", t.group))
-			if e != nil || groupStart != t.groupStart {
-				out.Complete = false
-				continue
+		out.Inaccessible += census.Inaccessible
+		for socket := range resolved.SocketIssues {
+			for _, index := range wanted[socket] {
+				out.Rows[index].Ownership = "Owner metadata unavailable"
+				out.Rows[index].Evidence = "A visible holder could not be fully inspected or changed during collection; the listed owner set is incomplete"
 			}
 		}
-		// A departed leader leaves /proc/TGID/fd empty and exe unavailable while
-		// live workers still hold sockets. Enumerate only this evidenced case, not
-		// every thread on the host. Use each worker's own start-time identity.
-		if t.group == 0 && activityLeaderExited(base) {
-			leaderStart, _, _ := processStat(base)
-			f, e := os.Open(base + "/task")
-			if e == nil {
-				tasks, readErr := f.ReadDir(257)
-				f.Close()
-				if len(tasks) > 256 || (readErr != nil && readErr != io.EOF) {
+		for socket, owners := range resolved.Owners {
+			for _, p := range owners {
+				if len(out.Processes) >= 2048 && !seen[p.PID] {
 					out.Complete = false
-					out.Issues = append(out.Issues, "Exited-leader worker census incomplete")
+					out.Issues = append(out.Issues, "Process row limit reached")
+					continue
 				}
-				for n, task := range tasks {
-					if n >= 256 || len(targets) >= 8192 {
+				seen[p.PID] = true
+				id := fmt.Sprintf("%d:%s", p.PID, p.Start)
+				group := 0
+				if p.ThreadGroup != p.PID {
+					group = p.ThreadGroup
+				}
+				out.Processes[id] = ActivityProcess{BootID: p.BootID, NetNS: p.NetNS, MountNS: p.MountNS, PIDNS: p.PIDNS, ID: id, PID: p.PID, Start: p.Start, UID: p.UID, Executable: p.Executable, Application: p.Application, ThreadGroup: group, Provenance: p.Provenance, ExecutableRevision: p.ExecutableRevision}
+				for _, index := range wanted[socket] {
+					row := &out.Rows[index]
+					if len(row.Owners) >= 32 {
 						out.Complete = false
-						break
+						row.Evidence = "More than 32 visible holders; owner list truncated"
+						continue
 					}
-					tid, e := strconv.Atoi(task.Name())
-					if e == nil && tid != pid {
-						targets = append(targets, target{pid: tid, group: pid, groupStart: leaderStart})
+					row.Owners = append(row.Owners, id)
+					if p.HolderWitness != "" {
+						row.HolderWitness = p.HolderWitness
 					}
 				}
-			} else {
-				out.Complete = false
-				out.Issues = append(out.Issues, "Exited-leader task directory inaccessible")
 			}
-			continue
-		}
-		// Open directories incrementally; do not allocate an arbitrary FD list.
-		dir, err := os.Open(base + "/fd")
-		if err != nil {
-			if _, e := os.Stat(base); !os.IsNotExist(e) {
-				out.Inaccessible++
-			}
-			continue
-		}
-		start, _, statErr := processStat(base)
-		owned := map[int]string{}
-		for fdCount < 131072 && time.Since(out.Started) < 2*time.Second {
-			fds, e := dir.ReadDir(256)
-			for _, fd := range fds {
-				fdCount++
-				target, linkErr := os.Readlink(base + "/fd/" + fd.Name())
-				if linkErr != nil && !os.IsNotExist(linkErr) {
-					unreadableFDs++
-					out.Complete = false
-				}
-				for _, index := range wanted[target] {
-					owned[index] = base + "/fd/" + fd.Name()
-				}
-			}
-			if e != nil {
-				if e != io.EOF && !os.IsNotExist(e) {
-					out.Complete = false
-					unreadableFDs++
-				}
-				break
-			}
-		}
-		dir.Close()
-		if fdCount >= 131072 || time.Since(out.Started) >= 2*time.Second {
-			out.Complete = false
-		}
-		if len(owned) == 0 {
-			continue
-		}
-		p, e := c.inspect(pid, out.Started)
-		end, _, endErr := processStat(base)
-		if t.group != 0 {
-			groupStart, _, e := processStat(fmt.Sprintf("/proc/%d", t.group))
-			if e != nil || groupStart != t.groupStart {
-				endErr = fmt.Errorf("thread group generation changed")
-			}
-		}
-		if statErr != nil || e != nil || endErr != nil || start != end || p.Start != start {
-			out.Complete = false
-			for index := range owned {
-				row := &out.Rows[index]
-				_, processErr := os.Stat(base)
-				if (statErr == nil && endErr == nil && start != end) || os.IsNotExist(processErr) {
-					row.Ownership = "Owner changed during inspection"
-					row.Evidence = "Descriptor holder was observed, but process start/exit checks changed; no PID identity retained"
-				} else if _, linkErr := os.Readlink(base + "/exe"); os.IsPermission(linkErr) {
-					row.Ownership = "Owner inaccessible"
-					row.Evidence = "Descriptor holder observed; executable access denied for this process"
-				} else {
-					row.Ownership = "Owner metadata unavailable"
-					row.Evidence = "Descriptor holder observed; process identity could not be validated"
-				}
-			}
-			continue
-		}
-		if len(out.Processes) >= 2048 {
-			out.Complete = false
-			out.Issues = append(out.Issues, "Process row limit reached")
-			break
-		}
-		seen[pid] = true
-		id := fmt.Sprintf("%d:%s", p.PID, p.Start)
-		out.Processes[id] = ActivityProcess{BootID: p.BootID, NetNS: p.NetNS, MountNS: p.MountNS, PIDNS: p.PIDNS, ID: id, PID: p.PID, Start: p.Start, UID: p.UID, Executable: p.Executable, Application: p.Application, ThreadGroup: t.group, Provenance: p.Provenance, ExecutableRevision: p.ExecutableRevision}
-		for index, path := range owned {
-			row := &out.Rows[index]
-			// Process inspection can race close/dup/FD reuse. Recheck the actual FD,
-			// never authorize by a remembered inode or PID. This is still a snapshot.
-			if !activityDescriptorMatches(path, row.Socket.Inode) {
-				out.Complete = false
-				row.Ownership = "Owner changed during inspection"
-				row.Evidence = "Descriptor closed or changed after enumeration; no current association retained"
-				continue
-			}
-			if len(row.Owners) >= 32 {
-				out.Complete = false
-				row.Evidence = "More than 32 visible holders; owner list truncated"
-				continue
-			}
-			row.Owners = append(row.Owners, id)
 		}
 	}
 	for pid := range c.cache {
 		if !seen[pid] {
 			delete(c.cache, pid)
 		}
-	}
-	if unreadableFDs > 0 {
-		out.Issues = append(out.Issues, fmt.Sprintf("%d descriptor reads inaccessible or interrupted", unreadableFDs))
-	}
-	if out.Inaccessible > 0 {
-		out.Complete = false
-		out.Issues = append(out.Issues, fmt.Sprintf("%d process descriptor directories inaccessible", out.Inaccessible))
 	}
 	for i := range out.Rows {
 		row := &out.Rows[i]
@@ -381,7 +259,7 @@ func (c *ActivityCollector) Collect() ActivitySnapshot {
 		}
 		for _, id := range row.Owners {
 			if p := out.Processes[id]; p.ThreadGroup != 0 {
-				row.Evidence += fmt.Sprintf(" Live worker TID %d in thread group %d after leader exit.", p.PID, p.ThreadGroup)
+				row.Evidence += fmt.Sprintf(" Worker descriptor observed at TID %d in thread group %d.", p.PID, p.ThreadGroup)
 			}
 		}
 	}
