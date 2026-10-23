@@ -105,11 +105,17 @@ unidentified record. No attribution bypass or destination-specific Allow was add
   - `252199f`: artwork lookup.
   Their tests are model, harness and API-level; no native-screen journey is
   claimed for this release.
-- **Unresolved report:** after Allow with Remember, the request was allowed and
-  its rule saved, but the popup stayed open with disabled actions. Not
-  re-reproduced; no fix has been made.
+- **Allow+Remember popup report:** the request was allowed and its rule saved,
+  but the popup stayed open with disabled actions and Check result. Recovery gap
+  fixed in source (not installed). An unconfirmed reviewed decision is now
+  checked read-only against its receipt a bounded number of times and is never
+  resent. Only a matching committed receipt confirms it; nothing is recorded
+  after a generation change, removal or stop. Evidence: Electron tests, and a
+  lab/API run against a real isolated daemon behind a proxy that dropped the
+  decide reply. The original incident's cause is unproven, and the native-window
+  journey is unverified.
 
-Remaining correctness work: resolve the Allow+Remember popup report;
+Remaining correctness work: verify the popup receipt recovery in a native-window journey;
 capture short-lived UDP failures with contemporaneous socket/process evidence; measure
 real launch behavior under load. New parity features remain deferred by the user.
 
