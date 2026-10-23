@@ -51,6 +51,7 @@ import {
   ENDED_PROCESS,
   ENDED_RULE_RESULT,
   ENDED_NEEDS_CHOICE,
+  endedStatusLine,
   endedLeaseAvailable,
   endedLeaseReason,
   endedLeaseResult,
@@ -2849,14 +2850,19 @@ function updateDecisions() {
             : needsDecisionReview() && reviewFor === reviewKey() && decisionReviews.allow
               ? `Application + peer/service · ${decisionZone === 'any' ? 'Any network' : zoneLabel(decisionZone)} · ${decisionReviews.allow.rule.expires.startsWith('0001-') ? 'persistent' : 'until ' + new Date(decisionReviews.allow.rule.expires).toLocaleTimeString()}`
               : permissionTarget(chosenScope, e?.flow.protocol || '', needsDecisionReview() ? decisionZone : 'any');
-  // One short status line: the countdown, or what the request is now.
-  const expiry = document.querySelector('.expiry');
+  // One short status line: the countdown, or what the request is now. An ended request
+  // shows its most specific reason here (the countdown's slot, so the card does not resize);
+  // Details → Status keeps every reason.
+  const expiry = document.querySelector<HTMLElement>('.expiry');
   if (expiry) {
     const limited = !!e && (!e.attribution.visibility_complete || e.attribution.status !== 'directly-associated');
+    const endedLine = ended ? endedStatusLine($('decisionNote')?.textContent, $('requestResult')?.textContent) : '';
+    expiry.classList.toggle('ended', !!endedLine);
+    expiry.title = endedLine;
     expiry.textContent = !e
       ? ''
       : ended
-        ? '' // the result line below states it once
+        ? endedLine
         : e.remainingMs > 0 && e.state === 'awaiting-decision'
           ? `${Math.ceil(e.remainingMs / 1000)} s left` +
             (group && group.count > 1 ? ` · +${group.count - 1} similar` : '') +
@@ -2869,7 +2875,8 @@ let guiBuild: GuiBuild | undefined;
 function renderBuildVersion() {
   const el = document.getElementById('buildVersion');
   if (!el) return;
-  const v = headerVersion(guiBuild, state.control.connected ? state.control.daemonBuild : undefined);
+  // guiBuild() may resolve before the first state publication.
+  const v = headerVersion(guiBuild, state?.control.connected ? state.control.daemonBuild : undefined);
   el.textContent = v.text;
   el.title = v.title;
   el.classList.toggle('mismatch', v.mismatch);

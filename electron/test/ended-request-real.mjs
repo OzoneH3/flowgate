@@ -174,6 +174,12 @@ async function clickAndMeasureHide(w, selector, label) {
   out.hide_ms = k ? out.kwin_hidden_ms : out.is_visible_false_ms;
   return out;
 }
+// The card shows address and port as separate fields (see for-a-while-real.mjs): "addr:port" from them.
+const remoteOf = (w) =>
+  w.evaluate(() => {
+    const f = document.getElementById('fieldRemote');
+    return f ? f.querySelector('.nl-address')?.textContent + ':' + (f.querySelector('.nl-port')?.textContent || '') : '';
+  });
 const resultRows = () =>
   main.evaluate(() =>
     [...document.querySelectorAll('#permissionResultRows li.permission-result')].map((li) => ({
@@ -319,10 +325,7 @@ try {
   await sleep(1500);
   // The retained card may live in the idle window (URL request=__idle__); identify it by content.
   evidence.ended_window_url = promptWindow()?.url();
-  assert(
-    /10\.79\.0\.2:43000/.test(await first.locator('#requestDetails').innerText()),
-    'ended request still on screen',
-  );
+  assert.equal(await remoteOf(first), '10.79.0.2:43000', 'ended request still on screen');
   evidence.ended_field_states = await first
     .locator('#rememberPanel input[data-field]')
     .evaluateAll((xs) =>
@@ -419,7 +422,14 @@ try {
   );
   assert(!rule.filter.process && !rule.filter.network_zone, 'application-wide, all zones');
   assert.equal((await list()).rules.length, 1);
-  // Outcome in the main window: Pending requests › Results.
+  // Outcome in the main window: Pending requests › Results. The main window starts hidden in the
+  // tray (0011b81) and hidden windows receive no state; open it as the tray entry would.
+  evidence.main_opened = await app.evaluate(({ BrowserWindow }) => {
+    const w = BrowserWindow.getAllWindows().find((x) => x.webContents.getURL().endsWith('/index.html'));
+    const before = w.isVisible();
+    w.show();
+    return { before, after: w.isVisible() };
+  });
   const saved = await wait(
     async () => (evidence.result_rows = await resultRows()).find((r) => r.event === savedId && r.text === 'Rule saved for future connections'),
     10000,
@@ -480,7 +490,7 @@ try {
   const next = await wait(
     async () => {
       const w = promptWindow();
-      return w && /10\.79\.0\.3:44000/.test(await w.locator('#requestDetails').innerText()) ? w : undefined;
+      return w && (await remoteOf(w)) === '10.79.0.3:44000' ? w : undefined;
     },
     15000,
     'next request presented',

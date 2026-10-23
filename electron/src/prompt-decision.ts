@@ -25,6 +25,11 @@ export const ENDED_PROCESS =
 // Short connection outcome shown under Details → Status, alongside the
 // backend's field-level reasons.
 export const ENDED_MESSAGE = 'This connection has ended.';
+// The first view's one status line for an ended request (the countdown's slot): the most
+// specific action-level reason, then the outcome, then the generic ended message.
+export function endedStatusLine(note?: string | null, result?: string | null): string {
+  return note || result || ENDED_MESSAGE;
+}
 export const ENDED_PROCESS_EXITED = 'The process has exited; For a while has nothing to cover.';
 // queue-reconcile-v1: an enabled rule exists for an earlier revision of this
 // application (same key, user, direction). Display only; never applied.

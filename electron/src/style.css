@@ -1613,6 +1613,7 @@ body.hide-sidebar #activityView > aside { display:none; }
 #promptBody .nl-links { display:flex; align-items:center; gap:40px; margin:14px 0 0; padding:0 12px 0 20px; min-height:32px; }
 #promptBody .nl-links .details-link { color:#2db5f6; font-size:var(--nl-font, 20px); padding:0; min-height:0; }
 #promptBody .nl-links .expiry { margin:0; font-size:calc(var(--nl-font, 20px) - 2px); color:#9a9a9a; }
+#promptBody .nl-links .expiry.ended { color:#e6c07b; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; } /* One line; full text in title and Details. */
 #promptBody .nl-card .decision-dock { position:sticky; bottom:0; background:#222; padding:15px 12px 0 23px; margin:0; }
 #promptBody .nl-card .decision-controls { display:flex; flex-wrap:wrap; align-items:center; column-gap:19px; row-gap:8px; padding:0; }
 #promptBody #requestDetails .decision-controls button.allow, #promptBody #requestDetails .decision-controls button.block { height:44px; min-height:44px; width:107px; padding:0 0 0 2px; font-size:var(--nl-font, 20px); background:#484848; border-color:#484848; display:inline-flex; align-items:center; justify-content:center; gap:0; }
