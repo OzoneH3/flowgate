@@ -182,6 +182,9 @@ func serveCommand(args []string) error {
 	e.Evaluation = evaluation
 	if *allowProtection {
 		e.ConfigureEssential(ctx, essential.Default())
+		if err = e.RepairMigratedEssential(); err != nil {
+			fmt.Fprintln(os.Stderr, "WARNING: essential migration metadata repair failed; affected permissions remain inactive:", err)
+		}
 		if err = evaluation.ConfigureProtection(*protectionState); err != nil {
 			return err
 		}

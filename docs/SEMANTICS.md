@@ -474,10 +474,22 @@ proof and fails closed. After a kernel upgrade that removed the running kernel's
 modules, reboot into the installed kernel and repeat the probe.
 
 Activity annotations skip new batches while Wine admission censuses are waiting
-or running. An already-started batch is not preempted and still performs all its
-bookend checks; this is reduced contention, not a latency guarantee.
+or running. An in-flight batch releases the broker lock during its full process/FD scan,
+resumes only with a non-waiting lock attempt, and yields at helper/image
+boundaries when admission arrives. Helper request/reply pairs remain serialized;
+helper generation and session are rechecked before using either bookend. A
+currently executing helper request is not interrupted. This reduces contention
+but is not a latency guarantee.
 
 The crash/startup guard deliberately remains fail-closed for new localhost
 traffic: it cannot evaluate executable-specific local Ask/Block rules without
 attribution. A blanket loopback guard exemption would bypass those explicit
 rules. Default localhost delivery is a property of the active daemon path.
+
+Essential preset executable-revision format migration is repaired at daemon
+startup after fresh discovery and before protection restoration. Only unedited
+records with a stale target hash and an identical currently derived permission
+qualify. The record ID and filter stay unchanged; derived entry metadata and
+version are updated atomically through the rule store, then logged per ID.
+Changed executable identity, endpoint, peer service or scope requires normal
+review. A failed save retains the old inactive records and emits a warning.
