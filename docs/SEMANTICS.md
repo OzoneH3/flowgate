@@ -91,7 +91,15 @@ No foreign firewall or VPN configuration is modified by this change.
 Vendor transport presets are no longer discovered or generated; retired API
 options explicitly refuse enabled values. Existing ordinary application rules
 remain independent. Old transport presets are retained as records but cannot
-be validated by the removed adapter, so they are inactive.
+be validated by the removed adapter, so they are inactive. A tunnel daemon's
+transport now needs ordinary application permissions and may prompt.
+
+Removing the vendor IPv6-prefix override also changes zone matching: tailnet
+IPv6 addresses in fd7a:115c:a1e0::/48 now classify as Local under the generic
+ULA rule, while 100.64.0.0/10 IPv4 peers remain Internet under CGNAT handling.
+Existing Local-scoped rules consequently match those IPv6 peers too. An explicit
+custom prefix can override classification; zone classification alone grants no
+permission.
 
 ## Actor permissions and root monitoring
 
