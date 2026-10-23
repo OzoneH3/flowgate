@@ -34,6 +34,8 @@ async function setup(
     projected = false,
     receiptProjected = false,
     previewError,
+    receiptChecks = [],
+    gate,
   } = {},
 ) {
   const dir = fs.mkdtempSync(path.resolve(__dirname, '../../.workspace/remember-test-')),
@@ -79,9 +81,11 @@ async function setup(
       remote_port: 50,
     },
   };
+  // Mutable daemon state for in-flight changes (generation, listed requests).
+  const fx = { generation: 'g', events: null };
   const base = () => ({
     version: 1,
-    generation: 'g',
+    generation: fx.generation,
     read_only: false,
     mode: 'daemon-monitor',
     server_time: new Date().toISOString(),
@@ -104,7 +108,7 @@ async function setup(
       internet_prefixes: [],
       reason: 'Test',
     },
-    events: [e],
+    events: fx.events ?? [e],
   });
   const server = net.createServer((s) =>
     s.once('data', (raw) => {
@@ -192,6 +196,16 @@ async function setup(
       } else if (q.operation === 'decision-status') {
         queries++;
         const p = issued.get(q.preview_token);
+        if (gate) {
+          // The test decides when (and with which state) this reply is sent.
+          gate(queries).then((state) => {
+            if (state === 'drop') return void s.destroy(); // reply lost
+            const g = base();
+            g.decision_receipt = { state, preview: p, ...(state === 'committed' ? { decision: { ...e, state: 'allowed' }, saved_rule: p.rule } : {}) };
+            s.end(JSON.stringify(g) + '\n');
+          });
+          return;
+        }
         r.decision_receipt = {
           state: status,
           preview: p,
@@ -205,6 +219,8 @@ async function setup(
   );
   await new Promise((r) => server.listen(endpoint, r));
   const b = new Backend(endpoint, endpoint, () => {});
+  // Automatic receipt checks are opted into per test (deterministic counts).
+  b.receiptCheckDelays = receiptChecks;
   await b.pollControl();
   t.after(() => {
     b.stop();
@@ -219,7 +235,7 @@ async function setup(
     network_zone: 'local',
     zone_revision: 'zr',
   };
-  return { b, d, e, sent, counts: () => ({ commits, previews, queries }) };
+  return { b, d, e, fx, sent, counts: () => ({ commits, previews, queries }) };
 }
 test('zone choice is previewed once, exact reviewed rule is committed', async (t) => {
   const { b, d, counts } = await setup(t);
@@ -254,6 +270,112 @@ test('lost ACK receipt resolves original outcome without resending Decide', asyn
   assert.equal(result.phase, 'acknowledged');
   assert.equal(result.rule.id, p.rule.id);
   assert.deepEqual(counts(), { commits: 1, previews: 1, queries: 1 });
+});
+const attemptOf = (b) => b.view().control.events.find((x) => x.id === 'e')?.attempt;
+const until = async (fn, label) => {
+  for (let i = 0; i < 400; i++) { if (fn()) return; await new Promise((r) => setImmediate(r)); await new Promise((r) => setTimeout(r, 1)); }
+  throw Error('condition not reached: ' + label);
+};
+// A test-controlled reply: gate(n) returns a promise released by hand.
+const gates = () => {
+  const held = [];
+  return { held, gate: (n) => new Promise((release) => held.push({ n, release })) };
+};
+const rememberAny = { address: true, port: false, protocol: false, process: false };
+test('lost Remember acknowledgement is confirmed automatically from its receipt, never resent', async (t) => {
+  const { b, d, counts } = await setup(t, { fields: true, lost: true, receiptChecks: [0, 0, 0] });
+  const choice = { ...d, scope: 'persistent', network_zone: 'any', remember: rememberAny };
+  const p = await b.previewDecision(choice);
+  const first = await b.decide({ ...choice, preview_token: p.token });
+  assert.equal(first.phase, 'unknown');
+  assert.equal(first.reconcile, p.token);
+  await b.receiptChecksSettled();
+  const a = attemptOf(b);
+  assert.equal(a.phase, 'acknowledged');
+  assert.equal(a.rule.id, p.rule.id);
+  assert.deepEqual(counts(), { commits: 1, previews: 1, queries: 1 });
+});
+test('automatic receipt check keeps a still-pending outcome unknown (bounded, no resend)', async (t) => {
+  const { b, d, counts } = await setup(t, { lost: true, status: 'pending', receiptChecks: [0, 0, 0] });
+  const p = await b.previewDecision(d);
+  assert.equal((await b.decide({ ...d, preview_token: p.token })).phase, 'unknown');
+  await b.receiptChecksSettled();
+  const a = attemptOf(b);
+  assert.equal(a.phase, 'unknown');
+  assert.equal(a.reconcile, p.token); // Check result remains available
+  assert.deepEqual(counts(), { commits: 1, previews: 1, queries: 3 });
+});
+test('automatic receipt check stops on a receipt that does not match the review', async (t) => {
+  const { b, d, counts } = await setup(t, { lost: true, status: 'unexpected', receiptChecks: [0, 0, 0] });
+  const p = await b.previewDecision(d);
+  await b.decide({ ...d, preview_token: p.token });
+  await b.receiptChecksSettled();
+  assert.equal(attemptOf(b).phase, 'unknown');
+  assert.deepEqual(counts(), { commits: 1, previews: 1, queries: 1 });
+});
+test('a late pending receipt never overwrites a confirmation (automatic and manual overlap)', async (t) => {
+  const g = gates();
+  const { b, d, counts } = await setup(t, { lost: true, receiptChecks: [0], gate: g.gate });
+  const p = await b.previewDecision(d);
+  await b.decide({ ...d, preview_token: p.token });
+  await until(() => g.held.length === 1, 'automatic query in flight');
+  const manual = b.reconcileDecision({ generation: 'g', id: 'e', preview_token: p.token });
+  await until(() => g.held.length === 2, 'manual query in flight');
+  g.held[1].release('committed');
+  assert.equal((await manual).phase, 'acknowledged');
+  g.held[0].release('pending'); // the older reply arrives last
+  await b.receiptChecksSettled();
+  assert.equal(attemptOf(b).phase, 'acknowledged');
+  assert.deepEqual(counts(), { commits: 1, previews: 1, queries: 2 });
+});
+test('a receipt arriving after a generation change, removal or stop records nothing', async (t) => {
+  for (const change of ['generation', 'removed', 'stopped']) {
+    const g = gates();
+    const x = await setup(t, { lost: true, receiptChecks: [0], gate: g.gate });
+    const p = await x.b.previewDecision(x.d);
+    await x.b.decide({ ...x.d, preview_token: p.token });
+    await until(() => g.held.length === 1, change + ': query in flight');
+    if (change === 'generation') { x.fx.generation = 'g2'; await x.b.pollControl(); }
+    if (change === 'removed') { x.fx.events = []; await x.b.pollControl(); }
+    if (change === 'stopped') x.b.stop();
+    g.held[0].release('committed');
+    await x.b.receiptChecksSettled();
+    const a = attemptOf(x.b);
+    assert.ok(!a || a.phase !== 'acknowledged', change + ': stale receipt revived the card');
+    assert.equal(x.counts().commits, 1, change);
+  }
+});
+test('a receipt query failing after stop schedules no further check', async (t) => {
+  const g = gates();
+  const { b, d, counts } = await setup(t, { lost: true, receiptChecks: [0, 60000], gate: g.gate });
+  const p = await b.previewDecision(d);
+  await b.decide({ ...d, preview_token: p.token });
+  await until(() => g.held.length === 1, 'query in flight');
+  b.stop();
+  b.state.control.connected = false; // the path that used to keep retrying
+  g.held[0].release('drop');
+  await b.receiptChecksSettled(); // would wait 60 s if a new delay were scheduled
+  assert.equal(b.receiptWaits.size, 0);
+  assert.equal(counts().queries, 1);
+  assert.equal(attemptOf(b).phase, 'unknown');
+});
+test('a decision answered after stop starts no receipt check', async (t) => {
+  const { b, d, counts } = await setup(t, { lost: true, receiptChecks: [0] });
+  const p = await b.previewDecision(d);
+  const pending = b.decide({ ...d, preview_token: p.token });
+  b.stop();
+  await pending;
+  await b.receiptChecksSettled();
+  assert.equal(b.receiptChecks.size, 0);
+  assert.equal(counts().queries, 0);
+});
+test('stop cancels a scheduled receipt check before any query', async (t) => {
+  const { b, d, counts } = await setup(t, { lost: true, receiptChecks: [60000] });
+  const p = await b.previewDecision(d);
+  await b.decide({ ...d, preview_token: p.token });
+  b.stop();
+  await b.receiptChecksSettled(); // resolves now, not after 60 s
+  assert.equal(counts().queries, 0);
 });
 test('pending receipt stays unknown, changed token/action cannot be committed', async (t) => {
   const { b, d, counts } = await setup(t, { lost: true, status: 'pending' });

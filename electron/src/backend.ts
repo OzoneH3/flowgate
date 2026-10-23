@@ -163,6 +163,12 @@ export class Backend {
   private policyStamp = '';
   private policyEndpoint = '';
   private policyLast = -Infinity;
+  // Read-only receipt checks after an unknown reviewed decision (milliseconds
+  // between attempts). Never a resend; a check that cannot confirm leaves the
+  // outcome unknown and Check result available.
+  receiptCheckDelays = [500, 1000, 2000, 4000, 8000];
+  private receiptWaits = new Set<() => void>();
+  private receiptChecks = new Set<Promise<void>>();
   constructor(
     readonly observer: string,
     public controller: string | undefined,
@@ -180,6 +186,12 @@ export class Backend {
   stop() {
     this.stopped = true;
     for (const t of this.timers) clearInterval(t);
+    // Pending receipt-check delays end now; no timer keeps the process alive.
+    for (const cancel of [...this.receiptWaits]) cancel();
+  }
+  // Test/shutdown hook: resolves when every automatic receipt check finished.
+  async receiptChecksSettled() {
+    while (this.receiptChecks.size) await Promise.all([...this.receiptChecks]);
   }
   now() {
     return this.reply
@@ -800,8 +812,18 @@ export class Backend {
         rule: parsed.saved_rule,
       };
     } else if (receipt?.state !== 'pending') throw Error('Invalid decision receipt');
-    if (this.state.control.generation === value.generation) this.attempts.set(value.id, result);
-    this.emit();
+    // Recheck after the await: only the same generation's still-current
+    // unknown attempt for this receipt may change, and only forwards. A late
+    // pending reply never overwrites a confirmation; a removed, replaced or
+    // stopped request is never revived.
+    const current = this.attempts.get(value.id);
+    if (current?.phase === 'acknowledged' && this.state.control.generation === value.generation) return current;
+    if (this.stopped || this.state.control.generation !== value.generation || current?.phase !== 'unknown' || current.reconcile !== value.preview_token)
+      throw Error('Request changed while its result was checked; nothing recorded');
+    if (result.phase === 'acknowledged') {
+      this.attempts.set(value.id, result);
+      this.emit();
+    }
     return result;
   }
   async decide(raw: Decision): Promise<Attempt> {
@@ -920,7 +942,48 @@ export class Backend {
     if (this.state.control.generation === d.generation) this.attempts.set(d.id, result);
     this.emit();
     this.reconcileSoon();
+    if (result.phase === 'unknown' && result.reconcile)
+      this.checkReceipt({ generation: d.generation, id: d.id, preview_token: result.reconcile });
     return result;
+  }
+  // A lost or late acknowledgement leaves the committed outcome knowable from
+  // its receipt: ask (read-only) a bounded number of times. Only a committed
+  // receipt that matches the reviewed rule becomes acknowledged.
+  private checkReceipt(value: { generation: string; id: string; preview_token: string }) {
+    if (this.stopped) return;
+    const run = this.checkReceiptLoop(value).finally(() => this.receiptChecks.delete(run));
+    this.receiptChecks.add(run);
+  }
+  private receiptDelay(ms: number) {
+    return new Promise<void>((resolve) => {
+      if (this.stopped) return resolve(); // never schedule after stop
+      const done = () => {
+        clearTimeout(timer);
+        this.receiptWaits.delete(done);
+        resolve();
+      };
+      const timer = setTimeout(done, ms);
+      this.receiptWaits.add(done);
+    });
+  }
+  private async checkReceiptLoop(value: { generation: string; id: string; preview_token: string }) {
+    const current = () => {
+      const a = this.attempts.get(value.id);
+      return !this.stopped && this.state.control.generation === value.generation && a?.phase === 'unknown' && a.reconcile === value.preview_token;
+    };
+    for (const delay of this.receiptCheckDelays) {
+      // Checked before scheduling and again after waking.
+      if (!current()) return;
+      await this.receiptDelay(delay);
+      if (!current()) return;
+      try {
+        if ((await this.reconcileDecision(value)).phase === 'acknowledged') return;
+      } catch {
+        // Unavailable/invalid receipt: keep the explicit unknown state.
+        if (!this.state.control.connected) continue;
+        return;
+      }
+    }
   }
   // local-pair-v1: both sides of one verified local connection. The backend
   // confirms the exact pair (events referencing each other) and returns BOTH

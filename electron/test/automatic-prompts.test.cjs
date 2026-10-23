@@ -208,3 +208,13 @@ test('explicit Remember review keeps its ended request, without retaining unsoli
   assert.equal(auto.follow(s,ref,true),undefined);
   assert.equal(auto.follow({...s,control:{...s.control,generation:'new'}},ref,true),undefined);
 });
+
+test('allowed request is held while its outcome is unknown, released once its receipt is acknowledged', () => {
+  const q = new AutomaticPrompts(),
+    s = state(['a']),
+    ref = q.next(s, false);
+  Object.assign(s.control.events[0], { state: 'allowed', remainingMs: 0, attempt: { phase: 'unknown', reconcile: 'token' } });
+  assert.deepEqual(q.follow(s, ref), ref);
+  s.control.events[0].attempt = { phase: 'acknowledged', message: 'Backend confirmed allowed' };
+  assert.equal(q.follow(s, ref), undefined);
+});
