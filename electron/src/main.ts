@@ -38,6 +38,7 @@ import { Rules } from './rules';
 import { ZoneMigration } from './zone-migration';
 import { sameProcessTarget } from './process-rules';
 import { DecisionLogClient } from './decision-log-client';
+import { ObservedUsageClient } from './observed-usage-client';
 import { Evaluation } from './evaluation';
 import type { Preferences } from './protocol';
 import { Backend } from './backend';
@@ -802,6 +803,11 @@ app.whenReady().then(async () => {
     throw Error('Unsupported pane rule operation');
   });
   const decisionLog = new DecisionLogClient(backend);
+  const observedUsage = new ObservedUsageClient(backend);
+  ipcMain.handle('usage:read', (e) => {
+    presentationSender(e);
+    return observedUsage.read();
+  });
   for (const [channel, handler] of Object.entries({
     'log:state': () => decisionLog.state(),
     'log:visible': (v: unknown) => decisionLog.setVisible(v),

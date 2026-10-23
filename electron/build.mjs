@@ -86,6 +86,8 @@ await build({
     'src/build-info.ts',
     'src/gui-build.ts',
     'src/inactive-rules.ts',
+    'src/observed-usage.ts',
+    'src/observed-usage-client.ts',
   ],
   bundle: true,
   platform: 'node',

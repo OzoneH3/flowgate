@@ -1,5 +1,10 @@
 # NetLimiter functionality audit — 23 October 2026
 
+> For the complete refreshed inventory at **b1b658b**, including new reproduced
+> defects and follow-up source fixes, see [FlowGate functionality audit against
+> NetLimiter documentation](NETLIMITER-FUNCTIONAL-AUDIT.md). The dated baseline
+> and deployment evidence below remain historical records.
+
 Audited FlowGate source: **0842059**. Reference: official NetLimiter documentation
 retrieved on 23 October 2026, including 5.3.28.0 release notes. This is a fresh
 source/behavior audit, not a claim that the products are equivalent. No product

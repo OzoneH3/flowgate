@@ -77,6 +77,7 @@ const api: Bridge = {
   promptLayout: (value) => ipcRenderer.invoke('prompt:layout', value),
   dismissPrompt: () => ipcRenderer.invoke('prompt:dismiss'),
   decisionLog: () => ipcRenderer.invoke('log:state'),
+  observedUsage: () => ipcRenderer.invoke('usage:read'),
   decisionLogVisible: (v) => ipcRenderer.invoke('log:visible', v),
   decisionLogFilter: (v) => ipcRenderer.invoke('log:filter', v),
   decisionLogOlder: () => ipcRenderer.invoke('log:older'),

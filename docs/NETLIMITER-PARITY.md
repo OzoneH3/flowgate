@@ -1,5 +1,10 @@
 # NetLimiter functional parity matrix
 
+> Current full inventory: [FlowGate functionality audit against NetLimiter
+> documentation](NETLIMITER-FUNCTIONAL-AUDIT.md), baseline **b1b658b** with
+> separately identified follow-up fixes. It supersedes the implementation status
+> and equivalence labels below; historical evidence remains available here.
+
 > Historical matrix: several rows describe older commits and are no longer current.
 > See [the 23 October 2026 audit](NETLIMITER-AUDIT-2026-10-23.md) for the fresh
 > source/documentation comparison at 0842059, followed by the current fix/deployment

@@ -1,3 +1,4 @@
+import { setupObservedUsage, showObservedUsage, updateObservedUsage } from './observed-usage-view';
 import { matchesApplicationZone } from './application-zones';
 import { ApplicationCallers } from './application-callers';
 import { replaceKeyedRow } from './keyed-rows';
@@ -915,6 +916,7 @@ if (promptID) {
   }
   const chooseTab = (next: string) => {
     tab = next;
+    showObservedUsage(next === 'usage');
     if ($('rulesView')) {
       $('rulesView').hidden = next !== 'rules';
       $('rulesTab').setAttribute('aria-selected', String(next === 'rules'));
@@ -942,6 +944,7 @@ if (promptID) {
       void openRule({ id });
     },
   );
+  setupObservedUsage(chooseTab);
   graph = new TrafficGraph($('trafficGraph'), {
     change: (chart) => void window.flowgate.paneUpdate({ chart }).catch(message),
     source: (source) => void window.flowgate.paneUpdate({ source }).catch(message),
@@ -1254,6 +1257,7 @@ function setupMainMenus(windowMenu: HTMLElement) {
     ['Rule list', 'rulesTab'],
     ['Pending requests', 'requestsTab'],
     ['Decision log', 'decisionLogTab'],
+    ['Observed usage', 'observedUsageTab'],
   ]) {
     const b = element('button', label);
     b.onclick = () => {
@@ -1316,6 +1320,7 @@ function setupPaneControls() {
     for (const small of document.querySelectorAll('.rate-header small'))
       small.textContent = value + ' (def)';
     graph?.setUnit(value);
+    if (state) updateObservedUsage(state, value);
     if (state) renderTree();
   };
   units.onchange = () => {
@@ -2933,6 +2938,7 @@ function consume(next: ClientState) {
     details.dataset.eventId = currentEvent()?.id || '';
     updateWorkflows(state);
     updateDecisionLog(state);
+    updateObservedUsage(state, displayUnit);
     renderPermissionResults();
   }
 }

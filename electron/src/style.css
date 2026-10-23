@@ -1738,3 +1738,17 @@ body.hide-sidebar #activityView > aside { display:none; }
 /* Release identity beside the title: GUI release + build date/time; daemon only on mismatch. */
 .build-version { margin-left: 6px; font-size: 11px; color: #8a8f98; white-space: nowrap; }
 .build-version.mismatch { color: #d9a441; }
+
+/* Backend-owned cumulative observations; independent from live Activity rates. */
+#observedUsageView .usage-main { padding: 38px 10px 10px; }
+#app:has(#observedUsageView:not([hidden])) .tabs { width: calc(100% - 8px); }
+#observedUsageView .filterbar { flex-wrap: wrap; gap: 8px; }
+#usageSearch { flex: 1; min-width: 180px; }
+#observedUsageView #usageSource { width: 210px; max-width: 210px; }
+#observedUsageView .usage-explanation { margin: 8px 0; color: #b7cad0; line-height: 1.5; }
+#observedUsageView .usage-coverage { white-space: pre-line; color: #d9bd81; }
+#usageTable { min-width: 700px; }
+#usageTable td { padding: 6px; }
+#usageTable td:first-child { max-width: 300px; overflow-wrap: anywhere; }
+#usageTable td:last-child { white-space: normal; }
+#usageTable .usage-amount { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
