@@ -4,7 +4,11 @@
 Status: sequence and first accounting scope jointly reviewed with the FlowGate
 backend session. The first slice is implemented and has passed source, isolated
 backend and native UI integration checks; see [observed usage](OBSERVED-USAGE.md) for its API, limits and
-evidence. It has not been deployed by this work.
+evidence. The accounting slice was subsequently deployed in matched release
+`358d18c`, with Both protection restored, 64 rules verified and both installed
+observed-usage endpoints checked. The next established-TCP slice has a tested,
+unexposed exact-socket primitive; its ownership gate remains open. See
+[established TCP control](ESTABLISHED-TCP-CONTROL.md).
 
 ## Delivery sequence
 
@@ -84,6 +88,15 @@ socket baselines. Capacity exhaustion freezes accumulation at an observation
 boundary without evicting totals. See the [implemented contract](OBSERVED-USAGE.md).
 
 ## Established TCP control: prove the operation first
+
+First gate result: exact-cookie local abort works for both IP families and
+connect/accept roles, while unrelated transfers continue. Tuple reuse rejects
+stale requests. Descriptor transfer retains the cookie and exposes an ownership
+race, so kernel identity alone does not authorize automatic application-scoped
+revocation. `internal/socketcontrol` implements the tested primitive without a
+daemon/API/UI caller. The [operation contract and evidence](ESTABLISHED-TCP-CONTROL.md)
+separate a possible administrator socket disconnect from automatic effective-Deny
+revocation; neither public feature is claimed complete.
 
 `internal/hostfirewall/firewall.go` accepts already-marked established TCP.
 `conntrack.go` binds masked updates to connection tuple, kernel ID and zone and

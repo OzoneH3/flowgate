@@ -77,6 +77,13 @@ FlowGate's [firewall.go](../internal/hostfirewall/firewall.go), `profileRules`, 
 
 Keep this distinction visible wherever a user can interpret Deny as “stop this application's traffic now.” A full parity implementation requires deliberate connection revocation and tests for existing connections, both directions, shared ownership and concurrent rule changes. An Allow API acknowledgement is not evidence that the remote receiver obtained data.
 
+Follow-up: the [established-TCP control proof](ESTABLISHED-TCP-CONTROL.md) adds an
+unexposed exact-cookie local-abort primitive. Isolated IPv4/IPv6 connect/accept,
+tuple-reuse and unrelated-transfer checks passed. A shared/transferred descriptor
+retains its cookie, demonstrating that socket identity alone does not establish
+current application authority. F03/B21 remains open: no public Kill API or
+automatic Deny revocation was added.
+
 ### F04 Activity Total is not cumulative usage
 
 NetLimiter's [Activity documentation][activity] defines totals since Reset. FlowGate's [traffic.go](../internal/identity/traffic.go), lines 92–130, establishes per-socket baselines and replaces its state with currently visible sockets. Closed or missing sockets lose their contribution to current aggregates; observation loss creates a new baseline. `TestTrafficLifetimes` passed and expressly verifies this behavior.
