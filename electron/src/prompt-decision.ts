@@ -62,6 +62,21 @@ export function validateEndedLease(v: unknown): EndedLeaseChoice {
     throw Error('Invalid For a while request');
   return d as unknown as EndedLeaseChoice;
 }
+// Scope previews are supplied for the current request by the backend. A runtime
+// hint or a worker PID must never turn into process authority in the client.
+export function liveLeaseReason(e: ViewEvent | undefined, capabilities?: string[]): string {
+  if (!forAWhileSupported(capabilities)) return 'For a while needs a newer FlowGate backend.';
+  if (!e) return 'Unavailable: no current request.';
+  const a = e.attribution, owner = a.owners.length === 1 ? a.owners[0] : undefined;
+  if (a.permission_target?.kind === 'runtime-unverified' || a.application?.hosted?.state === 'unverified')
+    return a.permission_target?.for_a_while || 'Unavailable: hosted application execution is unverified.';
+  if (!owner || a.runtime_table || (owner.thread_group_pid !== undefined && owner.thread_group_pid !== owner.pid))
+    return 'Unavailable: needs one verified owning process leader.';
+  if (!e.scope_previews['for-a-while'])
+    return a.permission_target?.for_a_while?.startsWith('Unavailable:')
+      ? a.permission_target.for_a_while : 'Unavailable: backend did not offer a process lease for this request.';
+  return '';
+}
 export function endedLeaseAvailable(e: ViewEvent | undefined, capabilities?: string[]) {
   return (
     endedRequest(e) &&
@@ -151,8 +166,8 @@ export function promptPlan(
       review: true,
     };
   if (c.forAWhile) {
-    if (!forAWhileSupported(c.capabilities))
-      return { kind: 'unavailable', note: 'For a while needs a newer FlowGate backend.' };
+    const reason = liveLeaseReason(e, c.capabilities);
+    if (reason) return { kind: 'unavailable', note: reason };
     return { kind: 'decide', decision: { ...base, scope: 'for-a-while', ...leaseSeconds(c) }, review: false };
   }
   // Once on a verified local pair: one click answers both firewall hooks of this

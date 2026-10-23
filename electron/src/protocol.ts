@@ -256,7 +256,7 @@ export interface RequestEvent {
   // local-pair-v1: other endpoint of a same-host connection (exact reversed tuple).
   local_peer?: LocalPeer;
   remembered_filter?: RuleFilter;
-  scope_previews: Partial<Record<Scope, string>>;
+  scope_previews: Partial<Record<Scope | 'for-a-while', string>>;
   // Equivalent repeated requests share a group (backend `request_group`).
   request_group?: string;
   // stored-ask-v1: the stored Ask rule that caused this prompt (absent = default Ask).
@@ -683,7 +683,7 @@ export function parseProvenance(raw: unknown): Provenance | undefined {
 export function parsePermissionTarget(raw: unknown): PermissionTarget | undefined {
   if (raw == null) return;
   const t = object(raw);
-  if (!['helper', 'application', 'interpreter', 'unavailable'].includes(string(t.kind))) return;
+  if (!['helper', 'application', 'interpreter', 'unavailable', 'runtime-unverified'].includes(string(t.kind))) return;
   return {
     kind: string(t.kind) as PermissionTarget['kind'],
     label: bounded(t.label),
@@ -716,7 +716,7 @@ function event(v: unknown): RequestEvent {
     a = object(e.attribution),
     scopes = object(e.scope_previews);
   const previews: RequestEvent['scope_previews'] = {};
-  for (const key of ['once', 'application', 'persistent'] as Scope[])
+  for (const key of ['once', 'application', 'persistent', 'for-a-while'] as const)
     if (typeof scopes[key] === 'string' && scopes[key]) previews[key] = scopes[key] as string;
   if (!string(e.id) || !Number.isFinite(Date.parse(string(e.deadline))))
     throw Error('Invalid request identity/deadline');

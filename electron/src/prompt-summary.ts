@@ -66,6 +66,11 @@ export function promptSummary(e: Ev, fallbackName: string): PromptSummary {
   const endpoint = e.flow.remote;
   const app = e.attribution.application;
   const provenance = e.attribution.provenance;
+  // A runtime's bundle argument is display context, even when a launch wrapper
+  // names a program. Keep the actual owner prominent without decorating it as
+  // the claimed bundle or changing the backend's decision scope.
+  if (app?.hosted?.state === 'unverified')
+    return { title: own, owner: '', note: 'application unverified', ownIdentity: false, launchedBy: launchedByName(e), destination: service || endpoint, endpoint: service ? endpoint : '', protocol: e.flow.protocol.toUpperCase() };
   const invocation = provenance?.invocation;
   if (invocation) {
     const interpreter = app?.display_name || app?.name || own;
@@ -79,7 +84,7 @@ export function promptSummary(e: Ev, fallbackName: string): PromptSummary {
     return {title: own, owner: '', note: 'Launcher connection; permission applies to this executable', ownIdentity: true, launchedBy: launchedByName(e), destination: service || endpoint, endpoint: service ? endpoint : '', protocol: e.flow.protocol.toUpperCase()};
   // A verified native socket owner is the program. Launch metadata may name a
   // runtime bootstrap or wrapper rather than this executable; keep it context.
-  if (app?.kind === 'native' && app.key && app.revision && app.hosted?.state !== 'unverified')
+  if (app?.kind === 'native' && app.key && app.revision)
     return { title: own, owner: '', note: '', ownIdentity: true, launchedBy: launchedByName(e), destination: service || endpoint, endpoint: service ? endpoint : '', protocol: e.flow.protocol.toUpperCase() };
   // A verified Electron app: the bundle is the application, the runtime owns the socket.
   if (!identity.title && app?.kind === 'electron')
@@ -96,7 +101,7 @@ export function promptSummary(e: Ev, fallbackName: string): PromptSummary {
   return {
     title: identity.title ? gameName(e.attribution.provenance) || identity.title : own,
     owner: identity.title && own !== identity.title ? own : '',
-    note: app?.hosted?.state === 'unverified' ? 'application unverified' : '',
+    note: '',
     ownIdentity: !identity.title,
     // A verified game launch already names the context; otherwise the parent program.
     launchedBy: identity.title ? '' : launchedByName(e),

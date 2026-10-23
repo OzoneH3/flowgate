@@ -53,6 +53,7 @@ import {
   ENDED_NEEDS_CHOICE,
   endedStatusLine,
   endedLeaseAvailable,
+  liveLeaseReason,
   endedLeaseReason,
   endedLeaseResult,
   endedRequest,
@@ -2561,6 +2562,7 @@ function updateDecisions() {
     remembering = rememberMode() && rememberOn,
     temporary = forAWhileOn && forAWhileMode() && !remembering,
     leaseMode = endedLeaseAvailable(e, state.control.capabilities),
+    liveLeaseUnavailable = liveLeaseReason(e, state.control.capabilities),
     leaseDone = !!e && endedLeaseDone.has(e.id),
     unverifiable = e ? ruleUnverifiable.get(e.id) : undefined;
   // Live Remember: a review that no longer matches (zones, fields, expiry duration
@@ -2623,6 +2625,7 @@ function updateDecisions() {
     b.disabled =
       pacing ||
       !actionable(e) ||
+      (temporary && !!liveLeaseUnavailable) ||
       (needsDecisionReview() &&
         (reviewFor !== reviewKey() ||
           !review ||
@@ -2630,7 +2633,7 @@ function updateDecisions() {
     b.title = needsDecisionReview()
       ? rememberBlockReason(e, now) || review?.summary || review?.scope_preview || 'Review required'
       : temporary
-        ? FOR_A_WHILE_TOOLTIP
+        ? liveLeaseUnavailable || FOR_A_WHILE_TOOLTIP
         : rememberMode()
           ? 'Once: this connection attempt only; creates no rule'
           : e?.scope_previews[chosenScope] || '';
@@ -2662,21 +2665,20 @@ function updateDecisions() {
   const scopeLine = $('permissionScope');
   if (scopeLine)
     scopeLine.textContent =
-      (rememberOn ? scopeLine.dataset.remember : forAWhileOn ? scopeLine.dataset.forAWhile : scopeLine.dataset.once) ||
+      (rememberOn ? scopeLine.dataset.remember : forAWhileOn
+        ? `For a while: ${ended ? (endedLeaseReason(e, state.control.capabilities) || forAWhileNote(forAWhileSeconds)) : (liveLeaseUnavailable || forAWhileNote(forAWhileSeconds))}`
+        : scopeLine.dataset.once) ||
       scopeLine.textContent;
   const whileBox = $<HTMLInputElement>('forAWhileToggle');
   if (whileBox) {
-    const single = e?.attribution.owners.length === 1 && !e?.attribution.runtime_table;
     // An ended request offers For a while only while its exact process runs.
     whileBox.disabled = ended
       ? pacing || !leaseMode || leaseDone || endedLeaseBusy.has(e!.id)
-      : locked || !single;
+      : locked || !!liveLeaseUnavailable;
     whileBox.parentElement!.title = ended
       ? endedLeaseReason(e, state.control.capabilities) || FOR_A_WHILE_TOOLTIP
-      : !single && e
-        ? 'Unavailable: needs one verified owning process.'
-        : FOR_A_WHILE_TOOLTIP;
-    whileBox.parentElement!.classList.toggle('unavailable', ended ? !leaseMode : !!e && !single);
+      : liveLeaseUnavailable || FOR_A_WHILE_TOOLTIP;
+    whileBox.parentElement!.classList.toggle('unavailable', ended ? !leaseMode : !!liveLeaseUnavailable);
   }
   const showLease = temporary && (!ended || leaseMode) && !leaseDone;
   if ($('forAWhileNote')) {
@@ -2852,7 +2854,7 @@ function updateDecisions() {
       : failure
         ? 'No rule saved · the original connection was not allowed.'
         : temporary
-          ? 'For a while: this connection and new ones from this process instance, same direction, 15 s · no rule'
+          ? liveLeaseUnavailable || `For a while: this connection and new connections. ${forAWhileNote(forAWhileSeconds)}`
           : rememberMode()
             ? remembering
               ? 'Remember: create a rule for the checked properties'

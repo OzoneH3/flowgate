@@ -16,7 +16,7 @@ const timberborn = {
 const rundll = { pid: 7, start_ticks: '1', uid: 1000, executable: '/w/rundll32.exe', application: { key: 'k', revision: 'r', name: 'rundll32.exe', executable: '/w/rundll32.exe' }, provenance: timberborn };
 const cupsd = { pid: 764, start_ticks: '9', uid: 0, executable: '/usr/bin/cupsd', application: { key: 'c', revision: 'r', name: 'cupsd', executable: '/usr/bin/cupsd' } };
 const ev = (over = {}) => ({
-  id: 'a1', state: 'awaiting-decision', reason: 'r', deadline: '', scope_previews: { once: 'Once' },
+  id: 'a1', state: 'awaiting-decision', reason: 'r', deadline: '', scope_previews: { once: 'Once', 'for-a-while': 'This verified process instance' },
   flow: { direction: 'outgoing', protocol: 'tcp', local: '127.0.0.1:40000', remote: '127.0.0.1:631' },
   attribution: { status: 'directly-associated', reason: '', visibility_complete: true, application: rundll.application, owners: [rundll], provenance: timberborn },
   local_peer: { state: 'verified', role: 'server', reason: '', owner: cupsd, socket: { kind: 'listener', protocol: 'tcp', local: '127.0.0.1:631', remote: '0.0.0.0:0', state: 'Listening', cookie: 'b', inode: 1 } },
@@ -131,7 +131,7 @@ test('Permission card: header, IPv6 endpoints verbatim, program side by directio
   assert.equal(ps.connectionFields(ev({ attribution: { ...ev().attribution, application: undefined, owners: [] } })).process, 'Unavailable');
 });
 
-test('Electron runtime: verified app is the title with "socket owner electron"; unverified keeps electron and says so', () => {
+test('legacy Electron verification remains readable; unverified runtime keeps its own name and warning', () => {
   const runtime = '/usr/lib/electron43/electron';
   const heroic = { key: 'kh', revision: 'r', name: 'heroic', executable: '/usr/lib/heroic-games-launcher/app.asar', kind: 'electron', runtime,
     hosted: { state: 'verified', runtime, bundle: '/usr/lib/heroic-games-launcher/app.asar', package_name: 'heroic', chain: [{ pid: 332445, start_ticks: '1198413', type: 'utility' }, { pid: 332402, start_ticks: '1198383', type: 'main' }], reason: 'utility process 332445 → Electron main process 332402' } };
@@ -143,17 +143,39 @@ test('Electron runtime: verified app is the title with "socket owner electron"; 
   const u = { ...out, attribution: { ...out.attribution, application: unv, owners: [{ ...owner, application: unv }] } };
   const su = ps.promptSummary(u, 'x');
   assert.deepEqual([su.title, su.owner, su.note], ['electron', '', 'application unverified']);
+  assert.equal(su.ownIdentity, false, 'unverified bundle cannot supply desktop artwork/name');
   assert.match(ps.rememberLabel({ kind: 'runtime-unverified', label: 'electron runtime (application unverified)' }), /^Unavailable: application unverified/);
   // Parser keeps the hosted evidence, bounded.
   const { parseReply } = require('../dist/test/protocol.cjs');
   const r = parseReply({ version: 1, generation: 'g', read_only: false, server_time: new Date().toISOString(), capabilities: [], events: [{
     id: 'a1', state: 'awaiting-decision', reason: 'r', deadline: new Date(Date.now() + 9000).toISOString(), first_seen: '', permission: '', rule: '',
     flow: { direction: 'outgoing', protocol: 'tcp', local: '10.0.0.2:40000', remote: '104.18.1.1:443' },
-    attribution: { status: 'directly-associated', reason: '', visibility_complete: true, application: heroic, owners: [owner] }, scope_previews: { once: 'Once' } }] });
+    attribution: { status: 'directly-associated', reason: '', visibility_complete: true, application: heroic, owners: [owner] }, scope_previews: { once: 'Once', 'for-a-while': 'This verified process instance' } }] });
   const a = r.events[0].attribution.application;
   assert.equal(a.kind, 'electron');
   assert.equal(a.runtime, runtime);
   assert.deepEqual([a.hosted.state, a.hosted.package_name, a.hosted.chain.length, a.hosted.chain[1].type], ['verified', 'heroic', 2, 'main']);
+});
+
+test('unverified hosted metadata cannot turn a launcher or bundle argument into the prompt identity', () => {
+  for (const name of ['alpha', 'beta']) {
+    const runtime = `/runtime-${name}/electron`;
+    const app = {kind:'native',key:`runtime-key-${name}`,revision:`runtime-rev-${name}`,name:'electron',executable:runtime,
+      hosted:{state:'unverified',runtime,bundle:`/bundle-${name}`,package_name:`claimed-${name}`,chain:[],reason:'Bundle execution not verified'}};
+    for (const role of ['launcher','helper']) {
+      const provenance = {...timberborn,role,invocation:{mode:'file',name:`claimed-${name}`,path:`/bundle-${name}`,revision:'metadata'}};
+      const event=ev({attribution:{status:'directly-associated',visibility_complete:true,application:app,provenance,
+        owners:[{pid:10,uid:1000,executable:runtime,application:app,provenance}]}});
+      const before=JSON.stringify(event);
+      const summary=ps.promptSummary(event,'fallback');
+      assert.equal(summary.title,'electron');
+      assert.equal(summary.note,'application unverified');
+      assert.equal(summary.ownIdentity,false);
+      assert.equal(summary.contextApplication,undefined);
+      assert.equal(ps.connectionFields(event).executable,runtime);
+      assert.equal(JSON.stringify(event),before,'presentation never rewrites permission identity');
+    }
+  }
 });
 
 test('launched by: a helper started by a verified Electron app names it; display only', () => {

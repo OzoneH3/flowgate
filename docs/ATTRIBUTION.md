@@ -212,3 +212,49 @@ injected through a read-path proxy, preserving the original evidence and control
 That journey did not produce a real `no_socket_observed` event or verify the main
 Info/observer-only UI paths; it does not establish improved attribution coverage
 or receiver delivery.
+
+## Runtime names and permission authority
+
+An executable name, parent chain, bundle argument or readable `package.json`
+can describe a hosted application without proving that the runtime executes it.
+Electron bundle metadata is therefore retained as **unverified display context**.
+The observed native executable remains the socket identity; the bundle does not
+replace its application key or revision. The prompt names the runtime and shows
+an application-unverified notice. Details labels the path as an observed bundle
+argument.
+
+This withdraws the earlier inferred Electron bundle-wide permission support.
+Application-wide Remember is unavailable for an unverified hosted runtime, and
+old application-specific bundle/runtime rules must not authorize its connections.
+Stored rules remain inspectable; they are not silently migrated into broader
+native-runtime permissions. Existing Once behavior is unchanged. Process rules
+remain refused for unverified runtimes. For-a-while now enforces that same refusal
+when creating or matching a lease, including ended-request and local-pair paths;
+the native test exposed that its earlier unavailable description was not enforced. Explicitly
+configured All programs rules keep their own UID, direction and filter semantics;
+the detection change creates no such rule.
+
+Native executables under directories containing `wine` must remain native unless
+runtime evidence establishes otherwise. Known Wine loader names may conservatively
+signal an unresolved runtime, alongside the existing runtime-mapping checks; an
+arbitrary parent-directory substring is not runtime evidence. Windows executable,
+user and prefix separation still require their existing corroboration.
+
+The detection audit reproduced unrelated native binaries named `electron`
+acquiring the same bundle identity and matching the same application rule in the
+in-memory evaluator, plus a native program falsely classified by a Wine-like
+parent directory. These are separate from the worker-descriptor coverage gaps.
+The audit used disposable processes/sockets and did not change installed rules
+or establish host exploitation. Source-fix validation and remaining worker limits
+are recorded with the implementation evidence.
+
+
+Validation used two native fixture executables with the same synthetic bundle
+argument in a private network namespace. The old daemon saved and applied an
+Electron bundle rule through the normal API. Against the corrected daemon and
+the same database, both executables prompted under distinct native identities;
+the old rule remained listed, and Once delivered only the selected request.
+Remember and For-a-while were disabled in the native GUI, and direct API attempts
+to bypass those controls were refused without changing rules or leases. This is
+isolated TCP receiver evidence, not an installed-host or native Wine acceptance
+claim. The Wine two-application/two-prefix negative checks are model regressions.

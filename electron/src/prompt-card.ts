@@ -244,11 +244,11 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
 
   const hosted = e.attribution.application?.hosted;
   if (hosted) {
-    // Evidence for the hosted application (Electron runtime → main process → bundle).
+    // Reported hosted context is distinct from permission authority.
     const l = section(details, 'Electron app', 'hosted').list;
-    row(l, 'State', hosted.state === 'verified' ? 'Verified' : 'Unverified — the rule identity stays the runtime; Remember is unavailable');
+    row(l, 'State', hosted.state === 'verified' ? 'Verified by reporting backend' : 'Application unverified. Bundle metadata is display context only; application-wide Remember is unavailable.');
     row(l, 'Runtime', hosted.runtime);
-    if (hosted.bundle) row(l, 'Bundle', hosted.bundle);
+    if (hosted.bundle) row(l, hosted.state === 'verified' ? 'Bundle' : 'Observed bundle argument', hosted.bundle);
     if (hosted.package_name)
       row(l, 'Package', [hosted.package_name, hosted.product_name, hosted.version].filter(Boolean).join(' · '));
     if (hosted.integrity) row(l, 'Integrity', hosted.integrity);

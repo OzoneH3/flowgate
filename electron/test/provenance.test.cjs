@@ -205,3 +205,12 @@ test('interpreter launcher prompt identifies invoked script before its launch ta
   // Invocation text is display context only: no game or launcher identity becomes a rule target.
   assert.equal(event(owner).attribution.permission_target, undefined);
 });
+
+
+test('runtime-unverified permission target survives parsing with refusal text intact', () => {
+  const raw = { kind: 'runtime-unverified', label: 'runtime (application unverified)', once: 'This request only',
+    for_a_while: 'Unavailable: execution unverified', remember: 'Unavailable: no verified application', key_basis: 'none' };
+  const parsed = parsePermissionTarget(raw);
+  for (const [key, value] of Object.entries(raw)) assert.equal(parsed[key], value);
+  assert.equal(targetLines(parsed).find(l => l.label === 'For a while').text, raw.for_a_while);
+});

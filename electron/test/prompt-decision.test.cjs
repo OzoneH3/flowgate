@@ -7,10 +7,11 @@ const net = require('node:net');
 const fs = require('node:fs');
 const path = require('node:path');
 const { Backend } = require('../dist/test/backend.cjs');
-const { validateDecision } = require('../dist/test/protocol.cjs');
+const { validateDecision, parseReply } = require('../dist/test/protocol.cjs');
 const lease = require('../dist/test/process-lease.cjs');
 const {
   promptPlan,
+  liveLeaseReason,
   EndedRuleFlow,
   ENDED_RULE_RESULT,
   ENDED_NEEDS_REMEMBER,
@@ -37,7 +38,7 @@ const awaitingEvent = (over = {}) => ({
     reason: 'socket inode held by exactly one process',
     visibility_complete: true,
   },
-  scope_previews: { once: 'Once · this TCP connection', persistent: 'Remember' },
+  scope_previews: { once: 'Once · this TCP connection', persistent: 'Remember', 'for-a-while': 'This process instance' },
   remembered_filter: { application: 'app', revision: 'r', uid: 1000, direction: 'outgoing', protocol: 'tcp', remote_address: '10.1.0.2', local_port: 0, remote_port: 443 },
   ...over,
 });
@@ -456,4 +457,35 @@ test('attribution categories stay in Details and preserve the original evidence 
     assert(detail.textContent.includes(evidence.status));
     assert.deepEqual(controls(c), controls(baseline));
   }
+});
+
+
+test('runtime hints, worker owners and absent lease previews cannot submit a process lease', () => {
+  for (const change of [
+    e => { e.attribution.permission_target = { kind: 'runtime-unverified', for_a_while: 'Unavailable: runtime execution unverified' }; },
+    e => { e.attribution.application.hosted = { state: 'unverified' }; },
+    e => { e.attribution.owners[0].thread_group_pid = 1234; },
+    e => { delete e.scope_previews['for-a-while']; },
+    e => { e.attribution.owners = []; },
+  ]) {
+    const e = awaitingEvent(); change(e);
+    assert.ok(liveLeaseReason(e, CAPS));
+    assert.equal(promptPlan(e, 'allow', choice({ forAWhile: true })).kind, 'unavailable');
+    assert.equal(promptPlan(e, 'block', choice({ forAWhile: true })).kind, 'unavailable');
+    assert.equal(promptPlan(e, 'allow', choice()).decision.scope, 'once');
+  }
+  const e = awaitingEvent(); e.attribution.owners[0].thread_group_pid = 4242;
+  assert.equal(liveLeaseReason(e, CAPS), '');
+  assert.equal(promptPlan(e, 'allow', choice({ forAWhile: true, forAWhileSeconds: 3600 })).decision.duration_seconds, 3600);
+});
+
+
+test('wire parsing retains the offered lease scope and the runtime refusal target', () => {
+  const raw = awaitingEvent();
+  raw.attribution.permission_target = { kind: 'runtime-unverified', label: 'runtime', once: 'Once',
+    for_a_while: 'Unavailable: hosted execution unverified', remember: 'Unavailable', key_basis: 'none' };
+  const reply = parseReply({ version: 1, generation: 'g', read_only: false, server_time: new Date().toISOString(), events: [raw] });
+  assert.equal(reply.events[0].scope_previews['for-a-while'], raw.scope_previews['for-a-while']);
+  assert.equal(reply.events[0].attribution.permission_target.kind, 'runtime-unverified');
+  assert.match(liveLeaseReason(reply.events[0], CAPS), /Unavailable/);
 });
