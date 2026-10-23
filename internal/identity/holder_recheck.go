@@ -34,7 +34,14 @@ func (p holderProc) scanStableGroup(tgid int, wanted map[string]bool, lim holder
 			return g, "time_limit"
 		}
 		g, code = p.scanGroup(tgid, wanted, lim, total, fdCount)
+		// A later group exit cannot erase an already observed visibility error.
+		if code != "" && !holderTopologyChange(code) {
+			return g, code
+		}
 		end, z, err := p.stat(tgid, tgid)
+		if err != nil && !holderGone(err) {
+			return g, "group_unreadable"
+		}
 		if holderGone(err) && (g == nil || len(g.paths) == 0) {
 			return nil, ""
 		}
@@ -172,8 +179,15 @@ func (c HolderCensus) RecheckDetail() HolderRecheck {
 		if known && len(old.paths) > 0 {
 			continue
 		}
-		if known && p.sameTopology(tgid, old) == nil {
-			continue
+		if known {
+			err := p.sameTopology(tgid, old)
+			if err == nil {
+				continue
+			}
+			if !holderTopologyChange(err.Error()) {
+				global(err.Error())
+				continue
+			}
 		}
 		fresh, code := p.scanStableGroup(tgid, c.wanted, c.lim, &budget.tasks, &budget.fds)
 		if code == "stop" {

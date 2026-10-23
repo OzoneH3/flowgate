@@ -7,20 +7,21 @@ import (
 
 // Only known topology changes may start a fresh complete observation. A new
 // holder is never appended to a member set that was inspected earlier.
-func retryableHolderTopology(c HolderCensus, d HolderRecheck) bool {
-	transient := func(code string) bool {
-		switch code {
-		case "membership_changed", "table_changed", "group_changed", "descriptor_changed":
-			return true
-		}
-		return false
+func holderTopologyChange(code string) bool {
+	switch code {
+	case "membership_changed", "table_changed", "group_changed", "descriptor_changed":
+		return true
 	}
+	return false
+}
+
+func retryableHolderTopology(c HolderCensus, d HolderRecheck) bool {
 	if !c.Complete {
 		if len(c.Issues) == 0 {
 			return false
 		}
 		for _, code := range c.Issues {
-			if !transient(code) {
+			if !holderTopologyChange(code) {
 				return false
 			}
 		}
@@ -29,7 +30,7 @@ func retryableHolderTopology(c HolderCensus, d HolderRecheck) bool {
 		return false
 	}
 	for _, code := range d.Groups {
-		if !transient(code) {
+		if !holderTopologyChange(code) {
 			return false
 		}
 	}

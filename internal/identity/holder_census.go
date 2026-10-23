@@ -405,7 +405,11 @@ func (p holderProc) recheckGroup(tgid int, g *holderGroup) error {
 			return errors.New("time_limit")
 		}
 		checked++
-		if target, err := p.readlink(path); err != nil || target != socket {
+		target, err := p.readlink(path)
+		if err != nil && !holderGone(err) {
+			return errors.New("descriptor_unreadable")
+		}
+		if err != nil || target != socket {
 			return errors.New("descriptor_changed")
 		}
 	}
@@ -417,10 +421,16 @@ func (p holderProc) recheckGroup(tgid int, g *holderGroup) error {
 
 func (p holderProc) sameTopology(tgid int, g *holderGroup) error {
 	start, zombie, err := p.stat(tgid, tgid)
+	if err != nil && !holderGone(err) {
+		return errors.New("group_unreadable")
+	}
 	if err != nil || start != g.start || zombie != g.leaderExited {
 		return errors.New("group_changed")
 	}
 	tids, err := p.tasks(tgid, len(g.tasks))
+	if err != nil && !holderGone(err) {
+		return errors.New("task_list_unreadable")
+	}
 	if err != nil || len(tids) != len(g.tasks) {
 		return errors.New("membership_changed")
 	}
@@ -433,11 +443,18 @@ func (p holderProc) sameTopology(tgid int, g *holderGroup) error {
 			return errors.New("membership_changed")
 		}
 		s, z, err := p.stat(tgid, tid)
+		if err != nil && !holderGone(err) {
+			return errors.New("task_unreadable")
+		}
 		if err != nil || s != old.start || z != old.zombie {
 			return errors.New("membership_changed")
 		}
 		if g.proven && !z && old.rep != tid {
-			if same, err := p.sameFiles(old.rep, tid); err != nil || !same {
+			same, err := p.sameFiles(old.rep, tid)
+			if err != nil && !holderGone(err) {
+				return errors.New("table_unreadable")
+			}
+			if err != nil || !same {
 				return errors.New("table_changed")
 			}
 		}
@@ -456,7 +473,11 @@ func (p holderProc) sameTopology(tgid int, g *holderGroup) error {
 				if p.late() {
 					return errors.New("time_limit")
 				}
-				if same, err := p.sameFiles(reps[i], reps[j]); err != nil || same {
+				same, err := p.sameFiles(reps[i], reps[j])
+				if err != nil && !holderGone(err) {
+					return errors.New("table_unreadable")
+				}
+				if err != nil || same {
 					return errors.New("table_changed")
 				}
 			}
