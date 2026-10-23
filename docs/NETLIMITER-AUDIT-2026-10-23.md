@@ -19,6 +19,9 @@ outstanding-task list. Source reviewed for this follow-up: **b8ee85e** (includin
 8fa7081). Installed
 and queried live: **ad30add** (unmodified build), protection **active both**. No fresh NetLimiter
 experiment was performed for this update; original reference claims are unchanged.
+The release now installed is **7f634e3** (see UI and updater follow-up). The table
+and networking sections below were reconciled against ad30add and have not been
+re-queried for 7f634e3.
 
 | Finding | Follow-up status | Evidence and remaining boundary |
 | --- | --- | --- |
@@ -85,20 +88,47 @@ unidentified record. No attribution bypass or destination-specific Allow was add
 
 ### UI and updater follow-up
 
-- **Installed release `ad30add`:** the agent update verified the backend and
-  restored protection `both` (`.workspace/agent-update.log`), but the GUI relaunch
-  failed: the updater's environment had no `WAYLAND_DISPLAY`, so Electron exited
-  after the old GUI was closed. A manual launch with the user's session variables
-  loaded the main window (`.workspace/agent-update-gui.log`).
-- **`b8ee85e` (not installed):** the updater resolves and verifies the desktop
-  session before closing the old GUI. Its sources, in order, are the replaced
-  GUI's own session, then the updater's session, then the single user-owned
-  Wayland socket that accepts a connection. Ambiguous or missing evidence keeps
-  the old GUI. The new GUI is supervised until it reports its main window loaded.
-  A GUI failure exits 3 as "Backend update verified; GUI not switched".
-  Evidence: 42 hermetic updater tests and a read-only discovery on this host,
-  which resolved the session with `WAYLAND_DISPLAY` unset. No live update or
-  relaunch was run.
+UI/updater status reviewed through **7f634e3**.
+
+- **Installed release `7f634e3`** (unmodified build): the agent update verified
+  the backend, reported 64 rules (the same count as the 8e7a00c install), restored
+  protection `both`, relaunched the GUI
+  on the resolved session `wayland-1`, and the GUI reported its main window loaded
+  (`.workspace/agent-update-7f634e3.log`). A later process listing showed one
+  FlowGate main GUI process, running from the 7f634e3 release. The log does not
+  record which session source was used or the old GUI's exit.
+- **Earlier `ad30add` install (historical):** the backend update succeeded, but
+  the GUI relaunch failed because the updater's environment had no
+  `WAYLAND_DISPLAY`. A manual launch restored the GUI
+  (`.workspace/agent-update.log`, `.workspace/agent-update-gui.log`).
+- **Desktop-session relaunch, `b8ee85e` (installed):** before closing the old
+  GUI, the updater resolves and verifies the desktop session. It tries, in order,
+  the replaced GUI's own session, the updater's session, then the single
+  user-owned Wayland socket that accepts a connection. If that evidence is
+  ambiguous or missing, the old GUI is kept. The new GUI is supervised until it
+  reports its main window loaded. A GUI failure exits 3 with "Backend update
+  verified; GUI not switched". Evidence: 42 hermetic updater tests, a read-only
+  discovery on this host, and the real 8e7a00c and 7f634e3 updates, which both
+  relaunched on `wayland-1`. GUI-failure coverage beyond the hermetic tests is
+  limited to one native run of the session discovery and GUI supervision steps,
+  not the full switch: released Electron launched without a reachable display
+  exited with status 1 before loading. It was reported as GUI not switched
+  (`.workspace/popup/gui-sup/result.json`).
+- **Running-GUI recognition, `8e7a00c` (installed):** the installed Electron
+  rewrites its main-process command line, so the updater found no running GUI.
+  The old GUI stayed open and a second one started. The updater now matches the
+  same UID, the exact release `runtime/electron` executable, and one of two known
+  forms of the exact launch command line. Anything else is not matched. Evidence:
+  46 updater tests, plus a native run of the unmodified `switch_gui` in a private
+  mount namespace, where the old isolated GUI exited and its replacement loaded.
+  The single GUI after the real 7f634e3 update is consistent with this fix. It
+  does not prove other Electron versions or command-line forms.
+- **Version header, `7f634e3` (installed):** the title shows the GUI release and
+  its build time, read from the bundle's own manifest after comparing the listed
+  GUI files. A differing daemon build is shown separately. The installed bundle's
+  manifest records `built_at` 2026-10-23T18:34:20Z. Matching files identify the
+  prepared release; they are not proof that the source is authentic. Evidence:
+  Electron and release tests, and a native KDE header check of a scratch bundle.
 - **Electron work included in `ad30add`:**
   - `49aa610`: precedence and localhost explanations, and the runtime-check notice;
   - `96ed62e` and `a18f2aa`: adding and editing rules for programs that are not running;
@@ -106,18 +136,36 @@ unidentified record. No attribution bypass or destination-specific Allow was add
   Their tests are model, harness and API-level; no native-screen journey is
   claimed for this release.
 - **Allow+Remember popup report:** the request was allowed and its rule saved,
-  but the popup stayed open with disabled actions and Check result. Recovery gap
-  fixed in source (not installed). An unconfirmed reviewed decision is now
-  checked read-only against its receipt a bounded number of times and is never
-  resent. Only a matching committed receipt confirms it; nothing is recorded
-  after a generation change, removal or stop. Evidence: Electron tests, and a
-  lab/API run against a real isolated daemon behind a proxy that dropped the
-  decide reply. The original incident's cause is unproven, and the native-window
-  journey is unverified.
+  but the popup stayed open with disabled actions and Check result. The
+  recovery fix is installed in 7f634e3 (`427dbcd`, `9b667e1`, `79146a2`). An
+  unconfirmed reviewed decision is checked read-only against its receipt, at
+  most five times, and is never resent. Transport failures of that check are
+  retried within the same bound. Only a matching committed receipt from the same
+  daemon generation confirms the decision and releases the card.
+  Evidence: Electron tests, a lab/API run, and four native KDE Wayland journeys.
+  Each journey used an isolated lab daemon behind a proxy that dropped the
+  decide reply, and each sent exactly one decide (results under
+  `.workspace/popup/`):
+  - committed receipt (`run-committed-JgbByV/result.json`): the popup left the
+    screen and the hidden card read "Allowed · rule saved.";
+  - pending receipt (`run-pending-eP3S4t/result.json`): the card stayed visible
+    and reviewable with Check result;
+  - invalid receipt (`run-invalid-mSxVOv/result.json`): the card stayed visible
+    and reviewable with Check result;
+  - first receipt reply delayed 5 s (`run-slow-mjtfZo/result.json`): the check
+    was retried, then the popup left the screen.
 
-Remaining correctness work: verify the popup receipt recovery in a native-window journey;
-capture short-lived UDP failures with contemporaneous socket/process evidence; measure
-real launch behavior under load. New parity features remain deferred by the user.
+  These journeys ran against working-tree source recorded only as `master`,
+  just before those commits; the run records do not pin a commit. They did not
+  use the host daemon or the installed GUI. They demonstrate recovery from a lost
+  or slow decide acknowledgement. The original incident's cause is unproven;
+  an invalid or unparseable acknowledgement can also leave a decision unknown.
+  No recurrence on the installed release has been tested or reported.
+
+Remaining correctness work: establish the original popup incident's cause if it recurs
+(capture the decide/receipt exchange on the host); capture short-lived UDP failures
+with contemporaneous socket/process evidence; measure real launch behavior under load.
+New parity features remain deferred by the user.
 
 ## Original audit evidence and limits
 
