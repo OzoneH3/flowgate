@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -101,6 +102,14 @@ func TestEssentialDHCPBootstrapKernel(t *testing.T) {
 	run("ip", "link", "set", "fgclient", "up")
 	run("ip", "addr", "add", "192.0.2.1/24", "dev", "fgclient")
 	run("ip", "-6", "addr", "add", "fe80::1/64", "dev", "fgclient", "nodad")
+	// Scope link-local sockets by the current interface index. Go's zone cache
+	// maps names to indexes for up to a minute, so a recreated fgclient (repeated
+	// runs in one namespace) would otherwise resolve to the deleted link.
+	client, err := net.InterfaceByName("fgclient")
+	if err != nil {
+		t.Fatal(err)
+	}
+	zone := strconv.Itoa(client.Index)
 	run("nsenter", "-t", pid, "-n", "ip", "link", "set", "lo", "up")
 	run("nsenter", "-t", pid, "-n", "ip", "link", "set", "fgpeer", "up")
 	run("nsenter", "-t", pid, "-n", "ip", "addr", "add", "192.0.2.2/24", "dev", "fgpeer")
@@ -213,7 +222,7 @@ func TestEssentialDHCPBootstrapKernel(t *testing.T) {
 				t.Fatal("changed table accepted")
 			}
 		}
-		for _, q := range []struct{ proto, local, remote string }{{"udp4", "192.0.2.1:68", "192.0.2.2:67"}, {"udp4", "192.0.2.1:68", "192.0.2.255:67"}, {"udp6", "[fe80::1%fgclient]:546", "[fe80::2%fgclient]:547"}, {"udp6", "[fe80::1%fgclient]:546", "[ff02::1:2%fgclient]:547"}} {
+		for _, q := range []struct{ proto, local, remote string }{{"udp4", "192.0.2.1:68", "192.0.2.2:67"}, {"udp4", "192.0.2.1:68", "192.0.2.255:67"}, {"udp6", "[fe80::1%" + zone + "]:546", "[fe80::2%" + zone + "]:547"}, {"udp6", "[fe80::1%" + zone + "]:546", "[ff02::1:2%" + zone + "]:547"}} {
 			l, _ := net.ResolveUDPAddr(q.proto, q.local)
 			d, _ := net.ResolveUDPAddr(q.proto, q.remote)
 			c, e := net.ListenUDP(q.proto, l)
