@@ -20,26 +20,53 @@ uses ports, names or a PID alone to invent an owner. IPv4-mapped IPv6 sockets
 retain their IPv6 family and inode/cookie; their address presentation is unmapped.
 No endpoint-based ownership workaround was needed.
 
-A native process can call `pthread_exit` in its main thread while workers retain
-sockets. Linux then leaves `/proc/TGID/fd` empty and `/proc/TGID/exe` unavailable.
-The observer now detects the zombie leader and scans its live task directories,
-up to 256 entries per such group, within the existing global 8192-task/131072-FD/
-two-second limits. It does **not** scan every host thread. Each worker is identified
-by its own TID/start ticks; `thread_group_pid` and row evidence explain its original
-TGID. Group generation and worker generation are checked again. Private FD tables
-of workers with a still-live leader remain outside this fallback's coverage.
+Activity and packet attribution now use the same bounded descriptor-holder
+census. It inspects visible task groups, including workers after a leader exits
+and workers with a private FD table while their leader is alive. `KCMP_FILES`
+can establish that tasks share a table; it does not establish their application
+identity. Every member still needs fresh generation, credential, executable and
+namespace checks. Without this table evidence, separate observations stay
+ambiguous rather than being merged.
 
-After process inspection, the matching FD link is read again. Closed/replaced FDs
-cannot keep an association merely because the earlier scan saw that inode. This
-narrows a race; it is not atomic observation or proof against hostile FD transfer.
-The five-second process metadata cache now also checks proc UID and network/mount
-namespace links, in addition to PID/start and executable path/revision. Detected
-inaccessible/changing holders remain a warning even if another holder was readable.
-No last-known identity is substituted for a current holder.
+For a native executable, equivalent tables within the same verified process
+generation may have one representative. Different thread groups, credentials or
+executables never collapse into one permission identity. Unsupported runtime
+workers remain refused. Each worker retains its own TID/start ticks and original
+thread group. A holder witness records the checked member set for revalidation;
+it is neither an application key nor proof of continuous ownership.
 
-These changes are **observation-only**. `Resolve`, enforcement authority, packet
-retention, rule matching, TCP accounting and the optional UDP kernel adapter are
-unchanged. A recovered display identity may still be unsupported for enforcement.
+The census bounds group, task, descriptor and table counts and has a two-second
+deadline. Missing, changed, inaccessible or over-budget evidence stays explicit.
+Matching descriptor links and member evidence are checked again before use. This
+narrows races; it cannot prove that no descriptor transfer happened between
+observations. No last-known identity substitutes for a current holder.
+
+A supported worker can supply native application identity for ordinary request
+handling and application rules. Process rules and For a while remain unavailable
+for nonleader representatives or merged holder sets, including a merged set
+whose representative is the leader. The backend enforces this restriction during
+creation and matching; the UI also excludes those rows from process-rule targets.
+Accounting continues to use its existing socket identities and sampling contract.
+
+Validation of this change uses a capped software-emulated VM with the same
+kernel version as the host. It does not measure desktop-scale collection cost,
+refusal rates during ordinary browsing, or prompt recurrence on real applications.
+Sustained churn and exhausted bounds can still produce an explicit refusal.
+
+The final worker candidate (`75ba88d630a8d743748fdde26a3ab6b85c3050812ac295fc8123f8ad1cb81411`)
+passed identity, policy and daemon race suites in Linux `7.3.0-3-cachyos` under
+QEMU TCG, plus the separate ordinary-UID API tests and private-mount verifier.
+The receiver matrix used two synthetic native executable paths, TCP/UDP over
+IPv4/IPv6, and both leader-exit and live-leader private-table modes. Its 32 checks
+verified Once delivery before saving a rule, zero denied deliveries, and later
+application-rule delivery with the actual saved rule ID while the other program
+still prompted. It used the `both` protection profile and measured incoming
+traffic only. The immediate no-repeat check is bounded; it does not establish
+long-term prompt recurrence behavior. Wine/Proton isolation remains model-tested
+with separate synthetic applications and prefixes; this is not native runtime
+acceptance. Evidence: `.workspace/worker-vm/{full2.log,full3.log,receivers4.log}`
+and `receivers4-artifacts/`. The UI's 372 model tests passed; no native worker UI
+journey or host-scale performance sample was run after the crash.
 
 ## Additive API evidence (v1 remains compatible)
 
@@ -52,6 +79,9 @@ unchanged. A recovered display identity may still be unsupported for enforcement
   set remains present. Mixed applications, unresolved/Wine identities, truncated
   lists and known incomplete holder inspection get no common display association.
   This field is never a permission target or input to `Resolve`.
+- Row `holder_witness`, optional: a bounded digest marking worker/merged holder
+  evidence. It restricts process-instance scope for that socket, not other rows
+  belonging to the same process. Clients never supply this as permission authority.
 - Process `thread_group_pid`, optional: the group of a recovered live worker.
   `pid` is that worker's Linux TID, and its stable ID uses that TID/start time.
 
@@ -74,10 +104,11 @@ Global inaccessible directory counts do **not** prove a particular socket's owne
 is inaccessible. Socket UID is the creation credential, not current ownership;
 other-UID unknown rows mention that difference but are not relabelled with an
 unproven cause. Namespace mismatch cannot generally be established from a missing
-FD link. Sockets outside the observer namespace, hidden proc mounts and private
-per-thread tables remain coverage limitations rather than invented per-row causes.
+FD link. Sockets outside the observer namespace, hidden proc mounts, unproved
+file-table relationships and unsupported runtime workers remain coverage limits
+rather than invented per-row causes.
 
-### Bounded host sample (read-only, no private process metadata retained)
+### Historical observer-only sample (before the shared holder census)
 
 | Evidence | Before | After |
 |---|---:|---:|

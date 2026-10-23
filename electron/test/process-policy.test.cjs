@@ -166,3 +166,33 @@ test('bridge bindings retain exact start ticks and opaque instance; missing or u
   assert.throws(() => parseProcessTarget({ ...binding, start_ticks: 9007199254740992 }));
   assert.throws(() => parseProcessTarget({ ...binding, pid: NaN }));
 });
+
+test('socket holder witness restricts process scope without transferring to sibling rows or app identity', () => {
+  const { state, row } = fixture();
+  const socket = { id: 'worker', owners: [row.process.id], ownership_category: 'visible-holder', holder_witness: 'a'.repeat(64) };
+  state.control.policy.rows.push({ row_id: socket.id, status: 'observed_native', application_ref: 'appref' });
+  const leaf = { ...row, id: socket.id, kind: 'socket', socket, rows: [socket] };
+  assert.equal(authoritativeProcessPolicy(leaf, state), undefined);
+  const inv = selectionInventory(leaf, state);
+  assert.equal(inv.app.identity.key, 'app');
+  assert.equal(inv.candidate, socket);
+  assert.equal(inv.processCandidate, undefined);
+  assert.equal(inv.processPolicy, undefined);
+  const witnessedProcess = selectionInventory({ ...row, rows: [socket] }, state);
+  assert.equal(witnessedProcess.processPolicy, undefined);
+  assert.deepEqual(witnessedProcess.rules.map(r => r.id), ['app']);
+  const ordinary = { ...socket, id: 'ordinary', holder_witness: undefined };
+  const mixed = selectionInventory({ ...row, rows: [socket, ordinary] }, state);
+  assert.equal(mixed.candidate, socket);
+  assert.equal(mixed.processCandidate, ordinary);
+  assert.equal(mixed.processPolicy.state, 'active');
+});
+
+test('Activity parser preserves valid holder restriction, legacy absence, and rejects malformed evidence', () => {
+  const { parseReply } = require('../dist/test/protocol.cjs');
+  const reply = holder_witness => ({version:1,generation:'g',read_only:true,server_time:'2026-10-23T21:00:00Z',activity:{processes:{},rows:[{id:'row',owners:[],socket:{},holder_witness}]}});
+  for (const w of [undefined, '', 'a'.repeat(64)])
+    assert.equal(parseReply(reply(w)).activity.rows[0].holder_witness, w || undefined);
+  for (const w of [null, false, 1, {}, 'short', 'A'.repeat(64), 'a'.repeat(65)])
+    assert.throws(() => parseReply(reply(w)), /Invalid holder witness/);
+});

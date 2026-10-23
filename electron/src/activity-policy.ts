@@ -108,9 +108,9 @@ export function selectionInventory(row: Row, state: ClientState) {
           })),
         );
   const rules = row.applicationZone ? unfilteredRules.filter(r=>matchesApplicationZone(r.scope,row.applicationZone!)) : unfilteredRules;
-  const candidate =
+  const candidates =
     (app || processPolicy) &&
-    (row.policyRows || row.rows).find(
+    (row.policyRows || row.rows).filter(
       (s) =>
         (s.runtime_application ? !!runtimeWitness(s, state.observation.activity?.processes || {}) && !!app?.process_ids.includes(runtimeWitness(s, state.observation.activity?.processes || {})!) :
         s.owners.length === 1 &&
@@ -130,7 +130,8 @@ export function selectionInventory(row: Row, state: ClientState) {
     reason: authoritative
       ? result.reason
       : 'Compatibility inventory: listed exact-identity rules; no backend summary.',
-    candidate,
+    candidate: candidates ? candidates[0] : undefined,
+    processCandidate: candidates ? candidates.find(s => !s.holder_witness) : undefined,
     fallback,
   };
 }
@@ -787,6 +788,8 @@ export class ActivityPolicy {
   private blockReason(inv: Inventory, tier: Tier): string {
     const c = this.state!.control;
     if (!canManageRules(c)) return 'Read-only: this connection cannot change rules.';
+    if (tier === 'process' && inv.candidate?.holder_witness && !inv.processCandidate)
+      return 'Worker or merged socket-holder evidence cannot bind a process rule.';
     if (!inv.available)
       return this.row?.kind === 'network'
         ? 'Backend update required for configured network-zone policy.'
@@ -805,7 +808,7 @@ export class ActivityPolicy {
   }
   private newSource(direction: Direction, tier: Tier, inv: Inventory): RuleSource | undefined {
     const c = this.state!.control,
-      candidate = inv.candidate;
+      candidate = tier === 'process' ? inv.processCandidate : inv.candidate;
     if(this.row?.applicationZone && this.row.applicationZone.model!==c.networkZones?.model)return;
     if (inv.zone && c.networkZones)
       return {

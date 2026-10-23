@@ -153,6 +153,8 @@ export interface Traffic {
 export interface RuntimeApplication { application: Application; uid: number; evidence: RuntimeTable; }
 export interface RuntimeTable { runtime: string; prefix: string; broker_pid: number; broker_start_ticks: string; socket_cookie: string; uid: number; method: string; windows_handle_holders: {pid:number; creation_time:string; image:string}[]; }
 export interface SocketRow {
+  // Server evidence restricting process scope, never an application identity.
+  holder_witness?: string;
  runtime_application?: RuntimeApplication;
   network_scope?: {
     state: 'known' | 'unavailable';
@@ -1045,6 +1047,11 @@ export function parseReply(raw: unknown): Reply {
           runtime_application: row.runtime_application ? (()=> {const r=object(row.runtime_application), evidence=parseRuntimeTable(r.evidence); if(!evidence)throw Error("Invalid runtime evidence");return {application:application(r.application),uid:number(r.uid),evidence};})() : undefined,
           ownership: string(row.ownership),
           ownership_category: string(row.ownership_category),
+          holder_witness: row.holder_witness === undefined || row.holder_witness === '' ? undefined : (() => {
+            if (typeof row.holder_witness !== 'string' || !/^[a-f0-9]{64}$/.test(row.holder_witness))
+              throw Error('Invalid holder witness');
+            return row.holder_witness;
+          })(),
           display_application: row.display_application
             ? application(row.display_application)
             : undefined,

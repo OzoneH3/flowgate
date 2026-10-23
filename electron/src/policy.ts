@@ -448,8 +448,11 @@ export function authoritativeProcessPolicy(
   if (
     row.displayApplication ||
     (row.socket &&
-      (row.socket.owners.length !== 1 || row.socket.ownership_category !== 'visible-holder'))
+      (row.socket.holder_witness || row.socket.owners.length !== 1 || row.socket.ownership_category !== 'visible-holder'))
   )
+    return;
+  const sockets = row.policyRows || row.rows;
+  if (row.kind === 'process' && sockets.length > 0 && sockets.every(s => !!s.holder_witness))
     return;
   const p = row.process || (row.socket && a.processes[row.socket.owners[0]]);
   if (!p) return;
