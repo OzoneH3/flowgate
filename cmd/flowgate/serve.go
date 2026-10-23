@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"flowgate/internal/accounting"
 	"flowgate/internal/daemon"
 	"flowgate/internal/decisionlog"
 	"flowgate/internal/essential"
@@ -138,6 +139,8 @@ func serveCommand(args []string) error {
 		e.TrafficControlUID = &peer
 	}
 	observer := monitor.New(time.Second)
+	e.ObservedUsage = accounting.New()
+	observer.Observed = e.ObservedUsage.Observe
 	observer.Zones = zones
 	observer.UDP = traffic.Snapshot
 	e.Activity = observer.Snapshot

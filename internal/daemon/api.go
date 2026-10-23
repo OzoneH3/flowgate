@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"flowgate/internal/accounting"
 	"flowgate/internal/decisionlog"
 	"flowgate/internal/essential"
 	"flowgate/internal/identity"
@@ -58,6 +59,7 @@ type EnforcementStatus struct {
 	StopsAt time.Time `json:"stops_at"`
 }
 type Response struct {
+	ObservedUsage    *accounting.Snapshot       `json:"observed_usage,omitempty"`
 	RuntimeChecks    []readiness.Check          `json:"runtime_checks,omitempty"`
 	SnapshotRevision string                     `json:"snapshot_revision,omitempty"`
 	SnapshotAt       time.Time                  `json:"snapshot_at,omitempty"`
@@ -219,6 +221,9 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 					}
 					if e.Decisions != nil {
 						r.Capabilities = append(r.Capabilities, DecisionLogCapability)
+					}
+					if e.ObservedUsage != nil {
+						r.Capabilities = append(r.Capabilities, accounting.Capability)
 					}
 					if e.Activity != nil {
 						r.Capabilities = append(r.Capabilities, "activity-initiation-v1", "application-display-metadata-v1", "activity-initiation-events-v1")
@@ -629,6 +634,15 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 								stopAfterResponse = true
 							}
 
+						case "observed-usage":
+							if e.ObservedUsage == nil {
+								r.ErrorCode, r.Error = "unavailable", "Observed usage is unavailable"
+							} else if e.Mode == "host-monitor" && e.APIUID == nil && cred.Uid != uint32(os.Geteuid()) {
+								r.ErrorCode, r.Error = "forbidden", "not authorized"
+							} else {
+								snapshot := e.ObservedUsage.Snapshot(cred.Uid, admin)
+								r.ObservedUsage = &snapshot
+							}
 						case "list":
 							if e.Mode == "host-monitor" && e.APIUID == nil && cred.Uid != uint32(os.Geteuid()) {
 								r.Error = "not authorized"

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"flowgate/internal/accounting"
 	"flowgate/internal/daemon"
 	"flowgate/internal/essential"
 	"flowgate/internal/identity"
@@ -236,6 +237,8 @@ func serve() error {
 	activityCtx, activityCancel := context.WithCancel(context.Background())
 	defer activityCancel()
 	e.Activity = observer.Snapshot
+	e.ObservedUsage = accounting.New()
+	observer.Observed = e.ObservedUsage.Observe
 	if *decisionPath != "" {
 		if !filepath.IsAbs(*decisionPath) {
 			return fmt.Errorf("--decision-log must be absolute")
@@ -383,6 +386,8 @@ func observe() error {
 	observer.ZoneSource = zoneManager.Snapshot
 	go zoneManager.Run(ctx)
 	e.Activity = observer.Snapshot
+	e.ObservedUsage = accounting.New()
+	observer.Observed = e.ObservedUsage.Observe
 	listener, err := daemon.Serve(path, e, true)
 	if err != nil {
 		return err

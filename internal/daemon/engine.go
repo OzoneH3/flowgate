@@ -3,6 +3,7 @@ package daemon
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"flowgate/internal/accounting"
 	"flowgate/internal/decisionlog"
 	"flowgate/internal/essential"
 	"flowgate/internal/identity"
@@ -120,6 +121,7 @@ type Engine struct {
 	AdministratorUID   *uint32
 	APIUID             *uint32
 	Activity           func() identity.ActivitySnapshot
+	ObservedUsage      *accounting.Ledger
 	Generation         string
 	Mode               string
 	mu                 sync.Mutex

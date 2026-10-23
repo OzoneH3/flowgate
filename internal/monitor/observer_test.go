@@ -25,3 +25,34 @@ func TestSnapshotFailureAndFreshness(t *testing.T) {
 		t.Fatal("reader mutated collector state")
 	}
 }
+
+func TestObservedHookAfterAnnotationAndBudgetNeverOnRead(t *testing.T) {
+	o := New(time.Second)
+	calls := 0
+	o.Annotate = func(s *identity.ActivitySnapshot) { s.Rows[0].OwnershipCategory = "annotated" }
+	o.Observed = func(s identity.ActivitySnapshot) {
+		calls++
+		if s.Rows[0].OwnershipCategory != "annotated" {
+			t.Fatal("consumed before annotation")
+		}
+	}
+	s := identity.ActivitySnapshot{Sequence: 1, Collected: time.Now(), Complete: true, Rows: []identity.ActivityRow{{ID: "one"}}}
+	o.publish(s)
+	for i := 0; i < 10; i++ {
+		o.Snapshot()
+	}
+	if calls != 1 {
+		t.Fatal("reads consumed observations", calls)
+	}
+	o.Observed = func(s identity.ActivitySnapshot) {
+		calls++
+		if s.Complete || len(s.Rows) != 0 {
+			t.Fatal("oversized observation escaped cap")
+		}
+	}
+	s.Rows[0].Evidence = string(make([]byte, 4<<20))
+	o.publish(s)
+	if calls != 2 {
+		t.Fatal(calls)
+	}
+}

@@ -10,6 +10,9 @@ import (
 )
 
 type Observer struct {
+	// Observed consumes each completed, annotated, size-bounded collection once.
+	// It is configured before Run and is never invoked by API polling.
+	Observed         func(identity.ActivitySnapshot)
 	Annotate         func(*identity.ActivitySnapshot)
 	InitiationEvents func([]identity.Socket) identity.InitiationEvents
 	Zones            identity.NetworkZones
@@ -30,20 +33,7 @@ func (o *Observer) Run(ctx context.Context) {
 			collector.Zones = o.ZoneSource()
 		}
 		snapshot := collector.Collect()
-		if o.Annotate != nil {
-			o.Annotate(&snapshot)
-		}
-		// Cap serialized API retention as well as row/process counts. Never return an
-		// old success as current after a failure or oversized snapshot.
-		if b, err := json.Marshal(snapshot); err != nil || len(b) > 3*1024*1024 {
-			snapshot.Rows = nil
-			snapshot.Processes = nil
-			snapshot.Complete = false
-			snapshot.Error = "Snapshot exceeded 3 MiB response budget"
-		}
-		o.mu.Lock()
-		o.snapshot = snapshot
-		o.mu.Unlock()
+		o.publish(snapshot)
 		timer := time.NewTimer(o.interval)
 		select {
 		case <-ctx.Done():
@@ -64,4 +54,24 @@ func (o *Observer) Snapshot() identity.ActivitySnapshot {
 		snapshot.Error = "Collection overdue; old activity withheld"
 	}
 	return snapshot
+}
+
+func (o *Observer) publish(snapshot identity.ActivitySnapshot) {
+	if o.Annotate != nil {
+		o.Annotate(&snapshot)
+	}
+	// Cap serialized API retention as well as row/process counts. Never return an
+	// old success as current after a failure or oversized snapshot.
+	if b, err := json.Marshal(snapshot); err != nil || len(b) > 3*1024*1024 {
+		snapshot.Rows = nil
+		snapshot.Processes = nil
+		snapshot.Complete = false
+		snapshot.Error = "Snapshot exceeded 3 MiB response budget"
+	}
+	if o.Observed != nil {
+		o.Observed(snapshot)
+	}
+	o.mu.Lock()
+	o.snapshot = snapshot
+	o.mu.Unlock()
 }
