@@ -106,8 +106,11 @@ policy permitting the controller command. Qt never collects a password. Refusals
 and cancelled authentication leave Activity available. See
 [the exact activation, Stop and recovery contract](docs/HOST-CONTROL.md).
 
-The terminal alternative remains `scripts/evaluate-host.sh`. There is no service,
-sudoers change, autostart or background automatic activation.
+The terminal alternative for bounded evaluation remains `scripts/evaluate-host.sh`.
+That path does not install a service or change sudoers. Separately, the prepared
+release installer installs the persistent FlowGate daemon in monitoring mode;
+`update-and-start.sh` can restore an explicitly selected protection mode after
+verification. See [the current audit status](docs/NETLIMITER-AUDIT-2026-10-23.md#follow-up-status--23-october-2026-after-installation).
 
 ## Launch the live host monitor
 

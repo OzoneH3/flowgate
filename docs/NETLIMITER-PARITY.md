@@ -2,7 +2,8 @@
 
 > Historical matrix: several rows describe older commits and are no longer current.
 > See [the 23 October 2026 audit](NETLIMITER-AUDIT-2026-10-23.md) for the fresh
-> source/documentation comparison at 0842059 and explicitly separated evidence.
+> source/documentation comparison at 0842059, followed by the current fix/deployment
+> status through source 8fa7081 and installed 298852b.
 > Existing verified labels below are historical claims, not a new certification.
 
 Functional comparison with NetLimiter. Statuses: **verified equivalent**, **divergent**, **missing**, **unverified**.
@@ -50,7 +51,7 @@ column and add the capture path. Re-rank "Dependency-ordered next increments" wh
 | Remember on an Ask-caused request | — | Remember(app)+Allow adds a second rule that beats Ask (equal weight) | Replaces the app's Ask rule in place (exposed in preview); narrow Remember separate rule | Replace vs add (same effect) | backend | `TestStoredAskLifecycle`; `--ask`; Electron journey | divergent (equivalent effect) |
 | Duplicate identical rules | — | NL allows a second identical-scope rule | FlowGate updates the existing rule | Different storage, same effect | backend | — | divergent |
 | Zone in Remember | — | No zone choice in dialog | API supports zone; UI sends any | API extension only | UI | — | verified equivalent (UI) |
-| For a while | Pending requests: temporary, process-scoped, "tens of seconds, minutes" | Checkbox; duration unmeasured | Not implemented | Missing; duration needs measurement | backend/UI | — | missing |
+| For a while | Pending requests: temporary, process-scoped | Historical duration observation below | Native process-bound lease implemented; Electron default one hour | Wine runtime-table lease refused; not reference timing parity | backend/UI | `internal/daemon/for_a_while.go`, audit A07 | partial / divergent |
 | Pending after rule change | Remember applies "to all following connections" | Window closed after Remember; later connections pass (re-evaluation of concurrent pending inconclusive) | All waiting requests re-evaluated; covered settle, ended finalized, others wait | NL concurrent behaviour unverified | backend/UI | `--app-policy`, `--ask`, Electron (no stale windows) | unverified (reference) |
 | Repeated identical requests | — | One card at a time, counter | One grouped card with count (`request_group`) | — | UI | Electron journey (3 attempts → 1 row/1 window) | verified equivalent |
 | Blocker default action / Blocker On-Off | Blocker: Options→Service→Blocker | Default In/Out action configurable | Unmatched supported traffic prompts; protection Start/Stop | Default action not configurable | backend/UI | — | divergent |
@@ -59,10 +60,10 @@ column and add the capture path. Re-rank "Dependency-ordered next increments" wh
 | C8 Process-instance weight 4 (incl. Remember Process) | Blocker weights 1/2/3/4+ (4+ only custom) | Remember(Process) creates an auto filter rule, weight 3 (auto filters = 3) | Process rules weight 4 (`policy.go:205-215`), Remember Process binds the instance | A process Remember outranks an equal app Deny; NL would tie at 3 → Deny wins | backend | unit `TestRememberProcessBindsRequestingInstance` | divergent |
 | C6/E7 Unmatched connection outcome | Blocker "default actions … applied if no other blocker rule exists" | Default In/Out = Allow (Options); no prompt when no rule | No rule → `default-ask` prompt (`policy.go:186-187`), then **block** at deadline (`internal/daemon/engine.go:112-116`) | Prompt-then-deny vs silent Allow | backend | unit `TestPendingUserTimeoutAndPolicyChangeRecords` | divergent |
 | E7 Unanswered prompt | Pending requests (undocumented) | Card disappeared after ~90-105 s; held connection then completed; next two passed unprompted (single run, fw-1..12; default-Allow interpretation unverified) | Deadline 30 s (`serve --decision-timeout` 1-60 s, `cmd/flowgate/serve.go:55`), final `timeout`, held packets dropped | Shorter deadline; outcome Deny not default action | backend | unit only | divergent |
-| E6 For a while (measured) | Pending requests "tens of seconds, minutes … for process from which it originated" | No duration control; text "…all subsequent connections created within a short period of time"; measured window ~10-18 s, process-scoped, no rule (single run) | Not implemented | Missing; implement as process-scoped temporary decision, no stored rule | backend/UI | NL `.workspace/nl-perm/shots/fw-*` | missing |
+| E6 For a while (measured) | Pending requests | Historical single-run reference window ~10–18 s, no stored rule | Native in-memory process lease, exit/expiry bounded; selectable duration | Wine table identities unsupported; Electron default differs | backend/UI | Audit A07; historical NL capture `.workspace/nl-perm/shots/fw-*` | divergent |
 | B3 Quick-setter Delete | — | Popup Delete is immediate, no confirm; Rule List Delete asks "1 rule(s) will be deleted. Yes/No" [048] | Popup Delete opens a confirmation (`electron/src/activity-policy.ts:711,896` → `confirmRuleDelete`, `workflows.ts:1056`) | Extra confirm in the popup | UI | RE rule-status (UI ws `rule-status-real-T8YDJk`) | divergent |
 | B3 Quick-setter Weight / Escape | — | `› Weight` expands "Weight [Default ▾] OK"; Escape does not close popup | No Weight link; Escape closes (kept for keyboard safety, R3) | See custom weights; Escape | UI | RE rule-status | divergent |
-| Editor explanation text | — | — | `internal/daemon/editor.go:89` still says "within each tier highest priority then smallest ID … highest priority wins, then smallest rule ID" | Stale; contradicts weight + Deny>Allow>Ask | backend | — | divergent |
+| Editor explanation text | — | No new reference observation | Shared evaluator-derived precedence/scope explanation; Qt wording guarded by drift test | Original stale sentence fixed, not a new parity certification | backend/UI | `49aa610`, `8df7d3d`; `internal/policy/precedence.go` | implemented / reference unverified |
 | B6 Advanced (Rule Editor) | Rules § Rule Editor: Filter, Zone, Type, Direction In/Out/Both, Value, Weight, Enabled, Scheduler | Advanced opens editor prefilled with app + direction [42] | Editor prefilled with fixed target; action/protocol/zone/address/ports/priority/expiry (`workflows.ts:281`) | No Filter chooser, Both, Weight, Scheduler, rule types | both | RE `creation-workflow.mjs` | divergent |
 | C14 Direction Both | Rules "Direction … Both" | Both available in editor | `incoming`/`outgoing` only (`policy.go:105`) | No Both (two rules needed) | backend/UI | — | missing |
 | B7 Rule Status icons | Activity column "Quick rule setter" | 7 family icons (Priority, DL/UL Limit, In/Out Blocker, In/Out Quota), icons on hover/selection, dots otherwise (R3) | 7-slot strip; only Blocker slots active, others `·`/n/a (`electron/src/renderer.ts:361-400`) | Limit/Priority/Quota slots inert (see G) | UI (after G backend) | RE rule-status | divergent |
@@ -104,7 +105,7 @@ Official source for A1-A18: [Activity](https://netlimiter.com/docs/user-gui-clie
 | A17 In/Out highlighters | Options › Activity | — | Fixed colours (`style.css:907-908`) | Not configurable | UI | — | missing |
 | A18 Totals since installation (persistent) | [Traffic monitoring](https://netlimiter.com/docs/netlimiter-overview/features/internet-traffic-monitoring) | — | Deltas since first observation; nothing persisted (TRAFFIC.md) | No persistent totals | backend | — | missing |
 | A19 Store packages / services as entries | [Services & Store apps](https://netlimiter.com/docs/basic-concepts/filters/system-services-and-windows-store-apps) | Service metadata rows | Wine/Proton resolved to .exe; no Flatpak/Snap/systemd grouping (`internal/identity/process.go:96-160`) | No package/unit nodes; no Store/svchost on Linux; closest = group by Flatpak/Snap app ID and systemd unit (cgroup) | backend | unit identity tests | platform deviation (needs user agreement) |
-| A20 App update keeps identity | Services & Store apps "each new version was … detected as a new app. It now works correctly" | — | Rules bind executable **revision** = dev:inode:size:mtime:ctime (`internal/identity/process.go:58-64`, `policy.go:132`); package update → new app, rules stop matching | Updates lose permissions and re-prompt; security trade-off; needs user agreement | backend | — | divergent |
+| A20 App update keeps identity | Services & Store apps | No fresh installed-reference test | Verified stable program key follows updates with UID/prefix/direction/scopes retained; temporary overrides retain fallback | Presets remain revision-pinned; no parent/launcher permission inheritance | backend | Audit coverage matrix; `internal/policy/policy.go`, update receiver cases in `.workspace/outage-repair-final-check.log` | implemented / equivalence unverified |
 | A21 Forwarded traffic node | [Forwarded traffic](https://netlimiter.com/docs/basic-concepts/forwarded-traffic) | — | Out of scope (NETWORK-ZONES.md) | Missing | backend | — | missing |
 | A22 Tags node | Tags | Tags node under root | None | Missing | both | — | missing |
 | A23 Custom filter nodes | Filters | Filters node; "The curl executable-1.1.1.1" listed [062] | No filter objects | Missing | both | — | missing |
@@ -213,7 +214,7 @@ Official source for A1-A18: [Activity](https://netlimiter.com/docs/user-gui-clie
 | J13 Admin privileges | System requirements | — | Daemon root; client unprivileged | Stricter split; intentional | both | — | divergent |
 | J14-J15 Remote connection; host name / File › Connect | [Remote connection](https://netlimiter.com/docs/remote-connection) | File menu connection items | Unix socket only (`api.go:125`); toolbar shows FLOWGATE | Missing | both | — | missing |
 | J17 Version checker | Options › Version checker | Version Checker 5.3.28.0 [04] | `flowgate version` only | Missing | UI | — | missing |
-| J18 Update keeps settings | [Updates](https://netlimiter.com/docs/installation/updates) | — | Immutable releases + atomic `current` swap (`scripts/install-monitoring.py`) | Host install not accepted | backend | lab `test-deployment-recovery.py` | unverified |
+| J18 Update keeps settings | Updates | No fresh installed-reference test | Immutable release and verified rollback; exact startup preset metadata repair accepted | Live 298852b install verified; not every possible migration tested | backend | `f4ae7af`, `298852b`, audit follow-up; 16 DNS repairs and live DNS | implemented / equivalence unverified |
 | J19 Uninstall keep / clean | Command-line options | — | Keeps data; no clean option (`deployment/uninstall.py`) | No clean | backend | lab `test-deployment-uninstall.py` | divergent |
 | J20 Languages, Theme | Options › Languages/Theme | Dark Gray / Light Blue / Lime, font 100% [08] | Fixed dark theme, English | Missing | UI | — | missing |
 
@@ -268,7 +269,7 @@ behaviour; later items build on the filter and statistics foundations.
    Rows: C6/E7, Blocker default action.
 3. **Global Blocker On/Off, Blocker tab, whole-machine and quick zone blocker** (both): needs (2).
    Rows: Blocker On/Off, C12, Quick zone blocker, D5.
-4. **For a while** (backend, then UI): process-scoped temporary decision, about 10-18 s, no rule.
+4. **For a while**: native support exists; Wine runtime-table support and reference-duration parity remain deferred (audit A07).
    Row: E6.
 5. **Direction Both + popup parity** (both): Both in editor; popup Delete without confirm; Escape
    behaviour. Rows: C14, B3.

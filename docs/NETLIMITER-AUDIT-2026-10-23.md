@@ -5,14 +5,87 @@ retrieved on 23 October 2026, including 5.3.28.0 release notes. This is a fresh
 source/behavior audit, not a claim that the products are equivalent. No product
 code, host firewall, service, installed rules or game prefixes were changed.
 
-**Result:** FlowGate implements a substantial application firewall and live
+**Original audit result (see follow-up status below):** FlowGate implements a substantial application firewall and live
 socket monitor, but does not reproduce NetLimiter's complete functionality.
 The most urgent problems are contradictory permission explanations, fixed
 unmatched defaults, partial localhost semantics, and different capabilities in
 the two desktop clients. Rate limiting, bandwidth prioritization and durable
 usage accounting are still separate, substantial missing subsystems.
 
-## Evidence and limits
+## Follow-up status — 23 October 2026, after installation
+
+The original audit below is a dated baseline at **0842059**, not the current
+outstanding-task list. Source reviewed for this follow-up: **3e6fdcf** (including service labels through
+8fa7081). Installed
+and queried live: **298852b**, protection **active both**. No fresh NetLimiter
+experiment was performed for this update; original reference claims are unchanged.
+
+| Finding | Follow-up status | Evidence and remaining boundary |
+| --- | --- | --- |
+| A01 explanations | Fixed in source and installed | `49aa610`, `8df7d3d`: shared evaluator comparator/sentences and Qt wording drift test. This is explanation correctness, not complete reference parity. |
+| A02 unmatched defaults | Deferred feature | Fixed Ask and unsafe-attribution Block remain. |
+| A03 localhost | Same-host defect fixed and installed | `9b1684a`: own assigned v4/v6 addresses on verified loopback device/netns; 48 isolated receiver cases for default/Ask/Block. Separate reusable loopback filter remains absent. |
+| A04 startup guard | Intentional fail-closed boundary documented | No blanket guard bypass; explicit local Deny must not be lost during failure. |
+| A05 weights | Deferred feature/migration | No change to permission ordering or custom-weight support. |
+| A06 Qt workflows | Feature gaps remain; Stop race fixed in source | `3e6fdcf`: queue shutdown wakeup no longer reports failure. Four unmodified unified-test runs pass (6/6 cases each); not installed in 298852b. |
+| A07 temporary Wine grants | Deferred feature | Native process lease exists; runtime-table Wine lease remains refused. |
+| A08 accounting/contention | Accounting gap remains; contention reduced | `7c1fbca`: release broker mutex for process collection, TryLock resume, generation/session rechecks and admission-demand yield. A census slot remains held; no latency guarantee. |
+| A09 traffic control | Deferred features | Rate limits, QoS, quotas and recurring schedules remain absent. |
+| A10 filters | Deferred features | No general named/composite filter model added. |
+| A11 lifecycle history | Gap remains | Decision history is not a complete connection/usage ledger. |
+| A12 documentation | Current status and key stale claims reconciled here | Historical matrix evidence is not promoted to equivalence. |
+| A13 runtime readiness | Fixed and installed; host capability restored | `9b1684a`, `49aa610`: active Unix-peer probe, module-tree warning, cached runtime checks and Electron advisory display. Host rebooted into 7.3.0-3; probe now passes. |
+| A14 VPN integration | Deferred integration | Generic tunnel refusals remain; zone labels do not establish enforcement support. |
+
+Additional outage fix: **f4ae7af + 298852b** repair only unchanged Essential
+preset metadata after fresh discovery and permit that exact transition during
+installation. The first install rolled back because its verifier rejected the
+repair; the second succeeded. Journal: 16 repairs at 11:03:29; a network-sourced
+DNS query succeeded in 35.2 ms with both-direction protection active. No new DNS
+endpoint or executable permission was approved. The prior 10:55 repair attempt
+was rolled back with the previous database; those are not duplicate repairs in
+the successful store.
+
+Post-reboot DHCP/veth and kernel fixtures passed (`.workspace/network-postboot-dhcp.log`,
+`.workspace/network-postboot-kernel.log`). Real Wine saturation with
+continuous Activity annotation passed in `.workspace/wine-saturation-6sgREV`:
+native delivery 608/608 in both rounds, p99 19.802/17.841 ms. The allowed Wine
+application delivered on all 24 sockets, with deliberate overload shedding;
+this does not establish lossless Wine delivery or real-game launch latency.
+The final outage full check passed (`.workspace/outage-repair-final-check.log`);
+installer follow-up passed 18 installer, 13 rollback, 26 updater and 6 preparation
+tests. Earlier optional Qt unified runs were not consistently passing. After `3e6fdcf`,
+`.workspace/ui2-unified-final1.log` through `final4.log` each report 6/6 passing.
+These are separate from the main check's two Qt binaries.
+
+### Unidentified traffic follow-up
+
+Complete live Activity snapshots showed only ownerless TCP TIME_WAIT rows under
+Unidentified; the live port-3000 listener and connections had executable owners.
+**424ec14 + 8fa7081** add native named-service display labels while excluding
+XDG/D-Bus/autostart launcher units. Display labels never alter executable keys,
+UID/prefix scope or permission authority. These two commits are not installed in
+298852b; the direct process probe is not a native GUI acceptance test.
+
+The first since-install history capture had four outgoing UDP attempts with no
+visible matching socket (three broadcasts, one unicast). A later capture added
+two localhost DNS attempts with the same reason. Their historical process owners
+cannot be recovered from destination ports or surrounding traffic. A private
+namespace probe reproduced the lifetime boundary in 10/10 rounds: an open UDP
+socket resolves to its current owner, then closing it makes the same flow return
+`no visible matching socket`. This proves the mechanism, **not** the cause or
+owner of those historical attempts, nor NFQUEUE delivery behavior. Evidence:
+`.workspace/udp-lifetime-probe/{main.go,result.log,history-summary.txt}`.
+Shared multicast sockets are separately ambiguous and must not be assigned one
+application's permission. Two launch-period capacity bursts (5 and 63 dropped
+packets) remain a performance follow-up, not an explanation established for every
+unidentified record. No attribution bypass or destination-specific Allow was added.
+
+Remaining correctness work: install and verify the queue cancellation repair;
+capture short-lived UDP failures with contemporaneous socket/process evidence; measure
+real launch behavior under load. New parity features remain deferred by the user.
+
+## Original audit evidence and limits
 
 - **Code-confirmed:** source path and mechanism checked at the audited commit.
 - **Probe-confirmed:** evaluator output or an isolated kernel receiver exercised
@@ -44,7 +117,7 @@ historical evidence, but no fresh NetLimiter installation was exercised here.
 In particular, a remembered-rule receiver test does not prove ordinary Allow
 suppresses future prompts; a submitted verdict does not prove delivery.
 
-## Findings requiring decisions or fixes
+## Original findings (follow-up status above supersedes completed work)
 
 ### A01 — Permission explanations contradict the actual winner (high)
 
@@ -315,7 +388,7 @@ integration before relaxing a refusal. Do not disable an existing VPN or confuse
 Ignore Traffic accounting with firewall permission.
 [Reference: VPN support and accounting](https://netlimiter.com/docs/using-with-vpns).
 
-## Current coverage matrix
+## Coverage matrix (updated implementation rows)
 
 “Implemented” below means the mechanism exists; it does not assert exact
 NetLimiter equivalence or fresh native UI acceptance. Official specification
@@ -337,8 +410,8 @@ links are in the findings and source index.
 | App permissions across updates | Implemented | Stable verified program key; UID/prefix/direction/scopes retained; native receiver evidence from preceding fix |
 | Historical rule override handling | Implemented with presentation limits | Newest unexpired exact program scope; temporary fallback retained; Rules list has no masked-until label |
 | Wine/Proton application identity | Validated capabilities, partial | Public owner tables: Wine10.0/11.x contracts; direct-owner path: two exact wineserver SHA-256 builds only; unknown builds fail closed; Unix-peer diagnostics required |
-| Activity vs admission contention | Source-confirmed risk | Shares two census slots and per-broker lock; measure launch latency with Activity polling; A08 |
-| Default localhost allow | Partial, source0842059 | Not installed on inspected host; own assigned IPs and guard phase differ; A03/A04 |
+| Activity vs admission contention | Reduced, installed | `7c1fbca`: releases lock during Collect, yields to admission, verifies generation on resume; one slot retained; launch latency still needs measurement |
+| Default localhost allow | Installed, same-host scope | Verified loopback device/current netns plus loopback or assigned endpoints; explicit local rules honored; guard remains fail-closed; A03/A04 |
 | Explicit localhost Block/Ask | Implemented for IP scopes | Native v4/v6 TCP/UDP both-direction receiver tests passed in prior task |
 | Proxy/launcher permissions | Intentionally separate | Localhost access can reach a proxy; proxy outbound remains its own policy |
 | Existing TCP after rule edit | Preserved | No automatic disconnect; no manual Kill operation |
@@ -361,7 +434,7 @@ links are in the findings and source index.
 | Quotas / threshold actions | Missing | No durable quota accounting |
 | Calendar rule scheduling | Missing | Expiry is not recurring Start/Stop/Delete |
 | Generic VPN enforcement | Restricted | Preflight rejects unreviewed tunnel kinds despite automatic zone support; A14 |
-| Runtime readiness | Incomplete | Active kernel capability check for Wine Unix-peer proof is missing; A13 |
+| Runtime readiness | Implemented and installed | Active Unix-peer syscall probe, module-tree warning and advisory runtime checks; individual broker evidence still required; A13 |
 | Forwarded/container traffic | Outside enforcement scope | Host input/output only; no FORWARD hook / forwarded Activity root |
 | Remote computer management | Missing | Local Unix-socket API, not network remote management |
 | Per-user permissions | Implemented, different model | Root daemon, peer credentials, selected administrator; not NetLimiter's full permission editor |
@@ -399,7 +472,7 @@ success, general throughput or VPN delivery benchmarks. Prior localhost/native
 receiver and UI logs are `.workspace/localhost-{delivery,integration,outgoing}.log`
 and `.workspace/localhost-ui.log`; they are earlier evidence, not reruns here.
 
-## Recommended order
+## Original feature roadmap (new features currently deferred)
 
 1. Correct shared explanations, client capability claims and stale parity docs
    (A01/A06/A12), with evaluator-vs-preview regression probes.
