@@ -37,7 +37,7 @@ class Preparation(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(dir=ROOT / '.workspace')
         self.root = Path(self.temp.name)
         names = ['scripts/prepare-release.sh', 'scripts/build.sh', 'scripts/go-env.sh',
-                 'scripts/lib/update_and_start.py', 'scripts/install-monitoring.py', 'scripts/host-daily-acceptance.py',
+                 'scripts/lib/update_and_start.py', 'scripts/lib/build_progress.py', 'scripts/install-monitoring.py', 'scripts/host-daily-acceptance.py',
                  'deployment/launch', 'deployment/control.py', 'deployment/recover.py', 'deployment/uninstall.py',
                  'deployment/systemd/flowgate.service', 'deployment/systemd/flowgate-guard.service',
                  'deployment/systemd/50-flowgate-guard.conf', 'docs/PROTON-LAUNCHER-REGRESSION.md',
@@ -94,6 +94,8 @@ class Preparation(unittest.TestCase):
     def test_full_bundle_can_be_reused_only_after_hash_verification(self):
         first = self.prepare()
         self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertIn('10/10 Package matched release — done', first.stdout)
+        self.assertIn('1/10 Build daemon', first.stderr)
         self.assert_manifest(self.gui, 'matched-manifest.json')
         self.assert_manifest(self.gui / 'backend', 'manifest.json')
         # The GUI launcher's Fontconfig helper ships hashed with the bundle.
@@ -121,7 +123,10 @@ class Preparation(unittest.TestCase):
 
     def test_failed_check_never_publishes_a_manifest(self):
         result = self.prepare(FAKE_GO_FAIL='1')
-        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.returncode, 93)
+        self.assertIn('6/10 Isolated race and receiver checks', result.stderr)
+        self.assertIn('FAILED', result.stderr)
+        self.assertIn('Build log:', result.stderr)
         self.assertFalse((self.backend / 'manifest.json').exists())
         self.assertFalse((self.gui / 'matched-manifest.json').exists())
     def test_invalid_build_request_is_refused_before_any_target_runs(self):

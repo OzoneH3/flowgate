@@ -17,6 +17,14 @@ git diff --cached --quiet
 revision=$(git rev-parse HEAD)
 backend="$PWD/.workspace/daily-releases/$revision"
 bundle="$PWD/.workspace/automatic-zone-releases/$revision"
+logs="$PWD/.workspace/build-logs/$revision"
+steps=10
+[ "$backend_only" -eq 0 ] || steps=8
+build_step() {
+ step=$1 label=$2 logfile=$3
+ shift 3
+ python3 scripts/lib/build_progress.py --step "$step" --total "$steps" --label "$label" --log "$logfile" -- "$@"
+}
 verify_existing() {
  python3 - "$1" "$2" "$revision" <<'PYVERIFY'
 import pathlib,sys
@@ -37,21 +45,22 @@ if [ -f "$backend/manifest.json" ]; then
  echo "Backend bundle ready: $backend"
 else
  mkdir -p "$backend"
-go build -trimpath -ldflags "-X main.sourceRevision=$revision" -o "$backend/flowgate" ./cmd/flowgate
-go build -trimpath -o "$backend/native" ./fixtures/process-rule
+build_step 1 "Build daemon" "$logs/build-daemon.log" go build -trimpath -ldflags "-X main.sourceRevision=$revision" -o "$backend/flowgate" ./cmd/flowgate
+build_step 2 "Build receiver fixtures" "$logs/build-fixtures.log" go build -trimpath -o "$backend/native" ./fixtures/process-rule
 cp "$backend/native" "$backend/native-other"
-scripts/build.sh wine-table
+build_step 3 "Build Wine observer" "$logs/build-wine.log" scripts/build.sh wine-table
 cp .workspace/windows/table-probe.exe "$backend/wine-owner-observer.exe"
 # Build collectors from this checkout, rather than accepting workspace leftovers.
-scripts/build.sh tcp-initiation
-scripts/build.sh udp
+build_step 4 "Build TCP collector" "$logs/build-tcp.log" scripts/build.sh tcp-initiation
+build_step 5 "Build UDP collector" "$logs/build-udp.log" scripts/build.sh udp
 cp .workspace/tcp-initiation-collector "$backend/tcp-initiation"
 cp .workspace/udp-collector "$backend/udp-collector"
 # Current source checks. These do not claim live-kernel collector acceptance.
 ordinary_peer_tests='^(TestDecisionLogAPIOnReadOnlyEndpoint|TestObservedCreationAuthorizationAndPersistence|TestTrafficAPIPermissionsAndProjection)$'
-scripts/lab.sh go test -race ./... -skip "$ordinary_peer_tests" > "$backend/go-race.log" 2>&1
-go test -race ./internal/daemon -run "$ordinary_peer_tests" >> "$backend/go-race.log" 2>&1
-go vet ./... > "$backend/go-vet.log" 2>&1
+build_step 6 "Isolated race and receiver checks" "$backend/go-race.log" scripts/lab.sh go test -race ./... -skip "$ordinary_peer_tests"
+build_step 7 "API permission checks" "$logs/go-peer-race.log" go test -race ./internal/daemon -run "$ordinary_peer_tests"
+cat "$logs/go-peer-race.log" >> "$backend/go-race.log"
+build_step 8 "Go static checks" "$backend/go-vet.log" go vet ./...
 cp deployment/launch deployment/control.py deployment/recover.py deployment/uninstall.py "$backend/"
 cp deployment/systemd/* "$backend/"
 cp scripts/install-monitoring.py "$backend/install-monitoring.py"
@@ -71,7 +80,8 @@ PY
 fi
 [ "$backend_only" -eq 0 ] || exit 0
 test ! -e "$bundle" || { echo "Incomplete GUI bundle exists; inspect it before rebuilding: $bundle" >&2; exit 1; }
-(cd electron && npm run build)
+build_step 9 "Build Electron UI" "$logs/build-electron.log" npm --prefix electron run build
+printf '[#########-] 10/10 Package matched release — running\n'
 mkdir -p "$bundle/electron" "$bundle/.workspace/cache" "$bundle/docs" "$bundle/evidence"
 cp -a ".workspace/daily-releases/$revision" "$bundle/backend"
 cp -a electron/dist "$bundle/electron/dist"
@@ -104,3 +114,4 @@ print('PREPARED',b)
 print('UI:',str(b/'launch-ui'),'--observer /run/flowgate-api/daemon.sock.monitor --control /run/flowgate-api/daemon.sock')
 print('Backend monitoring rollout is a separate deliberate action; no command was executed.')
 PY
+printf '[##########] 10/10 Package matched release — done\n'
