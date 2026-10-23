@@ -1735,3 +1735,6 @@ body.hide-sidebar #activityView > aside { display:none; }
 .inactive-rule-add .qs-action { height:22px; min-height:22px; padding:0 7px; display:inline-flex; align-items:center; gap:4px; }
 .inactive-rule-add-label { color:#bbb; }
 .inactive-rule-add .qs-row-links { margin-left:auto; }
+/* Release identity beside the title: GUI release + build date/time; daemon only on mismatch. */
+.build-version { margin-left: 6px; font-size: 11px; color: #8a8f98; white-space: nowrap; }
+.build-version.mismatch { color: #d9a441; }

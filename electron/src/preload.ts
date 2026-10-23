@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { Bridge, ClientState, Decision } from './protocol';
 const api: Bridge = {
   hostIdentity: () => ipcRenderer.invoke('host:identity'),
+  guiBuild: () => ipcRenderer.invoke('app:build'),
   zoneMigrationState: () => ipcRenderer.invoke('zone-migration:state'),
   zoneMigrationPreview: (target) => ipcRenderer.invoke('zone-migration:preview', target),
   zoneMigrationConfirm: (token) => ipcRenderer.invoke('zone-migration:confirm', token),

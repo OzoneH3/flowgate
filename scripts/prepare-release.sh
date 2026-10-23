@@ -105,10 +105,12 @@ exec "$here/runtime/electron" --ozone-platform=wayland "$here/electron" "$@"
 LAUNCH
 chmod 755 "$bundle/launch-ui"
 python3 - "$bundle" "$revision" <<'PY'
-import hashlib,json,pathlib,sys
+import datetime,hashlib,json,pathlib,sys
 b=pathlib.Path(sys.argv[1]);revision=sys.argv[2]
+# Packaging time of this bundle (UTC); a reused bundle keeps its manifest unchanged.
+built_at=datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat().replace('+00:00','Z')
 files={str(p.relative_to(b)):hashlib.sha256(p.read_bytes()).hexdigest()for p in sorted(b.rglob('*'))if p.is_file()}
-m=dict(source=revision,prepared_only=True,host_installed=False,host_protection_activated=False,classification_model='automatic-peer-v1',registry_version=json.loads(pathlib.Path('internal/identity/data/iana-special.json').read_text())['version'],files=files)
+m=dict(source=revision,prepared_only=True,host_installed=False,host_protection_activated=False,classification_model='automatic-peer-v1',registry_version=json.loads(pathlib.Path('internal/identity/data/iana-special.json').read_text())['version'],built_at=built_at,files=files)
 (b/'matched-manifest.json').write_text(json.dumps(m,indent=2)+'\n')
 print('PREPARED',b)
 print('UI:',str(b/'launch-ui'),'--observer /run/flowgate-api/daemon.sock.monitor --control /run/flowgate-api/daemon.sock')

@@ -1,4 +1,5 @@
 import { ruleCoversRevision, runtimeWitness } from './protocol';
+import { readGuiBuild } from './gui-build';
 import { matchesApplicationZone } from './application-zones';
 import { Essential } from './essential';
 import { Protection } from './protection';
@@ -951,6 +952,11 @@ app.whenReady().then(async () => {
       persist();
     }
     return saved.ui || {};
+  });
+  let guiBuild: import('./build-info').GuiBuild | undefined;
+  ipcMain.handle('app:build', (e) => {
+    trusted(e);
+    return (guiBuild ??= readGuiBuild(app.getAppPath()));
   });
   ipcMain.handle('host:identity', (e) => {
     trusted(e);

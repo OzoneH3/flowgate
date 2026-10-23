@@ -6,6 +6,7 @@ import {
 } from './protection-model';
 import { parseConnectionZone } from './connection-presentation';
 import { parseRuntimeChecks } from './runtime-checks';
+import { parseDaemonBuild } from './build-info';
 import {
   parseNetworkZones,
   type NetworkZones,
@@ -327,6 +328,7 @@ export interface Reply {
   protection?: ProtectionStatus;
   evaluation?: DaemonEvaluationStatus;
   runtime_checks?: import('./runtime-checks').RuntimeCheck[];
+  build?: import('./build-info').DaemonBuild;
   decision_log?: unknown;
   decision_record?: unknown;
   traffic_monitor?: TrafficMonitor;
@@ -396,6 +398,7 @@ export interface ClientState {
   };
   control: {
     runtimeChecks?: import('./runtime-checks').RuntimeCheck[];
+    daemonBuild?: import('./build-info').DaemonBuild;
     trafficMonitor?: TrafficMonitor;
     protection?: ProtectionStatus;
     evaluation?: DaemonEvaluationStatus;
@@ -440,6 +443,7 @@ export interface Decision {
 }
 export interface Bridge {
   hostIdentity(): Promise<string>;
+  guiBuild(): Promise<import('./build-info').GuiBuild>;
   zoneMigrationState(): Promise<import('./zone-migration').MigrationView>;
   zoneMigrationPreview(target: import('./zone-migration').MigrationTarget): Promise<import('./zone-migration').MigrationView>;
   zoneMigrationConfirm(token: string): Promise<import('./zone-migration').MigrationView>;
@@ -868,6 +872,7 @@ export function parseReply(raw: unknown): Reply {
     evaluation: parseEvaluation(r.evaluation),
     protection: parseProtection(r.protection),
     runtime_checks: parseRuntimeChecks(r.runtime_checks),
+    build: parseDaemonBuild(r.build),
   };
   if (r.permissions !== undefined || result.capabilities.includes('explicit-administrator-v1')) {
     const p = object(r.permissions);

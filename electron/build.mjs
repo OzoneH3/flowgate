@@ -83,6 +83,8 @@ await build({
     'src/permission-results.ts',
     'src/runtime-checks.ts',
     'src/card-result.ts',
+    'src/build-info.ts',
+    'src/gui-build.ts',
   ],
   bundle: true,
   platform: 'node',
