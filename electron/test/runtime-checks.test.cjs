@@ -1,7 +1,7 @@
 // runtime_checks (readiness.Check) parsing is fail-closed; degradation is display-only.
 const { test } = require('node:test'),
   assert = require('node:assert/strict');
-const { parseRuntimeChecks, runtimeDegradation } = require('../dist/test/runtime-checks.cjs');
+const { parseRuntimeChecks, runtimeDegradation, runtimeBadge } = require('../dist/test/runtime-checks.cjs');
 const { parseReply } = require('../dist/test/protocol.cjs');
 
 const ready = { id: 'kernel.module_tree', status: 'ready', code: 'module_tree_present', detail: 'Running kernel module tree exists' };
@@ -43,4 +43,44 @@ test('malformed or unknown data degrades without rejecting the response', () => 
     assert.equal(r.generation, 'g');
     assert.ok(runtimeDegradation(r.runtime_checks));
   }
+});
+
+const tree = {
+  id: 'kernel.module_tree',
+  status: 'not_checked',
+  code: 'module_tree_unavailable',
+  detail: 'Running kernel 7.3.0-3-cachyos has no accessible module tree; unavailable facilities cannot be loaded from this tree',
+  next: 'If the kernel was upgraded, reboot into the installed kernel, then repeat doctor',
+};
+
+test('short label keeps dotted versions, stops at a clause boundary and is bounded', () => {
+  assert.equal(runtimeDegradation(parseRuntimeChecks([tree])).text, 'Degraded: Running kernel 7.3.0-3-cachyos has no accessible module tree');
+  assert.equal(runtimeDegradation(parseRuntimeChecks([{ ...tree, detail: 'Probe v1.2 failed. Retry later' }])).text, 'Degraded: Probe v1.2 failed');
+  const long = runtimeDegradation(parseRuntimeChecks([{ ...tree, detail: 'x'.repeat(300) }])).text;
+  assert.equal(long, 'Degraded: ' + 'x'.repeat(59) + '…');
+  assert.equal(runtimeDegradation(parseRuntimeChecks([{ ...tree, detail: ': nothing first' }])).text, 'Degraded: kernel.module_tree');
+});
+
+test('toolbar badge: ready -> degraded -> ready; hidden when disconnected or unknown', () => {
+  assert.equal(runtimeBadge(true, parseRuntimeChecks([ready])), undefined);
+  const b = runtimeBadge(true, parseRuntimeChecks([tree, ready]));
+  assert.equal(b.text, 'Degraded: Running kernel 7.3.0-3-cachyos has no accessible module tree');
+  // Full actionable reason stays in the tooltip, labelled as advisory and separate from protection.
+  assert.equal(b.title, `Runtime health (advisory; protection state is shown separately)\nkernel.module_tree: not_checked · ${tree.detail} · Next: ${tree.next}`);
+  assert.equal(runtimeBadge(true, parseRuntimeChecks([{ ...tree, status: 'ready' }])), undefined);
+  assert.equal(runtimeBadge(false, parseRuntimeChecks([tree])), undefined, 'disconnected: no stale advisory');
+  assert.equal(runtimeBadge(true, undefined), undefined, 'daemon without runtime checks');
+  assert.match(runtimeBadge(true, parseRuntimeChecks('garbage')).text, /^Degraded: Runtime health unavailable/);
+});
+
+test('badge is display-only and sits beside, not inside, the protection entry', () => {
+  const fs = require('node:fs'), path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '../src/renderer.ts'), 'utf8');
+  const block = src.slice(src.indexOf("const health = document.getElementById('runtimeHealth');"), src.indexOf('function setupMainMenus'));
+  assert.ok(block.length > 0 && !/disabled|onclick|protectionStart|canStart/.test(block));
+  assert.match(src, /status\.after\(health\);/);
+  const css = fs.readFileSync(path.join(__dirname, '../src/style.css'), 'utf8');
+  // Keeps its "Degraded" prefix readable; the protection entry never shrinks for it, other items yield.
+  assert.match(css, /\.toolbar \.runtime-health \{ flex: 0 1 auto; min-width: 7em;/);
+  assert.match(css, /\.toolbar:has\(> \.runtime-health:not\(\[hidden\]\)\) \.firewall-state \{ flex-shrink: 0; \}/);
 });

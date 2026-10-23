@@ -82,7 +82,7 @@ import { openInactiveRules } from './inactive-rules';
 import { TrafficGraph } from './graph';
 import { setupWorkflows, updateWorkflows, openRule, resumeRuleEditor } from './workflows';
 import { setupDecisionLog, showDecisionLog, updateDecisionLog } from './decision-log-view';
-import { runtimeDegradation } from './runtime-checks';
+import { runtimeBadge, runtimeDegradation } from './runtime-checks';
 import { headerVersion, type GuiBuild } from './build-info';
 import type { Attempt, ClientState, ViewEvent, Scope } from './protocol';
 import { recordDecisionResult, showsLocalResult, type CardResult } from './card-result';
@@ -1211,6 +1211,13 @@ function updateFirewallStatus() {
   status.title =
     document.getElementById('controlStatus')?.title ||
     'Enforcement state unavailable. Monitoring never implies protection.';
+  const health = document.getElementById('runtimeHealth');
+  if (health) {
+    const badge = runtimeBadge(!!state?.control.connected, state?.control.runtimeChecks);
+    health.hidden = !badge;
+    health.textContent = badge?.text || '';
+    health.title = badge?.title || '';
+  }
 }
 function setupMainMenus(windowMenu: HTMLElement) {
   const toolbar = document.querySelector('.toolbar')!;
@@ -1276,6 +1283,12 @@ function setupMainMenus(windowMenu: HTMLElement) {
     (control as HTMLDetailsElement).open = true;
   };
   $('toolbarUnits').after(status);
+  // Advisory runtime health beside, not inside, the protection entry (its text is ellipsized).
+  const health = element('span', '', 'runtime-health');
+  health.id = 'runtimeHealth';
+  health.hidden = true;
+  health.setAttribute('role', 'status');
+  status.after(health);
   new MutationObserver(updateFirewallStatus).observe(controlTitle, {
     childList: true,
     characterData: true,

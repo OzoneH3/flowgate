@@ -45,13 +45,27 @@ export function parseRuntimeChecks(raw: unknown): RuntimeCheck[] | undefined {
   return out;
 }
 
+const LABEL_MAX = 60;
+// First clause of a detail: a dot inside a version ("7.3.0-3") is not a boundary.
+function shortReason(c: RuntimeCheck) {
+  const cut = c.detail.search(/[;:.](\s|$)/);
+  const s = (cut >= 0 ? c.detail.slice(0, cut) : c.detail).trim() || c.id;
+  return s.length > LABEL_MAX ? s.slice(0, LABEL_MAX - 1).trimEnd() + '…' : s;
+}
+
 /** Degraded (not ready) checks as a short status suffix plus full detail lines. */
 export function runtimeDegradation(checks: RuntimeCheck[] | undefined): { text: string; lines: string[] } | undefined {
   const degraded = (checks || []).filter((c) => c.status !== 'ready');
   if (!degraded.length) return undefined;
-  const first = degraded[0].detail.split(/[.:]/)[0].trim() || degraded[0].id;
+  const first = shortReason(degraded[0]);
   return {
     text: `Degraded: ${first}${degraded.length > 1 ? ` (+${degraded.length - 1} more)` : ''}`,
     lines: degraded.map((c) => `${c.id}: ${c.status} · ${c.detail}${c.next ? ' · Next: ' + c.next : ''}`),
   };
+}
+
+/** Toolbar badge, separate from protection state: shown only for a connected controller's degraded checks. */
+export function runtimeBadge(connected: boolean, checks: RuntimeCheck[] | undefined): { text: string; title: string } | undefined {
+  const d = connected ? runtimeDegradation(checks) : undefined;
+  return d && { text: d.text, title: ['Runtime health (advisory; protection state is shown separately)', ...d.lines].join('\n') };
 }
