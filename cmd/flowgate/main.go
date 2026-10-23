@@ -174,6 +174,8 @@ func main() {
 }
 func serve() error {
 	fs := flag.NewFlagSet("serve-lab", flag.ExitOnError)
+	var localZones zonePrefixes
+	fs.Var(&localZones, "zone-local", "repeatable local policy prefix for isolated acceptance")
 	socket := fs.String("socket", ".workspace/run/control.sock", "private socket path")
 	parent := fs.String("parent-netns", "", "original namespace identity (required)")
 	direction := fs.String("direction", "incoming", "incoming/outgoing")
@@ -208,6 +210,10 @@ func serve() error {
 	e := daemon.New(*timeout)
 	defer e.CloseProcessTargets()
 	e.Mode = "isolated-lab"
+	e.Zones, err = configuredZones(localZones, nil)
+	if err != nil {
+		return err
+	}
 	if *policyDB != "" {
 		if _, err := identity.WorkspaceObserverScratch(filepath.Dir(*policyDB)); err != nil {
 			return err

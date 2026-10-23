@@ -7,6 +7,7 @@ import (
 	"flowgate/internal/essential"
 	"flowgate/internal/identity"
 	"flowgate/internal/policy"
+	"flowgate/internal/readiness"
 	"flowgate/internal/udpaccount"
 	"fmt"
 	"strings"
@@ -68,6 +69,8 @@ type TrafficManager interface {
 	Stop(...string) (udpaccount.Status, error)
 }
 type Engine struct {
+	// RuntimeChecks returns a cached read-only capability snapshot, independently of enforcement.
+	RuntimeChecks     func() []readiness.Check
 	Essential         *essential.Manager
 	essentialPreviews map[string]*essentialPreview
 	Build             *BuildIdentity

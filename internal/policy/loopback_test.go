@@ -104,3 +104,18 @@ func TestLocalhostDefaultAndExplicitScope(t *testing.T) {
 		}
 	}
 }
+
+func TestAssignedAddressLocalScopes(t *testing.T) {
+	f := loopbackFixture(t)
+	f.Remote = netip.MustParseAddrPort("192.0.2.10:5000")
+	for _, tc := range []struct {
+		address string
+		want    bool
+	}{
+		{"192.0.2.10", true}, {"192.0.2.10/32", true}, {"192.0.2.0/24", false}, {"0.0.0.0/0", false}, {"192.0.2.11", false}, {"", false},
+	} {
+		if got := (Filter{RemoteAddress: tc.address}).targetsLocalFlow(f); got != tc.want {
+			t.Errorf("%s: %v", tc.address, got)
+		}
+	}
+}

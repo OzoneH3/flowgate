@@ -144,6 +144,14 @@ func serveCommand(args []string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 	if *wineHelper != "" {
+		health := readiness.NewRuntimeMonitor()
+		e.RuntimeChecks = health.Snapshot
+		for _, check := range health.Snapshot() {
+			if check.Status != readiness.Ready {
+				fmt.Fprintln(os.Stderr, "WARNING:", check.Detail, check.Next)
+			}
+		}
+		go health.Run(ctx)
 		scratch := filepath.Join(filepath.Dir(*socket), "wine-observer")
 		if err = os.MkdirAll(scratch, 0700); err != nil {
 			return err

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -33,6 +34,8 @@ type observedWine struct {
 	released bool
 }
 type WineObservers struct {
+	admissionDemand atomic.Int64 // waiting or running censuses; presentation yields to these
+
 	mu       sync.Mutex // guards sessions/closed/pins only; never held across setup or a census
 	options  WineObserverOptions
 	sessions map[string]*observedWine
@@ -215,6 +218,8 @@ func (m *WineObservers) resolve(f Flow, wait bool) (Attribution, bool) {
 // is taken first; m.mu only guards lookup and pins and is never held while a
 // session is set up or a census runs.
 func (m *WineObservers) sessionResolve(f Flow, a Attribution, broker *Process, bin string, wait bool) (Attribution, bool) {
+	m.admissionDemand.Add(1)
+	defer m.admissionDemand.Add(-1)
 	fail := func(reason string) Attribution {
 		a.Application = nil
 		a.Association = nil

@@ -3,10 +3,13 @@
 from lablib import *
 
 try:
+    # Assigned host addresses exercise local routing without requiring veth.
+    subprocess.run(['ip','addr','add','192.0.2.10/32','dev','lo'],check=True)
+    subprocess.run(['ip','-6','addr','add','2001:db8::10/128','dev','lo','nodad'],check=True)
     for direction in ('incoming','outgoing'):
         for action in ('default','block','ask'):
             rules=[]
-            for i,address in enumerate(('127.0.0.0/8','::1/128')):
+            for i,address in enumerate(('127.0.0.0/8','::1/128','192.0.2.10/32','2001:db8::10/128')):
                 rules.append({'schema':4,'id':f'local-{i}','action':'block' if action=='default' else action,
                     'filter':{'all_programs':True,'all_uids':True,'uid':0,'network_zone':'local',
                     'direction':direction,'protocol':'*',**({} if action=='default' else {'remote_address':address})}})
@@ -16,15 +19,15 @@ try:
             logpath=RUN/f'localhost-{direction}-{action}.log'
             with logpath.open('w') as log:
                 d=subprocess.Popen([BIN,'serve-lab','--parent-netns',os.environ['FLOWGATE_PARENT_NETNS'],
-                    '--socket',SOCK,'--direction',direction,'--rules',str(rp)],stdout=log,stderr=log)
+                    '--socket',SOCK,'--direction',direction,'--rules',str(rp), '--zone-local','192.0.2.10/32','--zone-local','2001:db8::10/128'],stdout=log,stderr=log)
             children.append(d)
             wait(lambda:logpath.exists() and 'READY' in logpath.read_text())
-            for j,(udp,v6) in enumerate(((False,False),(True,False),(False,True),(True,True))):
+            for j,(udp,v6,address) in enumerate(( (u,v,a) for a,v in [('127.0.0.1',False),('::1',True),('192.0.2.10',False),('2001:db8::10',True)] for u in (False,True))):
                 port=24500+j
-                srv,path=server(port,udp,v6)
+                srv,path=server(port,udp,v6,address)
                 c=socket.socket(socket.AF_INET6 if v6 else socket.AF_INET,socket.SOCK_DGRAM if udp else socket.SOCK_STREAM)
                 c.setblocking(False)
-                try:c.connect(('::1' if v6 else '127.0.0.1',port))
+                try:c.connect((address,port))
                 except BlockingIOError:pass
                 if udp:c.send(b'localhost-default')
                 if action=='default':
@@ -46,7 +49,7 @@ try:
                         wait(lambda:delivered(path))
                 c.close();srv.terminate();srv.wait()
             d.terminate();d.wait(timeout=3)
-            print('PASS localhost',direction,action,'TCP/UDP IPv4/IPv6',flush=True)
+            print('PASS localhost',direction,action,'TCP/UDP IPv4/IPv6 loopback and assigned host addresses',flush=True)
 finally:
     for p in children:
         if p.poll() is None:p.terminate()

@@ -26,13 +26,30 @@ func (f Filter) TargetsLoopback() bool {
 	return (p.Addr().Is4() && p.Bits() >= 8 && p.Addr().IsLoopback()) || (p.Addr().Is6() && p.Bits() == 128 && p.Addr().IsLoopback())
 }
 
+// Exact host scopes also participate when the kernel proves a same-host flow
+// using assigned addresses. A LAN-wide prefix must not become a localhost rule.
+func (f Filter) targetsLocalFlow(flow identity.Flow) bool {
+	if f.TargetsLoopback() {
+		return true
+	}
+	if f.Remote != "" {
+		a, err := netip.ParseAddrPort(f.Remote)
+		return err == nil && a == flow.Remote
+	}
+	if a, err := netip.ParseAddr(f.RemoteAddress); err == nil {
+		return a.Unmap() == flow.Remote.Addr().Unmap()
+	}
+	p, err := netip.ParsePrefix(f.RemoteAddress)
+	return err == nil && p.Bits() == p.Addr().BitLen() && p.Addr().Unmap() == flow.Remote.Addr().Unmap()
+}
+
 // LoopbackRules is conservative about identity: possible explicit targets must
 // still undergo ordinary ownership checks. No application permission is inferred.
 func LoopbackRules(rules []Rule, f identity.Flow, now time.Time) []Rule {
 	out := []Rule{}
 	for _, r := range CurrentProgramRules(rules, now) {
 		x := r.Filter
-		if r.Disabled || (!r.Expires.IsZero() && !now.Before(r.Expires)) || !x.TargetsLoopback() || x.Direction != f.Direction || !ProtocolMatches(x.Protocol, f.Protocol) {
+		if r.Disabled || (!r.Expires.IsZero() && !now.Before(r.Expires)) || !x.targetsLocalFlow(f) || x.Direction != f.Direction || !ProtocolMatches(x.Protocol, f.Protocol) {
 			continue
 		}
 		if x.Remote != "" && x.Remote != f.Remote.String() {

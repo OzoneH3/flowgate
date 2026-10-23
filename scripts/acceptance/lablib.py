@@ -29,8 +29,8 @@ while True:
  if b:print("RECEIVED",flush=True)
 '''
 children=[]
-def server(port,udp=False,v6=False):
-    path=RUN/f'receiver-{port}.log';f=path.open('w');p=subprocess.Popen([sys.executable,'-c',servercode,'10' if v6 else '2','2' if udp else '1','::1' if v6 else '127.0.0.1',str(port)],stdout=f,stderr=f);children.append(p);wait(lambda:path.exists() and 'READY' in path.read_text());return p,path
+def server(port,udp=False,v6=False,address=None):
+    path=RUN/f'receiver-{port}.log';f=path.open('w');p=subprocess.Popen([sys.executable,'-c',servercode,'10' if v6 else '2','2' if udp else '1',address or ('::1' if v6 else '127.0.0.1'),str(port)],stdout=f,stderr=f);children.append(p);wait(lambda:path.exists() and 'READY' in path.read_text());return p,path
 def client(port,udp=False,v6=False):
     code='import socket,sys;s=socket.socket(int(sys.argv[1]),int(sys.argv[2]));s.settimeout(4);s.connect((sys.argv[3],int(sys.argv[4])));s.send(b"test")'
     p=subprocess.Popen([sys.executable,'-c',code,'10' if v6 else '2','2' if udp else '1','::1' if v6 else '127.0.0.1',str(port)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);children.append(p);return p

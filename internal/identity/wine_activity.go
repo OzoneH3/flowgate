@@ -25,7 +25,7 @@ func activityTable(s Socket) activityTableKey {
 // spending the refresh budget on the same first eight sockets. No association
 // survives between snapshots. Admission still uses its independent census.
 func (m *WineObservers) AnnotateActivity(s *ActivitySnapshot) {
-	if !s.Complete {
+	if !s.Complete || m.admissionDemand.Load() != 0 {
 		return
 	}
 	groups := map[string][]int{}
@@ -52,7 +52,7 @@ func (m *WineObservers) AnnotateActivity(s *ActivitySnapshot) {
 	}
 	start := time.Now()
 	for _, key := range keys {
-		if time.Since(start) > time.Second {
+		if time.Since(start) > time.Second || m.admissionDemand.Load() != 0 {
 			break
 		}
 		indices := groups[key]
@@ -66,11 +66,10 @@ func (m *WineObservers) AnnotateActivity(s *ActivitySnapshot) {
 			row := s.Rows[indices[0]]
 			m.TryResolve(Flow{NetNS: row.Socket.NetNS, Protocol: row.Socket.Protocol, Direction: "outgoing", Local: row.Socket.Local, Remote: row.Socket.Remote})
 		}
-		select {
-		case m.census <- struct{}{}:
-		default:
+		if !m.tryActivityCensus() {
 			continue
 		}
+
 		m.mu.Lock()
 		record = m.sessions[sessionKey]
 		if record == nil || record.closed || m.closed {
@@ -216,4 +215,22 @@ func (w *WineTable) annotateCensus(s, fresh *ActivitySnapshot, sockets []Socket,
 		}
 	}
 	return result
+}
+
+// tryActivityCensus never waits and rechecks demand after taking a slot. A new
+// admission arriving after this check may wait for this one in-flight batch.
+func (m *WineObservers) tryActivityCensus() bool {
+	if m.admissionDemand.Load() != 0 {
+		return false
+	}
+	select {
+	case m.census <- struct{}{}:
+	default:
+		return false
+	}
+	if m.admissionDemand.Load() != 0 {
+		<-m.census
+		return false
+	}
+	return true
 }

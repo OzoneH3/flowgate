@@ -90,6 +90,7 @@ func Collect(ctx context.Context, o Options) Report {
 		visibility.Detail += "; partial visibility (unknown owners are not guessed)"
 	}
 	add(visibility)
+	r.Checks = append(r.Checks, readiness.Runtime()...)
 	r.Checks = append(r.Checks, readiness.FirewallFor(ctx, readiness.Default(), o.Profile, o.Administrator)...)
 	modules, _ := readiness.Read("/proc/modules")
 	for _, m := range []string{"nf_tables", "nf_conntrack", "nfnetlink_queue"} {

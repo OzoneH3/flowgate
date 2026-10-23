@@ -43,6 +43,14 @@ func socketFDs(pid int) (map[uint32]bool, error) {
 	}
 	return out, nil
 }
+
+// ProbeUnixPeers tests the actual kernel facility used for Wine broker proof.
+// Module presence alone cannot establish availability (the facility may be built in).
+func ProbeUnixPeers() error {
+	_, err := unixPeers()
+	return err
+}
+
 func unixPeers() (map[uint32]uint32, error) {
 	c, err := netlink.Dial(unix.NETLINK_SOCK_DIAG, nil)
 	if err != nil {

@@ -392,11 +392,12 @@ versions outside its safe-integer range rather than rounding.
 
 ### Localhost policy default
 
-TCP/UDP between loopback addresses is allowed by default when the packet's
+TCP/UDP between loopback or currently assigned host addresses is allowed by default when the packet's
 interface is a kernel loopback device in the daemon's network namespace.
-This covers IPv4 127.0.0.0/8 and IPv6 ::1, including mapped IPv4 addresses.
-LAN, link-local, the machine's non-loopback addresses, and forwarded traffic
-are not exempt. Interface names and application/launcher names are not evidence.
+This covers IPv4 127.0.0.0/8 and IPv6 ::1, including mapped IPv4 addresses,
+and exact addresses assigned in this network namespace. Both endpoints must
+qualify; unspecified, multicast and scoped addresses do not. LAN peers and
+forwarded traffic are not exempt. Interface names and application/launcher names are not evidence.
 
 This also allows an Internet-blocked application to contact a local proxy or
 relay. The proxy's own outbound connections remain subject to its own policy;
@@ -405,7 +406,9 @@ localhost access does not inherit the proxy's permissions.
 Broad application, process, machine and Local Network zone rules do not block
 or prompt for localhost. To filter localhost explicitly, scope a rule's remote
 address to a loopback IP/subnet (IPv4 /8 or narrower, IPv6 ::1/128), or use a
-legacy exact loopback remote endpoint. Those rules keep ordinary executable,
+legacy exact loopback remote endpoint. For assigned host addresses, an exact
+remote IP, /32 or /128 host prefix, or exact endpoint participates too; a LAN
+subnet does not become an explicit localhost scope. Those rules keep ordinary executable,
 UID, prefix, process, direction, protocol, port, expiry and precedence checks.
 A port-only scope or a subnet that includes non-loopback addresses is not an
 explicit localhost target. Existing rules with an explicit loopback address
@@ -458,3 +461,23 @@ Wine owner-table attribution can corroborate a launcher handoff whose command li
 Direct Linux sockets opened by an otherwise unresolved Wine client (including native-library DNS) can use the schema-3 process-image census. Two complete runtime Windows PID/Linux PID/creation-time/image snapshots bookend fresh kernel socket/FD-owner verification. The runtime Linux PID must equal the actual socket owner in the same PID namespace, and the private read-only runtime list must agree with public process enumeration. The sole Linux owner must map the exact selected PE header and section file, and have a verified Unix peer of the pinned same-user, same-prefix Wine server. Missing, changing or multiple matching process images refuse attribution. Earlier helpers lack this capability and remain explicit; command lines and launcher names do not donate permissions.
 
 For a full IPv6 socket with a nonzero inode, concrete IPv4-mapped local and remote endpoints in kernel inet_diag also prove dual-stack delivery when SKV6ONLY is omitted. Wildcard endpoints and partial/request socket rows do not provide that proof. Explicit v6-only diagnostics continue to reject IPv4 candidates.
+
+### Optional runtime capability health
+
+`doctor` probes Unix socket diagnostics, the facility used to verify Wine broker
+peers, and checks for the running kernel's module tree. A missing tree is not
+proof that a built-in capability is absent: the syscall result is reported
+separately. With Wine enabled the daemon publishes `runtime_checks`, refreshed
+every 30 seconds, and logs initial unavailable checks. Failure leaves the control
+API and native protection available; Wine attribution still requires its normal
+proof and fails closed. After a kernel upgrade that removed the running kernel's
+modules, reboot into the installed kernel and repeat the probe.
+
+Activity annotations skip new batches while Wine admission censuses are waiting
+or running. An already-started batch is not preempted and still performs all its
+bookend checks; this is reduced contention, not a latency guarantee.
+
+The crash/startup guard deliberately remains fail-closed for new localhost
+traffic: it cannot evaluate executable-specific local Ask/Block rules without
+attribution. A blanket loopback guard exemption would bypass those explicit
+rules. Default localhost delivery is a property of the active daemon path.
