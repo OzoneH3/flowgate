@@ -42,6 +42,7 @@ type Request struct {
 	EventIDs            []string     `json:"event_ids,omitempty"`
 	Generation          string       `json:"generation,omitempty"`
 	EventID             string       `json:"event_id,omitempty"`
+	BasisRuleID         string       `json:"basis_rule_id,omitempty"`
 	ExpectedVersion     *uint64      `json:"expected_version,omitempty"`
 	Rule                *policy.Rule `json:"rule,omitempty"`
 	Version             int          `json:"version"`
@@ -200,7 +201,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						}
 					}
 					if !readonly && e.Mode != "host-monitor" {
-						r.Capabilities = append(r.Capabilities, "explicit-root-sharing-v1", PolicyExplanationCapability, ObservedRuleCapability, ProcessRuleCapability, ObservedAnyProtocolCapability, DecisionZoneCapability, ApplicationPolicyCapability, DecisionRememberFieldsCapability, StoredAskCapability, RequestApplicationRuleCapability, ForAWhileCapability, ForAWhileDurationsCapability, QueueReconcileCapability, RequestForAWhileCapability, LocalPairCapability, RequestSandboxIdentityCapability)
+						r.Capabilities = append(r.Capabilities, "explicit-root-sharing-v1", PolicyExplanationCapability, ObservedRuleCapability, ProcessRuleCapability, ObservedAnyProtocolCapability, DecisionZoneCapability, ApplicationPolicyCapability, DecisionRememberFieldsCapability, StoredAskCapability, RequestApplicationRuleCapability, ForAWhileCapability, ForAWhileDurationsCapability, QueueReconcileCapability, RequestForAWhileCapability, LocalPairCapability, RequestSandboxIdentityCapability, RuleFromBasisCapability)
 						r.ForAWhileDurations = ForAWhileDurations
 					}
 					if e.Evaluation != nil {
@@ -688,7 +689,14 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 								r.Error = "rule document required"
 								r.ErrorCode = "invalid_request"
 							} else {
-								rule, preview, err := e.EditRule(q.ID, q.EventID, q.ExpectedVersion, *q.Rule, cred.Uid, admin, q.Operation == "rule-save")
+								var rule policy.Rule
+								var preview string
+								var err error
+								if q.BasisRuleID != "" && q.ID == "" && q.EventID == "" {
+									rule, preview, err = e.CreateRuleFromBasis(q.BasisRuleID, *q.Rule, cred.Uid, admin, q.Operation == "rule-save")
+								} else {
+									rule, preview, err = e.EditRule(q.ID, q.EventID, q.ExpectedVersion, *q.Rule, cred.Uid, admin, q.Operation == "rule-save")
+								}
 								if err != nil {
 									r.Error = err.Error()
 									var typed *RuleMutationError

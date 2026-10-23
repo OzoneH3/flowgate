@@ -17,6 +17,9 @@ export interface InactiveRulesOptions {
   canDelete: boolean;
   askWritable: boolean;
   message: (text: string) => void;
+  // rule-from-basis-v1: any stored rule of this application identity; a new
+  // rule reuses exactly its identity (application, revision, UID).
+  basisRuleId?: string;
 }
 
 type Action = 'allow' | 'block' | 'ask';
@@ -69,6 +72,33 @@ export async function changeStoredRule(rule: Rule, action: Action, disabled: boo
   throw Error(result.message || 'Not saved.');
 }
 
+/** Reviewed creation of a new application rule for the basis rule's identity. */
+export async function addStoredRule(basisId: string, direction: 'incoming' | 'outgoing', action: Action): Promise<string> {
+  const draft = await window.flowgate.ruleDraft({ basis: { rule: basisId, direction } });
+  const preview = await window.flowgate.rulePreview({
+    token: draft.token,
+    action,
+    protocol: '*',
+    remote_address: '*',
+    local_port: 0,
+    remote_port: 0,
+    priority: draft.rule.priority,
+    disabled: false,
+    expiry: 'permanent',
+  });
+  const v = preview.verifiedRule;
+  const f = draft.rule.filter;
+  if (
+    !v || v.action !== action || v.disabled || v.filter.direction !== direction || v.filter.process ||
+    v.filter.application !== f.application || v.filter.revision !== f.revision || v.filter.uid !== f.uid
+  )
+    throw Error('The backend reviewed a different rule than requested; nothing was saved.');
+  const result = await window.flowgate.ruleSave(preview.receipt);
+  if (result.phase === 'acknowledged') return `${word(action)} rule added (${direction === 'incoming' ? 'In' : 'Out'}, TCP + UDP, any endpoint).`;
+  if (result.phase === 'unknown') return 'Save result unknown; check Rules before adding it again.';
+  throw Error(result.message || 'Not saved.');
+}
+
 let open: { root: HTMLElement; close: () => void } | undefined;
 
 export function closeInactiveRules() {
@@ -102,7 +132,7 @@ export function openInactiveRules(anchor: HTMLElement, o: InactiveRulesOptions) 
       root.classList.remove('busy');
     }
   };
-  if (!o.rules.length) root.append(el('p', 'No rule in this direction. New rules need the running program.', 'inactive-rules-empty'));
+  if (!o.rules.length) root.append(el('p', 'No rule in this direction yet.', 'inactive-rules-empty'));
   for (const rule of o.rules) {
     const line = el('div', '', 'qs-row inactive-rule');
     const state = ruleState(rule, o.now);
@@ -150,6 +180,33 @@ export function openInactiveRules(anchor: HTMLElement, o: InactiveRulesOptions) 
     const wrap = el('div', '', 'inactive-rule-wrap');
     wrap.append(line, scope);
     root.append(wrap);
+  }
+  if (o.basisRuleId) {
+    // Add a new rule for exactly this program's identity (same file version and user).
+    const add = el('div', '', 'qs-row inactive-rule-add');
+    add.append(el('span', 'Add a rule:', 'inactive-rule-add-label'));
+    const actions: Action[] = o.askWritable ? ['ask', 'allow', 'block'] : ['allow', 'block'];
+    for (const action of actions) {
+      const b = el('button', '', `qs-action qs-${action}`);
+      b.type = 'button';
+      b.append(el('span', glyph(action), 'blocker-glyph tone-' + action), ' ' + word(action));
+      b.disabled = !o.canManage;
+      b.title = `Add a ${word(action)} rule for ${o.direction === 'incoming' ? 'incoming' : 'outgoing'} TCP + UDP to any endpoint, for this program only.`;
+      b.onclick = () => void run(() => addStoredRule(o.basisRuleId!, o.direction, action));
+      add.append(b);
+    }
+    const advanced = el('button', 'Advanced…', 'link-button');
+    advanced.type = 'button';
+    advanced.disabled = !o.canManage;
+    advanced.title = 'New rule with protocol, address, port and lifetime';
+    advanced.onclick = () => {
+      close();
+      void openRule({ basis: { rule: o.basisRuleId!, direction: o.direction } }, { activity: true });
+    };
+    const links = el('span', '', 'qs-row-links');
+    links.append(advanced);
+    add.append(links);
+    root.append(add);
   }
   root.append(status);
   document.body.append(root);

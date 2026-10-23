@@ -14,7 +14,7 @@ import {
 } from './protocol';
 // Draft identity, generation and version remain in main, never trusted from renderer.
 export class Rules {
-  private drafts = new Map<string, RuleDraft & { event?: string; id?: string }>();
+  private drafts = new Map<string, RuleDraft & { event?: string; id?: string; basis?: string }>();
   private receipts = new Map<
     string,
     { draft: string; request: object; rule: Rule; generation: string; id?: string }
@@ -44,6 +44,7 @@ export class Rules {
       return this.zones.draft((source as { zone: unknown }).zone);
     if (Object.keys(source).join(',') === 'observed')
       return this.observed.draft((source as { observed: unknown }).observed);
+    if (Object.keys(source).join(',') === 'basis') return this.basisDraft((source as { basis: unknown }).basis);
     const s = source as { id?: string; event?: string };
     if (
       Object.keys(s).length !== 1 ||
@@ -102,6 +103,46 @@ export class Rules {
     this.drafts.set(token, draft);
     return draft;
   }
+  // rule-from-basis-v1: a new, separate rule for the exact identity (application,
+  // revision, UID) of an existing stored rule — e.g. a program that is not running.
+  private async basisDraft(raw: unknown): Promise<RuleDraft> {
+    const b = (raw && typeof raw === 'object' ? raw : {}) as { rule?: unknown; direction?: unknown };
+    if (
+      Object.keys(b).sort().join(',') !== 'direction,rule' ||
+      typeof b.rule !== 'string' || !b.rule || b.rule.length > 256 ||
+      (b.direction !== 'incoming' && b.direction !== 'outgoing')
+    )
+      throw Error('Invalid source');
+    await this.backend.pollControl();
+    const c = this.authority();
+    if (!c.capabilities?.includes(RULE_FROM_BASIS_CAPABILITY)) throw Error('Backend update required to add rules for a program that is not running');
+    const basis = c.rules?.find((r) => r.id === b.rule);
+    if (!basis) throw Error('Rule no longer exists');
+    const f = basis.filter;
+    if (basis.preset || basis.schema === 5 || f.process || f.all_programs || f.all_uids || !f.application || !f.revision)
+      throw Error('This rule cannot be the basis of a new application rule');
+    const rule: Rule = {
+      version: 0,
+      id: '',
+      created: '0001-01-01T00:00:00Z',
+      schema: 2,
+      executable: basis.executable,
+      filter: { application: f.application, revision: f.revision, uid: f.uid, direction: b.direction, protocol: '*', remote_address: '*' } as Rule['filter'],
+      action: 'allow',
+      disabled: false,
+      priority: 0,
+      expires: '0001-01-01T00:00:00Z',
+    };
+    const token = randomUUID(),
+      draft = { token, generation: c.generation, rule, source: 'Saved rule identity', basis: basis.id };
+    if (this.drafts.size >= 64) {
+      const old = this.drafts.keys().next().value!;
+      this.drafts.delete(old);
+      for (const [key, p] of this.receipts) if (p.draft === old) this.receipts.delete(key);
+    }
+    this.drafts.set(token, draft);
+    return draft;
+  }
   async preview(value: unknown) {
     if (this.zones.ownsDraft((value as { token?: unknown })?.token))
       return this.zones.preview(value);
@@ -152,6 +193,7 @@ export class Rules {
       ...([4, 6].includes(rule.schema) ? { zone_revision: c.networkZones?.revision } : {}),
       id: d.id || '',
       event_id: d.event || '',
+      ...(d.basis ? { basis_rule_id: d.basis } : {}),
       expected_version: d.id ? d.rule.version : undefined,
       rule,
     };
@@ -208,7 +250,9 @@ export class Rules {
       if (
         !r.saved_rule ||
         r.generation !== p.generation ||
-        r.saved_rule.id !== p.rule.id ||
+        // Existing rule: same id. New rule: the daemon assigns the id at save, so the
+        // saved content must equal the reviewed content instead.
+        (p.id ? r.saved_rule.id !== p.rule.id : !sameNewRule(r.saved_rule, p.rule)) ||
         r.saved_rule.schema !== p.rule.schema ||
         r.saved_rule.filter.zone_model !== p.rule.filter.zone_model ||
         r.saved_rule.filter.network_zone !== p.rule.filter.network_zone ||
@@ -298,4 +342,15 @@ export class Rules {
       await this.backend.pollControl();
     }
   }
+}
+
+export const RULE_FROM_BASIS_CAPABILITY = 'rule-from-basis-v1';
+/** A newly created rule as saved equals the reviewed one (ids/creation time differ). */
+export function sameNewRule(saved: Rule, reviewed: Rule) {
+  const norm = (r: Rule) =>
+    JSON.stringify([r.action, r.disabled, r.priority, r.executable, r.schema, {
+      ...r.filter, remote: r.filter.remote || '', remote_address: r.filter.remote_address || '*',
+      local_port: r.filter.local_port || 0, remote_port: r.filter.remote_port || 0,
+    }]);
+  return norm(saved) === norm(reviewed);
 }

@@ -252,3 +252,18 @@ test('follows_updates is daemon-reported, literal true only, never on process ru
   const otherUser = { ...proc('k', 'v2'), process: { ...live('p', 1, app('k', 'v2', '/opt/tool/tool')), uid: 1001 } };
   assert.deepEqual(ids(otherUser, [following]), [], 'never another user');
 });
+
+test('adding a rule for a not-running program: same identity only; new-rule save check', () => {
+  const { sameNewRule } = require('../dist/test/rules.cjs');
+  const reviewed = { id: 'user:a', version: 1, created: '2026-10-23T10:00:00Z', schema: 2, action: 'block', disabled: false, priority: 100, executable: '/usr/bin/curl', expires: '0001-01-01T00:00:00Z',
+    filter: { application: 'k', revision: 'r', uid: 1000, direction: 'incoming', protocol: '*', remote_address: '*' } };
+  // The daemon assigns another id/creation time at save: still the same rule.
+  assert.equal(sameNewRule({ ...reviewed, id: 'user:b', created: '2026-10-23T10:00:01Z' }, reviewed), true);
+  assert.equal(sameNewRule({ ...reviewed, action: 'allow' }, reviewed), false);
+  assert.equal(sameNewRule({ ...reviewed, filter: { ...reviewed.filter, revision: 'r2' } }, reviewed), false);
+  assert.equal(sameNewRule({ ...reviewed, filter: { ...reviewed.filter, uid: 0 } }, reviewed), false);
+  const fs = require('node:fs'), path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '../src/inactive-rules.ts'), 'utf8');
+  assert.match(src, /ruleDraft\(\{ basis: \{ rule: basisId, direction \} \}\)/);
+  assert.match(src, /v\.filter\.application !== f\.application \|\| v\.filter\.revision !== f\.revision \|\| v\.filter\.uid !== f\.uid/);
+});

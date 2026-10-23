@@ -208,6 +208,12 @@ func (e *Engine) EditRule(id, eventID string, expected *uint64, candidate policy
 			return policy.Rule{}, "", fmt.Errorf("expiry must be in the future")
 		}
 	}
+	return e.applyRuleLocked(candidate, index, now, expiryUnchanged, commit)
+}
+
+// applyRuleLocked reviews a candidate whose identity the caller verified and,
+// when committing, stores it (index < 0: new rule) and re-evaluates pending requests.
+func (e *Engine) applyRuleLocked(candidate policy.Rule, index int, now time.Time, expiryUnchanged, commit bool) (policy.Rule, string, error) {
 	candidate, sentence, err := e.reviewRuleLocked(candidate, now, expiryUnchanged)
 	if err != nil {
 		return policy.Rule{}, "", err
@@ -251,6 +257,71 @@ func (e *Engine) EditRule(id, eventID string, expected *uint64, candidate policy
 		}
 	}
 	return candidate, sentence, nil
+}
+
+// RuleFromBasisCapability: a new, separate rule may be created for the exact
+// application identity (key, revision, UID) of an existing stored rule the
+// caller owns, e.g. for a program that is not running. The identity was
+// verified when the basis rule was created; nothing about it can change here.
+const RuleFromBasisCapability = "rule-from-basis-v1"
+
+// CreateRuleFromBasis creates (or previews) a new rule bound to the identity of
+// the stored rule basisID. Only direction, protocol, endpoint, action, priority
+// and lifetime may differ; process-bound, all-program, zone-wide and preset
+// bases are refused.
+func (e *Engine) CreateRuleFromBasis(basisID string, candidate policy.Rule, uid uint32, admin, commit bool) (policy.Rule, string, error) {
+	if candidate.ShareWithRoot && !admin {
+		return policy.Rule{}, "", mutationError("forbidden", "Only the configured administrator may share rules with root")
+	}
+	e.lockResolved(e.requestSelection("", uid, admin, false))
+	defer e.unlockResolved()
+	if e.SaveRules == nil {
+		return policy.Rule{}, "", fmt.Errorf("durable rule editing unavailable")
+	}
+	now := e.Now()
+	e.expire(now)
+	if len(e.rules) >= 256 {
+		return policy.Rule{}, "", fmt.Errorf("rule capacity reached")
+	}
+	var basis *policy.Rule
+	for i := range e.rules {
+		if e.rules[i].ID == basisID {
+			basis = &e.rules[i]
+			break
+		}
+	}
+	switch {
+	case basis == nil:
+		return policy.Rule{}, "", mutationError("not_found", "basis rule no longer exists")
+	case basis.Preset != nil || basis.Schema == 5:
+		return policy.Rule{}, "", mutationError("immutable_target", "a preset rule cannot be the basis of a new rule")
+	case basis.Filter.AllPrograms || basis.Filter.AllUIDs || basis.Filter.Application == "" || basis.Filter.Revision == "":
+		return policy.Rule{}, "", mutationError("invalid_request", "the basis rule names no single application identity")
+	case !basis.Filter.Process.IsZero():
+		return policy.Rule{}, "", mutationError("unsupported_process", "a process-bound rule cannot be the basis of a new application rule")
+	case !admin && basis.Filter.UID != uid:
+		return policy.Rule{}, "", mutationError("forbidden", "not authorized")
+	}
+	f := candidate.Filter
+	if f.Application != basis.Filter.Application || f.Revision != basis.Filter.Revision || f.UID != basis.Filter.UID {
+		return policy.Rule{}, "", fmt.Errorf("identity must match the basis rule's application/revision/UID")
+	}
+	if !f.Process.IsZero() || f.AllPrograms || f.AllUIDs {
+		return policy.Rule{}, "", mutationError("invalid_request", "a rule from a basis is an application rule for that identity only")
+	}
+	if f.Direction != "incoming" && f.Direction != "outgoing" {
+		return policy.Rule{}, "", mutationError("invalid_request", "direction must be incoming or outgoing")
+	}
+	candidate.ID = "user:" + randomID()
+	candidate.Created = now
+	candidate.Version = 1
+	e.bindZoneModel(&candidate)
+	candidate.Executable = basis.Executable
+	candidate.Invocation = basis.Invocation
+	if !candidate.Expires.IsZero() && !now.Before(candidate.Expires) {
+		return policy.Rule{}, "", fmt.Errorf("expiry must be in the future")
+	}
+	return e.applyRuleLocked(candidate, -1, now, false, commit)
 }
 
 // reviewRuleLocked is shared by pending/editor and observed-application creation.

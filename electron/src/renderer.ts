@@ -716,6 +716,12 @@ function statusStrip(r: Row) {
           canDelete: !!state.control.capabilities?.includes('conditional-rule-delete-v1'),
           askWritable: !!state.control.capabilities?.includes('stored-ask-v1'),
           message,
+          // New rules reuse the identity of one of this program's own stored rules.
+          basisRuleId: state.control.capabilities?.includes('rule-from-basis-v1')
+            ? [...(status.available ? [...status.incoming, ...status.outgoing] : [])].find(
+                (x) => !x.preset && !x.filter.process && !x.filter.all_programs && !x.filter.all_uids,
+              )?.id
+            : undefined,
         });
         return;
       }

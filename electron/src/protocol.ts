@@ -1232,6 +1232,8 @@ export interface ObservedSource {
 export type RuleSource = {
   id?: string;
   event?: string;
+  // rule-from-basis-v1: new rule for the identity of an existing stored rule.
+  basis?: { rule: string; direction: 'incoming' | 'outgoing' };
   observed?: ObservedSource;
   zone?: ZoneSource;
 };

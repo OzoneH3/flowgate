@@ -1731,3 +1731,7 @@ body.hide-sidebar #activityView > aside { display:none; }
 
 
 .row-icon.network-filter-icon { fill:#c4dd32; stroke:#a7c52b; stroke-width:.6; }
+.inactive-rule-add { display:flex; align-items:center; gap:6px; flex-wrap:wrap; border-top:1px solid #ffffff2a; margin-top:6px; padding-top:6px; }
+.inactive-rule-add .qs-action { height:22px; min-height:22px; padding:0 7px; display:inline-flex; align-items:center; gap:4px; }
+.inactive-rule-add-label { color:#bbb; }
+.inactive-rule-add .qs-row-links { margin-left:auto; }
