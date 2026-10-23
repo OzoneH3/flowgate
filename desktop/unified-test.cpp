@@ -80,7 +80,7 @@ private slots:
     installLauncher();
     window->show();
     QTRY_VERIFY(label("monitorStatus")->text().contains("live"));
-    QTRY_VERIFY_WITH_TIMEOUT(label("status")->text().contains("unknown"), 20000);
+    QTRY_VERIFY(label("status")->text().contains("unknown"));
     window->findChild<QLineEdit *>("activitySearch")->setText("python");
     qInfo().noquote() << "EVIDENCE" << run << "platform"
                       << QGuiApplication::platformName() << "UID" << getuid()
@@ -107,7 +107,7 @@ private slots:
   void evaluationAndRules() {
     QTRY_VERIFY(button("startEvaluation")->isEnabled());
     start();
-    QTRY_VERIFY_WITH_TIMEOUT(label("status")->text().contains("Host enforcement — active"), 20000);
+    QTRY_VERIFY(label("status")->text().contains("Host enforcement — active"));
     QVERIFY(label("monitorStatus")->text().contains("live"));
     QVERIFY(command("send")["sent_once"].toBool());
     QTRY_VERIFY(pending());
@@ -140,7 +140,7 @@ private slots:
     window->grab().save(run + "/unified-rules.png");
     auto before = label("activityStatus")->text();
     QTest::mouseClick(button("stopEvaluation"), Qt::LeftButton);
-    QTRY_VERIFY_WITH_TIMEOUT(label("status")->text().contains("Stopped (confirmed)"), 20000);
+    QTRY_VERIFY(label("status")->text().contains("Stopped (confirmed)"));
     QTRY_VERIFY(label("activityStatus")->text() != before);
     QVERIFY(window->findChild<QTabWidget *>("views")->tabText(2).contains(
         "last received"));
@@ -155,7 +155,7 @@ private slots:
   void lossNotificationsAndTimeout() {
     QTRY_VERIFY(button("startEvaluation")->isEnabled());
     start();
-    QTRY_VERIFY_WITH_TIMEOUT(label("status")->text().contains("Host enforcement — active"), 20000);
+    QTRY_VERIFY(label("status")->text().contains("Host enforcement — active"));
     QSignalSpy notification(window.get(), &Window::pendingNotification);
     window->showMinimized();
     QVERIFY(
@@ -177,7 +177,7 @@ private slots:
     window->openPendingNotification();
     QVERIFY(!button("promptAllow")->isEnabled());
     QVERIFY(command("kill")["ok"].toBool());
-    QTRY_VERIFY_WITH_TIMEOUT(label("status")->text().contains("unknown"), 20000);
+    QTRY_VERIFY(label("status")->text().contains("unknown"));
     QVERIFY(label("monitorStatus")->text().contains("live"));
     QVERIFY(!button("allow")->isEnabled());
     // Independent timer remains in force after consumer loss, with no restart.
@@ -191,7 +191,7 @@ private slots:
   void closingLeavesEvaluation() {
     QTRY_VERIFY(button("startEvaluation")->isEnabled());
     start();
-    QTRY_VERIFY_WITH_TIMEOUT(label("status")->text().contains("Host enforcement — active"), 20000);
+    QTRY_VERIFY(label("status")->text().contains("Host enforcement — active"));
     window->findChild<QTabWidget *>("views")->setCurrentIndex(0);
     window->showNormal();
     window->grab().save(run + "/unified-activity.png");
