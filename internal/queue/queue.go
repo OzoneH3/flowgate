@@ -244,7 +244,7 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 			return -1
 		}
 		return 0
-	}, func(err error) int { return receiveError(err, &receiveOverflow, fail) })
+	}, func(err error) int { return receiveError(ctx, err, &receiveOverflow, fail) })
 	if err != nil {
 		return err
 	}
@@ -278,7 +278,13 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 
 // ENOBUFS reports lost netlink messages, not loss of the queue binding. Continue
 // draining; no missing packet is approved. Other receive failures remain fatal.
-func receiveError(err error, overflow *atomic.Uint64, fail func(error)) int {
+// After cancellation the library interrupts Receive with a past read deadline;
+// that timeout is the requested shutdown, not a queue failure, and must not
+// race a clean stop into a retained fail-closed table.
+func receiveError(ctx context.Context, err error, overflow *atomic.Uint64, fail func(error)) int {
+	if ctx.Err() != nil {
+		return -1
+	}
 	if errors.Is(err, unix.ENOBUFS) {
 		overflow.Add(1)
 		return 0

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"golang.org/x/sys/unix"
+	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -118,11 +119,34 @@ func TestReceiveOverflowIsReportedWithoutStoppingProtection(t *testing.T) {
 	var count atomic.Uint64
 	failed := false
 	fail := func(error) { failed = true }
-	if receiveError(fmt.Errorf("netlink: %w", unix.ENOBUFS), &count, fail) != 0 || count.Load() != 1 || failed {
+	ctx := context.Background()
+	if receiveError(ctx, fmt.Errorf("netlink: %w", unix.ENOBUFS), &count, fail) != 0 || count.Load() != 1 || failed {
 		t.Fatal("overflow stopped receiver")
 	}
-	if receiveError(unix.EBADF, &count, fail) != -1 || !failed || count.Load() != 1 {
+	if receiveError(ctx, unix.EBADF, &count, fail) != -1 || !failed || count.Load() != 1 {
 		t.Fatal("fatal receive error hidden")
+	}
+}
+
+// A clean stop cancels the context; the library then interrupts Receive with a
+// past read deadline. That timeout ends the loop without reporting a failure,
+// which would otherwise retain the table fail-closed and refuse the next start.
+func TestReceiveInterruptAfterStopIsNotAFailure(t *testing.T) {
+	var count atomic.Uint64
+	var reported []error
+	fail := func(err error) { reported = append(reported, err) }
+	ctx, cancel := context.WithCancel(context.Background())
+	if receiveError(ctx, os.ErrDeadlineExceeded, &count, fail) != -1 || len(reported) != 1 {
+		t.Fatal("receive timeout while running was not fatal")
+	}
+	cancel()
+	for _, err := range []error{os.ErrDeadlineExceeded, unix.EBADF, fmt.Errorf("netlink: %w", unix.ENOBUFS)} {
+		if receiveError(ctx, err, &count, fail) != -1 {
+			t.Fatal("receive loop continued after stop", err)
+		}
+	}
+	if len(reported) != 1 || count.Load() != 0 {
+		t.Fatal("stop interruption reported as queue failure", reported, count.Load())
 	}
 }
 
