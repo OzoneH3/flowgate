@@ -246,7 +246,13 @@ func (m *WineObservers) sessionResolve(f Flow, a Attribution, broker *Process, b
 	// Expired generations never donate evidence or revive a stopped collector.
 	var retired []*observedWine
 	for k, s := range m.sessions {
-		if !InstanceRunning(s.broker.PID, s.broker.Start) {
+		exited := false
+		select {
+		case <-s.ready:
+			exited = s.table != nil && s.table.lifecycleExited()
+		default:
+		}
+		if exited || !InstanceRunning(s.broker.PID, s.broker.Start) {
 			retired = append(retired, m.retireLocked(k, s)...)
 		}
 	}
@@ -302,7 +308,12 @@ func (m *WineObservers) setup(record *observedWine, broker *Process, bin string)
 	// Discover every broker build. The helper negotiates the supported census
 	// contract after joining this exact generation; a filename is not authority.
 	version := ""
-	session := RuntimeSession{Broker: *broker, Runner: filepath.Join(bin, "wine"), Build: fileHash(filepath.Join(bin, "wineserver"))}
+	runner, err := observerRunner(bin)
+	if err != nil {
+		fail(err.Error())
+		return
+	}
+	session := RuntimeSession{Broker: *broker, Runner: runner, Build: fileHash(filepath.Join(bin, "wineserver"))}
 	if !session.current() {
 		fail("broker generation changed")
 		return
@@ -326,7 +337,7 @@ func (m *WineObservers) setup(record *observedWine, broker *Process, bin string)
 			}
 		}
 	}
-	env := []string{"PATH=/usr/bin:/bin", "WINEPREFIX=" + broker.Application.Prefix, "WINESERVER=/usr/bin/false", "WINEDEBUG=-all", "WINEDLLOVERRIDES=mscoree,mshtml=", "DISPLAY=", "WAYLAND_DISPLAY=", "TMPDIR=" + tmp, "HOME=" + m.options.Scratch, "XDG_CACHE_HOME=" + m.options.Scratch, "XDG_CONFIG_HOME=" + m.options.Scratch, "XDG_DATA_HOME=" + m.options.Scratch}
+	env := []string{"PATH=/usr/bin:/bin", "WINEPREFIX=" + broker.Application.Prefix, "WINESERVER=/usr/bin/false", "WINEDEBUG=-all", "WINELOADERNOEXEC=1", "WINEDLLOVERRIDES=mscoree,mshtml=", "DISPLAY=", "WAYLAND_DISPLAY=", "TMPDIR=" + tmp, "HOME=" + m.options.Scratch, "XDG_CACHE_HOME=" + m.options.Scratch, "XDG_CONFIG_HOME=" + m.options.Scratch, "XDG_DATA_HOME=" + m.options.Scratch}
 	env = append(env, syncEnv...)
 	if runtime != "" {
 		env = append(env, "XDG_RUNTIME_DIR="+runtime)

@@ -63,6 +63,9 @@ type WineTable struct {
 	cmd                     *exec.Cmd
 	input                   io.WriteCloser
 	output                  chan []byte
+	reaped                  chan struct{}
+	exitCode                atomic.Int32
+	stopping                atomic.Bool
 	dead                    bool
 	lost                    atomic.Bool
 	broker, prefix, version string
@@ -142,8 +145,11 @@ func newWineTableConfigured(runner, helper, broker, prefix, version string, env 
 	if err = cmd.Start(); err != nil {
 		return nil, err
 	}
-	w := &WineTable{helper: helper, cmd: cmd, input: in, output: make(chan []byte, 1), broker: broker, prefix: prefix, version: version, generation: fmt.Sprint(time.Now().UnixNano())}
+	w := &WineTable{helper: helper, cmd: cmd, input: in, output: make(chan []byte, 1), reaped: make(chan struct{}), broker: broker, prefix: prefix, version: version, generation: fmt.Sprint(time.Now().UnixNano())}
 	go func() {
+		// Reap spontaneous lifecycle exits even if this prefix receives no more
+		// traffic. EOF/lost output cannot donate further ownership evidence.
+		defer func() { w.cmd.Wait(); w.exitCode.Store(int32(w.cmd.ProcessState.ExitCode())); close(w.reaped) }()
 		s := bufio.NewScanner(out)
 		s.Buffer(make([]byte, 4096), 1<<20)
 		for s.Scan() {
@@ -152,6 +158,7 @@ func newWineTableConfigured(runner, helper, broker, prefix, version string, env 
 			case w.output <- b:
 			default:
 				w.lost.Store(true)
+				w.cmd.Process.Kill()
 				out.Close()
 				close(w.output)
 				return
@@ -166,11 +173,34 @@ func (w *WineTable) Close() { w.mu.Lock(); defer w.mu.Unlock(); w.stop() }
 func (w *WineTable) stop() {
 	if !w.dead {
 		w.dead = true
+		// EOF already observed is an independent exit. Otherwise closing stdin
+		// ourselves must not turn a census failure into automatic renewal.
+		if !w.lost.Load() {
+			w.stopping.Store(true)
+		}
 		w.input.Close()
 		w.cmd.Process.Kill()
-		w.cmd.Wait()
+		<-w.reaped
 	}
 }
+
+func (w *WineTable) censusFailure(err error) error {
+	w.stop()
+	if w.exitCode.Load() == 4 {
+		return fmt.Errorf("runtime lacks a validated observer-lifetime contract")
+	}
+	return err
+}
+
+func (w *WineTable) lifecycleExited() bool {
+	select {
+	case <-w.reaped:
+		return w.exitCode.Load() == 0 && !w.stopping.Load()
+	default:
+		return false
+	}
+}
+
 func (w *WineTable) snapshot(proto string) (tableSnapshot, error) {
 	return w.snapshotFamily(proto, 4)
 }
@@ -183,14 +213,12 @@ func (w *WineTable) snapshotFamily(proto string, family int) (tableSnapshot, err
 		return s, fmt.Errorf("observer stopped; explicit restart required")
 	}
 	if _, err := io.WriteString(w.input, fmt.Sprintf("%s%d\n", proto[:1], family)); err != nil {
-		w.stop()
-		return s, err
+		return s, w.censusFailure(err)
 	}
 	select {
 	case b, ok := <-w.output:
 		if w.lost.Load() || !ok || json.Unmarshal(b, &s) != nil || !s.Complete || s.Family != family || (s.Schema != 1 && s.Schema != 2 && s.Schema != 3) || (w.requiredSchema != 0 && s.Schema != w.requiredSchema) || s.Error != 0 || (w.version != "" && s.Version != w.version) || len(s.Rows) > 4096 {
-			w.stop()
-			return s, fmt.Errorf("incomplete or unsupported runtime census")
+			return s, w.censusFailure(fmt.Errorf("incomplete or unsupported runtime census"))
 		}
 		if w.version == "" {
 			if (s.Schema != 2 && s.Schema != 3) || !supportedCensusVersion(s.Version) {

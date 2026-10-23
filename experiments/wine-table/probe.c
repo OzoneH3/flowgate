@@ -111,4 +111,30 @@ static void processes(void){
  }
  str("],\"error\":");num(err);str(",\"complete\":");str(failed?"false":"true");str("}\n");DWORD done;WriteFile(GetStdHandle(STD_OUTPUT_HANDLE),out,used,&done,0);if(done!=used)ExitProcess(3);
 }
-void mainCRTStartup(void){char c;DWORD n;int mode=0,family=4;while(ReadFile(GetStdHandle(STD_INPUT_HANDLE),&c,1,&n,0)&&n){if(c=='u')mode=1;else if(c=='t')mode=0;else if(c=='p')mode=2;else if(c=='6')family=6;else if(c=='4')family=4;else if(c=='\n'){if(mode==2)processes();else scan(mode,family);}}ExitProcess(0);}
+/* Wine's system-process event is signalled when ordinary applications exit.
+ * This changes only this observer's lifetime; it supplies no ownership evidence.
+ * Resolve the named NT API instead of issuing a private server request number. */
+static DWORD WINAPI lifetime_wait(void *event){
+ if(WaitForSingleObject((HANDLE)event,INFINITE)==WAIT_OBJECT_0)ExitProcess(0);
+ ExitProcess(4);return 0;
+}
+static int background_lifetime(void){
+ typedef LONG (WINAPI *set_info_fn)(HANDLE,ULONG,void*,ULONG);
+ HMODULE ntdll=GetModuleHandleA("ntdll.dll");
+ typedef const char *(__cdecl *version_fn)(void);
+ version_fn version=(version_fn)GetProcAddress(ntdll,"wine_get_version");
+ const char *v=version?version():"";
+ int supported=lstrcmpA(v,"10.0")==0;
+ if(v[0]=='1'&&v[1]=='1'&&v[2]=='.'){
+  unsigned n=3;while(v[n]>='0'&&v[n]<='9'&&n<6)n++;
+  if(n>3&&!v[n])supported=1;
+ }
+ if(!supported)return 0;
+ set_info_fn set_info=(set_info_fn)GetProcAddress(ntdll,"NtSetInformationProcess");
+ HANDLE event=0,thread;
+ if(!set_info||set_info(GetCurrentProcess(),1000,&event,sizeof(event))<0||!event)return 0;
+ thread=CreateThread(0,0,lifetime_wait,event,0,0);
+ if(!thread){CloseHandle(event);return 0;}
+ CloseHandle(thread);return 1;
+}
+void mainCRTStartup(void){if(!background_lifetime())ExitProcess(4);char c;DWORD n;int mode=0,family=4;while(ReadFile(GetStdHandle(STD_INPUT_HANDLE),&c,1,&n,0)&&n){if(c=='u')mode=1;else if(c=='t')mode=0;else if(c=='p')mode=2;else if(c=='6')family=6;else if(c=='4')family=4;else if(c=='\n'){if(mode==2)processes();else scan(mode,family);}}ExitProcess(0);}

@@ -298,3 +298,68 @@ func TestProcessCensusCapability(t *testing.T) {
 		})
 	}
 }
+
+func TestObserverExitIsReapedWithoutAnotherCensus(t *testing.T) {
+	prefix := t.TempDir()
+	helper := filepath.Join(prefix, "observer.sh")
+	if err := os.WriteFile(helper, []byte("exit 0\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	w, err := NewWineTable("/bin/sh", helper, "/bin/sh", prefix, "11.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	select {
+	case <-w.reaped:
+	case <-time.After(3 * time.Second):
+		t.Fatal("observer exit left unreaped")
+	}
+	if !w.lost.Load() {
+		t.Fatal("exited observer still provides evidence")
+	}
+	if _, err = w.snapshot("tcp"); err == nil {
+		t.Fatal("exited observer accepted a census")
+	}
+}
+
+type waitForObserverExit struct {
+	io.WriteCloser
+	reaped <-chan struct{}
+}
+
+func (p waitForObserverExit) Close() error {
+	err := p.WriteCloser.Close()
+	select {
+	case <-p.reaped:
+	case <-time.After(3 * time.Second):
+	}
+	return err
+}
+
+func TestObserverDeliberateStopDoesNotRenew(t *testing.T) {
+	prefix := t.TempDir()
+	helper := filepath.Join(prefix, "observer.sh")
+	if err := os.WriteFile(helper, []byte("printf 'ready\\n'\nwhile read line; do :; done\nexit 0\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	w, err := NewWineTable("/bin/sh", helper, "/bin/sh", prefix, "11.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	select {
+	case <-w.output:
+	case <-time.After(3 * time.Second):
+		t.Fatal("helper not ready")
+	}
+	// Force EOF to win before Kill, the race which used to trigger renewal.
+	w.input = waitForObserverExit{w.input, w.reaped}
+	w.Close()
+	if w.exitCode.Load() != 0 {
+		t.Fatal("fixture did not exit successfully on EOF")
+	}
+	if w.lifecycleExited() {
+		t.Fatal("deliberate shutdown treated as independent lifecycle exit")
+	}
+}

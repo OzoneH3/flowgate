@@ -84,7 +84,11 @@ func DiscoverRuntimes(bins []string, helper string) ([]RuntimeSession, error) {
 				continue
 			}
 			seen[pid] = true
-			s := RuntimeSession{Broker: p, Runner: filepath.Join(bin, "wine"), Build: build, Version: version, Supported: build != "", Reason: "broker observed; owner census compatibility must be validated during attachment"}
+			runner, runnerErr := observerRunner(bin)
+			s := RuntimeSession{Broker: p, Runner: runner, Build: build, Version: version, Supported: build != "" && runnerErr == nil, Reason: "broker observed; owner census compatibility must be validated during attachment"}
+			if runnerErr != nil {
+				s.Reason = runnerErr.Error()
+			}
 			s.ID = digest(fmt.Sprintf("%d:%s:%s:%s:%s", pid, p.Start, p.NetNS, p.Application.Prefix, p.ExecutableRevision))
 			if p.Application.Prefix == "" || p.NetNS != NetNS() || p.MountNS != link("/proc/self/ns/mnt") {
 				s.Supported = false
@@ -202,7 +206,7 @@ func AttachRuntimes(prefixes, bins []string, helper string) (*RuntimeObservers, 
 		}
 		// Minimal explicit environment plus the server's temporary rendezvous directory.
 		// No shell, application arguments, LD_PRELOAD or arbitrary environment is executed.
-		env := []string{"PATH=/usr/bin:/bin", "WINEPREFIX=" + prefix, "WINEDEBUG=-all", "WINESERVER=/usr/bin/false", "WINEDLLOVERRIDES=mscoree,mshtml=", "DISPLAY=", "WAYLAND_DISPLAY="}
+		env := []string{"PATH=/usr/bin:/bin", "WINEPREFIX=" + prefix, "WINEDEBUG=-all", "WINELOADERNOEXEC=1", "WINESERVER=/usr/bin/false", "WINEDLLOVERRIDES=mscoree,mshtml=", "DISPLAY=", "WAYLAND_DISPLAY="}
 		haveTmp := false
 		for _, pair := range strings.Split(string(readBound(fmt.Sprintf("/proc/%d/environ", s.Broker.PID), 1<<20)), "\x00") {
 			k, v, ok := strings.Cut(pair, "=")

@@ -237,3 +237,41 @@ func TestWineCensusPrunedDuringCensusDonatesNoEvidence(t *testing.T) {
 		t.Fatalf("other prefix affected: %+v", a)
 	}
 }
+
+func TestWineObserverLifecycleExitRenewsOnlyThatSession(t *testing.T) {
+	x := newCensusFixture(t)
+	for _, name := range []string{"alpha", "beta"} {
+		x.resolve(t, name, true)
+	}
+	var old, other *observedWine
+	for _, s := range x.m.sessions {
+		if s.broker.Application.Prefix == "/prefixes/alpha" {
+			old = s
+		} else {
+			other = s
+		}
+	}
+	old.table = &WineTable{dead: true, reaped: make(chan struct{}), generation: "old"}
+	old.table.lost.Store(true)
+	close(old.table.reaped)
+	a, ok := x.resolve(t, "alpha", true)
+	if !ok || a.Application == nil || a.Application.Key != "key-alpha" {
+		t.Fatal(a)
+	}
+	if x.setups.Load() != 3 || !old.closed || !old.released {
+		t.Fatal("clean lifecycle did not retire and renew")
+	}
+	for _, s := range x.m.sessions {
+		if s == old {
+			t.Fatal("old evidence retained")
+		}
+	}
+	if other.closed {
+		t.Fatal("other prefix retired")
+	}
+	b, _ := x.resolve(t, "beta", true)
+	if b.Application == nil || b.Application.Key != "key-beta" {
+		t.Fatal("permissions crossed prefix")
+	}
+	x.m.Close()
+}
