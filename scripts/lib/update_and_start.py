@@ -14,6 +14,9 @@ import sys
 import time
 
 
+UPDATE_HELPER = '/usr/local/libexec/flowgate-update-helper'
+
+
 def say(message):
     print('==> ' + message, flush=True)
 
@@ -142,7 +145,23 @@ class Host:
         self.wine_source = (root / 'scripts/lib/configure_wine_discovery.py').read_text() if wine_discovery else None
 
     def authenticate(self):
-        subprocess.run(['sudo', '-v'], check=True)
+        self.passwordless_update = False
+        if pathlib.Path(UPDATE_HELPER).exists():
+            result = subprocess.run(['sudo', '-n', UPDATE_HELPER, 'check'],
+                                    capture_output=True, text=True, timeout=10)
+            if result.returncode != 0 or result.stdout.strip() != 'flowgate-local-update-v1':
+                raise RuntimeError('Passwordless update helper is unavailable or unauthorized; rerun its setup before updating')
+            self.passwordless_update = True
+            say('Using account-authorized passwordless update helper')
+        else:
+            subprocess.run(['sudo', '-v'], check=True)
+
+    def privileged(self, operation, source, payload=None):
+        if getattr(self, 'passwordless_update', False):
+            command = ['sudo', '-n', UPDATE_HELPER, operation]
+        else:
+            command = ['sudo', '-n', '/usr/bin/python3', '-I', '-c', source]
+        subprocess.run(command, input=payload, check=True)
 
     def preflight(self, backend, selected):
         if selected == 'monitoring':
@@ -150,13 +169,13 @@ class Host:
         files = json.loads(self.install_payload)['files']
         manifest = json.loads(base64.b64decode(files['manifest.json']))
         payload = json.dumps({'binary': files['flowgate'], 'sha256': manifest['files']['flowgate'], 'profile': selected}).encode()
-        subprocess.run(['sudo', '-n', '/usr/bin/python3', '-I', '-c', STAGE_PREFLIGHT], input=payload, check=True)
+        self.privileged('preflight', STAGE_PREFLIGHT, payload)
 
     def install(self, backend):
-        subprocess.run(['sudo', '-n', '/usr/bin/python3', '-I', '-c', STAGE_INSTALL], input=self.install_payload, check=True)
+        self.privileged('install', STAGE_INSTALL, self.install_payload)
 
     def configure_wine(self, root):
-        subprocess.run(['sudo', '-n', '/usr/bin/python3', '-I', '-c', self.wine_source], check=True)
+        self.privileged('configure-wine', self.wine_source)
 
     def action(self, backend, selected):
         # Existing typed client binds mutations to fresh generation/protection ID.

@@ -282,3 +282,43 @@ Desktop branding: CMake `-DFLOWGATE_PRODUCT_NAME=NewName`. CLI branding:
 libraries; no static/portable deployment claim. Other distributions and arm64
 remain unvalidated. Durable rules and bounded manual host enforcement are now implemented; production
 service integration, wider coexistence, packaging, charts and bandwidth control remain deferred.
+
+### Passwordless local updates
+
+To authorize the current desktop account once, run from this checkout:
+
+```sh
+sudo /usr/bin/python3 -I scripts/setup-passwordless-update.py
+```
+
+This installs a root-owned `/usr/local/libexec/flowgate-update-helper` and an
+account-specific `/etc/sudoers.d/flowgate-local-update` rule. It does not install
+a release or change protection. After setup, the ordinary updater automatically
+uses the helper without a password, including when run by an agent:
+
+```sh
+./scripts/update-and-start.sh --recover-stopped --local
+```
+
+**Trust boundary:** authorizing local updates grants the selected account the
+ability to install code that runs as root. Bundle hashes check consistency, not
+a trusted publisher signature. Only enable this for an account whose local
+source/builds you trust. The authorization is not tied to a login group and does
+not grant a general passwordless Python or shell command.
+
+The helper accepts only check, candidate preflight, staged monitoring install,
+and the explicitly requested Wine-discovery configuration operation. Existing
+bundle verification, candidate compatibility checks, rollback and protection
+restoration remain in effect. The helper keeps its staging code in root-owned
+storage; it does not import Python modules from the checkout. A broken or
+unauthorized installed helper refuses the update before stopping protection.
+Its staging code can be refreshed by rerunning the one-time setup when needed.
+
+To revoke passwordless updates:
+
+```sh
+sudo rm /etc/sudoers.d/flowgate-local-update /usr/local/libexec/flowgate-update-helper
+```
+
+The updater then returns to its existing sudo authentication path. Removing the
+helper does not uninstall FlowGate or change running protection.
