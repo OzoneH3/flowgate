@@ -111,7 +111,7 @@ func ComparePendingBinding(before, after Attribution, at time.Time) PendingReval
 	add("visibility_complete", fmt.Sprint(before.VisibilityComplete), fmt.Sprint(after.VisibilityComplete))
 	add("attribution_status", before.Status, after.Status)
 	add("fingerprint", before.Fingerprint, after.Fingerprint)
-	if len(before.Sockets) > 0 && len(after.Sockets) == 0 && after.Reason == "no visible matching socket" {
+	if len(before.Sockets) > 0 && len(after.Sockets) == 0 && (after.ReasonCode == ReasonNoSocketObserved || (after.ReasonCode == "" && after.Reason == "no visible matching socket")) {
 		r.Code = "connection_ended"
 		r.Reason = "Connection ended: original socket is no longer present; process/executable change is not established"
 	} else if sockets(before) != sockets(after) && len(before.Sockets) > 0 && len(after.Sockets) > 0 {

@@ -346,7 +346,7 @@ func (w *WineTable) resolveAttributionLocked(f Flow, a Attribution) Attribution 
 	if w.session != nil && !w.session.current() {
 		a.Application = nil
 		a.Association = nil
-		a.Reason = "attached runtime session replaced; explicit reattachment required"
+		a.setReason(ReasonRuntimeSessionChanged, "attached runtime session replaced; explicit reattachment required")
 		w.stop()
 		return a
 	}
@@ -354,7 +354,7 @@ func (w *WineTable) resolveAttributionLocked(f Flow, a Attribution) Attribution 
 	trusted, err := os.Stat(w.broker)
 	if err != nil {
 		a.Application = nil
-		a.Reason = "configured census broker unavailable"
+		a.setReason(ReasonRuntimeBrokerUnavailable, "configured census broker unavailable")
 		return a
 	}
 	var broker *Process
@@ -375,7 +375,7 @@ func (w *WineTable) resolveAttributionLocked(f Flow, a Attribution) Attribution 
 			if strings.HasPrefix(p.Application.Kind, "wine") && p.Application.Prefix == w.prefix {
 				a.Application = nil
 				a.Association = nil
-				a.Reason = "selected runtime lacks pinned broker evidence"
+				a.setReason(ReasonRuntimeEvidenceIncomplete, "selected runtime lacks pinned broker evidence")
 				return a
 			}
 		}
@@ -384,7 +384,7 @@ func (w *WineTable) resolveAttributionLocked(f Flow, a Attribution) Attribution 
 	a.Application = nil
 	a.Association = nil
 	a.Status = "unidentified"
-	a.Reason = "Wine census relationship incomplete"
+	a.setReason(ReasonRuntimeEvidenceIncomplete, "Wine census relationship incomplete")
 	if !a.VisibilityComplete || len(a.Sockets) != 1 || broker.Application.Prefix != w.prefix || (f.Direction != "incoming" && f.Direction != "outgoing") {
 		return a
 	}
@@ -398,16 +398,16 @@ func (w *WineTable) resolveAttributionLocked(f Flow, a Attribution) Attribution 
 		family = 6
 	}
 	if family == 6 && f.Local.Addr().Is4() && (a.Sockets[0].V6Only == nil || *a.Sockets[0].V6Only) {
-		a.Reason = "IPv4 delivery to IPv6 socket requires observed dual-stack mode"
+		a.setReason(ReasonRuntimeEvidenceIncomplete, "IPv4 delivery to IPv6 socket requires observed dual-stack mode")
 		return a
 	}
 	first, rows, err := w.snapshotRows(f, family)
 	if err != nil {
-		a.Reason = err.Error()
+		a.setReason(ReasonRuntimeCensusUnavailable, err.Error())
 		return a
 	}
 	if !w.sameServer(broker) {
-		a.Reason = "helper/broker Unix peer relationship missing"
+		a.setReason(ReasonRuntimeEvidenceIncomplete, "helper/broker Unix peer relationship missing")
 		return a
 	}
 	// Bookend with fresh kernel cookies and FD-holder identities, then another
@@ -415,7 +415,7 @@ func (w *WineTable) resolveAttributionLocked(f Flow, a Attribution) Attribution 
 	again := Resolve(f)
 	second, err := w.snapshotFamily(f.Protocol, family)
 	if err != nil {
-		a.Reason = err.Error()
+		a.setReason(ReasonRuntimeCensusUnavailable, err.Error())
 		return a
 	}
 	return w.finishCensus(f, a, again, broker, first, second, rows, w.imageRevisionVisible)
@@ -430,14 +430,14 @@ func (w *WineTable) finishCensus(f Flow, a, again Attribution, broker *Process, 
 	b, _ := json.Marshal(rows)
 	c, _ := json.Marshal(rows2)
 	if fingerprint(nil, a.Sockets) != fingerprint(nil, again.Sockets) || !again.VisibilityComplete || string(b) != string(c) || !sameBrokerGeneration(*broker, again.Owners) {
-		a.Reason = "ownership changed during runtime census"
+		a.setReason(ReasonRuntimeOwnershipChanged, "ownership changed during runtime census")
 		return a
 	}
 	a.Table = &TableEvidence{Runtime: first.Version, Prefix: w.prefix, BrokerPID: broker.PID, BrokerStart: broker.Start, SocketCookie: a.Sockets[0].Cookie, UID: broker.UID, Owners: rows, Generation: w.generation, Method: "two family-specific runtime owner-table snapshots bookending kernel cookie/FD census; ordinary same-user non-adversarial snapshot model"}
 	a.Fingerprint = digest(fingerprint([]Process{*broker}, a.Sockets) + w.generation + string(b))
 	if len(rows) != 1 {
 		a.Status = "multiple-candidates"
-		a.Reason = "runtime census has zero or multiple Windows handle holders"
+		a.setReason(ReasonRuntimeOwnerAmbiguous, "runtime census has zero or multiple Windows handle holders")
 		return a
 	}
 	win := strings.ReplaceAll(rows[0].Image, "\\", "/")
@@ -456,7 +456,7 @@ func (w *WineTable) finishCensus(f Flow, a, again Attribution, broker *Process, 
 	app.Key = digest(fmt.Sprintf("%d|%s|%s|%s", broker.UID, app.Kind, app.Prefix, app.Executable))
 	if !consistentWineHolders(a.Owners, *broker, app) || !consistentWineHolders(again.Owners, *broker, app) {
 		a.Status = "multiple-candidates"
-		a.Reason = "visible non-broker holder disagrees with Windows owner table"
+		a.setReason(ReasonRuntimeHolderConflict, "visible non-broker holder disagrees with Windows owner table")
 		return a
 	}
 	app.DisplayName = strings.TrimSuffix(app.Name, filepath.Ext(app.Name)) + " · via wineserver"
@@ -469,7 +469,7 @@ func (w *WineTable) finishCensus(f Flow, a, again Attribution, broker *Process, 
 	a.Fingerprint = digest(a.Fingerprint + revision)
 	a.Application = &app
 	a.Status = "corroborated-runtime-table"
-	a.Reason = "one verified Windows handle holder, exact socket endpoint and kernel cookie; broker FD is transport evidence, not the permission target"
+	a.setReason(ReasonRuntimeOwnerObserved, "one verified Windows handle holder, exact socket endpoint and kernel cookie; broker FD is transport evidence, not the permission target")
 	return a
 }
 

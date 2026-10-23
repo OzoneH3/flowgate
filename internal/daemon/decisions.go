@@ -57,7 +57,7 @@ func (e *Engine) baseRecord(v *Event, kind string) decisionlog.Record {
 	}
 	r.Flow = &decisionlog.Flow{NetworkScope: v.Flow.NetworkScope, Direction: v.Flow.Direction, Protocol: v.Flow.Protocol, Family: family, Local: v.Flow.Local.String(), Remote: v.Flow.Remote.String(), Interface: v.Flow.Interface}
 	a := v.Attribution
-	r.Attribution = &decisionlog.Attribution{Status: clip(a.Status, 64), Reason: clip(a.Reason, 512)}
+	r.Attribution = &decisionlog.Attribution{Status: clip(a.Status, 64), Reason: clip(a.Reason, 512), ReasonCode: clip(a.ReasonCode, 64)}
 	if a.Table != nil && len(a.Table.Owners) <= 4 {
 		table := *a.Table
 		table.Method = clip(table.Method, 512)

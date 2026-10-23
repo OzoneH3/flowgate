@@ -29,7 +29,7 @@ func TestDirectWineRuntimeImageIsolation(t *testing.T) {
 					owner.PID = 20 + i
 					owner.Start = fmt.Sprint(200 + i)
 					socket := Socket{NetNS: "net", Protocol: "udp", Local: netip.MustParseAddrPort("127.0.0.1:45000"), Remote: netip.MustParseAddrPort("127.0.0.53:53"), Inode: 1, Cookie: "one"}
-					a := Attribution{VisibilityComplete: true, Owners: []Process{owner}, Sockets: []Socket{socket}, Status: "unidentified"}
+					a := Attribution{VisibilityComplete: true, Owners: []Process{owner}, Sockets: []Socket{socket}, Status: "unidentified", ReasonCode: ReasonNativeOwnerObserved}
 					row := WindowsOwner{UnixPID: owner.PID, PID: uint32(40 + i), Created: uint64(400 + i), Image: "C:\\" + name}
 					snap := tableSnapshot{Schema: 3, Kind: "process-images", Version: "11.0", Complete: true, Rows: []WindowsOwner{row}}
 					path := filepath.Join(dir, name)
@@ -37,7 +37,7 @@ func TestDirectWineRuntimeImageIsolation(t *testing.T) {
 						return p.PID == owner.PID && p.Start == owner.Start && file == path && revision == stamp(path)
 					}
 					got := w.finishDirectCensus(a, a, broker, snap, snap, proof)
-					if got.Application == nil || got.Application.Key != digest(fmt.Sprintf("1000|wine|%s|%s", prefix, path)) || got.Table.DirectPID != owner.PID || got.Principal().UID != 1000 {
+					if got.ReasonCode != ReasonRuntimeOwnerObserved || got.Application == nil || got.Application.Key != digest(fmt.Sprintf("1000|wine|%s|%s", prefix, path)) || got.Table.DirectPID != owner.PID || got.Principal().UID != 1000 {
 						t.Fatal("direct owner not corroborated", got)
 					}
 					for _, scenario := range []string{"different-image", "cross-prefix", "foreign-user", "owner-change", "socket-change", "ambiguous", "new-ambiguous", "windows-generation", "incomplete", "old-capability", "missing-map", "revision-change", "foreign-unix-pid", "foreign-pidns", "unknown-version", "unknown-build", "own-unprovable-foreign-mapped"} {
@@ -114,7 +114,7 @@ func TestDirectWineRuntimeImageIsolation(t *testing.T) {
 								}
 								defer os.WriteFile(path, []byte(name), 0600)
 							}
-							if bad := w.finishDirectCensus(initial, fresh, b, before, after, verify); bad.Application != nil {
+							if bad := w.finishDirectCensus(initial, fresh, b, before, after, verify); bad.Application != nil || bad.ReasonCode != ReasonRuntimeIdentityUnverified {
 								t.Fatal("transferred permission identity", scenario)
 							}
 						})
@@ -145,7 +145,7 @@ func TestUnknownRuntimeBuildNeverSendsPrivateRequest(t *testing.T) {
 	w := WineTable{requiredSchema: 3, version: "11.0", input: writer, session: &RuntimeSession{Build: "unknown-fork", Broker: Process{PIDNS: ns}}}
 	a := Attribution{Owners: []Process{{PIDNS: ns}}}
 	got := w.resolveDirect(Flow{}, a)
-	if writer.calls != 0 || got.Application != nil || got.Reason != "runtime process-image census capability unavailable" {
+	if writer.calls != 0 || got.Application != nil || got.ReasonCode != ReasonRuntimeCapabilityUnavailable || got.Reason != "runtime process-image census capability unavailable" {
 		t.Fatal("unknown build reached private server call", writer.calls, got)
 	}
 }
@@ -177,7 +177,7 @@ func TestUnresolvedBrokerUsesOwnerTableBeforeDirectCapability(t *testing.T) {
 				// owner, and an unsupported direct capability must grant nothing.
 				w.broker = "/bin/sh"
 				got = w.resolveAttributionLocked(Flow{Protocol: "tcp", Direction: "outgoing"}, a)
-				if got.Application != nil || writer.calls != 0 || got.Reason != "runtime process-image census capability unavailable" {
+				if got.Application != nil || writer.calls != 0 || got.ReasonCode != ReasonRuntimeCapabilityUnavailable || got.Reason != "runtime process-image census capability unavailable" {
 					t.Fatal("foreign executable inherited broker evidence", got, writer.calls)
 				}
 			})

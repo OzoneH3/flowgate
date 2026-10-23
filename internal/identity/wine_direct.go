@@ -85,34 +85,34 @@ func directBrokerCandidates(a Attribution) []Process {
 }
 
 func (w *WineTable) resolveDirect(f Flow, a Attribution) Attribution {
-	fail := func(reason string) Attribution {
+	fail := func(code, reason string) Attribution {
 		a.Application = nil
 		a.Association = nil
 		a.Status = "unidentified"
-		a.Reason = reason
+		a.setReason(code, reason)
 		return a
 	}
 	broker := w.session.Broker
 	if broker.PIDNS != link("/proc/self/ns/pid") || a.Owners[0].PIDNS != broker.PIDNS {
-		return fail("direct Wine process PID namespace is unsupported")
+		return fail(ReasonRuntimeCapabilityUnavailable, "direct Wine process PID namespace is unsupported")
 	}
 	if w.requiredSchema != 3 || !w.processPIDContract(w.version) {
-		return fail("runtime process-image census capability unavailable")
+		return fail(ReasonRuntimeCapabilityUnavailable, "runtime process-image census capability unavailable")
 	}
 	if !w.session.current() || !wineClientPeer(a.Owners[0], broker) || !w.sameServer(&broker) {
-		return fail("direct Wine client/broker relationship unavailable")
+		return fail(ReasonRuntimeEvidenceIncomplete, "direct Wine client/broker relationship unavailable")
 	}
 	first, e := w.snapshotFamily("process", 4)
 	if e != nil {
-		return fail(e.Error())
+		return fail(ReasonRuntimeCensusUnavailable, e.Error())
 	}
 	again := Resolve(f)
 	second, e := w.snapshotFamily("process", 4)
 	if e != nil {
-		return fail(e.Error())
+		return fail(ReasonRuntimeCensusUnavailable, e.Error())
 	}
 	if !directUnresolved(again) || fingerprint(a.Owners, a.Sockets) != fingerprint(again.Owners, again.Sockets) || !w.session.current() || !wineClientPeer(again.Owners[0], broker) || !w.sameServer(&broker) {
-		return fail("direct Wine ownership changed during process census")
+		return fail(ReasonRuntimeOwnershipChanged, "direct Wine ownership changed during process census")
 	}
 	proof := func(p Process, path, revision string) bool {
 		matches := wineTableImageVisible(p, path, revision, string(readBound(fmt.Sprintf("/proc/%d/maps", p.PID), 2<<20)))
@@ -126,7 +126,7 @@ func (w *WineTable) finishDirectCensus(a, again Attribution, broker Process, fir
 	a.Application = nil
 	a.Association = nil
 	a.Status = "unidentified"
-	a.Reason = "direct Wine runtime image not uniquely corroborated"
+	a.setReason(ReasonRuntimeIdentityUnverified, "direct Wine runtime image not uniquely corroborated")
 	if !directUnresolved(a) || !directUnresolved(again) || first.Schema != 3 || second.Schema != 3 || first.Kind != "process-images" || second.Kind != "process-images" || !first.Complete || !second.Complete || first.Error != 0 || second.Error != 0 || first.Version != second.Version || !w.processPIDContract(first.Version) || fingerprint(a.Owners, a.Sockets) != fingerprint(again.Owners, again.Sockets) {
 		return a
 	}
@@ -211,7 +211,7 @@ func (w *WineTable) finishDirectCensus(a, again Attribution, broker Process, fir
 	holder.CreationTime = strconv.FormatUint(holder.Created, 10)
 	a.Application = chosen
 	a.Status = "corroborated-runtime-table"
-	a.Reason = "sole Linux socket owner corroborated by stable runtime process image and mapped PE file"
+	a.setReason(ReasonRuntimeOwnerObserved, "sole Linux socket owner corroborated by stable runtime process image and mapped PE file")
 	a.Table = &TableEvidence{DirectPID: p.PID, DirectStart: p.Start, Runtime: first.Version, Prefix: w.prefix, BrokerPID: broker.PID, BrokerStart: broker.Start, UID: broker.UID, SocketCookie: a.Sockets[0].Cookie, Owners: []WindowsOwner{holder}, Generation: w.generation, Method: "direct Linux socket owner; two runtime process-image censuses bookending fresh kernel ownership, mapped PE identity and broker Unix peer"}
 	b, _ := json.Marshal(a.Table)
 	a.Fingerprint = digest(fingerprint(a.Owners, a.Sockets) + string(b) + chosen.Revision)

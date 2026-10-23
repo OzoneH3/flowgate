@@ -46,6 +46,7 @@ type Attribution struct {
 	RuntimeTable *identity.TableEvidence `json:"runtime_table,omitempty"`
 	Status       string                  `json:"status"`
 	Reason       string                  `json:"reason"`
+	ReasonCode   string                  `json:"reason_code,omitempty"`
 }
 
 // RuleSnapshot is the rule exactly as evaluated at decision time. Version is a

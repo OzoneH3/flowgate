@@ -50,6 +50,7 @@ type Attribution struct {
 	Association        *Association   `json:"association,omitempty"`
 	Status             string         `json:"status"`
 	Reason             string         `json:"reason"`
+	ReasonCode         string         `json:"reason_code,omitempty"`
 	Owners             []Process      `json:"owners"`
 	Sockets            []Socket       `json:"sockets"`
 	Fingerprint        string         `json:"fingerprint"`
@@ -212,14 +213,14 @@ func exactTCPPeer(s Socket, f Flow) bool {
 }
 
 func Resolve(f Flow) Attribution {
-	a := Attribution{Status: "unidentified", Reason: "no visible matching socket"}
+	a := Attribution{Status: "unidentified", Reason: "no visible matching socket", ReasonCode: ReasonNoSocketObserved}
 	if f.NetNS != NetNS() {
-		a.Reason = "foreign network namespace is outside this observer"
+		a.setReason(ReasonNamespaceMismatch, "foreign network namespace is outside this observer")
 		return a
 	}
 	sockets, e := Sockets()
 	if e != nil {
-		a.Reason = "socket diagnostics unavailable: " + e.Error()
+		a.setReason(ReasonSocketCensusUnavailable, "socket diagnostics unavailable: "+e.Error())
 		return a
 	}
 	wanted := map[string]bool{}
@@ -281,12 +282,12 @@ func Resolve(f Flow) Attribution {
 	// visible process, then verify the socket snapshot did not change mid-scan.
 	again, err := Sockets()
 	if err != nil {
-		a.Reason = "socket recheck unavailable"
+		a.setReason(ReasonSocketCensusUnavailable, "socket recheck unavailable")
 		return a
 	}
 	current := receivers(again, f)
 	if fingerprint(nil, current) != fingerprint(nil, a.Sockets) {
-		a.Reason = "listener changed during attribution"
+		a.setReason(ReasonSocketChanged, "listener changed during attribution")
 		return a
 	}
 	a.VisibilityComplete = !incomplete && len(covered) == len(wanted)
@@ -297,30 +298,33 @@ func Resolve(f Flow) Attribution {
 			app := client.Application
 			a.Application = &app
 			a.Status = "corroborated-broker-client"
-			a.Reason = "one visible Windows client and verified Wine broker; non-sharing handle assumption applies"
+			a.setReason(ReasonBrokerClientAssociation, "one visible Windows client and verified Wine broker; non-sharing handle assumption applies")
 			a.Fingerprint = digest(a.Fingerprint + fmt.Sprintf("|%d:%d", association.ClientChannel, association.BrokerChannel))
 			return a
 		}
 	}
 	if len(a.Sockets) != 1 || len(a.Owners) != 1 {
 		a.Status = "multiple-candidates"
-		a.Reason = "shared descriptor, shared listener, or hidden owner; application permission unavailable"
+		a.setReason(ReasonMultipleCandidates, "shared descriptor, shared listener, or hidden owner; application permission unavailable")
 		return a
 	}
 	if incomplete || len(covered) != len(wanted) {
-		a.Reason = "incomplete process visibility; cannot exclude another owner"
+		a.setReason(ReasonProcessVisibilityIncomplete, "incomplete process visibility; cannot exclude another owner")
 		return a
 	}
 	p := a.Owners[0]
 	if p.Application.Key == "" {
-		a.Reason = "runtime observed but Windows image/prefix not corroborated"
+		a.setReason(ReasonRuntimeIdentityUnverified, "runtime observed but Windows image/prefix not corroborated")
 		return a
 	}
 	a.Status = "directly-associated"
 	if p.Application.Kind == "wine" {
 		a.Status = "corroborated"
 	}
-	a.Reason = "one visible socket and one current FD owner; observation is subject to races"
+	a.setReason(ReasonNativeOwnerObserved, "one visible socket and one current FD owner; observation is subject to races")
+	if p.Application.Kind == "wine" {
+		a.ReasonCode = ReasonRuntimeOwnerObserved
+	}
 	app := p.Application
 	a.Application = &app
 	return a

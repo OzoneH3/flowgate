@@ -263,7 +263,7 @@ func (m *RuntimeObservers) Resolve(f Flow) Attribution {
 				if selected >= 0 && selected != i {
 					a.Application = nil
 					a.Association = nil
-					a.Reason = "owners span attached runtime sessions"
+					a.setReason(ReasonRuntimeOwnerAmbiguous, "owners span attached runtime sessions")
 					return a
 				}
 				selected = i

@@ -220,7 +220,7 @@ func (e *Engine) liveEventsLocked() int {
 func (e *Engine) Observe(f identity.Flow, token string) Event {
 	// Every undecided/new attempt and every UDP datagram rechecks actual ownership.
 	if e.defaultLoopback(f) {
-		return e.ObserveResolved(f, token, identity.Attribution{Status: "localhost", Reason: "Localhost communication is allowed by default"})
+		return e.ObserveResolved(f, token, identity.Attribution{Status: "localhost", Reason: "Localhost communication is allowed by default", ReasonCode: identity.ReasonLocalhostExempt})
 	}
 	return e.ObserveResolved(f, token, e.Resolve(f))
 }
@@ -256,7 +256,7 @@ func (e *Engine) PrepareUDPBatch(f identity.Flow, token string, count int, censu
 	}
 	var a identity.Attribution
 	if e.defaultLoopback(f) {
-		a = identity.Attribution{Status: "localhost", Reason: "Localhost communication is allowed by default"}
+		a = identity.Attribution{Status: "localhost", Reason: "Localhost communication is allowed by default", ReasonCode: identity.ReasonLocalhostExempt}
 	} else if !census && e.TryResolve != nil {
 		var ok bool
 		a, ok = e.TryResolve(f)

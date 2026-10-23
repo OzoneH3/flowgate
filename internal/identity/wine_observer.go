@@ -198,7 +198,7 @@ func (m *WineObservers) resolve(f Flow, wait bool) (Attribution, bool) {
 					if broker != nil {
 						a.Application = nil
 						a.Association = nil
-						a.Reason = "multiple configured Wine brokers hold this socket"
+						a.setReason(ReasonRuntimeOwnerAmbiguous, "multiple configured Wine brokers hold this socket")
 						return a, true
 					}
 					broker = p
@@ -224,7 +224,7 @@ func (m *WineObservers) sessionResolve(f Flow, a Attribution, broker *Process, b
 		a.Application = nil
 		a.Association = nil
 		a.Status = "unidentified"
-		a.Reason = "Wine owner observer: " + reason
+		a.setReason(ReasonRuntimeObserverUnavailable, "Wine owner observer: "+reason)
 		return a
 	}
 	if wait {
