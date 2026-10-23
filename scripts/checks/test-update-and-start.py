@@ -306,12 +306,48 @@ class Update(unittest.TestCase):
         def exited(fd, sig):
             fields[0] = 'Z'
             (proc / 'stat').write_text('12345 (electron) ' + ' '.join(fields))
+        (proc / 'environ').write_bytes(b'WAYLAND_DISPLAY=gui-display\0XDG_RUNTIME_DIR=/gui-runtime\0SECRET=x\0')
         h = m.Host()
-        with patch.object(pathlib.Path, 'iterdir', listing), patch.object(m.os, 'pidfd_open', return_value=73) as opened, patch.object(m.signal, 'pidfd_send_signal', side_effect=exited) as sent, patch.object(m.os, 'close'), patch.object(m.os, 'execv') as launched:
+        desktop = dict(WAYLAND_DISPLAY='gui-display', XDG_RUNTIME_DIR='/gui-runtime')
+        with patch.object(pathlib.Path, 'iterdir', listing), patch.object(m, 'target_desktop', return_value=(desktop, None)) as target, patch.object(m.os, 'pidfd_open', return_value=73) as opened, patch.object(m.signal, 'pidfd_send_signal', side_effect=exited) as sent, patch.object(m.os, 'close'), patch.object(m, 'supervise_gui', return_value=4242) as launched, patch.dict(m.os.environ, {'WAYLAND_DISPLAY': 'stale', 'KEEP': '1'}), contextlib.redirect_stdout(io.StringIO()):
             h.switch_gui(self.root, self.root / 'new-ui')
+        # Only the released GUI's own session evidence is consulted.
+        self.assertEqual(target.call_args.args[0], [dict(WAYLAND_DISPLAY='gui-display', XDG_RUNTIME_DIR='/gui-runtime', SECRET='x')])
         opened.assert_called_once_with(12345)
         sent.assert_called_once_with(73, m.signal.SIGTERM)
-        self.assertEqual(launched.call_args.args[0], str(self.root / 'new-ui/launch-ui'))
+        self.assertEqual(launched.call_args.args[0][0], str(self.root / 'new-ui/launch-ui'))
+        env = launched.call_args.args[1]
+        self.assertEqual((env['WAYLAND_DISPLAY'], env['XDG_RUNTIME_DIR'], env['KEEP']), ('gui-display', '/gui-runtime', '1'))
+    def test_unverifiable_desktop_keeps_old_gui_and_launches_nothing(self):
+        proc = self.root / '12345'; proc.mkdir()
+        gui = self.root / '.workspace/automatic-zone-releases/old'
+        args = [str(gui / 'runtime/electron'), '--ozone-platform=wayland', str(gui / 'electron'), '--observer', '/run/flowgate-api/daemon.sock.monitor', '--control', '/run/flowgate-api/daemon.sock']
+        (proc / 'cmdline').write_bytes(('\0'.join(args) + '\0').encode())
+        (proc / 'stat').write_text('12345 (electron) ' + ' '.join(['S'] + ['0'] * 18 + ['99']))
+        original = pathlib.Path.iterdir
+        def listing(path):
+            return iter([proc]) if str(path) == '/proc' else original(path)
+        with patch.object(pathlib.Path, 'iterdir', listing), patch.object(m, 'target_desktop', return_value=(None, 'no verifiable Wayland session')), patch.object(m.signal, 'pidfd_send_signal') as sent, patch.object(m, 'supervise_gui') as launched:
+            with self.assertRaises(m.GuiNotSwitched) as raised:
+                m.Host().switch_gui(self.root, self.root / 'new-ui')
+        sent.assert_not_called()
+        launched.assert_not_called()
+        self.assertIn('running GUI was left open', str(raised.exception))
+    def test_gui_failure_is_reported_separately_after_verified_update(self):
+        class NoDesktop(FakeHost):
+            def switch_gui(self, root, bundle):
+                self.calls.append('gui')
+                raise m.GuiNotSwitched('no verifiable Wayland session; no GUI started')
+        h = NoDesktop(status('old', 'both'))
+        err, out = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out), self.assertRaises(SystemExit) as code:
+            m.main(['--root', str(self.root), '--revision', 'new'], host=h)
+        self.assertEqual(code.exception.code, 3)
+        self.assertEqual(h.calls[-1], 'gui')
+        self.assertLess(h.calls.index('both'), h.calls.index('gui'))  # protection restored first
+        self.assertIn('Update verified; protection mode: both', out.getvalue())
+        self.assertIn('Backend update verified; GUI not switched', err.getvalue())
+        self.assertNotIn('Update failed', err.getvalue())
     def test_tampered_bundle_fails_before_sudo_or_stop(self):
         (self.root / '.workspace/daily-releases/new/flowgate').write_bytes(b'tampered')
         h = FakeHost()
@@ -326,6 +362,138 @@ class Update(unittest.TestCase):
         with self.assertRaises(RuntimeError): self.run_update(h)
         self.assertNotIn('both', h.calls)
         self.assertNotIn('gui', h.calls)
+
+
+
+class Desktop(unittest.TestCase):
+    """Session discovery with real Unix sockets in private temporary runtime dirs."""
+    def setUp(self):
+        # Short path inside the workspace: AF_UNIX paths are limited to 108 bytes.
+        self.tmp = tempfile.TemporaryDirectory(prefix='d', dir=ROOT / '.workspace')
+        self.addCleanup(self.tmp.cleanup)
+        self.base = pathlib.Path(self.tmp.name)
+        self.servers = []
+    def tearDown(self):
+        for s in self.servers: s.close()
+    def runtime(self, name, *displays, bus=False):
+        d = self.base / name; d.mkdir(mode=0o700); d.chmod(0o700)
+        for display in displays:
+            s = m.socket.socket(m.socket.AF_UNIX); s.bind(str(d / display)); s.listen(4); self.servers.append(s)
+            (d / (display + '.lock')).write_text('')
+        if bus:
+            s = m.socket.socket(m.socket.AF_UNIX); s.bind(str(d / 'bus')); s.listen(1); self.servers.append(s)
+        return str(d)
+    def test_socket_evidence_is_verified(self):
+        r = self.runtime('a', 'wayland-0')
+        self.assertTrue(m.wayland_socket(dict(XDG_RUNTIME_DIR=r, WAYLAND_DISPLAY='wayland-0')))
+        self.assertTrue(m.wayland_socket(dict(XDG_RUNTIME_DIR=r, WAYLAND_DISPLAY=r + '/wayland-0')))
+        for env in [dict(XDG_RUNTIME_DIR=r), dict(WAYLAND_DISPLAY='wayland-0'), dict(XDG_RUNTIME_DIR=r, WAYLAND_DISPLAY='wayland-9'),
+                    dict(XDG_RUNTIME_DIR=r, WAYLAND_DISPLAY='wayland-0.lock'), dict(XDG_RUNTIME_DIR='relative', WAYLAND_DISPLAY='wayland-0')]:
+            self.assertIsNone(m.wayland_socket(env), env)
+        self.assertIsNone(m.wayland_socket(dict(XDG_RUNTIME_DIR=r, WAYLAND_DISPLAY='wayland-0'), uid=os.getuid() + 1))
+        dead = self.runtime('dead'); s = m.socket.socket(m.socket.AF_UNIX); s.bind(dead + '/wayland-0'); s.close()
+        self.assertIsNone(m.wayland_socket(dict(XDG_RUNTIME_DIR=dead, WAYLAND_DISPLAY='wayland-0')))
+        shared = self.runtime('shared', 'wayland-0'); pathlib.Path(shared).chmod(0o755)
+        self.assertIsNone(m.wayland_socket(dict(XDG_RUNTIME_DIR=shared, WAYLAND_DISPLAY='wayland-0')))
+    def test_replaced_gui_session_wins_over_updater_environment(self):
+        gui, own = self.runtime('gui', 'wayland-1'), self.runtime('own', 'wayland-0')
+        env, reason = m.target_desktop([dict(XDG_RUNTIME_DIR=gui, WAYLAND_DISPLAY='wayland-1', DBUS_SESSION_BUS_ADDRESS='unix:path=x', SECRET='s')], dict(XDG_RUNTIME_DIR=own, WAYLAND_DISPLAY='wayland-0'))
+        self.assertIsNone(reason)
+        self.assertEqual(env, dict(XDG_RUNTIME_DIR=gui, WAYLAND_DISPLAY='wayland-1', DBUS_SESSION_BUS_ADDRESS='unix:path=x'))
+    def test_conflicting_gui_sessions_are_ambiguous(self):
+        a, b = self.runtime('a', 'wayland-0'), self.runtime('b', 'wayland-0')
+        env, reason = m.target_desktop([dict(XDG_RUNTIME_DIR=a, WAYLAND_DISPLAY='wayland-0'), dict(XDG_RUNTIME_DIR=b, WAYLAND_DISPLAY='wayland-0')], {})
+        self.assertIsNone(env); self.assertIn('different desktop sessions', reason)
+    def test_updater_session_used_when_no_gui_runs(self):
+        own = self.runtime('own', 'wayland-3')
+        env, _ = m.target_desktop([], dict(XDG_RUNTIME_DIR=own, WAYLAND_DISPLAY='wayland-3'))
+        self.assertEqual(env['WAYLAND_DISPLAY'], 'wayland-3')
+    def test_agent_environment_without_display_finds_single_user_session(self):
+        # The reported failure: XDG_RUNTIME_DIR known, WAYLAND_DISPLAY absent.
+        r = self.runtime('agent', 'wayland-1', bus=True)
+        env, reason = m.target_desktop([], dict(XDG_RUNTIME_DIR=r))
+        self.assertIsNone(reason)
+        self.assertEqual((env['WAYLAND_DISPLAY'], env['DBUS_SESSION_BUS_ADDRESS']), ('wayland-1', 'unix:path=' + r + '/bus'))
+    def test_fallback_never_carries_another_sessions_bus(self):
+        r = self.runtime('nobus', 'wayland-1')
+        env, _ = m.target_desktop([], dict(XDG_RUNTIME_DIR=r, DBUS_SESSION_BUS_ADDRESS='unix:path=/elsewhere/bus'))
+        self.assertNotIn('DBUS_SESSION_BUS_ADDRESS', env)
+        (pathlib.Path(r) / 'bus').write_text('')  # not a socket
+        env, _ = m.target_desktop([], dict(XDG_RUNTIME_DIR=r))
+        self.assertNotIn('DBUS_SESSION_BUS_ADDRESS', env)
+    def test_several_or_no_sessions_launch_nothing(self):
+        r = self.runtime('two', 'wayland-0', 'wayland-1')
+        env, reason = m.target_desktop([], dict(XDG_RUNTIME_DIR=r))
+        self.assertIsNone(env); self.assertIn('several Wayland sessions', reason)
+        empty = self.runtime('none')
+        env, reason = m.target_desktop([], dict(XDG_RUNTIME_DIR=empty))
+        self.assertIsNone(env); self.assertIn('no verifiable Wayland session', reason)
+        # A stale display name in the updater environment is not trusted either.
+        env, reason = m.target_desktop([dict(XDG_RUNTIME_DIR=empty, WAYLAND_DISPLAY='wayland-0')], dict(XDG_RUNTIME_DIR=empty, WAYLAND_DISPLAY='wayland-0'))
+        self.assertIsNone(env)
+
+
+
+class Launch(unittest.TestCase):
+    """Supervised start with fake launchers: readiness, early exit, silence."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix='l', dir=ROOT / '.workspace')
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = pathlib.Path(self.tmp.name)
+        self.pids = []
+    def tearDown(self):
+        for pid in self.pids:
+            with contextlib.suppress(ProcessLookupError): os.killpg(pid, 15)
+    def launcher(self, body):
+        p = self.dir / 'launch-ui'
+        p.write_text('#!/bin/sh\n' + body + '\n'); p.chmod(0o755)
+        return [str(p), '--observer', 'x']
+    def test_ready_line_returns_running_detached_gui(self):
+        cmd = self.launcher('echo "[1:ERROR:display.cc] noise"; echo "FlowGate: main window rendered; sandbox enabled; native platform wayland"; exec sleep 30')
+        pid = m.supervise_gui(cmd, dict(PATH=os.environ['PATH']), self.dir / '.workspace/gui-launch.log', timeout=5, poll=.05)
+        self.pids.append(pid)
+        self.assertEqual(os.getpgid(pid), pid)  # own session: survives the updater
+    def test_early_exit_is_gui_failure_with_reason(self):
+        cmd = self.launcher('echo "Failed to connect to Wayland display: No such file or directory (2)" >&2; exit 1')
+        with self.assertRaises(m.GuiNotSwitched) as raised:
+            m.supervise_gui(cmd, dict(PATH=os.environ['PATH']), self.dir / 'gui.log', timeout=5, poll=.05)
+        self.assertIn('exited with status 1', str(raised.exception))
+        self.assertIn('Failed to connect to Wayland display', str(raised.exception))
+    def test_old_log_ready_line_does_not_count(self):
+        log = self.dir / 'gui.log'
+        log.write_bytes(b'FlowGate: main window rendered; earlier run\n')
+        with self.assertRaises(m.GuiNotSwitched):
+            m.supervise_gui(self.launcher('exit 1'), dict(PATH=os.environ['PATH']), log, timeout=5, poll=.05)
+    def test_ready_line_then_exit_is_not_reported_started(self):
+        # Deterministic: the child has already exited when readiness is first seen.
+        cmd = self.launcher('echo "FlowGate: main window rendered; native platform wayland"; exit 1')
+        with patch.object(m.subprocess.Popen, 'poll', lambda child: child.wait()), self.assertRaises(m.GuiNotSwitched) as raised:
+            m.supervise_gui(cmd, dict(PATH=os.environ['PATH']), self.dir / 'gui.log', timeout=5, poll=.05)
+        self.assertIn('exited with status 1 after reporting its main window loaded', str(raised.exception))
+    def test_log_failures_are_gui_failures(self):
+        blocked = self.dir / 'ro'; blocked.mkdir(); blocked.chmod(0o500)
+        self.addCleanup(blocked.chmod, 0o700)
+        with self.assertRaises(m.GuiNotSwitched) as raised:
+            m.supervise_gui(self.launcher('exit 0'), dict(PATH=os.environ['PATH']), blocked / 'gui.log', timeout=1, poll=.05)
+        self.assertIn('GUI launch failed', str(raised.exception))
+        with self.assertRaises(m.GuiNotSwitched):
+            m.supervise_gui(self.launcher('exit 0'), dict(PATH=os.environ['PATH']), self.dir / 'file' / 'sub' / 'gui.log', timeout=1, poll=.05) if (self.dir / 'file').write_text('') is not None else None
+        # A log that becomes unreadable while waiting is reported, not raised as an update failure.
+        real = open
+        def failing(path, mode='r', *a, **k):
+            if mode == 'rb': raise PermissionError('log unreadable')
+            return real(path, mode, *a, **k)
+        cmd = self.launcher('exec sleep 30')
+        with patch('builtins.open', failing), self.assertRaises(m.GuiNotSwitched) as raised:
+            m.supervise_gui(cmd, dict(PATH=os.environ['PATH']), self.dir / 'gui2.log', timeout=5, poll=.05)
+        self.assertIn('could not be observed', str(raised.exception))
+        self.pids.append(int(str(raised.exception).split('PID ')[1].split(',')[0]))
+    def test_missing_readiness_is_reported_not_claimed(self):
+        cmd = self.launcher('exec sleep 30')
+        with self.assertRaises(m.GuiNotSwitched) as raised:
+            m.supervise_gui(cmd, dict(PATH=os.environ['PATH']), self.dir / 'gui.log', timeout=.4, poll=.05)
+        self.assertIn('did not report its main window loaded', str(raised.exception))
+        self.pids.append(int(str(raised.exception).split('PID ')[1].split(')')[0]))
 
 
 if __name__ == '__main__':

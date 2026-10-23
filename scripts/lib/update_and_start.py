@@ -8,6 +8,7 @@ import os
 import pathlib
 import signal
 import socket
+import stat
 import struct
 import subprocess
 import sys
@@ -15,6 +16,144 @@ import time
 
 
 UPDATE_HELPER = '/usr/local/libexec/flowgate-update-helper'
+# Session variables carried to the relaunched GUI; nothing else is inherited.
+GUI_READY = b'FlowGate: main window rendered'  # emitted on the main window's did-finish-load
+GUI_START_TIMEOUT = 45
+SESSION_KEYS = ('WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR', 'DBUS_SESSION_BUS_ADDRESS', 'XDG_CURRENT_DESKTOP', 'XDG_SESSION_TYPE', 'XDG_SESSION_DESKTOP', 'DESKTOP_SESSION')
+
+
+class GuiNotSwitched(RuntimeError):
+    """The backend update is complete; only the GUI relaunch was not done."""
+
+
+def wayland_socket(environment, uid=None):
+    """Verified Wayland socket of this user for a session environment, else None.
+
+    Evidence: a private runtime directory and a socket owned by this user that
+    accepts a connection. Names and launch context alone are not trusted."""
+    uid = os.getuid() if uid is None else uid
+    runtime, display = environment.get('XDG_RUNTIME_DIR', ''), environment.get('WAYLAND_DISPLAY', '')
+    if not runtime or not display or not os.path.isabs(runtime):
+        return None
+    try:
+        st = os.stat(runtime)
+        if not stat.S_ISDIR(st.st_mode) or st.st_uid != uid or st.st_mode & 0o077:
+            return None
+        path = display if os.path.isabs(display) else os.path.join(runtime, display)
+        st = os.lstat(path)
+        if not stat.S_ISSOCK(st.st_mode) or st.st_uid != uid:
+            return None
+        with socket.socket(socket.AF_UNIX) as probe:
+            probe.settimeout(1)
+            probe.connect(path)
+        return path
+    except OSError:
+        return None
+
+
+def session_bus(runtime, uid=None):
+    """DBus address for a runtime directory's own bus socket, if verifiable."""
+    uid = os.getuid() if uid is None else uid
+    path = os.path.join(runtime, 'bus')
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return None
+    return 'unix:path=' + path if stat.S_ISSOCK(st.st_mode) and st.st_uid == uid else None
+
+
+def supervise_gui(command, environment, log_path, timeout=GUI_START_TIMEOUT, poll=0.2):
+    """Start the GUI detached and wait for its own readiness line.
+
+    Returns the PID once the main window reports it loaded. An early exit or a
+    missing readiness line is a GUI failure, never an update failure. Readiness
+    is the GUI's load report, not proof of what the compositor displays."""
+    log_path = pathlib.Path(log_path)
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, 'ab') as log:
+            start = log.tell()
+            child = subprocess.Popen(command, env=environment, stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
+    except OSError as error:
+        raise GuiNotSwitched('GUI launch failed: ' + str(error)) from error
+    def output():
+        with open(log_path, 'rb') as f:
+            f.seek(start)
+            return f.read(1 << 20)
+    deadline = time.monotonic() + timeout
+    try:
+        while time.monotonic() < deadline:
+            # Exit is checked before readiness: a GUI that printed the line and
+            # then exited is not reported as started.
+            code = child.poll()
+            text = output()
+            if code is not None:
+                tail = text.decode(errors='replace').strip().splitlines()[-3:]
+                when = 'after reporting its main window loaded' if GUI_READY in text else 'before its main window loaded'
+                raise GuiNotSwitched('new GUI exited with status ' + str(code) + ' ' + when + (': ' + ' | '.join(tail) if tail else '') + '; see ' + str(log_path))
+            if GUI_READY in text:
+                return child.pid
+            time.sleep(poll)
+    except OSError as error:
+        raise GuiNotSwitched('GUI start could not be observed (PID ' + str(child.pid) + ', left running): ' + str(error)) from error
+    raise GuiNotSwitched('new GUI (PID ' + str(child.pid) + ') did not report its main window loaded within ' + str(timeout) + ' s; left running; see ' + str(log_path))
+
+
+def session_environment(environ):
+    return {k: environ[k] for k in SESSION_KEYS if environ.get(k)}
+
+
+def process_environment(proc):
+    try:
+        raw = (proc / 'environ').read_bytes()
+    except OSError:
+        return {}
+    out = {}
+    for item in raw.split(b'\0'):
+        key, sep, value = item.partition(b'=')
+        if sep:
+            out[os.fsdecode(key)] = os.fsdecode(value)
+    return out
+
+
+def target_desktop(gui_environments, own_environment, uid=None):
+    """Choose the desktop session for the new GUI before the old one is closed.
+
+    Order: the session the replaced GUI was verifiably rendering in, then this
+    updater's own session, then the single Wayland socket in this user's runtime
+    directory. Conflicting or missing evidence returns (None, reason)."""
+    uid = os.getuid() if uid is None else uid
+    verified = {}
+    for env in gui_environments:
+        session = session_environment(env)
+        path = wayland_socket(session, uid)
+        if path:
+            verified.setdefault(path, session)
+    if len(verified) > 1:
+        return None, 'running FlowGate GUIs use different desktop sessions (' + ', '.join(sorted(verified)) + ')'
+    if verified:
+        return next(iter(verified.values())), None
+    own = session_environment(own_environment)
+    if wayland_socket(own, uid):
+        return own, None
+    runtime = own.get('XDG_RUNTIME_DIR') or '/run/user/' + str(uid)
+    try:
+        candidates = sorted(p.name for p in pathlib.Path(runtime).iterdir() if p.name.startswith('wayland-') and not p.name.endswith('.lock'))
+    except OSError:
+        candidates = []
+    # The updater's own session address may belong to another session: only
+    # this runtime directory's verified bus socket is carried over.
+    base = {k: v for k, v in own.items() if k != 'DBUS_SESSION_BUS_ADDRESS'}
+    bus = session_bus(runtime, uid)
+    if bus:
+        base['DBUS_SESSION_BUS_ADDRESS'] = bus
+    found = [dict(base, XDG_RUNTIME_DIR=runtime, WAYLAND_DISPLAY=name) for name in candidates]
+    found = [env for env in found if wayland_socket(env, uid)]
+    if len(found) == 1:
+        return found[0], None
+    if found:
+        return None, 'several Wayland sessions in ' + runtime + ' and no running FlowGate GUI to identify the right one'
+    return None, 'no verifiable Wayland session for this user (WAYLAND_DISPLAY/XDG_RUNTIME_DIR unset or socket not reachable)'
 
 
 def say(message):
@@ -207,6 +346,11 @@ class Host:
                 processes.append((proc, start))
             except (OSError, ValueError, IndexError):
                 continue
+        # Resolve and verify the target desktop while the old GUI still runs; an
+        # unverifiable target keeps it running instead of leaving no GUI at all.
+        desktop, reason = target_desktop([process_environment(proc) for proc, _ in processes], os.environ)
+        if desktop is None:
+            raise GuiNotSwitched(reason + ('; the running GUI was left open' if processes else '; no GUI started'))
         for proc, start in processes:
             try:
                 fd = os.pidfd_open(int(proc.name))
@@ -230,9 +374,13 @@ class Host:
                 break
             self.sleep()
         else:
-            raise RuntimeError('Old FlowGate GUI did not exit; no duplicate GUI started')
+            raise GuiNotSwitched('Old FlowGate GUI did not exit; no duplicate GUI started')
         launch = str(bundle / 'launch-ui')
-        os.execv(launch, [launch, '--observer', '/run/flowgate-api/daemon.sock.monitor', '--control', '/run/flowgate-api/daemon.sock'])
+        environment = {k: v for k, v in os.environ.items() if k not in SESSION_KEYS}
+        environment.update(desktop)
+        say('Launching GUI on Wayland session ' + desktop['WAYLAND_DISPLAY'])
+        pid = supervise_gui([launch, '--observer', '/run/flowgate-api/daemon.sock.monitor', '--control', '/run/flowgate-api/daemon.sock'], environment, bundle / '.workspace/gui-launch.log')
+        say('GUI started (PID ' + str(pid) + '); main window reported loaded')
 
 
 def transition(host, backend, selected):
@@ -353,7 +501,7 @@ def update(host, root, revision, *, dry=False, gui=True, profile="both", wine_di
         host.switch_gui(root, bundle)
 
 
-if __name__ == '__main__':
+def main(argv=None, host=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', type=pathlib.Path, required=True)
     parser.add_argument('--revision', required=True)
@@ -362,10 +510,18 @@ if __name__ == '__main__':
     parser.add_argument('--wine-discovery', action='store_true')
     parser.add_argument('--recover-stopped', action='store_true')
     parser.add_argument('--profile', choices=('preserve', 'monitoring', 'incoming', 'both'), default='both')
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     try:
-        update(Host(), args.root.resolve(), args.revision, dry=args.dry_run, gui=not args.no_gui, profile=args.profile, wine_discovery=args.wine_discovery, recover_stopped=args.recover_stopped)
+        update(host or Host(), args.root.resolve(), args.revision, dry=args.dry_run, gui=not args.no_gui, profile=args.profile, wine_discovery=args.wine_discovery, recover_stopped=args.recover_stopped)
+    except GuiNotSwitched as error:
+        # Distinct from update failure: the daemon/protection result above stands.
+        print('==> Backend update verified; GUI not switched: ' + str(error), file=sys.stderr, flush=True)
+        sys.exit(3)
     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
         if isinstance(error, subprocess.CalledProcessError):
             sys.exit('Update failed: command exited ' + str(error.returncode) + '; see verification/recovery status above')
         sys.exit('Update failed: ' + str(error))
+
+
+if __name__ == '__main__':
+    main()
