@@ -5,11 +5,11 @@ Never opens host endpoints or reuses a database. Run only through scripts/lab.sh
 """
 import argparse,json,os,socket,subprocess,sys,time,threading,pathlib,uuid,fcntl,struct
 ROOT=pathlib.Path(__file__).resolve().parents[2]
-p=argparse.ArgumentParser();p.add_argument('--binary',required=True);p.add_argument('--run',required=True);p.add_argument('--hold',action='store_true');p.add_argument('--suite',action='store_true');p.add_argument('--tailscale',action='store_true');p.add_argument('--skip-expiry',action='store_true');p.add_argument('--docker-dnat',action='store_true',help='focused Tailscale-shaped Docker DNAT readiness/translation check; no evaluation')
+p=argparse.ArgumentParser();p.add_argument('--binary',required=True);p.add_argument('--run',required=True);p.add_argument('--hold',action='store_true');p.add_argument('--suite',action='store_true');p.add_argument('--tunnel',action='store_true');p.add_argument('--skip-expiry',action='store_true');p.add_argument('--docker-dnat',action='store_true',help='focused generic tunnel Docker DNAT readiness/translation check; no evaluation')
 p.add_argument('--tcp-once',action='store_true',help='focused retained TCP Allow identity check')
 a=p.parse_args()
 if a.tcp_once and (a.suite or a.hold or a.docker_dnat):p.error('--tcp-once is a separate focused case')
-if a.docker_dnat and (not a.tailscale or a.suite or a.hold):p.error('--docker-dnat requires --tailscale and no --suite/--hold')
+if a.docker_dnat and (not a.tunnel or a.suite or a.hold):p.error('--docker-dnat requires --tunnel and no --suite/--hold')
 assert os.environ['FLOWGATE_PARENT_NETNS']!=os.readlink('/proc/self/ns/net')
 RUN=pathlib.Path(a.run).resolve();assert RUN.is_relative_to(ROOT/'.workspace');RUN.mkdir(mode=0o700,parents=True,exist_ok=True)
 for n,mode in [('api',0o711),('data',0o700)]: (RUN/n).mkdir(mode=mode,exist_ok=True);os.chmod(RUN/n,mode)
@@ -75,16 +75,15 @@ try:
  cmd('ip','link','add','fghost','type','veth','peer','name','fgpeer');cmd('ip','link','set','fgpeer','netns',str(peer.pid));cmd('ip','link','set','fghost','up')
  cmd('ip','addr','add','10.79.0.1/24','dev','fghost');cmd('ip','-6','addr','add','fd79::1/64','dev','fghost','nodad');remote('setup')
  cmd('nft','add','table','inet','unrelated_fixture');cmd('nft','add','chain','inet','unrelated_fixture','track','{ type filter hook input priority 0; policy accept; }');cmd('nft','add','rule','inet','unrelated_fixture','track','ct','state','established','counter')
- if a.tailscale:
-  tools=RUN/'tools';tools.mkdir(mode=0o700);f=tools/'tailscale';f.write_text('#!/bin/sh\ncase "$1 $2" in\n"version --daemon") echo \'{"short":"1.104.1","daemonLong":"1.104.1"}\';;\n"debug prefs") echo \'{"WantRunning":true,"NetfilterMode":2,"RouteAll":false,"AdvertiseRoutes":[]}\';;\n*) exit 1;;\nesac\n');f.chmod(0o700);os.environ['PATH']=str(tools)+':'+os.environ['PATH']
-  tun=os.open('/dev/net/tun',os.O_RDWR);fcntl.ioctl(tun,0x400454ca,struct.pack('16sH',b'tailscale0',0x1001));cmd('ip','link','set','tailscale0','up')
+ if a.tunnel:
+  tun=os.open('/dev/net/tun',os.O_RDWR);fcntl.ioctl(tun,0x400454ca,struct.pack('16sH',b'fixturetun0',0x1001));cmd('ip','link','set','fixturetun0','up')
   for family,prefix in [('-4','10.80.0.2/32'),('-6','fd80::2/128')]:
-   cmd('ip',family,'route','add',prefix,'dev','tailscale0','table','52')
+   cmd('ip',family,'route','add',prefix,'dev','fixturetun0','table','52')
    for pr,table in [('5210','main'),('5230','default')]:cmd('ip',family,'rule','add','priority',pr,'fwmark','0x80000/0xff0000','lookup',table)
    cmd('ip',family,'rule','add','priority','5250','fwmark','0x80000/0xff0000','type','unreachable');cmd('ip',family,'rule','add','priority','5270','lookup','52')
   for tool in ['iptables','ip6tables']:
-   for chain in ['ts-input','ts-forward']:cmd(tool,'-N',chain)
-   cmd(tool,'-A','INPUT','-j','ts-input');cmd(tool,'-A','FORWARD','-j','ts-forward');cmd(tool,'-A','ts-input','-i','tailscale0','-j','ACCEPT');cmd(tool,'-A','ts-input','-p','udp','--dport','41641','-j','ACCEPT');cmd(tool,'-A','ts-forward','-i','tailscale0','-j','MARK','--set-xmark','0x40000/0xff0000');cmd(tool,'-A','ts-forward','-m','mark','--mark','0x40000/0xff0000','-j','ACCEPT')
+   for chain in ['fixture-input','fixture-forward']:cmd(tool,'-N',chain)
+   cmd(tool,'-A','INPUT','-j','fixture-input');cmd(tool,'-A','FORWARD','-j','fixture-forward');cmd(tool,'-A','fixture-input','-i','fixturetun0','-j','ACCEPT');cmd(tool,'-A','fixture-input','-p','udp','--dport','41641','-j','ACCEPT');cmd(tool,'-A','fixture-forward','-i','fixturetun0','-j','MARK','--set-xmark','0x40000/0xff0000');cmd(tool,'-A','fixture-forward','-m','mark','--mark','0x40000/0xff0000','-j','ACCEPT')
    cmd(tool,'-t','mangle','-A','PREROUTING','-m','conntrack','--ctstate','RELATED,ESTABLISHED','-m','connmark','!','--mark','0x0/0xff0000','-j','CONNMARK','--restore-mark','--nfmask','0xff0000','--ctmask','0xff0000');cmd(tool,'-t','mangle','-A','OUTPUT','-m','conntrack','--ctstate','NEW','-m','mark','!','--mark','0x0/0xff0000','-j','CONNMARK','--save-mark','--nfmask','0xff0000','--ctmask','0xff0000')
  if a.docker_dnat:
   for tool,dest,port in [('iptables','10.79.0.1:44001',49999),('ip6tables','[fd79::1]:44101',49999)]:
@@ -122,7 +121,7 @@ try:
   assert api()['enforcement']['state']=='stopped'
   assert cmd('nft','-s','-j','list','ruleset')==nft_before
   assert 'flowgate_host'not in nft_before
-  log('PASS real IPv4/IPv6 Docker-chain DNAT receiver delivery; supported Tailscale-shaped readiness; no interception or ruleset mutation by readiness (not live Tailscale evidence)')
+  log('PASS real IPv4/IPv6 Docker-chain DNAT receiver delivery; supported generic tunnel readiness; no interception or ruleset mutation by readiness (not live VPN evidence)')
  if a.suite:
   assert api('evaluation-start',generation=generation,evaluation_id='',request_id=uuid.uuid4().hex,profile='incoming',readonly=True)['error_code']=='forbidden'
   send(44000);wait(lambda:counts[44000]==1)

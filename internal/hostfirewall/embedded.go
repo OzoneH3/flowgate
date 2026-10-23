@@ -228,6 +228,10 @@ func (m *Evaluation) Close() {
 func (m *Evaluation) finish(err error, clean bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.finishLocked(err, clean)
+}
+
+func (m *Evaluation) finishLocked(err error, clean bool) {
 	if err != nil {
 		m.status.State = "failed"
 		m.status.ReasonCode = "activation_failed"
@@ -475,8 +479,16 @@ func (m *Evaluation) run(ctx context.Context, id string) {
 			if guardErr != nil {
 				err = fmt.Errorf("%v; guard: %w", err, guardErr)
 			}
-			m.finish(err, false)
-			return
+			// Stop may arrive while the failure guard is being installed. Commit
+			// the degraded outcome under the same lock as desired-mode updates;
+			// otherwise an acknowledged Stop can be lost between these steps.
+			m.mu.Lock()
+			if m.desiredMode != "monitoring" {
+				m.finishLocked(err, false)
+				m.mu.Unlock()
+				return
+			}
+			m.mu.Unlock()
 		}
 	}
 	cleanupErr := cleanupEmbedded(m.dir, id)

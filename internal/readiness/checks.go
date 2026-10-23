@@ -137,7 +137,6 @@ func Firewall(ctx context.Context, env Environment) []Check {
 	return FirewallFor(ctx, env, "incoming", false)
 }
 func FirewallFor(ctx context.Context, env Environment, profile string, administrator bool) []Check {
-	tailscaleLink := false
 	out := []Check{}
 	links, err := env.Run(ctx, "ip", "-j", "-d", "link", "show")
 	if err != nil {
@@ -155,11 +154,7 @@ func FirewallFor(ctx context.Context, env Environment, profile string, administr
 			c := Check{ID: "firewall.interfaces", Status: Ready, Code: "interfaces_inspected", Detail: "No currently refused tunnel interface type observed"}
 			for _, i := range interfaces {
 				switch i.Linkinfo.Kind {
-				case "wireguard", "tun", "xfrm":
-					if i.Ifname == "tailscale0" && i.Linkinfo.Kind == "tun" {
-						tailscaleLink = true
-						continue
-					}
+				case "wireguard", "xfrm":
 					c.Status = Blocked
 					c.Code = "firewall_conflict"
 					c.Detail = fmt.Sprintf("VPN/tunnel interface %.80s (%.24s): initial profile requires a separately reviewed integration", i.Ifname, i.Linkinfo.Kind)
@@ -197,26 +192,11 @@ func FirewallFor(ctx context.Context, env Environment, profile string, administr
 			c.Code = "instance_or_foreign_table"
 			c.Detail = "FlowGate table already exists; table name alone does not prove ownership"
 			c.Next = "Inspect host-status; use scoped Stop/recovery only for a confirmed owned instance"
-		} else if tailscaleLink {
-			ts := observedTailscaleRules(ctx, env, b)
-			out = append(out, ts)
-			if ts.Status != Ready {
-				c.Status = ts.Status
-				c.Code = ts.Code
-				c.Detail = ts.Detail
-				c.Next = ts.Next
-			} else {
-				c.Detail = "Present mark operations inspected; Tailscale initialization is not a startup prerequisite"
-			}
 		} else {
-			for _, term := range []string{`"mark"`, `"queue"`, `"notrack"`, `"zone"`, `"MARK"`, `"CONNMARK"`, `"NFQUEUE"`, `"CT"`, `"flowtable"`} {
-				if bytes.Contains(b, []byte(term)) {
-					c.Status = Blocked
-					c.Code = "firewall_conflict"
-					c.Detail = "Existing rules use " + term + "; initial profile cannot establish collision-free coexistence"
-					c.Next = "Keep read-only monitoring and review allocation/coexistence"
-					break
-				}
+			markCheck := compatibleFirewallRules(ctx, env, b)
+			out = append(out, markCheck)
+			if markCheck.Status != Ready {
+				c.Status, c.Code, c.Detail, c.Next = markCheck.Status, markCheck.Code, markCheck.Detail, markCheck.Next
 			}
 		}
 		out = append(out, c)

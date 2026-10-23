@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
-"""Component verification with real TUN/IP/netfilter, emulated Tailscale metadata.
-No tailnet enrollment, encryption or live-host forwarding is performed.
+"""Component verification with real TUN/IP/netfilter, generic disjoint mark rules.
+No VPN enrollment, encryption or live-host forwarding is performed.
 """
 import json,os,socket,struct,fcntl,select,subprocess,tempfile,time,threading,sys,uuid,signal
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2];BIN=os.environ.get('FLOWGATE_TEST_BINARY',str(ROOT/'.workspace/flowgate-continuous'))
 assert os.environ['FLOWGATE_PARENT_NETNS']!=os.readlink('/proc/self/ns/net')
 RUN=Path(tempfile.mkdtemp(prefix='continuous-component-',dir=ROOT/'.workspace'))
-TOOLS=RUN/'tools';TOOLS.mkdir(mode=0o700)
-(TOOLS/'tailscale').write_text('#!/bin/sh\ncase "$1 $2" in\n"version --daemon") echo \'{"short":"1.104.1","daemonLong":"1.104.1"}\';;\n"debug prefs") echo \'{"WantRunning":true,"NetfilterMode":2,"RouteAll":false,"AdvertiseRoutes":[]}\';;\n*) exit 1;;\nesac\n');(TOOLS/'tailscale').chmod(0o700)
-os.environ['PATH']=str(TOOLS)+':'+os.environ['PATH']
 def cmd(*args):return subprocess.check_output(args,text=True,stderr=subprocess.STDOUT)
 left,right=socket.socketpair(socket.AF_UNIX,socket.SOCK_DGRAM)
-peer=subprocess.Popen(['unshare','--net','python3',str(ROOT/'scripts/acceptance/tailscale-tun-peer.py'),str(right.fileno()),str(RUN)],pass_fds=[right.fileno()],stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True);right.close()
-tun=os.open('/dev/net/tun',os.O_RDWR);fcntl.ioctl(tun,0x400454ca,struct.pack('16sH',b'tailscale0',0x1001))
+peer=subprocess.Popen(['unshare','--net','python3',str(ROOT/'scripts/acceptance/tun-peer.py'),str(right.fileno()),str(RUN)],pass_fds=[right.fileno()],stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True);right.close()
+tun=os.open('/dev/net/tun',os.O_RDWR);fcntl.ioctl(tun,0x400454ca,struct.pack('16sH',b'fixturetun0',0x1001))
 def pump():
  while True:
   r,_,_=select.select([tun,left],[],[])
@@ -35,21 +32,21 @@ def wait(fn,seconds=10):
   time.sleep(.04)
  raise AssertionError('timeout')
 wait(lambda:os.readlink(f'/proc/{peer.pid}/ns/net')!=os.readlink('/proc/self/ns/net'))
-cmd('ip','link','set','tailscale0','up');cmd('ip','addr','add','10.79.0.1/32','dev','tailscale0');cmd('ip','-6','addr','add','fd79::1/128','dev','tailscale0','nodad')
+cmd('ip','link','set','fixturetun0','up');cmd('ip','addr','add','10.79.0.1/32','dev','fixturetun0');cmd('ip','-6','addr','add','fd79::1/128','dev','fixturetun0','nodad')
 remote('setup')
-# Reproduce this host's routing selectors, while using only documentation addresses.
+# Generic masked policy routing with arbitrary priorities/table.
 cmd('ip','link','add','underlay0','type','dummy');cmd('ip','link','set','underlay0','up')
-for family,prefix in [('-4','10.79.0.2/32'),('-6','fd79::2/128')]:
- cmd('ip',family,'route','add',prefix,'dev','tailscale0','table','52')
+for family,prefix in [('-4','10.79.0.2/32'),('-6','fd79::/64')]:
+ cmd('ip',family,'route','add',prefix,'dev','fixturetun0','table','107')
  cmd('ip',family,'route','add','default','dev','underlay0')
- for pr,table in [('5210','main'),('5230','default')]:cmd('ip',family,'rule','add','priority',pr,'fwmark','0x80000/0xff0000','lookup',table)
- cmd('ip',family,'rule','add','priority','5250','fwmark','0x80000/0xff0000','type','unreachable')
- cmd('ip',family,'rule','add','priority','5270','lookup','52')
+ for pr,table in [('6210','main'),('6230','default')]:cmd('ip',family,'rule','add','priority',pr,'fwmark','0x80000/0xff0000','lookup',table)
+ cmd('ip',family,'rule','add','priority','6250','fwmark','0x80000/0xff0000','type','unreachable')
+ cmd('ip',family,'rule','add','priority','6270','lookup','107')
 for tool in ['iptables','ip6tables']:
- for chain in ['ts-input','ts-forward']:cmd(tool,'-N',chain)
- cmd(tool,'-A','INPUT','-j','ts-input');cmd(tool,'-A','FORWARD','-j','ts-forward')
- cmd(tool,'-A','ts-input','-i','tailscale0','-j','ACCEPT');cmd(tool,'-A','ts-input','-p','udp','--dport','41641','-j','ACCEPT')
- cmd(tool,'-A','ts-forward','-i','tailscale0','-j','MARK','--set-xmark','0x40000/0xff0000');cmd(tool,'-A','ts-forward','-m','mark','--mark','0x40000/0xff0000','-j','ACCEPT')
+ for chain in ['fixture-input','fixture-forward']:cmd(tool,'-N',chain)
+ cmd(tool,'-A','INPUT','-j','fixture-input');cmd(tool,'-A','FORWARD','-j','fixture-forward')
+ cmd(tool,'-A','fixture-input','-i','fixturetun0','-j','ACCEPT');cmd(tool,'-A','fixture-input','-p','udp','--dport','41641','-j','ACCEPT')
+ cmd(tool,'-A','fixture-forward','-i','fixturetun0','-j','MARK','--set-xmark','0x40000/0xff0000');cmd(tool,'-A','fixture-forward','-m','mark','--mark','0x40000/0xff0000','-j','ACCEPT')
  cmd(tool,'-t','mangle','-A','PREROUTING','-m','conntrack','--ctstate','RELATED,ESTABLISHED','-m','connmark','!','--mark','0x0/0xff0000','-j','CONNMARK','--restore-mark','--nfmask','0xff0000','--ctmask','0xff0000')
  cmd(tool,'-t','mangle','-A','OUTPUT','-m','conntrack','--ctstate','NEW','-m','mark','!','--mark','0x0/0xff0000','-j','CONNMARK','--save-mark','--nfmask','0xff0000','--ctmask','0xff0000')
 cmd('nft','add','table','inet','other_firewall');cmd('nft','add','chain','inet','other_firewall','late','{ type filter hook input priority 20; policy accept; }');cmd('nft','add','rule','inet','other_firewall','late','udp','dport','{ 44007, 44107 }','counter','drop')
@@ -90,10 +87,9 @@ def decide(port,action):
  r=call('decide',id=e['id'],action=action,scope='once');assert 'error'not in r,r
  return e
 def doctor(*flags):return json.loads(cmd(BIN,'doctor','--json','--administrator',*flags))
-def tailcheck(r):return next(c for c in r['checks']if c['id']=='firewall.tailscale')
+def markcheck(r):return next(c for c in r['checks']if c['id']=='firewall.mark_compatibility')
 def nft():return json.loads(cmd('nft','-j','list','ruleset'))
-def marks():return json.loads(cmd(BIN,'tailscale-inspect'))['conntrack_marks']
-result={'cases':[],'label':'real private TUN/conntrack/NFQUEUE with emulated Tailscale metadata; not host or encrypted tailnet proof'}
+result={'cases':[],'label':'real private TUN/conntrack/NFQUEUE with generic disjoint mark rules; not host or encrypted VPN proof'}
 def passed(s):
  print('PASS',s,flush=True);result['cases'].append(s);(RUN/'result.json').write_text(json.dumps(result,indent=2))
 def state():return call()['protection']
@@ -130,14 +126,14 @@ def outgoing(v6,tcp,action,remember=False):
  else:assert 'reply'not in outcome and after==before,(outcome,before,after)
  return e
 try:
- assert tailcheck(doctor('--profile','both'))['status']=='ready'
- foreign=nft();routes={f:cmd('ip','-j',f,'rule','show')+cmd('ip','-j',f,'route','show','table','52')for f in ['-4','-6']}
+ assert markcheck(doctor('--profile','both'))['status']=='ready'
+ foreign=nft();routes={f:cmd('ip','-j',f,'rule','show')+cmd('ip','-j',f,'route','show','table','107')for f in ['-4','-6']}
  before=launch();assert state()['state']=='stopped'
  s=protect();assert s['desired_mode']=='both'and 'stops_at'not in s
  # Real incoming and outgoing TCP/UDP for both families, replies and masked marks.
  for v6,base in [(False,44000),(True,44100)]:
   for offset,action in [(2,'allow'),(4,'block'),(1,'allow'),(3,'block')]:
-   port=base+offset;remote('tcp'if offset%2==0 else'udp',port=port,v6=v6,wait_reply=bool(offset%2));decide(port,action)
+   port=base+offset;print('CHECK',v6,port,action,flush=True);remote('tcp'if offset%2==0 else'udp',port=port,v6=v6,wait_reply=bool(offset%2));decide(port,action)
    if action=='allow':wait(lambda:counts[port]==1)
    else:time.sleep(.2);assert counts[port]==0
    if action=='allow'and offset%2:assert remote('udp-reply',port=port,v6=v6)['reply']=='reply'
@@ -166,15 +162,35 @@ try:
    assert state()['state']=='active';time.sleep(2)
   assert hold>300
   passed(f'Continuous active without GUI for {hold}s, beyond prior five-minute expiry')
- stop();backend.terminate();assert backend.wait(8)==0
+ # Candidate inspection omits only verified owned resources, without stopping.
+ checks=json.loads(cmd(BIN,'doctor','--json','--upgrade-preflight','--state',str(STATE),'--profile','both'))['checks']
+ assert all(c['status']=='ready' or (c['id']=='firewall.queue_census' and c['status']=='not_checked') for c in checks),checks
+ assert state()['state']=='active'
+ passed('Candidate upgrade preflight accepts verified owned active interception without mutations')
+ # A later conflicting writer must be detected by the runtime audit.
+ cmd('nft','add','table','inet','overlap_fixture');cmd('nft','add','chain','inet','overlap_fixture','late','{ type filter hook output priority 30; policy accept; }')
+ cmd('nft','add','rule','inet','overlap_fixture','late','ct','mark','set','0x10000000')
+ checks=json.loads(cmd(BIN,'doctor','--json','--upgrade-preflight','--state',str(STATE),'--profile','both'))['checks']
+ assert any(c['status']=='blocked' for c in checks),checks
+ wait(lambda:state()['state']=='degraded',seconds=20)
+ assert 'flowgate_guard' in cmd('nft','list','tables')
+ stop();cmd('nft','delete','table','inet','overlap_fixture')
+ passed('Overlapping runtime writer detected; fail-closed guard retained; explicit Stop cleans owned interception')
+ protect();stop();backend.terminate();assert backend.wait(8)==0
  def normalize(o):
   if isinstance(o,dict):return{k:normalize(v)for k,v in o.items()if k not in ['handle','counter','metainfo']}
   if isinstance(o,list):return[normalize(v)for v in o]
   return o
  assert normalize(foreign)==normalize(nft()),'foreign rules changed'
- assert routes=={f:cmd('ip','-j',f,'rule','show')+cmd('ip','-j',f,'route','show','table','52')for f in ['-4','-6']}
- passed('Foreign nft semantics and Tailscale-shaped routing unchanged after Stop/recovery')
+ assert routes=={f:cmd('ip','-j',f,'rule','show')+cmd('ip','-j',f,'route','show','table','107')for f in ['-4','-6']}
+ passed('Foreign nft semantics and generic policy routing unchanged after Stop/recovery')
  result['passed']=True;(RUN/'result.json').write_text(json.dumps(result,indent=2))
+except Exception:
+ (RUN/'failure-counts.json').write_text(json.dumps(counts))
+ if backend and backend.poll() is None:
+  (RUN/'failure-state.json').write_text(json.dumps(call(),indent=2))
+  (RUN/'failure-nft.json').write_text(json.dumps(nft(),indent=2))
+ raise
 finally:
  stopping=True
  if backend and backend.poll()is None:

@@ -1,3 +1,5 @@
+> Historical record: the vendor-specific adapter and commands described below have been removed. Current product-independent checks are documented in SEMANTICS.md. These historical test results do not establish current compatibility.
+
 # Tailscale coexistence: bounded incoming-only evaluation
 
 ## What was observed on this host

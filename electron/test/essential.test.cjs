@@ -244,7 +244,7 @@ test('no grant/old capability sends nothing; changed option/token or expiry send
   await e.action('apply', {
     generation: 'one',
     token: v.preview.token,
-    options: { ...essentialDefaults(), tailscale: true },
+    options: { ...essentialDefaults(), discovery: true },
   });
   assert.equal(f.calls.filter((q) => q.operation === 'essential-apply').length, 0);
   v = await e.action('preview', { generation: 'one', options: essentialDefaults() });

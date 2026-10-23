@@ -17,8 +17,8 @@ func TestRulesScopesAndRevisions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := Snapshot{Collected: time.Now(), Components: []Component{}, DNS: []DNS{{"192.0.2.53", 53, 2, "test0", false}}, Stubs: []Stub{{"127.0.0.53", "udp", 1}, {"127.0.0.53", "tcp", 1}}, NTP: []string{"192.0.2.123"}, DHCP: []DHCP{{"test0", 2, true, true}}, VPNPort: 41641}
-	for _, id := range []string{"dns", "dns-stub-client", "dhcp", "time", "tailscale"} {
+	s := Snapshot{Collected: time.Now(), Components: []Component{}, DNS: []DNS{{"192.0.2.53", 53, 2, "test0", false}}, Stubs: []Stub{{"127.0.0.53", "udp", 1}, {"127.0.0.53", "tcp", 1}}, NTP: []string{"192.0.2.123"}, DHCP: []DHCP{{"test0", 2, true, true}}}
+	for _, id := range []string{"dns", "dns-stub-client", "dhcp", "time"} {
 		s.Components = append(s.Components, Component{ID: id, State: "ready", Service: &p, Details: []string{}})
 	}
 	s.Seal()
@@ -35,7 +35,7 @@ func TestRulesScopesAndRevisions(t *testing.T) {
 		}
 	}
 	more, _, err := s.Rules(Options{Tailscale: true, TailscaleIncoming: true, TailscaleHTTP: true}, time.Now())
-	if err != nil || len(more) != len(rules)+5 {
+	if err == nil || len(more) != 0 {
 		t.Fatal(err, len(more))
 	}
 	orig := s.Component("dns").Revision
@@ -62,6 +62,9 @@ func TestStructuredDiscoveryNotWrappedOrGuessed(t *testing.T) {
 	}, Read: os.ReadFile, Sockets: func() ([]identity.Socket, error) { return []identity.Socket{}, nil }, Run: func(_ context.Context, name string, args ...string) ([]byte, error) {
 		if name == "systemctl" {
 			unit := args[1]
+			if unit != "systemd-resolved.service" && unit != "systemd-timesyncd.service" {
+				t.Fatalf("unexpected vendor service discovery: %s", unit)
+			}
 			if unit == "systemd-resolved.service" {
 				return []byte("MainPID=" + strconv.Itoa(p.PID) + "\nActiveState=active"), nil
 			}
@@ -81,17 +84,17 @@ func TestStructuredDiscoveryNotWrappedOrGuessed(t *testing.T) {
 	}
 }
 
-func TestTimeAndVPNDoNotExemptOtherPrograms(t *testing.T) {
+func TestTimeDoesNotExemptOtherPrograms(t *testing.T) {
 	p, err := identity.Inspect(os.Getpid())
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := Snapshot{Collected: time.Now(), NTP: []string{"192.0.2.123"}, VPNPort: 41641}
-	for _, id := range []string{"time", "tailscale"} {
+	s := Snapshot{Collected: time.Now(), NTP: []string{"192.0.2.123"}}
+	for _, id := range []string{"time"} {
 		s.Components = append(s.Components, Component{ID: id, State: "ready", Service: &p})
 	}
 	s.Seal()
-	rules, _, err := s.Rules(Options{Tailscale: true}, time.Now())
+	rules, _, err := s.Rules(Options{}, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,8 +107,8 @@ func TestTimeAndVPNDoNotExemptOtherPrograms(t *testing.T) {
 		{"udp", "outgoing", "192.0.2.1:40000", "192.0.2.123:123", false, "allow"},
 		{"udp", "incoming", "192.0.2.1:123", "192.0.2.123:40000", false, "ask"},
 		{"udp", "outgoing", "192.0.2.1:40000", "192.0.2.124:123", false, "ask"},
-		{"tcp", "outgoing", "192.0.2.1:40000", "198.51.100.10:443", false, "allow"},
-		{"udp", "outgoing", "192.0.2.1:41641", "198.51.100.10:50000", false, "allow"},
+		{"tcp", "outgoing", "192.0.2.1:40000", "198.51.100.10:443", false, "ask"},
+		{"udp", "outgoing", "192.0.2.1:41641", "198.51.100.10:50000", false, "ask"},
 		{"udp", "outgoing", "192.0.2.1:40000", "198.51.100.10:50000", false, "ask"},
 		{"tcp", "outgoing", "192.0.2.1:40000", "198.51.100.10:443", true, "ask"},
 		{"udp", "outgoing", "192.0.2.1:41641", "198.51.100.10:50000", true, "ask"},
@@ -261,10 +264,10 @@ func TestDNSRevisionIndependentOfInterfaceIndexOrdering(t *testing.T) {
 }
 
 // Essentials-only defaults: tailscale0 MagicDNS stays a resolver DNS rule; no
-// tailscaled transport permission exists unless the separate option is chosen.
+// transport permission is generated; the retired option is refused.
 func TestEssentialDefaultsCreateNoTailscaleTransport(t *testing.T) {
 	p, _ := identity.Inspect(os.Getpid())
-	s := Snapshot{Collected: time.Now(), DNS: []DNS{{"100.100.100.100", 53, 3, "tailscale0", false}}, VPNPort: 41641, Components: []Component{{ID: "dns", State: "ready", Service: &p}, {ID: "tailscale", State: "ready", Service: &p}}}
+	s := Snapshot{Collected: time.Now(), DNS: []DNS{{"100.100.100.100", 53, 3, "tailscale0", false}}, Components: []Component{{ID: "dns", State: "ready", Service: &p}, {ID: "tailscale", State: "ready", Service: &p}}}
 	s.Seal()
 	rules, _, err := s.Rules(Options{}, time.Now())
 	if err != nil {
@@ -277,5 +280,13 @@ func TestEssentialDefaultsCreateNoTailscaleTransport(t *testing.T) {
 	}
 	if len(rules) != 2 {
 		t.Fatalf("want udp+tcp DNS only, got %d", len(rules))
+	}
+}
+
+func TestRetiredTransportOptionsRefused(t *testing.T) {
+	for _, o := range []Options{{Tailscale: true}, {TailscaleIncoming: true}, {TailscaleHTTP: true}} {
+		if r, _, err := (Snapshot{}).Proposals(o, time.Now()); err == nil || len(r) != 0 {
+			t.Fatalf("retired option accepted: %+v", o)
+		}
 	}
 }

@@ -13,7 +13,16 @@ import (
 // table and own queue for foreign conflicts. A digest check of our table occurs
 // separately every second. Unknown/new foreign configuration fails closed.
 func (m *Evaluation) auditEnvironment(parent context.Context, profile string) error {
-	env := readiness.Default()
+	env := foreignEnvironment(readiness.Default(), true, true)
+	ctx, cancel := context.WithTimeout(parent, 15*time.Second)
+	defer cancel()
+	if err := blocked(readiness.FirewallFor(ctx, env, profile, m.e.AdministratorUID != nil)); err != nil {
+		return fmt.Errorf("runtime foreign configuration no longer supported: %w", err)
+	}
+	return nil
+}
+
+func foreignEnvironment(env readiness.Environment, host, guard bool) readiness.Environment {
 	run, read := env.Run, env.Read
 	env.Run = func(ctx context.Context, name string, args ...string) ([]byte, error) {
 		b, err := run(ctx, name, args...)
@@ -35,7 +44,7 @@ func (m *Evaluation) auditEnvironment(parent context.Context, profile string) er
 						Family string
 					}
 					json.Unmarshal(raw, &p)
-					if p.Family == "inet" && (p.Table == Table || p.Table == GuardTable || p.Name == Table || p.Name == GuardTable) {
+					if p.Family == "inet" && ((host && (p.Table == Table || p.Name == Table)) || (guard && (p.Table == GuardTable || p.Name == GuardTable))) {
 						own = true
 					}
 				}
@@ -50,7 +59,7 @@ func (m *Evaluation) auditEnvironment(parent context.Context, profile string) er
 	}
 	env.Read = func(path string) ([]byte, error) {
 		b, err := read(path)
-		if strings.HasSuffix(path, "/nfnetlink_queue") && err == nil {
+		if host && strings.HasSuffix(path, "/nfnetlink_queue") && err == nil {
 			lines := []string{}
 			for _, l := range strings.Split(string(b), "\n") {
 				f := strings.Fields(l)
@@ -62,10 +71,5 @@ func (m *Evaluation) auditEnvironment(parent context.Context, profile string) er
 		}
 		return b, err
 	}
-	ctx, cancel := context.WithTimeout(parent, 15*time.Second)
-	defer cancel()
-	if err := blocked(readiness.FirewallFor(ctx, env, profile, m.e.AdministratorUID != nil)); err != nil {
-		return fmt.Errorf("runtime foreign configuration no longer supported: %w", err)
-	}
-	return nil
+	return env
 }

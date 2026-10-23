@@ -4,17 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 )
 
-// Startup examines the rules that exist, not whether a VPN client has finished
-// logging in. Missing Tailscale hooks/routes/marks confer no permission and must
-// not deadlock startup behind the boot guard. Present opaque mark operations
-// still need the independently exported, bounded masks already reviewed here.
-func observedTailscaleRules(ctx context.Context, env Environment, nft []byte) Check {
-	c := Check{ID: "firewall.tailscale", Status: Blocked, Code: "firewall_conflict", Next: "Inspect conflicting mark/routing rules; no automatic firewall changes"}
+// Compatibility depends on bounded live mark semantics, never vendor names.
+// Opaque xt marks require a matching independently exported representation.
+func compatibleFirewallRules(ctx context.Context, env Environment, nft []byte) Check {
+	c := Check{ID: "firewall.mark_compatibility", Status: Blocked, Code: "firewall_conflict", Next: "Inspect conflicting mark/routing rules; no automatic firewall changes"}
 	fail := func(err error) Check { c.Detail = err.Error(); return c }
-	if err := tailscaleNFTMode(nft, false); err != nil {
+	if err := compatibleNFT(nft); err != nil {
 		return fail(err)
 	}
 	kernel, err := opaqueMarkCounts(nft)
@@ -35,13 +34,29 @@ func observedTailscaleRules(ctx context.Context, env Environment, nft []byte) Ch
 			if family == "ip6" {
 				tool = "ip6tables-save"
 			}
-			for _, table := range []string{"filter", "mangle"} {
+			for _, table := range []string{"filter", "mangle", "nat", "raw", "security"} {
+				needed := false
+				for key := range kernel {
+					if strings.HasPrefix(key, family+"/"+table+"/") {
+						needed = true
+					}
+				}
+				if !needed {
+					continue
+				}
 				b, err := env.Run(ctx, tool, "-t", table)
 				if err != nil {
 					return ProbeFailure(c.ID, err)
 				}
-				if err = tailscaleExportMode(b, table, false); err != nil {
+				if err = compatibleExport(b); err != nil {
 					return fail(fmt.Errorf("%s/%s: %w", tool, table, err))
+				}
+				again, err := env.Run(ctx, tool, "-t", table)
+				if err != nil {
+					return ProbeFailure(c.ID, err)
+				}
+				if !reflect.DeepEqual(exportRuleLines(b), exportRuleLines(again)) {
+					return fail(fmt.Errorf("mark export changed during inspection"))
 				}
 				for _, line := range strings.Split(string(b), "\n") {
 					f := strings.Fields(line)
@@ -67,20 +82,31 @@ func observedTailscaleRules(ctx context.Context, env Environment, nft []byte) Ch
 				return fail(fmt.Errorf("Export/kernel mark snapshot differs at %s; retry inspection", key))
 			}
 		}
+		latest, err := env.Run(ctx, "nft", "-j", "list", "ruleset")
+		if err != nil {
+			return ProbeFailure(c.ID, err)
+		}
+		if err = compatibleNFT(latest); err != nil {
+			return fail(err)
+		}
+		latestCounts, err := opaqueMarkCounts(latest)
+		if err != nil || !reflect.DeepEqual(kernel, latestCounts) {
+			return fail(fmt.Errorf("kernel mark snapshot changed during inspection"))
+		}
 	}
 	for _, family := range []string{"-4", "-6"} {
 		b, err := env.Run(ctx, "ip", "-j", family, "rule", "show")
 		if err != nil {
 			return ProbeFailure(c.ID, err)
 		}
-		if err = tailscaleRoutingMode(b, family, false); err != nil {
+		if err = compatibleRouting(b); err != nil {
 			return fail(err)
 		}
 	}
 	c.Status = Ready
-	c.Code = "tailscale_rules_inspected"
+	c.Code = "mark_masks_disjoint"
 	c.Next = ""
-	c.Detail = "Present packet/conntrack mark operations and routing selectors inspected; no Tailscale login/version/preferences or required-rule startup gate. Traffic remains subject to ordinary application permissions."
+	c.Detail = "Packet/conntrack mark masks and routing selectors are disjoint from reserved bits. Tunnel and transport traffic remain subject to ordinary application permissions."
 	return c
 }
 
@@ -115,4 +141,14 @@ func opaqueMarkCounts(b []byte) (map[string]int, error) {
 		}
 	}
 	return counts, nil
+}
+
+func exportRuleLines(b []byte) []string {
+	var out []string
+	for _, line := range strings.Split(string(b), "\n") {
+		if strings.HasPrefix(line, "-A ") {
+			out = append(out, line)
+		}
+	}
+	return out
 }

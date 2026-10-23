@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"flowgate/internal/diagnostics"
+	"flowgate/internal/hostfirewall"
 	"fmt"
 	"os"
 	"time"
@@ -14,6 +15,7 @@ func doctorCommand(args []string) error {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	fs.StringVar(&o.Profile, "profile", o.Profile, "planned evaluation profile: incoming or both; no activation")
 	fs.BoolVar(&o.Administrator, "administrator", false, "inspect planned explicit selected-peer administrator configuration; does not grant API permission")
+	upgrade := fs.Bool("upgrade-preflight", false, "read-only candidate firewall checks after verified owned cleanup")
 	jsonOutput := fs.Bool("json", false, "versioned JSON check output")
 	fs.StringVar(&o.Helper, "udp-helper", o.Helper, "explicitly selected optional helper (inspected, never executed)")
 	fs.StringVar(&o.State, "state", o.State, "existing controller state directory; never created")
@@ -36,6 +38,17 @@ func doctorCommand(args []string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+	if *upgrade {
+		if os.Geteuid() != 0 {
+			return fmt.Errorf("upgrade preflight requires root for complete kernel inspection")
+		}
+		checks, err := hostfirewall.UpgradePreflight(ctx, o.State, o.Profile)
+		if err != nil {
+			return err
+		}
+		output(map[string]any{"schema_version": 1, "checks": checks})
+		return nil
+	}
 	r := diagnostics.Collect(ctx, o)
 	if *jsonOutput {
 		output(r)

@@ -14,7 +14,7 @@ func automaticFixture() NetworkSnapshot {
 }
 func TestAutomaticAddressScopeAndVPN(t *testing.T) {
 	z := AutomaticNetworkZones(DefaultNetworkZones(), automaticFixture())
-	for address, want := range map[string]string{"1.1.1.1": "internet", "2001:4860:4860::8888": "internet", "8.8.8.8": "internet", "9.9.9.4": "local", "10.99.2.3": "local", "172.20.9.1": "local", "192.168.8.1": "local", "100.101.3.4": "internet", "fd7a:115c:a1e0::1": "internet", "fdca::2": "local", "127.1.2.3": "local", "::1": "local", "fe80::1%2": "local", "169.254.1.2": "local", "224.0.0.251": "local", "239.1.2.3": "local", "ff02::1": "local", "ff0e::1": "", "224.1.1.1": "", "0.0.0.0": "", "::": "", "192.0.2.1": "", "198.18.0.1": "", "2001:db8::1": "", "4000::1": "", "192.0.0.9": "internet", "64:ff9b::808:808": "internet"} {
+	for address, want := range map[string]string{"1.1.1.1": "internet", "2001:4860:4860::8888": "internet", "8.8.8.8": "internet", "9.9.9.4": "local", "10.99.2.3": "local", "172.20.9.1": "local", "192.168.8.1": "local", "100.101.3.4": "internet", "fd7a:115c:a1e0::1": "local", "fdca::2": "local", "127.1.2.3": "local", "::1": "local", "fe80::1%2": "local", "169.254.1.2": "local", "224.0.0.251": "local", "239.1.2.3": "local", "ff02::1": "local", "ff0e::1": "", "224.1.1.1": "", "0.0.0.0": "", "::": "", "192.0.2.1": "", "198.18.0.1": "", "2001:db8::1": "", "4000::1": "", "192.0.0.9": "internet", "64:ff9b::808:808": "internet"} {
 		got := z.Classify(netip.MustParseAddr(address))
 		if got.Zone != want {
 			t.Errorf("%s got%+v want%s", address, got, want)
@@ -77,7 +77,7 @@ func TestExactCoverageDiff(t *testing.T) {
 			t.Fatal("missing precise coverage", ip)
 		}
 	}
-	for _, ip := range []string{"1.1.1.1", "8.8.8.8", "127.0.0.1", "100.99.1.1", "fd7a:115c:a1e0::1"} {
+	for _, ip := range []string{"1.1.1.1", "8.8.8.8", "127.0.0.1", "100.99.1.1"} {
 		if contains(added, ip) {
 			t.Fatal("incorrect addition", ip)
 		}
@@ -124,7 +124,7 @@ func TestSharedAddressSpaceMatchesNetLimiter(t *testing.T) {
 	s.Routes = append(s.Routes, NetworkRoute{Prefix: "100.70.0.0/24", Interface: 2, Table: 254, Type: unix.RTN_UNICAST}, NetworkRoute{Prefix: "100.64.0.0/10", Interface: 3, Table: 254, Type: unix.RTN_UNICAST}, NetworkRoute{Prefix: "fd7a:115c:a1e0::/48", Interface: 3, Table: 254, Type: unix.RTN_UNICAST})
 	s.seal()
 	z := AutomaticNetworkZones(DefaultNetworkZones(), s)
-	for address, want := range map[string]string{"100.101.2.3": "internet", "100.70.0.9": "local", "fd7a:115c:a1e0::2": "internet", "10.23.45.67": "local", "127.0.0.1": "local"} {
+	for address, want := range map[string]string{"100.101.2.3": "internet", "100.70.0.9": "local", "fd7a:115c:a1e0::2": "local", "10.23.45.67": "local", "127.0.0.1": "local"} {
 		got := z.Classify(netip.MustParseAddr(address))
 		if got.Zone != want || got.Basis != "automatic" {
 			t.Errorf("%s got %+v want %s", address, got, want)

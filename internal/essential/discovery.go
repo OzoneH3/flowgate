@@ -125,9 +125,7 @@ func Discover(ctx context.Context, env Environment) Snapshot {
 				}
 			}
 		}
-		if strings.HasPrefix(link.Ifname, "tailscale") && len(link.Servers) > 0 {
-			dns.Details = append(dns.Details, "DNS servers configured on "+link.Ifname+" (MagicDNS) are resolver DNS queries only; they do not permit tailscaled transport, which is the separate unchecked Tailscale option")
-		}
+
 		if len(link.Fallback) > 0 {
 			fallback = true
 		}
@@ -218,31 +216,7 @@ func Discover(ctx context.Context, env Environment) Snapshot {
 		ntp.Details = append(ntp.Details, "chronyd/other time clients are detected as unsupported by this first adapter; no inbound time service opened")
 	}
 	s.Components = append(s.Components, ntp)
-	vpn := service(ctx, env, "tailscaled.service", "tailscale", "Optional Tailscale outer transport", false, fail)
-	if vpn.Service != nil {
-		b, e := env.Read(fmt.Sprintf("/proc/%d/cmdline", vpn.Service.PID))
-		if e != nil {
-			fail("tailscaled arguments unreadable")
-		} else {
-			args := strings.Split(string(b), "\x00")
-			port := uint64(41641)
-			for i, v := range args {
-				if strings.HasPrefix(v, "--port=") {
-					port, _ = strconv.ParseUint(strings.TrimPrefix(v, "--port="), 10, 16)
-				}
-				if v == "--port" && i+1 < len(args) {
-					port, _ = strconv.ParseUint(args[i+1], 10, 16)
-				}
-			}
-			s.VPNPort = uint16(port)
-		}
-		if s.VPNPort == 0 {
-			vpn.State = "unavailable"
-			vpn.Details = append(vpn.Details, "Dynamic/unknown WireGuard port cannot be silently generalized")
-		}
-	}
-	vpn.Details = append(vpn.Details, "Explicit optional permission: Any destination TCP443 coordination/DERP, UDP3478 STUN, UDP from configured WireGuard port to variable peer ports. Inner applications remain independently controlled; no routing/ACL change. Incoming configured port and TCP80 are separate choices.")
-	s.Components = append(s.Components, vpn, Component{ID: "discovery", Title: "Optional local discovery", State: "unavailable", Details: []string{"No trusted-interface policy configured; mDNS/LLMNR remain ungranted, regardless of RFC1918 addresses"}}, Component{ID: "connectivity", Title: "Optional connectivity checks and sharing", State: "optional", Details: []string{"NetworkManager URI checks, SSH, remote desktop, KDE Connect, printing/sharing require separate review; no permissions in this preset"}})
+	s.Components = append(s.Components, Component{ID: "discovery", Title: "Optional local discovery", State: "unavailable", Details: []string{"No trusted-interface policy configured; mDNS/LLMNR remain ungranted, regardless of RFC1918 addresses"}}, Component{ID: "connectivity", Title: "Optional connectivity checks and sharing", State: "optional", Details: []string{"NetworkManager URI checks, SSH, remote desktop, KDE Connect, printing/sharing require separate review; no permissions in this preset"}})
 	for _, c := range s.Components {
 		if c.Essential && c.State != "ready" {
 			s.Issues = append(s.Issues, c.Title+": unavailable; no permission guessed")

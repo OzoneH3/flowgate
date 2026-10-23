@@ -18,6 +18,7 @@ const Name = "essential-system-networking"
 
 type Options struct {
 	ServiceAssistance bool `json:"service_assistance,omitempty"` // Optional upstream DNS/time setup; DHCP remains the baseline.
+	// Retired wire fields: false remains compatible; true is explicitly refused.
 	Tailscale         bool `json:"tailscale"`
 	TailscaleIncoming bool `json:"tailscale_incoming"`
 	TailscaleHTTP     bool `json:"tailscale_http"`
@@ -102,7 +103,6 @@ type Snapshot struct {
 	Stubs      []Stub      `json:"stubs"`
 	DHCP       []DHCP      `json:"dhcp"`
 	NTP        []string    `json:"ntp"`
-	VPNPort    uint16      `json:"vpn_port"`
 	// Failures lists unsuccessful probes (errors/timeouts), not observations.
 	Failures []string `json:"failures,omitempty"`
 	// entries maps every currently derivable preset entry ID to its revision.
@@ -149,7 +149,7 @@ func (s *Snapshot) Seal() {
 				stubs[i].Interface = 0
 			}
 			// Re-sort after removing kernel indexes: a recreated interface (for
-			// example tailscale0) must not reorder identical named configuration.
+			// example a VPN interface) must not reorder identical named configuration.
 			sort.Slice(dns, func(i, j int) bool { return Hash(dns[i]) < Hash(dns[j]) })
 			sort.Slice(stubs, func(i, j int) bool { return Hash(stubs[i]) < Hash(stubs[j]) })
 			config = []any{dns, stubs}
@@ -168,17 +168,15 @@ func (s *Snapshot) Seal() {
 			config = dhcp
 		case "time":
 			config = s.NTP
-		case "tailscale":
-			config = s.VPNPort
 		}
 		c.Revision = Hash([]any{c.ID, c.State, service, config})
 	}
-	s.Revision = Hash([]any{s.Components, s.DNS, s.Stubs, s.DHCP, s.NTP, s.VPNPort, s.Issues})
+	s.Revision = Hash([]any{s.Components, s.DNS, s.Stubs, s.DHCP, s.NTP, s.Issues})
 	s.ValidUntil = s.Collected.Add(30 * time.Second)
 	// Index every entry derivable from this snapshot (all options), so stored
 	// preset rules are validated one endpoint/interface at a time.
 	s.entries = map[string]string{}
-	if all, _, err := s.Rules(Options{Tailscale: true, TailscaleIncoming: true, TailscaleHTTP: true}, s.Collected); err == nil {
+	if all, _, err := s.Rules(Options{}, s.Collected); err == nil {
 		for _, r := range all {
 			s.entries[r.Preset.EntryID] = r.Preset.Revision
 		}
@@ -211,8 +209,8 @@ func (s Snapshot) Proposals(o Options, now time.Time) ([]policy.Rule, []string, 
 }
 
 func (s Snapshot) Rules(o Options, now time.Time) ([]policy.Rule, []string, error) {
-	if (o.TailscaleIncoming || o.TailscaleHTTP) && !o.Tailscale {
-		return nil, nil, fmt.Errorf("select optional Tailscale before its incoming/HTTP options")
+	if o.Tailscale || o.TailscaleIncoming || o.TailscaleHTTP {
+		return nil, nil, fmt.Errorf("vendor-specific transport presets have been removed; use ordinary application rules")
 	}
 	o = o.Normalized()
 	if len(o.ExcludedInterfaces) > 16 {
@@ -327,23 +325,6 @@ func (s Snapshot) Rules(o Options, now time.Time) ([]policy.Rule, []string, erro
 	}
 	for _, address := range s.NTP {
 		add("time", app("time", "outgoing", "udp", address, 0, 123))
-	}
-	if o.Tailscale {
-		for _, p := range []struct {
-			proto         string
-			local, remote uint16
-		}{{"tcp", 0, 443}, {"udp", 0, 3478}, {"udp", s.VPNPort, 0}} {
-			if p.proto == "udp" && p.local == 0 && p.remote == 0 {
-				continue
-			}
-			add("tailscale", app("tailscale", "outgoing", p.proto, "*", p.local, p.remote))
-		}
-		if o.TailscaleIncoming && s.VPNPort != 0 {
-			add("tailscale", app("tailscale", "incoming", "udp", "*", s.VPNPort, 0))
-		}
-		if o.TailscaleHTTP {
-			add("tailscale", app("tailscale", "outgoing", "tcp", "*", 0, 80))
-		}
 	}
 	if o.Discovery {
 		issues = append(issues, "Local discovery unavailable: no explicitly approved trusted-interface configuration; no multicast/LLMNR permission inferred")

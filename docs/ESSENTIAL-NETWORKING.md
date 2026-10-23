@@ -27,8 +27,10 @@ The administrative Essential API and reviewed script remain available for legacy
 preset management and optional DNS/time assistance. Assistance is off by default,
 skips durable ordinary Allows that cover the complete proposed scope, and never
 proposes localhost permissions. Explicit localhost Ask/Block also applies to
-applications reaching a local DNS stub. Optional Tailscale transport remains
-separate and off by default.
+applications reaching a local DNS stub. Vendor-specific transport assistance
+has been removed. Retired option fields accept false for wire compatibility and
+refuse true; old vendor transport presets are no longer validated. Ordinary
+application rules and generic discovered DNS servers remain supported.
 
 The inventories and GUI measurements below are historical evidence, not current
 setup steps.

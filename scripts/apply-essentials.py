@@ -2,17 +2,17 @@
 """Apply the reviewed essentials-only preset through the authenticated primary API.
 
 Runs as the administrator UID (no sudo). Excludes the work VPN interface, never
-selects Tailscale transport/discovery, refuses anything outside the reviewed
+selects discovery, refuses anything outside the reviewed
 proposal, applies exactly once and reconciles a lost reply by receipt (no replay).
 Never starts protection. Usage: scripts/apply-essentials.py [--dry-run] [--services]
 """
 import argparse,json,pathlib,socket,sys,time
 
 SOCK='/run/flowgate-api/daemon.sock'
-OPTIONS={'service_assistance':False,'tailscale':False,'tailscale_incoming':False,'tailscale_http':False,'discovery':False,'excluded_interfaces':['ppp0']}
+OPTIONS={'service_assistance':False,'discovery':False,'excluded_interfaces':['ppp0']}
 RESOLVED,TIMESYNCD='/usr/lib/systemd/systemd-resolved','/usr/lib/systemd/systemd-timesyncd'
 # Reviewed semantic proposal (docs/ESSENTIAL-NETWORKING.md), work VPN ppp0 excluded.
-UPSTREAM={('172.30.42.128','enp7s0'),('172.30.42.250','enp7s0'),('100.100.100.100','tailscale0'),('fd7a:115c:a1e0::53','tailscale0')}
+UPSTREAM={('172.30.42.128','enp7s0'),('172.30.42.250','enp7s0')}
 NTP={'162.159.200.123'}
 DHCP={('enp7s0',68,67),('enp7s0',546,547)}
 
@@ -46,7 +46,7 @@ def check_preview(v,identity=None):
   if k not in allowed:problems.append(('outside reviewed proposal',k))
   if k in seen:problems.append(('duplicate',k))
   seen.add(k)
-  if (r.get('filter')or{}).get('interface_name')=='ppp0' or 'tailscaled'in(r.get('executable')or''):problems.append(('excluded scope proposed',k))
+  if (r.get('filter')or{}).get('interface_name')=='ppp0':problems.append(('excluded scope proposed',k))
   if identity and r.get('executable')in identity:
    want=identity[r['executable']];f=r['filter']
    if (f.get('application'),f.get('revision'))!=want:problems.append(('service identity changed since review',r['executable']))

@@ -3,7 +3,7 @@ Description=FlowGate fail-closed guard for new TCP/UDP admissions
 DefaultDependencies=no
 RequiresMountsFor=/usr/local/lib/flowgate /var/lib/flowgate
 After=local-fs.target systemd-modules-load.service
-Before=network-pre.target NetworkManager.service tailscaled.service
+Before=network-pre.target NetworkManager.service
 Wants=network-pre.target
 
 [Service]

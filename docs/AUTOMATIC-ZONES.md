@@ -22,11 +22,10 @@ participates in an Allow/Deny decision.
 4. RFC1918 and IPv6 ULA peers are Local even when routed, including private
    work-VPN destinations. Neither their interface nor their scope implies
    permission.
-5. RFC6598 shared/CGNAT space (including Tailscale 100.64/10) and Tailscale's
-   IPv6 overlay fd7a:115c:a1e0::/48 follow the public-address rule below: Local
-   only on a directly connected non-tunnel LAN, otherwise Internet. This matches
-   NetLimiter's routed CGNAT result. To treat overlay peers as Local, add them as
-   explicit Local prefixes (rule 3), which is reported as custom.
+5. RFC6598 shared/CGNAT space follows the public-address rule below: Local
+   only on a directly connected non-tunnel LAN, otherwise Internet. There are no
+   vendor prefix exceptions: all IPv6 ULA, including fd7a:115c:a1e0::/48, follows
+   rule 4. Explicit prefixes remain user-controlled overrides.
 6. A globally reachable address on an active non-tunnel interface's assigned
    prefix is Local only with an agreeing connected route. Tunnel kinds and
    point-to-point interfaces cannot establish public-address LAN membership.
@@ -137,8 +136,7 @@ reference probes. No WinBoat rules, filter definitions or network settings were
 changed; probe processes self-exited.
 
 FlowGate matches all four observations: routed RFC1918 and the connected
-gateway are Local; routed CGNAT and public peers are Internet. Tailscale's IPv6
-overlay /48 follows its IPv4 CGNAT counterpart. Other routed ULA peers stay Local
+gateway are Local; routed CGNAT and public peers are Internet. All routed IPv6 ULA peers stay Local
 by analogy with RFC1918; that IPv6 case, a CGNAT address on a directly connected
 Ethernet, and VPN topologies were not observable in the Ethernet-only guest, so
 no reference equivalence is claimed for them.
@@ -151,8 +149,8 @@ receiver suite (`scripts/acceptance/process-rules-isolated.py --automatic-zones`
 IPv4/IPv6 TCP and UDP over a nested GRE tunnel named ppp0. Local-only and
 Internet-only rules prove delivery and non-delivery for routed private, Tailscale
 CGNAT/ULA, public LAN, public routed and public-address tunnel-subnet peers.
-Its expectations now place the GRE-routed CGNAT and Tailscale-ULA peers in
-Internet; that updated run requires root and is listed in the release notes.
+The updated expectations place GRE-routed CGNAT in Internet and all ULA in
+Local, without vendor-specific overrides.
 A live route change reclassifies a pending request without changing ID/deadline.
 Rules finish at zero; only fixture-owned resources are removed. This is a GRE
 fixture, not a live Tailscale/work-VPN client or host-protection run.

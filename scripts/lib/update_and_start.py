@@ -79,6 +79,29 @@ with tempfile.TemporaryDirectory(prefix='.install-', dir=base) as temporary:
 """
 
 
+# Run the already hash-verified candidate bytes read-only, before stopping the
+# working release. An anonymous root-owned executable avoids writable-path races.
+STAGE_PREFLIGHT = r"""
+import base64, hashlib, json, os, subprocess, sys
+payload = json.load(sys.stdin)
+data = base64.b64decode(payload['binary'], validate=True)
+if hashlib.sha256(data).hexdigest() != payload['sha256']:
+    raise RuntimeError('Candidate preflight hash mismatch')
+fd = os.memfd_create('flowgate-upgrade-check', 0)
+with os.fdopen(os.dup(fd), 'wb') as f: f.write(data)
+os.fchmod(fd, 0o500)
+r = subprocess.run(['/proc/self/fd/'+str(fd), 'doctor', '--json', '--upgrade-preflight', '--state', '/run/flowgate-enforcement', '--profile', payload['profile']], pass_fds=(fd,), capture_output=True, text=True, timeout=25)
+if r.returncode:
+    raise RuntimeError('Candidate preflight failed: '+r.stderr[:4096])
+v = json.loads(r.stdout)
+if v.get('schema_version') != 1 or not isinstance(v.get('checks'), list) or not v['checks']:
+    raise RuntimeError('Invalid candidate preflight result')
+for c in v['checks']:
+    if c.get('status') != 'ready' and not (c.get('id') == 'firewall.queue_census' and c.get('status') == 'not_checked'):
+        raise RuntimeError('Candidate incompatible; current release retained: '+str(c.get('id'))+': '+str(c.get('detail')))
+print('Candidate firewall compatibility verified before stopping protection')
+"""
+
 def snapshot_bundle(backend, expected_manifest=None):
     manifest_bytes = (backend / 'manifest.json').read_bytes()
     manifest = json.loads(manifest_bytes)
@@ -120,6 +143,14 @@ class Host:
 
     def authenticate(self):
         subprocess.run(['sudo', '-v'], check=True)
+
+    def preflight(self, backend, selected):
+        if selected == 'monitoring':
+            return
+        files = json.loads(self.install_payload)['files']
+        manifest = json.loads(base64.b64decode(files['manifest.json']))
+        payload = json.dumps({'binary': files['flowgate'], 'sha256': manifest['files']['flowgate'], 'profile': selected}).encode()
+        subprocess.run(['sudo', '-n', '/usr/bin/python3', '-I', '-c', STAGE_PREFLIGHT], input=payload, check=True)
 
     def install(self, backend):
         subprocess.run(['sudo', '-n', '/usr/bin/python3', '-I', '-c', STAGE_INSTALL], input=self.install_payload, check=True)
@@ -241,8 +272,14 @@ def update(host, root, revision, *, dry=False, gui=True, profile="both", wine_di
             host.prepare_install(backend, root, wine_discovery, manifest)
             host.authenticate()
             current = host.status() if before is not None else None
+            selected = mode(current) if current is not None and profile == 'preserve' else selected
+            host.preflight(backend, selected)
+            checked_profile = selected
+            current = host.status() if before is not None else None
             if current is not None:
                 selected = mode(current) if profile == "preserve" else profile
+                if selected != checked_profile:
+                    host.preflight(backend, selected)
                 if not at_mode(current, 'monitoring'):
                     say('Stopping protection for the update; will restore ' + selected)
                     stopped_for_update = True

@@ -116,6 +116,8 @@ class FakeHost:
         self.current = status(self.current['build']['source'], selected)
         if self.lost_ack:
             raise subprocess.CalledProcessError(1, selected)
+    def preflight(self, backend, selected):
+        pass
     def install(self, backend):
         self.calls.append('install')
         assert m.at_mode(self.current, 'monitoring')
@@ -132,6 +134,17 @@ class FakeHost:
 
 
 class Update(unittest.TestCase):
+    def test_candidate_refusal_keeps_running_release(self):
+        class Incompatible(FakeHost):
+            def preflight(self, backend, selected):
+                raise RuntimeError('candidate incompatible')
+        h = Incompatible()
+        with self.assertRaisesRegex(RuntimeError, 'candidate incompatible'):
+            m.update(h, self.root, 'new', gui=False)
+        self.assertNotIn('monitoring', h.calls)
+        self.assertNotIn('install', h.calls)
+        self.assertNotIn('both', h.calls)
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(dir=ROOT / '.workspace')
         self.root = pathlib.Path(self.tmp.name)

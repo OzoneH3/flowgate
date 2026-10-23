@@ -5,7 +5,7 @@ def check(g):
  api,run,log,cmd,wait=[g[k]for k in ['api','RUN','log','cmd','wait']]
  peerpid=g['peer'].pid
  def peerip(*args):return cmd('nsenter','--net=/proc/'+str(peerpid)+'/ns/net','ip',*args)
- addresses=[('10.23.4.5','local'),('100.101.2.3','internet'),('fd7a:115c:a1e0::123','internet'),('fdca:1234::5','local'),('1.1.1.1','internet'),('2606:4700:4700::1111','internet'),('9.9.9.2','local'),('2606:4700:ffff::2','local'),('8.8.8.8','internet'),('2001:4860:ffff::2','internet')]
+ addresses=[('10.23.4.5','local'),('100.101.2.3','internet'),('fd7a:115c:a1e0::123','local'),('fdca:1234::5','local'),('1.1.1.1','internet'),('2606:4700:4700::1111','internet'),('9.9.9.2','local'),('2606:4700:ffff::2','local'),('8.8.8.8','internet'),('2001:4860:ffff::2','internet')]
  for ip,_ in addresses:
   v6=':'in ip;peerip(*(['-6']if v6 else[]),'addr','add',ip+('/128'if v6 else'/32'),'dev','fgpeer',*(['nodad']if v6 else[]))
   cmd('ip',*(['-6']if v6 else[]),'route','add',ip+('/128'if v6 else'/32'),'via','fd79::2'if v6 else'10.79.0.2','dev','fghost')
@@ -61,7 +61,7 @@ def check(g):
    for ip,z in addresses:
     for proto in ['udp','tcp']:send(ip,z,z==allowedzone,proto)
    for r in rules:g['delete'](r)
-   log('PASS automatic '+allowedzone+'-only actual TCP+UDP IPv4/IPv6 delivery; private/routed GRE work-VPN fixture, CGNAT/Tailscale-ULA as Internet, other ULA, public physical LAN and public routed/tunnel-subnet peers; no manual destination zones')
+   log('PASS automatic '+allowedzone+'-only actual TCP+UDP IPv4/IPv6 delivery; private/routed GRE work-VPN fixture, CGNAT as Internet, all ULA as Local, public physical LAN and public routed/tunnel-subnet peers; no manual destination zones')
   # Pending decision keeps its immutable target and deadline over topology updates.
   g['ask'](g['children']['alpha'],'send',protocol='udp',v6=False,host='9.9.9.2',port=45051,timeout_ms=4000)
   held=wait(lambda:next((e for e in api().get('events',[])if e['state']=='awaiting-decision'and e['flow']['remote'].startswith('9.9.9.2:')),None))

@@ -23,7 +23,7 @@ class Gate(unittest.TestCase):
  def test_services_are_opt_in_without_localhost(self):
   self.addCleanup(m.OPTIONS.update, service_assistance=False)
   m.OPTIONS['service_assistance']=True
-  v=preview();self.assertEqual(len(v['rules']),11);self.assertEqual(m.check_preview(v),([],[]))
+  v=preview();self.assertEqual(len(v['rules']),7);self.assertEqual(m.check_preview(v),([],[]))
   self.assertFalse(any(r['filter']['remote_address'].startswith('127.') for r in v['rules']))
  def test_work_vpn_tailscaled_and_broad_rules_refused(self):
   for k in[('dns',m.RESOLVED,'outgoing','udp','192.168.23.221',53,'',0,'ppp0',974,False,None),

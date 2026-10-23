@@ -76,17 +76,22 @@ targets. Direction is connection initiation, independent of upload/download.
 See POLICY-EXPLANATIONS.md for exact defaults, proof limits and authorization.
 
 
-## Bounded Tailscale coexistence
+## Product-independent compatibility checks
 
-Incoming-only control can coexist with the exact inspected1.104.1 iptables-nft
-client profile; see COEXISTENCE.md. No automatic transport exception or root UID
-Allow is introduced. Transport and inner applications use separate current
-identities/rules; explicit administrator authority permits decisions for service
-UIDs without changing the rule's principal. Combined outgoing mode still refuses
-this profile. Mark-copy/routing checks are shared by doctor and startup; they do
-not continuously attest foreign manager changes. Initiation/expiry/precedence
-and recovery ownership contracts are unchanged.
-
+The former Tailscale-specific coexistence adapter and inspection command are
+removed. Interface names grant no exception. TUN traffic remains subject to
+ordinary application rules; wireguard and xfrm devices remain unsupported.
+Explicit packet/conntrack mark masks and routing selectors must be proven
+disjoint from FlowGate's reserved bits. Opaque iptables-nft operations require
+matching, stable kernel/export snapshots; unknown operations, native mark
+writers, queues, notrack and zones are refused. Runtime checks detect later
+conflicts. The updater checks candidate compatibility before stopping the
+installed release; activation still rechecks because configuration can change.
+No foreign firewall or VPN configuration is modified by this change.
+Vendor transport presets are no longer discovered or generated; retired API
+options explicitly refuse enabled values. Existing ordinary application rules
+remain independent. Old transport presets are retained as records but cannot
+be validated by the removed adapter, so they are inactive.
 
 ## Actor permissions and root monitoring
 

@@ -7,9 +7,6 @@ export const ESSENTIAL_EXCLUSION_CAPABILITY = 'essential-interface-exclusion-v1'
 export const MAX_EXCLUDED_INTERFACES = 16;
 export interface EssentialOptions {
   service_assistance: boolean;
-  tailscale: boolean;
-  tailscale_incoming: boolean;
-  tailscale_http: boolean;
   discovery: boolean;
   // Canonical: sorted, de-duplicated, validated; empty = none (omitted on the wire).
   excluded_interfaces: string[];
@@ -17,16 +14,10 @@ export interface EssentialOptions {
 export type EssentialToggle = Exclude<keyof EssentialOptions, 'excluded_interfaces'>;
 export const ESSENTIAL_TOGGLES: EssentialToggle[] = [
   'service_assistance',
-  'tailscale',
-  'tailscale_incoming',
-  'tailscale_http',
   'discovery',
 ];
 export const essentialDefaults = (): EssentialOptions => ({
   service_assistance: false,
-  tailscale: false,
-  tailscale_incoming: false,
-  tailscale_http: false,
   discovery: false,
   excluded_interfaces: [],
 });
@@ -133,6 +124,11 @@ const strings = (v: unknown) => list(v, (x) => text(x));
 export function essentialOptions(v: unknown): EssentialOptions {
   const raw = object(v);
   const o: Record<string, unknown> = { service_assistance: false, ...raw };
+  // Accept only disabled retired fields from older daemon responses.
+  for (const key of ['tailscale', 'tailscale_incoming', 'tailscale_http']) {
+    if (key in o && o[key] !== false) throw Error('Vendor transport presets are no longer supported');
+    delete o[key];
+  }
   const keys = Object.keys(o).filter((k) => k !== 'excluded_interfaces');
   if (
     keys.sort().join() !== [...ESSENTIAL_TOGGLES].sort().join() ||

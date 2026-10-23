@@ -21,7 +21,7 @@ func (s Snapshot) RepairMigratedRule(old policy.Rule, now time.Time) (policy.Rul
 	if old.Preset.EntryID == Hash([]any{old.Preset.Component, target}) {
 		return old, false
 	}
-	candidates, _, err := s.Rules(Options{Tailscale: true, TailscaleIncoming: true, TailscaleHTTP: true}, now)
+	candidates, _, err := s.Rules(Options{}, now)
 	if err != nil {
 		return old, false
 	}
