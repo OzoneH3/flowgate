@@ -159,8 +159,8 @@ func TestRuntimeUpdateWitnessMustBeValidAndExact(t *testing.T) {
 		}
 		app.Key = identity.ApplicationKey(1000, app)
 		r := Rule{Executable: app.Executable, Filter: Filter{Application: app.Key, Revision: "old", UID: 1000}}
-		if !r.MatchesApplication(app.Key, "new", 1000, app) {
-			t.Fatal("valid runtime rejected", kind)
+		if got := r.MatchesApplication(app.Key, "new", 1000, app); got != (kind == "wine") {
+			t.Fatal("runtime update authority", kind, got)
 		}
 		bad := app
 		if kind == "wine" {

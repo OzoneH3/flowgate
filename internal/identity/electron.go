@@ -16,25 +16,20 @@ import (
 	"syscall"
 )
 
-// System Electron runtimes (/usr/bin/electron, /usr/lib/electron43/electron)
-// run many applications: the executable alone never identifies the app. An
-// Electron-hosted application is identified only when its process chain is
-// verified to the runtime's main process, whose app-bundle argument names an
-// existing bundle with a readable package.json. Then the application identity
-// (rule key) is the bundle, never the runtime: Allow Heroic does not allow
-// every program run by /usr/bin/electron. Otherwise the process keeps the
-// runtime identity and is marked unverified; no application-wide rule may be
-// created for it (see RuntimeRuleBlocked).
+// A shared runtime's basename, process chain, argv and readable bundle metadata
+// do not prove that it executes that bundle. These observations are display
+// hints only. Keep the running executable identity; do not derive a permission
+// identity from the bundle or grant application-wide access to the runtime.
 
 var electronRuntimeName = regexp.MustCompile(`^electron[0-9]*$`)
 
-// IsElectronRuntime reports a system Electron runtime binary (not an app that
-// bundles its own renamed Electron, which already has its own executable).
+// IsElectronRuntime is a conservative shared-runtime name hint, not proof of
+// Electron execution. Renamed bundled applications retain their own executable.
 func IsElectronRuntime(exe string) bool {
 	return electronRuntimeName.MatchString(filepath.Base(strings.TrimSuffix(exe, " (deleted)")))
 }
 
-// HostedStep is one verified process of the chain from the socket owner to
+// HostedStep is one observed process of the chain from the socket owner to
 // the runtime's main process.
 type HostedStep struct {
 	PID   int    `json:"pid"`
@@ -44,7 +39,7 @@ type HostedStep struct {
 
 // Hosted describes an application hosted by a shared runtime (Electron).
 type Hosted struct {
-	State       string       `json:"state"` // verified | unverified
+	State       string       `json:"state"` // unverified; legacy records may say verified
 	Runtime     string       `json:"runtime"`
 	Bundle      string       `json:"bundle,omitempty"`
 	PackageName string       `json:"package_name,omitempty"`
@@ -109,10 +104,8 @@ func readFacts(pid int) (procFacts, error) {
 	return procFacts{start: start, parent: parent, exe: link(base + "/exe"), mountNS: link(base + "/ns/mnt"), uid: st.Sys().(*syscall.Stat_t).Uid}, nil
 }
 
-// ResolveElectronApp verifies which application the Electron runtime process
-// pid (started at start) hosts. It never returns a verified result unless every
-// step of the chain is the same runtime file, user and mount namespace, and
-// every PID still has the start time read at the beginning (no PID reuse).
+// ResolveElectronApp gathers a claimed bundle and a generation-checked process
+// chain for display. It never verifies bundle execution or permission authority.
 func ResolveElectronApp(pid int, start string) *Hosted {
 	h := &Hosted{State: "unverified"}
 	first, err := readFacts(pid)
@@ -210,15 +203,14 @@ func ResolveElectronApp(pid int, start string) *Hosted {
 			return h
 		}
 	}
-	h.State = "verified"
 	h.PackageName = clip(meta.Name)
 	h.ProductName = clip(meta.ProductName)
 	h.Version = clip(meta.Version)
 	h.Integrity = integrity
 	h.revision = revision
-	h.Reason = fmt.Sprintf("Electron main process %d runs bundle %s", main, app)
+	h.Reason = fmt.Sprintf("process %d names bundle %s; command line and package metadata do not verify bundle execution", main, app)
 	if main != pid {
-		h.Reason = fmt.Sprintf("%s process %d → Electron main process %d (parent chain, start times verified) runs bundle %s", h.Chain[0].Type, pid, main, app)
+		h.Reason = fmt.Sprintf("%s process %d → %s (parent chain and start times observed)", h.Chain[0].Type, pid, h.Reason)
 	}
 	return h
 }
@@ -257,18 +249,6 @@ func cachedBundlePackage(path string) ([]byte, string, string, error) {
 	bundleCache.m[path] = bundleEntry{stamp: now, revision: revision, integrity: integrity, pkg: pkg}
 	bundleCache.Unlock()
 	return pkg, revision, integrity, nil
-}
-
-// ElectronApplication is the application identity of a verified hosted app.
-func ElectronApplication(uid uint32, h *Hosted) Application {
-	a := Application{Kind: "electron", Runtime: h.Runtime, Executable: h.Bundle, Revision: h.revision, Name: h.ProductName, Hosted: h}
-	if a.Name == "" {
-		a.Name = h.PackageName
-	}
-	a.Evidence = []string{"Electron runtime " + h.Runtime, h.Reason, "package.json name " + h.PackageName, "bundle " + h.Integrity}
-	a.Key = ApplicationKey(uid, a)
-	a.DisplayName, a.DisplayExecutable, a.ExecutableStatus = a.Name, a.Executable, "linked"
-	return a
 }
 
 // readBundlePackage returns package.json of an .asar archive or an app
@@ -340,14 +320,16 @@ func readBundlePackage(path string) ([]byte, string, string, error) {
 	return pkg, stamp(path), integrity, nil
 }
 
-// RuntimeRuleBlocked explains why no application-wide rule may be created for
-// this identity: an Electron runtime whose hosted app is not verified would
-// otherwise cover every Electron app it runs. "" when a rule is allowed.
+// RuntimeRuleBlocked also rejects legacy "verified" hosted records. No current
+// mechanism proves bundle execution, so a legacy label cannot restore authority.
 func RuntimeRuleBlocked(a *Application) string {
-	if a == nil || a.Hosted == nil || a.Hosted.State == "verified" {
+	if a == nil || (a.Hosted == nil && a.Kind != "electron") {
 		return ""
 	}
-	return fmt.Sprintf("%s runs many Electron applications and this process's application is unverified (%s); an application-wide rule would cover all of them", filepath.Base(a.Hosted.Runtime), a.Hosted.Reason)
+	if a.Hosted == nil {
+		return "Electron bundle execution is unverified; an application-wide rule cannot be bound to bundle metadata"
+	}
+	return fmt.Sprintf("%s is a possible shared runtime; bundle execution is unverified (%s); an application-wide rule cannot be bound to this hint", filepath.Base(a.Hosted.Runtime), a.Hosted.Reason)
 }
 
 // LiveRuleable: a live process identity that can bind an application rule.

@@ -333,10 +333,12 @@ func (e *Engine) ObserveResolved(f identity.Flow, token string, a identity.Attri
 			service = fmt.Sprintf("remote service port %d; any local source port", filter.RemotePort)
 		}
 		v.ScopePreviews = map[string]string{
-			"once":        fmt.Sprintf("Once: %s %s, local %s, remote %s; this application/revision/user only. TCP: one connection (30 seconds to admit); UDP: fixed 30-second flow lease.", f.Direction, f.Protocol, f.Local, f.Remote),
-			"application": fmt.Sprintf("Remember for one hour (memory only): program %s; captured revision %s; user %d; %s %s; remote address %s; %s. Other local addresses may match. Saved application permissions follow updates of the same verified program; other programs, users and prefixes stay separate.", filter.Application, filter.Revision, filter.UID, filter.Direction, filter.Protocol, filter.RemoteAddress, service),
+			"once": fmt.Sprintf("Once: %s %s, local %s, remote %s; this application/revision/user only. TCP: one connection (30 seconds to admit); UDP: fixed 30-second flow lease.", f.Direction, f.Protocol, f.Local, f.Remote),
 		}
-		if e.SaveRules != nil {
+		if identity.RuntimeRuleBlocked(a.Application) == "" {
+			v.ScopePreviews["application"] = fmt.Sprintf("Remember for one hour (memory only): program %s; captured revision %s; user %d; %s %s; remote address %s; %s. Other local addresses may match. Saved application permissions follow updates of the same verified program; other programs, users and prefixes stay separate.", filter.Application, filter.Revision, filter.UID, filter.Direction, filter.Protocol, filter.RemoteAddress, service)
+		}
+		if e.SaveRules != nil && v.ScopePreviews["application"] != "" {
 			v.ScopePreviews["application"] = strings.Replace(v.ScopePreviews["application"], "memory only", "saved to disk; absolute expiry survives restart", 1)
 			v.ScopePreviews["persistent"] = strings.Replace(v.ScopePreviews["application"], "Remember for one hour (saved to disk; absolute expiry survives restart)", "Persistent until disabled/deleted (saved to disk)", 1)
 		}

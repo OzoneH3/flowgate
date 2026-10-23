@@ -32,8 +32,8 @@ type Application struct {
 	Prefix         string   `json:"prefix,omitempty"`
 	SteamAppID     string   `json:"steam_app_id,omitempty"`
 	Evidence       []string `json:"evidence"`
-	// Hosted: the application a shared runtime (system Electron) runs, with
-	// its verification. Verified: Kind "electron", Executable = the bundle.
+	// Hosted is unverified shared-runtime display context. A bundle argument
+	// is not permission authority; legacy records may contain a verified label.
 	Hosted *Hosted `json:"hosted,omitempty"`
 }
 type Process struct {
@@ -104,10 +104,10 @@ func Inspect(pid int) (Process, error) {
 	p.ExecutableRevision = stamp(base + "/exe")
 	p.Cgroup = strings.TrimSpace(string(readBound(base+"/cgroup", 4096)))
 	a := Application{Kind: "native", Name: filepath.Base(p.Executable), Executable: p.Executable, Revision: stamp(base + "/exe"), Evidence: []string{"proc exe; PID plus start time"}}
-	lower := strings.ToLower(p.Executable)
-	// Runtime libraries are required as corroboration; arbitrary .exe arguments alone are insufficient.
+	// Loader names are conservative refusal hints, not permission evidence.
+	// A directory containing "wine" says nothing about the executable in it.
 	maps := string(readBound(base+"/maps", 2<<20))
-	wine := strings.Contains(lower, "wine") || strings.Contains(maps, "/ntdll.so") || strings.Contains(maps, "/ntdll.dll")
+	wine := wineRuntimeHint(p.Executable, maps)
 	if wine {
 		a.Kind = "wine-unresolved"
 		a.Runtime = p.Executable
@@ -193,12 +193,9 @@ func Inspect(pid int) (Process, error) {
 		}
 	}
 	if a.Kind == "native" && IsElectronRuntime(p.Executable) {
-		// The runtime is not the application: identify the hosted bundle.
-		h := ResolveElectronApp(pid, start)
-		a.Hosted = h
-		if h.State == "verified" {
-			a = ElectronApplication(p.UID, h)
-		}
+		// Command lines and bundle metadata do not prove which code executes.
+		// Retain the actual executable and only attach an unverified display hint.
+		a.Hosted = ResolveElectronApp(pid, start)
 	}
 	// The inode link count distinguishes a replaced native image from a file
 	// literally named with the kernel deletion suffix. Its revision stays exact.
@@ -227,6 +224,15 @@ func Inspect(pid int) (Process, error) {
 	}
 	return p, nil
 }
+
+func wineRuntimeHint(executable, maps string) bool {
+	switch strings.ToLower(filepath.Base(strings.TrimSuffix(executable, " (deleted)"))) {
+	case "wine", "wine64", "wine-preloader", "wine64-preloader", "wineserver":
+		return true
+	}
+	return strings.Contains(maps, "/ntdll.so") || strings.Contains(maps, "/ntdll.dll")
+}
+
 func fingerprint(owners []Process, sockets []Socket) string {
 	var f []string
 	for _, p := range owners {

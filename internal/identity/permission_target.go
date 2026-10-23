@@ -100,6 +100,8 @@ func DescribePermissionTarget(a Attribution) *PermissionTarget {
 		t.ForAWhile = fmt.Sprintf("Unavailable: %d visible socket holders (needs exactly one owning process)", len(a.Owners))
 	case owner == nil || owner.BootID == "":
 		t.ForAWhile = "Unavailable: owner PID/start/boot identity missing"
+	case owner.ThreadGroup != 0 && owner.ThreadGroup != owner.PID:
+		t.ForAWhile = "Unavailable: worker descriptor holder is not a live process leader"
 	default:
 		t.ForAWhile = fmt.Sprintf("This process instance only: %s PID %d, same direction; a relaunch or another %s process is not covered", name, owner.PID, name)
 	}
@@ -114,23 +116,14 @@ func DescribePermissionTarget(a Attribution) *PermissionTarget {
 			game = prov.Launch.Game.Title + " (" + prov.Launch.Game.Name + ")"
 		}
 	}
-	if app.Kind == "electron" {
-		// A verified Electron app: the bundle is the identity, never the runtime.
-		runtime := filepath.Base(app.Runtime)
-		t.Kind = "application"
-		t.KeyBasis = "uid+electron+bundle path; revision = bundle file stamp"
-		t.Label = fmt.Sprintf("%s (Electron app %s)", name, app.Executable)
-		t.Remember = fmt.Sprintf("%s (bundle %s run by %s), UID %d, this bundle revision", name, app.Executable, runtime, uid)
-		t.SharedWithNote = fmt.Sprintf("Only this application bundle; other applications run by %s are not covered", app.Runtime)
-		return t
-	}
 	if why := RuntimeRuleBlocked(app); why != "" {
 		// A shared runtime whose hosted app is not verified: no application-wide rule.
 		t.Kind = "runtime-unverified"
 		t.KeyBasis = "none: application unverified"
 		t.Label = fmt.Sprintf("%s runtime (application unverified)", name)
 		t.Remember = "Unavailable: " + why
-		t.SharedWithNote = fmt.Sprintf("Every Electron application run by %s shares this executable", app.Executable)
+		t.ForAWhile = "Unavailable: hosted application execution is unverified; no process rule can be bound"
+		t.SharedWithNote = fmt.Sprintf("%s is the observed executable; the claimed bundle is not permission authority", app.Executable)
 		return t
 	}
 	if app.Kind == "wine" {

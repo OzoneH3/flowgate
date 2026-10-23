@@ -729,7 +729,7 @@ var launchInfrastructure = map[string]bool{
 }
 
 // launchedBy picks the nearest verified ancestor that is another program. A
-// shared Electron runtime is named by the app it verifiably runs.
+// Shared-runtime bundle observations remain display hints, never applications.
 func launchedBy(owner Process, nodes []procNode, resolve func(int, string) *Hosted) *LaunchParent {
 	for i := 1; i < len(nodes); i++ {
 		n := nodes[i]
@@ -748,10 +748,7 @@ func launchedBy(owner Process, nodes []procNode, resolve func(int, string) *Host
 			l.Name = clip(base + " " + filepath.Base(n.argv[1]))
 		}
 		if IsElectronRuntime(n.exe) && resolve != nil {
-			if h := resolve(n.pid, n.start); h != nil && h.State == "verified" {
-				a := ElectronApplication(n.uid, h)
-				l.Application, l.Name = &a, a.Name
-			} else if h != nil {
+			if h := resolve(n.pid, n.start); h != nil {
 				l.Note = "Electron application unverified: " + h.Reason
 			}
 		}

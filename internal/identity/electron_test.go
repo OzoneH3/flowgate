@@ -83,6 +83,9 @@ func fakeRuntime(t *testing.T, name string) string {
 	t.Helper()
 	self, _ := os.Executable()
 	dst := filepath.Join(t.TempDir(), name)
+	if err := os.MkdirAll(filepath.Dir(dst), 0700); err != nil {
+		t.Fatal(err)
+	}
 	in, err := os.Open(self)
 	if err != nil {
 		t.Fatal(err)
@@ -125,42 +128,45 @@ func startMain(t *testing.T, runtime, mode string, env []string, args ...string)
 	return c.Process.Pid, child
 }
 
-func TestElectronVerifiedAppIsTheBundleNotTheRuntime(t *testing.T) {
+func TestElectronBundleClaimIsDisplayOnly(t *testing.T) {
 	runtime := fakeRuntime(t, "electron")
 	bundle := filepath.Join(t.TempDir(), "app.asar")
-	writeAsar(t, bundle, `{"name":"heroic","version":"2.22.4","main":"build/main/main.js"}`, "")
+	writeAsar(t, bundle, `{"name":"synthetic-alpha","main":"main.js"}`, "")
 	mainPID, child := startMain(t, runtime, "main", nil, bundle)
 	p, err := Inspect(child)
 	if err != nil {
 		t.Fatal(err)
 	}
 	a := p.Application
-	if a.Kind != "electron" || a.Name != "heroic" || a.Executable != bundle || a.Runtime != runtime || a.Key == "" || a.Revision == "" {
-		t.Fatalf("verified Electron app identity: %+v", a)
+	if a.Kind != "native" || a.Executable != runtime || a.Key != ApplicationKey(p.UID, Application{Kind: "native", Executable: runtime}) || a.Revision != p.ExecutableRevision {
+		t.Fatalf("must retain actual executable identity: %+v", a)
 	}
 	h := a.Hosted
-	if h == nil || h.State != "verified" || len(h.Chain) != 2 || h.Chain[0].PID != child || h.Chain[0].Type != "utility" || h.Chain[1].PID != mainPID || h.Chain[1].Type != "main" {
-		t.Fatalf("chain: %+v", h)
+	if h == nil || h.State != "unverified" || h.Bundle != bundle || len(h.Chain) != 2 || h.Chain[1].PID != mainPID || h.PackageName != "synthetic-alpha" {
+		t.Fatalf("observed bundle/chain hint lost: %+v", h)
 	}
-	if !strings.Contains(h.Integrity, "SHA-256 matches") || RuntimeRuleBlocked(&a) != "" || !LiveRuleable(a) {
-		t.Fatalf("verified app must be ruleable: %+v", h)
+	if !strings.Contains(h.Integrity, "SHA-256 matches") || RuntimeRuleBlocked(&a) == "" || LiveRuleable(a) {
+		t.Fatalf("metadata integrity must not confer execution authority: %+v", h)
 	}
-	// The key is the bundle's: another app on the same runtime has another key,
-	// and the runtime identity itself is a third one.
+	// A second claimed bundle on this same executable does not mint another
+	// permission identity. Both claims remain ineligible for app-wide rules.
 	other := filepath.Join(t.TempDir(), "app.asar")
-	writeAsar(t, other, `{"name":"other-app"}`, "")
+	writeAsar(t, other, `{"name":"synthetic-beta"}`, "")
 	_, child2 := startMain(t, runtime, "main", nil, other)
 	p2, err := Inspect(child2)
-	if err != nil || p2.Application.Kind != "electron" || p2.Application.Key == a.Key {
-		t.Fatalf("second app must not share the key: %+v %v", p2.Application, err)
+	if err != nil || p2.Application.Key != a.Key || LiveRuleable(p2.Application) {
+		t.Fatalf("bundle argument became authority: %+v %v", p2.Application, err)
 	}
-	runtimeKey := ApplicationKey(p.UID, Application{Kind: "native", Executable: runtime})
-	if a.Key == runtimeKey || p2.Application.Key == runtimeKey {
-		t.Fatal("an Electron app key must never equal the runtime's key")
+	// A different actual executable claiming the same bundle stays distinct.
+	runtime2 := fakeRuntime(t, "electron")
+	_, child3 := startMain(t, runtime2, "main", nil, bundle)
+	p3, err := Inspect(child3)
+	if err != nil || p3.Application.Key == a.Key || p3.Application.Revision == a.Revision || LiveRuleable(p3.Application) {
+		t.Fatalf("different executable inherited bundle identity: %+v %v", p3.Application, err)
 	}
 	target := DescribePermissionTarget(Attribution{Application: &a, Owners: []Process{p}, VisibilityComplete: true})
-	if !strings.Contains(target.Remember, "bundle "+bundle) || !strings.Contains(target.SharedWithNote, "not covered") {
-		t.Fatalf("permission target: %+v", target)
+	if target.Kind != "runtime-unverified" || !strings.HasPrefix(target.Remember, "Unavailable:") {
+		t.Fatalf("target: %+v", target)
 	}
 }
 
@@ -197,7 +203,7 @@ func TestElectronUnverifiedKeepsRuntimeAndBlocksRules(t *testing.T) {
 				t.Fatal("an unverified runtime must not bind an application-wide rule")
 			}
 			target := DescribePermissionTarget(Attribution{Application: &a, Owners: []Process{p}, VisibilityComplete: true})
-			if target.Kind != "runtime-unverified" || !strings.HasPrefix(target.Remember, "Unavailable: ") || strings.HasPrefix(target.ForAWhile, "Unavailable") {
+			if target.Kind != "runtime-unverified" || !strings.HasPrefix(target.Remember, "Unavailable: ") || !strings.HasPrefix(target.ForAWhile, "Unavailable") {
 				t.Fatalf("permission target: %+v", target)
 			}
 		})
@@ -223,37 +229,31 @@ func TestElectronRuntimeNames(t *testing.T) {
 	}
 }
 
-func TestLaunchedByVerifiedElectronApp(t *testing.T) {
+func TestLaunchedByElectronClaimHasNoApplicationAuthority(t *testing.T) {
 	runtime := fakeRuntime(t, "electron43")
-	helper := fakeRuntime(t, "nile")
+	helper := fakeRuntime(t, "synthetic-helper")
 	bundle := filepath.Join(t.TempDir(), "app.asar")
-	writeAsar(t, bundle, `{"name":"heroic"}`, "")
+	writeAsar(t, bundle, `{"name":"synthetic-alpha"}`, "")
 	mainPID, child := startMain(t, runtime, "launcher", []string{"FLOWGATE_FAKE_HELPER=" + helper}, bundle)
 	p, err := Inspect(child)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The helper keeps its own identity for rules.
 	if p.Application.Kind != "native" || p.Application.Executable != helper || p.Application.Hosted != nil {
 		t.Fatalf("helper identity: %+v", p.Application)
 	}
 	prov := CaptureProvenance(p)
 	if prov == nil || prov.Parent == nil {
-		t.Fatalf("no launching parent: %+v", prov)
+		t.Fatalf("missing observed parent: %+v", prov)
 	}
 	pa := prov.Parent
-	if pa.PID != mainPID || pa.Depth != 1 || pa.Name != "heroic" || pa.Application == nil || pa.Application.Kind != "electron" || pa.Application.Executable != bundle || pa.Application.Key == "" {
-		t.Fatalf("parent: %+v app %+v", pa, pa.Application)
+	if pa.PID != mainPID || pa.Depth != 1 || pa.Application != nil || !strings.Contains(pa.Note, "unverified") {
+		t.Fatalf("parent hint must not mint authority: %+v", pa)
 	}
-	// Display only: the helper's own key is not the parent's.
-	if pa.Application.Key == p.Application.Key {
-		t.Fatal("parent identity leaked into the helper")
-	}
-	// A cached capture returns the same parent, deep-copied.
 	again := CaptureProvenance(p)
-	again.Parent.Application.Name = "changed"
-	if CaptureProvenance(p).Parent.Application.Name != "heroic" {
-		t.Fatal("cache shares the parent application")
+	again.Parent.Note = "changed"
+	if CaptureProvenance(p).Parent.Note == "changed" {
+		t.Fatal("cache shares parent")
 	}
 }
 
@@ -279,28 +279,19 @@ func TestLaunchedBySkipsInfrastructure(t *testing.T) {
 	}
 }
 
-func TestVerifiedElectronProcessInstanceBinds(t *testing.T) {
+func TestElectronClaimDoesNotEnableProcessRules(t *testing.T) {
 	runtime := fakeRuntime(t, "electron")
 	bundle := filepath.Join(t.TempDir(), "app.asar")
-	writeAsar(t, bundle, `{"name":"heroic"}`, "")
-	_, child := startMain(t, runtime, "main", nil, bundle)
-	p, err := Inspect(child)
-	if err != nil || p.Application.Kind != "electron" {
-		t.Fatalf("%+v %v", p.Application, err)
-	}
-	// The instance pins the runtime file's own stamp; the bundle stays the application.
-	b, err := BindInstance("session", p)
-	if err != nil || b.ExecutableRevision != p.ExecutableRevision || b.Revision != p.Application.Revision || b.Revision == b.ExecutableRevision {
-		t.Fatalf("instance: %+v %v", b, err)
-	}
-	if !b.Matches(p) || b.Check() != nil {
-		t.Fatalf("instance must match and re-check its live process: %v", b.Check())
-	}
-	// An unverified runtime process binds no instance (no rules for it at all).
-	_, other := startMain(t, runtime, "main", nil, "--enable-features=X")
-	u, _ := Inspect(other)
-	if _, err := BindInstance("session", u); err == nil {
-		t.Fatal("unverified runtime must not bind a process instance")
+	writeAsar(t, bundle, `{"name":"synthetic-alpha"}`, "")
+	for _, args := range [][]string{{bundle}, {"--enable-features=X"}} {
+		_, child := startMain(t, runtime, "main", nil, args...)
+		p, err := Inspect(child)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := BindInstance("session", p); err == nil {
+			t.Fatal("unverified hosted runtime must not bind process instance")
+		}
 	}
 }
 
