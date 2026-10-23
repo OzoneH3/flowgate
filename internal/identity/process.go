@@ -219,6 +219,7 @@ func Inspect(pid int) (Process, error) {
 	if a.Executable != "" && a.Revision != "" {
 		a.Key = ApplicationKey(p.UID, a)
 	}
+	applyServiceDisplay(&a, p.Cgroup)
 	p.Application = a
 	end, _, e := processStat(base)
 	if e != nil || end != start {
