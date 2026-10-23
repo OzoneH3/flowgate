@@ -3,8 +3,8 @@ import { canManageRules, parseRule, type ClientState, type Decision, type Observ
 import { authoritativePolicy } from './policy';
 import type { Row } from './model';
 export const REMEMBER_ZONE_CAPABILITY = 'decision-zone-remember-v1';
-// NetLimiter 5.3.28 Remember: application always; protocol, process, remote
-// address and remote (incoming: local) port optional; optional deletion time.
+// Remember: application always; protocol, process, remote address and remote
+// (incoming: local) port optional; optional expiry duration.
 export const REMEMBER_FIELDS_CAPABILITY = 'decision-remember-fields-v1';
 export type RememberFields = NonNullable<Decision['remember']>;
 export const DEFAULT_REMEMBER: RememberFields = Object.freeze({
@@ -13,9 +13,9 @@ export const DEFAULT_REMEMBER: RememberFields = Object.freeze({
   protocol: false,
   process: false,
 });
-// "Delete the rule after:" exactly as NetLimiter offers it; 0 = Do not delete.
+// These durations set rule expiry, not immediate deletion; 0 = no expiry.
 export const REMEMBER_DURATIONS: readonly { label: string; seconds: number }[] = [
-  { label: 'Do not delete', seconds: 0 },
+  { label: 'No expiry', seconds: 0 },
   { label: '1 minute', seconds: 60 },
   { label: '5 minutes', seconds: 300 },
   { label: '10 minutes', seconds: 600 },
@@ -39,7 +39,7 @@ export function rememberDecision(
   zoneRevision: string,
 ): Decision {
   if (!REMEMBER_DURATIONS.some((d) => d.seconds === choice.duration))
-    throw Error('Unsupported rule deletion time');
+    throw Error('Unsupported rule expiry duration');
   const scope = rememberScope(choice.duration);
   return {
     generation: base.generation,
@@ -57,7 +57,7 @@ export function rememberDecision(
     ...(scope === 'application' ? { duration_seconds: choice.duration } : {}),
   };
 }
-// Any change of a checkbox or deletion time yields a different key; a preview
+// Any change of a checkbox or expiry duration yields a different key; a preview
 // reviewed for another key must not be submitted.
 export const rememberKey = (choice: RememberChoice) =>
   JSON.stringify([

@@ -177,7 +177,7 @@ try {
   evidence.at_800x550 = visible;
   assert(visible.allow && visible.block && visible.duration, '800x550 visibility ' + JSON.stringify(visible));
   await shot(w, '02-remember-800x550');
-  step('at 800x550 Allow, Deny and the deletion-time select are visible');
+  step('at 800x550 Allow, Deny and the expiry-duration select are visible');
 
   // 2. For a while + Allow: current delivered, lease line counts down, same process new TCP/UDP no prompt.
   await w.locator('#forAWhileToggle').check();

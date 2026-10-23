@@ -182,7 +182,7 @@ test('launched by: a helper started by a verified Electron app names it; display
 test('Remember never leaves Allow/Deny disabled without a reason; stale reviews renew', () => {
   const src = fs.readFileSync(path.join(__dirname, '../src/renderer.ts'), 'utf8');
   const fn = src.slice(src.indexOf('function rememberBlockReason'), src.indexOf('async function prepareDecisions'));
-  for (const reason of ['Disconnected', 'read-only', 'This request has ended.', 'Already submitted.', 'choose a deletion time', 'Rule not available: ', 'Checking rule…', 'Rule review expired'])
+  for (const reason of ['Disconnected', 'read-only', 'This request has ended.', 'Already submitted.', 'choose an expiry duration', 'Rule not available: ', 'Checking rule…', 'Rule review expired'])
     assert.ok(fn.includes(reason), reason);
   // Shown in the Remember panel and on the disabled buttons.
   assert.match(src, /rememberBlockReason\(e, now\) \|\|\n\s*\(reviewFor === reviewKey\(\)/);

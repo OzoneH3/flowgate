@@ -22,7 +22,7 @@ The card (`src/prompt-card.ts`, shared by the permission window and the Pending 
 
 Remember and For a while are mutually exclusive in both directions, as observed in NetLimiter 5.3.28 (`DECISION_OPTIONS_EXCLUSIVE` in `src/process-lease.ts`). For a while appears only with `decision-for-a-while-v1`; it shows a one-line explanation (duration selector: see below). Allow/Deny then send `decide {scope: "for-a-while"}`. A `process_scope_unavailable` refusal decides nothing, and the request stays answerable. The window hides on the click like any decision; the Pending requests tab lists active leases under "Temporary decisions".
 
-An ended request keeps the ordinary card. The separate "Rule for future connections" section is removed. For a while is enabled only while the request's exact process still runs (see below). Allow/Deny without Remember/For a while are disabled and show "Check Remember to save a rule for future connections." (or "…, or For a while for the running process."). With Remember, they use `request-rule-preview`/`request-rule-save` with the selected properties and deletion time. On a saved rule the ended request leaves Pending requests (`closedEnded` in `src/backend.ts`), the window hides, and the result ("Rule saved for future connections") is listed under Results with the rule under Rules; no ended card with another Allow/Deny row remains. Once a save was sent, every retry reuses that reviewed choice and token, so an unknown acknowledgement cannot create a second rule. A checked Process on an ended instance is never unchecked automatically, and saving stays unavailable until the user unchecks it.
+An ended request keeps the ordinary card. The separate "Rule for future connections" section is removed. For a while is enabled only while the request's exact process still runs (see below). Allow/Deny without Remember/For a while are disabled and show "Check Remember to save a rule for future connections." (or "…, or For a while for the running process."). With Remember, they use `request-rule-preview`/`request-rule-save` with the selected properties and expiry duration. On a saved rule the ended request leaves Pending requests (`closedEnded` in `src/backend.ts`), the window hides, and the result ("Rule saved for future connections") is listed under Results with the rule under Rules; no ended card with another Allow/Deny row remains. Once a save was sent, every retry reuses that reviewed choice and token, so an unknown acknowledgement cannot create a second rule. A checked Process on an ended instance is never unchecked automatically, and saving stays unavailable until the user unchecks it.
 
 ## Queue reconciliation, ended-request For a while, durations
 
@@ -71,3 +71,10 @@ automatic queue. Remembered saves hide only after acknowledgement; refusals and
 unknown acknowledgements stay visible without automatic retries. Activity also
 lists retained request identities absent from the socket census, labelled as
 request evidence rather than live processes, with their captured caller details.
+
+## Remember rule expiry
+
+The duration selector says **Rule expires after**, with **No expiry** for a
+rule without a time limit. At expiry, a saved rule stops matching; this does not
+immediately delete its stored record. Expired rules can still be inspected until
+removed or archived. The selected durations and backend requests are unchanged.

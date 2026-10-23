@@ -187,7 +187,7 @@ try {
   );
   const durations = await first.locator('#rememberDuration option').allInnerTexts();
   assert.deepEqual(durations, [
-    'Do not delete',
+    'No expiry',
     '1 minute',
     '5 minutes',
     '10 minutes',

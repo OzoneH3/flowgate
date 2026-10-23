@@ -434,7 +434,7 @@ test('preview cannot broaden backend remembered peer/service or change lifetime'
 const base = { generation: 'g', id: 'e', action: 'allow' };
 const fieldsDecision = (choice, action = 'allow') =>
   rememberDecision({ ...base, action }, choice, 'zr');
-test('Remember defaults to the application only and Do not delete = persistent', () => {
+test('Remember defaults to the application only and No expiry = persistent', () => {
   assert.deepEqual(DEFAULT_REMEMBER, {
     address: false,
     port: false,
@@ -461,11 +461,11 @@ test('each Create rule for checkbox maps to exactly its request field', () => {
       assert.equal(d.remember[k], k === field, field + ' -> ' + k);
   }
 });
-test('the eight deletion times map to scope and duration_seconds', () => {
+test('the eight expiry durations map to scope and duration_seconds', () => {
   assert.deepEqual(
     REMEMBER_DURATIONS.map((d) => [d.label, d.seconds]),
     [
-      ['Do not delete', 0],
+      ['No expiry', 0],
       ['1 minute', 60],
       ['5 minutes', 300],
       ['10 minutes', 600],
@@ -498,7 +498,7 @@ test('the eight deletion times map to scope and duration_seconds', () => {
     }),
   );
 });
-test('any checkbox or deletion-time change invalidates the reviewed preview', () => {
+test('any checkbox or expiry-duration change invalidates the reviewed preview', () => {
   const choice = { fields: DEFAULT_REMEMBER, duration: 0 },
     keys = new Set([rememberKey(choice)]);
   for (const k of ['address', 'port', 'protocol', 'process'])

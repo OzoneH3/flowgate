@@ -348,8 +348,8 @@ function rememberBlockReason(e: ViewEvent | undefined, now: number): string {
   if (e.attempt || localSubmitted.has(state.control.generation + ':' + e.id)) return 'Already submitted.';
   if (!e.scope_previews[chosenScope])
     return chosenScope === 'persistent'
-      ? 'A permanent rule is not offered for this request; choose a deletion time.'
-      : 'This deletion time is not offered for this request.';
+      ? 'A permanent rule is not offered for this request; choose an expiry duration.'
+      : 'This expiry duration is not offered for this request.';
   if (reviewMessage) return 'Rule not available: ' + shortError(reviewMessage);
   if (reviewChecking || reviewFor !== reviewKey() || !decisionReviews.allow) return 'Checking rule…';
   if (Date.parse(decisionReviews.allow.expires_at) <= now) return 'Rule review expired · checking again…';
@@ -2534,7 +2534,7 @@ function updateDecisions() {
     leaseMode = endedLeaseAvailable(e, state.control.capabilities),
     leaseDone = !!e && endedLeaseDone.has(e.id),
     unverifiable = e ? ruleUnverifiable.get(e.id) : undefined;
-  // Live Remember: a review that no longer matches (zones, fields, deletion time
+  // Live Remember: a review that no longer matches (zones, fields, expiry duration
   // changed) or that expired is renewed automatically, at most every 2 s.
   if (!ended && remembering && actionable(e) && !reviewChecking && !reviewMessage) {
     const fresh =

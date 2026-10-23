@@ -34,7 +34,7 @@ export function requestRuleChoice(
   duration: number,
   zoneRevision: string,
 ): RequestRuleChoice {
-  if (!REMEMBER_DURATIONS.some((d) => d.seconds === duration)) throw Error('Unsupported rule deletion time');
+  if (!REMEMBER_DURATIONS.some((d) => d.seconds === duration)) throw Error('Unsupported rule expiry duration');
   const scope = rememberScope(duration);
   return {
     generation: base.generation,

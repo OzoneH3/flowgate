@@ -302,7 +302,7 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
 
   // ---- decision row ----------------------------------------------------------
   // Sticky at the bottom of the scrolling body: the decision row and the
-  // selected option's controls (incl. the deletion time) stay visible.
+  // selected option's controls (incl. the expiry duration) stay visible.
   const dock = el('div', '', 'decision-dock', 'decisionDock');
   const controls = el('div', '', 'decision-controls', 'decisionControls');
   for (const [id, label] of [
@@ -355,9 +355,10 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
       label.append(input, ' ' + option.label);
       panel.append(label);
     }
-    const durationLabel = el('label', 'Delete the rule after: ', 'remember-duration'),
+    const durationLabel = el('label', 'Rule expires after: ', 'remember-duration'),
       duration = el('select', '', '', 'rememberDuration');
     for (const d of REMEMBER_DURATIONS) duration.append(new Option(d.label, String(d.seconds)));
+    duration.title = 'At expiry, the rule stops matching. Expiry does not immediately delete the saved rule.';
     durationLabel.append(duration);
     const summary = el('p', '', 'remember-summary', 'rememberSummary');
     summary.setAttribute('role', 'status');

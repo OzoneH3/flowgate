@@ -392,8 +392,8 @@ test('compact card: first view is short, everything technical behind one Details
   assert.ok(byId('rememberPanel').hidden, 'Remember panel collapsed until checked');
   assert.ok(byId('forAWhileNote').hidden);
   assert.ok(byId('rememberDuration'));
-  assert.equal(byId('rememberDuration').children.length, 8, 'all eight deletion times');
-  // Controls and the deletion time share the sticky dock.
+  assert.equal(byId('rememberDuration').children.length, 8, 'all eight expiry durations');
+  // Controls and the expiry duration share the sticky dock.
   const dock = byId('decisionDock');
   assert.ok([...dock.walk()].includes(byId('allow')) && [...dock.walk()].includes(byId('rememberDuration')));
   // The ended-request rule section is gone.
