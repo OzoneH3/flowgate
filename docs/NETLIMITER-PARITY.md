@@ -1,5 +1,10 @@
 # NetLimiter functional parity matrix
 
+> Historical matrix: several rows describe older commits and are no longer current.
+> See [the 23 October 2026 audit](NETLIMITER-AUDIT-2026-10-23.md) for the fresh
+> source/documentation comparison at 0842059 and explicitly separated evidence.
+> Existing verified labels below are historical claims, not a new certification.
+
 Functional comparison with NetLimiter. Statuses: **verified equivalent**, **divergent**, **missing**, **unverified**.
 No percentage scores. A row is equivalent only with behavioural evidence, never from a name,
 screenshot, API success or pre-existing test alone. Observations: `.workspace/coordination/
