@@ -13,7 +13,7 @@ The inventory and reproduction below are pinned to **b1b658b**. Work coordinated
 - **F01:** fixed in source by **fb92566**. Inactive quick edits now use the normalized draft and reject changes to unchanged authority/scope fields before saving. This audit independently compiled the changed client and ran all **7 new regression tests**, including legacy IPv4/IPv6 action/enable edits, modern scope preservation, individual preview-field tampering and stale versions/generations. The committed client/test bytes match the recorded tested-source hashes. This is client/synthetic-API verification, not installed or native-desktop acceptance.
 - **F02:** **3da9427** changes the prompt to “Rule expires after” and “No expiry,” with an explanation of expiry. The source change was inspected. Backend expiry/retention behavior is unchanged, so the wording defect is fixed in source while the deletion-parity difference remains. The implementing session reports 63 focused tests passing; no new native journey or deployment is claimed.
 - **F11:** current-facing README guidance was reconciled in **367b3b1**: service versus observer modes, update profiles, default tray behavior, charts, packaging, Wine observer and generic compatibility checks. The diff was reviewed against the corresponding source. The historical audit/parity documents now point to this report; dated observations remain historical evidence.
-- **F04 follow-up:** the first [observed-usage accounting slice](OBSERVED-USAGE.md) now retains sampled backend deltas after socket closure and exposes them in a separate Electron tab. This partially addresses cumulative observations; live Activity semantics remain unchanged. Restart persistence, complete accounting, Reset, historical statistics and quotas remain unimplemented. Source and isolated/native verification are recorded separately from this baseline; no deployment is claimed.
+- **F04 follow-up:** **273b9d7** (backend) and **a5e48af** (UI) implement the first [observed-usage accounting slice](OBSERVED-USAGE.md), retaining sampled backend deltas after socket closure in a separate Electron tab. This partially addresses cumulative observations; live Activity semantics remain unchanged. Restart persistence, complete accounting, Reset, historical statistics and quotas remain unimplemented. Source and isolated/native verification are recorded separately from this baseline; no deployment is claimed.
 
 No source fix in this section is evidence that the installed GUI has received it.
 
@@ -23,8 +23,10 @@ is hidden and the visible control retains the detail only in its tooltip. The
 short label also truncates dotted kernel versions. Evidence is peer-provided
 native Electron DOM plus source inspection against an isolated real daemon, not
 a captured painted-screen check; see `.workspace/ui2-verify/degraded-findings.md`.
-A fix is proposed, not yet recorded here as applied. Observed recovery delay has
-an unconfirmed cause and is not classified as a defect.
+The fix is now committed in **5507423**: runtime degradation gets a visible badge
+and dotted version numbers remain intact. UI2 reports isolated native verification;
+no installed-release verification is claimed. Observed recovery delay has an
+unconfirmed cause and is not classified as a defect.
 
 ## Findings requiring attention
 
