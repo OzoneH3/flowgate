@@ -148,3 +148,15 @@ Primary kernel sources consulted for this concrete distinction:
 [inet_connection_sock.c accepted-child cookie transfer](https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c).
 These distinguish kernel observation from a guessed port/process relationship;
 they do not make an Activity association a firewall permission target.
+
+## Closed TCP lifecycle rows in Activity
+
+Electron groups exact ownerless TCP `TIME_WAIT` records separately from unresolved
+live sockets. See [lifecycle groups and ownership evidence](TRAFFIC.md#lifecycle-groups-and-ownership-evidence)
+for the strict classification, count and filtering rules. This presentation change
+uses existing observation fields and infers no previous application. Ownership,
+authorization, firewall rules and accounting attribution are unchanged.
+
+Parser and model regressions are in `electron/test/activity-lifecycle.test.cjs`.
+Native checks use isolated synthetic API responses; they do not establish live
+attribution coverage across workloads.

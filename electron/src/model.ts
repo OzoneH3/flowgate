@@ -8,7 +8,7 @@ export interface Row {
   parent?: string;
   // 'launch': display-only group of processes from one verified game launch
   // (backend provenance). Never a firewall target; rules stay per process/application.
-  kind: 'inactive-group' | 'overview' | 'network' | 'application' | 'program' | 'launch' | 'process' | 'socket' | 'unidentified';
+  kind: 'inactive-group' | 'overview' | 'network' | 'application' | 'program' | 'launch' | 'process' | 'socket' | 'unidentified' | 'kernel-lifecycle';
   label: string;
   program?: { executable: string; inactive: boolean };
   presentationLabel?: string;
@@ -70,6 +70,25 @@ export const sourceRows = (rows: SocketRow[], source?: MeasurementSource) => [
     rows.filter((r) => !source || r.socket.protocol === source).map((r) => [r.id, r]),
   ).values(),
 ];
+export const KERNEL_LIFECYCLE_EXPLANATION =
+  'TCP TIME_WAIT records retained by the kernel after closure. No current userspace owner is identified; no previous application is inferred. These rows are not permission targets.';
+
+// Presentation only. Inode zero alone also occurs in active handshake records.
+// Require explicit, consistent evidence; older/incomplete metadata stays unresolved.
+export function isKernelTimeWait(row: SocketRow): boolean {
+  return row.socket.protocol === 'tcp' && row.socket.state === 6 &&
+    row.socket.inode === 0 && row.owners.length === 0 &&
+    row.ownership_category === 'no-userspace-inode' &&
+    !row.runtime_application && !row.display_application;
+}
+
+/** Counts the displayed socket leaves, independent of grouping and expansion. */
+export function activityRowCounts(roots: Row[]) {
+  const all = allRows(roots);
+  const sockets = sourceRows(all.flatMap(r => r.kind === 'socket' && r.socket ? [r.socket] : []));
+  const unresolved = sourceRows(all.filter(r => r.kind === 'unidentified').flatMap(r => r.rows));
+  return { displayed: sockets.length, lifecycle: sockets.filter(isKernelTimeWait).length, unresolved: unresolved.length };
+}
 export const NETWORK_UNAVAILABLE =
   'Classification unavailable: the daemon supplies no configured network-zone attribution. These totals are unknown, not zero; this is not a firewall target.';
 export function networkOverviews(): Row[] {
@@ -139,7 +158,7 @@ export function hierarchy(activity: Activity, query = '', filter = 'all'): Row[]
   const roots: Row[] = [];
   const apps = new Map<string, Row>(),
     procs = new Map<string, Row>();
-  let unknown: Row | undefined;
+  let unknown: Row | undefined, lifecycle: Row | undefined;
   const seen = new Set<string>();
   for (const s of activity.rows) {
     if (seen.has(s.id)) continue;
@@ -169,7 +188,14 @@ export function hierarchy(activity: Activity, query = '', filter = 'all'): Row[]
       s.socket.protocol === 'udp' ? !listening : [1, 2, 3, 12].includes(s.socket.state);
     if ((filter === 'active' && !active) || (filter === 'listening' && !listening)) continue;
     let parent: Row;
-    if (s.runtime_application) {
+    if (isKernelTimeWait(s)) {
+      if (!lifecycle) {
+        lifecycle = { id: 'kernel-lifecycle', kind: 'kernel-lifecycle', label: 'Kernel TCP lifecycle', children: [], rows: [] };
+        roots.push(lifecycle);
+      }
+      lifecycle.rows.push(s);
+      parent = lifecycle;
+    } else if (s.runtime_application) {
       const runtime=s.runtime_application, display=runtime.application;
       const key=`${display.key}|${display.revision}|uid:${runtime.uid}`;
       let a=apps.get(key);
@@ -302,6 +328,7 @@ export function hierarchy(activity: Activity, query = '', filter = 'all'): Row[]
       pid: owners.length === 1 ? owners[0].pid : undefined,
     });
   }
+  if (lifecycle) lifecycle.label = `Kernel TCP lifecycle (${lifecycle.rows.length})`;
   return nestLaunchedApplications(roots);
 }
 /** The application row key of a process ("<key>|<revision>|uid:<uid>"). */
@@ -371,7 +398,7 @@ export function flatten(
                   : (sum(r.rows, key as Metric, source).value ?? -1);
   const walk = (rows: Row[], depth: number) => {
     for (const row of [...rows].sort((a, b) => {
-      const categoryOrder = (r: Row) => r.kind === 'overview' ? 0 : r.kind === 'unidentified' ? 1 : r.kind === 'inactive-group' ? 2 : undefined;
+      const categoryOrder = (r: Row) => r.kind === 'overview' ? 0 : r.kind === 'unidentified' ? 1 : r.kind === 'kernel-lifecycle' ? 2 : r.kind === 'inactive-group' ? 3 : undefined;
       const ac = categoryOrder(a), bc = categoryOrder(b);
       if (ac !== undefined && bc !== undefined && ac !== bc) return ac - bc;
       if (a.kind === 'network' || b.kind === 'network') {

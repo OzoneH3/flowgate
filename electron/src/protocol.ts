@@ -181,6 +181,8 @@ export interface SocketRow {
   evidence: string;
   socket: {
     protocol: string;
+    // Optional on older responses. Missing/invalid evidence must not become zero.
+    inode?: number;
     local: string;
     remote: string;
     uid: number;
@@ -1086,6 +1088,7 @@ export function parseReply(raw: unknown): Reply {
             : undefined,
           evidence: string(row.evidence),
           socket: {
+            inode: typeof s.inode === 'number' && Number.isInteger(s.inode) && s.inode >= 0 && s.inode <= 0xffffffff ? s.inode : undefined,
             protocol: string(s.protocol),
             local: string(s.local),
             remote: string(s.remote),

@@ -89,6 +89,9 @@ import type { Attempt, ClientState, ViewEvent, Scope } from './protocol';
 import { recordDecisionResult, showsLocalResult, type CardResult } from './card-result';
 import {
   hasObservedConnection,
+  isKernelTimeWait,
+  KERNEL_LIFECYCLE_EXPLANATION,
+  activityRowCounts,
   overview,
   networkOverviews,
   NETWORK_UNAVAILABLE,
@@ -1063,10 +1066,10 @@ function buildTree() {
     : [];
   if (a) {
     const inactive = roots.filter(r => r.kind === 'inactive-group');
-    const unidentified = roots.filter(r => r.kind === 'unidentified');
-    const children = [...networkOverviews(), ...roots.filter(r => r.kind !== 'inactive-group' && r.kind !== 'unidentified')];
+    const observationGroups = roots.filter(r => r.kind === 'unidentified' || r.kind === 'kernel-lifecycle');
+    const children = [...networkOverviews(), ...roots.filter(r => r.kind !== 'inactive-group' && r.kind !== 'unidentified' && r.kind !== 'kernel-lifecycle')];
     for (const child of children) child.parent = 'overview';
-    roots = [overview(a, children, hostLabel), ...unidentified, ...inactive];
+    roots = [overview(a, children, hostLabel), ...observationGroups, ...inactive];
   }
   const all = allRows(roots);
   const r = all.find((r) => r.id === selected);
@@ -1079,14 +1082,16 @@ function buildTree() {
   }
   if (expanded.size > 8192) {
     const ids = new Set(all.map((r) => r.id));
-    for (const id of expanded) if (id !== 'unidentified' && !ids.has(id)) expanded.delete(id);
+    for (const id of expanded) if (id !== 'unidentified' && id !== 'kernel-lifecycle' && !ids.has(id)) expanded.delete(id);
   }
   renderTree();
   renderInfo();
+  const counts = activityRowCounts(roots);
+  const detailedSummary = a ? `${counts.displayed} displayed / ${a.rows.length} observed sockets · ${counts.lifecycle} kernel TIME_WAIT · ${counts.unresolved} unresolved/shared · ${a.complete ? 'Complete census' : 'Partial visibility'}` : state.observation.message;
   $('footerSummary').textContent = $('activitySummary').textContent = a
-    ? `${roots[0]?.children.reduce((n, r) => n + r.rows.length, 0) || 0} / ${a.rows.length} sockets · ${a.complete ? 'Complete census' : 'Partial visibility'}`
+    ? `${counts.displayed}/${a.rows.length} sockets · ${counts.lifecycle} TIME_WAIT · ${counts.unresolved} unresolved · ${a.complete ? 'Complete' : 'Partial'}`
     : state.observation.message;
-  $('activitySummary').title = $('footerSummary').title = [a?.collected, ...(a?.issues || [])]
+  $('activitySummary').title = $('footerSummary').title = [detailedSummary, 'Counts describe this endpoint’s projected observations and current search/socket filter. The measurement source selects byte columns, not which sockets are listed.', a?.collected, ...(a?.issues || [])]
     .filter(Boolean)
     .join(' · ');
 }
@@ -1706,7 +1711,7 @@ function renderInfo() {
       : '');
   $('selectedExecutable').hidden = !pathText;
   const selectedName = $('selectedName');
-  if (selectedName.dataset.identity !== (r?.id || '')) {
+  if (selectedName.dataset.identity !== (r?.id || '') || selectedName.dataset.label !== (r?.label || '')) {
     selectedName.dataset.identity = r?.id || '';
     // The chart legend names the selected entity (reference), not the type word shown as title.
     selectedName.dataset.label = r?.label || '';
@@ -1987,6 +1992,7 @@ function renderInfo() {
   }
   if (r.socket) {
     const s = r.socket;
+    if (isKernelTimeWait(s)) field(info, 'Lifecycle', KERNEL_LIFECYCLE_EXPLANATION);
     for (const [label, value] of [
       ['Protocol', s.socket.protocol],
       ['Local endpoint', s.socket.local],
@@ -2042,6 +2048,7 @@ function renderInfo() {
         'Ownership',
         'Unresolved and mixed-application shared sockets, counted once. This group is not an application or permission target.',
       );
+    if (r.kind === 'kernel-lifecycle') field(info, 'Lifecycle', KERNEL_LIFECYCLE_EXPLANATION);
   }
   commit();
 }

@@ -79,7 +79,7 @@ within 5 seconds; no process scan or executable hash is performed per packet.
 Observer jobs remain serial, and API polling does not launch collection jobs.
 Errors clear live state; old snapshots are not displayed as fresh after reconnect.
 
-## Unidentified group and ownership evidence
+## Lifecycle groups and ownership evidence
 
 One stable, initially collapsed **Unidentified (N)** group contains unknown and
 nonexclusive/shared sockets. Each child has its protocol/endpoints/state/traffic
@@ -88,7 +88,21 @@ and sums. Expanded/collapsed state survives refresh/filter and disappearance/ree
 within the window. Stable socket IDs retain selection as ownership becomes known;
 measurements are not duplicated or reset by that presentation move.
 
-This is not an application identity or a permission target. Known executable groups
+Electron separates confirmed ownerless TCP TIME_WAIT rows into **Kernel TCP
+lifecycle (N)**. Classification requires TCP state 6, explicit inode zero, the
+`no-userspace-inode` category, no owners and no runtime or display application.
+Missing or invalid inode metadata remains unknown; inode zero in another TCP state
+does not qualify. The group retains the original rows, evidence and measurements,
+and does not infer a previous application. Its children remain available in the
+All sockets view; active/listening filters retain their existing meaning.
+
+The summary distinguishes displayed rows, observed rows, kernel TIME_WAIT and
+unresolved/shared rows. These counts describe the endpoint's projected snapshot
+and current search/socket filter, not an attribution success rate. An identified
+owner with unknown initiation direction remains under its application or process;
+direction uncertainty does not make ownership unknown.
+
+Neither observation group is an application identity or a permission target. Known executable groups
 continue to use application key/revision and PID/start identities. The observer
 reports only what it saw. See [native ownership improvements](ATTRIBUTION.md) for
 bounded live-worker fallback, FD rechecks and additive display-only association.
