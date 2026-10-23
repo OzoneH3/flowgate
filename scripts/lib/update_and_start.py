@@ -198,7 +198,8 @@ def transition(host, backend, selected):
         if state not in ('starting', 'stopping'):
             break
         host.sleep()
-    raise RuntimeError('Protection did not reach ' + selected + '; inspect flowgate-control status. No action was replayed.')
+    reason = (status.get('protection') or {}).get('reason', 'No final state reported')
+    raise RuntimeError('Protection did not reach ' + selected + ': ' + reason + '; inspect flowgate-control status. No action was replayed.')
 
 
 def update(host, root, revision, *, dry=False, gui=True, profile="both", wine_discovery=False, recover_stopped=False):

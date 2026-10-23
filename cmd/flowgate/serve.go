@@ -232,10 +232,11 @@ func serveCommand(args []string) error {
 	defer ticker.Stop()
 	ready := false
 	lastStatus := ""
+	lastFailure := ""
 	for {
 		if !ready {
 			s := evaluation.ProtectionStatus()
-			if !*allowProtection || s.DesiredMode == "monitoring" || s.State == "active" {
+			if !*allowProtection || s.DesiredMode == "monitoring" || s.State == "active" || s.State == "failed" || s.State == "degraded" {
 				if *notify {
 					if err = notifyService("READY=1\nSTATUS=Policy loaded; " + s.State + " " + s.Profile); err != nil {
 						return err
@@ -247,7 +248,7 @@ func serveCommand(args []string) error {
 		}
 		if ready && *notify {
 			p, s := evaluation.ProtectionStatus(), evaluation.Status()
-			summary := "desired " + p.DesiredMode + "; actual " + s.State + " " + s.Profile + "; " + s.ReasonCode
+			summary := "desired " + p.DesiredMode + "; actual " + s.State + " " + s.Profile + "; " + s.ReasonCode + "; " + s.Reason
 			if summary != lastStatus {
 				if er := notifyService("STATUS=" + summary); er != nil {
 					fmt.Fprintln(os.Stderr, "WARNING: status notification:", er)
@@ -258,10 +259,13 @@ func serveCommand(args []string) error {
 		if *allowProtection {
 			s := evaluation.ProtectionStatus()
 			if s.DesiredMode != "monitoring" && (s.State == "failed" || s.State == "degraded") {
-				if *notify {
-					notifyService("STATUS=Protection failure: " + s.Reason)
+				// Keep the control API available for an explicit Stop/Retry. The
+				// protection manager retains fail-closed resources; readiness here
+				// describes the API, never successful traffic enforcement.
+				if s.Reason != lastFailure {
+					fmt.Fprintln(os.Stderr, "WARNING: protection failed; fail-closed resources retained; use Stop protection to return to monitoring:", s.Reason)
+					lastFailure = s.Reason
 				}
-				return fmt.Errorf("continuous protection failed: %s", s.Reason)
 			}
 		}
 		select {

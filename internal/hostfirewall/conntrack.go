@@ -73,7 +73,17 @@ func setMark(f ct.Flow, value uint32) error {
 }
 func bootstrap(claim func() error) error { return bootstrapContext(context.Background(), claim) }
 func bootstrapContext(ctx context.Context, claim func() error) error {
-	fs, err := flows()
+	return bootstrapSnapshots(ctx, claim, identity.Sockets, flows, setMark)
+}
+
+func bootstrapSnapshots(ctx context.Context, claim func() error, socketSnapshot func() ([]identity.Socket, error), flowSnapshot func() ([]ct.Flow, error), mark func(ct.Flow, uint32) error) error {
+	// Read sockets first: a connection established between the snapshots must
+	// not be compared with an older conntrack dump and falsely called untracked.
+	sockets, err := socketSnapshot()
+	if err != nil {
+		return err
+	}
+	fs, err := flowSnapshot()
 	if err != nil {
 		return err
 	}
@@ -87,10 +97,6 @@ func bootstrapContext(ctx context.Context, claim func() error) error {
 	}
 	// Refuse to strand established TCP sockets that were never tracked before
 	// activation (for example a host with conntrack hooks previously inactive).
-	sockets, err := identity.Sockets()
-	if err != nil {
-		return err
-	}
 	known := map[string]bool{}
 	for _, f := range fs {
 		if err := ctx.Err(); err != nil {
@@ -106,7 +112,7 @@ func bootstrapContext(ctx context.Context, claim func() error) error {
 	}
 	for _, s := range sockets {
 		if s.Protocol == "tcp" && s.State == 1 && !known[s.Local.String()+"|"+s.Remote.String()] {
-			return fmt.Errorf("established TCP socket lacks a pre-existing conntrack entry; refusing activation to preserve it")
+			return fmt.Errorf("established TCP socket %s -> %s (inode %d) lacks a pre-existing conntrack entry; refusing activation to preserve it", s.Local, s.Remote, s.Inode)
 		}
 	}
 	if err := claim(); err != nil {
@@ -118,7 +124,7 @@ func bootstrapContext(ctx context.Context, claim func() error) error {
 		}
 		p := f.TupleOrig.Proto.Protocol
 		if (p == 6 || p == 17) && f.Status.Confirmed() {
-			if err = setMark(f, preserved); err != nil {
+			if err = mark(f, preserved); err != nil {
 				return err
 			}
 		}

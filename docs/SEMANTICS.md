@@ -493,3 +493,13 @@ qualify. The record ID and filter stay unchanged; derived entry metadata and
 version are updated atomically through the rule store, then logged per ID.
 Changed executable identity, endpoint, peer service or scope requires normal
 review. A failed save retains the old inactive records and emits a warning.
+
+A protection activation/runtime refusal leaves the control daemon available in
+failed/degraded state, with its fail-closed resources retained. Systemd readiness
+means the control API is available, not that protection activated successfully.
+The status and journal retain the refusal reason; an explicit Stop performs owned
+cleanup and returns to monitoring. The daemon does not restart repeatedly merely
+because activation was refused. Startup samples established sockets before the
+conntrack dump to avoid comparing newly established sockets with an older dump;
+a genuinely untracked established socket still refuses activation, naming its
+endpoints and inode for diagnosis.
