@@ -48,24 +48,47 @@ function scopeText(r: Rule) {
   return parts.filter(Boolean).join(' · ');
 }
 
+// Everything an action/enabled change must leave untouched. `opt` marks fields the
+// daemon omits when zero (policy.Rule/Filter omitempty/omitzero), so absent equals
+// that zero; all other fields compare exactly. remote_address "" and "*" both mean
+// any address (policy.CanonicalFilter). The daemon itself derives root_application
+// and keeps the stored invocation on an edit; follows_updates is read-only display.
+const opt = <T,>(v: T | undefined | null, zero: T) => v ?? zero;
+function scopeKey(r: Rule) {
+  const f = r.filter;
+  return JSON.stringify([
+    r.id, opt(r.executable, ''), opt(r.root_application, ''), opt(r.share_with_root, false),
+    r.invocation ?? null, r.preset ?? null, r.priority, r.expires,
+    f.application, f.revision, f.uid, f.direction, f.protocol,
+    f.remote_address || '*', opt(f.local_port, 0), opt(f.remote_port, 0), opt(f.remote, ''),
+    opt(f.all_programs, false), opt(f.all_uids, false), opt(f.network_zone, ''), opt(f.zone_model, ''),
+    opt(f.interface_index, 0), opt(f.interface_name, ''), opt(f.local_address, ''),
+    f.peer_service ?? null, f.process ?? null,
+  ]);
+}
+// Schema the preview may legitimately assign (legacy 1 → 2; see Rules.preview).
+const editedSchema = (d: Rule) => ([4, 6].includes(d.schema) ? d.schema : d.filter.process ? 3 : 2);
+
 /** Reviewed in-place change of one stored rule (action and/or enabled). */
 export async function changeStoredRule(rule: Rule, action: Action, disabled: boolean): Promise<string> {
   const draft = await window.flowgate.ruleDraft({ id: rule.id });
   if (draft.rule.id !== rule.id || draft.rule.version !== rule.version)
     throw Error('This rule changed since it was listed; nothing was saved.');
+  // The draft is the authoritative, normalized scope; the listed rule may be in a legacy format.
+  const d = draft.rule;
   const preview = await window.flowgate.rulePreview({
     token: draft.token,
     action,
-    protocol: rule.filter.protocol,
-    remote_address: rule.filter.remote_address || '*',
-    local_port: rule.filter.local_port || 0,
-    remote_port: rule.filter.remote_port || 0,
-    priority: rule.priority,
+    protocol: d.filter.protocol,
+    remote_address: d.filter.remote_address || '*',
+    local_port: d.filter.local_port || 0,
+    remote_port: d.filter.remote_port || 0,
+    priority: d.priority,
     disabled,
     expiry: 'preserve',
   });
   const v = preview.verifiedRule;
-  if (!v || v.id !== rule.id || v.action !== action || v.disabled !== disabled || v.filter.direction !== rule.filter.direction)
+  if (!v || v.action !== action || v.disabled !== disabled || v.schema !== editedSchema(d) || scopeKey(v) !== scopeKey(d))
     throw Error('The backend reviewed a different change than requested; nothing was saved.');
   const result = await window.flowgate.ruleSave(preview.receipt);
   if (result.phase === 'acknowledged') return `${word(action)}${disabled ? ' (disabled)' : ''} saved for this rule.`;

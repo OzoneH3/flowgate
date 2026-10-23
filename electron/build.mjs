@@ -85,6 +85,7 @@ await build({
     'src/card-result.ts',
     'src/build-info.ts',
     'src/gui-build.ts',
+    'src/inactive-rules.ts',
   ],
   bundle: true,
   platform: 'node',

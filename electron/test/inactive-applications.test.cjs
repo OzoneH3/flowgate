@@ -90,7 +90,9 @@ test('not-running rules popup: reviewed in-place edits only, delete via the conf
   const src = fs.readFileSync(path.join(__dirname, '../src/inactive-rules.ts'), 'utf8');
   // Edits are pinned to the listed version and saved only when the backend reviewed exactly that change.
   assert.match(src, /draft\.rule\.version !== rule\.version/);
-  assert.match(src, /v\.id !== rule\.id \|\| v\.action !== action \|\| v\.disabled !== disabled/);
+  // The edit is built from the normalized draft and the reviewed scope must equal it (no widening).
+  assert.match(src, /const d = draft\.rule;/);
+  assert.match(src, /v\.action !== action \|\| v\.disabled !== disabled \|\| v\.schema !== editedSchema\(d\) \|\| scopeKey\(v\) !== scopeKey\(d\)/);
   assert.match(src, /expiry: 'preserve'/);
   // Uncertain saves are never reported as success.
   assert.match(src, /result\.phase === 'unknown'\) return 'Save result unknown/);
