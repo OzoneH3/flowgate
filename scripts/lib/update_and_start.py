@@ -99,6 +99,51 @@ def supervise_gui(command, environment, log_path, timeout=GUI_START_TIMEOUT, pol
     raise GuiNotSwitched('new GUI (PID ' + str(child.pid) + ') did not report its main window loaded within ' + str(timeout) + ' s; left running; see ' + str(log_path))
 
 
+DAEMON_SOCKETS = (b'/run/flowgate-api/daemon.sock', b'/run/flowgate-api/daemon.sock.monitor')
+CMDLINE_LIMIT = 64 * 1024
+
+
+def start_time(proc):
+    """Process start time (clock ticks since boot) from /proc/<pid>/stat."""
+    return (proc / 'stat').read_text().rsplit(')', 1)[1].split()[19]
+
+
+def released_gui(proc, releases, uid=None):
+    """Whether /proc entry `proc` is this user's released FlowGate GUI main process.
+
+    Evidence is the executed file (/proc/<pid>/exe) at the exact release layout
+    and the exact launch arguments update-and-start uses. Electron rewrites its
+    main process command line into one string with switches first and positional
+    values after them; both that form and the original argv must equal the
+    expected launch exactly, so extra, duplicate, swapped or conflicting endpoint
+    arguments, helper processes (--type) and oversized input never match."""
+    uid = os.getuid() if uid is None else uid
+    if proc.stat().st_uid != uid:
+        return False
+    exe = os.readlink(proc / 'exe')
+    if exe.endswith(' (deleted)'):
+        exe = exe[:-len(' (deleted)')]
+    executable = pathlib.Path(exe)
+    # Exact release layout: <releases>/<revision>/runtime/electron.
+    if not executable.is_relative_to(releases) or len(executable.relative_to(releases).parts) != 3 or executable.parts[-2:] != ('runtime', 'electron'):
+        return False
+    with open(proc / 'cmdline', 'rb') as f:
+        raw = f.read(CMDLINE_LIMIT + 1)
+    if len(raw) > CMDLINE_LIMIT:
+        return False
+    app = os.fsencode(str(executable.parent.parent / 'electron'))
+    monitor, control = DAEMON_SOCKETS[1], DAEMON_SOCKETS[0]
+    parts = raw.split(b'\0')
+    if parts and parts[-1] == b'':
+        parts = parts[:-1]
+    # Original argv as launched by launch-ui (argv[0] may be the launch path).
+    if parts[1:] == [b'--ozone-platform=wayland', app, b'--observer', monitor, b'--control', control]:
+        return True
+    # Electron's rewritten form: the resolved executable, switches, then values.
+    rewritten = b' '.join([os.fsencode(exe), b'--ozone-platform=wayland', b'--observer', b'--control', app, monitor, control])
+    return parts == [rewritten]
+
+
 def session_environment(environ):
     return {k: environ[k] for k in SESSION_KEYS if environ.get(k)}
 
@@ -327,35 +372,33 @@ class Host:
         # Only this user's released FlowGate main processes. Snapshot start time
         # and recheck before signalling so a reused PID is never targeted.
         processes = []
+        releases = (root / '.workspace/automatic-zone-releases').resolve()
         for proc in pathlib.Path('/proc').iterdir():
             if not proc.name.isdigit():
                 continue
             try:
-                if proc.stat().st_uid != os.getuid():
+                # Start time bookends the evidence: a PID recycled while it was
+                # read never binds the old process's identity or environment.
+                before = start_time(proc)
+                if not released_gui(proc, releases):
                     continue
-                args = (proc / 'cmdline').read_bytes().split(b'\0')
-                executable = pathlib.Path(os.fsdecode(args[0]))
-                releases = root / '.workspace/automatic-zone-releases'
-                if not executable.is_relative_to(releases) or executable.parts[-2:] != ('runtime', 'electron'):
+                environment = process_environment(proc)
+                if start_time(proc) != before:
                     continue
-                if len(args) < 3 or args[1] != b'--ozone-platform=wayland' or os.fsdecode(args[2]) != str(executable.parent.parent / 'electron'):
-                    continue
-                if b'/run/flowgate-api/daemon.sock' not in args or b'/run/flowgate-api/daemon.sock.monitor' not in args:
-                    continue
-                start = (proc / 'stat').read_text().rsplit(')', 1)[1].split()[19]
-                processes.append((proc, start))
+                processes.append((proc, before, environment))
             except (OSError, ValueError, IndexError):
                 continue
         # Resolve and verify the target desktop while the old GUI still runs; an
         # unverifiable target keeps it running instead of leaving no GUI at all.
-        desktop, reason = target_desktop([process_environment(proc) for proc, _ in processes], os.environ)
+        desktop, reason = target_desktop([environment for _, _, environment in processes], os.environ)
+        processes = [(proc, start) for proc, start, _ in processes]
         if desktop is None:
             raise GuiNotSwitched(reason + ('; the running GUI was left open' if processes else '; no GUI started'))
         for proc, start in processes:
             try:
                 fd = os.pidfd_open(int(proc.name))
                 try:
-                    if (proc / 'stat').read_text().rsplit(')', 1)[1].split()[19] == start:
+                    if start_time(proc) == start:
                         signal.pidfd_send_signal(fd, signal.SIGTERM)
                 finally:
                     os.close(fd)

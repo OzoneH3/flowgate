@@ -294,11 +294,15 @@ class Update(unittest.TestCase):
         proc = self.root / '12345'; proc.mkdir()
         gui = self.root / '.workspace/automatic-zone-releases/old'
         args = [str(gui / 'runtime/electron'), '--ozone-platform=wayland', str(gui / 'electron'), '--observer', '/run/flowgate-api/daemon.sock.monitor', '--control', '/run/flowgate-api/daemon.sock']
-        (proc / 'cmdline').write_bytes(('\0'.join(args) + '\0').encode())
+        # Electron's rewritten main-process cmdline: one string, switches first.
+        rewritten = [args[0], '--ozone-platform=wayland', '--observer', '--control', str(gui / 'electron'), '/run/flowgate-api/daemon.sock.monitor', '/run/flowgate-api/daemon.sock']
+        (proc / 'cmdline').write_bytes((' '.join(rewritten) + '\0').encode())
+        (proc / 'exe').symlink_to(gui / 'runtime/electron')
         fields = ['S'] + ['0'] * 18 + ['99']
         (proc / 'stat').write_text('12345 (electron) ' + ' '.join(fields))
         private = self.root / '12346'; private.mkdir()
         (private / 'cmdline').write_bytes(('\0'.join(args[:-1] + ['/private/test.sock']) + '\0').encode())
+        (private / 'exe').symlink_to(gui / 'runtime/electron')
         # Private fixture must never be closed as part of the desktop update.
         original = pathlib.Path.iterdir
         def listing(path):
@@ -318,11 +322,29 @@ class Update(unittest.TestCase):
         self.assertEqual(launched.call_args.args[0][0], str(self.root / 'new-ui/launch-ui'))
         env = launched.call_args.args[1]
         self.assertEqual((env['WAYLAND_DISPLAY'], env['XDG_RUNTIME_DIR'], env['KEEP']), ('gui-display', '/gui-runtime', '1'))
+    def test_recycled_pid_during_evidence_read_is_never_signalled(self):
+        proc = self.root / '12345'; proc.mkdir()
+        gui = self.root / '.workspace/automatic-zone-releases/old'
+        (proc / 'cmdline').write_bytes(('\0'.join([str(gui / 'runtime/electron'), '--ozone-platform=wayland', str(gui / 'electron'), '--observer', '/run/flowgate-api/daemon.sock.monitor', '--control', '/run/flowgate-api/daemon.sock']) + '\0').encode())
+        (proc / 'exe').symlink_to(gui / 'runtime/electron')
+        original = pathlib.Path.iterdir
+        def listing(path):
+            return iter([proc]) if str(path) == '/proc' else original(path)
+        # The start time changes between the reads that bookend the evidence.
+        starts = iter(['99', '100'])
+        with patch.object(pathlib.Path, 'iterdir', listing), patch.object(m, 'start_time', side_effect=lambda p: next(starts)), \
+             patch.object(m, 'target_desktop', return_value=(None, 'no verifiable Wayland session')) as target, patch.object(m.signal, 'pidfd_send_signal') as sent:
+            with self.assertRaises(m.GuiNotSwitched) as raised:
+                m.Host().switch_gui(self.root, self.root / 'new-ui')
+        self.assertEqual(target.call_args.args[0], [])  # no evidence from the recycled PID
+        sent.assert_not_called()
+        self.assertIn('no GUI started', str(raised.exception))
     def test_unverifiable_desktop_keeps_old_gui_and_launches_nothing(self):
         proc = self.root / '12345'; proc.mkdir()
         gui = self.root / '.workspace/automatic-zone-releases/old'
         args = [str(gui / 'runtime/electron'), '--ozone-platform=wayland', str(gui / 'electron'), '--observer', '/run/flowgate-api/daemon.sock.monitor', '--control', '/run/flowgate-api/daemon.sock']
         (proc / 'cmdline').write_bytes(('\0'.join(args) + '\0').encode())
+        (proc / 'exe').symlink_to(gui / 'runtime/electron')
         (proc / 'stat').write_text('12345 (electron) ' + ' '.join(['S'] + ['0'] * 18 + ['99']))
         original = pathlib.Path.iterdir
         def listing(path):
@@ -363,6 +385,68 @@ class Update(unittest.TestCase):
         self.assertNotIn('both', h.calls)
         self.assertNotIn('gui', h.calls)
 
+
+
+class ReleasedGui(unittest.TestCase):
+    """GUI selection from verifiable process evidence (fake /proc entries)."""
+    MON, CTL = '/run/flowgate-api/daemon.sock.monitor', '/run/flowgate-api/daemon.sock'
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix='g', dir=ROOT / '.workspace')
+        self.addCleanup(self.tmp.cleanup)
+        self.base = pathlib.Path(self.tmp.name)
+        self.n = 0
+    def proc(self, root, cmdline, exe=None):
+        releases = root / '.workspace/automatic-zone-releases'
+        gui = releases / 'old'
+        self.n += 1
+        p = self.base / ('proc' + str(self.n)); p.mkdir()
+        p.joinpath('cmdline').write_bytes(cmdline(gui))
+        p.joinpath('exe').symlink_to(exe(gui) if exe else gui / 'runtime/electron')
+        return p, releases
+    def argv(self, gui, args=None):
+        # As launch-ui runs it (NUL-separated, original order).
+        args = args if args is not None else ['--ozone-platform=wayland', str(gui / 'electron'), '--observer', self.MON, '--control', self.CTL]
+        return ('\0'.join([str(gui / 'runtime/electron'), *args]) + '\0').encode()
+    def rewritten(self, gui, switches=('--ozone-platform=wayland', '--observer', '--control'), values=None):
+        values = values if values is not None else [str(gui / 'electron'), self.MON, self.CTL]
+        return (' '.join([str(gui / 'runtime/electron'), *switches, *values]) + '\0').encode()
+    def check(self, root, cmdline, **kw):
+        p, releases = self.proc(root, cmdline, **kw)
+        return m.released_gui(p, releases)
+    def test_original_and_rewritten_command_lines_match(self):
+        for root in (self.base / 'plain', self.base / 'with space'):
+            self.assertTrue(self.check(root, self.argv), root)
+            self.assertTrue(self.check(root, self.rewritten), root)
+    def test_ambiguous_or_foreign_arguments_never_match(self):
+        root = self.base / 'with space'
+        app = lambda g: str(g / 'electron')
+        cases = {
+            'argv: socket strings as unrelated arguments': lambda g: self.argv(g, ['--ozone-platform=wayland', app(g), '--observer', '/x/mon', '--control', '/x/ctl', '--note', self.MON, self.CTL]),
+            'argv: duplicate observer': lambda g: self.argv(g, ['--ozone-platform=wayland', app(g), '--observer', self.MON, '--observer', self.MON, '--control', self.CTL]),
+            'argv: conflicting control': lambda g: self.argv(g, ['--ozone-platform=wayland', app(g), '--observer', self.MON, '--control', '/x/ctl']),
+            'argv: swapped endpoints': lambda g: self.argv(g, ['--ozone-platform=wayland', app(g), '--observer', self.CTL, '--control', self.MON]),
+            'argv: --type=zygote': lambda g: self.argv(g, ['--type=zygote', '--ozone-platform=wayland', app(g), '--observer', self.MON, '--control', self.CTL]),
+            'argv: --type as its own argument': lambda g: self.argv(g, ['--type', 'renderer', '--ozone-platform=wayland', app(g), '--observer', self.MON, '--control', self.CTL]),
+            'rewritten: --type= switch': lambda g: self.rewritten(g, switches=('--type=renderer', '--ozone-platform=wayland', '--observer', '--control')),
+            'rewritten: --type as its own token': lambda g: self.rewritten(g, switches=('--type', '--ozone-platform=wayland', '--observer', '--control')),
+            'rewritten: extra value with socket string': lambda g: self.rewritten(g, values=[app(g), '/x/mon', '/x/ctl', self.MON, self.CTL]),
+            'rewritten: duplicate switch': lambda g: self.rewritten(g, switches=('--ozone-platform=wayland', '--observer', '--observer', '--control')),
+            'rewritten: swapped values': lambda g: self.rewritten(g, values=[app(g), self.CTL, self.MON]),
+            'rewritten: longer socket path': lambda g: self.rewritten(g, values=[app(g), self.MON + '2', self.CTL]),
+            'another bundle app': lambda g: self.rewritten(g, values=[str(g.parent / 'other/electron'), self.MON, self.CTL]),
+            'empty': lambda g: b'',
+            'oversized': lambda g: self.argv(g)[:-1] + b'x' * (m.CMDLINE_LIMIT + 1),
+        }
+        for name, cmdline in cases.items():
+            self.assertFalse(self.check(root, cmdline), name)
+        for name, exe in {'outside releases': lambda g: pathlib.Path('/usr/lib/electron/electron'), 'nested layout': lambda g: g / 'nested/runtime/electron'}.items():
+            self.assertFalse(self.check(root, self.rewritten, exe=exe), name)
+    def test_other_user_and_deleted_executable(self):
+        root = self.base / 'u'
+        p, releases = self.proc(root, self.rewritten)
+        self.assertFalse(m.released_gui(p, releases, uid=os.getuid() + 1))
+        p, releases = self.proc(root, self.argv, exe=lambda g: pathlib.Path(str(g / 'runtime/electron') + ' (deleted)'))
+        self.assertTrue(m.released_gui(p, releases))
 
 
 class Desktop(unittest.TestCase):
