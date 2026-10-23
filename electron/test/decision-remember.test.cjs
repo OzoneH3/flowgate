@@ -345,6 +345,19 @@ test('a receipt arriving after a generation change, removal or stop records noth
     assert.equal(x.counts().commits, 1, change);
   }
 });
+test('an unreadable receipt reply is retried within the bound, then confirms', async (t) => {
+  const g = gates();
+  const { b, d, counts } = await setup(t, { lost: true, receiptChecks: [0, 0, 0], gate: g.gate });
+  const p = await b.previewDecision(d);
+  await b.decide({ ...d, preview_token: p.token });
+  await until(() => g.held.length === 1, 'first query');
+  g.held[0].release('drop'); // reply lost while connected (slow/failed transport)
+  await until(() => g.held.length === 2, 'second query after an unreadable reply');
+  g.held[1].release('committed');
+  await b.receiptChecksSettled();
+  assert.equal(attemptOf(b).phase, 'acknowledged');
+  assert.deepEqual(counts(), { commits: 1, previews: 1, queries: 2 });
+});
 test('a receipt query failing after stop schedules no further check', async (t) => {
   const g = gates();
   const { b, d, counts } = await setup(t, { lost: true, receiptChecks: [0, 60000], gate: g.gate });

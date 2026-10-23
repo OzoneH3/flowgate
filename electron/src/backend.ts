@@ -83,6 +83,11 @@ export function call(path: string, request: object, timeoutMs = 3500): Promise<R
 }
 // A backend refusal that decided nothing (the request stays answerable).
 class DecisionRefused extends Error {}
+// The receipt could not be read (no reply, timeout, socket failure). Unlike an
+// invalid or mismatched receipt this says nothing about the outcome.
+class ReceiptUnavailable extends Error {}
+const transportFailure = (e: unknown) =>
+  e instanceof Error && ('code' in e || e.message === 'Backend timed out' || e.message === 'Backend closed without acknowledgement');
 
 // Queue reconciliation (queue-reconcile-v1). A request acknowledged as decided,
 // or reported settled by an acknowledged operation, is remembered per
@@ -776,11 +781,16 @@ export class Backend {
       this.state.control.generation !== value.generation
     )
       throw Error('Original decision receipt unavailable; no decision resent');
-    const r = await call(this.controller, {
-      operation: 'decision-status',
-      generation: value.generation,
-      preview_token: value.preview_token,
-    });
+    let r: Reply;
+    try {
+      r = await call(this.controller, {
+        operation: 'decision-status',
+        generation: value.generation,
+        preview_token: value.preview_token,
+      });
+    } catch (e) {
+      throw transportFailure(e) ? new ReceiptUnavailable((e as Error).message) : e;
+    }
     if (r.error || r.generation !== value.generation)
       throw Error(r.error || 'Daemon generation changed');
     const receipt = r.decision_receipt as
@@ -978,9 +988,10 @@ export class Backend {
       if (!current()) return;
       try {
         if ((await this.reconcileDecision(value)).phase === 'acknowledged') return;
-      } catch {
-        // Unavailable/invalid receipt: keep the explicit unknown state.
-        if (!this.state.control.connected) continue;
+      } catch (e) {
+        // An unreadable receipt (slow daemon, lost reply, disconnect) is retried
+        // within the bound; an invalid or mismatched one ends the checks.
+        if (e instanceof ReceiptUnavailable || !this.state.control.connected) continue;
         return;
       }
     }
