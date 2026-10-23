@@ -2,6 +2,7 @@
 // Pure (no Electron/Node APIs) so main, renderer and tests share it. The backend owns
 // capture, persistence, authorization and historical truth; nothing here recomputes
 // outcomes, infers direction or substitutes current process identity.
+import { parseAttributionReasonCode } from './attribution-reason';
 export const DECISION_LOG_CAPABILITY = 'decision-log-v1';
 
 export interface LogApplication {
@@ -38,7 +39,7 @@ export interface LogRecord {
   };
   application: LogApplication | null;
   principal_uid: number | null;
-  attribution?: { status: string; reason: string };
+  attribution?: { status: string; reason: string; reason_code?: string };
   decision?: {
     action: string;
     source: string;
@@ -145,7 +146,7 @@ export function parseRecord(raw: unknown): LogRecord {
   }
   if (r.attribution) {
     const a = obj(r.attribution);
-    record.attribution = { status: str(a.status, 64), reason: str(a.reason) };
+    record.attribution = { status: str(a.status, 64), reason: str(a.reason), reason_code: parseAttributionReasonCode(a.reason_code) };
   }
   if (r.decision) {
     const d = obj(r.decision);

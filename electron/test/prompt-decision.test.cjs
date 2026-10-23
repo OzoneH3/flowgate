@@ -434,3 +434,26 @@ test('ended request: one visible reason in the countdown slot, most specific fir
   // Header build version: no state access before the first publication.
   assert.match(src, /headerVersion\(guiBuild, state\?\.control\.connected \? state\.control\.daemonBuild : undefined\)/);
 });
+
+test('attribution categories stay in Details and preserve the original evidence and controls', () => {
+  const baseline = card();
+  const controls = c => ['allow', 'block', 'rememberToggle', 'forAWhileToggle'].map(id => ({
+    id, disabled: !!c.byId(id).disabled, checked: !!c.byId(id).checked,
+  }));
+  for (const [code, label] of [[undefined, undefined], ['native_owner_observed', 'Native owner observed'], ['future_category', 'Unrecognized attribution category']]) {
+    const evidence = { ...awaitingEvent().attribution, reason_code: code };
+    const c = card({ attribution: evidence });
+    const detail = c.byId('requestMore');
+    const category = c.all.find(n => n.tagName === 'DT' && n.textContent === 'Attribution category');
+    if (code) {
+      assert(category);
+      const value = category.parent.children[category.parent.children.indexOf(category) + 1];
+      assert.equal(value.textContent, label);
+      assert.equal(value.title, code);
+      assert([...detail.walk()].includes(category));
+    } else assert.equal(category, undefined);
+    assert(detail.textContent.includes(evidence.reason));
+    assert(detail.textContent.includes(evidence.status));
+    assert.deepEqual(controls(c), controls(baseline));
+  }
+});

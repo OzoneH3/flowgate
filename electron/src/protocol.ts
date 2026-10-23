@@ -5,6 +5,7 @@ import {
   type ProtectionView,
 } from './protection-model';
 import { parseConnectionZone } from './connection-presentation';
+import { parseAttributionReasonCode } from './attribution-reason';
 import { parseRuntimeChecks } from './runtime-checks';
 import { parseDaemonBuild } from './build-info';
 import {
@@ -243,6 +244,7 @@ export interface RequestEvent {
     runtime_table?: RuntimeTable;
     status: string;
     reason: string;
+    reason_code?: string;
     visibility_complete: boolean;
     application?: Application;
     owners: Process[];
@@ -738,6 +740,7 @@ function event(v: unknown): RequestEvent {
       runtime_table: parseRuntimeTable(a.runtime_table),
       status: string(a.status),
       reason: string(a.reason),
+      reason_code: parseAttributionReasonCode(a.reason_code),
       visibility_complete: a.visibility_complete === true,
       application: a.application ? application(a.application) : undefined,
       owners: array(a.owners, 2048).map(process),

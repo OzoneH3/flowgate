@@ -1,4 +1,5 @@
 import { applicationHeading } from './application-heading';
+import { attributionReasonLabel } from './attribution-reason';
 import { connectionPresentation } from './connection-presentation';
 import { REMEMBER_DURATIONS, type RememberOption } from './decision-remember';
 import { FOR_A_WHILE_NOTE, FOR_A_WHILE_TOOLTIP, durationLabel } from './process-lease';
@@ -226,6 +227,8 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
     e.attribution.owners.map((x) => `PID ${x.pid} · start ${x.start_ticks} · UID ${x.uid}`).join('\n') || 'Unavailable',
   );
   row(app, 'Attribution', e.attribution.status);
+  if (e.attribution.reason_code)
+    row(app, 'Attribution category', attributionReasonLabel(e.attribution.reason_code)).title = e.attribution.reason_code;
   row(app, 'Reason', e.attribution.reason);
   const table=e.attribution.runtime_table;
   if(table){

@@ -160,3 +160,55 @@ authorization, firewall rules and accounting attribution are unchanged.
 Parser and model regressions are in `electron/test/activity-lifecycle.test.cjs`.
 Native checks use isolated synthetic API responses; they do not establish live
 attribution coverage across workloads.
+
+## Attribution reason categories
+
+New event and decision-log attribution objects can include an optional
+`reason_code`, alongside the existing `status` and human-readable `reason`.
+The backend assigns it at the producing branch and updates it when runtime
+verification replaces an earlier result. It describes the observed condition;
+it grants no permission and changes no application identity or socket fingerprint.
+
+| Codes | Meaning and limits |
+| --- | --- |
+| `no_socket_observed` | No matching socket was observed. This does not establish that no receiver exists, that a process exited, or that a sender closed early. |
+| `namespace_mismatch` | The flow is outside the observer's network namespace. |
+| `socket_census_unavailable`, `socket_changed` | Census/recheck unavailable, or socket evidence changed during attribution. |
+| `multiple_candidates`, `process_visibility_incomplete` | Ownership is ambiguous, or another holder cannot be excluded. This does not establish a complete set of multicast receivers. |
+| `native_owner_observed`, `runtime_owner_observed` | A native owner was observed or runtime ownership corroborated, within the existing snapshot limits. |
+| `broker_client_association` | The existing broker/client association and its stated assumptions apply. |
+| `runtime_identity_unverified`, `runtime_evidence_incomplete` | Runtime identity or supporting evidence is incomplete. |
+| `runtime_session_changed`, `runtime_ownership_changed` | Session or ownership evidence changed. |
+| `runtime_broker_unavailable`, `runtime_census_unavailable`, `runtime_capability_unavailable`, `runtime_observer_unavailable` | A required runtime component, census or capability is unavailable. The original reason retains the specific evidence; the category does not diagnose an unobserved cause. |
+| `runtime_owner_ambiguous`, `runtime_holder_conflict` | Runtime ownership is ambiguous, or Linux holders disagree with runtime evidence. |
+| `localhost_exempt` | The existing localhost exemption applied; this is not application identification. |
+
+Electron displays a category in request Details, recorded-request Info and decision
+log details when a valid code is present. Its tooltip (or recorded Info text)
+retains the exact code. Original status and reason remain available. Older records
+have no category; they are not rewritten or classified from their prose. Unknown
+future codes are retained and displayed as unrecognized. Codes are bounded to 64
+ASCII characters matching `[a-z][a-z0-9_-]{0,63}`; malformed optional values do not
+discard the surrounding event or its evidence.
+
+Pending revalidation uses `no_socket_observed` for its existing diagnostic when
+the original socket is missing. The previous exact-text fallback applies only when the code
+is absent; an unknown nonempty code cannot trigger that fallback. This does not
+turn a retained request's original attribution into current socket evidence.
+Activity ownership categories, unknown initiation direction, accounting gaps,
+queue capacity and verdict outcomes remain separate. No new aggregate success
+rate or workload coverage claim is introduced by these categories.
+
+Some runtime refusals retain an earlier attribution status while withholding the
+application identity. Neither that status nor the category substitutes for the
+verified application and scope required for permission.
+
+Validation covers resolver-generated native IPv4/IPv6 observations, legacy
+revalidation, persisted records and principal projection, and the existing
+synthetic two-application/two-prefix Wine isolation matrix. An isolated native
+Electron journey displayed the daemon's `native_owner_observed` category in
+request and log details. Known/future/absent/malformed UI cases were additionally
+injected through a read-path proxy, preserving the original evidence and controls.
+That journey did not produce a real `no_socket_observed` event or verify the main
+Info/observer-only UI paths; it does not establish improved attribution coverage
+or receiver delivery.

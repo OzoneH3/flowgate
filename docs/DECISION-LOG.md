@@ -68,10 +68,17 @@ submission, not proof of delivery**; other firewall chains may still drop.
 Captured fields: record ID, time, daemon generation, mode, direction (from the
 netfilter hook, never inferred from ports), protocol, family, endpoints, interface,
 application key/name/kind/executable/revision, principal UID, attribution status/
-reason, action/source/scope/reason, matching rule IDs, the **decision-time rule
+reason and optional diagnostic `reason_code`, action/source/scope/reason, matching rule IDs, the **decision-time rule
 snapshot** (ID, exact version as a decimal string, action, priority, created,
 expiry, filter), deciding UID. Not collected: payloads, environments, command lines,
 PIDs. Unknown values stay absent/`null`.
+
+Attribution categories are recorded at decision time and survive storage/query
+without being inferred from text or current processes. Existing records keep
+their absent code; the UI retains unfamiliar future codes as unrecognized and
+preserves the original reason. See [attribution reason categories](ATTRIBUTION.md#attribution-reason-categories)
+for the vocabulary and evidence limits. They do not change record visibility,
+permission authority, the verdict, or the separate delivery status.
 
 ## Storage, durability, retention
 

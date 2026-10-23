@@ -87,6 +87,7 @@ import { runtimeBadge, runtimeDegradation } from './runtime-checks';
 import { headerVersion, type GuiBuild } from './build-info';
 import type { Attempt, ClientState, ViewEvent, Scope } from './protocol';
 import { recordDecisionResult, showsLocalResult, type CardResult } from './card-result';
+import { attributionReasonLabel } from './attribution-reason';
 import {
   hasObservedConnection,
   isKernelTimeWait,
@@ -1864,6 +1865,8 @@ function renderInfo() {
     const e=r.requestEvent;
     field(info, 'Last request', `${e.state} · ${e.flow.direction} ${e.flow.protocol} · ${e.flow.remote}`);
     field(info, 'Request reason', e.reason || 'Awaiting decision');
+    if (e.attribution.reason_code)
+      field(info, 'Recorded attribution category', `${attributionReasonLabel(e.attribution.reason_code)} (${e.attribution.reason_code})`);
     field(info, 'Recorded executable', e.attribution.application?.executable || 'Unknown');
     field(info, 'Recorded caller', e.attribution.owners.map(p => `${p.pid} · ${p.provenance?.invocation?.path || p.provenance?.parent?.invocation?.path || p.provenance?.parent?.executable || 'caller unavailable'}`).join('\n'));
     field(info, 'Observation', 'Request evidence retained by the daemon; absence of a current socket does not establish that the process exited.');

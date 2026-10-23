@@ -14,6 +14,7 @@ import {
 import type { DecisionLogState } from './decision-log-client';
 import type { Application, ClientState } from './protocol';
 import { canManageRules } from './protocol';
+import { attributionReasonLabel } from './attribution-reason';
 // Decision Log tab: presents backend-recorded decision-time evidence only.
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, text = '', cls = '') => {
@@ -362,9 +363,11 @@ function select(id: string, outcome = false) {
   void showDetail(id, outcome);
 }
 
-const field = (dl: HTMLElement, label: string, value: string | number | null | undefined) => {
+const field = (dl: HTMLElement, label: string, value: string | number | null | undefined, title?: string) => {
   if (value === undefined || value === null || value === '') return;
-  dl.append(el('dt', label), el('dd', String(value)));
+  const detail = el('dd', String(value));
+  if (title) detail.title = title;
+  dl.append(el('dt', label), detail);
 };
 async function showDetail(id: string, outcome = false) {
   detailFor = id;
@@ -463,6 +466,8 @@ async function showDetail(id: string, outcome = false) {
     field(a, 'Name', r.application?.name || 'Unidentified');
     field(a, 'Executable', r.application?.executable);
     field(a, 'Revision', r.application?.revision);
+    if (r.attribution?.reason_code)
+      field(a, 'Attribution category', attributionReasonLabel(r.attribution.reason_code), r.attribution.reason_code);
     field(
       a,
       'Attribution',
