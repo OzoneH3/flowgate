@@ -39,3 +39,25 @@ test('native literal wrappers and Flatpak deployments provide bounded icon asset
  for(const app of [native,flat]){const result=results[iconKey(app)];assert.ok(result.icon);assert.equal(icons.asset(result.icon.split('/').pop()).data.toString(),svg);}
  assert.equal(results[iconKey(native)].name,'Native Client');assert.equal(results[iconKey(flat)].name,'Flatpak Client');assert.equal(results.unknown.icon,null);
 });
+
+test('saved host deployment paths retain Flatpak metadata; richer backing evidence invalidates a miss',async(t)=>{
+ const home=fs.mkdtempSync(path.resolve(__dirname,'../../.workspace/flatpak-host-icons-'));t.after(()=>fs.rmSync(home,{recursive:true,force:true}));
+ const id='org.example.Launcher',deploy=path.join(home,'app',id,'x86_64/stable','d'.repeat(64));
+ const executable=path.join(deploy,'files/bin/runner'),share=path.join(deploy,'files/share');
+ fs.mkdirSync(path.dirname(executable),{recursive:true});fs.writeFileSync(executable,'native');
+ fs.writeFileSync(path.join(deploy,'metadata'),`[Application]\nname=${id}\n`);
+ fs.mkdirSync(path.join(share,'applications'),{recursive:true});
+ fs.mkdirSync(path.join(share,'icons/hicolor/scalable/apps'),{recursive:true});
+ fs.writeFileSync(path.join(share,'applications',id+'.desktop'),`[Desktop Entry]\nType=Application\nName=Example Launcher\nIcon=${id}\n`);
+ fs.writeFileSync(path.join(share,'icons/hicolor/scalable/apps',id+'.svg'),'<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><path d="M0 0h16v16H0z"/></svg>');
+ const saved={key:'saved',revision:'r',executable};
+ const icons=new ApplicationIcons(home,[home],[],[],[]);
+ const state={observation:{activity:{rows:[],processes:{}}},control:{events:[],rules:[{executable,filter:{application:saved.key,revision:saved.revision,uid:1000}}]}};
+ icons.observe(state);
+ const result=(await icons.metadata([iconKey(saved)]))[iconKey(saved)];assert.equal(result.name,'Example Launcher');assert.ok(result.icon);
+ const live={key:'live',revision:'r',executable:'/app/bin/runner',kind:'native'};
+ state.observation.activity.processes.p={application:live,uid:1000};icons.observe(state);
+ assert.equal((await icons.metadata([iconKey(live)]))[iconKey(live)].icon,null);
+ live.host_executable=executable;icons.observe(state);
+ const found=(await icons.metadata([iconKey(live)]))[iconKey(live)];assert.equal(found.name,'Example Launcher');assert.ok(found.icon);
+});

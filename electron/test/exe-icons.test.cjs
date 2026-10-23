@@ -127,3 +127,35 @@ test('fallback artwork distinguishes installed services, CLI tools and desktop a
  assert.equal((await icons.metadata(['unauthorized']))['unauthorized'].fallback,undefined);
  assert.equal(JSON.stringify(apps),before,'artwork metadata cannot alter permission identities');
 });
+
+test('24-bit icon rows use DWORD padding and the transparency mask',()=>{
+ const {inflateSync}=require('node:zlib');
+ const width=3,height=2,stride=12,maskStride=4;
+ const ico=Buffer.alloc(22+40+(stride+maskStride)*height);
+ ico.writeUInt16LE(1,2);ico.writeUInt16LE(1,4);ico[6]=width;ico[7]=height;
+ ico.writeUInt32LE(ico.length-22,14);ico.writeUInt32LE(22,18);
+ ico.writeUInt32LE(40,22);ico.writeInt32LE(width,26);ico.writeInt32LE(height*2,30);ico.writeUInt16LE(1,34);ico.writeUInt16LE(24,36);
+ // Bottom row blue; top row red. Padding is not pixel data or alpha.
+ for(let x=0;x<3;x++){ico[62+x*3]=255;ico[62+stride+x*3+2]=255;}
+ ico.fill(123,71,74);ico[62+stride*height+maskStride]=0x40;
+ const png=icoToPng(ico);assert.ok(png);
+ let pos=8,data;
+ while(pos<png.length){const size=png.readUInt32BE(pos);if(png.toString('ascii',pos+4,pos+8)==='IDAT')data=inflateSync(png.subarray(pos+8,pos+8+size));pos+=size+12;}
+ assert.deepEqual([...data.subarray(1,13)],[255,0,0,255,255,0,0,0,255,0,0,255]);
+ assert.deepEqual([...data.subarray(14,18)],[0,0,255,255]);
+ assert.equal(icoToPng(ico.subarray(0,ico.length-1)),undefined);
+ ico.writeUInt16LE(16,36);assert.equal(icoToPng(ico),undefined);
+});
+
+test('read-only Windows images need no Unix execute bit; missing files retry',async(t)=>{
+ const fs=require('node:fs'),path=require('node:path');const {ApplicationIcons,iconKey}=require('../dist/test/icons.cjs');
+ const home=fs.mkdtempSync(path.resolve(__dirname,'../../.workspace/readonly-pe-'));t.after(()=>fs.rmSync(home,{recursive:true,force:true}));
+ let now=1000;const icons=new ApplicationIcons(home,[home],[],[],[],()=>now);
+ const apps=['Alpha','Beta'].map((name,i)=>({key:name,revision:'r'+i,name,executable:path.join(home,name+'.exe')}));
+ icons.observe({observation:{activity:{processes:{},rows:[]}},control:{events:[],rules:apps.map(a=>({executable:a.executable,filter:{application:a.key,revision:a.revision,uid:1000}}))}});
+ assert.equal((await icons.metadata(apps.map(iconKey)))[iconKey(apps[0])].icon,null);
+ for(const a of apps)fs.writeFileSync(a.executable,peFixture(),{mode:0o644});
+ now+=30001;
+ for(const a of apps)assert.ok((await icons.metadata([iconKey(a)]))[iconKey(a)].icon);
+ assert.equal((await icons.request(['not-allowed']))['not-allowed'],null);
+});

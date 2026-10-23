@@ -1,5 +1,5 @@
 import { deflateSync } from 'node:zlib';
-// Local Windows shortcut artwork only. Decode bounded 32-bit, uncompressed ICO
+// Local Windows shortcut artwork only. Decode bounded 24/32-bit, uncompressed ICO
 // frames (or embedded PNG); never load executable resources or external data.
 const MAX_BYTES = 1024 * 1024;
 function chunk(name: string, data: Buffer) {
@@ -47,15 +47,17 @@ export function icoToPng(data: Buffer): Buffer | undefined {
       bytes.readInt32LE(4) !== width ||
       bytes.readInt32LE(8) !== height * 2 ||
       bytes.readUInt16LE(12) !== 1 ||
-      bytes.readUInt16LE(14) !== 32 ||
+      ![24, 32].includes(bytes.readUInt16LE(14)) ||
       bytes.readUInt32LE(16) !== 0
     )
       continue;
-    const maskStride = Math.ceil(width / 32) * 4,
-      pixelsEnd = 40 + width * height * 4;
+    const bits = bytes.readUInt16LE(14), pixelBytes = bits / 8,
+      rowStride = Math.ceil(width * bits / 32) * 4,
+      maskStride = Math.ceil(width / 32) * 4,
+      pixelsEnd = 40 + rowStride * height;
     if (pixelsEnd + maskStride * height > bytes.length) continue;
     let hasAlpha = false;
-    for (let at = 43; at < pixelsEnd; at += 4)
+    for (let at = 43; bits === 32 && at < pixelsEnd; at += 4)
       if (bytes[at]) {
         hasAlpha = true;
         break;
@@ -64,7 +66,7 @@ export function icoToPng(data: Buffer): Buffer | undefined {
     for (let y = 0; y < height; y++)
       for (let x = 0; x < width; x++) {
         const row = height - 1 - y,
-          src = 40 + (row * width + x) * 4,
+          src = 40 + row * rowStride + x * pixelBytes,
           dst = y * (width * 4 + 1) + 1 + x * 4;
         scan[dst] = bytes[src + 2];
         scan[dst + 1] = bytes[src + 1];

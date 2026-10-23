@@ -62,6 +62,7 @@ export class ApplicationIcons {
   private allowed = new Map<string, Application>();
   private owners = new Map<string, number>();
   private cache = new Map<string, Promise<string | null>>();
+  private retryAfter = new Map<string, number>();
   private images = new Map<string, { data: Buffer; type: string }>();
   private ready: Promise<void>;
   private peNames = new Map<string, Promise<string | undefined>>();
@@ -86,6 +87,7 @@ export class ApplicationIcons {
     private searchPath = (process.env.PATH || '/usr/bin:/bin').split(':'),
     private flatpakRoots = [path.join(home, '.local/share/flatpak/app'), '/var/lib/flatpak/app'],
     private serviceDirs = ['/etc/systemd/system', '/usr/local/lib/systemd/system', '/usr/lib/systemd/system'],
+    private now = Date.now,
   ) {
     this.iconRoots = [
       path.join(home, '.icons'),
@@ -94,6 +96,7 @@ export class ApplicationIcons {
     this.ready = this.index();
   }
   observe(state: ClientState) {
+    const previous = new Map(this.allowed), previousOwners = new Map(this.owners);
     this.allowed.clear();
     this.owners.clear();
     const add = (a?: Application, uid?: number) => {
@@ -123,6 +126,16 @@ export class ApplicationIcons {
     for (const r of state.control.rules || [])
       if (r.filter.application && r.filter.revision && r.executable)
         add({ key: r.filter.application, revision: r.filter.revision, name: r.executable.split('/').pop() || '', executable: r.executable }, r.filter.uid);
+    const signature = (a?: Application) => JSON.stringify([a?.kind, a?.host_executable, a?.display_executable, a?.hosted]);
+    for (const [key, app] of this.allowed)
+      if (signature(app) !== signature(previous.get(key)) || this.owners.get(key) !== previousOwners.get(key))
+        this.invalidate(key);
+  }
+  private invalidate(key: string) {
+    this.cache.delete(key);
+    this.flatpakNames.delete(key);
+    this.peNames.delete(key);
+    this.retryAfter.delete(key);
   }
   private async executable(token: string) {
     for (const p of path.isAbsolute(token)
@@ -130,7 +143,8 @@ export class ApplicationIcons {
       : this.searchPath.filter(path.isAbsolute).map((d) => path.join(d, token))) {
       try {
         const s = await fs.stat(p);
-        if (s.isFile() && s.mode & 0o111) return await fs.realpath(p);
+        // Windows images are data to Wine and need no Unix execute bit.
+        if (s.isFile() && ((s.mode & 0o111) || (path.isAbsolute(token) && /\.exe$/i.test(token)))) return await fs.realpath(p);
       } catch {}
     }
     return '';
@@ -385,7 +399,7 @@ export class ApplicationIcons {
     if (!this.flatpakNames.has(key)) {
       if (this.flatpakNames.size >= 2048) this.flatpakNames.delete(this.flatpakNames.keys().next().value!);
       this.flatpakNames.set(key, (async () => {
-        const live = app.host_executable && await flatpakDesktopEntry(app.host_executable);
+        const live = await flatpakDesktopEntry(app.host_executable || app.executable);
         if (live) return live;
         const uid = this.owners.get(key);
         if (uid === undefined) return;
@@ -410,8 +424,9 @@ export class ApplicationIcons {
         result[key] = null;
         continue;
       }
+      if ((this.retryAfter.get(key) ?? Infinity) <= this.now()) this.invalidate(key);
       if (!this.cache.has(key)) {
-        if (this.cache.size >= 2048) this.cache.delete(this.cache.keys().next().value!);
+        if (this.cache.size >= 2048) this.invalidate(this.cache.keys().next().value!);
         this.cache.set(
           key,
           a.kind === 'electron'
@@ -423,6 +438,7 @@ export class ApplicationIcons {
         );
       }
       result[key] = await this.cache.get(key)!;
+      if (!result[key] && !this.retryAfter.has(key)) this.retryAfter.set(key, this.now() + 30_000);
     }
     return result;
   }

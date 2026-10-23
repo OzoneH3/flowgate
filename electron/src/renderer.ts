@@ -442,6 +442,17 @@ const appNames = new Map<string, string>();
 const iconFallbacks = new Map<string, 'service' | 'terminal'>();
 const iconCache = new Map<string, string | null>();
 const iconPending = new Set<string>();
+const iconRetryAfter = new Map<string, number>();
+function rememberIcon(key: string, url: string | null) {
+  if (iconCache.size >= 2048 && !iconCache.has(key)) {
+    const oldest = iconCache.keys().next().value!;
+    iconCache.delete(oldest);
+    iconRetryAfter.delete(oldest);
+  }
+  iconCache.set(key, url);
+  if (url) iconRetryAfter.delete(key);
+  else iconRetryAfter.set(key, Date.now() + 30_000);
+}
 let iconScheduled = false;
 function installedIcon(app: Application | undefined, kind: Row['kind']) {
   const span = element('span', '', 'application-icon');
@@ -455,11 +466,15 @@ function installedIcon(app: Application | undefined, kind: Row['kind']) {
     img.alt = '';
     img.width = img.height = 16;
     img.onerror = () => {
-      if (node.dataset.iconKey) iconCache.set(node.dataset.iconKey, null);
+      if (node.dataset.iconKey) rememberIcon(node.dataset.iconKey, null);
       node.replaceChildren(rowIcon(iconFallbacks.get(node.dataset.iconKey || '') || 'application'));
     };
     node.replaceChildren(img);
   };
+  if ((iconRetryAfter.get(key) ?? Infinity) <= Date.now()) {
+    iconCache.delete(key);
+    iconRetryAfter.delete(key);
+  }
   const url = iconCache.get(key);
   if (url) paint(span, url);
   else if (!iconCache.has(key)) {
@@ -488,14 +503,13 @@ function installedIcon(app: Application | undefined, kind: Row['kind']) {
               for (const label of document.querySelectorAll<HTMLElement>('[data-display-key]'))
                 if (label.dataset.displayKey === key) label.textContent = metadata.name;
             }
-            if (iconCache.size >= 2048) iconCache.delete(iconCache.keys().next().value!);
-            iconCache.set(key, url);
+            rememberIcon(key, url);
             if (url)
               for (const node of document.querySelectorAll<HTMLElement>('[data-icon-key]'))
                 if (node.dataset.iconKey === key) paint(node, url);
           }
         } catch {
-          for (const key of keys) iconCache.set(key, null);
+          for (const key of keys) rememberIcon(key, null);
         } finally {
           iconScheduled = false;
         }
