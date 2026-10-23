@@ -88,7 +88,9 @@ func (m *WineObservers) AnnotateActivity(s *ActivitySnapshot) {
 		m.mu.Unlock()
 		var result map[int]*RuntimeApplication
 		if record.table != nil {
-			result = record.table.activityBatch(s, indices, &record.broker)
+			result = record.table.activityBatch(s, indices, &record.broker, func() bool {
+				return m.admissionDemand.Load() == 0
+			})
 		}
 		retired := m.unpin(record)
 		<-m.census
@@ -104,17 +106,26 @@ func (m *WineObservers) AnnotateActivity(s *ActivitySnapshot) {
 // amortizes the expensive work across every socket in this broker (<=2048
 // activity rows). Socket cookies and complete owner identities must also match
 // the displayed snapshot and the final kernel socket census.
-func (w *WineTable) activityBatch(s *ActivitySnapshot, indices []int, broker *Process) map[int]*RuntimeApplication {
-	if !w.mu.TryLock() {
+func (w *WineTable) activityBatch(s *ActivitySnapshot, indices []int, broker *Process, proceed func() bool) map[int]*RuntimeApplication {
+	if !proceed() || !w.mu.TryLock() {
 		return nil
 	}
-	defer w.mu.Unlock()
-	if w.session == nil || !w.session.current() || !w.sameServer(broker) {
+	locked := true
+	defer func() {
+		if locked {
+			w.mu.Unlock()
+		}
+	}()
+	generation := w.generation
+	if w.dead || w.lost.Load() || w.session == nil || !w.session.current() || !w.sameServer(broker) {
 		return nil
 	}
 	first := map[activityTableKey]tableSnapshot{}
 	second := map[activityTableKey]tableSnapshot{}
 	for _, i := range indices {
+		if !proceed() {
+			return nil
+		}
 		key := activityTable(s.Rows[i].Socket)
 		if _, ok := first[key]; !ok {
 			v, e := w.snapshotFamily(key.protocol, key.family)
@@ -125,16 +136,26 @@ func (w *WineTable) activityBatch(s *ActivitySnapshot, indices []int, broker *Pr
 		}
 	}
 	c := ActivityCollector{}
-	fresh := c.Collect()
-	if !fresh.Complete {
+	fresh, acquired := w.activityCollect(c.Collect, proceed)
+	locked = acquired
+	if !acquired {
+		return nil
+	}
+	if !fresh.Complete || w.dead || w.lost.Load() || w.generation != generation || w.session == nil || !w.session.current() || !w.sameServer(broker) {
 		return nil
 	}
 	for key := range first {
+		if !proceed() {
+			return nil
+		}
 		v, e := w.snapshotFamily(key.protocol, key.family)
 		if e != nil {
 			return nil
 		}
 		second[key] = v
+	}
+	if !proceed() {
+		return nil
 	}
 	sockets, e := SocketsLimited(2048)
 	if e != nil || !w.session.current() || !w.sameServer(broker) {
@@ -143,6 +164,9 @@ func (w *WineTable) activityBatch(s *ActivitySnapshot, indices []int, broker *Pr
 	// Image mapping evidence is shared only within this single fresh census.
 	images := map[string]bool{}
 	visible := func(b *Process, path, revision string) bool {
+		if !proceed() {
+			return false
+		}
 		key := path + "|" + revision
 		if v, ok := images[key]; ok {
 			return v
@@ -151,7 +175,11 @@ func (w *WineTable) activityBatch(s *ActivitySnapshot, indices []int, broker *Pr
 		images[key] = v
 		return v
 	}
-	return w.annotateCensus(s, &fresh, sockets, indices, broker, first, second, visible)
+	result := w.annotateCensus(s, &fresh, sockets, indices, broker, first, second, visible)
+	if !proceed() {
+		return nil
+	}
+	return result
 }
 
 func activityAttribution(s *ActivitySnapshot, r ActivityRow) Attribution {
@@ -233,4 +261,22 @@ func (m *WineObservers) tryActivityCensus() bool {
 		return false
 	}
 	return true
+}
+
+// activityCollect is entered with mu held. The expensive kernel process/FD
+// scan needs no helper state. Release the lock so admission can use the helper;
+// never queue behind admission to resume presentation. The caller must check
+// its pinned generation and session again when acquired is true.
+func (w *WineTable) activityCollect(collect func() ActivitySnapshot, proceed func() bool) (fresh ActivitySnapshot, acquired bool) {
+	generation := w.generation
+	w.mu.Unlock()
+	fresh = collect()
+	if !proceed() || !w.mu.TryLock() {
+		return fresh, false
+	}
+	if !proceed() || w.dead || w.lost.Load() || w.generation != generation {
+		w.mu.Unlock()
+		return fresh, false
+	}
+	return fresh, true
 }

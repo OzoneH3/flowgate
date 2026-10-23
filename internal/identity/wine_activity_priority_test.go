@@ -19,3 +19,47 @@ func TestActivityYieldsToAdmissionDemand(t *testing.T) {
 		t.Fatal("presentation did not yield to occupied slots")
 	}
 }
+
+func TestActivityScanReleasesBrokerForAdmission(t *testing.T) {
+	for _, mode := range []string{"resume", "admission", "budget", "generation", "stopped", "lost"} {
+		t.Run(mode, func(t *testing.T) {
+			w := &WineTable{}
+			w.mu.Lock()
+			permitted := true
+			fresh, acquired := w.activityCollect(func() ActivitySnapshot {
+				if !w.mu.TryLock() {
+					t.Fatal("process scan still blocks admission on broker lock")
+				}
+				if mode == "generation" {
+					w.generation = "replacement"
+				}
+				if mode == "stopped" {
+					w.dead = true
+				}
+				if mode == "lost" {
+					w.lost.Store(true)
+				}
+				if mode != "admission" {
+					w.mu.Unlock()
+				}
+				if mode == "budget" {
+					permitted = false
+				}
+				return ActivitySnapshot{Complete: true, Sequence: 42}
+			}, func() bool { return permitted })
+			if mode == "admission" {
+				w.mu.Unlock()
+			}
+			if acquired {
+				w.mu.Unlock()
+			}
+			if acquired != (mode == "resume") || !fresh.Complete || fresh.Sequence != 42 {
+				t.Fatalf("mode=%s acquired=%v snapshot=%+v", mode, acquired, fresh)
+			}
+			if !w.mu.TryLock() {
+				t.Fatal("broker mutex leaked")
+			}
+			w.mu.Unlock()
+		})
+	}
+}
