@@ -461,6 +461,7 @@ export class Backend {
       this.state.control = {
         snapshotStarted,
         runtimeChecks: r.runtime_checks,
+        queueHealth: r.queue_health,
         daemonBuild: r.build,
         trafficMonitor: r.traffic_monitor,
         evaluation: r.evaluation,

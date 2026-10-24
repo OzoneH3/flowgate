@@ -4,6 +4,7 @@ import (
 	"context"
 	"flowgate/internal/daemon"
 	"flowgate/internal/identity"
+	"flowgate/internal/queuehealth"
 	"fmt"
 	"sync"
 	"time"
@@ -490,4 +491,11 @@ func (w *packetWorkers) stop() {
 	}
 	w.mu.Unlock()
 	w.wg.Wait()
+}
+
+// Diagnostic snapshot only; count/bytes include active jobs and lane transfers.
+func (w *packetWorkers) healthGauges() queuehealth.Gauges {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return queuehealth.Gauges{AttributionPackets: w.count, AttributionBytes: w.bytes, CensusPackets: w.censusCount, CensusBytes: w.censusBytes, ActiveWorkers: len(w.activeBatch)}
 }

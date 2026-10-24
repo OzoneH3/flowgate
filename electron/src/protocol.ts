@@ -8,6 +8,7 @@ import {
 import { parseConnectionZone } from './connection-presentation';
 import { parseAttributionReasonCode } from './attribution-reason';
 import { parseRuntimeChecks } from './runtime-checks';
+import { parseQueueHealth } from './queue-health';
 import { parseDaemonBuild } from './build-info';
 import {
   parseNetworkZones,
@@ -336,6 +337,7 @@ export interface Reply {
   };
   protection?: ProtectionStatus;
   evaluation?: DaemonEvaluationStatus;
+  queue_health?: import('./queue-health').QueueHealth;
   runtime_checks?: import('./runtime-checks').RuntimeCheck[];
   build?: import('./build-info').DaemonBuild;
   decision_log?: unknown;
@@ -406,6 +408,7 @@ export interface ClientState {
     evaluation?: DaemonEvaluationStatus;
   };
   control: {
+    queueHealth?: import('./queue-health').QueueHealth;
     runtimeChecks?: import('./runtime-checks').RuntimeCheck[];
     daemonBuild?: import('./build-info').DaemonBuild;
     trafficMonitor?: TrafficMonitor;
@@ -887,6 +890,7 @@ export function parseReply(raw: unknown): Reply {
     evaluation: parseEvaluation(r.evaluation),
     protection: parseProtection(r.protection),
     runtime_checks: parseRuntimeChecks(r.runtime_checks),
+    queue_health: parseQueueHealth(r.queue_health),
     build: parseDaemonBuild(r.build),
   };
   if (r.permissions !== undefined || result.capabilities.includes('explicit-administrator-v1')) {

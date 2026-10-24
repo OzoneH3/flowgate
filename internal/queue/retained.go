@@ -2,6 +2,7 @@ package queue
 
 import (
 	"flowgate/internal/daemon"
+	"flowgate/internal/queuehealth"
 	"sync"
 	"time"
 )
@@ -21,10 +22,11 @@ type held struct {
 	deadline    time.Time
 }
 type Retainer struct {
-	flushMu sync.Mutex // serialize flushes, never block Add on attribution
-	mu      sync.Mutex
-	packets []held
-	bytes   int
+	diagnostic func(queuehealth.Cause)
+	flushMu    sync.Mutex // serialize flushes, never block Add on attribution
+	mu         sync.Mutex
+	packets    []held
+	bytes      int
 }
 
 func (r *Retainer) Add(id uint32, size int, v daemon.Event) bool {
@@ -69,6 +71,13 @@ func (r *Retainer) Flush(now time.Time, state func(string, string) string, verdi
 			remaining = append(remaining, p)
 			continue
 		}
+		if r.diagnostic != nil {
+			if stop {
+				r.diagnostic(queuehealth.RetainedShutdown)
+			} else if !time.Now().Before(p.deadline) {
+				r.diagnostic(queuehealth.RetainedDeadline)
+			}
+		}
 		if err := verdict(p.id, s == "allow" && time.Now().Before(p.deadline)); err != nil && first == nil {
 			first = err
 		}
@@ -79,4 +88,10 @@ func (r *Retainer) Flush(now time.Time, state func(string, string) string, verdi
 	r.bytes -= releasedBytes
 	r.mu.Unlock()
 	return first
+}
+
+func (r *Retainer) gauges() (int, int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.packets), r.bytes
 }

@@ -9,6 +9,7 @@ import (
 	"flowgate/internal/essential"
 	"flowgate/internal/identity"
 	"flowgate/internal/policy"
+	"flowgate/internal/queuehealth"
 	"flowgate/internal/readiness"
 	"flowgate/internal/udpaccount"
 	"fmt"
@@ -60,6 +61,7 @@ type EnforcementStatus struct {
 	StopsAt time.Time `json:"stops_at"`
 }
 type Response struct {
+	QueueHealth      *queuehealth.Snapshot      `json:"queue_health,omitempty"`
 	EndpointPreview  *EndpointPreview           `json:"endpoint_preview,omitempty"`
 	ObservedUsage    *accounting.Snapshot       `json:"observed_usage,omitempty"`
 	RuntimeChecks    []readiness.Check          `json:"runtime_checks,omitempty"`
@@ -257,6 +259,9 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						}
 					}
 					admin := e.administrator(cred.Uid)
+					health := e.QueueHealth.Snapshot(admin)
+					r.QueueHealth = &health
+					r.Capabilities = append(r.Capabilities, queuehealth.Capability)
 					permissions := e.permissions(cred.Uid, r.ReadOnly)
 					if r.Evaluation != nil {
 						permissions.CanDecide = !readonly && (r.Evaluation.State == "active" || (r.Protection != nil && r.Protection.State == "active"))

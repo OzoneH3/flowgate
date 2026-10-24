@@ -8,6 +8,7 @@ import (
 	"flowgate/internal/essential"
 	"flowgate/internal/identity"
 	"flowgate/internal/policy"
+	"flowgate/internal/queuehealth"
 	"flowgate/internal/readiness"
 	"flowgate/internal/udpaccount"
 	"fmt"
@@ -70,6 +71,7 @@ type TrafficManager interface {
 	Stop(...string) (udpaccount.Status, error)
 }
 type Engine struct {
+	QueueHealth queuehealth.Registry
 	// RuntimeChecks returns a cached read-only capability snapshot, independently of enforcement.
 	RuntimeChecks     func() []readiness.Check
 	Essential         *essential.Manager

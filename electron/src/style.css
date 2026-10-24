@@ -1767,3 +1767,6 @@ body.hide-sidebar #activityView > aside { display:none; }
 #endpointEditor .endpoint-ack { display: block; margin: 12px 0; }
 #endpointEditor .endpoint-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
 #endpointEditor input:disabled, #endpointEditor select:disabled { opacity: .55; cursor: not-allowed; }
+
+.queue-health { flex: 0 0 auto; padding: 4px 10px; color: #ffba67; background: #49341f; border-bottom: 1px solid #735333; font-size: 12px; }
+.queue-health[hidden] { display: none; }

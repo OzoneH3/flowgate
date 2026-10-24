@@ -85,6 +85,7 @@ import { TrafficGraph } from './graph';
 import { setupWorkflows, updateWorkflows, openRule, resumeRuleEditor } from './workflows';
 import { setupDecisionLog, showDecisionLog, updateDecisionLog } from './decision-log-view';
 import { runtimeBadge, runtimeDegradation } from './runtime-checks';
+import { queueHealthWarning } from './queue-health';
 import { headerVersion, type GuiBuild } from './build-info';
 import type { Attempt, ClientState, ViewEvent, Scope } from './protocol';
 import { recordDecisionResult, showsLocalResult, type CardResult } from './card-result';
@@ -1226,6 +1227,14 @@ function updateFirewallStatus() {
     health.textContent = badge?.text || '';
     health.title = badge?.title || '';
   }
+  const queue = document.getElementById('queueHealth');
+  if (queue) {
+    const warning = queueHealthWarning(!!state?.control.connected, state?.control.queueHealth);
+    queue.hidden = !warning;
+    queue.textContent = warning?.text || '';
+    queue.title = warning?.title || '';
+  }
+
 }
 function setupMainMenus(windowMenu: HTMLElement) {
   const toolbar = document.querySelector('.toolbar')!;
@@ -1297,6 +1306,12 @@ function setupMainMenus(windowMenu: HTMLElement) {
   health.hidden = true;
   health.setAttribute('role', 'status');
   status.after(health);
+  const queue = element('span', '', 'queue-health');
+  queue.id = 'queueHealth';
+  queue.hidden = true;
+  queue.setAttribute('role', 'status');
+  queue.tabIndex = 0;
+  toolbar.after(queue);
   new MutationObserver(updateFirewallStatus).observe(controlTitle, {
     childList: true,
     characterData: true,

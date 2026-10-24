@@ -85,6 +85,7 @@ await build({
     'src/prompt-summary.ts',
     'src/permission-results.ts',
     'src/runtime-checks.ts',
+    'src/queue-health.ts',
     'src/card-result.ts',
     'src/build-info.ts',
     'src/gui-build.ts',

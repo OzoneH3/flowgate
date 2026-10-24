@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flowgate/internal/daemon"
 	"flowgate/internal/identity"
+	"flowgate/internal/queuehealth"
 	"fmt"
 	nfqueue "github.com/florianl/go-nfqueue/v2"
 	"github.com/mdlayher/netlink"
@@ -92,11 +93,13 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 		return err
 	}
 	defer nf.Close()
-	retained := &Retainer{}
-	errors := make(chan error, 1)
+	health := e.QueueHealth.Start(number, direction)
+	defer health.End()
+	retained := &Retainer{diagnostic: health.Add}
+	queueErrors := make(chan error, 1)
 	fail := func(err error) {
 		select {
-		case errors <- err:
+		case queueErrors <- err:
 		default:
 		}
 		cancel()
@@ -105,12 +108,14 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 	var selfFailureReason atomic.Pointer[string]
 	selfFailure := func(err error) {
 		selfFailures.Add(1)
+		health.Add(queuehealth.SelfTrackingFailure)
 		reason := err.Error()
 		selfFailureReason.Store(&reason)
 	}
 	var selfUpdates sync.Map // packet ID -> exact kernel connection update; removed on every verdict
 	submitVerdict := func(id uint32, allow bool) (bool, error) {
 		if allow && ctx.Err() != nil {
+			health.Add(queuehealth.Shutdown)
 			allow = false
 		}
 		var err error
@@ -120,7 +125,8 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 				allow = false
 			}
 		}
-		if ctx.Err() != nil {
+		if allow && ctx.Err() != nil {
+			health.Add(queuehealth.Shutdown)
 			allow = false
 		}
 		if allow && labMark {
@@ -131,6 +137,7 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 			err = nf.SetVerdict(id, nfqueue.NfDrop)
 		}
 		if err != nil {
+			health.Add(queuehealth.VerdictFailure)
 			fail(err)
 		}
 		return allow, err
@@ -144,16 +151,24 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 	// capacity rejection occurs before attribution and otherwise leaves no way
 	// to distinguish a game's failed admission from unrelated background traffic.
 	var overloadedSample atomic.Pointer[identity.Flow]
-	processor := packetProcessor{batchObserve: e.PrepareUDPBatch, ctx: ctx, observe: e.Observe, tryObserve: e.TryObserve, retain: retained.Add, record: e.RecordPacketOutcome, verdict: submitVerdict, expired: &expired}
+	processor := packetProcessor{batchObserve: e.PrepareUDPBatch, ctx: ctx, observe: e.Observe, tryObserve: e.TryObserve, retain: retained.Add, record: e.RecordPacketOutcome, verdict: submitVerdict, expired: &expired, diagnostic: health.Add}
 	workers := newPacketBatchLanes(AttributionWorkers, CensusWorkers, processor.processStage, processor.processBatch, func(p packetJob, cause rejectionCause) {
 		if cause == rejectShutdown {
+			health.Add(queuehealth.Shutdown)
 			expired.Add(1)
 		} else if cause == rejectAdmission {
 			displaced.Add(1)
+			health.Add(queuehealth.FairnessDisplacement)
 		} else {
 			censusOverflow.Add(1)
+			health.Add(queuehealth.CensusCapacity)
 		}
 		verdictPacket(p.id, false)
+	})
+	health.GaugeSource(func() queuehealth.Gauges {
+		g := workers.healthGauges()
+		g.RetainedPackets, g.RetainedBytes = retained.gauges()
+		return g
 	})
 	report := func() {
 		if n := selfFailures.Swap(0); n != 0 {
@@ -238,13 +253,33 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 				}
 				overloadedSample.CompareAndSwap(nil, &f)
 				overloaded.Add(1)
+				if ctx.Err() != nil {
+					health.Add(queuehealth.Shutdown)
+				} else {
+					health.Add(queuehealth.AttributionCapacity)
+				}
+			} else {
+				health.Add(queuehealth.ParseRejected)
 			}
+		} else if ctx.Err() != nil {
+			health.Add(queuehealth.Shutdown)
+		} else {
+			health.Add(queuehealth.PayloadMissing)
 		}
 		if err := verdictPacket(*a.PacketID, false); err != nil {
 			return -1
 		}
 		return 0
-	}, func(err error) int { return receiveError(ctx, err, &receiveOverflow, fail) })
+	}, func(err error) int {
+		if ctx.Err() == nil {
+			if errors.Is(err, unix.ENOBUFS) {
+				health.Add(queuehealth.NetlinkOverflow)
+			} else {
+				health.Add(queuehealth.ReceiveFailure)
+			}
+		}
+		return receiveError(ctx, err, &receiveOverflow, fail)
+	})
 	if err != nil {
 		return err
 	}
@@ -259,12 +294,12 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 		select {
 		case <-ctx.Done():
 			select {
-			case err := <-errors:
+			case err := <-queueErrors:
 				return err
 			default:
 				return nil
 			}
-		case err := <-errors:
+		case err := <-queueErrors:
 			return err
 		case <-reporting.C:
 			report()
