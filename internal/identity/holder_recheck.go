@@ -131,8 +131,12 @@ func holderSet(g *holderGroup, tgid int) []string {
 
 // RecheckDetail preserves unrelated groups' display metadata without accepting
 // a partial holder set. Changed topology is fully rescanned and bookended, then
-// its complete wanted-holder set must equal the inspected set. A new member of
-// a holding table therefore refuses, even if its executable might be the same.
+// its complete wanted-holder set must equal the inspected set. The one
+// exception is same-table membership churn of a live, proven group with an
+// unchanged class set: that fresh set is reported as Reconcilable for complete
+// re-verification by identity inspection, never accepted here. Any other
+// difference (new or lost tables, lost sockets, exited leader, unproven group)
+// refuses the group.
 func (c HolderCensus) RecheckDetail() HolderRecheck {
 	d := HolderRecheck{Groups: map[int]string{}}
 	if !c.Complete {

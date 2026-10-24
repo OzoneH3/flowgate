@@ -24,25 +24,27 @@ type churnModel struct {
 	inspects    int
 }
 
-const churnS1, churnS2, churnS3 = "socket:[201]", "socket:[202]", "socket:[203]"
+const churnS1, churnS2, churnS3, churnS4, churnS5 = "socket:[201]", "socket:[202]", "socket:[203]", "socket:[204]", "socket:[205]"
 
-var churnWanted = map[string]bool{churnS1: true, churnS2: true, churnS3: true}
+var churnWanted = map[string]bool{churnS1: true, churnS2: true, churnS3: true, churnS4: true, churnS5: true}
 
-// Group 10: live leader 10 and thread 11 share table 1 holding S1; thread 12
-// holds S2 in its private table 2 (worker-only native holder). Group 20: exited
-// leader, workers 21/22 share table 3 holding S3. Group 60: unrelated. Group 70:
-// a different executable, holding nothing yet.
+// Group 10: live leader 10 and thread 11 share table 1 holding S1 and S4; thread
+// 12 holds S2 in its private table 2 (worker-only native holder). Group 20:
+// exited leader, workers 21/22 share table 3 holding S3. Group 30: live leader 30
+// and thread 31 share table 5 holding S5 (a second reconcilable group). Group
+// 60: unrelated. Group 70: a different executable, holding nothing yet.
 func newChurnModel() *churnModel {
 	return &churnModel{
 		f: &censusProc{
 			groups: map[int]map[int]*censusTask{
 				10: {10: {"1000", false, 1}, 11: {"1001", false, 1}, 12: {"1002", false, 2}},
 				20: {20: {"2000", true, 0}, 21: {"2001", false, 3}, 22: {"2002", false, 3}},
+				30: {30: {"3000", false, 5}, 31: {"3001", false, 5}},
 				60: {60: {"6000", false, 8}},
 				70: {70: {"7000", false, 9}},
 			},
 			tables: map[int]map[int]string{
-				1: {3: churnS1, 4: "pipe:[9]"}, 2: {5: churnS2}, 3: {6: churnS3}, 8: {3: "socket:[999]"}, 9: {},
+				1: {3: churnS1, 4: "pipe:[9]", 6: churnS4}, 2: {5: churnS2}, 3: {6: churnS3}, 5: {3: churnS5}, 8: {3: "socket:[999]"}, 9: {},
 			},
 			statErr: map[int]error{}, fdErr: map[int]error{}, hidden: map[int]bool{}, now: time.Unix(0, 0),
 		},
@@ -142,7 +144,7 @@ func TestHolderChurnJoinSameTableReconciles(t *testing.T) {
 	if !c.Complete {
 		t.Fatal(c.Issues)
 	}
-	if !out.Complete || len(out.Issues) != 0 || out.Reconciled != 1 || len(out.SocketIssues) != 0 {
+	if !out.Complete || len(out.Issues) != 0 || out.Reconciled != 2 || len(out.SocketIssues) != 0 {
 		t.Fatalf("%+v", out)
 	}
 	if pids := churnOwnerPIDs(out, churnS1); !slices.Equal(pids, []int{10}) {
@@ -154,20 +156,77 @@ func TestHolderChurnJoinSameTableReconciles(t *testing.T) {
 	if out.Owners[churnS1][0].HolderWitness != "" {
 		t.Fatal("live leader class gained a witness")
 	}
-	// Exact re-verification order after the recheck, for every class of the
-	// group: every current member read, the inspected task re-classified, every
-	// member read again, descriptor re-read; the unchanged S2 class included.
-	want := []string{"recheck", "facts:10", "facts:11", "facts:13", "inspect:10", "facts:10", "facts:11", "facts:13", "descriptor", "facts:12", "inspect:12", "facts:12", "descriptor"}
+	if pids := churnOwnerPIDs(out, churnS4); !slices.Equal(pids, []int{10}) {
+		t.Fatalf("S4 (same table) owners %v", pids)
+	}
+	// Exact re-verification order after the recheck, once per table class of the
+	// group: every current member read, the inspected task re-classified, one
+	// descriptor read per socket of the class, every member read again. The
+	// unchanged S2 class is re-verified too (group-atomic), identity once.
+	want := []string{"recheck",
+		"facts:10", "facts:11", "facts:13", "inspect:10", "descriptor", "descriptor", "facts:10", "facts:11", "facts:13",
+		"facts:12", "inspect:12", "descriptor", "facts:12"}
 	got := m.trace[len(m.trace)-len(want):]
 	if !slices.Equal(got, want) {
 		t.Fatalf("trace tail %v", got)
+	}
+	if out.Reconciled != 2 {
+		t.Fatalf("both sockets of the changed table are reconciled: %d", out.Reconciled)
+	}
+}
+
+// Identity or I/O failures are terminal for the whole attempt even when a
+// later (or earlier) reconcilable group fails only on topology. Groups are
+// reconciled in ascending TGID order: 10 is the lower group, 30 the higher.
+func TestHolderChurnMixedFailuresAcrossGroupsNeverRetryIdentity(t *testing.T) {
+	type failure func(m *churnModel, hooks map[int]func(*churnModel), tgid, tid int, table int)
+	identity := func(m *churnModel, _ map[int]func(*churnModel), _, tid, _ int) { m.creds[tid] = "2:2:2:2/2:2:2:2/groups:2" }
+	unreadable := func(m *churnModel, _ map[int]func(*churnModel), _, tid, _ int) { m.factsErr[tid] = syscall.EACCES }
+	topology := func(_ *churnModel, hooks map[int]func(*churnModel), tgid, tid, table int) {
+		// Another task joins while this group's fresh members are being read.
+		hooks[tid] = func(m *churnModel) { addThread(m, tgid, tid+1, fmt.Sprint(tid+1), table) }
+	}
+	for _, tc := range []struct {
+		name        string
+		lower, high failure
+		retry       bool
+	}{
+		{"identity in lower group then topology in higher", identity, topology, false},
+		{"topology in lower group then identity in higher", topology, identity, false},
+		{"unreadable in lower group then topology in higher", unreadable, topology, false},
+		{"topology in lower group then unreadable in higher", topology, unreadable, false},
+		{"topology in both", topology, topology, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newChurnModel()
+			hooks := map[int]func(*churnModel){}
+			m.onFacts = func(m *churnModel, tid int) {
+				if h := hooks[tid]; h != nil {
+					delete(hooks, tid)
+					h(m)
+				}
+			}
+			tc.lower(m, hooks, 10, 13, 1)
+			tc.high(m, hooks, 30, 33, 5)
+			_, out := m.run(func() {
+				addThread(m, 10, 13, "1003", 1)
+				addThread(m, 30, 33, "3003", 5)
+			}, defaultHolderLimits)
+			if out.Complete || out.Reconciled != 0 || len(out.Owners[churnS1]) != 0 || len(out.Owners[churnS5]) != 0 {
+				t.Fatalf("%+v", out)
+			}
+			if out.retryTopology != tc.retry {
+				t.Fatalf("retryTopology %v want %v (issues %v socket issues %v)", out.retryTopology, tc.retry, out.Issues, out.SocketIssues)
+			}
+		})
 	}
 }
 
 func TestHolderChurnLeaveSameTableReconciles(t *testing.T) {
 	m := newChurnModel()
 	_, out := m.run(func() { delete(m.f.groups[10], 11) }, defaultHolderLimits)
-	if !out.Complete || out.Reconciled != 1 || !slices.Equal(churnOwnerPIDs(out, churnS1), []int{10}) {
+	// S1 and S4 share the changed table: both holders are reconciled.
+	if !out.Complete || out.Reconciled != 2 || !slices.Equal(churnOwnerPIDs(out, churnS1), []int{10}) || !slices.Equal(churnOwnerPIDs(out, churnS4), []int{10}) {
 		t.Fatalf("%+v", out)
 	}
 }
@@ -194,7 +253,7 @@ func TestHolderChurnMixedClassesOnlyChangedClassReconciles(t *testing.T) {
 	_, before := base.run(nil, defaultHolderLimits)
 	m := newChurnModel()
 	_, out := m.run(func() { addThread(m, 10, 13, "1003", 1) }, defaultHolderLimits)
-	if !out.Complete || out.Reconciled != 1 {
+	if !out.Complete || out.Reconciled != 2 {
 		t.Fatalf("%+v", out)
 	}
 	if before.Owners[churnS2][0].HolderWitness != out.Owners[churnS2][0].HolderWitness {
@@ -399,7 +458,7 @@ func TestHolderChurnRecheckErrorFormStaysClosed(t *testing.T) {
 		t.Fatalf("%+v", d)
 	}
 	hs := d.Reconcilable[10]
-	if len(hs) != 2 || holderMembers(hs[0]) != "10@1000,11@1001,13@1003" || hs[0].Socket != churnS1 || holderMembers(hs[1]) != "12@1002" {
+	if len(hs) != 3 || holderMembers(hs[0]) != "10@1000,11@1001,13@1003" || hs[0].Socket != churnS1 || holderMembers(hs[1]) != "10@1000,11@1001,13@1003" || hs[1].Socket != churnS4 || holderMembers(hs[2]) != "12@1002" || hs[2].Socket != churnS2 {
 		t.Fatalf("%v", holderSummary(HolderCensus{Holders: hs}))
 	}
 	if err := c.Recheck(); err == nil || err.Error() != "membership_changed" {

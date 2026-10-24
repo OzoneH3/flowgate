@@ -328,7 +328,9 @@ func inspectHolderIdentitiesWith(c HolderCensus, inspect func(int) (Process, err
 	// Same-table membership churn: re-verify the fresh task set completely, per
 	// group and atomically, under the census deadline. Any failure withdraws
 	// every holder of that group. Nothing is accepted on topology alone.
-	reconcileCode := ""
+	// Retry aggregation is monotonic across every group: one identity or I/O
+	// failure makes the whole attempt terminal, whatever other groups report.
+	reconcileFailed, reconcileTopologyOnly := false, true
 	for _, tgid := range slices.Sorted(maps.Keys(detail.Reconcilable)) {
 		code, staged := reconcileHolderChurn(tgid, detail, classes, inspect, facts, descriptor, late)
 		if code == "" {
@@ -346,7 +348,10 @@ func inspectHolderIdentitiesWith(c HolderCensus, inspect func(int) (Process, err
 			}
 			continue
 		}
-		reconcileCode = code
+		reconcileFailed = true
+		if !holderTopologyChange(code) {
+			reconcileTopologyOnly = false
+		}
 		for socket, hs := range classes {
 			kept := hs[:0]
 			for _, h := range hs {
@@ -362,10 +367,11 @@ func inspectHolderIdentitiesWith(c HolderCensus, inspect func(int) (Process, err
 			failSocket(h, code)
 		}
 	}
-	if reconcileCode != "" {
-		// A failed re-verification is retryable only as a plain topology change
-		// of an otherwise clean census; identity or visibility failures are not.
-		out.retryTopology = identityClean && holderTopologyChange(reconcileCode) && retryableHolderTopology(c, detail)
+	if reconcileFailed {
+		// A failed re-verification is retryable only when every failure was a
+		// plain topology change of an otherwise clean census; any identity or
+		// visibility failure in any group is terminal.
+		out.retryTopology = identityClean && reconcileTopologyOnly && retryableHolderTopology(c, detail)
 	}
 	for _, socket := range detail.Appeared {
 		fail("holder_appeared")
@@ -411,53 +417,88 @@ type stagedHolder struct {
 }
 
 // reconcileHolderChurn re-verifies one group's fresh holders against the
-// holders inspected earlier. Each fresh holder must map to an inspected,
-// proven, exact-native holder of the same table (same representative and
-// socket); every current member is read, compared with the inspected identity
-// and with the census generation of surviving tasks, the inspected task is
-// re-classified at its original generation, every member is read again, the
-// descriptor is re-read and finally the fresh group's topology is rechecked.
-// It returns "" with the staged replacements only when all of that passed;
-// otherwise the code that fails the whole group. The census deadline bounds
-// every step; nothing is retried here.
+// holders inspected earlier. Fresh holders are grouped by table class
+// (representative task): identity is re-established once per class, exactly as
+// the first inspection did, then every holder's descriptor is re-read, then the
+// class is bookended again. Each fresh holder must map to an inspected, proven,
+// exact-native holder of the same table and socket whose inspection all holders
+// of the class share; every current member is read and compared with the
+// inspected identity and with the census generation of surviving tasks; the
+// inspected task is re-classified at its original generation; every member is
+// read again; finally the fresh group's topology is rechecked. It returns ""
+// with the staged replacements only when all of that passed; otherwise the
+// code that fails the whole group. The census deadline bounds every step;
+// nothing is retried here.
 func reconcileHolderChurn(tgid int, detail HolderRecheck, classes map[string][]inspectedHolder, inspect func(int) (Process, error), facts func(Holder, HolderMember) (holderTaskFacts, error), descriptor func(string, string) bool, late func() bool) (string, []stagedHolder) {
 	verify := detail.verify[tgid]
 	if detail.Err != nil || verify == nil {
 		return "membership_changed", nil
 	}
-	var staged []stagedHolder
+	type tableClass struct {
+		rep     int
+		holders []Holder
+	}
+	var order []int
+	byRep := map[int]*tableClass{}
 	for _, fh := range detail.Reconcilable[tgid] {
-		if late() {
-			return "time_limit", nil
-		}
 		rep, ok := holderRep(fh)
 		if !ok || !fh.Proven || fh.LeaderExited || fh.TGID != tgid || len(fh.Members) == 0 {
 			return "membership_changed", nil
 		}
-		index := -1
-		for i, h := range classes[fh.Socket] {
-			if h.holder.TGID != tgid || !h.holder.Proven || h.holder.GroupStart != fh.GroupStart {
-				continue
+		c := byRep[rep]
+		if c == nil {
+			c = &tableClass{rep: rep}
+			byRep[rep] = c
+			order = append(order, rep)
+		}
+		c.holders = append(c.holders, fh)
+	}
+	var staged []stagedHolder
+	for _, rep := range order {
+		cl := byRep[rep]
+		if late() {
+			return "time_limit", nil
+		}
+		// Every fresh holder of the class must map to an inspected holder of the
+		// same table, and those inspected holders must share one inspection.
+		var ref *inspectedHolder
+		indexes := make([]int, len(cl.holders))
+		for i, fh := range cl.holders {
+			if !slices.Equal(fh.Members, cl.holders[0].Members) {
+				return "membership_changed", nil
 			}
-			if r, ok := holderRep(h.holder); ok && r == rep {
-				index = i
-				break
+			indexes[i] = -1
+			for j, h := range classes[fh.Socket] {
+				if h.holder.TGID != tgid || !h.holder.Proven || h.holder.GroupStart != fh.GroupStart {
+					continue
+				}
+				if r, ok := holderRep(h.holder); ok && r == rep {
+					indexes[i] = j
+					break
+				}
+			}
+			if indexes[i] < 0 {
+				return "membership_changed", nil
+			}
+			e := classes[fh.Socket][indexes[i]]
+			if ref == nil {
+				ref = &e
+			} else if e.process.PID != ref.process.PID || e.process.Start != ref.process.Start || !e.facts.sameIdentity(ref.facts) || !slices.Equal(e.holder.Members, ref.holder.Members) {
+				return "holder_inspection_changed", nil
 			}
 		}
-		if index < 0 {
-			return "membership_changed", nil
-		}
-		entry := classes[fh.Socket][index]
+		entry := *ref
 		if !exactNativeHolder(entry.process) || entry.process.ThreadGroup != tgid {
 			return "runtime_worker_unverified", nil
 		}
+		members := cl.holders[0].Members
 		survivors := map[int]string{}
 		for _, m := range entry.holder.Members {
 			survivors[m.TID] = m.Start
 		}
 		inspected := false
-		first := make([]holderTaskFacts, len(fh.Members))
-		for i, m := range fh.Members {
+		first := make([]holderTaskFacts, len(members))
+		for i, m := range members {
 			if late() {
 				return "time_limit", nil
 			}
@@ -471,7 +512,7 @@ func reconcileHolderChurn(tgid int, detail HolderRecheck, classes map[string][]i
 				}
 				inspected = true
 			}
-			f, err := facts(fh, m)
+			f, err := facts(cl.holders[0], m)
 			if err != nil || f.Group != tgid || f.Start != m.Start {
 				return "holder_inspection_changed", nil
 			}
@@ -480,13 +521,13 @@ func reconcileHolderChurn(tgid int, detail HolderRecheck, classes map[string][]i
 			}
 			first[i] = f
 		}
-		if !inspected || late() {
+		if !inspected {
 			// The task whose full inspection stands for this table must still be
 			// a member; otherwise this is a different inspection, not churn.
-			if late() {
-				return "time_limit", nil
-			}
 			return "holder_inspection_changed", nil
+		}
+		if late() {
+			return "time_limit", nil
 		}
 		// Runtime classification bookend on the originally inspected task,
 		// compared before any witness is derived from the new member set.
@@ -500,19 +541,28 @@ func reconcileHolderChurn(tgid int, detail HolderRecheck, classes map[string][]i
 		if !exactNativeHolder(current) || current.PID != original.PID || current.ThreadGroup != tgid || current.Start != original.Start || current.Application.Prefix != original.Application.Prefix || fingerprint([]Process{current}, nil) != fingerprint([]Process{original}, nil) {
 			return "holder_inspection_changed", nil
 		}
-		for i, m := range fh.Members {
+		// Per-descriptor checks for every socket of the class.
+		for _, fh := range cl.holders {
 			if late() {
 				return "time_limit", nil
 			}
-			after, err := facts(fh, m)
+			if !descriptor(fh.FDPath, fh.Socket) {
+				return "holder_inspection_changed", nil
+			}
+		}
+		// Final bookend of the whole class after the descriptors were read.
+		for i, m := range members {
+			if late() {
+				return "time_limit", nil
+			}
+			after, err := facts(cl.holders[0], m)
 			if err != nil || after != first[i] {
 				return "holder_inspection_changed", nil
 			}
 		}
-		if !descriptor(fh.FDPath, fh.Socket) {
-			return "holder_inspection_changed", nil
+		for i, fh := range cl.holders {
+			staged = append(staged, stagedHolder{fh.Socket, indexes[i], fh, first})
 		}
-		staged = append(staged, stagedHolder{fh.Socket, index, fh, first})
 	}
 	if late() {
 		return "time_limit", nil
