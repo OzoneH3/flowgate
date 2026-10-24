@@ -23,23 +23,25 @@ import (
 )
 
 type Request struct {
-	EndpointDraft       *EndpointDraft     `json:"endpoint_draft,omitempty"`
-	EssentialOptions    *essential.Options `json:"essential_options,omitempty"`
-	NetworkZone         string             `json:"network_zone,omitempty"`
-	ZoneTarget          *ZoneTarget        `json:"zone_target,omitempty"`
-	ZoneRevision        string             `json:"zone_revision,omitempty"`
-	Remember            *RememberFields    `json:"remember,omitempty"`
-	DurationSeconds     int64              `json:"duration_seconds,omitempty"`
-	ProtectionID        string             `json:"protection_id,omitempty"`
-	EvaluationID        string             `json:"evaluation_id,omitempty"`
-	RequestID           string             `json:"request_id,omitempty"`
-	Profile             string             `json:"profile,omitempty"`
-	DecisionQuery       json.RawMessage    `json:"decision_query,omitempty"`
-	DecisionID          string             `json:"decision_id,omitempty"`
-	CollectorGeneration string             `json:"collector_generation,omitempty"`
-	ObservedTarget      *ObservedTarget    `json:"observed_target,omitempty"`
-	ObservedDraft       *ObservedDraft     `json:"observed_draft,omitempty"`
-	PreviewToken        string             `json:"preview_token,omitempty"`
+	HistoryQuery        *accounting.HistoryQuery   `json:"history_query,omitempty"`
+	HistoryOptions      *accounting.HistoryOptions `json:"history_options,omitempty"`
+	EndpointDraft       *EndpointDraft             `json:"endpoint_draft,omitempty"`
+	EssentialOptions    *essential.Options         `json:"essential_options,omitempty"`
+	NetworkZone         string                     `json:"network_zone,omitempty"`
+	ZoneTarget          *ZoneTarget                `json:"zone_target,omitempty"`
+	ZoneRevision        string                     `json:"zone_revision,omitempty"`
+	Remember            *RememberFields            `json:"remember,omitempty"`
+	DurationSeconds     int64                      `json:"duration_seconds,omitempty"`
+	ProtectionID        string                     `json:"protection_id,omitempty"`
+	EvaluationID        string                     `json:"evaluation_id,omitempty"`
+	RequestID           string                     `json:"request_id,omitempty"`
+	Profile             string                     `json:"profile,omitempty"`
+	DecisionQuery       json.RawMessage            `json:"decision_query,omitempty"`
+	DecisionID          string                     `json:"decision_id,omitempty"`
+	CollectorGeneration string                     `json:"collector_generation,omitempty"`
+	ObservedTarget      *ObservedTarget            `json:"observed_target,omitempty"`
+	ObservedDraft       *ObservedDraft             `json:"observed_draft,omitempty"`
+	PreviewToken        string                     `json:"preview_token,omitempty"`
 
 	ExpectedPolicyToken string       `json:"expected_policy_token,omitempty"`
 	EventIDs            []string     `json:"event_ids,omitempty"`
@@ -61,30 +63,32 @@ type EnforcementStatus struct {
 	StopsAt time.Time `json:"stops_at"`
 }
 type Response struct {
-	QueueHealth      *queuehealth.Snapshot      `json:"queue_health,omitempty"`
-	EndpointPreview  *EndpointPreview           `json:"endpoint_preview,omitempty"`
-	ObservedUsage    *accounting.Snapshot       `json:"observed_usage,omitempty"`
-	RuntimeChecks    []readiness.Check          `json:"runtime_checks,omitempty"`
-	SnapshotRevision string                     `json:"snapshot_revision,omitempty"`
-	SnapshotAt       time.Time                  `json:"snapshot_at,omitempty"`
-	EssentialPreview *EssentialPreview          `json:"essential_preview,omitempty"`
-	EssentialReceipt *EssentialReceipt          `json:"essential_receipt,omitempty"`
-	EssentialStatus  *EssentialStatus           `json:"essential_status,omitempty"`
-	Build            *BuildIdentity             `json:"build,omitempty"`
-	DecisionPreview  *DecisionPreview           `json:"decision_preview,omitempty"`
-	DecisionReceipt  *DecisionReceipt           `json:"decision_receipt,omitempty"`
-	NetworkZones     *identity.NetworkZones     `json:"network_zones,omitempty"`
-	ZoneMigration    *ZoneMigrationPreview      `json:"zone_migration,omitempty"`
-	ZonePreview      *ZonePreview               `json:"zone_preview,omitempty"`
-	RuleStates       map[string]RuleTargetState `json:"rule_states,omitempty"`
-	Protection       *ProtectionStatus          `json:"protection,omitempty"`
-	Evaluation       *EvaluationStatus          `json:"evaluation,omitempty"`
-	DecisionLog      *decisionlog.Page          `json:"decision_log,omitempty"`
-	DecisionRecord   *decisionlog.Record        `json:"decision_record,omitempty"`
-	TrafficMonitor   *udpaccount.Status         `json:"traffic_monitor,omitempty"`
-	ObservedPreview  *ObservedPreview           `json:"observed_preview,omitempty"`
-	RequestRule      *RequestRulePreview        `json:"request_rule_preview,omitempty"`
-	Replayed         bool                       `json:"replayed,omitempty"`
+	UsageHistory     *accounting.HistorySnapshot `json:"usage_history,omitempty"`
+	HistorySettings  *accounting.HistorySettings `json:"history_settings,omitempty"`
+	QueueHealth      *queuehealth.Snapshot       `json:"queue_health,omitempty"`
+	EndpointPreview  *EndpointPreview            `json:"endpoint_preview,omitempty"`
+	ObservedUsage    *accounting.Snapshot        `json:"observed_usage,omitempty"`
+	RuntimeChecks    []readiness.Check           `json:"runtime_checks,omitempty"`
+	SnapshotRevision string                      `json:"snapshot_revision,omitempty"`
+	SnapshotAt       time.Time                   `json:"snapshot_at,omitempty"`
+	EssentialPreview *EssentialPreview           `json:"essential_preview,omitempty"`
+	EssentialReceipt *EssentialReceipt           `json:"essential_receipt,omitempty"`
+	EssentialStatus  *EssentialStatus            `json:"essential_status,omitempty"`
+	Build            *BuildIdentity              `json:"build,omitempty"`
+	DecisionPreview  *DecisionPreview            `json:"decision_preview,omitempty"`
+	DecisionReceipt  *DecisionReceipt            `json:"decision_receipt,omitempty"`
+	NetworkZones     *identity.NetworkZones      `json:"network_zones,omitempty"`
+	ZoneMigration    *ZoneMigrationPreview       `json:"zone_migration,omitempty"`
+	ZonePreview      *ZonePreview                `json:"zone_preview,omitempty"`
+	RuleStates       map[string]RuleTargetState  `json:"rule_states,omitempty"`
+	Protection       *ProtectionStatus           `json:"protection,omitempty"`
+	Evaluation       *EvaluationStatus           `json:"evaluation,omitempty"`
+	DecisionLog      *decisionlog.Page           `json:"decision_log,omitempty"`
+	DecisionRecord   *decisionlog.Record         `json:"decision_record,omitempty"`
+	TrafficMonitor   *udpaccount.Status          `json:"traffic_monitor,omitempty"`
+	ObservedPreview  *ObservedPreview            `json:"observed_preview,omitempty"`
+	RequestRule      *RequestRulePreview         `json:"request_rule_preview,omitempty"`
+	Replayed         bool                        `json:"replayed,omitempty"`
 
 	PolicyView         *PolicyView                `json:"policy_view,omitempty"`
 	PolicyExplanations *PolicyExplanations        `json:"policy_explanations,omitempty"`
@@ -225,6 +229,9 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 					}
 					if e.Decisions != nil {
 						r.Capabilities = append(r.Capabilities, DecisionLogCapability)
+					}
+					if e.UsageHistory != nil {
+						r.Capabilities = append(r.Capabilities, accounting.HistoryCapability)
 					}
 					if e.ObservedUsage != nil {
 						r.Capabilities = append(r.Capabilities, accounting.Capability)
@@ -666,6 +673,26 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 								stopAfterResponse = true
 							}
 
+						case "usage-history":
+							if q.HistoryQuery == nil {
+								r.ErrorCode, r.Error = "invalid_request", "Explicit history query required"
+							} else {
+								v, er := e.UsageHistoryRead(q.Generation, *q.HistoryQuery, cred.Uid, admin)
+								usageHistoryError(&r, er)
+								if er == nil {
+									r.UsageHistory = &v
+								}
+							}
+						case "usage-history-configure":
+							if q.HistoryOptions == nil {
+								r.ErrorCode, r.Error = "invalid_request", "Explicit history settings required"
+							} else {
+								v, er := e.UsageHistoryConfigure(q.Generation, *q.HistoryOptions, admin, readonly || !permissions.CanManageMachineRules)
+								usageHistoryError(&r, er)
+								if er == nil {
+									r.HistorySettings = &v
+								}
+							}
 						case "observed-usage":
 							if e.ObservedUsage == nil {
 								r.ErrorCode, r.Error = "unavailable", "Observed usage is unavailable"

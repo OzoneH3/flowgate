@@ -1,3 +1,4 @@
+import { setupUsageHistory, showUsageHistory, updateUsageHistory } from './usage-history-view';
 import type { ClientState } from './protocol';
 import type { DisplayUnit } from './display-units';
 import type { UsageState } from './observed-usage-client';
@@ -17,6 +18,7 @@ let context = '';
 let current: UsageState | undefined;
 let unit: DisplayUnit = 'autoByte';
 let rendered = '';
+let historyMode = false;
 
 export function setupObservedUsage(chooseTab: (tab: string) => void) {
   const tab = el('button', 'Observed usage');
@@ -28,7 +30,7 @@ export function setupObservedUsage(chooseTab: (tab: string) => void) {
   view.id = 'observedUsageView';
   view.hidden = true;
   view.innerHTML = `<section class="rules-main usage-main">
-    <div class="filterbar"><input id="usageSearch" type="search" aria-label="Search observed usage" placeholder="Search recorded applications">
+    <div class="filterbar"><label>View <select id="usageMode"><option value="live">Current observation interval</option><option value="history">Durable history</option></select></label><input id="usageSearch" type="search" aria-label="Search observed usage" placeholder="Search recorded applications">
     <select id="usageSource" aria-label="Observed usage source"><option value="all">TCP and UDP (separate)</option><option value="tcp">TCP payload</option><option value="udp">UDP API bytes</option></select>
     <button id="usageRefresh">Refresh</button></div>
     <p id="usageStatus" class="summary" role="status" aria-live="polite"></p>
@@ -38,10 +40,17 @@ export function setupObservedUsage(chooseTab: (tab: string) => void) {
     <p id="usageEmpty" class="log-empty"></p></div>
   </section>`;
   $('decisionLogView').after(view);
+  setupUsageHistory(view.querySelector('.usage-main') as HTMLElement);
+  $('usageMode').onchange = () => {
+    historyMode = ($('usageMode') as HTMLSelectElement).value === 'history';
+    syncMode();
+  };
   $('usageSearch').oninput = render;
   $('usageSource').onchange = render;
   $('usageRefresh').onclick = () => void poll();
-  setInterval(() => { if (visible) void poll(); }, 2000);
+  setInterval(() => {
+    if (visible) void poll();
+  }, 2000);
 }
 
 export function showObservedUsage(show: boolean) {
@@ -49,14 +58,27 @@ export function showObservedUsage(show: boolean) {
   if (!$('observedUsageView')) return;
   $('observedUsageView').hidden = !show;
   $('observedUsageTab').setAttribute('aria-selected', String(show));
-  if (show) { render(); void poll(); }
+  syncMode();
+  if (show && !historyMode) {
+    render();
+    void poll();
+  }
 }
 
 export function updateObservedUsage(state: ClientState, displayUnit: DisplayUnit) {
   unit = displayUnit;
+  updateUsageHistory(state, displayUnit);
   const { control: c, observation: o } = state;
-  const next = JSON.stringify([c.connected, c.generation, c.permissions, c.capabilities?.includes(USAGE_CAPABILITY),
-    o.connected, o.generation, o.permissions, o.capabilities?.includes(USAGE_CAPABILITY)]);
+  const next = JSON.stringify([
+    c.connected,
+    c.generation,
+    c.permissions,
+    c.capabilities?.includes(USAGE_CAPABILITY),
+    o.connected,
+    o.generation,
+    o.permissions,
+    o.capabilities?.includes(USAGE_CAPABILITY),
+  ]);
   if (context !== next) {
     context = next;
     revision++;
@@ -67,7 +89,7 @@ export function updateObservedUsage(state: ClientState, displayUnit: DisplayUnit
 }
 
 async function poll() {
-  if (!visible || flight) return;
+  if (!visible || historyMode || flight) return;
   flight = true;
   const started = revision;
   try {
@@ -85,8 +107,11 @@ function row(entry: UsageEntry): HTMLTableRowElement {
   const tr = el('tr');
   const app = el('td', entry.name || entry.executable || entry.application || 'Unattributed');
   app.title = [entry.executable, entry.application, entry.id].filter(Boolean).join('\n');
-  tr.append(app, el('td', entry.uid === undefined ? '—' : String(entry.uid)),
-    el('td', entry.source === 'tcp' ? 'TCP payload' : 'UDP API bytes'));
+  tr.append(
+    app,
+    el('td', entry.uid === undefined ? '—' : String(entry.uid)),
+    el('td', entry.source === 'tcp' ? 'TCP payload' : 'UDP API bytes'),
+  );
   for (const value of [entry.downloaded, entry.uploaded]) {
     const cell = el('td', formatUsage(value, unit), 'usage-amount');
     cell.title = `${value} observed bytes`;
@@ -109,20 +134,45 @@ function render() {
   $('usageCoverage').textContent = '';
   if (!snapshot) {
     status.textContent = current?.message || 'Reading observed usage…';
-    $('usageEmpty').textContent = current?.supported === false
-      ? 'This daemon does not advertise accumulated observed usage. Live Activity remains available.'
-      : 'No current accumulated observations available.';
+    $('usageEmpty').textContent =
+      current?.supported === false
+        ? 'This daemon does not advertise accumulated observed usage. Live Activity remains available.'
+        : 'No current accumulated observations available.';
     return;
   }
   status.textContent = `${snapshot.scope === 'machine' ? 'Machine' : 'Your applications'} · Observations since ${new Date(snapshot.startedAt).toLocaleString()} · ${snapshot.observedAt ? 'Sampled ' + new Date(snapshot.observedAt).toLocaleString() : 'Waiting for the first observation'}`;
   status.title = `Observation interval: ${snapshot.epoch}`;
   $('usageCoverage').textContent = snapshot.coverage;
-  const entries = snapshot.entries.filter((entry) => (source === 'all' || source === entry.source) &&
-    [entry.name, entry.executable, entry.application, entry.uid].join(' ').toLocaleLowerCase().includes(search));
+  const entries = snapshot.entries.filter(
+    (entry) =>
+      (source === 'all' || source === entry.source) &&
+      [entry.name, entry.executable, entry.application, entry.uid]
+        .join(' ')
+        .toLocaleLowerCase()
+        .includes(search),
+  );
   const fragment = document.createDocumentFragment();
   for (const entry of entries) fragment.append(row(entry));
   $('usageRows').append(fragment);
-  $('usageEmpty').textContent = entries.length ? '' : snapshot.entries.length
-    ? 'No recorded entries match these filters.'
-    : 'No attributable usage recorded yet. Unavailable or missed observations are not zero usage.';
+  $('usageEmpty').textContent = entries.length
+    ? ''
+    : snapshot.entries.length
+      ? 'No recorded entries match these filters.'
+      : 'No attributable usage recorded yet. Unavailable or missed observations are not zero usage.';
+}
+
+function syncMode() {
+  showUsageHistory(visible && historyMode);
+  const section = document.querySelector('#observedUsageView > .usage-main')!;
+  for (const node of Array.from(section.children)) {
+    if (node.id === 'usageHistoryView') continue;
+    if (node.classList.contains('filterbar')) {
+      for (const child of Array.from(node.children))
+        if (!(child as HTMLElement).querySelector('#usageMode'))
+          (child as HTMLElement).hidden = historyMode;
+      continue;
+    }
+    (node as HTMLElement).hidden = historyMode;
+  }
+  if (visible && !historyMode) void poll();
 }

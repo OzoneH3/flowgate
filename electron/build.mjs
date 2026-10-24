@@ -91,6 +91,8 @@ await build({
     'src/gui-build.ts',
     'src/inactive-rules.ts',
     'src/observed-usage.ts',
+    'src/usage-history.ts',
+    'src/usage-history-client.ts',
     'src/observed-usage-client.ts',
   ],
   bundle: true,

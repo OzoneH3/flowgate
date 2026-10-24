@@ -2,9 +2,12 @@
 
 FlowGate now retains sampled traffic deltas after sockets close. Electron's
 **Observed usage** tab displays those backend-owned records separately from live
-Activity. This first increment is in memory: a daemon/observer restart starts a
-new observation interval. It has no Reset, durable statistics, quota enforcement
-or bandwidth shaping.
+Activity. The **Current observation interval** view is in memory: a
+daemon/observer restart starts a new interval. Optional, administrator-enabled
+[durable history](USAGE-HISTORY.md) separately archives sampled checkpoint deltas
+across restarts with retention settings and historical graphs. Both views are
+partial observations; neither provides Reset, quota enforcement or bandwidth
+shaping. The live ledger semantics below remain independent of the archive.
 
 ## Meaning and limits
 

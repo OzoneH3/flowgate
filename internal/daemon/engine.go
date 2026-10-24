@@ -124,6 +124,7 @@ type Engine struct {
 	AdministratorUID   *uint32
 	APIUID             *uint32
 	Activity           func() identity.ActivitySnapshot
+	UsageHistory       *accounting.History
 	ObservedUsage      *accounting.Ledger
 	Generation         string
 	Mode               string

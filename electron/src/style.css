@@ -1770,3 +1770,12 @@ body.hide-sidebar #activityView > aside { display:none; }
 
 .queue-health { flex: 0 0 auto; padding: 4px 10px; color: #ffba67; background: #49341f; border-bottom: 1px solid #735333; font-size: 12px; }
 .queue-health[hidden] { display: none; }
+
+#usageHistoryView { min-height: 0; overflow: auto; padding: 8px; }
+.history-filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.history-filters select { max-width: 300px; }
+.history-chart svg { width: 100%; max-height: 240px; background: #262626; }
+.history-settings-controls { display: flex; gap: 16px; flex-wrap: wrap; }
+#historySettings { border: 1px solid #555; padding: 10px; margin-top: 10px; }
+#historySettings p { max-width: 1000px; }
+#historySave { margin-left: 10px; }

@@ -1,3 +1,4 @@
+import { UsageHistoryClient } from './usage-history-client';
 import { EndpointRules } from './endpoint-rules';
 import { ruleCoversRevision, runtimeWitness } from './protocol';
 import { readGuiBuild } from './gui-build';
@@ -805,6 +806,15 @@ app.whenReady().then(async () => {
   });
   const decisionLog = new DecisionLogClient(backend);
   const observedUsage = new ObservedUsageClient(backend);
+  const usageHistory = new UsageHistoryClient(backend);
+  ipcMain.handle('history:read', (e, q: unknown) => {
+    presentationSender(e);
+    return usageHistory.read(q);
+  });
+  ipcMain.handle('history:configure', (e, options: unknown) => {
+    presentationSender(e);
+    return usageHistory.configure(options);
+  });
   ipcMain.handle('usage:read', (e) => {
     presentationSender(e);
     return observedUsage.read();

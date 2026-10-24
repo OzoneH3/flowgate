@@ -140,6 +140,13 @@ func serveCommand(args []string) error {
 	}
 	observer := monitor.New(time.Second)
 	e.ObservedUsage = accounting.New()
+	history, historyErr := accounting.OpenHistory(filepath.Join(filepath.Dir(*database), "usage-history.db"), e.ObservedUsage, e.Generation)
+	if historyErr != nil {
+		fmt.Fprintln(os.Stderr, "WARNING: usage history unavailable:", historyErr)
+		history = accounting.UnavailableHistory(historyErr)
+	}
+	e.UsageHistory = history
+	defer history.Close()
 	observer.Observed = e.ObservedUsage.Observe
 	observer.Zones = zones
 	observer.UDP = traffic.Snapshot

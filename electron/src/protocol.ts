@@ -321,6 +321,8 @@ export interface Permissions {
 export interface Reply {
   endpoint_preview?: EndpointPreview;
   observed_usage?: unknown;
+  usage_history?: unknown;
+  history_settings?: unknown;
   snapshot_revision?: string;
   snapshot_at?: string;
   essential_status?: unknown;
@@ -533,6 +535,8 @@ export interface Bridge {
   promptLayout(value: { height: number; pointerDown: boolean; keysDown: string[]; remember: boolean }): Promise<void>;
   dismissPrompt(): Promise<void>;
   decisionLog(): Promise<DecisionLogState>;
+  usageHistory(query: unknown): Promise<import('./usage-history-client').HistoryState>;
+  usageHistoryConfigure(options: unknown): Promise<import('./usage-history-client').HistoryState>;
   observedUsage(): Promise<import('./observed-usage-client').UsageState>;
   decisionLogVisible(visible: boolean): Promise<void>;
   decisionLogFilter(filter: LogFilter): Promise<DecisionLogState>;
@@ -872,6 +876,8 @@ export function parseReply(raw: unknown): Reply {
     // Validated by decision-log.ts, which owns the decision-log-v1 schema.
     decision_log: r.decision_log,
     observed_usage: r.observed_usage,
+    usage_history: r.usage_history,
+    history_settings: r.history_settings,
     decision_preview: r.decision_preview,
     decision_receipt: r.decision_receipt,
     request_rule_preview: r.request_rule_preview,
