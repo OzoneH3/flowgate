@@ -174,3 +174,18 @@ zero packets throughout. Allowed delivery varied in both directions relative to
 the baseline and CPU time was similar; this does not establish a general
 throughput improvement or resolve the reported live QUIC overload. Evidence and
 all retained fixture failures are recorded in `.workspace/queue-health/README.txt`.
+
+Within one fresh holder census, sockets in the same proven native descriptor
+class can share process inspection. The exact thread-generation member list
+must agree. Every descriptor is still checked, followed by a final runtime and
+member-identity bookend and the census recheck. A changed identity withdraws all
+sockets that shared that inspection. Single-socket, unproven and unsupported
+runtime paths retain their existing checks; nothing is reused across censuses.
+
+A follow-up CPU profile with 256 idle UDP sockets and two distinct Allow/Block
+applications in the same capped guest measured sampled CPU falling from 10.51 s
+to 6.89 s, with background observation falling from 6.02 s to 2.08 s. Blocked
+traffic delivered zero packets. Allowed delivery remained poor and mixed, so
+this establishes a CPU reduction for that workload, not a general throughput
+improvement or resolution of live QUIC overload. Detailed scope and profiles are
+recorded in `.workspace/udp-profile/README.txt`.

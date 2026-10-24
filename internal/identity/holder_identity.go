@@ -110,6 +110,28 @@ func inspectHolderIdentities(c HolderCensus, inspect func(int) (Process, error))
 	}, c.RecheckDetail)
 }
 
+// A proven descriptor-table class is identified only within this immutable
+// census. Reuse below is native-only, never shared across snapshots or processes.
+type holderInspectionKey struct {
+	group        int
+	start        string
+	leaderExited bool
+	first        HolderMember
+}
+
+func inspectionKey(h Holder) holderInspectionKey {
+	return holderInspectionKey{h.TGID, h.GroupStart, h.LeaderExited, h.Members[0]}
+}
+
+type nativeHolderInspection struct {
+	invalid  bool
+	selected holderTaskFacts
+	holder   Holder
+	before   []holderTaskFacts
+	process  Process
+	holders  []Holder
+}
+
 func inspectHolderIdentitiesWith(c HolderCensus, inspect func(int) (Process, error), facts func(Holder, HolderMember) (holderTaskFacts, error), descriptor func(string, string) bool, recheck func() HolderRecheck) holderIdentities {
 	out := holderIdentities{Owners: map[string][]Process{}, Complete: c.Complete, Issues: append([]string(nil), c.Issues...), SocketIssues: map[string]string{}}
 	for socket, codes := range c.SocketIssues {
@@ -134,6 +156,7 @@ func inspectHolderIdentitiesWith(c HolderCensus, inspect func(int) (Process, err
 		out.Unavailable = len(failedTasks)
 	}
 	classes := map[string][]inspectedHolder{}
+	native := map[holderInspectionKey]*nativeHolderInspection{}
 	for _, h := range c.Holders {
 		if late() {
 			fail("time_limit")
@@ -142,6 +165,24 @@ func inspectHolderIdentitiesWith(c HolderCensus, inspect func(int) (Process, err
 		if len(h.Members) == 0 || (!h.Proven && len(h.Members) > 1) {
 			failSocket(h, "holder_members_unproven")
 			continue
+		}
+		if h.Proven {
+			if old := native[inspectionKey(h)]; old != nil {
+				if !slices.Equal(old.holder.Members, h.Members) {
+					old.invalid = true
+					failSocket(h, "holder_members_changed")
+					continue
+				}
+				// Every descriptor is still checked. All member identities are
+				// bookended again below, after the last associated socket.
+				if !descriptor(h.FDPath, h.Socket) {
+					failSocket(h, "holder_inspection_changed")
+					continue
+				}
+				old.holders = append(old.holders, h)
+				classes[h.Socket] = append(classes[h.Socket], inspectedHolder{h, old.selected, old.process})
+				continue
+			}
 		}
 		before := make([]holderTaskFacts, len(h.Members))
 		valid := true
@@ -200,11 +241,58 @@ func inspectHolderIdentitiesWith(c HolderCensus, inspect func(int) (Process, err
 			failSocket(h, "runtime_worker_unverified")
 			continue
 		}
+		if h.Proven && exactNativeHolder(p) {
+			copyHolder := h
+			copyHolder.Members = slices.Clone(h.Members)
+			native[inspectionKey(h)] = &nativeHolderInspection{holder: copyHolder, before: before, process: p, selected: f, holders: []Holder{h}}
+		}
 		classes[h.Socket] = append(classes[h.Socket], inspectedHolder{h, f, p})
 	}
 	if late() {
 		fail("time_limit")
 		return out
+	}
+	// A changed native member withdraws every socket that shared its inspection,
+	// including the first. RecheckDetail still verifies topology and every FD.
+	for key, entry := range native {
+		if len(entry.holders) == 1 && !entry.invalid {
+			continue
+		} // unchanged single-socket path
+		valid := !entry.invalid
+		if late() {
+			fail("time_limit")
+			return out
+		}
+		// Also re-inspect runtime classification once at the far bookend. Raw
+		// executable facts alone cannot detect a process loading a runtime.
+		current, err := inspect(entry.process.PID)
+		if err != nil || !exactNativeHolder(current) || current.ThreadGroup != entry.process.ThreadGroup || current.Application.Prefix != entry.process.Application.Prefix || fingerprint([]Process{current}, nil) != fingerprint([]Process{entry.process}, nil) {
+			valid = false
+		}
+		for i, m := range entry.holder.Members {
+			if late() {
+				fail("time_limit")
+				return out
+			}
+			after, err := facts(entry.holder, m)
+			if err != nil || after != entry.before[i] {
+				valid = false
+				break
+			}
+		}
+		if valid {
+			continue
+		}
+		for _, h := range entry.holders {
+			failSocket(h, "holder_inspection_changed")
+			rows := classes[h.Socket][:0]
+			for _, candidate := range classes[h.Socket] {
+				if !candidate.holder.Proven || inspectionKey(candidate.holder) != key {
+					rows = append(rows, candidate)
+				}
+			}
+			classes[h.Socket] = rows
+		}
 	}
 	// Recheck failures are local where the census can name the changed group.
 	// Unknown completeness keeps locally read metadata but cannot advertise an
