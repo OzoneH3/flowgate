@@ -3,7 +3,9 @@ package identity
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
+	"strings"
 )
 
 // HolderRecheck scopes stale evidence. Err means the census as a whole cannot
@@ -13,6 +15,51 @@ type HolderRecheck struct {
 	Err      error
 	Groups   map[int]string
 	Appeared []string
+	// Reconcilable lists the fresh holders of groups whose only change since the
+	// census is same-table membership of the same live, kcmp-proven thread group
+	// (threads joined or left an already inspected table; same class set, same
+	// representatives, same sockets). Nothing here is verified: every member must
+	// be re-read, runtime classification re-run and verify called before any of
+	// it is used. Recheck() still reports the original cause for callers that do
+	// not perform that verification.
+	Reconcilable map[int][]Holder
+	verify       map[int]func() error // final topology/descriptor check of the fresh group
+}
+
+// holderRep is the representative task whose table was read for this holder.
+func holderRep(h Holder) (int, bool) {
+	var tgid, rep, fd int
+	if _, err := fmt.Sscanf(h.FDPath, "/proc/%d/task/%d/fd/%d", &tgid, &rep, &fd); err != nil || tgid != h.TGID {
+		return 0, false
+	}
+	return rep, true
+}
+
+// classSet identifies a group's holding tables by representative and socket,
+// ignoring which tasks currently use each table.
+func classSet(g *holderGroup, tgid int) []string {
+	var out []string
+	for _, h := range g.holders(tgid) {
+		rep, ok := holderRep(h)
+		if !ok {
+			return nil
+		}
+		out = append(out, fmt.Sprintf("%d %s", rep, h.Socket))
+	}
+	slices.Sort(out)
+	return out
+}
+
+// reconcilableChurn is true only when a live, kcmp-proven group kept the exact
+// same holding tables (by representative) for the exact same sockets and merely
+// gained or lost tasks in those tables. New tables, lost sockets, exited or
+// unproven leaders and unproven groups are never reconcilable.
+func reconcilableChurn(old, fresh *holderGroup, tgid int) bool {
+	if old == nil || fresh == nil || !old.proven || !fresh.proven || old.leaderExited || fresh.leaderExited || old.start != fresh.start {
+		return false
+	}
+	o, f := classSet(old, tgid), classSet(fresh, tgid)
+	return len(o) > 0 && slices.Equal(o, f)
 }
 
 // A transient exit before any wanted descriptor was observed can be handled by
@@ -155,6 +202,25 @@ func (c HolderCensus) RecheckDetail() HolderRecheck {
 			continue
 		}
 		if !slices.Equal(holderSet(old, tgid), holderSet(fresh, tgid)) {
+			if cause == "membership_changed" && reconcilableChurn(old, fresh, tgid) {
+				// Same tables, same sockets, different task set: offered for full
+				// re-verification by identity inspection, never accepted here.
+				if d.Reconcilable == nil {
+					d.Reconcilable = map[int][]Holder{}
+					d.verify = map[int]func() error{}
+				}
+				holders := fresh.holders(tgid)
+				slices.SortFunc(holders, func(a, b Holder) int {
+					if a.Members[0].TID != b.Members[0].TID {
+						return a.Members[0].TID - b.Members[0].TID
+					}
+					return strings.Compare(a.Socket, b.Socket)
+				})
+				d.Reconcilable[tgid] = holders
+				g := fresh
+				d.verify[tgid] = func() error { return p.recheckGroup(tgid, g) }
+				continue
+			}
 			d.Groups[tgid] = cause
 			// This includes newly observed tables and members, and cannot be merged
 			// into the earlier identity inspection.

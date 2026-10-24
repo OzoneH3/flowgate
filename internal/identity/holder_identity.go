@@ -6,6 +6,7 @@ package identity
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"slices"
 	"strconv"
@@ -92,11 +93,15 @@ type inspectedHolder struct {
 }
 
 type holderIdentities struct {
-	Owners        map[string][]Process
-	Complete      bool
-	Issues        []string
-	SocketIssues  map[string]string
-	Unavailable   int
+	Owners       map[string][]Process
+	Complete     bool
+	Issues       []string
+	SocketIssues map[string]string
+	Unavailable  int
+	// Reconciled counts holders whose task set changed within the same inspected
+	// table and passed full re-verification (every current member re-read twice,
+	// runtime classification re-run, descriptor and topology rechecked).
+	Reconciled    int
 	retryTopology bool
 }
 
@@ -320,6 +325,48 @@ func inspectHolderIdentitiesWith(c HolderCensus, inspect func(int) (Process, err
 		}
 		classes[socket] = kept
 	}
+	// Same-table membership churn: re-verify the fresh task set completely, per
+	// group and atomically, under the census deadline. Any failure withdraws
+	// every holder of that group. Nothing is accepted on topology alone.
+	reconcileCode := ""
+	for _, tgid := range slices.Sorted(maps.Keys(detail.Reconcilable)) {
+		code, staged := reconcileHolderChurn(tgid, detail, classes, inspect, facts, descriptor, late)
+		if code == "" {
+			for _, s := range staged {
+				e := classes[s.socket][s.index]
+				if n := native[inspectionKey(e.holder)]; n != nil {
+					n.holder.Members = slices.Clone(s.holder.Members)
+					n.before = s.first
+				}
+				if !slices.Equal(e.holder.Members, s.holder.Members) {
+					out.Reconciled++
+				}
+				e.holder = s.holder
+				classes[s.socket][s.index] = e
+			}
+			continue
+		}
+		reconcileCode = code
+		for socket, hs := range classes {
+			kept := hs[:0]
+			for _, h := range hs {
+				if h.holder.TGID == tgid && h.holder.Proven {
+					failSocket(h.holder, code)
+				} else {
+					kept = append(kept, h)
+				}
+			}
+			classes[socket] = kept
+		}
+		for _, h := range detail.Reconcilable[tgid] {
+			failSocket(h, code)
+		}
+	}
+	if reconcileCode != "" {
+		// A failed re-verification is retryable only as a plain topology change
+		// of an otherwise clean census; identity or visibility failures are not.
+		out.retryTopology = identityClean && holderTopologyChange(reconcileCode) && retryableHolderTopology(c, detail)
+	}
 	for _, socket := range detail.Appeared {
 		fail("holder_appeared")
 		out.SocketIssues[socket] = "holder_appeared"
@@ -352,6 +399,128 @@ func inspectHolderIdentitiesWith(c HolderCensus, inspect func(int) (Process, err
 		slices.SortFunc(out.Owners[socket], func(a, b Process) int { return a.PID - b.PID })
 	}
 	return out
+}
+
+// stagedHolder is a fully re-verified replacement for one inspected holder,
+// applied only if every holder of its group passed.
+type stagedHolder struct {
+	socket string
+	index  int
+	holder Holder
+	first  []holderTaskFacts
+}
+
+// reconcileHolderChurn re-verifies one group's fresh holders against the
+// holders inspected earlier. Each fresh holder must map to an inspected,
+// proven, exact-native holder of the same table (same representative and
+// socket); every current member is read, compared with the inspected identity
+// and with the census generation of surviving tasks, the inspected task is
+// re-classified at its original generation, every member is read again, the
+// descriptor is re-read and finally the fresh group's topology is rechecked.
+// It returns "" with the staged replacements only when all of that passed;
+// otherwise the code that fails the whole group. The census deadline bounds
+// every step; nothing is retried here.
+func reconcileHolderChurn(tgid int, detail HolderRecheck, classes map[string][]inspectedHolder, inspect func(int) (Process, error), facts func(Holder, HolderMember) (holderTaskFacts, error), descriptor func(string, string) bool, late func() bool) (string, []stagedHolder) {
+	verify := detail.verify[tgid]
+	if detail.Err != nil || verify == nil {
+		return "membership_changed", nil
+	}
+	var staged []stagedHolder
+	for _, fh := range detail.Reconcilable[tgid] {
+		if late() {
+			return "time_limit", nil
+		}
+		rep, ok := holderRep(fh)
+		if !ok || !fh.Proven || fh.LeaderExited || fh.TGID != tgid || len(fh.Members) == 0 {
+			return "membership_changed", nil
+		}
+		index := -1
+		for i, h := range classes[fh.Socket] {
+			if h.holder.TGID != tgid || !h.holder.Proven || h.holder.GroupStart != fh.GroupStart {
+				continue
+			}
+			if r, ok := holderRep(h.holder); ok && r == rep {
+				index = i
+				break
+			}
+		}
+		if index < 0 {
+			return "membership_changed", nil
+		}
+		entry := classes[fh.Socket][index]
+		if !exactNativeHolder(entry.process) || entry.process.ThreadGroup != tgid {
+			return "runtime_worker_unverified", nil
+		}
+		survivors := map[int]string{}
+		for _, m := range entry.holder.Members {
+			survivors[m.TID] = m.Start
+		}
+		inspected := false
+		first := make([]holderTaskFacts, len(fh.Members))
+		for i, m := range fh.Members {
+			if late() {
+				return "time_limit", nil
+			}
+			// A surviving TID must keep its census generation: no TID reuse.
+			if start, known := survivors[m.TID]; known && start != m.Start {
+				return "holder_inspection_changed", nil
+			}
+			if m.TID == entry.process.PID {
+				if m.Start != entry.process.Start {
+					return "holder_inspection_changed", nil
+				}
+				inspected = true
+			}
+			f, err := facts(fh, m)
+			if err != nil || f.Group != tgid || f.Start != m.Start {
+				return "holder_inspection_changed", nil
+			}
+			if !f.sameIdentity(entry.facts) {
+				return "holder_identity_ambiguous", nil
+			}
+			first[i] = f
+		}
+		if !inspected || late() {
+			// The task whose full inspection stands for this table must still be
+			// a member; otherwise this is a different inspection, not churn.
+			if late() {
+				return "time_limit", nil
+			}
+			return "holder_inspection_changed", nil
+		}
+		// Runtime classification bookend on the originally inspected task,
+		// compared before any witness is derived from the new member set.
+		original := entry.process
+		original.HolderWitness = ""
+		current, err := inspect(original.PID)
+		if err != nil {
+			return "holder_inspection_changed", nil
+		}
+		current.HolderWitness = ""
+		if !exactNativeHolder(current) || current.PID != original.PID || current.ThreadGroup != tgid || current.Start != original.Start || current.Application.Prefix != original.Application.Prefix || fingerprint([]Process{current}, nil) != fingerprint([]Process{original}, nil) {
+			return "holder_inspection_changed", nil
+		}
+		for i, m := range fh.Members {
+			if late() {
+				return "time_limit", nil
+			}
+			after, err := facts(fh, m)
+			if err != nil || after != first[i] {
+				return "holder_inspection_changed", nil
+			}
+		}
+		if !descriptor(fh.FDPath, fh.Socket) {
+			return "holder_inspection_changed", nil
+		}
+		staged = append(staged, stagedHolder{fh.Socket, index, fh, first})
+	}
+	if late() {
+		return "time_limit", nil
+	}
+	if err := verify(); err != nil {
+		return err.Error(), nil
+	}
+	return "", staged
 }
 
 func exactNativeHolder(p Process) bool {

@@ -34,7 +34,7 @@ func retryableHolderTopology(c HolderCensus, d HolderRecheck) bool {
 			return false
 		}
 	}
-	return !c.Complete || len(d.Groups) > 0 || len(d.Appeared) > 0
+	return !c.Complete || len(d.Groups) > 0 || len(d.Appeared) > 0 || len(d.Reconcilable) > 0
 }
 
 func resolveHolderIdentities(wanted map[string]bool, inspect func(int) (Process, error), refresh func()) (HolderCensus, holderIdentities) {

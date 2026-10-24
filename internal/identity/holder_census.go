@@ -389,6 +389,11 @@ func (c HolderCensus) Recheck() error {
 	if len(groups) > 0 {
 		return errors.New(d.Groups[groups[0]])
 	}
+	if len(d.Reconcilable) > 0 {
+		// Unverified membership churn is still a changed topology for every
+		// caller that does not run the full re-verification.
+		return errors.New("membership_changed")
+	}
 	if len(d.Appeared) > 0 {
 		return errors.New("holder_appeared")
 	}
