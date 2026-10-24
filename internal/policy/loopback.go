@@ -49,7 +49,7 @@ func LoopbackRules(rules []Rule, f identity.Flow, now time.Time) []Rule {
 	out := []Rule{}
 	for _, r := range CurrentProgramRules(rules, now) {
 		x := r.Filter
-		if r.Disabled || (!r.Expires.IsZero() && !now.Before(r.Expires)) || !x.targetsLocalFlow(f) || x.Direction != f.Direction || !ProtocolMatches(x.Protocol, f.Protocol) {
+		if r.NetworkEndpoint || r.Disabled || (!r.Expires.IsZero() && !now.Before(r.Expires)) || !x.targetsLocalFlow(f) || x.Direction != f.Direction || !ProtocolMatches(x.Protocol, f.Protocol) {
 			continue
 		}
 		if x.Remote != "" && x.Remote != f.Remote.String() {

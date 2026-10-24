@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"flowgate/internal/daemon"
+	"flowgate/internal/policy"
 	"io"
 	"os"
 	"runtime/debug"
@@ -12,7 +13,7 @@ import (
 var sourceRevision string
 
 func buildIdentity() daemon.BuildIdentity {
-	b := daemon.BuildIdentity{Source: sourceRevision}
+	b := daemon.BuildIdentity{Source: sourceRevision, MaxRuleSchema: policy.NetworkEndpointSchema}
 	if v, ok := debug.ReadBuildInfo(); ok {
 		for _, s := range v.Settings {
 			switch s.Key {

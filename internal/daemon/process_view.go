@@ -69,6 +69,7 @@ func (e *Engine) processSummaryLocked(a PolicyIdentity, b identity.Instance, dir
 		out.Action = ""
 		out.Reason = "Process target inactive: " + state.Reason + "; application fallback remains separate"
 	}
+	endpointSummary(&out, rules, now)
 	return out
 }
 func (e *Engine) processViewsLocked(activity identity.ActivitySnapshot, rules []policy.Rule, h *EnforcementStatus, now time.Time) ([]ProcessPolicy, bool) {

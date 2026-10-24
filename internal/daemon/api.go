@@ -22,6 +22,7 @@ import (
 )
 
 type Request struct {
+	EndpointDraft       *EndpointDraft     `json:"endpoint_draft,omitempty"`
 	EssentialOptions    *essential.Options `json:"essential_options,omitempty"`
 	NetworkZone         string             `json:"network_zone,omitempty"`
 	ZoneTarget          *ZoneTarget        `json:"zone_target,omitempty"`
@@ -59,6 +60,7 @@ type EnforcementStatus struct {
 	StopsAt time.Time `json:"stops_at"`
 }
 type Response struct {
+	EndpointPreview  *EndpointPreview           `json:"endpoint_preview,omitempty"`
 	ObservedUsage    *accounting.Snapshot       `json:"observed_usage,omitempty"`
 	RuntimeChecks    []readiness.Check          `json:"runtime_checks,omitempty"`
 	SnapshotRevision string                     `json:"snapshot_revision,omitempty"`
@@ -295,7 +297,32 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						if zones.Model == identity.AutomaticZoneModel {
 							r.Capabilities = append(r.Capabilities, AutomaticNetworkZoneCapability, ZoneMigrationCapability)
 						}
+						if admin && permissions.CanManageMachineRules && !readonly {
+							r.Capabilities = append(r.Capabilities, NetworkEndpointCapability)
+						}
 						switch q.Operation {
+						case "endpoint-rule-preview", "endpoint-rule-save":
+							if readonly {
+								r.ErrorCode, r.Error = "read_only", "Read-only endpoint"
+							} else if !admin || !permissions.CanManageMachineRules {
+								r.ErrorCode, r.Error = "forbidden", "Network endpoint authority requires configured administrator"
+							} else if q.EndpointDraft == nil || (q.Operation == "endpoint-rule-save" && (q.PreviewToken == "" || len(q.PreviewToken) > 128)) {
+								r.ErrorCode, r.Error = "invalid_request", "Explicit endpoint draft and save preview token required"
+							} else if q.Operation == "endpoint-rule-preview" {
+								v, err := e.PreviewEndpointRule(q.Generation, *q.EndpointDraft, cred.Uid, admin, r.Enforcement)
+								decisionError(&r, err)
+								if err == nil {
+									r.EndpointPreview = &v
+								}
+							} else {
+								v, sentence, replayed, err := e.SaveEndpointRule(q.Generation, q.PreviewToken, *q.EndpointDraft, cred.Uid, admin)
+								decisionError(&r, err)
+								if err == nil {
+									r.SavedRule = &v
+									r.ScopePreview = sentence
+									r.Replayed = replayed
+								}
+							}
 						case "essential-status", "essential-preview", "essential-apply", "essential-remove-preview", "essential-remove":
 							c.SetDeadline(time.Now().Add(20 * time.Second))
 							if !admin || (q.Operation != "essential-status" && (!permissions.CanManageRules || readonly)) {

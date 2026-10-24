@@ -77,6 +77,7 @@ type Engine struct {
 	Build             *BuildIdentity
 	Zones             identity.NetworkZones
 	ZoneSource        func() identity.NetworkZones
+	endpointPreviews  map[string]*endpointPreview
 	zonePreviews      map[string]*zonePreview
 	zoneMigrations    map[string]*zoneMigration
 	decisionPreviews  map[string]*decisionPreview
@@ -218,6 +219,9 @@ func (e *Engine) liveEventsLocked() int {
 // slow (process scans, runtime censuses) and runs outside e.mu so prompts, API
 // reads and independent flows are not held behind it.
 func (e *Engine) Observe(f identity.Flow, token string) Event {
+	if v, ok := e.tryNetworkEndpoint(f, token); ok {
+		return v
+	}
 	// Every undecided/new attempt and every UDP datagram rechecks actual ownership.
 	if e.defaultLoopback(f) {
 		return e.ObserveResolved(f, token, identity.Attribution{Status: "localhost", Reason: "Localhost communication is allowed by default", ReasonCode: identity.ReasonLocalhostExempt})
@@ -229,6 +233,9 @@ func (e *Engine) Observe(f identity.Flow, token string) Event {
 // attribution needs a census that cannot start now: no event is created and
 // nothing is logged; the caller must use Observe later or drop explicitly.
 func (e *Engine) TryObserve(f identity.Flow, token string) (Event, bool) {
+	if v, ok := e.tryNetworkEndpoint(f, token); ok {
+		return v, true
+	}
 	if e.defaultLoopback(f) {
 		return e.Observe(f, token), true
 	}
@@ -287,6 +294,12 @@ func (e *Engine) ObserveResolved(f identity.Flow, token string, a identity.Attri
 	e.mu.Lock()
 	e.peerPrefetched = peers
 	defer func() { e.peerPrefetched = nil; e.mu.Unlock() }()
+	return e.observeResolvedLocked(f, token, a)
+}
+
+// Caller holds e.mu. Shared by ordinary fresh attribution and explicit network
+// authority, so rule publication and the final verdict cannot race a precheck.
+func (e *Engine) observeResolvedLocked(f identity.Flow, token string, a identity.Attribution) Event {
 	e.refreshZonesLocked()
 	f.NetworkScope = e.Zones.ClassifyFlow(f)
 	now := e.Now()
@@ -324,6 +337,15 @@ func (e *Engine) ObserveResolved(f identity.Flow, token string, a identity.Attri
 		action, rule = pair.Action, v.Rule
 	}
 	v.decided = e.ruleLocked(rule)
+	// Reuse only the bounded history identity after evaluating current network
+	// policy again. No collector result, cached verdict or ownership authority
+	// is reused. Sharing ID also serializes out-of-order packet log outcomes.
+	if v.decided != nil && v.decided.NetworkEndpoint && a.ReasonCode == identity.ReasonAttributionNotRequired {
+		if old := e.events[key]; old != nil && old.historyOnly && old.Attribution.ReasonCode == a.ReasonCode && old.decided != nil && *old.decided == *v.decided && now.Before(old.logDeadline) {
+			v.ID = old.ID
+			v.logAttemptID, v.logDeadline, v.finalLogged = old.logAttemptID, old.logDeadline, old.finalLogged
+		}
+	}
 	if a.Principal() != nil {
 		filter := policy.Remembered(f, a)
 		v.RememberedFilter = &filter
@@ -364,6 +386,10 @@ func (e *Engine) ObserveResolved(f identity.Flow, token string, a identity.Attri
 			v.AskRule = &RuleVersionRef{v.decided.ID, v.decided.Version}
 			v.Reason = "stored Ask rule " + v.decided.ID + " requires a decision; " + v.Reason
 		}
+	}
+	if v.decided != nil && v.decided.NetworkEndpoint {
+		v.Permission = endpointSentence(*v.decided)
+		v.Reason = "Explicit network endpoint policy (all users/programs; application identity is not required): " + action + "; Allow overrides application policy, other firewall chains may still deny delivery"
 	}
 	if pair != nil {
 		e.admitPairLocked(&v, pair, now)
@@ -760,6 +786,9 @@ func (e *Engine) ChangeRule(id, action string, uid uint32, admin bool) error {
 		}
 		if !admin && (r.Filter.AllUIDs || r.Filter.UID != uid) {
 			return fmt.Errorf("not authorized")
+		}
+		if r.NetworkEndpoint {
+			return mutationError("immutable_target", "Endpoint rules require exact conditional Delete; recreate through endpoint review to change")
 		}
 		if r.Preset != nil && active {
 			return mutationError("protection_active", "Stop protection before changing preset permissions")

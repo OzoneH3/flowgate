@@ -4,7 +4,7 @@ package policy
 // (editor preview, policy explanation, documentation) so they cannot drift.
 
 // PrecedenceSentence states the evaluator's order (see Precedes).
-const PrecedenceSentence = "Among matching active rules (the newest saved setting of each program scope): higher target weight wins (process 4 › application 3 › zone 2 › all programs 1); then higher priority; then Deny › Allow › Ask; then a user rule over a preset; then the smaller rule ID."
+const PrecedenceSentence = NetworkEndpointPrecedence + " Among matching active rules (the newest saved setting of each program scope): higher target weight wins (process 4 › application 3 › zone 2 › all programs 1); then higher priority; then Deny › Allow › Ask; then a user rule over a preset; then the smaller rule ID."
 
 // LoopbackSentence explains the same-host exception (DefaultLoopback).
 const LoopbackSentence = "Traffic to this machine itself (loopback or this exact host address) is allowed by default; only rules naming a loopback address or this exact host address apply to it, so a rule for any address does not."

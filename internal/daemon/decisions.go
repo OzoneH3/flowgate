@@ -85,6 +85,9 @@ func (e *Engine) recordFinal(v *Event, action, source, scope, reason string, rul
 	}
 	v.finalLogged = true
 	r := e.baseRecord(v, decisionlog.KindFinal)
+	if rule != nil && rule.NetworkEndpoint {
+		scope = "network-endpoint"
+	}
 	r.Decision = &decisionlog.Decision{Action: action, Source: source, Scope: scope, Reason: reason, MatchingRules: v.Conflicts, LeaseID: v.leaseID}
 	if rule != nil {
 		r.Decision.Rule = decisionlog.Snapshot(*rule)

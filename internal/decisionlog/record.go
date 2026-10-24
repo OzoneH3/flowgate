@@ -130,5 +130,8 @@ func Snapshot(r policy.Rule) *RuleSnapshot {
 	if r.Preset != nil && r.Filter.AllPrograms {
 		scope = "system"
 	}
+	if r.NetworkEndpoint {
+		scope = "network-endpoint"
+	}
 	return &RuleSnapshot{Preset: r.Preset, TargetScope: scope, ID: r.ID, Version: uitoa(r.Version), Action: r.Action, Priority: r.Priority, Disabled: r.Disabled, Created: r.Created, Expires: r.Expires, Filter: r.Filter}
 }

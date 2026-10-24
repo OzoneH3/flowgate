@@ -5,6 +5,8 @@ package identity
 // Empty codes are retained for legacy/injected results; consumers must not infer
 // a code from human-readable evidence. Future codes must remain safe to ignore.
 const (
+	ReasonAttributionNotRequired       = "attribution_not_required"
+	ReasonNoUserspaceOwnerObserved     = "no_userspace_owner_observed"
 	ReasonNoSocketObserved             = "no_socket_observed"
 	ReasonNamespaceMismatch            = "namespace_mismatch"
 	ReasonSocketCensusUnavailable      = "socket_census_unavailable"

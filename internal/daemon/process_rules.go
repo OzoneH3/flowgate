@@ -18,6 +18,9 @@ type RuleTargetState struct {
 }
 
 func (e *Engine) targetStateLocked(r policy.Rule) RuleTargetState {
+	if r.NetworkEndpoint {
+		return RuleTargetState{"network-endpoint", "active", policy.NetworkEndpointPrecedence + " Existing admitted TCP may continue after removal or expiry."}
+	}
 	if r.Preset != nil {
 		scope := "application"
 		if r.Filter.AllPrograms {

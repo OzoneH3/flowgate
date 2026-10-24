@@ -34,6 +34,9 @@ func duplicate(rules []policy.Rule, r policy.Rule, now time.Time, current ...ide
 }
 
 func RuleSentence(r policy.Rule) string {
+	if r.NetworkEndpoint {
+		return endpointSentence(r)
+	}
 	f := r.Filter
 	target := "all process instances"
 	if f.AllPrograms {
@@ -98,6 +101,9 @@ func RuleSentence(r policy.Rule) string {
 // immutable identity from a currently attributable pending request. Edits require
 // a version and preserve application/revision/UID/direction, ID and creation time.
 func (e *Engine) EditRule(id, eventID string, expected *uint64, candidate policy.Rule, uid uint32, admin, commit bool) (policy.Rule, string, error) {
+	if candidate.NetworkEndpoint || candidate.Schema == policy.NetworkEndpointSchema {
+		return policy.Rule{}, "", mutationError("immutable_target", "Endpoint rules require their dedicated preview/save; delete and recreate to change")
+	}
 	if candidate.ShareWithRoot && !admin {
 		return policy.Rule{}, "", mutationError("forbidden", "Only the configured administrator may share rules with root")
 	}
@@ -121,6 +127,9 @@ func (e *Engine) EditRule(id, eventID string, expected *uint64, candidate policy
 			return policy.Rule{}, "", mutationError("not_found", "rule no longer exists")
 		}
 		old := e.rules[index]
+		if old.NetworkEndpoint {
+			return policy.Rule{}, "", mutationError("immutable_target", "Endpoint rules must be conditionally deleted and recreated")
+		}
 		if old.Preset != nil {
 			return policy.Rule{}, "", mutationError("immutable_target", "Preset rules require Essential review; generic editor cannot strip provenance or scope")
 		}
@@ -331,6 +340,9 @@ func (e *Engine) CreateRuleFromBasis(basisID string, candidate policy.Rule, uid 
 // reviewRuleLocked is shared by pending/editor and observed-application creation.
 // The caller supplies independently verified immutable identity and holds e.mu.
 func (e *Engine) reviewRuleLocked(candidate policy.Rule, now time.Time, expiryUnchanged bool) (policy.Rule, string, error) {
+	if candidate.NetworkEndpoint || candidate.Schema == policy.NetworkEndpointSchema {
+		return policy.Rule{}, "", mutationError("immutable_target", "Endpoint authority cannot be created through an application editor")
+	}
 	if candidate.Schema == 5 || candidate.Preset != nil {
 		return policy.Rule{}, "", fmt.Errorf("preset schema5 is immutable through legacy editor; use Essential preview/removal or exact conditional Delete")
 	}

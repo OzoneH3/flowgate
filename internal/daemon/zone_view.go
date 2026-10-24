@@ -15,7 +15,7 @@ type ZonePolicy struct {
 func zoneFallbackIDs(rules []policy.Rule, uid uint32) []string {
 	out := []string{}
 	for _, r := range rules {
-		if r.Filter.AllPrograms && (r.Filter.AllUIDs || r.Filter.UID == uid) {
+		if !r.NetworkEndpoint && r.Filter.AllPrograms && (r.Filter.AllUIDs || r.Filter.UID == uid) {
 			out = append(out, r.ID)
 		}
 	}

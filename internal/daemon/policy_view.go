@@ -92,6 +92,7 @@ type PolicySnapshot struct {
 	Meaning     string     `json:"meaning"`
 }
 type PolicyView struct {
+	NetworkEndpoints  []PolicyRuleRef       `json:"network_endpoints"`
 	NetworkZones      identity.NetworkZones `json:"network_zones"`
 	Zones             []ZonePolicy          `json:"zones"`
 	Processes         []ProcessPolicy       `json:"processes"`
@@ -124,7 +125,13 @@ type PolicyExplanations struct {
 
 func ruleRef(r policy.Rule, now time.Time, current ...identity.Application) PolicyRuleRef {
 	expired := !r.Expires.IsZero() && !now.Before(r.Expires)
-	return PolicyRuleRef{FollowsUpdates: r.FollowsUpdates(), RootApplication: r.RootApplication, TargetScope: "application", TargetState: "active", TargetReason: "Saved application identity/UID rule; follows_updates states revision handling; enabled/expiry are separate", ID: r.ID, Version: strconv.FormatUint(r.Version, 10), Action: r.Action, Priority: r.Priority, Scope: r.Filter, Disabled: r.Disabled, Expired: expired, Active: !r.Disabled && !expired, Expires: r.Expires}
+	v := PolicyRuleRef{FollowsUpdates: r.FollowsUpdates(), RootApplication: r.RootApplication, TargetScope: "application", TargetState: "active", TargetReason: "Saved application identity/UID rule; follows_updates states revision handling; enabled/expiry are separate", ID: r.ID, Version: strconv.FormatUint(r.Version, 10), Action: r.Action, Priority: r.Priority, Scope: r.Filter, Disabled: r.Disabled, Expired: expired, Active: !r.Disabled && !expired, Expires: r.Expires}
+	if r.NetworkEndpoint {
+		v.TargetScope = "network-endpoint"
+		v.TargetReason = policy.NetworkEndpointPrecedence
+		v.Kind = "scoped"
+	}
+	return v
 }
 func appPolicyRef(a PolicyIdentity) string {
 	b, _ := json.Marshal(a)
@@ -225,6 +232,7 @@ func summaryFor(a PolicyIdentity, direction, mode string, h *EnforcementStatus, 
 		}
 	}
 	if len(out.Rules) == 0 {
+		endpointSummary(&out, rules, now)
 		return out
 	}
 	switch {
@@ -251,6 +259,7 @@ func summaryFor(a PolicyIdentity, direction, mode string, h *EnforcementStatus, 
 			}
 		}
 	}
+	endpointSummary(&out, rules, now)
 	return out
 }
 
@@ -320,6 +329,12 @@ func (e *Engine) PolicyView(generation, expected string, uid uint32, admin bool,
 	activity = ClassifyActivity(activity, e.Zones)
 	out := PolicyView{NetworkZones: e.Zones, Zones: e.zoneViews(rules, h, snapshot.EvaluatedAt), Snapshot: snapshot, ActivitySequence: strconv.FormatUint(activity.Sequence, 10), ActivityCollected: activity.Collected, Applications: []ApplicationPolicy{}, Rows: []PolicyAssociation{}, Complete: activity.Complete}
 	now := snapshot.EvaluatedAt
+	out.NetworkEndpoints = []PolicyRuleRef{}
+	for _, r := range rules {
+		if r.NetworkEndpoint {
+			out.NetworkEndpoints = append(out.NetworkEndpoints, e.ruleRefLocked(r, now))
+		}
+	}
 	var processComplete bool
 	out.Processes, processComplete = e.processViewsLocked(activity, rules, h, now)
 	if !processComplete {
@@ -494,4 +509,21 @@ func ruleKind(f policy.Filter) string {
 		return "zone"
 	}
 	return "application"
+}
+
+func endpointSummary(out *DirectionPolicy, rules []policy.Rule, now time.Time) {
+	if out.Direction != "outgoing" {
+		return
+	}
+	for _, r := range rules {
+		if !r.NetworkEndpoint || r.Disabled || (!r.Expires.IsZero() && !now.Before(r.Expires)) {
+			continue
+		}
+		out.Action = ""
+		if out.Configured == "uniform" {
+			out.Configured = "scoped"
+		}
+		out.Reason += "; explicit network endpoint policy overrides program policy for matching outgoing TCP endpoints; consult network endpoint inventory/concrete explanation"
+		return
+	}
 }

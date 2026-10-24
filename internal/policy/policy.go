@@ -32,6 +32,7 @@ type Filter struct {
 	UID           uint32 `json:"uid"`
 }
 type Rule struct {
+	NetworkEndpoint bool   `json:"network_endpoint,omitempty"`
 	ShareWithRoot   bool   `json:"share_with_root,omitempty"`
 	RootApplication string `json:"root_application,omitempty"`
 	// Invocation is historical display context, never a permission matcher.
@@ -99,6 +100,9 @@ func (r Rule) MatchesApplication(key, revision string, uid uint32, current ...id
 }
 
 func (r Rule) Validate() error {
+	if r.NetworkEndpoint || r.Schema == NetworkEndpointSchema {
+		return r.validateNetworkEndpoint()
+	}
 	if r.RootApplication != "" && (!r.validRootPair() || r.RootApplication != identity.ApplicationKey(0, identity.Application{Kind: "native", Executable: r.Executable})) {
 		return fmt.Errorf("invalid paired root application scope")
 	}
@@ -180,6 +184,9 @@ func Evaluate(rules []Rule, f identity.Flow, a identity.Attribution, now time.Ti
 	return EvaluateSession(rules, f, a, now, "")
 }
 func EvaluateSession(rules []Rule, f identity.Flow, a identity.Attribution, now time.Time, session string) (string, string, []string) {
+	if action, id, ids := EvaluateNetworkEndpoint(rules, f, now); id != "" {
+		return action, id, ids
+	}
 	localhost := identity.IsLoopbackFlow(f)
 	if localhost {
 		rules = LoopbackRules(rules, f, now)
@@ -192,6 +199,9 @@ func EvaluateSession(rules []Rule, f identity.Flow, a identity.Attribution, now 
 	}
 	var matches []Rule
 	for _, r := range CurrentProgramRules(rules, now) {
+		if r.NetworkEndpoint {
+			continue
+		}
 		x := r.Filter
 		// An argv/package-derived hosted identity is not application authority.
 		// Keep old rules inspectable, but do not revive either bundle rules or
@@ -303,6 +313,8 @@ func actionRank(a string) int {
 // equivalent) are 4 so an instance override keeps beating its application.
 func (r Rule) Weight() int {
 	switch {
+	case r.NetworkEndpoint:
+		return 5
 	case !r.Filter.Process.IsZero():
 		return 4
 	case r.Filter.AllPrograms && r.Filter.NetworkZone != "":

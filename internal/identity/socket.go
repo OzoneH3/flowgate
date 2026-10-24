@@ -275,9 +275,7 @@ func Resolve(f Flow) Attribution {
 			return a
 		}
 	}
-	if len(a.Sockets) != 1 || len(a.Owners) != 1 {
-		a.Status = "multiple-candidates"
-		a.setReason(ReasonMultipleCandidates, "shared descriptor, shared listener, or hidden owner; application permission unavailable")
+	if unresolvedOwnership(&a, incomplete) {
 		return a
 	}
 	if incomplete || len(covered) != len(wanted) {
@@ -314,4 +312,24 @@ func ParseFlow(protocol, direction, local, remote string) (Flow, error) {
 		return Flow{}, fmt.Errorf("invalid protocol/direction")
 	}
 	return Flow{Protocol: protocol, Direction: direction, Local: l, Remote: r, NetNS: NetNS()}, nil
+}
+
+// A missing userspace holder is an observation, never proof of kernel origin.
+// Preserve socket/fingerprint/visibility evidence and permission refusal.
+func unresolvedOwnership(a *Attribution, incomplete bool) bool {
+	if len(a.Sockets) == 1 && len(a.Owners) == 0 {
+		a.Status = "unidentified"
+		if incomplete {
+			a.setReason(ReasonProcessVisibilityIncomplete, "process visibility incomplete; no supported userspace owner established")
+		} else {
+			a.setReason(ReasonNoUserspaceOwnerObserved, "socket observed without a visible userspace FD owner; kernel origin not established")
+		}
+		return true
+	}
+	if len(a.Sockets) != 1 || len(a.Owners) != 1 {
+		a.Status = "multiple-candidates"
+		a.setReason(ReasonMultipleCandidates, "multiple socket or process candidates; application permission unavailable")
+		return true
+	}
+	return false
 }
