@@ -159,13 +159,17 @@ func TestObservedCreationRejections(t *testing.T) {
 					return identity.Process{}, errors.New("process exited")
 				}
 			case "expired-preview":
+				a.e.mu.Lock()
 				*clock = clock.Add(31 * time.Second)
+				a.e.mu.Unlock()
 				want = "preview_expired"
 			case "expired-rule":
 				d.Expires = func() *time.Time { x := clock.Add(time.Second); return &x }()
 				p = requirePreview(t, a, d)
 				q = saveRequest(a, p, d)
+				a.e.mu.Lock()
 				*clock = clock.Add(2 * time.Second)
+				a.e.mu.Unlock()
 				want = "preview_expired"
 			case "stale-activity":
 				snap.Collected = clock.Add(-time.Minute)
@@ -297,10 +301,16 @@ func TestObservedConcurrentSaveAndBounds(t *testing.T) {
 		requirePreview(t, a2, d)
 	}
 	assertCode(t, callResponse(a2.path, previewRequest(a2, d)), "limit_exceeded")
+	a2.e.mu.Lock()
 	*clock = clock.Add(31 * time.Second)
+	a2.e.mu.Unlock()
 	requirePreview(t, a2, d) // expired state is reclaimed, not unbounded
 }
 func TestObservedActualNativeUnixAPI(t *testing.T) {
+	if os.Getenv("FLOWGATE_PARENT_NETNS") == "" || os.Getenv("FLOWGATE_PARENT_NETNS") == identity.NetNS() {
+		t.Skip("real ownership fixture requires disposable PID/network namespace; run scripts/lab.sh")
+	}
+
 	listener, err := net.ListenPacket("udp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

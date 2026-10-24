@@ -588,7 +588,7 @@ def transition(host, backend, selected):
     raise RuntimeError('Protection did not reach ' + selected + ': ' + reason + '; inspect flowgate-control status. No action was replayed.')
 
 
-def update(host, root, revision, *, dry=False, gui=True, profile="both", wine_discovery=False, recover_stopped=False, autostart=False):
+def update(host, root, revision, *, dry=False, gui=True, profile="preserve", wine_discovery=False, recover_stopped=False, autostart=False, acknowledge_outgoing=False):
     if autostart and not gui:
         raise ValueError("--autostart requires GUI switching")
     bundle = root / '.workspace/automatic-zone-releases' / revision
@@ -607,6 +607,16 @@ def update(host, root, revision, *, dry=False, gui=True, profile="both", wine_di
         profile = 'monitoring'
     previous = mode(before) if before else 'monitoring'
     selected = previous if profile == "preserve" else profile
+    def check_activation(current_mode, target):
+        if target == 'both' and current_mode != 'both':
+            warning = ('Enabling outgoing default-deny can block DNS, DHCP, VPN and kernel-origin traffic. '
+                       'Review Essential networking and saved permissions; no permissions are added automatically. '
+                       'Root-local recovery: sudo /usr/local/sbin/flowgate-recover. '
+                       'Continuous protection has no automatic countdown.')
+            say(warning)
+            if not dry and not acknowledge_outgoing:
+                raise RuntimeError('Outgoing activation requires --acknowledge-outgoing-blocking after reviewing this warning; no action taken')
+    check_activation(previous, selected)
     needs_install = wine_discovery or before is None or (not matches(before, manifest) if manifest else (before.get('build') or {}).get('source') != revision)
     if dry:
         if needs_install:
@@ -632,11 +642,13 @@ def update(host, root, revision, *, dry=False, gui=True, profile="both", wine_di
             host.authenticate()
             current = host.status() if before is not None else None
             selected = mode(current) if current is not None and profile == 'preserve' else selected
+            check_activation(mode(current) if current is not None else 'monitoring', selected)
             host.preflight(backend, selected)
             checked_profile = selected
             current = host.status() if before is not None else None
             if current is not None:
                 selected = mode(current) if profile == "preserve" else profile
+                check_activation(mode(current), selected)
                 if selected != checked_profile:
                     host.preflight(backend, selected)
                 if not at_mode(current, 'monitoring'):
@@ -661,6 +673,9 @@ def update(host, root, revision, *, dry=False, gui=True, profile="both", wine_di
         if needs_install or profile is not None:
             current = host.status()
             if not at_mode(current, selected):
+                # A new install is expected to be monitoring. Only restoration
+                # of an already active outgoing policy skips a new acknowledgement.
+                check_activation(mode(recovery_status) if stopped_for_update else mode(current), selected)
                 say('Restoring protection mode: ' + selected)
                 transition(host, backend, selected)
         final = host.status()
@@ -706,10 +721,11 @@ def main(argv=None, host=None):
     parser.add_argument('--autostart', action='store_true', help='Start this user GUI at login; refresh the matched release on future GUI updates')
     parser.add_argument('--wine-discovery', action='store_true')
     parser.add_argument('--recover-stopped', action='store_true')
-    parser.add_argument('--profile', choices=('preserve', 'monitoring', 'incoming', 'both'), default='both')
+    parser.add_argument('--profile', choices=('preserve', 'monitoring', 'incoming', 'both'), default='preserve', help='Preserve current mode by default; new installs stay monitoring')
+    parser.add_argument('--acknowledge-outgoing-blocking', action='store_true', help='Acknowledge default-deny/DNS/DHCP lockout risk when enabling Both from another mode')
     args = parser.parse_args(argv)
     try:
-        update(host or Host(), args.root.resolve(), args.revision, dry=args.dry_run, gui=not args.no_gui, profile=args.profile, wine_discovery=args.wine_discovery, recover_stopped=args.recover_stopped, autostart=args.autostart)
+        update(host or Host(), args.root.resolve(), args.revision, dry=args.dry_run, gui=not args.no_gui, profile=args.profile, wine_discovery=args.wine_discovery, recover_stopped=args.recover_stopped, autostart=args.autostart, acknowledge_outgoing=args.acknowledge_outgoing_blocking)
     except GuiNotSwitched as error:
         # Distinct from update failure: the daemon/protection result above stands.
         print('==> Backend update verified; GUI not switched: ' + str(error), file=sys.stderr, flush=True)

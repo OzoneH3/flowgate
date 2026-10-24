@@ -234,7 +234,7 @@ func TestPolicyTokensEditsExpiryAndExactSequence(t *testing.T) {
 		t.Fatal("old generation accepted")
 	}
 	e.SaveRules = func([]policy.Rule) error { return nil }
-	e.ChangeRule("lease", "disable", 1000, false)
+	changeListedRule(e, "lease", "disable", 1000, false)
 	edited := viewFor(t, e, nil)
 	if edited.Snapshot.Token == current.Snapshot.Token {
 		t.Fatal("edit did not invalidate")
@@ -272,13 +272,17 @@ func TestPolicySnapshotConcurrentQueriesAndEdits(t *testing.T) {
 		}()
 	}
 	for i := 0; i < 30; i++ {
-		if err := e.ChangeRule("rule", []string{"disable", "enable"}[i%2], 1000, false); err != nil {
+		if err := changeListedRule(e, "rule", []string{"disable", "enable"}[i%2], 1000, false); err != nil {
 			t.Fatal(err)
 		}
 	}
 	wg.Wait()
 }
 func TestPolicyContractAuthenticatedNativeActivity(t *testing.T) {
+	if os.Getenv("FLOWGATE_PARENT_NETNS") == "" || os.Getenv("FLOWGATE_PARENT_NETNS") == identity.NetNS() {
+		t.Skip("real ownership fixture requires disposable PID/network namespace; run scripts/lab.sh")
+	}
+
 	if os.Getuid() == 0 {
 		t.Skip("real ordinary Unix peer required")
 	}
@@ -342,7 +346,8 @@ func TestPolicyContractAuthenticatedNativeActivity(t *testing.T) {
 	if strings.Contains(string(blob), "foreign-private-rule") {
 		t.Fatal("foreign policy exposure")
 	}
-	if err := os.WriteFile("../../.workspace/policy-api-example.json", blob, 0600); err != nil {
+	artifactDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(artifactDir, "policy-api-example.json"), blob, 0600); err != nil {
 		t.Fatal(err)
 	}
 	explanation, err := Call(api.path, Request{Version: 1, Operation: "policy-explain", Generation: api.e.Generation, ExpectedPolicyToken: r.PolicyView.Snapshot.Token, EventIDs: []string{event.ID}})
@@ -350,7 +355,9 @@ func TestPolicyContractAuthenticatedNativeActivity(t *testing.T) {
 		t.Fatal(explanation, err)
 	}
 	exblob, _ := json.MarshalIndent(explanation, "", "  ")
-	os.WriteFile("../../.workspace/policy-explanation-api-example.json", exblob, 0600)
+	if err := os.WriteFile(filepath.Join(artifactDir, "policy-explanation-api-example.json"), exblob, 0600); err != nil {
+		t.Fatal(err)
+	}
 	roPath := filepath.Join(filepath.Dir(api.path), "readonly")
 	ro, err := Serve(roPath, api.e, true)
 	if err != nil {

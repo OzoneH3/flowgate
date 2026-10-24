@@ -18,8 +18,11 @@ Run from a clean, committed `master` checkout:
 ```
 
 `--local` skips upstream access. `--profile preserve` keeps the existing protection
-mode; on a new installation it selects monitoring. Omitting `--profile` selects
-`both`, so the default updater also requests protection. Preparation and candidate
+mode; on a new installation it selects monitoring. Omitting `--profile` also
+preserves the mode. To explicitly enable Both from another mode, use
+`--profile both --acknowledge-outgoing-blocking` after reviewing Essential
+networking and root-local recovery. Continuous protection has no automatic
+countdown; no DNS/DHCP/service permissions are added automatically. Preparation and candidate
 compatibility checks precede stopping the current protection. Authentication uses
 sudo or the optional [passwordless local update helper](#passwordless-local-updates).
 
@@ -41,6 +44,8 @@ Source HEAD, the installed daemon and the running GUI may differ. The GUI header
 shows its release and recorded build date/time and flags a different daemon
 build. Use `flowgate version` on the specific binary being inspected; historical
 host states in the linked evidence documents are not current status reports.
+
+Maintained source/operational scope: [STATUS.md](docs/STATUS.md).
 
 ## Connect to the installed daemon
 
@@ -219,7 +224,7 @@ attribution, deadline and backend-provided permission scope.
   a different local service port, which remains subject to its own permission.
 - The terminal prints the private run directory. `receiver-41001.log` gains
   `RECEIVED` only upon delivery. No payload is logged.
-- Lab prompts last **60 seconds**. The backend default remains 15 seconds.
+- Lab prompts last **60 seconds**. The `serve` and `host-start` default to 30 seconds; `serve-lab` defaults to 15 seconds.
 - Closing/dismissing a prompt grants nothing. Closing the window leaves the lab
   enforcing. Type **q** or press **Ctrl+C in the terminal** to clean up its processes
   and namespace. Only this demo's objects are removed; logs remain in `.workspace`.

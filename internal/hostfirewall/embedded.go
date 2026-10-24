@@ -348,13 +348,7 @@ func (m *Evaluation) run(ctx context.Context, id string) {
 			if er := ctx.Err(); er != nil {
 				return er
 			}
-			if er := bootstrapContext(ctx, func() error { r.MarksOwned = true; return save(m.dir, r) }); er != nil {
-				return er
-			}
-			if er := ctx.Err(); er != nil {
-				return er
-			}
-			if er := batch(profileRules(id, profile, bootstrap...)); er != nil {
+			if er := activateProfile(ctx, id, profile, func() error { r.MarksOwned = true; return save(m.dir, r) }, bootstrap...); er != nil {
 				return er
 			}
 			if m.afterInstall != nil {

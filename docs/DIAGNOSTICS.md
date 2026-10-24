@@ -1,19 +1,14 @@
 # Read-only doctor and startup troubleshooting
 
-## Current Tailscale inspection
+## Firewall and VPN inspection
 
-`flowgate tailscale-inspect` performs fixed bounded read-only version/preferences,
-chain/mark-export/routing probes and a conntrack mark histogram, omitting peer
-identities and redacting address selectors. No arbitrary command runner is exposed.
-`doctor --json --profile incoming --administrator --uid 1000` shares the actual
-startup profile checks. --administrator describes a planned privileged grant;
-it does not grant API authority. Incoming Tailscale profile compatibility passes
-on the current sample; `both` refuses tailscale_profile_unsupported and missing
-administrative grant refuses administrator_required. Other unsupported masks,
-hooks, routes or builds report tailscale_unsupported. A running writer still
-blocks actual startup with policy_database_owned. See COEXISTENCE.md for exact
-scope and live-host gap; the older blanket-refusal sample below is historical.
-
+Use `flowgate doctor --json --profile incoming` or `--profile both` for bounded
+read-only prerequisite findings. `--administrator --uid 1000` describes planned
+configuration and does not grant API authority. Tailscale/coexistence findings are
+part of the shared doctor/startup checks; inspect their individual status and code.
+The former standalone command has been removed. No command here activates
+protection or changes VPN, routing, firewall or policy configuration.
+See [COEXISTENCE.md](COEXISTENCE.md) for supported inspection boundaries.
 
 ## Build and inspect
 

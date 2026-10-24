@@ -254,6 +254,8 @@ if op=='status':
   await wait(() => page.locator('#saveRule').isEnabled());
   await call(path.join(run, 'api/control.sock'), {
     operation: 'rule',
+    generation: (await snap(page)).control.generation,
+    expected_version: (await snap(page)).control.rules.find(r => r.id === initial.id).version,
     id: initial.id,
     action: 'disable',
   });

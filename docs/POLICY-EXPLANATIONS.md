@@ -150,7 +150,10 @@ requires clearly labelled fallback/unavailability, not fabricated backend result
 
 `scripts/checks/check-policy-view.sh` runs focused race/vet and a real UID1000 authenticated
 Unix API with native UDP Activity/SQLite rules. It writes real response captures
-under `.workspace/policy-api-example.json` and `policy-explanation-api-example.json`.
+under `.workspace/policy-api-example.json` and `policy-explanation-api-example.json`
+in the original evidence session. Current tests write these samples into a private
+per-test temporary directory, so ordinary-UID runs do not overwrite root-owned
+artifacts from an earlier run.
 The rule and recorded event are seeded test data; no intercepted decision or real
 receiver verdict is claimed by that fixture. Full uint64 versions are deliberate
 boundary fixtures. Other focused cases cover summary classes, both directions,

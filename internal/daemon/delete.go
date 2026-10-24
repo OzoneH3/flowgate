@@ -6,6 +6,7 @@ import (
 )
 
 const ConditionalDeleteCapability = "conditional-rule-delete-v1"
+const ConditionalMutationCapability = "conditional-rule-mutation-v1"
 
 type RuleMutationError struct {
 	Code    string

@@ -159,7 +159,7 @@ func TestEndpointPolicyConflictAndGenericMutationRefusal(t *testing.T) {
 		t.Fatal("stripped endpoint authority")
 	}
 	for _, action := range []string{"enable", "disable", "delete"} {
-		if e.ChangeRule(r.ID, action, 1000, true) == nil {
+		if changeListedRule(e, r.ID, action, 1000, true) == nil {
 			t.Fatal("legacy change handled endpoint", action)
 		}
 	}

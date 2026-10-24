@@ -771,15 +771,21 @@ func (e *Engine) Rules(uid uint32, admin bool) []policy.Rule {
 	}
 	return out
 }
-func (e *Engine) ChangeRule(id, action string, uid uint32, admin bool) error {
+func (e *Engine) ChangeRule(generation, id, action string, expected *uint64, uid uint32, admin bool) error {
 	active := false
 	if e.Enforcement != nil {
 		active = e.Enforcement().State != "stopped"
 	}
 	e.mu.Lock()
 	defer e.unlockAndSettle()
+	if generation == "" || generation != e.Generation {
+		return mutationError("generation_conflict", "backend generation changed or missing; reload")
+	}
+	if id == "" || expected == nil {
+		return mutationError("invalid_request", "rule ID and expected_version required")
+	}
 	if e.SaveRules == nil {
-		return fmt.Errorf("durable rules unavailable")
+		return mutationError("unavailable", "durable rules unavailable")
 	}
 	next := append([]policy.Rule{}, e.rules...)
 	found := false
@@ -788,7 +794,10 @@ func (e *Engine) ChangeRule(id, action string, uid uint32, admin bool) error {
 			continue
 		}
 		if !admin && (r.Filter.AllUIDs || r.Filter.UID != uid) {
-			return fmt.Errorf("not authorized")
+			return mutationError("forbidden", "not authorized")
+		}
+		if r.Version != *expected {
+			return mutationError("version_conflict", "stale rule version; reload before changing")
 		}
 		if r.NetworkEndpoint {
 			return mutationError("immutable_target", "Endpoint rules require exact conditional Delete; recreate through endpoint review to change")
@@ -819,10 +828,10 @@ func (e *Engine) ChangeRule(id, action string, uid uint32, admin bool) error {
 		break
 	}
 	if !found {
-		return fmt.Errorf("unknown rule")
+		return mutationError("not_found", "rule no longer exists; reload authoritative state")
 	}
 	if err := e.SaveRules(next); err != nil {
-		return err
+		return mutationError("persistence_failed", "rule transaction failed; old policy retained: "+err.Error())
 	}
 	e.rules = next
 	e.pruneHandlesLocked()

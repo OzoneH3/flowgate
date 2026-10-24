@@ -395,11 +395,7 @@ func RunProfileAuthorized(ctx context.Context, dir, socket, database string, uid
 	runctx, cancel := context.WithDeadline(ctx, r.StopsAt)
 	defer cancel()
 	err = queue.RunConfigured(runctx, e, profile, Queue, false, func() error {
-		if er := bootstrap(func() error { r.MarksOwned = true; return save(dir, r) }); er != nil {
-			return er
-		}
-		if er := batch(profileRules(r.Token, profile)); er != nil {
-			clearMarks()
+		if er := activateProfile(runctx, r.Token, profile, func() error { r.MarksOwned = true; return save(dir, r) }); er != nil {
 			return er
 		}
 		installed = true

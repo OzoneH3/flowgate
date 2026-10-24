@@ -75,7 +75,7 @@ scripts/update-and-start.sh
 The normal command fast-forwards master when upstream is configured, prepares
 and verifies the matched release, authenticates sudo before interrupting
 protection, stops protection if a daemon update is needed, installs, verifies
-the running build, starts **Both** protection, then closes the old released GUI
+the running build, restores the previous protection mode, then closes the old released GUI
 and launches the matching GUI. It preserves stored rules and existing Wine
 observer configuration. Running it again with the same healthy daemon skips
 installation and the protection interruption.
@@ -86,8 +86,9 @@ or any installed-service action; it never silently uses an older local revision.
 
 Options:
 
-- `--profile preserve`: restore the mode selected before the update (including monitoring/off).
+- `--profile preserve` (default): restore the mode selected before the update; new installs stay monitoring.
 - `--profile incoming` or `--profile monitoring`: select Incoming or leave protection off.
+- `--profile both --acknowledge-outgoing-blocking`: explicitly enable outgoing default-deny after reviewing Essential networking and recovery. Without acknowledgement, a transition from another mode refuses before authentication, stop or installation. DNS/DHCP/VPN can be blocked; no automatic permissions or continuous countdown are added.
 - `--no-gui`: perform the same update/protection workflow without switching the GUI.
 - `--recover-stopped`: recover an unavailable daemon into monitoring only.
 - `--local`: skip upstream access and use committed local master (still requires a clean tree).
@@ -162,3 +163,11 @@ opt-in with `--wine`. Private mount/runtime and essential-networking checks run 
 The subordinate-ID user-namespace fixture is still separate and explicitly
 reported as not covered by the default command. Required build dependencies must be installed; missing
 dependencies fail the command rather than silently skipping a suite.
+
+The native ownership/API fixture tests require a disposable PID/network namespace;
+plain `go test` reports an explicit skip for those tests outside that environment.
+The lab assertions still require a real owned socket. A host census with inaccessible
+processes or changing holders is a visibility result, not a portable unit-test fixture.
+Release acceptance must run the gated cases and the ordinary-UID API cases explicitly;
+a skipped native case is not evidence that ownership or delivery worked. Use capped
+VM validation for kernel/native work in this development environment.

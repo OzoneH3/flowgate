@@ -69,7 +69,7 @@ func TestEditorOverlapAndDuplicate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e.ChangeRule(r.ID, "enable", 1000, false)
+	changeListedRule(e, r.ID, "enable", 1000, false)
 	a, _, _ := policy.Evaluate(e.Rules(1000, false), f, e.Resolve(f), *now)
 	if a != "block" {
 		t.Fatal("priority changed")
@@ -129,7 +129,7 @@ func TestEditorExpiredRuleStaysExpired(t *testing.T) {
 	if err != nil || !next.Expires.Equal(oldExpiry) {
 		t.Fatal("expired edit changed expiry", err)
 	}
-	if err := e.ChangeRule(next.ID, "enable", 1000, false); err != nil {
+	if err := changeListedRule(e, next.ID, "enable", 1000, false); err != nil {
 		t.Fatal(err)
 	}
 	action, _, _ := policy.Evaluate(e.Rules(1000, false), f, e.Resolve(f), *now)

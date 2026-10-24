@@ -195,7 +195,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 					if err != nil || cred == nil {
 						return
 					}
-					r := Response{Build: e.Build, Capabilities: []string{ConditionalDeleteCapability, "explicit-administrator-v1"}, Version: 1, Generation: e.Generation, ReadOnly: readonly, Mode: e.Mode, ServerTime: time.Now(), PeerUID: cred.Uid}
+					r := Response{Build: e.Build, Capabilities: []string{ConditionalDeleteCapability, ConditionalMutationCapability, "explicit-administrator-v1"}, Version: 1, Generation: e.Generation, ReadOnly: readonly, Mode: e.Mode, ServerTime: time.Now(), PeerUID: cred.Uid}
 					if e.RuntimeChecks != nil {
 						r.RuntimeChecks = e.RuntimeChecks()
 					}
@@ -804,8 +804,12 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						case "rule":
 							if r.ReadOnly {
 								r.Error = "read-only API"
-							} else if err := e.ChangeRule(q.ID, q.Action, cred.Uid, admin); err != nil {
-								r.Error = err.Error()
+							} else if err := e.ChangeRule(q.Generation, q.ID, q.Action, q.ExpectedVersion, cred.Uid, admin); err != nil {
+								r.ErrorCode, r.Error = "invalid_request", err.Error()
+								var typed *RuleMutationError
+								if errors.As(err, &typed) {
+									r.ErrorCode = typed.Code
+								}
 							}
 						case "decision-preview", "decision-status":
 							if readonly || e.Mode == "host-monitor" {

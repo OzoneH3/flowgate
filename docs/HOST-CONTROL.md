@@ -164,10 +164,19 @@ recovery: no software watchdog can survive its own destruction.
   initiation contract; rule changes do not disconnect it. UDP is re-evaluated.
 - Confirmed TCP/UDP connections present in the startup conntrack snapshot are
   preserved. Established TCP sockets without a matching conntrack record cause
-  startup refusal rather than silently breaking them. The snapshot and atomic rule
-  installation are not one kernel transaction: connections first opened during
-  **starting**, after that snapshot, can need a retry. This is not seamless cutover
-  under an arbitrarily busy/mutating network.
+  startup refusal rather than silently breaking them. A bounded **starting** phase
+  installs an owned temporary preservation table, takes a second conntrack pass,
+  then atomically replaces it with the selected profile. Traffic racing the second
+  pass is marked by the temporary hooks. This closes the snapshot/install gap for
+  established connections; new SYNs after the atomic cutoff require normal policy.
+  Before replacement, the temporary table must still have the owned token and
+  unchanged structural digest; a detected replacement or foreign mark collision
+  refuses startup. Rollback may remove a still-token-owned modified table; a
+  foreign token refuses cleanup. These read/check/replace steps do not provide an
+  atomic ownership CAS against a concurrent privileged actor. The complete cutover helper has a 15-second context plus bounded
+  in-flight command time. Continuous startup retains its priority9 guard throughout.
+  Starting is not Active;
+  guard/other firewalls and in-progress handshakes can still require retries.
 - Other protocols, including ICMP/ICMPv6, remain outside application filtering and
   pass through to the remaining firewall. IPv4 DHCP server67→client68 and IPv6
   link-local server547→client546 are explicit client bootstrap exceptions. They

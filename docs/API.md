@@ -148,11 +148,22 @@ multiple independent engines concurrently replacing one database.
 
 ## Compatibility and caller migration
 
-Legacy v1 `{"operation":"rule","action":"delete","id":"..."}` is retained
-for existing Qt/older clients. It **does not check generation or version**. A
-client-side list/precheck cannot make it safe against concurrent edits. Merely
-adding condition fields to that legacy operation does not change its semantics.
-There is no silent fallback from `rule-delete` to the legacy operation.
+Capability `conditional-rule-mutation-v1` means legacy `rule` actions now require
+both `generation` and numeric `expected_version` from the displayed snapshot:
+
+```json
+{"version":1,"operation":"rule","generation":"<listed-generation>","id":"<listed-id>","action":"disable","expected_version":3}
+```
+
+Enable, Disable and legacy Delete check generation, principal and version under
+the same lock as durable persistence and publication. Missing conditions refuse;
+stale generation/version returns `generation_conflict`/`version_conflict`. A
+persistence error leaves both version and policy unchanged. Replaying a committed
+request conflicts or returns `not_found` after deletion. Inspect current inventory
+after a lost reply; never substitute a newly fetched version behind an old action.
+Older daemons may ignore these conditions: Qt Enable/Disable require the new
+capability. There is no fallback to an unconditional legacy mutation. Dedicated
+`rule-delete` remains the integrated Delete operation with its explicit receipt.
 
 Both integrated clients now use one `rule-delete` with the displayed snapshot's
 frozen generation/ID/version and require the capability. No legacy fallback is

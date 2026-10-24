@@ -270,10 +270,17 @@ func TestConditionalDeleteUnavailableAndLegacyCompatibility(t *testing.T) {
 		t.Fatal(edit)
 	}
 	assertCode(t, callResponse(a.path, a.deleteRequest()), "version_conflict")
-	// Legacy Qt clients deliberately retain unconditional deletion semantics.
-	r := callResponse(a.path, Request{Version: 1, Operation: "rule", ID: a.rule.ID, Action: "delete"})
+	// Legacy operation now requires the same generation/version conditions.
+	q := Request{Version: 1, Operation: "rule", ID: a.rule.ID, Action: "delete"}
+	assertCode(t, callResponse(a.path, q), "generation_conflict")
+	q.Generation = a.e.Generation
+	q.ExpectedVersion = a.deleteRequest().ExpectedVersion
+	assertCode(t, callResponse(a.path, q), "version_conflict")
+	version := edit.SavedRule.Version
+	q.ExpectedVersion = &version
+	r := callResponse(a.path, q)
 	if r.Error != "" || len(a.e.Rules(0, true)) != 0 {
-		t.Fatal("legacy compatibility changed", r)
+		t.Fatal(r)
 	}
 }
 
@@ -317,7 +324,7 @@ func TestConditionalDeleteVersionExhaustion(t *testing.T) {
 	if r.Error == "" {
 		t.Fatal("edit wrapped version")
 	}
-	r = callResponse(a.path, Request{Version: 1, Operation: "rule", ID: a.rule.ID, Action: "enable"})
+	r = callResponse(a.path, Request{Version: 1, Operation: "rule", Generation: a.e.Generation, ExpectedVersion: &a.rule.Version, ID: a.rule.ID, Action: "enable"})
 	if r.Error == "" {
 		t.Fatal("enable wrapped version")
 	}

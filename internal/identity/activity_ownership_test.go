@@ -108,6 +108,10 @@ func TestLeaderStateAndCategory(t *testing.T) {
 	}
 }
 func TestOwnerlessStateDoesNotInheritDisplayIdentity(t *testing.T) {
+	if os.Getenv("FLOWGATE_PARENT_NETNS") == "" || os.Getenv("FLOWGATE_PARENT_NETNS") == NetNS() {
+		t.Skip("real ownership fixture requires disposable PID/network namespace; run scripts/lab.sh")
+	}
+
 	l, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -119,7 +123,7 @@ func TestOwnerlessStateDoesNotInheritDisplayIdentity(t *testing.T) {
 		if r.Socket.Local.String() == l.Addr().String() && r.Socket.State == 10 {
 			id = r.ID
 			if len(r.Owners) == 0 {
-				t.Fatal("listener unowned")
+				t.Fatalf("listener unowned: complete=%v issues=%v ownership=%s row=%+v", before.Complete, before.Issues, r.Ownership, r)
 			}
 		}
 	}

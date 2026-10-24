@@ -297,10 +297,15 @@ Window::Window(const QString &path, QWidget *parent) : QMainWindow(parent) {
   for (auto *b : {enableRule, disableRule})
     connect(b, &QPushButton::clicked, this, [this, b] {
       int row = rules->currentRow();
-      if (!connected || readOnly || ruleSubmitting || row < 0 ||
-          !rules->item(row, 0))
+      if (!connected || readOnly || ruleSubmitting || !conditionalMutation ||
+          row < 0 || !rules->item(row, 0))
         return;
       auto id = rules->item(row, 0)->data(Qt::UserRole).toString();
+      const auto listedVersion = ExactJson::ruleVersion(storedRules.value(id));
+      if (!ExactJson::uint64Text(listedVersion)) {
+        feedback("Invalid exact rule version; reload before changing.");
+        return;
+      }
       ruleSubmitting = true;
       enableRule->setEnabled(false);
       disableRule->setEnabled(false);
@@ -309,6 +314,8 @@ Window::Window(const QString &path, QWidget *parent) : QMainWindow(parent) {
       request(
           {{"version", 1},
            {"operation", "rule"},
+           {"generation", submittedGeneration},
+           {"expected_version", listedVersion},
            {"id", id},
            {"action", b == enableRule ? "enable" : "disable"}},
           [this, submittedGeneration](QJsonObject r, QString error) {
@@ -643,6 +650,8 @@ void Window::consume(QJsonObject r) {
   }
   conditionalDelete =
       r["capabilities"].toArray().contains("conditional-rule-delete-v1");
+  conditionalMutation =
+      r["capabilities"].toArray().contains("conditional-rule-mutation-v1");
   auto gen = r["generation"].toString();
   if (gen != generation) {
     generation = gen;
@@ -723,8 +732,8 @@ void Window::consume(QJsonObject r) {
     storedRules[rule["id"].toString()] = rule;
   }
   renderRules(r["rules"].toArray());
-  enableRule->setEnabled(hostControl && !readOnly && !ruleSubmitting);
-  disableRule->setEnabled(hostControl && !readOnly && !ruleSubmitting);
+  enableRule->setEnabled(hostControl && !readOnly && !ruleSubmitting && conditionalMutation);
+  disableRule->setEnabled(hostControl && !readOnly && !ruleSubmitting && conditionalMutation);
   deleteRule->setEnabled(hostControl && !readOnly && !ruleSubmitting &&
                          conditionalDelete);
 
@@ -1084,8 +1093,12 @@ void Window::updateEnforcement() {
   }
   bool editRules =
       connected && mode == "host-enforcement" && !readOnly && !ruleSubmitting;
-  for (auto *b : {enableRule, disableRule, editRule})
-    b->setEnabled(editRules);
+  editRule->setEnabled(editRules);
+  for (auto *b : {enableRule, disableRule}) {
+    b->setEnabled(editRules && conditionalMutation);
+    b->setToolTip(conditionalMutation ? "Change the confirmed rule version"
+        : "Unavailable: backend requires conditional-rule-mutation-v1 support");
+  }
   deleteRule->setEnabled(editRules && conditionalDelete);
   deleteRule->setToolTip(conditionalDelete
                              ? "Delete the confirmed rule version"

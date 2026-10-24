@@ -74,6 +74,7 @@ private:
   QString generation, selected, promptID, activeEndpoint;
   bool ruleSubmitting = false;
   bool conditionalDelete = false;
+  bool conditionalMutation = false;
   void confirmDeleteRule();
   bool connected = false, readOnly = true, listing = false;
   int epoch = 0;

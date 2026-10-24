@@ -33,10 +33,10 @@ func TestPersistenceBeforeVerdict(t *testing.T) {
 	if len(e.Rules(1001, false)) != 0 {
 		t.Fatal("cross-user rule exposed")
 	}
-	if err := e.ChangeRule(r.ID, "disable", 1001, false); err == nil {
+	if err := changeListedRule(e, r.ID, "disable", 1001, false); err == nil {
 		t.Fatal("cross-user mutation")
 	}
-	if err := e.ChangeRule(r.ID, "disable", 1000, false); err != nil {
+	if err := changeListedRule(e, r.ID, "disable", 1000, false); err != nil {
 		t.Fatal(err)
 	}
 	if e.RetainedState(v.ID, v.Attribution.Fingerprint) != "drop" {
@@ -52,13 +52,13 @@ func TestEnablePreservesScopeAndExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := e.Rules(1000, false)[0]
-	if err := e.ChangeRule(before.ID, "disable", 1000, false); err != nil {
+	if err := changeListedRule(e, before.ID, "disable", 1000, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.ChangeRule(before.ID, "enable", 1001, false); err == nil {
+	if err := changeListedRule(e, before.ID, "enable", 1001, false); err == nil {
 		t.Fatal("cross-user enable")
 	}
-	if err := e.ChangeRule(before.ID, "enable", 1000, false); err != nil {
+	if err := changeListedRule(e, before.ID, "enable", 1000, false); err != nil {
 		t.Fatal(err)
 	}
 	after := e.Rules(1000, false)[0]

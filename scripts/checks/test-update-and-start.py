@@ -88,6 +88,15 @@ esac
             r = self.run_source('--local', **env)
             self.assertNotEqual(r.returncode, 0)
             self.assertNotIn('COORDINATOR', self.calls())
+    def test_shell_preserves_mode_and_forwards_explicit_ack(self):
+        self.tool('python3', '#!/bin/sh\nprintf "%s\\n" "$*" >> "$CALLS"\n')
+        r = self.run_source('--local')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('--profile preserve', self.calls())
+        self.log.unlink()
+        r = self.run_source('--local', '--profile', 'both', '--acknowledge-outgoing-blocking')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('--profile both --acknowledge-outgoing-blocking', self.calls())
     def test_fetch_is_noninteractive_and_bounded(self):
         self.tool('timeout', '#!/bin/sh\nprintf "%s|%s|%s\\n" "$GIT_TERMINAL_PROMPT" "$GIT_SSH_COMMAND" "$*" >> "$CALLS"\nshift 2\nexec "$@"\n')
         r = self.run_source()
@@ -285,13 +294,60 @@ class Update(unittest.TestCase):
         self.assertEqual([c for c in h.calls if c != 'status'], ['gui'])
     def test_explicit_profile_is_applied_without_unnecessary_install(self):
         h = FakeHost(status('new', 'monitoring'))
-        self.run_update(h, profile='both')
+        self.run_update(h, profile='both', acknowledge_outgoing=True)
         self.assertIn('both', h.calls)
         self.assertNotIn('install', h.calls)
-    def test_plain_command_starts_both_after_previously_stopped_install(self):
+    def test_plain_command_preserves_monitoring_after_previously_stopped_install(self):
         h = FakeHost(status(selected='monitoring'))
         self.run_update(h)
-        self.assertEqual([c for c in h.calls if c != 'status'], ['authenticate', 'install', 'both', 'gui'])
+        self.assertEqual([c for c in h.calls if c != 'status'], ['authenticate', 'install', 'gui'])
+    def test_outgoing_activation_requires_ack_before_auth_or_stop(self):
+        for selected in ('monitoring', 'incoming'):
+            h = FakeHost(status(selected=selected))
+            with self.assertRaisesRegex(RuntimeError, 'acknowledge-outgoing-blocking'):
+                self.run_update(h, profile='both')
+            self.assertFalse(any(c in h.calls for c in ('authenticate','monitoring','install','both','gui')))
+    def test_plain_command_preserves_incoming_and_monitoring(self):
+        for selected in ('monitoring', 'incoming'):
+            h = FakeHost(status(selected=selected))
+            self.run_update(h)
+            self.assertTrue(m.at_mode(h.current, selected))
+            self.assertNotIn('both', h.calls)
+    def test_mode_change_during_auth_rechecks_outgoing_ack(self):
+        class Changed(FakeHost):
+            def authenticate(self):
+                super().authenticate()
+                self.current = status(selected='monitoring')
+        h = Changed()
+        with self.assertRaisesRegex(RuntimeError, 'acknowledge-outgoing-blocking'):
+            self.run_update(h, profile='both')
+        self.assertNotIn('install', h.calls)
+        self.assertNotIn('both', h.calls)
+    def test_late_mode_change_rechecks_ack_even_when_target_unchanged(self):
+        class Changed(FakeHost):
+            def __init__(self):
+                super().__init__(); self.reads = 0
+            def status(self):
+                self.reads += 1
+                if self.reads == 3: self.current = status(selected='monitoring')
+                return super().status()
+        h = Changed()
+        with self.assertRaisesRegex(RuntimeError, 'acknowledge-outgoing-blocking'):
+            self.run_update(h, profile='both')
+        self.assertNotIn('install', h.calls)
+        self.assertNotIn('both', h.calls)
+    def test_fresh_default_install_stays_monitoring(self):
+        class Fresh(FakeHost):
+            def status(self):
+                if self.current is None: raise OSError('no daemon')
+                return super().status()
+            def installed(self): return False
+            def install(self, backend):
+                self.calls.append('install'); self.current = status('new','monitoring')
+        h = Fresh(); h.current = None
+        self.run_update(h)
+        self.assertTrue(m.at_mode(h.current,'monitoring'))
+        self.assertNotIn('both',h.calls)
     def test_preserve_rechecks_user_mode_after_sudo_prompt(self):
         class ChangedDuringPrompt(FakeHost):
             def authenticate(self):
@@ -301,6 +357,15 @@ class Update(unittest.TestCase):
         self.run_update(h, profile='preserve')
         self.assertTrue(m.at_mode(h.current, 'incoming'))
         self.assertNotIn('both', h.calls)
+    def test_preserve_restores_outgoing_enabled_by_user_during_auth(self):
+        class ChangedDuringPrompt(FakeHost):
+            def authenticate(self):
+                super().authenticate()
+                self.current = status(selected='both')
+        h = ChangedDuringPrompt(status(selected='incoming'))
+        self.run_update(h)
+        self.assertTrue(m.at_mode(h.current,'both'))
+        self.assertEqual(h.calls.count('both'),1)
     def test_discovery_is_explicit_and_restarts_even_matching_release(self):
         h = FakeHost(status(source='new'))
         self.run_update(h, profile='preserve', wine_discovery=True)

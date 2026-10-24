@@ -51,10 +51,10 @@ func TestRuleDecisionKeepsDecisionTimeSnapshotAcrossEditAndDelete(t *testing.T) 
 	}
 	*now = now.Add(3 * time.Second) // cached lease expired: same flow re-evaluated
 	e.RecordPacketOutcome(e.Observe(f, "udp"), VerdictDropped, nil)
-	if err := e.ChangeRule("r1", "disable", 1000, false); err != nil {
+	if err := changeListedRule(e, "r1", "disable", 1000, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.ChangeRule("r1", "delete", 1000, false); err != nil {
+	if err := changeListedRule(e, "r1", "delete", 1000, false); err != nil {
 		t.Fatal(err)
 	}
 	rs := records(t, e, l, path)
@@ -174,7 +174,7 @@ func TestMonitorModeRecordsNoDecisions(t *testing.T) {
 	e.Decisions = l
 	e.SaveRules = func([]policy.Rule) error { return nil }
 	e.SetRules([]policy.Rule{{ID: "r", Version: 1, Schema: 2, Created: time.Unix(1, 0), Action: "allow", Filter: policy.Filter{Application: "app", Revision: "rev", Direction: "incoming", Protocol: "tcp", UID: 1000, RemoteAddress: "*"}}})
-	e.ChangeRule("r", "disable", 1000, true)
+	changeListedRule(e, "r", "disable", 1000, true)
 	e.List(1000, true)
 	e.FinalizePending()
 	if rs := records(t, e, l, path); len(rs) != 0 {

@@ -62,9 +62,10 @@ Use `rule-delete` with the displayed backend generation and expected version;
 check, transaction and publication are atomic relative to edits. A stale delete
 cannot remove the edited rule. Fresh creation uses a new random ID; restart has a
 new generation. See [API.md](API.md) for capability, errors, retries and CLI.
-Legacy `rule`/`delete` is still unconditional for older third-party callers; a
-frontend precheck does not close its race. The integrated Qt/Electron Delete
-controls have migrated and require the conditional capability.
+Legacy `rule` mutations now also require generation and expected version.
+Older clients omitting them are refused. Integrated Qt/Electron Delete controls
+use the dedicated conditional operation; Qt legacy toggles require the new
+`conditional-rule-mutation-v1` capability.
 No storage schema/table migration is required.
 
 ## Rules for applications that are not running
@@ -82,3 +83,11 @@ At equal priority, Internet Deny wins over an application-wide Allow for Interne
 traffic. Other explicit higher-priority rules still follow normal precedence.
 Existing rule edits preserve their network scope; Advanced creation can select a
 new scope. Apps with no saved identity still require a verified observed target.
+
+`conditional-rule-mutation-v1` advertises stale-safe legacy actions. Qt disables
+its legacy Enable/Disable controls without this capability. Legacy `rule`
+enable/disable/delete requests also require the displayed daemon
+generation and `expected_version`. Missing or stale conditions refuse before
+persistence and leave policy unchanged. A lost acknowledgement requires inspection
+of authoritative inventory; do not replay the mutation against a new generation
+or guessed version. Endpoint rules retain dedicated conditional deletion.
