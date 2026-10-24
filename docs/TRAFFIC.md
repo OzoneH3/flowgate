@@ -138,3 +138,39 @@ Synthetic Go tests cover counter reset, cookie/endpoint reuse and missing sample
 numeric endpoint reuse is not claimed as exercised by the real fixture. Qt uses
 actual traffic for table/sort/partial aggregation and a separate synthetic snapshot
 for deterministic regrouping. No firewall or privileged collection is used.
+
+## UDP inspection work
+
+UDP inspection retains fresh socket observations and current policy evaluation.
+A UDP socket census can use Linux's local-port filter on a multipart diagnostic
+dump, in both address families. It still includes wildcard, connected and
+reuse-port competitors; an exact single-socket lookup would conceal ambiguity.
+The kernel still traverses its UDP table, but unrelated rows need not be returned
+and decoded. A query error does not authorize reuse of old evidence.
+
+Before starting a fresh observation, the general packet scheduler can collect a
+small UDP burst with a requested 250-microsecond timer. Kernel scheduling can
+extend that timer; the packet's original deadline and count/byte bounds remain
+unchanged. At most 16 already-queued identical-flow datagrams are then frozen as
+one observation group. Arrivals after that boundary require another observation.
+Shutdown interrupts the wait. TCP does not use this collection delay.
+
+This optimization does not cache an Allow in the firewall, lengthen ownership
+reuse windows, or change Once, rule expiry, process identity or permission scopes.
+It does not promise a particular throughput or eliminate UDP capacity drops.
+Performance and delivery evidence must identify the workload and kernel tested.
+
+Validation of this increment used a capped Linux 7.3 TCG guest. Full queue and
+identity race tests passed, including reuse-port/IPv6 census equivalence, frozen
+batch boundaries, shutdown, deadlines and existing application/prefix isolation
+models. The two-executable incoming TCP/UDP receiver matrix passed 32 cases.
+With 256 UDP sockets, 100 race-instrumented diagnostic iterations measured about
+26.38 ms per full census versus 2.68 ms per filtered census; these are guest
+microbenchmark results, not desktop latency bounds.
+
+A separate outgoing UDP load test used distinct Allow and Block application
+identities, IPv4/IPv6, paced and burst sends. The blocked application delivered
+zero packets throughout. Allowed delivery varied in both directions relative to
+the baseline and CPU time was similar; this does not establish a general
+throughput improvement or resolve the reported live QUIC overload. Evidence and
+all retained fixture failures are recorded in `.workspace/queue-health/README.txt`.

@@ -22,14 +22,15 @@ import (
 type UDPAttributionReuse struct {
 	resolve func(Flow) Attribution
 	// Try, when set, is the non-waiting form of resolve used by TryResolve.
-	Try     func(Flow) (Attribution, bool)
-	Sockets func() ([]Socket, error)
-	Running func(pid int, start string) bool
-	Now     func() time.Time
-	Async   func(func())
-	Refresh time.Duration
-	Window  time.Duration
-	Max     int
+	Try         func(Flow) (Attribution, bool)
+	Sockets     func() ([]Socket, error)
+	PortSockets func(uint16) ([]Socket, error)
+	Running     func(pid int, start string) bool
+	Now         func() time.Time
+	Async       func(func())
+	Refresh     time.Duration
+	Window      time.Duration
+	Max         int
 
 	mu      sync.Mutex
 	entries map[string]*reusedAttribution
@@ -41,7 +42,7 @@ type reusedAttribution struct {
 }
 
 func NewUDPAttributionReuse(resolve func(Flow) Attribution) *UDPAttributionReuse {
-	return &UDPAttributionReuse{resolve: resolve, Sockets: UDPSockets, Running: InstanceRunning, Now: time.Now, Async: func(fn func()) { go fn() }, Refresh: 10 * time.Second, Window: 30 * time.Second, Max: 256, entries: map[string]*reusedAttribution{}}
+	return &UDPAttributionReuse{resolve: resolve, PortSockets: UDPPortSockets, Running: InstanceRunning, Now: time.Now, Async: func(fn func()) { go fn() }, Refresh: 10 * time.Second, Window: 30 * time.Second, Max: 256, entries: map[string]*reusedAttribution{}}
 }
 
 func reuseKey(f Flow, s Socket) string {
@@ -93,7 +94,13 @@ func (r *UDPAttributionReuse) resolveWith(f Flow, resolve func(Flow) (Attributio
 	if !reuseEligible(f) {
 		return resolve(f)
 	}
-	sockets, err := r.Sockets()
+	var sockets []Socket
+	var err error
+	if r.Sockets != nil { // explicit injected full-census provider
+		sockets, err = r.Sockets()
+	} else {
+		sockets, err = r.PortSockets(f.Local.Port())
+	}
 	if err == nil {
 		if current := receivers(sockets, f); len(current) == 1 {
 			if a, ok := r.reuse(f, reuseKey(f, current[0])); ok {

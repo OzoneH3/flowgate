@@ -38,6 +38,10 @@ const endpointStallWindow = 100 * time.Millisecond
 const endpointStallBudget = 10 * time.Millisecond
 const recentCompletionWindow = time.Second
 
+// Collect a small burst before obtaining fresh evidence. No packet arriving
+// after the batch is frozen may use that observation. Bounds/deadlines stay fixed.
+const udpCoalesceWindow = 250 * time.Microsecond
+
 type packetJob struct {
 	id       uint32
 	size     int
@@ -61,6 +65,7 @@ const (
 )
 
 type packetWorkers struct {
+	coalesceWindow           time.Duration // constructor default; zero disables in benchmarks/tests
 	mu                       sync.Mutex
 	wake                     [2]*sync.Cond
 	jobs                     map[string][]packetJob // includes active jobs, even across lane transfer
@@ -93,7 +98,7 @@ func newPacketLanes(general, census int, process func(packetJob, bool, bool) boo
 }
 
 func newPacketBatchLanes(general, census int, process func(packetJob, bool, bool) bool, batch func([]packetJob, bool, bool) bool, reject func(packetJob, rejectionCause)) *packetWorkers {
-	w := &packetWorkers{jobs: make(map[string][]packetJob), census: make(map[string]bool), active: make(map[string]bool), activeBatch: make(map[string]int), recent: make(map[string]time.Time), capacity: make(chan struct{}, 1), stopping: make(chan struct{}), process: process, processBatch: batch, reject: reject}
+	w := &packetWorkers{coalesceWindow: udpCoalesceWindow, jobs: make(map[string][]packetJob), census: make(map[string]bool), active: make(map[string]bool), activeBatch: make(map[string]int), recent: make(map[string]time.Time), capacity: make(chan struct{}, 1), stopping: make(chan struct{}), process: process, processBatch: batch, reject: reject}
 	for lane, n := range []int{general, census} {
 		w.wake[lane] = sync.NewCond(&w.mu)
 		for i := 0; i < n; i++ {
@@ -349,6 +354,23 @@ func (w *packetWorkers) run(lane int) {
 		key := w.ready[lane][next]
 		w.ready[lane] = append(w.ready[lane][:next], w.ready[lane][next+1:]...)
 		p := w.jobs[key][0]
+		if lane == 0 && !w.stopped && w.processBatch != nil && p.flow.Protocol == "udp" && len(w.jobs[key]) < daemon.MaxUDPObservationBatch && w.coalesceWindow > 0 {
+			// Reserve the endpoint/head while waiting so another worker cannot
+			// overtake it. Tail packets remain bounded and displaceable until frozen.
+			w.active[key], w.activeBatch[key] = true, 1
+			until := time.Now().Add(w.coalesceWindow)
+			if p.deadline.Before(until) {
+				until = p.deadline
+			}
+			w.mu.Unlock()
+			timer := time.NewTimer(time.Until(until))
+			select {
+			case <-timer.C:
+			case <-w.stopping:
+			}
+			timer.Stop()
+			w.mu.Lock()
+		}
 		n := 1
 		if w.processBatch != nil && p.flow.Protocol == "udp" {
 			for n < daemon.MaxUDPObservationBatch && n < len(w.jobs[key]) && w.jobs[key][n].flow == p.flow && w.jobs[key][n].token == p.token {

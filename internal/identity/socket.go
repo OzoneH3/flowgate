@@ -66,7 +66,38 @@ func UDPSockets() ([]Socket, error) { return socketsFor([]byte{unix.IPPROTO_UDP}
 func SocketsLimited(limit int) ([]Socket, error) {
 	return socketsFor([]byte{unix.IPPROTO_TCP, unix.IPPROTO_UDP}, limit)
 }
+
+// UDPPortSockets retains every UDP competitor on this local port in both
+// address families. This is a filtered multipart dump, never a single-socket
+// lookup: wildcard, dual-stack and reuseport ambiguity must remain visible.
+func UDPPortSockets(port uint16) ([]Socket, error) {
+	if port == 0 {
+		return nil, fmt.Errorf("UDP local port is zero")
+	}
+	return socketsForPort([]byte{unix.IPPROTO_UDP}, 0, port)
+}
+
 func socketsFor(protos []byte, limit int) ([]Socket, error) {
+	return socketsForPort(protos, limit, 0)
+}
+
+func diagRequest(family, proto byte, limit int, port uint16) []byte {
+	req := make([]byte, 56)
+	req[0], req[1] = family, proto
+	if limit > 0 && proto == unix.IPPROTO_TCP {
+		req[2] = 1 << (2 - 1)
+	}
+	binary.NativeEndian.PutUint32(req[4:8], 0xffffffff)
+	// inet_diag_sockid.idiag_sport is network byte order. No destination or
+	// address filter: connected and unconnected candidates are both needed.
+	binary.BigEndian.PutUint16(req[8:10], port)
+	for i := 48; i < 56; i++ {
+		req[i] = 255
+	}
+	return req
+}
+
+func socketsForPort(protos []byte, limit int, port uint16) ([]Socket, error) {
 	c, e := netlink.Dial(unix.NETLINK_SOCK_DIAG, nil)
 	if e != nil {
 		return nil, e
@@ -76,16 +107,7 @@ func socketsFor(protos []byte, limit int) ([]Socket, error) {
 	var result []Socket
 	for _, family := range []byte{unix.AF_INET, unix.AF_INET6} {
 		for _, proto := range protos {
-			req := make([]byte, 56)
-			req[0] = family
-			req[1] = proto
-			if limit > 0 && proto == unix.IPPROTO_TCP {
-				req[2] = 1 << (2 /* INET_DIAG_INFO */ - 1)
-			}
-			binary.NativeEndian.PutUint32(req[4:8], 0xffffffff)
-			for i := 48; i < 56; i++ {
-				req[i] = 255
-			}
+			req := diagRequest(family, proto, limit, port)
 			var msgs []netlink.Message
 			if limit > 0 {
 				msgs, e = boundedDiag(req, limit-len(result))

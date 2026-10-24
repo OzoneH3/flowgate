@@ -249,3 +249,35 @@ func TestUDPReuseTryBusyStoresNothingAndLaterResolveSucceeds(t *testing.T) {
 		t.Fatalf("beta must not reuse alpha evidence: %+v %v", a, ok)
 	}
 }
+
+// The optimized query narrows only retained socket rows, never the policy
+// endpoint or remote. Errors must use full fresh attribution, not old evidence.
+func TestUDPReuseUsesFreshPortCensusAndRefusesItsErrors(t *testing.T) {
+	x, r := newReuseFixture()
+	x.sockets = []Socket{x.socket(41001, 11, "c-alpha")}
+	x.owners["c-alpha"] = syntheticWine("alpha.exe", "/prefixes/alpha")
+	x.running[11] = true
+	r.Sockets = nil
+	queries := 0
+	fail := false
+	r.PortSockets = func(port uint16) ([]Socket, error) {
+		queries++
+		if port != 41001 {
+			t.Fatal(port)
+		}
+		if fail {
+			return nil, fmt.Errorf("incomplete")
+		}
+		return append([]Socket(nil), x.sockets...), nil
+	}
+	f := udpFlow("outgoing", "192.0.2.1:41001", "198.51.100.1:443")
+	r.Resolve(f)
+	r.Resolve(f)
+	if queries != 2 || x.calls != 1 {
+		t.Fatal("census must remain fresh", queries, x.calls)
+	}
+	fail, x.fail = true, true
+	if a := r.Resolve(f); a.Application != nil || x.calls != 2 {
+		t.Fatal("query failure reused old evidence", a, x.calls)
+	}
+}
