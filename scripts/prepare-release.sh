@@ -73,7 +73,11 @@ b=pathlib.Path(sys.argv[1]);revision=sys.argv[2]
 evidence=[b/'go-race.log',b/'go-vet.log']
 executables=['flowgate','native','native-other','tcp-initiation','udp-collector','launch','control.py','recover.py','uninstall.py','install-monitoring.py','host-acceptance.py']
 names=[*executables,'wine-owner-observer.exe','flowgate.service','flowgate-guard.service','50-flowgate-guard.conf',*[p.name for p in evidence]]
-m={'release':revision,'source':revision,'isolated_passed':True,'checks':['go-race','go-vet','isolated-native-api-receiver'],'live_kernel_collectors_verified':False,'evidence':[p.name for p in evidence],'executables':executables,'files':{name:hashlib.sha256((b/name).read_bytes()).hexdigest()for name in names}}
+import subprocess
+v=json.loads(subprocess.run([str(b/'flowgate'),'version'],check=True,capture_output=True,text=True,timeout=10).stdout)
+schema=v.get('max_rule_schema')
+if type(schema)is not int or not 1<=schema<=64:sys.exit('Built daemon does not declare a valid max_rule_schema')
+m={'max_rule_schema':schema,'release':revision,'source':revision,'isolated_passed':True,'checks':['go-race','go-vet','isolated-native-api-receiver'],'live_kernel_collectors_verified':False,'evidence':[p.name for p in evidence],'executables':executables,'files':{name:hashlib.sha256((b/name).read_bytes()).hexdigest()for name in names}}
 (b/'manifest.json').write_text(json.dumps(m,indent=2))
 print('PREPARED',b)
 print('AUTHENTICATED MONITORING-ONLY INSTALL (one command; does not activate protection):')

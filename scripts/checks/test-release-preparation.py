@@ -27,7 +27,15 @@ elif name=='go' and args[:1]==['test']:
  print('fixture-only test result')
 elif name in ('go','clang','cc') and '-o' in args:
  out=pathlib.Path(args[args.index('-o')+1]);out.parent.mkdir(parents=True,exist_ok=True)
- out.write_bytes(('fixture '+name+' '+' '.join(args)).encode());out.chmod(0o755)
+ if name=='go' and args[-1:]==['./cmd/flowgate']:
+  # The fixture daemon answers only `version`; FAKE_SCHEMA selects its declaration.
+  schema={'missing':None,'zero':0,'large':65,'text':'7'}.get(os.environ.get('FAKE_SCHEMA',''),7)
+  identity={'source':'a'*40}
+  if schema is not None:identity['max_rule_schema']=schema
+  out.write_text('#!/usr/bin/python3\n# fixture '+' '.join(args)+'\nimport sys\nif sys.argv[1:]!=["version"]:sys.exit(2)\nprint('+repr(json.dumps(identity))+')\n')
+ else:
+  out.write_bytes(('fixture '+name+' '+' '.join(args)).encode())
+ out.chmod(0o755)
 elif name=='bpftool':print('/* fixture header */')
 elif name in ('sudo','systemctl','nft'):raise RuntimeError('Forbidden host action')
 '''
@@ -77,6 +85,8 @@ class Preparation(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         manifest = self.assert_manifest(self.backend, 'manifest.json')
         self.assertIn('install-monitoring.py', manifest['files'])
+        # The capability ceiling comes from the built daemon's own `version`.
+        self.assertEqual(manifest['max_rule_schema'], 7)
         # Every produced/copied artifact belongs to the root transfer manifest;
         # only the manifest itself and deliberately injected junk are excluded.
         artifacts = {p.name for p in self.backend.iterdir() if p.is_file()} - {'manifest.json', 'install.py'}
@@ -91,6 +101,15 @@ class Preparation(unittest.TestCase):
         self.assertNotIn('install.py', manifest['files'])
         self.assertFalse(self.gui.exists())
         self.assertFalse(any(call[0] in ('npm', 'sudo', 'systemctl', 'nft') for call in self.calls()))
+    def test_release_refuses_missing_or_invalid_rule_schema_declaration(self):
+        # Schema 7 or later needs a positive declaration; preparation never infers one.
+        for case in ('missing', 'zero', 'large', 'text'):
+            with self.subTest(case=case):
+                shutil.rmtree(self.backend, ignore_errors=True)
+                result = self.prepare('--backend-only', FAKE_SCHEMA=case)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('does not declare a valid max_rule_schema', result.stderr)
+                self.assertFalse((self.backend / 'manifest.json').exists())
     def test_full_bundle_can_be_reused_only_after_hash_verification(self):
         first = self.prepare()
         self.assertEqual(first.returncode, 0, first.stderr)

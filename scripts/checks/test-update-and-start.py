@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Unprivileged update orchestration: real manifests, simulated host transitions."""
 import contextlib
+import sqlite3
+import base64
 import hashlib
 import importlib.util
 import io
@@ -144,6 +146,18 @@ class Update(unittest.TestCase):
         self.assertNotIn('monitoring', h.calls)
         self.assertNotIn('install', h.calls)
         self.assertNotIn('both', h.calls)
+
+    def test_monitoring_target_refusal_happens_before_any_stop(self):
+        class Refused(FakeHost):
+            def preflight(self, backend, selected):
+                self.calls.append('preflight-' + selected)
+                raise RuntimeError('stored rule schema unsupported')
+        h = Refused()
+        with self.assertRaisesRegex(RuntimeError, 'stored rule schema unsupported'):
+            m.update(h, self.root, 'new', gui=False, profile='monitoring')
+        self.assertIn('preflight-monitoring', h.calls)
+        self.assertNotIn('monitoring', h.calls)
+        self.assertNotIn('install', h.calls)
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(dir=ROOT / '.workspace')
@@ -578,6 +592,145 @@ class Launch(unittest.TestCase):
             m.supervise_gui(cmd, dict(PATH=os.environ['PATH']), self.dir / 'gui.log', timeout=.4, poll=.05)
         self.assertIn('did not report its main window loaded', str(raised.exception))
         self.pids.append(int(str(raised.exception).split('PID ')[1].split(')')[0]))
+
+
+class StoredRuleSchemaGuard(unittest.TestCase):
+    """Real SQLite and the real privileged script text, unprivileged: a temp rules DB
+    replaces the fixed path and a fake candidate answers `version`. No host state."""
+    FIXED = "RULES_DB = '/var/lib/flowgate/rules.db'"
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(dir=ROOT / '.workspace')
+        self.dir = pathlib.Path(self.tmp.name)
+        self.count = 0
+    def tearDown(self):
+        self.tmp.cleanup()
+    def db(self, *documents, table=True):
+        self.count += 1
+        path = self.dir / f'rules-{self.count}.db'
+        with contextlib.closing(sqlite3.connect(path)) as c, c:
+            if table:
+                c.execute('CREATE TABLE rules (id TEXT PRIMARY KEY, document TEXT NOT NULL)')
+            for i, d in enumerate(documents):
+                c.execute('INSERT INTO rules VALUES (?,?)', (str(i), d if isinstance(d, str) else json.dumps(d)))
+        return path
+    def guard(self):
+        self.assertEqual(m.SCHEMA_GUARD.count(self.FIXED), 1)
+        ns = {}
+        exec(m.SCHEMA_GUARD, ns)
+        return ns
+    def candidate(self, identity):
+        body = '#!/usr/bin/python3\nimport sys\nif sys.argv[1:] != ["version"]: sys.exit(3)\n'
+        if identity is None:
+            body += 'sys.exit(2)\n'
+        else:
+            body += 'print(' + repr(identity if isinstance(identity, str) else json.dumps(identity)) + ')\n'
+        return body.encode()
+    def preflight(self, db, identity, manifest=None, profile='monitoring'):
+        data = self.candidate(identity)
+        script = m.STAGE_PREFLIGHT.replace(self.FIXED, 'RULES_DB = ' + repr(str(db)))
+        payload = json.dumps({'binary': base64.b64encode(data).decode(), 'sha256': hashlib.sha256(data).hexdigest(), 'profile': profile, 'manifest': manifest or {}})
+        return subprocess.run([sys.executable, '-I', '-B', '-c', script], input=payload, capture_output=True, text=True, timeout=30)
+
+    def test_stored_schema_counts_and_refusals(self):
+        g = self.guard()
+        mixed = self.db({'id': 'legacy'}, *[{'schema': n} for n in range(1, 8)])
+        self.assertEqual(g['stored_rule_schemas'](str(mixed)), {0: 1, **{n: 1 for n in range(1, 8)}})
+        with self.assertRaisesRegex(RuntimeError, r'up to 6, but 1 rule\(s\) of schema 7 exist'):
+            g['require_rule_schemas'](str(mixed), 6)
+        g['require_rule_schemas'](str(mixed), 7)
+        self.assertEqual(g['stored_rule_schemas'](str(self.dir / 'absent.db')), {})
+        self.assertEqual(g['stored_rule_schemas'](str(self.db(table=False))), {})
+        for bad in ['{not json', json.dumps({'schema': '7'}), json.dumps({'schema': -1}), json.dumps(['schema', 7]), json.dumps({'schema': 7.0})]:
+            with self.subTest(bad=bad), self.assertRaisesRegex(RuntimeError, 'unreadable'):
+                g['stored_rule_schemas'](str(self.db(bad)))
+
+    def test_candidate_declaration_and_manifest_agreement(self):
+        c = self.guard()['candidate_rule_schema']
+        self.assertEqual(c(None, {}), 6)  # undeclared: prior ceiling only
+        self.assertEqual(c(7, {}), 7)
+        self.assertEqual(c(7, {'max_rule_schema': 7}), 7)
+        for declared, manifest, message in [(6, {'max_rule_schema': 7}, 'differs'), (None, {'max_rule_schema': 7}, 'differs'),
+                                            (7, {'max_rule_schema': 0}, 'invalid'), (7, {'max_rule_schema': 65}, 'invalid'), (7, {'max_rule_schema': '7'}, 'invalid')]:
+            with self.subTest(declared=declared, manifest=manifest), self.assertRaisesRegex(RuntimeError, message):
+                c(declared, manifest)
+
+    def test_preflight_refuses_unsupported_schema_for_every_profile_before_firewall_checks(self):
+        db = self.db({'schema': 6}, {'schema': 7})
+        for profile in ('monitoring', 'incoming', 'both'):
+            for identity in ({'source': 'old'}, None):  # no field, or a build without `version`
+                with self.subTest(profile=profile, identity=identity):
+                    r = self.preflight(db, identity, profile=profile)
+                    self.assertNotEqual(r.returncode, 0)
+                    self.assertIn('up to 6, but 1 rule(s) of schema 7 exist', r.stderr)
+                    self.assertNotIn('Candidate preflight failed', r.stderr)
+
+    def test_preflight_declaration_failures(self):
+        db = self.db({'schema': 7})
+        for identity, manifest, message in [({'max_rule_schema': 7}, {'max_rule_schema': 6}, 'differs'), ({'max_rule_schema': 0}, None, 'invalid'),
+                                            ({'max_rule_schema': '7'}, None, 'invalid'), ('not json', None, 'output invalid'), ('[7]', None, 'output invalid')]:
+            with self.subTest(identity=identity, manifest=manifest):
+                r = self.preflight(db, identity, manifest)
+                self.assertNotEqual(r.returncode, 0)
+                self.assertIn(message, r.stderr)
+
+    def test_preflight_supported_schema_monitoring_passes_and_others_still_run_firewall_checks(self):
+        db = self.db({'schema': 7})
+        ok = self.preflight(db, {'max_rule_schema': 7}, {'max_rule_schema': 7})
+        self.assertEqual(ok.returncode, 0, ok.stderr)
+        self.assertIn('firewall checks not needed for monitoring', ok.stdout)
+        # The fake candidate refuses `doctor`: the guard passed and firewall checks still ran.
+        both = self.preflight(db, {'max_rule_schema': 7}, profile='both')
+        self.assertNotEqual(both.returncode, 0)
+        self.assertIn('Candidate preflight failed', both.stderr)
+
+    def test_stage_install_checks_staged_candidate_before_candidate_installer(self):
+        s = m.STAGE_INSTALL
+        self.assertTrue(s.startswith(m.SCHEMA_GUARD))
+        hashed = s.index("raise RuntimeError('Staged bundle hash mismatch')")
+        check = s.index('require_rule_schemas(RULES_DB, candidate_rule_schema(declared_rule_schema(fd), manifest))')
+        staged = s.index("(stage / 'flowgate').read_bytes()")
+        installer = s.index("str(stage / 'install-monitoring.py')")
+        self.assertLess(hashed, staged)
+        self.assertLess(staged, check)
+        self.assertLess(check, installer)
+        compile(s, 'STAGE_INSTALL', 'exec')
+
+    def test_host_preflight_runs_for_monitoring_and_forwards_manifest_ceiling(self):
+        for listed, expected in [({'max_rule_schema': 7}, {'max_rule_schema': 7}), ({}, {})]:
+            manifest = dict(source='new', files={'flowgate': 'h'}, **listed)
+            host = m.Host()
+            host.install_payload = json.dumps({'files': {'flowgate': base64.b64encode(b'x').decode(), 'manifest.json': base64.b64encode(json.dumps(manifest).encode()).decode()}})
+            with patch.object(m.Host, 'privileged') as privileged:
+                host.preflight(None, 'monitoring')
+            operation, source, payload = privileged.call_args.args
+            self.assertEqual((operation, source), ('preflight', m.STAGE_PREFLIGHT))
+            sent = json.loads(payload)
+            self.assertEqual((sent['profile'], sent['manifest'], sent['sha256']), ('monitoring', expected, 'h'))
+
+    def test_installer_copy_matches_shared_guard(self):
+        spec = importlib.util.spec_from_file_location('installer_guard', ROOT / 'scripts/install-monitoring.py')
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        g = self.guard()
+        fixtures = [self.db(), self.db({'id': 'x'}, {'schema': 4}), self.db({'schema': 7}), self.db({'schema': 9}, {'schema': 7}),
+                    self.db('{bad'), self.db({'schema': True}), self.db(table=False), self.dir / 'absent.db']
+        for db in fixtures:
+            for ceiling in (6, 7, 8):
+                with self.subTest(db=db.name, ceiling=ceiling):
+                    outcomes = []
+                    for check in (lambda: g['require_rule_schemas'](str(db), ceiling), lambda: installer.require_rule_schemas(db, ceiling)):
+                        try:
+                            check()
+                            outcomes.append(None)
+                        except RuntimeError as error:
+                            outcomes.append(str(error))
+                    self.assertEqual(outcomes[0], outcomes[1])
+        for listed, ceiling in [({}, 6), ({'max_rule_schema': 7}, 7)]:
+            self.assertEqual(installer.manifest_rule_schema(listed), ceiling)
+            self.assertEqual(g['candidate_rule_schema'](None if not listed else 7, listed), ceiling)
+        for bad in (0, 65, '7', True):
+            with self.assertRaisesRegex(RuntimeError, 'invalid'):
+                installer.manifest_rule_schema({'max_rule_schema': bad})
 
 
 if __name__ == '__main__':

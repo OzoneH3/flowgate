@@ -94,6 +94,38 @@ def rule_documents(db):
   return rules,archived
  finally:c.close()
 
+# Same rule as SCHEMA_GUARD in scripts/lib/update_and_start.py (checked by the
+# consistency test). An undeclared ceiling keeps the prior value 6 only.
+LEGACY_RULE_SCHEMA=6
+def manifest_rule_schema(manifest):
+ v=manifest.get('max_rule_schema')
+ if v is None:return LEGACY_RULE_SCHEMA
+ if type(v)is not int or not 1<=v<=64:raise RuntimeError('Manifest max_rule_schema invalid; current release retained')
+ return v
+def stored_rule_schemas(db):
+ counts={}
+ if not db.exists():return counts
+ c=sqlite3.connect(f'file:{db}?mode=ro',uri=True)
+ try:
+  c.execute('BEGIN')
+  try:rows=c.execute('SELECT document FROM rules').fetchall()
+  except sqlite3.OperationalError as e:
+   if 'no such table' not in str(e):raise
+   rows=[]
+ finally:c.close()
+ for (document,) in rows:
+  try:rule=json.loads(document)
+  except ValueError:raise RuntimeError('Stored rule unreadable; current release retained')
+  schema=rule.get('schema',0)if isinstance(rule,dict)else None
+  if type(schema)is not int or schema<0:raise RuntimeError('Stored rule schema unreadable; current release retained')
+  counts[schema]=counts.get(schema,0)+1
+ return counts
+def require_rule_schemas(db,ceiling):
+ unsupported={s:n for s,n in stored_rule_schemas(db).items()if s>ceiling}
+ if unsupported:
+  detail=', '.join('%d rule(s) of schema %d'%(n,s)for s,n in sorted(unsupported.items()))
+  raise RuntimeError('Candidate supports stored rule schemas up to %d, but %s exist; delete those rules first or install a build that declares support. Candidate not activated'%(ceiling,detail))
+
 def repaired_preset_metadata(old,new):
  """Recognize metadata-only startup repair; never permit a policy-field change.
 
@@ -408,6 +440,9 @@ def install_locked(h,bundle,stamp):
    if src.exists():
     snapshot_database(src,backup/db)
   before_rules=rule_inventory(backup/'rules.db')
+  # Quiesced compatibility check before any release switch: a rule saved after
+  # the preflight cannot reach a candidate that would refuse to load it.
+  require_rule_schemas(backup/'rules.db',manifest_rule_schema(manifest))
   for src in[data/'protection.json',*[h.path('/etc/systemd/system')/u for u in UNITS],drop,*map(h.path,TOOLS.values())]:
    if src.exists():atomic(h,backup/(src.name+'.previous'),src.read_bytes(),0o600)
   if etc.exists():

@@ -37,7 +37,7 @@ def main():
     if len(sys.argv) != 2 or sys.argv[1] not in ('check', *COMMANDS):
         raise SystemExit('FlowGate update: invalid operation')
     if sys.argv[1] == 'check':
-        print('flowgate-local-update-v1')
+        print('flowgate-local-update-v2')
         return 0
     # Never execute caller-supplied command strings or import from their tree.
     # The selected bundle itself is trusted root code, as with a sudo install.

@@ -39,7 +39,7 @@ class PasswordlessUpdate(unittest.TestCase):
              patch.object(sys, 'argv', ['helper', 'check']), patch('sys.stdout', new_callable=io.StringIO) as out, \
              patch('subprocess.run') as run:
             self.assertEqual(self.helper()(), 0)
-            self.assertEqual(out.getvalue().strip(), 'flowgate-local-update-v1')
+            self.assertEqual(out.getvalue().strip(), 'flowgate-local-update-v2')
             run.assert_not_called()
 
     def test_fixed_source_isolation_and_exit_code(self):
@@ -68,14 +68,14 @@ class PasswordlessUpdate(unittest.TestCase):
     def test_dispatch_without_password_validation(self):
         host = updater.Host()
         with patch('pathlib.Path.exists', return_value=True), \
-             patch('subprocess.run', return_value=subprocess.CompletedProcess([], 0, 'flowgate-local-update-v1\n')) as run:
+             patch('subprocess.run', return_value=subprocess.CompletedProcess([], 0, 'flowgate-local-update-v2\n')) as run:
             host.authenticate()
             host.privileged('install', 'not executable caller code', b'bundle')
             self.assertEqual(run.call_args.args[0], ['sudo', '-n', updater.UPDATE_HELPER, 'install'])
             self.assertFalse(any('-v' in c.args[0] for c in run.call_args_list))
 
     def test_broken_helper_never_falls_back_to_password_or_install(self):
-        for code, output in [(1, ''), (0, 'wrong-version')]:
+        for code, output in [(1, ''), (0, 'wrong-version'), (0, 'flowgate-local-update-v1')]:
             with patch('pathlib.Path.exists', return_value=True), \
                  patch('subprocess.run', return_value=subprocess.CompletedProcess([], code, output)) as run:
                 with self.assertRaises(RuntimeError): updater.Host().authenticate()

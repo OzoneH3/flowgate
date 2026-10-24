@@ -238,10 +238,73 @@ def matches(status, manifest):
     return build.get('source') == manifest['source'] and build.get('executable_sha256') == manifest['files']['flowgate'] and build.get('modified') is False
 
 
+# Stored-rule compatibility, shared verbatim by both privileged scripts below.
+# A candidate that cannot load a stored active rule schema would refuse the whole
+# rule database at startup (and fail closed under protection). A candidate's
+# `version` declares max_rule_schema; an undeclared value keeps the prior ceiling
+# 6. That only preserves earlier behaviour; it does not prove an old build
+# supports schemas 0-6, and schema 7 or later always needs a positive declaration.
+SCHEMA_GUARD = r"""
+import json as _json, os as _os, sqlite3 as _sqlite3, subprocess as _subprocess
+RULES_DB = '/var/lib/flowgate/rules.db'
+LEGACY_RULE_SCHEMA = 6
+def _bounded_schema(value, what):
+    if type(value) is not int or not 1 <= value <= 64:
+        raise RuntimeError(what + ' max_rule_schema invalid; current release retained')
+    return value
+def declared_rule_schema(fd):
+    r = _subprocess.run(['/proc/self/fd/' + str(fd), 'version'], pass_fds=(fd,), capture_output=True, text=True, timeout=10)
+    if r.returncode != 0:
+        return None  # builds before `version` declare nothing: legacy ceiling
+    try:
+        v = _json.loads(r.stdout)
+    except ValueError:
+        raise RuntimeError('Candidate version output invalid; current release retained')
+    if not isinstance(v, dict):
+        raise RuntimeError('Candidate version output invalid; current release retained')
+    return None if v.get('max_rule_schema') is None else _bounded_schema(v['max_rule_schema'], 'Candidate')
+def candidate_rule_schema(declared, manifest):
+    listed = (manifest or {}).get('max_rule_schema')
+    if listed is not None and _bounded_schema(listed, 'Manifest') != declared:
+        raise RuntimeError('Candidate rule schema declaration differs from its manifest; current release retained')
+    return LEGACY_RULE_SCHEMA if declared is None else declared
+def stored_rule_schemas(db):
+    counts = {}
+    if not _os.path.exists(db):
+        return counts
+    c = _sqlite3.connect('file:' + db + '?mode=ro', uri=True)
+    try:
+        c.execute('BEGIN')
+        try:
+            rows = c.execute('SELECT document FROM rules').fetchall()
+        except _sqlite3.OperationalError as e:
+            if 'no such table' not in str(e):
+                raise
+            rows = []
+    finally:
+        c.close()
+    for (document,) in rows:
+        try:
+            rule = _json.loads(document)
+        except ValueError:
+            raise RuntimeError('Stored rule unreadable; current release retained')
+        schema = rule.get('schema', 0) if isinstance(rule, dict) else None
+        if type(schema) is not int or schema < 0:
+            raise RuntimeError('Stored rule schema unreadable; current release retained')
+        counts[schema] = counts.get(schema, 0) + 1
+    return counts
+def require_rule_schemas(db, ceiling):
+    unsupported = {s: n for s, n in stored_rule_schemas(db).items() if s > ceiling}
+    if unsupported:
+        detail = ', '.join('%d rule(s) of schema %d' % (n, s) for s, n in sorted(unsupported.items()))
+        raise RuntimeError('Candidate supports stored rule schemas up to %d, but %s exist; delete those rules first or install a build that declares support. Candidate not activated' % (ceiling, detail))
+"""
+
+
 # The privileged process receives bytes selected before authentication, never a
 # path into the user's writable build tree. This is a local-source trust model,
 # not a signature or proof that the selected source is trustworthy.
-STAGE_INSTALL = r"""
+STAGE_INSTALL = SCHEMA_GUARD + r"""
 import base64, hashlib, json, os, pathlib, subprocess, sys, tempfile
 payload = json.load(sys.stdin)
 base = pathlib.Path('/usr/local/lib/flowgate')
@@ -261,6 +324,13 @@ with tempfile.TemporaryDirectory(prefix='.install-', dir=base) as temporary:
     for name, expected in manifest['files'].items():
         if name not in payload['files'] or hashlib.sha256((stage / name).read_bytes()).hexdigest() != expected:
             raise RuntimeError('Staged bundle hash mismatch')
+    # The candidate installer may predate this check (a downgrade), so the
+    # current tooling verifies stored schemas immediately before running it.
+    fd = os.memfd_create('flowgate-rule-schema', 0)
+    with os.fdopen(os.dup(fd), 'wb') as f: f.write((stage / 'flowgate').read_bytes())
+    os.fchmod(fd, 0o500)
+    require_rule_schemas(RULES_DB, candidate_rule_schema(declared_rule_schema(fd), manifest))
+    os.close(fd)
     result = subprocess.run(['/usr/bin/python3', '-I', str(stage / 'install-monitoring.py'), '--bundle', str(stage)], check=False)
     sys.exit(result.returncode)
 """
@@ -268,7 +338,7 @@ with tempfile.TemporaryDirectory(prefix='.install-', dir=base) as temporary:
 
 # Run the already hash-verified candidate bytes read-only, before stopping the
 # working release. An anonymous root-owned executable avoids writable-path races.
-STAGE_PREFLIGHT = r"""
+STAGE_PREFLIGHT = SCHEMA_GUARD + r"""
 import base64, hashlib, json, os, subprocess, sys
 payload = json.load(sys.stdin)
 data = base64.b64decode(payload['binary'], validate=True)
@@ -277,6 +347,12 @@ if hashlib.sha256(data).hexdigest() != payload['sha256']:
 fd = os.memfd_create('flowgate-upgrade-check', 0)
 with os.fdopen(os.dup(fd), 'wb') as f: f.write(data)
 os.fchmod(fd, 0o500)
+# Every profile, including monitoring: an unloadable rule database stops the
+# daemon regardless of protection mode.
+require_rule_schemas(RULES_DB, candidate_rule_schema(declared_rule_schema(fd), payload.get('manifest')))
+if payload['profile'] == 'monitoring':
+    print('Candidate supports every stored rule schema; firewall checks not needed for monitoring')
+    sys.exit(0)
 r = subprocess.run(['/proc/self/fd/'+str(fd), 'doctor', '--json', '--upgrade-preflight', '--state', '/run/flowgate-enforcement', '--profile', payload['profile']], pass_fds=(fd,), capture_output=True, text=True, timeout=25)
 if r.returncode:
     raise RuntimeError('Candidate preflight failed: '+r.stderr[:4096])
@@ -333,8 +409,8 @@ class Host:
         if pathlib.Path(UPDATE_HELPER).exists():
             result = subprocess.run(['sudo', '-n', UPDATE_HELPER, 'check'],
                                     capture_output=True, text=True, timeout=10)
-            if result.returncode != 0 or result.stdout.strip() != 'flowgate-local-update-v1':
-                raise RuntimeError('Passwordless update helper is unavailable or unauthorized; rerun its setup before updating')
+            if result.returncode != 0 or result.stdout.strip() != 'flowgate-local-update-v2':
+                raise RuntimeError('Passwordless update helper is unavailable, unauthorized or outdated (this update needs helper v2 with the stored-rule-schema check); rerun scripts/setup-passwordless-update.py before updating. Nothing was stopped')
             self.passwordless_update = True
             say('Using account-authorized passwordless update helper')
         else:
@@ -348,11 +424,11 @@ class Host:
         subprocess.run(command, input=payload, check=True)
 
     def preflight(self, backend, selected):
-        if selected == 'monitoring':
-            return
+        # Runs for monitoring too: stored rule schemas are checked for every profile.
         files = json.loads(self.install_payload)['files']
         manifest = json.loads(base64.b64decode(files['manifest.json']))
-        payload = json.dumps({'binary': files['flowgate'], 'sha256': manifest['files']['flowgate'], 'profile': selected}).encode()
+        listed = {'max_rule_schema': manifest['max_rule_schema']} if 'max_rule_schema' in manifest else {}
+        payload = json.dumps({'binary': files['flowgate'], 'sha256': manifest['files']['flowgate'], 'profile': selected, 'manifest': listed}).encode()
         self.privileged('preflight', STAGE_PREFLIGHT, payload)
 
     def install(self, backend):

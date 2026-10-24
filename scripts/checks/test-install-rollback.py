@@ -134,6 +134,38 @@ class Rollback(unittest.TestCase):
         self.assertIn(('user:last-edit', 9), m.rule_inventory(self.base / 'var/lib/flowgate/rules.db'))
         self.assertNotIn(('systemctl', 'disable', 'flowgate.service'), self.host.calls)
 
+    def schema7_saved_during_quiesce(self, ceiling=None):
+        # A schema 7 rule saved after the pre-stop check but before quiesce must
+        # be caught on the quiesced snapshot, before any release switch.
+        if ceiling is not None:
+            manifest = json.loads((self.bundle / 'manifest.json').read_text())
+            manifest['max_rule_schema'] = ceiling
+            (self.bundle / 'manifest.json').write_text(json.dumps(manifest))
+        original = self.host.run
+        def run(*argv):
+            if argv == ('systemctl', 'stop', 'flowgate.service') and self.host.running:
+                with contextlib.closing(sqlite3.connect(self.host.path('/var/lib/flowgate/rules.db'))) as db, db:
+                    db.execute('INSERT INTO rules VALUES(?,?)', ('endpoint:late', json.dumps({'version': 1, 'schema': 7})))
+            return original(*argv)
+        self.host.run = run
+    def test_unsupported_schema_after_quiesce_restarts_unchanged_original_without_switch(self):
+        self.schema7_saved_during_quiesce()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+            with self.assertRaises(m.RollbackComplete):
+                m.install(self.host, self.bundle, 'test')
+        self.assertEqual((self.base / 'usr/local/lib/flowgate/current').resolve().name, 'OLD')
+        self.assertEqual([source for source, _ in self.host.started_states], ['OLD'])  # candidate never started
+        self.assertIn(('endpoint:late', 1), m.rule_inventory(self.base / 'var/lib/flowgate/rules.db'))
+        self.assertNotIn(('systemctl', 'daemon-reload'), self.host.calls)  # no unit switch
+        self.assertNotIn(('systemctl', 'disable', 'flowgate.service'), self.host.calls)
+    def test_declared_schema_ceiling_lets_quiesced_install_proceed(self):
+        self.schema7_saved_during_quiesce(ceiling=7)
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(m.RollbackComplete):  # the fixture candidate still fails its own startup check
+                m.install(self.host, self.bundle, 'test')
+        self.assertEqual(self.host.started_states[0][0], 'SRC')  # passed the schema check and was started
+
     def test_unsafe_state_refused_before_stopping_old_daemon(self):
         config = self.base / 'etc/flowgate/zones.json'
         target = self.base / 'original-zones.json'
