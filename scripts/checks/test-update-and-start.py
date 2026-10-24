@@ -162,6 +162,9 @@ class Update(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(dir=ROOT / '.workspace')
         self.root = pathlib.Path(self.tmp.name)
+        environment = patch.dict(os.environ, XDG_CONFIG_HOME=str(self.root / 'config'))
+        environment.start()
+        self.addCleanup(environment.stop)
         for parent, filename in [('automatic-zone-releases', 'matched-manifest.json'), ('daily-releases', 'manifest.json')]:
             directory = self.root / '.workspace' / parent / 'new'
             directory.mkdir(parents=True)
@@ -190,6 +193,19 @@ class Update(unittest.TestCase):
         h = FakeHost()
         self.run_update(h)
         self.assertEqual([c for c in h.calls if c != 'status'], ['authenticate', 'monitoring', 'install', 'both', 'gui'])
+    def test_login_entry_only_after_successful_gui_switch(self):
+        h = FakeHost()
+        with patch.object(m, 'configure_login_start') as configured:
+            self.run_update(h, autostart=True)
+            configured.assert_called_once_with(self.root / '.workspace/automatic-zone-releases/new', enable=True)
+            self.assertEqual(h.calls[-1], 'gui')
+        with patch.object(h, 'switch_gui', side_effect=m.GuiNotSwitched('failed')), patch.object(m, 'configure_login_start') as configured:
+            with self.assertRaises(m.GuiNotSwitched):
+                self.run_update(h, autostart=True)
+            configured.assert_not_called()
+        with self.assertRaisesRegex(ValueError, 'requires GUI'):
+            self.run_update(h, autostart=True, gui=False)
+
     def test_stopped_remains_stopped_and_incoming_restores_incoming(self):
         for selected in ['monitoring', 'incoming']:
             h = FakeHost(status(selected=selected))
@@ -731,6 +747,61 @@ class StoredRuleSchemaGuard(unittest.TestCase):
         for bad in (0, 65, '7', True):
             with self.assertRaisesRegex(RuntimeError, 'invalid'):
                 installer.manifest_rule_schema({'max_rule_schema': bad})
+
+
+class LoginStartup(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(dir=ROOT / '.workspace')
+        self.addCleanup(self.tmp.cleanup)
+        self.root = pathlib.Path(self.tmp.name)
+        self.environment = patch.dict(os.environ, XDG_CONFIG_HOME=str(self.root / 'config'))
+        self.environment.start()
+        self.addCleanup(self.environment.stop)
+        self.entry = m.login_entry_path()
+
+    def test_opt_in_refresh_and_disabled_preference(self):
+        m.configure_login_start(self.root / 'old')
+        self.assertFalse(self.entry.exists())
+        m.configure_login_start(self.root / 'old', enable=True)
+        self.assertIn(str(self.root / 'old/launch-ui'), self.entry.read_text())
+        self.entry.write_text(self.entry.read_text() + 'Hidden=true\n')
+        m.configure_login_start(self.root / 'new')
+        self.assertIn(str(self.root / 'new/launch-ui'), self.entry.read_text())
+        self.assertIn('Hidden=true', self.entry.read_text())
+        m.configure_login_start(self.root / 'new', enable=True)
+        self.assertNotIn('Hidden=', self.entry.read_text())
+        self.assertNotIn('WAYLAND_DISPLAY', self.entry.read_text())
+        self.assertNotIn('host-start', self.entry.read_text())
+
+    def test_unmanaged_and_symlink_left_unchanged(self):
+        self.entry.parent.mkdir(parents=True)
+        self.entry.write_text('[Desktop Entry]\nName=Custom\n')
+        before = self.entry.read_bytes()
+        m.configure_login_start(self.root)
+        with self.assertRaisesRegex(ValueError, 'unmanaged'):
+            m.configure_login_start(self.root, enable=True)
+        self.assertEqual(self.entry.read_bytes(), before)
+        self.entry.unlink()
+        target = self.root / 'other'; target.write_text('untouched')
+        self.entry.symlink_to(target)
+        with self.assertRaisesRegex(ValueError, 'symlink'):
+            m.configure_login_start(self.root, enable=True)
+        self.assertEqual(target.read_text(), 'untouched')
+
+    def test_desktop_exec_reserved_characters(self):
+        bundle = self.root / 'space $cash `tick` "quote" %field \\slash'
+        content = m.login_entry(bundle)
+        self.assertIn('%%field', content)
+        self.assertIn('\\\\$cash', content)
+        self.entry.parent.mkdir(parents=True)
+        self.entry.write_text(content)
+        subprocess.run(['desktop-file-validate', str(self.entry)], check=True)
+
+    def test_root_and_invalid_configuration_refused(self):
+        with patch.object(m.os, 'getuid', return_value=0), self.assertRaisesRegex(ValueError, 'desktop user'):
+            m.configure_login_start(self.root, enable=True)
+        with patch.dict(os.environ, XDG_CONFIG_HOME='relative'), self.assertRaisesRegex(ValueError, 'absolute'):
+            m.configure_login_start(self.root, enable=True)
 
 
 if __name__ == '__main__':

@@ -8,6 +8,22 @@ scripts/prepare-release.sh --backend-only  # backend only
 scripts/update-and-start.sh                # prepare, install, verify, activate
 ```
 
+To start the desktop user's GUI automatically at login, use:
+
+```sh
+scripts/update-and-start.sh --local --profile preserve --autostart
+```
+
+After the matched GUI reports it loaded, this writes the current user's
+`$XDG_CONFIG_HOME/autostart/flowgate.desktop` (normally
+`~/.config/autostart/flowgate.desktop`). It launches the GUI in its existing tray
+mode using the new login's desktop environment. It does not start protection or
+change permissions. Future GUI updates refresh this managed entry to the matched
+release; disabling it in desktop settings is preserved unless `--autostart` is
+explicitly used again. An unrelated existing entry is never overwritten. Remove
+the entry or disable it in desktop startup settings to stop login startup.
+The release directory must remain available at login.
+
 Upstream updates are noninteractive and have a 60-second timeout (with up to five
 seconds for forced cleanup). Failure stops before preparation, authentication or
 protection changes. Use `scripts/update-and-start.sh --local` to deliberately skip

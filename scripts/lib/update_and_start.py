@@ -502,6 +502,75 @@ class Host:
         say('GUI started (PID ' + str(pid) + '); main window reported loaded')
 
 
+AUTOSTART_MARKER = 'X-FlowGate-Managed=true'
+
+
+def login_entry_path():
+    config = os.environ.get('XDG_CONFIG_HOME') or str(pathlib.Path.home() / '.config')
+    if not os.path.isabs(config):
+        raise ValueError('XDG_CONFIG_HOME must be absolute for login startup')
+    return pathlib.Path(config) / 'autostart/flowgate.desktop'
+
+
+def login_entry(bundle):
+    # Desktop Entry Exec is not shell syntax. Escape reserved characters inside
+    # its quoted executable token, then apply Desktop Entry string escaping.
+    launch = str(bundle.resolve() / 'launch-ui')
+    if any(c in launch for c in ('\n', '\r', '\x00')):
+        raise ValueError('GUI launcher path contains a control character')
+    quoted = ''.join('\\' + c if c in '\\"`$' else c for c in launch).replace('%', '%%')
+    command = ('"' + quoted + '" --observer /run/flowgate-api/daemon.sock.monitor '
+               '--control /run/flowgate-api/daemon.sock').replace('\\', '\\\\')
+    return ('[Desktop Entry]\nType=Application\nName=FlowGate\n'
+            'Comment=Monitor connection requests in the tray\nExec=' + command +
+            '\nTerminal=false\n' + AUTOSTART_MARKER + '\n')
+
+
+def configure_login_start(bundle, enable=False):
+    """Enable only on request; refresh an existing managed entry on GUI updates.
+
+    The session supplies its own display/bus environment at login. This starts
+    only the user GUI; it never starts or changes firewall protection.
+    """
+    path = login_entry_path()
+    old = None
+    if path.is_symlink():
+        raise ValueError('Refusing a symlink login entry: ' + str(path))
+    if path.exists():
+        st = path.stat()
+        if st.st_uid != os.getuid() or not stat.S_ISREG(st.st_mode):
+            raise ValueError('Login entry is not a regular file owned by this user')
+        old = path.read_text()
+        if AUTOSTART_MARKER not in old.splitlines():
+            if enable:
+                raise ValueError('Existing unmanaged login entry left unchanged: ' + str(path))
+            return
+    elif not enable:
+        return
+    if os.getuid() == 0:
+        raise ValueError('GUI login startup must be configured as the desktop user')
+    content = login_entry(bundle)
+    if old is not None:
+        # A desktop-settings opt-out survives release refreshes. Explicit enable
+        # re-enables the entry without changing unrelated user configuration.
+        for line in old.splitlines():
+            if line.startswith(('Hidden=', 'X-GNOME-Autostart-enabled=')) and not enable:
+                content += line + '\n'
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    import tempfile
+    fd, temporary = tempfile.mkstemp(prefix='.flowgate-', dir=path.parent)
+    try:
+        with os.fdopen(fd, 'w') as output:
+            output.write(content)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    say('GUI login startup configured: ' + str(path))
+
+
 def transition(host, backend, selected):
     try:
         host.action(backend, selected)
@@ -519,7 +588,9 @@ def transition(host, backend, selected):
     raise RuntimeError('Protection did not reach ' + selected + ': ' + reason + '; inspect flowgate-control status. No action was replayed.')
 
 
-def update(host, root, revision, *, dry=False, gui=True, profile="both", wine_discovery=False, recover_stopped=False):
+def update(host, root, revision, *, dry=False, gui=True, profile="both", wine_discovery=False, recover_stopped=False, autostart=False):
+    if autostart and not gui:
+        raise ValueError("--autostart requires GUI switching")
     bundle = root / '.workspace/automatic-zone-releases' / revision
     backend = root / '.workspace/daily-releases' / revision
     manifest = None
@@ -547,6 +618,8 @@ def update(host, root, revision, *, dry=False, gui=True, profile="both", wine_di
             say('Daemon startup would archive expired and confirmed obsolete native rules')
         if gui:
             say('Would close the old released GUI and launch ' + str(bundle / 'launch-ui'))
+            if autostart:
+                say('Would enable GUI login startup at ' + str(login_entry_path()))
         return
     stopped_for_update = False
     recovery_status = None
@@ -618,6 +691,10 @@ def update(host, root, revision, *, dry=False, gui=True, profile="both", wine_di
     if gui:
         say('Switching to the matching GUI')
         host.switch_gui(root, bundle)
+        try:
+            configure_login_start(bundle, enable=autostart)
+        except (OSError, ValueError) as error:
+            raise GuiNotSwitched('matching GUI started, but login startup was not configured: ' + str(error)) from error
 
 
 def main(argv=None, host=None):
@@ -626,12 +703,13 @@ def main(argv=None, host=None):
     parser.add_argument('--revision', required=True)
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('--no-gui', action='store_true')
+    parser.add_argument('--autostart', action='store_true', help='Start this user GUI at login; refresh the matched release on future GUI updates')
     parser.add_argument('--wine-discovery', action='store_true')
     parser.add_argument('--recover-stopped', action='store_true')
     parser.add_argument('--profile', choices=('preserve', 'monitoring', 'incoming', 'both'), default='both')
     args = parser.parse_args(argv)
     try:
-        update(host or Host(), args.root.resolve(), args.revision, dry=args.dry_run, gui=not args.no_gui, profile=args.profile, wine_discovery=args.wine_discovery, recover_stopped=args.recover_stopped)
+        update(host or Host(), args.root.resolve(), args.revision, dry=args.dry_run, gui=not args.no_gui, profile=args.profile, wine_discovery=args.wine_discovery, recover_stopped=args.recover_stopped, autostart=args.autostart)
     except GuiNotSwitched as error:
         # Distinct from update failure: the daemon/protection result above stands.
         print('==> Backend update verified; GUI not switched: ' + str(error), file=sys.stderr, flush=True)
