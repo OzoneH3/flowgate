@@ -28,6 +28,8 @@ await build({
   entryPoints: [
     'src/model.ts',
     'src/attribution-reason.ts',
+    'src/endpoint-policy.ts',
+    'src/endpoint-rules.ts',
     'src/connection-presentation.ts',
     'src/automatic-prompts.ts',
     'src/decision-remember.ts',

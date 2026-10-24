@@ -13,6 +13,7 @@ export interface LogApplication {
   revision: string;
 }
 export interface LogRuleSnapshot {
+  target_scope?: string;
   id: string;
   version: string;
   action: string;
@@ -154,6 +155,7 @@ export function parseRecord(raw: unknown): LogRecord {
     if (d.rule) {
       const s = obj(d.rule);
       rule = {
+        target_scope: typeof s.target_scope === 'string' ? s.target_scope.slice(0,64) : undefined,
         id: str(s.id, 256),
         version: str(typeof s.version === 'number' ? String(s.version) : s.version, 32),
         action: str(s.action, 32),

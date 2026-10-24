@@ -1,3 +1,4 @@
+import { canManageEndpoints } from './endpoint-policy';
 import { AUTOMATIC_ZONE_CAPABILITY, ZONE_CAPABILITY } from './network-zones';
 import { ZoneRules } from './zone-rules';
 import { PROCESS_CAPABILITY, sameProcessTarget } from './process-rules';
@@ -58,6 +59,7 @@ export class Rules {
     if (s.id) {
       const r = c.rules?.find((r) => r.id === s.id);
       if (!r) throw Error('Rule no longer exists');
+      if (r.network_endpoint) throw Error('Endpoint rules are immutable. Delete and recreate through Endpoint permission.');
       if (r.schema === 5 || r.preset)
         throw Error(
           'Preset-owned rule: manage through the administrative Essential API; this editor cannot preserve its scope.',
@@ -123,7 +125,7 @@ export class Rules {
     const basis = c.rules?.find((r) => r.id === b.rule);
     if (!basis) throw Error('Rule no longer exists');
     const f = basis.filter;
-    if (basis.preset || basis.schema === 5 || f.process || f.all_programs || f.all_uids || !f.application || !f.revision)
+    if (basis.network_endpoint || basis.preset || basis.schema === 5 || f.process || f.all_programs || f.all_uids || !f.application || !f.revision)
       throw Error('This rule cannot be the basis of a new application rule');
     const rule: Rule = {
       version: 0,
@@ -319,6 +321,7 @@ export class Rules {
     )
       throw Error('Invalid deletion');
     const c = this.authority();
+    if (c.rules?.find(r => r.id === v.id)?.network_endpoint && !canManageEndpoints(c)) throw Error('Endpoint deletion requires administrator authority');
     if (!c.capabilities?.includes('conditional-rule-delete-v1'))
       throw Error(
         'Safe Delete unavailable: backend must advertise conditional-rule-delete-v1. No legacy fallback.',

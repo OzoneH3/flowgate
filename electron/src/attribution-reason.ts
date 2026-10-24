@@ -1,6 +1,8 @@
 // Diagnostic categories supplied by the backend. Never infer these from prose,
 // ownership labels or verdicts, and never use them as permission authority.
 const LABELS: Readonly<Record<string, string>> = Object.freeze({
+  attribution_not_required: 'Application attribution not required by endpoint policy',
+  no_userspace_owner_observed: 'No userspace owner observed',
   no_socket_observed: 'No matching socket observed',
   namespace_mismatch: 'Outside observer network namespace',
   socket_census_unavailable: 'Socket census unavailable',

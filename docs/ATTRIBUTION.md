@@ -289,3 +289,11 @@ Remember and For-a-while were disabled in the native GUI, and direct API attempt
 to bypass those controls were refused without changing rules or leases. This is
 isolated TCP receiver evidence, not an installed-host or native Wine acceptance
 claim. The Wine two-application/two-prefix negative checks are model regressions.
+
+Kernel transports can create network traffic without a userspace FD owner.
+A complete one-socket observation with no holder is reported as **No userspace
+owner observed**, rather than as multiple candidates. That evidence does not
+identify a kernel service or grant a shell/mount helper's application identity.
+For a deliberately reviewed network-wide exception, see
+[Network endpoint permissions](NETWORK-ENDPOINTS.md); its scope includes all
+matching programs and users, not only kernel traffic.

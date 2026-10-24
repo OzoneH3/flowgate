@@ -20,7 +20,7 @@ export interface PolicyRuleRef {
   expired: boolean;
   active: boolean;
   expires: string;
-  target_scope?: 'application' | 'process' | 'zone';
+  target_scope?: 'application' | 'process' | 'zone' | 'network-endpoint';
   target_state?: string;
   target_reason?: string;
   // application = whole target, all zones; zone = whole target, one zone; scoped = restricted.
@@ -71,6 +71,7 @@ export interface ProcessPolicy {
   application_outgoing: DirectionPolicy;
 }
 export interface PolicyView {
+  network_endpoints?: PolicyRuleRef[];
   network_zones?: NetworkZones;
   zones?: { zone: NetworkZone; incoming: DirectionPolicy; outgoing: DirectionPolicy }[];
   processes?: ProcessPolicy[];
@@ -143,7 +144,7 @@ function ruleRef(v: unknown): PolicyRuleRef {
     throw Error('Invalid priority');
   return {
     target_scope:
-      r.target_scope === undefined
+      r.target_scope === 'network-endpoint' ? 'network-endpoint' : r.target_scope === undefined
         ? undefined
         : r.target_scope === 'process'
           ? 'process'
@@ -234,6 +235,7 @@ export function parsePolicyView(raw: unknown): PolicyView {
   const v = obj(raw),
     s = obj(v.snapshot);
   const view: PolicyView = {
+    network_endpoints: v.network_endpoints === undefined ? undefined : list(v.network_endpoints,8192).map(ruleRef),
     network_zones: parseNetworkZones(v.network_zones),
     zones:
       v.zones === undefined

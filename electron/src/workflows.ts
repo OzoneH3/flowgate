@@ -1,3 +1,5 @@
+import { setupEndpointPermissions } from './endpoint-view';
+import { canManageEndpoints, ENDPOINT_SCOPE, ENDPOINT_PRECEDENCE, ENDPOINT_LIFETIME } from './endpoint-policy';
 import { setupZoneMigration } from './zone-migration-view';
 import { setupProtectionControls } from './protection-view';
 import { ZONE_CAPABILITY, zoneLabel, zoneRuleLabel, zoneDefinitionDetails } from './network-zones';
@@ -22,6 +24,7 @@ const node = (tag: string, text: string) => {
   n.textContent = text;
   return n;
 };
+let endpointUI: ReturnType<typeof setupEndpointPermissions> | undefined;
 let migrationUI: ReturnType<typeof setupZoneMigration> | undefined;
 let editRevision = 0;
 let accessState = '';
@@ -130,6 +133,7 @@ export async function openRule(source: RuleSource, options: EditorOptions = {}) 
     previewNeedsRefresh = false;
     saving = false;
     const r = draft.rule;
+    if (r.network_endpoint) throw Error('Endpoint rules are immutable. Delete and recreate through Endpoint permission.');
     $('editorApplication').textContent =
       `${draft.targetScope === 'process' ? 'This process · ' : targetLabel(r.filter.process) + ' · '}${r.executable || r.filter.application} · ${r.filter.direction} · UID ${r.filter.uid}`;
     $('editorIdentity').textContent =
@@ -259,6 +263,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
   view.hidden = true;
   view.innerHTML = `<section class="rules-main"><div class="filterbar"><button id="editRule">Edit selected</button><button id="toggleRule">Enable / Disable…</button><button id="deleteRule">Delete…</button></div><div class="table-scroll"><table id="rulesTable" tabindex="0" aria-label="Saved rules"><thead><tr><th>Application</th><th>Action</th><th>Direction</th><th>Protocol</th><th>Endpoint scope</th><th>Expiry</th><th>State</th></tr></thead><tbody id="ruleRows"></tbody></table></div><p class="hint">Rules are evaluated by Go. Changing rules does not necessarily disconnect already-approved TCP sessions.</p><p id="deleteCompatibility" class="hint"></p><p id="ruleFeedback" role="status"></p></section><aside><h2>Rule information</h2><dl id="ruleInfo">Select a saved rule.</dl></aside>`;
   $('requestsView').after(view);
+  endpointUI = setupEndpointPermissions();
   for (const [id, label] of [
     ['optionsMenu', 'Options'],
     ['controlMenu', 'Control'],
@@ -781,6 +786,7 @@ function updateButtons() {
 }
 export function updateWorkflows(next: ClientState) {
   state = next;
+  endpointUI?.update(next);
   migrationUI?.update(next, selected);
   updateButtons();
   const rules = state.control.rules || [],
@@ -802,7 +808,7 @@ export function updateWorkflows(next: ClientState) {
       tr.dataset.id = r.id;
       tr.tabIndex = 0;
       for (const value of [
-        r.preset
+        r.network_endpoint ? 'Network endpoint · all users/programs' : r.preset
           ? `Essential · ${r.preset.component} · ${r.executable || (r.filter.all_programs ? 'All programs' : r.filter.application)}`
           : r.executable || r.filter.application,
         r.action,
@@ -835,7 +841,7 @@ export function updateWorkflows(next: ClientState) {
         if (e.key === 'Enter') {
           selected = r.id;
           selectRule();
-          void openRule({ id: r.id });
+          if (!r.network_endpoint) void openRule({ id: r.id });
         }
       };
       body.append(tr);
@@ -844,10 +850,13 @@ export function updateWorkflows(next: ClientState) {
   }
   for (const id of ['editRule', 'toggleRule', 'deleteRule'])
     $<HTMLButtonElement>(id).disabled = !writable() || !rules.some((r) => r.id === selected);
-  const presetSelected = rules.find((r) => r.id === selected)?.schema === 5;
+  const chosen = rules.find((r) => r.id === selected);
+  const endpointSelected = !!chosen?.network_endpoint;
+  const presetSelected = chosen?.schema === 5;
+  if (endpointSelected && !canManageEndpoints(state.control)) $<HTMLButtonElement>('deleteRule').disabled = true;
   for (const id of ['editRule', 'toggleRule']) {
-    $<HTMLButtonElement>(id).disabled ||= presetSelected;
-    $<HTMLButtonElement>(id).title = presetSelected
+    $<HTMLButtonElement>(id).disabled ||= presetSelected || endpointSelected;
+    $<HTMLButtonElement>(id).title = endpointSelected ? 'Endpoint scope is immutable. Delete and recreate through Endpoint permission.' : presetSelected
       ? 'Legacy preset scope; manage through the administrative Essential API.'
       : '';
   }
@@ -907,7 +916,7 @@ function selectRule() {
         ],
         [
           'Target',
-          r.preset
+          r.network_endpoint ? 'Network endpoint · all matching users/programs' : r.preset
             ? r.filter.peer_service
               ? 'All programs → exact local service'
               : r.filter.all_programs
@@ -915,6 +924,7 @@ function selectRule() {
                 : 'Exact application'
             : targetLabel(r.filter.process),
         ],
+        ...(r.network_endpoint ? [['Scope', ENDPOINT_SCOPE], ['Precedence', ENDPOINT_PRECEDENCE], ['Removal / expiry', ENDPOINT_LIFETIME], ['Changes', 'Delete and recreate; generic edit and enable/disable are unavailable.']] : []),
         ...(r.preset
           ? [
               ['Preset', `${r.preset.name} · ${r.preset.component}`],
@@ -1082,7 +1092,7 @@ async function setupSizing() {
 }
 
 export function confirmRuleDelete(r: Rule, generation: string) {
-  if (!writable() || !state.control.capabilities?.includes('conditional-rule-delete-v1')) return;
+  if (!writable() || !state.control.capabilities?.includes('conditional-rule-delete-v1') || (r.network_endpoint && !canManageEndpoints(state.control))) return;
   // Freeze exactly the snapshot displayed in this confirmation, including its generation.
   const snapshot = { id: r.id, generation: generation, version: r.version ?? 0 };
   confirmAction(

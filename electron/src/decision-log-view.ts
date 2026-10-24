@@ -1,3 +1,4 @@
+import { ENDPOINT_SCOPE, ENDPOINT_PRECEDENCE } from './endpoint-policy';
 import {
   LOG_SOURCES,
   loadedOutcome,
@@ -481,6 +482,10 @@ async function showDetail(id: string, outcome = false) {
     if (rule) {
       const s = section('Rule at decision time');
       field(s, 'Rule ID', rule.id);
+      if (rule.target_scope === 'network-endpoint') {
+        field(s, 'Target scope', ENDPOINT_SCOPE);
+        field(s, 'Precedence', ENDPOINT_PRECEDENCE);
+      }
       field(s, 'Version', rule.version);
       field(s, 'Action', rule.action);
       field(s, 'Priority', rule.priority);

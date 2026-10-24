@@ -1759,3 +1759,11 @@ body.hide-sidebar #activityView > aside { display:none; }
 #usageTable td:first-child { max-width: 300px; overflow-wrap: anywhere; }
 #usageTable td:last-child { white-space: normal; }
 #usageTable .usage-amount { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+#endpointEditor { width: min(650px, calc(100vw - 40px)); max-width: 650px; max-height: calc(100vh - 48px); overflow-y: auto; box-sizing: border-box; }
+#endpointEditor p { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0; }
+#endpointEditor .endpoint-fields { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 8px; align-items: center; }
+#endpointEditor input:not([type=checkbox]), #endpointEditor select { width: 100%; min-width: 0; box-sizing: border-box; }
+#endpointEditor .endpoint-ack { display: block; margin: 12px 0; }
+#endpointEditor .endpoint-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+#endpointEditor input:disabled, #endpointEditor select:disabled { opacity: .55; cursor: not-allowed; }

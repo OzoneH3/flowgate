@@ -1,3 +1,4 @@
+import { validateEndpointRule, type EndpointDraft, type EndpointReview, type EndpointPreview } from './endpoint-policy';
 import {
   parseProtection,
   type ProtectionStatus,
@@ -317,6 +318,7 @@ export interface Permissions {
   can_decide: boolean;
 }
 export interface Reply {
+  endpoint_preview?: EndpointPreview;
   observed_usage?: unknown;
   snapshot_revision?: string;
   snapshot_at?: string;
@@ -490,6 +492,9 @@ export interface Bridge {
   extended(action: 'enable' | 'stop'): Promise<void>;
   extendedState(): Promise<ExtendedState>;
   ruleContext(): Promise<ClientState>;
+  endpointPreview(draft: EndpointDraft): Promise<EndpointReview>;
+  endpointSave(value: {receipt: string; acknowledge_scope: true}): Promise<Attempt>;
+  endpointReconcile(receipt: string): Promise<Attempt>;
   ruleDraft(source: RuleSource): Promise<RuleDraft>;
   ruleReconcile(receipt: string): Promise<Attempt>;
   rulePreview(value: RuleEdit): Promise<RulePreview>;
@@ -844,7 +849,7 @@ export function parseReply(raw: unknown): Reply {
             .map(([id, value]) => {
               const v = object(value);
               if (
-                !['application', 'process', 'zone', 'system'].includes(string(v.target_scope)) ||
+                !['application', 'process', 'zone', 'system', 'network-endpoint'].includes(string(v.target_scope)) ||
                 !['active', 'inactive'].includes(string(v.state))
               )
                 throw Error('Invalid rule target state');
@@ -939,6 +944,13 @@ export function parseReply(raw: unknown): Reply {
   }
   result.backend_mode = string(r.backend_mode);
   if (r.policy_view) result.policy_view = parsePolicyView(r.policy_view);
+  if (r.endpoint_preview) {
+    const p = object(r.endpoint_preview), e = object(p.enforcement);
+    if (!string(p.token) || string(p.token).length > 256 || !string(p.scope_preview) || string(p.scope_preview).length > 16384 || !Number.isFinite(Date.parse(string(p.expires_at))) || typeof e.covered !== 'boolean' || !string(e.state) || string(e.state).length > 256 || string(e.reason).length > 8192) throw Error('Invalid endpoint preview');
+    const rule = parseRule(p.rule);
+    if (!rule.network_endpoint) throw Error('Endpoint preview has a different rule type');
+    result.endpoint_preview = {token:string(p.token),expires_at:string(p.expires_at),rule,scope_preview:string(p.scope_preview),enforcement:{state:string(e.state),covered:e.covered,reason:string(e.reason)}};
+  }
   if (r.zone_preview) {
     const p = object(r.zone_preview),
       network_zones = parseNetworkZones(p.network_zones);
@@ -1209,11 +1221,12 @@ export interface RuleFilter {
   uid: number;
 }
 export interface RuleTargetState {
-  target_scope: 'application' | 'process' | 'zone' | 'system';
+  target_scope: 'application' | 'process' | 'zone' | 'system' | 'network-endpoint';
   state: 'active' | 'inactive';
   reason: string;
 }
 export interface Rule {
+  network_endpoint?: boolean;
   share_with_root?: boolean;
   // Daemon-derived, read-only (never persisted or sent back): this saved
   // application rule also covers updated revisions of the same verified program.
@@ -1382,8 +1395,11 @@ export const ruleCoversRevision = (rule: Rule, revision: string) =>
 export function parseRule(v: unknown): Rule {
   const r = object(v),
     filter = ruleFilter(r.filter);
+  if (r.network_endpoint !== undefined && (r.network_endpoint !== true || r.schema !== 7)) throw Error('Invalid endpoint rule schema');
   let preset: Rule['preset'];
-  if (number(r.schema) === 5) {
+  if (number(r.schema) === 7) {
+    validateEndpointRule(v);
+  } else if (number(r.schema) === 5) {
     const rawFilter = object(r.filter);
     if (
       !Number.isSafeInteger(rawFilter.uid) ||
@@ -1449,6 +1465,7 @@ export function parseRule(v: unknown): Rule {
   }
   return {
     ...(preset ? { preset } : {}),
+    ...(r.network_endpoint === true ? { network_endpoint: true } : {}),
     version: ruleVersion(r.version),
     invocation: (() => {
       const i = object(r.invocation);

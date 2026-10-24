@@ -1,3 +1,4 @@
+import { EndpointRules } from './endpoint-rules';
 import { ruleCoversRevision, runtimeWitness } from './protocol';
 import { readGuiBuild } from './gui-build';
 import { matchesApplicationZone } from './application-zones';
@@ -846,6 +847,16 @@ app.whenReady().then(async () => {
     trusted(e);
     if (e.sender !== main.webContents) throw Error('Essential networking requires the main window');
     return essential.action(action, value);
+  });
+  const endpoints = new EndpointRules(backend);
+  for (const [channel, action] of Object.entries({
+    'endpoint:preview': (v: unknown) => endpoints.preview(v),
+    'endpoint:save': (v: unknown) => endpoints.save(v),
+    'endpoint:reconcile': (v: unknown) => endpoints.reconcile(v),
+  })) ipcMain.handle(channel, (e, value) => {
+    trusted(e);
+    if (e.sender !== main.webContents) throw Error('Review endpoint permissions in the main window');
+    return action(value);
   });
   const zoneMigration = new ZoneMigration(backend);
   for (const [channel, action] of Object.entries({
