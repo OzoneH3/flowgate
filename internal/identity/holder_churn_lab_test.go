@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Real processes, real descriptor tables, real SCM_RIGHTS transfers in the
@@ -24,11 +25,22 @@ type churnFixture struct {
 	worker int
 }
 
+// Every fixture read is bounded: a command that does not acknowledge within
+// churnDeadline kills the fixture so the blocked read returns and cleanup can
+// run; stderr stays attached for the failure report.
+const churnDeadline = 30 * time.Second
+
 func startChurnFixture(t *testing.T, bin string, args ...string) *churnFixture {
 	t.Helper()
 	cmd := exec.Command(bin, args...)
-	in, _ := cmd.StdinPipe()
-	stdout, _ := cmd.StdoutPipe()
+	in, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -48,11 +60,42 @@ func startChurnFixture(t *testing.T, bin string, args ...string) *churnFixture {
 
 func (f *churnFixture) line(t *testing.T) string {
 	t.Helper()
-	line, err := f.out.ReadString('\n')
-	if err != nil {
-		t.Fatal(err)
+	type result struct {
+		line string
+		err  error
 	}
-	return strings.TrimSpace(line)
+	done := make(chan result, 1)
+	go func() {
+		line, err := f.out.ReadString('\n')
+		done <- result{line, err}
+	}()
+	timer := time.NewTimer(churnDeadline)
+	defer timer.Stop()
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatalf("fixture %s (pid %d): %v", f.cmd.Path, f.tgid, r.err)
+		}
+		return strings.TrimSpace(r.line)
+	case <-timer.C:
+		f.cmd.Process.Kill()
+		r := <-done
+		t.Fatalf("fixture %s (pid %d) did not answer within %v (read: %q, %v)", f.cmd.Path, f.tgid, churnDeadline, strings.TrimSpace(r.line), r.err)
+		return ""
+	}
+}
+
+// received waits for the receiver thread's RECEIVED line and verifies that the
+// transferred descriptor is exactly the holder's socket.
+func (f *churnFixture) received(t *testing.T, socket string) int {
+	t.Helper()
+	line := f.line(t)
+	var inode uint64
+	var tid int
+	if _, err := fmt.Sscanf(line, "RECEIVED %d %d", &inode, &tid); err != nil || fmt.Sprintf("socket:[%d]", inode) != socket {
+		t.Fatalf("%q (want %s): %v", line, socket, err)
+	}
+	return tid
 }
 
 // command sends one line and returns the acknowledgement, which must start
@@ -214,16 +257,11 @@ func TestHolderChurnRealTopologies(t *testing.T) {
 		path := filepath.Join(dir, "recv.sock")
 		f := startChurnFixture(t, alpha, "4", "tcp")
 		r := startChurnFixture(t, beta, "recv", path)
-		var received int
 		_, out := observeChurn(f.socket, func() {
 			f.command(t, "join", "JOINED ") // alpha's own churn stays reconcilable
 			r.command(t, "recv", "SPAWNED ") // beta gains a thread, then the descriptor
 			f.command(t, "send "+path, "SENT")
-			line := r.line(t)
-			var inode uint64
-			if _, err := fmt.Sscanf(line, "RECEIVED %d %d", &inode, &received); err != nil || fmt.Sprintf("socket:[%d]", inode) != f.socket {
-				t.Fatal(line, err)
-			}
+			r.received(t, f.socket)
 		}, nil)
 		if out.Complete || out.SocketIssues[f.socket] != "holder_appeared" {
 			t.Fatalf("%+v", out)
@@ -233,11 +271,12 @@ func TestHolderChurnRealTopologies(t *testing.T) {
 				t.Fatalf("receiver became an owner: %+v", p)
 			}
 		}
-		// Settled: both executables hold the socket; neither is its exclusive owner.
+		// Settled: both executables hold the socket with complete evidence;
+		// neither is its exclusive owner. An incomplete identity must not pass.
 		c := CensusHolders(map[string]bool{f.socket: true})
 		settled := inspectHolderIdentities(c, Inspect)
-		if !c.Complete || len(settled.Owners[f.socket]) != 2 {
-			t.Fatalf("%v %+v", c.Issues, settled.Owners[f.socket])
+		if !c.Complete || !settled.Complete || len(settled.SocketIssues) != 0 || len(settled.Owners[f.socket]) != 2 {
+			t.Fatalf("%v %+v", c.Issues, settled)
 		}
 		keys := map[string]bool{}
 		for _, p := range settled.Owners[f.socket] {
@@ -256,12 +295,9 @@ func TestHolderChurnRealTopologies(t *testing.T) {
 		r := startChurnFixture(t, beta, "recv-pre", path)
 		_, out := observeChurn(f.socket, func() {
 			f.command(t, "send "+path, "SENT")
-			line := r.line(t)
-			if !strings.HasPrefix(line, "RECEIVED ") {
-				t.Fatal(line)
-			}
+			r.received(t, f.socket) // the transferred descriptor is exactly this socket
 		}, nil)
-		if !out.Complete || len(out.Owners[f.socket]) != 1 || out.Owners[f.socket][0].ThreadGroup != f.tgid {
+		if !out.Complete || len(out.SocketIssues) != 0 || len(out.Owners[f.socket]) != 1 || out.Owners[f.socket][0].ThreadGroup != f.tgid {
 			t.Fatalf("snapshot boundary changed: %+v", out)
 		}
 		// The next census sees both holders and withdraws exclusive ownership.
