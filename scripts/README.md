@@ -88,7 +88,7 @@ Options:
 
 - `--profile preserve` (default): restore the mode selected before the update; new installs stay monitoring.
 - `--profile incoming` or `--profile monitoring`: select Incoming or leave protection off.
-- `--profile both --acknowledge-outgoing-blocking`: explicitly enable outgoing default-deny after reviewing Essential networking and recovery. Without acknowledgement, a transition from another mode refuses before authentication, stop or installation. DNS/DHCP/VPN can be blocked; no automatic permissions or continuous countdown are added.
+- `--profile both --acknowledge-outgoing-blocking`: explicitly enable outgoing default-deny after reviewing Essential networking and recovery. Without acknowledgement, a transition from another mode refuses before authentication, stop or installation. DNS/DHCP/VPN can be blocked; no automatic permissions or continuous countdown are added. The warning adds one read-only evidence line from the current daemon: the number of stored Essential preset records (which may include disabled or expired rules) with the current discovery revision, "No stored Essential preset records" or "status unavailable"; none of these validates coverage.
 - `--no-gui`: perform the same update/protection workflow without switching the GUI.
 - `--recover-stopped`: recover an unavailable daemon into monitoring only.
 - `--local`: skip upstream access and use committed local master (still requires a clean tree).

@@ -10,9 +10,11 @@ import json
 import os
 import shutil
 import pathlib
+import socket
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 sys.dont_write_bytecode = True
@@ -112,6 +114,9 @@ class FakeHost:
     def status(self):
         self.calls.append('status')
         return self.current
+    def essential_status(self, generation):
+        self.calls.append('essential-status:' + str(generation))
+        return getattr(self, 'essential', None)
     def installed(self):
         return True
     def prepare_install(self, backend, root, wine_discovery, expected_manifest=None):
@@ -307,6 +312,44 @@ class Update(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'acknowledge-outgoing-blocking'):
                 self.run_update(h, profile='both')
             self.assertFalse(any(c in h.calls for c in ('authenticate','monitoring','install','both','gui')))
+    def warning_output(self, host, **kw):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            try:
+                m.update(host, self.root, 'new', **kw)
+            except RuntimeError as e:
+                if 'acknowledge-outgoing-blocking' not in str(e):
+                    raise
+        return out.getvalue()
+    def test_outgoing_warning_reports_stored_records_without_coverage_claim(self):
+        # Three stored records, one of them disabled and one expired in the
+        # daemon: the count includes them and the line says so.
+        h = FakeHost(status(selected='incoming'))
+        h.essential = {'rule_ids': ['dns', 'dhcp-disabled', 'ntp-expired'], 'revision': 'disc7'}
+        text = self.warning_output(h, profile='both')
+        self.assertIn('Stored Essential preset records: 3 (may include disabled/expired); discovery revision disc7; coverage not validated.', text)
+        self.assertNotIn('applied', text.lower().replace('may include', ''))
+        self.assertIn('essential-status:g', h.calls)
+        self.assertNotIn('both', h.calls)
+        h = FakeHost(status(selected='incoming')); h.essential = {'rule_ids': ['dns'], 'revision': 'disc7'}
+        self.run_update(h, profile='both', acknowledge_outgoing=True)
+        self.assertIn('both', h.calls)
+    def test_outgoing_warning_reports_zero_records_as_manual_coverage_possible(self):
+        h = FakeHost(status(selected='monitoring'))
+        h.essential = {'rule_ids': [], 'revision': 'disc7'}
+        text = self.warning_output(h, profile='both')
+        self.assertIn('No stored Essential preset records; manual rules may provide coverage.', text)
+        self.assertNotIn('no saved permissions', text)
+    def test_outgoing_warning_keeps_unavailable_status_explicit(self):
+        h = FakeHost(status(selected='monitoring'))
+        text = self.warning_output(h, profile='both')
+        self.assertIn('Essential preset status unavailable; coverage not validated.', text)
+        self.assertIn('essential-status:g', h.calls)
+    def test_essential_status_not_queried_without_outgoing_transition(self):
+        for selected, profile in (('monitoring', 'incoming'), ('both', 'both'), ('incoming', 'preserve')):
+            h = FakeHost(status(selected=selected))
+            self.run_update(h, profile=profile)
+            self.assertFalse(any(c.startswith('essential-status') for c in h.calls), (selected, profile, h.calls))
     def test_plain_command_preserves_incoming_and_monitoring(self):
         for selected in ('monitoring', 'incoming'):
             h = FakeHost(status(selected=selected))
@@ -867,6 +910,68 @@ class LoginStartup(unittest.TestCase):
             m.configure_login_start(self.root, enable=True)
         with patch.dict(os.environ, XDG_CONFIG_HOME='relative'), self.assertRaisesRegex(ValueError, 'absolute'):
             m.configure_login_start(self.root, enable=True)
+
+
+class EssentialStatusQuery(unittest.TestCase):
+    """Real Host.essential_status against a local Unix socket standing in for the daemon."""
+    def setUp(self):
+        import threading
+        self.tmp = tempfile.TemporaryDirectory(dir=ROOT / '.workspace')
+        self.addCleanup(self.tmp.cleanup)
+        self.path = os.path.join(self.tmp.name, 'd.sock')
+        self.requests = []
+        self.server = socket.socket(socket.AF_UNIX)
+        self.server.bind(self.path)
+        self.server.listen(1)
+        self.addCleanup(self.server.close)
+        self.threading = threading
+        # The fixture is our own process, so the peer check expects our UID.
+        for name, value in (('CONTROL_SOCKET', self.path), ('DAEMON_PEER_UID', os.getuid()), ('REQUEST_TIMEOUT', 0.5)):
+            p = patch.object(m, name, value); p.start(); self.addCleanup(p.stop)
+    def serve(self, reply, *, close_without_reply=False, hang=False):
+        def run():
+            conn, _ = self.server.accept()
+            with conn:
+                self.requests.append(json.loads(conn.makefile('rb').readline()))
+                if hang:
+                    time.sleep(1.5)
+                elif not close_without_reply:
+                    conn.sendall(reply)
+        t = self.threading.Thread(target=run, daemon=True); t.start()
+        self.addCleanup(t.join, 3)
+    def reply(self, **fields):
+        return (json.dumps(dict({'version': 1, 'generation': 'gen1'}, **fields)) + '\n').encode()
+    def test_valid_reply_bound_to_requested_generation(self):
+        self.serve(self.reply(essential_status={'revision': 'disc7', 'components': [], 'rule_ids': ['a', 'b'], 'issues': []}))
+        self.assertEqual(m.Host().essential_status('gen1'), {'rule_ids': ['a', 'b'], 'revision': 'disc7'})
+        self.assertEqual(self.requests, [{'version': 1, 'operation': 'essential-status', 'generation': 'gen1'}])
+    def test_other_generation_or_error_is_unavailable(self):
+        self.serve(self.reply(generation='gen2', essential_status={'revision': 'disc7', 'rule_ids': ['a']}))
+        self.assertIsNone(m.Host().essential_status('gen1'))
+        self.serve(self.reply(error='Daemon changed', error_code='generation_conflict'))
+        self.assertIsNone(m.Host().essential_status('gen1'))
+        self.serve(self.reply(error='forbidden', error_code='forbidden'))
+        self.assertIsNone(m.Host().essential_status('gen1'))
+        self.assertIsNone(m.Host().essential_status(''))
+    def test_malformed_truncated_or_late_replies_are_unavailable(self):
+        self.serve(b'{"version":1,"generation":"gen1","essential_status":{"rule_ids":"not-a-list","revision":"r"}}\n')
+        self.assertIsNone(m.Host().essential_status('gen1'))
+        self.serve(b'{"version":1,"generation":"gen1","essential_status":{"rule_ids":[1,2],"revision":"r"}}\n')
+        self.assertIsNone(m.Host().essential_status('gen1'))
+        self.serve(b'not json\n')
+        self.assertIsNone(m.Host().essential_status('gen1'))
+        self.serve(b'[]\n')
+        self.assertIsNone(m.Host().essential_status('gen1'))
+        self.serve(b'{"version":1,"generation":"gen1"', close_without_reply=False)
+        self.assertIsNone(m.Host().essential_status('gen1'))
+        self.serve(b'', hang=True)
+        self.assertIsNone(m.Host().essential_status('gen1'))
+        self.server.close()
+        self.assertIsNone(m.Host().essential_status('gen1'))
+    def test_summary_wording(self):
+        self.assertEqual(m.essential_summary(None), 'Essential preset status unavailable; coverage not validated.')
+        self.assertEqual(m.essential_summary({'rule_ids': [], 'revision': 'r'}), 'No stored Essential preset records; manual rules may provide coverage.')
+        self.assertEqual(m.essential_summary({'rule_ids': ['x'], 'revision': ''}), 'Stored Essential preset records: 1 (may include disabled/expired); discovery revision unknown; coverage not validated.')
 
 
 if __name__ == '__main__':

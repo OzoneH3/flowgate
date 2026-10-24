@@ -383,19 +383,72 @@ def snapshot_bundle(backend, expected_manifest=None):
     return json.dumps({'files': files}).encode()
 
 
+CONTROL_SOCKET = '/run/flowgate-api/daemon.sock'
+DAEMON_PEER_UID = 0
+# Bounded single-line responses: the daemon's own request bound is 16384 bytes.
+RESPONSE_LIMIT = 1 << 20
+REQUEST_TIMEOUT = 5
+
+
+def essential_summary(status):
+    """One explicit line about stored Essential preset records; never a coverage claim.
+
+    status is the read-only essential-status result or None when it could not be
+    obtained for the current daemon generation. Stored records may include
+    disabled or expired rules and the revision is the current discovery
+    revision, not an applied one, so the wording states exactly that.
+    """
+    if status is None:
+        return 'Essential preset status unavailable; coverage not validated.'
+    if not status['rule_ids']:
+        return 'No stored Essential preset records; manual rules may provide coverage.'
+    return ('Stored Essential preset records: %d (may include disabled/expired); discovery revision %s; coverage not validated.'
+            % (len(status['rule_ids']), status['revision'] or 'unknown'))
+
+
 class Host:
-    def status(self):
+    def request(self, operation, **fields):
         with socket.socket(socket.AF_UNIX) as client:
-            client.settimeout(5)
-            client.connect('/run/flowgate-api/daemon.sock')
+            client.settimeout(REQUEST_TIMEOUT)
+            client.connect(CONTROL_SOCKET)
             _, uid, _ = struct.unpack('3i', client.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
-            if uid != 0:
+            if uid != DAEMON_PEER_UID:
                 raise RuntimeError('System daemon peer is not root')
-            client.sendall(b'{"version":1,"operation":"list"}\n')
-            response = json.loads(client.makefile('rb').readline())
+            client.sendall(json.dumps(dict(fields, version=1, operation=operation)).encode() + b'\n')
+            line = client.makefile('rb').readline(RESPONSE_LIMIT)
+        if not line.endswith(b'\n'):
+            raise RuntimeError('Daemon response truncated or oversized')
+        response = json.loads(line)
+        if not isinstance(response, dict):
+            raise RuntimeError('Daemon response is not an object')
+        return response
+
+    def status(self):
+        response = self.request('list')
         if response.get('error'):
             raise RuntimeError(response['error'])
         return {key: response.get(key) for key in ('generation', 'build', 'protection', 'enforcement')}
+
+    def essential_status(self, generation):
+        """Read-only stored-record summary bound to the expected daemon generation.
+
+        Returns {'rule_ids': [...], 'revision': str} or None. None covers every
+        failure: refusal, another generation, malformed/oversized/late replies.
+        Nothing is retried and nothing stale is reused.
+        """
+        if not generation:
+            return None
+        try:
+            response = self.request('essential-status', generation=generation)
+        except (OSError, ValueError, RuntimeError):
+            return None
+        status = response.get('essential_status')
+        if response.get('error') or response.get('generation') != generation or not isinstance(status, dict):
+            return None
+        rule_ids, revision = status.get('rule_ids'), status.get('revision')
+        if not isinstance(rule_ids, list) or not all(isinstance(r, str) for r in rule_ids) or not isinstance(revision, str):
+            return None
+        return {'rule_ids': rule_ids, 'revision': revision}
 
     def installed(self):
         return pathlib.Path('/usr/local/lib/flowgate/current').exists()
@@ -607,16 +660,19 @@ def update(host, root, revision, *, dry=False, gui=True, profile="preserve", win
         profile = 'monitoring'
     previous = mode(before) if before else 'monitoring'
     selected = previous if profile == "preserve" else profile
-    def check_activation(current_mode, target):
+    def check_activation(current_mode, target, live=None):
         if target == 'both' and current_mode != 'both':
             warning = ('Enabling outgoing default-deny can block DNS, DHCP, VPN and kernel-origin traffic. '
                        'Review Essential networking and saved permissions; no permissions are added automatically. '
                        'Root-local recovery: sudo /usr/local/sbin/flowgate-recover. '
                        'Continuous protection has no automatic countdown.')
             say(warning)
+            # Evidence for the review above, read-only and bound to the daemon
+            # generation just observed; unavailable stays explicit.
+            say(essential_summary(host.essential_status((live or {}).get('generation'))))
             if not dry and not acknowledge_outgoing:
                 raise RuntimeError('Outgoing activation requires --acknowledge-outgoing-blocking after reviewing this warning; no action taken')
-    check_activation(previous, selected)
+    check_activation(previous, selected, before)
     needs_install = wine_discovery or before is None or (not matches(before, manifest) if manifest else (before.get('build') or {}).get('source') != revision)
     if dry:
         if needs_install:
@@ -642,13 +698,13 @@ def update(host, root, revision, *, dry=False, gui=True, profile="preserve", win
             host.authenticate()
             current = host.status() if before is not None else None
             selected = mode(current) if current is not None and profile == 'preserve' else selected
-            check_activation(mode(current) if current is not None else 'monitoring', selected)
+            check_activation(mode(current) if current is not None else 'monitoring', selected, current)
             host.preflight(backend, selected)
             checked_profile = selected
             current = host.status() if before is not None else None
             if current is not None:
                 selected = mode(current) if profile == "preserve" else profile
-                check_activation(mode(current), selected)
+                check_activation(mode(current), selected, current)
                 if selected != checked_profile:
                     host.preflight(backend, selected)
                 if not at_mode(current, 'monitoring'):
@@ -675,7 +731,7 @@ def update(host, root, revision, *, dry=False, gui=True, profile="preserve", win
             if not at_mode(current, selected):
                 # A new install is expected to be monitoring. Only restoration
                 # of an already active outgoing policy skips a new acknowledgement.
-                check_activation(mode(recovery_status) if stopped_for_update else mode(current), selected)
+                check_activation(mode(recovery_status) if stopped_for_update else mode(current), selected, current)
                 say('Restoring protection mode: ' + selected)
                 transition(host, backend, selected)
         final = host.status()

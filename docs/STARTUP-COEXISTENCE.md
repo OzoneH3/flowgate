@@ -17,8 +17,8 @@ future Tailscale versions or rule changes are supported.
 No transport exemption or automatic Allow is introduced. System and tunnel
 traffic still uses ordinary application permissions. The boot/crash guard,
 work-VPN essential-permission exclusions and Tailscale transport exclusion from
-essential permissions remain unchanged. The optional `tailscale-inspect`
-read-only diagnostic remains available.
+essential permissions remain unchanged. The former `tailscale-inspect` command
+has been removed; use `flowgate doctor` (see DIAGNOSTICS.md).
 
 Validation: readiness race tests cover empty, partial and complete rule sets,
 no Tailscale client probes, unsafe masks, missing/mismatched exports, duplicates
