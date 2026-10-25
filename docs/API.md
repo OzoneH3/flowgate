@@ -468,9 +468,13 @@ Mutations and revalidating previews publish before their acknowledgement; pure
 status, log and policy queries reuse the last publication. Clients
 ignore older snapshots and lists that were already in flight when a decision
 completed. An acknowledged request must not reopen from the same or an older
-publication. A missing acknowledgement means an unknown outcome; reconcile via a
-fresh list without automatically retrying the decision. Legacy daemons without
-this capability retain the existing request-order reconciliation.
+publication. A missing acknowledgement means an unknown outcome; reconcile via
+read-only list requests without automatically retrying the decision. An immediate
+list can still contain the pre-mutation publication: durable commit and list
+publication are distinct steps. Compare generation and snapshot revisions and
+continue bounded inspection when the result is still uncertain; a rule remaining
+in that earlier snapshot is not proof that the mutation failed. Legacy daemons
+without this capability retain the existing request-order reconciliation.
 
 Publication still briefly holds the engine lock to capture and serialize state;
 this is separation of API list reads, not a claim that policy evaluation and all

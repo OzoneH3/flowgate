@@ -304,9 +304,22 @@ func TestConditionalDeleteLostResponse(t *testing.T) {
 	}
 	c.Close() // Deliberately discard acknowledgement.
 	<-committed
-	listed := callResponse(a.path, Request{Version: 1, Operation: "list"})
-	if len(listed.Rules) != 0 {
-		t.Fatal("authoritative inspection did not resolve ambiguity")
+	// Persistence precedes snapshot publication. With the acknowledgement lost,
+	// inspection may initially return the previous published list; poll only
+	// reads, never replay the mutation to resolve this uncertainty.
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		listed, err := Call(a.path, Request{Version: 1, Operation: "list"})
+		if err != nil || listed.Error != "" {
+			t.Fatal("inspection failed", err, listed.Error)
+		}
+		if len(listed.Rules) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("published inspection did not resolve ambiguity", listed.SnapshotRevision)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	assertCode(t, callResponse(a.path, a.deleteRequest()), "not_found")
 }
