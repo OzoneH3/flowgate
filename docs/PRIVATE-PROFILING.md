@@ -2,8 +2,10 @@
 
 This is diagnostic support, not a UDP throughput optimization. It is off by
 default and does not open a listener, add an API operation, or install a signal
-handler. The deployed baseline remains `bbee9b56d4ba10634142bfdff65edb6f60a6973e`
-until an explicitly approved guarded update.
+handler. Diagnostic release `25dbb1a90e81f6fc2a150231cae699db87e430f3` was explicitly
+approved and deployed; its one capture finished and the temporary override was
+removed. `bbee9b56d4ba10634142bfdff65edb6f60a6973e` remains the comparison
+baseline. Performance releases require separate deployment approval.
 
 A root administrator may set `FLOWGATE_PROFILE_DIR` in the service environment
 to an existing root-owned directory with mode 0700. The diagnostic build waits

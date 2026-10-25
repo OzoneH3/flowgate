@@ -29,16 +29,21 @@ scope and does not turn partial observations into billing or delivery evidence.
 
 ## Current source versus deployed software
 
-The recorded deployed backend/GUI baseline is
-`bbee9b56d4ba10634142bfdff65edb6f60a6973e` (2026-10-25). Both-direction
-protection, all 75 rules, collector settings and GUI autostart were preserved;
-service health verification reported zero restarts. A subsequent 300-second
-normal-use sample recorded 140 admission rejections, with endpoint-only
-last-observed limit masks, zero fairness displacements and zero overflow
-notifications. Daemon CPU averaged 29.09% of one core. The 9,497 collector misses
-were accounting gaps, not drops. No connectivity problems were reported, but
-this uncontrolled sample has no receiver denominator and does not establish a
-loss rate or a live QUIC fix. Evidence: `.workspace/deploy-admission-live/`.
+The deployed diagnostic backend/GUI release is
+`25dbb1a90e81f6fc2a150231cae699db87e430f3` (2026-10-25), based on performance
+baseline `bbee9b56d4ba10634142bfdff65edb6f60a6973e`. The approved guarded
+update preserved Both protection and all 78 current rule documents exactly,
+collector/Wine configuration and GUI autostart. A single 60.000479-second
+normal-use profile completed; its temporary override was removed without a
+second restart. The service stayed healthy, with zero unexpected restarts.
+
+That quiet instrumented window contained 134 NFQUEUE callbacks (73 UDP, 61 TCP),
+zero admission/fairness/overflow counter increases, and 46 collector measurement
+misses. Process CPU was 15.964921 seconds (26.61% of one core). It did not reproduce
+overload and has no wire/receiver denominator. No connectivity problems were
+reported. The actual CPU profile identified holder census/validation, particularly
+fresh task-stat reads, as the target; nested call-tree totals are not additive.
+Evidence: `.workspace/serve-profile/deploy/analysis.txt` and private profiles.
 
 That deployment includes the GUI shutdown fix, census thread-churn reconciliation,
 practical native UDP inspection refresh (fresh per-batch facts, full classification
@@ -47,13 +52,19 @@ and UDP scheduling/evaluation changes. A fresh per-packet link query runs outsid
 the policy lock; recent-endpoint overtaking is bounded to two turns. Idle packet
 slots can be borrowed and reclaimed; global/byte bounds remain unchanged.
 
-New private one-shot profiling support is source/prepared-only until explicitly
-approved for deployment. It adds no throughput fast path, public endpoint or
-policy/cache relaxation; see [PRIVATE-PROFILING.md](PRIVATE-PROFILING.md). Four
+The diagnostic support is off unless explicitly enabled; the approved capture
+has finished. It adds no throughput fast path, public endpoint or policy/cache
+relaxation; see [PRIVATE-PROFILING.md](PRIVATE-PROFILING.md). Four
 subsequent scratch batching/transport-pool experiments were rejected for failing
 to demonstrate a reliable delivery/CPU improvement (`.workspace/udp-throughput/`).
-The actual deployed `serve` cost split must be measured before selecting another
-optimization; TCG timings alone do not justify a multi-queue redesign.
+A narrower holder-census task-stat reader optimization has passed source/guest
+validation and is prepared for review, not installed. Profiling-disabled, reversed-
+order VM comparisons used 69.29 versus 67.63 CPU seconds and delivered 6,848 versus
+6,987 allowed packets. Ordinary low-rate delivery was complete and Deny delivered
+zero. Severe-load results were mixed: high-rate allowed delivery was 663 versus
+597, with worse survivor latency; overload is not resolved. The broader reader
+variant was withdrawn after a focused stress repeat. See `.workspace/holder-stat/`.
+These results do not establish actual-host gains or justify a multi-queue redesign.
 
 In two reversed-order capped-VM comparisons, sustained allowed delivery was
 4592/4800 versus 3619/4800 baseline, with low-rate allowed delivery 480/480

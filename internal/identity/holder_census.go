@@ -562,20 +562,7 @@ func procHolders() holderProc {
 			return out, nil
 		},
 		stat: func(tgid, tid int) (string, bool, error) {
-			b, err := os.ReadFile(fmt.Sprintf("/proc/%d/task/%d/stat", tgid, tid))
-			if err != nil {
-				return "", false, err
-			}
-			s := string(b)
-			i := strings.LastIndex(s, ") ")
-			if i < 0 {
-				return "", false, fmt.Errorf("task stat unavailable")
-			}
-			f := strings.Fields(s[i+2:])
-			if len(f) < 20 {
-				return "", false, fmt.Errorf("short task stat")
-			}
-			return f[19], f[0] == "Z", nil
+			return readHolderTaskStat(fmt.Sprintf("/proc/%d/task/%d/stat", tgid, tid))
 		},
 		fds: func(tgid, tid int, visit func(path, target string) bool) error {
 			return readFDTable(fmt.Sprintf("/proc/%d/task/%d/fd", tgid, tid), os.Readlink, visit)
