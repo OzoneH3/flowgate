@@ -1,6 +1,7 @@
 package identity
 
 import (
+	diagnostics "flowgate/internal/serveprofile"
 	"fmt"
 	"golang.org/x/sys/unix"
 	"net"
@@ -46,6 +47,7 @@ func LoopbackDeviceOnInterfaces(f Flow, interfaces []net.Interface) (loopback, k
 // InterfacesForFlow pins the namespace across the fresh dump. The returned
 // snapshot is owned by this one evaluation, never a cached network authority.
 func InterfacesForFlow(f Flow) ([]net.Interface, error) {
+	defer diagnostics.Begin(diagnostics.LinkQuery).End()
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	if f.NetNS == "" || f.NetNS != link("/proc/thread-self/ns/net") {

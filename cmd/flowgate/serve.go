@@ -11,6 +11,7 @@ import (
 	"flowgate/internal/identity"
 	"flowgate/internal/monitor"
 	"flowgate/internal/readiness"
+	diagnostics "flowgate/internal/serveprofile"
 	"flowgate/internal/store"
 	"flowgate/internal/tcpinit"
 	"flowgate/internal/udpaccount"
@@ -254,6 +255,11 @@ func serveCommand(args []string) error {
 				}
 				fmt.Fprintln(os.Stderr, "READY: root daemon; desired:", s.DesiredMode, "actual:", s.State)
 				ready = true
+				stopProfile := diagnostics.StartFromEnvironment(ctx, func() any {
+					collector := traffic.Status()
+					return map[string]any{"queue_health": e.QueueHealth.Snapshot(true), "collector_state": collector.State, "collector_generation": collector.Generation, "collector_missed_operations": collector.Missed, "build": build}
+				})
+				defer stopProfile()
 			}
 		}
 		if ready && *notify {

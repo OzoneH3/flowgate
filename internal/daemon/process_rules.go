@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	diagnostics "flowgate/internal/serveprofile"
 	"flowgate/internal/identity"
 	"flowgate/internal/policy"
 	"fmt"
@@ -131,6 +132,7 @@ func (e *Engine) evaluateClassifiedLocked(rules []policy.Rule, f identity.Flow, 
 type packetLinkObservation struct{ loopback, known bool }
 
 func (e *Engine) evaluateClassifiedLinkLocked(rules []policy.Rule, f identity.Flow, a identity.Attribution, now time.Time, link *packetLinkObservation) (string, string, []string, bool) {
+	defer diagnostics.Begin(diagnostics.PolicyEvaluate).End()
 	// Do not validate process/preset targets and resolve interfaces for scopes
 	// which cannot match this packet. Equal program scopes share these fields,
 	// so newest-setting/disabled-setting precedence is preserved.

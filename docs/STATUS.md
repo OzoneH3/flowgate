@@ -29,31 +29,39 @@ scope and does not turn partial observations into billing or delivery evidence.
 
 ## Current source versus deployed software
 
-Source HEAD, installed service and GUI may differ. The last recorded deployment
-was `3581c7b3772c62b2161b9b2f2b12e98d5fda1e2a` on 2026-10-25 at 13:47 CET: Both active, 74 rule documents preserved exactly,
-matched GUI loaded, login entry refreshed, and opt-in usage history disabled.
-The installed executable matched its release manifest and the service reported
-zero restarts. This is a recorded acceptance snapshot, not a logout/login test.
-That deployment includes census thread-churn reconciliation and practical native
-UDP inspection refresh (fresh per-batch task facts, full runtime classification
-at initial resolution/refresh, 10-second refresh scheduling and 30-second hard
-reuse window). It does not establish lossless live QUIC: later read-only samples
-still recorded admission-capacity rejections.
+The recorded deployed backend/GUI baseline is
+`bbee9b56d4ba10634142bfdff65edb6f60a6973e` (2026-10-25). Both-direction
+protection, all 75 rules, collector settings and GUI autostart were preserved;
+service health verification reported zero restarts. A subsequent 300-second
+normal-use sample recorded 140 admission rejections, with endpoint-only
+last-observed limit masks, zero fairness displacements and zero overflow
+notifications. Daemon CPU averaged 29.09% of one core. The 9,497 collector misses
+were accounting gaps, not drops. No connectivity problems were reported, but
+this uncontrolled sample has no receiver denominator and does not establish a
+loss rate or a live QUIC fix. Evidence: `.workspace/deploy-admission-live/`.
 
-The subsequent GUI session-shutdown fix and UDP evaluation/scheduling follow-up
-are source-only until an explicitly requested installation. The latter removes
-irrelevant target/interface validation and moves a fresh per-packet link query
-outside the policy lock; it also bounds recent-endpoint overtaking to two turns.
-Idle packet slots can be borrowed by busy endpoints and reclaimed for another
-endpoint within its base allowance; the byte reserve is unchanged.
+That deployment includes the GUI shutdown fix, census thread-churn reconciliation,
+practical native UDP inspection refresh (fresh per-batch facts, full classification
+initially/on refresh, 10-second refresh scheduling and 30-second hard reuse age),
+and UDP scheduling/evaluation changes. A fresh per-packet link query runs outside
+the policy lock; recent-endpoint overtaking is bounded to two turns. Idle packet
+slots can be borrowed and reclaimed; global/byte bounds remain unchanged.
+
+New private one-shot profiling support is source/prepared-only until explicitly
+approved for deployment. It adds no throughput fast path, public endpoint or
+policy/cache relaxation; see [PRIVATE-PROFILING.md](PRIVATE-PROFILING.md). Four
+subsequent scratch batching/transport-pool experiments were rejected for failing
+to demonstrate a reliable delivery/CPU improvement (`.workspace/udp-throughput/`).
+The actual deployed `serve` cost split must be measured before selecting another
+optimization; TCG timings alone do not justify a multi-queue redesign.
+
 In two reversed-order capped-VM comparisons, sustained allowed delivery was
 4592/4800 versus 3619/4800 baseline, with low-rate allowed delivery 480/480
 and denied delivery zero. High-rate/burst loss remains, including some low-rate
 traffic under stress. These are receiver results in a 1-vCPU TCG guest, not a
 live QUIC acceptance claim. Queue/identity lifetimes and global packet/byte
-limits are unchanged. Scoped validation
-and failed attempts are recorded in `.workspace/udp-admission/`; release
-preparation is separate from deployment and live-host acceptance.
+limits are unchanged. These are the earlier bbee9b56 validation results;
+scoped validation and failed attempts are in `.workspace/udp-admission/`.
 
 For current status use the GUI build/protection indicators or
 `/usr/local/bin/flowgate-control status`. Service “active” alone does not prove

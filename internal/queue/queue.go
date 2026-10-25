@@ -8,6 +8,7 @@ import (
 	"flowgate/internal/daemon"
 	"flowgate/internal/identity"
 	"flowgate/internal/queuehealth"
+	diagnostics "flowgate/internal/serveprofile"
 	"fmt"
 	nfqueue "github.com/florianl/go-nfqueue/v2"
 	"github.com/mdlayher/netlink"
@@ -114,6 +115,7 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 	}
 	var selfUpdates sync.Map // packet ID -> exact kernel connection update; removed on every verdict
 	submitVerdict := func(id uint32, allow bool) (bool, error) {
+		defer diagnostics.Begin(diagnostics.Verdict).End()
 		if allow && ctx.Err() != nil {
 			health.Add(queuehealth.Shutdown)
 			allow = false
@@ -139,6 +141,13 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 		if err != nil {
 			health.Add(queuehealth.VerdictFailure)
 			fail(err)
+		}
+		if err != nil {
+			diagnostics.Count(diagnostics.VerdictError, 1)
+		} else if allow {
+			diagnostics.Count(diagnostics.VerdictAllow, 1)
+		} else {
+			diagnostics.Count(diagnostics.VerdictDrop, 1)
 		}
 		return allow, err
 	}
@@ -218,6 +227,7 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 		report()
 	}()
 	err = nf.RegisterWithErrorFunc(ctx, func(a nfqueue.Attribute) int {
+		diagnostics.Count(diagnostics.Offered, 1)
 		if a.PacketID == nil {
 			return 0
 		}
@@ -239,6 +249,12 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 				err = fmt.Errorf("unsupported queue hook")
 			}
 			if err == nil {
+				diagnostics.Count(diagnostics.Parsed, 1)
+				if f.Protocol == "udp" {
+					diagnostics.Count(diagnostics.ParsedUDP, 1)
+				} else if f.Protocol == "tcp" {
+					diagnostics.Count(diagnostics.ParsedTCP, 1)
+				}
 				if a.InDev != nil {
 					f.Interface = *a.InDev
 				}
@@ -260,8 +276,10 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 					}
 				}
 				if workers.submitWait(ctx, packetJob{id: *a.PacketID, size: len(*a.Payload), flow: f, token: token, deadline: time.Now().Add(AttributionTimeout)}) {
+					diagnostics.Count(diagnostics.Admitted, 1)
 					return 0
 				}
+				diagnostics.Count(diagnostics.AdmissionRejected, 1)
 				overloadedSample.CompareAndSwap(nil, &f)
 				overloaded.Add(1)
 				if ctx.Err() != nil {

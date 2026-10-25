@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"flowgate/internal/accounting"
 	"flowgate/internal/decisionlog"
+	diagnostics "flowgate/internal/serveprofile"
 	"flowgate/internal/essential"
 	"flowgate/internal/identity"
 	"flowgate/internal/policy"
@@ -308,7 +309,10 @@ func (e *Engine) ObserveResolved(f identity.Flow, token string, a identity.Attri
 	// Only this call consumes the observation; policy/expiry/zones remain fresh
 	// under the lock and the next datagram makes another kernel observation.
 	device, known := observeLoopbackDevice(f)
+	wait := diagnostics.Begin(diagnostics.PolicyLockWait)
 	e.mu.Lock()
+	wait.End()
+	defer diagnostics.Begin(diagnostics.PolicyLocked).End()
 	e.peerPrefetched = peers
 	defer func() { e.peerPrefetched = nil; e.mu.Unlock() }()
 	return e.observeResolvedWithLinkLocked(f, token, a, &packetLinkObservation{device, known})

@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"flowgate/internal/daemon"
+	diagnostics "flowgate/internal/serveprofile"
 	"flowgate/internal/identity"
 	"flowgate/internal/queuehealth"
 	"fmt"
@@ -119,6 +120,7 @@ func newPacketBatchLanes(general, census int, process func(packetJob, bool, bool
 // just the callback's existing packet; it creates no goroutines or extra queue.
 // Never renew the packet's attribution deadline, and bound head-of-line delay.
 func (w *packetWorkers) submitWait(ctx context.Context, p packetJob) (admitted bool) {
+	defer diagnostics.Begin(diagnostics.AdmissionWait).End()
 	var mask uint8
 	defer func() {
 		if !admitted && w.admissionRejected != nil {
@@ -427,11 +429,21 @@ func (w *packetWorkers) run(lane int) {
 		w.active[key] = true
 		stop := w.stopped
 		w.mu.Unlock()
+		for _, item := range batch {
+			diagnostics.Since(diagnostics.QueueResidence, item.deadline.Add(-AttributionTimeout))
+		}
+		diagnostics.Count(diagnostics.WorkerVisits, uint64(n))
+		diagnostics.Batch(n)
+		work := diagnostics.Begin(diagnostics.WorkerBatch)
 		var done bool
 		if n > 1 {
 			done = w.processBatch(batch, stop, lane == 1)
 		} else {
 			done = w.process(p, stop, lane == 1)
+		}
+		work.End()
+		if done {
+			diagnostics.Count(diagnostics.CompletedVisits, uint64(n))
 		}
 		w.mu.Lock()
 		if !done {

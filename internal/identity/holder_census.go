@@ -2,6 +2,7 @@ package identity
 
 import (
 	"errors"
+	diagnostics "flowgate/internal/serveprofile"
 	"fmt"
 	"io"
 	"io/fs"
@@ -130,6 +131,7 @@ func (p holderProc) census(wanted map[string]bool, lim holderLimits) HolderCensu
 }
 
 func (p holderProc) censusBudget(wanted map[string]bool, lim holderLimits, budget *holderBudget) HolderCensus {
+	defer diagnostics.Begin(diagnostics.HolderCensus).End()
 	p.deadline = budget.deadline
 	c := HolderCensus{Complete: true, SocketIssues: map[string][]string{}, src: p, wanted: wanted, lim: lim, deadline: p.deadline, budget: budget, groups: map[int]*holderGroup{}}
 	omitted := func(socket, code string) {

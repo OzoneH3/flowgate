@@ -4,6 +4,7 @@ package identity
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	diagnostics "flowgate/internal/serveprofile"
 	"fmt"
 	"io"
 	"os"
@@ -89,6 +90,7 @@ func processStat(base string) (string, int, error) {
 	return f[19], p, nil
 }
 func Inspect(pid int) (Process, error) {
+	defer diagnostics.Begin(diagnostics.FullInspect).End()
 	base := fmt.Sprintf("/proc/%d", pid)
 	start, parent, e := processStat(base)
 	if e != nil {

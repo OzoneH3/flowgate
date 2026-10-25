@@ -5,6 +5,7 @@ package identity
 // executable and generation must agree before selecting a representative.
 import (
 	"encoding/json"
+	diagnostics "flowgate/internal/serveprofile"
 	"fmt"
 	"maps"
 	"os"
@@ -27,6 +28,7 @@ func (f holderTaskFacts) sameIdentity(g holderTaskFacts) bool {
 }
 
 func readHolderFacts(h Holder, m HolderMember) (holderTaskFacts, error) {
+	defer diagnostics.Begin(diagnostics.ProcessFacts).End()
 	base := fmt.Sprintf("/proc/%d/task/%d", h.TGID, m.TID)
 	start, _, err := processStat(base)
 	if err != nil || start != m.Start {

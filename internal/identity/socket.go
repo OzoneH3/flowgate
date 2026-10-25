@@ -2,6 +2,7 @@ package identity
 
 import (
 	"encoding/binary"
+	diagnostics "flowgate/internal/serveprofile"
 	"fmt"
 	"net/netip"
 	"strconv"
@@ -98,6 +99,7 @@ func diagRequest(family, proto byte, limit int, port uint16) []byte {
 }
 
 func socketsForPort(protos []byte, limit int, port uint16) ([]Socket, error) {
+	defer diagnostics.Begin(diagnostics.SocketCensus).End()
 	c, e := netlink.Dial(unix.NETLINK_SOCK_DIAG, nil)
 	if e != nil {
 		return nil, e
@@ -256,6 +258,7 @@ func resolveDump(f Flow) (func() ([]Socket, error), string) {
 }
 
 func Resolve(f Flow) Attribution {
+	defer diagnostics.Begin(diagnostics.FullResolve).End()
 	a := Attribution{Status: "unidentified", Reason: "no visible matching socket", ReasonCode: ReasonNoSocketObserved}
 	if f.NetNS != NetNS() {
 		a.setReason(ReasonNamespaceMismatch, "foreign network namespace is outside this observer")

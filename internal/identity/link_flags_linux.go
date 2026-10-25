@@ -2,6 +2,7 @@ package identity
 
 import (
 	"encoding/binary"
+	diagnostics "flowgate/internal/serveprofile"
 	"fmt"
 	"runtime"
 	"time"
@@ -39,6 +40,7 @@ func linkIsLoopback(index uint32) bool {
 }
 
 func freshLinkFlags(index uint32, expectedNS string) (uint32, error) {
+	defer diagnostics.Begin(diagnostics.LinkQuery).End()
 	if index == 0 || index > 1<<31-1 {
 		return 0, fmt.Errorf("invalid link index")
 	}
