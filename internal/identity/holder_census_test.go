@@ -508,11 +508,16 @@ func TestHolderCensusDetailedFailureScopeAndChurn(t *testing.T) {
 	if !c.Complete {
 		t.Fatal(c.Issues)
 	}
-	// Group10's holder membership changes; other holder groups remain valid.
+	// Group10's same-table membership change is offered for full identity
+	// reconciliation; other holder groups remain valid. This is not acceptance
+	// by the census itself: callers using Recheck still refuse the changed set.
 	f.groups[10][13] = &censusTask{"1003", false, 1}
 	d := c.RecheckDetail()
-	if d.Err != nil || len(d.Groups) != 1 || d.Groups[10] == "" {
-		t.Fatalf("failure leaked across groups: %+v", d)
+	if d.Err != nil || len(d.Groups) != 0 || len(d.Appeared) != 0 || len(d.Reconcilable) != 1 || len(d.Reconcilable[10]) == 0 {
+		t.Fatalf("reconciliation leaked across groups: %+v", d)
+	}
+	if err := c.Recheck(); err == nil || err.Error() != "membership_changed" {
+		t.Fatalf("unverified membership change accepted: %v", err)
 	}
 	// A new task in a distinct, nonholding table can be proven irrelevant by a
 	// complete fresh scan. It is never added to the inspected holder set.
