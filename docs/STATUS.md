@@ -57,13 +57,16 @@ has finished. It adds no throughput fast path, public endpoint or policy/cache
 relaxation; see [PRIVATE-PROFILING.md](PRIVATE-PROFILING.md). Four
 subsequent scratch batching/transport-pool experiments were rejected for failing
 to demonstrate a reliable delivery/CPU improvement (`.workspace/udp-throughput/`).
-A narrower holder-census task-stat reader optimization has passed source/guest
-validation and is prepared for review, not installed. Profiling-disabled, reversed-
-order VM comparisons used 69.29 versus 67.63 CPU seconds and delivered 6,848 versus
-6,987 allowed packets. Ordinary low-rate delivery was complete and Deny delivered
-zero. Severe-load results were mixed: high-rate allowed delivery was 663 versus
-597, with worse survivor latency; overload is not resolved. The broader reader
-variant was withdrawn after a focused stress repeat. See `.workspace/holder-stat/`.
+The narrower holder-census task-stat experiment `66313d5` was rejected: its
+69.29→67.63 CPU-second saving accompanied high-rate allowed delivery falling
+663→597 and worse survivor latency. Its production reader is reverted; evidence
+remains in `.workspace/holder-stat/`. It is not an approved UDP fix.
+The default updater now pins exact diagnostic `25dbb1a` using
+`deployment/default-release`. The coordinator checks an exact-source approval
+policy before any host contact; rejected and unapproved builds cannot silently
+install, including newer HEADs. Preparing a release does not approve it.
+A separate Essential-discovery census-sharing experiment is under guest
+comparison in `.workspace/holder-work/`; it is not deployed or approved.
 These results do not establish actual-host gains or justify a multi-queue redesign.
 
 In two reversed-order capped-VM comparisons, sustained allowed delivery was
