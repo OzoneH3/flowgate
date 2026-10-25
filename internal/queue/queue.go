@@ -151,6 +151,7 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 	// capacity rejection occurs before attribution and otherwise leaves no way
 	// to distinguish a game's failed admission from unrelated background traffic.
 	var overloadedSample atomic.Pointer[identity.Flow]
+	var admissionLimits [32]atomic.Uint64
 	processor := packetProcessor{batchObserve: e.PrepareUDPBatch, ctx: ctx, observe: e.Observe, tryObserve: e.TryObserve, retain: retained.Add, record: e.RecordPacketOutcome, verdict: submitVerdict, expired: &expired, diagnostic: health.Add}
 	workers := newPacketBatchLanes(AttributionWorkers, CensusWorkers, processor.processStage, processor.processBatch, func(p packetJob, cause rejectionCause) {
 		if cause == rejectShutdown {
@@ -165,6 +166,7 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 		}
 		verdictPacket(p.id, false)
 	})
+	workers.admissionRejected = func(mask uint8) { admissionLimits[mask&31].Add(1) }
 	health.GaugeSource(func() queuehealth.Gauges {
 		g := workers.healthGauges()
 		g.RetainedPackets, g.RetainedBytes = retained.gauges()
@@ -193,6 +195,15 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 			} else {
 				log.Printf("queue %d: dropped %d packets: attribution capacity exhausted", number, n)
 			}
+		}
+		var limits [32]uint64
+		var limitTotal uint64
+		for i := range admissionLimits {
+			limits[i] = admissionLimits[i].Swap(0)
+			limitTotal += limits[i]
+		}
+		if limitTotal != 0 {
+			log.Printf("queue %d: admission rejection last-observed limit masks %v (bits endpoint=1 global=2 census=4 stopped=8 follower-headroom=16; 0=unclassified; overlapping conditions, not ownership or network-loss evidence)", number, limits)
 		}
 		if n := expired.Swap(0); n != 0 {
 			log.Printf("queue %d: dropped %d packets: attribution deadline or shutdown", number, n)

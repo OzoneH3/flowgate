@@ -184,10 +184,16 @@ func Evaluate(rules []Rule, f identity.Flow, a identity.Attribution, now time.Ti
 	return EvaluateSession(rules, f, a, now, "")
 }
 func EvaluateSession(rules []Rule, f identity.Flow, a identity.Attribution, now time.Time, session string) (string, string, []string) {
+	return EvaluateSessionObserved(rules, f, a, now, session, identity.IsLoopbackFlow)
+}
+
+// EvaluateSessionObserved uses the caller's fresh kernel loopback observation
+// for this evaluation. It must never be a cached verdict or link observation.
+func EvaluateSessionObserved(rules []Rule, f identity.Flow, a identity.Attribution, now time.Time, session string, loopback func(identity.Flow) bool) (string, string, []string) {
 	if action, id, ids := EvaluateNetworkEndpoint(rules, f, now); id != "" {
 		return action, id, ids
 	}
-	localhost := identity.IsLoopbackFlow(f)
+	localhost := loopback(f)
 	if localhost {
 		rules = LoopbackRules(rules, f, now)
 		if len(rules) == 0 {

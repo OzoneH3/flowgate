@@ -34,8 +34,13 @@ func newLinkQueryPool(limit int) *linkQueryPool {
 var loopbackQueries = newLinkQueryPool(8)
 
 func linkIsLoopback(index uint32) bool {
+	flags, err := freshLinkFlags(index, "")
+	return err == nil && flags&unix.IFF_LOOPBACK != 0
+}
+
+func freshLinkFlags(index uint32, expectedNS string) (uint32, error) {
 	if index == 0 || index > 1<<31-1 {
-		return false
+		return 0, fmt.Errorf("invalid link index")
 	}
 	// A netlink connection belongs to the creating thread's network namespace.
 	// Keep that thread fixed through checkout/dial/query; pooled connections from
@@ -43,11 +48,10 @@ func linkIsLoopback(index uint32) bool {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	ns := link("/proc/thread-self/ns/net")
-	if ns == "" {
-		return false
+	if ns == "" || (expectedNS != "" && ns != expectedNS) {
+		return 0, fmt.Errorf("link namespace unavailable or changed")
 	}
-	flags, err := loopbackQueries.query(index, ns, time.Now().Add(time.Second), func() (linkQueryConnection, error) { return netlink.Dial(unix.NETLINK_ROUTE, nil) })
-	return err == nil && flags&unix.IFF_LOOPBACK != 0
+	return loopbackQueries.query(index, ns, time.Now().Add(time.Second), func() (linkQueryConnection, error) { return netlink.Dial(unix.NETLINK_ROUTE, nil) })
 }
 
 // Only transport connections are reused, never link observations. Each checkout

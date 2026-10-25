@@ -303,22 +303,31 @@ func (e *Engine) ObserveResolved(f identity.Flow, token string, a identity.Attri
 	} else if !e.defaultLoopback(f) {
 		peers = e.resolvePeers(f)
 	}
+	// This packet's kernel link query does not require the policy mutex. Keep
+	// unrelated endpoints and rule publication progressing while netlink waits.
+	// Only this call consumes the observation; policy/expiry/zones remain fresh
+	// under the lock and the next datagram makes another kernel observation.
+	device, known := observeLoopbackDevice(f)
 	e.mu.Lock()
 	e.peerPrefetched = peers
 	defer func() { e.peerPrefetched = nil; e.mu.Unlock() }()
-	return e.observeResolvedLocked(f, token, a)
+	return e.observeResolvedWithLinkLocked(f, token, a, &packetLinkObservation{device, known})
 }
 
 // Caller holds e.mu. Shared by ordinary fresh attribution and explicit network
 // authority, so rule publication and the final verdict cannot race a precheck.
 func (e *Engine) observeResolvedLocked(f identity.Flow, token string, a identity.Attribution) Event {
+	return e.observeResolvedWithLinkLocked(f, token, a, nil)
+}
+
+func (e *Engine) observeResolvedWithLinkLocked(f identity.Flow, token string, a identity.Attribution, link *packetLinkObservation) Event {
 	e.refreshZonesLocked()
 	f.NetworkScope = e.Zones.ClassifyFlow(f)
 	now := e.Now()
 	e.expire(now)
 	e.pruneLeasesLocked(now, false)
 	key := f.Key() + "|" + token
-	base, rule, conflicts := e.evaluateClassifiedLocked(e.rules, f, a, now)
+	base, rule, conflicts, nonLoopbackDevice := e.evaluateClassifiedLinkLocked(e.rules, f, a, now, link)
 	action, rule, lease := e.leaseOverlayLocked(base, rule, f, a, now)
 	if old := e.events[key]; old != nil && now.Before(old.Deadline) && old.Attribution.Fingerprint == a.Fingerprint && a.Application != nil {
 		valid := old.Rule == rule && ((old.State == "allowed" && action == "allow") || (old.State == "blocked" && action == "block") || (old.State == "awaiting-decision" && action == "ask"))
@@ -342,7 +351,7 @@ func (e *Engine) observeResolvedLocked(f identity.Flow, token string, a identity
 	// local-pair-v1: identify the same-host peer; a reviewed pair decision may
 	// answer this (incoming) side when no configured rule decides it.
 	var pair *pairHit
-	if rule != policy.DefaultLoopback {
+	if rule != policy.DefaultLoopback && !nonLoopbackDevice {
 		pair = e.observeLocalPairLocked(&v, a, action, now)
 	}
 	if pair != nil {

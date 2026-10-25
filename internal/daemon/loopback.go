@@ -15,5 +15,5 @@ func (e *Engine) defaultLoopback(f identity.Flow) bool {
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return len(policy.LoopbackRules(e.activeRulesLocked(e.rules), f, e.Now())) == 0
+	return len(policy.LoopbackRules(e.activeRulesLocked(policy.FlowCandidates(e.rules, f)), f, e.Now())) == 0
 }

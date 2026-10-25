@@ -72,13 +72,17 @@ func (e *Engine) RuleStates(uid uint32, admin bool) map[string]RuleTargetState {
 	return out
 }
 func (e *Engine) activeRulesLocked(rules []policy.Rule) []policy.Rule {
+	return e.activeRulesWithLinksLocked(rules, net.Interfaces)
+}
+
+func (e *Engine) activeRulesWithLinksLocked(rules []policy.Rule, lookup func() ([]net.Interface, error)) []policy.Rule {
 	out := append([]policy.Rule{}, rules...)
 	for i := range out {
 		if (out[i].Preset != nil || !out[i].Filter.Process.IsZero()) && e.targetStateLocked(out[i]).State != "active" {
 			out[i].Disabled = true
 		}
 	}
-	resolveRuleInterfaces(out, net.Interfaces)
+	resolveRuleInterfaces(out, lookup)
 	return out
 }
 
@@ -118,7 +122,27 @@ func (e *Engine) evaluateLocked(rules []policy.Rule, f identity.Flow, a identity
 // evaluateClassifiedLocked is evaluateLocked for a flow value the caller has
 // already classified within the same locked decision.
 func (e *Engine) evaluateClassifiedLocked(rules []policy.Rule, f identity.Flow, a identity.Attribution, now time.Time) (string, string, []string) {
-	active := e.activeRulesLocked(rules)
+	action, rule, conflicts, _ := e.evaluateClassifiedLinkLocked(rules, f, a, now, nil)
+	return action, rule, conflicts
+}
+
+// The fourth result proves a non-loopback device for this packet only. The peer
+// resolver can skip its duplicate kernel link query on that same observation.
+type packetLinkObservation struct{ loopback, known bool }
+
+func (e *Engine) evaluateClassifiedLinkLocked(rules []policy.Rule, f identity.Flow, a identity.Attribution, now time.Time, link *packetLinkObservation) (string, string, []string, bool) {
+	// Do not validate process/preset targets and resolve interfaces for scopes
+	// which cannot match this packet. Equal program scopes share these fields,
+	// so newest-setting/disabled-setting precedence is preserved.
+	rules = policy.FlowCandidates(rules, f)
+	var links []net.Interface
+	linksOK := false
+	active := e.activeRulesWithLinksLocked(rules, func() ([]net.Interface, error) {
+		var err error
+		links, err = identity.InterfacesForFlow(f)
+		linksOK = err == nil
+		return links, err
+	})
 	for i, r := range active {
 		if r.Filter.PeerService != (policy.PeerService{}) && policy.ProtocolMatches(r.Filter.Protocol, f.Protocol) && f.Direction == r.Filter.Direction && f.Remote.Port() == r.Filter.RemotePort && f.Remote.Addr().String() == r.Filter.RemoteAddress && !e.peerServiceMatches(f, r.Filter.PeerService) {
 			active[i].Disabled = true
@@ -127,8 +151,24 @@ func (e *Engine) evaluateClassifiedLocked(rules []policy.Rule, f identity.Flow, 
 			active[i].Disabled = true
 		}
 	}
-	return policy.EvaluateSession(active, f, a, now, e.Generation)
+	nonLoopback := false
+	action, rule, conflicts := policy.EvaluateSessionObserved(active, f, a, now, e.Generation, func(f identity.Flow) bool {
+		var device, known bool
+		if linksOK {
+			device, known = identity.LoopbackDeviceOnInterfaces(f, links)
+		} else if link != nil {
+			device, known = link.loopback, link.known
+		} else {
+			device, known = observeLoopbackDevice(f)
+		}
+		nonLoopback = known && !device
+		return identity.IsLoopbackFlowOnDevice(f, device)
+	})
+	return action, rule, conflicts, nonLoopback
 }
+
+var observeLoopbackDevice = identity.ObserveLoopbackDevice
+
 func (e *Engine) pruneHandlesLocked() {
 	for b, h := range e.processHandles {
 		found := false

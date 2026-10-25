@@ -10,6 +10,10 @@ import (
 
 // startBlockedBatch freezes a full batch on endpoint port and holds it active.
 func startBlockedBatch(t *testing.T, ports ...int) (*packetWorkers, chan []uint32, context.CancelFunc) {
+	return startBlockedBatchWithReject(t, nil, ports...)
+}
+
+func startBlockedBatchWithReject(t *testing.T, reject func(packetJob, rejectionCause), ports ...int) (*packetWorkers, chan []uint32, context.CancelFunc) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	batches := make(chan []uint32, 16)
@@ -31,7 +35,7 @@ func startBlockedBatch(t *testing.T, ports ...int) (*packetWorkers, chan []uint3
 		}
 		<-ctx.Done()
 		return true
-	}, nil)
+	}, reject)
 	id := uint32(1000)
 	for _, port := range ports {
 		for i := 0; i < MaxAttributionPerEndpoint; i++ {
@@ -88,30 +92,51 @@ func TestActiveBatchPlusWaitingBatchWithinGlobalBounds(t *testing.T) {
 	_ = batches
 }
 
-func TestHotEndpointsCannotTakeColdReserve(t *testing.T) {
+func TestHotEndpointsBorrowIdleReserveAndColdReclaimsIt(t *testing.T) {
 	// Two hot endpoints with active full batches: 32 charged.
-	w, _, cancel := startBlockedBatch(t, 8000, 8001)
+	dropped := make(chan uint32, SharedAttributionReserve)
+	w, _, cancel := startBlockedBatchWithReject(t, func(p packetJob, cause rejectionCause) {
+		if cause != rejectAdmission {
+			t.Error("unexpected rejection", cause)
+		}
+		dropped <- p.id
+	}, 8000, 8001)
 	defer func() { cancel(); w.stop() }()
-	// At 32 = MaxAttributionPackets-SharedAttributionReserve, neither hot endpoint
-	// may queue a second batch: the reserve belongs to endpoints within base.
-	if w.submit(job(1, 8000)) || w.submit(job(2, 8001)) {
-		t.Fatal("hot endpoint consumed the shared reserve")
-	}
-	// Cold TCP/UDP endpoints still get the remaining 16 global slots.
+	// Unused reserved packet slots need not drop a burst. All loans are tails
+	// beyond the base allowance, outside the frozen/protected active batches.
 	for i := 0; i < SharedAttributionReserve; i++ {
-		p := job(uint32(10+i), 9000+i)
+		if !w.submit(job(uint32(i+1), 8000+i%2)) {
+			t.Fatal("idle slot unavailable", i)
+		}
+	}
+	w.mu.Lock()
+	for _, port := range []int{8000, 8001} {
+		w.completedLocked(job(0, port).key(), time.Now())
+	}
+	w.mu.Unlock()
+	// Cold TCP/UDP endpoints reclaim all 16 loans despite hot recent hints.
+	for i := 0; i < SharedAttributionReserve; i++ {
+		p := job(uint32(100+i), 9000+i)
 		if i%2 == 1 {
 			p.flow.Protocol, p.token = "tcp", "1"
 		}
 		if !w.submit(p) {
-			t.Fatal("cold endpoint refused inside reserve", i)
+			t.Fatal("cold endpoint could not reclaim loan", i)
 		}
 	}
-	if w.submit(job(50, 9999)) {
-		t.Fatal("global bound exceeded")
+	seen := map[uint32]bool{}
+	for i := 0; i < SharedAttributionReserve; i++ {
+		id := receiveID(t, dropped)
+		if id < 1 || id > SharedAttributionReserve || seen[id] {
+			t.Fatal("active/base/duplicate victim", id)
+		}
+		seen[id] = true
+	}
+	if w.submit(job(50, 8000)) {
+		t.Fatal("borrower displaced base work")
 	}
 	w.mu.Lock()
-	full := w.count == MaxAttributionPackets
+	full := w.count == MaxAttributionPackets && len(w.jobs[job(0, 8000).key()]) == MaxAttributionPerEndpoint && len(w.jobs[job(0, 8001).key()]) == MaxAttributionPerEndpoint
 	w.mu.Unlock()
 	if !full {
 		t.Fatal("global accounting")

@@ -16,12 +16,13 @@ const MaxAttributionPackets = 48
 const MaxAttributionBytes = 1 << 20
 const MaxAttributionPerEndpoint = 16
 
-// SharedAttributionReserve is the part of MaxAttributionPackets an endpoint may
-// not use for packets queued behind its own in-flight batch. Waiting packets,
+// SharedAttributionReserve is the reclaimable part of MaxAttributionPackets.
+// Idle slots may be borrowed by packets behind an in-flight batch; an endpoint
+// within its base allowance can reclaim a borrowed tail before displacing base
+// work, including from a recently progressing endpoint. Waiting packets,
 // not the frozen active batch, count toward MaxAttributionPerEndpoint, so a busy
 // endpoint can prepare its next batch while one resolves; that second batch only
-// uses global capacity above this reserve, which stays available to endpoints
-// within their base per-endpoint allowance. Global count/byte bounds are unchanged.
+// uses the unchanged global capacity. Active batches are never reclaimed.
 const SharedAttributionReserve = MaxAttributionPerEndpoint
 
 // SharedAttributionByteReserve is the matching share of MaxAttributionBytes
@@ -37,6 +38,7 @@ const EndpointBurstWait = 2 * time.Millisecond
 const endpointStallWindow = 100 * time.Millisecond
 const endpointStallBudget = 10 * time.Millisecond
 const recentCompletionWindow = time.Second
+const MaxRecentPreferredTurns = 2
 
 // Collect a small burst before obtaining fresh evidence. No packet arriving
 // after the batch is frozen may use that observation. Bounds/deadlines stay fixed.
@@ -72,6 +74,7 @@ type packetWorkers struct {
 	activeBatch              map[string]int
 	active                   map[string]bool      // heads currently owned by workers cannot be displaced
 	recent                   map[string]time.Time // bounded scheduling hints, never ownership/policy evidence
+	recentPreferredTurns     int                  // bounded overtaking of the oldest general endpoint
 	census                   map[string]bool      // ordering only; never permission authority
 	ready                    [2][]string
 	count, bytes             int
@@ -86,6 +89,7 @@ type packetWorkers struct {
 	processBatch             func([]packetJob, bool, bool) bool
 	process                  func(packetJob, bool, bool) bool // true = completed, false = needs census
 	reject                   func(packetJob, rejectionCause)  // lane overflow or shutdown, exactly one drop
+	admissionRejected        func(uint8)                      // last observed limit mask, diagnostics only
 }
 
 // Single-lane adapter used by ordering/bounds tests.
@@ -114,7 +118,13 @@ func newPacketBatchLanes(general, census int, process func(packetJob, bool, bool
 // make room, instead of immediately dropping this connection's SYN. This owns
 // just the callback's existing packet; it creates no goroutines or extra queue.
 // Never renew the packet's attribution deadline, and bound head-of-line delay.
-func (w *packetWorkers) submitWait(ctx context.Context, p packetJob) bool {
+func (w *packetWorkers) submitWait(ctx context.Context, p packetJob) (admitted bool) {
+	var mask uint8
+	defer func() {
+		if !admitted && w.admissionRejected != nil {
+			w.admissionRejected(mask)
+		}
+	}()
 	started := time.Now()
 	until := started.Add(AdmissionWait)
 	if p.deadline.Before(until) {
@@ -146,6 +156,26 @@ func (w *packetWorkers) submitWait(ctx context.Context, p packetJob) bool {
 		eligible := !w.stopped && (!endpointFull || burst) &&
 			(!w.census[key] || (w.censusCount < MaxCensusPackets && p.size <= MaxCensusBytes-w.censusBytes))
 		full := endpointFull || w.count >= MaxAttributionPackets || p.size > MaxAttributionBytes-w.bytes
+		mask = 0
+		if endpointFull {
+			mask |= 1
+			waiting := len(w.jobs[key])
+			if w.active[key] {
+				waiting -= w.activeBatch[key]
+			}
+			if waiting < MaxAttributionPerEndpoint {
+				mask |= 16
+			} // shared global reserve, not a full waiting batch
+		}
+		if w.count >= MaxAttributionPackets || p.size > MaxAttributionBytes-w.bytes {
+			mask |= 2
+		}
+		if w.census[key] && (w.censusCount >= MaxCensusPackets || p.size > MaxCensusBytes-w.censusBytes) {
+			mask |= 4
+		}
+		if w.stopped {
+			mask |= 8
+		}
 		w.mu.Unlock()
 		if !eligible {
 			return false
@@ -185,10 +215,10 @@ func (w *packetWorkers) submitWait(ctx context.Context, p packetJob) bool {
 	}
 }
 
-// endpointFullLocked applies the per-endpoint bound to packets waiting behind
-// the frozen active batch. Beyond the base allowance (active plus waiting), the
-// endpoint is also limited to global packet and byte capacity above the shared
-// reserves, which stay available to endpoints within their base allowance.
+// endpointFullLocked applies the per-endpoint waiting bound. Beyond the base
+// allowance, a follower may borrow idle global packet slots but cannot displace
+// another endpoint at the global limit. Keep the conservative byte reserve:
+// one displaced tail need not free enough bytes for a larger incoming packet.
 func (w *packetWorkers) endpointFullLocked(key string, size int) bool {
 	total := len(w.jobs[key])
 	waiting := total
@@ -198,7 +228,7 @@ func (w *packetWorkers) endpointFullLocked(key string, size int) bool {
 	if waiting >= MaxAttributionPerEndpoint {
 		return true
 	}
-	return total >= MaxAttributionPerEndpoint && (w.count >= MaxAttributionPackets-SharedAttributionReserve || size > MaxAttributionBytes-SharedAttributionByteReserve-w.bytes)
+	return total >= MaxAttributionPerEndpoint && (w.count >= MaxAttributionPackets || size > MaxAttributionBytes-SharedAttributionByteReserve-w.bytes)
 }
 
 func (w *packetWorkers) endpointWaitBudgetLocked(now time.Time) time.Duration {
@@ -280,6 +310,7 @@ func (w *packetWorkers) displaceLocked(incoming packetJob, incomingKey string, i
 	victimKey := ""
 	var victim packetJob
 	depth := 0
+	victimBorrowed := false
 	for key, q := range w.jobs {
 		if key == incomingKey || len(q) == 0 || (w.active[key] && len(q) <= max(1, w.activeBatch[key])) {
 			continue
@@ -288,20 +319,23 @@ func (w *packetWorkers) displaceLocked(incoming packetJob, incomingKey string, i
 		// another general queue they must reduce a backlog imbalance instead
 		// of taking its sole waiting head.
 		victimRecent := w.recentlyCompletedLocked(key, now)
-		// Fresh cold endpoints cannot displace established general progress.
+		borrowed := incomingDepth < MaxAttributionPerEndpoint && len(q) > MaxAttributionPerEndpoint
+		// Fresh cold endpoints cannot displace established base work; borrowed
+		// tails are reclaimable regardless of recent-progress hints.
 		// This grants scheduling only, never a policy result or attribution.
-		if victimRecent && !incomingRecent {
+		if !borrowed && victimRecent && !incomingRecent {
 			continue
 		}
-		if !w.census[key] && (!incomingRecent || victimRecent) && incomingDepth > 0 && len(q) <= incomingDepth+1 {
+		if !borrowed && !w.census[key] && (!incomingRecent || victimRecent) && incomingDepth > 0 && len(q) <= incomingDepth+1 {
 			continue
 		}
 		tail := q[len(q)-1]
 		if tail.size < needed {
 			continue
 		}
-		if depth == 0 || w.census[key] && !w.census[victimKey] || w.census[key] == w.census[victimKey] && (len(q) > depth || len(q) == depth && tail.deadline.Before(victim.deadline)) {
+		if depth == 0 || borrowed && !victimBorrowed || borrowed == victimBorrowed && (w.census[key] && !w.census[victimKey] || w.census[key] == w.census[victimKey] && (len(q) > depth || len(q) == depth && tail.deadline.Before(victim.deadline))) {
 			victimKey, victim, depth = key, tail, len(q)
+			victimBorrowed = borrowed
 		}
 	}
 	if depth == 0 {
@@ -341,14 +375,23 @@ func (w *packetWorkers) run(lane int) {
 			w.mu.Unlock()
 			return
 		}
+		// Keep short-burst priority, but bound how often hot endpoints can
+		// overtake the oldest queued general endpoint. Then require a FIFO turn.
 		next := 0
-		if lane == 0 {
+		if lane == 0 && w.recentPreferredTurns < MaxRecentPreferredTurns {
 			now := time.Now()
 			for i, key := range w.ready[lane] {
 				if w.recentlyCompletedLocked(key, now) {
 					next = i
 					break
 				}
+			}
+		}
+		if lane == 0 {
+			if next > 0 {
+				w.recentPreferredTurns++
+			} else {
+				w.recentPreferredTurns = 0
 			}
 		}
 		key := w.ready[lane][next]
