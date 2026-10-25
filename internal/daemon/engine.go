@@ -291,7 +291,16 @@ func (e *Engine) PrepareUDPBatch(f identity.Flow, token string, count int, censu
 // applies to this attempt. Resolve must be safe for concurrent use.
 func (e *Engine) ObserveResolved(f identity.Flow, token string, a identity.Attribution) Event {
 	var peers *prefetchSet
-	if !e.defaultLoopback(f) {
+	// Peer prefetch resolves other flows outside e.mu and is the only reason to
+	// check loopback before the locked decision. Without peer candidates (the
+	// common UDP case) the decision's loopback observation is the one policy
+	// evaluation makes under e.mu; TCP keeps its endpoint-scope lookups.
+	if !e.hasPeerCandidates(f) {
+		// Same shape resolvePeers returns for no candidates: an empty, non-nil
+		// set, so a peer rule published between this check and the locked
+		// decision finds no prefetched evidence and refuses as before.
+		peers = &prefetchSet{flows: map[string]prefetchedAttribution{}}
+	} else if !e.defaultLoopback(f) {
 		peers = e.resolvePeers(f)
 	}
 	e.mu.Lock()
@@ -309,7 +318,7 @@ func (e *Engine) observeResolvedLocked(f identity.Flow, token string, a identity
 	e.expire(now)
 	e.pruneLeasesLocked(now, false)
 	key := f.Key() + "|" + token
-	base, rule, conflicts := e.evaluateLocked(e.rules, f, a, now)
+	base, rule, conflicts := e.evaluateClassifiedLocked(e.rules, f, a, now)
 	action, rule, lease := e.leaseOverlayLocked(base, rule, f, a, now)
 	if old := e.events[key]; old != nil && now.Before(old.Deadline) && old.Attribution.Fingerprint == a.Fingerprint && a.Application != nil {
 		valid := old.Rule == rule && ((old.State == "allowed" && action == "allow") || (old.State == "blocked" && action == "block") || (old.State == "awaiting-decision" && action == "ask"))

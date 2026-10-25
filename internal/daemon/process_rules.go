@@ -112,6 +112,12 @@ func resolveRuleInterfaces(rules []policy.Rule, lookup func() ([]net.Interface, 
 }
 func (e *Engine) evaluateLocked(rules []policy.Rule, f identity.Flow, a identity.Attribution, now time.Time) (string, string, []string) {
 	f.NetworkScope = e.Zones.ClassifyFlow(f)
+	return e.evaluateClassifiedLocked(rules, f, a, now)
+}
+
+// evaluateClassifiedLocked is evaluateLocked for a flow value the caller has
+// already classified within the same locked decision.
+func (e *Engine) evaluateClassifiedLocked(rules []policy.Rule, f identity.Flow, a identity.Attribution, now time.Time) (string, string, []string) {
 	active := e.activeRulesLocked(rules)
 	for i, r := range active {
 		if r.Filter.PeerService != (policy.PeerService{}) && policy.ProtocolMatches(r.Filter.Protocol, f.Protocol) && f.Direction == r.Filter.Direction && f.Remote.Port() == r.Filter.RemotePort && f.Remote.Addr().String() == r.Filter.RemoteAddress && !e.peerServiceMatches(f, r.Filter.PeerService) {

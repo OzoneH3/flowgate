@@ -5,8 +5,12 @@ import (
 	"flowgate/internal/policy"
 )
 
+// loopbackFlow is the fresh kernel loopback-device observation used by the
+// preliminary peer-prefetch check; tests substitute it to count observations.
+var loopbackFlow = identity.IsLoopbackFlow
+
 func (e *Engine) defaultLoopback(f identity.Flow) bool {
-	if !identity.IsLoopbackFlow(f) {
+	if !loopbackFlow(f) {
 		return false
 	}
 	e.mu.Lock()

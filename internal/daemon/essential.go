@@ -406,6 +406,13 @@ func (e *Engine) peerFlowsLocked(f identity.Flow) []identity.Flow {
 	return nil
 }
 
+// hasPeerCandidates reports whether any peer flow would be prefetched for f.
+func (e *Engine) hasPeerCandidates(f identity.Flow) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return len(e.peerFlowsLocked(f)) > 0
+}
+
 // resolvePeers runs outside the decision lock. Evidence is scoped to this
 // operation, never a persistent service permission or cross-flow cache.
 func (e *Engine) resolvePeers(f identity.Flow) *prefetchSet {
