@@ -65,8 +65,18 @@ The default updater now pins exact diagnostic `25dbb1a` using
 `deployment/default-release`. The coordinator checks an exact-source approval
 policy before any host contact; rejected and unapproved builds cannot silently
 install, including newer HEADs. Preparing a release does not approve it.
-A separate Essential-discovery census-sharing experiment is under guest
-comparison in `.workspace/holder-work/`; it is not deployed or approved.
+Essential-discovery census sharing was also tested with profiling disabled and
+reversed order. It reduced quiet guest CPU 5.06→4.60 seconds over two 15-second
+windows, but failed throughput acceptance: the main matrix used 85.81→82.88 CPU
+seconds while high-rate delivery fell 2909→2652 and survivor latency worsened.
+The longer confirmation did not remove the latency concern. Correctness tests
+passed; that is not sufficient for a performance release. The experiment is held
+off master on `research/essential-census-01a15db4` (`f872051`), with exact hashes,
+receiver/counter data, failed attempts and scope in `.workspace/holder-work/`.
+No new performance bundle, host capture, service restart or deployment was made.
+The live pressure-time bottleneck remains unverified: the existing host capture
+had zero admission rejections. No multi-queue redesign follows from these TCG
+results.
 These results do not establish actual-host gains or justify a multi-queue redesign.
 
 In two reversed-order capped-VM comparisons, sustained allowed delivery was
