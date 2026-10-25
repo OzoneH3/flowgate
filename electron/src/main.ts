@@ -1,4 +1,5 @@
 import { UsageHistoryClient } from './usage-history-client';
+import { SessionExit, kdeSessionEnding } from './session-exit';
 import { EndpointRules } from './endpoint-rules';
 import { ruleCoversRevision, runtimeWitness } from './protocol';
 import { readGuiBuild } from './gui-build';
@@ -14,6 +15,7 @@ import {
   clipboard,
   ipcMain,
   protocol,
+  powerMonitor,
   session,
   screen,
   type IpcMainInvokeEvent,
@@ -291,6 +293,7 @@ let backend: Backend;
 let evaluation: Evaluation;
 let background: Background;
 let quitting = false;
+const sessionExit = new SessionExit(kdeSessionEnding, () => app.quit());
 const paneModel = new PaneModel(
   isDisplayUnit(saved.ui?.displayUnit) ? saved.ui.displayUnit : 'autoByte',
 );
@@ -466,10 +469,13 @@ function windowFor(isPrompt = false, id = '', generation = '', group?: string) {
     w.on('close', (event) => {
       if (quitting) return;
       event.preventDefault();
-      const ref = promptRefs.get(w.webContents.id);
-      if (ref && !promptIdle) automaticPrompts.dismiss(ref);
-      promptDismissed = true;
-      pacePrompt();
+      void sessionExit.close(() => {
+        if (quitting || w.isDestroyed()) return;
+        const ref = promptRefs.get(w.webContents.id);
+        if (ref && !promptIdle) automaticPrompts.dismiss(ref);
+        promptDismissed = true;
+        pacePrompt();
+      });
     });
     promptDismissed = false;
     promptReadyAt.set(w.webContents.id, Date.now() + TRANSITION_MS);
@@ -1233,12 +1239,17 @@ app.whenReady().then(async () => {
   main.on('close', (e) => {
     if (quitting) return;
     e.preventDefault();
-    if (saved.ui?.keepInTray === true && background.available()) {
-      main.hide();
-    } else void background.requestQuit();
+    void sessionExit.close(() => {
+      if (quitting || main.isDestroyed()) return;
+      if (saved.ui?.keepInTray === true && background.available()) {
+        main.hide();
+      } else void background.requestQuit();
+    });
   });
   main.on('closed', () => app.quit());
   backend.start();
+  // Never inhibit shutdown or route it through tray/interactive Quit handling.
+  powerMonitor.on('shutdown', () => sessionExit.shutdown());
 });
 app.on('before-quit', () => {
   quitting = true;
