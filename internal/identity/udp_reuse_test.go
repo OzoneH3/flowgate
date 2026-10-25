@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// Pure model of the full resolver, the raw task facts and the full inspection.
+// Pure model of the full resolver and raw task facts.
 // No /proc, no sockets. Native owners are thread-group leaders of distinct
 // executables; Wine owners model the runtime-table path that must never cache.
 type reuseFixture struct {
@@ -17,12 +17,10 @@ type reuseFixture struct {
 	running       map[int]bool
 	factsOverride map[int]func(*holderTaskFacts)
 	factsErr      map[int]error
-	inspectHook   func(pid int, p *Process)
-	inspectErr    map[int]error
+	resolveHook   func(*Attribution)
 	onFacts       func(pid int) // runs after a facts read (store or verification)
 	calls         int
 	factsCalls    int
-	inspectCalls  int
 	fail          bool
 	now           time.Time
 	async         []func()
@@ -79,6 +77,9 @@ func (x *reuseFixture) resolve(f Flow) Attribution {
 	a.Reason = "synthetic census"
 	a.Fingerprint = a.Sockets[0].Cookie + app.Key
 	a.Application = &app
+	if x.resolveHook != nil {
+		x.resolveHook(&a)
+	}
 	return a
 }
 
@@ -114,29 +115,12 @@ func (x *reuseFixture) facts(pid int, start string) (holderTaskFacts, error) {
 	return f, nil
 }
 
-func (x *reuseFixture) inspect(pid int) (Process, error) {
-	x.inspectCalls++
-	if err := x.inspectErr[pid]; err != nil {
-		return Process{}, err
-	}
-	app, ok := x.appOfPID(pid)
-	if !ok || !x.running[pid] {
-		return Process{}, errors.New("gone")
-	}
-	p := x.process(pid, app)
-	if x.inspectHook != nil {
-		x.inspectHook(pid, &p)
-	}
-	return p, nil
-}
-
 func newReuseFixture() (*reuseFixture, *UDPAttributionReuse) {
-	x := &reuseFixture{owners: map[string]Application{}, running: map[int]bool{}, factsOverride: map[int]func(*holderTaskFacts){}, factsErr: map[int]error{}, inspectErr: map[int]error{}, now: time.Unix(1000, 0)}
+	x := &reuseFixture{owners: map[string]Application{}, running: map[int]bool{}, factsOverride: map[int]func(*holderTaskFacts){}, factsErr: map[int]error{}, now: time.Unix(1000, 0)}
 	r := NewUDPAttributionReuse(x.resolve)
 	r.Sockets = func() ([]Socket, error) { return append([]Socket(nil), x.sockets...), nil }
 	r.Running = func(pid int, start string) bool { return x.running[pid] && start == "start" }
 	r.Facts = x.facts
-	r.Inspect = x.inspect
 	r.Now = func() time.Time { return x.now }
 	r.Async = func(fn func()) { x.async = append(x.async, fn) }
 	return x, r
@@ -177,10 +161,10 @@ func TestUDPReuseServesBurstToManyRemotesFromOneVerifiedSocket(t *testing.T) {
 	if x.calls != 1 {
 		t.Fatalf("burst from one verified socket ran %d full censuses, want 1", x.calls)
 	}
-	// Every hit re-verified the owner: one facts read at store, then two facts
-	// reads and one full Inspect per hit.
-	if x.factsCalls != 1+2*14 || x.inspectCalls != 14 {
-		t.Fatalf("verification per hit missing: facts=%d inspect=%d", x.factsCalls, x.inspectCalls)
+	// Every hit re-verifies raw identity twice; full runtime inspection stays
+	// in the initial/refresh resolver rather than the burst path.
+	if x.factsCalls != 1+2*14 {
+		t.Fatalf("verification per hit missing: facts=%d", x.factsCalls)
 	}
 }
 
@@ -201,8 +185,8 @@ func TestUDPReuseNeverCachesWineRuntimeApplications(t *testing.T) {
 			t.Fatalf("round %d: %+v / %+v", i, a, b)
 		}
 	}
-	if x.calls != 10 || len(r.entries) != 0 || x.factsCalls != 0 || x.inspectCalls != 0 {
-		t.Fatalf("runtime applications must run the full resolver every batch: calls=%d entries=%d facts=%d inspect=%d", x.calls, len(r.entries), x.factsCalls, x.inspectCalls)
+	if x.calls != 10 || len(r.entries) != 0 || x.factsCalls != 0 {
+		t.Fatalf("runtime applications must run the full resolver every batch: calls=%d entries=%d facts=%d", x.calls, len(r.entries), x.factsCalls)
 	}
 }
 
@@ -267,14 +251,13 @@ func TestUDPReuseHitRequiresUnchangedOwnerIdentity(t *testing.T) {
 		"namespace changed": {func(x *reuseFixture) {
 			x.factsOverride[11] = func(f *holderTaskFacts) { f.MountNS = "other" }
 		}},
-		"facts unreadable": {func(x *reuseFixture) { x.factsErr[11] = errors.New("EACCES") }},
-		"inspect failed":   {func(x *reuseFixture) { x.inspectErr[11] = errors.New("gone") }},
-		"inspect classifies another application": {func(x *reuseFixture) {
-			x.inspectHook = func(pid int, p *Process) { p.Application.Key = "other"; p.Application.Revision = "rev-other" }
-		}},
-		"inspect sees a worker-only identity": {func(x *reuseFixture) {
-			x.inspectHook = func(pid int, p *Process) { p.ThreadGroup = 99 }
-		}},
+		"facts unreadable":            {func(x *reuseFixture) { x.factsErr[11] = errors.New("EACCES") }},
+		"thread group changed":        {func(x *reuseFixture) { x.factsOverride[11] = func(f *holderTaskFacts) { f.Group = 99 } }},
+		"UID changed":                 {func(x *reuseFixture) { x.factsOverride[11] = func(f *holderTaskFacts) { f.UID = 0 } }},
+		"process generation changed":  {func(x *reuseFixture) { x.factsOverride[11] = func(f *holderTaskFacts) { f.Start = "new-generation" } }},
+		"executable revision changed": {func(x *reuseFixture) { x.factsOverride[11] = func(f *holderTaskFacts) { f.Revision = "new-revision" } }},
+		"network namespace changed":   {func(x *reuseFixture) { x.factsOverride[11] = func(f *holderTaskFacts) { f.NetNS = "new-net" } }},
+		"PID namespace changed":       {func(x *reuseFixture) { x.factsOverride[11] = func(f *holderTaskFacts) { f.PIDNS = "new-pid" } }},
 		"second read differs": {func(x *reuseFixture) {
 			reads := 0
 			x.onFacts = func(pid int) {
@@ -498,5 +481,46 @@ func TestUDPReuseUsesFreshPortCensusAndRefusesItsErrors(t *testing.T) {
 	fail, x.fail = true, true
 	if a := r.Resolve(f); a.Application != nil || x.calls != 2 {
 		t.Fatal("query failure reused old evidence", a, x.calls)
+	}
+}
+
+// The practical policy deliberately reclassifies an unchanged native executable
+// at full refresh, not on every hit. Model an in-process runtime mapping change
+// without changing any raw process facts; this is the chosen residual.
+func TestUDPReuseRuntimeClassificationChangesAtFullRefresh(t *testing.T) {
+	for _, completeRefresh := range []bool{true, false} {
+		t.Run(fmt.Sprintf("refresh-completes-%v", completeRefresh), func(t *testing.T) {
+			x, r := newReuseFixture()
+			x.nativeAlpha()
+			f := udpFlow("outgoing", "192.0.2.1:34429", "198.51.100.1:443")
+			if appOf(r.Resolve(f)) != "alpha" || len(r.entries) != 1 {
+				t.Fatal("setup did not cache native identity")
+			}
+			x.resolveHook = func(a *Attribution) {
+				a.Application = nil
+				a.Status = "unidentified"
+				a.Reason = "runtime classification now unresolved"
+			}
+			x.now = x.now.Add(r.Refresh / 2)
+			if appOf(r.Resolve(f)) != "alpha" || x.calls != 1 {
+				t.Fatal("native classification was not reused under practical contract")
+			}
+			x.now = x.now.Add(r.Refresh / 2)
+			if appOf(r.Resolve(f)) != "alpha" || len(x.async) != 1 || x.calls != 1 {
+				t.Fatal("full refresh not scheduled at refresh age")
+			}
+			if completeRefresh {
+				x.async[0]()
+				if len(r.entries) != 0 {
+					t.Fatal("unresolved refresh retained native classification")
+				}
+			} else {
+				// A delayed asynchronous refresh never renews the hard window.
+				x.now = x.now.Add(r.Window - r.Refresh)
+			}
+			if a := r.Resolve(f); a.Application != nil || len(r.entries) != 0 {
+				t.Fatalf("stale runtime classification survived full re-resolution: %+v", a)
+			}
+		})
 	}
 }

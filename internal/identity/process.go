@@ -109,8 +109,10 @@ func Inspect(pid int) (Process, error) {
 	a := Application{Kind: "native", Name: filepath.Base(p.Executable), Executable: p.Executable, Revision: stamp(base + "/exe"), Evidence: []string{"proc exe; PID plus start time"}}
 	// Loader names are conservative refusal hints, not permission evidence.
 	// A directory containing "wine" says nothing about the executable in it.
-	maps := string(readBound(base+"/maps", 2<<20))
-	wine := wineRuntimeHint(p.Executable, maps)
+	maps, wine, err := inspectProcessMaps(base+"/maps", p.Executable)
+	if err != nil {
+		return p, fmt.Errorf("process mappings unavailable: %w", err)
+	}
 	if wine {
 		a.Kind = "wine-unresolved"
 		a.Runtime = p.Executable

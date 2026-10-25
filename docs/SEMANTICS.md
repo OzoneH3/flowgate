@@ -187,6 +187,8 @@ Socket discovery uses NETLINK_SOCK_DIAG TCP/UDP IPv4/IPv6 dumps, including inode
 
 Native logical keys hash UID, kind and executable path. Wine keys add canonical prefix and resolved Windows executable; the runtime executable and Steam display metadata are excluded. A revision guard uses device/inode/size/mtime/ctime, not a cryptographic content attestation. Wine mappings must match the mapped inode as well as argv[0]. A changed/replaced executable requires a new permission. Moved installations and reused paths do not inherit permissions automatically. Runtime updates do not change a Wine key. Interpreted native programs currently identify their interpreter, not each script.
 
+Process inspection reads a fresh process-mapping snapshot on every call. A read error or a snapshot exceeding 2 MiB makes inspection unavailable; a truncated or unreadable mapping list cannot establish a native identity. Native runtime hints scan the fresh bytes directly. Wine image checks receive a private string copy of that same snapshot. Up to four scratch byte buffers are retained (at most 8 MiB plus four overflow-detection bytes); their old contents are never evidence for another inspection. Buffer reuse changes allocation cost; runtime-classification frequency is described below.
+
 Wine identification requires a Wine runtime indication, explicit WINEPREFIX or STEAM_COMPAT_DATA_PATH/pfx, and argv[0] corroborated by a mapped .exe. Only WINEPREFIX, STEAM_COMPAT_DATA_PATH and SteamAppId environment values are retained. Reads are bounded; raw environments, command lines and maps are never serialized. Reading the bounded proc environment still accesses other values transiently because proc exposes one file. Diagnostic metadata/path strings are JSON escaped, not shell commands. Prefix and metadata are evidence supplied by a process, not trusted security assertions.
 
 The prototype does not infer a child's identity from its parent, a prefix, basename or SteamAppId. Runtime version, launcher installation databases and tracked multi-process launch sessions are not yet implemented. Missing explicit prefix, a launcher changing argv, inaccessible mappings or multiple mapped image candidates may prevent attribution.
@@ -266,11 +268,17 @@ one fresh ownership observation as described above. Reuse is limited to a comple
 directly associated attribution of one exact native executable in its thread-group
 leader, without a holder witness or hosted runtime. A fresh UDP census must show
 exactly that socket (netns, inode, cookie) for the same direction and local endpoint.
-Every reuse also reads the owner's raw generation, executable revision, credentials
-and namespaces before and after a fresh full process inspection. Changed or unreadable
-identity withdraws reuse. Wine/runtime, hosted and worker-held identities take the
-full resolver for every batch. Full attribution refresh is scheduled after at least
-10 seconds and is required after 30 seconds; verification cannot extend that window.
+Every reuse reads the owner's raw generation, executable revision, credentials and
+namespaces twice and requires both reads to match the stored identity. Changed or
+unreadable identity withdraws reuse and forces full attribution immediately. Runtime
+classification from mappings is established by that full attribution, rather than
+rescanned for each native reuse hit. Full refresh is scheduled after at least 10 seconds
+and is required at the next packet after 30 seconds; verification cannot extend that
+window. A native process that loads Wine components in-process without changing its
+executable can therefore retain its native classification until full re-resolution.
+This is the chosen practical checking policy for trusted ordinary applications. The
+API does not currently expose a separate runtime-classification age. Wine/runtime,
+hosted and worker-held identities continue to take the full resolver for every batch.
 Partial or failed attribution, TCP and link-local endpoints are never reused. The
 remote never contributes identity evidence and policy is evaluated for each packet.
 These checks re-verify the recorded owner, not the complete current holder set:

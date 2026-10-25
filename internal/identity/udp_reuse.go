@@ -6,27 +6,24 @@ import (
 	"time"
 )
 
-// Every queued UDP datagram requires fresh ownership evidence. The queue may
-// share a fresh observation across a frozen batch that predates the check;
-// subsequent arrivals require another check. Full attribution scans every process
-// and, for Wine sockets, takes two runtime owner-table censuses.
-//
 // A complete positive attribution of one exact native application run by its
-// thread-group leader is therefore reused for one kernel socket. Each hit still
-// needs a fresh UDP census showing exactly that one matching socket (netns,
-// inode, cookie) on the same local endpoint and direction, and re-verifies the
-// recorded owner's identity: raw task facts (generation, executable, revision,
-// credentials, namespaces) read before and after a fresh full Inspect whose
-// runtime classification and fingerprint must equal the stored process. Facts
-// are captured at store time, after the full resolution, and the reuse window
-// starts after that capture. Full attribution re-runs in the background after
-// at least Refresh and is required again after Window. Partial, ambiguous or
-// failed results, worker or witness-bearing owners, Wine/runtime/hosted
-// applications and anything but a native leader are never reused: they take the
-// full resolver for every batch. A hit is a re-verified cached attribution of
-// the recorded owner; it does not observe descriptors passed to or inherited
-// by other processes since the last full resolution (SEMANTICS snapshot
-// boundary), and PID/start equality alone is never treated as authority.
+// thread-group leader may be reused for one kernel socket. Every frozen group
+// still needs a fresh UDP census showing exactly that socket (netns, inode,
+// cookie), followed by two matching reads of the owner's generation, executable,
+// revision, credentials and namespaces. Facts are captured at store time after
+// full resolution, and the reuse window starts after that capture.
+//
+// Runtime classification is re-derived by the full resolver initially and on
+// refresh, not by scanning mappings on each hit. A native process that loads a
+// Wine runtime without exec can retain its native classification until that
+// refresh. Full attribution is scheduled after at least Refresh and required
+// again after Window; verification never extends the window. Partial, ambiguous
+// or failed results, workers, witnesses and Wine/runtime/hosted applications are
+// never reused. Every packet still receives a current policy decision.
+//
+// These checks re-verify the recorded owner, not descriptors passed to or
+// inherited by other processes since the last census (SEMANTICS snapshot
+// boundary). PID/start equality alone is never treated as permission authority.
 type UDPAttributionReuse struct {
 	resolve func(Flow) Attribution
 	// Try, when set, is the non-waiting form of resolve used by TryResolve.
@@ -34,15 +31,14 @@ type UDPAttributionReuse struct {
 	Sockets     func() ([]Socket, error)
 	PortSockets func(uint16) ([]Socket, error)
 	Running     func(pid int, start string) bool
-	// Facts reads the recorded owner's raw task facts; Inspect re-runs the full
-	// process inspection. Tests substitute models; production reads /proc.
-	Facts       func(pid int, start string) (holderTaskFacts, error)
-	Inspect     func(pid int) (Process, error)
-	Now         func() time.Time
-	Async       func(func())
-	Refresh     time.Duration
-	Window      time.Duration
-	Max         int
+	// Facts reads the recorded owner's raw task facts. Tests substitute models;
+	// production reads /proc. Runtime classification belongs to the full resolver.
+	Facts   func(pid int, start string) (holderTaskFacts, error)
+	Now     func() time.Time
+	Async   func(func())
+	Refresh time.Duration
+	Window  time.Duration
+	Max     int
 
 	mu      sync.Mutex
 	entries map[string]*reusedAttribution
@@ -66,7 +62,7 @@ func factsMatchProcess(f holderTaskFacts, p Process) bool {
 }
 
 func NewUDPAttributionReuse(resolve func(Flow) Attribution) *UDPAttributionReuse {
-	return &UDPAttributionReuse{resolve: resolve, PortSockets: UDPPortSockets, Running: InstanceRunning, Facts: ownerFacts, Inspect: Inspect, Now: time.Now, Async: func(fn func()) { go fn() }, Refresh: 10 * time.Second, Window: 30 * time.Second, Max: 256, entries: map[string]*reusedAttribution{}}
+	return &UDPAttributionReuse{resolve: resolve, PortSockets: UDPPortSockets, Running: InstanceRunning, Facts: ownerFacts, Now: time.Now, Async: func(fn func()) { go fn() }, Refresh: 10 * time.Second, Window: 30 * time.Second, Max: 256, entries: map[string]*reusedAttribution{}}
 }
 
 func reuseKey(f Flow, s Socket) string {
@@ -155,8 +151,8 @@ func (r *UDPAttributionReuse) reuse(f Flow, key string) (Attribution, bool) {
 	a.Sockets = append([]Socket(nil), a.Sockets...)
 	stored := entry.facts
 	r.mu.Unlock()
-	// Fresh identity verification outside the lock: first raw facts, full
-	// Inspect, second raw facts. Any difference withdraws the entry.
+	// Fresh recorded-owner verification outside the lock. Both raw reads must
+	// match the stored identity; runtime classification is refreshed separately.
 	if !r.verifyOwner(a.Owners[0], stored) {
 		r.mu.Lock()
 		if r.entries[key] == entry {
@@ -184,25 +180,15 @@ func (r *UDPAttributionReuse) reuse(f Flow, key string) (Attribution, bool) {
 	return a, true
 }
 
-// verifyOwner re-establishes that the recorded owner is still the same exact
-// native application: generation, executable, revision, credentials and
-// namespaces unchanged across a fresh full inspection. It proves nothing about
-// other holders of the socket.
+// verifyOwner re-establishes the recorded native owner's process generation,
+// executable revision, credentials and namespaces. It does not reclassify
+// runtime mappings or observe other holders of the socket.
 func (r *UDPAttributionReuse) verifyOwner(p Process, stored holderTaskFacts) bool {
 	if r.Running != nil && !r.Running(p.PID, p.Start) {
 		return false
 	}
 	first, err := r.Facts(p.PID, p.Start)
 	if err != nil || first != stored || !factsMatchProcess(first, p) {
-		return false
-	}
-	current, err := r.Inspect(p.PID)
-	if err != nil {
-		return false
-	}
-	original := p
-	original.HolderWitness, current.HolderWitness = "", ""
-	if !exactNativeHolder(current) || current.PID != p.PID || current.ThreadGroup != p.PID || current.Start != p.Start || current.Application.Prefix != p.Application.Prefix || fingerprint([]Process{current}, nil) != fingerprint([]Process{original}, nil) {
 		return false
 	}
 	second, err := r.Facts(p.PID, p.Start)
