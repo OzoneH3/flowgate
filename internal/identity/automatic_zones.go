@@ -52,7 +52,18 @@ func AutomaticNetworkZones(legacy NetworkZones, s NetworkSnapshot) NetworkZones 
 	z.Revision = hex.EncodeToString(h[:])
 	return z
 }
+// Legacy is the configured-prefix value for these prefixes, exactly as before.
+// The hot path does not call it: classifyAutomatic uses the constructor's view.
 func (z NetworkZones) Legacy() NetworkZones { v, _ := NewNetworkZones(z.Local, z.Internet); return v }
+
+// registryPrefixes are the parsed embedded IANA records, in record order.
+var registryPrefixes = func() []netip.Prefix {
+	out := make([]netip.Prefix, len(addressRegistry.Records))
+	for i, r := range addressRegistry.Records {
+		out[i] = netip.MustParsePrefix(r.Prefix)
+	}
+	return out
+}()
 func tunnelLink(l NetworkLink) bool {
 	switch l.Kind {
 	case "tun", "wireguard", "ppp", "ipip", "sit", "gre", "gretap", "ip6gre", "ip6gretap", "ip6tnl", "vti", "vti6", "vxlan", "geneve":
@@ -88,7 +99,12 @@ func (s NetworkSnapshot) route(remote netip.Addr) *NetworkRoute {
 	return best
 }
 func (z NetworkZones) classifyAutomatic(remote netip.Addr) NetworkScope {
-	legacy := z.Legacy().Classify(remote)
+	var legacy NetworkScope
+	if v, ok := z.matchedView(); ok {
+		legacy = v.classify(remote)
+	} else {
+		legacy = z.Legacy().Classify(remote)
+	}
 	out := NetworkScope{State: "unavailable", Revision: z.Revision, Source: AutomaticZoneModel, Reason: "No usable unicast peer", LegacyState: legacy.State, LegacyZone: legacy.Zone, LegacyRevision: legacy.Revision}
 	remote = remote.Unmap().WithZone("")
 	if !remote.IsValid() || remote.IsUnspecified() {
@@ -134,7 +150,7 @@ func (z NetworkZones) classifyAutomatic(remote netip.Addr) NetworkScope {
 	bits := -1
 	for i := range addressRegistry.Records {
 		r := &addressRegistry.Records[i]
-		p, _ := netip.ParsePrefix(r.Prefix)
+		p := registryPrefixes[i]
 		if p.Contains(remote) && p.Bits() > bits {
 			bits = p.Bits()
 			record = r

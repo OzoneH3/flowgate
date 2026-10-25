@@ -233,13 +233,36 @@ func exactTCPPeer(s Socket, f Flow) bool {
 	return s.Protocol == "tcp" && s.State != 10 && s.Inode != 0 && (!s.diagObserved || s.diagFull) && s.Local == local && s.Remote == remote
 }
 
+// socketDumps are the SOCK_DIAG providers Resolve chooses from; tests substitute
+// deterministic models. Both passes of one Resolve use the same provider.
+var socketDumps = struct {
+	full    func() ([]Socket, error)
+	udpPort func(uint16) ([]Socket, error)
+}{Sockets, UDPPortSockets}
+
+// resolveDump selects the socket census for a flow. A UDP flow with a concrete
+// local port can only be received by UDP sockets bound to that port in either
+// address family (matches requires equal protocol and local port), so the
+// kernel's port-filtered multipart dump yields exactly the competitor set the
+// full dump yields after matches: wildcard, dual-stack and reuseport
+// candidates included. Every other flow, and a zero port, keeps the full dump.
+// This changes cost only: failure handling and the recheck are unchanged.
+func resolveDump(f Flow) (func() ([]Socket, error), string) {
+	if f.Protocol == "udp" && f.Local.Port() != 0 {
+		port := f.Local.Port()
+		return func() ([]Socket, error) { return socketDumps.udpPort(port) }, "udp-port"
+	}
+	return socketDumps.full, "full"
+}
+
 func Resolve(f Flow) Attribution {
 	a := Attribution{Status: "unidentified", Reason: "no visible matching socket", ReasonCode: ReasonNoSocketObserved}
 	if f.NetNS != NetNS() {
 		a.setReason(ReasonNamespaceMismatch, "foreign network namespace is outside this observer")
 		return a
 	}
-	sockets, e := Sockets()
+	dump, _ := resolveDump(f)
+	sockets, e := dump()
 	if e != nil {
 		a.setReason(ReasonSocketCensusUnavailable, "socket diagnostics unavailable: "+e.Error())
 		return a
@@ -273,8 +296,9 @@ func Resolve(f Flow) Attribution {
 		}
 	}
 	// A process may retain a socket from a different network namespace. Scan every
-	// visible process, then verify the socket snapshot did not change mid-scan.
-	again, err := Sockets()
+	// visible process, then verify the socket snapshot did not change mid-scan,
+	// using the same census provider as the first pass.
+	again, err := dump()
 	if err != nil {
 		a.setReason(ReasonSocketCensusUnavailable, "socket recheck unavailable")
 		return a

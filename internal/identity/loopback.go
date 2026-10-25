@@ -11,8 +11,7 @@ func IsLoopbackFlow(f Flow) bool {
 	if f.NetNS != NetNS() || f.Interface == 0 || (f.Protocol != "tcp" && f.Protocol != "udp") || (f.Direction != "incoming" && f.Direction != "outgoing") {
 		return false
 	}
-	i, err := net.InterfaceByIndex(int(f.Interface))
-	if err != nil || i.Flags&net.FlagLoopback == 0 {
+	if !linkIsLoopback(f.Interface) {
 		return false
 	}
 	local, remote := f.Local.Addr().Unmap(), f.Remote.Addr().Unmap()

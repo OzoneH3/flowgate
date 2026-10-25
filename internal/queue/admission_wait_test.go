@@ -203,12 +203,17 @@ func TestEndpointBurstWaitEligibilityAndAccounting(t *testing.T) {
 				w.burstSpent = endpointStallBudget
 			}
 			before := w.burstSpent
+			started := time.Now()
 			if w.submitWait(context.Background(), p) {
 				t.Fatal("exceeded endpoint bound")
 			}
 			if mode == "recent" {
-				if w.burstSpent < EndpointBurstWait {
-					t.Fatal("wait not accounted", w.burstSpent)
+				// The deadline starts before eligibility checks. Only time blocked
+				// in select is charged, so scheduler/inspection overhead may leave
+				// less than EndpointBurstWait to charge, especially under emulation.
+				elapsed := time.Since(started)
+				if elapsed < EndpointBurstWait || w.burstSpent <= before || w.burstSpent-before > elapsed {
+					t.Fatal("invalid wait accounting", w.burstSpent-before, elapsed)
 				}
 			} else if w.burstSpent != before {
 				t.Fatal("ineligible endpoint waited", w.burstSpent)

@@ -262,17 +262,21 @@ invalidates relevant userspace decisions as previously documented; none currentl
 disconnects an already-admitted TCP connection or clears its conntrack mark.
 There is no separate disconnect operation yet. UDP retains the existing per-flow
 lease and fresh ownership/per-datagram rule checks. A frozen UDP batch may share
-one fresh ownership observation as described above. A datagram may reuse the complete
-attribution of its kernel socket: a fresh UDP census must still show exactly that
-one socket (netns, inode, cookie) for the same direction and local endpoint, and
-every recorded owner must be the same process instance. Full attribution
-(including Wine runtime censuses) re-runs in the background after 10 seconds and
-is required after 30 seconds. Partial or failed attribution, TCP and link-local
-endpoints are never reused; the remote never contributes evidence and rules are
-still evaluated per flow. Hostile same-user descriptor or handle transfer within
-that window is outside this snapshot model, as for one full attribution. Continuous ownership tracking and
-explicit disconnect are separate future capabilities, not prerequisites for
-native prompts under this contract.
+one fresh ownership observation as described above. Reuse is limited to a complete,
+directly associated attribution of one exact native executable in its thread-group
+leader, without a holder witness or hosted runtime. A fresh UDP census must show
+exactly that socket (netns, inode, cookie) for the same direction and local endpoint.
+Every reuse also reads the owner's raw generation, executable revision, credentials
+and namespaces before and after a fresh full process inspection. Changed or unreadable
+identity withdraws reuse. Wine/runtime, hosted and worker-held identities take the
+full resolver for every batch. Full attribution refresh is scheduled after at least
+10 seconds and is required after 30 seconds; verification cannot extend that window.
+Partial or failed attribution, TCP and link-local endpoints are never reused. The
+remote never contributes identity evidence and policy is evaluated for each packet.
+These checks re-verify the recorded owner, not the complete current holder set:
+new descriptor inheritance or transfer since the last full census remains outside
+this bounded snapshot model. Continuous ownership tracking and explicit disconnect
+remain separate capabilities. No unlimited UDP throughput is claimed.
 
 
 Runtime attachment is explicit for already-running workspace test prefixes.

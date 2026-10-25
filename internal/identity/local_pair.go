@@ -86,10 +86,7 @@ var localAddresses = func() ([]netip.Addr, error) {
 
 // loopbackInterface reports whether an interface index is a loopback device
 // (tests replace it). Same-host packets traverse lo, never a physical device.
-var loopbackInterface = func(index uint32) bool {
-	i, err := net.InterfaceByIndex(int(index))
-	return err == nil && i.Flags&net.FlagLoopback != 0
-}
+var loopbackInterface = linkIsLoopback
 
 // localPairPIDs lists the processes whose descriptors are scanned (tests limit
 // it to the test process; production scans every visible /proc entry).

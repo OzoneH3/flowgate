@@ -77,16 +77,38 @@ func (e *Engine) activeRulesLocked(rules []policy.Rule) []policy.Rule {
 		if (out[i].Preset != nil || !out[i].Filter.Process.IsZero()) && e.targetStateLocked(out[i]).State != "active" {
 			out[i].Disabled = true
 		}
-		if out[i].Filter.InterfaceName != "" {
-			iface, err := net.InterfaceByName(out[i].Filter.InterfaceName)
-			if err != nil {
-				out[i].Disabled = true
-			} else {
-				out[i].Filter.InterfaceIndex = uint32(iface.Index)
+	}
+	resolveRuleInterfaces(out, net.Interfaces)
+	return out
+}
+
+// Resolve interface names from one fresh link snapshot for this evaluation only.
+// A failed snapshot disables all name-scoped rules for this evaluation. No result
+// survives into another packet evaluation or policy read. Stored rules stay intact.
+func resolveRuleInterfaces(rules []policy.Rule, lookup func() ([]net.Interface, error)) {
+	var indices map[string]uint32
+	for i := range rules {
+		name := rules[i].Filter.InterfaceName
+		if name == "" {
+			continue
+		}
+		if indices == nil {
+			indices = make(map[string]uint32)
+			interfaces, err := lookup()
+			if err == nil {
+				for _, iface := range interfaces {
+					if iface.Index > 0 {
+						indices[iface.Name] = uint32(iface.Index)
+					}
+				}
 			}
 		}
+		if index := indices[name]; index != 0 {
+			rules[i].Filter.InterfaceIndex = index
+		} else {
+			rules[i].Disabled = true
+		}
 	}
-	return out
 }
 func (e *Engine) evaluateLocked(rules []policy.Rule, f identity.Flow, a identity.Attribution, now time.Time) (string, string, []string) {
 	f.NetworkScope = e.Zones.ClassifyFlow(f)
