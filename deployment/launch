@@ -50,4 +50,9 @@ if wine_config.exists():
     args.extend([flag,value])
 for kind,flag in [('local','--zone-local'),('internet','--zone-internet')]:
  for prefix in zones[kind]:args.extend([flag,prefix])
-os.execve(args[0],args,{'PATH':'/usr/sbin:/usr/bin:/sbin:/bin','LANG':'C.UTF-8','NOTIFY_SOCKET':os.environ.get('NOTIFY_SOCKET','')})
+environment={'PATH':'/usr/sbin:/usr/bin:/sbin:/bin','LANG':'C.UTF-8','NOTIFY_SOCKET':os.environ.get('NOTIFY_SOCKET','')}
+# Explicit root service opt-in only. The daemon validates and pins the private
+# directory; no other inherited environment reaches the privileged backend.
+if os.environ.get('FLOWGATE_PROFILE_DIR'):
+ environment['FLOWGATE_PROFILE_DIR']=os.environ['FLOWGATE_PROFILE_DIR']
+os.execve(args[0],args,environment)
