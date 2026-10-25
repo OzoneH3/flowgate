@@ -1,5 +1,9 @@
 {
-  "approved": ["25dbb1a90e81f6fc2a150231cae699db87e430f3", "bbee9b56d4ba10634142bfdff65edb6f60a6973e"],
-  "rejected": ["66313d5deaa350dc4e77adda44e1b986fb8e2619"],
+  "approved": [
+    "25dbb1a90e81f6fc2a150231cae699db87e430f3"
+  ],
+  "rejected": [
+    "66313d5deaa350dc4e77adda44e1b986fb8e2619"
+  ],
   "note": "New releases require explicit review and exact-SHA approval; default updater stays on diagnostic25db, profiling off."
 }
