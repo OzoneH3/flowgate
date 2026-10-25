@@ -1,5 +1,5 @@
 #!/bin/sh
-# Prepare/install the latest master, preserve protection mode, switch matching GUI.
+# Install the approved pinned release; preserve protection and switch matching GUI.
 # Usage: scripts/update-and-start.sh [--dry-run] [--no-gui] [--autostart]
 #        [--profile preserve|monitoring|incoming|both] [--wine-discovery] [--recover-stopped] [--local] [--acknowledge-outgoing-blocking]
 # Valid rules and Wine observer configuration are preserved. Daemon startup
@@ -53,17 +53,21 @@ elif git rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; the
 else
   say "No upstream configured; using local master"
 fi
-rev=$(git rev-parse HEAD)
+say "Source HEAD: $(git rev-parse HEAD)"
+IFS= read -r rev < deployment/default-release
+case "$rev" in ''|*[!0-9a-f]*) echo "Invalid approved release pin" >&2; exit 1;; esac
+[ "${#rev}" = 40 ] || { echo "Invalid approved release SHA" >&2; exit 1; }
 bundle="$root/.workspace/automatic-zone-releases/$rev"
 backend="$root/.workspace/daily-releases/$rev"
-say "Latest: $(git log -1 --format='%h %s')"
+say "Approved release: $rev (HEAD is not implicitly approved)"
 
 # --- bundle -------------------------------------------------------------------
 if [ -f "$bundle/matched-manifest.json" ] && [ -f "$backend/manifest.json" ]; then
   say "Bundle ready: $bundle"
 else
   say "Preparing bundle for $rev (build + isolated release checks; takes a few minutes)"
-  run scripts/prepare-release.sh
+  echo "Approved release artifacts missing; prepare that exact revision separately. No build/install from HEAD." >&2
+  exit 1
 fi
 
 # The Python coordinator verifies immutable manifests and handles typed control

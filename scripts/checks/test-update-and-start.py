@@ -38,6 +38,12 @@ class SourceStage(unittest.TestCase):
         self.root = pathlib.Path(self.tmp.name)
         (self.root / 'scripts').mkdir()
         shutil.copyfile(ROOT / 'scripts/update-and-start.sh', self.root / 'scripts/update-and-start.sh')
+        (self.root / 'deployment').mkdir()
+        (self.root / 'deployment/default-release').write_text('f' * 40 + '\n')
+        for parent, name in [('automatic-zone-releases', 'matched-manifest.json'), ('daily-releases', 'manifest.json')]:
+            d = self.root / '.workspace' / parent / ('f' * 40)
+            d.mkdir(parents=True)
+            (d / name).write_text('{}')
         self.bin = self.root / 'bin'
         self.bin.mkdir()
         self.log = self.root / 'calls'
@@ -99,6 +105,19 @@ esac
         r = self.run_source('--local', '--profile', 'both', '--acknowledge-outgoing-blocking')
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn('--profile both --acknowledge-outgoing-blocking', self.calls())
+    def test_default_pin_never_selects_source_head_or_builds_missing_bundle(self):
+        self.tool('python3', '#!/bin/sh\nprintf "%s\\n" "$*" >> "$CALLS"\n')
+        r = self.run_source('--local')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('--revision ' + 'f' * 40, self.calls())
+        self.assertNotIn('--revision revision', self.calls())
+        self.log.unlink()
+        (self.root / '.workspace/daily-releases' / ('f' * 40) / 'manifest.json').unlink()
+        r = self.run_source('--local')
+        self.assertNotEqual(r.returncode, 0)
+        self.assertNotIn('PREPARE', self.calls())
+        self.assertNotIn('COORDINATOR', self.calls())
+
     def test_fetch_is_noninteractive_and_bounded(self):
         self.tool('timeout', '#!/bin/sh\nprintf "%s|%s|%s\\n" "$GIT_TERMINAL_PROMPT" "$GIT_SSH_COMMAND" "$*" >> "$CALLS"\nshift 2\nexec "$@"\n')
         r = self.run_source()
@@ -176,6 +195,8 @@ class Update(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(dir=ROOT / '.workspace')
         self.root = pathlib.Path(self.tmp.name)
+        (self.root / 'deployment').mkdir()
+        (self.root / 'deployment/release-policy.json').write_text(json.dumps({'approved': ['new'], 'rejected': ['bad']}))
         environment = patch.dict(os.environ, XDG_CONFIG_HOME=str(self.root / 'config'))
         environment.start()
         self.addCleanup(environment.stop)
@@ -189,6 +210,18 @@ class Update(unittest.TestCase):
     def run_update(self, host, **kw):
         with contextlib.redirect_stdout(io.StringIO()):
             m.update(host, self.root, 'new', **kw)
+    def test_unapproved_and_rejected_releases_never_contact_host(self):
+        class NoContact:
+            def __getattr__(self, name):
+                raise AssertionError('host contacted: ' + name)
+        for revision in ['bad', 'experiment', 'newer-descendant']:
+            for dry in [False, True]:
+                with self.assertRaisesRegex(RuntimeError, 'Rejected|review/approval'):
+                    m.update(NoContact(), self.root, revision, dry=dry)
+        (self.root / 'deployment/release-policy.json').unlink()
+        with self.assertRaises(OSError):
+            m.update(NoContact(), self.root, 'new')
+
     def test_explicit_stopped_recovery_enters_guarded_installer(self):
         class Stopped(FakeHost):
             def status(self):

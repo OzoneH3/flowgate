@@ -641,7 +641,18 @@ def transition(host, backend, selected):
     raise RuntimeError('Protection did not reach ' + selected + ': ' + reason + '; inspect flowgate-control status. No action was replayed.')
 
 
+def check_release_approval(root, revision):
+    policy = json.loads((root / 'deployment/release-policy.json').read_text())
+    if not isinstance(policy, dict) or any(not isinstance(policy.get(k), list) or not all(isinstance(v, str) for v in policy[k]) for k in ('approved', 'rejected')):
+        raise ValueError('Invalid release approval policy; no host action taken')
+    if revision in policy.get('rejected', []):
+        raise RuntimeError('Rejected release: ' + revision + '; no host action taken')
+    if revision not in policy.get('approved', []):
+        raise RuntimeError('Release requires explicit review/approval: ' + revision + '; no host action taken')
+
+
 def update(host, root, revision, *, dry=False, gui=True, profile="preserve", wine_discovery=False, recover_stopped=False, autostart=False, acknowledge_outgoing=False):
+    check_release_approval(root, revision)
     if autostart and not gui:
         raise ValueError("--autostart requires GUI switching")
     bundle = root / '.workspace/automatic-zone-releases' / revision

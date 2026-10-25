@@ -72,8 +72,14 @@ tests, and separate acceptance scenarios remain.
 scripts/update-and-start.sh
 ```
 
-The normal command fast-forwards master when upstream is configured, prepares
-and verifies the matched release, authenticates sudo before interrupting
+The normal command fast-forwards master when upstream is configured, then selects
+the exact SHA in `deployment/default-release`, not HEAD. It requires already
+prepared matched artifacts and verifies them. `deployment/release-policy.json`
+rejects experiments and refuses every unapproved SHA before contacting the host,
+including direct calls to the Python coordinator. Approval is an explicit exact-SHA
+review; preparing a bundle does not approve installation. The current pin remains
+`25dbb1a90e81f6fc2a150231cae699db87e430f3`; rejected `66313d5` is blocked.
+The coordinator authenticates sudo before interrupting
 protection, stops protection if a daemon update is needed, installs, verifies
 the running build, restores the previous protection mode, then closes the old released GUI
 and launches the matching GUI. It preserves stored rules and existing Wine
@@ -91,7 +97,7 @@ Options:
 - `--profile both --acknowledge-outgoing-blocking`: explicitly enable outgoing default-deny after reviewing Essential networking and recovery. Without acknowledgement, a transition from another mode refuses before authentication, stop or installation. DNS/DHCP/VPN can be blocked; no automatic permissions or continuous countdown are added. The warning adds one read-only evidence line from the current daemon: the number of stored Essential preset records (which may include disabled or expired rules) with the current discovery revision, "No stored Essential preset records" or "status unavailable"; none of these validates coverage.
 - `--no-gui`: perform the same update/protection workflow without switching the GUI.
 - `--recover-stopped`: recover an unavailable daemon into monitoring only.
-- `--local`: skip upstream access and use committed local master (still requires a clean tree).
+- `--local`: skip upstream access; keep the approved release pin (still requires a clean tree).
 - `--wine-discovery`: explicitly enable generic supported Wine discovery.
 - `--dry-run`: show the plan without fetching, building, authenticating, changing protection or signalling the GUI.
 
