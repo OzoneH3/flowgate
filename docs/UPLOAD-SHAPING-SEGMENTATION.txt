@@ -103,16 +103,16 @@ accounting, queue bounds (bytes and segments), verdict semantics and fairness,
 and is a separate reviewed firewall increment, not made here.
 
 Supported-rate profile with segmentation
-Latency for the capped application itself is bounded by CoDel plus the
-serialisation time of one superpacket at its rate: 64 KiB takes 524 ms at
+CoDel target/interval are not hard latency bounds. Serialization alone costs: 64 KiB takes 524 ms at
 1 Mbit/s, 65 ms at 8 Mbit/s, 16 ms at 32 Mbit/s. TCP keeps its own superpackets
 small at low rates (autosizing to about 1 ms of pacing rate, minimum two
 segments); explicit UDP_SEGMENT applications choose their own size. The
 controller reports recommended_min_rate_bps = 10 superpackets per second
 (5.24 Mbit/s for 64 KiB). Caps below that remain enforced for throughput; the
-capped application's own latency degrades as above. Other applications are
-unaffected (independent classes). Rates measured natively: 2, 8 and 32 Mbit/s
-TCP and 8 Mbit/s UDP_SEGMENT; higher rates up to the 1 Gbit/s configuration
+capped application's own latency can degrade. Independent classes do not
+guarantee independent throughput under CPU contention (the default-traffic
+gate below failed). Cap accuracy was measured at 2, 8 and 32 Mbit/s TCP;
+the attempted 8 Mbit/s UDP_SEGMENT rate gate was inconclusive; higher rates up to the 1 Gbit/s configuration
 bound are not validated in the guest.
 
 Measurement methodology (experimental/upload-shaper/segmentation/run.py)
@@ -134,7 +134,8 @@ through the untouched default root before takeover.
 Measured results (VM7, final source; .workspace/shaping-segmentation/vm7-artifacts)
 Guest: netdevsim pair, SG/TSO/GSO on, tx-udp-segmentation off [fixed], hw-tc-offload
 off, gso_max_size 65536, kernel default fq_codel 0: root; single TCG vCPU, 2 GiB.
-Verdict of the run: SEGMENTATION_PARTIAL_GATE_FAILED (one required gate failed).
+Verdict of the run: SEGMENTATION_PARTIAL_GATE_FAILED (two outstanding gates: default-traffic
+throughput FAILED and UDP_SEGMENT cap accuracy FAILED_INCONCLUSIVE).
 
  phase (6 s TCP bulk, 64 KiB writes)   tcp 2 Mbit/s   tcp 8 Mbit/s   tcp 32 Mbit/s
  class_accuracy (whole interval)        1.005          1.005          0.999
@@ -208,8 +209,13 @@ Opt-in host validation plan (NOT executed; requires explicit user approval)
    Expected: profile segmentation-capable, hw-tc-offload off, supported=true
    except for the namespace guard.
 2. Add an explicit host-interface opt-in flag, separate from the lab namespace
-   guard, reviewed and defaulted off; doctor prints the preflight result and
-   the exact restore command (`tc qdisc del dev enp7s0 root`).
+   guard, reviewed and defaulted off. Recovery must use the controller
+   cleanup-only path with the original private ownership journal: verify
+   interface generation, namespace, pinned program/map IDs and owned TC
+   topology before removing owned objects, then check restoration. On an
+   ownership mismatch, refuse mutation and report the evidence for review.
+   Bare root-qdisc deletion is not a normal recovery procedure; absent or
+   ambiguous ownership requires manual diagnosis, not automatic deletion.
 3. User-approved window with no other traffic: takeover, one capped TCP flow at
    8 and 32 Mbit/s to a LAN receiver for 30 s each, one UDP_SEGMENT flow,
    baseline/during/after throughput of an uncapped flow, then disable and
@@ -220,3 +226,8 @@ Opt-in host validation plan (NOT executed; requires explicit user approval)
    active journal (expect Unsupported then journal-only forget).
 5. Only after that evidence: matched release candidate, review, activation
    approval. Never change offloads silently; never replace a non-default root.
+
+Follow-up default-traffic isolation and query-launch reduction
+See UPLOAD-SHAPING-DEFAULT-COST.txt and .workspace/shaping-default-cost.
+The historical VM7 results above are retained, not replaced by later results.
+UDP GSO passthrough design/test requirements: UDP-GSO-REVIEW-PLAN.txt; no flag change.

@@ -35,10 +35,9 @@ def queue_bytes(bits, mtu, gso=0):
     # default). fq_codel's memory_limit counts skb truesize (payload plus page and
     # header overhead), so the floor reserves three superpackets' worth to make
     # room for at least two queued superpackets; the bound grows to 16
-    # superpackets so a sustained cap is not starved by one skb. Latency for the
-    # capped application itself is then bounded by CoDel (5 ms target, 100 ms
-    # interval) plus the serialisation time of one superpacket at its rate, NOT
-    # by this memory figure; see the documented supported-rate profile.
+    # superpackets so a sustained cap is not starved by one skb. CoDel target/interval are congestion-control parameters, not a hard
+    # latency bound. Superpacket serialization and socket buffering still
+    # matter; see the documented supported-rate profile.
     floor = max(2 * mtu, 3 * gso)
     ceiling = max(262144, 16 * gso)
     return min(ceiling, max(floor, bits // 8 // 40))
@@ -62,6 +61,24 @@ def structural(value):
     if isinstance(value, list):
         return [structural(v) for v in value]
     return value
+
+
+def decode_tc_batch(text, count):
+    """tc emits one JSON array per show command, not a single outer array."""
+    decoder = json.JSONDecoder()
+    rows = []
+    rest = text.lstrip()
+    while rest:
+        value, end = decoder.raw_decode(rest)
+        if not isinstance(value, list) or not all(isinstance(x, dict) for x in value):
+            raise RuntimeError('invalid traffic-control batch output')
+        rows.append(structural(value))
+        if len(rows) > count:
+            raise RuntimeError('extra traffic-control batch output')
+        rest = rest[end:].lstrip()
+    if len(rows) != count:
+        raise RuntimeError('incomplete traffic-control batch output')
+    return rows
 
 
 def compatibility(link, topology, features=None, default_qdisc=None):
@@ -244,29 +261,39 @@ class Controller:
     def get_link(self):
         return json.loads(self.call('ip', '-d', '-j', 'link', 'show', 'dev', self.dev))[0]
 
+    def query_tc(self, commands):
+        # Fresh read-only dumps, identical to the former individual processes.
+        # No -force: any failed command invalidates the entire observation.
+        # This is not an atomic kernel snapshot and does not cache authority.
+        p = subprocess.run(['tc', '-j', '-batch', '-'],
+                           input=''.join(' '.join(c) + '\n' for c in commands),
+                           capture_output=True, text=True, timeout=3)
+        if p.returncode or len(p.stdout) > 2 * 1024 * 1024:
+            raise RuntimeError('traffic-control query batch failed: ' + p.stderr[:1024])
+        return decode_tc_batch(p.stdout, len(commands))
+
     def topology(self):
-        fields = {'qdiscs': ('qdisc', 'show'), 'classes': ('class', 'show'),
-                  'egress': ('filter', 'show'), 'ingress': ('filter', 'show'),
-                  'root_filters': ('filter', 'show')}
-        out = {}
-        for name, command in fields.items():
-            tail = {'egress': ['egress'], 'ingress': ['ingress'], 'root_filters': ['root']}.get(name, [])
-            out[name] = structural(json.loads(self.call('tc', '-j', *command, 'dev', self.dev, *tail)))
-        # FQ-CoDel exposes ephemeral flow buckets through class show; these are
-        # runtime scheduler state, not administrator-created classes. The qdisc
-        # itself and its options remain included in the ownership comparison.
+        fields = ('qdiscs', 'classes', 'egress', 'ingress', 'root_filters')
+        commands = [('qdisc', 'show', 'dev', self.dev),
+                    ('class', 'show', 'dev', self.dev),
+                    ('filter', 'show', 'dev', self.dev, 'egress'),
+                    ('filter', 'show', 'dev', self.dev, 'ingress'),
+                    ('filter', 'show', 'dev', self.dev, 'root')]
+        out = dict(zip(fields, self.query_tc(commands)))
+        # FQ-CoDel's ephemeral flow buckets are scheduler state, not owned classes.
         out['classes'] = [x for x in out['classes'] if x.get('class') != 'fq_codel']
         if self.link.get('linkinfo', {}).get('info_kind') != 'veth':
             if len(out['classes']) > MAX_APPS + 1:
                 raise RuntimeError('Unsupported: class inspection bound exceeded')
+            parents = [c.get('handle', '') for c in out['classes']]
+            if any(not re.fullmatch(r'[0-9a-fA-F]+:[0-9a-fA-F]*', p) for p in parents):
+                raise RuntimeError('Unsupported: unrecognized class identity')
             out['class_filters'] = []
-            for c in out['classes']:
-                parent = c.get('handle')
-                if not parent:
-                    raise RuntimeError('Unsupported: unrecognized class identity')
-                fs = json.loads(self.call('tc', '-j', 'filter', 'show', 'dev', self.dev, 'parent', parent))
-                if fs:
-                    out['class_filters'].append({'parent': parent, 'filters': structural(fs)})
+            if parents:
+                queries = [('filter', 'show', 'dev', self.dev, 'parent', p) for p in parents]
+                for parent, fs in zip(parents, self.query_tc(queries)):
+                    if fs:
+                        out['class_filters'].append({'parent': parent, 'filters': fs})
         return out
 
     def preflight(self, topology=None):

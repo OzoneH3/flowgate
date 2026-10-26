@@ -1,0 +1,83 @@
+Experimental default-traffic cost reduction (from 87d32e0b)
+
+Status: isolated software-path improvement; NOT approved for host activation
+or updates. The exact-SHA approved list remains 25dbb1a only. No host state
+changes accompany this work. UDP GSO passthrough remains a separate design,
+not a queue flag change (see UDP-GSO-REVIEW-PLAN.txt).
+
+Cause isolated
+Four variants of the existing netdevsim/TSO/GSO fixture were run forward and
+reverse with the same running daemon/firewall, six-second bulk TCP sender and
+120 low-rate TCP messages at 50 ms intervals. Existing guest binaries reused.
+Rates below are receiver payload / the measured wall window, Mbit/s:
+ original fq_codel + daemon                   574 / 575
+ static HTB/default fq_codel, empty clsact     568 / 592
+ static classifier, no bindings/housekeeping  623 / 520
+ full controller + automatic discovery        316 / 314
+A second matched sequence separated controller-with-no-caps from discovery:
+ static classifier                            587 / 563
+ enabled controller, empty caps               405 / 406
+ full controller + one idle capped socket     331 / 343
+The static classifier's lease expires; its unbound path still executes. No
+bound lease or authority was bypassed. All low-rate messages arrived.
+
+CPU accounting includes live descendant self CPU and reaped-child CPU, unlike
+the earlier VM7 figures. Short-lived tc/ip/ethtool/probe/kernel children count.
+In the first run daemon-tree CPU grew from 68-72 to 219-220 ticks per ~6 s
+(HZ=100); in the split run, static 64-73, empty-caps 168-173, full 216-220.
+This identifies recurring control-plane work, not HTB alone, as the dominant
+measured regression. It does not identify every remaining kernel/daemon cost.
+
+One targeted change
+Topology reads now issue five identical fresh queries in one `tc -j -batch -`
+process, and all bounded class-parent filter queries in a second. Previously
+each query launched another process. No cached topology, fewer checks, longer
+leases or slower polling. Mutations remain individual commands bracketed by
+the existing write-ahead journal. Dump order is unchanged; neither method is
+an atomic kernel snapshot. Nonzero command exit, incomplete/extra JSON arrays,
+malformed output or timeout refuse the observation. Class-parent names are
+validated before constructing batch input.
+
+Same-guest old/candidate/candidate/old comparison:
+ receiver Mbit/s             364.7   425.2   421.0   355.1
+ daemon-tree CPU ticks       225     187     193     236
+ reaped helper CPU ticks     100      67      70     106
+ low-rate p95 ms             1.748   1.793   1.614   1.916
+ all low-rate messages       120     120     120     120
+Mean throughput +17.6%, daemon-tree CPU -17.6%; latency is reported separately,
+not claimed to improve consistently. Whole guest CPU remains near saturation:
+freed CPU is used by sender/receiver, not an idle-host CPU savings claim.
+
+Evidence and limits
+.workspace/shaping-default-cost contains exact staged hashes, raw records,
+logs, four isolation/comparison scripts and README. candidate1 retained a
+fixture Applying-state KeyError; candidate2 completed native comparisons and
+checks. Model tests: 14 passed; a prior wrong-working-directory launcher failure
+is retained as models.log (no tests ran). Native checks compare old and new
+query topology, inject a foreign filter and require verification/cleanup refusal,
+remove only that fixture filter, verify exact owned restoration, and show Deny
+zero delivery with firewall active. Previous cap/live-edit, identity, lease and
+crash recovery evidence is reused: those mechanisms did not change. No new
+claim that those entire suites ran on this revision.
+
+The committed default-cost/run.py parameterizes the executed scripts via
+FLOWGATE_DEFAULT_COST_MODE=isolation|split|candidate|control. Only schedule and
+labels differ; raw executed script copies and staged manifests remain in the
+evidence directory. It requires the existing disposable guest harness plus
+controller-baseline.py (87d32e0b) and controller-candidate.py staged in /work/m1.
+Never run this fixture on the host.
+
+Final matched control/candidate/candidate/control (same guest, same workload):
+ receiver Mbit/s             584.3   406.8   394.0   687.1
+ daemon-tree CPU ticks        68     187     193      26
+ low-rate p95 ms             1.236   1.656   1.590   1.382
+All 120 low-rate messages arrived in each phase. Candidate mean is 63.0% of
+mean control (57.3-69.6% against the individual controls). The default-traffic
+gate remains FAILED; this is a reduction, not resolution. Control variation
+and daemon background activity are visible in CPU; do not normalize them away.
+
+Remaining: control-plane work still consumes CPU; this increment makes no
+hardware throughput/no-regression guarantee. UDP cap accuracy is still
+FAILED_INCONCLUSIVE; no UDP passthrough was enabled. No UI/download/VPN/priorities.
+Eventual host recovery must use ownership-verified cleanup and refuse foreign
+or ambiguous objects; a bare root-qdisc deletion is not a normal recovery path.

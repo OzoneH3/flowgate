@@ -7,6 +7,33 @@ m1 = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m1)
 
 class ModelTests(unittest.TestCase):
+    def test_tc_batch_requires_complete_arrays(self):
+        self.assertEqual(m1.decode_tc_batch('[]\n[{"handle":"123:","refcnt":2}]\n', 2),
+                         [[], [{'handle':'123:'}]])
+        for text, count in [('[]',2), ('[][]',1), ('{}',1), ('[1]',1), ('[]garbage',1), ('',1)]:
+            with self.assertRaises((RuntimeError, ValueError)):
+                m1.decode_tc_batch(text,count)
+
+    def test_tc_query_failure_never_returns_partial_snapshot(self):
+        from unittest.mock import patch
+        import types
+        c=self.fake()
+        with patch.object(m1.subprocess,'run',return_value=types.SimpleNamespace(returncode=1,stdout='[]',stderr='failure')):
+            with self.assertRaises(RuntimeError):c.query_tc([('qdisc','show')])
+
+    def test_topology_batches_all_parents_and_preserves_foreign_filters(self):
+        c=self.fake();c.link={};calls=[]
+        def query(commands):
+            calls.append(commands)
+            if len(calls)==1:
+                return [[], [{'class':'htb','handle':'123:fffe'},{'class':'htb','handle':'123:1'}], [], [], []]
+            return [[], [{'kind':'bpf','pref':7}]]
+        c.query_tc=query
+        result=c.topology()
+        self.assertEqual(len(calls),2)
+        self.assertEqual(len(calls[0]),5)
+        self.assertEqual(result['class_filters'],[{'parent':'123:1','filters':[{'kind':'bpf','pref':7}]}])
+
     def test_rate_and_queue_bounds(self):
         for value in (True, 0, -1, 999999, 1000000001, '1000000', 1.5):
             with self.assertRaises(ValueError):

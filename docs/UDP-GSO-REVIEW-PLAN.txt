@@ -1,0 +1,61 @@
+UDP GSO passthrough: separate firewall increment, NOT implemented or approved
+
+Motivation and boundary
+The segmentation fixture underfed the shaper on the intercepted outgoing UDP
+path. This does not establish UDP cap accuracy. Enabling NFQA_CFG_F_GSO alone
+is not an acceptable fix. Keep the current queue flags until the following
+packet representation and acceptance gates are implemented and reviewed.
+
+Proposed bounded representation
+Decode NFQA_SKB_INFO (network byte order) and NFQA_CAP_LEN alongside payload,
+packet ID and interface metadata. Distinguish GSO, checksum-not-ready and
+checksum-not-verified. Checksum-not-ready is kernel offload metadata, not
+proof of corruption; it must never grant permission. Preserve original skb
+and checksum state by issuing a verdict without payload replacement.
+
+Define explicit maximum represented bytes and conservative segment-work units
+before admission. Charge retained kernel bytes using original CAP_LEN, not
+merely copied payload bytes. A GSO skb cannot cost one small datagram for
+endpoint/global byte budgets or fairness. NFQUEUE does not necessarily expose
+an exact gso_size/segment count through the current dependency: establish
+what metadata the supported kernel supplies; if exact counts are unavailable,
+use a documented conservative upper bound or refuse unsupported forms. Do not
+invent segment counts from interface MTU. Keep packet-ID slots bounded too.
+
+Parse metadata and headers together. Validate IPv4 IHL/length, IPv6 length,
+UDP header and length semantics for the supported GSO form. Reject fragments,
+unsupported extension headers, unknown GSO forms and inconsistent lengths.
+Explicitly distinguish a truncated copy (CAP_LEN > copied length), missing
+metadata and complete payload. Initial implementation should refuse truncation
+and oversize/BIG TCP forms, rather than silently treating a prefix as a normal
+packet. Review kernel/netlink attribute size limits before selecting a maximum:
+MaxPacketLen=65535 does not prove all superpackets fit in the payload attribute.
+A future header-only representation requires its own proof, not implicit reuse
+of today's Parse(), which receives bytes without these metadata distinctions.
+
+Verdict semantics
+One NFQUEUE ID identifies one queued skb; one Accept releases all represented
+segments and one Drop must drop all of them. Preserve cancellation, timeout,
+rule-version responsiveness, fail-closed identity checks, self-connect handling
+and error paths. Do not split verdict IDs, replay an Accept, or create a broader
+flow permission. Existing per-socket inspection lifetimes remain unchanged.
+Counters must distinguish skbs, represented bytes, known/estimated segments,
+admission rejection, intentional Deny, attribution refusal and receiver loss.
+
+Required evidence before enabling the flag
+- Parser/model cases: v4/v6 ordinary and GSO UDP, checksum-partial metadata,
+  missing/unknown flags, short headers, mismatched CAP_LEN, malformed UDP
+  lengths, fragments/extensions, boundary/oversize payloads; fuzz bounded parsing.
+- Guest kernel tests with explicit UDP_SEGMENT and ordinary UDP, connected and
+  unconnected/multiple peers, TCP unchanged. Prove actual GSO at queue/hook,
+  unique receiver sequence delivery and Deny zero for every represented segment.
+- Concurrent bulk GSO, low-rate ordinary sender and a denied executable;
+  endpoint/global bytes, work fairness, latency, and bounded shutdown/timeout.
+- Live Allow->Deny, identity exec/exit/PID reuse, descriptor transfer and socket
+  reuse; retain accepted firewall identity contract independently of shaping.
+- Equal-duration forward/reverse baseline comparison, no-interception control,
+  CPU and receiver delivery. Repeat the UDP shaping cap-accuracy gate only when
+  offered traffic actually exceeds the cap without upstream underfeeding.
+
+No host capture, queue flag change, deployment or shaping activation accompanies
+this plan. Hardware/VPN paths need separate evidence after isolated correctness.
