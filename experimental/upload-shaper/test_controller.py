@@ -34,6 +34,39 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(len(calls[0]),5)
         self.assertEqual(result['class_filters'],[{'parent':'123:1','filters':[{'kind':'bpf','pref':7}]}])
 
+    def test_empty_socket_census_withdraws_binding_and_keeps_heartbeat(self):
+        c=self.fake();c.base=Path('/unused');c.compatibility={'topology':'veth-noqueue'}
+        c.bindings={'cookie':{'app':'uid:key','inode':1,'protocol':'udp','netns':'net:[1]'}}
+        c.apps={'uid:key':{'minor':1,'idle_since':m1.time.monotonic()}}
+        calls=[];c.call=lambda *a:'null';c.k=lambda *a:calls.append(a)
+        c.tick()
+        self.assertEqual(c.bindings,{})
+        self.assertEqual(calls,[('del','cookie'),('beat',)])
+        c.call=lambda *a:'{}'
+        with self.assertRaises(RuntimeError):c.tick()
+
+    def test_verified_topology_combines_only_matching_fresh_classes(self):
+        import copy
+        c=self.fake();c.link={}
+        classes=[{'class':'htb','handle':'123:fffe'},{'class':'htb','handle':'123:1'}]
+        calls=[]
+        def query(commands):
+            calls.append(commands)
+            return [[],copy.deepcopy(classes),[],[],[],[],[{'kind':'bpf','pref':7}]]
+        c.query_tc=query
+        expected={'classes':copy.deepcopy(classes)}
+        result=c.topology(expected)
+        self.assertEqual(len(calls),1)
+        self.assertEqual(len(calls[0]),7)
+        self.assertEqual(result['class_filters'],[{'parent':'123:1','filters':[{'kind':'bpf','pref':7}]}])
+        for changed in [classes[:1],classes+[{'class':'htb','handle':'123:2'}],
+                        [dict(classes[0],rate=1),classes[1]]]:
+            c.query_tc=lambda commands:[[],changed,[],[],[],[],[]]
+            with self.assertRaisesRegex(RuntimeError,'classes changed'):
+                c.topology(expected)
+        for bad in [classes+[classes[0]],[{'handle':'bad'}]]:
+            with self.assertRaises(RuntimeError):c.topology({'classes':bad})
+
     def test_rate_and_queue_bounds(self):
         for value in (True, 0, -1, 999999, 1000000001, '1000000', 1.5):
             with self.assertRaises(ValueError):

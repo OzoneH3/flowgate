@@ -272,26 +272,40 @@ class Controller:
             raise RuntimeError('traffic-control query batch failed: ' + p.stderr[:1024])
         return decode_tc_batch(p.stdout, len(commands))
 
-    def topology(self):
+    def topology(self, expected=None):
         fields = ('qdiscs', 'classes', 'egress', 'ingress', 'root_filters')
         commands = [('qdisc', 'show', 'dev', self.dev),
                     ('class', 'show', 'dev', self.dev),
                     ('filter', 'show', 'dev', self.dev, 'egress'),
                     ('filter', 'show', 'dev', self.dev, 'ingress'),
                     ('filter', 'show', 'dev', self.dev, 'root')]
-        out = dict(zip(fields, self.query_tc(commands)))
-        # FQ-CoDel's ephemeral flow buckets are scheduler state, not owned classes.
-        out['classes'] = [x for x in out['classes'] if x.get('class') != 'fq_codel']
-        if self.link.get('linkinfo', {}).get('info_kind') != 'veth':
-            if len(out['classes']) > MAX_APPS + 1:
+        nic = self.link.get('linkinfo', {}).get('info_kind') != 'veth'
+        def parents_for(classes):
+            if len(classes) > MAX_APPS + 1:
                 raise RuntimeError('Unsupported: class inspection bound exceeded')
-            parents = [c.get('handle', '') for c in out['classes']]
-            if any(not re.fullmatch(r'[0-9a-fA-F]+:[0-9a-fA-F]*', p) for p in parents):
+            parents = [c.get('handle', '') for c in classes]
+            if (any(not re.fullmatch(r'[0-9a-fA-F]+:[0-9a-fA-F]*', p) for p in parents)
+                    or len(set(parents)) != len(parents)):
                 raise RuntimeError('Unsupported: unrecognized class identity')
+            return parents
+        # Expected classes select query targets, never supply observed evidence.
+        # A successful finite process is required; fresh class equality below
+        # proves that every actual parent was queried. Dumps are not atomic.
+        combined = nic and expected is not None
+        parents = parents_for(expected['classes']) if combined else []
+        queries = [('filter', 'show', 'dev', self.dev, 'parent', p) for p in parents]
+        rows = self.query_tc(commands + queries)
+        out = dict(zip(fields, rows[:5]))
+        out['classes'] = [x for x in out['classes'] if x.get('class') != 'fq_codel']
+        if combined and out['classes'] != expected['classes']:
+            raise RuntimeError('Unsupported: traffic-control classes changed; refusing observation')
+        if nic:
+            parents = parents_for(out['classes'])
             out['class_filters'] = []
             if parents:
-                queries = [('filter', 'show', 'dev', self.dev, 'parent', p) for p in parents]
-                for parent, fs in zip(parents, self.query_tc(queries)):
+                filters = rows[5:] if combined else self.query_tc(
+                    [('filter', 'show', 'dev', self.dev, 'parent', p) for p in parents])
+                for parent, fs in zip(parents, filters):
                     if fs:
                         out['class_filters'].append({'parent': parent, 'filters': fs})
         return out
@@ -339,7 +353,7 @@ class Controller:
             setting = Path('/proc/sys/net/core/default_qdisc')
             if setting.exists() and setting.read_text().strip() != 'fq_codel':
                 raise RuntimeError('Unsupported: default qdisc changed; restoration requires review')
-        actual = self.topology()
+        actual = self.topology(self.expected)
         if actual != self.expected:
             (self.state / 'ownership-mismatch.json').write_text(json.dumps({'expected': self.expected, 'actual': actual}))
             raise RuntimeError('Unsupported: traffic-control objects changed; refusing mutation')
@@ -563,6 +577,10 @@ class Controller:
                 if note not in self.partial:
                     self.partial.append(note)
         ss = json.loads(self.call(self.base / 'probe', 'sockets'))
+        if ss is None:
+            ss = []
+        if not isinstance(ss, list):
+            raise RuntimeError('invalid socket census')
         live = {(s['cookie'], s['inode'], s['protocol'], s['netns']) for s in ss if s['inode']}
         for c, b in list(self.bindings.items()):
             if (c, b['inode'], b['protocol'], b['netns']) not in live:

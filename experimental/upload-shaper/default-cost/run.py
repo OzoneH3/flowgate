@@ -251,6 +251,28 @@ try:
  ask(senders['D'],'OPEN 4 0 1 1 0');ask(senders['D'],'SEND deniedcheck 12 10000');time.sleep(.3)
  assert peerop('stats').get('deniedcheck',{}).get('received',0)==0
  record('deny-zero',received=0)
+ # Disabled remains inert; inspect guest descendants, not the host.
+ def query_pids():
+  found=[]
+  for path in pathlib.Path('/proc').glob('[0-9]*/cmdline'):
+   try:
+    a=path.read_bytes().split(b'\0')
+    if (len(a)>4 and a[0].endswith(b'/tc')) or a[:1]==[b'tc']:
+     if b'-batch' in a and b'-' in a:found.append(int(path.parent.name))
+   except (FileNotFoundError,ProcessLookupError):pass
+  return found
+ assert status()['status']=='Disabled' and not childpids() and not query_pids()
+ time.sleep(2)
+ assert status()['status']=='Disabled' and not childpids() and not query_pids() and qdiscs()==original
+ record('disabled-no-helper',status=status(),query_pids=query_pids(),qdiscs=qdiscs())
+ # Empty-census bug regression: stop fixture sockets before enabling empty caps.
+ for name,p in senders.items():
+  if p.poll() is None:ask(p,'CLOSE')
+ configure([]);time.sleep(2)
+ assert status()['status']!='Unsupported'
+ configure([],False)
+ assert not childpids() and not query_pids() and qdiscs()==original
+ record('empty-census-enabled-cleaned',status=status(),qdiscs=qdiscs())
  record('final-cleanup',qdiscs=qdiscs(),protection=api()['protection'])
  (R/'success.json').write_text(json.dumps({'result':'ISOLATION_COMPLETE'}))
 except BaseException:

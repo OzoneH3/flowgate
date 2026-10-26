@@ -1,0 +1,90 @@
+Experimental finite TC verification consolidation (from e6530a64)
+
+The default-traffic gate STILL FAILS. This is an experimental consolidation,
+not approval for host activation. Installed 25dbb1a and the exact-SHA updater
+approval list remain unchanged. UDP GSO is still a separate unresolved gate;
+no NFQUEUE, BPF, policy, cap, lease, discovery interval or offload changes.
+
+Diagnosis (same isolated netdevsim guest, one six-second full-controller phase)
+Controller helper CPU and elapsed time, measured around each subprocess.run
+with cumulative RUSAGE_CHILDREN and monotonic time. Calls do not overlap, so
+these are not nested stage totals. Elapsed includes scheduling/waiting, not CPU.
+                              calls   child CPU s   elapsed s
+ tc read-only query batches     22       .187          .701
+ socket probe                    5       .110          .388
+ link query                     10       .078          .333
+ kernel IDs                     11       .053          .217
+ kernel binding renewal          5       .029          .128
+ kernel stats                    6       .028          .106
+ kernel heartbeat                5       .028          .136
+ kernel health                   6       .027          .102
+ offload query                   5       .025          .111
+Empty-caps controller costs were similar except binding renewal. These figures
+do not attribute all daemon-side identity scans or Python CPU. Previous
+four-way isolation already showed that static HTB/classifier cost alone did
+not explain the throughput regression. No new host capture was taken.
+
+One targeted change
+During verify(), include the expected class-parent filter queries with the five
+base queries in ONE finite tc -j -batch - invocation. Expected classes select
+query targets only: freshly observed classes must equal the expected classes
+before the observation is accepted. Added/removed/modified classes refuse the
+observation; invalid/duplicate handles and class bounds also refuse it.
+All dumps remain fresh and non-atomic. Successful process exit, exact JSON-array
+count, 3s timeout and the existing output check remain mandatory.
+Preflight and post-mutation discovery still use the original two-phase query,
+so newly created classes are fully observed before journaling. Mutations retain
+individual write-ahead journal brackets. No persistent helper or dependency,
+polling interval, lease, identity, queue or firewall change is introduced.
+
+Rejected experiment
+A persistent TC interpreter was tried and measured, then rejected in review:
+complete JSON can arrive before a command reports failure. Those measurements
+(candidate1/control artifacts) are retained but DO NOT validate this finite
+replacement. No persistent-query implementation is included.
+
+A pre-existing empty-census bug was also exposed: Go encodes an empty nil
+socket slice as JSON null. The controller now treats only null as an empty
+list, withdraws absent bindings, and maintains the heartbeat. Invalid object
+output remains an error. Diagnostic startup failures and trace are retained.
+
+Profiling OFF: e653 / candidate / candidate / e653, identical six-second bulk
+TCP plus120 low-rate messages at50ms, same daemon/rules/interface/offloads:
+ receiver Mbit/s                 405.9   430.1   435.0   454.7
+ daemon+live/reaped helper ticks 189     176     171     168
+ low-rate p95 ms                 1.701   1.580   1.757   1.599
+ low-rate receiver count         120     120     120     120
+Mean throughput +0.5%, process-tree CPU -2.8% (HZ100). The second baseline is
+faster than either candidate: NO repeatable practical throughput gain has been
+established. Control variability is retained. Latency is reported separately;
+it did not consistently improve. Fewer launches are an implementation fact,
+not proof that process-launch overhead explains the entire remaining gap.
+
+Matched shaping-disabled control / candidate / candidate / control:
+ receiver Mbit/s                 597.9   415.5   415.3   593.7
+ daemon+live/reaped helper ticks   70     180     190      75
+ low-rate p95 ms                 1.416   1.567   1.634   1.116
+ low-rate receiver count         120     120     120     120
+Mean candidate/control ratio69.7%; paired ratios69.5%/70.0% (unrounded second
+ratio69.9556%). Both are below the existing70% threshold. Default gate FAILED.
+CPU remains substantially above disabled control. UDP GSO accuracy remains the
+second unresolved gate. No further bottleneck is inferred from these results.
+Existing cap, identity, lease and recovery evidence is reused where unchanged.
+No host restart, deployment, traffic generation or settings changes occurred.
+
+
+Focused validation: 16 controller models pass, including complete JSON with
+nonzero process exit refused, fresh class addition/removal/field changes refused,
+foreign parent filters retained, invalid/duplicate handles, and null census withdrawal.
+Native finite-pair checks passed fresh topology equivalence, foreign-filter
+refusal (including refusing cleanup until the fixture removes its foreign
+filter), owned restoration, Deny zero, disabled no helper for2s, and empty-cap
+enable/disable. Exact null census is model evidence; guest TIME_WAIT entries
+may survive socket closure. Existing cap/lease/recovery/identity evidence is
+reused without claiming a new full-suite run.
+
+Evidence: .workspace/shaping-query-cost/profile4-artifacts,
+finite-pair-artifacts, finite-control-artifacts and per-run staged hashes.
+profile1-3 startup failures and rejected persistent experiment preserved.
+Review: independent source review accepted e653 and the finite consolidation.
+No performance release approved. Installed25db and approval policy unchanged.
