@@ -46,7 +46,7 @@ static uint64_t cookie(const char *s) {
   memcpy(&c, b, 8);
   return c;
 }
-int main(int argc, char **argv) {
+static int dispatch(int argc, char **argv) {
   if (argc < 3)
     return 2;
   const char *op = argv[1], *pin = argv[2];
@@ -188,4 +188,34 @@ int main(int argc, char **argv) {
     return 2;
   close(fd);
   return 0;
+}
+
+
+// Private serial protocol. The completion marker is emitted ONLY after a
+// successful operation, including all map reads/writes. No descriptors or
+// observations survive a request. Failure terminates the worker without ACK.
+int main(int argc, char **argv) {
+  if (argc != 2 || strcmp(argv[1], "serve"))
+    return dispatch(argc, argv);
+  char line[1024];
+  while (fgets(line, sizeof(line), stdin)) {
+    size_t n = strlen(line);
+    if (!n || line[n - 1] != '\n') return 2;
+    char *args[8] = {argv[0]}, *save = NULL;
+    int count = 1;
+    for (char *p = strtok_r(line, " \n", &save); p;
+         p = strtok_r(NULL, " \n", &save)) {
+      if (count == 8) return 2;
+      args[count++] = p;
+    }
+    if (count < 3) return 2;
+    const char *op = args[1];
+    if (strcmp(op,"ids") && strcmp(op,"beat") && strcmp(op,"health") &&
+        strcmp(op,"stats") && strcmp(op,"bind") && strcmp(op,"del")) return 2;
+    if (count != (!strcmp(op,"bind") ? 5 : !strcmp(op,"del") ? 4 : 3))
+      return 2;
+    if (dispatch(count,args)) return 2;
+    if (fputs("\036OK\n",stdout) == EOF || fflush(stdout)) return 1;
+  }
+  return ferror(stdin) ? 1 : 0;
 }

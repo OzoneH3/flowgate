@@ -1,0 +1,122 @@
+Experimental full-path cost investigation from35cb03a
+
+Scope: isolated netdevsim,1 TCG vCPU2GiB, software TSO/GSO enabled unchanged.
+Installed25db and release-policy exact-SHA approval list unchanged. No host
+restart, traffic, capture, offload, TC, protection or rule changes.
+UDP GSO remains a separate unresolved gate; no NFQUEUE change.
+
+Diagnostic evidence (profiling ON, NOT a performance acceptance comparison)
+Two60-second daemon profiles after20s daemon age, disabled then enabled.
+90s established unbound TCP bulk; same capped idle A socket while enabled.
+Whole process tree includes waited children; helper CPU is a subset, not added
+again. Approximate windows: fixture observes started.json and ends after summary
+serialization, controller switches cProfile at its loop boundary. Non-atomic
+/proc boundary snapshots can miss a child reaped between reads.
+Python cProfile(process_time) itself adds enabled-only overhead.
+Low-rate diagnostic SEND1200 hit the fixture's15s duration limit (298/297
+received); this is NOT evidence of1200 sent or minute-long low-rate fairness.
+Profiling-off validation uses3x200 sequential sends instead.
+
+CPU seconds, disabled vs enabled:
+ daemon process (rusage)       4.61 -> 9.76
+ daemon + observed subtree    6.49 ->20.30
+ new controller cProfile              4.18
+ new controller helper CPU            4.25 (user1.06/system3.19, approximately)
+Tree increase13.81s is approximately explained by5.15s daemon increase,
+4.18s controller and4.25s new helpers:13.58s. Residual~0.23s reflects boundary
+and instrumentation differences; not evidence of an unmeasured giant component.
+Disabled waited children1.84s are already in the baseline, not attributed to
+the new controller. cProfile cumulative functions must not be summed.
+
+Go sampled enabled CPU8.29s: Manager.run3.85s including Resolve3.57s;
+Observer1.69s (control1.43s). These caller totals are not independent of the
+shared identity stack. Full resolutions0->117, holder censuses50->168,
+socket censuses50->344. Discovery revisits uncapped same-UID sockets and pays
+fresh ownership resolution. Those checks are not removed by this increment.
+Mutex profile49ms sampled total: lock contention is not the measured dominant
+daemon cost here. Established TCP bypassed per-packet NFQUEUE in this sample;
+zero callback counters are expected and do not prove UDP performance.
+
+Controller cProfile:580 helper calls, of which300 short kernel-map operations.
+The helper wrapper counts582/302 because its window boundaries differ.
+Python CPU in subprocess.run2.67s (subset of4.18s); helper CPU4.25s includes
+TC.94s, probe.84s, ip.77s and kernel operations~1.49s. The largest individual
+helper is NOT the whole-path bottleneck. Repeated process orchestration and
+fresh discovery are both substantial.
+Guest system ticks4427->4030, softirq596->471, user758->1267, IRQ233->260.
+Less network work was delivered enabled; a lower whole-guest kernel total is
+not a kernel-efficiency improvement. Go syscall stacks locate process scanning,
+but these captures contain no symbolized kernel stacks. Native kernel function
+costs and physical NIC performance remain unmeasured.
+
+One targeted structural change
+Private persistent kernel-map worker replaces per-operation process launches.
+The worker has no cached map FDs or observations: each request reopens pinned
+objects, performs the same operation, closes descriptors, then emits an
+explicit success marker. Complete JSON alone is NOT success; an error exits
+without the marker. This differs from the rejected persistent TC interpreter.
+TC verification remains finite and unchanged; no batching experiment added.
+Only ids/beat/health/stats/bind/del are accepted by the serial protocol.
+Load/init stay one-shot. Requests<1024bytes, responses<=2MiB,3s deadline;
+failure closes/reaps the child (kill after.2s grace), with no request replay.
+Reconciliation, startup failure, cleanup and disabled state reap the worker.
+No interval, lease, authority, class bound, cap or firewall scope changes.
+
+Architectural conclusion
+The current polling design has a significant recurring CPU floor. This one
+change targets the demonstrated launch component, not fresh identity checks.
+Low overhead is not established by this experiment or by crossing a70% gate.
+Further discovery work would require a bounded structural design preserving
+fresh authority, not cached negative permissions or slower polling.
+
+Profiling OFF, same workload/offloads, no new Go build:
+Each phase:5s bulk warmup,3x200 low-rate messages at50ms while bulk remains
+active, measured30.41..30.56s inside a40s bulk stream. Old/new/new/old order:
+ receiver Mbit/s                406.9  456.3  413.7  384.1
+ daemon+helper CPU ticks        876    801    810    854  (HZ100)
+ low-rate receiver count        600    600    600    600
+ per-chunk p95 range ms         1.57-1.76  1.45-1.93  1.36-1.64  1.56-1.85
+Mean receiver improvement10.0%, treeCPU reduction6.9%; both paired orders
+improve throughput and CPU. Candidate variability414..456 and old384..407
+remain visible. Two repeats are not a statistical bound. Latency did not
+consistently improve; this is not a latency optimization.
+
+Matched disabled/new/new/disabled comparison, profiling OFF:
+ receiver Mbit/s                626.5  451.3  458.4  627.0
+ daemon+helper CPU ticks        327    809    848    327
+ low-rate receiver count        600    600    600    600
+ per-chunk p95 range ms         1.25-1.55  1.35-1.57  1.54-1.66  1.17-1.26
+Measured durations30.31..30.45s, still within40s bulk after5s warmup.
+Mean ratio72.6%; paired72.0%/73.1%. Experimental70% minimum PASS.
+Remaining receiver deficit27.4%: PERFORMANCE PROBLEM NOT SOLVED. Candidate tree
+CPU~27.2% of one core vs control~10.8%, a substantial recurring cost.
+The disabled controls were stable here; the separate pair's candidate
+variability remains visible and is not averaged away as a guarantee.
+Both runs independently verified Deny zero and cleanup. Control1 explicitly
+found no kernel serve worker or controller after disable across2s and after
+worker-death recovery. No overhead is attributed to disabled shaping: no worker
+starts, no TC mutation occurs, and the Go disabled path is unchanged.
+Native pair checks: Deny0, foreignfilter refusal, owned cleanup, disabled no
+controller, killed worker->Unsupported->explicit disable cleanup, empty-cap
+enable/disable. Final control also passed explicit zero kernel-worker checks.
+20 model tests pass, including fragmented ACK, timeout, complete JSON followed
+by error without ACK, reuse, input bounds and all previous controller models.
+No full-suite rerun; unchanged cap/identity/recovery evidence retained.
+Native worker code dispatch is the same map-operation implementation, with
+an explicit completion boundary after successful return. No operation replay.
+
+Evidence .workspace/shaping-full-profile/:
+ profile1-artifacts, enabled-cpu.txt, disabled-cpu.txt, enabled-mutex.txt,
+ pair1-artifacts, control1-artifacts, models.log, per-run staged hashes.
+Diagnostic profiling scripts live only there; they are not production changes.
+
+
+
+Independent review
+Read-only independent reviewer approved the source/protocol, then checked the
+profile method and paired evidence. Boundary/count corrections are retained:
+cProfile580/300 vs helper wrapper582/302, incomplete diagnostic low-rate window,
+non-atomic subtree snapshots. Final matched-control evidence reviewed separately.
+This is an experimental source increment, not an approved update or host-ready
+limiter. The remaining discovery/verification cost needs a focused design and
+evidence; no additional optimization is bundled here.

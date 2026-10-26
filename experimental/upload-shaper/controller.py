@@ -81,6 +81,63 @@ def decode_tc_batch(text, count):
     return rows
 
 
+class KernelWorker:
+    """Private bounded RPC; completion is an explicit native success ACK."""
+    def __init__(self, command, timeout=3):
+        self.timeout = timeout
+        self.command = command
+        self.process = None
+
+    def close(self):
+        p, self.process = self.process, None
+        if p is None:
+            return
+        p.stdin.close()
+        try:
+            p.wait(timeout=.2)
+        except subprocess.TimeoutExpired:
+            p.kill(); p.wait()
+        p.stdout.close()
+
+    def call(self, op, pin, *args):
+        words = list(map(str, (op, pin, *args)))
+        if any(not re.fullmatch(r'[A-Za-z0-9_./:-]+', w) for w in words):
+            raise RuntimeError('invalid kernel worker argument')
+        wire = (' '.join(words) + '\n').encode()
+        if len(wire) >= 1024:
+            raise RuntimeError('kernel worker input bound')
+        deadline = time.monotonic() + self.timeout
+        try:
+            if self.process is None:
+                self.process = subprocess.Popen(self.command, stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0)
+            p = self.process
+            if p.poll() is not None or p.stdin.write(wire) != len(wire):
+                raise RuntimeError('kernel worker exited or short write')
+            data = b''
+            with selectors.DefaultSelector() as sel:
+                sel.register(p.stdout, selectors.EVENT_READ)
+                while True:
+                    left = deadline - time.monotonic()
+                    if left <= 0 or not sel.select(left):
+                        raise RuntimeError('kernel worker timed out')
+                    part = os.read(p.stdout.fileno(), 65536)
+                    if not part:
+                        raise RuntimeError('kernel worker failed without completion')
+                    data += part
+                    if len(data) > 2 * 1024 * 1024:
+                        raise RuntimeError('kernel worker output bound')
+                    if b'\x1e' in data:
+                        payload, ack = data.split(b'\x1e', 1)
+                        if ack == b'OK\n':
+                            return payload.decode()
+                        if not b'OK\n'.startswith(ack):
+                            raise RuntimeError('invalid kernel worker completion')
+        except BaseException:
+            self.close()
+            raise
+
+
 def compatibility(link, topology, features=None, default_qdisc=None):
     """Pure, conservative preflight. A positive result is not activation consent."""
     reasons = []
@@ -208,7 +265,11 @@ class Controller:
         self.fault = None
         self.manifest = self.state / 'owner.json'
         if self.manifest.exists():
-            self.reconcile()
+            try:
+                self.reconcile()
+            finally:
+                if getattr(self, 'kernel_worker', None):
+                    self.kernel_worker.close()
         if getattr(args, 'cleanup_only', False):
             self.closed = True
             return
@@ -245,6 +306,8 @@ class Controller:
             # Reconciliation only removes objects matching the durable identity.
             # An interrupted mutation not represented in the journal refuses takeover.
             self.fault = 'startup incomplete; leases expire, inspect journal'
+            if getattr(self, 'kernel_worker', None):
+                self.kernel_worker.close()
             raise
 
     def call(self, *args):
@@ -256,7 +319,11 @@ class Controller:
         return p.stdout
 
     def k(self, op, *args):
-        return self.call(self.base / 'kernel', op, self.pin, *args)
+        if op not in ('ids', 'beat', 'health', 'stats', 'bind', 'del'):
+            return self.call(self.base / 'kernel', op, self.pin, *args)
+        if getattr(self, 'kernel_worker', None) is None:
+            self.kernel_worker = KernelWorker([str(self.base / 'kernel'), 'serve'])
+        return self.kernel_worker.call(op, self.pin, *args)
 
     def get_link(self):
         return json.loads(self.call('ip', '-d', '-j', 'link', 'show', 'dev', self.dev))[0]
@@ -626,7 +693,11 @@ class Controller:
 
     def close(self):
         if not self.closed:
-            self.cleanup_objects(); self.closed = True
+            try:
+                self.cleanup_objects(); self.closed = True
+            finally:
+                if getattr(self, 'kernel_worker', None):
+                    self.kernel_worker.close()
 
 
 def main():

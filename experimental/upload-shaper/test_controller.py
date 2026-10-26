@@ -67,6 +67,42 @@ class ModelTests(unittest.TestCase):
         for bad in [classes+[classes[0]],[{'handle':'bad'}]]:
             with self.assertRaises(RuntimeError):c.topology({'classes':bad})
 
+    def test_kernel_worker_requires_success_marker_and_reuses_only_process(self):
+        import sys
+        script = "import sys,json\nn=0\nfor line in sys.stdin:\n n+=1;print(json.dumps({'n':n}));print('\\x1eOK',flush=True)"
+        w=m1.KernelWorker([sys.executable,'-u','-c',script])
+        try:
+            self.assertEqual(m1.json.loads(w.call('ids','/unused')),{'n':1})
+            pid=w.process.pid
+            self.assertEqual(m1.json.loads(w.call('ids','/unused')),{'n':2})
+            self.assertEqual(w.process.pid,pid)
+        finally:w.close()
+        self.assertIsNone(w.process)
+
+    def test_kernel_worker_complete_json_without_ack_is_failure(self):
+        import sys
+        for script in ["print('{}',flush=True);raise SystemExit(1)",
+                       "print('{}');print('\\x1eBAD',flush=True)"]:
+            w=m1.KernelWorker([sys.executable,'-u','-c',script])
+            with self.assertRaises(RuntimeError):w.call('ids','/unused')
+            self.assertIsNone(w.process)
+
+    def test_kernel_worker_timeout_and_fragmented_ack(self):
+        import sys
+        w=m1.KernelWorker([sys.executable,'-u','-c',"import time;time.sleep(10)"],timeout=.05)
+        with self.assertRaisesRegex(RuntimeError,'timed out'):w.call('ids','/unused')
+        self.assertIsNone(w.process)
+        script="import sys,time;sys.stdin.readline();sys.stdout.write('{}\\n\\x1eO');sys.stdout.flush();time.sleep(.02);print('K',flush=True)"
+        w=m1.KernelWorker([sys.executable,'-u','-c',script])
+        try:self.assertEqual(m1.json.loads(w.call('ids','/unused')),{})
+        finally:w.close()
+
+    def test_kernel_worker_argument_bound(self):
+        w=m1.KernelWorker(['/unused'])
+        for pin in ['a\nb','a'*1024]:
+            with self.assertRaises(RuntimeError):w.call('ids',pin)
+        self.assertIsNone(w.process)
+
     def test_rate_and_queue_bounds(self):
         for value in (True, 0, -1, 999999, 1000000001, '1000000', 1.5):
             with self.assertRaises(ValueError):
