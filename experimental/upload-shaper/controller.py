@@ -84,6 +84,9 @@ class Controller:
         self.manifest = self.state / 'owner.json'
         if self.manifest.exists():
             self.reconcile()
+        if getattr(args, 'cleanup_only', False):
+            self.closed = True
+            return
         before = self.topology()
         if before['classes'] or before['egress'] or before['ingress'] or before['root_filters']:
             raise ValueError('Unsupported: foreign traffic-control configuration')
@@ -213,8 +216,10 @@ class Controller:
         bits = rate(bits)
         self.applying = True
         if app not in self.apps:
-            if self.next_minor > MAX_APPS:
-                raise ValueError('class generation budget exhausted; clean restart required')
+            if len(self.apps) >= MAX_APPS:
+                raise ValueError('concurrent class capacity reached')
+            if self.next_minor > 0xfffd:
+                raise ValueError('class_generation_exhausted')
             minor = self.next_minor; self.next_minor += 1
             self.mutate('class', 'add', 'dev', self.dev, 'parent', self.handle(), 'classid', self.handle(minor), *self.class_params(bits))
             self.mutate('qdisc', 'add', 'dev', self.dev, 'parent', self.handle(minor), 'handle', f'{minor:x}:', 'fq_codel', 'limit', '128', 'memory_limit', str(queue_bytes(bits, self.mtu)), 'flows', '128', 'target', '5ms', 'interval', '100ms')
@@ -228,8 +233,6 @@ class Controller:
 
     def bind(self, req):
         bits = rate(req['rate'])
-        if len(self.bindings) >= MAX_BINDINGS:
-            raise ValueError('binding capacity reached')
         self.verify()
         proto, local, remote = req['protocol'], req['local'], req['remote']
         if proto not in ('tcp', 'udp') or len(local) > 80 or len(remote) > 80:
@@ -249,6 +252,12 @@ class Controller:
         if not re.fullmatch('[0-9a-f]{16}', cookie) or cookie in ('0000000000000000', 'ffffffffffffffff') or s['netns'] != self.ns:
             raise ValueError('missing socket generation')
         app = str(a['owners'][0]['uid']) + ':' + a['application']['key']
+        if req.get('expected_app', app) != app:
+            raise ValueError('fresh application differs from configured cap')
+        if req.get('expected_cookie', cookie) != cookie:
+            raise ValueError('socket generation changed before binding')
+        if cookie not in self.bindings and len(self.bindings) >= MAX_BINDINGS:
+            raise ValueError('binding capacity reached')
         # Explicit rebind only; background lease maintenance never changes owner.
         if cookie in self.bindings and not req.get('rebind', False):
             if self.bindings[cookie]['app'] != app:
@@ -297,6 +306,7 @@ class Controller:
         now = time.monotonic_ns()
         live = {b['cookie']: b for b in health['bindings'] if b['until'] > now}
         covered = sum(1 for c, b in self.bindings.items() if c in live and live[c]['minor'] == self.apps[b['app']]['minor'])
+        valid_until = min([health['config_until']] + [b['until'] for b in live.values()])
         if health['config_until'] <= now:
             covered = 0
         if self.fault:
@@ -309,8 +319,9 @@ class Controller:
             state = 'Active'
         return {'status': state, 'coverage': 'observed socket bindings on selected interface only',
                 'application_wide_guarantee': False, 'covered_bindings': covered, 'interface': self.dev, 'lease_seconds': 5,
+                'valid_for_ms': max(0, (valid_until - now) // 1000000),
                 'fault': self.fault, 'limitations': self.partial[-8:], 'apps': self.apps,
-                'bindings': list(self.bindings.values()), 'counters': counters}
+                'bindings': list(self.bindings.values()), 'next_minor': self.next_minor, 'counters': counters}
 
     def close(self):
         if not self.closed:
@@ -319,6 +330,7 @@ class Controller:
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument('--cleanup-only', action='store_true')
     p.add_argument('--interface', required=True)
     p.add_argument('--state', required=True)
     p.add_argument('--helpers', required=True)
@@ -331,6 +343,9 @@ def main():
     signal.signal(signal.SIGINT, stop)
     try:
         c = Controller(args)
+        if args.cleanup_only:
+            print(json.dumps({'stopped': True}), flush=True)
+            return
         print(json.dumps({'status': 'Applying', 'ready': True, 'scope': 'isolated M1'}), flush=True)
         poll = selectors.DefaultSelector(); poll.register(sys.stdin.buffer, selectors.EVENT_READ)
         buf = b''

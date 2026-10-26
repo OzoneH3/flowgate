@@ -12,6 +12,7 @@ import (
 	"flowgate/internal/queuehealth"
 	"flowgate/internal/readiness"
 	"flowgate/internal/udpaccount"
+	"flowgate/internal/uploadshape"
 	"fmt"
 	"golang.org/x/sys/unix"
 	"net"
@@ -23,6 +24,7 @@ import (
 )
 
 type Request struct {
+	UploadConfig        *uploadshape.Config        `json:"upload_config,omitempty"`
 	HistoryQuery        *accounting.HistoryQuery   `json:"history_query,omitempty"`
 	HistoryOptions      *accounting.HistoryOptions `json:"history_options,omitempty"`
 	EndpointDraft       *EndpointDraft             `json:"endpoint_draft,omitempty"`
@@ -63,6 +65,7 @@ type EnforcementStatus struct {
 	StopsAt time.Time `json:"stops_at"`
 }
 type Response struct {
+	UploadShaping    *uploadshape.Snapshot       `json:"upload_shaping,omitempty"`
 	UsageHistory     *accounting.HistorySnapshot `json:"usage_history,omitempty"`
 	HistorySettings  *accounting.HistorySettings `json:"history_settings,omitempty"`
 	QueueHealth      *queuehealth.Snapshot       `json:"queue_health,omitempty"`
@@ -196,6 +199,9 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						return
 					}
 					r := Response{Build: e.Build, Capabilities: []string{ConditionalDeleteCapability, ConditionalMutationCapability, "explicit-administrator-v1"}, Version: 1, Generation: e.Generation, ReadOnly: readonly, Mode: e.Mode, ServerTime: time.Now(), PeerUID: cred.Uid}
+					if e.UploadShaping != nil {
+						r.Capabilities = append(r.Capabilities, "experimental-native-upload-v1")
+					}
 					if e.RuntimeChecks != nil {
 						r.RuntimeChecks = e.RuntimeChecks()
 					}
@@ -673,6 +679,12 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 								stopAfterResponse = true
 							}
 
+						case "upload-status", "upload-configure":
+							v, er := e.uploadRequest(q, admin, readonly)
+							usageHistoryError(&r, er)
+							if er == nil {
+								r.UploadShaping = &v
+							}
 						case "usage-history":
 							if q.HistoryQuery == nil {
 								r.ErrorCode, r.Error = "invalid_request", "Explicit history query required"

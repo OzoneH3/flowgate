@@ -1,0 +1,144 @@
+Experimental native upload integration (disabled by default)
+
+Scope
+This daemon integration builds on isolated M1, not a host release. Only one
+explicit startup-selected veth in a disposable child network namespace is
+supported. Physical NICs, download, VPN/tunnels, priorities and UI are deferred.
+The installed25db release/updater allowlist is unaffected.
+
+Root startup opt-in (actual serve path, isolated guest only)
+ --experimental-upload-interface <veth>
+ --experimental-upload-helpers <absolute root-owned build directory>
+ --experimental-upload-state <absolute private controller journal directory>
+ --experimental-upload-parent-netns 'net:[parent inode]'
+ --administrator (with the existing selected API UID)
+The current namespace must differ from that explicit parent. This is an
+experimental deployment guard, not protection against a malicious root lying
+about the parent. Trusted helper files and all ancestors must be root-owned,
+not symlinks or writable by non-root. Startup installs only the API capability;
+it does not activate shaping. No shaping worker, poll, helper or attachment
+exists while disabled in a clean state. Existing unrelated daemon observers
+are unchanged.
+
+API contract for the UI owner
+Capability: experimental-native-upload-v1. Existing authenticated private Unix
+API, SO_PEERCRED; root or the explicitly configured administrator only.
+The administrator can read status through the read-only companion, but cannot
+configure through it. Ordinary users cannot
+read machine shaping state or mutate it. No request selects helper paths or
+expands the startup interface. All requests include version:1 and generation
+from the current daemon list response. Example reads:
+ {"version":1,"operation":"upload-status","generation":"CURRENT"}
+Response.upload_shaping contains version (initial1), applied_version, enabled,
+interface, status, configured_caps, kernel, known_gaps, last_error, updated,
+verified_until, coverage_snapshot_expired, coverage, application_wide_guarantee:false.
+
+Full replacement desired configuration, not a patch:
+ {"version":1,"operation":"upload-configure","generation":"CURRENT",
+  "expected_version":1,"upload_config":{"enabled":true,"caps":[
+   {"uid":1000,"application":"VERIFIED_NATIVE_APPLICATION_KEY",
+    "bits_per_second":4000000}]}}
+Maximum16 distinct UID/application targets;1..1000Mbit/s each. Application keys
+come from existing verified application observations; a configured key alone
+never binds a socket. Caps aggregate across freshly bound sockets/processes.
+No automatic parent/helper/launcher inheritance. An empty enabled cap list removes
+caps but leaves the opted-in controller; disabling requires caps:[]:
+ {"version":1,"operation":"upload-configure","generation":"CURRENT",
+  "expected_version":2,"upload_config":{"enabled":false,"caps":[]}}
+
+Configuration is session-scoped, deliberately not persisted. Daemon restart
+requires a new reviewed configuration, never a replay of old socket bindings.
+Generation mismatch => stale_generation; missing conditional fields/invalid
+rates => invalid_request; old version => stale_version; unauthorized/companion
+write => forbidden; absent startup capability => unavailable.
+
+Acknowledgement means desired version accepted, normally Applying, NOT that
+traffic is capped. Follow upload-status until applied_version matches and inspect
+coverage/faults. Kernel changes are serialized asynchronously; partial kernel
+failure does not roll desired state back and can leave earlier changes applied.
+Unsupported + last_error reports failure; submit a new reviewed CAS to retry or
+remove. An in-flight operation from the old version may finish before the new
+version is processed; Applying is not instantaneous enforcement. No permission
+mutation is involved. On lost reply, read generation/version/configuration and
+reconcile. Never blindly replay or advance expected_version behind a draft; a
+replay with the old version is rejected. A newer desired state may have already
+superseded the lost request.
+
+Coverage and accepted ownership
+One socket cookie is assigned to its freshly verified native application when
+bound, until close/removal or explicit fresh revalidation/rebinding. Exec, fork
+and descriptor transfer AFTER binding do not automatically change its class.
+The API does not currently offer an explicit rebind operation; removing the cap
+and reconfiguring causes fresh discovery. Unknown or ambiguous initial ownership
+never inherits another application's class. Runtime/Wine/shared sockets that
+cannot satisfy the native M1 proof remain uncovered.
+
+Configured caps, kernel app classes, requested bindings and covered_bindings
+are distinct. Kernel status/limitations describe only its requested subset.
+The daemon's enabled state is conservatively Partial, even if the kernel subset
+says Active: this integration cannot enumerate/cap every new application socket
+before first traffic. Applying means reconciliation is pending; Unsupported
+means a fault/capability/ownership refusal. Disabled means clean shutdown; an
+orphan journal at startup is Unsupported, not silently called Disabled.
+
+Attribution publishes bounded nonblocking hints; a private helper repeats the
+full M1 socket/holder/process proof before binding, matching expected app/cookie.
+Queued hints never become permission evidence. Existing connected sockets are
+discovered independently of the GUI/UDP collector: max1024 socket rows, at most8
+candidate inspections per one-second cycle, round-robin. Kernel creator UID is
+a discovery filter; a socket whose current owner UID differs may need an actual
+attribution hint. Unconnected/listening/wildcard rows without a usable peer are
+reported as gaps and need an outgoing attribution observation. TCP endpoint-rule
+shortcuts may be covered only after connection discovery. First packets and
+traffic before discovery/verification use default/unclassified handling and are
+NOT retroactively capped. Route changes to another interface escape this cap.
+
+known_gaps counts observations/failed attempts/controller generations, NOT lost
+packets or unique missing sockets. In particular first_packet_binding_race counts
+controller starts, not the number of escaped packets. Kernel counters index0 =
+unbound/default,1 = classified,17 = expired;2..16 reserved. They include unrelated
+and control traffic, not a per-app uncovered-byte estimate. Kernel map verification
+has an explicit lease-derived verified_until, conservatively anchored before the
+status RPC. The published verified_until is wall-clock display information; the
+daemon uses its retained monotonic deadline for expiry. Clients should use the
+returned coverage state rather than make authority decisions from local clocks. After that, covered_bindings is returned as0/Partial until renewed
+status is observed; the cached observation is never advertised indefinitely.
+
+Bounds and failure handling
+128 bindings/hints;16 concurrent classes; max1024 census rows; finite helper
+command deadlines. IDs1..65533 are monotonically allocated and never reused in
+one generation, even after retirement, so an old queued priority cannot name a
+new application's class. The former16-generation lifetime restriction is gone.
+At ID-space exhaustion the manager verifies owned cleanup, rotates the whole
+controller and rediscovers fresh bindings automatically. This creates an explicit
+Partial gap; failed cleanup stops instead of deleting foreign objects.
+
+M1 five-second kernel heartbeat/binding leases, bounded queues, idle class
+retirement and foreign-object verification remain. Controller death/renewal loss
+lets shaping expire to default, NOT firewall Allow. Ordinary disable closes the
+helper and verifies cleanup. Fault->disable uses a journal-triggered cleanup-only
+helper that never creates attachments; absence of journal creates no helper.
+Cleanup failure/timeout/foreign change stays Unsupported and requires a new CAS.
+Startup orphan journals are reported, with no implicit helper or stale restoration;
+explicit disable requests cleanup. If the selected interface vanished or was
+replaced, cleanup refuses; restoring the original owned interface identity permits
+verified cleanup. Otherwise manual review of orphan pins/journal is required.
+No blind deletion by interface name; no atomic CAS against concurrent root edits.
+
+Evidence / remaining physical-interface work
+Actual serve guest proof and retained failures: .workspace/shaping-integration/
+M0/M1 receiver, shared/transfer/socket reuse, bounded queues and foreign-object
+proofs are reused where unchanged. Test fixture: experimental/upload-shaper/
+integration/run.py. All kernel experiments are capped disposable VM only.
+
+Before a host-ready release:
+1. Define safe coexistence with real NIC default fq_codel/mq and existing TC/BPF;
+   current controller explicitly refuses them. Never replace foreign root TC.
+2. Validate real NIC offloads/GSO/TSO, retransmission/accounted bytes, IPv4/IPv6,
+   multiqueue hardware, throughput and CPU/latency at realistic rates.
+3. Validate device removal/recreation/rename, namespace/routing changes and orphan
+   cleanup UX without weakening identity/generation checks or deleting foreign TC.
+4. Package root-trusted helper identities and permissions, audit crash windows,
+   configuration durability choices and administrator-facing partial coverage.
+5. Review exact candidate and obtain host activation approval. No current release
+   or updater approval is implied by this experimental integration.

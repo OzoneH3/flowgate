@@ -21,7 +21,7 @@ class ModelTests(unittest.TestCase):
         c.verify = lambda: None
         c.fault = None; c.applying = False; c.partial = []
         c.bindings = {'cookie': {'app': 'uid:key'}}; c.apps = {'uid:key': {'minor': 1}}
-        c.dev = 'test0'
+        c.dev = 'test0'; c.next_minor=2
         import json
         c.counters = [{'packets': 0, 'bytes': 0} for _ in range(18)]
         c.health = {'config_until': 2**64-1, 'bindings': [{'cookie': 'cookie', 'minor': 1, 'until': 2**64-1}]}
@@ -71,6 +71,19 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(ops[2][1][0:2], ('class','del'))
         self.assertEqual(c.next_minor,4)
         self.assertEqual(set(c.bindings),{'other'})
+
+
+    def test_churn_limit_is_concurrent_not_lifetime(self):
+        c=self.fake();c.apps={};c.bindings={};c.major=0x123;c.mtu=1500;c.next_minor=1
+        c.mutate=lambda *a:None
+        c.k=lambda *a:None
+        for i in range(40):
+            c.set_cap('app',4000000)
+            self.assertEqual(c.apps['app']['minor'],i+1)
+            c.remove('app')
+        c.next_minor=0xfffe
+        with self.assertRaisesRegex(ValueError,'class_generation_exhausted'):
+            c.set_cap('app',4000000)
 
 if __name__ == '__main__':
     unittest.main()

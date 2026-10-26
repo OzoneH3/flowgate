@@ -44,9 +44,9 @@ SEC("classifier") int classify(struct __sk_buff *skb) {
   struct binding *b = bpf_map_lookup_elem(&bindings, &cookie);
   skb->priority = (c->major << 16) | 0xfffe;
   if (c->until > now && b && b->until > now && b->minor >= 1 &&
-      b->minor <= 16) {
+      b->minor <= 0xfffd) {
     skb->priority = (c->major << 16) | b->minor;
-    idx = b->minor;
+    idx = 1; // Aggregate classified counter; class IDs are not recycled.
   } else if (b)
     idx = 17;
   struct counter *n = bpf_map_lookup_elem(&counters, &idx);

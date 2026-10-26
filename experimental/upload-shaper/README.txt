@@ -1,7 +1,7 @@
 FlowGate M1: isolated native upload controller
 
-Status: experimental, opt-in, NOT integrated into serve, installed service,
-release preparation or the updater. No host activation is authorized by running
+Status: experimental, opt-in, available through an explicitly gated isolated serve API, NOT enabled in the
+installed service, release preparation or updater. API: docs/UPLOAD-SHAPING-API.txt. No host activation is authorized by running
 build.sh. There is no general NetLimiter-parity claim.
 
 Supported contract
@@ -33,7 +33,8 @@ M1 capability boundary
 - Explicit private stdin JSON control, not a public endpoint or daemon API.
 - Cap range1..1000Mbit/s. Rates count qdisc bytes, including headers/retransmits,
   not only application payload. This is a cap, not a reserved bandwidth promise.
-- No automatic discovery/binding of newly created sockets. Unbound, unsupported,
+- The standalone controller has no automatic discovery/binding of new sockets;
+  the daemon adapter adds bounded discovery and attribution hints. Unbound, unsupported,
   ambiguous or expired entries use a separate uncapped default class. They NEVER
   inherit a configured application's class. Traffic on another interface is not
   covered. Therefore there is NO guaranteed application-wide cap in this milestone.
@@ -58,8 +59,9 @@ object identity or operational failure. No further renewal/mutation is attempted
 except verified cleanup. Active never substitutes for a firewall permission.
 
 Bounds / failure behavior
-128 bindings;16 class generations per controller instance, no class-ID recycling
-until a clean instance restart. A configured cap applies across its bindings.
+128 bindings;16 concurrent classes, monotonically allocated IDs1..65533 with
+no class-ID recycling until a clean instance restart. The daemon adapter rotates
+a fully exhausted generation through verified cleanup and fresh discovery. A configured cap applies across its bindings.
 Every kernel binding and the controller heartbeat have a five-second monotonic
 lease. A bounded socket census (max1024 rows) checks cookie/inode/protocol/netns
 existence approximately once per second; it does not rescan process ownership
@@ -98,7 +100,8 @@ Build / test
 Run build.sh in the existing capped build environment. All outputs must be under
 this repository's .workspace. Dependencies: Go, clang BPF target, C compiler,
 libbpf development files, Python3; isolated guest needs tc/ip and relevant modules.
-The tests/run.py fixture executes ONLY inside the capped disposable VM, with no
+The tests/run.py and integration/run.py fixtures execute ONLY inside the capped
+disposable VM, with no
 NIC/host shares; never invoke it in the host namespace. It uses synthetic native
 executables and the unchanged25db firewall. tests/check_results.py checks exported
 receiver evidence. test_controller.py is pure in-memory model coverage.
@@ -117,9 +120,9 @@ implicitly move an assignment. Multiple binds for an app share/update its one ca
 All results are JSON lines; failures explicitly report Partial/Unsupported.
 
 Next integration step
-Integrate a disabled-by-default controller adapter that publishes independently
-verified socket bindings at existing attribution boundaries, with generation-
-checked configuration and coverage reporting. It must not read shaping maps as
+The disabled-by-default daemon adapter now publishes independently verified
+socket bindings with generation/version-checked configuration and coverage
+reporting; see docs/UPLOAD-SHAPING-API.txt. It must not read shaping maps as
 permission evidence. Before any host-ready release: test physical-interface
 ownership/coexistence, link replacement/routing coverage, interrupted-startup
 recovery UX and sustained resource overhead. Keep download/VPN/priorities/UI

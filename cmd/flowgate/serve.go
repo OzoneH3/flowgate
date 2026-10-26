@@ -15,6 +15,7 @@ import (
 	"flowgate/internal/store"
 	"flowgate/internal/tcpinit"
 	"flowgate/internal/udpaccount"
+	"flowgate/internal/uploadshape"
 	"fmt"
 	"net"
 	"os"
@@ -62,6 +63,10 @@ func serveCommand(args []string) error {
 	allowEvaluation := fs.Bool("allow-evaluation", false, "explicit selected administrator authority to start/stop incoming five-minute evaluation")
 	evaluationState := fs.String("evaluation-state", "/run/flowgate-evaluation", "root-owned evaluation state; prepared only on explicit Start")
 	allowTraffic := fs.Bool("allow-traffic-control", false, "explicitly allow the selected administrator to start/stop machine UDP collection")
+	shapeInterface := fs.String("experimental-upload-interface", "", "opt-in isolated native upload API, veth only; disabled by default")
+	shapeHelpers := fs.String("experimental-upload-helpers", "", "root-owned M1 helper directory")
+	shapeState := fs.String("experimental-upload-state", "", "private isolated controller journal directory")
+	shapeParent := fs.String("experimental-upload-parent-netns", "", "explicit parent namespace; child namespace required")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -111,6 +116,19 @@ func serveCommand(args []string) error {
 	e.APIUID = &peer
 	if *administrator {
 		e.AdministratorUID = &peer
+	}
+	if *shapeInterface != "" {
+		if !*administrator {
+			return fmt.Errorf("experimental upload requires explicit administrator")
+		}
+		manager, er := uploadshape.New(uploadshape.Options{Interface: *shapeInterface, Helpers: *shapeHelpers, State: *shapeState, ParentNetNS: *shapeParent})
+		if er != nil {
+			return er
+		}
+		e.UploadShaping = manager
+		defer manager.Close()
+	} else if *shapeHelpers != "" || *shapeState != "" || *shapeParent != "" {
+		return fmt.Errorf("experimental upload options require an explicit interface")
 	}
 	e.Mode = "daemon-monitor"
 	e.SaveRules = db.Replace

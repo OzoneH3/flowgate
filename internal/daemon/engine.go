@@ -5,13 +5,14 @@ import (
 	"encoding/hex"
 	"flowgate/internal/accounting"
 	"flowgate/internal/decisionlog"
-	diagnostics "flowgate/internal/serveprofile"
 	"flowgate/internal/essential"
 	"flowgate/internal/identity"
 	"flowgate/internal/policy"
 	"flowgate/internal/queuehealth"
 	"flowgate/internal/readiness"
+	diagnostics "flowgate/internal/serveprofile"
 	"flowgate/internal/udpaccount"
+	"flowgate/internal/uploadshape"
 	"fmt"
 	"strings"
 	"sync"
@@ -125,6 +126,7 @@ type Engine struct {
 	AdministratorUID   *uint32
 	APIUID             *uint32
 	Activity           func() identity.ActivitySnapshot
+	UploadShaping      *uploadshape.Manager
 	UsageHistory       *accounting.History
 	ObservedUsage      *accounting.Ledger
 	Generation         string
@@ -291,6 +293,9 @@ func (e *Engine) PrepareUDPBatch(f identity.Flow, token string, count int, censu
 // are read under e.mu at decision time, so a rule changed during resolution
 // applies to this attempt. Resolve must be safe for concurrent use.
 func (e *Engine) ObserveResolved(f identity.Flow, token string, a identity.Attribution) Event {
+	if e.UploadShaping != nil {
+		e.UploadShaping.Offer(f, a)
+	}
 	var peers *prefetchSet
 	// Peer prefetch resolves other flows outside e.mu and is the only reason to
 	// check loopback before the locked decision. Without peer candidates (the

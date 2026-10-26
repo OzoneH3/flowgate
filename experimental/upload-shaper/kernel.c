@@ -167,7 +167,7 @@ int main(int argc, char **argv) {
       return 2;
     struct value v = {.until = now() + 5000000000ULL,
                       .id = strtoul(argv[4], NULL, 10)};
-    if (v.id < 1 || v.id > 16)
+    if (v.id < 1 || v.id > 0xfffd)
       return 2;
     if (bpf_map_update_elem(fd, &key, &v, BPF_ANY))
       die("binding");
