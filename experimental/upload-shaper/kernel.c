@@ -66,6 +66,19 @@ int main(int argc, char **argv) {
     bpf_object__close(o);
     return 0;
   }
+  if (!strcmp(op, "priority-test")) {
+    if (argc != 4) return 2;
+    int fd = map(pin, "program");
+    unsigned char packet[64] = {0};
+    struct __sk_buff in = {0}, out = {0};
+    in.priority = strtoul(argv[3], NULL, 10);
+    struct bpf_test_run_opts opts = {.sz = sizeof(opts), .data_in = packet,
+      .data_size_in = sizeof(packet), .ctx_in = &in, .ctx_size_in = sizeof(in),
+      .ctx_out = &out, .ctx_size_out = sizeof(out), .repeat = 1};
+    if (bpf_prog_test_run_opts(fd, &opts)) die("priority-test");
+    printf("{\"priority\":%u}\n", out.priority);
+    close(fd); return 0;
+  }
   if (!strcmp(op, "ids")) {
     const char *names[] = {"bindings", "config", "counters", "program"};
     printf("{");

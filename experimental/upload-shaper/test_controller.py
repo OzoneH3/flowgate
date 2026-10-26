@@ -85,5 +85,59 @@ class ModelTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'class_generation_exhausted'):
             c.set_cap('app',4000000)
 
+class CompatibilityTests(unittest.TestCase):
+    def topology(self):
+        return {'qdiscs': [{'kind':'fq_codel','handle':'0:','root':True,'options':
+            {'limit':10240,'flows':1024,'quantum':1514,'target':4999,'interval':99999,
+             'memory_limit':33554432,'ecn':True,'drop_batch':64}}],
+            'classes':[], 'egress':[], 'ingress':[], 'root_filters':[]}
+    def test_narrow_nic_and_refusals(self):
+        import copy
+        link={'mtu':1500,'link_type':'ether','parentbus':'virtio','num_tx_queues':1,'flags':['UP','LOWER_UP']}
+        features={k:'off' for k in ('tcp-segmentation-offload','generic-segmentation-offload','tx-udp-segmentation','hw-tc-offload')}
+        check=lambda l,q,f: m1.compatibility(l,q,f,'fq_codel')['supported']
+        self.assertTrue(check(link,self.topology(),features))
+        self.assertFalse(check(dict(link,num_tx_queues=2),self.topology(),features))
+        self.assertFalse(check(link,self.topology(),None))
+        for k in features:
+            self.assertFalse(check(link,self.topology(),dict(features,**{k:'on'})))
+        for field in ['egress','ingress','root_filters','classes']:
+            q=self.topology();q[field]=[{'foreign':True}];self.assertFalse(check(link,q,features))
+        for mutation in [{'handle':'8000:'},{'kind':'mq'},{'options':{}}]:
+            q=self.topology();q['qdiscs'][0].update(mutation);self.assertFalse(check(link,q,features))
+        self.assertFalse(m1.compatibility(link,self.topology(),features,'pfifo_fast')['supported'])
+    def test_pending_root_recovery_is_narrow(self):
+        import json,copy
+        c=object.__new__(m1.Controller);c.major=0x123;c.ids={'program':7}
+        c.k=lambda *args:json.dumps(c.ids)
+        c.original=self.topology();c.expected=copy.deepcopy(c.original)
+        c.setup_step=['qdisc','replace','dev','test0','root']
+        actual=copy.deepcopy(c.original);actual['qdiscs']=[{'kind':'htb','handle':'123:','root':True}]
+        self.assertTrue(c.setup_topology_owned(actual))
+        for key,addition in [('qdiscs',{'kind':'clsact','handle':'ffff:'}),('egress',{'kind':'bpf','pref':99}),('classes',{'kind':'htb','handle':'999:1'})]:
+            other=copy.deepcopy(actual);other[key].append(addition)
+            self.assertFalse(c.setup_topology_owned(other))
+        c.expected=copy.deepcopy(actual)
+        c.setup_step=['class','add','dev','test0','classid','123:fffe']
+        actual['classes']=[{'class':'htb','handle':'123:fffe'}]
+        self.assertTrue(c.setup_topology_owned(actual))
+        c.setup_step=None
+        self.assertFalse(c.setup_topology_owned(actual))
+
+    def test_empty_journal_generation_guards(self):
+        d={'major':0x123,'boot_id':'old','netns':'net:[1]','ifindex':2,'interface':'x','original':self.topology()}
+        changed={'qdiscs':[{'kind':'pfifo_fast','handle':'0:'}],'classes':[]}
+        check=lambda actual,pins,boot: m1.journal_empty(d,actual,pins,boot,'net:[1]',2,'x')
+        self.assertTrue(check(self.topology(),False,'old'))
+        self.assertFalse(check(changed,False,'old'))
+        self.assertTrue(check(changed,False,'new'))
+        self.assertFalse(check(changed,True,'new'))
+        self.assertFalse(check({'qdiscs':[{'handle':'123:'}],'classes':[]},False,'new'))
+        self.assertFalse(m1.journal_empty(d,self.topology(),False,'old','net:[2]',2,'x'))
+
+    def test_feature_parser(self):
+        self.assertEqual(m1.parse_features('Features for x:\n tcp-segmentation-offload: off [fixed]\n generic-segmentation-offload: on\n'),
+                         {'tcp-segmentation-offload':'off','generic-segmentation-offload':'on'})
+
 if __name__ == '__main__':
     unittest.main()

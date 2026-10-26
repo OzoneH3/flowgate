@@ -42,7 +42,10 @@ SEC("classifier") int classify(struct __sk_buff *skb) {
     return TC_ACT_UNSPEC;
   __u64 now = bpf_ktime_get_ns(), cookie = bpf_get_socket_cookie(skb);
   struct binding *b = bpf_map_lookup_elem(&bindings, &cookie);
-  skb->priority = (c->major << 16) | 0xfffe;
+  // Preserve unrelated SO_PRIORITY/QoS. Values in our reserved class namespace
+  // cannot be supplied by an unbound socket to inherit another application's cap.
+  if ((skb->priority >> 16) == c->major)
+    skb->priority = 0;
   if (c->until > now && b && b->until > now && b->minor >= 1 &&
       b->minor <= 0xfffd) {
     skb->priority = (c->major << 16) | b->minor;

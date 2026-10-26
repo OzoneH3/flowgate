@@ -2,12 +2,13 @@ Experimental native upload integration (disabled by default)
 
 Scope
 This daemon integration builds on isolated M1, not a host release. Only one
-explicit startup-selected veth in a disposable child network namespace is
-supported. Physical NICs, download, VPN/tunnels, priorities and UI are deferred.
+explicit startup-selected supported interface in a disposable child network namespace is
+supported. Host physical-interface activation, download, VPN/tunnels, priorities
+and UI are deferred; isolated NIC scope is in UPLOAD-SHAPING-PREFLIGHT.txt.
 The installed25db release/updater allowlist is unaffected.
 
 Root startup opt-in (actual serve path, isolated guest only)
- --experimental-upload-interface <veth>
+ --experimental-upload-interface <supported-interface>
  --experimental-upload-helpers <absolute root-owned build directory>
  --experimental-upload-state <absolute private controller journal directory>
  --experimental-upload-parent-netns 'net:[parent inode]'
@@ -142,3 +143,8 @@ Before a host-ready release:
    configuration durability choices and administrator-facing partial coverage.
 5. Review exact candidate and obtain host activation approval. No current release
    or updater approval is implied by this experimental integration.
+
+NIC preflight increment: see docs/UPLOAD-SHAPING-PREFLIGHT.txt. The namespace guard
+remains; single-queue default-fq_codel NIC experiments require segmentation off.
+Kernel status may include compatibility (topology, supported, reasons, offloads,
+default_qdisc_observed, coverage, host_activation=false). No host activation added.

@@ -43,6 +43,77 @@ def structural(value):
     return value
 
 
+def compatibility(link, topology, features=None, default_qdisc=None):
+    """Pure, conservative preflight. A positive result is not activation consent."""
+    reasons = []
+    kind = link.get('linkinfo', {}).get('info_kind')
+    veth = kind == 'veth'
+    nic = (not kind and link.get('link_type') == 'ether'
+           and link.get('parentbus') in ('pci', 'virtio'))
+    if not (veth or nic):
+        reasons.append('device must be veth or a directly attached PCI/virtio Ethernet NIC')
+    if not 576 <= link.get('mtu', 0) <= 9000:
+        reasons.append('MTU outside bounded queue model')
+    if nic and ('UP' not in link.get('flags', []) or 'LOWER_UP' not in link.get('flags', [])):
+        reasons.append('NIC must be administratively up with carrier')
+    if nic and (link.get('master') or link.get('xdp')):
+        reasons.append('enslaved devices and XDP are unsupported')
+    if nic and link.get('num_tx_queues') != 1:
+        reasons.append('only one transmit queue is supported; mq is unsupported')
+    if any(topology.get(k) for k in ('classes', 'egress', 'ingress', 'root_filters', 'class_filters')):
+        reasons.append('foreign classes or filters present')
+    q = topology.get('qdiscs', [])
+    root = q[0] if len(q) == 1 else {}
+    default = (root.get('kind') == 'fq_codel' and root.get('handle') == '0:'
+               and root.get('root') is True and default_qdisc in (None, 'fq_codel'))
+    # Only the kernel-created default root, never an administrator-created handle.
+    # Exact restoration is verified after deletion; custom options are refused.
+    options = root.get('options', {})
+    expected = {'limit': 10240, 'flows': 1024, 'quantum': link.get('mtu', 0)+14,
+                'target': 4999, 'interval': 99999, 'memory_limit': 33554432,
+                'ecn': True, 'drop_batch': 64}
+    default = default and options == expected
+    if not ((veth and root.get('kind') == 'noqueue') or (nic and default)):
+        reasons.append('requires unmodified kernel default fq_codel handle 0 (veth: noqueue)')
+    if nic:
+        if features is None:
+            reasons.append('offload state unavailable')
+        else:
+            for name in ('tcp-segmentation-offload', 'generic-segmentation-offload',
+                         'tx-udp-segmentation', 'hw-tc-offload'):
+                if features.get(name) != 'off':
+                    reasons.append(name + ' must be off; controller never changes offloads')
+    return {'supported': not reasons, 'topology': 'veth-noqueue' if veth else 'single-queue-default-fq_codel',
+            'reasons': reasons, 'offloads': features, 'default_qdisc_observed': default_qdisc, 'host_activation': False,
+            'coverage': 'Partial: verified bound sockets only; first packets may escape'}
+
+
+def parse_features(text):
+    out = {}
+    for line in text.splitlines():
+        if ':' in line:
+            key, value = line.strip().split(':', 1)
+            value = value.strip().split()
+            if value and value[0] in ('on', 'off'):
+                out[key] = value[0]
+    return out
+
+
+def journal_empty(d, actual, pin_exists, boot, ns, index, dev):
+    if pin_exists:
+        return False
+    previous_boot = d.get('boot_id') is not None and d['boot_id'] != boot
+    if previous_boot:
+        major = d.get('major')
+        if type(major) is not int or not 0x100 <= major < 0xff00:
+            return False
+        prefix = f'{major:x}:'
+        return not any(str(obj.get('handle', '')).startswith(prefix)
+                       for obj in actual.get('qdiscs', []) + actual.get('classes', []))
+    same_device = d.get('netns') == ns and d.get('ifindex') == index and d.get('interface') == dev
+    return same_device and d.get('original') == actual
+
+
 class Controller:
     def __init__(self, args):
         self.args = args
@@ -66,12 +137,6 @@ class Controller:
         self.lock = os.open(self.state / 'lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
         fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         self.link = self.get_link()
-        # M1's tested interface capability: one non-loopback Ethernet veth.
-        # Physical/VPN/bridge integration is deliberately not enabled here.
-        if self.link.get('linkinfo', {}).get('info_kind') != 'veth':
-            raise ValueError('Unsupported: M1 isolated controller supports veth only')
-        if not 576 <= self.link['mtu'] <= 9000:
-            raise ValueError('Unsupported: MTU outside bounded queue model')
         self.index = self.link['ifindex']
         self.mtu = self.link['mtu']
         self.apps = {}
@@ -88,15 +153,17 @@ class Controller:
             self.closed = True
             return
         before = self.topology()
-        if before['classes'] or before['egress'] or before['ingress'] or before['root_filters']:
-            raise ValueError('Unsupported: foreign traffic-control configuration')
-        if len(before['qdiscs']) != 1 or before['qdiscs'][0].get('kind') != 'noqueue':
-            raise ValueError('Unsupported: will not replace a foreign root/clsact')
+        self.compatibility = self.preflight(before)
+        if not self.compatibility['supported']:
+            raise ValueError('Unsupported: ' + '; '.join(self.compatibility['reasons']))
+        self.original = before
         self.token = secrets.token_hex(16)
         self.major = 0x100 + secrets.randbelow(0xfe00)
         self.pin = Path('/sys/fs/bpf') / ('fg-m1-' + self.token)
         self.pin.mkdir(mode=0o700)
         self.expected = before
+        self.pending_setup = True
+        self.setup_step = None
         self.ids = None
         self.save()  # journal intent before any kernel object creation
         try:
@@ -104,11 +171,14 @@ class Controller:
             self.ids = json.loads(self.k('ids'))
             self.k('init', str(self.major))
             self.save()
-            self.mutate('qdisc', 'add', 'dev', self.dev, 'root', 'handle', self.handle(), 'htb', 'default', 'fffe')
+            self.mutate('qdisc', 'replace' if self.compatibility['topology'] != 'veth-noqueue' else 'add', 'dev', self.dev, 'root', 'handle', self.handle(), 'htb', 'default', 'fffe')
             self.mutate('class', 'add', 'dev', self.dev, 'parent', self.handle(), 'classid', self.handle(0xfffe), 'htb', 'rate', '100gbit', 'ceil', '100gbit', 'quantum', str(self.mtu))
-            self.mutate('qdisc', 'add', 'dev', self.dev, 'parent', self.handle(0xfffe), 'handle', 'fffe:', 'fq_codel', 'limit', '128', 'memory_limit', '65536', 'flows', '128')
+            default_options = ['limit', '128', 'memory_limit', '65536', 'flows', '128'] if self.compatibility['topology'] == 'veth-noqueue' else []
+            self.mutate('qdisc', 'add', 'dev', self.dev, 'parent', self.handle(0xfffe), 'handle', 'fffe:', 'fq_codel', *default_options)
             self.mutate('qdisc', 'add', 'dev', self.dev, 'clsact')
             self.mutate('filter', 'add', 'dev', self.dev, 'egress', 'pref', '10000', 'handle', '1', 'bpf', 'da', 'pinned', str(self.pin / 'program'))
+            self.pending_setup = False
+            self.save()
             self.applying = False
             self.last_tick = 0.0
         except BaseException:
@@ -143,7 +213,31 @@ class Controller:
         # runtime scheduler state, not administrator-created classes. The qdisc
         # itself and its options remain included in the ownership comparison.
         out['classes'] = [x for x in out['classes'] if x.get('class') != 'fq_codel']
+        if self.link.get('linkinfo', {}).get('info_kind') != 'veth':
+            if len(out['classes']) > MAX_APPS + 1:
+                raise RuntimeError('Unsupported: class inspection bound exceeded')
+            out['class_filters'] = []
+            for c in out['classes']:
+                parent = c.get('handle')
+                if not parent:
+                    raise RuntimeError('Unsupported: unrecognized class identity')
+                fs = json.loads(self.call('tc', '-j', 'filter', 'show', 'dev', self.dev, 'parent', parent))
+                if fs:
+                    out['class_filters'].append({'parent': parent, 'filters': structural(fs)})
         return out
+
+    def preflight(self, topology=None):
+        link = self.get_link()
+        self.link = link
+        features = None
+        default = None
+        if link.get('linkinfo', {}).get('info_kind') != 'veth':
+            try:
+                features = parse_features(self.call('ethtool', '-k', self.dev))
+                default = Path('/proc/sys/net/core/default_qdisc').read_text().strip()
+            except (OSError, RuntimeError):
+                pass
+        return compatibility(link, self.topology() if topology is None else topology, features, default)
 
     def handle(self, minor=None):
         return f'{self.major:x}:' + (f'{minor:x}' if minor is not None else '')
@@ -151,7 +245,9 @@ class Controller:
     def save(self):
         data = {'schema': 1, 'token': self.token, 'major': self.major, 'pin': str(self.pin),
                 'netns': self.ns, 'interface': self.dev, 'ifindex': self.index,
-                'expected': self.expected, 'ids': self.ids}
+                'boot_id': Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
+                'expected': self.expected, 'ids': self.ids, 'original': self.original, 'pending_setup': getattr(self, 'pending_setup', False), 'compatibility': getattr(self, 'compatibility', None), 'setup_step': getattr(self, 'setup_step', None),
+                'link_identity': {k: self.link.get(k) for k in ('ifindex','address','parentbus','parentdev','link_type')}}
         p = self.state / 'owner.new'
         fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         try:
@@ -163,8 +259,16 @@ class Controller:
             p.unlink(missing_ok=True)
 
     def verify(self):
-        if os.readlink('/proc/self/ns/net') != self.ns or self.get_link()['ifindex'] != self.index:
+        link = self.get_link()
+        identity_fields = ('ifindex', 'address', 'parentbus', 'parentdev', 'link_type', 'mtu', 'num_tx_queues')
+        if getattr(self, 'cleaning', False):
+            identity_fields = tuple(k for k in identity_fields if k != 'mtu')
+        if os.readlink('/proc/self/ns/net') != self.ns or any(link.get(k) != self.link.get(k) for k in identity_fields):
             raise RuntimeError('interface/namespace generation changed')
+        if not getattr(self, 'cleaning', False) and getattr(self, 'original', {}).get('qdiscs', [{}])[0].get('kind') == 'fq_codel':
+            setting = Path('/proc/sys/net/core/default_qdisc')
+            if setting.exists() and setting.read_text().strip() != 'fq_codel':
+                raise RuntimeError('Unsupported: default qdisc changed; restoration requires review')
         actual = self.topology()
         if actual != self.expected:
             (self.state / 'ownership-mismatch.json').write_text(json.dumps({'expected': self.expected, 'actual': actual}))
@@ -174,8 +278,12 @@ class Controller:
 
     def mutate(self, *args):
         self.verify()
+        if getattr(self, 'pending_setup', False) and not getattr(self, 'cleaning', False):
+            self.setup_step = list(args)
+            self.save()
         self.call('tc', *args)
         self.expected = self.topology()
+        self.setup_step = None
         self.save()
 
     def reconcile(self):
@@ -183,29 +291,107 @@ class Controller:
         if not stat.S_ISREG(st.st_mode) or st.st_uid != 0 or st.st_mode & 0o077 or st.st_size > 65536:
             raise ValueError('invalid owner journal')
         d = json.loads(self.manifest.read_text())
+        boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+        valid_pin = (isinstance(d.get('token'), str) and re.fullmatch('[0-9a-f]{32}', d['token'])
+                     and d.get('pin') == '/sys/fs/bpf/fg-m1-' + d['token'])
+        if (d.get('schema') == 1 and valid_pin
+                and journal_empty(d, self.topology(), Path(d['pin']).exists(), boot, self.ns, self.index, self.dev)):
+            # No owned kernel state remains. Forget only our private stale journal;
+            # never recreate old bindings or mutate a replacement interface.
+            self.manifest.unlink()
+            (self.state / 'owner.new').unlink(missing_ok=True)
+            self.partial.append('previous generation has no owned objects; stale journal cleared')
+            return
         if (d.get('schema') != 1 or d['netns'] != self.ns or d['ifindex'] != self.index
                 or d['interface'] != self.dev or not re.fullmatch('[0-9a-f]{32}', d['token'])
                 or d['pin'] != '/sys/fs/bpf/fg-m1-' + d['token']):
             raise ValueError('Unsupported: journal belongs to another namespace/interface')
         self.token, self.major, self.pin = d['token'], d['major'], Path(d['pin'])
         self.expected, self.ids = d['expected'], d['ids']
+        self.original = d.get('original', {'qdiscs': [{'kind': 'noqueue', 'handle': '0:', 'root': True}], 'classes': [], 'egress': [], 'ingress': [], 'root_filters': []})
+        if d.get('link_identity') and d['link_identity'] != {k: self.link.get(k) for k in ('ifindex','address','parentbus','parentdev','link_type')}:
+            raise ValueError('Unsupported: interface identity changed')
+        # A crash during atomic journal replacement may leave an uncommitted file.
+        # Only after validating owner.json and interface identity may it be removed.
+        (self.state / 'owner.new').unlink(missing_ok=True)
+        self.pending_setup = d.get('pending_setup', False)
+        self.setup_step = d.get('setup_step')
+        actual = self.topology()
+        if self.pending_setup and actual != self.expected:
+            if not self.setup_topology_owned(actual):
+                raise ValueError('Unsupported: interrupted setup includes foreign objects')
+            self.expected = actual
+            self.save()
         self.verify()
         self.cleanup_objects()
         # Old bindings/caps are intentionally NOT restored from stale process data.
         self.partial.append('restart reconciled; fresh bindings required')
 
+    def setup_topology_owned(self, actual):
+        # Recovery is only for the initial fixed setup, never arbitrary live edits.
+        # The random root handle and pinned IDs are journalled before creation.
+        if not self.ids or json.loads(self.k('ids')) != self.ids:
+            return False
+        if actual == self.original:
+            return True
+        step = self.setup_step or []
+        if len(step) < 2:
+            return False
+        changed = {k for k in actual if actual[k] != self.expected.get(k)}
+        allowed = {'qdisc': {'qdiscs'}, 'class': {'classes'}, 'filter': {'egress'}}.get(step[0], set())
+        if not changed or not changed <= allowed:
+            return False
+        # Previously journalled objects must be byte-for-byte structurally intact.
+        for key in changed:
+            old = self.expected.get(key, [])
+            new = actual[key]
+            if step[0] == 'qdisc' and step[1] in ('add', 'replace') and 'root' in step:
+                if len(new) != 1:
+                    return False
+            elif not all(obj in new for obj in old) or len(new) <= len(old):
+                return False
+        roots = [q for q in actual['qdiscs'] if q.get('root')]
+        if len(roots) != 1 or roots[0].get('kind') != 'htb' or roots[0].get('handle') != self.handle():
+            return False
+        for q in actual['qdiscs']:
+            if q in roots:
+                continue
+            if q.get('kind') == 'clsact' and q.get('handle') == 'ffff:':
+                continue
+            if q.get('kind') == 'fq_codel' and q.get('handle') == 'fffe:' and q.get('parent') == self.handle(0xfffe):
+                continue
+            return False
+        for c in actual['classes']:
+            if c.get('class') != 'htb' or c.get('handle') != self.handle(0xfffe):
+                return False
+        if actual['ingress'] or actual['root_filters'] or actual.get('class_filters'):
+            return False
+        for f in actual['egress']:
+            # tc emits a protocol/pref header followed by the concrete filter.
+            if f.get('kind') != 'bpf' or f.get('pref') != 10000:
+                return False
+            opt = f.get('options')
+            if opt and (opt.get('id') != self.ids.get('program') or opt.get('handle') != '0x1'):
+                return False
+        return True
+
     def cleanup_objects(self):
+        self.cleaning = True
         self.verify()
         q = self.expected['qdiscs']
         if any(x['kind'] == 'clsact' for x in q):
             self.mutate('qdisc', 'del', 'dev', self.dev, 'clsact')
         if any(x['kind'] == 'htb' and x['handle'] == self.handle() for x in q):
             self.mutate('qdisc', 'del', 'dev', self.dev, 'root', 'handle', self.handle())
+        restoration_changed = self.topology() != self.original
         if self.pin.exists():
             for name in ['program', 'bindings', 'config', 'counters']:
                 (self.pin / name).unlink(missing_ok=True)
             self.pin.rmdir()
         self.manifest.unlink(missing_ok=True)
+        self.cleaning = False
+        if restoration_changed:
+            raise RuntimeError('Unsupported: owned objects removed but kernel default differs from original; inspect default_qdisc/MTU, no foreign restoration attempted')
 
     def class_params(self, bits):
         burst = max(2 * self.mtu, bits // 8 // 200)
@@ -285,6 +471,12 @@ class Controller:
 
     def tick(self):
         self.verify()
+        if self.compatibility['topology'] != 'veth-noqueue':
+            current = parse_features(self.call('ethtool', '-k', self.dev))
+            for name in ('tcp-segmentation-offload', 'generic-segmentation-offload',
+                         'tx-udp-segmentation', 'hw-tc-offload'):
+                if current.get(name) != 'off':
+                    raise RuntimeError('Unsupported: offload setting changed: ' + name)
         ss = json.loads(self.call(self.base / 'probe', 'sockets'))
         live = {(s['cookie'], s['inode'], s['protocol'], s['netns']) for s in ss if s['inode']}
         for c, b in list(self.bindings.items()):
@@ -318,6 +510,7 @@ class Controller:
         else:
             state = 'Active'
         return {'status': state, 'coverage': 'observed socket bindings on selected interface only',
+                'compatibility': getattr(self, 'compatibility', None),
                 'application_wide_guarantee': False, 'covered_bindings': covered, 'interface': self.dev, 'lease_seconds': 5,
                 'valid_for_ms': max(0, (valid_until - now) // 1000000),
                 'fault': self.fault, 'limitations': self.partial[-8:], 'apps': self.apps,
@@ -330,12 +523,17 @@ class Controller:
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument('--preflight', action='store_true')
     p.add_argument('--cleanup-only', action='store_true')
     p.add_argument('--interface', required=True)
     p.add_argument('--state', required=True)
     p.add_argument('--helpers', required=True)
     p.add_argument('--lab-parent-netns', required=True)
     args = p.parse_args()
+    if args.preflight:
+        c = object.__new__(Controller); c.dev = args.interface
+        print(json.dumps(c.preflight()), flush=True)
+        return
     c = None
     def stop(*unused):
         raise KeyboardInterrupt()

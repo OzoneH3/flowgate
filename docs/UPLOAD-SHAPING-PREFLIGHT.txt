@@ -1,0 +1,100 @@
+Native upload NIC compatibility increment (no host activation)
+
+Scope
+The controller can now exercise a second isolated topology: a directly attached
+PCI/virtio Ethernet NIC with one TX queue, UP/carrier, MTU576..9000, and an
+unmodified kernel-created fq_codel root (handle0). No mq, bridge/bond slave,
+VLAN/tunnel/VPN device, XDP, custom root/options, clsact, class or filter takeover.
+The original disposable-child-network-namespace guard remains mandatory. This is
+not an installed host feature, driver certification, or general NetLimiter parity.
+
+Preflight
+python3 -B controller.py --preflight --interface IFACE --helpers /unused \
+ --state /unused --lab-parent-netns 'net:[0]'
+This mode reads link, TC and ethtool data only: no state directory, lock, worker,
+BPF attachment, offload change or traffic. Result includes supported, topology,
+reasons, observed offloads, default_qdisc_observed, coverage and host_activation=false.
+Failure/unreadable required capability refuses support. The enabled daemon's
+kernel status also carries compatibility; automatic coverage remains Partial.
+
+Segmentation contract
+TSO, GSO, UDP segmentation and hardware TC offload must all report off. The
+controller NEVER changes these settings. Checksums and scatter/gather remain
+permitted; they do not themselves authorize oversized segmentation aggregates.
+The enabled controller rechecks these four flags before each periodic renewal;
+a change faults the controller, withdraws renewal and attempts owned cleanup.
+Existing leases expire within5s if cleanup fails. This is periodic detection,
+not atomic protection against privileged concurrent device reconfiguration.
+Cap accounting is the existing HTB/skb byte model, not exact wire occupancy:
+no preamble/inter-frame-gap/FCS guarantee. No offloads-on throughput claim.
+Plain TCP/UDP is the tested workload; explicit UDP_SEGMENT/GSO-producing APIs
+remain unsupported/unproved. Offload-off flags are not a universal packet-shape guarantee.
+Unknown/orphaned sockets remain unclassified. No per-packet process scan added.
+
+Ownership and restoration
+Before replacement, save the exact structural topology, interface identity,
+random major handle, pinned object IDs and compatibility evidence in the private
+journal. Preserve all non-owned configuration. Unbound traffic uses the default
+class with normal fq_codel defaults, rather than M1's small default leaf.
+Unrelated skb priority values remain unchanged; values in our reserved major
+are sanitized on unbound/expired packets to prevent class impersonation.
+Bound socket priority selects its application class. Stacked VLAN/QoS behaviour
+is not supported or proved by this direct-Ethernet experiment.
+Cleanup checks object identity and topology before deleting owned clsact/root.
+Deleting our root lets the kernel recreate its current default. Compare it with
+the original; do not overwrite a new default selected by an administrator.
+If the restored default differs, clear our pins/journal and report the mismatch.
+No promise to restore queued packets, scheduler runtime state or counters.
+
+The default_qdisc sysctl is init-network-namespace-only on the tested kernel.
+When readable, require fq_codel and detect a changed value. In a child namespace,
+exact handle0/default-options structure is the recorded evidence instead.
+Post-deletion comparison is authoritative in both cases. A privileged concurrent
+change cannot be made atomic with these netlink calls; this is not ownership CAS.
+
+Interrupted setup
+Write the pending fixed setup operation before its TC command. Recovery can
+recognize the operation's newly created root/class/leaf/clsact/BPF objects only
+inside our journalled identities, while preserving previously recorded objects.
+Unknown changes, foreign filters (including class-parent filters), replaced
+interfaces, or mismatched pinned IDs refuse cleanup. A valid journal permits
+removing a leftover uncommitted owner.new. Bindings/caps are never resurrected.
+A same-boot stale journal with absent pins and exact original topology is forgotten
+without TC changes for the same interface. For a recorded previous boot, absent
+pins and absence of the old major suffice; a new default/MTU is preserved. The guest simulates
+previous-boot kernel-state loss; this is not a real host reboot test.
+The guest injects death after root replacement but before the completion save,
+proves foreign additions prevent cleanup, then proves restoration once the
+fixture removes its own foreign addition. Crashes before pinned IDs are saved,
+same-boot missing pins with an owned root still present,
+and unrecognized live-edit/cleanup interruption states, remain explicit manual
+review cases; do not infer universal crash recovery from this one injection.
+Interface replacement/disappearance stops renewal; no action on the replacement.
+An MTU change permits owned cleanup without resetting MTU; a different restored
+quantum is reported. A down link or changed identity can prevent exact restoration verification;
+no automatic link-up, MTU reset or device replacement is performed.
+
+Host observation and remaining gate
+The inspected host enp7s0/r8169 has one TX queue, default fq_codel and no visible
+TC classes/filters. TSO/GSO are ON: this candidate explicitly refuses it. The
+ethtool channel query is unsupported; ip link reports one TX/RX queue. No host
+configuration, traffic, service, installed release or updater approval changed.
+
+Eventual opt-in host path (NOT implemented/authorized here)
+1. Prove segmentation-enabled accounting/queue sizing and fairness on virtio with
+   the same offloads, then independently check the actual driver/hardware.
+2. Add an explicit host-interface opt-in separate from the lab namespace guard,
+   showing preflight, coverage gaps and exact root replacement/restoration plan.
+3. Validate bounded real-interface rates/latency, driver resets/link lifecycle,
+   NetworkManager changes, default-root restoration and supported offloads with
+   user approval. Unsupported mq/custom topology continues to refuse takeover.
+4. Only then prepare matched release and seek activation approval. Never change
+   offloads silently. No UI/download/VPN/priority work is included in this increment.
+
+Evidence
+.workspace/shaping-physical/ contains read-only host-capabilities.json and
+host-preflight.json, capped compile/model logs, immutable guest manifests,
+receiver records and retained failed attempts. Guest uses two virtio-net-pci NICs
+on an internal QEMU hub with no host network; not veth and not physical hardware.
+See its README.txt for exact tested source and results. M0/M1/daemon identity,
+CAS and class lifetime evidence is reused where unchanged.

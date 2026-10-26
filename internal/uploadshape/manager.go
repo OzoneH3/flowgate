@@ -34,6 +34,7 @@ type Binding struct {
 	Cookie string `json:"cookie"`
 }
 type KernelStatus struct {
+	Compatibility  json.RawMessage            `json:"compatibility,omitempty"`
 	ValidForMillis int64                      `json:"valid_for_ms"`
 	Fault          string                     `json:"fault,omitempty"`
 	Limitations    []string                   `json:"limitations,omitempty"`

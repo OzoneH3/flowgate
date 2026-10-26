@@ -27,7 +27,7 @@ or bypass NFQUEUE. Existing firewall semantics remain independent.
 
 M1 capability boundary
 - Root in a disposable child network namespace; explicit interface and parent
-  namespace identity required. Tested/supported interface kind: veth only,
+  namespace identity required. Original M1 interface kind: veth,
   MTU576..9000, existing root noqueue, no foreign TC configuration.
 - One interface; upload only; native TCP/UDP over IPv4/IPv6 using stable cookies.
 - Explicit private stdin JSON control, not a public endpoint or daemon API.
@@ -38,7 +38,7 @@ M1 capability boundary
   ambiguous or expired entries use a separate uncapped default class. They NEVER
   inherit a configured application's class. Traffic on another interface is not
   covered. Therefore there is NO guaranteed application-wide cap in this milestone.
-- Physical NICs, VPN/tunnel/bridge interfaces, download, priorities, Wine/runtime
+- Host physical-NIC activation, VPN/tunnel/bridge interfaces, download, priorities, Wine/runtime
   support, persistence and UI are not enabled. Existing foreign HTB/fq_codel or
   clsact causes refusal, not replacement. Veth support is an isolated integration
   boundary; this is not yet a host-ready upload implementation.
@@ -127,3 +127,10 @@ permission evidence. Before any host-ready release: test physical-interface
 ownership/coexistence, link replacement/routing coverage, interrupted-startup
 recovery UX and sustained resource overhead. Keep download/VPN/priorities/UI
 separate. Deployment and host activation require a later approval.
+
+NIC preflight increment
+See docs/UPLOAD-SHAPING-PREFLIGHT.txt and physical/run.py. Single-queue default
+fq_codel PCI/virtio NICs are experimental in a disposable namespace only, with
+segmentation off and exact restoration checks. Existing host offloads are never
+changed. The actual host currently fails this capability gate. M1 veth evidence
+is not claimed as physical-interface proof.
