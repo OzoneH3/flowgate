@@ -29,9 +29,30 @@ def rate(value):
     return value
 
 
-def queue_bytes(bits, mtu):
-    # At most ~25 ms of qdisc bytes, subject to two-MTU floor; not TCP send buffers.
-    return min(262144, max(2 * mtu, bits // 8 // 40))
+def queue_bytes(bits, mtu, gso=0):
+    # At most ~25 ms of qdisc bytes, subject to a two-MTU floor; not TCP send buffers.
+    # With segmentation offload one skb may carry gso bytes of payload (64 KiB by
+    # default). fq_codel's memory_limit counts skb truesize (payload plus page and
+    # header overhead), so the floor reserves three superpackets' worth to make
+    # room for at least two queued superpackets; the bound grows to 16
+    # superpackets so a sustained cap is not starved by one skb. Latency for the
+    # capped application itself is then bounded by CoDel (5 ms target, 100 ms
+    # interval) plus the serialisation time of one superpacket at its rate, NOT
+    # by this memory figure; see the documented supported-rate profile.
+    floor = max(2 * mtu, 3 * gso)
+    ceiling = max(262144, 16 * gso)
+    return min(ceiling, max(floor, bits // 8 // 40))
+
+
+def burst_bytes(bits, mtu, gso=0):
+    # HTB token-bucket size: ~5 ms of rate, never below two MTUs, and with
+    # segmentation never below one superpacket (gso_max_size). Tokens refill at
+    # the configured rate; a superpacket larger than the accumulated tokens is
+    # still dequeued once the bucket is non-negative and the deficit is repaid
+    # before the next dequeue. The transient excess over the long-run rate is
+    # therefore bounded by one bucket (burst) plus at most one superpacket, not
+    # a renewed free allowance per interval.
+    return max(2 * mtu, gso, bits // 8 // 200)
 
 
 def structural(value):
@@ -48,10 +69,18 @@ def compatibility(link, topology, features=None, default_qdisc=None):
     reasons = []
     kind = link.get('linkinfo', {}).get('info_kind')
     veth = kind == 'veth'
+    # netdevsim is the kernel's software NIC simulator: TSO/GSO capable, default
+    # fq_codel root. It exists only when root loads it and is accepted so the
+    # isolated guest can prove segmentation handling; it is not a host device class.
     nic = (not kind and link.get('link_type') == 'ether'
-           and link.get('parentbus') in ('pci', 'virtio'))
+           and link.get('parentbus') in ('pci', 'virtio', 'netdevsim'))
     if not (veth or nic):
         reasons.append('device must be veth or a directly attached PCI/virtio Ethernet NIC')
+    # Superpacket bound: the largest of the per-family GSO maxima and the TSO
+    # maximum the link advertises (BIG TCP may raise the IPv6 value).
+    gso = max([v for v in (link.get('gso_max_size'), link.get('gso_ipv4_max_size'), link.get('tso_max_size')) if isinstance(v, int)] or [0])
+    if nic and not 1500 <= gso <= 262144:
+        reasons.append('gso_max_size unavailable or outside the bounded queue model (1500..262144)')
     if not 576 <= link.get('mtu', 0) <= 9000:
         reasons.append('MTU outside bounded queue model')
     if nic and ('UP' not in link.get('flags', []) or 'LOWER_UP' not in link.get('flags', [])):
@@ -75,16 +104,30 @@ def compatibility(link, topology, features=None, default_qdisc=None):
     default = default and options == expected
     if not ((veth and root.get('kind') == 'noqueue') or (nic and default)):
         reasons.append('requires unmodified kernel default fq_codel handle 0 (veth: noqueue)')
+    segmentation = None
     if nic:
         if features is None:
             reasons.append('offload state unavailable')
         else:
-            for name in ('tcp-segmentation-offload', 'generic-segmentation-offload',
-                         'tx-udp-segmentation', 'hw-tc-offload'):
-                if features.get(name) != 'off':
-                    reasons.append(name + ' must be off; controller never changes offloads')
+            # Segmentation offloads may be on or off: sizing uses gso_max_size, which
+            # bounds superpackets regardless of flags (explicit UDP_SEGMENT builds
+            # them even with every offload off). Hardware TC offload could move
+            # classification/scheduling out of the kernel path we verify: refused.
+            # Explicit observed 'off' is required: a missing or unparsable flag is refused.
+            if features.get('hw-tc-offload') != 'off':
+                reasons.append('hw-tc-offload must report off; controller never changes offloads')
+            flags = {k: features.get(k) for k in ('tcp-segmentation-offload', 'generic-segmentation-offload',
+                                                  'tx-udp-segmentation', 'scatter-gather')}
+            segmentation = {'offloads': flags, 'gso_max_size': gso, 'gso_max_segs': link.get('gso_max_segs'),
+                            'profile': 'segmentation-capable' if 'on' in flags.values() else 'segmentation-off',
+                            'superpacket_bytes': gso, 'burst_floor_bytes': gso, 'leaf_memory_floor_bytes': 3 * gso,
+                            'superpacket_serialisation_ms_at_1mbit': gso * 8 // 1000,
+                            'recommended_min_rate_bps': gso * 8 * 10,
+                            'leaf_memory_ceiling_bytes': max(262144, 16 * gso),
+                            'udp_segment': 'per-segment accounting: UDP packets queued to userspace for attribution are segmented before the egress hook'}
     return {'supported': not reasons, 'topology': 'veth-noqueue' if veth else 'single-queue-default-fq_codel',
-            'reasons': reasons, 'offloads': features, 'default_qdisc_observed': default_qdisc, 'host_activation': False,
+            'reasons': reasons, 'offloads': features, 'segmentation': segmentation,
+            'default_qdisc_observed': default_qdisc, 'host_activation': False,
             'coverage': 'Partial: verified bound sockets only; first packets may escape'}
 
 
@@ -260,9 +303,9 @@ class Controller:
 
     def verify(self):
         link = self.get_link()
-        identity_fields = ('ifindex', 'address', 'parentbus', 'parentdev', 'link_type', 'mtu', 'num_tx_queues')
+        identity_fields = ('ifindex', 'address', 'parentbus', 'parentdev', 'link_type', 'mtu', 'num_tx_queues', 'gso_max_size', 'gso_ipv4_max_size', 'tso_max_size')
         if getattr(self, 'cleaning', False):
-            identity_fields = tuple(k for k in identity_fields if k != 'mtu')
+            identity_fields = tuple(k for k in identity_fields if k not in ('mtu', 'gso_max_size', 'gso_ipv4_max_size', 'tso_max_size'))
         if os.readlink('/proc/self/ns/net') != self.ns or any(link.get(k) != self.link.get(k) for k in identity_fields):
             raise RuntimeError('interface/namespace generation changed')
         if not getattr(self, 'cleaning', False) and getattr(self, 'original', {}).get('qdiscs', [{}])[0].get('kind') == 'fq_codel':
@@ -393,8 +436,15 @@ class Controller:
         if restoration_changed:
             raise RuntimeError('Unsupported: owned objects removed but kernel default differs from original; inspect default_qdisc/MTU, no foreign restoration attempted')
 
+    def gso(self):
+        # Veth keeps the M1 sizing its evidence was recorded with; NIC topologies
+        # size for the link's maximum superpacket.
+        if (getattr(self, 'compatibility', None) or {}).get('topology', 'veth-noqueue') == 'veth-noqueue':
+            return 0
+        return max([v for v in (self.link.get('gso_max_size'), self.link.get('gso_ipv4_max_size'), self.link.get('tso_max_size')) if isinstance(v, int)] or [0])
+
     def class_params(self, bits):
-        burst = max(2 * self.mtu, bits // 8 // 200)
+        burst = burst_bytes(bits, self.mtu, self.gso())
         return ['htb', 'rate', str(bits) + 'bit', 'ceil', str(bits) + 'bit',
                 'burst', str(burst), 'cburst', str(burst), 'quantum', str(self.mtu)]
 
@@ -408,13 +458,15 @@ class Controller:
                 raise ValueError('class_generation_exhausted')
             minor = self.next_minor; self.next_minor += 1
             self.mutate('class', 'add', 'dev', self.dev, 'parent', self.handle(), 'classid', self.handle(minor), *self.class_params(bits))
-            self.mutate('qdisc', 'add', 'dev', self.dev, 'parent', self.handle(minor), 'handle', f'{minor:x}:', 'fq_codel', 'limit', '128', 'memory_limit', str(queue_bytes(bits, self.mtu)), 'flows', '128', 'target', '5ms', 'interval', '100ms')
-            self.apps[app] = {'minor': minor, 'rate': bits, 'idle_since': time.monotonic()}
+            self.mutate('qdisc', 'add', 'dev', self.dev, 'parent', self.handle(minor), 'handle', f'{minor:x}:', 'fq_codel', 'limit', '128', 'memory_limit', str(queue_bytes(bits, self.mtu, self.gso())), 'flows', '128', 'target', '5ms', 'interval', '100ms')
+            self.apps[app] = {'minor': minor, 'rate': bits, 'idle_since': time.monotonic(),
+                              'burst_bytes': burst_bytes(bits, self.mtu, self.gso()), 'leaf_memory_limit': queue_bytes(bits, self.mtu, self.gso())}
         else:
             a = self.apps[app]
             self.mutate('class', 'change', 'dev', self.dev, 'parent', self.handle(), 'classid', self.handle(a['minor']), *self.class_params(bits))
-            self.mutate('qdisc', 'change', 'dev', self.dev, 'parent', self.handle(a['minor']), 'handle', f'{a["minor"]:x}:', 'fq_codel', 'limit', '128', 'memory_limit', str(queue_bytes(bits, self.mtu)), 'target', '5ms', 'interval', '100ms')
+            self.mutate('qdisc', 'change', 'dev', self.dev, 'parent', self.handle(a['minor']), 'handle', f'{a["minor"]:x}:', 'fq_codel', 'limit', '128', 'memory_limit', str(queue_bytes(bits, self.mtu, self.gso())), 'target', '5ms', 'interval', '100ms')
             a['rate'] = bits
+            a['burst_bytes'] = burst_bytes(bits, self.mtu, self.gso()); a['leaf_memory_limit'] = queue_bytes(bits, self.mtu, self.gso())
         self.applying = False
 
     def bind(self, req):
@@ -473,10 +525,16 @@ class Controller:
         self.verify()
         if self.compatibility['topology'] != 'veth-noqueue':
             current = parse_features(self.call('ethtool', '-k', self.dev))
-            for name in ('tcp-segmentation-offload', 'generic-segmentation-offload',
-                         'tx-udp-segmentation', 'hw-tc-offload'):
-                if current.get(name) != 'off':
-                    raise RuntimeError('Unsupported: offload setting changed: ' + name)
+            if current.get('hw-tc-offload') != 'off':
+                raise RuntimeError('Unsupported: offload setting changed or unreadable: hw-tc-offload')
+            watched = ('tcp-segmentation-offload', 'generic-segmentation-offload', 'tx-udp-segmentation')
+            seen = {k: current.get(k) for k in watched}
+            if seen != {k: (self.compatibility.get('offloads') or {}).get(k) for k in watched}:
+                # Sizing derives from gso_max_size, not these flags: a change is
+                # reported as a limitation, never silently absorbed or reverted.
+                note = 'segmentation offload flags changed: ' + json.dumps(seen, sort_keys=True)
+                if note not in self.partial:
+                    self.partial.append(note)
         ss = json.loads(self.call(self.base / 'probe', 'sockets'))
         live = {(s['cookie'], s['inode'], s['protocol'], s['netns']) for s in ss if s['inode']}
         for c, b in list(self.bindings.items()):
@@ -514,6 +572,11 @@ class Controller:
                 'application_wide_guarantee': False, 'covered_bindings': covered, 'interface': self.dev, 'lease_seconds': 5,
                 'valid_for_ms': max(0, (valid_until - now) // 1000000),
                 'fault': self.fault, 'limitations': self.partial[-8:], 'apps': self.apps,
+                'segmentation': {'superpackets_classified': counters[2], 'superpackets_unbound': counters[3],
+                                 'segments_classified': counters[4]['packets'], 'segments_unbound': counters[4]['bytes'],
+                                 'superpacket_bytes': self.gso() or None,
+                                 'per_app_burst_bytes': {a: v.get('burst_bytes') for a, v in self.apps.items()},
+                                 'per_app_leaf_memory_limit': {a: v.get('leaf_memory_limit') for a, v in self.apps.items()}},
                 'bindings': list(self.bindings.values()), 'next_minor': self.next_minor, 'counters': counters}
 
     def close(self):

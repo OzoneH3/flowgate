@@ -20,6 +20,26 @@ def conn(s):
  finally:s.close()
 def tcp(s):
  while True:threading.Thread(target=conn,args=(s.accept()[0],),daemon=True).start()
+# Bulk flows (ports 43003 TCP / 43004 UDP): bytes per source flow, no record parsing.
+bulk={}
+def account(key,n):
+ now=time.monotonic_ns()
+ with lock:
+  row=bulk.setdefault(key,{'bytes':0,'messages':0,'first':now,'last':now})
+  row['bytes']+=n;row['messages']+=1;row['last']=now
+def bulkudp(s):
+ while True:
+  b,a=s.recvfrom(65535);account('udp:%s:%d'%(a[0],a[1]),len(b))
+def bulkconn(s):
+ a=s.getpeername();key='tcp:%s:%d'%(a[0],a[1])
+ try:
+  while True:
+   x=s.recv(262144)
+   if not x:return
+   account(key,len(x))
+ finally:s.close()
+def bulktcp(s):
+ while True:threading.Thread(target=bulkconn,args=(s.accept()[0],),daemon=True).start()
 for line in sys.stdin:
  op=json.loads(line)['op']
  if op=='setup':
@@ -30,6 +50,11 @@ for line in sys.stdin:
      s=socket.socket(fam,typ);s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);s.bind((addr,port));socks.append(s)
      if typ==socket.SOCK_STREAM:s.listen(16)
      threading.Thread(target=fn,args=(s,),daemon=True).start()
+   for port,typ,fn in [(43003,socket.SOCK_STREAM,bulktcp),(43004,socket.SOCK_DGRAM,bulkudp)]:
+    s=socket.socket(fam,typ);s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);s.setsockopt(socket.SOL_SOCKET,socket.SO_RCVBUF,4*1024*1024);s.bind((addr,port));socks.append(s)
+    if typ==socket.SOCK_STREAM:s.listen(16)
+    threading.Thread(target=fn,args=(s,),daemon=True).start()
  with lock:
   out={k:{'received':len(v['seen']),'bytes':v['bytes'],'first_ns':v['first'],'last_ns':v['last'],'p50_ms':sorted(v['latency'])[len(v['latency'])//2],'p95_ms':sorted(v['latency'])[min(len(v['latency'])-1,int(len(v['latency'])*.95))]} for k,v in stats.items()}
+  if op=='bulk':out={k:dict(v) for k,v in bulk.items()}
  print(json.dumps(out),flush=True)

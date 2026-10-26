@@ -1,0 +1,222 @@
+Segmentation-enabled upload shaping (isolated proof, no host activation)
+
+Scope
+Continues docs/UPLOAD-SHAPING-PREFLIGHT.txt. The isolated controller now accepts a
+single-queue default-fq_codel NIC whose TSO/GSO features are ON, sizes its
+classes for superpackets, and reports what it observed. Offloads are never
+changed by the controller. The host NIC enp7s0 (r8169, TSO/GSO on) is the
+target configuration; it is still refused by the mandatory child-namespace
+guard and no host flag exists. Download, VPN, priorities and UI are deferred.
+Installed release 25dbb1a, rules, protection and updater safeguards unchanged.
+
+Why the previous virtio fixture could not carry this proof
+QEMU clears every virtio-net offload feature when its network backend lacks a
+virtio-net header; the unprivileged backends (hubport, socket, stream, user)
+all lack it. The guest NIC therefore reports tx-scatter-gather and all
+segmentation features "off [fixed]", and the kernel refuses GSO without SG.
+"TSO/GSO enabled" was unreachable on that device, not merely unproven.
+Backends with offload support (tap, vhost-user, passt) need host privileges or
+route guest traffic into the host network; both are excluded.
+
+Segmentation fixture device: netdevsim
+netdevsim is the kernel's software NIC simulator (CONFIG_NETDEVSIM=m, loaded
+only by root inside the disposable guest). Two single-port devices are
+peer-linked through /sys/bus/netdevsim/link_device. Each port is a plain
+Ethernet netdev with parentbus "netdevsim", one TX queue, tx_queue_len 1000
+(kernel-default fq_codel root, handle 0:), scatter-gather, TSO and GSO on,
+tx-udp-segmentation off (UDP_SEGMENT superpackets are segmented in software
+after the qdisc), hw-tc-offload present but off, gso_max_size 65536.
+The classifier, HTB and fq_codel path is identical to a physical NIC. What
+differs is after dequeue: netdevsim forwards GSO skbs to its peer unsegmented,
+a real NIC segments in hardware. netdevsim is therefore software-path evidence
+only; it proves nothing about virtio or r8169 hardware offload behaviour.
+compatibility() accepts parentbus netdevsim as a NIC bus. It never exists on a
+host unless an administrator loads the module; interface support is not
+otherwise broadened and the namespace guard is unchanged.
+
+Supported offload matrix (controller policy, single-queue default fq_codel NIC)
+ feature                        policy
+ tcp-segmentation-offload       on or off: recorded; sizing independent of flag
+ generic-segmentation-offload   on or off: recorded; sizing independent of flag
+ tx-udp-segmentation            on or off: recorded. NOTE: under FlowGate's UDP
+                                path UDP superpackets never reach the shaper
+                                (see "UDP_SEGMENT finding")
+ scatter-gather                 on or off: recorded
+ hw-tc-offload                  must report exactly "off"; missing/unreadable
+                                refuses; turning it on during operation faults
+ gso_max_size / gso_ipv4_max_size / tso_max_size
+                                largest value = superpacket bound; must be within
+                                1500..262144; part of interface identity (change
+                                faults; cleanup still allowed, like MTU)
+ profile                        "segmentation-capable" if any segmentation flag is
+                                on, else "segmentation-off"; purely descriptive
+Flag changes during operation are reported as a limitation (status.limitations),
+never silently absorbed and never reverted. Nothing here authorises touching
+host offloads.
+
+Sizing with superpackets (NIC topologies; the veth M1 sizing is unchanged)
+ superpacket S  = max(gso_max_size, gso_ipv4_max_size, tso_max_size)   [65536]
+ HTB burst      = max(2·MTU, S, rate·5 ms)        token-bucket size
+ leaf memory    = min(max(256 KiB, 16·S), max(2·MTU, 3·S, rate·25 ms))
+ leaf packets   = 128, FQ-CoDel target 5 ms, interval 100 ms
+Charged bytes versus skb length: HTB and fq_codel charge qdisc_pkt_len, which
+for a GSO skb is skb->len plus the repeated per-segment headers
+((gso_segs - 1) x header length). The largest charged packet measured on
+netdevsim was 68130 B for a 65536 B superpacket (tc "maxpacket"). S is
+therefore the advertised payload bound, not a universal charged-byte bound:
+the token bucket (burst >= S) can be exceeded by one charged superpacket, i.e.
+the measured deficit is at most 68130 - 65536 = 2594 B beyond the bucket, repaid
+before the next dequeue. The classifier counters use skb->len, so classifier
+bytes and class dequeued bytes differ by exactly these header charges (plus
+drops between hook and dequeue); the three figures are reported separately.
+Burst allowance: HTB is a token bucket refilled at the configured rate. One
+superpacket is always admitted once the bucket is non-negative and its deficit
+is repaid before the next dequeue, so the transient excess over the long-run
+rate is bounded by one bucket plus at most one charged superpacket; it is not
+a renewed free allowance per interval. The actual per-application burst and
+leaf memory limit are reported in status.segmentation.per_app_burst_bytes /
+per_app_leaf_memory_limit (for example 65536 B at 8 Mbit/s, 625000 B at 1 Gbit/s).
+fq_codel memory_limit counts skb truesize (payload plus page/header overhead),
+so 3·S is a configured threshold that leaves room for two queued superpackets;
+it is not a payload guarantee. This iproute2's JSON exposes no memory_used, so
+the evidence records the configured threshold plus sampled backlog/qlen (1 s
+sampling); no peak-memory claim is made.
+
+UDP_SEGMENT: rate gate FAILED / inconclusive (measured, VM3/VM4)
+Tested path: original-direction UDP of an allowed application in protection
+mode "both", i.e. the intercepted NFQUEUE path (queue opened with the conntrack
+flag only, no GSO passthrough, 128-entry queue). On that path the kernel
+segments GSO skbs before handing them to the queue, so the application's
+UDP_SEGMENT superpacket arrived at the egress hook as ordinary segments: 2197
+datagrams of 64000 B (140.6 MB) offered with UDP_SEGMENT 1400 in 6 s produced 0
+superpackets and 715 ~1400 B segments (1.03 MB) at the hook, 996 KB at the
+receiver. That is queue saturation (the 8 Mbit/s shaper was underfed at about
+1.4 Mbit/s), so UDP cap accuracy at the target rate was NOT measured; this gate
+is recorded as failed/inconclusive, not as a pass. The observation is scoped to
+this intercepted path: reply-direction, bootstrap or otherwise non-intercepted
+UDP can behave differently and no universal "UDP is never GSO at the shaper"
+claim is made. Established TCP bypasses the queue, which is why TCP superpackets
+do reach the hook; the segmentation evidence for shaping is therefore TCP-only.
+Candidate smallest change for a later increment: GSO passthrough on the queue
+(one verdict per superpacket). It changes firewall packet parsing and length
+accounting, queue bounds (bytes and segments), verdict semantics and fairness,
+and is a separate reviewed firewall increment, not made here.
+
+Supported-rate profile with segmentation
+Latency for the capped application itself is bounded by CoDel plus the
+serialisation time of one superpacket at its rate: 64 KiB takes 524 ms at
+1 Mbit/s, 65 ms at 8 Mbit/s, 16 ms at 32 Mbit/s. TCP keeps its own superpackets
+small at low rates (autosizing to about 1 ms of pacing rate, minimum two
+segments); explicit UDP_SEGMENT applications choose their own size. The
+controller reports recommended_min_rate_bps = 10 superpackets per second
+(5.24 Mbit/s for 64 KiB). Caps below that remain enforced for throughput; the
+capped application's own latency degrades as above. Other applications are
+unaffected (independent classes). Rates measured natively: 2, 8 and 32 Mbit/s
+TCP and 8 Mbit/s UDP_SEGMENT; higher rates up to the 1 Gbit/s configuration
+bound are not validated in the guest.
+
+Measurement methodology (experimental/upload-shaper/segmentation/run.py)
+Three figures are always kept separate: classifier bytes (clsact egress hook,
+enqueue attempts, including later drops and retransmits), HTB class dequeued
+bytes (tc -s class; what the scheduler released) and receiver payload (peer
+bulk accounting by source flow). Each rate phase samples all three once per
+second during 6 s of saturating bulk. class_accuracy = class bytes / (rate ×
+wall interval including ramp and drain); steady_accuracy = median per-second
+class rate / rate over the interior seconds. Segmented skbs reaching the
+shaping path are proven by classifier counters index 2/3 (GSO skbs with
+gso_segs > 1, classified / not classified), index 4 (segment sums; the raw
+struct's packets/bytes fields hold classified/unbound segment counts) and the
+leaf's maxpacket exceeding two MTUs. These counters change no class selection
+and are never permission evidence. The guest is a single TCG vCPU: uncapped
+throughput is CPU-bound and reported only as a ratio against a baseline taken
+through the untouched default root before takeover.
+
+Measured results (VM7, final source; .workspace/shaping-segmentation/vm7-artifacts)
+Guest: netdevsim pair, SG/TSO/GSO on, tx-udp-segmentation off [fixed], hw-tc-offload
+off, gso_max_size 65536, kernel default fq_codel 0: root; single TCG vCPU, 2 GiB.
+Verdict of the run: SEGMENTATION_PARTIAL_GATE_FAILED (one required gate failed).
+
+ phase (6 s TCP bulk, 64 KiB writes)   tcp 2 Mbit/s   tcp 8 Mbit/s   tcp 32 Mbit/s
+ class_accuracy (whole interval)        1.005          1.005          0.999
+ steady_accuracy (median interior s)    0.998          1.004          1.002
+ superpackets at hook / segments        670 / 1538     1501 / 4302    2413 / 19083
+ leaf maxpacket (charged bytes)         24224          24224          24224
+ leaf peak backlog / memory_limit       9084 / 196608  12112 / 196608 34822 / 196608
+ CoDel drops / drop_overlimit           36 / 0         55 / 0         44 / 0
+(VM2-VM6 at the same rates: accuracy 1.000-1.017, maxpacket 68130, peak backlog
+up to 43906 B; TCP autosizing decides the superpacket size per run.) In every
+run classifier bytes, class dequeued bytes and receiver payload differed as
+expected: receiver = payload only; classifier > dequeued when CoDel dropped
+superpackets before dequeue (2 Mbit/s); dequeued >= classifier otherwise because
+the scheduler charges repeated segment headers.
+
+ low-rate app (own 1 Mbit/s cap) while A saturates 8 Mbit/s: 100/100 records,
+   p50 0.33 ms, p95 1.01 ms (VM4-VM7: p95 1.01-1.14 ms). PASS.
+ live change 8 -> 32 Mbit/s -> removal during one transfer, receiver Mbit/s per
+   second: 7.6, 7.6, 16.3 (transition), 30.5, 30.6, 122.4 (uncapped), then the
+   transfer ended. PASS.
+ Deny application with a cap: nothing delivered. PASS. Clean disable: exact
+   original root restored, no helper. PASS. Recovery branch 1 (crash after
+   `tc class add`, journal pending step class/add): restart -> Unsupported ->
+   explicit disable -> original restored, journal gone. PASS (first native
+   evidence). Recovery branch 2 (previous-boot journal whose recorded original
+   has quantum 1414 while the live default has 1514): startup Unsupported ->
+   explicit disable -> journal forgotten without TC action, topology unchanged.
+   PASS (first native evidence). Final cleanup with firewall active. PASS.
+ UDP_SEGMENT (8 Mbit/s cap, 64000 B datagrams, 1400 B segments): 107.6 MB
+   offered, 0 superpackets and 564 segments at the hook, 786 KB received.
+   Rate gate FAILED / inconclusive (queue saturation; see finding above).
+ Default (unbound) traffic gate: FAILED on this guest.
+   pre-daemon baseline 755 Mbit/s; matched control (daemon running, shaping
+   disabled, same workload) 613 Mbit/s before and 632 Mbit/s after the shaping
+   session; shaping enabled 338 Mbit/s = 0.55 of the matched control (0.53 vs
+   the after-control; 0.45 vs the pre-daemon baseline). CPU ticks over the
+   4.5 s window (CLK_TCK 100, one vCPU): baseline sender 240 + receiver 104,
+   idle 50; control sender 204 + receiver 90 + daemon 37, idle 51; enabled
+   sender 126 + receiver 65 + daemon 55 + controller 26, idle 26. Shaping
+   added about 44 ticks (10%) of daemon/controller housekeeping and the bulk
+   sender+receiver lost 103 ticks; the remainder is kernel/emulation time that
+   this accounting cannot attribute. The hypothesis is that per-second census,
+   `tc` topology verification and helper execs on one emulated CPU starve the
+   CPU-bound uncapped flow; it is a hypothesis pending a matched control on a
+   machine where the link, not the CPU, is the bottleneck. No "no material
+   regression" claim is made; the housekeeping cost (daemon worker census and
+   controller verify of five `tc` invocations per status) is a follow-up item.
+ Default class carried 2850+ unbound superpackets intact (maxpacket 68130 in the
+   default leaf, zero drops, kernel-default fq_codel options).
+
+Remaining hardware-specific limitations
+- netdevsim exercises software GSO handling at the qdisc; hardware TSO on r8169
+  (rtl8126a), checksum offload interaction, driver TX ring behaviour, link
+  resets and real wire timing are not exercised.
+- virtio on the internal hub cannot enable SG/GSO at all; virtio-with-offloads
+  behaviour (vhost/tap) remains untested without host privileges.
+- fq_codel truesize accounting versus payload differs per driver allocation
+  pattern; the 3·S threshold is validated only on netdevsim allocations.
+- UDP_SEGMENT (64000-byte datagrams, 1400-byte segments, IPv4) on the intercepted
+  path was pre-segmented and queue-saturated: UDP superpacket shaping and UDP cap
+  accuracy are NOT demonstrated (failed/inconclusive gate). IPv6 UDP GSO,
+  sendmmsg batching and non-intercepted UDP paths are not measured.
+- Rates above 32 Mbit/s, multi-queue NICs, VLAN/bond/bridge, Wi-Fi and BIG TCP
+  (gso_ipv4_max_size/gso_max_size above 64 KiB) are outside the measured scope;
+  maxima above 262144 are refused.
+- 1 s sampling cannot observe sub-second queue peaks.
+
+Opt-in host validation plan (NOT executed; requires explicit user approval)
+1. Preflight only (read-only): run `controller.py --preflight` against enp7s0
+   from the host namespace to record the matrix, maxima and root options.
+   Expected: profile segmentation-capable, hw-tc-offload off, supported=true
+   except for the namespace guard.
+2. Add an explicit host-interface opt-in flag, separate from the lab namespace
+   guard, reviewed and defaulted off; doctor prints the preflight result and
+   the exact restore command (`tc qdisc del dev enp7s0 root`).
+3. User-approved window with no other traffic: takeover, one capped TCP flow at
+   8 and 32 Mbit/s to a LAN receiver for 30 s each, one UDP_SEGMENT flow,
+   baseline/during/after throughput of an uncapped flow, then disable and
+   verify the exact default root is restored. Record the three byte figures,
+   peak leaf memory, receiver latency and `ethtool -S` TX counters.
+4. Lifecycle under NetworkManager: link down/up, MTU change, offload toggle by
+   the administrator (expect reported limitation, no revert), reboot with an
+   active journal (expect Unsupported then journal-only forget).
+5. Only after that evidence: matched release candidate, review, activation
+   approval. Never change offloads silently; never replace a non-default root.

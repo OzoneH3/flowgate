@@ -115,7 +115,9 @@ Returns the verified app key and cookie. IPv6 endpoints use brackets. Add
 implicitly move an assignment. Multiple binds for an app share/update its one cap.
 {"op":"cap","app":"returned UID:key","rate":8000000}
 {"op":"remove","app":"returned UID:key"}
-{"op":"status"}
+{"op":"status"}   (includes compatibility, counters and segmentation telemetry:
+                   superpackets classified/unbound, segment sums, per-app burst
+                   and leaf memory limit; telemetry only, never authority)
 {"op":"stop"}
 All results are JSON lines; failures explicitly report Partial/Unsupported.
 

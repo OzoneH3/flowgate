@@ -16,6 +16,7 @@ static pid_t child = 0;
 static int fds[8], nf = 0, fam = 4, stream = 0, connected = 1;
 static struct sockaddr_storage dst;
 static socklen_t dl;
+static int dport = 43001;
 static uint64_t ns(void) {
   struct timespec t;
   clock_gettime(CLOCK_MONOTONIC, &t);
@@ -26,13 +27,13 @@ static void dest(void) {
   if (fam == 4) {
     struct sockaddr_in *a = (void *)&dst;
     a->sin_family = AF_INET;
-    a->sin_port = htons(43001);
+    a->sin_port = htons(dport);
     inet_pton(AF_INET, "10.79.0.2", &a->sin_addr);
     dl = sizeof(*a);
   } else {
     struct sockaddr_in6 *a = (void *)&dst;
     a->sin6_family = AF_INET6;
-    a->sin6_port = htons(43001);
+    a->sin6_port = htons(dport);
     inet_pton(AF_INET6, "fd79::2", &a->sin6_addr);
     dl = sizeof(*a);
   }
@@ -124,6 +125,76 @@ static void sends(const char *tag, int count, int delay) {
   printf("{\"sent\":%d,\"errors\":%d,\"elapsed_ns\":%llu}\n", ok, errors,
          (unsigned long long)(ns() - begin));
 }
+#ifndef SOL_UDP
+#define SOL_UDP 17
+#endif
+#ifndef UDP_SEGMENT
+#define UDP_SEGMENT 103
+#endif
+// Bulk for a bounded time with large messages. TCP: big writes let the stack
+// build GSO/TSO superpackets (sized by autosizing). UDP with gso>0: explicit
+// UDP_SEGMENT superpackets that the kernel segments after the qdisc. Payload
+// starts with the tag; the receiver accounts by flow (source port).
+static void bulk(const char *tag, int millis, int size, int gso) {
+  static unsigned char b[65536];
+  // UDP datagrams (including UDP_SEGMENT superpackets) are bounded by the IP
+  // maximum payload; TCP writes may use the full buffer.
+  if (size < 32 || size > (int)sizeof(b) || (!stream && size > 65507) || nf < 1) {
+    puts("{\"error\":22}");
+    return;
+  }
+  memset(b, 'b', size);
+  snprintf((char *)b, 16, "%.15s", tag);
+  int buf = 4 * 1024 * 1024;
+  setsockopt(fds[0], SOL_SOCKET, SO_SNDBUF, &buf, sizeof(buf));
+  uint64_t begin = ns(), deadline = begin + (uint64_t)millis * 1000000ULL;
+  uint64_t bytes = 0;
+  int messages = 0, errors = 0, eagain = 0;
+  while (ns() < deadline) {
+    ssize_t n;
+    if (!stream && gso > 0) {
+      struct iovec io = {b, size};
+      union {
+        struct cmsghdr align;
+        char bytes[CMSG_SPACE(sizeof(uint16_t))];
+      } c = {0};
+      struct msghdr m = {.msg_name = connected ? NULL : &dst,
+                         .msg_namelen = connected ? 0 : dl,
+                         .msg_iov = &io,
+                         .msg_iovlen = 1,
+                         .msg_control = &c,
+                         .msg_controllen = sizeof(c)};
+      struct cmsghdr *h = CMSG_FIRSTHDR(&m);
+      h->cmsg_level = SOL_UDP;
+      h->cmsg_type = UDP_SEGMENT;
+      h->cmsg_len = CMSG_LEN(sizeof(uint16_t));
+      uint16_t g = gso;
+      memcpy(CMSG_DATA(h), &g, sizeof(g));
+      n = sendmsg(fds[0], &m, MSG_NOSIGNAL);
+    } else if (connected) {
+      n = send(fds[0], b, size, MSG_NOSIGNAL);
+    } else {
+      n = sendto(fds[0], b, size, MSG_NOSIGNAL, (void *)&dst, dl);
+    }
+    if (n < 0) {
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        eagain++;
+        struct timespec pause = {0, 2000000};
+        nanosleep(&pause, 0);
+        continue;
+      }
+      if (++errors > 64)
+        break;
+      continue;
+    }
+    bytes += n;
+    messages++;
+  }
+  printf("{\"tag\":\"%s\",\"bytes\":%llu,\"messages\":%d,\"errors\":%d,"
+         "\"timeouts\":%d,\"elapsed_ns\":%llu,\"gso\":%d}\n",
+         tag, (unsigned long long)bytes, messages, errors, eagain,
+         (unsigned long long)(ns() - begin), gso);
+}
 static void transfer(const char *path, int receive) {
   int u = socket(AF_UNIX, SOCK_STREAM, 0);
   struct sockaddr_un a = {.sun_family = AF_UNIX};
@@ -202,11 +273,18 @@ int main(int argc, char **argv) {
   }
   info();
   char line[1024], tag[64], path[512];
-  int n, delay, lp;
+  int n, delay, lp, dp, sz, gso;
   while (fgets(line, sizeof(line), stdin)) {
-    if (sscanf(line, "OPEN %d %d %d %d %d", &fam, &stream, &n, &connected,
-               &lp) == 5)
+    if (sscanf(line, "OPEN %d %d %d %d %d %d", &fam, &stream, &n, &connected,
+               &lp, &dp) == 6) {
+      dport = dp;
       opens(n, lp);
+    } else if (sscanf(line, "OPEN %d %d %d %d %d", &fam, &stream, &n,
+                      &connected, &lp) == 5) {
+      dport = 43001;
+      opens(n, lp);
+    } else if (sscanf(line, "BULK %63s %d %d %d", tag, &n, &sz, &gso) == 4)
+      bulk(tag, n, sz, gso);
     else if (sscanf(line, "SEND %63s %d %d", tag, &n, &delay) == 3)
       sends(tag, n, delay);
     else if (sscanf(line, "EXEC %511s", path) == 1) {

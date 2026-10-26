@@ -16,6 +16,23 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(m1.queue_bytes(4000000, 1500), 12500)
         self.assertEqual(m1.queue_bytes(1000000000, 1500), 262144)
 
+    def test_segmentation_sizing_floors_and_bounds(self):
+        gso = 65536
+        # Two superpackets always fit; the bound grows to 16 superpackets.
+        self.assertEqual(m1.queue_bytes(1000000, 1500, gso), 3 * gso)
+        self.assertEqual(m1.queue_bytes(8000000, 1500, gso), 3 * gso)
+        self.assertEqual(m1.queue_bytes(100000000, 1500, gso), 312500)
+        self.assertEqual(m1.queue_bytes(1000000000, 1500, gso), 16 * gso)
+        # Burst admits one whole superpacket; without segmentation the old rule holds.
+        self.assertEqual(m1.burst_bytes(1000000, 1500, gso), gso)
+        self.assertEqual(m1.burst_bytes(1000000, 1500), 3000)
+        self.assertEqual(m1.burst_bytes(200000000, 1500, gso), 125000)
+        c = self.fake(); c.mtu = 1500; c.link = {'gso_max_size': gso}
+        c.compatibility = {'topology': 'veth-noqueue'}
+        self.assertIn('3000', c.class_params(1000000))
+        c.compatibility = {'topology': 'single-queue-default-fq_codel'}
+        self.assertIn(str(gso), c.class_params(1000000))
+
     def fake(self):
         c = object.__new__(m1.Controller)
         c.verify = lambda: None
@@ -93,14 +110,30 @@ class CompatibilityTests(unittest.TestCase):
             'classes':[], 'egress':[], 'ingress':[], 'root_filters':[]}
     def test_narrow_nic_and_refusals(self):
         import copy
-        link={'mtu':1500,'link_type':'ether','parentbus':'virtio','num_tx_queues':1,'flags':['UP','LOWER_UP']}
-        features={k:'off' for k in ('tcp-segmentation-offload','generic-segmentation-offload','tx-udp-segmentation','hw-tc-offload')}
+        link={'mtu':1500,'link_type':'ether','parentbus':'virtio','num_tx_queues':1,'flags':['UP','LOWER_UP'],'gso_max_size':65536,'gso_max_segs':65535}
+        features={k:'off' for k in ('tcp-segmentation-offload','generic-segmentation-offload','tx-udp-segmentation','hw-tc-offload','scatter-gather')}
         check=lambda l,q,f: m1.compatibility(l,q,f,'fq_codel')['supported']
         self.assertTrue(check(link,self.topology(),features))
         self.assertFalse(check(dict(link,num_tx_queues=2),self.topology(),features))
         self.assertFalse(check(link,self.topology(),None))
-        for k in features:
-            self.assertFalse(check(link,self.topology(),dict(features,**{k:'on'})))
+        # Segmentation offloads are a recorded matrix, not a refusal; hardware TC offload is refused.
+        for k in ('tcp-segmentation-offload','generic-segmentation-offload','tx-udp-segmentation','scatter-gather'):
+            r=m1.compatibility(link,self.topology(),dict(features,**{k:'on'}),'fq_codel')
+            self.assertTrue(r['supported'],r); self.assertEqual(r['segmentation']['profile'],'segmentation-capable')
+            self.assertEqual(r['segmentation']['superpacket_bytes'],65536)
+        # A missing hw-tc-offload flag is a refusal, never an implicit off.
+        missing=dict(features);del missing['hw-tc-offload']
+        self.assertFalse(check(link,self.topology(),missing))
+        # The superpacket bound is the largest advertised maximum.
+        big=m1.compatibility(dict(link,gso_ipv4_max_size=131072),self.topology(),features,'fq_codel')
+        self.assertEqual(big['segmentation']['superpacket_bytes'],131072)
+        self.assertEqual(m1.compatibility(link,self.topology(),features,'fq_codel')['segmentation']['profile'],'segmentation-off')
+        self.assertFalse(check(link,self.topology(),dict(features,**{'hw-tc-offload':'on'})))
+        # netdevsim (kernel NIC simulator) is accepted as a NIC bus; unknown buses and missing gso_max_size are not.
+        self.assertTrue(check(dict(link,parentbus='netdevsim'),self.topology(),features))
+        self.assertFalse(check(dict(link,parentbus='usb'),self.topology(),features))
+        self.assertFalse(check(dict(link,gso_max_size=None),self.topology(),features))
+        self.assertFalse(check(dict(link,gso_max_size=524288),self.topology(),features))
         for field in ['egress','ingress','root_filters','classes']:
             q=self.topology();q[field]=[{'foreign':True}];self.assertFalse(check(link,q,features))
         for mutation in [{'handle':'8000:'},{'kind':'mq'},{'options':{}}]:

@@ -57,6 +57,27 @@ SEC("classifier") int classify(struct __sk_buff *skb) {
     n->packets++;
     n->bytes += skb->len;
   }
+  // Segmentation visibility: a GSO/TSO superpacket reaches this hook as ONE
+  // skb carrying gso_segs segments. Index 2/3 count such skbs (classified /
+  // not classified); index 4 accumulates their segment counts (packets =
+  // classified, bytes = not classified). These prove segmented skbs reached
+  // the shaping path; enabled offload flags alone never do.
+  if (skb->gso_segs > 1) {
+    __u32 g = idx == 1 ? 2 : 3;
+    struct counter *s = bpf_map_lookup_elem(&counters, &g);
+    if (s) {
+      s->packets++;
+      s->bytes += skb->len;
+    }
+    g = 4;
+    s = bpf_map_lookup_elem(&counters, &g);
+    if (s) {
+      if (idx == 1)
+        s->packets += skb->gso_segs;
+      else
+        s->bytes += skb->gso_segs;
+    }
+  }
   return TC_ACT_UNSPEC;
 }
 char LICENSE[] SEC("license") = "GPL";

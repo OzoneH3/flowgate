@@ -17,18 +17,24 @@ reasons, observed offloads, default_qdisc_observed, coverage and host_activation
 Failure/unreadable required capability refuses support. The enabled daemon's
 kernel status also carries compatibility; automatic coverage remains Partial.
 
-Segmentation contract
-TSO, GSO, UDP segmentation and hardware TC offload must all report off. The
-controller NEVER changes these settings. Checksums and scatter/gather remain
-permitted; they do not themselves authorize oversized segmentation aggregates.
-The enabled controller rechecks these four flags before each periodic renewal;
-a change faults the controller, withdraws renewal and attempts owned cleanup.
-Existing leases expire within5s if cleanup fails. This is periodic detection,
-not atomic protection against privileged concurrent device reconfiguration.
-Cap accounting is the existing HTB/skb byte model, not exact wire occupancy:
-no preamble/inter-frame-gap/FCS guarantee. No offloads-on throughput claim.
-Plain TCP/UDP is the tested workload; explicit UDP_SEGMENT/GSO-producing APIs
-remain unsupported/unproved. Offload-off flags are not a universal packet-shape guarantee.
+Segmentation contract (superseded in part by docs/UPLOAD-SHAPING-SEGMENTATION.txt)
+Hardware TC offload must report exactly off; a missing or unreadable flag
+refuses. TSO, GSO, UDP segmentation and scatter-gather may be on or off: the
+controller records the matrix, sizes classes from the link's advertised
+superpacket maxima (gso_max_size, gso_ipv4_max_size, tso_max_size, largest
+wins, 1500..262144) and NEVER changes any offload setting. The enabled
+controller rechecks the flags before each periodic renewal: hw-tc-offload on
+faults the controller, withdraws renewal and attempts owned cleanup; any other
+flag change is reported as a limitation, never silently absorbed or reverted.
+A change of the superpacket maxima is an identity change (fault; cleanup still
+permitted). This is periodic detection, not atomic protection against
+privileged concurrent device reconfiguration. Cap accounting is the HTB/skb
+byte model, not exact wire occupancy: no preamble/inter-frame-gap/FCS
+guarantee. Classifier counters index2/3/4 prove GSO superpackets reached the
+hook; they never influence class selection or permission. Plain TCP/UDP and
+explicit IPv4 UDP_SEGMENT (64000-byte datagrams, 1400-byte segments) are the
+measured workloads on netdevsim; see the segmentation document for the
+measured rates, the supported-rate profile and hardware limitations.
 Unknown/orphaned sockets remain unclassified. No per-packet process scan added.
 
 Ownership and restoration
@@ -76,7 +82,8 @@ no automatic link-up, MTU reset or device replacement is performed.
 
 Host observation and remaining gate
 The inspected host enp7s0/r8169 has one TX queue, default fq_codel and no visible
-TC classes/filters. TSO/GSO are ON: this candidate explicitly refuses it. The
+TC classes/filters. TSO/GSO are ON: the controller policy now accepts that
+matrix, but the host remains refused by the mandatory namespace guard. The
 ethtool channel query is unsupported; ip link reports one TX/RX queue. No host
 configuration, traffic, service, installed release or updater approval changed.
 

@@ -35,6 +35,7 @@ type Binding struct {
 }
 type KernelStatus struct {
 	Compatibility  json.RawMessage            `json:"compatibility,omitempty"`
+	Segmentation   json.RawMessage            `json:"segmentation,omitempty"`
 	ValidForMillis int64                      `json:"valid_for_ms"`
 	Fault          string                     `json:"fault,omitempty"`
 	Limitations    []string                   `json:"limitations,omitempty"`
