@@ -1,0 +1,135 @@
+Experimental binding-capacity ladder — baseline 21684d9
+======================================================
+This increment changes only the isolated measurement fixture and documentation.
+No production optimization, permission/lease changes, or host activation.
+Installed 25dbb1a and updater authorization remain untouched.
+
+Question and method
+-------------------
+The earlier 128-binding run reported a 305 ms low-rate chunk p95, 43–45%
+absolute process-tree CPU and 583 ms conservative renewal headroom. Its aggregate
+samples did not establish a cause. Do not reinterpret it from this later run.
+
+One capped, one-vCPU TCG guest, netdevsim/software offloads, current production
+binaries. At each 32/64/128 binding level: disabled/enabled/enabled/disabled;
+16 native application processes, 2/4/8 TCP sockets each, exactly 16 bulk-active
+sockets; one additional uncapped bulk socket, low-rate TCP, denied UDP, and
+1,300 unrelated idle UDP sockets. Same socket populations and sender commands.
+Application A has an aggregate 8 Mbit/s cap only when enabled. Hence actual
+receiver work is necessarily different: uncapped A delivered 523–724 Mbit/s,
+capped A about 7.6 Mbit/s. These are not equal delivered-work CPU comparisons.
+
+Each phase: 45-second bulk, 3-second warmup, four 100-record/50-ms low-rate
+chunks, identical API/TC/proc sampling except enabled-only kernel health reads.
+All bulk senders were still running at the last sample. Actual measured windows
+were 30.1–38.9 s disabled and 24.9–25.8 s enabled, not identical durations:
+scheduling and sampling calls extended them. Samples took 0.57–6.11 s; enabled
+health calls added 45.8–133.2 ms. Rates use actual intervals; non-atomic snapshots
+and this observation cost limit precision and causal CPU comparisons.
+
+Acceptance had controller tracing and TCP_INFO/recvmsg diagnostics OFF.
+Per-record send/receive timestamps were retained in both arms. Receiver low-rate
+statistics reset each phase; bulk queries do not sort historical latency data.
+
+Predeclared finite-run criteria
+------------------------------
+400/400 low-rate records per phase; enabled worst chunk p95 <= disabled worst
+chunk p95 +1 ms at that level; positive sampled leases AND advancing maintenance
+cycles AND max successful completion-gap + max renewal-span <5 seconds;
+charged cap within 10% of 8 Mbit/s and payload >=6.5 Mbit/s; no Deny receiver
+traffic; exact owned cleanup and no surviving controller/helpers when disabled.
+The timing maxima are controller-lifetime maxima, including setup, not a future
+worst-case bound. No general 85% throughput/7-point CPU goal is tested here.
+
+Acceptance results (two enabled phases per level)
+-------------------------------------------------
+Bindings | enabled worst chunk p95 | maximum record | daemon+helpers CPU
+32       | 2.99 / 6.40 ms          | 114.05 ms      | 36.93 / 37.99%
+64       | 3.34 / 2.97 ms          |   8.80 ms      | 36.20 / 38.86%
+128      | 3.46 / 3.01 ms          |   8.43 ms      | 37.01 / 34.29%
+CPU is absolute ticks/s at HZ=100, one vCPU, including live/reaped descendants.
+Disabled means were 15.55 /13.72 /12.48% for 32/64/128 respectively; enabled
+means 37.46 /37.53 /35.65%. No monotonic CPU deterioration was demonstrated.
+
+Bindings | minimum sampled margin | conservative headroom | max full pass
+32       | 2,638 ms               | 2,082 ms              | 1,666 ms
+64       | 2,899 ms               | 2,248 ms              | 1,388 ms
+128      | 2,385 ms               | 1,357 ms              | 2,044 ms
+128 had max completion gap 3,128 ms and max renewal span 515 ms (same phase).
+Its sampled existence passes reached 1,115 ms. Headroom deteriorated from64
+to128; no lease expiry or maintenance fault was observed. Finite positive
+margins do not establish a production-safe limit under arbitrary contention.
+
+All 4,800 acceptance low-rate records arrived. All six capped phases delivered
+7.960–8.008 Mbit/s charged HTB bytes and 7.608–7.668 Mbit/s receiver payload.
+Charged bytes include protocol/accounting overhead; payload is not wire rate.
+All fourteen phase cleanups (including diagnostics) restored the original TC
+objects exactly and left no controller/socket/kernel workers. Protection stayed
+active in the guest. Passed priority discovery/identity/overload/lease-expiry
+and worker-recovery evidence is reused unchanged, not rerun.
+
+Deny evidence must be qualified: 224 total requested datagrams across14 phases,
+144 reported successful sends and80 send errors, zero receiver records. The
+first9 phases supplied all144 successful sends. From n128e1 onward each Deny
+command returned errors; errno was not recorded. Therefore the new enabled128
+Deny receiver test is not successfully offered-traffic proof. Earlier successful
+128-load Deny evidence remains applicable to unchanged production code. Do not
+attribute these new send errors to a particular mechanism without evidence.
+
+Causal diagnostic: what was actually observed
+-------------------------------------------
+Disabled controls had worst chunk p95 734–1,314 ms. Thus every level passes the
+relative latency criterion, but that criterion is weak here: the control's
+receiver is severely delayed. It is NOT evidence that shaping improves latency
+or that any level is production safe. The32 enabled run also had a114ms tail.
+
+Separate128 diagnostic disabled/enabled windows used a workspace-only traced
+controller and explicit sender/receiver tracing. On the disabled window:
+- pooled end-to-end p95 618.25 ms; kernel-timestamp-to-record p95 618.17 ms;
+- send-to-last-skb timestamp p95 0.207 ms; send-call p95 0.351 ms;
+- low-rate TCP total retransmissions stayed zero;
+-399/400 records had ancillary timestamps (first blocking recv began before
+ tracing); both diagnostic windows delivered400/400.
+This localizes most observed diagnostic control delay after kernel receipt and
+before application recording, rather than to the shaper (which was disabled),
+TCP retransmission or a long send call. It does not distinguish Python GIL,
+shared receiver locks, OS scheduling or other receiver-side CPU contention.
+SO_TIMESTAMPNS is the last-skb timestamp, not an exact per-record wire arrival;
+recv chunk boundaries and realtime/monotonic calibration are retained.
+
+Enabled diagnostic pooled p95 was3.15ms (worst chunk3.68ms), maximum6.16ms.
+There were eight complete maintenance cycles inside the measured window (two
+boundary cycles excluded): full-pass median1,993ms/max2,229ms; existence-call
+median6.46ms, kernel RPC median3.45ms. Nested stage times are NOT additive;
+Python self CPU excludes helpers. Long maintenance coexisted with low latency,
+so maintenance overlap alone cannot establish the earlier305ms spike's cause.
+Diagnostic conservative headroom was1,032ms. Traced absolute tree CPU35.76%
+falls inside acceptance128's34.29–37.01% range, but this single diagnostic pair
+does not precisely quantify instrumentation overhead or eliminate variability.
+
+Decision and release status
+---------------------------
+32/64/128 pass the stated relative-latency and maintenance criteria in this
+finite workload, with complete low-rate delivery and accurate aggregate caps.
+There is no observed latency deterioration with binding count; the128 renewal
+margin is narrower than64. The historical305ms/583ms result was not reproduced
+and remains a retained warning, not disproved. No production fix is justified
+by the current causal evidence. The next measurement should separate the
+low-rate receiver from bulk receiver CPU/GIL work before stronger latency claims.
+
+Independent design/fixture/result review closed with explicit Deny and control
+limitations. Review does not mean feature completion or host readiness.
+Remaining blockers: uncertain latency tails and capacity under contention;
+substantial absolute CPU; previously failed85% throughput/7pp added CPU goals
+(not retested); UDP GSO; physical-host compatibility/approval. No host deployment,
+restart, traffic generation, TC/offload/rule/protection or updater changes.
+
+Evidence
+--------
+.workspace/shaping-ladder/ladder1-artifacts/{records.json,controller-trace.txt,
+ sender-trace.txt,success.json}; ladder1-summary.json; ladder1-diagnosis.json;
+ladder1-inputs.json; ladder1-staged-hashes.json; DESIGN.txt; retained VM log.
+Baseline production hashes are pinned there; the committed run/peer/sender
+fixtures match staged inputs. VM_RESULT=0 means the fixture completed, not that
+all release gates passed. No suites were rerun; only fixture compilation and
+this bounded guest run were needed. Reused production binaries were unchanged.
