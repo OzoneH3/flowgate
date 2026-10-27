@@ -61,21 +61,24 @@ type Snapshot struct {
 	// Reader-side view of the controller's last successful verification: the
 	// controller-observed age plus the time this snapshot has been held, derived
 	// at read time; "unknown" is a sentinel, never upgraded.
-	VerificationAgeMillis *int64            `json:"verification_age_ms,omitempty"`
-	Verification          string            `json:"verification,omitempty"`
-	Version               uint64            `json:"version"`
-	AppliedVersion        uint64            `json:"applied_version"`
-	Enabled               bool              `json:"enabled"`
-	Interface             string            `json:"interface"`
-	Status                string            `json:"status"`
-	Caps                  []Cap             `json:"configured_caps"`
-	Kernel                *KernelStatus     `json:"kernel,omitempty"`
-	ApplicationWide       bool              `json:"application_wide_guarantee"`
-	Gaps                  map[string]uint64 `json:"known_gaps"`
-	Discovery             DiscoveryStats    `json:"discovery"`
-	LastError             string            `json:"last_error,omitempty"`
-	Updated               time.Time         `json:"updated"`
-	Coverage              string            `json:"coverage"`
+	VerificationAgeMinMillis *int64            `json:"verification_age_min_ms,omitempty"`
+	ObservationHeldMillis    *int64            `json:"observation_held_ms,omitempty"`
+	ObservationRPCMillis     *int64            `json:"observation_rpc_ms,omitempty"`
+	VerificationAgeMillis    *int64            `json:"verification_age_ms,omitempty"`
+	Verification             string            `json:"verification,omitempty"`
+	Version                  uint64            `json:"version"`
+	AppliedVersion           uint64            `json:"applied_version"`
+	Enabled                  bool              `json:"enabled"`
+	Interface                string            `json:"interface"`
+	Status                   string            `json:"status"`
+	Caps                     []Cap             `json:"configured_caps"`
+	Kernel                   *KernelStatus     `json:"kernel,omitempty"`
+	ApplicationWide          bool              `json:"application_wide_guarantee"`
+	Gaps                     map[string]uint64 `json:"known_gaps"`
+	Discovery                DiscoveryStats    `json:"discovery"`
+	LastError                string            `json:"last_error,omitempty"`
+	Updated                  time.Time         `json:"updated"`
+	Coverage                 string            `json:"coverage"`
 }
 
 // DiscoveryStats are monotonic activity counters for the census-driven discovery
@@ -116,7 +119,8 @@ type Manager struct {
 	snap            Snapshot
 	running, closed bool
 	dirty           bool
-	sampleStart     time.Time // monotonic anchor of the published kernel status
+	sampleStart     time.Time // monotonic request anchor of the published kernel status
+	sampleReceived  time.Time // monotonic response receipt; bounds observation timing
 	wake            chan struct{}
 	done            chan struct{}
 	hints           chan hint
@@ -153,11 +157,12 @@ func (m *Manager) Snapshot() Snapshot {
 	return m.snapshotLocked()
 }
 func (m *Manager) snapshotLocked() Snapshot {
+	now := time.Now()
 	// Deep copy keeps API serialization independent from worker publication.
 	b, _ := json.Marshal(m.snap)
 	var s Snapshot
 	_ = json.Unmarshal(b, &s)
-	if s.Kernel != nil && time.Now().After(m.snap.VerifiedUntil) {
+	if s.Kernel != nil && now.After(m.snap.VerifiedUntil) {
 		s.Kernel.Covered = 0
 		if s.Status == "Active" {
 			s.Status = "Partial"
@@ -165,7 +170,10 @@ func (m *Manager) snapshotLocked() Snapshot {
 		s.CoverageExpired = true
 	}
 	if s.Kernel != nil {
-		s.VerificationAgeMillis, s.Verification = verificationView(m.snap.Kernel, m.sampleStart, time.Now())
+		s.VerificationAgeMinMillis, s.VerificationAgeMillis, s.ObservationHeldMillis, s.ObservationRPCMillis = verificationInterval(m.snap.Kernel, m.sampleStart, m.sampleReceived, now)
+		k := *m.snap.Kernel
+		k.VerifiedAgeMillis = s.VerificationAgeMillis
+		_, s.Verification = verificationView(&k, time.Time{}, now)
 		// Stale/unknown verification can only downgrade Active; Applying and
 		// Unsupported are preserved as published.
 		if s.Status == "Active" && s.Verification != "fresh" {
@@ -173,6 +181,28 @@ func (m *Manager) snapshotLocked() Snapshot {
 		}
 	}
 	return s
+}
+
+// verificationInterval brackets the age since verification START. The controller
+// floors its age to milliseconds at an instant between request and receipt.
+// Keep transit uncertainty explicit; neither bound is controller/lease health.
+func verificationInterval(k *KernelStatus, start, received, now time.Time) (lower, upper, held, rpc *int64) {
+	if k == nil || k.VerifiedAgeMillis == nil || *k.VerifiedAgeMillis < 0 || start.IsZero() || received.IsZero() || received.Before(start) || now.Before(received) {
+		return
+	}
+	base := *k.VerifiedAgeMillis
+	// A controller report is bounded by its RPC deadline; reject corrupt ages
+	// instead of wrapping arithmetic into apparently fresh evidence.
+	const maxMillis = int64(1 << 62)
+	if base > maxMillis {
+		return
+	}
+	h := now.Sub(received).Milliseconds()
+	r := (received.Sub(start) + time.Millisecond - 1) / time.Millisecond
+	l := base + h
+	u := base + 1 + int64((now.Sub(start)+time.Millisecond-1)/time.Millisecond)
+	rr := int64(r)
+	return &l, &u, &h, &rr
 }
 
 // verificationView ages the controller-observed verification by the time the
@@ -484,6 +514,7 @@ func (m *Manager) run() {
 		// lease or missing map entry is never presented as Active by userspace alone.
 		sampleStart := time.Now()
 		raw, err := call(t, map[string]any{"op": "status"})
+		sampleReceived := time.Now()
 		if err != nil {
 			m.fail(err)
 			return
@@ -515,6 +546,7 @@ func (m *Manager) run() {
 		m.mu.Lock()
 		m.snap.Kernel = &ks
 		m.sampleStart = sampleStart
+		m.sampleReceived = sampleReceived
 		m.snap.VerifiedUntil = sampleStart.Add(time.Duration(ks.ValidForMillis) * time.Millisecond)
 		m.snap.Status = "Partial"
 		m.snap.Updated = time.Now()

@@ -249,12 +249,18 @@ class StatusObservationTests(unittest.TestCase):
         self.assertEqual((s['verified_age_ms'], s['verification'], s['status']), (None, 'unknown', 'Partial'))
     def test_boundaries_fresh_stale_unknown_withdrawn(self):
         c = self.fake(); c.verify = lambda: None; now = time.monotonic()
-        for age, label, state in ((0.5, 'fresh', 'Active'), (1.5, 'stale', 'Partial'), (2.5, 'unknown', 'Partial'), (5.5, 'unknown', 'Unsupported')):
+        for age, label, state in ((0.5, 'fresh', 'Active'), (1.5, 'stale', 'Partial'), (2.5, 'unknown', 'Partial'), (5.5, 'unknown', 'Partial')):
             c.verified_at = now - age; c.fault = None
             s = c.status()
             self.assertEqual((s['verification'], s['status']), (label, state), (age, s))
             self.assertTrue(abs(s['verified_age_ms'] - age * 1000) < 200, s['verified_age_ms'])
         self.assertIsNone(c.fault, 'status must not set a permanent fault')
+        self.assertTrue(any('verification watchdog' in x for x in s['limitations']), s)
+        self.assertEqual(s['covered_bindings'], 0)
+        c.verified_at = time.monotonic()
+        self.assertEqual(c.status()['status'], 'Active')
+        c.fault = 'ownership mismatch'
+        self.assertEqual(c.status()['status'], 'Unsupported')
     def test_verify_records_start_anchor_only_on_success(self):
         c = self.fake()
         import types

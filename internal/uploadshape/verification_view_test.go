@@ -51,6 +51,7 @@ func TestSnapshotAgesCachedVerificationWithoutRPC(t *testing.T) {
 		covered int
 	}{{0, "Active", "Active", "fresh", 2}, {900 * time.Millisecond, "Active", "Partial", "stale", 2}, {3 * time.Second, "Active", "Partial", "unknown", 2}, {3 * time.Second, "Applying", "Applying", "unknown", 2}, {3 * time.Second, "Unsupported", "Unsupported", "unknown", 2}} {
 		m.sampleStart = time.Now().Add(-tc.held)
+		m.sampleReceived = m.sampleStart
 		m.snap.Status = tc.status
 		s := m.Snapshot()
 		if s.Status != tc.want || s.Verification != tc.label || s.VerificationAgeMillis == nil || *s.VerificationAgeMillis < 200+tc.held.Milliseconds() {
@@ -59,5 +60,57 @@ func TestSnapshotAgesCachedVerificationWithoutRPC(t *testing.T) {
 		if m.snap.Status != tc.status {
 			t.Fatal("reading a snapshot must not change the published state")
 		}
+	}
+}
+
+// The age already includes time spent inside the RPC before it was sampled.
+// Report the uncertainty, rather than claiming request-anchored age is exact.
+func TestVerificationIntervalTransportAndHeldTime(t *testing.T) {
+	start := time.Now()
+	received := start.Add(400 * time.Millisecond)
+	k := &KernelStatus{VerifiedAgeMillis: ms(700), Verification: "fresh"}
+	for _, held := range []time.Duration{0, 250 * time.Millisecond, 2 * time.Second} {
+		lo, hi, h, r := verificationInterval(k, start, received, received.Add(held))
+		if *lo != 700+held.Milliseconds() || *hi != 1101+held.Milliseconds() || *h != held.Milliseconds() || *r != 400 || *lo > *hi {
+			t.Fatalf("held=%v bounds=%v,%v held/rpc=%v/%v", held, *lo, *hi, *h, *r)
+		}
+	}
+	// Millisecond flooring at both clocks must not hide fractional uncertainty.
+	lo, hi, _, _ := verificationInterval(k, start, start.Add(1500*time.Microsecond), start.Add(2750*time.Microsecond))
+	if *lo != 701 || *hi != 704 {
+		t.Fatalf("fractional bounds %d/%d", *lo, *hi)
+	}
+	for _, tc := range []struct {
+		k                   *KernelStatus
+		start, receipt, now time.Time
+	}{
+		{nil, start, received, received}, {&KernelStatus{}, start, received, received},
+		{&KernelStatus{VerifiedAgeMillis: ms(-1)}, start, received, received},
+		{k, time.Time{}, received, received}, {k, start, time.Time{}, received},
+		{k, received, start, received}, {k, start, received, start},
+	} {
+		lo, hi, _, _ := verificationInterval(tc.k, tc.start, tc.receipt, tc.now)
+		if lo != nil || hi != nil {
+			t.Fatal("invalid observation must stay unknown")
+		}
+	}
+}
+
+func TestSnapshotIntervalPreservesPublishedObservation(t *testing.T) {
+	m := newManager(Options{})
+	m.sampleReceived = time.Now().Add(-2 * time.Second)
+	m.sampleStart = m.sampleReceived.Add(-400 * time.Millisecond)
+	m.snap.Kernel = &KernelStatus{VerifiedAgeMillis: ms(700), Verification: "fresh", Covered: 1}
+	m.snap.VerifiedUntil = time.Now().Add(time.Second)
+	m.snap.Status = "Applying"
+	s := m.Snapshot()
+	if s.Verification != "unknown" || s.Status != "Applying" || *s.VerificationAgeMinMillis < 2700 || *s.VerificationAgeMillis < 3101 {
+		t.Fatalf("bad interval/state %+v", s)
+	}
+	if *s.Kernel.VerifiedAgeMillis != 700 || s.Kernel.Verification != "fresh" || *m.snap.Kernel.VerifiedAgeMillis != 700 {
+		t.Fatal("controller observation must remain immutable")
+	}
+	if s.CoverageExpired || s.Kernel.Covered != 1 {
+		t.Fatal("observation recency must not substitute for lease validity")
 	}
 }

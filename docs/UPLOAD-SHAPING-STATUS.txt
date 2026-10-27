@@ -41,8 +41,9 @@ C2 Observation (new). A status report shows the latest observed state with
    verification = fresh (age <= 1 s) | stale (<= 2 s) | unknown (> 2 s or
    never), verifications and status_reports (monotonic counters). Stale or
    unknown downgrades the reported state to Partial, never Active; an age
-   beyond the 5 s lease reports Unsupported without recording a permanent
-   fault (nothing current to report; the daemon withdraws on it).
+   beyond 5s originally reported Unsupported with no controller fault string.
+   The daemon nevertheless latched Unsupported as a failure; the correctness
+   follow-up below fixes this distinction.
    Daemon side: the manager keeps the monotonic time at which each kernel
    status sample was requested; Snapshot() derives at read time, under the
    lock, verification_age_ms = controller age + time the sample has been held
@@ -188,3 +189,77 @@ docs/UPLOAD-SHAPING-DISCOVERY-BOUNDED.txt (port-range sharded SOCK_DIAG
 census with rotation and truthful coverage, per-binding exact lookups for
 lease pruning). An unreviewed design proposal, no code, no implementation
 approval; it stays on the blocker list.
+
+Correctness follow-up: explicit observation uncertainty
+The following supersedes the description of verification_age_ms as a single
+age. The daemon now retains both monotonic request and response anchors and
+publishes the interval described in UPLOAD-SHAPING-API.txt. Previously it added
+the entire RPC elapsed time to an age sampled near the response, conservatively
+counting much of that interval twice. The compatibility upper-age field remains
+conservative (now also accounts for millisecond flooring); a new lower bound
+shows that uncertainty instead of claiming the upper estimate is exact.
+
+Observation recency, controller liveness/failure and lease coverage are distinct.
+Healthy cadence is not a1s guarantee: tick work plus the1s completion-to-next-tick
+eligibility interval, manager scheduling and sample holding explain frequent
+stale labels. No thresholds are widened and no improved freshness fraction is
+claimed. Expired kernel leases withdraw shaping independently of reporting;
+firewall Deny does not depend on any shaping classification. The5s observation watchdog now reports Partial with zero confirmed coverage
+and a limitation, not Unsupported. a0a00b07 would have latched this reporting
+age as a daemon failure despite no failed ownership verification. A fresh
+verification can restore reporting; actual controller faults still cause
+Unsupported and daemon failure. No stale observation renews a lease.
+
+The a0a00b07 performance evidence above remains measured on daemon2e66ed36 and
+its staged controller, not on this reporting follow-up. No performance rerun is
+claimed or needed for the unchanged packet/authority/scheduling paths. Guest
+objectives remain FAILED:79.3% disabled throughput and+11.87CPU points.
+
+Direct lease-expiry evidence (correctness guest VM2)
+Fixture: experimental/upload-shaper/lease/run.py. Evidence:
+.workspace/shaping-correctness/vm2-artifacts/records.json and vm2-summary.json.
+Candidate daemon SHA f692e34f4596661faca14a1485073c736d398ed54dca0d6dbd1e3ea1b385616d.
+Capped disposable single-vCPU netdevsim guest, existing IPv4 TCP connection, native
+application cap8Mbit/s, profiling off. Controller SIGSTOP for over10.5s;
+read-only kernel helper queried the pinned config/binding deadlines and counters
+independently of the controller. Monotonic time was recorded BEFORE the health
+query, so an already-expired deadline was expired when observed, not merely
+by the time a delayed sample finished. No helper renewed a lease.
+
+Window          elapsed   receiver payload Mbit/s  HTB charged Mbit/s
+before stall     6.269s          7.651                  8.006
+after expiry     6.345s        507.377                  0.000
+after recovery   6.299s          7.643                  7.999
+During the expired window both config and binding deadlines were past, the
+binding remained in the map, counter17 (existing binding but expired/invalid
+lease at classification) gained11754 packets, and counter1 (live classified
+traffic) gained zero. Receiver delivery continued through default/unshaped
+traffic; no new bytes were charged to the capped class. Prequeued packets may
+drain after expiry generally; the measured expired window had zero class bytes.
+API coverage first reported expired at stopped-3, before the direct kernel
+deadlines were confirmed past at stopped-4, never after: its early withdrawal
+was conservative. This directly dates the API-versus-kernel distinction.
+After SIGCONT, fresh verification/renewal restored classification and cap
+accounting without daemon restart or configuration CAS. This is direct kernel
+AND receiver evidence of expiry/recovery, replacing the previous inference for
+this tested topology/connection. It is not a UDP GSO or physical-NIC proof.
+
+Deny:13 separate IPv4 UDP probe batches,12 successful send calls each, zero receiver
+delivery before/during/after the stall. All tests were guest-local. Disable
+restored the exact original fq_codel root and empty egress filters; controller,
+kernel worker and socket worker were absent; daemon protection remained active.
+Killed-controller/CAS recovery branch was NOT exercised (ordinary resume worked).
+
+Example reported intervals: pre-stall1406..1414ms (stale, lease covered1);
+late stall12779..12787ms (unknown, expired coverage0); after recovery961..967ms
+(fresh, covered1), later1279..1286ms (stale, covered1). Healthy stale observation
+is therefore distinct from broken controller/expired lease. The6–8ms interval
+width in these samples makes the transport uncertainty visible; it does not
+explain away the1s recency threshold versus healthy cadence. No threshold was
+widened and no freshness-rate or new throughput-acceptance claim is made.
+
+Focused validation: uploadshape race tests/vet/build and28 controller model
+tests passed. Reused unchanged identity, cap/recovery and performance evidence.
+VM1 retained: fixture expected tc JSON kind:htb, but this version uses class:htb;
+it failed before the stall. VM2 accepts either key and exports intermediate
+samples. Production sources unchanged between VM1/VM2; no failed result erased.

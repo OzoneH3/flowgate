@@ -1,82 +1,96 @@
-Bounded discovery beyond 1024 sockets — design only (no code in this increment)
+Bounded discovery — revised design only, NOT implemented support
 
-Status
-Open release blocker since 4563bc40. Today the manager's discovery census is
-identity.SocketsLimited(1024); when the kernel holds more rows the call returns
-an error together with the partial rows, and the manager correctly discards
-the whole pass (gap discovery_failed) rather than treating a partial census as
-complete. Result on such a host: discovery never runs, newly eligible sockets
-are found only through attribution hints (Offer) on their first observed
-packet, and pre-existing connected sockets of a newly capped application are
-never bound. The controller's own census (probe serve-sockets, also 1024) has
-the same cap and faults the controller when exceeded, which withdraws shaping
-entirely on busy hosts. Neither behaviour is wrong (nothing partial is ever
-treated as complete); both are unusable above the bound.
+Current implementation / release blocker
+The manager and controller use SocketsLimited(1024). An over-limit or failed
+dump is discarded, never used as a complete absence observation. Manager
+discovery then fails; the controller census can fault and withdraw shaping.
+Attribution hints do not cure the controller's census limit. Existing socket
+coverage above that limit is not supported. The firewall path is unchanged.
 
-Requirements
-R1 Progress: every eligible socket must be examined within a bounded number of
-   ticks no matter how many sockets exist; no application may be starved by a
-   fixed scan prefix.
-R2 Honesty: a partial observation is never reported or used as a complete one;
-   coverage must state which parts of the socket space were examined and when.
-R3 Bounds: no single kernel dump larger than the existing bound; memory per
-   tick bounded by one shard; CPU per tick bounded; no unbounded retries.
-R4 Authority unchanged: discovery remains a hint; the controller's bind proof
-   stays the only binding authority; lease renewal must not depend on a full
-   census at all.
+Feasible progress contract
+No finite resource budget can guarantee inspection of every socket regardless
+of population or churn. This proposal supports only a finite, stable retained
+population within explicit limits and successful dump/resolve service. Initial
+DESIGN limits (unmeasured, subject to review before implementation): 4096 rows
+per scan generation, 1024 rows per leaf dump, 512 shard descriptors, eight
+examined rows per scheduling turn. Existing 128 binding / 16 cap limits remain.
+The16-cap limit is validateConfig/MaxCaps in internal/uploadshape/manager.go.
+These numbers are resource limits, not tested capacity or latency promises.
+4096/8 alone is512 consumption turns: at one turn/second about8.5minutes,
+before shard dump scheduling/retries. This is unacceptable as an invisible
+application-wide activation delay and must remain explicit pending coverage.
 
-Design
-D1 Shard the census by local port range using the kernel's SOCK_DIAG bytecode
-   filter (INET_DIAG_REQ_BYTECODE with INET_DIAG_BC_S_GE / S_LE, the mechanism
-   `ss` uses for port ranges). Fixed initial sharding: per family (v4, v6) and
-   protocol (tcp, udp), 8 port ranges of 8192 ports each = 32 shards. A shard's
-   dump is bounded by the same 1024-row limit; a shard that overflows is split
-   in two on its port range for the next pass (bounded depth: at most 4 splits
-   => 512 ports minimum; a shard that still overflows at minimum width is
-   marked overflow and reported, not silently skipped). Splits merge back when
-   both halves stay under half the limit for a full pass. The shard table is
-   bounded (at most 32 * 2^4 = 512 entries) and lives only in the manager.
-D2 Rotate: each tick examines the next shard in a fixed rotation (R1): a full
-   pass over S shards takes S ticks (32 s at the initial sharding, up to 512 s
-   when maximally split; both are stated bounds, not latency promises). Hints
-   from Offer() continue to bind newly observed sockets immediately, so the
-   rotation only governs sockets whose first packet was not attributed.
-D3 Report coverage truthfully (R2): snapshot.discovery gains
-   shards_total, shards_complete_last_pass, shards_overflow, pass_duration_ms,
-   last_full_pass_age_ms, and a boolean census_partial. The daemon status stays
-   Partial whenever any shard overflowed in the last pass or a pass has not
-   completed within 2 x S ticks. Nothing in known_gaps changes meaning.
-D4 Lease pruning without a full census (R4): the controller's tick currently
-   needs the full socket list only to drop bindings whose socket closed. Replace
-   that with per-binding existence checks: one exact SOCK_DIAG lookup per bound
-   cookie (INET_DIAG_REQ with the socket's id: family, protocol, local/remote
-   tuple, interface, cookie), at most 128 lookups per tick (the binding bound),
-   independent of how many sockets the host has. A lookup that fails or returns
-   a different cookie/inode unbinds exactly as today. This removes the
-   controller's 1024-row dependency entirely and is also cheaper than today's
-   full dump at any socket count.
-D5 Row-limit error today: keep discarding the whole pass (never use partial
-   rows); after D1 the error can only occur inside a minimum-width shard, where
-   it marks that shard overflow and the pass partial.
+A successful bounded shard dump becomes an immutable retained row snapshot.
+Maintain a cursor and consume every row, including unusable/skipped rows, at
+eight examined rows per turn. Only after all retained rows have been examined
+may that shard be called examined. A completed dump alone is not discovery.
+A shard's cursor never restarts because another dump changed ordering. Rows
+are keyed by socket generation (cookie/inode/protocol/namespace plus tuple
+where needed); a row is a hint, not authority. The existing fresh bind proof
+must still validate current identity, socket generation and selected route.
+A vanished/replaced row is rejected, never rebound by PID/tuple alone.
 
-Interaction with the shared census (ResolveBatch)
-The holder census walks all processes regardless of shard; sharding changes
-which socket rows are candidates per tick (at most 8 as today), not the holder
-walk. The per-tick cost therefore stays one holder walk for at most 8
-candidates.
+Port ranges can reduce dump size but cannot separate arbitrarily many sockets
+on one port (SO_REUSEPORT/shared listeners/UDP). Splitting is bounded; an
+unsplittable over-limit shard is OVERLOAD, not complete and not empty. Total
+retained-row exhaustion is also OVERLOAD. No claim that port sharding alone
+solves arbitrary populations. Alternative partitioning requires separate
+kernel capability proof, not userspace filtering of an unbounded dump.
 
-Validation plan (when implemented)
-Guest with a synthetic 3000-socket population (connected UDP sockets of an
-uncapped application) plus the standard workload: discovery must bind a newly
-capped application's existing socket within one full pass (observed, not
-promised), report census_partial=false once all shards complete, and
-census_partial=true with the overflow count when one shard is forced over the
-bound at minimum width. Controller lease pruning must stay at <= 128 lookups
-per tick with 3000 sockets present. Row-limit error path: model test that a
-failed shard never contributes rows. Starvation: a long-lived eligible socket
-in the last shard is found on every pass. Memory: shard table bounded; RSS of
-the manager flat across passes.
+Scheduling and incomplete evidence
+Rotate shard service fairly; consume bounded retained work without fixed-prefix
+starvation. New sockets during consumption are discovered by attribution hints
+or a later generation. Reordering between dumps cannot make retained rows
+skip forward or reset the cursor. Interrupted/error/over-limit dumps discard
+that dump's partial rows; bounded retries rotate rather than monopolize the
+worker. Unresolved failed/overflow shards prevent a complete scan-generation
+claim. Superseding cap configuration cancels affected pending work by version;
+a row from an old generation must not silently configure a removed cap.
 
-Out of scope here
-No code. The firewall's own attribution dumps (Resolve/SocketsLimited(0)) are
-a separate path and are not changed by this design.
+Conditional bound: for a stable finite snapshot with R retained rows and S
+shards, consumption requires sum(ceil(rows_in_shard/8)) turns, plus successful
+dump scheduling, resolution and retry work. Empty shards still require a dump.
+There is NO unconditional wall-clock bound: slow helpers, errors, churn or
+overload invalidate it. Under continuous churn there is no guaranteed discovery
+of short-lived sockets. Fair generation rotation gives long-lived sockets an
+opportunity within supported capacity, not a claim of continuous completeness.
+A scan over separate-time dumps is not an atomic enumeration of current sockets.
+
+User-visible coverage and cap application
+CAS success acknowledges desired configuration only. Applying means controller
+configuration has not reconciled. Once configured, Partial must distinguish:
+configured caps; verified bound sockets; pending retained rows and shards;
+failed/overloaded shards; latest progress time; oldest pending age; snapshot
+examination time; and known unsupported/shared sockets. Do not call examined
+rows bound, or a completed generation application-wide coverage. Unknown/new
+sockets can escape; first-packet races remain. Report no application-wide cap.
+
+Applying a cap to an already-running application can take many scheduling
+turns. The previous 32–512-second cycle did not even include consuming more
+than eight rows per shard and was not a valid bound. No such delay may appear
+as an already-applied app-wide limit. Expose configured-but-discovery-pending,
+Partial and overload explicitly. A priority scan for the newly configured app
+could improve responsiveness but needs a separately reviewed, measured hint
+source and fairness bound; it is NOT implemented by this proposal.
+
+Controller pruning is a separate dependency
+Exact per-binding socket existence queries might remove the controller's full
+census dependency. Feasibility must first be proved for TCP/listeners, connected
+and unconnected multi-peer UDP, shared sockets and socket cookies. Errors must
+not become evidence of a different owner; failure/lease behavior must remain
+explicit. Compare CPU, elapsed time and syscall count against bounded census
+at several binding/population sizes. No claim these lookups are cheaper.
+Sharded manager discovery alone cannot close the controller's 1024-row limit.
+
+Required proof before implementation acceptance
+Stable population: retained last row eventually examined, all rows consumed,
+no prefix starvation; more than eight rows in one shard; multiple capped apps.
+Overload: >1024 same-port sockets and >total retained capacity; truthful Partial
+and bounded memory/work; no class inherited by an ambiguous socket.
+Churn/reordering/interrupted dumps: no false completion/absence, bounded retry,
+no stale-generation bind; cap add/remove/version races; observed pending delay.
+Controller lookup feasibility and comparative cost; resource exhaustion and
+lease withdrawal; actual daemon receiver/cap/Deny tests in isolation.
+
+This is a reviewed-design candidate only. No sharding, cursor, new limits,
+exact lookup or coverage fields described here are implemented in this round.

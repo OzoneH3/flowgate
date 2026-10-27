@@ -148,3 +148,32 @@ NIC preflight increment: see docs/UPLOAD-SHAPING-PREFLIGHT.txt. The namespace gu
 remains; single-queue default-fq_codel NIC experiments require segmentation off.
 Kernel status may include compatibility (topology, supported, reasons, offloads,
 default_qdisc_observed, coverage, host_activation=false). No host activation added.
+
+Observation-age interval (correctness increment, experimental)
+The nested kernel.verified_age_ms / kernel.verification fields are the immutable
+controller observation at report creation. Top-level verification_age_min_ms
+and verification_age_ms bracket the age SINCE VERIFICATION START at API read
+time. The compatibility field verification_age_ms is the conservative UPPER
+bound, not an exact timestamp. observation_rpc_ms is rounded-up RPC duration;
+observation_held_ms is rounded-down time since response receipt. All calculations
+use retained monotonic anchors, not JSON wall times. Missing/invalid observations
+remain unknown with no age; reads never upgrade the controller label.
+
+A report's millisecond age was floored at an instant between request and receipt:
+lower = reported age + floor(time since receipt)
+upper = reported age + 1ms + ceil(time since request)
+The interval makes transport uncertainty explicit instead of hiding double-counted
+RPC time in an apparently exact age. The upper bound still drives the unchanged
+1s/2s fresh/stale/unknown labels. Fractions near a boundary can classify
+conservatively; this is not a threshold widening or a claim of more fresh samples.
+
+These labels describe observation RECENCY only. They are not a controller
+liveness result, and are not binding leases or permission authority. Existing
+verified_until / coverage_snapshot_expired independently describe the conservative
+lease observation; expired coverage reports zero covered bindings. Applying and
+Unsupported remain unchanged by read-time aging. A controller report with a
+verification-start age over5s now reports Partial, zero confirmed coverage
+and an explicit observation-watchdog limitation. It does not latch a daemon
+fault merely because an observation is old. Actual ownership/controller faults
+remain Unsupported. The upper age may be up to2ms larger than the prior
+formula because it now includes integer-floor uncertainty and rounding.

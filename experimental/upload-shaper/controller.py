@@ -702,8 +702,9 @@ class Controller:
             state = 'Unsupported'
         elif verified_age_ms is not None and verified_age_ms > 5000:
             # No sufficiently recent successful verification (older than the lease): not proof the loop
-            # stopped, but nothing current to report; the daemon withdraws on this.
-            state = 'Unsupported'
+            # stopped, but nothing current to report. This is not a latched controller fault.
+            state = 'Partial'
+            covered = 0
         elif self.applying:
             state = 'Applying'
         elif covered != len(self.bindings) or not self.bindings or self.partial or counters[0]['packets'] or counters[17]['packets'] or verification != 'fresh':
@@ -716,7 +717,7 @@ class Controller:
                 'compatibility': getattr(self, 'compatibility', None),
                 'application_wide_guarantee': False, 'covered_bindings': covered, 'interface': self.dev, 'lease_seconds': 5,
                 'valid_for_ms': max(0, (valid_until - now) // 1000000),
-                'fault': self.fault, 'limitations': self.partial[-8:], 'apps': self.apps,
+                'fault': self.fault, 'limitations': (self.partial + (['verification watchdog: last successful verification start exceeds 5s'] if verified_age_ms is not None and verified_age_ms > 5000 else []))[-8:], 'apps': self.apps,
                 'segmentation': {'superpackets_classified': counters[2], 'superpackets_unbound': counters[3],
                                  'segments_classified': counters[4]['packets'], 'segments_unbound': counters[4]['bytes'],
                                  'superpacket_bytes': self.gso() or None,
