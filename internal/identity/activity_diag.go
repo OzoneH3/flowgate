@@ -2,6 +2,7 @@ package identity
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"github.com/mdlayher/netlink"
 	"golang.org/x/sys/unix"
@@ -9,11 +10,14 @@ import (
 	"time"
 )
 
+// ErrSocketCensusCapacity denotes an incomplete bounded census, never an empty one.
+var ErrSocketCensusCapacity = errors.New("socket diagnostic capacity exceeded")
+
 // The ordinary netlink library assembles an entire multipart dump before return.
 // Monitoring needs a bounded accumulator; enforcement retains its original path.
 func boundedDiag(req []byte, limit int) ([]netlink.Message, error) {
 	if limit <= 0 {
-		return nil, fmt.Errorf("socket row limit reached")
+		return nil, ErrSocketCensusCapacity
 	}
 	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW|unix.SOCK_CLOEXEC, unix.NETLINK_SOCK_DIAG)
 	if err != nil {
@@ -71,7 +75,7 @@ func boundedDiag(req []byte, limit int) ([]netlink.Message, error) {
 				return result, nil
 			}
 			if len(result) >= limit || total+len(m.Data) > 3*1024*1024 {
-				return result, fmt.Errorf("socket diagnostic row/byte limit reached")
+				return result, ErrSocketCensusCapacity
 			}
 			total += len(m.Data)
 			result = append(result, netlink.Message{Data: append([]byte(nil), m.Data...)})

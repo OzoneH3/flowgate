@@ -37,20 +37,22 @@ type KernelStatus struct {
 	Compatibility json.RawMessage `json:"compatibility,omitempty"`
 	// Observation of the controller's last successful verification, measured by
 	// the controller at report time (age since the verification STARTED).
-	VerifiedAgeMillis *int64                     `json:"verified_age_ms"`
-	Verification      string                     `json:"verification,omitempty"`
-	Verifications     uint64                     `json:"verifications,omitempty"`
-	StatusReports     uint64                     `json:"status_reports,omitempty"`
-	Segmentation      json.RawMessage            `json:"segmentation,omitempty"`
-	ValidForMillis    int64                      `json:"valid_for_ms"`
-	Fault             string                     `json:"fault,omitempty"`
-	Limitations       []string                   `json:"limitations,omitempty"`
-	Status            string                     `json:"status"`
-	Covered           int                        `json:"covered_bindings"`
-	Bindings          []Binding                  `json:"bindings"`
-	Apps              map[string]json.RawMessage `json:"apps"`
-	NextMinor         uint32                     `json:"next_minor"`
-	Counters          []struct {
+	VerifiedAgeMillis   *int64                     `json:"verified_age_ms"`
+	Verification        string                     `json:"verification,omitempty"`
+	Verifications       uint64                     `json:"verifications,omitempty"`
+	StatusReports       uint64                     `json:"status_reports,omitempty"`
+	ExistencePassMillis *int64                     `json:"existence_pass_ms,omitempty"`
+	ExistenceQueries    int                        `json:"existence_queries"`
+	Segmentation        json.RawMessage            `json:"segmentation,omitempty"`
+	ValidForMillis      int64                      `json:"valid_for_ms"`
+	Fault               string                     `json:"fault,omitempty"`
+	Limitations         []string                   `json:"limitations,omitempty"`
+	Status              string                     `json:"status"`
+	Covered             int                        `json:"covered_bindings"`
+	Bindings            []Binding                  `json:"bindings"`
+	Apps                map[string]json.RawMessage `json:"apps"`
+	NextMinor           uint32                     `json:"next_minor"`
+	Counters            []struct {
 		Packets uint64 `json:"packets"`
 		Bytes   uint64 `json:"bytes"`
 	} `json:"counters"`
@@ -76,6 +78,7 @@ type Snapshot struct {
 	ApplicationWide          bool              `json:"application_wide_guarantee"`
 	Gaps                     map[string]uint64 `json:"known_gaps"`
 	Discovery                DiscoveryStats    `json:"discovery"`
+	DiscoverySnapshot        DiscoveryProgress `json:"discovery_snapshot"`
 	LastError                string            `json:"last_error,omitempty"`
 	Updated                  time.Time         `json:"updated"`
 	Coverage                 string            `json:"coverage"`
@@ -87,8 +90,8 @@ type Snapshot struct {
 type DiscoveryStats struct {
 	CensusAttempts     uint64 `json:"census_attempts"`     // ticks that asked for a socket census
 	CensusErrors       uint64 `json:"census_errors"`       // census calls that returned an error (partial rows unused)
-	CensusPasses       uint64 `json:"census_passes"`       // successful non-empty censuses that were walked
-	RowsVisited        uint64 `json:"rows_visited"`        // rows examined, skipped ones included (<= 8 per pass)
+	CensusPasses       uint64 `json:"census_passes"`       // successful complete censuses, including empty ones
+	RowsVisited        uint64 `json:"rows_visited"`        // rows examined, skipped ones included (<= 512 per turn)
 	SkippedUnusable    uint64 `json:"skipped_unusable"`    // rows without an inode
 	SkippedBound       uint64 `json:"skipped_bound"`       // rows already bound in the kernel
 	SkippedUID         uint64 `json:"skipped_uid"`         // rows of a UID without any cap
@@ -147,7 +150,7 @@ func New(o Options) (*Manager, error) {
 	return m, nil
 }
 func newManager(o Options) *Manager {
-	m := &Manager{opts: o, wake: make(chan struct{}, 1), hints: make(chan hint, 128), pending: map[string]bool{}, sockets: func() ([]identity.Socket, error) { return identity.SocketsLimited(1024) }, resolve: identity.Resolve, resolveBatch: identity.ResolveBatch}
+	m := &Manager{opts: o, wake: make(chan struct{}, 1), hints: make(chan hint, 128), pending: map[string]bool{}, sockets: func() ([]identity.Socket, error) { return identity.SocketsLimited(DiscoveryCapacity) }, resolve: identity.Resolve, resolveBatch: identity.ResolveBatch}
 	m.snap = Snapshot{Version: 1, Interface: o.Interface, Status: "Disabled", Caps: []Cap{}, Gaps: map[string]uint64{}, Coverage: "verified socket bindings only; first packets and unobserved sockets may escape; never application-wide"}
 	return m
 }
@@ -415,7 +418,8 @@ func (m *Manager) run() {
 	var t transport
 	var applied uint64
 	var bound = map[string]bool{}
-	var cursor int
+	var discovery discoverySnapshot
+	discovery.reset()
 	defer func() {
 		if t != nil {
 			if err := t.Close(); err != nil {
@@ -431,6 +435,8 @@ func (m *Manager) run() {
 		cfg, version, closed := m.current()
 		attemptedVersion = version
 		if !cfg.Enabled || closed {
+			discovery.reset()
+			m.publishDiscovery(&discovery)
 			m.mu.Lock()
 			dirty := m.dirty
 			m.mu.Unlock()
@@ -504,8 +510,8 @@ func (m *Manager) run() {
 				}
 			}
 			applied = version
+			discovery.clearRetry() // cap edits may request a fresh attempt, never reset progress
 			bound = map[string]bool{}
-			cursor = 0
 			m.mu.Lock()
 			m.snap.AppliedVersion = version
 			m.mu.Unlock()
@@ -567,29 +573,41 @@ func (m *Manager) run() {
 				m.bind(t, h, version)
 			}
 		case <-tick.C:
-			m.discovered(DiscoveryStats{CensusAttempts: 1})
-			ss, er := m.sockets()
-			if er != nil {
-				// Includes the row-limit error: a partial census is never walked.
-				m.discovered(DiscoveryStats{CensusErrors: 1})
-				m.gap("discovery_failed")
+			if len(cfg.Caps) == 0 {
+				discovery.reset()
+				m.publishDiscovery(&discovery)
 				continue
 			}
-			if len(ss) == 0 {
-				continue
+			if discovery.view.Pending == 0 {
+				if time.Now().Before(discovery.view.NextRetry) {
+					continue
+				}
+				m.discovered(DiscoveryStats{CensusAttempts: 1})
+				start := time.Now()
+				rows, er := m.sockets()
+				er = discovery.load(rows, er, start)
+				m.publishDiscovery(&discovery)
+				if er != nil {
+					m.discovered(DiscoveryStats{CensusErrors: 1})
+					m.gap("discovery_failed")
+					if discovery.view.Overloaded {
+						m.gap("discovery_overloaded")
+					}
+					continue
+				}
+				m.discovered(DiscoveryStats{CensusPasses: 1})
 			}
-			// At most 8 ROWS are visited per cycle (round robin over the finite
-			// 1024-row census, skipped rows included). Candidate rows that survive
-			// the cheap filters are attributed by ONE shared, fresh holder census
-			// (identity.ResolveBatch) instead of one census per row. Nothing is
-			// remembered between cycles; the controller re-proves every binding.
+			// Retained rows are hints only. Advance even across cap edits;
+			// fresh resolution and the version guard still precede binding.
 			var candidates []identity.Socket
 			var flows []identity.Flow
-			stats := DiscoveryStats{CensusPasses: 1}
+			stats := DiscoveryStats{}
 			stop := false
-			for i := 0; i < 8 && i < len(ss); i++ {
-				s := ss[cursor%len(ss)]
-				cursor++
+			for i := 0; i < DiscoveryScanBudget && len(candidates) < identity.MaxResolveBatch; i++ {
+				s, ok := discovery.next()
+				if !ok {
+					break
+				}
 				_, v, closed := m.current()
 				if closed || v != version {
 					stop = true
@@ -623,6 +641,7 @@ func (m *Manager) run() {
 				candidates = append(candidates, s)
 				flows = append(flows, identity.Flow{Protocol: s.Protocol, Direction: "outgoing", Local: s.Local, Remote: s.Remote, NetNS: s.NetNS, Interface: s.Interface})
 			}
+			m.publishDiscovery(&discovery)
 			stats.CandidateRows = uint64(len(candidates))
 			if stop || len(candidates) == 0 {
 				m.discovered(stats)

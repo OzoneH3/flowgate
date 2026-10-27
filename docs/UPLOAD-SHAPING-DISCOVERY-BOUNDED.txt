@@ -1,96 +1,113 @@
-Bounded discovery — revised design only, NOT implemented support
+Bounded native upload discovery — experimental implementation
 
-Current implementation / release blocker
-The manager and controller use SocketsLimited(1024). An over-limit or failed
-dump is discarded, never used as a complete absence observation. Manager
-discovery then fails; the controller census can fault and withdraw shaping.
-Attribution hints do not cure the controller's census limit. Existing socket
-coverage above that limit is not supported. The firewall path is unchanged.
+Decision and scope
+A single retained snapshot replaces repeated 1024-row censuses. The reviewed
+implementation uses a global 4096-row capacity, not port sharding. It can retain
+many sockets sharing one port; above its aggregate capacity it reports overload.
+Port sharding remains a future option, NOT implemented: no port split can divide
+arbitrarily many sockets sharing one port. There is no arbitrary-population claim.
+Installed 25dbb1a and approved-update restrictions are unchanged. No host activation.
 
-Feasible progress contract
-No finite resource budget can guarantee inspection of every socket regardless
-of population or churn. This proposal supports only a finite, stable retained
-population within explicit limits and successful dump/resolve service. Initial
-DESIGN limits (unmeasured, subject to review before implementation): 4096 rows
-per scan generation, 1024 rows per leaf dump, 512 shard descriptors, eight
-examined rows per scheduling turn. Existing 128 binding / 16 cap limits remain.
-The16-cap limit is validateConfig/MaxCaps in internal/uploadshape/manager.go.
-These numbers are resource limits, not tested capacity or latency promises.
-4096/8 alone is512 consumption turns: at one turn/second about8.5minutes,
-before shard dump scheduling/retries. This is unacceptable as an invisible
-application-wide activation delay and must remain explicit pending coverage.
+Discovery progress
+Each complete dump is copied into one immutable retained generation. A scheduling
+turn examines at most512 rows and submits at most8 candidate flows to the existing
+fresh ResolveBatch. Cheap skips count as cursor progress. The next dump starts only
+after the retained generation ends. Cap edits retain snapshot+cursor and evaluate
+current configuration at consumption; the version guard discards an in-flight
+result if configuration changes. Disable or empty caps drops the retained set.
+No per-packet process scan is added.
 
-A successful bounded shard dump becomes an immutable retained row snapshot.
-Maintain a cursor and consume every row, including unusable/skipped rows, at
-eight examined rows per turn. Only after all retained rows have been examined
-may that shard be called examined. A completed dump alone is not discovery.
-A shard's cursor never restarts because another dump changed ordering. Rows
-are keyed by socket generation (cookie/inode/protocol/namespace plus tuple
-where needed); a row is a hint, not authority. The existing fresh bind proof
-must still validate current identity, socket generation and selected route.
-A vanished/replaced row is rejected, never rebound by PID/tuple alone.
+For a stable supported population, every retained row receives an examination
+opportunity. Worst case4096 candidate rows require512 turns (roughly8.5 minutes
+at one turn/second BEFORE service time). All-cheap-skipped rows require8 turns.
+New rows that arrive during consumption wait for a later generation or an existing
+attribution hint. There is no wall-clock discovery SLA, no guaranteed discovery
+of transient sockets under churn, and no continuous-current-owner claim.
+Dump reordering cannot restart a retained cursor. Four family/protocol dumps are
+not an atomic socket-table snapshot. Closed/reused rows remain hints only: fresh
+ResolveBatch, cookie comparison, current config, and the unchanged controller
+bind proof must all succeed before a binding can authorize SHAPING, never Allow.
 
-Port ranges can reduce dump size but cannot separate arbitrarily many sockets
-on one port (SO_REUSEPORT/shared listeners/UDP). Splitting is bounded; an
-unsplittable over-limit shard is OVERLOAD, not complete and not empty. Total
-retained-row exhaustion is also OVERLOAD. No claim that port sharding alone
-solves arbitrary populations. Alternative partitioning requires separate
-kernel capability proof, not userspace filtering of an unbounded dump.
+Bounds, interruption and overload
+4096 retained rows globally; raw accumulator <=3MiB per family/protocol request;
+receive timeout2s and loop time budget2s per request (a blocked receive can extend
+the loop budget by its receive timeout). There are four requests in a full dump.
+The existing fresh ownership-resolution path is unchanged and is not subject to
+this retained-hint limit; this increment does not claim population-independent
+cost for authority checks.16 configured caps and128 bindings remain resource caps.
 
-Scheduling and incomplete evidence
-Rotate shard service fairly; consume bounded retained work without fixed-prefix
-starvation. New sockets during consumption are discovered by attribution hints
-or a later generation. Reordering between dumps cannot make retained rows
-skip forward or reset the cursor. Interrupted/error/over-limit dumps discard
-that dump's partial rows; bounded retries rotate rather than monopolize the
-worker. Unresolved failed/overflow shards prevent a complete scan-generation
-claim. Superseding cap configuration cancels affected pending work by version;
-a row from an old generation must not silently configure a removed cap.
+Any failed/interrupted dump discards its entire partial prefix. Capacity errors
+use an errors.Is sentinel, not string inference. Retry delay grows1,2,4,8,16,30s,
+capped at30s; a cap edit permits a fresh retry without resetting cursor progress.
+Recovery can therefore wait up to30s plus scheduling/service time. A successful
+dump clears backoff. Repeated overload is not retried every scheduling turn.
+No completed/examined or empty-table claim is made from failed evidence.
 
-Conditional bound: for a stable finite snapshot with R retained rows and S
-shards, consumption requires sum(ceil(rows_in_shard/8)) turns, plus successful
-dump scheduling, resolution and retry work. Empty shards still require a dump.
-There is NO unconditional wall-clock bound: slow helpers, errors, churn or
-overload invalidate it. Under continuous churn there is no guaranteed discovery
-of short-lived sockets. Fair generation rotation gives long-lived sockets an
-opportunity within supported capacity, not a claim of continuous completeness.
-A scan over separate-time dumps is not an atomic enumeration of current sockets.
+Configuration and coverage API
+CAS acknowledgement = desired configuration accepted; applied_version = controller
+configuration reconciled, NOT application-wide coverage. Enabled remains Partial.
+Configured caps, verified bindings and known gaps remain distinct.
+discovery_snapshot exposes generation, capacity, retained_rows, cursor,
+pending_rows, incomplete, overloaded, last_error, dump_duration_ms, last_dump,
+last_progress, last_completed and next_retry. These describe historical hint
+examination, never current completeness. Generation numbers are worker-local
+(reset after disable/restart); combine with configuration/lifecycle state, not a
+global socket-table version. discovery contains cumulative work
+counters; discovery_overloaded is a distinct known gap. A pending or completed
+pass must never be displayed as an application-wide applied cap. Shared,
+unconnected/unobserved-peer sockets and first-packet races remain explicit gaps.
 
-User-visible coverage and cap application
-CAS success acknowledges desired configuration only. Applying means controller
-configuration has not reconciled. Once configured, Partial must distinguish:
-configured caps; verified bound sockets; pending retained rows and shards;
-failed/overloaded shards; latest progress time; oldest pending age; snapshot
-examination time; and known unsupported/shared sockets. Do not call examined
-rows bound, or a completed generation application-wide coverage. Unknown/new
-sockets can escape; first-packet races remain. Report no application-wide cap.
+Independent lease maintenance
+The controller no longer dumps the unrelated socket population. It asks its
+private persistent probe for fresh exact generation existence, one descriptor per
+binding, at most128 bindings. Descriptor: namespace, family, protocol, local/remote,
+interface, cookie, inode, UID. SOCK_DIAG without DUMP queries in the worker's netns;
+TCP uses ordinary tuple order, UDP the kernel's historical reversed lookup order.
+The reply is validated against the original descriptor. ENOENT/ESTALE or a valid
+nonmatching row means absent: delete the binding. Other errors fault the controller
+and leases expire; no incomplete result becomes absence or renewal authority.
 
-Applying a cap to an already-running application can take many scheduling
-turns. The previous 32–512-second cycle did not even include consuming more
-than eight rows per shard and was not a valid bound. No such delay may appear
-as an already-applied app-wide limit. Expose configured-but-discovery-pending,
-Partial and overload explicitly. A priority scan for the newly configured app
-could improve responsiveness but needs a separately reviewed, measured hint
-source and fairness bound; it is NOT implemented by this proposal.
+All existence reads finish before renewals begin. Each private frame <=1024bytes,
+ACK deadline3s, output<=2MiB; query deadline2s; a2s total pass budget is checked
+between queries (one in-flight query may extend it). A missed pass deadline faults,
+not silently lengthens leases. This remains a load-sensitive limitation to measure.
+No claim exact lookups are universally cheaper. The first exact existence check
+also precedes installation, so an unqueryable socket form cannot enter the class.
+The legacy private 'sockets -' operation remains for compatibility/tests; the
+controller does not use it. Cleanup-only/disabled starts no socket worker.
 
-Controller pruning is a separate dependency
-Exact per-binding socket existence queries might remove the controller's full
-census dependency. Feasibility must first be proved for TCP/listeners, connected
-and unconnected multi-peer UDP, shared sockets and socket cookies. Errors must
-not become evidence of a different owner; failure/lease behavior must remain
-explicit. Compare CPU, elapsed time and syscall count against bounded census
-at several binding/population sizes. No claim these lookups are cheaper.
-Sharded manager discovery alone cannot close the controller's 1024-row limit.
+Ownership contract is unchanged: bind freshly verifies application ownership;
+exec/descriptor transfer does not automatically change a bound assignment. Close
+or generation replacement withdraws it. Explicit rebind must prove the new owner.
+No shaping evidence is reused for firewall permission. Lease duration, topology
+ownership checks, foreign-object refusal and cleanup remain unchanged.
 
-Required proof before implementation acceptance
-Stable population: retained last row eventually examined, all rows consumed,
-no prefix starvation; more than eight rows in one shard; multiple capped apps.
-Overload: >1024 same-port sockets and >total retained capacity; truthful Partial
-and bounded memory/work; no class inherited by an ambiguous socket.
-Churn/reordering/interrupted dumps: no false completion/absence, bounded retry,
-no stale-generation bind; cap add/remove/version races; observed pending delay.
-Controller lookup feasibility and comparative cost; resource exhaustion and
-lease withdrawal; actual daemon receiver/cap/Deny tests in isolation.
+Validation and release status
+Focused guest evidence and matched comparison: .workspace/shaping-bounded/README.txt.
+The prior direct kernel lease-expiry/recovery proof is reused from a2283f47.
+Interruption/churn/capacity handling has deterministic model checks in addition
+to the native population tests; model evidence is not a native interrupted dump.
+The85% throughput / <=7pp added-vCPU objectives remain FAILED until a new matched
+comparison establishes otherwise. UDP GSO cap accuracy is a separate unresolved
+gate. Guest support does not authorize physical-host deployment or activation.
 
-This is a reviewed-design candidate only. No sharding, cursor, new limits,
-exact lookup or coverage fields described here are implemented in this round.
+Observed guest results (core3 + compare1)
+1300 same-port UDP sockets: newly capped existing TCP bound4.90s after request.
+4094 rows retained natively (81ms dump, whole-daemon VmRSS41312KiB);4300-socket
+overload discarded all partial rows while existing cap continued. Charged8.003
+Mbit/s vs receiver payload7.655; Deny0. Tail UDP at initial row1302/1305 bound4.22s.
+Shared handoff stayed unbound; exclusive handoff0.53s, same-PID exec0.80s, new cap
+on existing socket1.09s. Same-port reuse by an uncapped application inherited no
+class. These are measured examples, not universal discovery or128-binding SLAs.
+128 serial exact-worker queries took202ms unloaded at1302 rows; concurrent bound
+traffic was tested with only a small number of bindings, not128 under load.
+
+Matched reversed comparison: baseline513.57 vs candidate507.17 Mbit/s (-1.25%);
+daemon/controller/helper CPU21.27->21.81pp. Overlapping ranges and mixed paired
+direction do not establish a practical performance gain or cost. Candidate vs disabled:80.49% throughput,
++10.51pp of one vCPU. Both85%/7pp performance objectives FAILED; no performance fix
+claim. Low-rate delivery1200/1200 each window, candidate p95 max1.58ms vs1.31ms
+control; Deny receiver0. Charged class bytes are dequeued accounting, not wire
+bytes; receiver figures are application payload. Detailed spreads, timestamps,
+models/native scope and a brief host model-test scheduling overlap with sensitivity
+are retained in the local evidence README. UDP GSO remains a separate open gate.

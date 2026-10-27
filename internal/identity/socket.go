@@ -112,7 +112,14 @@ func socketsForPort(protos []byte, limit int, port uint16) ([]Socket, error) {
 			req := diagRequest(family, proto, limit, port)
 			var msgs []netlink.Message
 			if limit > 0 {
-				msgs, e = boundedDiag(req, limit-len(result))
+				// At the aggregate limit, still distinguish an empty remaining
+				// family/protocol from overflow. One sentinel row suffices; it is
+				// rejected below and never added to the retained result.
+				remaining := limit - len(result)
+				if remaining == 0 {
+					remaining = 1
+				}
+				msgs, e = boundedDiag(req, remaining)
 			} else {
 				msgs, e = c.Execute(netlink.Message{Header: netlink.Header{Type: 20, Flags: netlink.Request | netlink.Dump}, Data: req})
 			}
@@ -122,7 +129,7 @@ func socketsForPort(protos []byte, limit int, port uint16) ([]Socket, error) {
 			}
 			for _, m := range msgs {
 				if limit > 0 && len(result) >= limit {
-					return result, fmt.Errorf("socket row limit reached")
+					return result, ErrSocketCensusCapacity
 				}
 				b := m.Data
 				if len(b) < 72 {

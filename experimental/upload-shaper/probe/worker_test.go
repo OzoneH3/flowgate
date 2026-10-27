@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/hex"
 	"errors"
 	"flowgate/internal/identity"
 	"io"
@@ -54,3 +55,22 @@ func TestSocketWorkerInputOutputBounds(t *testing.T) {
 type shortWriter struct{}
 
 func (shortWriter) Write([]byte) (int, error) { return 0, nil }
+
+func TestExactWorkerFreshChecksAndNoAckOnError(t *testing.T) {
+	var out bytes.Buffer
+	calls := 0
+	descriptor := hex.EncodeToString([]byte(`{"cookie":"abcd"}`))
+	err := serveSockets(strings.NewReader(strings.Repeat("exists "+descriptor+"\n", 3)), &out, func() ([]identity.Socket, error) { t.Fatal("unexpected census"); return nil, nil }, func(s identity.Socket) (bool, error) {
+		calls++
+		if s.Cookie != "abcd" {
+			t.Fatal(s)
+		}
+		if calls == 3 {
+			return false, errors.New("query interrupted")
+		}
+		return calls == 1, nil
+	})
+	if err == nil || calls != 3 || out.String() != "true\n\x1eOK\nfalse\n\x1eOK\n" {
+		t.Fatalf("%d %v %q", calls, err, out.String())
+	}
+}

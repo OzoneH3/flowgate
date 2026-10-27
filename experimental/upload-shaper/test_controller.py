@@ -38,26 +38,25 @@ class ModelTests(unittest.TestCase):
 
     def test_empty_socket_census_withdraws_binding_and_keeps_heartbeat(self):
         c=self.fake();c.base=Path('/unused');c.compatibility={'topology':'veth-noqueue'}
-        c.bindings={'cookie':{'app':'uid:key','inode':1,'protocol':'udp','netns':'net:[1]'}}
+        c.bindings={'cookie':{'app':'uid:key','inode':1,'protocol':'udp','netns':'net:[1]', 'descriptor': {}}}
         c.apps={'uid:key':{'minor':1,'idle_since':m1.time.monotonic()}}
-        calls=[];c.sockets=lambda:None;c.k=lambda *a:calls.append(a)
+        calls=[];c.exists=lambda s:False;c.k=lambda *a:calls.append(a)
         c.tick()
         self.assertEqual(c.bindings,{})
         self.assertEqual(calls,[('del','cookie'),('beat',)])
-        c.sockets=lambda:{}
-        with self.assertRaises(RuntimeError):c.tick()
+        # A malformed worker reply is covered separately below.
 
     def test_socket_worker_fresh_requests_and_close_on_cleanup_refusal(self):
         c=self.fake();calls=[]
         class Worker:
             def call(self,*args):
                 calls.append(args)
-                return '[]' if len(calls)==1 else 'null'
+                return 'true' if len(calls)==1 else 'null'
             def close(self):calls.append('closed')
         c.socket_worker=Worker()
-        self.assertEqual(c.sockets(),[])
-        self.assertIsNone(c.sockets())
-        self.assertEqual(calls,[('sockets','-'),('sockets','-')])
+        self.assertTrue(c.exists({}))
+        with self.assertRaises(RuntimeError): c.exists({})
+        self.assertEqual(calls,[('exists','7b7d'),('exists','7b7d')])
         c.closed=False
         def refuse():raise RuntimeError('foreign topology')
         c.cleanup_objects=refuse
@@ -293,9 +292,9 @@ class StatusObservationTests(unittest.TestCase):
     def test_tick_path_still_verifies_and_renews(self):
         c = self.fake(); calls = []
         c.verify = lambda: calls.append('verify')
-        c.bindings = {'cookie': {'app': 'uid:key', 'inode': 7, 'protocol': 'tcp', 'netns': 'ns'}}
+        c.bindings = {'cookie': {'app': 'uid:key', 'inode': 7, 'protocol': 'tcp', 'netns': 'ns', 'descriptor': {}}}
         c.apps['uid:key']['idle_since'] = time.monotonic()
-        c.sockets = lambda: [{'cookie': 'cookie', 'inode': 7, 'protocol': 'tcp', 'netns': 'ns'}]
+        c.exists = lambda s: True
         c.k = lambda *a: (calls.append(a[0]), 'OK')[1]
         m1.Controller.tick(c)
         self.assertEqual(calls, ['verify', 'bind', 'beat'], calls)

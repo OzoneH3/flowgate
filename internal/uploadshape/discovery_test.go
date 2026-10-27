@@ -47,11 +47,11 @@ func TestDiscoveryVisitsEightRowsAndResolvesOnceSharedPerTick(t *testing.T) {
 	mu.Lock()
 	first := batches[0]
 	mu.Unlock()
-	if len(first) != 6 { // 8 rows visited: rows 1 and 2 filtered, 6 candidates
-		t.Fatalf("expected 6 candidates from 8 visited rows, got %d", len(first))
+	if len(first) != 8 { // Ten rows visited: two filtered, eight candidates
+		t.Fatalf("expected 8 candidates after cheap filtering, got %d", len(first))
 	}
 	d := m.Snapshot().Discovery
-	if d.CensusAttempts < 2 || d.CensusPasses < 2 || d.RowsVisited < 16 || d.SharedResolutions < 2 || d.FlowsResolved < 12 || d.SkippedUID < 1 || d.SkippedUnusable < 1 || d.BindRequests != 0 || d.EligibleCandidates != 0 {
+	if d.CensusAttempts != 1 || d.CensusPasses != 1 || d.RowsVisited < 16 || d.SharedResolutions < 2 || d.FlowsResolved < 12 || d.SkippedUID < 1 || d.SkippedUnusable < 1 || d.BindRequests != 0 || d.EligibleCandidates != 0 {
 		t.Fatalf("activity metrics not accounted: %+v", d)
 	}
 	if g := m.Snapshot().Gaps["discovery_full_resolutions"]; g != 0 {

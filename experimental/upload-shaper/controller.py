@@ -333,12 +333,15 @@ class Controller:
     def get_link(self):
         return json.loads(self.call('ip', '-d', '-j', 'link', 'show', 'dev', self.dev))[0]
 
-    def sockets(self):
-        # Process reuse only: the worker performs SocketsLimited(1024) afresh
-        # for every request. Bind-time authority stays in the finite probe bind.
+    def exists(self, descriptor):
+        # Fresh generation existence, never ownership/permission authority.
         if getattr(self, 'socket_worker', None) is None:
             self.socket_worker = KernelWorker([str(self.base / 'probe'), 'serve-sockets'])
-        return json.loads(self.socket_worker.call('sockets', '-'))
+        data = json.dumps(descriptor, separators=(',', ':')).encode().hex()
+        result = json.loads(self.socket_worker.call('exists', data))
+        if type(result) is not bool:
+            raise RuntimeError('invalid exact socket response')
+        return result
 
     def query_tc(self, commands):
         # Fresh read-only dumps, identical to the former individual processes.
@@ -619,6 +622,10 @@ class Controller:
             raise ValueError('socket generation changed before binding')
         if cookie not in self.bindings and len(self.bindings) >= MAX_BINDINGS:
             raise ValueError('binding capacity reached')
+        descriptor = {key: s[key] for key in ('family', 'protocol', 'local', 'remote', 'inode', 'cookie', 'uid', 'netns')}
+        descriptor['interface_index'] = s.get('interface_index', 0)
+        if not self.exists(descriptor):
+            raise ValueError('socket generation absent before binding')
         # Explicit rebind only; background lease maintenance never changes owner.
         if cookie in self.bindings and not req.get('rebind', False):
             if self.bindings[cookie]['app'] != app:
@@ -627,7 +634,7 @@ class Controller:
             self.set_cap(app, bits)
         self.k('bind', cookie, str(self.apps[app]['minor']))
         self.bindings[cookie] = {'app': app, 'inode': s['inode'], 'protocol': s['protocol'],
-                                 'cookie': cookie, 'netns': s['netns'], 'bound_at': time.time()}
+                                 'cookie': cookie, 'netns': s['netns'], 'bound_at': time.time(), 'descriptor': descriptor}
         self.apps[app]['idle_since'] = time.monotonic()
         return {'app': app, 'cookie': cookie, 'scope': 'socket-binding', 'status': 'Active'}
 
@@ -658,14 +665,18 @@ class Controller:
                 note = 'segmentation offload flags changed: ' + json.dumps(seen, sort_keys=True)
                 if note not in self.partial:
                     self.partial.append(note)
-        ss = self.sockets()
-        if ss is None:
-            ss = []
-        if not isinstance(ss, list):
-            raise RuntimeError('invalid socket census')
-        live = {(s['cookie'], s['inode'], s['protocol'], s['netns']) for s in ss if s['inode']}
+        start = time.monotonic()
+        live = {}
+        # Complete all reads before renewing anything: a failed pass must not
+        # silently extend only a prefix of the bindings.
         for c, b in list(self.bindings.items()):
-            if (c, b['inode'], b['protocol'], b['netns']) not in live:
+            if time.monotonic() - start > 2:
+                raise RuntimeError('socket existence pass time budget exceeded')
+            live[c] = self.exists(b['descriptor'])
+        self.existence_pass_ms = int((time.monotonic() - start) * 1000)
+        self.existence_queries = len(live)
+        for c, b in list(self.bindings.items()):
+            if not live[c]:
                 self.k('del', c); del self.bindings[c]
             else:
                 self.k('bind', c, str(self.apps[b['app']]['minor']))
@@ -714,6 +725,8 @@ class Controller:
         return {'status': state, 'coverage': 'observed socket bindings on selected interface only',
                 'verified_age_ms': verified_age_ms, 'verification': verification,
                 'verifications': self.verifications, 'status_reports': self.status_reports,
+                'existence_pass_ms': getattr(self, 'existence_pass_ms', None),
+                'existence_queries': getattr(self, 'existence_queries', 0),
                 'compatibility': getattr(self, 'compatibility', None),
                 'application_wide_guarantee': False, 'covered_bindings': covered, 'interface': self.dev, 'lease_seconds': 5,
                 'valid_for_ms': max(0, (valid_until - now) // 1000000),

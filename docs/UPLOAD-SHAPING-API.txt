@@ -1,3 +1,6 @@
+Current discovery and lease-maintenance limits: see UPLOAD-SHAPING-DISCOVERY-BOUNDED.txt.
+The original integration measurements below are retained as historical evidence.
+
 Experimental native upload integration (disabled by default)
 
 Scope
@@ -85,8 +88,10 @@ orphan journal at startup is Unsupported, not silently called Disabled.
 Attribution publishes bounded nonblocking hints; a private helper repeats the
 full M1 socket/holder/process proof before binding, matching expected app/cookie.
 Queued hints never become permission evidence. Existing connected sockets are
-discovered independently of the GUI/UDP collector: max1024 socket rows, at most8
-candidate inspections per one-second cycle, round-robin. Kernel creator UID is
+discovered independently of the GUI/UDP collector: max4096 retained socket rows, at most8
+candidate inspections and512 cheap row examinations per scheduling turn. Progress
+is retained across cap edits; errors back off to30s. See discovery_snapshot for
+pending rows and overload, not an application-wide completion flag. Kernel creator UID is
 a discovery filter; a socket whose current owner UID differs may need an actual
 attribution hint. Unconnected/listening/wildcard rows without a usable peer are
 reported as gaps and need an outgoing attribution observation. TCP endpoint-rule
@@ -106,7 +111,7 @@ returned coverage state rather than make authority decisions from local clocks. 
 status is observed; the cached observation is never advertised indefinitely.
 
 Bounds and failure handling
-128 bindings/hints;16 concurrent classes; max1024 census rows; finite helper
+128 bindings/hints;16 concurrent classes; max4096 retained discovery rows; finite helper
 command deadlines. IDs1..65533 are monotonically allocated and never reused in
 one generation, even after retirement, so an old queued priority cannot name a
 new application's class. The former16-generation lifetime restriction is gone.

@@ -3,18 +3,20 @@ package main
 
 import (
 	"bufio"
+	"encoding/hex"
 	"encoding/json"
 	"flowgate/internal/identity"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 )
 
 func main() {
 	if len(os.Args) == 2 && os.Args[1] == "serve-sockets" {
 		if err := serveSockets(os.Stdin, os.Stdout, func() ([]identity.Socket, error) {
 			return identity.SocketsLimited(1024)
-		}); err != nil {
+		}, identity.SocketExists); err != nil {
 			fail(err)
 		}
 		return
@@ -64,18 +66,31 @@ func main() {
 // Private, serial pipe protocol. Each request makes a new kernel census; there
 // is no retained socket evidence, permission decision or bind operation here.
 // The controller enforces the same deadline and output bound as finite helpers.
-func serveSockets(in io.Reader, out io.Writer, census func() ([]identity.Socket, error)) error {
+func serveSockets(in io.Reader, out io.Writer, census func() ([]identity.Socket, error), exact ...func(identity.Socket) (bool, error)) error {
 	scanner := bufio.NewScanner(in)
 	scanner.Buffer(make([]byte, 1024), 1024)
 	for scanner.Scan() {
-		if scanner.Text() != "sockets -" {
+		var result any
+		var err error
+		if scanner.Text() == "sockets -" {
+			result, err = census()
+		} else if strings.HasPrefix(scanner.Text(), "exists ") && len(exact) == 1 {
+			var raw []byte
+			raw, err = hex.DecodeString(strings.TrimPrefix(scanner.Text(), "exists "))
+			if err == nil {
+				var descriptor identity.Socket
+				err = json.Unmarshal(raw, &descriptor)
+				if err == nil {
+					result, err = exact[0](descriptor)
+				}
+			}
+		} else {
 			return fmt.Errorf("invalid socket worker request")
 		}
-		ss, err := census()
 		if err != nil {
-			return err // No success ACK, including partial census results.
-		}
-		payload, err := json.Marshal(ss)
+			return err
+		} // No ACK or partial evidence on failure.
+		payload, err := json.Marshal(result)
 		if err != nil {
 			return err
 		}
