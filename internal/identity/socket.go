@@ -257,6 +257,15 @@ func resolveDump(f Flow) (func() ([]Socket, error), string) {
 	return socketDumps.full, "full"
 }
 
+// inspectWithProvenance is the holder inspection both Resolve and ResolveBatch use.
+func inspectWithProvenance(pid int) (Process, error) {
+	p, err := Inspect(pid)
+	if err == nil {
+		p.Provenance = CaptureProvenance(p)
+	}
+	return p, err
+}
+
 func Resolve(f Flow) Attribution {
 	defer diagnostics.Begin(diagnostics.FullResolve).End()
 	a := Attribution{Status: "unidentified", Reason: "no visible matching socket", ReasonCode: ReasonNoSocketObserved}
@@ -278,26 +287,10 @@ func Resolve(f Flow) Attribution {
 	if len(wanted) == 0 {
 		return a
 	}
-	_, resolved := resolveHolderIdentities(wanted, func(pid int) (Process, error) {
-		p, err := Inspect(pid)
-		if err == nil {
-			p.Provenance = CaptureProvenance(p)
-		}
-		return p, err
-	}, nil)
-	covered := map[string]bool{}
-	incomplete := !resolved.Complete
-	seen := map[string]bool{}
-	for socket, owners := range resolved.Owners {
-		for _, p := range owners {
-			covered[socket] = true
-			key := fmt.Sprintf("%d:%s:%s", p.PID, p.Start, p.HolderWitness)
-			if !seen[key] {
-				a.Owners = append(a.Owners, p)
-				seen[key] = true
-			}
-		}
-	}
+	_, resolved := resolveHolderIdentities(wanted, inspectWithProvenance, nil)
+	// Observed owners are evidence recorded before the recheck, so a failed
+	// recheck keeps them (without granting visibility or authority).
+	covered := collectOwners(&a, wanted, resolved.Owners)
 	// A process may retain a socket from a different network namespace. Scan every
 	// visible process, then verify the socket snapshot did not change mid-scan,
 	// using the same census provider as the first pass.
@@ -306,14 +299,44 @@ func Resolve(f Flow) Attribution {
 		a.setReason(ReasonSocketCensusUnavailable, "socket recheck unavailable")
 		return a
 	}
-	current := receivers(again, f)
+	finalizeAttribution(&a, wanted, covered, !resolved.Complete, receivers(again, f))
+	return a
+}
+
+// collectOwners appends the de-duplicated holders of this flow's wanted sockets
+// to a.Owners and returns how many wanted sockets have at least one holder.
+// owners entries for sockets outside wanted are ignored.
+func collectOwners(a *Attribution, wanted map[string]bool, owners map[string][]Process) int {
+	covered := map[string]bool{}
+	seen := map[string]bool{}
+	for socket, ps := range owners {
+		if !wanted[socket] {
+			continue
+		}
+		for _, p := range ps {
+			covered[socket] = true
+			key := fmt.Sprintf("%d:%s:%s", p.PID, p.Start, p.HolderWitness)
+			if !seen[key] {
+				a.Owners = append(a.Owners, p)
+				seen[key] = true
+			}
+		}
+	}
+	return len(covered)
+}
+
+// finalizeAttribution applies the post-recheck decision shared by Resolve and
+// ResolveBatch to ONE flow whose owners were already collected for its own
+// wanted sockets (covered = wanted sockets with a holder). current is the
+// flow's receiver set from the recheck dump.
+func finalizeAttribution(a *Attribution, wanted map[string]bool, covered int, incomplete bool, current []Socket) {
 	if fingerprint(nil, current) != fingerprint(nil, a.Sockets) {
 		a.setReason(ReasonSocketChanged, "listener changed during attribution")
-		return a
+		return
 	}
-	a.VisibilityComplete = !incomplete && len(covered) == len(wanted)
+	a.VisibilityComplete = !incomplete && covered == len(wanted)
 	a.Fingerprint = fingerprint(a.Owners, a.Sockets)
-	if !incomplete && len(covered) == len(wanted) && len(a.Sockets) == 1 {
+	if !incomplete && covered == len(wanted) && len(a.Sockets) == 1 {
 		if association, client := brokerAssociation(a.Owners); association != nil {
 			a.Association = association
 			app := client.Application
@@ -321,20 +344,20 @@ func Resolve(f Flow) Attribution {
 			a.Status = "corroborated-broker-client"
 			a.setReason(ReasonBrokerClientAssociation, "one visible Windows client and verified Wine broker; non-sharing handle assumption applies")
 			a.Fingerprint = digest(a.Fingerprint + fmt.Sprintf("|%d:%d", association.ClientChannel, association.BrokerChannel))
-			return a
+			return
 		}
 	}
-	if unresolvedOwnership(&a, incomplete) {
-		return a
+	if unresolvedOwnership(a, incomplete) {
+		return
 	}
-	if incomplete || len(covered) != len(wanted) {
+	if incomplete || covered != len(wanted) {
 		a.setReason(ReasonProcessVisibilityIncomplete, "incomplete process visibility; cannot exclude another owner")
-		return a
+		return
 	}
 	p := a.Owners[0]
 	if p.Application.Key == "" {
 		a.setReason(ReasonRuntimeIdentityUnverified, "runtime observed but Windows image/prefix not corroborated")
-		return a
+		return
 	}
 	a.Status = "directly-associated"
 	if p.Application.Kind == "wine" {
@@ -346,7 +369,6 @@ func Resolve(f Flow) Attribution {
 	}
 	app := p.Application
 	a.Application = &app
-	return a
 }
 func ParseFlow(protocol, direction, local, remote string) (Flow, error) {
 	l, e := netip.ParseAddrPort(local)

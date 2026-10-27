@@ -37,8 +37,12 @@ func retryableHolderTopology(c HolderCensus, d HolderRecheck) bool {
 	return !c.Complete || len(d.Groups) > 0 || len(d.Appeared) > 0 || len(d.Reconcilable) > 0
 }
 
+// holderSource is the /proc census provider; tests substitute a model so
+// Resolve and ResolveBatch can be compared without a live kernel.
+var holderSource = procHolders
+
 func resolveHolderIdentities(wanted map[string]bool, inspect func(int) (Process, error), refresh func()) (HolderCensus, holderIdentities) {
-	p := procHolders()
+	p := holderSource()
 	lim := defaultHolderLimits
 	return retryHolderIdentities(p.now, lim, refresh, func(b *holderBudget) (HolderCensus, holderIdentities) {
 		c := p.censusBudget(wanted, lim, b)

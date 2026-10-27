@@ -1,0 +1,150 @@
+Discovery/identity overhead: shared fresh census per discovery tick (from 834debf)
+
+Scope
+Experimental isolated increment. No host deployment, restart, protection, rule
+or offload change; installed 25dbb1a and updater restrictions unchanged. UDP GSO
+remains a separate unresolved gate. Socket-binding ownership semantics, the
+controller's bind-time proof, lease/renewal, the one-second discovery interval
+and every permission path are unchanged.
+
+Trace: why uncapped sockets were resolved every second
+The manager's discovery tick takes one inet_diag census and visits at most eight
+rows round-robin. Rows that are unbound, belong to a capped UID and are
+connected were each passed to identity.Resolve separately. Each Resolve runs
+its own socket dump, its own FULL holder census (a walk of every
+/proc/*/task/*/fd with a readlink per descriptor; the dominant cost) and its own
+recheck dump. eligible() does not consult the cap set: a verified uncapped
+application passes it, reaches bind() and exits there because its rate is zero,
+with nothing recorded. The same row is resolved again on the next tick. In the
+instrumented 35cb03a profile (taken before 834debf's native map worker) this
+was 117 full resolutions per minute and 3.57 of 3.85 CPU seconds of the manager
+loop, for sockets that are uncapped under the tested configuration and so
+could not be bound; 834debf did not change this path.
+The controller's bind proof (probe bind: Resolve, native-leader checks,
+identity.Inspect re-check, bookend Resolve, expected app/cookie match) is the
+only binding authority; the manager's Resolve result is a discovery hint.
+
+Change: identity.ResolveBatch and a shared discovery pass
+ResolveBatch(flows) attributes up to eight flows with ONE full socket dump, ONE
+shared holder census (resolveHolderIdentities over the union of the flows'
+receiver inodes; it may itself retry once) and ONE recheck dump. Each flow is
+finalised with the identical decision Resolve applies, by the function
+finalizeAttribution extracted from Resolve's tail; owners are restricted to that
+flow's own receiver sockets before de-duplication, coverage, broker
+association and fingerprinting. Resolve keeps its own per-flow dump selection
+and keeps its decision logic; its tail now lives in finalizeAttribution and
+collectOwners, so Resolve IS refactored source on the permission path, covered
+by a frozen-reference regression (resolveReferenceOld) including the failure
+path where observed owners must survive a failed recheck. The manager collects
+the candidate rows among the
+at most eight ROWS visited per tick and calls ResolveBatch once; after the
+batch it re-checks version and enabled state and discards the batch if the
+configuration changed meanwhile. Nothing is remembered between ticks: no
+cache, no TTL, no negative memory, no per-PID memo. Verified uncapped sockets
+are still re-examined every pass, now sharing one census instead of paying one
+each.
+
+Differences from per-flow Resolve, deliberate and tested
+- Census completeness, retry and time/FD/task budgets are shared: a socket
+  whose own census would be complete-negative (no holder) is reported
+  visibility-incomplete when another flow's inspection failed in the same
+  census. The batch is never less strict than Resolve (model test asserts the
+  collateral and its conservative shape).
+- Concrete UDP flows use the full dump instead of the port-filtered dump; the
+  competitor set is the same (existing test), the cost profile differs.
+- The recheck dump is shared; "listener changed" is judged per flow on it.
+- Tests: empty input performs no dump/census; more than eight inputs refused
+  whole; per-flow namespace refusal and positional mapping; no-receiver flows
+  equal Resolve; dump and recheck failures propagate like Resolve; mixed
+  TCP/UDP v4/v6, duplicate flow, shared-holder socket; finalize restriction;
+  real own-socket equivalence (fields compared, completeness compared not
+  assumed). Manager: eight rows visited incl. skipped ones; row-limit census
+  error uses no partial rows (unchanged behaviour, now tested); configuration
+  change during the census discards the batch and counts it as stale.
+
+Observability
+status.upload_shaping.discovery holds monotonic activity counters:
+census_attempts (ticks that asked for a census), census_errors (census calls
+that returned an error; partial rows are never walked), census_passes
+(successful non-empty censuses walked), rows_visited (rows examined, skipped
+ones included, at most eight per pass), skipped_unusable (no inode),
+skipped_bound, skipped_uid, skipped_unconnected, candidate_rows (rows handed to
+the shared resolution), shared_resolutions (ResolveBatch CALLS, not physical
+holder walks: a call may walk twice on retry and walks zero times when no row
+has a receiver), flows_resolved, eligible_candidates (eligible whether capped or
+not), bind_requests (controller bind RPCs actually issued), stale_batches. They
+describe work performed and are kept out of known_gaps, which implies
+uncovered traffic. The old build has no such counters.
+
+Bounds and remaining findings
+With R TOTAL retained census rows (skipped rows included) and eight visited per
+tick, a full pass takes at least ceil(R/8) ticks; changing dump order, census
+errors, controller RPC blocking and configuration changes add to that, so no
+wall-clock bound is given, only observed times.
+The 1024-row census cap still makes SocketsLimited return an error with a
+partial result, and the manager still skips the whole tick on that error
+(gap discovery_failed): a pre-existing coverage limitation on hosts with more
+than 1024 sockets, not changed here. Verified uncapped sockets of a capped UID
+are still visited every pass; the remaining recurring cost after this change
+is one shared census per tick with candidates, the controller's per-tick socket
+probe and lease renewals, and the inet_diag census itself.
+
+Measured results (VM4, profiling OFF, netdevsim guest, 1 TCG vCPU; .workspace/shaping-discovery)
+Design: eight comparison phases (nominal 30 s of a 40 s B bulk after 5 s warmup; actual measured
+intervals 31.4..32.0 s) in the order old,new,new,old, control,new,new,control; the daemon is
+restarted on its binary for every phase. IDENTICAL workload in every comparison phase: B uncapped
+bulk TCP, L uncapped low-rate 3x200 records at 50 ms, D denied UDP, A (8 Mbit/s cap) and C (2 Mbit/s
+cap) connected and bound when shaping but IDLE. Two further single-order phases with A transmitting
+measure cap accuracy under load and are reported separately, never pooled. Receiver throughput is the
+peer's payload for B; CPU is the daemon process tree (self + live descendants + reaped children,
+HZ 100) normalised to the actual interval.
+
+ phase     build     B Mbit/s  tree ticks  interval s  ticks/s  flows_resolved/shared_resolutions  L p95 ms
+ old1      834debf   466.6     905         31.46       28.767   n/a                                 2.04/1.81/1.59
+ new1      candidate 445.1     803         31.59       25.419   84/30                               1.42/1.48/1.7
+ new2      candidate 471.7     785         31.48       24.936   84/31                               1.49/1.42/1.41
+ old2      834debf   426.4     984         31.48       31.258   n/a                                 1.66/1.67/1.63
+ control1  disabled  653.9     333         32.01       10.403   n/a                                 1.06/1.04/1.06
+ new3      candidate 489.5     781         31.57       24.739   84/32                               1.43/1.43/1.34
+ new4      candidate 475.3     800         31.48       25.413   84/31                               1.77/1.52/1.57
+ control2  disabled  605.8     392         31.38       12.492   n/a                                 1.25/1.28/1.32
+Block 1 (old1,old2 vs new1,new2, same workload): B 446.5 -> 458.4 Mbit/s (+2.67 %, direction
+MIXED: new1 445.1 < old1 466.6); daemon tree 944.5 -> 794.0 raw ticks (-15.9 %),
+30.013 -> 25.178 ticks/s over the actual intervals (-16.1 %), consistent in both pairs. The CPU reduction is the robust result; the throughput change is within
+the spread.
+Block 2 (control1,control2 vs new3,new4, same workload): B 629.8 -> 482.4 Mbit/s, candidate =
+76.59 % of the shaping-disabled control (deficit 23.41 %); daemon tree 11.437 -> 25.075
+ticks/s. Shaping enabled still costs about 13.6 ticks/s of one vCPU over the disabled
+control. The experimental 70 % threshold is passed; that is not "overhead solved" and not host readiness.
+Cap-load phases (A transmitting, single order, shaped builds only): old B 363.4 Mbit/s, A 7.7 Mbit/s,
+tree 981 ticks; candidate B 402.5 Mbit/s, A 7.67 Mbit/s, tree 836 ticks. A's cap held on both.
+Low-rate delivery 200/200 in every chunk of every phase; p95 at most 2.04 ms. Deny delivered nothing in
+every phase.
+Discovery counters (candidate): about 31 ResolveBatch calls resolving 84 candidate rows per phase (three
+candidate rows B, L, D per tick; eligible_candidates 81-89; bind_requests 0 because none is capped).
+The old build has no counters: its per-row full resolutions equal its candidate rows, so about 84
+single-row holder censuses per phase are INFERRED from the identical census, not measured.
+shared_resolutions counts calls, not physical walks (a call may retry once).
+The targeted component (one holder census per candidate row) was replaced by one shared census per
+tick as designed. Total shaping overhead fell by about 16 % of daemon-tree CPU. The remaining cost is
+NOT attributed: no candidate profile was taken, and no conclusion about which component dominates can
+be drawn from a partial improvement.
+
+Identity-change tests (candidate): descriptor handoff with both holders alive stays unbound
+(ambiguous, asserted after 4 s); exclusive handoff (B closes its copy) bound to A after 1.30 s; exec of
+the uncapped sender into the capped image with the same PID rebound after 0.81 s; a new cap for a
+previously uncapped application bound its existing socket after 1.08 s. Observed times on this guest
+with three candidate rows, not guarantees. Bounded failure (kernel worker killed -> Unsupported, no
+restart without CAS), explicit disable -> exact original root, zero controller and zero kernel-worker
+processes while disabled (checked before and after every phase): PASS. Guest live identity tests (own
+sockets, lab netns): 6/6 PASS in VM3 and VM4 (identity-live.txt); VM2 had one failure caused by
+comparing the per-capture Provenance pointer target, since corrected. Retained failed runs: vm1
+(identity fixture bug; its controls had an unequal workload: diagnostic only), vm2 (session dir mode),
+vm3 (idle-A receiver lookup). One earlier host execution of the two live tests is retained as such.
+
+Readiness: experimental source increment. The discovery component was reduced as designed and the
+daemon-tree CPU fell by about 16 % at identical workload; throughput change is within the measurement
+spread; with shaping enabled the guest delivers 76.6 % of the disabled-control throughput (deficit
+23.4 %) on this single vCPU. Overhead is
+NOT solved. Not a host-ready limiter; no approval, deployment or updater change is implied. UDP GSO
+remains a separate unresolved gate.

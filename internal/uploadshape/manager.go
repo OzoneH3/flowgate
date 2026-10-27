@@ -61,10 +61,32 @@ type Snapshot struct {
 	Kernel          *KernelStatus     `json:"kernel,omitempty"`
 	ApplicationWide bool              `json:"application_wide_guarantee"`
 	Gaps            map[string]uint64 `json:"known_gaps"`
+	Discovery       DiscoveryStats    `json:"discovery"`
 	LastError       string            `json:"last_error,omitempty"`
 	Updated         time.Time         `json:"updated"`
 	Coverage        string            `json:"coverage"`
 }
+
+// DiscoveryStats are monotonic activity counters for the census-driven discovery
+// path. They describe work performed, never uncovered traffic, and are kept
+// apart from known_gaps for that reason.
+type DiscoveryStats struct {
+	CensusAttempts     uint64 `json:"census_attempts"`     // ticks that asked for a socket census
+	CensusErrors       uint64 `json:"census_errors"`       // census calls that returned an error (partial rows unused)
+	CensusPasses       uint64 `json:"census_passes"`       // successful non-empty censuses that were walked
+	RowsVisited        uint64 `json:"rows_visited"`        // rows examined, skipped ones included (<= 8 per pass)
+	SkippedUnusable    uint64 `json:"skipped_unusable"`    // rows without an inode
+	SkippedBound       uint64 `json:"skipped_bound"`       // rows already bound in the kernel
+	SkippedUID         uint64 `json:"skipped_uid"`         // rows of a UID without any cap
+	SkippedUnconnected uint64 `json:"skipped_unconnected"` // unconnected/wildcard rows
+	CandidateRows      uint64 `json:"candidate_rows"`      // rows handed to the shared resolution
+	SharedResolutions  uint64 `json:"shared_resolutions"`  // ResolveBatch calls (each may census twice on retry)
+	FlowsResolved      uint64 `json:"flows_resolved"`      // attributions returned by those calls
+	EligibleCandidates uint64 `json:"eligible_candidates"` // candidates whose attribution was eligible (capped or not)
+	BindRequests       uint64 `json:"bind_requests"`       // controller bind RPCs actually issued
+	StaleBatches       uint64 `json:"stale_batches"`       // batches discarded because the configuration changed meanwhile
+}
+
 type Options struct {
 	Interface, Helpers, State, ParentNetNS string
 }
@@ -91,6 +113,7 @@ type Manager struct {
 	sockets         func() ([]identity.Socket, error)
 	cleanup         func() error
 	resolve         func(identity.Flow) identity.Attribution
+	resolveBatch    func([]identity.Flow) []identity.Attribution
 }
 
 func New(o Options) (*Manager, error) {
@@ -108,7 +131,7 @@ func New(o Options) (*Manager, error) {
 	return m, nil
 }
 func newManager(o Options) *Manager {
-	m := &Manager{opts: o, wake: make(chan struct{}, 1), hints: make(chan hint, 128), pending: map[string]bool{}, sockets: func() ([]identity.Socket, error) { return identity.SocketsLimited(1024) }, resolve: identity.Resolve}
+	m := &Manager{opts: o, wake: make(chan struct{}, 1), hints: make(chan hint, 128), pending: map[string]bool{}, sockets: func() ([]identity.Socket, error) { return identity.SocketsLimited(1024) }, resolve: identity.Resolve, resolveBatch: identity.ResolveBatch}
 	m.snap = Snapshot{Version: 1, Interface: o.Interface, Status: "Disabled", Caps: []Cap{}, Gaps: map[string]uint64{}, Coverage: "verified socket bindings only; first packets and unobserved sockets may escape; never application-wide"}
 	return m
 }
@@ -204,6 +227,25 @@ func (m *Manager) Close() {
 	}
 }
 func (m *Manager) gap(reason string) { m.mu.Lock(); m.snap.Gaps[reason]++; m.mu.Unlock() }
+func (m *Manager) discovered(d DiscoveryStats) {
+	m.mu.Lock()
+	s := &m.snap.Discovery
+	s.CensusAttempts += d.CensusAttempts
+	s.CensusErrors += d.CensusErrors
+	s.CensusPasses += d.CensusPasses
+	s.RowsVisited += d.RowsVisited
+	s.SkippedUnusable += d.SkippedUnusable
+	s.SkippedBound += d.SkippedBound
+	s.SkippedUID += d.SkippedUID
+	s.SkippedUnconnected += d.SkippedUnconnected
+	s.CandidateRows += d.CandidateRows
+	s.SharedResolutions += d.SharedResolutions
+	s.FlowsResolved += d.FlowsResolved
+	s.EligibleCandidates += d.EligibleCandidates
+	s.BindRequests += d.BindRequests
+	s.StaleBatches += d.StaleBatches
+	m.mu.Unlock()
+}
 func eligible(a identity.Attribution) (string, string) {
 	if !a.VisibilityComplete || a.Status != "directly-associated" || len(a.Owners) != 1 || len(a.Sockets) != 1 || a.Application == nil {
 		return "", ""
@@ -443,23 +485,41 @@ func (m *Manager) run() {
 				m.bind(t, h, version)
 			}
 		case <-tick.C:
+			m.discovered(DiscoveryStats{CensusAttempts: 1})
 			ss, er := m.sockets()
 			if er != nil {
+				// Includes the row-limit error: a partial census is never walked.
+				m.discovered(DiscoveryStats{CensusErrors: 1})
 				m.gap("discovery_failed")
 				continue
 			}
 			if len(ss) == 0 {
 				continue
 			}
-			// At most8 socket inspections per cycle, round robin, finite1024-row census.
+			// At most 8 ROWS are visited per cycle (round robin over the finite
+			// 1024-row census, skipped rows included). Candidate rows that survive
+			// the cheap filters are attributed by ONE shared, fresh holder census
+			// (identity.ResolveBatch) instead of one census per row. Nothing is
+			// remembered between cycles; the controller re-proves every binding.
+			var candidates []identity.Socket
+			var flows []identity.Flow
+			stats := DiscoveryStats{CensusPasses: 1}
+			stop := false
 			for i := 0; i < 8 && i < len(ss); i++ {
 				s := ss[cursor%len(ss)]
 				cursor++
-				_, v, stop := m.current()
-				if stop || v != version {
+				_, v, closed := m.current()
+				if closed || v != version {
+					stop = true
 					break
 				}
-				if s.Inode == 0 || bound[s.Cookie] {
+				stats.RowsVisited++
+				if s.Inode == 0 {
+					stats.SkippedUnusable++
+					continue
+				}
+				if bound[s.Cookie] {
+					stats.SkippedBound++
 					continue
 				}
 				uidWanted := false
@@ -470,14 +530,40 @@ func (m *Manager) run() {
 					}
 				}
 				if !uidWanted {
+					stats.SkippedUID++
 					continue
 				}
 				if !s.Remote.IsValid() || s.Remote.Port() == 0 || s.Remote.Addr().IsUnspecified() || !s.Local.IsValid() || s.Local.Addr().IsUnspecified() {
+					stats.SkippedUnconnected++
 					m.gap("unconnected_or_listener_needs_observed_peer")
 					continue
 				}
-				f := identity.Flow{Protocol: s.Protocol, Direction: "outgoing", Local: s.Local, Remote: s.Remote, NetNS: s.NetNS, Interface: s.Interface}
-				app, cookie := eligible(m.resolve(f))
+				candidates = append(candidates, s)
+				flows = append(flows, identity.Flow{Protocol: s.Protocol, Direction: "outgoing", Local: s.Local, Remote: s.Remote, NetNS: s.NetNS, Interface: s.Interface})
+			}
+			stats.CandidateRows = uint64(len(candidates))
+			if stop || len(candidates) == 0 {
+				m.discovered(stats)
+				continue
+			}
+			stats.SharedResolutions = 1
+			attributions := m.resolveBatch(flows)
+			stats.FlowsResolved = uint64(len(attributions))
+			if len(attributions) != len(flows) {
+				// Resolver contract violation: treat as a failed pass, never index past it.
+				m.gap("discovery_failed")
+				m.discovered(stats)
+				continue
+			}
+			// The configuration may have changed while the census ran: never act on,
+			// or publish as current, results obtained under an older version.
+			if _, v, closed := m.current(); closed || v != version {
+				stats.StaleBatches = 1
+				m.discovered(stats)
+				continue
+			}
+			for i, s := range candidates {
+				app, cookie := eligible(attributions[i])
 				if app == "" {
 					m.gap("unsupported_or_shared_discovery")
 					continue
@@ -486,15 +572,22 @@ func (m *Manager) run() {
 					m.gap("discovery_generation_changed")
 					continue
 				}
-				m.bind(t, hint{f, app, cookie}, version)
+				stats.EligibleCandidates++
+				if m.bind(t, hint{flows[i], app, cookie}, version) {
+					stats.BindRequests++
+				}
 			}
+			m.discovered(stats)
 		}
 	}
 }
-func (m *Manager) bind(t transport, h hint, version uint64) {
+
+// bind asks the controller to prove and bind one socket; it reports whether a
+// controller request was actually issued (false for stale/uncapped/invalid).
+func (m *Manager) bind(t transport, h hint, version uint64) bool {
 	cfg, v, closed := m.current()
 	if v != version || closed || !cfg.Enabled {
-		return
+		return false
 	}
 	var rate uint64
 	for _, c := range cfg.Caps {
@@ -503,11 +596,11 @@ func (m *Manager) bind(t transport, h hint, version uint64) {
 		}
 	}
 	if rate == 0 {
-		return
+		return false
 	}
 	if !validFlow(h.flow) {
 		m.gap("unsupported_flow")
-		return
+		return false
 	}
 	_, err := call(t, map[string]any{"op": "bind", "protocol": h.flow.Protocol, "local": h.flow.Local.String(), "remote": h.flow.Remote.String(), "rate": rate, "expected_app": h.app, "expected_cookie": h.cookie})
 	if err != nil {
@@ -516,6 +609,7 @@ func (m *Manager) bind(t transport, h hint, version uint64) {
 		m.snap.LastError = err.Error()
 		m.mu.Unlock()
 	}
+	return true
 }
 func validFlow(f identity.Flow) bool {
 	return (f.Protocol == "tcp" || f.Protocol == "udp") && f.Local.IsValid() && f.Remote.IsValid() && f.Remote.Port() != 0 && !f.Remote.Addr().IsUnspecified()
