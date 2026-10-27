@@ -95,6 +95,8 @@ await build({
     'src/usage-history.ts',
     'src/usage-history-client.ts',
     'src/observed-usage-client.ts',
+    'src/upload-shaping.ts',
+    'src/upload-shaping-client.ts',
   ],
   bundle: true,
   platform: 'node',

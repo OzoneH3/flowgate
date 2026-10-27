@@ -319,6 +319,7 @@ export interface Permissions {
   can_decide: boolean;
 }
 export interface Reply {
+  upload_shaping?: unknown;
   endpoint_preview?: EndpointPreview;
   observed_usage?: unknown;
   usage_history?: unknown;
@@ -456,6 +457,8 @@ export interface Decision {
   duration_seconds?: number;
 }
 export interface Bridge {
+  uploadStatus(): Promise<import("./upload-shaping").UploadView>;
+  uploadConfigure(value: import("./upload-shaping").UploadEdit | import("./upload-shaping").UploadCleanup): Promise<import("./upload-shaping").UploadView>;
   hostIdentity(): Promise<string>;
   guiBuild(): Promise<import('./build-info').GuiBuild>;
   zoneMigrationState(): Promise<import('./zone-migration').MigrationView>;
@@ -878,6 +881,7 @@ export function parseReply(raw: unknown): Reply {
     observed_usage: r.observed_usage,
     usage_history: r.usage_history,
     history_settings: r.history_settings,
+    upload_shaping: r.upload_shaping,
     decision_preview: r.decision_preview,
     decision_receipt: r.decision_receipt,
     request_rule_preview: r.request_rule_preview,

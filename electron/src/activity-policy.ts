@@ -1,3 +1,4 @@
+import { uploadButton } from "./upload-shaping-view";
 import { runtimeWitness } from './protocol';
 import { matchesApplicationZone } from './application-zones';
 import { acceptsPublication } from './publication';
@@ -550,6 +551,7 @@ export class ActivityPolicy {
       for (const d of name === 'Priority' ? ['both'] : directions) {
         const td = el('td');
         if (d === 'both') td.colSpan = 2;
+        if (name === 'Limit' && d === 'outgoing' && this.row && this.state) { td.append(uploadButton(this.row,this.state)); tr.append(td); continue; }
         const cell = el('span', '', 'rule-cell static' + (d === 'both' ? ' wide' : ''));
         cell.append(
           el('span', glyph, 'blocker-glyph tone-none family-' + name.toLowerCase()),

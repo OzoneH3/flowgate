@@ -191,3 +191,18 @@ applied_version, verified bindings and receiver cap enforcement are distinct.
 Kernel maintenance timing fields are observation counters only:
 maintenance_cycles, maintenance_pass_ms, max_maintenance_pass_ms,
 max_completion_gap_ms, max_renewal_span_ms (controller-lifetime maxima).
+
+Experimental GUI integration
+snapshot.deployment_mode is isolated or host-trial; startup selects this mode,
+not the API. host-trial requires the explicit experimental startup switch and
+an explicitly selected structurally supported single-queue interface. The
+normal updater neither selects this mode nor authorizes this release.
+
+snapshot.coverage_valid_for_ms is remaining monotonic coverage time at API
+read (0..5000), rounded down. A client anchors it at request START and zeros
+coverage when it elapses. kernel.valid_for_ms is part of a retained controller
+observation and MUST NOT be treated as remaining time on each API read.
+Each kernel.bindings entry has covered (report-only), derived from the same
+health sample as covered_bindings. Expiry/fault/Disabled/Unsupported clears
+both the aggregate and per-binding flags in the returned snapshot. These
+fields are reporting, never permission or binding authority.

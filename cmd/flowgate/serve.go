@@ -63,9 +63,10 @@ func serveCommand(args []string) error {
 	allowEvaluation := fs.Bool("allow-evaluation", false, "explicit selected administrator authority to start/stop incoming five-minute evaluation")
 	evaluationState := fs.String("evaluation-state", "/run/flowgate-evaluation", "root-owned evaluation state; prepared only on explicit Start")
 	allowTraffic := fs.Bool("allow-traffic-control", false, "explicitly allow the selected administrator to start/stop machine UDP collection")
-	shapeInterface := fs.String("experimental-upload-interface", "", "opt-in isolated native upload API, veth only; disabled by default")
+	shapeInterface := fs.String("experimental-upload-interface", "", "opt-in experimental native upload API on one supported interface; disabled by default")
 	shapeHelpers := fs.String("experimental-upload-helpers", "", "root-owned M1 helper directory")
 	shapeState := fs.String("experimental-upload-state", "", "private isolated controller journal directory")
+	shapeHost := fs.Bool("experimental-upload-host-trial", false, "explicit experimental physical-interface trial opt-in; mutually exclusive with parent-netns; no automatic activation")
 	shapeParent := fs.String("experimental-upload-parent-netns", "", "explicit parent namespace; child namespace required")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -121,13 +122,13 @@ func serveCommand(args []string) error {
 		if !*administrator {
 			return fmt.Errorf("experimental upload requires explicit administrator")
 		}
-		manager, er := uploadshape.New(uploadshape.Options{Interface: *shapeInterface, Helpers: *shapeHelpers, State: *shapeState, ParentNetNS: *shapeParent})
+		manager, er := uploadshape.New(uploadshape.Options{Interface: *shapeInterface, Helpers: *shapeHelpers, State: *shapeState, ParentNetNS: *shapeParent, HostTrial: *shapeHost})
 		if er != nil {
 			return er
 		}
 		e.UploadShaping = manager
 		defer manager.Close()
-	} else if *shapeHelpers != "" || *shapeState != "" || *shapeParent != "" {
+	} else if *shapeHelpers != "" || *shapeState != "" || *shapeParent != "" || *shapeHost {
 		return fmt.Errorf("experimental upload options require an explicit interface")
 	}
 	e.Mode = "daemon-monitor"

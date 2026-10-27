@@ -1,3 +1,4 @@
+import {uploadButton, refreshUpload, openUploadLimits} from "./upload-shaping-view";
 import { setupObservedUsage, showObservedUsage, updateObservedUsage } from './observed-usage-view';
 import { matchesApplicationZone } from './application-zones';
 import { ApplicationCallers } from './application-callers';
@@ -599,6 +600,7 @@ function statusStrip(r: Row) {
   const result = authoritative ? authoritativePolicy(r, state) : undefined;
   const processPolicy = authoritativeProcessPolicy(r, state);
   for (const slot of STATUS_SLOTS) {
+    if (slot.key === "ul-limit") { strip.append(uploadButton(r,state)); continue; }
     if (!slot.direction) {
       const dot = element('span', '', 'status-slot unavailable');
       dot.append(element('span', '·', 'slot-dot'), statusFamilyGlyph(slot.key));
@@ -878,7 +880,7 @@ if (promptID) {
     }
   });
 } else {
-  root.innerHTML = `<header class="toolbar"><strong class="brand">FLOWGATE</strong><span id="buildVersion" class="build-version"></span><span id="toolbarUnits" class="toolbar-units"><label for="displayUnits">Units</label><select id="displayUnits" aria-label="Display units" title="Display only: bytes or bits, decimal SI prefixes (1 KB = 1000 B). Accounting sources stay separate."></select></span><span id="observerStatus" class="toolbar-status"></span><span id="controlStatus" class="toolbar-status"></span><span class="toolbar-layout"><select id="layoutPreset" aria-label="Window layout"><option value="chart">Default with Chart</option><option value="plain">Default</option><option value="activity">Activity only</option></select></span><input id="search" type="search" aria-label="Search Activity" placeholder="Search"></header><nav class="tabs" aria-label="Views"><button id="activityTab" aria-selected="true">Activity</button><button id="requestsTab" aria-selected="false">Pending requests <span id="pendingCount">0</span></button><span id="tabsPaneControls" class="pane-controls"></span></nav><main id="activityView"><section class="activity-main"><div class="filterbar"><select id="activitySource" aria-label="Activity measurement source"><option value="tcp">TCP</option><option value="udp">UDP</option></select><button id="rateMode" aria-pressed="false" title="Switch the two traffic columns between current rate and total transferred">Rate</button><select id="columnPreset" aria-label="Column preset"><option value="status">Status</option><option value="details">Details</option></select><select id="filter" aria-label="Socket filter"><option value="all">All sockets</option><option value="active">Active TCP / connected UDP</option><option value="listening">Listening TCP / bound UDP</option></select><span class="filterbar-icons"><button id="expand" class="icon-button" title="Expand all" aria-label="Expand all">⊞</button><button id="collapse" class="icon-button" title="Collapse all" aria-label="Collapse all">⊟</button><button id="refreshNow" class="icon-button" title="Refresh now" aria-label="Refresh now">↻</button></span></div><div class="table-scroll"><table id="tree" role="treegrid" tabindex="0" aria-label="Application process socket activity"><thead><tr id="headers"></tr></thead><tbody id="rows"></tbody></table></div><div id="activitySummary" class="summary"></div></section><aside><h2>Info View<span id="infoPaneControls" class="pane-controls"></span></h2><h3 id="selectedName">FlowGate Activity</h3><div id="selectedExecutable"></div><div class="info-scroll"><h3 id="infoProperties" class="info-section-title">Overview</h3><dl id="info"></dl><section id="infoRules"></section><section class="info-tools"><h3 class="info-section-title">Tools</h3><button id="infoOpenRules">Rule list</button><button id="infoOpenLog">Decision log</button><button id="infoOpenPending">Pending requests</button></section></div><section id="trafficGraph"></section></aside></main><main id="requestsView" hidden><section class="request-list"><h2>Pending requests</h2><p class="hint">One row per group of identical requests; a decision answers its oldest request. Dismissal grants nothing. Closing FlowGate leaves an independent controller running.</p><div class="table-scroll"><table id="requests"><thead><tr><th>Application</th><th>Direction</th><th>Protocol</th><th>Remote endpoint</th><th>Requests</th><th>State</th></tr></thead><tbody id="requestRows"></tbody></table></div><section id="temporaryDecisions" class="temporary-decisions" hidden><h3 title="For a while decisions: in memory only, never saved as rules">Temporary decisions</h3><div id="leaseRows"></div></section><section id="permissionResultsView" class="permission-results" hidden><h3 title="Outcomes of Allow/Deny submissions; the permission window hides on the click">Results</h3><ol id="permissionResultRows"></ol></section></section><aside class="request-sidebar"><h2>Connection permission</h2><div id="requestDetails"></div></aside></main><footer><span id="footerSummary"></span><button id="resultsAttention" class="link-button results-attention" hidden></button><span id="feedback" role="status" aria-live="polite"></span></footer>`;
+  root.innerHTML = `<header class="toolbar"><strong class="brand">FLOWGATE</strong><span id="buildVersion" class="build-version"></span><span id="toolbarUnits" class="toolbar-units"><label for="displayUnits">Units</label><select id="displayUnits" aria-label="Display units" title="Display only: bytes or bits, decimal SI prefixes (1 KB = 1000 B). Accounting sources stay separate."></select></span><span id="observerStatus" class="toolbar-status"></span><span id="controlStatus" class="toolbar-status"></span><span class="toolbar-layout"><select id="layoutPreset" aria-label="Window layout"><option value="chart">Default with Chart</option><option value="plain">Default</option><option value="activity">Activity only</option></select></span><input id="search" type="search" aria-label="Search Activity" placeholder="Search"></header><nav class="tabs" aria-label="Views"><button id="activityTab" aria-selected="true">Activity</button><button id="requestsTab" aria-selected="false">Pending requests <span id="pendingCount">0</span></button><span id="tabsPaneControls" class="pane-controls"></span></nav><main id="activityView"><section class="activity-main"><div class="filterbar"><select id="activitySource" aria-label="Activity measurement source"><option value="tcp">TCP</option><option value="udp">UDP</option></select><button id="uploadLimits">Upload limits</button><button id="rateMode" aria-pressed="false" title="Switch the two traffic columns between current rate and total transferred">Rate</button><select id="columnPreset" aria-label="Column preset"><option value="status">Status</option><option value="details">Details</option></select><select id="filter" aria-label="Socket filter"><option value="all">All sockets</option><option value="active">Active TCP / connected UDP</option><option value="listening">Listening TCP / bound UDP</option></select><span class="filterbar-icons"><button id="expand" class="icon-button" title="Expand all" aria-label="Expand all">⊞</button><button id="collapse" class="icon-button" title="Collapse all" aria-label="Collapse all">⊟</button><button id="refreshNow" class="icon-button" title="Refresh now" aria-label="Refresh now">↻</button></span></div><div class="table-scroll"><table id="tree" role="treegrid" tabindex="0" aria-label="Application process socket activity"><thead><tr id="headers"></tr></thead><tbody id="rows"></tbody></table></div><div id="activitySummary" class="summary"></div></section><aside><h2>Info View<span id="infoPaneControls" class="pane-controls"></span></h2><h3 id="selectedName">FlowGate Activity</h3><div id="selectedExecutable"></div><div class="info-scroll"><h3 id="infoProperties" class="info-section-title">Overview</h3><dl id="info"></dl><section id="infoRules"></section><section class="info-tools"><h3 class="info-section-title">Tools</h3><button id="infoOpenRules">Rule list</button><button id="infoOpenLog">Decision log</button><button id="infoOpenPending">Pending requests</button></section></div><section id="trafficGraph"></section></aside></main><main id="requestsView" hidden><section class="request-list"><h2>Pending requests</h2><p class="hint">One row per group of identical requests; a decision answers its oldest request. Dismissal grants nothing. Closing FlowGate leaves an independent controller running.</p><div class="table-scroll"><table id="requests"><thead><tr><th>Application</th><th>Direction</th><th>Protocol</th><th>Remote endpoint</th><th>Requests</th><th>State</th></tr></thead><tbody id="requestRows"></tbody></table></div><section id="temporaryDecisions" class="temporary-decisions" hidden><h3 title="For a while decisions: in memory only, never saved as rules">Temporary decisions</h3><div id="leaseRows"></div></section><section id="permissionResultsView" class="permission-results" hidden><h3 title="Outcomes of Allow/Deny submissions; the permission window hides on the click">Results</h3><ol id="permissionResultRows"></ol></section></section><aside class="request-sidebar"><h2>Connection permission</h2><div id="requestDetails"></div></aside></main><footer><span id="footerSummary"></span><button id="resultsAttention" class="link-button results-attention" hidden></button><span id="feedback" role="status" aria-live="polite"></span></footer>`;
   // The GUI's own release identity (verified against its bundle manifest).
   void window.flowgate
     .guiBuild()
@@ -886,6 +888,7 @@ if (promptID) {
     .then((b) => {
       guiBuild = b;
       renderBuildVersion();
+
     });
   const columns = [
     ['name', 'Name'],
@@ -958,6 +961,7 @@ if (promptID) {
   });
   setupPaneControls();
   activityPolicy = new ActivityPolicy($('infoRules'));
+  $('uploadLimits').onclick=()=>void openUploadLimits().catch(e=>message(String(e)));
   window.flowgate.onFutureApplicationRule((source) => {
     if (source.generation !== state?.control.generation || source.target_scope !== 'application') return;
     chooseTab('activity');
@@ -2911,6 +2915,7 @@ function renderBuildVersion() {
 function consume(next: ClientState) {
   if (!acceptsPublication(state, next)) return;
   state = next;
+  if (!promptID) refreshUpload(state);
   applicationCallers.observe(next);
   const present = new Set(state.control.events.map((e) => state.control.generation + ':' + e.id));
   for (const key of localSubmitted) if (!present.has(key)) localSubmitted.delete(key);
@@ -2938,7 +2943,7 @@ function consume(next: ClientState) {
     updateFirewallStatus();
     for (const th of document.querySelectorAll<HTMLElement>('.col-rule_status button'))
       th.title = state.control.capabilities?.includes(POLICY_CAPABILITY)
-        ? 'Priority · DL Limit · UL Limit · In Blocker · Out Blocker · In Quota · Out Quota. Only Blocker is a FlowGate feature; backend policy summary.'
+        ? 'Priority · DL Limit · UL Limit · In Blocker · Out Blocker · In Quota · Out Quota. Upload limits are experimental and separate from firewall Blocker policy.'
         : 'Compatibility inventory (listed rules; no backend summary).';
     $('observerStatus').textContent = state.observation.message;
     $('observerStatus').title = state.observation.message;
@@ -3111,6 +3116,7 @@ void window.flowgate.hostIdentity?.().then(label => {
   if (state) { buildTree(); renderTree(); }
 }).catch(() => {});
 window.flowgate.subscribe(consume);
+if (!promptID) window.setInterval(() => { if(state) refreshUpload(state); }, 1000);
 window.flowgate.onClock((clock) => {
   const next = advanceClock(state, clock);
   if (next && next !== state) consume(next);

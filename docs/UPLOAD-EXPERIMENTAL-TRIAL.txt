@@ -1,0 +1,117 @@
+Experimental native upload limits: integration and host-trial plan
+Release: exact source/backend/GUI SHA is recorded in matched-manifest.json.
+Prepare-only command: scripts/prepare-upload-experiment.sh (clean committed tree).
+
+Status and usable workflow
+The matched experimental daemon/GUI bundle provides an opt-in native upload
+limit through Activity's UL Limit slot, Info View's Limit / Out cell, and the
+Upload limits list. Select one verified native application/UID, enter 1–1000
+Mbit/s, and Enable / save. Editing preserves other targets. Disable removes that
+target; removing the last target requests verified controller cleanup. A disabled,
+empty configuration with a cleanup fault offers Retry owned cleanup.
+
+Configuration acknowledgement is Pending, not receiver proof. The display keeps
+configured rate, requested bindings and confirmed bindings distinct. Partial
+means verified sockets on the selected interface only; first packets, undiscovered
+or unsupported sockets, and traffic routed elsewhere can escape. Read-time
+coverage expiry clears confirmed counts. Refresh/review is required after a stale
+draft or uncertain receipt; writes are never automatically replayed. The GUI's
+lifetime and UDP collector settings do not control shaping. Configuration is
+session-scoped: restarting the daemon does not replay old bindings or caps.
+
+Firewall Allow/Deny remains a separate authority. No limit grants access, and no
+UI limit operation edits firewall rules. Socket-binding ownership is unchanged:
+exec or descriptor transfer after binding does not automatically reassign it.
+Runtime/shared/ambiguous identities remain unsupported rather than inheriting a
+launcher or another application's class. No download limiting, priorities or VPN
+support is added. UDP GSO is still an unresolved gate; TCP cap evidence does not
+prove UDP cap accuracy. Configured rates are charged scheduler rates, not a promise
+of equal receiver payload throughput or wire-byte accounting.
+
+Actual host inspection — read-only, not activation
+Retained result: .workspace/shaping-ui/host-preflight.json.
+The selected enp7s0 passed the implemented structural predicate:
+single-queue-default-fq_codel, no reported refusal reasons, hw-tc-offload off.
+TSO/GSO/scatter-gather were on. The recorded superpacket bound was 64000 bytes,
+with a 192000-byte minimum per-app leaf memory limit and a recommended minimum
+rate of 5120000 bit/s for the segmentation profile. The result explicitly says
+host_activation=false and activation_authorized=false.
+
+This checks compatibility of the observed configuration, not r8169 hardware
+behavior, offload accounting, link stability, or real-host performance. Interface
+identity, topology and offloads can change after inspection. Fresh preflight and
+owned-object verification remain mandatory at activation and maintenance. Foreign
+roots, filters or an unsupported/multiqueue topology are refusals. Offloads must
+not be silently disabled to make a trial pass.
+
+Explicit future startup opt-in
+The new --experimental-upload-host-trial flag is startup-only and does not make
+any API request a host authorization. It is mutually exclusive with the isolated
+parent-namespace mode. The existing --experimental-upload-interface selects one
+interface; --experimental-upload-helpers selects the root-trusted helper directory;
+--experimental-upload-state selects the private ownership journal directory.
+The administrator API UID remains explicitly selected. Starting with capability
+available alone does not activate shaping: a later reviewed cap configuration is
+required. Existing host guard refusal remains the default without this flag.
+
+No installation, daemon restart, host shaping activation or authorization change
+is part of this increment. Installed 25dbb1a and existing updater safeguards remain.
+
+Concrete next step — obtain approval for a pinned, bounded host trial
+1. Review the final exact release SHA, matched backend/GUI/helper manifest and
+   isolated real-UI journey evidence. Approve that exact experimental release,
+   one selected interface and a short TCP workload window. Include restart and
+   guarded recovery permission explicitly; do not authorize a moving HEAD.
+2. Immediately before an approved trial, read the current protection mode,
+   current complete rule set/version, collector/Wine settings, GUI autostart,
+   daemon health/build and interface identity/TC/offloads. Preserve the latest
+   user edits: an older saved configuration must never replace current rules.
+3. Use the existing guarded updater's exact-release checks. Preserve Both
+   protection, all latest rules, collector/Wine settings and autostart. Verify
+   matched running backend/GUI, service health and those invariants before
+   accepting any experimental cap. Refuse activation if fresh compatibility
+   differs from the supported topology or ownership cannot be verified.
+4. With explicit traffic permission, set a modest TCP-only trial cap through
+   the real GUI, observe receiver payload and charged bytes separately, edit,
+   disable and confirm owned cleanup. Record independent traffic, Deny receiver
+   behavior, latency and complete daemon/helper CPU. Stop on connectivity loss,
+   missing coverage/lease renewal, controller faults or foreign configuration.
+   Guest evidence permits preparing this plan, not skipping hardware acceptance.
+5. End by disabling all caps through a fresh generation/version CAS. Confirm
+   Disabled, empty desired caps, no surviving helpers and exact removal of only
+   the owned objects. Inspect the original/default TC topology and report any
+   restoration difference; do not overwrite foreign changes.
+
+Recovery and rollback
+Cleanup precedes binary rollback while the experimental helper version that owns
+the journal is still available. Use the controller's ownership-verified cleanup
+path (or the GUI's explicit cleanup retry for a disabled empty configuration),
+which validates journal/interface identity, object handles and pinned programs.
+On mismatch, disappearance or replacement, stop and preserve the journal/pins and
+configuration for inspection. Never use a bare deletion of enp7s0's root qdisc as
+normal recovery. A rollback of binaries is not proof that kernel objects were
+cleaned up. Lease expiry withdraws shaping to default; it does not authorize
+firewall traffic and does not by itself restore TC configuration.
+
+After verified cleanup, remove only the trial's own startup override and use the
+existing guarded rollback to the retained installed release. Recheck the actual
+running build, Both protection, latest rules, collector/Wine settings, autostart
+and service health. Do not restore stale rule backups or alter unrelated drop-ins.
+If cleanup cannot be verified, recovery requires explicit review; no blind TC
+mutation is permitted. Preserve all trial evidence and rejected states.
+
+Deferred limitations — accepted for integration, not solved
+The previous 85%-of-control throughput and +7-percentage-point CPU objectives
+remain failed. Earlier 128-binding evidence included a 305 ms low-rate chunk p95,
+43–45% absolute process-tree CPU and 583 ms conservative renewal headroom. The
+later bounded ladder did not reproduce that spike at 128 bindings and exposed
+receiver-side diagnostic delays; it did not establish a production-safe maximum
+or close the latency investigation. See UPLOAD-SHAPING-CAPACITY.txt for its exact
+finite-run envelope and limitations. No additional benchmark cycle is required
+for this integration, but hardware trial results cannot inherit a guest pass.
+
+The experimental host target remains under 5% uncapped throughput loss, with up
+to 10% provisional only after explicit review and acceptable latency/CPU. UDP
+GSO, unsupported topologies/runtime identities and physical-interface acceptance
+remain open. Existing lease, identity, priority-discovery, overload and cleanup
+evidence is reused where this UI/reporting/startup-adapter increment is unchanged.

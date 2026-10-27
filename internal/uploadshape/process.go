@@ -35,16 +35,28 @@ func securePath(path string, directory bool) error {
 	}
 	return nil
 }
-func validateOptions(o Options) error {
-	if !regexp.MustCompile(`^[A-Za-z0-9_.-]{1,15}$`).MatchString(o.Interface) || !regexp.MustCompile(`^net:\[[0-9]+\]$`).MatchString(o.ParentNetNS) {
-		return fmt.Errorf("explicit interface and lab parent namespace required")
+func validateDeploymentMode(o Options, ns string) error {
+	if !regexp.MustCompile(`^[A-Za-z0-9_.-]{1,15}$`).MatchString(o.Interface) {
+		return fmt.Errorf("explicit interface required")
 	}
+	if o.HostTrial {
+		if o.ParentNetNS != "" {
+			return fmt.Errorf("host-trial and lab parent namespace are mutually exclusive")
+		}
+		return nil
+	}
+	if !regexp.MustCompile(`^net:\[[0-9]+\]$`).MatchString(o.ParentNetNS) || ns == o.ParentNetNS {
+		return fmt.Errorf("shaping requires disposable child namespace or explicit host-trial startup opt-in")
+	}
+	return nil
+}
+func validateOptions(o Options) error {
 	ns, err := os.Readlink("/proc/self/ns/net")
 	if err != nil {
 		return err
 	}
-	if ns == o.ParentNetNS {
-		return fmt.Errorf("shaping supports disposable child namespace only")
+	if err = validateDeploymentMode(o, ns); err != nil {
+		return err
 	}
 	if err = securePath(o.Helpers, true); err != nil {
 		return err
@@ -84,7 +96,13 @@ func cleanupProcess(o Options) error {
 }
 func startProcessMode(o Options, cleanup bool) (transport, error) {
 	// Helpers are root startup configuration, never supplied by an API request.
-	cmd := exec.Command("python3", "-I", filepath.Join(o.Helpers, "controller.py"), "--interface", o.Interface, "--state", o.State, "--helpers", o.Helpers, "--lab-parent-netns", o.ParentNetNS)
+	args := []string{"-I", filepath.Join(o.Helpers, "controller.py"), "--interface", o.Interface, "--state", o.State, "--helpers", o.Helpers}
+	if o.HostTrial {
+		args = append(args, "--host-trial")
+	} else {
+		args = append(args, "--lab-parent-netns", o.ParentNetNS)
+	}
+	cmd := exec.Command("python3", args...)
 	if cleanup {
 		cmd.Args = append(cmd.Args, "--cleanup-only")
 	}

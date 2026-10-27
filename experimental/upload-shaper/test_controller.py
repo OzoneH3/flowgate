@@ -9,6 +9,16 @@ m1 = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m1)
 
 class ModelTests(unittest.TestCase):
+    def test_explicit_trial_never_weakens_default_namespace_or_topology_guards(self):
+        for parent, host, uid, allowed in (('', False, 0, False), ('net:[1]', False, 0, False), ('net:[2]', False, 0, True), ('', True, 0, True), ('net:[2]', True, 0, False), ('', True, 1000, False)):
+            if allowed: m1.validate_deployment_mode(parent, host, 'net:[1]', uid)
+            else:
+                with self.assertRaises(ValueError):m1.validate_deployment_mode(parent, host, 'net:[1]', uid)
+        m1.validate_activation_topology({'supported':True,'topology':'single-queue-default-fq_codel'}, True)
+        m1.validate_activation_topology({'supported':True,'topology':'veth-noqueue'}, False)
+        with self.assertRaises(ValueError):m1.validate_activation_topology({'supported':True,'topology':'veth-noqueue'}, True)
+        with self.assertRaises(ValueError):m1.validate_activation_topology({'supported':False,'topology':'single-queue-default-fq_codel','reasons':['foreign']}, True)
+
     def test_tc_batch_requires_complete_arrays(self):
         self.assertEqual(m1.decode_tc_batch('[]\n[{"handle":"123:","refcnt":2}]\n', 2),
                          [[], [{'handle':'123:'}]])
@@ -260,6 +270,24 @@ class StatusObservationTests(unittest.TestCase):
         self.assertEqual(c.status()['status'], 'Active')
         c.fault = 'ownership mismatch'
         self.assertEqual(c.status()['status'], 'Unsupported')
+    def test_binding_coverage_is_same_health_observation_and_never_authority(self):
+        c = self.fake(); c.verified_at = time.monotonic()
+        c.bindings['other'] = {'app': 'uid:other', 'cookie': 'other'}
+        c.apps['uid:other'] = {'minor': 2}
+        c.health['bindings'].append({'cookie': 'other', 'minor': 99, 'until': 2**64-1})
+        s = c.status()
+        self.assertEqual([b['covered'] for b in s['bindings']], [True, False])
+        self.assertEqual(s['covered_bindings'], 1)
+        self.assertNotIn('covered', c.bindings['cookie'])
+        for condition in ('binding_expired', 'config_expired', 'watchdog', 'fault'):
+            x = self.fake(); x.verified_at = time.monotonic()
+            if condition == 'binding_expired': x.health['bindings'][0]['until'] = 0
+            if condition == 'config_expired': x.health['config_until'] = 0
+            if condition == 'watchdog': x.verified_at -= 6
+            if condition == 'fault': x.fault = 'ownership changed'
+            state = x.status()
+            self.assertEqual(state['covered_bindings'], 0, condition)
+            self.assertFalse(any(b['covered'] for b in state['bindings']), condition)
     def test_verify_records_start_anchor_only_on_success(self):
         c = self.fake()
         import types

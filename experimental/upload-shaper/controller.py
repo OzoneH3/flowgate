@@ -231,6 +231,21 @@ def journal_empty(d, actual, pin_exists, boot, ns, index, dev):
     return same_device and d.get('original') == actual
 
 
+def validate_deployment_mode(parent, host_trial, current, uid):
+    if uid != 0:
+        raise ValueError('root required')
+    if host_trial:
+        if parent:
+            raise ValueError('host-trial and lab parent namespace are mutually exclusive')
+    elif not re.fullmatch(r'net:\[\d+\]', parent or '') or parent == current:
+        raise ValueError('disposable child namespace or explicit host-trial startup opt-in required')
+
+def validate_activation_topology(result, host_trial):
+    if not result['supported']:
+        raise ValueError('Unsupported: ' + '; '.join(result['reasons']))
+    if host_trial and result['topology'] != 'single-queue-default-fq_codel':
+        raise ValueError('Unsupported: host trial requires direct single-queue default-fq_codel NIC')
+
 class Controller:
     def __init__(self, args):
         self.args = args
@@ -238,10 +253,7 @@ class Controller:
         self.base = Path(args.helpers).resolve()
         self.state = Path(args.state).absolute()
         self.ns = os.readlink('/proc/self/ns/net')
-        if os.geteuid() != 0 or args.lab_parent_netns == self.ns:
-            raise ValueError('root in a disposable child network namespace required')
-        if not re.fullmatch(r'net:\[\d+\]', args.lab_parent_netns):
-            raise ValueError('explicit parent namespace identity required')
+        validate_deployment_mode(args.lab_parent_netns, getattr(args, 'host_trial', False), self.ns, os.geteuid())
         if not re.fullmatch(r'[A-Za-z0-9_.-]{1,15}', self.dev):
             raise ValueError('invalid interface')
         self.state.mkdir(mode=0o700, parents=False, exist_ok=True)
@@ -280,8 +292,7 @@ class Controller:
             return
         before = self.topology()
         self.compatibility = self.preflight(before)
-        if not self.compatibility['supported']:
-            raise ValueError('Unsupported: ' + '; '.join(self.compatibility['reasons']))
+        validate_activation_topology(self.compatibility, getattr(args, 'host_trial', False))
         self.original = before
         self.token = secrets.token_hex(16)
         self.major = 0x100 + secrets.randbelow(0xfe00)
@@ -715,12 +726,14 @@ class Controller:
         # cannot make the reported verification age younger than it is at report time.
         verified_age_ms, verification = self.verification_observation()
         live = {b['cookie']: b for b in health['bindings'] if b['until'] > now}
-        covered = sum(1 for c, b in self.bindings.items() if c in live and live[c]['minor'] == self.apps[b['app']]['minor'])
+        covered_cookies = {c for c, b in self.bindings.items() if c in live and live[c]['minor'] == self.apps[b['app']]['minor']}
+        covered = len(covered_cookies)
         valid_until = min([health['config_until']] + [b['until'] for b in live.values()])
         if health['config_until'] <= now:
             covered = 0
         if self.fault:
             state = 'Unsupported'
+            covered = 0
         elif verified_age_ms is not None and verified_age_ms > 5000:
             # No sufficiently recent successful verification (older than the lease): not proof the loop
             # stopped, but nothing current to report. This is not a latched controller fault.
@@ -751,7 +764,9 @@ class Controller:
                                  'superpacket_bytes': self.gso() or None,
                                  'per_app_burst_bytes': {a: v.get('burst_bytes') for a, v in self.apps.items()},
                                  'per_app_leaf_memory_limit': {a: v.get('leaf_memory_limit') for a, v in self.apps.items()}},
-                'bindings': list(self.bindings.values()), 'next_minor': self.next_minor, 'counters': counters}
+                # Per-binding coverage is an observation from the SAME health read,
+                # never an authority token or an application-wide guarantee.
+                'bindings': [dict(b, covered=bool(covered and c in covered_cookies)) for c, b in self.bindings.items()], 'next_minor': self.next_minor, 'counters': counters}
 
     def close(self):
         if not self.closed:
@@ -771,11 +786,18 @@ def main():
     p.add_argument('--interface', required=True)
     p.add_argument('--state', required=True)
     p.add_argument('--helpers', required=True)
-    p.add_argument('--lab-parent-netns', required=True)
+    p.add_argument('--lab-parent-netns', default='')
+    p.add_argument('--host-trial', action='store_true', help='explicit startup-only experimental host trial; no hardware certification')
     args = p.parse_args()
     if args.preflight:
         c = object.__new__(Controller); c.dev = args.interface
-        print(json.dumps(c.preflight()), flush=True)
+        result = c.preflight()
+        result['deployment_mode'] = 'host-trial' if args.host_trial else 'structural-preflight-only'
+        result['activation_authorized'] = False
+        if args.host_trial and (args.lab_parent_netns or result['topology'] != 'single-queue-default-fq_codel'):
+            result['supported'] = False
+            result['reasons'].append('host trial requires no lab parent flag and direct single-queue default-fq_codel NIC')
+        print(json.dumps(result), flush=True)
         return
     c = None
     def stop(*unused):
@@ -787,7 +809,7 @@ def main():
         if args.cleanup_only:
             print(json.dumps({'stopped': True}), flush=True)
             return
-        print(json.dumps({'status': 'Applying', 'ready': True, 'scope': 'isolated M1'}), flush=True)
+        print(json.dumps({'status': 'Applying', 'ready': True, 'scope': 'experimental host-trial' if args.host_trial else 'isolated M1'}), flush=True)
         poll = selectors.DefaultSelector(); poll.register(sys.stdin.buffer, selectors.EVENT_READ)
         buf = b''
         while True:

@@ -1,3 +1,4 @@
+import { refreshUpload } from "./upload-shaping-view";
 import { zoneLabel } from './network-zones';
 import { acceptsPublication } from './publication';
 import { PROTECTION_CAPABILITY, stateProtection } from './protection-model';
@@ -78,6 +79,7 @@ function consume(next: PaneFrame) {
   )
     return;
   frame = next;
+  if(kind === "info") refreshUpload(next.state);
   const p = next.presentation,
     s = next.state,
     r = p.row;
@@ -217,4 +219,5 @@ function consume(next: PaneFrame) {
   policy?.update(r, s);
 }
 window.flowgate.onPaneFrame(consume);
+if(kind === "info") window.setInterval(()=>{if(frame)refreshUpload(frame.state);},1000);
 void window.flowgate.paneSnapshot().then(consume).catch(message);

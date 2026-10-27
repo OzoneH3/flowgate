@@ -1,3 +1,4 @@
+import { UploadShapingClient } from "./upload-shaping-client";
 import { UsageHistoryClient } from './usage-history-client';
 import { SessionExit, kdeSessionEnding } from './session-exit';
 import { EndpointRules } from './endpoint-rules';
@@ -810,6 +811,9 @@ app.whenReady().then(async () => {
     }
     throw Error('Unsupported pane rule operation');
   });
+  const upload = new UploadShapingClient(backend);
+  ipcMain.handle("upload:status", (e) => { presentationSender(e); return upload.read(); });
+  ipcMain.handle("upload:configure", (e, v) => { presentationSender(e); return upload.configure(v); });
   const decisionLog = new DecisionLogClient(backend);
   const observedUsage = new ObservedUsageClient(backend);
   const usageHistory = new UsageHistoryClient(backend);

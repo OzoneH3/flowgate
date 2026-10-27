@@ -1779,3 +1779,9 @@ body.hide-sidebar #activityView > aside { display:none; }
 #historySettings { border: 1px solid #555; padding: 10px; margin-top: 10px; }
 #historySettings p { max-width: 1000px; }
 #historySave { margin-left: 10px; }
+
+.upload-limit-dialog { max-width: 490px; padding: 16px; color: var(--fg-text, #ddd); background: var(--fg-panel, #25282d); border: 1px solid #667; }
+.upload-limit-dialog::backdrop { background: #0007; }
+.upload-limit-dialog button { margin: 12px 8px 0 0; }
+.upload-limit-dialog input { width: 100px; }
+.status-slot.upload-limit { font-size: 10px; max-width: 105px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -114,3 +114,60 @@ func TestSnapshotIntervalPreservesPublishedObservation(t *testing.T) {
 		t.Fatal("observation recency must not substitute for lease validity")
 	}
 }
+
+func TestPerBindingCoverageExpiresWithoutChangingPublishedObservation(t *testing.T) {
+	for _, tc := range []struct {
+		status, kernel, fault string
+		expired               bool
+	}{
+		{"Partial", "Partial", "", true}, {"Unsupported", "Partial", "", false},
+		{"Partial", "Unsupported", "", false}, {"Partial", "Partial", "failed", false},
+		{"Disabled", "Partial", "", false},
+	} {
+		m := newManager(Options{})
+		m.snap.Status = tc.status
+		m.snap.VerifiedUntil = time.Now().Add(time.Hour)
+		if tc.expired {
+			m.snap.VerifiedUntil = time.Now().Add(-time.Second)
+		}
+		m.snap.Kernel = &KernelStatus{Status: tc.kernel, Fault: tc.fault, Covered: 1, Bindings: []Binding{{App: "uid:app", Cookie: "cookie", Covered: true}}}
+		s := m.Snapshot()
+		if s.Kernel.Covered != 0 || s.Kernel.Bindings[0].Covered {
+			t.Fatalf("stale coverage %+v", s)
+		}
+		if !m.snap.Kernel.Bindings[0].Covered {
+			t.Fatal("mutated published observation")
+		}
+	}
+	m := newManager(Options{})
+	m.snap.Status = "Partial"
+	m.snap.VerifiedUntil = time.Now().Add(time.Hour)
+	m.snap.Kernel = &KernelStatus{Status: "Partial", Verification: "unknown", Covered: 1, Bindings: []Binding{{App: "uid:app", Cookie: "cookie", Covered: true}}}
+	if !m.Snapshot().Kernel.Bindings[0].Covered {
+		t.Fatal("verification recency is not lease validity")
+	}
+}
+
+func TestCoverageRemainingDurationCannotRefreshCachedTTL(t *testing.T) {
+	m := newManager(Options{})
+	m.snap.Status = "Partial"
+	m.snap.Kernel = &KernelStatus{Covered: 1, ValidForMillis: 5000, Bindings: []Binding{{Covered: true}}}
+	m.snap.VerifiedUntil = time.Now().Add(200 * time.Millisecond)
+	first := m.Snapshot()
+	if first.CoverageValidMillis <= 0 || first.CoverageValidMillis > 200 {
+		t.Fatalf("bad remaining %d", first.CoverageValidMillis)
+	}
+	m.snap.VerifiedUntil = time.Now().Add(50 * time.Millisecond)
+	second := m.Snapshot()
+	if second.CoverageValidMillis <= 0 || second.CoverageValidMillis > 50 {
+		t.Fatal("cached TTL was refreshed")
+	}
+	m.snap.VerifiedUntil = time.Now().Add(-time.Millisecond)
+	expired := m.Snapshot()
+	if expired.CoverageValidMillis != 0 || expired.Kernel.Bindings[0].Covered {
+		t.Fatal("expired still confirmed")
+	}
+	if m.snap.Kernel.ValidForMillis != 5000 || !m.snap.Kernel.Bindings[0].Covered {
+		t.Fatal("observation mutated")
+	}
+}

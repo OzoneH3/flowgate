@@ -30,8 +30,9 @@ type Config struct {
 	Caps    []Cap `json:"caps"`
 }
 type Binding struct {
-	App    string `json:"app"`
-	Cookie string `json:"cookie"`
+	App     string `json:"app"`
+	Cookie  string `json:"cookie"`
+	Covered bool   `json:"covered"`
 }
 type KernelStatus struct {
 	Compatibility json.RawMessage `json:"compatibility,omitempty"`
@@ -63,8 +64,10 @@ type KernelStatus struct {
 	} `json:"counters"`
 }
 type Snapshot struct {
-	VerifiedUntil   time.Time `json:"verified_until"`
-	CoverageExpired bool      `json:"coverage_snapshot_expired"`
+	DeploymentMode      string    `json:"deployment_mode"`
+	VerifiedUntil       time.Time `json:"verified_until"`
+	CoverageValidMillis int64     `json:"coverage_valid_for_ms"`
+	CoverageExpired     bool      `json:"coverage_snapshot_expired"`
 	// Reader-side view of the controller's last successful verification: the
 	// controller-observed age plus the time this snapshot has been held, derived
 	// at read time; "unknown" is a sentinel, never upgraded.
@@ -112,6 +115,7 @@ type DiscoveryStats struct {
 
 type Options struct {
 	Interface, Helpers, State, ParentNetNS string
+	HostTrial                              bool
 }
 type transport interface {
 	Call(map[string]any) (json.RawMessage, error)
@@ -158,7 +162,11 @@ func New(o Options) (*Manager, error) {
 }
 func newManager(o Options) *Manager {
 	m := &Manager{opts: o, wake: make(chan struct{}, 1), hints: make(chan hint, 128), pending: map[string]bool{}, sockets: func() ([]identity.Socket, error) { return identity.SocketsLimited(DiscoveryCapacity) }, resolve: identity.Resolve, resolveBatch: identity.ResolveBatch, priorityHints: nativePriorityHints}
-	m.snap = Snapshot{Version: 1, Interface: o.Interface, Status: "Disabled", Caps: []Cap{}, Gaps: map[string]uint64{}, Coverage: "verified socket bindings only; first packets and unobserved sockets may escape; never application-wide"}
+	mode := "isolated"
+	if o.HostTrial {
+		mode = "host-trial"
+	}
+	m.snap = Snapshot{DeploymentMode: mode, Version: 1, Interface: o.Interface, Status: "Disabled", Caps: []Cap{}, Gaps: map[string]uint64{}, Coverage: "verified socket bindings only; first packets and unobserved sockets may escape; never application-wide"}
 	return m
 }
 func (m *Manager) Snapshot() Snapshot {
@@ -179,6 +187,12 @@ func (m *Manager) snapshotLocked() Snapshot {
 		}
 		s.CoverageExpired = true
 	}
+	if s.Kernel != nil && (s.CoverageExpired || s.Status == "Unsupported" || s.Status == "Disabled" || s.Kernel.Status == "Unsupported" || s.Kernel.Fault != "") {
+		s.Kernel.Covered = 0
+		for i := range s.Kernel.Bindings {
+			s.Kernel.Bindings[i].Covered = false
+		}
+	}
 	if s.Kernel != nil {
 		s.VerificationAgeMinMillis, s.VerificationAgeMillis, s.ObservationHeldMillis, s.ObservationRPCMillis = verificationInterval(m.snap.Kernel, m.sampleStart, m.sampleReceived, now)
 		k := *m.snap.Kernel
@@ -188,6 +202,18 @@ func (m *Manager) snapshotLocked() Snapshot {
 		// Unsupported are preserved as published.
 		if s.Status == "Active" && s.Verification != "fresh" {
 			s.Status = "Partial"
+		}
+	}
+	// Remaining lifetime at this read, not the immutable controller TTL. A UI
+	// may anchor this conservative floor at its request start; rereads cannot
+	// resurrect an old observation. It is reporting only, never authority.
+	if s.Kernel != nil && s.Kernel.Covered > 0 && !s.CoverageExpired {
+		s.CoverageValidMillis = m.snap.VerifiedUntil.Sub(now).Milliseconds()
+		if s.CoverageValidMillis < 0 {
+			s.CoverageValidMillis = 0
+		}
+		if s.CoverageValidMillis > 5000 {
+			s.CoverageValidMillis = 5000
 		}
 	}
 	return s
