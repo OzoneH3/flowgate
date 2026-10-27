@@ -1,0 +1,115 @@
+Experimental priority discovery and binding capacity
+===================================================
+
+This increment builds on 19d3770. No host activation or approved-update status.
+The installed 25dbb1a release is unchanged. Upload shaping is still an isolated
+supported-topology experiment, not general application-wide bandwidth control.
+
+Priority contract
+-----------------
+A newly added or rate-changed cap schedules one bounded native process/descriptor
+observation. The application key derived from UID and the observed executable
+path is ONLY a candidate hint. It does not prove native runtime identity, current
+ownership, process generation or a permission. Private thread descriptor tables,
+foreign mount path translations, inaccessible processes and newly arriving
+sockets may be missed. No display label, parent or command line is authority.
+
+The scan reads /proc and matching leader fd directories in batches of 64 entries:
+4096 numeric process entries, 16384 fd entries globally, 128 unique inode hints,
+and a 250ms work deadline checked between operations. An individual syscall is
+not given a hard deadline. Reaching a bound or a non-disappearance I/O failure is
+reported as incomplete. There is no periodic process hint polling. Disabled
+shaping has no new worker or polling. Configuration acknowledgement performs no
+hint I/O; the worker performs it outside configuration and policy locks.
+
+Hints select at most128 unique rows from the retained complete snapshot, including
+rows behind its cursor. If there has not yet been a complete snapshot, selection
+waits for one. Sockets absent from that generation produce snapshot_not_present
+and use ordinary discovery or existing attribution offers; no extra full census
+is added. A snapshot is historical and may become stale immediately.
+
+Each discovery batch still has at most8 fresh ResolveBatch candidates. At most4
+priority rows are attempted, reserving space for at least4 background candidates
+when available within the bounded scan. Repeated cap changes supersede priority
+work but do not reset background snapshot/cursor progress. Cookie deduplication
+prevents the same row being resolved twice in one batch. All selected rows require
+fresh resolution, generation equality, the current cap/version and the controller's
+unchanged full binding proof. Exec, shared ownership, descriptor transfer and
+socket reuse cannot gain a binding through a stale hint.
+
+priority_discovery reports version, hint_inodes, pending_rows, attempts,
+incomplete/reason, hint_duration_ms and completed. Completion means this bounded
+hint attempt finished; it never implies complete application coverage. Existing
+configured_caps, applied_version, actual kernel bindings and receiver delivery
+remain distinct. AppliedVersion means controller configuration reconciled, not
+that all application sockets have been found. Status remains Partial.
+
+Provisional responsiveness objective (not a supported latency guarantee):
+acknowledgement <2s, first verified binding and receiver-observed cap within15s of
+acknowledgement for one stable target among<=16 priority sockets, within the above
+observation limits and PRESENT in the retained snapshot. Missing/private-table/
+new-generation sockets, overload and scan limits have no such deadline. The
+background worst case remains512 turns for4096 candidate-heavy rows. This
+increment must not disguise that fallback delay as a fully applied app-wide cap.
+
+Maintenance measurements
+------------------------
+KernelStatus adds maintenance_cycles, maintenance_pass_ms,
+max_maintenance_pass_ms, max_completion_gap_ms and max_renewal_span_ms. These are
+monotonic-time timing observations from successful controller ticks (maxima are
+controller-lifetime maxima). Full maintenance includes verification, offload
+observation, exact existence queries, removal/renewal, class retirement and beat.
+Renewal span includes the renewal loop through beat. Durations round upward.
+No lease duration, check, RPC deadline or authority semantics changed.
+
+For a continuously present binding and successful cycles, maximum completion
+gap plus maximum renewal span is a conservative bound on inter-renewal spacing.
+Failure paths still fault or expire as before. Direct kernel health snapshots
+supply sampled remaining margins; samples alone are not continuous kernel trace.
+A test with128 bound sockets is not evidence of128 simultaneously bulk-active
+sockets unless that workload is separately recorded.
+
+Results and release status
+--------------------------
+See .workspace/shaping-priority/README.txt for exact tested binaries, fixtures,
+measured delays/capacity and retained failures. Guest core3 completed on a netdevsim software path (TSO/GSO on); not a host
+trial. 1300 already-connected native TCP sockets made the prefix candidate-heavy.
+The target's observed rank was1146/1307 in an independent prior dump (not an atomic
+claim about the retained dump). The retained cursor progressed8->23 in generation1.
+Acknowledgement took0.0129s, first binding1.955s after acknowledgement, and the
+receiver window confirmed enforcement by6.142s: charged8.025Mbit/s, payload7.656.
+The8->4Mbit rate edit acknowledged in0.0718s and was receiver-confirmed by5.190s:
+charged4.000, payload3.810. These observed objectives passed; not universal SLAs.
+
+128 actual bound TCP sockets across16 processes,16 bulk-active sockets, an
+uncapped competing bulk sender and separate low-rate/Deny senders were exercised.
+At normal population /4300 additional unrelated sockets, measurement windows were
+34.419/33.846s. Aggregate charged rates8.002/7.996Mbit/s, receiver payload7.649/7.649.
+Complete daemon/controller/live+reaped-helper CPU45.35/43.46% of one vCPU. These
+are workload-specific absolute costs, not overhead versus a matched control.
+Both windows delivered600/600 low-rate records and0 of24 Deny records. One normal
+load chunk had305.22ms p95; the other normal-load chunks were2.76..5.94ms, overload
+chunks2.31..3.49ms. NO acceptable-latency or no-regression claim is made at128.
+
+Every direct health sample had128 live bindings. Minimum sampled lease margin
+was2040/2866ms. Sampled existence-pass maxima1313/1102ms. Controller-lifetime
+maximum full maintenance pass2811ms, successful completion gap3852ms and renewal
+span565ms; gap+span4417ms gives a conservative583ms inter-renewal headroom for
+continuously present bindings in those successful cycles. Maintenance progressed
+50->62 and77->89 cycles. These are bounded-run observations, not a continuous
+kernel trace or a guarantee under arbitrary load. The128 resource ceiling is
+retained as experimental; latency and general CPU suitability are NOT qualified.
+No smaller production-safe capacity has been established by this test.
+
+Closing8 bindings reduced coverage to120. An uncapped UDP socket reused a closed
+TCP local port without inheriting its class (cross-protocol reuse, explicitly;
+previous same-protocol UDP reuse evidence is unchanged and reused). After128
+bindings were restored, socket-worker death during bulk traffic produced
+Unsupported; explicit disable restored exactly the original qdiscs and left no
+controller/kernel/socket workers. Deny during worker-death itself was not newly
+measured; previous firewall-independence/failure evidence is reused.
+Previous guest performance objectives remain FAILED:80.49% of matched disabled
+throughput and+10.51 percentage points of one vCPU, against85% and<=7 objectives.
+No performance improvement is asserted by this transient priority path. TCP cap
+measurements distinguish qdisc charged bytes from receiver payload. UDP GSO is a
+separate unresolved firewall gate. No physical-host readiness claim follows.

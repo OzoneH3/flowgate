@@ -1,0 +1,270 @@
+# Disposable guest: priority discovery and 128 real bindings.
+# No performance comparison, no host traffic or activation.
+import resource
+import os,sys,json,socket,subprocess,time,pathlib,sqlite3,select,traceback,shutil,threading
+P=pathlib.Path('/work/m1');R=pathlib.Path('/work/.workspace/m1');R.mkdir(mode=0o700,exist_ok=True);API=R/'session'/'api.sock';children=[];records=[];backend=None
+assert os.environ.get('FLOWGATE_PARENT_NETNS') and os.environ['FLOWGATE_PARENT_NETNS']!=os.readlink('/proc/self/ns/net')
+DEV='fghost'
+def cmd(*a):return subprocess.check_output([str(x) for x in a],text=True,timeout=20)
+def launch(args,name):
+ p=subprocess.Popen([str(x) for x in args],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=(R/(name+'.err')).open('a'),text=True,bufsize=1);children.append(p);return p
+def line(p,timeout=25):
+ if not select.select([p.stdout],[],[],timeout)[0]:raise RuntimeError('fixture timeout '+str(p.pid))
+ s=p.stdout.readline()
+ if not s:raise RuntimeError('fixture exited '+str(p.pid))
+ return json.loads(s)
+def write(p,s):p.stdin.write(s+'\n');p.stdin.flush()
+def ask(p,s):write(p,s);return line(p)
+def peerop(op):return ask(peer,json.dumps({'op':op}))
+def request(op='list',ro=False,**kw):
+ with socket.socket(socket.AF_UNIX) as s:
+  s.settimeout(4);s.connect(str(API)+('.monitor' if ro else ''));s.sendall((json.dumps(dict(version=1,operation=op,**kw))+'\n').encode())
+  return json.loads(s.makefile('rb').readline())
+def api(op='list',**kw):
+ d=request(op,**kw);assert not d.get('error'),d;return d
+GEN=''
+def status():return api('upload-status',generation=GEN)['upload_shaping']
+def bindings(s=None):return (s or status()).get('kernel',{}) and ((s or status()).get('kernel') or {}).get('bindings',[]) or []
+def wait(pred,timeout=35):
+ until=time.monotonic()+timeout
+ while time.monotonic()<until:
+  s=status()
+  if s['status']=='Unsupported':raise RuntimeError('shaping fault '+json.dumps(s))
+  if pred(s):return s
+  time.sleep(.25)
+ raise RuntimeError('wait timeout '+json.dumps(s))
+def configure(caps=None,enabled=True):
+ before=status();r=api('upload-configure',generation=GEN,expected_version=before['version'],upload_config={'enabled':enabled,'caps':caps or []})['upload_shaping'];assert r['version']==before['version']+1
+ return wait(lambda s:s['applied_version']==r['version'])
+def cap(name,rate):return {'uid':0,'application':procs[name]['application']['key'],'bits_per_second':rate}
+def appkey(name):return '0:'+procs[name]['application']['key']
+def childpids():
+ pids=set()
+ for task in pathlib.Path(f'/proc/{backend.pid}/task').glob('*'):
+  try:pids.update((task/'children').read_text().split())
+  except FileNotFoundError:pass
+ return [pid for pid in pids if b'controller.py' in pathlib.Path('/proc/'+pid+'/cmdline').read_bytes()]
+def kernel_workers():
+ out=[]
+ for path in pathlib.Path('/proc').glob('[0-9]*/cmdline'):
+  try:
+   argv=path.read_bytes().split(b'\0')
+   if argv[:2]==[b'/work/m1/kernel',b'serve']:out.append(int(path.parent.name))
+  except (FileNotFoundError,ProcessLookupError):pass
+ return out
+def socket_workers():
+ out=[]
+ for path in pathlib.Path('/proc').glob('[0-9]*/cmdline'):
+  try:
+   if path.read_bytes().split(b'\0')[:2]==[b'/work/m1/probe',b'serve-sockets']:out.append(int(path.parent.name))
+  except (FileNotFoundError,ProcessLookupError):pass
+ return out
+def start(binary,name):
+ global backend,GEN
+ args=[P/binary,'serve','--socket',API,'--database',R/'rules.db','--uid','0','--administrator','--allow-protection','--protection-state',R/'protection.json','--evaluation-state',R/'session'/'evaluation','--decision-timeout','2s','--experimental-upload-interface',DEV,'--experimental-upload-helpers',P,'--experimental-upload-state',R/'controller','--experimental-upload-parent-netns',os.environ['FLOWGATE_PARENT_NETNS']]
+ backend=launch(args,name)
+ for _ in range(300):
+  try:
+   s=api()
+   if s.get('protection',{}).get('state')=='active':GEN=s['generation'];return s
+  except (FileNotFoundError,ConnectionRefusedError,AssertionError):pass
+  if backend.poll() is not None:raise RuntimeError('daemon exited '+str(backend.returncode))
+  time.sleep(.1)
+ raise RuntimeError('not ready')
+def stop():
+ global backend
+ if backend and backend.poll() is None:
+  backend.terminate()
+  try:backend.wait(25)
+  except subprocess.TimeoutExpired:backend.kill()
+ backend=None
+def record(kind,**kw):records.append(dict(kind=kind,**kw));(R/'records.json').write_text(json.dumps(records,indent=2));print(kind,flush=True)
+def qdiscs():return json.loads(cmd('tc','-j','qdisc','show','dev',DEV))
+def egress_filters():return json.loads(cmd('tc','-j','filter','show','dev',DEV,'egress'))
+def flowkey(proto,info):
+ s=info['sockets'][0];ip='10.79.0.1' if info['family']==4 else 'fd79::1'
+ return f"{proto}:{ip}:{s['port']}"
+def tree_ticks(root):
+ stack=[root];seen=set();own=waited=0
+ while stack:
+  pid=stack.pop()
+  if pid in seen:continue
+  seen.add(pid)
+  try:
+   st=pathlib.Path(f'/proc/{pid}/stat').read_text().rsplit(')',1)[1].split()
+   own+=int(st[11])+int(st[12]);waited+=int(st[13])+int(st[14])
+   for t in pathlib.Path(f'/proc/{pid}/task').glob('*'):
+    try:stack.extend(map(int,(t/'children').read_text().split()))
+    except FileNotFoundError:pass
+  except FileNotFoundError:pass
+ return {'self_and_live_ticks':own,'reaped_children_ticks':waited,'total_ticks':own+waited}
+def accounting():
+ roots={'daemon_tree':backend.pid,'sender_A':senders['A'].pid,'sender_B':senders['B'].pid,'peer':peer.pid,'latency':senders['L'].pid}
+ out={n:tree_ticks(pid) for n,pid in roots.items()}
+ out['cpu']=list(map(int,pathlib.Path('/proc/stat').read_text().splitlines()[0].split()[1:]))
+ return out
+def gaps():
+ s=status();d=dict(s.get('discovery') or {});d['gap_unsupported_or_shared_discovery']=(s.get('known_gaps') or {}).get('unsupported_or_shared_discovery');d['gap_discovery_failed']=(s.get('known_gaps') or {}).get('discovery_failed');return d
+def discovery_counters(g):return dict(g) if g else {}
+def verification_counters():
+ k=(status().get('kernel') or {});return {a:k.get(a) for a in ('verifications','status_reports','verified_age_ms','verification')}
+def snapshot_fields():
+ s=status();k=s.get('kernel') or {}
+ return {'status':s['status'],'covered':k.get('covered_bindings'),'expired':s.get('coverage_snapshot_expired'),'verification_age_ms':s.get('verification_age_ms'),'verification':s.get('verification'),'valid_for_ms':k.get('valid_for_ms'),'status_reports':k.get('status_reports'),'verifications':k.get('verifications'),'fault':k.get('fault')}
+def check_timeline(timeline):
+ """Reader-side invariants: while the published kernel sample is unchanged (same status_reports), the derived age never
+ decreases and the label never upgrades; an expired coverage snapshot reports covered 0; unknown/stale is never Active."""
+ rank={'fresh':0,'stale':1,'unknown':2}
+ for a,b in zip(timeline,timeline[1:]):
+  if a['status_reports'] is not None and a['status_reports']==b['status_reports'] and a['verification_age_ms'] is not None:
+   assert b['verification_age_ms']>=a['verification_age_ms'],(a,b)
+   assert rank[b['verification']]>=rank[a['verification']],(a,b)
+ for e in timeline:
+  if e['expired']:assert e['covered']==0,e
+  if e['verification']!='fresh':assert e['status']!='Active',e
+assert not os.environ.get('FLOWGATE_PROFILE_DIR')
+resource.setrlimit(resource.RLIMIT_NOFILE,(8192,8192))
+try:
+ peer=launch(['unshare','--net','python3',P/'peer.py'],'peer')
+ for _ in range(100):
+  if os.readlink(f'/proc/{peer.pid}/ns/net')!=os.readlink('/proc/self/ns/net'):break
+  time.sleep(.02)
+ cmd('ip','link','set','nsim0','name',DEV);cmd('ip','link','set','nsim1','name','fgpeer')
+ cmd('ip','link','set','fgpeer','netns',peer.pid)
+ for a in [('link','set','dev',DEV,'addrgenmode','none'),('link','set',DEV,'up'),('addr','add','10.79.0.1/24','dev',DEV),('-6','addr','add','fd79::1/64','dev',DEV,'nodad')]:cmd('ip',*a)
+ peerop('setup')
+ original=qdiscs()
+ feats={l.split(':')[0].strip():l.split(':',1)[1].strip().split()[0] for l in cmd('ethtool','-k',DEV).splitlines() if ':' in l and not l.startswith('Features')}
+ record('nic-capabilities',device=DEV,link=json.loads(cmd('ip','-d','-j','link','show','dev',DEV))[0],offloads=feats,qdiscs=original,binaries={b:cmd('sha256sum',P/b).split()[0] for b in ('flowgate-old','flowgate-new')})
+ senders={};procs={}
+ # A capped bulk, C capped idle (second class), B uncapped bulk, L uncapped low-rate, D denied, X transfer target (alpha).
+ for n,exe in [('A','alpha'),('C','gamma'),('B','beta'),('L','beta'),('D','denied'),('X','alpha')]:
+  p=launch([P/exe],n);line(p);senders[n]=p;procs[n]=json.loads(cmd(P/'inspect','inspect',p.pid))
+ db=sqlite3.connect(R/'rules.db');db.execute('create table rules(id text primary key,document text not null)');db.execute('pragma user_version=1')
+ for n in ['A','C','B','D']:
+  a=procs[n]['application'];rule={'schema':2,'id':'m0-'+n,'version':1,'created':'2026-01-01T00:00:00Z','action':'block' if n=='D' else 'allow','priority':0,'executable':a['executable'],'filter':{'application':a['key'],'revision':a['revision'],'uid':0,'direction':'outgoing','protocol':'*'}};db.execute('insert into rules values(?,?)',(rule['id'],json.dumps(rule)))
+ db.commit();db.close();os.chmod(R/'rules.db',0o600)
+ (R/'protection.json').write_text('{"schema":1,"mode":"both"}');os.chmod(R/'protection.json',0o600)
+ (R/'session').mkdir(mode=0o711)
+ resource.setrlimit(resource.RLIMIT_NOFILE,(8192,8192))
+ start('flowgate-new','priority')
+ crowd=[]
+ crowd_holder=launch([P/'beta'],'crowd-holder');line(crowd_holder)
+ write(crowd_holder,'OPEN 4 1 1300 1 0 43005');crowd_info=line(crowd_holder,timeout=240)
+ assert len(crowd_info.get('sockets',[]))==1300,crowd_info
+ record('candidate-heavy-population',count=len(crowd_info['sockets']))
+ # Select a live target late in the candidate-heavy TCP inventory after enabling the guest firewall.
+ for attempt in range(48):
+  ainfo=ask(senders['A'],'OPEN 4 1 1 1 0 43003');cookie=ainfo['sockets'][0]['cookie']
+  inventory=json.loads(cmd(P/'snapshot'));rank=next(i for i,r in enumerate(inventory) if r['cookie']==cookie)
+  if rank>=1024:break
+ else:raise AssertionError('no late TCP target in 48 attempts')
+ akey=flowkey('tcp',ainfo)
+ # C cap establishes a retained generation without A eligibility.
+ configure([cap('C',8000000)])
+ initial=wait(lambda s:s['discovery_snapshot']['retained_rows']>=1300 and s['discovery_snapshot']['cursor']>0)
+ assert initial['discovery_snapshot']['cursor']<rank,initial
+ before=status();sent=time.monotonic()
+ receipt=api('upload-configure',generation=GEN,expected_version=before['version'],upload_config={'enabled':True,'caps':[cap('A',8000000),cap('C',8000000)]})['upload_shaping'];ack=time.monotonic()
+ found=wait(lambda s:any(b['cookie']==cookie for b in bindings(s)),timeout=35);bound_at=time.monotonic()
+ record('priority-binding',rank=rank,rows=len(inventory),request_time=sent,ack_time=ack,bound_time=bound_at,ack_seconds=ack-sent,binding_seconds=bound_at-ack,before=before,receipt=receipt,after=found)
+ journal=json.loads((R/'controller'/'owner.json').read_text());pin=journal['pin']
+ minor=found['kernel']['apps'][appkey('A')]['minor'];classid=f"{journal['major']:x}:{minor:x}"
+ def sample(keys):
+  started=time.monotonic_ns();health=json.loads(cmd(P/'kernel','health',pin));finished=time.monotonic_ns()
+  classes=json.loads(cmd('tc','-s','-j','class','show','dev',DEV))
+  cb=next(c.get('bytes',c.get('stats',{}).get('bytes')) for c in classes if c.get('kind',c.get('class'))=='htb' and c.get('handle',c.get('classid'))==classid)
+  bulk=peerop('bulk');payload=sum(bulk.get(k,{}).get('bytes',0) for k in keys)
+  return {'t':time.monotonic(),'payload':payload,'charged':cb,'tree':tree_ticks(backend.pid),'status':status(),'kernel_health':health,'health_start_ns':started,'health_end_ns':finished,'min_lease_margin_ms':(min([health['config_until']]+[b['until'] for b in health['bindings']])-finished)/1e6}
+ write(senders['A'],'BULK priority 10000 65536 0');time.sleep(1)
+ first=sample([akey]);time.sleep(3);last=sample([akey]);dt=last['t']-first['t']
+ charged=(last['charged']-first['charged'])*8/dt/1e6;payload=(last['payload']-first['payload'])*8/dt/1e6
+ record('priority-enforcement',charged_mbit=charged,payload_mbit=payload,observed_seconds_from_ack=last['t']-ack,before=first,after=last)
+ assert receipt['version']==before['version']+1
+ assert ack-sent<2 and bound_at-ack<=15 and last['t']-ack<=15,(ack-sent,bound_at-ack,last['t']-ack)
+ assert 6.8<charged<9.2 and payload>6.5,(charged,payload)
+ assert last['status']['discovery_snapshot']['generation']==initial['discovery_snapshot']['generation']
+ assert last['status']['discovery_snapshot']['cursor']>initial['discovery_snapshot']['cursor']
+ line(senders['A'])
+ # Existing binding rate edit: receipt is not receiver enforcement.
+ edit0=time.monotonic();edit_receipt=api('upload-configure',generation=GEN,expected_version=status()['version'],upload_config={'enabled':True,'caps':[cap('A',4000000),cap('C',8000000)]})['upload_shaping'];edit_ack=time.monotonic()
+ wait(lambda s:s['applied_version']==edit_receipt['version'])
+ write(senders['A'],'BULK rateedit 10000 65536 0');time.sleep(1);ea=sample([akey]);time.sleep(3);eb=sample([akey]);edt=eb['t']-ea['t']
+ erate=(eb['charged']-ea['charged'])*8/edt/1e6;epayload=(eb['payload']-ea['payload'])*8/edt/1e6
+ record('existing-binding-rate-edit',ack_seconds=edit_ack-edit0,enforcement_seconds=eb['t']-edit_ack,charged_mbit=erate,payload_mbit=epayload,before=ea,after=eb)
+ assert 3.4<erate<4.6 and epayload>3.2 and eb['t']-edit_ack<15
+ line(senders['A'])
+ ask(crowd_holder,'CLOSE')
+ # Remove heavy hint population before filling exactly 128 actual application bindings.
+ for q in crowd:q.close()
+ crowd=[];ask(senders['A'],'CLOSE');configure([],False)
+ assert qdiscs()==original and not childpids() and not socket_workers()
+ holders=[senders['A']]
+ for i in range(15):
+  p=launch([P/'alpha'],f'holder-{i}');line(p);holders.append(p)
+ infos=[ask(p,'OPEN 4 1 8 1 0 43003') for p in holders]
+ expected={s['cookie'] for inf in infos for s in inf['sockets']};assert len(expected)==128
+ keys=['tcp:10.79.0.1:'+str(inf['sockets'][0]['port']) for inf in infos]
+ configure([cap('A',8000000)])
+ full=wait(lambda s:len(bindings(s))==128,timeout=240)
+ assert {b['cookie'] for b in bindings(full)}==expected
+ journal=json.loads((R/'controller'/'owner.json').read_text());pin=journal['pin'];minor=full['kernel']['apps'][appkey('A')]['minor'];classid=f"{journal['major']:x}:{minor:x}"
+ record('full-128-bound',status=full,processes=len(holders))
+ ask(senders['B'],'OPEN 4 1 1 1 0 43003');ask(senders['L'],'OPEN 4 1 1 1 0');ask(senders['D'],'OPEN 4 0 1 1 0')
+ def load(label):
+  for p in holders:write(p,f'BULK {label} 65000 65536 0')
+  write(senders['B'],f'BULK competing 65000 65536 0')
+  time.sleep(3);samples=[sample(keys)];low=[];denies=[]
+  for i in range(6):
+   tag=f'{label[:7]}-{i}';write(senders['L'],f'SEND {tag} 100 50000');low.append(line(senders['L']))
+   denies.append(ask(senders['D'],f'SEND {tag}-deny 4 10000'))
+   samples.append(sample(keys))
+  assert all(not select.select([p.stdout],[],[],0)[0] for p in holders+[senders['B']]), 'bulk ended before final sample'
+  rx=peerop('stats');a,b=samples[0],samples[-1];dt=b['t']-a['t'];charged=(b['charged']-a['charged'])*8/dt/1e6;payload=(b['payload']-a['payload'])*8/dt/1e6
+  rows=[rx.get(f'{label[:7]}-{i}',{}) for i in range(6)];deny=sum(rx.get(f'{label[:7]}-{i}-deny',{}).get('received',0) for i in range(6))
+  record(label,elapsed=dt,samples=samples,lowrate=rows,deny_received=deny,charged_mbit=charged,payload_mbit=payload,tree_ticks_per_second=(b['tree']['total_ticks']-a['tree']['total_ticks'])/dt)
+  for p in holders:line(p,timeout=70)
+  line(senders['B'],timeout=70)
+  assert deny==0 and all(r.get('received')==100 for r in rows),rows
+  assert 6.8<charged<9.2 and payload>6.5,(charged,payload)
+  assert all(len(s['kernel_health']['bindings'])==128 and s['min_lease_margin_ms']>0 for s in samples)
+  assert b['status']['kernel']['maintenance_cycles']>a['status']['kernel']['maintenance_cycles']
+  assert b['status']['kernel']['max_completion_gap_ms']+b['status']['kernel']['max_renewal_span_ms']<5000, b['status']['kernel']
+  assert all(s['status']['status']!='Unsupported' and not s['status'].get('last_error') for s in samples)
+ load('load128')
+ # Unrelated UDP population growth must not disturb the 128 exact maintenance reads.
+ for i in range(4300):
+  q=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);q.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEPORT,1);q.bind(('10.79.0.1',45001));crowd.append(q)
+ wait(lambda s:s['discovery_snapshot']['overloaded'],timeout=120)
+ load('over128')
+ # Close one eight-socket holder; uncapped B reuses a freed local port, never its class.
+ old=infos[-1]['sockets'];ask(holders[-1],'CLOSE');ask(senders['B'],'CLOSE')
+ reused=ask(senders['B'],f"OPEN 4 0 1 1 {old[0]['port']}")
+ remaining=wait(lambda s:len(bindings(s))==120,timeout=20)
+ assert reused['sockets'][0]['cookie'] not in {b['cookie'] for b in bindings(remaining)}
+ record('close-reuse',status=remaining,old=old,reused=reused)
+ for q in crowd:q.close()
+ crowd=[]
+ ask(holders[-1],'OPEN 4 1 8 1 0 43003')
+ restored=wait(lambda s:len(bindings(s))==128,timeout=60)
+ record('capacity-restored-before-fault',status=restored)
+ # Worker death during traffic; no silent restart/renewal and exact disable cleanup.
+ write(holders[0],'BULK fault 10000 65536 0');victim=socket_workers();assert len(victim)==1
+ os.kill(victim[0],9)
+ until=time.monotonic()+15
+ while time.monotonic()<until:
+  fault=status()
+  if fault['status']=='Unsupported':break
+  time.sleep(.25)
+ assert fault['status']=='Unsupported',fault
+ record('worker-failure-under-load',status=fault)
+ line(holders[0]);configure([],False)
+ assert qdiscs()==original and egress_filters()==[] and not childpids() and not kernel_workers() and not socket_workers()
+ record('final-cleanup',status=status(),qdiscs=qdiscs(),protection=api()['protection'])
+ (R/'success.json').write_text(json.dumps({'result':'PRIORITY_AND_128_COMPLETE'}))
+except BaseException:
+ (R/'failure.txt').write_text(traceback.format_exc());print(traceback.format_exc(),flush=True);raise
+finally:
+ stop()
+ for p in reversed(children):
+  if p.poll() is None:p.terminate()

@@ -652,6 +652,7 @@ class Controller:
         del self.apps[app]
 
     def tick(self):
+        tick_start = time.monotonic()
         self.verify()
         if self.compatibility['topology'] != 'veth-noqueue':
             current = parse_features(self.call('ethtool', '-k', self.dev))
@@ -675,6 +676,7 @@ class Controller:
             live[c] = self.exists(b['descriptor'])
         self.existence_pass_ms = int((time.monotonic() - start) * 1000)
         self.existence_queries = len(live)
+        renewal_start = time.monotonic()
         for c, b in list(self.bindings.items()):
             if not live[c]:
                 self.k('del', c); del self.bindings[c]
@@ -685,7 +687,15 @@ class Controller:
             if time.monotonic() - a['idle_since'] > 10:
                 self.remove(app)
         self.k('beat')
-        self.last_tick = time.monotonic()
+        completed = time.monotonic()
+        previous = getattr(self, 'maintenance_completed', None)
+        self.maintenance_completed = completed
+        self.maintenance_cycles = getattr(self, 'maintenance_cycles', 0) + 1
+        self.max_completion_gap_ms = max(getattr(self, 'max_completion_gap_ms', 0), int((completed - previous) * 1000) + 1 if previous is not None else 0)
+        self.max_renewal_span_ms = max(getattr(self, 'max_renewal_span_ms', 0), int((completed - renewal_start) * 1000) + 1)
+        self.last_tick = completed
+        self.maintenance_pass_ms = int((self.last_tick - tick_start) * 1000) + 1
+        self.max_maintenance_pass_ms = max(getattr(self, "max_maintenance_pass_ms", 0), self.maintenance_pass_ms)
 
     def verification_observation(self):
         # Age of the last successful verification measured from its START (conservative).
@@ -726,6 +736,11 @@ class Controller:
                 'verified_age_ms': verified_age_ms, 'verification': verification,
                 'verifications': self.verifications, 'status_reports': self.status_reports,
                 'existence_pass_ms': getattr(self, 'existence_pass_ms', None),
+                'maintenance_pass_ms': getattr(self, 'maintenance_pass_ms', None),
+                'maintenance_cycles': getattr(self, 'maintenance_cycles', 0),
+                'max_maintenance_pass_ms': getattr(self, 'max_maintenance_pass_ms', 0),
+                'max_completion_gap_ms': getattr(self, 'max_completion_gap_ms', 0),
+                'max_renewal_span_ms': getattr(self, 'max_renewal_span_ms', 0),
                 'existence_queries': getattr(self, 'existence_queries', 0),
                 'compatibility': getattr(self, 'compatibility', None),
                 'application_wide_guarantee': False, 'covered_bindings': covered, 'interface': self.dev, 'lease_seconds': 5,

@@ -37,22 +37,27 @@ type KernelStatus struct {
 	Compatibility json.RawMessage `json:"compatibility,omitempty"`
 	// Observation of the controller's last successful verification, measured by
 	// the controller at report time (age since the verification STARTED).
-	VerifiedAgeMillis   *int64                     `json:"verified_age_ms"`
-	Verification        string                     `json:"verification,omitempty"`
-	Verifications       uint64                     `json:"verifications,omitempty"`
-	StatusReports       uint64                     `json:"status_reports,omitempty"`
-	ExistencePassMillis *int64                     `json:"existence_pass_ms,omitempty"`
-	ExistenceQueries    int                        `json:"existence_queries"`
-	Segmentation        json.RawMessage            `json:"segmentation,omitempty"`
-	ValidForMillis      int64                      `json:"valid_for_ms"`
-	Fault               string                     `json:"fault,omitempty"`
-	Limitations         []string                   `json:"limitations,omitempty"`
-	Status              string                     `json:"status"`
-	Covered             int                        `json:"covered_bindings"`
-	Bindings            []Binding                  `json:"bindings"`
-	Apps                map[string]json.RawMessage `json:"apps"`
-	NextMinor           uint32                     `json:"next_minor"`
-	Counters            []struct {
+	VerifiedAgeMillis        *int64                     `json:"verified_age_ms"`
+	Verification             string                     `json:"verification,omitempty"`
+	Verifications            uint64                     `json:"verifications,omitempty"`
+	StatusReports            uint64                     `json:"status_reports,omitempty"`
+	ExistencePassMillis      *int64                     `json:"existence_pass_ms,omitempty"`
+	MaintenanceCycles        uint64                     `json:"maintenance_cycles"`
+	MaxMaintenancePassMillis int64                      `json:"max_maintenance_pass_ms"`
+	MaxCompletionGapMillis   int64                      `json:"max_completion_gap_ms"`
+	MaxRenewalSpanMillis     int64                      `json:"max_renewal_span_ms"`
+	MaintenancePassMillis    *int64                     `json:"maintenance_pass_ms,omitempty"`
+	ExistenceQueries         int                        `json:"existence_queries"`
+	Segmentation             json.RawMessage            `json:"segmentation,omitempty"`
+	ValidForMillis           int64                      `json:"valid_for_ms"`
+	Fault                    string                     `json:"fault,omitempty"`
+	Limitations              []string                   `json:"limitations,omitempty"`
+	Status                   string                     `json:"status"`
+	Covered                  int                        `json:"covered_bindings"`
+	Bindings                 []Binding                  `json:"bindings"`
+	Apps                     map[string]json.RawMessage `json:"apps"`
+	NextMinor                uint32                     `json:"next_minor"`
+	Counters                 []struct {
 		Packets uint64 `json:"packets"`
 		Bytes   uint64 `json:"bytes"`
 	} `json:"counters"`
@@ -79,6 +84,7 @@ type Snapshot struct {
 	Gaps                     map[string]uint64 `json:"known_gaps"`
 	Discovery                DiscoveryStats    `json:"discovery"`
 	DiscoverySnapshot        DiscoveryProgress `json:"discovery_snapshot"`
+	Priority                 PriorityProgress  `json:"priority_discovery"`
 	LastError                string            `json:"last_error,omitempty"`
 	Updated                  time.Time         `json:"updated"`
 	Coverage                 string            `json:"coverage"`
@@ -133,6 +139,7 @@ type Manager struct {
 	cleanup         func() error
 	resolve         func(identity.Flow) identity.Attribution
 	resolveBatch    func([]identity.Flow) []identity.Attribution
+	priorityHints   func([]Cap) priorityHints
 }
 
 func New(o Options) (*Manager, error) {
@@ -150,7 +157,7 @@ func New(o Options) (*Manager, error) {
 	return m, nil
 }
 func newManager(o Options) *Manager {
-	m := &Manager{opts: o, wake: make(chan struct{}, 1), hints: make(chan hint, 128), pending: map[string]bool{}, sockets: func() ([]identity.Socket, error) { return identity.SocketsLimited(DiscoveryCapacity) }, resolve: identity.Resolve, resolveBatch: identity.ResolveBatch}
+	m := &Manager{opts: o, wake: make(chan struct{}, 1), hints: make(chan hint, 128), pending: map[string]bool{}, sockets: func() ([]identity.Socket, error) { return identity.SocketsLimited(DiscoveryCapacity) }, resolve: identity.Resolve, resolveBatch: identity.ResolveBatch, priorityHints: nativePriorityHints}
 	m.snap = Snapshot{Version: 1, Interface: o.Interface, Status: "Disabled", Caps: []Cap{}, Gaps: map[string]uint64{}, Coverage: "verified socket bindings only; first packets and unobserved sockets may escape; never application-wide"}
 	return m
 }
@@ -419,6 +426,8 @@ func (m *Manager) run() {
 	var applied uint64
 	var bound = map[string]bool{}
 	var discovery discoverySnapshot
+	var priority priorityQueue
+	previousCaps := map[string]uint64{}
 	discovery.reset()
 	defer func() {
 		if t != nil {
@@ -509,6 +518,22 @@ func (m *Manager) run() {
 					return
 				}
 			}
+			var changed []Cap
+			for _, c := range cfg.Caps {
+				if previousCaps[c.key()] != c.BitsPerSecond {
+					changed = append(changed, c)
+				}
+			}
+			previousCaps = map[string]uint64{}
+			for _, c := range cfg.Caps {
+				previousCaps[c.key()] = c.BitsPerSecond
+			}
+			priority = priorityQueue{}
+			if len(changed) > 0 {
+				priority.hints = m.priorityHints(changed)
+			}
+			priority.hints.view.Version = version
+			m.publishPriority(&priority)
 			applied = version
 			discovery.clearRetry() // cap edits may request a fresh attempt, never reset progress
 			bound = map[string]bool{}
@@ -599,12 +624,23 @@ func (m *Manager) run() {
 			}
 			// Retained rows are hints only. Advance even across cap edits;
 			// fresh resolution and the version guard still precede binding.
+			priority.selectRows(&discovery)
+			seen := map[string]bool{}
 			var candidates []identity.Socket
 			var flows []identity.Flow
 			stats := DiscoveryStats{}
 			stop := false
 			for i := 0; i < DiscoveryScanBudget && len(candidates) < identity.MaxResolveBatch; i++ {
-				s, ok := discovery.next()
+				var s identity.Socket
+				var ok bool
+				// At most four priority attempts; the remainder always advances
+				// background discovery, including during repeated configuration edits.
+				if i < 4 {
+					s, ok = priority.next()
+				}
+				if !ok {
+					s, ok = discovery.next()
+				}
 				if !ok {
 					break
 				}
@@ -614,6 +650,10 @@ func (m *Manager) run() {
 					break
 				}
 				stats.RowsVisited++
+				if seen[s.Cookie] {
+					continue
+				}
+				seen[s.Cookie] = true
 				if s.Inode == 0 {
 					stats.SkippedUnusable++
 					continue
@@ -642,6 +682,7 @@ func (m *Manager) run() {
 				flows = append(flows, identity.Flow{Protocol: s.Protocol, Direction: "outgoing", Local: s.Local, Remote: s.Remote, NetNS: s.NetNS, Interface: s.Interface})
 			}
 			m.publishDiscovery(&discovery)
+			m.publishPriority(&priority)
 			stats.CandidateRows = uint64(len(candidates))
 			if stop || len(candidates) == 0 {
 				m.discovered(stats)

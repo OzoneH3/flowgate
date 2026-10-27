@@ -182,3 +182,12 @@ and an explicit observation-watchdog limitation. It does not latch a daemon
 fault merely because an observation is old. Actual ownership/controller faults
 remain Unsupported. The upper age may be up to2ms larger than the prior
 formula because it now includes integer-floor uncertainty and rounding.
+
+Priority discovery (experimental, see UPLOAD-SHAPING-PRIORITY.txt):
+priority_discovery records version, hint_inodes, pending_rows, attempts,
+incomplete/reason, hint_duration_ms, completed. Completion describes a bounded
+hint attempt only, never application-wide coverage. Configuration accepted,
+applied_version, verified bindings and receiver cap enforcement are distinct.
+Kernel maintenance timing fields are observation counters only:
+maintenance_cycles, maintenance_pass_ms, max_maintenance_pass_ms,
+max_completion_gap_ms, max_renewal_span_ms (controller-lifetime maxima).
