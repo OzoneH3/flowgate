@@ -1,0 +1,82 @@
+Bounded discovery beyond 1024 sockets — design only (no code in this increment)
+
+Status
+Open release blocker since 4563bc40. Today the manager's discovery census is
+identity.SocketsLimited(1024); when the kernel holds more rows the call returns
+an error together with the partial rows, and the manager correctly discards
+the whole pass (gap discovery_failed) rather than treating a partial census as
+complete. Result on such a host: discovery never runs, newly eligible sockets
+are found only through attribution hints (Offer) on their first observed
+packet, and pre-existing connected sockets of a newly capped application are
+never bound. The controller's own census (probe serve-sockets, also 1024) has
+the same cap and faults the controller when exceeded, which withdraws shaping
+entirely on busy hosts. Neither behaviour is wrong (nothing partial is ever
+treated as complete); both are unusable above the bound.
+
+Requirements
+R1 Progress: every eligible socket must be examined within a bounded number of
+   ticks no matter how many sockets exist; no application may be starved by a
+   fixed scan prefix.
+R2 Honesty: a partial observation is never reported or used as a complete one;
+   coverage must state which parts of the socket space were examined and when.
+R3 Bounds: no single kernel dump larger than the existing bound; memory per
+   tick bounded by one shard; CPU per tick bounded; no unbounded retries.
+R4 Authority unchanged: discovery remains a hint; the controller's bind proof
+   stays the only binding authority; lease renewal must not depend on a full
+   census at all.
+
+Design
+D1 Shard the census by local port range using the kernel's SOCK_DIAG bytecode
+   filter (INET_DIAG_REQ_BYTECODE with INET_DIAG_BC_S_GE / S_LE, the mechanism
+   `ss` uses for port ranges). Fixed initial sharding: per family (v4, v6) and
+   protocol (tcp, udp), 8 port ranges of 8192 ports each = 32 shards. A shard's
+   dump is bounded by the same 1024-row limit; a shard that overflows is split
+   in two on its port range for the next pass (bounded depth: at most 4 splits
+   => 512 ports minimum; a shard that still overflows at minimum width is
+   marked overflow and reported, not silently skipped). Splits merge back when
+   both halves stay under half the limit for a full pass. The shard table is
+   bounded (at most 32 * 2^4 = 512 entries) and lives only in the manager.
+D2 Rotate: each tick examines the next shard in a fixed rotation (R1): a full
+   pass over S shards takes S ticks (32 s at the initial sharding, up to 512 s
+   when maximally split; both are stated bounds, not latency promises). Hints
+   from Offer() continue to bind newly observed sockets immediately, so the
+   rotation only governs sockets whose first packet was not attributed.
+D3 Report coverage truthfully (R2): snapshot.discovery gains
+   shards_total, shards_complete_last_pass, shards_overflow, pass_duration_ms,
+   last_full_pass_age_ms, and a boolean census_partial. The daemon status stays
+   Partial whenever any shard overflowed in the last pass or a pass has not
+   completed within 2 x S ticks. Nothing in known_gaps changes meaning.
+D4 Lease pruning without a full census (R4): the controller's tick currently
+   needs the full socket list only to drop bindings whose socket closed. Replace
+   that with per-binding existence checks: one exact SOCK_DIAG lookup per bound
+   cookie (INET_DIAG_REQ with the socket's id: family, protocol, local/remote
+   tuple, interface, cookie), at most 128 lookups per tick (the binding bound),
+   independent of how many sockets the host has. A lookup that fails or returns
+   a different cookie/inode unbinds exactly as today. This removes the
+   controller's 1024-row dependency entirely and is also cheaper than today's
+   full dump at any socket count.
+D5 Row-limit error today: keep discarding the whole pass (never use partial
+   rows); after D1 the error can only occur inside a minimum-width shard, where
+   it marks that shard overflow and the pass partial.
+
+Interaction with the shared census (ResolveBatch)
+The holder census walks all processes regardless of shard; sharding changes
+which socket rows are candidates per tick (at most 8 as today), not the holder
+walk. The per-tick cost therefore stays one holder walk for at most 8
+candidates.
+
+Validation plan (when implemented)
+Guest with a synthetic 3000-socket population (connected UDP sockets of an
+uncapped application) plus the standard workload: discovery must bind a newly
+capped application's existing socket within one full pass (observed, not
+promised), report census_partial=false once all shards complete, and
+census_partial=true with the overflow count when one shard is forced over the
+bound at minimum width. Controller lease pruning must stay at <= 128 lookups
+per tick with 3000 sockets present. Row-limit error path: model test that a
+failed shard never contributes rows. Starvation: a long-lived eligible socket
+in the last shard is found on every pass. Memory: shard table bounded; RSS of
+the manager flat across passes.
+
+Out of scope here
+No code. The firewall's own attribution dumps (Resolve/SocketsLimited(0)) are
+a separate path and are not changed by this design.

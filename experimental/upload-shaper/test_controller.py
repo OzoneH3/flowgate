@@ -1,6 +1,8 @@
 import importlib.util
 from pathlib import Path
 import unittest
+import time
+import json
 
 spec = importlib.util.spec_from_file_location('m1', Path(__file__).with_name('controller.py'))
 m1 = importlib.util.module_from_spec(spec)
@@ -152,6 +154,7 @@ class ModelTests(unittest.TestCase):
         c.fault = None; c.applying = False; c.partial = []
         c.bindings = {'cookie': {'app': 'uid:key'}}; c.apps = {'uid:key': {'minor': 1}}
         c.dev = 'test0'; c.next_minor=2
+        c.verified_at = time.monotonic(); c.verifications = 0; c.status_reports = 0  # fresh observation for legacy expectations
         import json
         c.counters = [{'packets': 0, 'bytes': 0} for _ in range(18)]
         c.health = {'config_until': 2**64-1, 'bindings': [{'cookie': 'cookie', 'minor': 1, 'until': 2**64-1}]}
@@ -214,6 +217,94 @@ class ModelTests(unittest.TestCase):
         c.next_minor=0xfffe
         with self.assertRaisesRegex(ValueError,'class_generation_exhausted'):
             c.set_cap('app',4000000)
+
+class StatusObservationTests(unittest.TestCase):
+    """Status is an observation: it never verifies, renews or beats; verification is recorded by verify()
+    callers at the verification START and only on success; labels/states change at 1/2/5 s."""
+    def fake(self):
+        c = object.__new__(m1.Controller)
+        c.fault = None; c.applying = False; c.partial = []
+        c.bindings = {'cookie': {'app': 'uid:key'}}; c.apps = {'uid:key': {'minor': 1}}
+        c.dev = 'test0'; c.next_minor = 2; c.verified_at = None; c.verifications = 0; c.status_reports = 0
+        c.counters = [{'packets': 0, 'bytes': 0} for _ in range(18)]
+        c.health = {'config_until': 2**64-1, 'bindings': [{'cookie': 'cookie', 'minor': 1, 'until': 2**64-1}]}
+        c.kcalls = []
+        def k(*a):
+            c.kcalls.append(a[0])
+            return json.dumps(c.health if a[0] == 'health' else c.counters)
+        c.k = k
+        c.compatibility = {'topology': 'veth-noqueue'}
+        c.link = {}
+        return c
+    def test_status_never_verifies_renews_or_beats(self):
+        c = self.fake(); calls = []
+        c.verify = lambda: calls.append('verify')
+        for _ in range(5): c.status()
+        self.assertEqual(calls, [])
+        self.assertEqual(c.status_reports, 5)
+        self.assertFalse({'bind', 'beat'} & set(c.kcalls), c.kcalls)
+    def test_unknown_before_first_verification_and_never_active(self):
+        c = self.fake(); c.verify = lambda: None
+        s = c.status()
+        self.assertEqual((s['verified_age_ms'], s['verification'], s['status']), (None, 'unknown', 'Partial'))
+    def test_boundaries_fresh_stale_unknown_withdrawn(self):
+        c = self.fake(); c.verify = lambda: None; now = time.monotonic()
+        for age, label, state in ((0.5, 'fresh', 'Active'), (1.5, 'stale', 'Partial'), (2.5, 'unknown', 'Partial'), (5.5, 'unknown', 'Unsupported')):
+            c.verified_at = now - age; c.fault = None
+            s = c.status()
+            self.assertEqual((s['verification'], s['status']), (label, state), (age, s))
+            self.assertTrue(abs(s['verified_age_ms'] - age * 1000) < 200, s['verified_age_ms'])
+        self.assertIsNone(c.fault, 'status must not set a permanent fault')
+    def test_verify_records_start_anchor_only_on_success(self):
+        c = self.fake()
+        import types
+        # Failed verification must not refresh the observation.
+        c.get_link = lambda: (_ for _ in ()).throw(RuntimeError('link gone'))
+        with self.assertRaises(RuntimeError): m1.Controller.verify(c)
+        self.assertIsNone(c.verified_at); self.assertEqual(c.verifications, 0)
+        # Successful verification: anchor at the START of verify.
+        c.ns = 'net:[1]'; c.link = {'ifindex': 1}; c.expected = {'qdiscs': []}; c.ids = None; c.original = {}
+        c.get_link = lambda: {'ifindex': 1}
+        c.topology = lambda *a: (time.sleep(0.05), {'qdiscs': []})[1]
+        import os as _os
+        real = m1.os.readlink
+        m1.os.readlink = lambda p: 'net:[1]'
+        try:
+            before = time.monotonic(); m1.Controller.verify(c); after = time.monotonic()
+        finally:
+            m1.os.readlink = real
+        self.assertEqual(c.verifications, 1)
+        self.assertTrue(before <= c.verified_at <= after - 0.04, (before, c.verified_at, after))
+    def test_mutation_path_still_verifies(self):
+        # Scope: mutate() only. tick() and bind() are exercised separately below.
+        c = self.fake(); calls = []
+        c.verify = lambda: calls.append('verify')
+        c.call = lambda *a: None; c.save = lambda: None; c.topology = lambda: {'qdiscs': []}
+        c.pending_setup = False; c.cleaning = False
+        m1.Controller.mutate(c, 'class', 'change')
+        self.assertEqual(calls, ['verify'])
+
+    def test_tick_path_still_verifies_and_renews(self):
+        c = self.fake(); calls = []
+        c.verify = lambda: calls.append('verify')
+        c.bindings = {'cookie': {'app': 'uid:key', 'inode': 7, 'protocol': 'tcp', 'netns': 'ns'}}
+        c.apps['uid:key']['idle_since'] = time.monotonic()
+        c.sockets = lambda: [{'cookie': 'cookie', 'inode': 7, 'protocol': 'tcp', 'netns': 'ns'}]
+        c.k = lambda *a: (calls.append(a[0]), 'OK')[1]
+        m1.Controller.tick(c)
+        self.assertEqual(calls, ['verify', 'bind', 'beat'], calls)
+
+    def test_status_age_sampled_after_health_rpcs(self):
+        # A slow health RPC must not make the reported age younger than the report time.
+        c = self.fake(); c.verified_at = time.monotonic()
+        base_k = c.k
+        def slow_k(name, *a):
+            if name == 'health':
+                time.sleep(0.3)
+            return base_k(name, *a)
+        c.k = slow_k
+        r = m1.Controller.status(c)
+        self.assertGreaterEqual(r['verified_age_ms'], 300, r)
 
 class CompatibilityTests(unittest.TestCase):
     def topology(self):

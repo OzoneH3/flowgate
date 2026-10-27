@@ -34,37 +34,48 @@ type Binding struct {
 	Cookie string `json:"cookie"`
 }
 type KernelStatus struct {
-	Compatibility  json.RawMessage            `json:"compatibility,omitempty"`
-	Segmentation   json.RawMessage            `json:"segmentation,omitempty"`
-	ValidForMillis int64                      `json:"valid_for_ms"`
-	Fault          string                     `json:"fault,omitempty"`
-	Limitations    []string                   `json:"limitations,omitempty"`
-	Status         string                     `json:"status"`
-	Covered        int                        `json:"covered_bindings"`
-	Bindings       []Binding                  `json:"bindings"`
-	Apps           map[string]json.RawMessage `json:"apps"`
-	NextMinor      uint32                     `json:"next_minor"`
-	Counters       []struct {
+	Compatibility json.RawMessage `json:"compatibility,omitempty"`
+	// Observation of the controller's last successful verification, measured by
+	// the controller at report time (age since the verification STARTED).
+	VerifiedAgeMillis *int64                     `json:"verified_age_ms"`
+	Verification      string                     `json:"verification,omitempty"`
+	Verifications     uint64                     `json:"verifications,omitempty"`
+	StatusReports     uint64                     `json:"status_reports,omitempty"`
+	Segmentation      json.RawMessage            `json:"segmentation,omitempty"`
+	ValidForMillis    int64                      `json:"valid_for_ms"`
+	Fault             string                     `json:"fault,omitempty"`
+	Limitations       []string                   `json:"limitations,omitempty"`
+	Status            string                     `json:"status"`
+	Covered           int                        `json:"covered_bindings"`
+	Bindings          []Binding                  `json:"bindings"`
+	Apps              map[string]json.RawMessage `json:"apps"`
+	NextMinor         uint32                     `json:"next_minor"`
+	Counters          []struct {
 		Packets uint64 `json:"packets"`
 		Bytes   uint64 `json:"bytes"`
 	} `json:"counters"`
 }
 type Snapshot struct {
-	VerifiedUntil   time.Time         `json:"verified_until"`
-	CoverageExpired bool              `json:"coverage_snapshot_expired"`
-	Version         uint64            `json:"version"`
-	AppliedVersion  uint64            `json:"applied_version"`
-	Enabled         bool              `json:"enabled"`
-	Interface       string            `json:"interface"`
-	Status          string            `json:"status"`
-	Caps            []Cap             `json:"configured_caps"`
-	Kernel          *KernelStatus     `json:"kernel,omitempty"`
-	ApplicationWide bool              `json:"application_wide_guarantee"`
-	Gaps            map[string]uint64 `json:"known_gaps"`
-	Discovery       DiscoveryStats    `json:"discovery"`
-	LastError       string            `json:"last_error,omitempty"`
-	Updated         time.Time         `json:"updated"`
-	Coverage        string            `json:"coverage"`
+	VerifiedUntil   time.Time `json:"verified_until"`
+	CoverageExpired bool      `json:"coverage_snapshot_expired"`
+	// Reader-side view of the controller's last successful verification: the
+	// controller-observed age plus the time this snapshot has been held, derived
+	// at read time; "unknown" is a sentinel, never upgraded.
+	VerificationAgeMillis *int64            `json:"verification_age_ms,omitempty"`
+	Verification          string            `json:"verification,omitempty"`
+	Version               uint64            `json:"version"`
+	AppliedVersion        uint64            `json:"applied_version"`
+	Enabled               bool              `json:"enabled"`
+	Interface             string            `json:"interface"`
+	Status                string            `json:"status"`
+	Caps                  []Cap             `json:"configured_caps"`
+	Kernel                *KernelStatus     `json:"kernel,omitempty"`
+	ApplicationWide       bool              `json:"application_wide_guarantee"`
+	Gaps                  map[string]uint64 `json:"known_gaps"`
+	Discovery             DiscoveryStats    `json:"discovery"`
+	LastError             string            `json:"last_error,omitempty"`
+	Updated               time.Time         `json:"updated"`
+	Coverage              string            `json:"coverage"`
 }
 
 // DiscoveryStats are monotonic activity counters for the census-driven discovery
@@ -105,6 +116,7 @@ type Manager struct {
 	snap            Snapshot
 	running, closed bool
 	dirty           bool
+	sampleStart     time.Time // monotonic anchor of the published kernel status
 	wake            chan struct{}
 	done            chan struct{}
 	hints           chan hint
@@ -152,8 +164,45 @@ func (m *Manager) snapshotLocked() Snapshot {
 		}
 		s.CoverageExpired = true
 	}
+	if s.Kernel != nil {
+		s.VerificationAgeMillis, s.Verification = verificationView(m.snap.Kernel, m.sampleStart, time.Now())
+		// Stale/unknown verification can only downgrade Active; Applying and
+		// Unsupported are preserved as published.
+		if s.Status == "Active" && s.Verification != "fresh" {
+			s.Status = "Partial"
+		}
+	}
 	return s
 }
+
+// verificationView ages the controller-observed verification by the time the
+// snapshot has been held (monotonic anchor), and labels it with the controller's
+// own thresholds: fresh <= 1 s, stale <= 2 s, otherwise unknown. A controller
+// that reported no observation (older controller, or never verified) stays
+// unknown with no age; a label is never upgraded beyond what the controller said.
+func verificationView(k *KernelStatus, sampleStart, now time.Time) (*int64, string) {
+	if k == nil || k.VerifiedAgeMillis == nil {
+		return nil, "unknown"
+	}
+	age := *k.VerifiedAgeMillis
+	if !sampleStart.IsZero() && now.After(sampleStart) {
+		age += now.Sub(sampleStart).Milliseconds()
+	}
+	label := "unknown"
+	if k.Verification == "fresh" || k.Verification == "stale" {
+		switch {
+		case age <= 1000:
+			label = "fresh"
+		case age <= 2000:
+			label = "stale"
+		}
+		if k.Verification == "stale" && label == "fresh" {
+			label = "stale"
+		}
+	}
+	return &age, label
+}
+
 func validateConfig(c Config) error {
 	if len(c.Caps) > MaxCaps || (!c.Enabled && len(c.Caps) != 0) {
 		return fmt.Errorf("at most16 caps; disabled configuration must have no caps")
@@ -465,6 +514,7 @@ func (m *Manager) run() {
 		}
 		m.mu.Lock()
 		m.snap.Kernel = &ks
+		m.sampleStart = sampleStart
 		m.snap.VerifiedUntil = sampleStart.Add(time.Duration(ks.ValidForMillis) * time.Millisecond)
 		m.snap.Status = "Partial"
 		m.snap.Updated = time.Now()

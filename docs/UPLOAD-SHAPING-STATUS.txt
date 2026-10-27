@@ -1,0 +1,190 @@
+Status reads and verification: observation contract (from 839a950c)
+
+Scope
+Experimental isolated increment. No host deployment, restart, protection,
+rule, offload or updater change; installed 25dbb1a unchanged. UDP GSO remains
+a separate unresolved gate. Binding ownership, the bind-time proof, lease
+renewal, discovery, the probe worker and every permission path are unchanged.
+
+Trace: why reading status verified the topology
+Three readers exist and must not be conflated.
+ R1 The daemon API upload-status (GUI, doctor, fixtures). Engine.uploadRequest
+    returns Manager.Snapshot(), a locked deep copy of the last published
+    snapshot. No controller RPC, no verification, at any reader count or rate.
+ R2 The manager's own worker loop issues a controller `status` RPC once per
+    iteration (after each configuration change, and before accepting more
+    hints). The loop iterates on the 1 s ticker and on every wake/hint, so the
+    RPC rate is at least 1/s and rises with hints: 61 in the 60 s profile2
+    window (a 4563bc40 profile; 839a950c changed the probe path, not verify).
+ R3 The controller's tick() runs at least every 1 s, verifies, probes sockets,
+    renews leases (`k bind` per binding, `k beat`) and retires idle classes.
+Controller.status() began with self.verify(): ip -d -j link, tc -j -batch
+(five dumps plus class-parent filters), structural comparison with the
+journalled expectation and `k ids`. So every manager iteration paid a full
+topology verification only to produce a report, in addition to the tick's
+own: profile2 verify 104 = 43 tick + 61 status; tc 0.99 s, ip 0.83 s.
+
+The three contracts, separated
+C1 Fresh authority (unchanged). Before any TC mutation (mutate), any binding
+   (bind: probe proof then verify) and every lease renewal (tick: verify, then
+   k bind / k beat) the controller re-verifies the owned topology and kernel
+   object identity. A status read never verifies, renews, beats, binds or
+   mutates, and never makes old evidence authoritative for any of these.
+C2 Observation (new). A status report shows the latest observed state with
+   its observation time. Kernel health and counters are read fresh on each
+   report (cheap worker RPCs, each bounded by its 3 s deadline). The topology
+   verification shown is the most recent SUCCESSFUL verification by any C1
+   path, recorded inside verify() at its START (conservative anchor) and only
+   after it succeeded; a failed verification refreshes nothing. The
+   observation is sampled AFTER the health RPCs so a slow worker cannot make
+   the age younger than it is at report time. Fields: verified_age_ms,
+   verification = fresh (age <= 1 s) | stale (<= 2 s) | unknown (> 2 s or
+   never), verifications and status_reports (monotonic counters). Stale or
+   unknown downgrades the reported state to Partial, never Active; an age
+   beyond the 5 s lease reports Unsupported without recording a permanent
+   fault (nothing current to report; the daemon withdraws on it).
+   Daemon side: the manager keeps the monotonic time at which each kernel
+   status sample was requested; Snapshot() derives at read time, under the
+   lock, verification_age_ms = controller age + time the sample has been held
+   and re-labels from the combined age. The label is never upgraded beyond
+   what the controller reported (stale stays stale, unknown stays unknown, a
+   missing observation is unknown without an age) and only Active is
+   downgraded to Partial; Applying and Unsupported are preserved. The
+   existing lease view (verified_until, coverage_snapshot_expired, covered 0
+   after expiry) is unchanged.
+C3 Failure detection and withdrawal. Foreign topology or kernel object
+   identity changes are detected by the next C1 verification (tick, or any
+   mutation/bind). Previously the status path was an additional detection
+   opportunity; it no longer is. There is no proven 1 s wall-clock bound in
+   either design: the tick becomes eligible 1 s after the previous tick
+   completed, and the loop serves buffered requests first, each bounded only
+   by its helper/worker deadline. The honest statement: detection within one
+   controller loop cycle, bounded by 1 s plus the bounded service time of the
+   requests dispatched ahead of the tick. Withdrawal is unchanged: fault, no
+   further renewal, kernel leases expire 5 s after the LAST successful
+   renewal/beat (not after the foreign change), default class (unshaped,
+   never Allow), owned cleanup attempted, cleanup refused while foreign
+   objects exist.
+
+Change
+controller.py: verify() records verified_at (start anchor) and increments
+verifications only on success; status() no longer verifies and reports the
+observation fields after the stats/health RPCs. mutate, bind, remove,
+set_cap, cleanup_objects, tick: unchanged.
+internal/uploadshape/manager.go: KernelStatus decodes the four fields; the
+manager keeps the sample anchor; Snapshot() derives verification_age_ms and
+verification as described (verificationView). RPC cadence unchanged.
+Tests: controller model (status never verifies/renews/beats; unknown before
+the first verification is never Active; boundaries 0.5/1.5/2.5/5.5 s; failed
+verify refreshes nothing; age sampled after a 300 ms health RPC; mutate and
+tick still verify, tick order verify, bind, beat). Go (verificationView
+boundaries at exactly 1 s and 2 s, never-upgrade, nil sentinel; a cached
+snapshot ages without any RPC; Applying/Unsupported preserved; the published
+state is not modified by reads).
+
+Why API polling cannot multiply expensive work
+R1 never reaches the controller. R2's rate is bounded by the manager loop
+(ticker + hint channel), independent of API readers. Each R2 report now costs
+two bounded worker RPCs and no helper launches. Verification work is bounded
+by the controller's own tick plus actual mutations/binds. The reader phases
+below measure this on both builds.
+
+Measured results (VM2, profiling OFF, netdevsim guest, 1 TCG vCPU; .workspace/shaping-status)
+Reference = 839a950c (daemon rebuilt from a clean archive, byte-identical to the compare1 build;
+controller and probe of 839a950c). Candidate = this change. Control = candidate daemon with shaping
+disabled. Same fixture design as the previous comparison: eight equal-workload phases in the order
+old,new,new,old, control,new,new,control (A and C capped and bound but idle when shaping; B uncapped
+bulk; L 6 x 200 low-rate records at 50 ms; D denied UDP); two separate cap-load phases with A
+transmitting; the daemon is restarted on its binary for every phase. VM1 failed on a fixture
+assumption (the reference was asserted to have no socket worker; 839a950c has one) and is retained.
+
+ phase        build      B Mbit/s  tree ticks/s  max p95 ms  verifications/status_reports per phase
+ old1         839a950c   454.5     24.62         1.77        n/a (no counters)
+ new1         candidate  518.3     21.17         1.52        51 / 61
+ new2         candidate  516.0     20.88         1.51        53 / 63
+ old2         839a950c   494.6     23.45         1.47        n/a
+ control1     disabled   659.9      7.40         1.32        -
+ new3         candidate  512.1     20.75         1.56        51 / 61
+ new4         candidate  497.0     21.19         1.47        51 / 62
+ control2     disabled   611.8     10.79         1.34        -
+ capload-old  839a950c   425.7     24.13         1.73        A charged 8.00 Mbit/s
+ capload-new  candidate  465.2     20.88         1.51        A charged 8.00 Mbit/s, 51 / 62
+Block 1 (old1,old2 vs new1,new2): B 474.5 -> 517.1 Mbit/s (+8.98 %, both candidate phases above both
+reference phases); daemon tree 24.04 -> 21.02 ticks/s (-3.01 points of one vCPU).
+Block 2 (control1,control2 vs new3,new4): B 635.9 -> 504.5 Mbit/s = 79.3 % of the disabled control;
+tree CPU 9.10 -> 20.97 ticks/s = +11.87 points. Guest objectives (>= 85 %, <= +7 points): NOT MET.
+Low-rate 1200/1200 in every phase; candidate max p95 1.56 ms vs control 1.34 ms (within 1 ms). Deny
+delivered nothing in every phase. A's charged class 8.00 Mbit/s against the 8 Mbit/s cap on both builds.
+Verification work: the candidate performed 51-53 verifications per 62 s phase with 61-63 status
+reports in the same window, i.e. verifications track the tick (plus binds/mutations) and are no longer
+added to by status reports. The reference has no counters and its tick rate was not measured in this
+run; by the trace its verifications are ticks + status RPCs, a count this run does not supply. The
+block-1 difference is about 3 points of tree CPU and about 9 % of guest throughput; the remaining
+11.9 points over the disabled control are not attributed by this run (no profile taken, as
+requested). Cap-load payload at the receiver: old 7.673, new 7.677 Mbit/s against charged class
+bytes 8.001 / 8.001 Mbit/s.
+
+API reader load (M1; 3 readers each, B bulk, caps bound; 30 s):
+ phase            build      reads/s  verifications  status_reports  tree ticks/s  B Mbit/s
+ readers-old-1hz  839a950c    2.93    n/a            n/a             23.22         499.7
+ readers-new-1hz  candidate   2.99    25             30              20.24         530.6
+ readers-old-10hz 839a950c   27.95    n/a            n/a             30.30         398.0
+ readers-new-10hz candidate  28.60    24             30              28.67         413.0
+On the candidate, verifications were similar (25 and 24 per 30 s) and status reports equal (30 per
+30 s) at 3 and 28.6 reads/s: API polling added no controller work. API reads are not free: at 28.6
+reads/s the daemon tree used about 7-8 ticks/s more than at 3 reads/s on BOTH builds, and throughput
+fell about 20 % on both builds, with the reader threads sharing the single vCPU. The mechanism
+(snapshot copy, encoding, socket handling, reader CPU) is not apportioned: no profile was taken, and
+only the two rates were measured, so no cost-per-read law is claimed. Verification, helper launch
+and lease counts did not move with the read rate. 10 Hz x 3 is a stress level, not an established UI
+cadence. Zero API errors; all reader threads joined.
+
+Foreign topology change (M2, candidate): a foreign matchall filter added at t=0 on the egress hook;
+status Unsupported at t=1.41 s (observed detection time for this one event; the reader-side age is a
+conservative upper estimate that includes RPC time, so it does not date the verifications around the
+change). Disable while the foreign object
+was present was refused: qdiscs and the egress filter list were unchanged, the state stayed
+Unsupported; after removing the foreign filter, disable restored the exact original root with an
+empty filter list and zero controller/worker processes.
+
+Controller stalls (M3, candidate, SIGSTOP of the controller; timelines in vm2-artifacts):
+ 1 s stall: the published sample did not change while stopped (status_reports constant); the derived
+   age grew monotonically 1579 -> 2607 ms, label stale -> unknown at 0.62 s; after SIGCONT the next
+   sample (t=1.30) was fresh with both bindings covered and lease view 4995 ms. No fault.
+ 7 s stall: age grew 1576 -> 8620 ms, unknown from 0.64 s; coverage_snapshot_expired with covered 0
+   from t=3.53 s (the sample's lease view ran out) until SIGCONT at 7.04 s; the first sample after
+   resume (t=7.31) was fresh with both bindings covered and lease view 4984 ms. The controller
+   resumed, re-verified and renewed; no Unsupported was published and no timeout was observed
+   (whether an RPC was in flight at the stop was not measured). The kernel lease itself (5 s from the last beat, so expired
+   in the kernel for roughly the last 2-3 s of the stall) is INFERRED from the lease rule: this run
+   has no direct kernel health observation; valid_for_ms/covered come from the controller's health
+   RPC after resume. Either outcome was acceptable by design; the invariants held: nothing was
+   reported fresher than it was, expired coverage reported covered 0, and the published state was
+   never upgraded by a read.
+Worker death (M4): kernel worker kill -> Unsupported (previous increment, reused); socket worker kill
+-> Unsupported within 10 s, then explicit disable -> exact original root, zero workers: PASS.
+
+Finding on the thresholds (open, not changed here, no widening): the reader-side age is a
+conservative upper estimate (verification start anchor plus the status RPC and the time the sample
+was held), not the exact verification age. In ordinary candidate operation it labelled 11 of 30
+steady samples fresh, 17 stale and 2 unknown (ages up to 3.0 s): the tick is eligible 1 s after the
+previous tick completed and the sample is held up to about 1 s, so this estimate exceeds the 1 s
+bound most of the time and occasionally 2 s. What that means for Active in practice is unproven
+here: every steady sample was already Partial on both builds for pre-existing reasons, so no
+Active-to-Partial change attributable to the label was observed. Whether the bounds should follow
+the actual cadence is a contract question for review, not a silent adjustment.
+
+Readiness: experimental source increment. Against 839a950c the candidate is faster and cheaper at
+identical workload; against the disabled control the guest objectives are still missed: 79.3 % of
+control throughput (a 20.7 % deficit) and +11.9 CPU points. No performance goal is passed and no host
+readiness is claimed; no approval, deployment or updater change is implied.
+Release blockers: throughput/CPU objectives; bounded discovery beyond 1024 sockets (an unreviewed
+design proposal below, not an implementation approval, no code); the fresh/stale thresholds versus
+cadence finding; UDP GSO (separate gate).
+
+Bounded discovery beyond 1024 sockets (release blocker, unchanged)
+Still open; not changed by this increment. The design is in
+docs/UPLOAD-SHAPING-DISCOVERY-BOUNDED.txt (port-range sharded SOCK_DIAG
+census with rotation and truthful coverage, per-binding exact lookups for
+lease pruning). An unreviewed design proposal, no code, no implementation
+approval; it stays on the blocker list.

@@ -263,6 +263,11 @@ class Controller:
         self.applying = True
         self.closed = False
         self.fault = None
+        # Observation record of the last SUCCESSFUL verification (any caller): start anchor,
+        # published only on success. Status reads report it and never refresh it.
+        self.verified_at = None
+        self.verifications = 0
+        self.status_reports = 0
         self.manifest = self.state / 'owner.json'
         if self.manifest.exists():
             try:
@@ -417,6 +422,7 @@ class Controller:
             p.unlink(missing_ok=True)
 
     def verify(self):
+        verify_started = time.monotonic()
         link = self.get_link()
         identity_fields = ('ifindex', 'address', 'parentbus', 'parentdev', 'link_type', 'mtu', 'num_tx_queues', 'gso_max_size', 'gso_ipv4_max_size', 'tso_max_size')
         if getattr(self, 'cleaning', False):
@@ -433,6 +439,8 @@ class Controller:
             raise RuntimeError('Unsupported: traffic-control objects changed; refusing mutation')
         if self.ids is not None and json.loads(self.k('ids')) != self.ids:
             raise RuntimeError('Unsupported: kernel object identity changed')
+        self.verified_at = verify_started
+        self.verifications = getattr(self, 'verifications', 0) + 1
 
     def mutate(self, *args):
         self.verify()
@@ -668,11 +676,23 @@ class Controller:
         self.k('beat')
         self.last_tick = time.monotonic()
 
+    def verification_observation(self):
+        # Age of the last successful verification measured from its START (conservative).
+        if getattr(self, 'verified_at', None) is None:
+            return None, 'unknown'
+        age = time.monotonic() - self.verified_at
+        return int(age * 1000), 'fresh' if age <= 1 else ('stale' if age <= 2 else 'unknown')
+
     def status(self):
-        self.verify()
+        # Observation only: fresh kernel health/counters, plus the latest successful verification
+        # with its age. No verification, no renewal, no beat, no mutation happens here.
+        self.status_reports = getattr(self, 'status_reports', 0) + 1
         counters = json.loads(self.k('stats'))
         health = json.loads(self.k('health'))
         now = time.monotonic_ns()
+        # Sampled AFTER the worker RPCs (each bounded by its own deadline), so a slow health read
+        # cannot make the reported verification age younger than it is at report time.
+        verified_age_ms, verification = self.verification_observation()
         live = {b['cookie']: b for b in health['bindings'] if b['until'] > now}
         covered = sum(1 for c, b in self.bindings.items() if c in live and live[c]['minor'] == self.apps[b['app']]['minor'])
         valid_until = min([health['config_until']] + [b['until'] for b in live.values()])
@@ -680,13 +700,19 @@ class Controller:
             covered = 0
         if self.fault:
             state = 'Unsupported'
+        elif verified_age_ms is not None and verified_age_ms > 5000:
+            # No sufficiently recent successful verification (older than the lease): not proof the loop
+            # stopped, but nothing current to report; the daemon withdraws on this.
+            state = 'Unsupported'
         elif self.applying:
             state = 'Applying'
-        elif covered != len(self.bindings) or not self.bindings or self.partial or counters[0]['packets'] or counters[17]['packets']:
+        elif covered != len(self.bindings) or not self.bindings or self.partial or counters[0]['packets'] or counters[17]['packets'] or verification != 'fresh':
             state = 'Partial'
         else:
             state = 'Active'
         return {'status': state, 'coverage': 'observed socket bindings on selected interface only',
+                'verified_age_ms': verified_age_ms, 'verification': verification,
+                'verifications': self.verifications, 'status_reports': self.status_reports,
                 'compatibility': getattr(self, 'compatibility', None),
                 'application_wide_guarantee': False, 'covered_bindings': covered, 'interface': self.dev, 'lease_seconds': 5,
                 'valid_for_ms': max(0, (valid_until - now) // 1000000),
