@@ -1,0 +1,134 @@
+Current-candidate control-path profile and private socket census worker
+
+Scope
+Experimental only, based on 4563bc40ae6bff8679921c5cf6cea3233f693b24.
+Installed 25dbb1a and deployment/release-policy.json unchanged. No host restart,
+deployment, protection/rule/collector/offload/TC changes or generated host traffic.
+UDP GSO remains separate and unresolved. No physical-interface readiness claim.
+
+Current evidence
+.workspace/shaping-current-profile/profile2-artifacts contains the 60-second
+private Go CPU/mutex profiles, elapsed stages, controller cProfile(process_time),
+helper child rusage and whole process-tree/user/system counters. Same binary,
+netdevsim guest (1 TCG vCPU, 2 GiB), shaping-disabled then enabled; A+C capped idle,
+B uncapped TCP bulk, L 1,000 low-rate records, D 20 denied datagrams. Offloads unchanged.
+Profile 1 retained: complete receiver/counter run but exporter omitted nested
+profiles; profile 2 repeated with recursive export. No old profile substituted.
+
+Instrumented tree CPU 11.832 -> 28.784 ticks/s (HZ 100, +16.952 pp of one vCPU).
+Go CPU samples 4.40 -> 7.48 s; Manager.run 2.53 s includes ResolveBatch 2.35 s;
+Observer 1.85 -> 1.97 s. Controller subtree 6.38 CPU seconds already included in tree:
+cProfile 3.28 s and finite helper rusage 2.983 s. Helpers: 104 ip queries .828s,
+104 tc batches .991s,43 ethtool queries .239s,43 socket-probe processes .925s.
+104 verify calls originate from 43 tick and 61 status calls. No dominant policy lock
+contention observed: mutex samples 131 ms, runtime locks. This is a split between
+fresh discovery/identity work and recurring controller verification/query work.
+The largest child-process row alone does not explain the whole overhead.
+
+These are diagnostics, not acceptance measurements: cProfile adds controller
+CPU, Go sampling adds overhead, boundary snapshots are non-atomic, windows have
+small notification offsets. Python cumulative functions and elapsed stages overlap;
+do not sum them. Helper wall time includes blocking/scheduling, not justCPU.
+Guest system/softirq totals are recorded; kernel stacks and persistent native
+worker symbols were not captured, so residual kernel cost is not attributed.
+Established allowed TCP bypassed NFQUEUE here; the 20 callbacks were denied UDP,
+with zero admission rejections and 20 drop verdicts. Receiver payload 621.1/445.1
+Mbit/s is not a UDP result or an acceptance ratio. Low-rate 1,000/1,000 each, Deny 0.
+
+One targeted change
+Controller tick reuses one private socket census probe process. Every request
+still executes fresh SocketsLimited(1024); there is no socket/evidence cache,
+negative TTL, changed interval, changed ownership contract or topology reuse.
+Finite probe bind (fresh ownership proof), permission authority, discovery,
+TC verification, lease renewal/expiry and foreign-object refusal are unchanged.
+Only repeated Go process startup is removed; the .925s includes actual census
+work that remains. No predicted CPU floor, throughput ceiling or gain is claimed.
+
+The worker is lazy, serial, private stdin/stdout only, no network listener.
+Exact request 'sockets -', 1024-byte input bound,2 MiB output including framing,
+3 s controller deadline, explicit success ACK after complete census/encoding.
+A partial/error census produces no ACK; broken/short output and timeout fail.
+The controller closes/reaps the worker on fault/cleanup, including cleanup refusal.
+Disabled and cleanup-only modes create no socket worker. Worker death is a new
+fault source: controller becomes Unsupported, leases bound stale classifications,
+and explicit CAS configuration is required to resume. No automatic replay.
+
+Architecture assessment
+Repeated finite processes are measurable avoidable work; persistent fresh-query
+mechanisms can remove startup while preserving evidence. This experiment does
+not establish that process reuse alone can meet low-overhead operation. Reusing
+an older topology observation in status was considered and declined because it
+would change verification freshness. Other architectural changes require their
+own evidence and review; none are bundled here.
+
+Validation method
+.workspace/shaping-current-compare: profiling OFF, exact same daemon binary,
+reference controller/probe versus candidate controller/probe; 60 s nominal intervals,
+75 s bulk, 5 s traffic warmup and common 20 s daemon age before traffic. Reversed
+old/new/new/old then disabled/new/new/disabled, never pooled across blocks.
+A+C idle in all comparisons; separate old/new capped-A phases report charged
+HTB bytes versus receiver payload. 1,200 low-rate records/phase; same six status
+requests in disabled and enabled, checking coverage/expiry when enabled.
+Fresh worker PID stays stable throughout candidate phase and absent when disabled;
+new worker killed in failure phase, then Unsupported/explicit disable/exact
+owned cleanup/zero helpers. Unchanged identity/M0/M1 recovery evidence reused.
+21 Python models and new pure Go race-tested protocol cases passed; build/vet passed.
+Compile 1 retained a test-literal uint64/uint32 mismatch, fixed in compile 2.
+
+Guest provisional objectives, not predictions:
+>=85% matched disabled receiver throughput; added whole tree CPU <= 7 percentage
+points of one vCPU; 1,200/1,200 low-rate delivery, maximum candidate chunk p95 within
+1 ms of disabled maximum; Deny 0 and preserved charged cap accuracy. 70% is no longer
+the checkpoint. Eventual physical-host goal < 5% uncapped loss, 10% provisionally,
+acceptable latency/CPU. Even a guest pass only permits preparing a host-trial plan;
+explicit host approval remains required.
+
+Profiling-off result (compare1, completed, VM_RESULT=0)
+All rates below are RECEIVER PAYLOAD Mbit/s, except explicitly charged cap rates.
+CPU is complete daemon/controller/helper tree ticks per actual second (HZ 100;
+one tick/s equals one percentage point of a vCPU). Actual intervals: 62.09-65.48 s.
+                         throughput          tree CPU
+Reference old1/old2       471.46 / 469.76      25.683 / 25.778
+Candidate new1/new2       480.21 / 477.67      24.784 / 25.076
+Block 1 means            470.61 -> 478.94     25.730 -> 24.930
+Change                   +1.77%              -0.801 pp (about -3.1%)
+Both ordering pairs improved slightly. This is a small measured gain, not a
+prediction of a production gain or a practical solution to shaping overhead.
+
+Disabled control1/2      610.84 / 666.16      12.007 / 9.178
+Candidate new3/4         468.68 / 518.37      24.597 / 22.354
+Block 2 means            638.50 -> 493.53     10.592 -> 23.475
+Candidate delivers 77.295% of disabled control: a 22.705% deficit.
+Added whole tree CPU is 12.883 percentage points of one vCPU.
+The control and candidate spreads are shown above; do not pool this block with
+block 1 or cap-load phases. Self/live versus reaped CPU and whole-guest
+user/system/softirq counters are retained per phase in compare1-summary.json.
+
+GUEST OBJECTIVES: throughput >=85% FAILED; added CPU <=7 pp FAILED.
+Low-rate delivery: 1,200/1,200 in each of ten phases. Candidate block-2 maximum
+chunk p95 1.786 ms versus disabled 1.451 ms: +0.335 ms, within the stated +1 ms
+criterion. Deny receiver delivery zero throughout and after worker failure.
+Covered bindings remained two and snapshots unexpired at every sampled boundary.
+
+Separate cap-load phases (single order, not part of either throughput block):
+8 Mbit/s configured cap: reference charged 7.9983, candidate charged 8.0027 Mbit/s.
+Receiver A payload: reference 7.6651, candidate 7.6668 Mbit/s. These are HTB charged
+bytes and receiver payload respectively, neither a wire-byte measurement.
+Uncapped B payload in those phases: 452.83 / 452.30 Mbit/s.
+TCP cap evidence remains intact; this does not close the UDP GSO gate.
+
+One stable socket-worker PID across every candidate phase, none in reference or
+disabled phases. Source/protocol proves fresh requests; PID reuse proves only
+process reuse. Worker kill -> Unsupported; explicit disable restored the exact
+original qdisc and left no controller, kernel-map worker or socket worker.
+Existing verification/foreign-object refusal remains unchanged; cleanup-refusal
+model additionally proves the new worker closes even when TC cleanup refuses.
+
+Disposition
+Retain the small isolated startup reduction as experimental, independently
+reviewed. No release is approved or deployed. Both engineering performance
+objectives remain unmet; no physical-host trial is proposed from this result.
+No further optimization bundled. Remaining cost of the resulting candidate was
+not re-profiled; the profile above belongs to its exact 4563bc40 baseline.
+A larger reduction still requires fresh-query control/discovery architecture
+work, selected and validated from evidence rather than weaker freshness checks.

@@ -38,12 +38,29 @@ class ModelTests(unittest.TestCase):
         c=self.fake();c.base=Path('/unused');c.compatibility={'topology':'veth-noqueue'}
         c.bindings={'cookie':{'app':'uid:key','inode':1,'protocol':'udp','netns':'net:[1]'}}
         c.apps={'uid:key':{'minor':1,'idle_since':m1.time.monotonic()}}
-        calls=[];c.call=lambda *a:'null';c.k=lambda *a:calls.append(a)
+        calls=[];c.sockets=lambda:None;c.k=lambda *a:calls.append(a)
         c.tick()
         self.assertEqual(c.bindings,{})
         self.assertEqual(calls,[('del','cookie'),('beat',)])
-        c.call=lambda *a:'{}'
+        c.sockets=lambda:{}
         with self.assertRaises(RuntimeError):c.tick()
+
+    def test_socket_worker_fresh_requests_and_close_on_cleanup_refusal(self):
+        c=self.fake();calls=[]
+        class Worker:
+            def call(self,*args):
+                calls.append(args)
+                return '[]' if len(calls)==1 else 'null'
+            def close(self):calls.append('closed')
+        c.socket_worker=Worker()
+        self.assertEqual(c.sockets(),[])
+        self.assertIsNone(c.sockets())
+        self.assertEqual(calls,[('sockets','-'),('sockets','-')])
+        c.closed=False
+        def refuse():raise RuntimeError('foreign topology')
+        c.cleanup_objects=refuse
+        with self.assertRaisesRegex(RuntimeError,'foreign topology'):c.close()
+        self.assertEqual(calls[-1],'closed')
 
     def test_verified_topology_combines_only_matching_fresh_classes(self):
         import copy

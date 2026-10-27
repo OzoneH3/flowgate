@@ -328,6 +328,13 @@ class Controller:
     def get_link(self):
         return json.loads(self.call('ip', '-d', '-j', 'link', 'show', 'dev', self.dev))[0]
 
+    def sockets(self):
+        # Process reuse only: the worker performs SocketsLimited(1024) afresh
+        # for every request. Bind-time authority stays in the finite probe bind.
+        if getattr(self, 'socket_worker', None) is None:
+            self.socket_worker = KernelWorker([str(self.base / 'probe'), 'serve-sockets'])
+        return json.loads(self.socket_worker.call('sockets', '-'))
+
     def query_tc(self, commands):
         # Fresh read-only dumps, identical to the former individual processes.
         # No -force: any failed command invalidates the entire observation.
@@ -643,7 +650,7 @@ class Controller:
                 note = 'segmentation offload flags changed: ' + json.dumps(seen, sort_keys=True)
                 if note not in self.partial:
                     self.partial.append(note)
-        ss = json.loads(self.call(self.base / 'probe', 'sockets'))
+        ss = self.sockets()
         if ss is None:
             ss = []
         if not isinstance(ss, list):
@@ -698,6 +705,8 @@ class Controller:
             finally:
                 if getattr(self, 'kernel_worker', None):
                     self.kernel_worker.close()
+                if getattr(self, 'socket_worker', None):
+                    self.socket_worker.close()
 
 
 def main():

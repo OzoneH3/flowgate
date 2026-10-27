@@ -2,13 +2,23 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"flowgate/internal/identity"
 	"fmt"
+	"io"
 	"os"
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "serve-sockets" {
+		if err := serveSockets(os.Stdin, os.Stdout, func() ([]identity.Socket, error) {
+			return identity.SocketsLimited(1024)
+		}); err != nil {
+			fail(err)
+		}
+		return
+	}
 	var out any
 	if len(os.Args) == 2 && os.Args[1] == "sockets" {
 		ss, err := identity.SocketsLimited(1024)
@@ -49,5 +59,41 @@ func main() {
 	if err := json.NewEncoder(os.Stdout).Encode(out); err != nil {
 		fail(err)
 	}
+}
+
+// Private, serial pipe protocol. Each request makes a new kernel census; there
+// is no retained socket evidence, permission decision or bind operation here.
+// The controller enforces the same deadline and output bound as finite helpers.
+func serveSockets(in io.Reader, out io.Writer, census func() ([]identity.Socket, error)) error {
+	scanner := bufio.NewScanner(in)
+	scanner.Buffer(make([]byte, 1024), 1024)
+	for scanner.Scan() {
+		if scanner.Text() != "sockets -" {
+			return fmt.Errorf("invalid socket worker request")
+		}
+		ss, err := census()
+		if err != nil {
+			return err // No success ACK, including partial census results.
+		}
+		payload, err := json.Marshal(ss)
+		if err != nil {
+			return err
+		}
+		if len(payload)+5 > 2*1024*1024 {
+			return fmt.Errorf("socket worker output bound")
+		}
+		payload = append(payload, '\n')
+		if n, err := out.Write(payload); err != nil {
+			return err
+		} else if n != len(payload) {
+			return io.ErrShortWrite
+		}
+		if n, err := io.WriteString(out, "\x1eOK\n"); err != nil {
+			return err
+		} else if n != 4 {
+			return io.ErrShortWrite
+		}
+	}
+	return scanner.Err()
 }
 func fail(err error) { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
