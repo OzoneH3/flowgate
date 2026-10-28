@@ -201,7 +201,7 @@ def phase(label,ul=None,dl=None,expect=None,edit=None,dur=9000,latency=None,fam=
  return dict(checks,_first=first,_second=second)
 results={};HOLD={}
 def gate(label,checks):
- results[label]={k:v['pass'] for k,v in checks.items()}
+ results[label]={k:v['pass'] for k,v in checks.items() if not k.startswith('_')}
 try:
  peer=launch(['unshare','--net','python3',P/'peer.py'],'peer')
  for _ in range(100):
