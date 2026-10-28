@@ -133,6 +133,16 @@ B=40_000_000
 def tp(s=None):return ((s or status()).get('kernel') or {}).get('traffic_priority') or {}
 def counters():return tp().get('counters') or {}
 def nbind(s,name):return sum(1 for b in bindings(s) if b['app']==appkey(name))
+RETRIES=[]
+def open_retry(p,command,name):
+ # Bounded retry: first-packet firewall attribution in the TCG guest can exceed
+ # the fixture sender's 2 s connect timeout (errno 115/110). Retries are recorded.
+ for attempt in range(5):
+  info=ask(p,command)
+  if 'error' not in info:return info
+  RETRIES.append({'socket':name,'command':command,'errno':info['error'],'attempt':attempt})
+  time.sleep(1)
+ raise AssertionError((name,info))
 def spawn(exe,name):
  p=launch([P/exe],name);line(p);return p
 def deny_check(label):
@@ -143,11 +153,11 @@ def phase(label,ul=None,dl=None,expect=None,edit=None,dur=9000,latency=None,fam=
  ul=ul or {};dl=dl or {};expect=expect or {};procs_ul={};procs_dl={};keys={}
  for app,n in ul.items():
   for i in range(n):
-   p=spawn(EXE[app],f'{label}-ul-{app}{i}');info=ask(p,f'OPEN {fam} 1 1 1 0 43003');assert 'error' not in info,info
+   p=spawn(EXE[app],f'{label}-ul-{app}{i}');info=open_retry(p,f'OPEN {fam} 1 1 1 0 43003',f'{label}-ul-{app}{i}')
    procs_ul[(app,i)]=p;keys[(app,i)]=flowkey('tcp',info)
  for app,(n,k) in dl.items():
   for i in range(n):
-   p=spawn(EXE[app],f'{label}-dl-{app}{i}');info=ask(p,f'OPEN {fam} 1 {k} 1 0 43005');assert 'error' not in info,info
+   p=spawn(EXE[app],f'{label}-dl-{app}{i}');info=open_retry(p,f'OPEN {fam} 1 {k} 1 0 43005',f'{label}-dl-{app}{i}')
    procs_dl[(app,i)]=p
  want={}
  for app,n in ul.items():want[app]=want.get(app,0)+n
@@ -252,7 +262,7 @@ try:
       expect={'ul:C':(8,15.5),'dl:C':(8,15.5),'ul:A':(0.2,2.0),'dl:A':(0.2,2.0),'2:ul:A':(8,15.5),'2:dl:A':(8,15.5),'2:ul:C':(0.2,2.0),'2:dl:C':(0.2,2.0)})
  gate('G3-min-budget-16-apps-live-edit',g3)
  configure([],enabled=False);assert qdiscs()==original
- record('pre-ui-results',results=results)
+ record('pre-ui-results',results=results,connect_retries=RETRIES)
  # ---- Real UI journey: the GUI configures budgets and priorities; the guest measures. ----
  holders={}
  for n in ('A','C'):
@@ -282,7 +292,7 @@ try:
    assert api().get('rules',[])==initial_rules
    ui={l:all(v['pass'] for v in j['checks'].values()) for l,j in jobs.items()}
    results.update({'UI-'+l:v for l,v in ui.items()})
-   record('final-cleanup',status=s['status'],qdiscs=qdiscs(),rules_unchanged=True,results=results)
+   record('final-cleanup',status=s['status'],qdiscs=qdiscs(),rules_unchanged=True,results=results,connect_retries=RETRIES)
    (R/'results.json').write_text(json.dumps(results,indent=1))
    (R/'success.json').write_text(json.dumps({'result':'REAL_UI_PRIORITY_JOURNEY_COMPLETE','note':'fixture complete is not all expectations passed; see results.json'}));finished.set();return {'finished':True,'results':results}
   raise ValueError('unknown fixture operation')
