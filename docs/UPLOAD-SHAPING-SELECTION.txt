@@ -1,0 +1,65 @@
+Activity selection fixture correction (experimental)
+
+Binary identity remains 94f7876aa4d0f7fb62968ab90acbfe6ef91a84d4.
+Only the GUI integration test changes; there is no production UI/backend fix.
+Installed 25dbb1a and host configuration were not changed in this task.
+
+The host trial first selected a permission window via firstWindow(). Its later
+attempt selected the main page but never showed it. Main starts hidden in the
+tray; backend broadcasts intentionally omit hidden/minimized windows. A hidden
+renderer consequently retained its creation-time Activity inventory while IPC
+contained the new application's process/socket. Showing the main window pushes
+current state. This is a harness defect, not evidence of incorrect grouping,
+filtering, permission authority or upload eligibility.
+
+Private replay used retained initial Activity data and a target reconstructed
+from recorded output (the complete failure-time IPC frame was not retained).
+It demonstrated: hidden DOM 0 matching rows, IPC target present; show -> one
+exact named target and correct dialog; three refreshes preserve the target.
+The replay also records three distinct Activity sequences delivered through the
+normal state subscription while the dialog is open: the target/dialog remain
+unchanged. The replay's Unsupported dialog comes from its read-only stub, not
+product health.
+
+The corrected test explicitly shows the exact main URL, verifies native visibility,
+checks target PID/application key/executable in IPC, selects one exact visible
+application name and checks dialog identity stays stable for 2.4 seconds with the dialog open. Cap receipts
+must reference that same application key/UID. No row positions or ambiguous window
+titles are used, and previous receiver results cannot be reused as a fresh journey.
+All GUI preferences were private test preferences; user preferences were untouched.
+
+Focused isolated journey using the unchanged matched bundle:
+  GUI action       Receiver TCP payload Mbit/s     Deny receiver
+  set 8 Mbit/s                 7.6451                    0
+  edit 16 Mbit/s              15.3015                    0
+  disable                    566.2231                    0
+Deny sent 8 packets per phase (24 total). Four fixture rules and Both protection
+remained unchanged. Final assertions: Disabled, no shaping helpers, original
+qdiscs, no egress filters. No page errors. These are receiver payload rates,
+not charged scheduler or wire rates. Existing backend acceptance was reused;
+no performance investigation or full suite was repeated. The guest bridge uses
+guest root credentials and does not prove physical-host peer authentication.
+
+Evidence: .workspace/shaping-selection/README.txt, replay-result.json,
+ui-journey.json and tested-bundle-hashes.json; guest records/success under
+.workspace/shaping-ui/selection1-artifacts/. RESEARCH independently reviewed the
+source diagnosis, replay, fixture and results. An initial modal-refresh test
+mistake was retained; it failed before setting any cap. The final fixture differs
+from the tested fixture only in using literal dialog-title matching instead of
+regex matching; production inputs and measurements are unchanged.
+
+Next step requires explicit host-retrial approval for the SAME binary SHA.
+Use the established Docker receiver at 172.30.42.128 via enp7s0. Recheck interface
+compatibility without changing offloads or foreign configuration; guarded deploy
+and launch matched GUI, preserving latest rules, Both, collector/Wine and autostart.
+Show/restore the exact main window before selecting the dedicated native test app.
+Perform set8/edit16/disable, receiver and independent-traffic checks, separate Deny
+check, then verify owned cleanup. Stop on connectivity, authority, renewal or
+ownership failure. Clean only ownership-verified objects before guarded rollback;
+never delete enp7s0's root qdisc unconditionally. Remove the owned receiver container.
+No retrial, restart or deployment is authorized by this report.
+
+Prepared bundle remains:
+.workspace/experimental-upload-bundles/94f7876aa4d0f7fb62968ab90acbfe6ef91a84d4
+Partial coverage, unsupported sockets/topologies, UDP GSO and experimental
+performance limitations remain. This correction makes no new support claims.
