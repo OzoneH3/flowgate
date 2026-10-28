@@ -41,11 +41,23 @@ Wrong nonempty alias always refuses. This detects accidental replacement; it is
 not a security boundary against a privileged actor cloning kernel attributes.
 NIC and IFB qdiscs/classes/root/ingress/egress/class filters are verified before
 mutation. Changed existing objects and observed foreign filters cause refusal; no blanket
-root/IFB deletion is used. Interrupted IFB TC-add recovery validates the new
-object's identity/kind and preserves previously journalled objects exactly, but
-currently does not compare every new object's rate/queue option with the pending
-command. This remains an experimental recovery limitation requiring review
-before host activation; runtime snapshots do compare those options.
+root/IFB deletion is used. Pending IFB TC-add operations carry durable exact
+before/after detailed queue intent. The expected after-state is derived from the
+same kernel's phase-specific UL setup with only device/major translation, equal
+owned-IFB MTU, and explicit device-dependent HTB direct_qlen. This includes
+quantum, rate/ceil/burst/cell/linklayer options and the implicit class.leaf change.
+Detailed actual state must equal the intended result before adoption; recovery
+also accepts the exact before-state when the command did not take effect.
+Unknown fields/options are not discarded. Pinned program IDs, parent/handle,
+IFB identity, outside-IFB topology and all observed filters remain checked.
+Mismatch refuses before destructive cleanup and retains the owner journal plus
+pending-ifb-mismatch.json. Legacy pending IFB TC-add journals without this intent
+refuse; completed legacy journals keep their existing snapshot cleanup contract.
+Each successful add also persists its detailed checkpoint until startup completes,
+so crashes after journal commit retain option-level verification. Each pending
+cleanup mutation rechecks the detailed intent/checkpoint until the IFB is gone.
+This does not broaden steady-state non-detailed observation into a guarantee of
+detecting every possible runtime quantum/linklayer edit.
 Redirect is withdrawn before owned IFB deletion; owned NIC objects are removed
 and the original supported default root is checked. Leases remain five seconds;
 there is no overload-driven extension. Crash journals never restore old bindings.

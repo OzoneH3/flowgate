@@ -471,7 +471,7 @@ class DownloadOwnershipTests(unittest.TestCase):
                'root_filters': [], 'ingress': [], 'egress': [], 'class_filters': []}
         new = copy.deepcopy(old); new['classes'] = [{'class': 'htb', 'handle': '200:fffe'}]
         step = ['class', 'add', 'dev', c.ifb, 'parent', '200:']
-        self.assertTrue(c.ifb_setup_delta_owned(old, new, step))
+        self.assertFalse(c.ifb_setup_delta_owned(old, new, step))  # legacy count-only intent is insufficient
         for field in ('root_filters', 'ingress', 'egress', 'class_filters'):
             foreign = copy.deepcopy(new); foreign[field] = [{'foreign': True}]
             self.assertFalse(c.ifb_setup_delta_owned(old, foreign, step))
@@ -486,6 +486,89 @@ class DownloadOwnershipTests(unittest.TestCase):
         self.assertTrue(c.ifb_setup_delta_owned({}, new, ['link','add',c.ifb,'type','ifb']))
         new['classes'] = [{'foreign': True}]
         self.assertFalse(c.ifb_setup_delta_owned({}, new, ['link','add',c.ifb,'type','ifb']))
+
+class PendingIFBIntentTests(unittest.TestCase):
+    def controller(self):
+        c = object.__new__(m1.Controller)
+        c.setup_step = ['class', 'add', 'dev', 'fgdl01234567', 'parent', '200:', 'classid', '200:fffe', 'htb']
+        c.ids = {'program': 1, 'ingress': 2}
+        c.k = lambda *a: json.dumps(c.ids)
+        c.expected = {'qdiscs': [{'kind': 'htb', 'handle': '100:'}], 'ifb': {
+            'qdiscs': [{'kind': 'htb', 'handle': '200:', 'root': True}], 'classes': [],
+            'root_filters': [], 'ingress': [], 'egress': [], 'class_filters': []}}
+        before = {k: copy.deepcopy(c.expected['ifb'][k]) for k in ('qdiscs', 'classes')}
+        after = copy.deepcopy(before)
+        after['classes'] = [{'class': 'htb', 'handle': '200:fffe', 'root': True,
+            'quantum': 1500, 'rate': 12500000000, 'ceil': 12500000000,
+            'burst': 2400, 'cburst': 2400, 'linklayer': 'ethernet'}]
+        c.setup_tc_intent = {'schema': 1, 'command': c.setup_step[:], 'before': before, 'after': after}
+        c.observed = copy.deepcopy(after)
+        c.detailed_queues = lambda dev: c.observed
+        c.ifb = 'fgdl01234567'; c.evidence = []
+        class Sink:
+            def __truediv__(self, name): return self
+            def write_text(self, text): c.evidence.append(json.loads(text))
+        c.state = Sink()
+        actual = copy.deepcopy(c.expected); actual['ifb']['classes'] = copy.deepcopy(after['classes'])
+        return c, actual
+
+    def test_intended_or_absent_only(self):
+        c, actual = self.controller()
+        c.verify_ifb_intent(actual)
+        c.observed = c.setup_tc_intent['before']
+        c.verify_ifb_intent(c.expected, allow_before=True)
+        with self.assertRaises(RuntimeError): c.verify_ifb_intent(c.expected)
+        self.assertTrue(c.evidence)
+
+    def test_options_identity_and_unknown_fields_refuse_without_mutation(self):
+        for field, value in [('quantum', 9000), ('rate', 1), ('ceil', 1), ('burst', 1),
+                             ('cburst', 1), ('handle', '201:fffe'), ('root', False),
+                             ('linklayer', 'atm'), ('foreign_option', True)]:
+            c, actual = self.controller(); original = copy.deepcopy(c.expected)
+            c.observed['classes'][0][field] = value
+            with self.assertRaises(RuntimeError, msg=field): c.verify_ifb_intent(actual, True)
+            self.assertEqual(c.expected, original); self.assertTrue(c.evidence)
+        for field in ('root_filters', 'ingress', 'egress', 'class_filters'):
+            c, actual = self.controller(); actual['ifb'][field] = [{'foreign': True}]
+            with self.assertRaises(RuntimeError): c.verify_ifb_intent(actual, True)
+        c, actual = self.controller(); actual['qdiscs'][0]['handle'] = '999:'
+        with self.assertRaises(RuntimeError): c.verify_ifb_intent(actual, True)
+
+    def test_root_leaf_options_and_parent_are_exact(self):
+        for kind, options in [('htb', {'r2q': 10, 'default': '0xfffe', 'direct_qlen': 32}),
+                              ('fq_codel', {'limit': 10240, 'flows': 1024, 'quantum': 1514,
+                               'target': 4999, 'interval': 99999, 'memory_limit': 33554432,
+                               'ecn': True, 'drop_batch': 64})]:
+            for field in [*options, 'parent', 'handle', 'kind', 'unexpected']:
+                c, actual = self.controller()
+                q = {'kind': kind, 'handle': 'fffe:', 'parent': '200:fffe', 'options': options.copy()}
+                c.setup_tc_intent['after']['qdiscs'] = [copy.deepcopy(q)]
+                c.observed['qdiscs'] = [copy.deepcopy(q)]
+                if field in options: c.observed['qdiscs'][0]['options'][field] = 'changed'
+                else: c.observed['qdiscs'][0][field] = 'changed'
+                with self.assertRaises(RuntimeError, msg=field): c.verify_ifb_intent(actual, True)
+        for field in ('before', 'after'):
+            c, actual = self.controller(); del c.setup_tc_intent[field]
+            with self.assertRaises(RuntimeError): c.verify_ifb_intent(actual, True)
+            self.assertTrue(c.evidence)
+
+    def test_post_journal_checkpoint_keeps_detailed_authority(self):
+        c, actual = self.controller(); c.ifb_detail_expected = copy.deepcopy(c.observed)
+        c.verify_ifb_checkpoint(actual)
+        c.observed['classes'][0]['quantum'] = 9000
+        with self.assertRaises(RuntimeError): c.verify_ifb_checkpoint(actual)
+        self.assertTrue(c.evidence)
+        c.ifb_detail_expected = None
+        with self.assertRaises(RuntimeError): c.verify_ifb_checkpoint(actual)
+
+    def test_legacy_command_and_program_mismatch_refuse(self):
+        for case in ('legacy', 'command', 'program'):
+            c, actual = self.controller()
+            if case == 'legacy': c.setup_tc_intent = None
+            if case == 'command': c.setup_step = ['foreign']
+            if case == 'program': c.k = lambda *a: '{"program": 99}'
+            with self.assertRaises(RuntimeError): c.verify_ifb_intent(actual, True)
+            self.assertTrue(c.evidence)
 
 if __name__ == '__main__':
     unittest.main()

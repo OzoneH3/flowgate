@@ -316,6 +316,9 @@ class Controller:
         self.expected = before
         self.pending_setup = True
         self.setup_step = None
+        self.setup_tc_intent = None
+        self.setup_templates = {}
+        self.ifb_detail_expected = None  # new generation, never inherit reconciled queues
         self.ids = None
         self.save()  # journal intent before any kernel object creation
         try:
@@ -334,6 +337,7 @@ class Controller:
             # redirected; everything else never touches the IFB.
             self.link_mutate('add', self.ifb, 'address', self.ifb_address(), 'type', 'ifb')
             self.link_mutate('set', self.ifb, 'alias', 'flowgate:' + self.token)
+            self.link_mutate('set', self.ifb, 'mtu', str(self.mtu))
             self.link_mutate('set', self.ifb, 'up')
             self.mutate('qdisc', 'add', 'dev', self.ifb, 'root', 'handle', self.dl_handle(), 'htb', 'default', 'fffe')
             self.mutate('class', 'add', 'dev', self.ifb, 'parent', self.dl_handle(), 'classid', self.dl_handle(0xfffe), 'htb', 'rate', '100gbit', 'ceil', '100gbit', 'quantum', str(self.mtu))
@@ -380,11 +384,11 @@ class Controller:
             raise RuntimeError('invalid exact socket response')
         return result
 
-    def query_tc(self, commands):
+    def query_tc(self, commands, detailed=False):
         # Fresh read-only dumps, identical to the former individual processes.
         # No -force: any failed command invalidates the entire observation.
         # This is not an atomic kernel snapshot and does not cache authority.
-        p = subprocess.run(['tc', '-j', '-batch', '-'],
+        p = subprocess.run(['tc', *(['-d'] if detailed else []), '-j', '-batch', '-'],
                            input=''.join(' '.join(c) + '\n' for c in commands),
                            capture_output=True, text=True, timeout=3)
         if p.returncode or len(p.stdout) > 2 * 1024 * 1024:
@@ -519,6 +523,8 @@ class Controller:
                 'netns': self.ns, 'interface': self.dev, 'ifindex': self.index,
                 'boot_id': Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
                 'expected': self.expected, 'ids': self.ids, 'original': self.original, 'pending_setup': getattr(self, 'pending_setup', False), 'compatibility': getattr(self, 'compatibility', None), 'setup_step': getattr(self, 'setup_step', None),
+                'setup_tc_intent': getattr(self, 'setup_tc_intent', None),
+                'ifb_detail_expected': getattr(self, 'ifb_detail_expected', None),
                 'link_identity': {k: self.link.get(k) for k in ('ifindex','address','parentbus','parentdev','link_type')}}
         p = self.state / 'owner.new'
         fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
@@ -550,20 +556,131 @@ class Controller:
             raise RuntimeError('Unsupported: kernel object identity changed')
         if getattr(self, 'ifb_index', None) is not None and not getattr(self, 'cleaning', False) and self.ifb_link() is None:
             raise RuntimeError('Unsupported: owned IFB disappeared')
+        if (getattr(self, 'pending_setup', False) and 'ifb' in actual
+                and getattr(self, 'setup_step', None) and len(self.setup_step) >= 4
+                and self.setup_step[1:4] == ['add', 'dev', self.ifb]):
+            # Recheck detailed intent before each cleanup mutation too; normal
+            # steady-state observations intentionally retain their old contract.
+            self.verify_ifb_intent(actual, allow_before=True)
+        elif getattr(self, 'pending_setup', False) and 'ifb' in actual:
+            self.verify_ifb_checkpoint(actual)
         self.verified_at = verify_started
         self.verifications = getattr(self, 'verifications', 0) + 1
 
+    def detailed_queues(self, dev):
+        q, c = self.query_tc([('qdisc', 'show', 'dev', dev),
+                              ('class', 'show', 'dev', dev)], detailed=True)
+        return {'qdiscs': q, 'classes': [x for x in c if x.get('class') != 'fq_codel']}
+
+    @staticmethod
+    def setup_queue_key(args):
+        if args[:2] not in (('qdisc', 'add'), ('qdisc', 'replace'), ('class', 'add')):
+            return None
+        if args[0] == 'class' and 'htb' in args:
+            return 'class'
+        if args[0] == 'qdisc' and 'htb' in args and 'root' in args:
+            return 'root'
+        if args[0] == 'qdisc' and 'fq_codel' in args:
+            return 'leaf'
+        return None
+
+    def prepare_ifb_intent(self, args):
+        # The three fixed IFB operations repeat the already observed UL setup.
+        # Capture each phase separately: adding a leaf also changes class.leaf.
+        key = self.setup_queue_key(args)
+        template = self.setup_templates.get(key)
+        if template is None:
+            raise RuntimeError('Unsupported: no validated setup template')
+        def translate(value):
+            if isinstance(value, dict):
+                return {k: translate(v) for k, v in value.items()}
+            if isinstance(value, list):
+                return [translate(v) for v in value]
+            if isinstance(value, str):
+                if value == self.dev:
+                    return self.ifb
+                if value.startswith(self.handle()):
+                    return self.dl_handle() + value[len(self.handle()):]
+            return value
+        command = translate(template['command'])
+        command[1] = 'add'
+        if command != list(args):
+            raise RuntimeError('Unsupported: IFB command differs from setup template')
+        link = self.ifb_link()
+        if not link or link.get('mtu') != self.mtu or type(link.get('txqlen')) is not int:
+            raise RuntimeError('Unsupported: IFB setup link parameters changed')
+        after = translate(template['after'])
+        # Kernel HTB default is device-dependent; make this option explicit.
+        qlen = max(2, link['txqlen'])
+        for q in after['qdiscs']:
+            if q.get('kind') == 'htb' and q.get('root'):
+                q['options']['direct_qlen'] = qlen
+        if key == 'root':
+            command += ['direct_qlen', str(qlen)]
+        before = self.detailed_queues(self.ifb)
+        previous = (getattr(self, 'ifb_detail_expected', None) if key != 'root' else
+                    {k: self.expected['ifb'][k] for k in ('qdiscs', 'classes')})
+        if before != previous:
+            raise RuntimeError('Unsupported: IFB pre-operation details changed')
+        return {'schema': 1, 'command': command, 'before': before,
+                'after': after, 'template': template, 'mtu': self.mtu, 'txqlen': link['txqlen']}
+
+    def verify_ifb_intent(self, actual, allow_before=False):
+        intent = getattr(self, 'setup_tc_intent', None)
+        observed = self.detailed_queues(self.ifb)
+        valid = (isinstance(intent, dict) and intent.get('schema') == 1
+                 and intent.get('command') == self.setup_step
+                 and isinstance(intent.get('before'), dict) and isinstance(intent.get('after'), dict)
+                 and self.ids and json.loads(self.k('ids')) == self.ids)
+        # No change outside the owned IFB is licensed by this pending operation.
+        valid = valid and {k: v for k, v in actual.items() if k != 'ifb'} == {
+            k: v for k, v in self.expected.items() if k != 'ifb'}
+        old, new = self.expected.get('ifb', {}), actual.get('ifb', {})
+        valid = valid and {k: v for k, v in old.items() if k not in ('qdiscs', 'classes')} == {
+            k: v for k, v in new.items() if k not in ('qdiscs', 'classes')}
+        valid = valid and (observed == intent['after'] or
+                          (allow_before and actual == self.expected and observed == intent['before']))
+        if not valid:
+            (self.state / 'pending-ifb-mismatch.json').write_text(json.dumps({
+                'command': self.setup_step, 'intent': intent, 'expected': self.expected,
+                'actual': actual, 'observed_details': observed}, indent=2))
+            raise RuntimeError('Unsupported: pending IFB operation mismatch; preserving all resources; inspect pending-ifb-mismatch.json')
+        return observed
+
+    def verify_ifb_checkpoint(self, actual):
+        # A successful TC-add journal save must not discard detailed authority
+        # while startup is still pending (e.g. crash before the next operation).
+        intended = getattr(self, 'ifb_detail_expected', None)
+        if intended is None and not any(q.get('kind') == 'htb' for q in actual['ifb']['qdiscs']):
+            return  # link-only creation, before the first TC operation
+        observed = self.detailed_queues(self.ifb)
+        if intended != observed:
+            (self.state / 'pending-ifb-mismatch.json').write_text(json.dumps({
+                'checkpoint': intended, 'actual': actual, 'observed_details': observed}, indent=2))
+            raise RuntimeError('Unsupported: pending IFB checkpoint mismatch; preserving all resources; inspect pending-ifb-mismatch.json')
+
     def mutate(self, *args):
         self.verify()
-        if getattr(self, 'pending_setup', False) and not getattr(self, 'cleaning', False):
-            self.setup_step = list(args)
-            self.save()
-        self.call('tc', *args)
-        self.expected = self.topology()
+        setting_up = getattr(self, 'pending_setup', False) and not getattr(self, 'cleaning', False)
+        ifb_add = setting_up and len(args) >= 4 and args[1:4] == ('add', 'dev', self.ifb)
+        if setting_up:
+            self.setup_tc_intent = self.prepare_ifb_intent(args) if ifb_add else None
+            self.setup_step = self.setup_tc_intent['command'] if ifb_add else list(args)
+            self.save()  # durable exact intent BEFORE the kernel mutation
+        self.call('tc', *(self.setup_step if ifb_add else args))
+        actual = self.topology()
+        if ifb_add:
+            self.verify_ifb_intent(actual)
+            self.ifb_detail_expected = self.setup_tc_intent['after']
+        self.expected = actual
+        if setting_up and len(args) >= 4 and args[2:4] == ('dev', self.dev):
+            key = self.setup_queue_key(args)
+            if key:
+                self.setup_templates[key] = {'command': list(args), 'after': self.detailed_queues(self.dev)}
         # Cleanup may still need the creation marker for an alias-less IFB.
-        # Keep that exact durable intent until link deletion removes the IFB.
         if not getattr(self, 'cleaning', False):
             self.setup_step = None
+            self.setup_tc_intent = None
         self.save()
 
     def reconcile(self):
@@ -608,8 +725,15 @@ class Controller:
         (self.state / 'owner.new').unlink(missing_ok=True)
         self.pending_setup = d.get('pending_setup', False)
         self.setup_step = d.get('setup_step')
+        self.setup_tc_intent = d.get('setup_tc_intent')
+        self.ifb_detail_expected = d.get('ifb_detail_expected')
         actual = self.topology()
-        if self.pending_setup and actual != self.expected:
+        if (self.pending_setup and self.setup_step and len(self.setup_step) >= 4
+                and self.setup_step[1:4] == ['add', 'dev', self.ifb]):
+            self.ifb_detail_expected = self.verify_ifb_intent(actual, allow_before=True)
+            self.expected = actual
+            self.save()
+        elif self.pending_setup and actual != self.expected:
             if not self.setup_topology_owned(actual):
                 raise ValueError('Unsupported: interrupted setup includes foreign objects')
             self.expected = actual
@@ -697,18 +821,9 @@ class Controller:
             return (step[:3] == ['link', 'add', self.ifb]
                     and not new.get('classes') and (not new.get('qdiscs') or
                     (len(new['qdiscs']) == 1 and new['qdiscs'][0].get('kind') == 'noqueue')))
-        if len(step) < 5 or step[1] != 'add' or step[2:4] != ['dev', self.ifb]:
-            return False
-        field = {'qdisc': 'qdiscs', 'class': 'classes'}.get(step[0])
-        if field is None:
-            return False
-        for key in set(old) | set(new):
-            if key != field and old.get(key) != new.get(key):
-                return False
-        previous = old.get(field, [])
-        if field == 'qdiscs' and 'root' in step:
-            previous = [q for q in previous if not (q.get('root') and q.get('kind') == 'noqueue')]
-        return all(obj in new.get(field, []) for obj in previous) and len(new.get(field, [])) == len(previous) + 1
+        # TC-add recovery requires the durable detailed intent, never this
+        # legacy link-creation identity check.
+        return False
 
     def cleanup_objects(self):
         self.cleaning = True

@@ -1,0 +1,91 @@
+PENDING IFB TC-ADD RECOVERY AND BOUNDED PHYSICAL TRIAL PLAN
+
+Scope
+-----
+Shared UL/DL architecture, API, UI, socket attribution, five-second leases and
+firewall policy unchanged. Only startup/pending-recovery checks add detailed TC
+queries. No performance investigation, full-suite repetition or host action.
+
+Recovery contract
+-----------------
+Before each IFB root/class/leaf add, journal the exact command, detailed before
+queues, intended detailed after queues and phase-specific UL template provenance.
+Templates are taken at each corresponding UL startup phase, before any app caps;
+the final UL tree cannot be used because leaf creation changes class.leaf.
+IFB MTU is set to the selected interface MTU before UP. HTB direct_qlen is explicit
+using the verified IFB txqlen (minimum 2), preserving the tested default 32.
+Only major/device and direct_qlen differ from the same-kernel UL phase. Detailed
+JSON retains all reported configuration fields; only reference-count and direct
+packet counters use the existing structural normalization.
+
+Normal completion and restart compare exact detailed results. The accepted
+detailed checkpoint remains durable while startup is pending, including crashes
+after the add journal commit and before the next operation. Restart permits
+only the unchanged before-state or intended after-state. Foreign filters, IFB
+identity, program IDs, parent/handle and outside-IFB differences refuse cleanup.
+The private owner journal remains; pending-ifb-mismatch.json records intended,
+observed and ordinary topology evidence. IFB link-identity refusal retains the
+journal and explicit error instead. No handle-only fallback for legacy pending
+adds. Additional detail checks run before each pending cleanup mutation, not on
+the steady-state loop. Kernel dumps/checks are not atomic against privileged
+concurrent mutation; this is not an adversarial root security boundary.
+
+Tests and attribution
+---------------------
+See .workspace/shaping-dl-recovery/README.txt for final SHA/hashes and evidence.
+Native root/class/leaf absent, post-command/pre-journal, post-journal and changed
+options; foreign IFB-major filter and changed alias. Refusal preserves journal,
+IFB and UL structural configuration. Fixture restores only its injected change,
+then ownership-verified cleanup succeeds and unrelated ifb0 is preserved.
+Model tests cover option/parent/handle/kind/program/unknown-field and malformed
+intent. Native API check records configured UL before failure and retains that
+UL rate when a subsequent DL setup faults/refused cleanup. This is CONFIGURATION
+preservation: the shared worker faults and leases expire, so continuous upload
+ENFORCEMENT during that failure is not claimed.
+
+Reuse the 17b180e DL receiver/UI journey, identity/expiry/worker tests where the
+paths are unchanged. Its 8/16/off payload was 7.65/15.30/529.34 Mbit/s. New startup
+queries are validated by focused native creation/recovery; no new rate benchmark.
+Established TCP-only/Partial coverage, UDP/GSO, high guest latency and prior failed
+throughput/CPU objectives remain documented experimental limits.
+
+Proposed host trial — requires explicit approval for the final exact SHA
+-----------------------------------------------------------------------
+1. Read live backend/GUI versions and service generation/PID; snapshot latest
+   rules (order-independent content), Both protection, collector/Wine settings,
+   preferences/autostart, and current UL/DL configured caps/version/application
+   keys/rates. Read enp7s0 topology/filters/offloads and compatibility. Verify the
+   exact prepared manifest and save the current installed bundle for rollback.
+   Any incompatibility or ownership mismatch stops the trial; no offload changes.
+2. Obtain approval for the guarded matched backend restart and GUI switch AND
+   the brief interruption of shaping. Caps are volatile: preserving configured
+   rates does not imply continuous enforcement across restart. Re-read generation,
+   cap version and settings before action; if the user edited them, resnapshot
+   and reconcile explicitly instead of overwriting newer state.
+3. Ownership-verified cleanup of the old generation precedes restart. Deploy only
+   the approved exact bundle without widening updater policy. Restore saved cap
+   configuration through new-generation CAS, using fresh attribution/binding
+   checks; never restore cookie/class/lease maps from the old process. Verify
+   each existing UL entry/rate and coverage; missing apps remain explicit
+   Pending/Partial. Do not silently discard or broaden their identity.
+4. Use established Unraid Docker endpoint172.30.42.128 through enp7s0 as a bounded
+   TCP sender to a dedicated native receiver application. Through actual GUI set
+   ONLY its DL8Mbit/s, edit16, then remove that test DL entry. Use three bounded
+   receiver windows (at most10seconds each; container lifetime at most5minutes). Record receiver
+   payload separately from tc charged bytes, independent traffic, existing UL
+   cap behaviour/coverage/lease margin, and successfully offered Deny traffic.
+   No UDP download support claim. No performance target-chasing cycle.
+5. Stop on connectivity, incorrect enforcement, renewal or ownership failure.
+   Remove only test caps/resources/container; retain all pre-existing UL/DL
+   configured caps. If other caps remain active, owned shared shaping resources
+   legitimately remain: do not claim globally Disabled or delete their roots.
+   If none remain, verify original supported root restoration and no owned IFB.
+6. Failure rollback: inspect journal and actual identity/options first. If
+   ambiguous, refuse deletion and retain evidence; do not overwrite the unresolved
+   journal with an older controller. Once owned cleanup is verified, guarded
+   rollback to the saved exact prior release, fresh new-generation CAS reapply of
+   saved configurations, and confirm rules/protection/settings unchanged. Never
+   bare-delete enp7s0 root or an IFB by name. Successful trial may leave the approved
+   matched build installed only if that is included in the user's approval.
+
+No deployment/restart/host activation is authorized by this document.
