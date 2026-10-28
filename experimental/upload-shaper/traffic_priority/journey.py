@@ -228,6 +228,10 @@ try:
  ask(senders['D'],'OPEN 4 0 1 0 0')
  record('setup',qdiscs=original,binaries={b:cmd('sha256sum',P/b).split()[0] for b in ('flowgate-new','controller.py','classify.bpf.o','kernel','probe','alpha')})
  # ---- Pre-UI gates requested by review R3 (direct API; expectations fixed here) ----
+ # Deterministic IPv6 neighbours (first-contact ND can exceed the sender's 2 s connect timeout in TCG).
+ peermac=json.loads(cmd('nsenter','-t',str(peer.pid),'-n','ip','-j','link','show','dev','fgpeer'))[0]['address']
+ cmd('ip','-6','neigh','replace','fd79::2','lladdr',peermac,'dev',DEV,'nud','permanent')
+ cmd('nsenter','-t',str(peer.pid),'-n','ip','-6','neigh','replace','fd79::1','lladdr',json.loads(cmd('ip','-j','link','show','dev',DEV))[0]['address'],'dev','fgpeer','nud','permanent')
  configure([cap('A',prio='low'),cap('C',prio='high')],ub=B,db=B)
  gate('G1-ipv6-saturation',phase('G1',ul={'A':1,'C':1,'U':1},dl={'A':(1,1),'C':(1,1),'U':(1,1)},fam=6,
       expect={'ul:A':(3.0,5.0),'ul:C':(22,31),'ul:U':(4.5,7.5),'dl:A':(3.0,5.0),'dl:C':(22,31),'dl:U':(4.5,7.5)}))
