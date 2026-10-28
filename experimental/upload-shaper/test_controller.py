@@ -663,6 +663,16 @@ class TrafficPriorityTests(unittest.TestCase):
         self.assertNotIn('0:b', c.apps)
         self.assertEqual(set(c.class_state['ul']), {1})
 
+    def test_policy_validation_uses_desired_population_only(self):
+        # Review replay: an old Low app capped 1 Mbit/s replaced by 15 High apps.
+        c = self.fake()
+        c.set_policy({'upload_budget': 16_000_000, 'apps': {'0:old': {'priority': 'low', 'rate': 1_000_000}}})
+        c.set_cap('0:old', 1_000_000, 0, 'low')  # instantiated by a binding
+        self.assertIn('0:old', c.apps)
+        c.set_policy({'upload_budget': 16_000_000, 'apps': {f'0:h{i}': {'priority': 'high'} for i in range(15)}})
+        self.assertNotIn('0:old', c.apps)
+        self.assertEqual(c.class_state['ul'][m1.DEFAULT_MINOR][0], 457_142)
+
     def test_pure_decrease_resizes_leaf_and_withdrawal_has_flag(self):
         c = self.fake()
         c.set_cap('0:a', 8_000_000)

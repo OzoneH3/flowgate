@@ -953,13 +953,15 @@ class Controller:
         budget parent. Allocation uses the CONFIGURED population."""
         b = self.budgets.get(d, 0)
         capkey = 'rate' if d == 'ul' else 'download_rate'
-        live = {a['minor']: (app, self.entry_for(app)) for app, a in self.apps.items()
-                if self.has_class(self.entry_for(app), d)}
+        # Only CONFIGURED applications (set_policy/bind/cap all record them in
+        # policy_apps); instantiated classes about to be retired never count.
+        live = {a['minor']: (app, self.policy_apps[app]) for app, a in self.apps.items()
+                if app in self.policy_apps and self.has_class(self.policy_apps[app], d)}
         if not b:
             # Legacy recipe: independent hard caps, priority dormant.
             return {m: (e[capkey], e[capkey], 0) for m, (app, e) in live.items()}, None
         population = {'default': ('normal', 0)}
-        for app, e in list(self.policy_apps.items()) + [(app, e) for _, (app, e) in live.items()]:
+        for app, e in self.policy_apps.items():
             if self.has_class(e, d):
                 population[app] = (e.get('priority', 'normal'), e.get(capkey, 0))
         alloc = allocate(b, population)
