@@ -401,6 +401,34 @@ class CompatibilityTests(unittest.TestCase):
         c.setup_step=None
         self.assertFalse(c.setup_topology_owned(actual))
 
+    def test_pending_default_class_under_budget_parent(self):
+        import json,copy
+        c=object.__new__(m1.Controller);c.major=0x123;c.ids={'program':7}
+        c.k=lambda *args:json.dumps(c.ids)
+        c.original=self.topology();base=copy.deepcopy(c.original)
+        root={'kind':'htb','handle':'123:','root':True,'options':{'r2q':10,'default':'0xfff1','direct_qlen':1000}}
+        leaf=lambda h:{'class':'htb','handle':h,'root':True,'prio':0,'rate':1,'ceil':1,'burst':2400,'cburst':2400}
+        c.expected=dict(base,qdiscs=[root],classes=[leaf('123:fff1'),leaf('123:fff0')])
+        c.setup_step=['class','add','dev','test0','parent','123:fff0','classid','123:fffe','htb','rate','100gbit']
+        inner={k:v for k,v in leaf('123:fff0').items() if k!='prio'}
+        child={'class':'htb','handle':'123:fffe','parent':'123:fff0','prio':0,'rate':1,'ceil':1,'burst':2400,'cburst':2400}
+        ok=dict(c.expected,classes=[leaf('123:fff1'),child,inner])
+        self.assertTrue(c.setup_topology_owned(ok))
+        for bad in ([leaf('123:fff1'),child,dict(inner,rate=2)], [dict(leaf('123:fff1'),rate=2),child,inner]):
+            self.assertFalse(c.setup_topology_owned(dict(c.expected,classes=bad)))
+
+    def test_pending_default_leaf_marks_only_its_class(self):
+        import json
+        c=object.__new__(m1.Controller);c.major=0x123;c.ids={'program':7}
+        c.k=lambda *args:json.dumps(c.ids);c.original=self.topology()
+        root={'kind':'htb','handle':'123:','root':True,'options':{}}
+        cls={'class':'htb','handle':'123:fffe','parent':'123:fff0','prio':0,'rate':1,'ceil':1}
+        c.expected=dict(c.original,qdiscs=[root],classes=[cls])
+        c.setup_step=['qdisc','add','dev','test0','parent','123:fffe','handle','fffe:','fq_codel']
+        leafq={'kind':'fq_codel','handle':'fffe:','parent':'123:fffe'}
+        self.assertTrue(c.setup_topology_owned(dict(c.expected,qdiscs=[root,leafq],classes=[dict(cls,leaf='fffe:')])))
+        self.assertFalse(c.setup_topology_owned(dict(c.expected,qdiscs=[root,leafq],classes=[dict(cls,leaf='fffe:',rate=2)])))
+
     def test_empty_journal_generation_guards(self):
         d={'major':0x123,'boot_id':'old','netns':'net:[1]','ifindex':2,'interface':'x','original':self.topology()}
         changed={'qdiscs':[{'kind':'pfifo_fast','handle':'0:'}],'classes':[]}

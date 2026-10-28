@@ -819,6 +819,12 @@ class Controller:
         step = self.setup_step or []
         if len(step) < 2:
             return False
+        if step[:2] == ['qdisc', 'add'] and 'fq_codel' in step and 'parent' in step:
+            # Attaching the default leaf qdisc only adds `leaf` to its class row.
+            parent = step[step.index('parent') + 1]
+            strip = lambda rows: [{k: v for k, v in o.items() if not (o.get('handle') == parent and k == 'leaf')} for o in rows]
+            if strip(actual.get('classes', [])) == strip(self.expected.get('classes', [])):
+                actual = dict(actual, classes=self.expected.get('classes', []))
         changed = {k for k in actual if actual[k] != self.expected.get(k)}
         allowed = {'qdisc': {'qdiscs', 'ifb'}, 'class': {'classes', 'ifb'}, 'filter': {'egress', 'ingress'}, 'link': {'ifb'}}.get(step[0], set())
         if not changed or not changed <= allowed:
@@ -833,6 +839,18 @@ class Controller:
                 continue
             if step[0] == 'qdisc' and step[1] in ('add', 'replace') and 'root' in step:
                 if len(new) != 1:
+                    return False
+            elif step[0] == 'class' and 'parent' in step and key == 'classes':
+                # Adding the default class under the budget class turns that
+                # parent from a leaf into an inner class: HTB then omits its
+                # prio. Only the journalled parent may change, only that way.
+                parent = step[step.index('parent') + 1]
+                kept = [o for o in old if o.get('handle') != parent]
+                was = [o for o in old if o.get('handle') == parent]
+                now = [o for o in new if o.get('handle') == parent]
+                if was and (len(now) != 1 or now[0] != {k: v for k, v in was[0].items() if k != 'prio'}):
+                    return False
+                if not all(obj in new for obj in kept) or len(new) <= len(old):
                     return False
             elif not all(obj in new for obj in old) or len(new) <= len(old):
                 return False
