@@ -590,6 +590,7 @@ class Controller:
                 'expected': self.expected, 'ids': self.ids, 'original': self.original, 'pending_setup': getattr(self, 'pending_setup', False), 'compatibility': getattr(self, 'compatibility', None), 'setup_step': getattr(self, 'setup_step', None),
                 'setup_tc_intent': getattr(self, 'setup_tc_intent', None),
                 'ifb_detail_expected': getattr(self, 'ifb_detail_expected', None),
+                'ul_detail_expected': getattr(self, 'ul_detail_expected', None),
                 'link_identity': {k: self.link.get(k) for k in ('ifindex','address','parentbus','parentdev','link_type')}}
         p = self.state / 'owner.new'
         fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
@@ -621,6 +622,8 @@ class Controller:
             raise RuntimeError('Unsupported: kernel object identity changed')
         if getattr(self, 'ifb_index', None) is not None and not getattr(self, 'cleaning', False) and self.ifb_link() is None:
             raise RuntimeError('Unsupported: owned IFB disappeared')
+        if getattr(self, 'pending_setup', False):
+            self.verify_ul_checkpoint(actual)
         if (getattr(self, 'pending_setup', False) and 'ifb' in actual
                 and getattr(self, 'setup_step', None) and len(self.setup_step) >= 4
                 and self.setup_step[1:4] == ['add', 'dev', self.ifb]):
@@ -636,6 +639,26 @@ class Controller:
         q, c = self.query_tc([('qdisc', 'show', 'dev', dev),
                               ('class', 'show', 'dev', dev)], detailed=True)
         return {'qdiscs': q, 'classes': [x for x in c if x.get('class') != 'fq_codel']}
+
+    def ul_setup_details(self):
+        details = self.detailed_queues(self.dev)
+        # clsact is independently covered by topology/filter identities and is
+        # removed first during cleanup; retain the complete owned HTB tree.
+        return dict(details, qdiscs=[q for q in details['qdiscs'] if q.get('kind') != 'clsact'])
+
+    def verify_ul_checkpoint(self, actual):
+        # Ordinary tc dumps omit options such as quantum. During startup,
+        # require the detailed post-operation journal before deleting a tree.
+        if any(q.get('kind') == 'htb' and q.get('root') for q in actual.get('qdiscs', [])):
+            expected = getattr(self, 'ul_detail_expected', None)
+            if expected is None or self.ul_setup_details() != expected:
+                raise RuntimeError('Unsupported: upload setup details lack matching ownership proof; preserving resources')
+
+    def reject_ambiguous_ul_step(self):
+        step = getattr(self, 'setup_step', None) or []
+        if (getattr(self, 'pending_setup', False) and len(step) >= 4
+                and step[0] in ('qdisc', 'class') and step[2:4] == ['dev', self.dev]):
+            raise RuntimeError('Unsupported: interrupted upload setup operation has no exact durable intent; preserving resources')
 
     @staticmethod
     def setup_queue_key(args):
@@ -742,8 +765,10 @@ class Controller:
         self.expected = actual
         if setting_up and len(args) >= 4 and args[2:4] == ('dev', self.dev):
             key = self.setup_queue_key(args)
+            details = self.detailed_queues(self.dev)
+            self.ul_detail_expected = dict(details, qdiscs=[q for q in details['qdiscs'] if q.get('kind') != 'clsact'])
             if key:
-                self.setup_templates[key] = {'command': list(args), 'after': self.detailed_queues(self.dev)}
+                self.setup_templates[key] = {'command': list(args), 'after': details}
         # Cleanup may still need the creation marker for an alias-less IFB.
         if not getattr(self, 'cleaning', False):
             self.setup_step = None
@@ -803,14 +828,17 @@ class Controller:
         self.original = d.get('original', {'qdiscs': [{'kind': 'noqueue', 'handle': '0:', 'root': True}], 'classes': [], 'egress': [], 'ingress': [], 'root_filters': []})
         if d.get('link_identity') and d['link_identity'] != {k: self.link.get(k) for k in ('ifindex','address','parentbus','parentdev','link_type')}:
             raise ValueError('Unsupported: interface identity changed')
-        # A crash during atomic journal replacement may leave an uncommitted file.
-        # Only after validating owner.json and interface identity may it be removed.
-        (self.state / 'owner.new').unlink(missing_ok=True)
+        self.ul_detail_expected = d.get('ul_detail_expected')
+        self.reject_ambiguous_ul_step()
         self.pending_setup = d.get('pending_setup', False)
         self.setup_step = d.get('setup_step')
         self.setup_tc_intent = d.get('setup_tc_intent')
         self.ifb_detail_expected = d.get('ifb_detail_expected')
         actual = self.topology()
+        if self.pending_setup:
+            self.verify_ul_checkpoint(actual)
+        # Remove an uncommitted temporary journal only after ownership checks.
+        (self.state / 'owner.new').unlink(missing_ok=True)
         if (self.pending_setup and self.setup_step and len(self.setup_step) >= 4
                 and self.setup_step[1:4] == ['add', 'dev', self.ifb]):
             self.ifb_detail_expected = self.verify_ifb_intent(actual, allow_before=True)
@@ -1123,6 +1151,8 @@ class Controller:
                 if app in self.apps:
                     self.apps[app].update(e)
             self.apply_policy()
+        except Exception as exc:
+            raise RuntimeError('policy application failed after validation: ' + str(exc)) from exc
         finally:
             self.applying = False
 
@@ -1343,7 +1373,7 @@ class Controller:
                                  'download_default_redirected': counters[8], 'download_excluded_no_exact_socket': counters[12],
                                  'download_excluded_unsupported_format': counters[9]},
                     'activity': self.budget_activity(),
-                    'scope': 'connected host-local sockets on the selected interface; floors are scheduler allocations, not delivery or latency guarantees'},
+                    'scope': 'best-effort connected host-local socket priority on the selected interface; no delivery minimum, bounded progress or latency guarantee'},
                 # Ingress adapter telemetry: local delivery of bound established TCP
                 # only; it cannot reclaim bandwidth already consumed on the link.
                 'download': {'interface': getattr(self, 'ifb', None), 'redirected': counters[5], 'unbound_tcp': counters[6], 'bound_without_class': counters[7], 'scope': 'established native TCP sockets on the selected interface; UDP, listeners, fragments and IPv6 extension headers are uncovered'}}

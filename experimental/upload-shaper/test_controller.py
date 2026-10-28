@@ -234,6 +234,100 @@ class ModelTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'class_generation_exhausted'):
             c.set_cap('app',4000000)
 
+    def test_interrupted_ul_steps_refuse_even_when_topology_looks_unchanged(self):
+        c = self.fake(); c.pending_setup = True; c.dev = 'eth0'
+        for kind, op in [('qdisc', 'replace'), ('class', 'add'), ('qdisc', 'add')]:
+            c.setup_step = [kind, op, 'dev', 'eth0', 'root']
+            with self.assertRaisesRegex(RuntimeError, 'no exact durable intent'):
+                c.reject_ambiguous_ul_step()
+        c.setup_step = ['class', 'add', 'dev', 'ifb0']
+        c.reject_ambiguous_ul_step()
+
+    def test_pending_ul_detail_detects_foreign_options_and_clsact_cleanup(self):
+        c = self.fake(); c.dev = 'eth0'
+        htb = {'kind': 'htb', 'root': True, 'options': {'quantum': 1500}}
+        clsact = {'kind': 'clsact'}
+        observed = {'qdiscs': [htb, clsact], 'classes': [{'options': {'quantum': 1500}}]}
+        c.detailed_queues = lambda dev: copy.deepcopy(observed)
+        c.ul_detail_expected = c.ul_setup_details()
+        actual = {'qdiscs': [{'kind': 'htb', 'root': True}]}
+        c.verify_ul_checkpoint(actual)
+        observed['qdiscs'].remove(clsact)  # cleanup removes clsact first
+        c.verify_ul_checkpoint(actual)
+        observed['classes'][0]['options']['quantum'] = 3000
+        with self.assertRaisesRegex(RuntimeError, 'preserving resources'):
+            c.verify_ul_checkpoint(actual)
+        c.ul_detail_expected = None  # old pending journal has no detailed proof
+        with self.assertRaisesRegex(RuntimeError, 'preserving resources'):
+            c.verify_ul_checkpoint(actual)
+
+    def test_reconcile_preserves_ambiguous_and_detail_mismatch(self):
+        from unittest.mock import patch
+        import tempfile, types, os
+        root = Path(__file__).resolve().parents[2] / '.workspace'
+        root.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=root) as directory:
+            c = self.fake(); c.state = Path(directory); c.manifest = c.state / 'owner.json'
+            c.dev = 'eth0'; c.index = 2; c.ns = 'net:[test]'; c.link = {}; c.partial = []
+            c.ifb_link = lambda: {'ifindex': 3}
+            token = 'a' * 32
+            actual = {'qdiscs': [{'kind': 'htb', 'root': True}], 'classes': [],
+                      'egress': [], 'ingress': [], 'root_filters': []}
+            c.topology = lambda *a: copy.deepcopy(actual)
+            c.detailed_queues = lambda dev: {'qdiscs': [{'kind': 'htb', 'options': {'quantum': 3000}}], 'classes': []}
+            deleted = []; c.cleanup_objects = lambda: deleted.append('cleanup')
+            c.save = lambda: deleted.append('adopt')
+            doc = {'schema': 1, 'token': token, 'pin': '/sys/fs/bpf/fg-m1-' + token,
+                   'netns': c.ns, 'interface': c.dev, 'ifindex': c.index, 'major': 123,
+                   'ifb': 'fgdl' + token[:8], 'ifb_index': 3, 'expected': actual, 'ids': {},
+                   'pending_setup': True, 'original': {},
+                   'ul_detail_expected': {'qdiscs': [{'kind': 'htb', 'options': {'quantum': 1500}}], 'classes': []}}
+            for step in (['class', 'add', 'dev', 'eth0', 'classid', '123:fff0'], None):
+                doc['setup_step'] = step
+                c.manifest.write_text(json.dumps(doc)); (c.state / 'owner.new').write_text('uncommitted')
+                fake_stat = types.SimpleNamespace(st_mode=0o100600, st_uid=0, st_size=1024)
+                with patch.object(Path, 'lstat', return_value=fake_stat):
+                    with self.assertRaisesRegex(RuntimeError, 'preserving resources'):
+                        c.reconcile()
+                self.assertEqual(json.loads(c.manifest.read_text()), doc)
+                self.assertEqual(deleted, [])
+                self.assertTrue((c.state / 'owner.new').exists())
+
+    def test_pending_cleanup_progresses_past_clsact_to_ifb_and_root(self):
+        from unittest.mock import MagicMock
+        c = self.fake(); c.dev = 'eth0'; c.major = 0x123; c.pending_setup = True
+        c.ifb = 'fgdltest'; c.pin = Path('/nonexistent-fg-test-pin')
+        c.manifest = MagicMock(); c.original = {'qdiscs': []}
+        htb = {'kind': 'htb', 'root': True, 'handle': c.handle()}
+        c.expected = {'qdiscs': [htb, {'kind': 'clsact'}]}
+        detail = {'qdiscs': [htb, {'kind': 'clsact'}], 'classes': [{'options': {'quantum': 1500}}]}
+        c.detailed_queues = lambda dev: copy.deepcopy(detail)
+        c.ul_detail_expected = c.ul_setup_details()
+        c.verify = lambda: c.verify_ul_checkpoint(c.expected)
+        c.ifb_link = lambda: {'ifindex': 3}
+        calls = []
+        def mutate(*args):
+            c.verify(); calls.append(args)
+            if 'clsact' in args:
+                detail['qdiscs'] = [htb]; c.expected['qdiscs'] = [htb]
+            elif 'root' in args:
+                c.expected['qdiscs'] = []
+        c.mutate = mutate
+        c.link_mutate = lambda *args: (c.verify(), calls.append(('link',) + args))
+        c.topology = lambda: c.original
+        c.cleanup_objects()
+        self.assertEqual([x[0] for x in calls], ['qdisc', 'link', 'qdisc'])
+        c.manifest.unlink.assert_called_once()
+
+    def test_policy_post_validation_exception_faults(self):
+        c = self.fake(); init_policy(c); c.apps = {}; c.bindings = {}
+        c.apply_policy = lambda: (_ for _ in ()).throw(ValueError('after first tc change'))
+        with self.assertRaisesRegex(RuntimeError, 'policy application failed after validation'):
+            c.set_policy({'apps': {}})
+        self.assertFalse(c.applying)
+        with self.assertRaises(ValueError):
+            c.set_policy({'upload_budget': 1, 'apps': {}})
+
 class StatusObservationTests(unittest.TestCase):
     """Status is an observation: it never verifies, renews or beats; verification is recorded by verify()
     callers at the verification START and only on success; labels/states change at 1/2/5 s."""
@@ -365,6 +459,22 @@ class StatusObservationTests(unittest.TestCase):
             m1.Controller.refresh_during_apply(c)
         self.assertEqual(calls, [])
         self.assertEqual(set(c.bindings), {'a', 'b'})
+
+    def test_apply_checkpoint_write_failure_renews_only_prefix_and_never_beats(self):
+        c = self.fake(); calls = []
+        c.applying = True; c.pending_setup = False; c.cleaning = False; c.last_tick = 0
+        c.verify = lambda: None
+        c.bindings = {'a': {'app': 'uid:key', 'descriptor': {}},
+                      'b': {'app': 'uid:key', 'descriptor': {}}}
+        c.exists = lambda d: True
+        def k(*args):
+            calls.append(args)
+            if args[:2] == ('bind', 'b'): raise ValueError('map write failed')
+        c.k = k
+        with self.assertRaisesRegex(RuntimeError, 'maintenance during configuration failed'):
+            c.refresh_during_apply()
+        self.assertEqual([x[:2] for x in calls], [('bind', 'a'), ('bind', 'b')])
+        self.assertEqual(c.last_tick, 0)
 
     def test_slow_apply_checks_lease_before_next_tc_change(self):
         c = self.fake(); calls = []
