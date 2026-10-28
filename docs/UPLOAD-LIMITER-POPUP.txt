@@ -10,7 +10,9 @@ The shared Activity/Info View button now uses a dot and upload glyph, with a
 persistent blue configured indicator, hover/focus access and coverage tooltip.
 The setter is a viewport-clamped 264px popup: checkbox, rate, unit, OK, Details
 and Delete. Open, Escape and outside dismissal do not submit. Only explicit OK
-or Delete sends the existing generation/version checked request. Background
+or Delete sends the existing generation/version checked request. An accepted
+OK/Delete closes the popup; errors keep it open with details. The strip reports
+Pending/Partial as before: acceptance does not prove enforcement. Background
 refresh does not replace a draft or its target. Stale configuration still
 requires review. Identity eligibility and firewall policy are unchanged.
 
