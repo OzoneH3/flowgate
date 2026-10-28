@@ -663,6 +663,22 @@ class TrafficPriorityTests(unittest.TestCase):
         self.assertNotIn('0:b', c.apps)
         self.assertEqual(set(c.class_state['ul']), {1})
 
+    def test_pure_decrease_resizes_leaf_and_withdrawal_has_flag(self):
+        c = self.fake()
+        c.set_cap('0:a', 8_000_000)
+        c.ops.clear()
+        c.set_cap('0:a', 4_000_000)
+        leaf = [o for o in c.ops if o[:3] == ('tc', 'qdisc', 'change')]
+        self.assertEqual(len(leaf), 1)
+        self.assertEqual(leaf[0][leaf[0].index('memory_limit') + 1], str(m1.queue_bytes(4_000_000, 1500, 0)))
+        calls = []
+        c.pin = Path('/nonexistent'); c.withdraw_download()
+        w = object.__new__(m1.Controller); w.pin = Path('/'); w.k = lambda *a: calls.append(a)
+        import unittest.mock as um
+        with um.patch.object(m1.Path, 'exists', return_value=True):
+            w.withdraw_download()
+        self.assertEqual(calls, [('download', '0', '0', '0')])
+
     def test_reserved_minors_and_bounds(self):
         self.assertEqual((m1.MAX_APP_MINOR, m1.BUDGET_MINOR, m1.BYPASS_MINOR, m1.DEFAULT_MINOR), (0xffef, 0xfff0, 0xfff1, 0xfffe))
         c = self.fake(); c.next_minor = 0xfff0

@@ -901,7 +901,7 @@ class Controller:
             self.mutate('qdisc', 'del', 'dev', self.dev, 'clsact')
         if self.pin.exists() and (self.pin / 'download').exists():
             try:
-                self.k('download', '0', '0')  # withdraw redirect before the IFB goes
+                self.k('download', '0', '0', '0')  # withdraw redirect before the IFB goes
             except RuntimeError:
                 pass
         if getattr(self, 'ifb', None) and self.ifb_link() is not None:
@@ -983,6 +983,8 @@ class Controller:
         want, b = self.targets(d)
         b = b or 0
         was_budget = bool(self.applied_budget.get(d))
+        self.applied_budget_before = self.applied_budget.get(d, 0)
+        before = dict(state)
         if was_budget and not b:
             self.publish_budget(d, False)  # withdraw marking before legacy tree
         for minor in [m for m in state if m != DEFAULT_MINOR and m not in want]:
@@ -1015,15 +1017,19 @@ class Controller:
             self.applied_budget[d] = b
         for minor, new in want.items():
             old = state.get(minor)
-            if old == new:
-                continue
             if old is None and minor != DEFAULT_MINOR:
                 self.mutate('class', 'add', 'dev', dev, 'parent', root(BUDGET_MINOR), 'classid', root(minor), *self.tuple_params(new))
                 self.mutate('qdisc', 'add', 'dev', dev, 'parent', root(minor), 'handle', f'{minor:x}:', 'fq_codel', 'limit', '128', 'memory_limit', str(self.leaf_memory(new[1])), 'flows', '128', 'target', '5ms', 'interval', '100ms')
-            else:
+                state[minor] = new
+                continue
+            if old != new:
                 self.mutate('class', 'change', 'dev', dev, 'parent', root(BUDGET_MINOR), 'classid', root(minor), *self.tuple_params(new))
-                if old is None or old[1] != new[1]:
-                    self.mutate('qdisc', 'change', 'dev', dev, 'parent', root(minor), 'handle', f'{minor:x}:', 'fq_codel', 'limit', '128', 'memory_limit', str(self.leaf_memory(new[1] if minor != DEFAULT_MINOR else b)), 'target', '5ms', 'interval', '100ms')
+            # Leaf sizing follows the ceiling as it was BEFORE this batch, so a
+            # pure decrease (already final after the shrink step) is resized too.
+            if minor != DEFAULT_MINOR and (before.get(minor) is None or before[minor][1] != new[1]):
+                self.mutate('qdisc', 'change', 'dev', dev, 'parent', root(minor), 'handle', f'{minor:x}:', 'fq_codel', 'limit', '128', 'memory_limit', str(self.leaf_memory(new[1])), 'target', '5ms', 'interval', '100ms')
+            elif minor == DEFAULT_MINOR and b and was_budget and self.applied_budget_before != b:
+                self.mutate('qdisc', 'change', 'dev', dev, 'parent', root(minor), 'handle', 'fffe:', 'fq_codel', 'limit', '128', 'memory_limit', str(self.leaf_memory(b)))
             state[minor] = new
         if b and not was_budget:
             self.publish_budget(d, True)  # marking only after the tree is ready
@@ -1320,7 +1326,7 @@ class Controller:
         # drop bound traffic while leases run out. Never touches firewall state.
         try:
             if getattr(self, 'pin', None) and (self.pin / 'download').exists():
-                self.k('download', '0', '0')
+                self.k('download', '0', '0', '0')
         except Exception:
             pass
 
@@ -1379,7 +1385,7 @@ def main():
                 if not chunk:
                     return
                 buf += chunk
-                if len(buf) > 8192:
+                if len(buf) > 65536:  # one full 16-application policy fits
                     raise ValueError('bounded command buffer exceeded')
                 while b'\n' in buf:
                     line, buf = buf.split(b'\n', 1)
