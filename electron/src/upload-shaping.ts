@@ -45,3 +45,28 @@ export function uploadSummary(v: UploadView, t?: UploadTarget): string {
   if (!c) return 'Off';
   return `${c.bits_per_second/1000000} Mbit/s · Partial`;
 }
+
+// Reference UI units: byte prefixes are binary, bit prefixes decimal.
+// Presentation only; conversion never rounds controller values.
+export const UPLOAD_RATE_UNITS = ['B/s','KB/s','MB/s','GB/s','bit/s','Kbit/s','Mbit/s','Gbit/s'] as const;
+export type UploadRateUnit = typeof UPLOAD_RATE_UNITS[number];
+const uploadRateFactors: Record<UploadRateUnit, bigint> = {
+  'B/s':8n,'KB/s':8192n,'MB/s':8388608n,'GB/s':8589934592n,
+  'bit/s':1n,'Kbit/s':1000n,'Mbit/s':1000000n,'Gbit/s':1000000000n,
+};
+export function uploadRateBits(value:string, unit:UploadRateUnit):number {
+  if (!Object.hasOwn(uploadRateFactors,unit) || !/^\d{1,16}(?:\.\d{1,33})?$/.test(value.trim())) throw Error('Enter a decimal upload rate.');
+  const [whole,fraction='']=value.trim().split('.'), divisor=10n**BigInt(fraction.length);
+  const scaled=BigInt(whole+fraction)*uploadRateFactors[unit];
+  if(scaled%divisor!==0n)throw Error('The rate must represent a whole number of bit/s.');
+  const bits=scaled/divisor;
+  if(bits<1000000n || bits>1000000000n)throw Error('Supported rate: 1–1000 Mbit/s (125000–125000000 B/s).');
+  return Number(bits);
+}
+export function uploadRateValue(bits:number,unit:UploadRateUnit):string {
+  if(!Number.isSafeInteger(bits) || bits<1000000 || bits>1000000000 || !Object.hasOwn(uploadRateFactors,unit))throw Error('Invalid upload rate.');
+  const factor=uploadRateFactors[unit],n=BigInt(bits),whole=n/factor;
+  let remainder=n%factor,fraction='';
+  while(remainder && fraction.length<33){remainder*=10n;fraction+=String(remainder/factor);remainder%=factor;}
+  return String(whole)+(fraction?'.'+fraction:'');
+}

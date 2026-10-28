@@ -1,0 +1,34 @@
+Experimental upload limiter popup
+
+The Activity UL Limit cell bypassed the shared Rule Status glyph structure:
+it rendered a text arrow/summary in a 19px slot, and polling replaced its text.
+That obscured access instead of retaining the strip's dot/hover icon and a
+persistent configured indicator. The installed 94f7876 GUI and backend had the
+upload capability; this was not a missing backend or deployment.
+
+The shared Activity/Info View button now uses a dot and upload glyph, with a
+persistent blue configured indicator, hover/focus access and coverage tooltip.
+The setter is a viewport-clamped 264px popup: checkbox, rate, unit, OK, Details
+and Delete. Open, Escape and outside dismissal do not submit. Only explicit OK
+or Delete sends the existing generation/version checked request. Background
+refresh does not replace a draft or its target. Stale configuration still
+requires review. Identity eligibility and firewall policy are unchanged.
+
+The unit picker displays 50 KB/s as 409.6 Kbit/s. Byte prefixes use 1024; bit prefixes use 1000.
+Conversion is exact integer bit/s; saving retains backend bounds 1–1000 Mbit/s.
+Empty unit selection is allowed; an invalid/out-of-range rate must be corrected
+before conversion/submission. No rate is silently rounded.
+
+Intentional differences: Details exposes coverage/experimental limitations,
+not an inert Advanced rules editor. Unchecking and pressing OK removes the cap;
+the backend has no stored disabled-cap state. This is stated in its tooltip.
+Unsupported identities remain disabled. Configured is not proof of complete
+coverage; TCP-bound sockets only have the previously demonstrated support,
+UDP GSO remains unsupported. Caps end at daemon restart.
+
+Verification: focused upload-shaping unit tests and the private guest GUI
+journey in electron/test/upload-limit-real.mjs. FlowGate captures and receiver evidence are retained in .workspace/limiter-popup and
+.workspace/shaping-ui. The earlier Unsupported dialog was a read-only fixture.
+No host deployment, daemon restart, shaping activation or preference change
+is part of this increment. The matched bundle is prepared, not installed;
+release policy is unchanged. Existing performance limitations are deferred.

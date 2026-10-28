@@ -1,10 +1,12 @@
-import {uploadTarget, uploadSummary, UPLOAD_CAPABILITY, type UploadView, type UploadTarget} from './upload-shaping';
+import { popupPosition } from './popup-position';
+import {uploadTarget, uploadSummary, UPLOAD_CAPABILITY, UPLOAD_RATE_UNITS, uploadRateBits, uploadRateValue, type UploadRateUnit, type UploadView, type UploadTarget} from './upload-shaping';
 import type {Row} from './model';
 import type {ClientState} from './protocol';
 let view:UploadView={supported:false,writable:false,message:'Unsupported: experimental upload controller is not enabled.'};
 let flight=false, last=0, context='', leaseDeadline=0;
 let dialogTarget:UploadTarget|undefined, latestState:ClientState|undefined;
 let updateActions:(()=>void)|undefined;
+let dismissPopup: (()=>void)|undefined;
 function adopt(v:UploadView,start:number) { if(v.generation===view.generation && v.snapshot && view.snapshot && v.snapshot.version<view.snapshot.version)return; view=v; leaseDeadline=start+Math.max(0, v.snapshot?.coverage_valid_for_ms||0); }
 function coverageExpired() { return view.snapshot?.coverage_snapshot_expired || performance.now()>=leaseDeadline; }
 const targets=new WeakMap<HTMLElement,UploadTarget>();
@@ -14,16 +16,29 @@ function coverage(t:UploadTarget) {
   const confirmed=coverageExpired()?0:rows.filter(b=>b.covered===true).length;
   return `${confirmed} confirmed / ${rows.length} requested socket bindings. Coverage is partial; not an application-wide guarantee.`;
 }
+function paintButton(b:HTMLButtonElement,t:UploadTarget) {
+  const configured=view.snapshot?.configured_caps.some(c=>c.uid===t.uid&&c.application===t.application)===true;
+  b.classList.toggle('upload-configured',configured);
+  b.dataset.uploadState=uploadSummary(view,t);
+  b.title=`Upload limit · ${uploadSummary(view,t)}\n${coverage(t)}\n${view.message}`;
+}
 function paint() {
   updateActions?.();
   const live=document.getElementById('uploadCoverageLive');
   if(live && dialogTarget) live.textContent=`${uploadSummary(view,dialogTarget)} · ${coverage(dialogTarget)} ${view.message} ${view.snapshot?.last_error||''}`;
-
   for(const b of document.querySelectorAll<HTMLButtonElement>('[data-upload-limit]')) {
-    const t=targets.get(b); if(!t)continue;
-    b.textContent=uploadSummary(view,t)==='Off'?'↑':uploadSummary(view,t);
-    b.title=`Upload limit · ${uploadSummary(view,t)}\n${coverage(t)}\n${view.message}`;
+    const t=targets.get(b); if(t)paintButton(b,t);
   }
+}
+function limitGlyph() {
+  const span=text('span','');span.className='slot-icon family-ul-limit';
+  const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
+  svg.setAttribute('viewBox','0 0 16 16');svg.setAttribute('aria-hidden','true');
+  const path=document.createElementNS(svg.namespaceURI,'path');
+  path.setAttribute('d','M8 13V3M4 7l4-4 4 4');path.setAttribute('fill','none');
+  path.setAttribute('stroke','currentColor');path.setAttribute('stroke-width','1.3');
+  path.setAttribute('stroke-linecap','round');path.setAttribute('stroke-linejoin','round');
+  svg.append(path);span.append(svg);return span;
 }
 export function refreshUpload(state:ClientState) {
   latestState=state;
@@ -37,16 +52,17 @@ export function refreshUpload(state:ClientState) {
 export function uploadButton(row:Row,state:ClientState) {
   const t=uploadTarget(row,state), b=document.createElement('button');
   b.className='status-slot upload-limit'; b.dataset.uploadLimit='';
-  b.setAttribute('aria-label',`Upload limit for ${row.label}`);b.setAttribute('aria-haspopup','dialog');
-  if(t){targets.set(b,t);b.textContent=uploadSummary(view,t)==='Off'?'↑':uploadSummary(view,t);b.title=`Upload limit · ${uploadSummary(view,t)}\n${coverage(t)}`;b.onclick=e=>{e.stopPropagation();void open(t);};}
-  else{b.disabled=true;b.textContent='·';b.title='Unsupported: select one verified native application or process. Runtime/shared identities are not supported.';}
+  b.setAttribute('aria-label',`Upload limit for ${row.label}`);b.setAttribute('aria-haspopup','dialog');b.setAttribute('aria-expanded','false');
+  const dot=text('span','·');dot.className='slot-dot';b.append(dot,limitGlyph());
+  if(t){targets.set(b,t);paintButton(b,t);b.onclick=e=>{e.stopPropagation();void open(t,b);};}
+  else{b.disabled=true;b.classList.add('unavailable');b.title='Unsupported: select one verified native application or process. Runtime/shared identities are not supported.';}
   return b;
 }
 export async function openUploadLimits() {
   const sent=performance.now(), start=context; const v=await window.flowgate.uploadStatus(); if(start!==context) throw Error("Connection changed; reopen limits"); adopt(v,sent);
   const d=document.createElement("dialog");d.id="uploadLimitList";d.className="upload-limit-dialog";
   d.append(text("h3","Experimental upload limits"),text("p",view.message||"Configured limits survive closing the GUI, but not a daemon restart. Coverage remains partial."));
-  for(const c of view.snapshot?.configured_caps||[]){const b=text("button",`${c.application} · UID ${c.uid} · ${c.bits_per_second/1000000} Mbit/s`);b.onclick=()=>{d.remove();const p=latestState?.observation.connected ? Object.values(latestState.observation.activity?.processes||{}).find(p=>p.uid===c.uid&&p.application.key===c.application&&p.application.kind==='native'):undefined;void open({...c,revision:p?.application.revision});};d.append(b);}
+  for(const c of view.snapshot?.configured_caps||[]){const b=text("button",`${c.application} · UID ${c.uid} · ${c.bits_per_second/1000000} Mbit/s`);b.onclick=()=>{d.remove();const p=latestState?.observation.connected ? Object.values(latestState.observation.activity?.processes||{}).find(p=>p.uid===c.uid&&p.application.key===c.application&&p.application.kind==='native'):undefined;void open({...c,revision:p?.application.revision},document.getElementById('uploadLimits') || undefined);};d.append(b);}
   if(!view.snapshot?.configured_caps.length)d.append(text("p","No configured limits. Select a verified native application’s ↑ UL Limit slot in Activity to add one."));
   if(view.writable && view.generation && view.snapshot && !view.snapshot.enabled && !view.snapshot.configured_caps.length && view.snapshot.status==='Unsupported') {
     const saved=view, retry=text('button','Retry owned cleanup'); retry.id='uploadCleanup';
@@ -54,21 +70,47 @@ export async function openUploadLimits() {
   }
   const close=text("button","Close");close.onclick=()=>d.remove();d.append(close);document.body.append(d);d.showModal();
 }
-async function open(t:UploadTarget) {
-  document.getElementById('uploadLimitDialog')?.remove();
+async function open(t:UploadTarget, anchor?:HTMLElement) {
+  dismissPopup?.();
   dialogTarget=t;
-  const d=document.createElement('dialog');d.id='uploadLimitDialog';d.className='upload-limit-dialog';
-  const heading=text('h3',`Upload limit · ${t.label||t.application}`), summary=text('p','Reading current configuration…');summary.id='uploadCoverage';summary.setAttribute('role','status');
-  const input=document.createElement('input');input.id='uploadRate';input.type='number';input.min='1';input.max='1000';input.step='0.001';input.value='8';
-  const label=text('label','Configured upload rate (Mbit/s) ');label.append(input);
-  const save=text('button','Enable / save'), remove=text('button','Disable limit'), refresh=text('button','Refresh status / review'), close=text('button','Close');
-  save.id='uploadSave';remove.id='uploadRemove';refresh.id='uploadRefresh';close.id='uploadClose';
-  const detail=text('p','Experimental · verified native sockets on the selected interface only. First traffic and unsupported sockets may escape. UDP GSO is unsupported; TCP caps are receiver-tested. Limits do not grant firewall Allow. Socket assignment survives exec/transfer until close or fresh rebinding. Limits end at daemon restart.');detail.className='hint';
+  const d=document.createElement('section');d.id='uploadLimitDialog';d.className='quick-popup upload-limit-popup';
+  d.setAttribute('role','dialog');d.setAttribute('aria-labelledby','uploadLimitTitle');d.tabIndex=-1;
+  const heading=text('h3',`Upload limit · ${t.label||t.application}`);heading.id='uploadLimitTitle';heading.className='visually-hidden';
+  const row=text('div','');row.className='upload-setter-row';
+  const enabled=document.createElement('input');enabled.type='checkbox';enabled.id='uploadEnabled';enabled.setAttribute('aria-label','Enable upload limit');enabled.title='Uncheck and press OK to remove this limit; disabled limits are not stored.';
+  const input=document.createElement('input');input.id='uploadRate';input.type='text';input.inputMode='decimal';input.value='8';input.setAttribute('aria-label','Upload rate');
+  const units=document.createElement('select');units.id='uploadUnits';units.setAttribute('aria-label','Upload rate units');
+  for(const unit of UPLOAD_RATE_UNITS)units.add(new Option(unit,unit));units.value='Mbit/s';
+  let unit:UploadRateUnit='Mbit/s';
+  const save=text('button','OK');save.id='uploadSave';
+  row.append(enabled,input,units,save);
+  const actions=text('div','');actions.className='upload-setter-actions';
+  const detailsButton=text('button','Details');detailsButton.id='uploadDetails';detailsButton.setAttribute('aria-expanded','false');detailsButton.setAttribute('aria-controls','uploadDetailsBody');
+  const remove=text('button','Delete');remove.id='uploadRemove';actions.append(detailsButton,remove);
+  const details=text('div','');details.id='uploadDetailsBody';details.hidden=true;
+  const summary=text('p','Reading current configuration…');summary.id='uploadCoverage';summary.setAttribute('role','status');
   const live=text('p','');live.id='uploadCoverageLive';
-  d.append(heading,live,summary,label,detail,save,remove,refresh,close);document.body.append(d);d.showModal();close.onclick=()=>d.remove();
-  let draft:UploadView|undefined, blocked=true;
-  const buttons=()=>{const stale=!view.writable||view.generation!==draft?.generation||view.snapshot?.version!==draft?.snapshot?.version;save.disabled=blocked||stale||!t.revision||!draft?.writable;remove.disabled=blocked||stale||!draft?.writable||!draft?.snapshot?.configured_caps.some(c=>c.uid===t.uid&&c.application===t.application);};updateActions=()=>{if(d.isConnected)buttons();};buttons();
-  const read=async()=>{blocked=true;buttons();try {const sent=performance.now(), start=context;const v=await window.flowgate.uploadStatus();if(start!==context)throw Error("Connection changed; refresh again");adopt(v,sent);draft=view;const c=view.snapshot?.configured_caps.find(c=>c.uid===t.uid&&c.application===t.application);if(c)input.value=String(c.bits_per_second/1000000);summary.textContent=`${view.snapshot?.interface?'Interface '+view.snapshot.interface+'. ':''}${view.message} ${view.snapshot?.last_error||''}`;blocked=false;paint();}catch(e){summary.textContent=String(e);}buttons();};
-  const apply=async(rate:number|null)=>{if(!draft?.generation||!draft.snapshot)return;blocked=true;buttons();try{const sent=performance.now(), start=context;const result=await window.flowgate.uploadConfigure({generation:draft.generation,expected_version:draft.snapshot.version,target:t,bits_per_second:rate});if(start!==context)throw Error("Connection changed; refresh again");adopt(result,sent);summary.textContent=`Pending · ${view.message} Refresh to observe binding coverage or completed removal.`;paint();}catch(e){summary.textContent=String(e);}/* Refresh must explicitly reconcile both accepted and uncertain outcomes. */};
-  save.onclick=()=>void apply(Math.round(Number(input.value)*1000000));remove.onclick=()=>void apply(null);refresh.onclick=()=>void read();await read();
+  const detail=text('p','Experimental: verified native sockets on the selected interface only; first traffic and unsupported sockets may escape. UDP GSO unsupported; TCP caps receiver-tested. Firewall Allow/Deny is separate. Socket assignment survives exec/transfer until close or fresh rebinding. Limits end at daemon restart. Byte prefixes use 1024; bit prefixes use 1000.');detail.className='hint';
+  const refresh=text('button','Refresh / review'),close=text('button','Close');refresh.id='uploadRefresh';close.id='uploadClose';
+  details.append(live,summary,detail,refresh,close);
+  d.append(heading,row,actions,details);document.body.append(d);anchor?.setAttribute('aria-expanded','true');
+  const bounds=anchor?.getBoundingClientRect() || {left:8,top:8,bottom:8};
+  const place=()=>{const current=anchor?.isConnected?anchor.getBoundingClientRect():bounds;const pos=popupPosition(current,d.offsetWidth,d.offsetHeight,{width:innerWidth,height:innerHeight});d.style.left=pos.left+'px';d.style.top=pos.top+'px';};
+  const reveal=()=>{details.hidden=false;detailsButton.setAttribute('aria-expanded','true');place();};
+  const dismiss=()=>{d.remove();anchor?.setAttribute('aria-expanded','false');document.removeEventListener('pointerdown',outside,true);document.removeEventListener('keydown',escape,true);window.removeEventListener('resize',place);if(dismissPopup===dismiss)dismissPopup=undefined;if(anchor?.isConnected)anchor.focus({preventScroll:true});};
+  const outside=(e:PointerEvent)=>{if(!d.contains(e.target as Node)&&!anchor?.contains(e.target as Node))dismiss();};
+  const escape=(e:KeyboardEvent)=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();dismiss();}};
+  dismissPopup=dismiss;document.addEventListener('pointerdown',outside,true);document.addEventListener('keydown',escape,true);window.addEventListener('resize',place);close.onclick=dismiss;
+  detailsButton.onclick=()=>{details.hidden=!details.hidden;detailsButton.setAttribute('aria-expanded',String(!details.hidden));place();};
+  let draft:UploadView|undefined, blocked=true, edited=false;
+  const hasCap=()=>draft?.snapshot?.configured_caps.some(c=>c.uid===t.uid&&c.application===t.application);
+  const buttons=()=>{const stale=!view.writable||view.generation!==draft?.generation||view.snapshot?.version!==draft?.snapshot?.version;save.disabled=blocked||stale||!draft?.writable||(enabled.checked&&!t.revision)||(!enabled.checked&&!hasCap());remove.disabled=blocked||stale||!draft?.writable||!hasCap();};
+  updateActions=()=>{if(d.isConnected)buttons();};buttons();place();d.focus({preventScroll:true});
+  input.oninput=()=>{edited=true;};enabled.onchange=()=>{edited=true;buttons();};
+  units.onchange=()=>{if(!input.value.trim()){unit=units.value as UploadRateUnit;edited=true;return;}try{const bits=uploadRateBits(input.value,unit);unit=units.value as UploadRateUnit;input.value=uploadRateValue(bits,unit);edited=true;}catch(e){units.value=unit;summary.textContent=String(e instanceof Error?e.message:e);reveal();}};
+  const read=async()=>{blocked=true;buttons();try{const sent=performance.now(),start=context;const v=await window.flowgate.uploadStatus();if(start!==context)throw Error('Connection changed; refresh again');adopt(v,sent);paint();if(!d.isConnected)return;draft=view;const c=view.snapshot?.configured_caps.find(c=>c.uid===t.uid&&c.application===t.application);if(!edited){enabled.checked=true;input.value=uploadRateValue(c?.bits_per_second||8000000,unit);}summary.textContent=`${view.snapshot?.interface?'Interface '+view.snapshot.interface+'. ':''}${view.message} ${view.snapshot?.last_error||''}`;blocked=false;paint();if(!view.writable||view.snapshot?.last_error)reveal();}catch(e){summary.textContent=String(e);reveal();}buttons();};
+  const apply=async(rate:number|null)=>{if(!draft?.generation||!draft.snapshot)return;blocked=true;buttons();try{const sent=performance.now(),start=context;const result=await window.flowgate.uploadConfigure({generation:draft.generation,expected_version:draft.snapshot.version,target:t,bits_per_second:rate});if(start!==context)throw Error('Connection changed; refresh again');adopt(result,sent);paint();if(!d.isConnected)return;summary.textContent='Pending · Configuration accepted. Refresh / review to reconcile; acknowledgement is not enforcement.';paint();}catch(e){summary.textContent=String(e);}reveal();};
+  save.onclick=()=>{try{void apply(enabled.checked?uploadRateBits(input.value,unit):null);}catch(e){summary.textContent=String(e instanceof Error?e.message:e);reveal();}};
+  input.onkeydown=e=>{if(e.key==='Enter'&&!e.isComposing){e.preventDefault();if(!save.disabled)save.click();}};
+  remove.onclick=()=>void apply(null);refresh.onclick=()=>{edited=false;void read();};await read();
 }

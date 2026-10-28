@@ -1,7 +1,7 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),net=require('node:net');
-const {parseUpload,replaceCap,uploadTarget,uploadSummary,UPLOAD_CAPABILITY}=require('../dist/test/upload-shaping.cjs');
+const {parseUpload,replaceCap,uploadTarget,uploadSummary,UPLOAD_CAPABILITY,UPLOAD_RATE_UNITS,uploadRateBits,uploadRateValue}=require('../dist/test/upload-shaping.cjs');
 const {UploadShapingClient}=require('../dist/test/upload-shaping-client.cjs');
 const cap={uid:1000,application:'native-alpha',bits_per_second:8000000};
 const snap=(extra={})=>({version:1,applied_version:1,enabled:true,interface:'lab0',status:'Partial',configured_caps:[cap],...extra});
@@ -64,4 +64,14 @@ test('new caps require connected observation of the reviewed native revision',as
  h.state.observation.connected=true;e.target.revision='old';
  await assert.rejects(h.client.configure(e),/No current native/);
  assert.equal(h.calls.filter(c=>c.operation==='upload-configure').length,0);
+});
+
+test('upload rate units preserve exact integer bit rates through decimal byte/bit views',()=>{
+ for(const bits of [1000000,1000001,1600000,8000000,32000000,1000000000])
+   for(const unit of UPLOAD_RATE_UNITS) assert.equal(uploadRateBits(uploadRateValue(bits,unit),unit),bits,`${bits} ${unit}`);
+ assert.equal(uploadRateBits('200','KB/s'),1638400);
+ assert.equal(uploadRateBits('0.125','MB/s'),1048576);
+ assert.equal(uploadRateBits('1','Gbit/s'),1000000000);
+ for(const [value,unit] of [['0.1','Mbit/s'],['1001','Mbit/s'],['NaN','bit/s'],['1e6','bit/s'],['125000.01','B/s'],['8','KiB/s']])
+   assert.throws(()=>uploadRateBits(value,unit));
 });
