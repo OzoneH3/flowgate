@@ -81,18 +81,18 @@ async function open(t:UploadTarget, anchor?:HTMLElement, direction:LimitDirectio
   dialogTarget=t;dialogDirection=direction;
   const label=direction==='download'?'Download':'Upload';
   const d=document.createElement('section');d.id='uploadLimitDialog';d.className='quick-popup upload-limit-popup';
-  d.setAttribute('role','dialog');d.setAttribute('aria-labelledby','uploadLimitTitle');d.tabIndex=-1;
+  d.setAttribute('role','dialog');d.setAttribute('aria-labelledby','uploadLimitTitle');d.dataset.direction=direction;d.tabIndex=-1;
   const heading=text('h3',`${label} limit · ${t.label||t.application}`);heading.id='uploadLimitTitle';heading.className='visually-hidden';
   const row=text('div','');row.className='upload-setter-row';
   const enabled=document.createElement('input');enabled.type='checkbox';enabled.id='uploadEnabled';enabled.setAttribute('aria-label',`Enable ${direction} limit`);enabled.title='Uncheck and press OK to remove this limit; disabled limits are not stored.';
-  const input=document.createElement('input');input.id='uploadRate';input.type='text';input.inputMode='decimal';input.value='8';input.setAttribute('aria-label',`${label} rate`);
+  const input=document.createElement('input');input.id='uploadRate';input.type='text';input.inputMode='decimal';input.value='8';input.setAttribute('aria-label',`${label} rate`);input.autocomplete='off';input.spellcheck=false;
   const units=document.createElement('select');units.id='uploadUnits';units.setAttribute('aria-label',`${label} rate units`);
   for(const unit of UPLOAD_RATE_UNITS)units.add(new Option(unit,unit));units.value='Mbit/s';
   let unit:UploadRateUnit='Mbit/s';
   const save=text('button','OK');save.id='uploadSave';
   row.append(enabled,input,units,save);
   const actions=text('div','');actions.className='upload-setter-actions';
-  const detailsButton=text('button','Details');detailsButton.id='uploadDetails';detailsButton.setAttribute('aria-expanded','false');detailsButton.setAttribute('aria-controls','uploadDetailsBody');
+  const detailsButton=text('button','Advanced');detailsButton.id='uploadDetails';detailsButton.setAttribute('aria-expanded','false');detailsButton.setAttribute('aria-controls','uploadDetailsBody');detailsButton.title='Advanced limit status, coverage and refresh';
   const remove=text('button','Delete');remove.id='uploadRemove';actions.append(detailsButton,remove);
   const details=text('div','');details.id='uploadDetailsBody';details.hidden=true;
   const summary=text('p','Reading current configuration…');summary.id='uploadCoverage';summary.setAttribute('role','status');
@@ -106,7 +106,7 @@ async function open(t:UploadTarget, anchor?:HTMLElement, direction:LimitDirectio
   const reveal=()=>{details.hidden=false;detailsButton.setAttribute('aria-expanded','true');place();};
   const dismiss=()=>{d.remove();anchor?.setAttribute('aria-expanded','false');document.removeEventListener('pointerdown',outside,true);document.removeEventListener('keydown',escape,true);window.removeEventListener('resize',place);if(dismissPopup===dismiss)dismissPopup=undefined;if(anchor?.isConnected)anchor.focus({preventScroll:true});};
   const outside=(e:PointerEvent)=>{if(!d.contains(e.target as Node)&&!anchor?.contains(e.target as Node))dismiss();};
-  const escape=(e:KeyboardEvent)=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();dismiss();}};
+  const escape=(e:KeyboardEvent)=>{if(e.key==='Escape'){if(units.matches(':open'))return;e.preventDefault();e.stopPropagation();dismiss();}};
   dismissPopup=dismiss;document.addEventListener('pointerdown',outside,true);document.addEventListener('keydown',escape,true);window.addEventListener('resize',place);close.onclick=dismiss;
   detailsButton.onclick=()=>{details.hidden=!details.hidden;detailsButton.setAttribute('aria-expanded',String(!details.hidden));place();};
   let draft:UploadView|undefined, blocked=true, edited=false;
@@ -120,4 +120,6 @@ async function open(t:UploadTarget, anchor?:HTMLElement, direction:LimitDirectio
   save.onclick=()=>{try{void apply(enabled.checked?uploadRateBits(input.value,unit):null);}catch(e){summary.textContent=String(e instanceof Error?e.message:e);reveal();}};
   input.onkeydown=e=>{if(e.key==='Enter'&&!e.isComposing){e.preventDefault();if(!save.disabled)save.click();}};
   remove.onclick=()=>void apply(null);refresh.onclick=()=>{edited=false;void read();};await read();
+  // A slow status reply must not steal focus or select a draft the user already edited.
+  if(d.isConnected && !blocked && !save.disabled && !edited && document.activeElement===d){input.focus({preventScroll:true});input.select();}
 }

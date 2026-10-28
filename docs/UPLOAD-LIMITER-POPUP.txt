@@ -8,7 +8,7 @@ upload capability; this was not a missing backend or deployment.
 
 The shared Activity/Info View button now uses a dot and upload glyph, with a
 persistent blue configured indicator, hover/focus access and coverage tooltip.
-The setter is a viewport-clamped 264px popup: checkbox, rate, unit, OK, Details
+The setter is a viewport-clamped 266px popup: checkbox, rate, unit, OK, Advanced
 and Delete. Open, Escape and outside dismissal do not submit. Only explicit OK
 or Delete sends the existing generation/version checked request. An accepted
 OK/Delete closes the popup; errors keep it open with details. The strip reports
@@ -21,7 +21,7 @@ Conversion is exact integer bit/s; saving retains backend bounds 1–1000 Mbit/s
 Empty unit selection is allowed; an invalid/out-of-range rate must be corrected
 before conversion/submission. No rate is silently rounded.
 
-Intentional differences: Details exposes coverage/experimental limitations,
+Intentional differences: Advanced exposes coverage/experimental limitations,
 not an inert Advanced rules editor. Unchecking and pressing OK removes the cap;
 the backend has no stored disabled-cap state. This is stated in its tooltip.
 Unsupported identities remain disabled. Configured is not proof of complete
@@ -39,3 +39,33 @@ Directional extension: download-capable experimental daemons expose the DL slot
 through the same compact popup. A direction edit/removal preserves the other cap.
 Download coverage counts only live covered bindings marked download=true; UDP
 and unsupported receive forms remain explicit gaps. See DOWNLOAD-LIMITER.txt.
+
+2026-10-28 UL/DL setter layout refinement (UI only)
+
+Both directions use the same compact setter. Initial focus selects the rate.
+The eight-unit picker uses20px rows, dark frame, blue selection and exact
+existing binary-byte/decimal-bit conversion. Escape closes the unit picker
+first, then the setter; outside dismissal and draft changes do not write.
+At small viewports the popup clamps/reflows and Advanced scrolls inside it.
+
+Advanced opens actual FlowGate coverage/status/refresh, not NetLimiter's full
+rule editor. Unsupported backend features are not offered as inert controls.
+Unchecked+OK removes the direction's cap (no disabled-cap storage). Backend
+rate bounds, native identity verification, directional preservation, generation/
+version checks, explicit-write-only behavior and partial coverage are unchanged.
+
+Verification:409Node tests and the sandboxed native synthetic-API journey
+electron/test/limit-popup-ui.mjs. The journey checks both directional sizes/
+controls and unit menu; exact conversion, selected focus, delayed-status focus
+and background draft preservation; Escape/outside no-write; explicit edit/removal preserving the
+other direction; invalid rates, stale CAS, read-only and server refusal; lost
+acknowledgement followed by read-only Refresh with no mutation replay; and
+1280/800/360px viewport bounds. Artifacts under .workspace/limiter-parity.
+These are GUI/API checks, not a new shaping, receiver-rate, or host trial proof.
+No deployment, host daemon restart, limiter enablement or preference change.
+
+Repeat the GUI-only journey from the repository root after building Electron:
+systemd-run --user --scope -p MemoryMax=1G -p MemorySwapMax=0 -p CPUQuota=100% \
+  -p TasksMax=96 env WAYLAND_DISPLAY=wayland-1 node electron/test/limit-popup-ui.mjs
+Use the actual current Wayland display. This launches a private synthetic API
+and one sandboxed client; it never connects to the installed controller.

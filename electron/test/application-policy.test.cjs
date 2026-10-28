@@ -117,6 +117,7 @@ global.document = {
   body: new El('body'),
   activeElement: null,
   createElement: (t) => new El(t),
+  createElementNS: (ns, t) => Object.assign(new El(t), { namespaceURI: ns }),
   createDocumentFragment: () => Object.assign(new El('#fragment'), { fragment: true }),
   getElementById: (id) => (id === 'feedback' ? feedback : null),
   querySelector: () => null,
