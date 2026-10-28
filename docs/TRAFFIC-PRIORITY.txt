@@ -97,6 +97,11 @@ packets bypass after ~4.1-4.6 s; 25 interrupted-setup cases cleaned; reserved
 SO_PRIORITY attempts ineffective; Deny 0 throughout. Low-class 0.48 Mbit/s stream under
 saturation: p95 ~89-92 ms in the guest. Bulk shares do NOT establish gaming/VoIP latency
 benefits. Failed runs (core1, recovery1, probe1-3) are retained, not relabelled.
+Final bundle 28b1a7ba: IPv6 saturation H/L/default 28.2/3.7/5.5; two High apps ~16/16 (no fairness
+promise); 16 configured apps at the 16 Mbit/s minimum budget: floors as modelled, live edit 1.4 s, max
+maintenance completion gap ~3.0 s of the 5 s lease; Low DL payload 0.10-0.32 Mbit/s against a ~0.3 Mbit/s
+floor, so minimum-budget floors are not a reliable delivery level. Real sandboxed Electron journey (budgets,
+Low/High, swap, Delete, budgets cleared) matched receiver expectations; Deny 0; owned cleanup exact.
 Not established: physical NIC behaviour, host CPU, WAN/ISP bottlenecks, automatic
 capacity detection, NetLimiter's Critical level, reaction-speed and slider semantics.
 
