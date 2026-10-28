@@ -11,7 +11,10 @@
 #include <unistd.h>
 struct value {
   uint64_t until;
-  uint32_t id, reserved;
+  uint32_t id, download; // egress class, IFB class (either may be 0)
+};
+struct download_config {
+  uint32_t major, ifindex;
 };
 static void die(const char *s) {
   perror(s);
@@ -59,10 +62,25 @@ static int dispatch(int argc, char **argv) {
       die("load");
     if (bpf_object__pin_maps(o, pin))
       die("pin");
-    char p[512];
-    snprintf(p, sizeof(p), "%s/program", pin);
-    if (bpf_program__pin(bpf_object__next_program(o, NULL), p))
-      die("program");
+    // One object carries both direction adapters sharing one map set:
+    // egress "classify" -> program, ingress "classify_ingress" -> ingress.
+    struct bpf_program *prog;
+    int pinned = 0;
+    bpf_object__for_each_program(prog, o) {
+      const char *name = bpf_program__name(prog);
+      char p[512];
+      if (!strcmp(name, "classify"))
+        snprintf(p, sizeof(p), "%s/program", pin);
+      else if (!strcmp(name, "classify_ingress"))
+        snprintf(p, sizeof(p), "%s/ingress", pin);
+      else
+        exit(2);
+      if (bpf_program__pin(prog, p))
+        die("program");
+      pinned++;
+    }
+    if (pinned != 2)
+      exit(2);
     bpf_object__close(o);
     return 0;
   }
@@ -80,16 +98,16 @@ static int dispatch(int argc, char **argv) {
     close(fd); return 0;
   }
   if (!strcmp(op, "ids")) {
-    const char *names[] = {"bindings", "config", "counters", "program"};
+    const char *names[] = {"bindings", "config", "counters", "download", "program", "ingress"};
     printf("{");
-    for (int i = 0; i < 4; i++) {
-      int fd = map(pin, names[i]);
+    for (int i = 0; i < 6; i++) {
+      int fd = map(pin, names[i]), isprog = i >= 4;
       struct bpf_map_info m = {0};
       struct bpf_prog_info p = {0};
-      uint32_t n = i == 3 ? sizeof(p) : sizeof(m);
-      if (bpf_obj_get_info_by_fd(fd, i == 3 ? (void *)&p : (void *)&m, &n))
+      uint32_t n = isprog ? sizeof(p) : sizeof(m);
+      if (bpf_obj_get_info_by_fd(fd, isprog ? (void *)&p : (void *)&m, &n))
         die("info");
-      printf("%s\"%s\":%u", i ? "," : "", names[i], i == 3 ? p.id : m.id);
+      printf("%s\"%s\":%u", i ? "," : "", names[i], isprog ? p.id : m.id);
       close(fd);
     }
     puts("}");
@@ -109,6 +127,19 @@ static int dispatch(int argc, char **argv) {
     v.until = now() + 5000000000ULL;
     if (bpf_map_update_elem(fd, &z, &v, BPF_ANY))
       die("heartbeat");
+    close(fd);
+    return 0;
+  }
+  if (!strcmp(op, "download")) {
+    if (argc != 5)
+      return 2;
+    int fd = map(pin, "download");
+    struct download_config d = {.major = strtoul(argv[3], NULL, 10),
+                                .ifindex = strtoul(argv[4], NULL, 10)};
+    if ((d.major && (d.major < 0x100 || d.major >= 0xff00)) || (!d.major) != (!d.ifindex))
+      return 2;
+    if (bpf_map_update_elem(fd, &z, &d, BPF_ANY))
+      die("download");
     close(fd);
     return 0;
   }
@@ -132,8 +163,8 @@ static int dispatch(int argc, char **argv) {
       unsigned char *raw = (void *)&key;
       for (int i = 0; i < 8; i++)
         printf("%02x", raw[i]);
-      printf("\",\"until\":%llu,\"minor\":%u}", (unsigned long long)b.until,
-             b.id);
+      printf("\",\"until\":%llu,\"minor\":%u,\"download\":%u}",
+             (unsigned long long)b.until, b.id, b.download);
       have = 1;
     }
     if (errno != ENOENT) {
@@ -176,11 +207,12 @@ static int dispatch(int argc, char **argv) {
     if (bpf_map_delete_elem(fd, &key) && errno != ENOENT)
       die("delete");
   } else if (!strcmp(op, "bind")) {
-    if (argc != 5)
+    if (argc != 6)
       return 2;
     struct value v = {.until = now() + 5000000000ULL,
-                      .id = strtoul(argv[4], NULL, 10)};
-    if (v.id < 1 || v.id > 0xfffd)
+                      .id = strtoul(argv[4], NULL, 10),
+                      .download = strtoul(argv[5], NULL, 10)};
+    if (v.id > 0xfffd || v.download > 0xfffd || (!v.id && !v.download))
       return 2;
     if (bpf_map_update_elem(fd, &key, &v, BPF_ANY))
       die("binding");
@@ -212,7 +244,7 @@ int main(int argc, char **argv) {
     const char *op = args[1];
     if (strcmp(op,"ids") && strcmp(op,"beat") && strcmp(op,"health") &&
         strcmp(op,"stats") && strcmp(op,"bind") && strcmp(op,"del")) return 2;
-    if (count != (!strcmp(op,"bind") ? 5 : !strcmp(op,"del") ? 4 : 3))
+    if (count != (!strcmp(op,"bind") ? 6 : !strcmp(op,"del") ? 4 : 3))
       return 2;
     if (dispatch(count,args)) return 2;
     if (fputs("\036OK\n",stdout) == EOF || fflush(stdout)) return 1;

@@ -11,7 +11,7 @@ export GOCACHE="$root/.workspace/backend-go/cache" GOPATH="$root/.workspace/go"
 export GOTMPDIR="$root/.workspace/tmp" TMPDIR="$root/.workspace/tmp"
 CGO_ENABLED=0 go build -p=1 -trimpath -o "$out/probe" ./experimental/upload-shaper/probe
 CGO_ENABLED=0 go build -p=1 -trimpath -o "$out/inspect" ./experimental/upload-shaper/tests/inspect
-clang -O2 -g -target bpf -c experimental/upload-shaper/classify.bpf.c -o "$out/classify.bpf.o"
+clang -O2 -g -target bpf -c experimental/upload-shaper/shaping.bpf.c -o "$out/classify.bpf.o"
 cc -O2 -Wall -Wextra -Werror experimental/upload-shaper/kernel.c -o "$out/kernel" -lbpf
 cc -O2 -Wall -Wextra -Werror experimental/upload-shaper/tests/sender.c -o "$out/sender"
 cp experimental/upload-shaper/controller.py "$out/controller.py"

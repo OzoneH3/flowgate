@@ -29,6 +29,15 @@ def rate(value):
     return value
 
 
+def rates(req):
+    # Independent upload/download caps: absent/0 means no class in that
+    # direction; at least one direction must be capped.
+    up, down = req.get('rate') or 0, req.get('download_rate') or 0
+    if not up and not down:
+        raise ValueError('upload or download rate required')
+    return (rate(up) if up else 0), (rate(down) if down else 0)
+
+
 def queue_bytes(bits, mtu, gso=0):
     # At most ~25 ms of qdisc bytes, subject to a two-MTU floor; not TCP send buffers.
     # With segmentation offload one skb may carry gso bytes of payload (64 KiB by
@@ -296,6 +305,12 @@ class Controller:
         self.original = before
         self.token = secrets.token_hex(16)
         self.major = 0x100 + secrets.randbelow(0xfe00)
+        # Download adapter: one owned IFB per generation with its own HTB major.
+        self.dl_major = (self.major + 1 + secrets.randbelow(0xfdff)) % 0xfe00 + 0x100
+        self.ifb = 'fgdl' + self.token[:8]
+        self.ifb_index = None
+        if subprocess.run(['ip', '-j', 'link', 'show', 'dev', self.ifb], capture_output=True).returncode == 0:
+            raise ValueError('Unsupported: owned IFB name already exists')
         self.pin = Path('/sys/fs/bpf') / ('fg-m1-' + self.token)
         self.pin.mkdir(mode=0o700)
         self.expected = before
@@ -314,6 +329,16 @@ class Controller:
             self.mutate('qdisc', 'add', 'dev', self.dev, 'parent', self.handle(0xfffe), 'handle', 'fffe:', 'fq_codel', *default_options)
             self.mutate('qdisc', 'add', 'dev', self.dev, 'clsact')
             self.mutate('filter', 'add', 'dev', self.dev, 'egress', 'pref', '10000', 'handle', '1', 'bpf', 'da', 'pinned', str(self.pin / 'program'))
+            # Ingress adapter: owned IFB (journalled name before creation), its own
+            # HTB tree, then the ingress redirect program. Only bound packets are
+            # redirected; everything else never touches the IFB.
+            self.link_mutate('add', self.ifb, 'type', 'ifb')
+            self.link_mutate('set', self.ifb, 'up')
+            self.mutate('qdisc', 'add', 'dev', self.ifb, 'root', 'handle', self.dl_handle(), 'htb', 'default', 'fffe')
+            self.mutate('class', 'add', 'dev', self.ifb, 'parent', self.dl_handle(), 'classid', self.dl_handle(0xfffe), 'htb', 'rate', '100gbit', 'ceil', '100gbit', 'quantum', str(self.mtu))
+            self.mutate('qdisc', 'add', 'dev', self.ifb, 'parent', self.dl_handle(0xfffe), 'handle', 'fffe:', 'fq_codel', *default_options)
+            self.k('download', str(self.dl_major), str(self.ifb_index))
+            self.mutate('filter', 'add', 'dev', self.dev, 'ingress', 'pref', '10000', 'handle', '2', 'bpf', 'da', 'pinned', str(self.pin / 'ingress'))
             self.pending_setup = False
             self.save()
             self.applying = False
@@ -401,6 +426,11 @@ class Controller:
                 for parent, fs in zip(parents, filters):
                     if fs:
                         out['class_filters'].append({'parent': parent, 'filters': fs})
+        if getattr(self, 'ifb', None) and self.ifb_link() is not None:
+            rows = self.query_tc([('qdisc', 'show', 'dev', self.ifb), ('class', 'show', 'dev', self.ifb),
+                                  ('filter', 'show', 'dev', self.ifb, 'root')])
+            parents_for(rows[1])
+            out['ifb'] = {'qdiscs': rows[0], 'classes': [x for x in rows[1] if x.get('class') != 'fq_codel'], 'root_filters': rows[2]}
         return out
 
     def preflight(self, topology=None):
@@ -419,8 +449,41 @@ class Controller:
     def handle(self, minor=None):
         return f'{self.major:x}:' + (f'{minor:x}' if minor is not None else '')
 
+    def dl_handle(self, minor=None):
+        return f'{self.dl_major:x}:' + (f'{minor:x}' if minor is not None else '')
+
+    def ifb_link(self):
+        # Owned IFB identity: journalled random name, kind ifb, recorded ifindex.
+        if not getattr(self, 'ifb', None):
+            return None
+        p = subprocess.run(['ip', '-d', '-j', 'link', 'show', 'dev', self.ifb], capture_output=True, text=True, timeout=3)
+        if p.returncode:
+            return None
+        link = json.loads(p.stdout)[0]
+        if link.get('linkinfo', {}).get('info_kind') != 'ifb':
+            raise RuntimeError('Unsupported: owned IFB name has a foreign link kind')
+        if self.ifb_index is not None and link.get('ifindex') != self.ifb_index:
+            raise RuntimeError('Unsupported: owned IFB was replaced')
+        return link
+
+    def link_mutate(self, op, name, *args):
+        # ip-link mutation of the owned IFB only, journalled like tc mutations.
+        self.verify()
+        if getattr(self, 'pending_setup', False) and not getattr(self, 'cleaning', False):
+            self.setup_step = ['link', op, name, *args]
+            self.save()
+        self.call('ip', 'link', op, 'dev' if op != 'add' else 'name', name, *args)
+        if op == 'add':
+            self.ifb_index = self.ifb_link()['ifindex']
+        elif op == 'del':
+            self.ifb_index = None
+        self.expected = self.topology()
+        self.setup_step = None
+        self.save()
+
     def save(self):
         data = {'schema': 1, 'token': self.token, 'major': self.major, 'pin': str(self.pin),
+                'dl_major': getattr(self, 'dl_major', None), 'ifb': getattr(self, 'ifb', None), 'ifb_index': getattr(self, 'ifb_index', None),
                 'netns': self.ns, 'interface': self.dev, 'ifindex': self.index,
                 'boot_id': Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
                 'expected': self.expected, 'ids': self.ids, 'original': self.original, 'pending_setup': getattr(self, 'pending_setup', False), 'compatibility': getattr(self, 'compatibility', None), 'setup_step': getattr(self, 'setup_step', None),
@@ -453,6 +516,8 @@ class Controller:
             raise RuntimeError('Unsupported: traffic-control objects changed; refusing mutation')
         if self.ids is not None and json.loads(self.k('ids')) != self.ids:
             raise RuntimeError('Unsupported: kernel object identity changed')
+        if getattr(self, 'ifb_index', None) is not None and not getattr(self, 'cleaning', False) and self.ifb_link() is None:
+            raise RuntimeError('Unsupported: owned IFB disappeared')
         self.verified_at = verify_started
         self.verifications = getattr(self, 'verifications', 0) + 1
 
@@ -487,6 +552,9 @@ class Controller:
                 or d['pin'] != '/sys/fs/bpf/fg-m1-' + d['token']):
             raise ValueError('Unsupported: journal belongs to another namespace/interface')
         self.token, self.major, self.pin = d['token'], d['major'], Path(d['pin'])
+        self.dl_major, self.ifb, self.ifb_index = d.get('dl_major'), d.get('ifb'), d.get('ifb_index')
+        if self.ifb and not re.fullmatch('fgdl[0-9a-f]{8}', self.ifb):
+            raise ValueError('Unsupported: journal names a foreign IFB')
         self.expected, self.ids = d['expected'], d['ids']
         self.original = d.get('original', {'qdiscs': [{'kind': 'noqueue', 'handle': '0:', 'root': True}], 'classes': [], 'egress': [], 'ingress': [], 'root_filters': []})
         if d.get('link_identity') and d['link_identity'] != {k: self.link.get(k) for k in ('ifindex','address','parentbus','parentdev','link_type')}:
@@ -518,13 +586,15 @@ class Controller:
         if len(step) < 2:
             return False
         changed = {k for k in actual if actual[k] != self.expected.get(k)}
-        allowed = {'qdisc': {'qdiscs'}, 'class': {'classes'}, 'filter': {'egress'}}.get(step[0], set())
+        allowed = {'qdisc': {'qdiscs', 'ifb'}, 'class': {'classes', 'ifb'}, 'filter': {'egress', 'ingress'}, 'link': {'ifb'}}.get(step[0], set())
         if not changed or not changed <= allowed:
             return False
         # Previously journalled objects must be byte-for-byte structurally intact.
         for key in changed:
             old = self.expected.get(key, [])
             new = actual[key]
+            if key == 'ifb':
+                continue  # verified structurally below
             if step[0] == 'qdisc' and step[1] in ('add', 'replace') and 'root' in step:
                 if len(new) != 1:
                     return False
@@ -544,15 +614,31 @@ class Controller:
         for c in actual['classes']:
             if c.get('class') != 'htb' or c.get('handle') != self.handle(0xfffe):
                 return False
-        if actual['ingress'] or actual['root_filters'] or actual.get('class_filters'):
+        if actual['root_filters'] or actual.get('class_filters'):
             return False
-        for f in actual['egress']:
-            # tc emits a protocol/pref header followed by the concrete filter.
-            if f.get('kind') != 'bpf' or f.get('pref') != 10000:
+        for direction, prog, handle in (('egress', 'program', '0x1'), ('ingress', 'ingress', '0x2')):
+            for f in actual[direction]:
+                # tc emits a protocol/pref header followed by the concrete filter.
+                if f.get('kind') != 'bpf' or f.get('pref') != 10000:
+                    return False
+                opt = f.get('options')
+                if opt and (opt.get('id') != self.ids.get(prog) or opt.get('handle') != handle):
+                    return False
+        ifb = actual.get('ifb')
+        if ifb is not None:
+            if ifb.get('root_filters'):
                 return False
-            opt = f.get('options')
-            if opt and (opt.get('id') != self.ids.get('program') or opt.get('handle') != '0x1'):
+            for q in ifb['qdiscs']:
+                if q.get('root') and q.get('kind') == 'htb' and q.get('handle') == self.dl_handle():
+                    continue
+                if q.get('kind') == 'fq_codel' and q.get('handle') == 'fffe:' and q.get('parent') == self.dl_handle(0xfffe):
+                    continue
+                if q.get('root') and q.get('kind') == 'noqueue' and len(ifb['qdiscs']) == 1:
+                    continue  # freshly created IFB
                 return False
+            for c in ifb['classes']:
+                if c.get('class') != 'htb' or c.get('handle') != self.dl_handle(0xfffe):
+                    return False
         return True
 
     def cleanup_objects(self):
@@ -561,11 +647,18 @@ class Controller:
         q = self.expected['qdiscs']
         if any(x['kind'] == 'clsact' for x in q):
             self.mutate('qdisc', 'del', 'dev', self.dev, 'clsact')
+        if self.pin.exists() and (self.pin / 'download').exists():
+            try:
+                self.k('download', '0', '0')  # withdraw redirect before the IFB goes
+            except RuntimeError:
+                pass
+        if getattr(self, 'ifb', None) and self.ifb_link() is not None:
+            self.link_mutate('del', self.ifb)
         if any(x['kind'] == 'htb' and x['handle'] == self.handle() for x in q):
             self.mutate('qdisc', 'del', 'dev', self.dev, 'root', 'handle', self.handle())
         restoration_changed = self.topology() != self.original
         if self.pin.exists():
-            for name in ['program', 'bindings', 'config', 'counters']:
+            for name in ['program', 'ingress', 'bindings', 'config', 'counters', 'download']:
                 (self.pin / name).unlink(missing_ok=True)
             self.pin.rmdir()
         self.manifest.unlink(missing_ok=True)
@@ -585,8 +678,25 @@ class Controller:
         return ['htb', 'rate', str(bits) + 'bit', 'ceil', str(bits) + 'bit',
                 'burst', str(burst), 'cburst', str(burst), 'quantum', str(self.mtu)]
 
-    def set_cap(self, app, bits):
-        bits = rate(bits)
+    def direction_class(self, dev, root, minor, old, new):
+        # One direction's leaf on one device: create, change, delete or keep.
+        if new and not old:
+            self.mutate('class', 'add', 'dev', dev, 'parent', root(), 'classid', root(minor), *self.class_params(new))
+            self.mutate('qdisc', 'add', 'dev', dev, 'parent', root(minor), 'handle', f'{minor:x}:', 'fq_codel', 'limit', '128', 'memory_limit', str(queue_bytes(new, self.mtu, self.gso())), 'flows', '128', 'target', '5ms', 'interval', '100ms')
+        elif new and old != new:
+            self.mutate('class', 'change', 'dev', dev, 'parent', root(), 'classid', root(minor), *self.class_params(new))
+            self.mutate('qdisc', 'change', 'dev', dev, 'parent', root(minor), 'handle', f'{minor:x}:', 'fq_codel', 'limit', '128', 'memory_limit', str(queue_bytes(new, self.mtu, self.gso())), 'target', '5ms', 'interval', '100ms')
+        elif old and not new:
+            # Removing one direction releases its traffic immediately; pending
+            # leaf packets may be purged. The other direction is untouched.
+            self.mutate('qdisc', 'del', 'dev', dev, 'parent', root(minor), 'handle', f'{minor:x}:')
+            self.mutate('class', 'del', 'dev', dev, 'classid', root(minor))
+
+    def set_cap(self, app, bits, download_bits=0):
+        bits = rate(bits) if bits else 0
+        download_bits = rate(download_bits) if download_bits else 0
+        if not bits and not download_bits:
+            raise ValueError('upload or download rate required')
         self.applying = True
         if app not in self.apps:
             if len(self.apps) >= MAX_APPS:
@@ -594,20 +704,25 @@ class Controller:
             if self.next_minor > 0xfffd:
                 raise ValueError('class_generation_exhausted')
             minor = self.next_minor; self.next_minor += 1
-            self.mutate('class', 'add', 'dev', self.dev, 'parent', self.handle(), 'classid', self.handle(minor), *self.class_params(bits))
-            self.mutate('qdisc', 'add', 'dev', self.dev, 'parent', self.handle(minor), 'handle', f'{minor:x}:', 'fq_codel', 'limit', '128', 'memory_limit', str(queue_bytes(bits, self.mtu, self.gso())), 'flows', '128', 'target', '5ms', 'interval', '100ms')
-            self.apps[app] = {'minor': minor, 'rate': bits, 'idle_since': time.monotonic(),
-                              'burst_bytes': burst_bytes(bits, self.mtu, self.gso()), 'leaf_memory_limit': queue_bytes(bits, self.mtu, self.gso())}
-        else:
-            a = self.apps[app]
-            self.mutate('class', 'change', 'dev', self.dev, 'parent', self.handle(), 'classid', self.handle(a['minor']), *self.class_params(bits))
-            self.mutate('qdisc', 'change', 'dev', self.dev, 'parent', self.handle(a['minor']), 'handle', f'{a["minor"]:x}:', 'fq_codel', 'limit', '128', 'memory_limit', str(queue_bytes(bits, self.mtu, self.gso())), 'target', '5ms', 'interval', '100ms')
-            a['rate'] = bits
-            a['burst_bytes'] = burst_bytes(bits, self.mtu, self.gso()); a['leaf_memory_limit'] = queue_bytes(bits, self.mtu, self.gso())
+            self.apps[app] = {'minor': minor, 'rate': 0, 'download_rate': 0, 'idle_since': time.monotonic()}
+        a = self.apps[app]
+        # Same minor on both devices; each direction's leaf exists only while capped.
+        self.direction_class(self.dev, self.handle, a['minor'], a['rate'], bits)
+        if getattr(self, 'ifb', None):
+            self.direction_class(self.ifb, self.dl_handle, a['minor'], a.get('download_rate', 0), download_bits)
+        a['rate'], a['download_rate'] = bits, download_bits
+        a['burst_bytes'] = burst_bytes(bits or download_bits, self.mtu, self.gso()); a['leaf_memory_limit'] = queue_bytes(bits or download_bits, self.mtu, self.gso())
+        for c, b in self.bindings.items():
+            if b['app'] == app:
+                self.k('bind', c, *self.class_ids(app))
         self.applying = False
 
+    def class_ids(self, app):
+        a = self.apps[app]
+        return (str(a['minor'] if a.get('rate', 1) else 0), str(a['minor'] if a.get('download_rate') else 0))
+
     def bind(self, req):
-        bits = rate(req['rate'])
+        bits, download_bits = rates(req)
         self.verify()
         proto, local, remote = req['protocol'], req['local'], req['remote']
         if proto not in ('tcp', 'udp') or len(local) > 80 or len(remote) > 80:
@@ -641,9 +756,9 @@ class Controller:
         if cookie in self.bindings and not req.get('rebind', False):
             if self.bindings[cookie]['app'] != app:
                 raise ValueError('existing binding ownership differs; explicit rebind required')
-        if app not in self.apps or self.apps[app]['rate'] != bits:
-            self.set_cap(app, bits)
-        self.k('bind', cookie, str(self.apps[app]['minor']))
+        if app not in self.apps or self.apps[app]['rate'] != bits or self.apps[app].get('download_rate', 0) != download_bits:
+            self.set_cap(app, bits, download_bits)
+        self.k('bind', cookie, *self.class_ids(app))
         self.bindings[cookie] = {'app': app, 'inode': s['inode'], 'protocol': s['protocol'],
                                  'cookie': cookie, 'netns': s['netns'], 'bound_at': time.time(), 'descriptor': descriptor}
         self.apps[app]['idle_since'] = time.monotonic()
@@ -655,11 +770,12 @@ class Controller:
         for c, b in list(self.bindings.items()):
             if b['app'] == app:
                 self.k('del', c); del self.bindings[c]
-        minor = self.apps[app]['minor']
+        a = self.apps[app]
         # Removing a cap releases new traffic immediately; pending leaf packets
         # may be purged. No class ID reuse within this controller generation.
-        self.mutate('qdisc', 'del', 'dev', self.dev, 'parent', self.handle(minor), 'handle', f'{minor:x}:')
-        self.mutate('class', 'del', 'dev', self.dev, 'classid', self.handle(minor))
+        self.direction_class(self.dev, self.handle, a['minor'], a.get('rate', 1), 0)
+        if getattr(self, 'ifb', None):
+            self.direction_class(self.ifb, self.dl_handle, a['minor'], a.get('download_rate', 0), 0)
         del self.apps[app]
 
     def tick(self):
@@ -692,7 +808,7 @@ class Controller:
             if not live[c]:
                 self.k('del', c); del self.bindings[c]
             else:
-                self.k('bind', c, str(self.apps[b['app']]['minor']))
+                self.k('bind', c, *self.class_ids(b['app']))
                 self.apps[b['app']]['idle_since'] = time.monotonic()
         for app, a in list(self.apps.items()):
             if time.monotonic() - a['idle_since'] > 10:
@@ -726,7 +842,7 @@ class Controller:
         # cannot make the reported verification age younger than it is at report time.
         verified_age_ms, verification = self.verification_observation()
         live = {b['cookie']: b for b in health['bindings'] if b['until'] > now}
-        covered_cookies = {c for c, b in self.bindings.items() if c in live and live[c]['minor'] == self.apps[b['app']]['minor']}
+        covered_cookies = {c for c, b in self.bindings.items() if c in live and (str(live[c]['minor']), str(live[c].get('download', 0))) == self.class_ids(b['app'])}
         covered = len(covered_cookies)
         valid_until = min([health['config_until']] + [b['until'] for b in live.values()])
         if health['config_until'] <= now:
@@ -766,7 +882,19 @@ class Controller:
                                  'per_app_leaf_memory_limit': {a: v.get('leaf_memory_limit') for a, v in self.apps.items()}},
                 # Per-binding coverage is an observation from the SAME health read,
                 # never an authority token or an application-wide guarantee.
-                'bindings': [dict(b, covered=bool(covered and c in covered_cookies)) for c, b in self.bindings.items()], 'next_minor': self.next_minor, 'counters': counters}
+                'bindings': [dict(b, covered=bool(covered and c in covered_cookies), download=bool(b.get('protocol') == 'tcp' and self.apps[b['app']].get('download_rate'))) for c, b in self.bindings.items()], 'next_minor': self.next_minor, 'counters': counters,
+                # Ingress adapter telemetry: local delivery of bound established TCP
+                # only; it cannot reclaim bandwidth already consumed on the link.
+                'download': {'interface': getattr(self, 'ifb', None), 'redirected': counters[5], 'unbound_tcp': counters[6], 'bound_without_class': counters[7], 'scope': 'established native TCP sockets on the selected interface; UDP, listeners, fragments and IPv6 extension headers are uncovered'}}
+
+    def withdraw_download(self):
+        # Best effort on fault: stop redirecting so a vanished/foreign IFB cannot
+        # drop bound traffic while leases run out. Never touches firewall state.
+        try:
+            if getattr(self, 'pin', None) and (self.pin / 'download').exists():
+                self.k('download', '0', '0')
+        except Exception:
+            pass
 
     def close(self):
         if not self.closed:
@@ -817,7 +945,7 @@ def main():
                 try:
                     c.tick()
                 except Exception as e:
-                    c.fault = str(e); print(json.dumps({'status': 'Unsupported', 'error': str(e), 'leases': 'expire within5s'}), flush=True); break
+                    c.fault = str(e); c.withdraw_download(); print(json.dumps({'status': 'Unsupported', 'error': str(e), 'leases': 'expire within5s'}), flush=True); break
             for key, _ in poll.select(.2):
                 chunk = os.read(key.fileobj.fileno(), 4096)
                 if not chunk:
@@ -833,7 +961,7 @@ def main():
                             result = c.bind(req)
                         elif op == 'cap':
                             if req['app'] not in c.apps: raise ValueError('unknown application')
-                            c.set_cap(req['app'], req['rate']); result = c.status()
+                            c.set_cap(req['app'], req.get('rate') or 0, req.get('download_rate') or 0); result = c.status()
                         elif op == 'remove':
                             c.remove(req['app']); result = c.status()
                         elif op == 'status':
