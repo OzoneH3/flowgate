@@ -334,6 +334,61 @@ class StatusObservationTests(unittest.TestCase):
         m1.Controller.tick(c)
         self.assertEqual(calls, ['verify', 'bind', 'beat'], calls)
 
+    def test_apply_checkpoint_revalidates_all_sockets_before_renewal(self):
+        c = self.fake(); calls = []
+        c.applying = True; c.pending_setup = False; c.cleaning = False; c.last_tick = 0
+        c.verify = lambda: calls.append('verify')
+        c.bindings = {
+            'live': {'app': 'uid:key', 'descriptor': {'id': 'live'}},
+            'gone': {'app': 'uid:key', 'descriptor': {'id': 'gone'}},
+        }
+        c.apps['uid:key']['idle_since'] = 0
+        c.exists = lambda s: (calls.append('exists:' + s['id']), s['id'] == 'live')[1]
+        c.k = lambda *a: calls.append(a)
+        c.remove = lambda app: self.fail('checkpoint must not retire classes')
+        m1.Controller.refresh_during_apply(c)
+        self.assertEqual(calls[:3], ['verify', 'exists:live', 'exists:gone'])
+        self.assertEqual(calls[3:], [('bind', 'live', '1', '0'), ('del', 'gone'), ('beat',)])
+        self.assertEqual(set(c.bindings), {'live'})
+
+    def test_apply_checkpoint_failure_cannot_renew_partial_evidence(self):
+        c = self.fake(); calls = []
+        c.applying = True; c.pending_setup = False; c.cleaning = False; c.last_tick = 0
+        c.verify = lambda: None
+        c.bindings = {'a': {'app': 'uid:key', 'descriptor': {'id': 'a'}},
+                      'b': {'app': 'uid:key', 'descriptor': {'id': 'b'}}}
+        def exists(d):
+            if d['id'] == 'b': raise ValueError('incomplete socket observation')
+            return True
+        c.exists = exists; c.k = lambda *a: calls.append(a)
+        with self.assertRaisesRegex(RuntimeError, 'maintenance during configuration failed'):
+            m1.Controller.refresh_during_apply(c)
+        self.assertEqual(calls, [])
+        self.assertEqual(set(c.bindings), {'a', 'b'})
+
+    def test_slow_apply_checks_lease_before_next_tc_change(self):
+        c = self.fake(); calls = []
+        c.applying = True; c.pending_setup = False; c.cleaning = False; c.last_tick = 0
+        c.tick = lambda retire_idle=True: calls.append(('tick', retire_idle))
+        c.verify = lambda: calls.append('verify')
+        c.call = lambda *a: calls.append('tc')
+        c.topology = lambda: {'qdiscs': []}
+        c.save = lambda: calls.append('save')
+        m1.Controller.mutate(c, 'class', 'change')
+        self.assertEqual(calls, [('tick', False), 'verify', 'tc', 'save'])
+
+    def test_failed_apply_checkpoint_stops_before_tc_change(self):
+        c = self.fake(); calls = []
+        c.applying = True; c.pending_setup = False; c.cleaning = False; c.last_tick = 0
+        def failed_tick(retire_idle=True):
+            raise ValueError('socket evidence incomplete')
+        c.tick = failed_tick
+        c.verify = lambda: calls.append('verify')
+        c.call = lambda *a: calls.append('tc')
+        with self.assertRaisesRegex(RuntimeError, 'maintenance during configuration failed'):
+            m1.Controller.mutate(c, 'class', 'change')
+        self.assertEqual(calls, [])
+
     def test_status_age_sampled_after_health_rpcs(self):
         # A slow health RPC must not make the reported age younger than the report time.
         c = self.fake(); c.verified_at = time.monotonic()

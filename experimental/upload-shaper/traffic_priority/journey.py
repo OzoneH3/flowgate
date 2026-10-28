@@ -268,10 +268,14 @@ try:
  def edit_all(label,caps,ub,db):
   samples=[];stop_s=threading.Event()
   def sampler():
+   pin=json.loads((R/'controller'/'owner.json').read_text())['pin']
    while not stop_s.is_set():
     try:
      x=status();k=x.get('kernel') or {}
-     samples.append({'status':x['status'],'valid_for_ms':x.get('coverage_valid_for_ms'),'expired':x.get('coverage_snapshot_expired'),'covered':k.get('covered_bindings'),'applied':x['applied_version'],'version':x['version']})
+     health=json.loads(cmd(P/'kernel','health',pin));now=time.monotonic_ns()
+     remaining=[(row['until']-now)//1000000 for row in health['bindings']]
+     samples.append({'status':x['status'],'valid_for_ms':x.get('coverage_valid_for_ms'),'expired':x.get('coverage_snapshot_expired'),'covered':k.get('covered_bindings'),'applied':x['applied_version'],'version':x['version'],
+                     'config_ms':(health['config_until']-now)//1000000,'min_binding_ms':min(remaining,default=-1),'live_bindings':sum(v>0 for v in remaining)})
     except Exception as e:samples.append({'error':str(e)})
     time.sleep(.25)
   th=threading.Thread(target=sampler,daemon=True);th.start()
@@ -283,14 +287,18 @@ try:
        'kernel_before':{k:k0.get(k) for k in ('max_maintenance_pass_ms','max_completion_gap_ms','max_renewal_span_ms')},
        'kernel_after':{k:k1.get(k) for k in ('max_maintenance_pass_ms','max_completion_gap_ms','max_renewal_span_ms')},
        'min_valid_for_ms':min([x['valid_for_ms'] for x in samples if x.get('valid_for_ms') is not None] or [None]) if samples else None,
-       'expired_samples':sum(1 for x in samples if x.get('expired')),'samples':len(samples),'statuses':sorted({x.get('status') for x in samples if x.get('status')}),
+       'expired_samples':sum(1 for x in samples if x.get('expired')),'kernel_samples':samples,'samples':len(samples),'statuses':sorted({x.get('status') for x in samples if x.get('status')}),
        'default_class':tp(after).get('default_class')}
   record('population-edit',**rec);return rec
  e1=edit_all('budget-16-to-20',many,20_000_000,20_000_000)
  flipped=[cap('A',prio='high'),cap('C',prio='low')]+[cap(x,prio='low') for x in xs]
  e2=edit_all('all-levels-flipped',flipped,20_000_000,20_000_000)
  results['G3a-16-instantiated-live-edits']={'instantiated':e1['instantiated_after']==16 and e2['instantiated_after']==16,'all_classes_changed':e1['classes_changed']==16 and e2['classes_changed']==16,
-  'no_coverage_expiry':e1['expired_samples']==0 and e2['expired_samples']==0,'completion_gap_within_lease':(e2['kernel_after']['max_completion_gap_ms'] or 0)<5000}
+  # The API snapshot may honestly expire while its worker is busy. Test the
+  # actual kernel leases independently rather than treating stale UI evidence
+  # as proof of either live or expired enforcement.
+  'sampled_kernel_leases_live':all(e['kernel_samples'] and all(not x.get('error') and x.get('config_ms',0)>0 and x.get('min_binding_ms',0)>0 and x.get('live_bindings',0)>=16 for x in e['kernel_samples']) for e in (e1,e2)),
+  'completion_gap_within_lease':(e2['kernel_after']['max_completion_gap_ms'] or 0)<5000}
  configure(many,ub=16_000_000,db=16_000_000);wait(lambda s:instantiated(s)==16,60)
  def swap16():
   t=time.monotonic();configure([cap('A',prio='high'),cap('C',prio='low')]+many[2:],ub=16_000_000,db=16_000_000);record('min-budget-live-edit',apply_seconds=round(time.monotonic()-t,3),kernel={k:((status().get('kernel') or {}).get(k)) for k in ('max_maintenance_pass_ms','max_completion_gap_ms','max_renewal_span_ms')})

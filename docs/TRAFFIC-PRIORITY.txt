@@ -115,6 +115,16 @@ promise); 16 configured apps at the 16 Mbit/s minimum budget: floors as modelled
 maintenance completion gap ~3.0 s of the 5 s lease; Low DL payload 0.10-0.32 Mbit/s against a ~0.3 Mbit/s
 floor, so minimum-budget floors are not a reliable delivery level. Real sandboxed Electron journey (budgets,
 Low/High, swap, Delete, budgets cleared) matched receiver expectations; Deny 0; owned cleanup exact.
+An isolated follow-up exercised 16 instantiated applications with one verified TCP socket
+each. Before maintenance checkpoints, two full edits took 15.2 and 12.9 s; the observed
+maintenance gap reached 15.4 s and coverage expired. With checkpoints, the corresponding
+edits took 15.0 and 13.1 s. Direct pinned-map samples during those edits saw all 16 socket
+leases and the controller lease remain live: minimum sampled margins were 3.606 s and
+3.611 s respectively. The maximum observed maintenance completion gap was 1.550 s and
+renewal span 24 ms. These are sampled guest results, not a continuous kernel trace or a
+guarantee at every supported load. The API's previous coverage snapshot still expired
+while its policy request was in progress; it correctly remained stale until refreshed.
+The changed controller and daemon have not yet had a new full Electron journey.
 Not established: physical NIC behaviour, host CPU, WAN/ISP bottlenecks, automatic
 capacity detection, NetLimiter's Critical level, reaction-speed and slider semantics.
 

@@ -726,6 +726,7 @@ class Controller:
             raise RuntimeError('Unsupported: pending IFB checkpoint mismatch; preserving all resources; inspect pending-ifb-mismatch.json')
 
     def mutate(self, *args):
+        self.refresh_during_apply()
         self.verify()
         setting_up = getattr(self, 'pending_setup', False) and not getattr(self, 'cleaning', False)
         ifb_add = setting_up and len(args) >= 4 and args[1:4] == ('add', 'dev', self.ifb)
@@ -748,6 +749,22 @@ class Controller:
             self.setup_step = None
             self.setup_tc_intent = None
         self.save()
+
+    def refresh_during_apply(self):
+        # A policy edit may contain dozens of individually verified, journalled
+        # mutations. Do the normal complete socket-existence pass between them
+        # so the five-second kernel leases do not expire during a long edit.
+        # Do not retire classes in this checkpoint: the caller is iterating and
+        # updating the class tree. A failed check must fault the worker instead
+        # of treating a partially applied edit as an ordinary validation error.
+        if (getattr(self, 'applying', False)
+                and not getattr(self, 'pending_setup', False)
+                and not getattr(self, 'cleaning', False)
+                and time.monotonic() - getattr(self, 'last_tick', 0) >= 1):
+            try:
+                self.tick(retire_idle=False)
+            except Exception as exc:
+                raise RuntimeError('maintenance during configuration failed: ' + str(exc)) from exc
 
     def reconcile(self):
         st = self.manifest.lstat()
@@ -1071,7 +1088,10 @@ class Controller:
             for app in self.apps:
                 self.apps[app]['ul'] = self.class_state['ul'].get(self.apps[app]['minor'])
                 self.apps[app]['dl'] = self.class_state['dl'].get(self.apps[app]['minor'])
-            for c, bnd in self.bindings.items():
+            for c, bnd in list(self.bindings.items()):
+                self.refresh_during_apply()
+                if c not in self.bindings:
+                    continue
                 self.k('bind', c, *self.class_ids(bnd['app']))
         finally:
             self.applying = False
@@ -1095,12 +1115,16 @@ class Controller:
         except ValueError:
             self.budgets, self.policy_apps = old
             raise
-        for app in [a for a in self.apps if a not in policy]:
-            self.remove(app)
-        for app, e in policy.items():
-            if app in self.apps:
-                self.apps[app].update(e)
-        self.apply_policy()
+        self.applying = True
+        try:
+            for app in [a for a in self.apps if a not in policy]:
+                self.remove(app)
+            for app, e in policy.items():
+                if app in self.apps:
+                    self.apps[app].update(e)
+            self.apply_policy()
+        finally:
+            self.applying = False
 
     def set_cap(self, app, bits, download_bits=0, prio=None):
         bits = rate(bits) if bits else 0
@@ -1196,7 +1220,7 @@ class Controller:
                 del self.class_state[d][minor]
         del self.apps[app]
 
-    def tick(self):
+    def tick(self, retire_idle=True):
         tick_start = time.monotonic()
         self.verify()
         if self.compatibility['topology'] != 'veth-noqueue':
@@ -1228,9 +1252,10 @@ class Controller:
             else:
                 self.k('bind', c, *self.class_ids(b['app']))
                 self.apps[b['app']]['idle_since'] = time.monotonic()
-        for app, a in list(self.apps.items()):
-            if time.monotonic() - a['idle_since'] > 10:
-                self.remove(app)
+        if retire_idle:
+            for app, a in list(self.apps.items()):
+                if time.monotonic() - a['idle_since'] > 10:
+                    self.remove(app)
         self.k('beat')
         completed = time.monotonic()
         previous = getattr(self, 'maintenance_completed', None)

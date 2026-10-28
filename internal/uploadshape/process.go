@@ -153,6 +153,10 @@ func startProcessMode(o Options, cleanup bool) (transport, error) {
 	return p, nil
 }
 func (p *process) read() (json.RawMessage, error) {
+	return p.readWithin(20 * time.Second)
+}
+
+func (p *process) readWithin(timeout time.Duration) (json.RawMessage, error) {
 	select {
 	case b, ok := <-p.lines:
 		if !ok {
@@ -177,7 +181,7 @@ func (p *process) read() (json.RawMessage, error) {
 			return nil, fmt.Errorf("cleanup refused: %s", v.Cleanup)
 		}
 		return b, nil
-	case <-time.After(20 * time.Second):
+	case <-time.After(timeout):
 		_ = p.cmd.Process.Kill()
 		return nil, fmt.Errorf("controller timed out; leases expire within5s")
 	}
@@ -188,6 +192,12 @@ func (p *process) Call(q map[string]any) (json.RawMessage, error) {
 	}
 	if err := json.NewEncoder(p.in).Encode(q); err != nil {
 		return nil, err
+	}
+	// A full policy may update both trees for all configured applications.
+	// Its controller performs verified lease checkpoints between mutations;
+	// keep its deadline bounded without killing that work at the old 20s limit.
+	if q["op"] == "policy" {
+		return p.readWithin(45 * time.Second)
 	}
 	return p.read()
 }
