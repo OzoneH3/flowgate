@@ -136,3 +136,7 @@ fq_codel PCI/virtio NICs are experimental in a disposable namespace only, with
 segmentation off and exact restoration checks. Existing host offloads are never
 changed. The actual host currently fails this capability gate. M1 veth evidence
 is not claimed as physical-interface proof.
+
+Download extension: see ../../docs/DOWNLOAD-LIMITER.txt. Same service/binding
+contract, with verified established-TCP ingress lookup and an owned IFB. The
+native fixture remains isolated; this is not host activation authorization.

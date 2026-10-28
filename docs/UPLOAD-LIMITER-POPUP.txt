@@ -34,3 +34,8 @@ journey in electron/test/upload-limit-real.mjs. FlowGate captures and receiver e
 No host deployment, daemon restart, shaping activation or preference change
 is part of this increment. The matched bundle is prepared, not installed;
 release policy is unchanged. Existing performance limitations are deferred.
+
+Directional extension: download-capable experimental daemons expose the DL slot
+through the same compact popup. A direction edit/removal preserves the other cap.
+Download coverage counts only live covered bindings marked download=true; UDP
+and unsupported receive forms remain explicit gaps. See DOWNLOAD-LIMITER.txt.

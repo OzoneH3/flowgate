@@ -206,3 +206,19 @@ Each kernel.bindings entry has covered (report-only), derived from the same
 health sample as covered_bindings. Expiry/fault/Disabled/Unsupported clears
 both the aggregate and per-binding flags in the returned snapshot. These
 fields are reporting, never permission or binding authority.
+
+Directional extension (experimental-native-download-v1)
+------------------------------------------------------
+The existing upload-status/upload-configure operations remain the single service.
+A configured cap now contains bits_per_second (upload;0 means absent) and optional
+ download_bits_per_second (0/absent means absent). At least one must be nonzero;
+each nonzero direction is1,000,000..1,000,000,000bit/s. One application/UID entry
+holds both; duplicate application entries remain invalid. CAS replaces the full
+configuration, so directional clients must preserve the other rate.
+
+The opt-in daemon advertises experimental-native-download-v1 alongside upload.
+Old upload-only daemons must not receive download edits. Kernel status includes
+ download adapter observations, and each binding has download:boolean. This is
+TCP-direction eligibility, not current coverage: require covered=true and a live
+coverage snapshot as well. No change to permission identity, fresh binding proof,
+lease duration or manager ownership. See DOWNLOAD-LIMITER.txt for explicit gaps.

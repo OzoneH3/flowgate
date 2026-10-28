@@ -1809,3 +1809,6 @@ body.hide-sidebar #activityView > aside { display:none; }
 #uploadDetailsBody p { margin: 3px 0 7px; font-size: 11px; line-height: 1.35; }
 #uploadDetailsBody button { font-size: 11px; margin-right: 6px; }
 @media(max-width: 280px) { .upload-setter-row { grid-template-columns: 16px minmax(30px,1fr) 65px 32px; gap: 3px; } }
+
+.status-slot.upload-limit.upload-configured .slot-icon.family-dl-limit,
+#tree tbody tr[aria-selected='true'] .status-slot.upload-limit.upload-configured .slot-icon.family-dl-limit { background: #409cdb; color: #17232c; }

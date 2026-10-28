@@ -1,3 +1,4 @@
+import copy
 import importlib.util
 from pathlib import Path
 import unittest
@@ -408,6 +409,63 @@ class CompatibilityTests(unittest.TestCase):
     def test_feature_parser(self):
         self.assertEqual(m1.parse_features('Features for x:\n tcp-segmentation-offload: off [fixed]\n generic-segmentation-offload: on\n'),
                          {'tcp-segmentation-offload':'off','generic-segmentation-offload':'on'})
+
+class DownloadOwnershipTests(unittest.TestCase):
+    def test_pending_ifb_add_accepts_nested_program_id_only(self):
+        import json
+        c=object.__new__(m1.Controller);c.major=0x123;c.dl_major=0x234;c.ifb='fgdl12345678';c.ids={'program':7,'ingress':8}
+        c.k=lambda *a:json.dumps(c.ids)
+        c.original={'qdiscs':[]}
+        c.expected={'qdiscs':[{'kind':'htb','handle':'123:','root':True},{'kind':'clsact','handle':'ffff:'}], 'classes':[], 'root_filters':[], 'class_filters':[], 'ingress':[], 'egress':[{'kind':'bpf','pref':10000,'options':{'handle':'0x1','prog':{'id':7}}}]}
+        c.setup_step=['link','add',c.ifb,'address','02:00:00:00:00:01','type','ifb']
+        actual=copy.deepcopy(c.expected);actual['ifb']={'qdiscs':[],'classes':[]}
+        self.assertTrue(c.setup_topology_owned(actual))
+        actual['egress'][0]['options']['prog']['id']=9
+        self.assertFalse(c.setup_topology_owned(actual))
+
+    def test_creation_identity_crash_boundaries(self):
+        c = object.__new__(m1.Controller)
+        c.token = '1234567890abcdef0123456789abcdef'; c.ifb = 'fgdl12345678'
+        c.ifb_index = None; c.pending_setup = True
+        c.setup_step = ['link','add',c.ifb,'address',c.ifb_address(),'type','ifb']
+        link = {'ifname':c.ifb,'linkinfo':{'info_kind':'ifb'},'address':c.ifb_address(),'ifindex':4}
+        self.assertTrue(c.ifb_identity_matches(link)) # crash after add, before save
+        c.ifb_index = 4
+        self.assertTrue(c.ifb_identity_matches(link))
+        c.setup_step = ['link','set',c.ifb,'alias','flowgate:'+c.token]
+        self.assertTrue(c.ifb_identity_matches(link)) # before alias RPC
+        link['ifalias'] = 'flowgate:'+c.token
+        self.assertTrue(c.ifb_identity_matches(link)) # after alias RPC, before save
+        c.setup_step = None; c.pending_setup = False
+        self.assertTrue(c.ifb_identity_matches(link))
+        for key,value in [('ifname','foreign'),('address','02:00:00:00:00:01'),('ifindex',5),('ifalias',''),('ifalias','foreign')]:
+            changed = dict(link); changed[key] = value
+            self.assertFalse(c.ifb_identity_matches(changed),key)
+        c.pending_setup = True; c.setup_step = ['link','set',c.ifb,'up']
+        changed = dict(link); changed.pop('ifalias')
+        self.assertFalse(c.ifb_identity_matches(changed))
+
+    def test_ifb_recovery_preserves_previous_objects(self):
+        c = object.__new__(m1.Controller); c.ifb = 'fgdl12345678'
+        old = {'qdiscs': [{'kind': 'htb', 'handle': '200:', 'root': True}], 'classes': [],
+               'root_filters': [], 'ingress': [], 'egress': [], 'class_filters': []}
+        new = copy.deepcopy(old); new['classes'] = [{'class': 'htb', 'handle': '200:fffe'}]
+        step = ['class', 'add', 'dev', c.ifb, 'parent', '200:']
+        self.assertTrue(c.ifb_setup_delta_owned(old, new, step))
+        for field in ('root_filters', 'ingress', 'egress', 'class_filters'):
+            foreign = copy.deepcopy(new); foreign[field] = [{'foreign': True}]
+            self.assertFalse(c.ifb_setup_delta_owned(old, foreign, step))
+        changed = copy.deepcopy(new); changed['qdiscs'][0]['handle'] = '201:'
+        self.assertFalse(c.ifb_setup_delta_owned(old, changed, step))
+        self.assertFalse(c.ifb_setup_delta_owned(old, new, ['link', 'set', c.ifb, 'up']))
+
+    def test_ifb_creation_is_only_empty_noqueue(self):
+        c = object.__new__(m1.Controller); c.ifb = 'fgdl12345678'
+        self.assertTrue(c.ifb_setup_delta_owned({}, {'qdiscs': [], 'classes': []}, ['link','add',c.ifb,'type','ifb']))
+        new = {'qdiscs': [{'kind': 'noqueue'}], 'classes': []}
+        self.assertTrue(c.ifb_setup_delta_owned({}, new, ['link','add',c.ifb,'type','ifb']))
+        new['classes'] = [{'foreign': True}]
+        self.assertFalse(c.ifb_setup_delta_owned({}, new, ['link','add',c.ifb,'type','ifb']))
 
 if __name__ == '__main__':
     unittest.main()

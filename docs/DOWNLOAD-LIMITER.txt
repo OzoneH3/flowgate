@@ -1,0 +1,99 @@
+Experimental native TCP download limiter
+=======================================
+
+This extends the existing upload service, configuration, socket-binding proof,
+lease and journal. It is not a second permission system. A native application
+may have upload, download or both rates; each nonzero rate is 1..1000 Mbit/s.
+Both directions share the existing 16-application / 128-binding limits.
+
+The download adapter looks up the LOCAL established TCP receiver by the packet
+4-tuple in the ingress namespace, reads its socket cookie, and requires the
+existing fresh authoritative binding and unexpired controller/binding leases.
+Only those packets are redirected to a generation-owned IFB with an HTB class.
+Unbound traffic stays on its original path. No raw ingress skb cookie or display
+name is used as attribution authority. Firewall Allow/Deny remains independent.
+
+This shapes local delivery and induces TCP backpressure. It cannot recover link
+capacity already consumed upstream. UDP download, listeners, fragmented packets,
+IPv6 extension headers, VLAN, ingress DNAT/transparent-proxy tuple transformations, VPN/TUN and multiple-interface routing are outside
+the supported profile. UDP GSO remains a separate unresolved upload/firewall gate.
+First packets and undiscovered/shared/runtime sockets may escape. Config accepted
+is not enforcement; a completed discovery pass is not application-wide coverage.
+The UI says Partial and reports confirmed/requested bindings for the direction.
+For download, both covered=true AND download=true plus live snapshot coverage
+are required. The download flag alone is eligibility, not current enforcement.
+
+Activity Rule Status and Info View use the existing compact limiter popup, with
+separate UL and DL slots. Open/dismiss does not write. Editing/removing one
+direction preserves the other. Successful OK/Delete closes the popup; failures
+remain visible. Byte units use binary prefixes; bit units use decimal prefixes.
+Unchecking and accepting removes that direction (disabled limits are not stored).
+Closing the GUI preserves configured limits; restarting the daemon does not.
+
+Ownership and failure
+---------------------
+An IFB name plus a disjoint random local-unicast MAC are supplied atomically at
+creation; together they carry 72 random bits. Its full generation token is then
+set as an alias, before UP or queue attachment. The tested kernel did not retain
+an alias supplied in link-add, so missing alias is tolerated ONLY at the exact
+journalled creation/alias step, with matching name/kind/MAC and saved ifindex.
+Wrong nonempty alias always refuses. This detects accidental replacement; it is
+not a security boundary against a privileged actor cloning kernel attributes.
+NIC and IFB qdiscs/classes/root/ingress/egress/class filters are verified before
+mutation. Changed existing objects and observed foreign filters cause refusal; no blanket
+root/IFB deletion is used. Interrupted IFB TC-add recovery validates the new
+object's identity/kind and preserves previously journalled objects exactly, but
+currently does not compare every new object's rate/queue option with the pending
+command. This remains an experimental recovery limitation requiring review
+before host activation; runtime snapshots do compare those options.
+Redirect is withdrawn before owned IFB deletion; owned NIC objects are removed
+and the original supported default root is checked. Leases remain five seconds;
+there is no overload-driven extension. Crash journals never restore old bindings.
+
+Validation and limitations
+--------------------------
+Evidence and final source hashes are retained under .workspace/shaping-dl.
+The narrow load gate and receiver gates use an isolated single-queue netdevsim
+pair in a guest; they are not physical NIC certification. TCP4 aggregate and
+TCP6 receiver rates, independent traffic, offered Deny traffic and owned cleanup
+are recorded separately from model tests. Receiver payload excludes protocol
+headers; tc class dequeued bytes are charged bytes, and ingress classifier bytes
+include enqueue attempts/drops/retransmissions. None is a wire-byte counter.
+
+Low-rate UDP delivery under competing guest traffic was 200/200 in core1, but
+199/200 in one core3 phase. Core1 p95 was about145..261ms. This is retained as an
+experimental limitation; no latency or CPU objective is declared passed. Prior
+85%-throughput/7-percentage-point CPU objectives remain failed, not remeasured.
+No performance optimization cycle was undertaken. Host release060fb6c3, rules,
+Both protection, collector/Wine settings, offloads and updater policy are untouched.
+
+Physical trial: NOT authorized by this implementation
+---------------------------------------------------
+Prepare a matched bundle only. Before any installation, obtain explicit approval
+for its exact SHA. Recheck enp7s0 compatibility read-only, preserve latest rules,
+protection/settings/autostart, and use the established Docker/Unraid receiver
+route at172.30.42.128 as a bounded TCP sender for download. Trial must compare
+receiver payload at8/16/off, independent traffic, offered Deny and lease margin.
+Do not change offloads or foreign configuration. Stop on ownership/connectivity/
+renewal failure. Rollback starts with journal/identity-verified owned cleanup,
+then an explicitly guarded rollback. Never use bare root-qdisc deletion.
+
+Retained native results (before final GUI journey)
+------------------------------------------------
+core1: A TCP4 two sockets aggregate payload7.712/15.373Mbit/s at8/16;
+B TCP6 payload7.605/15.175; independent C287.689/275.990. Low-rate200/200
+both phases, p95144.638/260.965ms. Deny12 successfully offered perphase,0rx.
+core3 repeated load: one phase199/200 low-rate; retained, not discarded.
+failure1: direct kernel health and counters sampled after controller stop;
+receiver649Mbit/s after expiry,15.31Mbit/s after resume. Deny12 offered,0rx.
+Kernel-worker death -> Unsupported; disabled cleanup passed. That run's later
+crash-setup test failed and is superseded ONLY for that case by crash3.
+crash3: native exit immediately after IFB add before index/alias journal update;
+cleanup-only reconciled the ownership marker, removed IFB, restored originalroot.
+directions1: both DL16.83/UL7.55; UL-only DL546.02/UL7.11; DL-only DL16.85/
+UL506.72Mbit/s payload in short4s windows (buffering/interval effects apply).
+Deny8 offered in each,0rx. Foreign ingress filter and owned roots survived
+refused disable byte-for-byte; after fixture removed its foreign filter,
+verified cleanup succeeded. No unrelated ifb0 existed in that run; its conditional
+comparison therefore did not prove preservation of an existing foreign IFB.
+These are sampled isolated results, not latency floors or physical-host claims.

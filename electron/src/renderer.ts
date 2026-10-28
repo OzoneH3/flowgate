@@ -600,7 +600,7 @@ function statusStrip(r: Row) {
   const result = authoritative ? authoritativePolicy(r, state) : undefined;
   const processPolicy = authoritativeProcessPolicy(r, state);
   for (const slot of STATUS_SLOTS) {
-    if (slot.key === "ul-limit") { strip.append(uploadButton(r,state)); continue; }
+    if (slot.key === "ul-limit" || slot.key === "dl-limit") { strip.append(uploadButton(r,state,slot.key === "dl-limit" ? "download" : "upload")); continue; }
     if (!slot.direction) {
       const dot = element('span', '', 'status-slot unavailable');
       dot.append(element('span', '·', 'slot-dot'), statusFamilyGlyph(slot.key));

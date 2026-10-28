@@ -2,6 +2,7 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <signal.h>
+#include <poll.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -58,6 +59,21 @@ static void info(void) {
     printf("\"}");
   }
   puts("]}");
+}
+static void drain(int millis) {
+  if (millis < 1 || millis > 60000 || !stream || nf < 1) exit(2);
+  struct pollfd ps[8];
+  for (int i=0;i<nf;i++) ps[i]=(struct pollfd){.fd=fds[i],.events=POLLIN};
+  uint64_t start=ns(), until=start+(uint64_t)millis*1000000, bytes=0;
+  char buf[65536];
+  while(ns()<until) {
+    if(poll(ps,nf,10)<0 && errno!=EINTR) exit(2);
+    for(int i=0;i<nf;i++) if(ps[i].revents&POLLIN) {
+      ssize_t n=recv(fds[i],buf,sizeof(buf),MSG_DONTWAIT);
+      if(n>0) bytes+=(uint64_t)n;
+    }
+  }
+  printf("{\"bytes\":%llu,\"elapsed_ns\":%llu}\n",(unsigned long long)bytes,(unsigned long long)(ns()-start));
 }
 static void closeall(void) {
   for (int i = 0; i < nf; i++)
@@ -283,7 +299,9 @@ int main(int argc, char **argv) {
                       &connected, &lp) == 5) {
       dport = 43001;
       opens(n, lp);
-    } else if (sscanf(line, "BULK %63s %d %d %d", tag, &n, &sz, &gso) == 4)
+    } else if (sscanf(line, "DRAIN %d", &n) == 1)
+      drain(n);
+    else if (sscanf(line, "BULK %63s %d %d %d", tag, &n, &sz, &gso) == 4)
       bulk(tag, n, sz, gso);
     else if (sscanf(line, "SEND %63s %d %d", tag, &n, &delay) == 3)
       sends(tag, n, delay);

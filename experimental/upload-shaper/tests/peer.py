@@ -40,6 +40,14 @@ def bulkconn(s):
  finally:s.close()
 def bulktcp(s):
  while True:threading.Thread(target=bulkconn,args=(s.accept()[0],),daemon=True).start()
+def pushconn(s):
+ try:
+  block=b'x'*65536
+  while True:s.sendall(block)
+ except OSError:pass
+ finally:s.close()
+def pushtcp(s):
+ while True:threading.Thread(target=pushconn,args=(s.accept()[0],),daemon=True).start()
 for line in sys.stdin:
  op=json.loads(line)['op']
  if op=='setup':
@@ -50,7 +58,7 @@ for line in sys.stdin:
      s=socket.socket(fam,typ);s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);s.bind((addr,port));socks.append(s)
      if typ==socket.SOCK_STREAM:s.listen(16)
      threading.Thread(target=fn,args=(s,),daemon=True).start()
-   for port,typ,fn in [(43003,socket.SOCK_STREAM,bulktcp),(43004,socket.SOCK_DGRAM,bulkudp)]:
+   for port,typ,fn in [(43003,socket.SOCK_STREAM,bulktcp),(43004,socket.SOCK_DGRAM,bulkudp),(43005,socket.SOCK_STREAM,pushtcp)]:
     s=socket.socket(fam,typ);s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);s.setsockopt(socket.SOL_SOCKET,socket.SO_RCVBUF,4*1024*1024);s.bind((addr,port));socks.append(s)
     if typ==socket.SOCK_STREAM:s.listen(16)
     threading.Thread(target=fn,args=(s,),daemon=True).start()

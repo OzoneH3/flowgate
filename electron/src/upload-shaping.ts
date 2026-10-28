@@ -1,16 +1,18 @@
 import type { Row } from './model';
 import type { ClientState } from './protocol';
+export const DOWNLOAD_CAPABILITY = 'experimental-native-download-v1';
+export type LimitDirection = 'upload' | 'download';
 export const UPLOAD_CAPABILITY = 'experimental-native-upload-v1';
 export interface UploadTarget { uid: number; application: string; label?: string; revision?: string }
-export interface UploadCap extends UploadTarget { bits_per_second: number }
+export interface UploadCap extends UploadTarget { bits_per_second: number; download_bits_per_second?: number }
 export interface UploadSnapshot {
   version: number; applied_version: number; enabled: boolean; interface: string; status: string;
   configured_caps: UploadCap[]; last_error?: string; coverage_snapshot_expired?: boolean; coverage_valid_for_ms?: number;
-  kernel?: { valid_for_ms?: number; covered_bindings?: number; bindings?: {app: string; covered?: boolean}[]; limitations?: string[]; fault?: string };
+  kernel?: { valid_for_ms?: number; covered_bindings?: number; bindings?: {app: string; covered?: boolean; download?: boolean}[]; limitations?: string[]; fault?: string };
 }
-export interface UploadView { supported: boolean; writable: boolean; generation?: string; snapshot?: UploadSnapshot; message: string }
+export interface UploadView { supported: boolean; downloadSupported?: boolean; writable: boolean; generation?: string; snapshot?: UploadSnapshot; message: string }
 export interface UploadCleanup { generation: string; expected_version: number; cleanup_only: true }
-export interface UploadEdit { generation: string; expected_version: number; target: UploadTarget; bits_per_second: number | null }
+export interface UploadEdit { generation: string; expected_version: number; target: UploadTarget; direction?: LimitDirection; bits_per_second: number | null }
 export function uploadTarget(row: Row, state: ClientState): UploadTarget | undefined {
   if (!state.observation?.connected) return;
   if (row.displayApplication || row.runtimeApplication || row.applicationZone || row.inactive || !['application','process'].includes(row.kind)) return;
@@ -25,25 +27,40 @@ export function parseUpload(raw: unknown): UploadSnapshot {
   for (const c of r.configured_caps) validateCap(c);
   return r;
 }
+export function capRate(c: UploadCap | undefined, direction: LimitDirection = 'upload'): number {
+  return (direction === 'download' ? c?.download_bits_per_second : c?.bits_per_second) || 0;
+}
 export function validateCap(c: UploadCap) {
-  if (!c || !Number.isSafeInteger(c.uid) || c.uid < 0 || typeof c.application !== 'string' || !c.application || c.application.length > 4096 || !Number.isSafeInteger(c.bits_per_second) || c.bits_per_second < 1000000 || c.bits_per_second > 1000000000) throw Error('Use a native application and a rate from 1 to 1000 Mbit/s');
+  const validRate=(n:unknown)=>Number.isSafeInteger(n) && (n===0 || Number(n)>=1000000 && Number(n)<=1000000000);
+  if (!c || !Number.isSafeInteger(c.uid) || c.uid < 0 || typeof c.application !== 'string' || !c.application || c.application.length > 4096 || !validRate(c.bits_per_second) || !validRate(c.download_bits_per_second ?? 0) || !(c.bits_per_second || c.download_bits_per_second)) throw Error('Use a native application and a rate from 1 to 1000 Mbit/s');
 }
 export function replaceCap(s: UploadSnapshot, edit: UploadEdit): UploadCap[] {
-  if (!edit || !Number.isSafeInteger(edit.expected_version) || edit.expected_version < 1 || (edit.bits_per_second !== null && !Number.isSafeInteger(edit.bits_per_second))) throw Error("Invalid upload configuration draft");
+  if (!edit || !Number.isSafeInteger(edit.expected_version) || edit.expected_version < 1 || (edit.direction !== undefined && edit.direction !== 'upload' && edit.direction !== 'download') || (edit.bits_per_second !== null && (!Number.isSafeInteger(edit.bits_per_second) || edit.bits_per_second<1000000 || edit.bits_per_second>1000000000))) throw Error("Invalid upload configuration draft or rate");
   if (s.version !== edit.expected_version) throw Error('Configuration changed. Refresh and review the draft before saving.');
-  const cap = {...edit.target, bits_per_second: edit.bits_per_second ?? 1000000}; validateCap(cap);
-  const caps = s.configured_caps.filter(c => c.uid !== cap.uid || c.application !== cap.application);
-  if (edit.bits_per_second !== null) caps.push({uid:cap.uid, application:cap.application, bits_per_second:cap.bits_per_second});
-  if (caps.length > 16) throw Error('The experimental controller supports 16 configured applications');
+  validateCap({...edit.target,bits_per_second:1000000});
+  const old=s.configured_caps.find(c=>c.uid===edit.target.uid && c.application===edit.target.application);
+  const cap:UploadCap={uid:edit.target.uid,application:edit.target.application,bits_per_second:old?.bits_per_second || 0};
+  if(old?.download_bits_per_second)cap.download_bits_per_second=old.download_bits_per_second;
+  if(edit.direction==='download') {if(edit.bits_per_second===null)delete cap.download_bits_per_second;else cap.download_bits_per_second=edit.bits_per_second;}
+  else cap.bits_per_second=edit.bits_per_second ?? 0;
+  const caps=s.configured_caps.filter(c=>c.uid!==cap.uid || c.application!==cap.application);
+  if(cap.bits_per_second || cap.download_bits_per_second){validateCap(cap);caps.push(cap);}
+  if(caps.length>16)throw Error('The experimental controller supports 16 configured applications');
   return caps;
 }
-export function uploadSummary(v: UploadView, t?: UploadTarget): string {
-  if (!v.supported || !v.snapshot) return 'Unsupported';
+export function limitCoverage(s:UploadSnapshot | undefined, t:UploadTarget, direction:LimitDirection, expired:boolean) {
+  const cap=s?.configured_caps.find(c=>c.uid===t.uid && c.application===t.application);
+  if(!capRate(cap,direction))return {requested:0,confirmed:0};
+  const rows=s?.kernel?.bindings?.filter(b=>b.app===`${t.uid}:${t.application}`)||[];
+  return {requested:rows.length,confirmed:expired?0:rows.filter(b=>b.covered===true && (direction!=='download' || b.download===true)).length};
+}
+export function uploadSummary(v: UploadView, t?: UploadTarget, direction: LimitDirection = 'upload'): string {
+  if (!v.supported || !v.snapshot || (direction==='download' && !v.downloadSupported)) return 'Unsupported';
   const s=v.snapshot, c=t && s.configured_caps.find(c=>c.uid===t.uid && c.application===t.application);
   if (s.status==='Unsupported') return 'Unsupported';
   if (s.status==='Applying' || s.applied_version!==s.version) return 'Pending';
-  if (!c) return 'Off';
-  return `${c.bits_per_second/1000000} Mbit/s · Partial`;
+  if (!capRate(c,direction)) return 'Off';
+  return `${capRate(c,direction)/1000000} Mbit/s · Partial`;
 }
 
 // Reference UI units: byte prefixes are binary, bit prefixes decimal.
@@ -55,7 +72,7 @@ const uploadRateFactors: Record<UploadRateUnit, bigint> = {
   'bit/s':1n,'Kbit/s':1000n,'Mbit/s':1000000n,'Gbit/s':1000000000n,
 };
 export function uploadRateBits(value:string, unit:UploadRateUnit):number {
-  if (!Object.hasOwn(uploadRateFactors,unit) || !/^\d{1,16}(?:\.\d{1,33})?$/.test(value.trim())) throw Error('Enter a decimal upload rate.');
+  if (!Object.hasOwn(uploadRateFactors,unit) || !/^\d{1,16}(?:\.\d{1,33})?$/.test(value.trim())) throw Error('Enter a decimal rate.');
   const [whole,fraction='']=value.trim().split('.'), divisor=10n**BigInt(fraction.length);
   const scaled=BigInt(whole+fraction)*uploadRateFactors[unit];
   if(scaled%divisor!==0n)throw Error('The rate must represent a whole number of bit/s.');
@@ -64,7 +81,7 @@ export function uploadRateBits(value:string, unit:UploadRateUnit):number {
   return Number(bits);
 }
 export function uploadRateValue(bits:number,unit:UploadRateUnit):string {
-  if(!Number.isSafeInteger(bits) || bits<1000000 || bits>1000000000 || !Object.hasOwn(uploadRateFactors,unit))throw Error('Invalid upload rate.');
+  if(!Number.isSafeInteger(bits) || bits<1000000 || bits>1000000000 || !Object.hasOwn(uploadRateFactors,unit))throw Error('Invalid limit rate.');
   const factor=uploadRateFactors[unit],n=BigInt(bits),whole=n/factor;
   let remainder=n%factor,fraction='';
   while(remainder && fraction.length<33){remainder*=10n;fraction+=String(remainder/factor);remainder%=factor;}

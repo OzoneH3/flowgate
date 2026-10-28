@@ -306,10 +306,10 @@ class Controller:
         self.token = secrets.token_hex(16)
         self.major = 0x100 + secrets.randbelow(0xfe00)
         # Download adapter: one owned IFB per generation with its own HTB major.
-        self.dl_major = (self.major + 1 + secrets.randbelow(0xfdff)) % 0xfe00 + 0x100
+        self.dl_major = ((self.major - 0x100 + 1 + secrets.randbelow(0xfdff)) % 0xfe00) + 0x100
         self.ifb = 'fgdl' + self.token[:8]
         self.ifb_index = None
-        if subprocess.run(['ip', '-j', 'link', 'show', 'dev', self.ifb], capture_output=True).returncode == 0:
+        if subprocess.run(['ip', '-j', 'link', 'show', 'dev', self.ifb], capture_output=True, timeout=3).returncode == 0:
             raise ValueError('Unsupported: owned IFB name already exists')
         self.pin = Path('/sys/fs/bpf') / ('fg-m1-' + self.token)
         self.pin.mkdir(mode=0o700)
@@ -332,7 +332,8 @@ class Controller:
             # Ingress adapter: owned IFB (journalled name before creation), its own
             # HTB tree, then the ingress redirect program. Only bound packets are
             # redirected; everything else never touches the IFB.
-            self.link_mutate('add', self.ifb, 'type', 'ifb')
+            self.link_mutate('add', self.ifb, 'address', self.ifb_address(), 'type', 'ifb')
+            self.link_mutate('set', self.ifb, 'alias', 'flowgate:' + self.token)
             self.link_mutate('set', self.ifb, 'up')
             self.mutate('qdisc', 'add', 'dev', self.ifb, 'root', 'handle', self.dl_handle(), 'htb', 'default', 'fffe')
             self.mutate('class', 'add', 'dev', self.ifb, 'parent', self.dl_handle(), 'classid', self.dl_handle(0xfffe), 'htb', 'rate', '100gbit', 'ceil', '100gbit', 'quantum', str(self.mtu))
@@ -428,9 +429,15 @@ class Controller:
                         out['class_filters'].append({'parent': parent, 'filters': fs})
         if getattr(self, 'ifb', None) and self.ifb_link() is not None:
             rows = self.query_tc([('qdisc', 'show', 'dev', self.ifb), ('class', 'show', 'dev', self.ifb),
-                                  ('filter', 'show', 'dev', self.ifb, 'root')])
-            parents_for(rows[1])
-            out['ifb'] = {'qdiscs': rows[0], 'classes': [x for x in rows[1] if x.get('class') != 'fq_codel'], 'root_filters': rows[2]}
+                                  ('filter', 'show', 'dev', self.ifb, 'root'),
+                                  ('filter', 'show', 'dev', self.ifb, 'ingress'),
+                                  ('filter', 'show', 'dev', self.ifb, 'egress')])
+            rows[1] = [x for x in rows[1] if x.get('class') != 'fq_codel']
+            parents = parents_for(rows[1])
+            filters = self.query_tc([('filter', 'show', 'dev', self.ifb, 'parent', p) for p in parents]) if parents else []
+            out['ifb'] = {'qdiscs': rows[0], 'classes': [x for x in rows[1] if x.get('class') != 'fq_codel'],
+                          'root_filters': rows[2], 'ingress': rows[3], 'egress': rows[4],
+                          'class_filters': [{'parent': p, 'filters': f} for p, f in zip(parents, filters) if f]}
         return out
 
     def preflight(self, topology=None):
@@ -452,6 +459,24 @@ class Controller:
     def dl_handle(self, minor=None):
         return f'{self.dl_major:x}:' + (f'{minor:x}' if minor is not None else '')
 
+    def ifb_address(self):
+        # Disjoint 40 random bits beside the name's 32; created atomically.
+        return '02:' + ':'.join(self.token[i:i+2] for i in range(8, 18, 2))
+
+    def ifb_identity_matches(self, link):
+        if link.get('ifname') != self.ifb or link.get('linkinfo', {}).get('info_kind') != 'ifb' or link.get('address') != self.ifb_address():
+            return False
+        if self.ifb_index is not None and link.get('ifindex') != self.ifb_index:
+            return False
+        alias = link.get('ifalias', '')
+        if alias == 'flowgate:' + self.token:
+            return True
+        # ip link add does not retain IFLA_IFALIAS on the tested kernel. The
+        # name+MAC creation marker covers only these two journalled windows.
+        return not alias and getattr(self, 'pending_setup', False) and getattr(self, 'setup_step', None) in (
+            ['link', 'add', self.ifb, 'address', self.ifb_address(), 'type', 'ifb'],
+            ['link', 'set', self.ifb, 'alias', 'flowgate:' + self.token])
+
     def ifb_link(self):
         # Owned IFB identity: journalled random name, kind ifb, recorded ifindex.
         if not getattr(self, 'ifb', None):
@@ -460,10 +485,10 @@ class Controller:
         if p.returncode:
             return None
         link = json.loads(p.stdout)[0]
-        if link.get('linkinfo', {}).get('info_kind') != 'ifb':
-            raise RuntimeError('Unsupported: owned IFB name has a foreign link kind')
-        if self.ifb_index is not None and link.get('ifindex') != self.ifb_index:
-            raise RuntimeError('Unsupported: owned IFB was replaced')
+        if not self.ifb_identity_matches(link):
+            raise RuntimeError('Unsupported: IFB ownership identity mismatch')
+        if not getattr(self, 'pending_setup', False) and not getattr(self, 'cleaning', False) and 'UP' not in link.get('flags', []):
+            raise RuntimeError('Unsupported: owned IFB is down')
         return link
 
     def link_mutate(self, op, name, *args):
@@ -478,7 +503,8 @@ class Controller:
         elif op == 'del':
             self.ifb_index = None
         self.expected = self.topology()
-        self.setup_step = None
+        if op != 'add':
+            self.setup_step = None
         self.save()
 
     def save(self):
@@ -528,7 +554,10 @@ class Controller:
             self.save()
         self.call('tc', *args)
         self.expected = self.topology()
-        self.setup_step = None
+        # Cleanup may still need the creation marker for an alias-less IFB.
+        # Keep that exact durable intent until link deletion removes the IFB.
+        if not getattr(self, 'cleaning', False):
+            self.setup_step = None
         self.save()
 
     def reconcile(self):
@@ -539,7 +568,16 @@ class Controller:
         boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
         valid_pin = (isinstance(d.get('token'), str) and re.fullmatch('[0-9a-f]{32}', d['token'])
                      and d.get('pin') == '/sys/fs/bpf/fg-m1-' + d['token'])
-        if (d.get('schema') == 1 and valid_pin
+        if not valid_pin:
+            raise ValueError('invalid ownership journal token')
+        self.token = d['token']
+        self.ifb, self.ifb_index = d.get('ifb'), d.get('ifb_index')
+        self.pending_setup = d.get('pending_setup', False)
+        self.setup_step = d.get('setup_step')
+        if self.ifb and self.ifb != 'fgdl' + self.token[:8]:
+            raise ValueError('Unsupported: journal IFB does not match ownership token')
+        ifb_absent = not self.ifb or self.ifb_link() is None
+        if (d.get('schema') == 1 and valid_pin and ifb_absent
                 and journal_empty(d, self.topology(), Path(d['pin']).exists(), boot, self.ns, self.index, self.dev)):
             # No owned kernel state remains. Forget only our private stale journal;
             # never recreate old bindings or mutate a replacement interface.
@@ -594,7 +632,9 @@ class Controller:
             old = self.expected.get(key, [])
             new = actual[key]
             if key == 'ifb':
-                continue  # verified structurally below
+                if not self.ifb_setup_delta_owned(old, new, step):
+                    return False
+                continue
             if step[0] == 'qdisc' and step[1] in ('add', 'replace') and 'root' in step:
                 if len(new) != 1:
                     return False
@@ -622,11 +662,11 @@ class Controller:
                 if f.get('kind') != 'bpf' or f.get('pref') != 10000:
                     return False
                 opt = f.get('options')
-                if opt and (opt.get('id') != self.ids.get(prog) or opt.get('handle') != handle):
+                if opt and (opt.get('id', opt.get('prog', {}).get('id')) != self.ids.get(prog) or opt.get('handle') != handle):
                     return False
         ifb = actual.get('ifb')
         if ifb is not None:
-            if ifb.get('root_filters'):
+            if any(ifb.get(k) for k in ('root_filters', 'ingress', 'egress', 'class_filters')):
                 return False
             for q in ifb['qdiscs']:
                 if q.get('root') and q.get('kind') == 'htb' and q.get('handle') == self.dl_handle():
@@ -640,6 +680,29 @@ class Controller:
                 if c.get('class') != 'htb' or c.get('handle') != self.dl_handle(0xfffe):
                     return False
         return True
+
+    def ifb_setup_delta_owned(self, old, new, step):
+        # Recovery permits only the single write-ahead operation, never a blanket
+        # acceptance of any tree under our root major. Token/ifindex are checked
+        # separately by ifb_link(), including the crash-after-link-add window.
+        if any(new.get(k) for k in ('root_filters', 'ingress', 'egress', 'class_filters')):
+            return False
+        if not old:
+            return (step[:3] == ['link', 'add', self.ifb]
+                    and not new.get('classes') and (not new.get('qdiscs') or
+                    (len(new['qdiscs']) == 1 and new['qdiscs'][0].get('kind') == 'noqueue')))
+        if len(step) < 5 or step[1] != 'add' or step[2:4] != ['dev', self.ifb]:
+            return False
+        field = {'qdisc': 'qdiscs', 'class': 'classes'}.get(step[0])
+        if field is None:
+            return False
+        for key in set(old) | set(new):
+            if key != field and old.get(key) != new.get(key):
+                return False
+        previous = old.get(field, [])
+        if field == 'qdiscs' and 'root' in step:
+            previous = [q for q in previous if not (q.get('root') and q.get('kind') == 'noqueue')]
+        return all(obj in new.get(field, []) for obj in previous) and len(new.get(field, [])) == len(previous) + 1
 
     def cleanup_objects(self):
         self.cleaning = True

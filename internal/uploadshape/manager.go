@@ -18,9 +18,10 @@ import (
 const MaxCaps = 16
 
 type Cap struct {
-	UID           uint32 `json:"uid"`
-	Application   string `json:"application"`
-	BitsPerSecond uint64 `json:"bits_per_second"`
+	UID                   uint32 `json:"uid"`
+	Application           string `json:"application"`
+	BitsPerSecond         uint64 `json:"bits_per_second"`
+	DownloadBitsPerSecond uint64 `json:"download_bits_per_second,omitempty"`
 }
 
 func (c Cap) key() string { return strconv.FormatUint(uint64(c.UID), 10) + ":" + c.Application }
@@ -30,12 +31,14 @@ type Config struct {
 	Caps    []Cap `json:"caps"`
 }
 type Binding struct {
-	App     string `json:"app"`
-	Cookie  string `json:"cookie"`
-	Covered bool   `json:"covered"`
+	App      string `json:"app"`
+	Cookie   string `json:"cookie"`
+	Covered  bool   `json:"covered"`
+	Download bool   `json:"download"`
 }
 type KernelStatus struct {
 	Compatibility json.RawMessage `json:"compatibility,omitempty"`
+	Download      json.RawMessage `json:"download,omitempty"`
 	// Observation of the controller's last successful verification, measured by
 	// the controller at report time (age since the verification STARTED).
 	VerifiedAgeMillis        *int64                     `json:"verified_age_ms"`
@@ -275,7 +278,7 @@ func validateConfig(c Config) error {
 	}
 	seen := map[string]bool{}
 	for _, v := range c.Caps {
-		if len(v.Application) == 0 || len(v.Application) > 512 || strings.ContainsAny(v.Application, "\x00\r\n") || v.BitsPerSecond < 1_000_000 || v.BitsPerSecond > 1_000_000_000 {
+		if len(v.Application) == 0 || len(v.Application) > 512 || strings.ContainsAny(v.Application, "\x00\r\n") || (v.BitsPerSecond == 0 && v.DownloadBitsPerSecond == 0) || (v.BitsPerSecond != 0 && (v.BitsPerSecond < 1_000_000 || v.BitsPerSecond > 1_000_000_000)) || (v.DownloadBitsPerSecond != 0 && (v.DownloadBitsPerSecond < 1_000_000 || v.DownloadBitsPerSecond > 1_000_000_000)) {
 			return fmt.Errorf("invalid native application cap or rate (1..1000Mbit/s)")
 		}
 		if seen[v.key()] {
@@ -453,7 +456,7 @@ func (m *Manager) run() {
 	var bound = map[string]bool{}
 	var discovery discoverySnapshot
 	var priority priorityQueue
-	previousCaps := map[string]uint64{}
+	previousCaps := map[string]Cap{}
 	discovery.reset()
 	defer func() {
 		if t != nil {
@@ -537,7 +540,7 @@ func (m *Manager) run() {
 			for app := range s.Apps {
 				q := map[string]any{"op": "remove", "app": app}
 				if c, ok := desired[app]; ok {
-					q = map[string]any{"op": "cap", "app": app, "rate": c.BitsPerSecond}
+					q = map[string]any{"op": "cap", "app": app, "rate": c.BitsPerSecond, "download_rate": c.DownloadBitsPerSecond}
 				}
 				if _, err = call(t, q); err != nil {
 					m.fail(err)
@@ -546,13 +549,13 @@ func (m *Manager) run() {
 			}
 			var changed []Cap
 			for _, c := range cfg.Caps {
-				if previousCaps[c.key()] != c.BitsPerSecond {
+				if previousCaps[c.key()] != c {
 					changed = append(changed, c)
 				}
 			}
-			previousCaps = map[string]uint64{}
+			previousCaps = map[string]Cap{}
 			for _, c := range cfg.Caps {
-				previousCaps[c.key()] = c.BitsPerSecond
+				previousCaps[c.key()] = c
 			}
 			priority = priorityQueue{}
 			if len(changed) > 0 {
@@ -757,20 +760,21 @@ func (m *Manager) bind(t transport, h hint, version uint64) bool {
 	if v != version || closed || !cfg.Enabled {
 		return false
 	}
-	var rate uint64
+	var rate, downloadRate uint64
 	for _, c := range cfg.Caps {
 		if c.key() == h.app {
 			rate = c.BitsPerSecond
+			downloadRate = c.DownloadBitsPerSecond
 		}
 	}
-	if rate == 0 {
+	if rate == 0 && downloadRate == 0 {
 		return false
 	}
 	if !validFlow(h.flow) {
 		m.gap("unsupported_flow")
 		return false
 	}
-	_, err := call(t, map[string]any{"op": "bind", "protocol": h.flow.Protocol, "local": h.flow.Local.String(), "remote": h.flow.Remote.String(), "rate": rate, "expected_app": h.app, "expected_cookie": h.cookie})
+	_, err := call(t, map[string]any{"op": "bind", "protocol": h.flow.Protocol, "local": h.flow.Local.String(), "remote": h.flow.Remote.String(), "rate": rate, "download_rate": downloadRate, "expected_app": h.app, "expected_cookie": h.cookie})
 	if err != nil {
 		m.gap("binding_refused")
 		m.mu.Lock()

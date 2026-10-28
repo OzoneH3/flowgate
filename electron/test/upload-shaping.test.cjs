@@ -1,7 +1,7 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),net=require('node:net');
-const {parseUpload,replaceCap,uploadTarget,uploadSummary,UPLOAD_CAPABILITY,UPLOAD_RATE_UNITS,uploadRateBits,uploadRateValue}=require('../dist/test/upload-shaping.cjs');
+const {parseUpload,replaceCap,uploadTarget,uploadSummary,limitCoverage,UPLOAD_CAPABILITY,UPLOAD_RATE_UNITS,uploadRateBits,uploadRateValue}=require('../dist/test/upload-shaping.cjs');
 const {UploadShapingClient}=require('../dist/test/upload-shaping-client.cjs');
 const cap={uid:1000,application:'native-alpha',bits_per_second:8000000};
 const snap=(extra={})=>({version:1,applied_version:1,enabled:true,interface:'lab0',status:'Partial',configured_caps:[cap],...extra});
@@ -74,4 +74,47 @@ test('upload rate units preserve exact integer bit rates through decimal byte/bi
  assert.equal(uploadRateBits('1','Gbit/s'),1000000000);
  for(const [value,unit] of [['0.1','Mbit/s'],['1001','Mbit/s'],['NaN','bit/s'],['1e6','bit/s'],['125000.01','B/s'],['8','KiB/s']])
    assert.throws(()=>uploadRateBits(value,unit));
+});
+
+test('directional edits preserve the other limit and remove the app only after both are removed',()=>{
+ const both={...cap,download_bits_per_second:16000000}, s=snap({configured_caps:[both]});
+ assert.deepEqual(replaceCap(s,{expected_version:1,target:cap,direction:'download',bits_per_second:32000000}),[{...both,download_bits_per_second:32000000}]);
+ assert.deepEqual(replaceCap(s,{expected_version:1,target:cap,direction:'download',bits_per_second:null}),[cap]);
+ const downOnly={...both,bits_per_second:0};
+ assert.deepEqual(replaceCap(s,{expected_version:1,target:cap,bits_per_second:null}),[downOnly]);
+ assert.deepEqual(replaceCap(snap({configured_caps:[downOnly]}),{expected_version:1,target:cap,direction:'download',bits_per_second:null}),[]);
+ assert.deepEqual(parseUpload(snap({configured_caps:[downOnly]})).configured_caps,[downOnly]);
+ assert.throws(()=>parseUpload(snap({configured_caps:[{...cap,bits_per_second:0}]})),/rate/);
+ assert.throws(()=>parseUpload(snap({configured_caps:[{...cap,download_bits_per_second:1}]})),/rate/);
+ assert.throws(()=>replaceCap(s,{expected_version:1,target:cap,direction:'sideways',bits_per_second:null}),/Invalid/);
+ assert.equal(uploadSummary({supported:true,downloadSupported:true,snapshot:s},cap,'download'),'16 Mbit/s · Partial');
+ assert.equal(uploadSummary({supported:true,snapshot:s},cap,'download'),'Unsupported');
+ assert.equal(uploadSummary({supported:true,downloadSupported:true,snapshot:snap({configured_caps:[downOnly]})},cap),'Off');
+});
+test('download writes require capability and keep upload policy and rate intact',async t=>{
+ const h=await harness(t),e={generation:'g1',expected_version:1,target:{...cap,revision:'r1'},direction:'download',bits_per_second:16000000};
+ await assert.rejects(h.client.configure(e),/not supported/);
+ assert.equal(h.calls.length,0);
+ h.state.control.capabilities.push('experimental-native-download-v1');
+ const status=await h.client.read();assert.equal(status.downloadSupported,true);
+ await h.client.configure(e);
+ assert.deepEqual(h.calls.find(c=>c.operation==='upload-configure').upload_config,{enabled:true,caps:[{...cap,download_bits_per_second:16000000}]});
+ assert.ok(h.calls.every(c=>['upload-status','upload-configure'].includes(c.operation)));
+});
+
+test('download coverage excludes upload-only bindings and expired leases',()=>{
+ const s=snap({configured_caps:[{...cap,download_bits_per_second:16000000}],kernel:{bindings:[{app:'1000:native-alpha',covered:true,download:true},{app:'1000:native-alpha',covered:true,download:false},{app:'1000:native-alpha',covered:false,download:true},{app:'1001:other',covered:true,download:true}]}});
+ assert.deepEqual(limitCoverage(s,cap,'download',false),{requested:3,confirmed:1});
+ assert.deepEqual(limitCoverage(s,cap,'upload',false),{requested:3,confirmed:2});
+ assert.deepEqual(limitCoverage(s,cap,'download',true),{requested:3,confirmed:0});
+});
+
+test('coverage is zero for an unconfigured direction even when the other direction is bound',()=>{
+ const kernel={bindings:[{app:'1000:native-alpha',covered:true,download:true}]};
+ const down=snap({configured_caps:[{...cap,bits_per_second:0,download_bits_per_second:16000000}],kernel});
+ assert.deepEqual(limitCoverage(down,cap,'upload',false),{requested:0,confirmed:0});
+ assert.deepEqual(limitCoverage(down,cap,'download',false),{requested:1,confirmed:1});
+ const up=snap({kernel});
+ assert.deepEqual(limitCoverage(up,cap,'download',false),{requested:0,confirmed:0});
+ assert.deepEqual(limitCoverage(up,cap,'upload',false),{requested:1,confirmed:1});
 });
