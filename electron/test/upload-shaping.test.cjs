@@ -156,3 +156,13 @@ test('schema 2 is sent only with the capability; budgets are preserved unless ed
  assert.deepEqual(b,{enabled:true,caps:[{...cap,traffic_priority:'high'}],schema:2,upload_budget_bits_per_second:0,download_budget_bits_per_second:40000000});
  await assert.rejects(h.client.configure({generation:'g1',expected_version:1,budgets:{upload:0,download:0}}),/changed/);
 });
+
+test('every coverage adoption is anchored at a timestamp captured before its request',()=>{
+ // Regression guard: adopt() adds coverage_valid_for_ms to its anchor, so an anchor taken
+ // after the reply would extend coverage by the response latency.
+ const src=fs.readFileSync(path.resolve(__dirname,'../src/upload-shaping-view.ts'),'utf8');
+ const calls=[...src.matchAll(/adopt\(([^)]*)\)/g)].map(m=>m[1]).filter(a=>a.includes(',')&&!a.includes(':'));
+ assert.ok(calls.length>=4,calls);
+ for(const a of calls)assert.match(a,/^\w+,(sent)$/,a);
+ assert.ok(!/adopt\([^)]*performance\.now\(\)/.test(src));
+});
