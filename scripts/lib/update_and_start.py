@@ -385,8 +385,9 @@ def snapshot_bundle(backend, expected_manifest=None):
 
 CONTROL_SOCKET = '/run/flowgate-api/daemon.sock'
 DAEMON_PEER_UID = 0
-# Bounded single-line responses: the daemon's own request bound is 16384 bytes.
-RESPONSE_LIMIT = 1 << 20
+# List replies include Activity as well as rules and can legitimately exceed 1 MiB.
+# Bound the complete reply (including newline) independently of the request bound.
+RESPONSE_LIMIT = 8 << 20
 REQUEST_TIMEOUT = 5
 
 
@@ -415,9 +416,11 @@ class Host:
             if uid != DAEMON_PEER_UID:
                 raise RuntimeError('System daemon peer is not root')
             client.sendall(json.dumps(dict(fields, version=1, operation=operation)).encode() + b'\n')
-            line = client.makefile('rb').readline(RESPONSE_LIMIT)
+            line = client.makefile('rb').readline(RESPONSE_LIMIT + 1)
+        if len(line) > RESPONSE_LIMIT:
+            raise RuntimeError('Daemon response oversized')
         if not line.endswith(b'\n'):
-            raise RuntimeError('Daemon response truncated or oversized')
+            raise RuntimeError('Daemon response truncated')
         response = json.loads(line)
         if not isinstance(response, dict):
             raise RuntimeError('Daemon response is not an object')

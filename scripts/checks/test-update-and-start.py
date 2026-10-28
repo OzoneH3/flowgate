@@ -1007,5 +1007,43 @@ class EssentialStatusQuery(unittest.TestCase):
         self.assertEqual(m.essential_summary({'rule_ids': ['x'], 'revision': ''}), 'Stored Essential preset records: 1 (may include disabled/expired); discovery revision unknown; coverage not validated.')
 
 
+class BoundedHostReply(unittest.TestCase):
+    setUp = EssentialStatusQuery.setUp
+    serve = EssentialStatusQuery.serve
+
+    def test_large_legitimate_list_and_exact_bound(self):
+        for size in (2 << 20, m.RESPONSE_LIMIT):
+            reply = b'{"padding":"' + b'x' * (size - 15) + b'"}\n'
+            self.assertEqual(len(reply), size)
+            self.serve(reply)
+            self.assertEqual(len(m.Host().request('list')['padding']), size - 15)
+
+    def test_oversized_with_newline_is_rejected(self):
+        reply = b'{"padding":"' + b'x' * (m.RESPONSE_LIMIT - 14) + b'"}\n'
+        self.assertEqual(len(reply), m.RESPONSE_LIMIT + 1)
+        self.serve(reply)
+        with self.assertRaisesRegex(RuntimeError, 'oversized'):
+            m.Host().request('list')
+
+    def test_truncation_malformed_object_and_daemon_error(self):
+        for reply, exception in ((b'{}', RuntimeError), (b'not-json\n', ValueError), (b'[]\n', RuntimeError)):
+            self.serve(reply)
+            with self.assertRaises(exception):
+                m.Host().request('list')
+        self.serve(b'{"error":"refused"}\n')
+        with self.assertRaisesRegex(RuntimeError, 'refused'):
+            m.Host().status()
+
+    def test_stalled_server_propagates_timeout(self):
+        self.serve(b'', hang=True)
+        with self.assertRaises(socket.timeout):
+            m.Host().request('list')
+
+    def test_wrong_peer_refused_before_request(self):
+        with patch.object(m, 'DAEMON_PEER_UID', os.getuid() + 1):
+            with self.assertRaisesRegex(RuntimeError, 'not root'):
+                m.Host().request('list')
+
+
 if __name__ == '__main__':
     unittest.main()
