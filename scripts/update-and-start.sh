@@ -1,6 +1,8 @@
 #!/bin/sh
-# Install the approved pinned release; preserve protection and switch matching GUI.
-# Usage: scripts/update-and-start.sh [--dry-run] [--no-gui] [--autostart]
+# No arguments: launch/reuse installed GUI; no update or daemon restart.
+# --update (or explicit update options): install the approved pinned release.
+# Usage: scripts/update-and-start.sh [--launch | --dry-run]
+# Update: scripts/update-and-start.sh --update [--dry-run] [--no-gui] [--autostart]
 #        [--profile preserve|monitoring|incoming|both] [--wine-discovery] [--recover-stopped] [--local] [--acknowledge-outgoing-blocking]
 # Valid rules and Wine observer configuration are preserved. Daemon startup
 # archives expired rules and confirmed replaced native versions. Builds and sudo
@@ -8,9 +10,16 @@
 set -eu
 cd "$(dirname "$0")/.."
 root=$PWD
+if [ "$#" -eq 1 ] && [ "$1" = "--dry-run" ]; then
+  exec python3 scripts/lib/launch_installed.py --dry-run
+fi
+if [ "$#" -eq 0 ] || { [ "$#" -eq 1 ] && [ "$1" = "--launch" ]; }; then
+  exec python3 scripts/lib/launch_installed.py
+fi
 dry=0 gui=1 profile=preserve wine_discovery=0 recover_stopped=0 local_source=0 autostart=0 acknowledge_outgoing=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --update) shift;;
     --acknowledge-outgoing-blocking) acknowledge_outgoing=1; shift;;
     --profile) [ "$#" -gt 1 ] || { echo "--profile needs preserve, monitoring, incoming or both" >&2; exit 2; }; profile=$2; shift 2;;
     --local) local_source=1; shift;;

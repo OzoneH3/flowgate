@@ -1,0 +1,28 @@
+Everyday launch: scripts/update-and-start.sh
+
+With no arguments (or --launch), this verifies the running daemon's exact,
+approved source and the corresponding GUI manifest. It reuses the existing
+GUI or starts that GUI. It does not fetch, build, install, restart the daemon,
+change protection, replay caps, or edit autostart. Unavailable/unapproved or
+modified releases refuse; they never fall through to an install.
+--dry-run alone previews this launch decision without starting a GUI.
+
+An update is explicit: scripts/update-and-start.sh --update --local
+(--local skips fetching; --update --dry-run --local previews the update).
+The default exact update pin is 060fb6c33d53f259e236058473911adaab17b8e7,
+which the user explicitly approved and deployed. The prior 25dbb1a release
+remains approved for explicit guarded rollback only; it is not the default.
+No arbitrary HEAD or newer GUI candidate is authorized by this routing fix.
+Explicit protection/Wine/recovery options retain their existing semantics.
+
+The popup-close GUI is 1b7fbf4a6e8da800e28a1bbaeb29eaab1630582d. It is
+prepared for a GUI-only switch against installed 060fb6c3, with unchanged
+backend sources/API. It is not deployed or added to the approval allowlist.
+That switch requires exact-GUI approval first, refreshes preferences at switch
+time, and must preserve daemon generation, caps, protection and autostart state.
+Normal launch currently continues to use installed 060fb6c3.
+
+Rollback is never selected by ordinary launch. If deliberately needed, use the
+guarded coordinator with an explicit approved revision, e.g. --revision
+25dbb1a90e81f6fc2a150231cae699db87e430f3, and review the resulting protection
+and GUI pairing. The launcher itself has no rollback or installation operation.

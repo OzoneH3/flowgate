@@ -74,15 +74,23 @@ esac
                               env=dict(self.env, **env), text=True, capture_output=True, timeout=5)
     def calls(self):
         return self.log.read_text() if self.log.exists() else ''
+    def test_launch_routes_never_fetch_or_update(self):
+        self.tool('python3', '#!/bin/sh\nprintf "%s\\n" "$*" >> "$CALLS"\n')
+        for args in ((), ('--launch',), ('--dry-run',)):
+            if self.log.exists(): self.log.unlink()
+            r = self.run_source(*args)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(self.calls().strip(), 'scripts/lib/launch_installed.py' + (' --dry-run' if args == ('--dry-run',) else ''))
+
     def test_hung_fetch_times_out_before_prepare_or_control(self):
-        r = self.run_source(HANG='1')
+        r = self.run_source('--update', HANG='1')
         self.assertEqual(r.returncode, 124, r.stderr)
         self.assertIn('--local', r.stderr)
         self.assertNotIn('PREPARE', self.calls())
         self.assertNotIn('COORDINATOR', self.calls())
         self.assertNotIn('SUDO', self.calls())
     def test_failed_fetch_never_falls_back_to_local(self):
-        r = self.run_source(PULL_EXIT='17')
+        r = self.run_source('--update', PULL_EXIT='17')
         self.assertEqual(r.returncode, 17)
         self.assertIn('no installation or protection action', r.stderr)
         self.assertNotIn('PREPARE', self.calls())
@@ -120,7 +128,7 @@ esac
 
     def test_fetch_is_noninteractive_and_bounded(self):
         self.tool('timeout', '#!/bin/sh\nprintf "%s|%s|%s\\n" "$GIT_TERMINAL_PROMPT" "$GIT_SSH_COMMAND" "$*" >> "$CALLS"\nshift 2\nexec "$@"\n')
-        r = self.run_source()
+        r = self.run_source('--update')
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn('0|ssh -oBatchMode=yes -oConnectTimeout=10 -oConnectionAttempts=1|--kill-after=5s 60s git', self.calls())
 

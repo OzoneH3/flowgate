@@ -1,9 +1,10 @@
 {
   "approved": [
-    "25dbb1a90e81f6fc2a150231cae699db87e430f3"
+    "25dbb1a90e81f6fc2a150231cae699db87e430f3",
+    "060fb6c33d53f259e236058473911adaab17b8e7"
   ],
   "rejected": [
     "66313d5deaa350dc4e77adda44e1b986fb8e2619"
   ],
-  "note": "New releases require explicit review and exact-SHA approval; default updater stays on diagnostic25db, profiling off."
+  "note": "Exact 060fb6c explicitly deployed with user approval; routine update pin matches installed release. 25dbb1a retained for explicit rollback. Other revisions, including newer GUI candidates, require exact approval."
 }

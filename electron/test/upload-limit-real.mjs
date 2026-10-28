@@ -42,14 +42,14 @@ try{
 
  for(const [label,rate] of [['set8',8],['edit16',16],['disabled',null]]){
   assert.equal((await call({operation:'result',label})).result,null,'fresh journey required');
-  if(!await p.locator('#uploadLimitDialog').count()){await buttons.click();await wait(()=>p.locator('#uploadSave').isEnabled());await p.locator('#uploadDetails').click()}
+  if(!await p.locator('#uploadLimitDialog').count()){await buttons.click();await wait(()=>p.locator('#uploadSave').isEnabled())}
   for(let n=0;n<2;n++){await sleep(1200);assert.equal(await buttons.count(),1);assert.equal(await p.locator('#uploadLimitTitle').textContent(),'Upload limit · '+(identity.display_name||identity.name))}
-  await p.locator('#uploadRefresh').click();await wait(()=>p.locator('#uploadSave').isEnabled());
+  if(await p.locator('#uploadRefresh').isVisible())await p.locator('#uploadRefresh').click();await wait(()=>p.locator('#uploadSave').isEnabled());
   if(rate!==null){if(rate===16){await p.locator('#uploadUnits').selectOption('B/s');assert.equal(await p.locator('#uploadRate').inputValue(),'1000000');await p.locator('#uploadRate').fill('2000000')}else await p.locator('#uploadRate').fill(String(rate));await wait(()=>p.locator('#uploadSave').isEnabled());await p.locator('#uploadSave').click()}
   else {await wait(()=>p.locator('#uploadRemove').isEnabled());await p.locator('#uploadRemove').click()}
   await p.locator('#uploadLimitDialog').waitFor({state:'detached'});
   await wait(async()=>{const s=(await call({operation:'ready'})).status;return rate===null?s.status==='Disabled':s.configured_caps.some(c=>c.application===identity.key&&c.uid===0&&c.bits_per_second===rate*1e6)&&s.kernel?.covered_bindings>0});
-  if(rate!==null){await wait(()=>buttons.evaluate(e=>e.classList.contains('upload-configured')));assert.match(await buttons.getAttribute('data-upload-state'),new RegExp(rate+' Mbit/s'));await p.screenshot({path:captures+'/after-'+label+'.png'})}await call({operation:'measure',label});const r=await wait(async()=> (await call({operation:'result',label})).result);assert(!r.error,r.error);evidence.steps.push({label,...r,ui:await buttons.getAttribute('data-upload-state'),popupClosed:await p.locator('#uploadLimitDialog').count()===0});
+  if(rate!==null){await wait(()=>buttons.evaluate(e=>e.classList.contains('upload-configured')));await wait(async()=>new RegExp(rate+' Mbit/s').test(await buttons.getAttribute('data-upload-state')||''));assert.match(await buttons.getAttribute('data-upload-state'),new RegExp(rate+' Mbit/s'));await p.screenshot({path:captures+'/after-'+label+'.png'})}await call({operation:'measure',label});const r=await wait(async()=> (await call({operation:'result',label})).result);assert(!r.error,r.error);evidence.steps.push({label,...r,ui:await buttons.getAttribute('data-upload-state'),popupClosed:await p.locator('#uploadLimitDialog').count()===0});
  }
  evidence.finish=await call({operation:'finish'});assert.equal(evidence.errors.length,0);console.log(JSON.stringify(evidence.steps.map(s=>({label:s.label,payload:s.receiver_payload_mbit,deny:s.deny_receiver}))));
-}catch(e){evidence.error=String(e);if(page)evidence.body=await page.locator('body').innerText();throw e}finally{fs.writeFileSync(dir+'/ui-journey.json',JSON.stringify(evidence,null,2));if(app)await app.close()}
+}catch(e){evidence.error=String(e);if(page){evidence.body=await page.locator('body').innerText();await page.screenshot({path:captures+'/failure.png'});evidence.popup=await page.locator('#uploadLimitDialog').evaluateAll(es=>es.map(e=>({rect:e.getBoundingClientRect().toJSON(),style:e.getAttribute('style')})))}throw e}finally{fs.writeFileSync(dir+'/ui-journey.json',JSON.stringify(evidence,null,2));if(app)await app.close()}
