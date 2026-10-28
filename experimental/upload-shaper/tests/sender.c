@@ -323,7 +323,13 @@ int main(int argc, char **argv) {
       transfer(path, 0);
     else if (sscanf(line, "RECV %511s", path) == 1)
       transfer(path, 1);
-    else if (sscanf(line, "PEER %d", &lp) == 1) {
+    else if (sscanf(line, "SOPRIO %u", (unsigned *)&lp) == 1) {
+      // Fixture only: attempt to select a traffic-control class via SO_PRIORITY.
+      int ok = 0;
+      for (int i = 0; i < nf; i++)
+        ok += !setsockopt(fds[i], SOL_SOCKET, SO_PRIORITY, &lp, sizeof(lp));
+      printf("{\"so_priority_set\":%d}\n", ok);
+    } else if (sscanf(line, "PEER %d", &lp) == 1) {
       if (fam == 4)
         ((struct sockaddr_in *)&dst)->sin_port = htons(lp);
       else
