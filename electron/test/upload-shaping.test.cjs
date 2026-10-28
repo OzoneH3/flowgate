@@ -118,3 +118,41 @@ test('coverage is zero for an unconfigured direction even when the other directi
  assert.deepEqual(limitCoverage(up,cap,'download',false),{requested:0,confirmed:0});
  assert.deepEqual(limitCoverage(up,cap,'upload',false),{requested:1,confirmed:1});
 });
+
+const prio=require('../dist/test/upload-shaping.cjs');
+test('traffic priority edits keep both rates; rate edits keep priority; Normal removes only the priority',()=>{
+ const both={...cap,download_bits_per_second:16000000};
+ const s=snap({configured_caps:[both]});
+ assert.deepEqual(prio.replaceCap(s,{expected_version:1,target:cap,bits_per_second:null,priority:'high'}),[{...both,traffic_priority:'high'}]);
+ const withPrio=snap({configured_caps:[{...both,traffic_priority:'low'}]});
+ assert.deepEqual(prio.replaceCap(withPrio,{expected_version:1,target:cap,direction:'download',bits_per_second:null}),[{...cap,traffic_priority:'low'}]);
+ assert.deepEqual(prio.replaceCap(withPrio,{expected_version:1,target:cap,bits_per_second:null,priority:'normal'}),[both]);
+ // Priority-only entry: deleting the priority removes the entry; deleting its last cap keeps the priority.
+ const only=snap({configured_caps:[{uid:1000,application:'native-alpha',bits_per_second:0,traffic_priority:'high'}]});
+ assert.deepEqual(prio.replaceCap(only,{expected_version:1,target:cap,bits_per_second:null,priority:'normal'}),[]);
+ assert.deepEqual(prio.replaceCap(withPrio,{expected_version:1,target:cap,direction:'upload',bits_per_second:null}).map(c=>c.traffic_priority),['low']);
+ assert.throws(()=>prio.replaceCap(s,{expected_version:1,target:cap,bits_per_second:null,priority:'critical'}),/Invalid traffic priority/);
+ assert.throws(()=>prio.validateBudget(15999999));assert.equal(prio.validateBudget(0),0);
+ assert.equal(prio.prioritySummary({supported:true,prioritySupported:true,snapshot:only},cap),'High · inactive (no budget)');
+ assert.equal(prio.prioritySummary({supported:true,prioritySupported:true,snapshot:{...only,upload_budget_bits_per_second:40000000}},cap),'High · UL budget · Partial');
+ assert.equal(prio.prioritySummary({supported:true,prioritySupported:false,snapshot:only},cap),'Unsupported');
+ const k={bindings:[{app:'1000:native-alpha',covered:true,upload_class:true,download_class:false},{app:'1000:native-alpha',covered:true,upload_class:false}]};
+ assert.deepEqual(prio.priorityCoverage({...only,upload_budget_bits_per_second:40000000,kernel:k},cap,false),{requested:2,confirmed:1});
+ assert.deepEqual(prio.priorityCoverage({...only,kernel:k},cap,false),{requested:0,confirmed:0});
+ assert.deepEqual(prio.priorityCoverage({...only,upload_budget_bits_per_second:40000000,kernel:k},cap,true),{requested:2,confirmed:0});
+});
+test('schema 2 is sent only with the capability; budgets are preserved unless edited',async t=>{
+ const h=await harness(t);
+ await assert.rejects(h.client.configure({generation:'g1',expected_version:1,target:{...cap,revision:'r1'},bits_per_second:null,priority:'high'}),/not supported/);
+ assert.equal(h.calls.filter(c=>c.operation==='upload-configure').length,0);
+ h.state.control.capabilities.push(prio.PRIORITY_CAPABILITY);
+ h.setSnapshot(snap({upload_budget_bits_per_second:40000000}));
+ await h.client.configure({generation:'g1',expected_version:1,target:{...cap,revision:'r1'},bits_per_second:null,priority:'high'});
+ const sent=h.calls.filter(c=>c.operation==='upload-configure').at(-1).upload_config;
+ assert.deepEqual(sent,{enabled:true,caps:[{...cap,traffic_priority:'high'}],schema:2,upload_budget_bits_per_second:40000000,download_budget_bits_per_second:0});
+ h.setSnapshot(snap({version:2,configured_caps:[{...cap,traffic_priority:'high'}],upload_budget_bits_per_second:40000000}));
+ await h.client.configure({generation:'g1',expected_version:2,budgets:{upload:0,download:40000000}});
+ const b=h.calls.filter(c=>c.operation==='upload-configure').at(-1).upload_config;
+ assert.deepEqual(b,{enabled:true,caps:[{...cap,traffic_priority:'high'}],schema:2,upload_budget_bits_per_second:0,download_budget_bits_per_second:40000000});
+ await assert.rejects(h.client.configure({generation:'g1',expected_version:1,budgets:{upload:0,download:0}}),/changed/);
+});

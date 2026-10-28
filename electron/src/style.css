@@ -1795,6 +1795,7 @@ body.hide-sidebar #activityView > aside { display:none; }
 .status-slot.upload-limit.upload-configured .slot-dot,
 .status-slot.upload-limit.unavailable .slot-dot,
 #infoRules .status-slot.upload-limit .slot-dot { display: none; }
+.status-slot.upload-limit.upload-configured .slot-icon.family-priority,
 .status-slot.upload-limit.upload-configured .slot-icon.family-ul-limit,
 #tree tbody tr[aria-selected='true'] .status-slot.upload-limit.upload-configured .slot-icon.family-ul-limit { background: #409cdb; color: #17232c; }
 .status-slot.upload-limit.unavailable .slot-icon { opacity: .55; }
@@ -1872,3 +1873,7 @@ body.hide-sidebar #activityView > aside { display:none; }
 
 .status-slot.upload-limit.upload-configured .slot-icon.family-dl-limit,
 #tree tbody tr[aria-selected='true'] .status-slot.upload-limit.upload-configured .slot-icon.family-dl-limit { background: #409cdb; color: #17232c; }
+
+.upload-setter-row.priority-setter-row { grid-template-columns: minmax(80px,1fr) 34px; }
+#priorityBudgets label { display: inline-block; margin: 4px 8px 4px 0; }
+#priorityBudgets input { width: 72px; }

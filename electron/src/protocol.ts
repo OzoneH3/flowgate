@@ -458,7 +458,7 @@ export interface Decision {
 }
 export interface Bridge {
   uploadStatus(): Promise<import("./upload-shaping").UploadView>;
-  uploadConfigure(value: import("./upload-shaping").UploadEdit | import("./upload-shaping").UploadCleanup): Promise<import("./upload-shaping").UploadView>;
+  uploadConfigure(value: import("./upload-shaping").UploadEdit | import("./upload-shaping").UploadCleanup | import("./upload-shaping").BudgetEdit): Promise<import("./upload-shaping").UploadView>;
   hostIdentity(): Promise<string>;
   guiBuild(): Promise<import('./build-info').GuiBuild>;
   zoneMigrationState(): Promise<import('./zone-migration').MigrationView>;
