@@ -14,8 +14,9 @@ Budgets (manual, per direction, independent)
 --------------------------------------------
 upload_budget_bits_per_second / download_budget_bits_per_second: 0 = none, otherwise
 16..10000 Mbit/s (provisional bounds). Without a direction's budget, priority is inactive
-in that direction and ordinary caps work exactly as before (legacy recipe: rate = ceil =
-cap). Priority only has an effect while the local budget is the busy shaping point. It
+in that direction and ordinary caps keep the legacy recipe (rate = ceil = cap) inside the
+common tree. Equivalence with the previous flat tree is intended; it is measured only for the
+tested legacy cap cases (UL 8 -> 7.65, DL 16 -> 15.35 Mbit/s payload), not proven universally. Priority only has an effect while the local budget is the busy shaping point. It
 cannot detect link capacity. Set the budget below the real bottleneck (e.g. 90-95 % of
 the measured WAN rate) or the queue builds in the router/ISP and priority does little;
 the headroom below the true capacity is lost for all budgeted traffic.
@@ -51,7 +52,11 @@ reversed tuple must exactly match a connected local socket; otherwise packets us
 bypass class outside the budget. Per-app UDP download is not supported; a connected UDP
 socket only joins the aggregate default. Later NAT/transparent-proxy/policy-routing
 transformations are unsupported. Excluded traffic still consumes the physical link, so
-budget effectiveness depends on how much traffic is outside scope.
+budget effectiveness depends on how much traffic is outside scope. These aggregate parser
+exclusions apply to the budget default path; the per-application download cap path keeps its
+existing contract (exact established TCP + fresh binding) and does not add the VLAN/multicast
+checks. Exclusion counters are measured evidence for the counted cases only and are not a
+complete inventory of out-of-scope traffic.
 Ingress shaping controls local delivery and induces TCP backpressure; it cannot reclaim
 download bandwidth already consumed on the incoming link.
 
@@ -67,9 +72,15 @@ acknowledgement is desired state; status reports applied version. Controller los
 the 5 s lease, NEW packets bypass both budgets (UL unmarked -> bypass, DL not redirected);
 packets already queued drain or drop (storage bounded, time not). Firewall Deny is
 unaffected. Steady-state ownership checks cover HTB rate/ceil/burst/cburst/prio of every
-class via ordinary dumps; quantum/linklayer are verified only during setup. Interrupted
-setup of the new classes recovers only the journalled step (parent leaf->inner change,
-leaf marker) and refuses any other difference.
+class via ordinary dumps; quantum/linklayer are verified only during setup (pending IFB
+adds use detailed intent; the generic UL pending-setup check is structural and does not
+compare every option of a newly added object). Interrupted setup at each new step recovered
+in the tested cases (25 clean interruptions; one changed IFB option refused); this does not
+prove refusal of every possible foreign mutation. The only new accepted UL deltas are the
+journalled parent's leaf->inner prio omission and the leaf marker on its own class.
+Journals: completed pre-priority journals are reconciled by removing the owned roots/IFB as
+before; pending IFB adds without detailed intent refuse; an old allocated minor is never
+reinterpreted as a budget/bypass/default class (cleanup deletes the whole owned root).
 
 API / UI
 --------
@@ -94,7 +105,9 @@ Low<->High swap within one window; UL budget removal keeps DL priority; legacy c
 unchanged (7.65 / 15.35); non-local destination to host wildcard sockets not redirected;
 connected UDP redirected and delivered; foreign filter refused; controller kill -> new
 packets bypass after ~4.1-4.6 s; 25 interrupted-setup cases cleaned; reserved
-SO_PRIORITY attempts ineffective; Deny 0 throughout. Low-class 0.48 Mbit/s stream under
+SO_PRIORITY attempts from an unconfigured app stayed within the budget (not a proof against
+inheriting a specific live application's class); offered UDP Deny checks after each window
+returned 0 deliveries (not a continuous trace). Low-class 0.48 Mbit/s stream under
 saturation: p95 ~89-92 ms in the guest. Bulk shares do NOT establish gaming/VoIP latency
 benefits. Failed runs (core1, recovery1, probe1-3) are retained, not relabelled.
 Final bundle 28b1a7ba: IPv6 saturation H/L/default 28.2/3.7/5.5; two High apps ~16/16 (no fairness
@@ -110,23 +123,30 @@ Bounded physical trial plan (NOT authorized by this document)
 Prerequisite: explicit approval of the exact bundle SHA. Reuse the method of the approved
 b06 download trial (.workspace/shaping-download-host): guarded exact-SHA deploy, preflight
 and final snapshots, one GUI, bounded Unraid Docker peer at 172.30.42.128 via enp7s0.
-1. Read-only first: current release/generation, rules (count + content hash), protection,
-   collector/Wine settings, autostart, configured caps/version, enp7s0 qdiscs/filters,
-   offloads, default_qdisc. Refuse on any foreign TC object or unsupported topology. No
-   offload changes.
-2. Deploy only the approved SHA with the guarded updater (records generation/version and
-   latest caps/settings; reject intervening edits; daemon restart = temporary unshaped
-   interval; caps are volatile and must be re-entered by CAS, never replayed).
-3. Bounded traffic (<=10 s windows) between two synthetic native client copies on the
-   host and the Unraid container (upload and download, TCP4): budget 40 Mbit/s per
-   direction via GUI; client X Low, client Y High, plus one unconfigured flow; record
-   receiver payload per app and class bytes; then swap priorities; then delete priorities
-   and budgets; uncapped control window. Offer UDP to a denied client: 0 delivered.
-4. Stop on: connectivity loss, ownership/verification fault, lease renewal gaps, foreign
-   configuration, unexpected rule/setting change.
-5. End state: Disabled, empty caps and budgets, qdiscs/filters equal to step 1, no owned
-   IFB or helpers, container removed, rules/settings unchanged.
-Rollback: ownership-verified cleanup first (disable via CAS; cleanup-only helper if
-faulted), never bare root-qdisc deletion; then guarded rollback to the previously
-approved exact release; verify running build, Both protection, rules, settings,
-autostart. If cleanup cannot be verified, stop and preserve journal/pins for review.
+1. Read-only snapshot before approval and again immediately before deploy: release,
+   generation, FULL desired limiter configuration (caps per direction, budgets,
+   priorities, version), rules (count + content hash), protection, collector/Wine
+   settings, autostart, enp7s0 qdiscs/filters, offloads, default_qdisc. Any change between
+   the two snapshots -> stop and ask (never overwrite newer user edits). Refuse on foreign
+   TC objects or unsupported topology. No offload changes.
+2. Ownership-verified cleanup of the current generation, then deploy only the approved SHA
+   with the guarded updater. The restart is a disclosed temporary unshaped interval.
+3. Reapply the saved desired configuration by a new-generation schema-2 CAS (never replay
+   cookies, classes or leases); applications must re-bind with fresh attribution; absent
+   ones stay Pending/Partial. Verify coverage and receiver behaviour before testing.
+4. Bounded test traffic (<=10 s windows) between two synthetic native client copies on the
+   host and the Unraid container, TCP4, both directions. Use test-only entries for those
+   clients; a test budget is set only if none existed (otherwise record the existing one
+   and test under it). Low/High, swap, delete; offered UDP to a denied client: 0 delivered.
+   Stop on connectivity loss, ownership/verification fault, renewal gaps, foreign
+   configuration or any unexpected rule/setting change.
+5. End: remove only the test-created entries/budgets; the user's saved configuration stays
+   applied. "Disabled, no shaping objects, qdiscs equal to step 1" is the expected end
+   state ONLY if the initial configuration was empty; otherwise owned objects for the
+   restored configuration legitimately remain. Rules/settings unchanged; container removed.
+Rollback: disable via CAS with ownership-verified cleanup (cleanup-only helper if faulted),
+never bare root-qdisc deletion; guarded rollback to the previously approved exact release;
+then reapply the same saved desired configuration by a new-generation CAS with fresh
+binding, and verify coverage/receiver behaviour plus running build, Both protection,
+rules, settings and autostart. If cleanup cannot be verified, stop and preserve
+journal/pins for review.

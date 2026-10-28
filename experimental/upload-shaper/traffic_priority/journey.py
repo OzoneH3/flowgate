@@ -223,11 +223,13 @@ try:
  peerop('setup')
  original=qdiscs()
  EXE={'A':'alpha','C':'gamma','U':'beta','D':'denied'}
+ for i in range(14):shutil.copy2(P/'alpha',P/f'app{i:02d}')
  senders={};procs={}
- for n in ['A','C','U','D']:
+ for i in range(14):EXE[f'X{i:02d}']=f'app{i:02d}'
+ for n in ['A','C','U','D']+[f'X{i:02d}' for i in range(14)]:
   p=spawn(EXE[n],n);senders[n]=p;procs[n]=json.loads(cmd(P/'inspect','inspect',p.pid))
  db=sqlite3.connect(R/'rules.db');db.execute('create table rules(id text primary key,document text not null)');db.execute('pragma user_version=1')
- for n in ['A','C','U','D']:
+ for n in ['A','C','U','D']+[f'X{i:02d}' for i in range(14)]:
   a=procs[n]['application'];rule={'schema':2,'id':'tp-'+n,'version':1,'created':'2026-01-01T00:00:00Z','action':'block' if n=='D' else 'allow','priority':0,'executable':a['executable'],'filter':{'application':a['key'],'revision':a['revision'],'uid':0,'direction':'outgoing','protocol':'*'}};db.execute('insert into rules values(?,?)',(rule['id'],json.dumps(rule)))
  db.commit();db.close();os.chmod(R/'rules.db',0o600)
  (R/'protection.json').write_text('{"schema":1,"mode":"both"}');os.chmod(R/'protection.json',0o600)
@@ -249,18 +251,55 @@ try:
  g2=phase('G2',ul={'A':1,'C':1,'U':1},dl={'A':(1,1),'C':(1,1),'U':(1,1)},
       expect={'ul:A':(6.0,30),'ul:C':(6.0,30),'ul:U':(4.5,7.5),'dl:A':(6.0,30),'dl:C':(6.0,30),'dl:U':(4.5,7.5)})
  gate('G2-two-high-split',g2);record('two-high-split',note='no fairness promise among equal priorities; recorded only',first=g2['_first'])
- # 16 configured applications at the minimum 16 Mbit/s budget (14 idle copies give real keys).
- extra={}
- for i in range(14):
-  exe=P/f'app{i:02d}';shutil.copy2(P/'alpha',exe);q=spawn(f'app{i:02d}',f'idle{i:02d}');extra[f'app{i:02d}']=json.loads(cmd(P/'inspect','inspect',q.pid))['application']['key']
- many=[cap('A',prio='low'),cap('C',prio='high')]+[{'uid':0,'application':k,'bits_per_second':0,'traffic_priority':'high'} for k in extra.values()]
+ # 16 configured AND instantiated applications at the minimum 16 Mbit/s budget: every app
+ # (A, C, X00..X13) holds one verified connected TCP socket, so all 16 get UL+DL classes.
+ xs=[f'X{i:02d}' for i in range(14)]
+ many=[cap('A',prio='low'),cap('C',prio='high')]+[cap(x,prio='high') for x in xs]
  t0=time.monotonic();s=configure(many,ub=16_000_000,db=16_000_000);t_apply=time.monotonic()-t0
- alloc=tp(s);record('min-budget-population',apply_seconds=round(t_apply,3),apps=len(many),traffic_priority=alloc,kernel={k:(s.get('kernel') or {}).get(k) for k in ('max_maintenance_pass_ms','max_completion_gap_ms','max_renewal_span_ms','maintenance_pass_ms')})
+ pop={}
+ for n in ['A','C']+xs:
+  h=spawn(EXE[n],'pop-'+n);open_retry(h,'OPEN 4 1 1 1 0 43003','pop-'+n);pop[n]=h
+ def instantiated(s):
+  apps=tp(s).get('apps') or {}
+  return sum(1 for v in apps.values() if v.get('upload') and v.get('download'))
+ s=wait(lambda s:instantiated(s)==16,120)
+ record('min-budget-population',configure_seconds=round(t_apply,3),instantiated=instantiated(s),bindings=len(bindings(s)),traffic_priority=tp(s),
+        kernel={k:(s.get('kernel') or {}).get(k) for k in ('max_maintenance_pass_ms','max_completion_gap_ms','max_renewal_span_ms','maintenance_pass_ms','existence_pass_ms')})
+ def edit_all(label,caps,ub,db):
+  samples=[];stop_s=threading.Event()
+  def sampler():
+   while not stop_s.is_set():
+    try:
+     x=status();k=x.get('kernel') or {}
+     samples.append({'status':x['status'],'valid_for_ms':x.get('coverage_valid_for_ms'),'expired':x.get('coverage_snapshot_expired'),'covered':k.get('covered_bindings'),'applied':x['applied_version'],'version':x['version']})
+    except Exception as e:samples.append({'error':str(e)})
+    time.sleep(.25)
+  th=threading.Thread(target=sampler,daemon=True);th.start()
+  before=status();t=time.monotonic();after=configure(caps,ub=ub,db=db);dt=time.monotonic()-t
+  after=wait(lambda s:instantiated(s)==16 and (s.get('kernel') or {}).get('covered_bindings',0)>=16,60)
+  stop_s.set();th.join()
+  k0=before.get('kernel') or {};k1=after.get('kernel') or {}
+  rec={'label':label,'apply_seconds':round(dt,3),'instantiated_after':instantiated(after),'classes_changed':sum(1 for a in (tp(after).get('apps') or {}) if (tp(before).get('apps') or {}).get(a)!=(tp(after).get('apps') or {}).get(a)),
+       'kernel_before':{k:k0.get(k) for k in ('max_maintenance_pass_ms','max_completion_gap_ms','max_renewal_span_ms')},
+       'kernel_after':{k:k1.get(k) for k in ('max_maintenance_pass_ms','max_completion_gap_ms','max_renewal_span_ms')},
+       'min_valid_for_ms':min([x['valid_for_ms'] for x in samples if x.get('valid_for_ms') is not None] or [None]) if samples else None,
+       'expired_samples':sum(1 for x in samples if x.get('expired')),'samples':len(samples),'statuses':sorted({x.get('status') for x in samples if x.get('status')}),
+       'default_class':tp(after).get('default_class')}
+  record('population-edit',**rec);return rec
+ e1=edit_all('budget-16-to-20',many,20_000_000,20_000_000)
+ flipped=[cap('A',prio='high'),cap('C',prio='low')]+[cap(x,prio='low') for x in xs]
+ e2=edit_all('all-levels-flipped',flipped,20_000_000,20_000_000)
+ results['G3a-16-instantiated-live-edits']={'instantiated':e1['instantiated_after']==16 and e2['instantiated_after']==16,'all_classes_changed':e1['classes_changed']==16 and e2['classes_changed']==16,
+  'no_coverage_expiry':e1['expired_samples']==0 and e2['expired_samples']==0,'completion_gap_within_lease':(e2['kernel_after']['max_completion_gap_ms'] or 0)<5000}
+ configure(many,ub=16_000_000,db=16_000_000);wait(lambda s:instantiated(s)==16,60)
  def swap16():
   t=time.monotonic();configure([cap('A',prio='high'),cap('C',prio='low')]+many[2:],ub=16_000_000,db=16_000_000);record('min-budget-live-edit',apply_seconds=round(time.monotonic()-t,3),kernel={k:((status().get('kernel') or {}).get(k)) for k in ('max_maintenance_pass_ms','max_completion_gap_ms','max_renewal_span_ms')})
+ HOLD.update({'A':1,'C':1})
  g3=phase('G3',ul={'A':1,'C':1,'U':1},dl={'A':(1,1),'C':(1,1),'U':(1,1)},dur=20000,edit=swap16,
       expect={'ul:C':(8,15.5),'dl:C':(8,15.5),'ul:A':(0.2,2.0),'dl:A':(0.2,2.0),'2:ul:A':(8,15.5),'2:dl:A':(8,15.5),'2:ul:C':(0.2,2.0),'2:dl:C':(0.2,2.0)})
  gate('G3-min-budget-16-apps-live-edit',g3)
+ for h in pop.values():h.terminate();h.wait()
+ HOLD.clear()
  configure([],enabled=False);assert qdiscs()==original
  record('pre-ui-results',results=results,connect_retries=RETRIES)
  # ---- Real UI journey: the GUI configures budgets and priorities; the guest measures. ----
