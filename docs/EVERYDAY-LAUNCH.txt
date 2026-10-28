@@ -9,12 +9,18 @@ modified releases refuse; they never fall through to an install.
 
 An update is explicit: scripts/update-and-start.sh --update --local
 (--local skips fetching; --update --dry-run --local previews the update).
-The default exact update pin is b06ae6a92ed605d1a1d2852aa2c28c941bacb0d1.
-The user explicitly approved this exact matched release for the bounded
-physical download trial and authorized leaving it installed after success.
-The trial passed. Both backend and GUI now run that release; login autostart
-uses its stable .workspace/automatic-zone-releases/<exact SHA>/launch-ui.
-The earlier 060fb6c3 and 25dbb1a approved releases remain available for explicit
+The default exact update pin is daa12524d2e88b9c37ce961c7fe314dc9c077941.
+The user explicitly requested this matched UL/DL popup release deployment.
+Backend and GUI run that exact release; login autostart uses its stable
+.workspace/automatic-zone-releases/<exact SHA>/launch-ui. Deployment verified
+Both protection active/ready, the UDP collector active, all 86 rule documents
+preserved, shaping Disabled with no caps, and unchanged interface qdiscs and
+filters. The GUI acknowledged its main window loaded.
+
+The backend source is unchanged from the approved b06ae6a physical trial;
+its backend evidence was reused. The new GUI passed 409 Node tests and a
+capped native synthetic-API journey. This deployment did not repeat the
+physical shaping trial. Earlier approved releases remain available for explicit
 guarded rollback only. No moving master or arbitrary newer release is approved.
 Explicit protection/Wine/recovery options retain their existing semantics.
 
