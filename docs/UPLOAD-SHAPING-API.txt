@@ -222,3 +222,13 @@ Old upload-only daemons must not receive download edits. Kernel status includes
 TCP-direction eligibility, not current coverage: require covered=true and a live
 coverage snapshot as well. No change to permission identity, fresh binding proof,
 lease duration or manager ownership. See DOWNLOAD-LIMITER.txt for explicit gaps.
+
+Traffic priority extension (experimental-traffic-priority-v1)
+ Cap.traffic_priority: "low" | "high" (omitted/"normal" = Normal), one value for both directions.
+ upload_config.schema = 2, upload_budget_bits_per_second, download_budget_bits_per_second
+ (0 = none, 16..10000 Mbit/s). schema 2 is required when the request or the stored config has a
+ budget or priority (else schema_upgrade_required); unadmittable floors -> allocation_below_minimum.
+ A cap entry is valid with any cap or a non-Normal priority. Budget-only enabled configs are allowed.
+ Snapshot adds upload/download_budget_bits_per_second; kernel.traffic_priority reports budgets,
+ applied tuples, default class and evidence counters; bindings add upload_class/download_class
+ (direction eligibility; AND with covered and snapshot expiry). See docs/TRAFFIC-PRIORITY.txt.

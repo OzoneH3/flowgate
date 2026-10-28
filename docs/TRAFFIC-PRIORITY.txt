@@ -1,0 +1,127 @@
+Experimental per-application traffic priority (shared UL/DL limiter)
+====================================================================
+
+Scope and separation
+--------------------
+One Low / Normal / High traffic priority per verified native application, applying to
+both directions. Normal is the default and is not stored. It is part of the existing
+limiter: same daemon, discovery, socket-binding proof, configuration/CAS API, controller,
+leases, ownership journal, status and compact popup. It is SHAPING ONLY: never an
+Allow/Deny input, never related to firewall rule "Priority" (verdict precedence) or to
+priority_discovery (binding hint order). No launcher/parent inheritance.
+
+Budgets (manual, per direction, independent)
+--------------------------------------------
+upload_budget_bits_per_second / download_budget_bits_per_second: 0 = none, otherwise
+16..10000 Mbit/s (provisional bounds). Without a direction's budget, priority is inactive
+in that direction and ordinary caps work exactly as before (legacy recipe: rate = ceil =
+cap). Priority only has an effect while the local budget is the busy shaping point. It
+cannot detect link capacity. Set the budget below the real bottleneck (e.g. 90-95 % of
+the measured WAN rate) or the queue builds in the router/ISP and priority does little;
+the headroom below the true capacity is lost for all budgeted traffic.
+
+Semantics under a saturated budget (FlowGate design, not NetLimiter parity)
+--------------------------------------------------------------------------
+Each class first receives a floor; remaining capacity goes to High, then Normal (the
+aggregate default class plus configured Normal-cap apps), then Low, each bounded by its
+own cap and the budget (HTB prio for excess, guaranteed rate for floors).
+Floors (provisional constants, validated only in the isolated guest): Low 10 %,
+Normal 15 %, High 20 % of the budget per class, clamped to the class ceiling, all scaled
+by one factor so the sum never exceeds 60 % of the budget. Population = the aggregate
+default plus every CONFIGURED app with a cap or non-Normal priority in that direction.
+A configuration whose floor would fall below 256 kbit/s is refused
+(allocation_below_minimum). Floors are scheduler allocations, not delivery or latency
+guarantees. All unconfigured/unbound host traffic shares ONE Normal default class, so a
+single Low app competes with "everything else" as one aggregate. Multiple sockets or
+processes of one app share one class (no extra entitlement). Equal-priority apps share
+excess by HTB scheduling; no fairness ratio between them is promised.
+Caps stay hard long-run ceilings (token-bucket bursts aside); priority never raises a cap.
+
+Scope of the budget: connected host-local sockets only
+------------------------------------------------------
+Download: ingress packets are redirected to the owned IFB only when the full 4-tuple
+exactly matches a CONNECTED local socket in the interface namespace (local address =
+destination, remote address/port = source); per-app classes additionally need the
+existing verified established-TCP binding. Listener (SYN) matches, unconnected/wildcard
+UDP sockets (servers, kernel VPN endpoints, many games), packets without such a socket
+(forwarded, other network namespaces, closed ports), fragments, IPv6 extension headers,
+VLAN, multicast/broadcast and non-TCP/UDP are NOT redirected and are reported as
+excluded counters (measured evidence gaps, not proof of foreign traffic). Upload: the
+reversed tuple must exactly match a connected local socket; otherwise packets use the
+bypass class outside the budget. Per-app UDP download is not supported; a connected UDP
+socket only joins the aggregate default. Later NAT/transparent-proxy/policy-routing
+transformations are unsupported. Excluded traffic still consumes the physical link, so
+budget effectiveness depends on how much traffic is outside scope.
+Ingress shaping controls local delivery and induces TCP backpressure; it cannot reclaim
+download bandwidth already consumed on the incoming link.
+
+Tree, ownership, failure
+------------------------
+NIC and owned IFB: root HTB (default = bypass fff1) -> budget fff0 -> {default fffe,
+applications 1..ffef}; bypass fff1 beside the budget. Reserved minors are excluded from
+application ids in allocator, kernel helper and both BPF readers; a socket cannot select
+them via SO_PRIORITY (namespace cleared before classification). Edits apply complete
+(rate, ceil, prio) tuples per class in order: shrink, budget parent, grow, leaf sizing;
+mode transitions withdraw/publish the BPF budget flag around the TC changes. API
+acknowledgement is desired state; status reports applied version. Controller loss: after
+the 5 s lease, NEW packets bypass both budgets (UL unmarked -> bypass, DL not redirected);
+packets already queued drain or drop (storage bounded, time not). Firewall Deny is
+unaffected. Steady-state ownership checks cover HTB rate/ceil/burst/cburst/prio of every
+class via ordinary dumps; quantum/linklayer are verified only during setup. Interrupted
+setup of the new classes recovers only the journalled step (parent leaf->inner change,
+leaf marker) and refuses any other difference.
+
+API / UI
+--------
+Cap.traffic_priority ("low"|"high"; "normal" normalised to omitted). Config fields
+schema, upload_budget_bits_per_second, download_budget_bits_per_second. schema 2 is
+required when the request OR the stored configuration has a budget or priority;
+otherwise schema_upgrade_required (an old full-replacement client cannot erase them).
+Capability experimental-traffic-priority-v1. UI: the Rule Status Priority slot and the
+Info View Priority cell open the shared compact popup with Low/Normal/High, OK, Advanced
+and Delete (= Normal); priority edits keep both directional rates and vice versa. Budgets
+are edited in the existing limits list dialog. Session-scoped like caps.
+
+Evidence (isolated guest only; see .workspace/shaping-prio/README-impl.txt)
+--------------------------------------------------------------------------
+Scheduler probe (tc u32, no FlowGate) motivated strict excess priority + floors; weight
+ratios were not reliable when classes competed only for borrowed capacity.
+Real daemon/controller, 40 Mbit/s budgets, floors 6/4/8 (default/Low/High):
+saturation High/Low/default payload UL 28.7/3.5/5.7, DL 28.7/3.8/5.7, simultaneous
+equal; Low 1 vs 4 sockets ratio 0.99; Low alone 34.0 UL+DL / 38.2 UL-only (27.1 in the
+failed core1 run, retained as variance); High capped 8 -> 7.57; live
+Low<->High swap within one window; UL budget removal keeps DL priority; legacy caps
+unchanged (7.65 / 15.35); non-local destination to host wildcard sockets not redirected;
+connected UDP redirected and delivered; foreign filter refused; controller kill -> new
+packets bypass after ~4.1-4.6 s; 25 interrupted-setup cases cleaned; reserved
+SO_PRIORITY attempts ineffective; Deny 0 throughout. Low-class 0.48 Mbit/s stream under
+saturation: p95 ~89-92 ms in the guest. Bulk shares do NOT establish gaming/VoIP latency
+benefits. Failed runs (core1, recovery1, probe1-3) are retained, not relabelled.
+Not established: physical NIC behaviour, host CPU, WAN/ISP bottlenecks, automatic
+capacity detection, NetLimiter's Critical level, reaction-speed and slider semantics.
+
+Bounded physical trial plan (NOT authorized by this document)
+-------------------------------------------------------------
+Prerequisite: explicit approval of the exact bundle SHA. Reuse the method of the approved
+b06 download trial (.workspace/shaping-download-host): guarded exact-SHA deploy, preflight
+and final snapshots, one GUI, bounded Unraid Docker peer at 172.30.42.128 via enp7s0.
+1. Read-only first: current release/generation, rules (count + content hash), protection,
+   collector/Wine settings, autostart, configured caps/version, enp7s0 qdiscs/filters,
+   offloads, default_qdisc. Refuse on any foreign TC object or unsupported topology. No
+   offload changes.
+2. Deploy only the approved SHA with the guarded updater (records generation/version and
+   latest caps/settings; reject intervening edits; daemon restart = temporary unshaped
+   interval; caps are volatile and must be re-entered by CAS, never replayed).
+3. Bounded traffic (<=10 s windows) between two synthetic native client copies on the
+   host and the Unraid container (upload and download, TCP4): budget 40 Mbit/s per
+   direction via GUI; client X Low, client Y High, plus one unconfigured flow; record
+   receiver payload per app and class bytes; then swap priorities; then delete priorities
+   and budgets; uncapped control window. Offer UDP to a denied client: 0 delivered.
+4. Stop on: connectivity loss, ownership/verification fault, lease renewal gaps, foreign
+   configuration, unexpected rule/setting change.
+5. End state: Disabled, empty caps and budgets, qdiscs/filters equal to step 1, no owned
+   IFB or helpers, container removed, rules/settings unchanged.
+Rollback: ownership-verified cleanup first (disable via CAS; cleanup-only helper if
+faulted), never bare root-qdisc deletion; then guarded rollback to the previously
+approved exact release; verify running build, Both protection, rules, settings,
+autostart. If cleanup cannot be verified, stop and preserve journal/pins for review.

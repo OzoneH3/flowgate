@@ -15,6 +15,7 @@ npm --prefix electron run build
 cp -r electron/dist "$out/electron/dist"
 cp electron/package.json "$out/electron/package.json"
 cp docs/UPLOAD-EXPERIMENTAL-TRIAL.txt "$out/TRIAL.txt"
+cp docs/TRAFFIC-PRIORITY.txt "$out/TRAFFIC-PRIORITY.txt"
 printf '\nPinned experimental release: %s\n' "$revision" >> "$out/TRIAL.txt"
 cat > "$out/launch-ui" <<'EOF'
 #!/bin/sh
