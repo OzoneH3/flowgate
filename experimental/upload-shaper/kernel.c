@@ -13,9 +13,12 @@ struct value {
   uint64_t until;
   uint32_t id, download; // egress class, IFB class (either may be 0)
 };
+// The config map value reuses this layout: until, egress major, flags.
 struct download_config {
-  uint32_t major, ifindex;
+  uint32_t major, ifindex, flags, reserved; // flags bit0: download budget
 };
+// Application class ids exclude the reserved budget/bypass/default minors.
+#define MAX_APP_MINOR 0xffef
 static void die(const char *s) {
   perror(s);
   exit(1);
@@ -130,13 +133,28 @@ static int dispatch(int argc, char **argv) {
     close(fd);
     return 0;
   }
+  if (!strcmp(op, "ulbudget")) {
+    // Upload budget flag (bit0 of config.flags); until/major are preserved.
+    if (argc != 4 || (strcmp(argv[3], "0") && strcmp(argv[3], "1")))
+      return 2;
+    int fd = map(pin, "config");
+    struct value v = {0};
+    if (bpf_map_lookup_elem(fd, &z, &v))
+      die("config");
+    v.download = argv[3][0] == '1';
+    if (bpf_map_update_elem(fd, &z, &v, BPF_ANY))
+      die("ulbudget");
+    close(fd);
+    return 0;
+  }
   if (!strcmp(op, "download")) {
-    if (argc != 5)
+    if (argc != 6 || (strcmp(argv[5], "0") && strcmp(argv[5], "1")))
       return 2;
     int fd = map(pin, "download");
     struct download_config d = {.major = strtoul(argv[3], NULL, 10),
-                                .ifindex = strtoul(argv[4], NULL, 10)};
-    if ((d.major && (d.major < 0x100 || d.major >= 0xff00)) || (!d.major) != (!d.ifindex))
+                                .ifindex = strtoul(argv[4], NULL, 10),
+                                .flags = argv[5][0] == '1'};
+    if ((d.major && (d.major < 0x100 || d.major >= 0xff00)) || (!d.major) != (!d.ifindex) || (!d.major && d.flags))
       return 2;
     if (bpf_map_update_elem(fd, &z, &d, BPF_ANY))
       die("download");
@@ -212,7 +230,9 @@ static int dispatch(int argc, char **argv) {
     struct value v = {.until = now() + 5000000000ULL,
                       .id = strtoul(argv[4], NULL, 10),
                       .download = strtoul(argv[5], NULL, 10)};
-    if (v.id > 0xfffd || v.download > 0xfffd || (!v.id && !v.download))
+    // Both ids may be 0: a priority-only application without any budgeted
+    // direction keeps its lease but receives no class.
+    if (v.id > MAX_APP_MINOR || v.download > MAX_APP_MINOR)
       return 2;
     if (bpf_map_update_elem(fd, &key, &v, BPF_ANY))
       die("binding");

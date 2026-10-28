@@ -23,8 +23,8 @@ func (e *Engine) uploadRequest(q Request, admin, readonly bool) (uploadshape.Sna
 	s, err := e.UploadShaping.Configure(*q.ExpectedVersion, *q.UploadConfig)
 	if err != nil {
 		code := "invalid_request"
-		if err.Error() == "stale_version" {
-			code = "stale_version"
+		if err.Error() == "stale_version" || err.Error() == "schema_upgrade_required" || err.Error() == "allocation_below_minimum" {
+			code = err.Error()
 		}
 		return s, mutationError(code, err.Error())
 	}

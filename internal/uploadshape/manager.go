@@ -22,6 +22,9 @@ type Cap struct {
 	Application           string `json:"application"`
 	BitsPerSecond         uint64 `json:"bits_per_second"`
 	DownloadBitsPerSecond uint64 `json:"download_bits_per_second,omitempty"`
+	// One traffic priority for both directions: "low" or "high"; omitted means
+	// Normal. Shaping only, unrelated to firewall rule priority.
+	TrafficPriority string `json:"traffic_priority,omitempty"`
 }
 
 func (c Cap) key() string { return strconv.FormatUint(uint64(c.UID), 10) + ":" + c.Application }
@@ -29,12 +32,89 @@ func (c Cap) key() string { return strconv.FormatUint(uint64(c.UID), 10) + ":" +
 type Config struct {
 	Enabled bool  `json:"enabled"`
 	Caps    []Cap `json:"caps"`
+	// Schema 2 is required whenever the request or the stored configuration
+	// carries traffic priority or a budget, so an older full-replacement client
+	// can never clear them by omission.
+	Schema         int    `json:"schema,omitempty"`
+	UploadBudget   uint64 `json:"upload_budget_bits_per_second,omitempty"`
+	DownloadBudget uint64 `json:"download_budget_bits_per_second,omitempty"`
 }
+
+// Provisional traffic-priority constants, mirrored from the controller's
+// allocate(); validated in the isolated guest only (not NetLimiter behaviour).
+const (
+	MinBudget = 16_000_000
+	MaxBudget = 10_000_000_000
+	minFloor  = 256_000
+)
+
+var floorPercent = map[string]uint64{"low": 10, "": 15, "high": 20}
+
+func advanced(c Config) bool {
+	if c.UploadBudget != 0 || c.DownloadBudget != 0 {
+		return true
+	}
+	for _, v := range c.Caps {
+		if v.TrafficPriority != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// allocationAdmitted repeats the controller's integer floor allocation for one
+// direction so an unadmittable configuration is refused at CAS time instead of
+// faulting the worker. The controller remains authoritative and re-checks.
+func allocationAdmitted(budget uint64, caps []Cap, download bool) bool {
+	if budget == 0 {
+		return true
+	}
+	type entry struct {
+		prio string
+		cap  uint64
+	}
+	entries := []entry{{"", 0}}
+	for _, c := range caps {
+		limit := c.BitsPerSecond
+		if download {
+			limit = c.DownloadBitsPerSecond
+		}
+		if limit != 0 || c.TrafficPriority != "" {
+			entries = append(entries, entry{c.TrafficPriority, limit})
+		}
+	}
+	var total uint64
+	nominal := make([]uint64, len(entries))
+	for i, e := range entries {
+		n := budget * floorPercent[e.prio] / 100
+		if e.cap != 0 && e.cap < n {
+			n = e.cap
+		}
+		nominal[i] = n
+		total += n
+	}
+	pool := budget * 3 / 5
+	for _, n := range nominal {
+		floor := n
+		if total > pool {
+			floor = n * pool / total
+		}
+		if floor < minFloor {
+			return false
+		}
+	}
+	return true
+}
+
 type Binding struct {
 	App      string `json:"app"`
 	Cookie   string `json:"cookie"`
 	Covered  bool   `json:"covered"`
 	Download bool   `json:"download"`
+	// Direction eligibility of the applied class (cap or budgeted priority);
+	// AND with Covered and snapshot expiry before reporting enforcement.
+	UploadClass   bool `json:"upload_class"`
+	DownloadClass bool `json:"download_class"`
 }
 type KernelStatus struct {
 	Compatibility json.RawMessage `json:"compatibility,omitempty"`
@@ -53,6 +133,7 @@ type KernelStatus struct {
 	MaintenancePassMillis    *int64                     `json:"maintenance_pass_ms,omitempty"`
 	ExistenceQueries         int                        `json:"existence_queries"`
 	Segmentation             json.RawMessage            `json:"segmentation,omitempty"`
+	TrafficPriority          json.RawMessage            `json:"traffic_priority,omitempty"`
 	ValidForMillis           int64                      `json:"valid_for_ms"`
 	Fault                    string                     `json:"fault,omitempty"`
 	Limitations              []string                   `json:"limitations,omitempty"`
@@ -85,6 +166,8 @@ type Snapshot struct {
 	Interface                string            `json:"interface"`
 	Status                   string            `json:"status"`
 	Caps                     []Cap             `json:"configured_caps"`
+	UploadBudget             uint64            `json:"upload_budget_bits_per_second"`
+	DownloadBudget           uint64            `json:"download_budget_bits_per_second"`
 	Kernel                   *KernelStatus     `json:"kernel,omitempty"`
 	ApplicationWide          bool              `json:"application_wide_guarantee"`
 	Gaps                     map[string]uint64 `json:"known_gaps"`
@@ -273,12 +356,17 @@ func verificationView(k *KernelStatus, sampleStart, now time.Time) (*int64, stri
 }
 
 func validateConfig(c Config) error {
-	if len(c.Caps) > MaxCaps || (!c.Enabled && len(c.Caps) != 0) {
-		return fmt.Errorf("at most16 caps; disabled configuration must have no caps")
+	if len(c.Caps) > MaxCaps || (!c.Enabled && (len(c.Caps) != 0 || c.UploadBudget != 0 || c.DownloadBudget != 0)) {
+		return fmt.Errorf("at most16 caps; disabled configuration must have no caps or budgets")
+	}
+	for _, b := range []uint64{c.UploadBudget, c.DownloadBudget} {
+		if b != 0 && (b < MinBudget || b > MaxBudget) {
+			return fmt.Errorf("invalid budget (16..10000Mbit/s, or 0 for none)")
+		}
 	}
 	seen := map[string]bool{}
 	for _, v := range c.Caps {
-		if len(v.Application) == 0 || len(v.Application) > 512 || strings.ContainsAny(v.Application, "\x00\r\n") || (v.BitsPerSecond == 0 && v.DownloadBitsPerSecond == 0) || (v.BitsPerSecond != 0 && (v.BitsPerSecond < 1_000_000 || v.BitsPerSecond > 1_000_000_000)) || (v.DownloadBitsPerSecond != 0 && (v.DownloadBitsPerSecond < 1_000_000 || v.DownloadBitsPerSecond > 1_000_000_000)) {
+		if len(v.Application) == 0 || len(v.Application) > 512 || strings.ContainsAny(v.Application, "\x00\r\n") || (v.TrafficPriority != "" && v.TrafficPriority != "low" && v.TrafficPriority != "high") || (v.BitsPerSecond == 0 && v.DownloadBitsPerSecond == 0 && v.TrafficPriority == "") || (v.BitsPerSecond != 0 && (v.BitsPerSecond < 1_000_000 || v.BitsPerSecond > 1_000_000_000)) || (v.DownloadBitsPerSecond != 0 && (v.DownloadBitsPerSecond < 1_000_000 || v.DownloadBitsPerSecond > 1_000_000_000)) {
 			return fmt.Errorf("invalid native application cap or rate (1..1000Mbit/s)")
 		}
 		if seen[v.key()] {
@@ -286,16 +374,29 @@ func validateConfig(c Config) error {
 		}
 		seen[v.key()] = true
 	}
+	if !allocationAdmitted(c.UploadBudget, c.Caps, false) || !allocationAdmitted(c.DownloadBudget, c.Caps, true) {
+		return fmt.Errorf("allocation_below_minimum")
+	}
 	return nil
 }
 
 // Configure accepts desired state, not a claim that kernel changes completed.
 // CAS makes lost acknowledgements reconcilable by reading version/configuration.
 func (m *Manager) Configure(expected uint64, c Config) (Snapshot, error) {
+	c.Caps = append([]Cap(nil), c.Caps...)
+	for i := range c.Caps {
+		if c.Caps[i].TrafficPriority == "normal" {
+			c.Caps[i].TrafficPriority = "" // explicit Normal is the default
+		}
+	}
 	if err := validateConfig(c); err != nil {
 		return Snapshot{}, err
 	}
 	m.mu.Lock()
+	if (advanced(c) || advanced(m.cfg)) && c.Schema != 2 {
+		m.mu.Unlock()
+		return Snapshot{}, fmt.Errorf("schema_upgrade_required")
+	}
 	if m.closed {
 		m.mu.Unlock()
 		return Snapshot{}, fmt.Errorf("controller closed")
@@ -309,6 +410,7 @@ func (m *Manager) Configure(expected uint64, c Config) (Snapshot, error) {
 	m.snap.Version++
 	m.snap.Enabled = c.Enabled
 	m.snap.Caps = append([]Cap{}, c.Caps...)
+	m.snap.UploadBudget, m.snap.DownloadBudget = c.UploadBudget, c.DownloadBudget
 	m.snap.Status = "Applying"
 	m.snap.LastError = ""
 	m.snap.Updated = time.Now()
@@ -523,29 +625,16 @@ func (m *Manager) run() {
 			m.gap("first_packet_binding_race")
 		}
 		if applied != version {
-			raw, err := call(t, map[string]any{"op": "status"})
-			if err != nil {
-				m.fail(err)
-				return
-			}
-			var s KernelStatus
-			if err = json.Unmarshal(raw, &s); err != nil {
-				m.fail(err)
-				return
-			}
-			desired := map[string]Cap{}
+			// One full desired policy: configured population, budgets and
+			// priorities. The controller removes instantiated applications that
+			// are no longer configured and applies an ordered class batch.
+			apps := map[string]any{}
 			for _, c := range cfg.Caps {
-				desired[c.key()] = c
+				apps[c.key()] = map[string]any{"rate": c.BitsPerSecond, "download_rate": c.DownloadBitsPerSecond, "priority": c.TrafficPriority}
 			}
-			for app := range s.Apps {
-				q := map[string]any{"op": "remove", "app": app}
-				if c, ok := desired[app]; ok {
-					q = map[string]any{"op": "cap", "app": app, "rate": c.BitsPerSecond, "download_rate": c.DownloadBitsPerSecond}
-				}
-				if _, err = call(t, q); err != nil {
-					m.fail(err)
-					return
-				}
+			if _, err := call(t, map[string]any{"op": "policy", "upload_budget": cfg.UploadBudget, "download_budget": cfg.DownloadBudget, "apps": apps}); err != nil {
+				m.fail(err)
+				return
 			}
 			var changed []Cap
 			for _, c := range cfg.Caps {
@@ -588,7 +677,7 @@ func (m *Manager) run() {
 			m.fail(fmt.Errorf("controller unsupported: %s", ks.Fault))
 			return
 		}
-		if ks.NextMinor > 0xfffd {
+		if ks.NextMinor > 0xffef { // application ids exclude reserved budget/bypass/default
 			if err = t.Close(); err != nil {
 				m.fail(err)
 				return
@@ -761,20 +850,22 @@ func (m *Manager) bind(t transport, h hint, version uint64) bool {
 		return false
 	}
 	var rate, downloadRate uint64
+	var prio string
 	for _, c := range cfg.Caps {
 		if c.key() == h.app {
 			rate = c.BitsPerSecond
 			downloadRate = c.DownloadBitsPerSecond
+			prio = c.TrafficPriority
 		}
 	}
-	if rate == 0 && downloadRate == 0 {
+	if rate == 0 && downloadRate == 0 && prio == "" {
 		return false
 	}
 	if !validFlow(h.flow) {
 		m.gap("unsupported_flow")
 		return false
 	}
-	_, err := call(t, map[string]any{"op": "bind", "protocol": h.flow.Protocol, "local": h.flow.Local.String(), "remote": h.flow.Remote.String(), "rate": rate, "download_rate": downloadRate, "expected_app": h.app, "expected_cookie": h.cookie})
+	_, err := call(t, map[string]any{"op": "bind", "protocol": h.flow.Protocol, "local": h.flow.Local.String(), "remote": h.flow.Remote.String(), "rate": rate, "download_rate": downloadRate, "priority": prio, "expected_app": h.app, "expected_cookie": h.cookie})
 	if err != nil {
 		m.gap("binding_refused")
 		m.mu.Lock()

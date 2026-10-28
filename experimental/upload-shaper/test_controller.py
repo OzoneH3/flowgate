@@ -9,6 +9,12 @@ spec = importlib.util.spec_from_file_location('m1', Path(__file__).with_name('co
 m1 = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m1)
 
+def init_policy(c, ul=None):
+    # Fakes bypass __init__: give them the session traffic-policy state.
+    c.policy_apps = {}; c.budgets = {'ul': 0, 'dl': 0}; c.applied_budget = {'ul': 0, 'dl': 0}
+    c.class_state = {'ul': dict(ul or {}), 'dl': {}}
+    return c
+
 class ModelTests(unittest.TestCase):
     def test_explicit_trial_never_weakens_default_namespace_or_topology_guards(self):
         for parent, host, uid, allowed in (('', False, 0, False), ('net:[1]', False, 0, False), ('net:[2]', False, 0, True), ('', True, 0, True), ('net:[2]', True, 0, False), ('', True, 1000, False)):
@@ -163,7 +169,7 @@ class ModelTests(unittest.TestCase):
         c.verify = lambda: None
         c.fault = None; c.applying = False; c.partial = []
         c.bindings = {'cookie': {'app': 'uid:key'}}; c.apps = {'uid:key': {'minor': 1}}
-        c.dev = 'test0'; c.next_minor=2
+        c.dev = 'test0'; c.next_minor=2; init_policy(c, {1: (1000000, 1000000, 0)})
         c.verified_at = time.monotonic(); c.verifications = 0; c.status_reports = 0  # fresh observation for legacy expectations
         import json
         c.counters = [{'packets': 0, 'bytes': 0} for _ in range(18)]
@@ -196,7 +202,7 @@ class ModelTests(unittest.TestCase):
 
     def test_live_change_keeps_class_and_creation_only_flow_count(self):
         c = self.fake(); c.apps = {'uid:key': {'minor': 3, 'rate': 4000000}}
-        c.major=0x123; c.mtu=1500
+        c.major=0x123; c.mtu=1500; c.bindings={}; init_policy(c, {3: (4000000, 4000000, 0)})
         ops=[];c.mutate=lambda *a:ops.append(a)
         c.set_cap('uid:key',8000000)
         self.assertEqual(c.apps['uid:key']['minor'],3)
@@ -205,7 +211,7 @@ class ModelTests(unittest.TestCase):
         self.assertIn('25000',ops[1])
 
     def test_retirement_unbinds_before_deleting_and_does_not_reuse_minor(self):
-        c = self.fake();c.apps = {'uid:key': {'minor': 3}};c.major=0x123;c.next_minor=4
+        c = self.fake();c.apps = {'uid:key': {'minor': 3}};c.major=0x123;c.next_minor=4;init_policy(c, {3: (4000000, 4000000, 0)})
         c.bindings = {'one': {'app': 'uid:key'}, 'other': {'app': 'other'}}
         ops=[];c.k=lambda *a: ops.append(('kernel',a));c.mutate=lambda *a:ops.append(('tc',a))
         c.remove('uid:key')
@@ -217,7 +223,7 @@ class ModelTests(unittest.TestCase):
 
 
     def test_churn_limit_is_concurrent_not_lifetime(self):
-        c=self.fake();c.apps={};c.bindings={};c.major=0x123;c.mtu=1500;c.next_minor=1
+        c=self.fake();c.apps={};c.bindings={};c.major=0x123;c.mtu=1500;c.next_minor=1;init_policy(c)
         c.mutate=lambda *a:None
         c.k=lambda *a:None
         for i in range(40):
@@ -235,7 +241,7 @@ class StatusObservationTests(unittest.TestCase):
         c = object.__new__(m1.Controller)
         c.fault = None; c.applying = False; c.partial = []
         c.bindings = {'cookie': {'app': 'uid:key'}}; c.apps = {'uid:key': {'minor': 1}}
-        c.dev = 'test0'; c.next_minor = 2; c.verified_at = None; c.verifications = 0; c.status_reports = 0
+        c.dev = 'test0'; c.next_minor = 2; init_policy(c, {1: (1000000, 1000000, 0)}); c.verified_at = None; c.verifications = 0; c.status_reports = 0
         c.counters = [{'packets': 0, 'bytes': 0} for _ in range(18)]
         c.health = {'config_until': 2**64-1, 'bindings': [{'cookie': 'cookie', 'minor': 1, 'until': 2**64-1}]}
         c.kcalls = []
@@ -569,6 +575,100 @@ class PendingIFBIntentTests(unittest.TestCase):
             if case == 'program': c.k = lambda *a: '{"program": 99}'
             with self.assertRaises(RuntimeError): c.verify_ifb_intent(actual, True)
             self.assertTrue(c.evidence)
+
+class TrafficPriorityTests(unittest.TestCase):
+    def test_allocation_floors_clamp_scale_and_minimum(self):
+        a = m1.allocate(40_000_000, {'default': ('normal', 0), 'l': ('low', 0), 'n': ('normal', 0), 'h': ('high', 0)})
+        self.assertEqual({k: v[0] for k, v in a.items()}, {'default': 6_000_000, 'l': 4_000_000, 'n': 6_000_000, 'h': 8_000_000})
+        self.assertEqual({k: v[2] for k, v in a.items()}, {'default': 1, 'l': 2, 'n': 1, 'h': 0})
+        capped = m1.allocate(40_000_000, {'default': ('normal', 0), 'h': ('high', 1_000_000)})
+        self.assertEqual(capped['h'], (1_000_000, 1_000_000, 0))
+        # Review counterexample: 16 High apps capped at 1 Mbit/s, budget 16 Mbit/s.
+        many = {'default': ('normal', 0), **{f'h{i}': ('high', 1_000_000) for i in range(16)}}
+        r = m1.allocate(16_000_000, many)
+        self.assertLessEqual(sum(v[0] for v in r.values()), 16_000_000 * 3 // 5)
+        self.assertTrue(all(v[0] <= v[1] for v in r.values()))
+        self.assertEqual(r['h0'][0], 1_000_000 * 9_600_000 // 18_400_000)
+        self.assertEqual(r, m1.allocate(16_000_000, dict(reversed(list(many.items())))))  # order independent
+        low = {'default': ('normal', 0), 'l': ('low', 1_000_000), **{f'h{i}': ('high', 0) for i in range(15)}}
+        with self.assertRaisesRegex(ValueError, 'allocation_below_minimum'):
+            m1.allocate(16_000_000, low)
+        for b in (0, None):
+            self.assertEqual(m1.budget(b), 0)
+        for b in (15_999_999, 10_000_000_001, '16000000', True):
+            with self.assertRaises(ValueError): m1.budget(b)
+
+    def test_priority_only_entries_and_validation(self):
+        self.assertEqual(m1.rates({'priority': 'high'}), (0, 0, 'high'))
+        self.assertEqual(m1.rates({'rate': 2_000_000}), (2_000_000, 0, 'normal'))
+        for bad in ({}, {'priority': 'normal'}, {'priority': 'critical'}, {'rate': 1}):
+            with self.assertRaises(ValueError): m1.rates(bad)
+
+    def fake(self):
+        c = object.__new__(m1.Controller)
+        init_policy(c)
+        c.dev = 'nic0'; c.ifb = 'fgdl00000000'; c.major = 0x123; c.dl_major = 0x456; c.mtu = 1500
+        c.ifb_index = 9; c.apps = {}; c.bindings = {}; c.next_minor = 1; c.applying = False
+        c.default_leaf_options = {'ul': [], 'dl': []}
+        c.compatibility = {'topology': 'veth-noqueue'}; c.link = {}
+        c.ops = []
+        c.mutate = lambda *a: c.ops.append(('tc',) + a)
+        c.k = lambda *a: c.ops.append(('k',) + a)
+        return c
+
+    def tuples(self, ops):
+        out = []
+        for o in ops:
+            if o[0] == 'tc' and o[1] == 'class' and 'rate' in o and 'bit' in o[o.index('rate') + 1] and 'gbit' not in o[o.index('rate') + 1]:
+                out.append((int(o[o.index('rate') + 1][:-3]), int(o[o.index('ceil') + 1][:-3])))
+        return out
+
+    def test_mode_transitions_order_and_rate_le_ceil(self):
+        c = self.fake()
+        c.set_cap('0:cap', 8_000_000, 0, 'normal')   # legacy cap-only
+        c.set_cap('0:pri', 0, 0, 'high')              # priority only: dormant without budget
+        self.assertEqual(c.class_ids('0:pri'), ('0', '0'))
+        self.assertEqual(c.class_state['ul'][1], (8_000_000, 8_000_000, 0))
+        c.ops.clear()
+        c.set_policy({'upload_budget': 40_000_000, 'apps': {'0:cap': {'rate': 8_000_000}, '0:pri': {'priority': 'high'}}})
+        tc = [i for i, o in enumerate(c.ops) if o[0] == 'tc']
+        publish = [i for i, o in enumerate(c.ops) if o[:2] == ('k', 'ulbudget')]
+        self.assertEqual(publish and c.ops[publish[0]], ('k', 'ulbudget', '1'))
+        self.assertGreater(publish[0], max(tc))           # marking only after the tree is ready
+        self.assertTrue(all(r <= ce for r, ce in self.tuples(c.ops)))
+        self.assertEqual(c.class_state['ul'][1], (6_000_000, 8_000_000, 1))   # floor clamp, cap ceiling
+        self.assertEqual(c.class_state['ul'][2], (8_000_000, 40_000_000, 0))  # High, uncapped
+        self.assertEqual(c.class_state['ul'][m1.DEFAULT_MINOR], (6_000_000, 40_000_000, 1))
+        self.assertEqual(c.class_ids('0:pri'), ('2', '0'))   # no download budget: dormant on DL
+        self.assertEqual(c.class_state['dl'], {})
+        c.ops.clear()
+        c.set_policy({'apps': {'0:cap': {'rate': 8_000_000}, '0:pri': {'priority': 'high'}}})
+        first_tc = min(i for i, o in enumerate(c.ops) if o[0] == 'tc')
+        self.assertEqual(c.ops[0], ('k', 'ulbudget', '0'))  # withdraw marking first
+        self.assertLess(0, first_tc)
+        self.assertEqual(c.class_state['ul'], {1: (8_000_000, 8_000_000, 0)})
+        self.assertTrue(all(r <= ce for r, ce in self.tuples(c.ops)))
+
+    def test_policy_rejects_atomically_and_removes_unconfigured(self):
+        c = self.fake()
+        c.set_cap('0:a', 4_000_000)
+        c.set_cap('0:b', 4_000_000)
+        before = (dict(c.budgets), dict(c.policy_apps), dict(c.class_state['ul']))
+        bad = {'upload_budget': 16_000_000, 'apps': {'0:a': {'rate': 4_000_000}, '0:l': {'priority': 'low', 'rate': 1_000_000},
+               **{f'0:h{i}': {'priority': 'high'} for i in range(14)}}}
+        with self.assertRaisesRegex(ValueError, 'allocation_below_minimum'):
+            c.set_policy(bad)
+        self.assertEqual((c.budgets, c.policy_apps, c.class_state['ul']), before)
+        c.set_policy({'apps': {'0:a': {'rate': 4_000_000}}})
+        self.assertNotIn('0:b', c.apps)
+        self.assertEqual(set(c.class_state['ul']), {1})
+
+    def test_reserved_minors_and_bounds(self):
+        self.assertEqual((m1.MAX_APP_MINOR, m1.BUDGET_MINOR, m1.BYPASS_MINOR, m1.DEFAULT_MINOR), (0xffef, 0xfff0, 0xfff1, 0xfffe))
+        c = self.fake(); c.next_minor = 0xfff0
+        with self.assertRaisesRegex(ValueError, 'class_generation_exhausted'):
+            c.set_cap('0:x', 4_000_000)
+        self.assertEqual(m1.Controller.setup_queue_key(('class', 'add', 'dev', 'x', 'parent', '1:', 'classid', '1:fff0', 'htb')), 'class:fff0')
 
 if __name__ == '__main__':
     unittest.main()

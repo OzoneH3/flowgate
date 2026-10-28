@@ -21,6 +21,59 @@ MAX_APPS = 16
 MAX_BINDINGS = 128
 MIN_RATE = 1_000_000
 MAX_RATE = 1_000_000_000
+# Reserved class minors in both trees (application ids are 1..MAX_APP_MINOR).
+MAX_APP_MINOR = 0xffef
+BUDGET_MINOR = 0xfff0
+BYPASS_MINOR = 0xfff1
+DEFAULT_MINOR = 0xfffe
+# Traffic priority: provisional FlowGate constants (validated in the isolated
+# guest only; not NetLimiter behaviour and not kernel requirements).
+PRIORITIES = ('low', 'normal', 'high')
+HTB_PRIO = {'high': 0, 'normal': 1, 'low': 2}
+FLOOR_PERCENT = {'low': 10, 'normal': 15, 'high': 20}
+FLOOR_POOL = (3, 5)          # all floors together never exceed 60 % of the budget
+MIN_FLOOR = 256_000
+MIN_BUDGET = 16_000_000
+MAX_BUDGET = 10_000_000_000
+
+
+def priority(value):
+    if value in (None, ''):
+        return 'normal'
+    if value not in PRIORITIES:
+        raise ValueError('traffic priority must be low, normal or high')
+    return value
+
+
+def budget(value):
+    if value in (None, 0):
+        return 0
+    if type(value) is not int or not MIN_BUDGET <= value <= MAX_BUDGET:
+        raise ValueError('supported budget range: integer 16Mbit/s..10Gbit/s, or 0 for none')
+    return value
+
+
+def allocate(budget_bits, entries):
+    """Pure deterministic floor allocation for ONE direction.
+
+    entries: {key: (priority, cap)} for the configured population, including the
+    aggregate default as ('normal', 0); cap 0 means uncapped. Returns
+    {key: (floor, ceil, htb_prio)} with floor <= ceil = min(cap, budget) and
+    sum(floor) <= 3/5 budget. Raises allocation_below_minimum rather than
+    admitting a floor below MIN_FLOOR. Integer arithmetic only.
+    """
+    nominal = {k: min(budget_bits * FLOOR_PERCENT[prio] // 100, cap or budget_bits)
+               for k, (prio, cap) in entries.items()}
+    total = sum(nominal.values())
+    pool = budget_bits * FLOOR_POOL[0] // FLOOR_POOL[1]
+    out = {}
+    for k in sorted(entries):
+        prio, cap = entries[k]
+        floor = nominal[k] if total <= pool else nominal[k] * pool // total
+        if floor < MIN_FLOOR:
+            raise ValueError('allocation_below_minimum')
+        out[k] = (floor, min(cap or budget_bits, budget_bits), HTB_PRIO[prio])
+    return out
 
 
 def rate(value):
@@ -30,12 +83,13 @@ def rate(value):
 
 
 def rates(req):
-    # Independent upload/download caps: absent/0 means no class in that
-    # direction; at least one direction must be capped.
+    # Independent upload/download caps (absent/0 = none) plus one traffic
+    # priority for both directions. At least one cap or a non-Normal priority.
     up, down = req.get('rate') or 0, req.get('download_rate') or 0
-    if not up and not down:
-        raise ValueError('upload or download rate required')
-    return (rate(up) if up else 0), (rate(down) if down else 0)
+    prio = priority(req.get('priority'))
+    if not up and not down and prio == 'normal':
+        raise ValueError('upload/download rate or non-Normal traffic priority required')
+    return (rate(up) if up else 0), (rate(down) if down else 0), prio
 
 
 def queue_bytes(bits, mtu, gso=0):
@@ -280,6 +334,12 @@ class Controller:
         self.apps = {}
         self.bindings = {}
         self.next_minor = 1
+        # Session-scoped traffic policy: configured population, per-direction
+        # budgets (0 = none, legacy recipe) and applied class tuples.
+        self.policy_apps = {}
+        self.budgets = {'ul': 0, 'dl': 0}
+        self.applied_budget = {'ul': 0, 'dl': 0}
+        self.class_state = {'ul': {}, 'dl': {}}
         self.partial = []
         self.applying = True
         self.closed = False
@@ -326,8 +386,11 @@ class Controller:
             self.ids = json.loads(self.k('ids'))
             self.k('init', str(self.major))
             self.save()
-            self.mutate('qdisc', 'replace' if self.compatibility['topology'] != 'veth-noqueue' else 'add', 'dev', self.dev, 'root', 'handle', self.handle(), 'htb', 'default', 'fffe')
-            self.mutate('class', 'add', 'dev', self.dev, 'parent', self.handle(), 'classid', self.handle(0xfffe), 'htb', 'rate', '100gbit', 'ceil', '100gbit', 'quantum', str(self.mtu))
+            # Common tree in both modes: root (default = bypass) -> budget ->
+            # {aggregate default, applications}; bypass beside the budget.
+            self.mutate('qdisc', 'replace' if self.compatibility['topology'] != 'veth-noqueue' else 'add', 'dev', self.dev, 'root', 'handle', self.handle(), 'htb', 'default', f'{BYPASS_MINOR:x}')
+            for minor, parent in ((BUDGET_MINOR, self.handle()), (BYPASS_MINOR, self.handle()), (DEFAULT_MINOR, self.handle(BUDGET_MINOR))):
+                self.mutate('class', 'add', 'dev', self.dev, 'parent', parent, 'classid', self.handle(minor), 'htb', 'rate', '100gbit', 'ceil', '100gbit', 'quantum', str(self.mtu))
             default_options = ['limit', '128', 'memory_limit', '65536', 'flows', '128'] if self.compatibility['topology'] == 'veth-noqueue' else []
             self.mutate('qdisc', 'add', 'dev', self.dev, 'parent', self.handle(0xfffe), 'handle', 'fffe:', 'fq_codel', *default_options)
             self.mutate('qdisc', 'add', 'dev', self.dev, 'clsact')
@@ -339,13 +402,15 @@ class Controller:
             self.link_mutate('set', self.ifb, 'alias', 'flowgate:' + self.token)
             self.link_mutate('set', self.ifb, 'mtu', str(self.mtu))
             self.link_mutate('set', self.ifb, 'up')
-            self.mutate('qdisc', 'add', 'dev', self.ifb, 'root', 'handle', self.dl_handle(), 'htb', 'default', 'fffe')
-            self.mutate('class', 'add', 'dev', self.ifb, 'parent', self.dl_handle(), 'classid', self.dl_handle(0xfffe), 'htb', 'rate', '100gbit', 'ceil', '100gbit', 'quantum', str(self.mtu))
+            self.mutate('qdisc', 'add', 'dev', self.ifb, 'root', 'handle', self.dl_handle(), 'htb', 'default', f'{BYPASS_MINOR:x}')
+            for minor, parent in ((BUDGET_MINOR, self.dl_handle()), (BYPASS_MINOR, self.dl_handle()), (DEFAULT_MINOR, self.dl_handle(BUDGET_MINOR))):
+                self.mutate('class', 'add', 'dev', self.ifb, 'parent', parent, 'classid', self.dl_handle(minor), 'htb', 'rate', '100gbit', 'ceil', '100gbit', 'quantum', str(self.mtu))
             self.mutate('qdisc', 'add', 'dev', self.ifb, 'parent', self.dl_handle(0xfffe), 'handle', 'fffe:', 'fq_codel', *default_options)
-            self.k('download', str(self.dl_major), str(self.ifb_index))
+            self.k('download', str(self.dl_major), str(self.ifb_index), '0')
             self.mutate('filter', 'add', 'dev', self.dev, 'ingress', 'pref', '10000', 'handle', '2', 'bpf', 'da', 'pinned', str(self.pin / 'ingress'))
             self.pending_setup = False
             self.save()
+            self.default_leaf_options = {'ul': default_options, 'dl': default_options}
             self.applying = False
             self.last_tick = 0.0
         except BaseException:
@@ -404,7 +469,7 @@ class Controller:
                     ('filter', 'show', 'dev', self.dev, 'root')]
         nic = self.link.get('linkinfo', {}).get('info_kind') != 'veth'
         def parents_for(classes, qdiscs):
-            if len(classes) > MAX_APPS + 1:
+            if len(classes) > MAX_APPS + 3:
                 raise RuntimeError('Unsupported: class inspection bound exceeded')
             parents = [c.get('handle', '') for c in classes]
             roots = [q.get('handle', '') for q in qdiscs if q.get('root') and q.get('kind') == 'htb']
@@ -576,8 +641,9 @@ class Controller:
     def setup_queue_key(args):
         if args[:2] not in (('qdisc', 'add'), ('qdisc', 'replace'), ('class', 'add')):
             return None
-        if args[0] == 'class' and 'htb' in args:
-            return 'class'
+        if args[0] == 'class' and 'htb' in args and 'classid' in args:
+            # One template per reserved setup class (budget, bypass, default).
+            return 'class:' + str(args[list(args).index('classid') + 1]).split(':')[-1]
         if args[0] == 'qdisc' and 'htb' in args and 'root' in args:
             return 'root'
         if args[0] == 'qdisc' and 'fq_codel' in args:
@@ -781,8 +847,9 @@ class Controller:
             if q.get('kind') == 'fq_codel' and q.get('handle') == 'fffe:' and q.get('parent') == self.handle(0xfffe):
                 continue
             return False
+        setup_classes = {self.handle(m) for m in (BUDGET_MINOR, BYPASS_MINOR, DEFAULT_MINOR)}
         for c in actual['classes']:
-            if c.get('class') != 'htb' or c.get('handle') != self.handle(0xfffe):
+            if c.get('class') != 'htb' or c.get('handle') not in setup_classes:
                 return False
         if actual['root_filters'] or actual.get('class_filters'):
             return False
@@ -806,8 +873,9 @@ class Controller:
                 if q.get('root') and q.get('kind') == 'noqueue' and len(ifb['qdiscs']) == 1:
                     continue  # freshly created IFB
                 return False
+            dl_classes = {self.dl_handle(m) for m in (BUDGET_MINOR, BYPASS_MINOR, DEFAULT_MINOR)}
             for c in ifb['classes']:
-                if c.get('class') != 'htb' or c.get('handle') != self.dl_handle(0xfffe):
+                if c.get('class') != 'htb' or c.get('handle') not in dl_classes:
                     return False
         return True
 
@@ -862,51 +930,187 @@ class Controller:
         return ['htb', 'rate', str(bits) + 'bit', 'ceil', str(bits) + 'bit',
                 'burst', str(burst), 'cburst', str(burst), 'quantum', str(self.mtu)]
 
-    def direction_class(self, dev, root, minor, old, new):
-        # One direction's leaf on one device: create, change, delete or keep.
-        if new and not old:
-            self.mutate('class', 'add', 'dev', dev, 'parent', root(), 'classid', root(minor), *self.class_params(new))
-            self.mutate('qdisc', 'add', 'dev', dev, 'parent', root(minor), 'handle', f'{minor:x}:', 'fq_codel', 'limit', '128', 'memory_limit', str(queue_bytes(new, self.mtu, self.gso())), 'flows', '128', 'target', '5ms', 'interval', '100ms')
-        elif new and old != new:
-            self.mutate('class', 'change', 'dev', dev, 'parent', root(), 'classid', root(minor), *self.class_params(new))
-            self.mutate('qdisc', 'change', 'dev', dev, 'parent', root(minor), 'handle', f'{minor:x}:', 'fq_codel', 'limit', '128', 'memory_limit', str(queue_bytes(new, self.mtu, self.gso())), 'target', '5ms', 'interval', '100ms')
-        elif old and not new:
-            # Removing one direction releases its traffic immediately; pending
-            # leaf packets may be purged. The other direction is untouched.
+    def tuple_params(self, t):
+        # Complete class tuple (rate, ceil, prio); never individual fields.
+        r, c, prio = t
+        burst = burst_bytes(c, self.mtu, self.gso())
+        return ['htb', 'rate', f'{r}bit', 'ceil', f'{c}bit', 'burst', str(burst),
+                'cburst', str(burst), 'quantum', str(self.mtu), 'prio', str(prio)]
+
+    def direction_device(self, d):
+        return (self.dev, self.handle) if d == 'ul' else (self.ifb, self.dl_handle)
+
+    def has_class(self, entry, d):
+        cap = entry.get('rate' if d == 'ul' else 'download_rate', 0)
+        return bool(cap) or (entry.get('priority', 'normal') != 'normal' and bool(self.budgets.get(d)))
+
+    def entry_for(self, app):
+        return self.policy_apps.get(app) or self.apps.get(app) or {}
+
+    def targets(self, d):
+        """Intended tuples for one direction: {minor: (rate, ceil, prio)} for
+        instantiated application classes and the aggregate default, plus the
+        budget parent. Allocation uses the CONFIGURED population."""
+        b = self.budgets.get(d, 0)
+        capkey = 'rate' if d == 'ul' else 'download_rate'
+        live = {a['minor']: (app, self.entry_for(app)) for app, a in self.apps.items()
+                if self.has_class(self.entry_for(app), d)}
+        if not b:
+            # Legacy recipe: independent hard caps, priority dormant.
+            return {m: (e[capkey], e[capkey], 0) for m, (app, e) in live.items()}, None
+        population = {'default': ('normal', 0)}
+        for app, e in list(self.policy_apps.items()) + [(app, e) for _, (app, e) in live.items()]:
+            if self.has_class(e, d):
+                population[app] = (e.get('priority', 'normal'), e.get(capkey, 0))
+        alloc = allocate(b, population)
+        out = {m: alloc[app] for m, (app, e) in live.items()}
+        out[DEFAULT_MINOR] = alloc['default']
+        return out, b
+
+    def leaf_memory(self, ceil):
+        return queue_bytes(ceil, self.mtu, self.gso())
+
+    def apply_direction(self, d):
+        """Ordered per-class batch for one direction: delete retired classes,
+        shrink (min of old/new rate and ceil), parent budget, grow to final
+        tuples (incl. prio) and create new classes, then leaf sizing. Every
+        step keeps rate <= ceil per class. Mode transitions publish/withdraw
+        the BPF budget flag around the TC changes."""
+        if d == 'dl' and not getattr(self, 'ifb', None):
+            return
+        dev, root = self.direction_device(d)
+        state = self.class_state[d]
+        want, b = self.targets(d)
+        b = b or 0
+        was_budget = bool(self.applied_budget.get(d))
+        if was_budget and not b:
+            self.publish_budget(d, False)  # withdraw marking before legacy tree
+        for minor in [m for m in state if m != DEFAULT_MINOR and m not in want]:
             self.mutate('qdisc', 'del', 'dev', dev, 'parent', root(minor), 'handle', f'{minor:x}:')
             self.mutate('class', 'del', 'dev', dev, 'classid', root(minor))
+            del state[minor]
+        for minor, new in want.items():
+            old = state.get(minor)
+            if old and old != new:
+                mid = (min(old[0], new[0]), min(old[1], new[1]), old[2])
+                if mid != old:
+                    self.mutate('class', 'change', 'dev', dev, 'parent', root(BUDGET_MINOR), 'classid', root(minor), *self.tuple_params(mid))
+                    state[minor] = mid
+        if b != self.applied_budget.get(d):
+            parent = ['htb', 'rate', f'{b}bit', 'ceil', f'{b}bit', 'burst', str(burst_bytes(b, self.mtu, self.gso())), 'cburst', str(burst_bytes(b, self.mtu, self.gso())), 'quantum', str(self.mtu)] if b else ['htb', 'rate', '100gbit', 'ceil', '100gbit', 'quantum', str(self.mtu)]
+            if b and not was_budget:
+                # Entering budget mode: the aggregate default leaves 100gbit
+                # before the parent shrinks (complete tuple, rate <= ceil).
+                dflt = want[DEFAULT_MINOR]
+                self.mutate('class', 'change', 'dev', dev, 'parent', root(BUDGET_MINOR), 'classid', root(DEFAULT_MINOR), *self.tuple_params(dflt))
+                self.mutate('qdisc', 'change', 'dev', dev, 'parent', root(DEFAULT_MINOR), 'handle', 'fffe:', 'fq_codel', 'limit', '128', 'memory_limit', str(self.leaf_memory(b)))
+                state[DEFAULT_MINOR] = dflt
+            self.mutate('class', 'change', 'dev', dev, 'parent', root(), 'classid', root(BUDGET_MINOR), *parent)
+            if not b and was_budget:
+                # Back to the setup recipe for the aggregate default.
+                self.mutate('class', 'change', 'dev', dev, 'parent', root(BUDGET_MINOR), 'classid', root(DEFAULT_MINOR), 'htb', 'rate', '100gbit', 'ceil', '100gbit', 'quantum', str(self.mtu), 'prio', '0')
+                opts = self.default_leaf_options.get(d) or ['limit', '10240', 'memory_limit', '33554432']
+                self.mutate('qdisc', 'change', 'dev', dev, 'parent', root(DEFAULT_MINOR), 'handle', 'fffe:', 'fq_codel', *[o for i, o in enumerate(opts) if opts[i - (i % 2)] in ('limit', 'memory_limit')])
+                state.pop(DEFAULT_MINOR, None)
+            self.applied_budget[d] = b
+        for minor, new in want.items():
+            old = state.get(minor)
+            if old == new:
+                continue
+            if old is None and minor != DEFAULT_MINOR:
+                self.mutate('class', 'add', 'dev', dev, 'parent', root(BUDGET_MINOR), 'classid', root(minor), *self.tuple_params(new))
+                self.mutate('qdisc', 'add', 'dev', dev, 'parent', root(minor), 'handle', f'{minor:x}:', 'fq_codel', 'limit', '128', 'memory_limit', str(self.leaf_memory(new[1])), 'flows', '128', 'target', '5ms', 'interval', '100ms')
+            else:
+                self.mutate('class', 'change', 'dev', dev, 'parent', root(BUDGET_MINOR), 'classid', root(minor), *self.tuple_params(new))
+                if old is None or old[1] != new[1]:
+                    self.mutate('qdisc', 'change', 'dev', dev, 'parent', root(minor), 'handle', f'{minor:x}:', 'fq_codel', 'limit', '128', 'memory_limit', str(self.leaf_memory(new[1] if minor != DEFAULT_MINOR else b)), 'target', '5ms', 'interval', '100ms')
+            state[minor] = new
+        if b and not was_budget:
+            self.publish_budget(d, True)  # marking only after the tree is ready
 
-    def set_cap(self, app, bits, download_bits=0):
+    def publish_budget(self, d, on):
+        if d == 'ul':
+            self.k('ulbudget', '1' if on else '0')
+        else:
+            self.k('download', str(self.dl_major), str(self.ifb_index), '1' if on else '0')
+
+    def apply_policy(self):
+        self.applying = True
+        try:
+            # Validate both directions completely before the first mutation.
+            for d in ('ul', 'dl'):
+                self.targets(d)
+            for d in ('ul', 'dl'):
+                self.apply_direction(d)
+            for app in self.apps:
+                self.apps[app]['ul'] = self.class_state['ul'].get(self.apps[app]['minor'])
+                self.apps[app]['dl'] = self.class_state['dl'].get(self.apps[app]['minor'])
+            for c, bnd in self.bindings.items():
+                self.k('bind', c, *self.class_ids(bnd['app']))
+        finally:
+            self.applying = False
+
+    def set_policy(self, req):
+        budgets = {'ul': budget(req.get('upload_budget')), 'dl': budget(req.get('download_budget'))}
+        apps = req.get('apps') or {}
+        if not isinstance(apps, dict) or len(apps) > MAX_APPS:
+            raise ValueError('at most 16 configured applications')
+        policy = {}
+        for app, e in apps.items():
+            if not isinstance(app, str) or not re.fullmatch(r'[0-9]+:.{1,512}', app, re.S) or '\n' in app:
+                raise ValueError('invalid application key')
+            up, down, prio = rates(e)
+            policy[app] = {'rate': up, 'download_rate': down, 'priority': prio}
+        old = (self.budgets, self.policy_apps)
+        self.budgets, self.policy_apps = budgets, policy
+        try:
+            for d in ('ul', 'dl'):
+                self.targets(d)
+        except ValueError:
+            self.budgets, self.policy_apps = old
+            raise
+        for app in [a for a in self.apps if a not in policy]:
+            self.remove(app)
+        for app, e in policy.items():
+            if app in self.apps:
+                self.apps[app].update(e)
+        self.apply_policy()
+
+    def set_cap(self, app, bits, download_bits=0, prio=None):
         bits = rate(bits) if bits else 0
         download_bits = rate(download_bits) if download_bits else 0
-        if not bits and not download_bits:
-            raise ValueError('upload or download rate required')
-        self.applying = True
+        prio = priority(prio if prio is not None else self.entry_for(app).get('priority'))
+        if not bits and not download_bits and prio == 'normal':
+            raise ValueError('upload/download rate or non-Normal traffic priority required')
+        entry = {'rate': bits, 'download_rate': download_bits, 'priority': prio}
         if app not in self.apps:
             if len(self.apps) >= MAX_APPS:
                 raise ValueError('concurrent class capacity reached')
-            if self.next_minor > 0xfffd:
+            if self.next_minor > MAX_APP_MINOR:
                 raise ValueError('class_generation_exhausted')
             minor = self.next_minor; self.next_minor += 1
-            self.apps[app] = {'minor': minor, 'rate': 0, 'download_rate': 0, 'idle_since': time.monotonic()}
+            self.apps[app] = {'minor': minor, 'idle_since': time.monotonic(), 'ul': None, 'dl': None}
+        previous = self.policy_apps.get(app)
+        self.policy_apps[app] = entry
+        self.apps[app].update(entry)
+        try:
+            self.apply_policy()
+        except ValueError:
+            if previous is None:
+                self.policy_apps.pop(app, None)
+            else:
+                self.policy_apps[app] = previous
+            raise
         a = self.apps[app]
-        # Same minor on both devices; each direction's leaf exists only while capped.
-        self.direction_class(self.dev, self.handle, a['minor'], a['rate'], bits)
-        if getattr(self, 'ifb', None):
-            self.direction_class(self.ifb, self.dl_handle, a['minor'], a.get('download_rate', 0), download_bits)
-        a['rate'], a['download_rate'] = bits, download_bits
-        a['burst_bytes'] = burst_bytes(bits or download_bits, self.mtu, self.gso()); a['leaf_memory_limit'] = queue_bytes(bits or download_bits, self.mtu, self.gso())
-        for c, b in self.bindings.items():
-            if b['app'] == app:
-                self.k('bind', c, *self.class_ids(app))
-        self.applying = False
+        a['burst_bytes'] = burst_bytes(bits or download_bits or MIN_RATE, self.mtu, self.gso()); a['leaf_memory_limit'] = queue_bytes(bits or download_bits or MIN_RATE, self.mtu, self.gso())
 
     def class_ids(self, app):
         a = self.apps[app]
-        return (str(a['minor'] if a.get('rate', 1) else 0), str(a['minor'] if a.get('download_rate') else 0))
+        return (str(a['minor'] if a['minor'] in self.class_state['ul'] else 0),
+                str(a['minor'] if a['minor'] in self.class_state['dl'] else 0))
 
     def bind(self, req):
-        bits, download_bits = rates(req)
+        bits, download_bits, prio = rates(req)
         self.verify()
         proto, local, remote = req['protocol'], req['local'], req['remote']
         if proto not in ('tcp', 'udp') or len(local) > 80 or len(remote) > 80:
@@ -940,8 +1144,9 @@ class Controller:
         if cookie in self.bindings and not req.get('rebind', False):
             if self.bindings[cookie]['app'] != app:
                 raise ValueError('existing binding ownership differs; explicit rebind required')
-        if app not in self.apps or self.apps[app]['rate'] != bits or self.apps[app].get('download_rate', 0) != download_bits:
-            self.set_cap(app, bits, download_bits)
+        a = self.apps.get(app)
+        if a is None or (a.get('rate'), a.get('download_rate', 0), a.get('priority', 'normal')) != (bits, download_bits, prio):
+            self.set_cap(app, bits, download_bits, prio)
         self.k('bind', cookie, *self.class_ids(app))
         self.bindings[cookie] = {'app': app, 'inode': s['inode'], 'protocol': s['protocol'],
                                  'cookie': cookie, 'netns': s['netns'], 'bound_at': time.time(), 'descriptor': descriptor}
@@ -954,12 +1159,15 @@ class Controller:
         for c, b in list(self.bindings.items()):
             if b['app'] == app:
                 self.k('del', c); del self.bindings[c]
-        a = self.apps[app]
+        minor = self.apps[app]['minor']
         # Removing a cap releases new traffic immediately; pending leaf packets
         # may be purged. No class ID reuse within this controller generation.
-        self.direction_class(self.dev, self.handle, a['minor'], a.get('rate', 1), 0)
-        if getattr(self, 'ifb', None):
-            self.direction_class(self.ifb, self.dl_handle, a['minor'], a.get('download_rate', 0), 0)
+        for d in ('ul', 'dl'):
+            if minor in self.class_state[d]:
+                dev, root = self.direction_device(d)
+                self.mutate('qdisc', 'del', 'dev', dev, 'parent', root(minor), 'handle', f'{minor:x}:')
+                self.mutate('class', 'del', 'dev', dev, 'classid', root(minor))
+                del self.class_state[d][minor]
         del self.apps[app]
 
     def tick(self):
@@ -1066,10 +1274,46 @@ class Controller:
                                  'per_app_leaf_memory_limit': {a: v.get('leaf_memory_limit') for a, v in self.apps.items()}},
                 # Per-binding coverage is an observation from the SAME health read,
                 # never an authority token or an application-wide guarantee.
-                'bindings': [dict(b, covered=bool(covered and c in covered_cookies), download=bool(b.get('protocol') == 'tcp' and self.apps[b['app']].get('download_rate'))) for c, b in self.bindings.items()], 'next_minor': self.next_minor, 'counters': counters,
+                'bindings': [dict(b, covered=bool(covered and c in covered_cookies),
+                                  download=bool(b.get('protocol') == 'tcp' and self.apps[b['app']].get('download_rate')),
+                                  upload_class=self.apps[b['app']]['minor'] in self.class_state['ul'],
+                                  download_class=bool(b.get('protocol') == 'tcp' and self.apps[b['app']]['minor'] in self.class_state['dl']))
+                             for c, b in self.bindings.items()], 'next_minor': self.next_minor, 'counters': counters,
+                # Traffic priority: configured budgets and the applied tuples. A
+                # budget only governs connected host-local sockets; excluded
+                # counters are measured evidence gaps, not proof of foreign traffic.
+                'traffic_priority': {
+                    'budgets': {'upload': self.budgets['ul'], 'download': self.budgets['dl']},
+                    'applied_budgets': {'upload': self.applied_budget['ul'], 'download': self.applied_budget['dl']},
+                    'default_class': {'upload': self.class_state['ul'].get(DEFAULT_MINOR), 'download': self.class_state['dl'].get(DEFAULT_MINOR)},
+                    'apps': {a: {'priority': v.get('priority', 'normal'), 'upload': self.class_state['ul'].get(v['minor']), 'download': self.class_state['dl'].get(v['minor'])} for a, v in self.apps.items()},
+                    'counters': {'upload_default_marked': counters[14], 'upload_excluded_no_exact_socket': counters[13],
+                                 'upload_excluded_unsupported_format': counters[10], 'upload_lease_expired_bypass': counters[11],
+                                 'download_default_redirected': counters[8], 'download_excluded_no_exact_socket': counters[12],
+                                 'download_excluded_unsupported_format': counters[9]},
+                    'activity': self.budget_activity(),
+                    'scope': 'connected host-local sockets on the selected interface; floors are scheduler allocations, not delivery or latency guarantees'},
                 # Ingress adapter telemetry: local delivery of bound established TCP
                 # only; it cannot reclaim bandwidth already consumed on the link.
                 'download': {'interface': getattr(self, 'ifb', None), 'redirected': counters[5], 'unbound_tcp': counters[6], 'bound_without_class': counters[7], 'scope': 'established native TCP sockets on the selected interface; UDP, listeners, fragments and IPv6 extension headers are uncovered'}}
+
+    def budget_activity(self):
+        # Measured parent-class counters (local shaping activity), NOT proof
+        # that the budget is the end-to-end bottleneck or that priority worked.
+        if not any(self.applied_budget.values()):
+            return None
+        try:
+            cmds = [('-s', 'class', 'show', 'dev', self.dev, 'classid', self.handle(BUDGET_MINOR))]
+            if getattr(self, 'ifb', None):
+                cmds.append(('-s', 'class', 'show', 'dev', self.ifb, 'classid', self.dl_handle(BUDGET_MINOR)))
+            out = {}
+            for name, c in zip(('upload', 'download'), cmds):
+                r = json.loads(self.call('tc', '-s', '-j', *c[1:]))
+                st = (r[0].get('stats') if r else None) or {}
+                out[name] = {k: st.get(k) for k in ('bytes', 'packets', 'drops', 'overlimits', 'backlog', 'qlen')}
+            return out
+        except (RuntimeError, ValueError, IndexError):
+            return None
 
     def withdraw_download(self):
         # Best effort on fault: stop redirecting so a vanished/foreign IFB cannot
@@ -1145,7 +1389,9 @@ def main():
                             result = c.bind(req)
                         elif op == 'cap':
                             if req['app'] not in c.apps: raise ValueError('unknown application')
-                            c.set_cap(req['app'], req.get('rate') or 0, req.get('download_rate') or 0); result = c.status()
+                            c.set_cap(req['app'], req.get('rate') or 0, req.get('download_rate') or 0, req.get('priority')); result = c.status()
+                        elif op == 'policy':
+                            c.set_policy(req); result = c.status()
                         elif op == 'remove':
                             c.remove(req['app']); result = c.status()
                         elif op == 'status':
