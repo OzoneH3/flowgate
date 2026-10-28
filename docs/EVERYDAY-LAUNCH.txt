@@ -9,18 +9,31 @@ modified releases refuse; they never fall through to an install.
 
 An update is explicit: scripts/update-and-start.sh --update --local
 (--local skips fetching; --update --dry-run --local previews the update).
-The default exact update pin is 060fb6c33d53f259e236058473911adaab17b8e7,
-which the user explicitly approved and deployed. The prior 25dbb1a release
-remains approved for explicit guarded rollback only; it is not the default.
-No arbitrary HEAD or newer GUI candidate is authorized by this routing fix.
+The default exact update pin is b06ae6a92ed605d1a1d2852aa2c28c941bacb0d1.
+The user explicitly approved this exact matched release for the bounded
+physical download trial and authorized leaving it installed after success.
+The trial passed. Both backend and GUI now run that release; login autostart
+uses its stable .workspace/automatic-zone-releases/<exact SHA>/launch-ui.
+The earlier 060fb6c3 and 25dbb1a approved releases remain available for explicit
+guarded rollback only. No moving master or arbitrary newer release is approved.
 Explicit protection/Wine/recovery options retain their existing semantics.
 
-The popup-close GUI is 1b7fbf4a6e8da800e28a1bbaeb29eaab1630582d. It is
-prepared for a GUI-only switch against installed 060fb6c3, with unchanged
-backend sources/API. It is not deployed or added to the approval allowlist.
-That switch requires exact-GUI approval first, refreshes preferences at switch
-time, and must preserve daemon generation, caps, protection and autostart state.
-Normal launch currently continues to use installed 060fb6c3.
+Normal launch is /home/flowgate-user/Apps/flowgate/scripts/update-and-start.sh.
+No arguments reuse the installed exact matched GUI without daemon restart.
+The physical trial ended with all test resources removed and shaping Disabled.
+There were no pre-existing caps. Caps remain volatile across daemon restart;
+configuration preservation requires fresh identity and binding verification,
+never replay of old socket bindings.
+
+Experimental download support remains established native TCP on the verified
+topology, with Partial coverage. Download UDP, VPN and broader topologies are
+not established by this trial. Existing performance limitations remain accepted
+experimental limitations, not resolved objectives. The host trial measured
+receiver payload (not charged/wire bytes): 7.657 Mbit/s at an 8 Mbit/s cap,
+15.308 Mbit/s at 16, and 936.975 Mbit/s after removal. Independent traffic
+continued; all 48 successfully offered Deny datagrams were blocked. Prior
+upload receiver evidence was reused; no pre-existing upload cap existed here.
+Local evidence: .workspace/shaping-download-host/.
 
 Rollback is never selected by ordinary launch. If deliberately needed, use the
 guarded coordinator with an explicit approved revision, e.g. --revision
