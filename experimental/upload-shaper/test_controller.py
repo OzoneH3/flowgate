@@ -83,7 +83,7 @@ class ModelTests(unittest.TestCase):
             calls.append(commands)
             return [[],copy.deepcopy(classes),[],[],[],[],[{'kind':'bpf','pref':7}]]
         c.query_tc=query
-        expected={'classes':copy.deepcopy(classes)}
+        expected={'classes':copy.deepcopy(classes),'qdiscs':[]}
         result=c.topology(expected)
         self.assertEqual(len(calls),1)
         self.assertEqual(len(calls[0]),7)
@@ -94,7 +94,7 @@ class ModelTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError,'classes changed'):
                 c.topology(expected)
         for bad in [classes+[classes[0]],[{'handle':'bad'}]]:
-            with self.assertRaises(RuntimeError):c.topology({'classes':bad})
+            with self.assertRaises(RuntimeError):c.topology({'classes':bad,'qdiscs':[]})
 
     def test_kernel_worker_requires_success_marker_and_reuses_only_process(self):
         import sys
@@ -411,6 +411,26 @@ class CompatibilityTests(unittest.TestCase):
                          {'tcp-segmentation-offload':'off','generic-segmentation-offload':'on'})
 
 class DownloadOwnershipTests(unittest.TestCase):
+    def test_htb_major_filter_parents_are_inspected_on_nic_and_ifb(self):
+        c=object.__new__(m1.Controller);c.dev='nic';c.ifb='owned';c.link={}
+        c.ifb_link=lambda: {'ifindex':2}
+        queries=[]
+        def query(commands):
+            out=[]
+            for q in commands:
+                queries.append(q);major='123:' if q[3]=='nic' else '234:'
+                if q[0]=='qdisc':out.append([{'kind':'htb','root':True,'handle':major}])
+                elif q[0]=='class':out.append([{'class':'htb','handle':major+'fffe'}])
+                elif q[-2:]==('parent',major):out.append([{'kind':'matchall','pref':12}])
+                else:out.append([])
+            return out
+        c.query_tc=query
+        got=c.topology()
+        self.assertEqual(got['class_filters'],[{'parent':'123:','filters':[{'kind':'matchall','pref':12}]}])
+        self.assertEqual(got['ifb']['class_filters'],[{'parent':'234:','filters':[{'kind':'matchall','pref':12}]}])
+        self.assertIn(('filter','show','dev','nic','root'),queries)
+        self.assertIn(('filter','show','dev','owned','root'),queries)
+
     def test_pending_ifb_add_accepts_nested_program_id_only(self):
         import json
         c=object.__new__(m1.Controller);c.major=0x123;c.dl_major=0x234;c.ifb='fgdl12345678';c.ids={'program':7,'ingress':8}

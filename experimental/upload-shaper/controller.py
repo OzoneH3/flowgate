@@ -399,10 +399,16 @@ class Controller:
                     ('filter', 'show', 'dev', self.dev, 'ingress'),
                     ('filter', 'show', 'dev', self.dev, 'root')]
         nic = self.link.get('linkinfo', {}).get('info_kind') != 'veth'
-        def parents_for(classes):
+        def parents_for(classes, qdiscs):
             if len(classes) > MAX_APPS + 1:
                 raise RuntimeError('Unsupported: class inspection bound exceeded')
             parents = [c.get('handle', '') for c in classes]
+            roots = [q.get('handle', '') for q in qdiscs if q.get('root') and q.get('kind') == 'htb']
+            if len(roots) > 1:
+                raise RuntimeError('Unsupported: multiple classful roots')
+            # TC_H_ROOT and an HTB major parent are distinct filter hooks.
+            # Inspect both; a filter at major: is not reported by `show root`.
+            parents += [p for p in roots if p not in parents]
             if (any(not re.fullmatch(r'[0-9a-fA-F]+:[0-9a-fA-F]*', p) for p in parents)
                     or len(set(parents)) != len(parents)):
                 raise RuntimeError('Unsupported: unrecognized class identity')
@@ -411,7 +417,7 @@ class Controller:
         # A successful finite process is required; fresh class equality below
         # proves that every actual parent was queried. Dumps are not atomic.
         combined = nic and expected is not None
-        parents = parents_for(expected['classes']) if combined else []
+        parents = parents_for(expected['classes'], expected['qdiscs']) if combined else []
         queries = [('filter', 'show', 'dev', self.dev, 'parent', p) for p in parents]
         rows = self.query_tc(commands + queries)
         out = dict(zip(fields, rows[:5]))
@@ -419,7 +425,7 @@ class Controller:
         if combined and out['classes'] != expected['classes']:
             raise RuntimeError('Unsupported: traffic-control classes changed; refusing observation')
         if nic:
-            parents = parents_for(out['classes'])
+            parents = parents_for(out['classes'], out['qdiscs'])
             out['class_filters'] = []
             if parents:
                 filters = rows[5:] if combined else self.query_tc(
@@ -433,7 +439,7 @@ class Controller:
                                   ('filter', 'show', 'dev', self.ifb, 'ingress'),
                                   ('filter', 'show', 'dev', self.ifb, 'egress')])
             rows[1] = [x for x in rows[1] if x.get('class') != 'fq_codel']
-            parents = parents_for(rows[1])
+            parents = parents_for(rows[1], rows[0])
             filters = self.query_tc([('filter', 'show', 'dev', self.ifb, 'parent', p) for p in parents]) if parents else []
             out['ifb'] = {'qdiscs': rows[0], 'classes': [x for x in rows[1] if x.get('class') != 'fq_codel'],
                           'root_filters': rows[2], 'ingress': rows[3], 'egress': rows[4],

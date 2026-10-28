@@ -97,3 +97,20 @@ refused disable byte-for-byte; after fixture removed its foreign filter,
 verified cleanup succeeded. No unrelated ifb0 existed in that run; its conditional
 comparison therefore did not prove preservation of an existing foreign IFB.
 These are sampled isolated results, not latency floors or physical-host claims.
+
+GUI1 (82897e82 candidate): actual Electron DL slot, exact native identity,
+8Mbit/s -> edit2000000B/s(16Mbit/s) -> Delete. Receiver payload7.6526/15.3038/
+637.5808Mbit/s,8 offered UDP Deny messages perphase,0received. Popup closed
+on success; dirty field/focus survived delivered refreshes; Escape wrote nothing.
+Originalqdisc/helpers cleanup and an unrelated fixture IFB were verified.
+
+A subsequent negative test found that tc 'root' and an HTB major parent are
+separate filter hooks. The controller now inspects both NIC/IFB HTB major parents
+as well as existing root and per-class hooks. reuse2 verified foreign IFB-major
+filter refusal/preservation and cleanup after the fixture removed its filter.
+It also closed a capped TCP socket and reused the same port in another native
+application: cookie changed, old binding disappeared, new receiver587.93Mbit/s
+versus7.65Mbit/s for the old8Mbit cap. No inherited cap. This root-parent proof is
+for the NIC topology; general veth class-filter coverage is not claimed.
+The final exact bundle is checked again by the isolated GUI journey; see the
+workspace evidence ledger for its SHA and resulting figures.
