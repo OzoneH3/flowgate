@@ -61,7 +61,7 @@ static void info(void) {
   puts("]}");
 }
 static void drain(int millis) {
-  if (millis < 1 || millis > 60000 || !stream || nf < 1) exit(2);
+  if (millis < 1 || millis > 60000 || nf < 1) exit(2); // TCP or connected UDP
   struct pollfd ps[8];
   for (int i=0;i<nf;i++) ps[i]=(struct pollfd){.fd=fds[i],.events=POLLIN};
   uint64_t start=ns(), until=start+(uint64_t)millis*1000000, bytes=0;

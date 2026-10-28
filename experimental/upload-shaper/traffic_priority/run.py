@@ -2,6 +2,7 @@
 # controller, BPF adapters and receivers. Expectations are fixed below BEFORE the
 # run; results are recorded, never tuned. No host traffic or activation.
 import resource
+failed=True
 import os,sys,json,socket,subprocess,time,pathlib,sqlite3,select,traceback,shutil,threading
 P=pathlib.Path('/work/m1');R=pathlib.Path('/work/.workspace/m1');R.mkdir(mode=0o700,exist_ok=True);API=R/'session'/'api.sock';children=[];records=[];backend=None
 assert os.environ.get('FLOWGATE_PARENT_NETNS') and os.environ['FLOWGATE_PARENT_NETNS']!=os.readlink('/proc/self/ns/net')
@@ -162,6 +163,10 @@ def phase(label,ul=None,dl=None,expect=None,edit=None,dur=9000,latency=None):
  for p in procs_dl.values():line(p)
  if not procs_dl:time.sleep(2)
  def window(seconds=4):
+  # Discard data queued in receive buffers while nobody was draining (e.g.
+  # during a configuration edit); it would inflate the measured window.
+  for p in procs_dl.values():write(p,'DRAIN 1000')
+  for p in procs_dl.values():line(p)
   a=peerop('bulk');t=time.monotonic()
   if lat:write(lat,f'SEND L{label[:10]} 150 20000')
   for p in procs_dl.values():write(p,f'DRAIN {seconds*1000}')
@@ -248,6 +253,7 @@ try:
  record('aggregation-ratio',ratio=ratio,within_25_percent={d:0.75<=v<=1.25 for d,v in ratio.items()})
  results['P4-matched-ratio']={d:0.75<=v<=1.25 for d,v in ratio.items()}
  gate('P5-low-alone',phase('P5',ul={'A':1},dl={'A':(1,1)},expect={'ul:A':(32,41),'dl:A':(32,41)}))
+ gate('P5b-low-alone-upload-only',phase('P5b',ul={'A':1},expect={'ul:A':(32,41)}))
  configure([cap('A',prio='low'),cap('C',ul=8_000_000,dl=8_000_000,prio='high')],ub=B,db=B)
  gate('P6-high-capped',phase('P6',ul={'A':1,'C':1,'U':1},dl={'A':(1,1),'C':(1,1),'U':(1,1)},expect={'ul:C':(5,8.0),'dl:C':(5,8.0),'ul:A':(3.0,5.0),'dl:A':(3.0,5.0),'ul:U':(20,30),'dl:U':(20,30)}))
  configure([cap('A',prio='low'),cap('C',prio='high')],ub=B,db=B)
@@ -263,26 +269,36 @@ try:
  # Scope negatives: wildcard listener/socket hit by a non-local destination, and connected UDP positive.
  configure([cap('A',prio='low'),cap('C',prio='high')],ub=B,db=B)
  hostmac=json.loads(cmd('ip','-j','link','show','dev',DEV))[0]['address']
- wl=launch(['python3','-c','import socket,sys,time\nt=socket.socket();t.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);t.bind(("0.0.0.0",45000));t.listen(8)\nu=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);u.bind(("0.0.0.0",45001))\nc=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);c.bind(("10.79.0.1",45002));c.connect(("10.79.0.2",43001))\nprint("{}",flush=True);n=0\nc.settimeout(.2);end=time.time()+8\nwhile time.time()<end:\n try:c.recv(2048);n+=1\n except OSError:pass\nprint(\'{"connected_udp_received":%d}\'%n,flush=True)'],'scope-listeners');line(wl)
- before=counters()
+ wl=launch(['python3','-c','import socket\nt=socket.socket();t.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);t.bind(("0.0.0.0",45000));t.listen(8)\nu=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);u.bind(("0.0.0.0",45001))\nprint("{}",flush=True)\nimport sys;sys.stdin.read()'],'scope-listeners');line(wl)
+ def fresh_counters():
+  r0=(status().get('kernel') or {}).get('status_reports',0);wait(lambda s:(s.get('kernel') or {}).get('status_reports',0)>=r0+2,15);return counters()
+ before=fresh_counters()
  nspeer=['nsenter','-t',str(peer.pid),'-n']
  cmd(*nspeer,'ip','neigh','replace','10.79.0.99','lladdr',hostmac,'dev','fgpeer','nud','permanent')
- cmd(*nspeer,'python3','-c','import socket\nfor p in (45000,):\n s=socket.socket();s.setblocking(False)\n try:s.connect(("10.79.0.99",p))\n except OSError:pass\nu=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)\nfor i in range(50):u.sendto(b"x"*200,("10.79.0.99",45001))\nimport time;time.sleep(.5)')
- mid=counters()
- cmd(*nspeer,'python3','-c','import socket,time\nu=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);u.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);u.bind(("10.79.0.2",43001))\nfor i in range(50):u.sendto(b"y"*200,("10.79.0.1",45002));time.sleep(.01)')
- got=line(wl,20);after=counters()
+ cmd(*nspeer,'python3','-c','import socket,time\nfor i in range(3):\n s=socket.socket();s.setblocking(False)\n try:s.connect(("10.79.0.99",45000))\n except OSError:pass\nu=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)\nfor i in range(50):u.sendto(b"x"*200,("10.79.0.99",45001))\ntime.sleep(.5)')
+ mid=fresh_counters()
+ # Positive: an allowed native app's connected UDP socket (outgoing first, so the
+ # firewall sees an established flow), then 50 datagrams from the peer.
+ cu=spawn('alpha','scope-cudp');info=ask(cu,'OPEN 4 0 1 1 0 43001');assert 'error' not in info,info
+ assert ask(cu,'SEND hello 1 0')['sent']==1
+ hport=info['sockets'][0]['port'];write(cu,'DRAIN 6000');time.sleep(.5)
+ cmd(*nspeer,'python3','-c',f'import socket,time\nu=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);u.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);u.bind(("10.79.0.2",43001))\nfor i in range(50):u.sendto(b"y"*1200,("10.79.0.1",{hport}));time.sleep(.01)')
+ got=line(cu,20);after=fresh_counters();cu.terminate();wl.terminate()
  delta=lambda a,b,k:(b.get(k) or {}).get('packets',0)-(a.get(k) or {}).get('packets',0)
  neg={'excluded_no_exact':delta(before,mid,'download_excluded_no_exact_socket'),'default_redirected':delta(before,mid,'download_default_redirected')}
- pos={'default_redirected':delta(mid,after,'download_default_redirected'),'received':got['connected_udp_received']}
+ pos={'default_redirected':delta(mid,after,'download_default_redirected'),'received_bytes':got['bytes']}
  record('scope',nonlocal_wildcard=neg,connected_udp=pos)
- results['P9-scope']={'nonlocal_not_redirected':neg['default_redirected']==0 and neg['excluded_no_exact']>=50,'connected_udp_redirected':pos['default_redirected']>=45 and pos['received']>=45}
+ results['P9-scope']={'nonlocal_not_redirected':neg['default_redirected']==0 and neg['excluded_no_exact']>=50,'connected_udp_redirected_and_delivered':pos['default_redirected']>=45 and pos['received_bytes']>=45*1200}
  # Foreign class filter under the owned budget parent: refusal and exact preservation.
  owner=json.loads((R/'controller'/'owner.json').read_text());budget_parent=f"{owner['major']:x}:fff0"
  cmd('tc','filter','add','dev',DEV,'parent',budget_parent,'pref','321','matchall','action','pass')
- until=time.monotonic()+15
- while time.monotonic()<until and status()['status']!='Unsupported':time.sleep(.2)
+ until=time.monotonic()+15;timeline=[]
+ while time.monotonic()<until and status()['status']!='Unsupported':
+  s=status();timeline.append({'status':s['status'],'reports':(s.get('kernel') or {}).get('status_reports'),'error':s.get('last_error'),'verified_age_ms':s.get('verification_age_ms')});time.sleep(1)
+ mismatch=(R/'controller'/'ownership-mismatch.json')
+ record('foreign-detection',timeline=timeline,status=status(),mismatch_file=mismatch.exists(),filters=json.loads(cmd('tc','-j','filter','show','dev',DEV,'parent',budget_parent)))
  roots=qdiscs();classes=json.loads(cmd('tc','-j','class','show','dev',DEV))
- s=status();assert s['status']=='Unsupported'
+ s=status();assert s['status']=='Unsupported',s['status']
  api('upload-configure',generation=GEN,expected_version=s['version'],upload_config={'enabled':False,'caps':[],'schema':2});time.sleep(2)
  assert status()['status']=='Unsupported' and qdiscs()==roots and json.loads(cmd('tc','-j','class','show','dev',DEV))==classes
  record('foreign-refusal',filters=json.loads(cmd('tc','-j','filter','show','dev',DEV,'parent',budget_parent)))
@@ -298,11 +314,14 @@ try:
  configure([],enabled=False);assert qdiscs()==original and not kernel_workers() and not socket_workers()
  record('cleanup',qdiscs=qdiscs(),rules=len(api().get('rules',[])),protection=api()['protection'])
  (R/'results.json').write_text(json.dumps(results,indent=1))
- stop();(R/'success.json').write_text('{"scope":"traffic priority kernel proof; fixture complete is not all expectations passed"}');print('PRIO_RESULTS',json.dumps(results),flush=True);print('VM_RESULT=0',flush=True)
+ stop();(R/'success.json').write_text('{"scope":"traffic priority kernel proof; fixture complete is not all expectations passed"}');print('PRIO_RESULTS',json.dumps(results),flush=True)
 except Exception:
  (R/'results.json').write_text(json.dumps(results,indent=1))
- (R/'failure.txt').write_text(traceback.format_exc());print(traceback.format_exc(),flush=True);print('VM_RESULT=1',flush=True)
+ (R/'failure.txt').write_text(traceback.format_exc());print(traceback.format_exc(),flush=True);failed=True
+else:
+ failed=False
 finally:
  stop()
  for p in reversed(children):
   if p.poll() is None:p.terminate()
+sys.exit(1 if failed else 0)
