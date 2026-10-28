@@ -2,10 +2,11 @@
   "approved": [
     "25dbb1a90e81f6fc2a150231cae699db87e430f3",
     "060fb6c33d53f259e236058473911adaab17b8e7",
-    "b06ae6a92ed605d1a1d2852aa2c28c941bacb0d1"
+    "b06ae6a92ed605d1a1d2852aa2c28c941bacb0d1",
+    "daa12524d2e88b9c37ce961c7fe314dc9c077941"
   ],
   "rejected": [
     "66313d5deaa350dc4e77adda44e1b986fb8e2619"
   ],
-  "note": "User explicitly approved exact b06ae6a physical download trial and leaving that matched release installed after success. Trial passed; routine pin matches installed release. Prior approved releases retained for explicit rollback only. No moving master or arbitrary newer revision authorization."
+  "note": "User explicitly requested deployment of exact daa12524 UL/DL popup update. Matched backend source is unchanged from approved b06ae6a; existing backend evidence reused, new GUI checks completed. Prior approved releases retained for explicit rollback only. No moving master authorization."
 }
