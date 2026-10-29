@@ -23,9 +23,13 @@ Deleting that priority restores inheritance; explicit zone Normal is not deletio
 Unknown uses the all-network fallback. The all-network priority still determines the
 application's aggregate scheduler-floor allocation under the existing shared budget.
 Child floor allocations share that parent allocation using weights 10/15/20 for
-Low/Normal/High; each is capped by its own ceiling, with no redistribution. Actual
+Low/Normal/High; each is capped by its own ceiling, with no redistribution. The unknown leaf retains its share of that scheduler
+allocation even while idle; active leaves can borrow unused capacity up to their
+ceilings. These allocations are not receiver delivery guarantees. Actual
 borrowing depends on HTB hierarchy, eligibility and effective LEAF priority. Interior
-HTB priority is not an independent application ordering mechanism. No strict global
+HTB priority is not an independent application ordering mechanism. A zone override
+also changes its competition with other applications for excess shared-budget
+capacity, subject to the application and zone ceilings. No strict global
 priority ordering, receiver minimum, progress bound or latency guarantee is promised.
 Without the corresponding directional budget priority remains dormant, including
 child-floor weights (equal weights then). Existing budgets remain all eligible traffic;
@@ -63,7 +67,10 @@ or mixed zoned/legacy apps) and the existing 128 socket bindings. Configured pop
 is validated before TC mutation, including unobserved apps. Each budget floor and child
 floor must be at least 256 kbit/s; a low all-network cap can therefore make a proposed
 priority split unrepresentable and is refused. This threshold is not delivered service.
-The allocator reserves fresh class-ID headroom; generation exhaustion is explicit.
+The allocator reserves class-ID headroom for newly represented applications and
+zone leaves; generation exhaustion is explicit. Parent and zone IDs may be reused
+for the same application/zone across directional conversions. They are never
+reassigned to another application; affected bindings are withdrawn before conversion.
 Ownership journal checks, foreign-object refusal and maintenance checkpoints are reused.
 
 The daemon classifies bindings using Engine.CurrentZones, including namespace/interface
@@ -157,4 +164,6 @@ hashes are in staged manifests. New hierarchy foreign-object/crash injection, pu
 connectivity, physical NIC events, 128 loaded bindings and WAN latency are NOT established.
 Existing unchanged ownership/recovery model and receiver evidence is reused, not relabelled.
 Independent source/UI/evidence review by /root/zone_review found no remaining blockers;
-this is distinct from the external fg RESEARCH session, whose participation was requested.
+the external fg RESEARCH session subsequently closed its review of commit 4a478da3
+without blockers for the documented experimental scope. That review excluded the
+Options defaults added in b4396f23 and did not authorize deployment or a host trial.
