@@ -1,3 +1,4 @@
+import { accountName } from './account-lookup';
 import { DEFAULT_SHAPING, validateShapingDefaults } from './upload-shaping';
 import { UploadShapingClient } from "./upload-shaping-client";
 import { UsageHistoryClient } from './usage-history-client';
@@ -934,6 +935,7 @@ app.whenReady().then(async () => {
     trusted(e);
     return background.requestQuit();
   });
+  ipcMain.handle('account:name', (e, uid) => { trusted(e, true); return accountName(uid); });
   ipcMain.handle('preferences', (e, v) => {
     trusted(e, v === undefined); // detached Info may read defaults, never change preferences
     if (v !== undefined) {

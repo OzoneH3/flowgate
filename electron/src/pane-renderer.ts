@@ -1,3 +1,4 @@
+import { accountLabel } from './accounts';
 import { refreshUpload } from "./upload-shaping-view";
 import { zoneLabel } from './network-zones';
 import { acceptsPublication } from './publication';
@@ -115,7 +116,7 @@ function consume(next: PaneFrame) {
     fields.push(['Name', r.kind === 'process' ? r.process?.application.name || r.label : r.label]);
     if (r.process)
       fields.push(
-        ['User ID', String(r.process.uid)],
+        ['User', accountLabel(r.process.uid)],
         ...(r.kind === 'process' || r.kind === 'socket'
           ? [['Process', `${r.process.pid} · start ${r.process.start_ticks}`] as [string, string]]
           : []),
@@ -218,6 +219,7 @@ function consume(next: PaneFrame) {
   }
   policy?.update(r, s);
 }
+window.addEventListener('flowgate-account-name', () => { if (frame) consume(frame); });
 window.flowgate.onPaneFrame(consume);
 if(kind === "info") window.setInterval(()=>{if(frame)refreshUpload(frame.state);},1000);
 void window.flowgate.paneSnapshot().then(consume).catch(message);

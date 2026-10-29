@@ -1,3 +1,4 @@
+import { accountLabel, accountRowLabel } from './accounts';
 import { addApplicationZones, type ApplicationZone } from './application-zones';
 import type { NetworkZones } from './network-zones';
 import type { Activity, SocketRow, Process, Traffic, Application, Rule, ViewEvent } from './protocol';
@@ -674,7 +675,7 @@ export function groupApplicationVersions(rows: Row[]): Row[] {
       const a = r.process?.application || r.displayApplication || r.requestEvent?.attribution.application;
       const path = r.inactive?.executable || a?.executable || '';
       const uid = r.inactive?.uid ?? r.process?.uid ?? r.requestEvent?.attribution.owners[0]?.uid;
-      r.identityNote = [r.identityNote, path, r.process?.provenance?.launch?.prefix ? `Prefix ${r.process.provenance.launch.prefix}` : '', `UID ${uid ?? 'unknown'}`, `Identity ${(r.inactive?.key || a?.key || 'unknown').slice(0,12)}`].filter(Boolean).join(' · ');
+      r.identityNote = [r.identityNote, path, r.process?.provenance?.launch?.prefix ? `Prefix ${r.process.provenance.launch.prefix}` : '', accountLabel(uid), `Identity ${(r.inactive?.key || a?.key || 'unknown').slice(0,12)}`].filter(Boolean).join(' · ');
     }
   }
   return result;
@@ -706,7 +707,7 @@ export function groupProgramAccounts(rows: Row[]): Row[] {
       const prefix = child.process?.provenance?.launch?.prefix;
       const identity = child.inactive?.key || app?.key;
       child.parent = id;
-      child.presentationLabel = `${uid === 0 ? 'Root (UID 0)' : uid === undefined ? 'Unknown account' : `User UID ${uid}`}${prefix ? ` · ${prefix}` : ''}`;
+      child.presentationLabel = `${accountRowLabel(uid)}${prefix ? ` · ${prefix}` : ''}`;
       child.identityNote = `${child.label} · ${child.inactive ? 'Saved rules' : 'Observed'}${identity ? ` · Identity ${identity.slice(0,12)}` : ''}`;
       removed.add(child);
     }

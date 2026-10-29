@@ -1,3 +1,4 @@
+import { accountLabel } from './accounts';
 import type { Application, PermissionTarget, Process, Provenance, RequestEvent } from './protocol';
 
 // Launch provenance presentation. Display grouping only: a launch group is
@@ -102,7 +103,7 @@ export function provenanceDetails(e: RequestEvent): [string, string][] {
   if (owner)
     rows.push([
       'Socket owner',
-      `${ownerName(owner)} owns this socket\nPID ${owner.pid} · start ${owner.start_ticks} · UID ${owner.uid}\n${owner.application?.executable || owner.executable || 'executable unavailable'}`,
+      `${ownerName(owner)} owns this socket\nPID ${owner.pid} · start ${owner.start_ticks} · ${accountLabel(owner.uid)}\n${owner.application?.executable || owner.executable || 'executable unavailable'}`,
     ]);
   if (!p) return rows;
   if (p.invocation) rows.push(['Invoked program',

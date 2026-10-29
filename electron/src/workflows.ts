@@ -1,3 +1,4 @@
+import { accountLabel } from './accounts';
 import { setupShapingDefaults } from './shaping-defaults-view';
 import { setupEndpointPermissions } from './endpoint-view';
 import { canManageEndpoints, ENDPOINT_SCOPE, ENDPOINT_PRECEDENCE, ENDPOINT_LIFETIME } from './endpoint-policy';
@@ -136,9 +137,9 @@ export async function openRule(source: RuleSource, options: EditorOptions = {}) 
     const r = draft.rule;
     if (r.network_endpoint) throw Error('Endpoint rules are immutable. Delete and recreate through Endpoint permission.');
     $('editorApplication').textContent =
-      `${draft.targetScope === 'process' ? 'This process · ' : targetLabel(r.filter.process) + ' · '}${r.executable || r.filter.application} · ${r.filter.direction} · UID ${r.filter.uid}`;
+      `${draft.targetScope === 'process' ? 'This process · ' : targetLabel(r.filter.process) + ' · '}${r.executable || r.filter.application} · ${r.filter.direction} · ${accountLabel(r.filter.uid)}`;
     $('editorIdentity').textContent =
-      `${r.executable}\n${r.filter.application} · ${revisionScope(state?.control.rules?.find((x) => x.id === r.id) || r)}\n${r.filter.direction} · UID ${r.filter.uid} · ${draft.source}`;
+      `${r.executable}\n${r.filter.application} · ${revisionScope(state?.control.rules?.find((x) => x.id === r.id) || r)}\n${r.filter.direction} · ${accountLabel(r.filter.uid)} · ${draft.source}`;
     // Ask is offered only with stored-ask-v1; an existing Ask rule without it stays read-only.
     const askWritable = !!state?.control.capabilities?.includes(STORED_ASK_CAPABILITY);
     const askOption = $('editAction').querySelector<HTMLOptionElement>('option[value=ask]')!;
@@ -415,9 +416,9 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
       if (r.verifiedRule) {
         const rule = r.verifiedRule;
         $('editorApplication').textContent =
-          `Verified · ${rule.filter.all_programs ? 'All programs · ' + (rule.filter.all_uids ? 'all users' : 'UID ' + rule.filter.uid) : targetLabel(rule.filter.process) + ' · ' + rule.executable} · ${zoneLabel(rule.filter.network_zone)} · ${rule.filter.direction}`;
+          `Verified · ${rule.filter.all_programs ? 'All programs · ' + (rule.filter.all_uids ? 'all users' : accountLabel(rule.filter.uid)) : targetLabel(rule.filter.process) + ' · ' + rule.executable} · ${zoneLabel(rule.filter.network_zone)} · ${rule.filter.direction}`;
         $('editorIdentity').textContent =
-          `${rule.executable}\n${rule.filter.application} · ${revisionScope(state?.control.rules?.find((x) => x.id === rule.id) || rule)}\n${rule.filter.direction} · UID ${rule.filter.uid}${r.processID ? ' · observed process ' + r.processID : ''}`;
+          `${rule.executable}\n${rule.filter.application} · ${revisionScope(state?.control.rules?.find((x) => x.id === rule.id) || rule)}\n${rule.filter.direction} · ${accountLabel(rule.filter.uid)}${r.processID ? ' · observed process ' + r.processID : ''}`;
         $('absoluteExpiry').textContent = rule.expires.startsWith('0001-')
           ? rule.filter.process
             ? 'This daemon session · ends on process exit.'
@@ -939,7 +940,7 @@ function selectRule() {
               [
                 'Local service',
                 r.filter.peer_service
-                  ? `${r.filter.peer_service.application} · revision ${r.filter.peer_service.revision} · UID ${r.filter.peer_service.uid}`
+                  ? `${r.filter.peer_service.application} · revision ${r.filter.peer_service.revision} · ${accountLabel(r.filter.peer_service.uid)}`
                   : 'Not constrained',
               ],
             ]
@@ -976,7 +977,7 @@ function selectRule() {
             (r.preset ? 'Not application-bound; see exact local-service/interface scope' : ''),
         ],
         ['Revision', r.filter.revision],
-        ['UID', r.filter.all_uids ? 'All users' : String(r.filter.uid)],
+        ['User', r.filter.all_uids ? 'All users' : accountLabel(r.filter.uid)],
         ['Edit version', String(r.version)],
       ]
     : [];
@@ -1099,7 +1100,7 @@ export function confirmRuleDelete(r: Rule, generation: string) {
   const snapshot = { id: r.id, generation: generation, version: r.version ?? 0 };
   confirmAction(
     'Delete rule',
-    `Delete ${r.filter.all_programs ? 'All programs · ' + (r.filter.all_uids ? 'all users' : 'UID ' + r.filter.uid) : targetLabel(r.filter.process) + ' · ' + (r.executable || r.filter.application)} · ${zoneLabel(r.filter.network_zone)}? Action: ${r.action}; ${r.filter.direction} ${r.filter.protocol}; remote ${r.filter.remote_address || r.filter.remote || '*'}; ports ${r.filter.local_port || '*'} → ${r.filter.remote_port || '*'}; expiry ${r.expires}; ${r.disabled ? 'disabled' : 'enabled'}. Rule ${snapshot.id}, version ${snapshot.version}, generation ${snapshot.generation}. Existing approved TCP sessions may continue.`,
+    `Delete ${r.filter.all_programs ? 'All programs · ' + (r.filter.all_uids ? 'all users' : accountLabel(r.filter.uid)) : targetLabel(r.filter.process) + ' · ' + (r.executable || r.filter.application)} · ${zoneLabel(r.filter.network_zone)}? Action: ${r.action}; ${r.filter.direction} ${r.filter.protocol}; remote ${r.filter.remote_address || r.filter.remote || '*'}; ports ${r.filter.local_port || '*'} → ${r.filter.remote_port || '*'}; expiry ${r.expires}; ${r.disabled ? 'disabled' : 'enabled'}. Rule ${snapshot.id}, version ${snapshot.version}, generation ${snapshot.generation}. Existing approved TCP sessions may continue.`,
     async () => {
       try {
         status((await window.flowgate.ruleDelete(snapshot)).message);

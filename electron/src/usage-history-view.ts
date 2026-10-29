@@ -1,3 +1,4 @@
+import { accountLabel } from './accounts';
 import type { ClientState } from './protocol';
 import type { DisplayUnit } from './display-units';
 import type { HistoryState } from './usage-history-client';
@@ -49,6 +50,7 @@ export function setupUsageHistory(parent: HTMLElement) {
     if (shown) void poll();
   }, 10000);
 }
+if (typeof window !== 'undefined') window.addEventListener('flowgate-account-name', () => { if (shown) render(); });
 export function showUsageHistory(value: boolean) {
   shown = value;
   $('usageHistoryView').hidden = !value;
@@ -243,7 +245,7 @@ function render() {
   const options = [
     ['', 'All recorded applications'],
     ...(s.scope === 'machine' ? [['unattributed', 'Unattributed / shared observations']] : []),
-    ...s.entries.map((e) => [e.id, `${e.name || e.key} · UID ${e.uid}`]),
+    ...s.entries.map((e) => [e.id, `${e.name || e.key} · ${accountLabel(e.uid)}`]),
   ];
   select.replaceChildren(
     ...options.map(([value, label]) => {

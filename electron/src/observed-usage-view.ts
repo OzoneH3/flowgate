@@ -1,3 +1,4 @@
+import { accountLabel } from './accounts';
 import { setupUsageHistory, showUsageHistory, updateUsageHistory } from './usage-history-view';
 import type { ClientState } from './protocol';
 import type { DisplayUnit } from './display-units';
@@ -21,6 +22,7 @@ let rendered = '';
 let historyMode = false;
 
 export function setupObservedUsage(chooseTab: (tab: string) => void) {
+  window.addEventListener('flowgate-account-name', () => { if (visible && !historyMode) { rendered = ''; render(); } });
   const tab = el('button', 'Observed usage');
   tab.id = 'observedUsageTab';
   tab.setAttribute('aria-selected', 'false');
@@ -109,7 +111,7 @@ function row(entry: UsageEntry): HTMLTableRowElement {
   app.title = [entry.executable, entry.application, entry.id].filter(Boolean).join('\n');
   tr.append(
     app,
-    el('td', entry.uid === undefined ? '—' : String(entry.uid)),
+    el('td', entry.uid === undefined ? '—' : accountLabel(entry.uid)),
     el('td', entry.source === 'tcp' ? 'TCP payload' : 'UDP API bytes'),
   );
   for (const value of [entry.downloaded, entry.uploaded]) {

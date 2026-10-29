@@ -3,6 +3,7 @@ let ruleContext: { selection: string; generation: string } | undefined;
 const operation = (op: string, value: unknown) =>
   ipcRenderer.invoke('pane:rule-operation', op, value, ruleContext);
 const api = {
+  accountName: (uid: number) => ipcRenderer.invoke('account:name', uid),
   preferences: () => ipcRenderer.invoke('preferences'),
   uploadStatus: () => ipcRenderer.invoke("upload:status"),
   uploadConfigure: (value: unknown) => ipcRenderer.invoke("upload:configure", value),

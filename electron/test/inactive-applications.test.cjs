@@ -146,7 +146,7 @@ test('one executable across three accounts has one visual root and intact target
   assert.equal(group.displayApplication,undefined);
   assert.equal(group.requestEvent,undefined);
   assert.deepEqual(group.children.map(r=>r.id).sort(),[1000,0,970].map(uid=>`app:key${uid}|v1|uid:${uid}`).sort());
-  assert.equal(group.children.find(r=>r.inactive.uid===0).presentationLabel,'Root (UID 0)');
+  assert.equal(group.children.find(r=>r.inactive.uid===0).presentationLabel,'User UID 0');
   assert.ok(group.children.every(r=>r.parent===group.id));
   const different = activityTree({processes:{},rows:[]},[...rules,rule('else','else','v1','/other/tool')])[0].children;
   assert.equal(different.length,2,'same basename elsewhere is not the same program');

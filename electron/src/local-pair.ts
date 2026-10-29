@@ -1,3 +1,4 @@
+import { accountLabel } from './accounts';
 import type { Application, Provenance, RequestEvent } from './protocol';
 
 // local-pair-v1: same-host connections. The backend identifies the other
@@ -257,7 +258,7 @@ function peerRow(p: LocalPeer): string {
   const s = p.socket,
     o = p.owner;
   return [
-    o ? `${nameOf(o.application, o.executable)} · PID ${o.pid} · start ${o.start_ticks} · UID ${o.uid}` : 'Owner not identified',
+    o ? `${nameOf(o.application, o.executable)} · PID ${o.pid} · start ${o.start_ticks} · ${accountLabel(o.uid)}` : 'Owner not identified',
     o ? o.application.executable || o.executable : '',
     s ? `${s.kind} socket ${s.local} → ${s.remote} · ${s.state}` : '',
     s ? `cookie ${s.cookie} · inode ${s.inode}` : '',

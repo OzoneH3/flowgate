@@ -1,3 +1,4 @@
+import { accountLabel } from './accounts';
 import { parseNetworkZones, type NetworkZones, type NetworkZone } from './network-zones';
 import { parseProcessTarget, type ProcessTarget } from './process-rules';
 import type { ClientState, RuleFilter } from './protocol';
@@ -495,7 +496,7 @@ export function policyLabel(d: DirectionPolicy) {
 }
 export function policyRuleDescription(r: PolicyRuleRef) {
   const f = r.scope;
-  return `${r.root_application ? `UID ${f.uid} + root · ` : ''}${r.expired ? 'Expired' : r.disabled ? 'Disabled' : r.active ? 'Enabled' : 'Inactive'} ${r.action} · ${f.direction} ${f.protocol} · remote ${f.remote_address || f.remote || 'any'} · local port ${f.local_port || 'any'} · remote port ${f.remote_port || 'any'} · expires ${r.expires.startsWith('0001-') ? 'never' : r.expires} · ${r.id} v${r.version}`;
+  return `${r.root_application ? `${accountLabel(f.uid)} + root · ` : ''}${r.expired ? 'Expired' : r.disabled ? 'Disabled' : r.active ? 'Enabled' : 'Inactive'} ${r.action} · ${f.direction} ${f.protocol} · remote ${f.remote_address || f.remote || 'any'} · local port ${f.local_port || 'any'} · remote port ${f.remote_port || 'any'} · expires ${r.expires.startsWith('0001-') ? 'never' : r.expires} · ${r.id} v${r.version}`;
 }
 
 // Exact backend inventory association only; never classify an endpoint or choose a rule.

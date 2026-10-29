@@ -1,3 +1,4 @@
+import { accountLabel } from './accounts';
 // decision-for-a-while-v1 (NetLimiter 5.3.28 "For a while"): the backend decides
 // the current request like Once and keeps an in-memory process-instance lease
 // (same direction, exactly this verified process instance, all addresses and
@@ -155,7 +156,7 @@ export function leaseDetails(lease: ProcessLease): [string, string][] {
     ['Application', lease.application || 'Unknown'],
     ['Executable', lease.executable || 'Unknown'],
     ['Process', `PID ${lease.pid}${lease.start ? ' · start ' + lease.start : ''}`],
-    ['UID', lease.uid >= 0 ? String(lease.uid) : 'Unknown'],
+    ['UID', accountLabel(lease.uid).replace(/^UID /, '')],
     ['Direction', lease.direction === 'incoming' ? 'Incoming' : lease.direction === 'outgoing' ? 'Outgoing' : lease.direction || 'Unknown'],
     ['Action', lease.action === 'allow' ? 'Allow' : 'Deny'],
     ['Duration', durationLabel(lease.seconds)],

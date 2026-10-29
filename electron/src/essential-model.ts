@@ -1,3 +1,4 @@
+import { accountLabel } from './accounts';
 import { parseRule, type Rule } from './protocol';
 export const ESSENTIAL_ASSISTANCE_CAPABILITY = 'essential-optional-services-v1';
 export const ESSENTIAL_CAPABILITY = 'essential-system-networking-v1';
@@ -274,9 +275,9 @@ export function agreesWithEssential(p: EssentialPreview, r: EssentialReceipt) {
 export function essentialRuleLabel(r: Rule) {
   const f = r.filter;
   const target = f.peer_service
-    ? `All programs${f.all_uids ? ' · all users' : ''} → local service ${f.peer_service.application} · UID ${f.peer_service.uid}`
+    ? `All programs${f.all_uids ? ' · all users' : ''} → local service ${f.peer_service.application} · ${accountLabel(f.peer_service.uid)}`
     : f.all_programs
       ? `All programs${f.all_uids ? ' · all users' : ''}`
-      : `${r.executable || f.application} · UID ${f.uid}`;
+      : `${r.executable || f.application} · ${accountLabel(f.uid)}`;
   return `${r.preset?.component === 'dhcp' ? 'DHCP durable interface protocol exception' : r.preset?.component || 'Essential'} · ${r.action === 'allow' ? 'Allow' : 'Deny'} ${f.direction} ${f.protocol.toUpperCase()} · ${target} · local ${f.local_address || '*'}:${f.local_port || '*'} → ${f.remote_address || '*'}:${f.remote_port || '*'}${f.interface_name || f.interface_index ? ` · interface ${f.interface_name || 'index'} (${f.interface_index || 'Any index'})` : ''}${!f.remote_address || f.remote_address === '*' ? ' · Any destination' : ''} · ${r.expires.startsWith('0001-') ? 'No expiry' : `Expires ${r.expires}`}`;
 }

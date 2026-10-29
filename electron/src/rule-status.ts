@@ -1,3 +1,4 @@
+import { accountLabel } from './accounts';
 import { matchesApplicationZone } from './application-zones';
 import { zoneRuleLabel } from './network-zones';
 import { ruleCoversRevision, type ClientState, type Rule } from './protocol';
@@ -72,9 +73,9 @@ export const revisionScope = (rule: Rule) =>
 export function ruleDescription(rule: Rule, now: number) {
   const f = rule.filter;
   const preset = rule.preset
-    ? `Essential · ${rule.preset.component} · local ${f.local_address || '*'} · interface ${f.interface_name || '*'}/${f.interface_index || '*'}${f.peer_service ? ` · local service ${f.peer_service.application} UID ${f.peer_service.uid}` : ''} · `
+    ? `Essential · ${rule.preset.component} · local ${f.local_address || '*'} · interface ${f.interface_name || '*'}/${f.interface_index || '*'}${f.peer_service ? ` · local service ${f.peer_service.application} ${accountLabel(f.peer_service.uid)}` : ''} · `
     : '';
-  return `${rule.root_application ? `UID ${f.uid} + root · ` : ""}${preset}${zoneRuleLabel(rule)} · ${ruleState(rule, now)} ${rule.action} · ${f.direction} ${f.protocol} · remote ${f.remote_address || f.remote || 'any'} · local port ${f.local_port || 'any'} · remote port ${f.remote_port || 'any'} · expires ${rule.expires && !rule.expires.startsWith('0001-') ? rule.expires : 'never'}${rule.follows_updates ? ' · follows updates' : ''} · ${rule.id}`;
+  return `${rule.root_application ? `${accountLabel(f.uid)} + root · ` : ""}${preset}${zoneRuleLabel(rule)} · ${ruleState(rule, now)} ${rule.action} · ${f.direction} ${f.protocol} · remote ${f.remote_address || f.remote || 'any'} · local port ${f.local_port || 'any'} · remote port ${f.remote_port || 'any'} · expires ${rule.expires && !rule.expires.startsWith('0001-') ? rule.expires : 'never'}${rule.follows_updates ? ' · follows updates' : ''} · ${rule.id}`;
 }
 
 // Describe stored filter constraints; this does not evaluate a connection or precedence.

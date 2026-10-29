@@ -1,3 +1,4 @@
+import { accountLabel } from './accounts';
 import {uploadButton, priorityButton, refreshUpload, openUploadLimits} from "./upload-shaping-view";
 import { setupObservedUsage, showObservedUsage, updateObservedUsage } from './observed-usage-view';
 import { matchesApplicationZone } from './application-zones';
@@ -1886,7 +1887,7 @@ function renderInfo() {
     field(info,'Wine prefix',a.evidence.prefix);
     field(info,'Windows ownership',a.evidence.windows_handle_holders.map(h=>`PID ${h.pid} · creation ${h.creation_time} · ${h.image}`).join('\n'));
     field(info,'Unix socket holder',`wineserver PID ${a.evidence.broker_pid}, start ${a.evidence.broker_start_ticks}; socket cookie ${a.evidence.socket_cookie}`);
-    field(info,'Rule identity',`${a.application.key} · revision ${a.application.revision} · UID ${a.uid}`);
+    field(info,'Rule identity',`${a.application.key} · revision ${a.application.revision} · ${accountLabel(a.uid)}`);
   }
   if (r.requestEvent) {
     const e=r.requestEvent;
@@ -1941,7 +1942,7 @@ function renderInfo() {
       field(info, 'Recorded scripts', r.inactive.invocations.join('\n'));
       field(info, 'Permission scope', 'These rules match the interpreter executable, not only the named script. Script context was recorded when the rule was created.');
     }
-    field(info, 'User ID', String(r.inactive.uid));
+    field(info, 'User', accountLabel(r.inactive.uid));
     field(info, 'Identity', `${r.inactive.key}\nRevision: ${r.inactive.revision}`);
     const callers = applicationCallers.forApplication(r.inactive.key,r.inactive.revision,r.inactive.uid);
     const nodeRuntime = /^(node|nodejs)$/.test(r.inactive.executable.split('/').pop()||'');
@@ -1998,7 +1999,7 @@ function renderInfo() {
         'Replaced/deleted on disk; this running image retains its original identity. Installed icon/name are display metadata only.',
       );
     field(info, 'Executable', r.process.executable);
-    field(info, 'User ID', String(r.process.uid));
+    field(info, 'User', accountLabel(r.process.uid));
     field(
       info,
       'Identity',
@@ -2017,7 +2018,7 @@ function renderInfo() {
       field(
         info,
         'Process',
-        `${r.process.thread_group_pid ? `Worker TID ${r.process.pid} · thread-group PID ${r.process.thread_group_pid}` : r.process.pid} · start ${r.process.start_ticks} · UID ${r.process.uid}`,
+        `${r.process.thread_group_pid ? `Worker TID ${r.process.pid} · thread-group PID ${r.process.thread_group_pid}` : r.process.pid} · start ${r.process.start_ticks} · ${accountLabel(r.process.uid)}`,
       );
   }
   if (r.socket) {
@@ -2031,7 +2032,7 @@ function renderInfo() {
       ['Initiation', initiationPresentation(s).title],
       ['Ownership', s.ownership],
       ['Ownership evidence category', ownershipExplanation(s.ownership_category)],
-      ['Socket creation UID', String(s.socket.uid)],
+      ['Socket creation user', accountLabel(s.socket.uid)],
       ...(s.display_application
         ? [
             [
@@ -3122,6 +3123,7 @@ void window.flowgate.hostIdentity?.().then(label => {
   hostLabel = label;
   if (state) { buildTree(); renderTree(); }
 }).catch(() => {});
+window.addEventListener('flowgate-account-name', () => { if (state) { buildTree(); renderInfo(); } });
 window.flowgate.subscribe(consume);
 if (!promptID) window.setInterval(() => { if(state) refreshUpload(state); }, 1000);
 window.flowgate.onClock((clock) => {

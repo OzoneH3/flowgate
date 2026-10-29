@@ -1,3 +1,4 @@
+import { accountLabel } from './accounts';
 import { uploadButton, priorityButton } from "./upload-shaping-view";
 import { runtimeWitness } from './protocol';
 import { matchesApplicationZone } from './application-zones';
@@ -885,7 +886,7 @@ export class ActivityPolicy {
         box.append(
           el(
             'p',
-            `${short(direction)} · ${only.scope.all_programs ? 'All programs · ' + (only.scope.all_uids ? 'all users' : 'UID ' + only.scope.uid) : targetShort} · ${zoneLabel(only.scope.network_zone)} · ${shortScope(only).split(' · ')[0]} · ${lifetimeShort(only.expires)}`,
+            `${short(direction)} · ${only.scope.all_programs ? 'All programs · ' + (only.scope.all_uids ? 'all users' : accountLabel(only.scope.uid)) : targetShort} · ${zoneLabel(only.scope.network_zone)} · ${shortScope(only).split(' · ')[0]} · ${lifetimeShort(only.expires)}`,
             'qs-scope',
           ),
         );

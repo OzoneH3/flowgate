@@ -1,3 +1,4 @@
+import { showAccountIn } from './accounts';
 import { popupPosition } from './popup-position';
 import {DEFAULT_SHAPING, ZONE_CAPABILITY, scopeOf, scopeLabel, sameTarget, type LimitScope, uploadTarget, uploadSummary, limitCoverage, capRate, capPriority, prioritySummary, priorityCoverage, validateBudget, DOWNLOAD_CAPABILITY, PRIORITY_CAPABILITY, TRAFFIC_PRIORITIES, type TrafficPriority, type LimitDirection, UPLOAD_CAPABILITY, UPLOAD_RATE_UNITS, uploadRateBits, uploadRateValue, type UploadRateUnit, type UploadView, type UploadTarget} from './upload-shaping';
 import type {Row} from './model';
@@ -98,11 +99,11 @@ export async function openUploadLimits() {
   d.append(text("h3","Experimental bandwidth limits"),text("p",view.message||"Configured limits survive closing the GUI, but not a daemon restart. Coverage remains partial."));
   for(const c of view.snapshot?.configured_caps||[])for(const direction of ['upload','download'] as const){
     if(!capRate(c,direction))continue;
-    const b=text('button',`${c.application} · UID ${c.uid} · ${scopeLabel(scopeOf(c))} · ${direction} ${capRate(c,direction)/1000000} Mbit/s`);
+    const b=text('button','');showAccountIn(b,c.uid,user=>`${c.application} · ${user} · ${scopeLabel(scopeOf(c))} · ${direction} ${capRate(c,direction)/1000000} Mbit/s`);
     b.onclick=()=>{d.remove();const p=latestState?.observation.connected?Object.values(latestState.observation.activity?.processes||{}).find(p=>p.uid===c.uid&&p.application.key===c.application&&p.application.kind==='native'):undefined;void open({...c,revision:p?.application.revision},document.getElementById('uploadLimits')||undefined,direction);};d.append(b);
   }
   for(const c of view.snapshot?.configured_caps||[])if(c.traffic_priority){
-    const b=text('button',`${c.application} · UID ${c.uid} · ${scopeLabel(scopeOf(c))} · traffic priority ${c.traffic_priority}`);
+    const b=text('button','');showAccountIn(b,c.uid,user=>`${c.application} · ${user} · ${scopeLabel(scopeOf(c))} · traffic priority ${c.traffic_priority}`);
     b.onclick=()=>{d.remove();const p=latestState?.observation.connected?Object.values(latestState.observation.activity?.processes||{}).find(p=>p.uid===c.uid&&p.application.key===c.application&&p.application.kind==='native'):undefined;void open({...c,revision:p?.application.revision},document.getElementById('uploadLimits')||undefined,'priority');};d.append(b);
   }
   if(view.prioritySupported && view.snapshot){

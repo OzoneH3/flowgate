@@ -1,3 +1,4 @@
+import { accountLabel } from './accounts';
 import { ENDPOINT_SCOPE, ENDPOINT_PRECEDENCE } from './endpoint-policy';
 import {
   LOG_SOURCES,
@@ -165,6 +166,7 @@ async function applyFilter() {
   render();
   $('logScroll').scrollTop = 0;
 }
+if (typeof window !== 'undefined') window.addEventListener('flowgate-account-name', () => { if (visible && detailFor) void showDetail(detailFor); });
 export async function showDecisionLog(show: boolean) {
   if (visible === show) return;
   visible = show;
@@ -411,7 +413,7 @@ async function showDetail(id: string, outcome = false) {
     );
     field(d, 'Scope', scopeLabel(r.decision?.scope));
     field(d, 'Reason', r.decision?.reason);
-    field(d, 'Decided by UID', r.decision?.decided_by_uid);
+    field(d, 'Decided by', r.decision?.decided_by_uid == null ? undefined : accountLabel(r.decision.decided_by_uid));
     field(
       d,
       'Record type',
@@ -474,7 +476,7 @@ async function showDetail(id: string, outcome = false) {
       'Attribution',
       [r.attribution?.status, r.attribution?.reason].filter(Boolean).join(' · '),
     );
-    field(a, 'Principal UID', r.principal_uid);
+    field(a, 'Principal', r.principal_uid == null ? undefined : accountLabel(r.principal_uid));
     parts.push(
       el('p', 'Recorded identity; not matched against currently running processes.', 'hint'),
     );

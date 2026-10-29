@@ -457,6 +457,7 @@ export interface Decision {
   duration_seconds?: number;
 }
 export interface Bridge {
+  accountName(uid: number): Promise<string | null>;
   uploadStatus(): Promise<import("./upload-shaping").UploadView>;
   uploadConfigure(value: import("./upload-shaping").UploadEdit | import("./upload-shaping").UploadCleanup | import("./upload-shaping").BudgetEdit): Promise<import("./upload-shaping").UploadView>;
   hostIdentity(): Promise<string>;

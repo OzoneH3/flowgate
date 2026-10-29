@@ -1,3 +1,4 @@
+import { accountLabel } from './accounts';
 import { zoneLabel } from './network-zones';
 import type { DirectionPolicy, PolicyRuleRef } from './policy';
 // Presentation of a backend direction summary. Inventory only: no matching or precedence.
@@ -41,7 +42,7 @@ export function shortScope(r: PolicyRuleRef) {
     protocolLabel(r),
     zoneLabel(f.network_zone),
     ...(f.all_programs
-      ? [f.all_uids ? 'all programs / all users' : 'all programs / UID ' + f.uid]
+      ? [f.all_uids ? 'all programs / all users' : 'all programs / ' + accountLabel(f.uid)]
       : []),
   ];
   const address = f.remote_address && f.remote_address !== '*' ? f.remote_address : f.remote;

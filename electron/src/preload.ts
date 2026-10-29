@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { Bridge, ClientState, Decision } from './protocol';
 const api: Bridge = {
+  accountName: (uid) => ipcRenderer.invoke('account:name', uid),
   uploadStatus: () => ipcRenderer.invoke("upload:status"),
   uploadConfigure: (v) => ipcRenderer.invoke("upload:configure", v),
   hostIdentity: () => ipcRenderer.invoke('host:identity'),

@@ -1,3 +1,4 @@
+import { accountLabel } from './accounts';
 import { applicationHeading } from './application-heading';
 import { attributionReasonLabel } from './attribution-reason';
 import { connectionPresentation } from './connection-presentation';
@@ -224,7 +225,7 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
   row(
     app,
     'Process',
-    e.attribution.owners.map((x) => `PID ${x.pid} · start ${x.start_ticks} · UID ${x.uid}`).join('\n') || 'Unavailable',
+    e.attribution.owners.map((x) => `PID ${x.pid} · start ${x.start_ticks} · ${accountLabel(x.uid)}`).join('\n') || 'Unavailable',
   );
   row(app, 'Attribution', e.attribution.status);
   if (e.attribution.reason_code)

@@ -27,6 +27,8 @@ await build({
 await build({
   entryPoints: [
     'src/model.ts',
+    'src/accounts.ts',
+    'src/account-lookup.ts',
     'src/session-exit.ts',
     'src/attribution-reason.ts',
     'src/endpoint-policy.ts',
