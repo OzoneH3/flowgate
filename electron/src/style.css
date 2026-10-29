@@ -1426,7 +1426,7 @@ body.hide-sidebar #activityView > aside { display:none; }
 .quick-popup select[data-focus=qs-zone] {height:20px;min-height:20px;font-size:11px;max-width:132px;margin:0 4px 3px 0;padding:0 3px;}
 .quick-popup select[data-focus=qs-principal] {height:20px;min-height:20px;font-size:11px;width:84px;padding:0 2px;}
 
-/* Cursor-free live reference: both neutral Blocker slots use the same heavy check. */
+/* Incoming enters a gate; outgoing leaves it. Distinct from vertical limit arrows. */
 #tree .status-slot .slot-icon.family-in-blocker,#tree .status-slot .slot-icon.family-out-blocker { background:#a7a7a7; color:#272727; border-radius:50%; }
 .slot-icon.family-in-blocker svg,.slot-icon.family-out-blocker svg { width:14px; height:14px; }
 
@@ -1797,6 +1797,7 @@ body.hide-sidebar #activityView > aside { display:none; }
 .status-slot.upload-limit.unavailable .slot-dot,
 #infoRules .status-slot.upload-limit .slot-dot { display: none; }
 .status-slot.upload-limit.upload-configured .slot-icon.family-priority,
+#tree tbody tr[aria-selected='true'] .status-slot.upload-limit.upload-configured .slot-icon.family-priority,
 .status-slot.upload-limit.upload-configured .slot-icon.family-ul-limit,
 #tree tbody tr[aria-selected='true'] .status-slot.upload-limit.upload-configured .slot-icon.family-ul-limit { background: #409cdb; color: #17232c; }
 .status-slot.upload-limit.unavailable .slot-icon { opacity: .55; }

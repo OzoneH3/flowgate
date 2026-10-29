@@ -574,8 +574,10 @@ function statusFamilyGlyph(key: string) {
   const path = document.createElementNS(svg.namespaceURI, 'path');
   path.setAttribute(
     'd',
-    key === 'in-blocker' || key === 'out-blocker'
-      ? 'M3.5 7.5L6.2 10.2L12 4.4'
+    key === 'in-blocker'
+      ? 'M10 2h3v12h-3M2 8h8M7 5l3 3-3 3'
+      : key === 'out-blocker'
+        ? 'M6 2H3v12h3M6 8h8M11 5l3 3-3 3'
       : key.includes('quota')
         ? 'M8 1l6 3v8l-6 3-6-3V4zM8 1v14M2 4l6 4 6-4'
         : key === 'dl-limit'
@@ -584,7 +586,7 @@ function statusFamilyGlyph(key: string) {
   );
   path.setAttribute('fill', 'none');
   path.setAttribute('stroke', 'currentColor');
-  path.setAttribute('stroke-width', key === 'in-blocker' || key === 'out-blocker' ? '2.2' : '1.3');
+  path.setAttribute('stroke-width', key === 'in-blocker' || key === 'out-blocker' ? '1.5' : '1.3');
   path.setAttribute('stroke-linecap', 'round');
   path.setAttribute('stroke-linejoin', 'round');
   svg.append(path);
