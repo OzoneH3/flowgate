@@ -5,10 +5,11 @@
     "b06ae6a92ed605d1a1d2852aa2c28c941bacb0d1",
     "daa12524d2e88b9c37ce961c7fe314dc9c077941",
     "517f001d7195490640fa17d3ca9def6b4b9b38da",
-    "0e1703bb98e98470d66c10fcc438947db7fc0615"
+    "0e1703bb98e98470d66c10fcc438947db7fc0615",
+    "2d7cd7ae222b051811446cda0a2136d8764e29ea"
   ],
   "rejected": [
     "66313d5deaa350dc4e77adda44e1b986fb8e2619"
   ],
-  "note": "User requested commit and deployment of unavailable Activity control fix. Exact release 0e1703bb98e98470d66c10fcc438947db7fc0615 passed full release checks; approved shaping helper bytes and installed launcher configuration preserved."
+  "note": "User requested completion of unavailable Activity control deployment. Exact release 2d7cd7ae222b051811446cda0a2136d8764e29ea passed full release checks, includes invisible non-interactive empty slots, and preserves approved shaping helpers and installed launcher configuration."
 }
