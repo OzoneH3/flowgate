@@ -390,6 +390,9 @@ func (e *Engine) observeResolvedWithLinkLocked(f identity.Flow, token string, a 
 		if identity.RuntimeRuleBlocked(a.Application) == "" {
 			v.ScopePreviews["application"] = fmt.Sprintf("Remember for one hour (memory only): program %s; captured revision %s; user %d; %s %s; remote address %s; %s. Other local addresses may match. Saved application permissions follow updates of the same verified program; other programs, users and prefixes stay separate.", filter.Application, filter.Revision, filter.UID, filter.Direction, filter.Protocol, filter.RemoteAddress, service)
 		}
+		if a.Application != nil && identity.BestEffortElectron(*a.Application) {
+			v.ScopePreviews["application"] = strings.Replace(v.ScopePreviews["application"], "same verified program", "same best-effort matched application", 1)
+		}
 		if e.SaveRules != nil && v.ScopePreviews["application"] != "" {
 			v.ScopePreviews["application"] = strings.Replace(v.ScopePreviews["application"], "memory only", "saved to disk; absolute expiry survives restart", 1)
 			v.ScopePreviews["persistent"] = strings.Replace(v.ScopePreviews["application"], "Remember for one hour (saved to disk; absolute expiry survives restart)", "Persistent until disabled/deleted (saved to disk)", 1)

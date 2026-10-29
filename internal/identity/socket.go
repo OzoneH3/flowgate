@@ -45,16 +45,17 @@ func (f Flow) Key() string {
 }
 
 type Attribution struct {
-	Table              *TableEvidence `json:"runtime_table,omitempty"`
-	VisibilityComplete bool           `json:"visibility_complete"`
-	Association        *Association   `json:"association,omitempty"`
-	Status             string         `json:"status"`
-	Reason             string         `json:"reason"`
-	ReasonCode         string         `json:"reason_code,omitempty"`
-	Owners             []Process      `json:"owners"`
-	Sockets            []Socket       `json:"sockets"`
-	Fingerprint        string         `json:"fingerprint"`
-	Application        *Application   `json:"application,omitempty"`
+	presentationTarget *permissionPresentation // immutable-list display only; never authority
+	Table              *TableEvidence          `json:"runtime_table,omitempty"`
+	VisibilityComplete bool                    `json:"visibility_complete"`
+	Association        *Association            `json:"association,omitempty"`
+	Status             string                  `json:"status"`
+	Reason             string                  `json:"reason"`
+	ReasonCode         string                  `json:"reason_code,omitempty"`
+	Owners             []Process               `json:"owners"`
+	Sockets            []Socket                `json:"sockets"`
+	Fingerprint        string                  `json:"fingerprint"`
+	Application        *Application            `json:"application,omitempty"`
 }
 
 func NetNS() string              { return link("/proc/self/ns/net") }

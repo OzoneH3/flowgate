@@ -146,3 +146,19 @@ func TestRequestRuleRetentionIsBounded(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestUnresolvedRuntimeCannotSaveFutureApplicationRule(t *testing.T) {
+	e, f, a, now := fixture()
+	e.SaveRules = func([]policy.Rule) error { t.Fatal("unresolved identity saved"); return nil }
+	a.Application.Hosted = &identity.Hosted{State: "best-effort", Runtime: "/synthetic/electron", Bundle: "/synthetic/app.asar"}
+	a.Application.Kind = "electron" // client-shaped claim has no private resolver receipt
+	v := e.Observe(f, "unresolved")
+	*now = now.Add(2 * time.Minute)
+	_, err := e.PreviewRequestRule(e.Generation, v.ID, "allow", "persistent", "any", e.Zones.Revision, 1000, false, appOnly())
+	if code(err) != identity.CodeIdentityUnverifiable || !strings.Contains(err.Error(), "No application was successfully matched") {
+		t.Fatal(err)
+	}
+	if len(e.rules) != 0 {
+		t.Fatal("unresolved claim granted permission")
+	}
+}

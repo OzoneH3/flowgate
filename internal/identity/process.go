@@ -16,6 +16,8 @@ import (
 )
 
 type Application struct {
+	bestEffortElectron bool // resolver-issued; never restored from client or stored JSON
+
 	DisplayName       string `json:"display_name,omitempty"`
 	DisplayExecutable string `json:"display_executable,omitempty"`
 	ExecutableStatus  string `json:"executable_status,omitempty"`
@@ -33,8 +35,8 @@ type Application struct {
 	Prefix         string   `json:"prefix,omitempty"`
 	SteamAppID     string   `json:"steam_app_id,omitempty"`
 	Evidence       []string `json:"evidence"`
-	// Hosted is unverified shared-runtime display context. A bundle argument
-	// is not permission authority; legacy records may contain a verified label.
+	// Hosted describes shared-runtime matching. Only the private resolver receipt
+	// enables best-effort rules; serialized or legacy verified labels do not.
 	Hosted *Hosted `json:"hosted,omitempty"`
 }
 type Process struct {
@@ -203,6 +205,16 @@ func Inspect(pid int) (Process, error) {
 		// Command lines and bundle metadata do not prove which code executes.
 		// Retain the actual executable and only attach an unverified display hint.
 		a.Hosted = ResolveElectronApp(pid, start)
+		if a.Hosted != nil && a.Hosted.matched {
+			a.bestEffortElectron = true
+			a.Kind, a.Runtime, a.Executable, a.Revision = "electron", p.Executable, a.Hosted.Bundle, a.Hosted.revision
+			a.HostExecutable = ""
+			a.Name = a.Hosted.ProductName
+			if a.Name == "" {
+				a.Name = a.Hosted.PackageName
+			}
+			a.Evidence = append(a.Evidence, "best-effort Electron application match; launch/package evidence is not verified code execution")
+		}
 	}
 	// The inode link count distinguishes a replaced native image from a file
 	// literally named with the kernel deletion suffix. Its revision stays exact.

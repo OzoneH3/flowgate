@@ -30,6 +30,7 @@ type ListSnapshot struct {
 }
 
 type publishedList struct {
+	targets    map[string]identity.PermissionTarget // presentation only, immutable after publish
 	data       []byte
 	hasPresets bool
 	revision   string
@@ -57,7 +58,11 @@ func (s *listReadState) publish(e *Engine) error {
 	// Expiring previews is lifecycle work, not a side effect of list polling.
 	e.pruneDecisionPreviews(now)
 	view := ListSnapshot{Revision: strconv.FormatUint(s.revision+1, 10), At: now, Events: []Event{}, Zones: e.Zones, Rules: []policy.Rule{}, RuleStates: map[string]RuleTargetState{}, Leases: []ProcessLease{}}
+	targets := map[string]identity.PermissionTarget{}
 	for _, event := range e.events {
+		if target := identity.DescribePermissionTarget(event.Attribution); target != nil {
+			targets[event.ID] = *target
+		}
 		row := *event
 		row.RequestRule = e.requestRuleSourceLocked(event.ID)
 		row.PreviousRevisionRules = e.previousRevisionRulesLocked(event)
@@ -81,7 +86,7 @@ func (s *listReadState) publish(e *Engine) error {
 		return fmt.Errorf("publish request snapshot: %w", err)
 	}
 	s.revision++
-	s.published.Store(&publishedList{data: data, hasPresets: view.HasPresets, revision: view.Revision, at: view.At})
+	s.published.Store(&publishedList{targets: targets, data: data, hasPresets: view.HasPresets, revision: view.Revision, at: view.At})
 	return nil
 }
 
@@ -96,6 +101,9 @@ func (s *listReadState) read(uid uint32, admin bool, now time.Time) (ListSnapsho
 	}
 	events := view.Events[:0]
 	for _, event := range view.Events {
+		if target, ok := p.targets[event.ID]; ok {
+			event.Attribution = event.Attribution.WithPermissionPresentation(target)
+		}
 		if !admin && !owned(event.Attribution, uid) {
 			continue
 		}

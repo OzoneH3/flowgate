@@ -130,6 +130,14 @@ func DescribePermissionTarget(a Attribution) *PermissionTarget {
 		t.SharedWithNote = fmt.Sprintf("%s is the observed executable; the claimed bundle is not permission authority", app.Executable)
 		return t
 	}
+	if BestEffortElectron(*app) {
+		t.Kind = "application"
+		t.Label = name + " (best-effort Electron match)"
+		t.KeyBasis = "uid+runtime executable+canonical application entry; best-effort, not verified execution"
+		t.Remember = fmt.Sprintf("%s (%s), UID %d; best-effort match survives relaunches at this entry with the same runtime path", name, app.Executable, uid)
+		t.SharedWithNote = "Matching Electron network processes are covered; other application entries, users, runtimes and independent helpers remain separate. Manipulated launch/package evidence can impersonate this identity."
+		return t
+	}
 	if app.Kind == "wine" {
 		short := ShortPrefix(app.Prefix)
 		t.Prefix = app.Prefix
@@ -188,6 +196,24 @@ func DescribePermissionTarget(a Attribution) *PermissionTarget {
 	return t
 }
 
+// WithPermissionPresentation preserves a backend-derived label through an
+// immutable list snapshot's JSON copy. It restores no resolver receipt and is
+// never consulted by policy. Any serialized attribution change drops the label.
+type permissionPresentation struct {
+	target  PermissionTarget
+	binding string
+}
+
+func (a Attribution) presentationBinding() string {
+	type plain Attribution
+	b, _ := json.Marshal(plain(a))
+	return digest(string(b))
+}
+func (a Attribution) WithPermissionPresentation(target PermissionTarget) Attribution {
+	a.presentationTarget = &permissionPresentation{target: target, binding: a.presentationBinding()}
+	return a
+}
+
 // MarshalJSON adds the principal owner's launch provenance and the permission
 // target, derived from the attribution's current fields at serialization, so
 // wrappers that withdraw an application identity can never leave a stale target.
@@ -203,6 +229,10 @@ func (a Attribution) MarshalJSON() ([]byte, error) {
 	}
 	if len(a.Owners) > 0 || a.Application != nil {
 		out.PermissionTarget = DescribePermissionTarget(a)
+		if p := a.presentationTarget; p != nil && p.binding == a.presentationBinding() {
+			target := p.target
+			out.PermissionTarget = &target
+		}
 	}
 	return json.Marshal(out)
 }

@@ -213,6 +213,10 @@ func (e *Engine) requestRuleSourceLocked(id string) *RequestRuleSource {
 	src.ProcessLeaseAvailable = r.Owner != nil && !r.Decided && state == "running"
 	src.Provenance = r.Provenance
 	src.ExecutableIdentity = "unavailable"
+	if identity.BestEffortElectron(r.Application) {
+		src.ExecutableIdentity = "best-effort"
+		return src
+	}
 	if r.Exe != nil {
 		switch ev := r.Exe.Evidence(); {
 		case ev.Visibility != identity.VisibilityHost:
@@ -234,6 +238,12 @@ func (e *Engine) requestRuleSourceLocked(id string) *RequestRuleSource {
 func (e *Engine) verifyRetainedLocked(r *retainedRequest) error {
 	var err error
 	switch ev := r.Exe.Evidence(); {
+	case identity.BestEffortElectron(r.Application):
+		// This in-memory resolver receipt was captured by retainRequestLocked,
+		// never decoded from a client or rule file. It authorizes a future rule
+		// for the resolved candidate even after exit; each future connection
+		// still needs a fresh resolver receipt. It cannot release the old flow.
+		err = nil
 	case e.verifyRetained != nil: // tests
 		err = e.verifyRetained(r.Application, r.UID, r.MountNS)
 	case r.Exe != nil && ev.Visibility == identity.VisibilityHost:
@@ -297,6 +307,20 @@ func (e *Engine) requestRuleLocked(generation, id, action, scope, zone, revision
 	if zone != "any" {
 		if err := e.zoneRevision(zone, revision); err != nil {
 			return nil, err
+		}
+	}
+	if e.requestRules[id] == nil {
+		for _, event := range e.events {
+			if event.ID != id {
+				continue
+			}
+			principal := event.Attribution.Principal()
+			if !admin && (principal == nil || principal.UID != uid) {
+				return nil, mutationError("forbidden", "Request belongs to another principal")
+			}
+			if identity.RuntimeRuleBlocked(event.Attribution.Application) != "" {
+				return nil, mutationError(identity.CodeIdentityUnverifiable, "No application was successfully matched for this shared-runtime request. A future application rule cannot be saved from its name or bundle hint; only a live verified process decision may be available.")
+			}
 		}
 	}
 	now := e.Now()

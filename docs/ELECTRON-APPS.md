@@ -1,84 +1,75 @@
 # Applications on a shared Electron runtime
 
-A system Electron runtime (`/usr/bin/electron`, `/usr/lib/electron43/electron`, any
-`electron[0-9]*`) runs many applications; the executable alone never identifies one.
-Heroic Games Launcher, for example, runs as `electron43 /usr/lib/heroic-games-launcher/app.asar`,
-and its sockets belong to the runtime's `--type=utility` network-service process.
+FlowGate supports **best-effort application matching** on supported shared Electron
+runtimes. This is an explicit convenience/security tradeoff: launch information,
+package metadata and open-file evidence do not attest which application code is
+executing. Manipulated evidence can impersonate another application. The prompt
+shows a short “Best-effort application match” label; Details explains the scope.
 
-## Identity and permission scope
+## Matching and permission scope
 
-Bundle arguments, package metadata and parent chains are display evidence, not
-proof that the bundle is executing. Since `de2c90b4`, FlowGate does not create or
-match application-wide permissions from these hints, including legacy entries
-labelled verified. The prompt keeps “application unverified”.
+A match uses the user ID, canonical runtime executable path and canonical application
+entry. ASAR entries require the main process to hold the corresponding archive inode
+open. Script entries (`.js`, `.mjs`, `.cjs`) require adjacent package metadata;
+unpacked package directories are also understood. Dependency archives are not
+substituted for the application entry. Missing or ambiguous evidence stays unverified.
 
-Remember can instead bind the exact verified native socket-owning process. The
-backend requires complete single-owner visibility, executable identity and stamp,
-UID, boot/start identity, namespaces and a thread-group leader; a pidfd pins the
-process lifetime. The Process checkbox is mandatory for this case. Rules retain
-direction and selected protocol/peer constraints. They stop matching on exit,
-identity change or daemon restart, even when the saved rule has no expiry. Another
-process, child, sibling or relaunch is not covered. Existing application rules are
-not converted, and no Allow is created without a user decision.
+The resolver checks process generations, same-user/runtime/mount ancestry and a
+bounded runtime capability probe (64-bit ELF, Node execution symbol and Electron
+fuse-v1 structure). The existing shared-runtime entry point recognizes
+`electron`/`electron[0-9]*`; differently named packaged binaries retain native
+executable identity. Runtime capability is a hint, not a signature. Real-runtime
+qualification covers Electron 42 and 43, not every build or platform.
 
-For a while similarly covers only the verified native process for the selected
-duration. Unknown, worker-only, merged-owner and legacy bundle identity evidence
-remains unavailable. Old backends do not advertise the new `process-remember`
-scope offer, so the UI keeps Remember disabled with them. Ended unverified-runtime
-requests do not offer remembered application rules; use a current request.
+Matching Chromium network-service processes use the application's identity.
+Independent Node utilities, Node-mode scripts and other helpers do not inherit it.
+Detected inspection/injection modes and nonempty NODE_OPTIONS are refused. No
+application name, launcher path or server-specific exception is used.
 
-## Presentation (`electron/src`)
+Application-only **Remember** saves a rule for future matching connections in the
+selected direction. With no expiry it survives application relaunch and daemon
+restart. Selected protocol, address, port or zone constraints narrow the rule;
+they do not transfer it to another application or user. The compact prompt keeps
+its existing controls; explicit zone scopes remain available through the existing
+backend/rule controls. Ordinary Allow/Deny retains its existing single-request
+semantics. For a while and an explicitly selected Process field remain process
+scopes, not reusable application permissions.
 
-The permission window shows the app (e.g. **Heroic Games Launcher**, `socket owner electron`)
-and, in Details › Electron app, the state, runtime, bundle, package, integrity, chain and
-reason. Unverified: `electron` with `application unverified`; Remember offers only the verified native process scope described above, or is disabled
-with the backend's reason when that scope is unavailable. The desktop name and icon come from the desktop entry whose launcher script
-names exactly that bundle (`/usr/bin/heroic`), or else a unique `StartupWMClass` equal to the
-package name — display only, never identity.
+Different application entries, runtime paths and users have separate keys. Same-path
+updates can continue to match; this is not a content-hash-pinned code permission.
+Each future connection must pass the normal resolver. A backend-private resolver
+receipt is never restored from serialized application JSON or client hints.
+The `electron-best-effort-v1` key space does not migrate old blanket runtime rules
+or revive legacy records labelled “verified”. No automatic Allow is created.
 
-## Launched by (general reverse chain)
+## Requests whose process has exited
 
-Every socket owner's provenance records its start-time-verified ancestry
-(`provenance.ancestry`). `provenance.parent` names the nearest ancestor that is another
-program: same UID (an ancestor of another user ends the search), not the owner's own
-executable, and not session, shell, terminal or sandbox infrastructure (systemd, shells,
-sudo, bwrap, Plasma/KWin, portals, tmux, Konsole, …). An Electron runtime ancestor is named by
-the app it verifiably runs (`parent.application`, kind `electron`). Example: Heroic's
-`nile` (its own binary in `app.asar.unpacked`) reads **nile · launched by Heroic Games
-Launcher**; Details › Launch › Launched by shows PID, start ticks and depth. Display only —
-rules for nile bind nile's own executable, never Heroic. A verified game launch (Proton/umu)
-keeps the game as the context instead.
+For a successfully resolved application, the backend retains its own match with the
+request (up to ten minutes after its deadline, with a bounded 256-request inventory).
+Remember on the ended request can save a **future application rule** without the
+original process still running. It neither revives nor claims delivery for the old
+connection. Future connections are independently resolved before the rule applies.
+The retained request receipt itself is in memory and does not survive daemon restart;
+a rule already saved to disk does. Expiry/eviction removes this future-rule opportunity.
 
-## Activity grouping (display only)
+If no application match was established, there is no application receipt to retain.
+The prompt reports the unresolved runtime limitation; a name or JSON claim cannot
+create a future application permission. A still-running unverified runtime can use
+an exact native process decision when its executable, UID, generation, namespaces
+and single socket owner are verified. That process scope ends on exit/identity
+change/backend restart and cannot cover a relaunch.
 
-Verified Electron processes are one application entry (the bundle identity). An application
-whose every visible process has `provenance.parent.application` = the same verified Electron
-application (same UID) is shown beneath that application's row, e.g. **Heroic Games
-Launcher › gogdl, legendary, nile** (`nestLaunchedApplications` in `electron/src/model.ts`).
-Each child keeps its own row id, sockets, totals, Rule Status, Info View and Allow/Deny
-prompts; the parent's totals and rule context are its own sockets only. Nothing is inherited:
-allowing Heroic creates a rule for Heroic's bundle identity only, and its helpers and the
-games it launches stay uncovered. If any process of the helper lacks the verified
-relationship, the relationships differ, the parent is unverified, or the parent has no row,
-the helper is shown separately rather than guessed. Info View shows "Launched by … Display
-only".
+## Display and helpers
 
-Legacy bundle-based process bindings are not revived. The current prompt binds the
-native executable and process generation. Activity application-wide rules remain
-unavailable for unverified bundles.
+Names, artwork and launch provenance are presentation, not an additional permission
+source. Matching application processes share their application identity; independent
+helpers retain their own identities and prompts even when displayed under a launcher.
+Incoming/outgoing and explicit rule scopes remain independent. Existing inactive-rule
+editing and conditional deletion continue to operate on the saved rule inventory.
 
-## Rule Status display details
+## Verification boundaries
 
-- Not-running applications that stored rules name are listed after all running applications
-  (dimmed, "not running"; `inactiveApplications` in `electron/src/model.ts`), one entry per
-  application key/revision/UID, in every sort order. An entry for an earlier revision of a
-  running program is marked "earlier version". Their Rule Status comes from the stored rule
-  inventory. Clicking an In/Out cell opens that direction's stored rules
-  (`electron/src/inactive-rules.ts`): enable/disable, Ask/Allow/Deny, Advanced, Delete. Each
-  change is reviewed by the backend (draft → preview → save, pinned to the listed version)
-  and saved only when the reviewed rule is exactly the requested change; delete uses the
-  confirmed conditional delete. When the last rule is deleted the entry disappears. No new
-  rule can be created there: that needs the running, verified program. Active/Listening
-  filters show sockets only and omit them.
-- A process row without its own rule shows its application's rule as inherited: muted grey,
-  disabled (no hover, tooltip or click). A process with its own rule keeps a normal cell.
+Synthetic API windows prove rendering and preview wiring, not kernel enforcement.
+Real-runtime identity fixtures prove matching and policy serialization, not packet
+admission. The isolated native GUI/kernel receiver journey is recorded separately in
+the release evidence. No zone/shaping benchmark is implied by Electron matching.

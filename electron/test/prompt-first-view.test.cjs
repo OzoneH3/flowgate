@@ -237,3 +237,14 @@ test('native application identity wins over a verified launch wrapper title', ()
     assert.equal(JSON.stringify(event),before,'presentation never rewrites owner, key, revision or prefix');
   }
 });
+
+test('best-effort Electron prompt names the application with a short honest label', () => {
+  const application = {key:'candidate',revision:'r',kind:'electron',name:'Synthetic alpha',executable:'/fixture/alpha.asar',runtime:'/fixture/electron43',hosted:{state:'best-effort',runtime:'/fixture/electron43',bundle:'/fixture/alpha.asar',reason:'candidate'}};
+  const event = ev({local_peer:undefined,attribution:{application,owners:[],visibility_complete:true}});
+  const summary = ps.promptSummary(event, 'electron');
+  assert.equal(summary.title,'Synthetic alpha');
+  assert.equal(summary.note,'Best-effort application match');
+  assert.equal(summary.ownIdentity,true);
+  application.hosted.state='unverified';
+  assert.notEqual(ps.promptSummary(event,'electron').note,'Best-effort application match');
+});

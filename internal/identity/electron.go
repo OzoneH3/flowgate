@@ -17,9 +17,9 @@ import (
 )
 
 // A shared runtime's basename, process chain, argv and readable bundle metadata
-// do not prove that it executes that bundle. These observations are display
-// hints only. Keep the running executable identity; do not derive a permission
-// identity from the bundle or grant application-wide access to the runtime.
+// do not prove that it executes that bundle. The explicitly best-effort contract
+// below combines these observations; it must not be described as code attestation.
+// Unresolved and legacy hints never grant application-wide runtime access.
 
 var electronRuntimeName = regexp.MustCompile(`^electron[0-9]*$`)
 
@@ -39,7 +39,7 @@ type HostedStep struct {
 
 // Hosted describes an application hosted by a shared runtime (Electron).
 type Hosted struct {
-	State       string       `json:"state"` // unverified; legacy records may say verified
+	State       string       `json:"state"` // best-effort or unverified; legacy records may say verified
 	Runtime     string       `json:"runtime"`
 	Bundle      string       `json:"bundle,omitempty"`
 	PackageName string       `json:"package_name,omitempty"`
@@ -48,6 +48,7 @@ type Hosted struct {
 	Integrity   string       `json:"integrity,omitempty"` // asar package.json SHA-256 verified | not provided
 	Chain       []HostedStep `json:"chain,omitempty"`
 	Reason      string       `json:"reason"`
+	matched     bool
 	revision    string
 }
 
@@ -105,7 +106,7 @@ func readFacts(pid int) (procFacts, error) {
 }
 
 // ResolveElectronApp gathers a claimed bundle and a generation-checked process
-// chain for display. It never verifies bundle execution or permission authority.
+// chain for a best-effort application match. It does not attest application code.
 func ResolveElectronApp(pid int, start string) *Hosted {
 	h := &Hosted{State: "unverified"}
 	first, err := readFacts(pid)
@@ -148,6 +149,10 @@ func ResolveElectronApp(pid int, start string) *Hosted {
 	}
 	base := fmt.Sprintf("/proc/%d", main)
 	args := cmdlineArgs(base)
+	if len(args) == 0 {
+		h.Reason = "main process command line became unavailable"
+		return h
+	}
 	for _, a := range args[1:] {
 		name, _, _ := strings.Cut(a, "=")
 		for _, u := range electronUnsafe {
@@ -157,7 +162,16 @@ func ResolveElectronApp(pid int, start string) *Hosted {
 			}
 		}
 	}
-	for _, v := range strings.Split(string(readBound(base+"/environ", 1<<20)), "\x00") {
+	environment := readBound(base+"/environ", 1<<20)
+	if environment == nil {
+		h.Reason = "main process environment is unavailable"
+		return h
+	}
+	for _, v := range strings.Split(string(environment), "\x00") {
+		if strings.HasPrefix(v, "NODE_OPTIONS=") && v != "NODE_OPTIONS=" {
+			h.Reason = "NODE_OPTIONS may load unrelated code; application matching unavailable"
+			return h
+		}
 		if strings.HasPrefix(v, "ELECTRON_RUN_AS_NODE=") && v != "ELECTRON_RUN_AS_NODE=" && v != "ELECTRON_RUN_AS_NODE=0" {
 			h.Reason = fmt.Sprintf("the Electron main process %d runs in Node mode (ELECTRON_RUN_AS_NODE)", main)
 			return h
@@ -178,10 +192,34 @@ func ResolveElectronApp(pid int, start string) *Hosted {
 		app = filepath.Join(link(base+"/cwd"), app)
 	}
 	app = filepath.Clean(app)
+	// Resolve aliases only when the path resolves to the same visible file.
+	// A foreign mount namespace with an inaccessible canonical path stays unknown.
+	canonical, canonicalErr := filepath.EvalSymlinks(base + "/root" + app)
+	if canonicalErr != nil {
+		h.Reason = "application path not found or cannot be resolved"
+		return h
+	}
+	visible, visibleErr := os.Stat(base + "/root" + canonical)
+	original, originalErr := os.Stat(base + "/root" + app)
+	if visibleErr != nil || originalErr != nil || !os.SameFile(visible, original) {
+		h.Reason = "application canonical path is ambiguous in this namespace"
+		return h
+	}
+	app = canonical
 	h.Bundle = app
 	// The bundle as the main process sees it (its mount namespace).
 	host := base + "/root" + app
-	pkg, revision, integrity, err := cachedBundlePackage(host)
+	packageHost := host
+	script := false
+	if st, err := os.Stat(host); err == nil && st.Mode().IsRegular() && (strings.HasSuffix(host, ".js") || strings.HasSuffix(host, ".mjs") || strings.HasSuffix(host, ".cjs")) {
+		script = true
+		packageHost = filepath.Dir(host)
+	}
+	pkg, revision, integrity, err := cachedBundlePackage(packageHost)
+	if script {
+		revision = digest(revision + "|" + stamp(host))
+		integrity = "script with adjacent package.json (best-effort association)"
+	}
 	if err != nil {
 		h.Reason = fmt.Sprintf("application bundle %s: %v", app, err)
 		return h
@@ -198,7 +236,7 @@ func ResolveElectronApp(pid int, start string) *Hosted {
 	// No PID of the chain may have been reused meanwhile.
 	for _, s := range h.Chain {
 		f, err := readFacts(s.PID)
-		if err != nil || f.start != s.Start || f.exe != first.exe {
+		if err != nil || f.start != s.Start || f.exe != first.exe || f.uid != first.uid || f.mountNS != first.mountNS {
 			h.Reason = fmt.Sprintf("PID %d changed while its chain was verified", s.PID)
 			return h
 		}
@@ -208,6 +246,41 @@ func ResolveElectronApp(pid int, start string) *Hosted {
 	h.Version = clip(meta.Version)
 	h.Integrity = integrity
 	h.revision = revision
+	// Only known runtime capabilities and a fresh, corroborated candidate may
+	// mint the new best-effort identity. Legacy verified labels stay refused.
+	eligible := electronRuntimeCapable(fmt.Sprintf("/proc/%d/exe", pid))
+	for _, step := range h.Chain {
+		stepArgs := cmdlineArgs(fmt.Sprintf("/proc/%d", step.PID))
+		if step.Type == "utility" && !hasArgument(stepArgs, "--utility-sub-type=network.mojom.NetworkService") {
+			eligible = false
+		}
+		if step.Type != "main" && step.Type != "utility" && step.Type != "renderer" && step.Type != "zygote" && step.Type != "gpu-process" {
+			eligible = false
+		}
+	}
+	if strings.HasSuffix(host, ".asar") && !openArchiveMatches(main, host) {
+		eligible = false
+	}
+	// Recheck package/entry after FD inspection, including package edits in an
+	// unchanged directory (directory mtime alone is not a package revision).
+	_, checkRevision, _, checkErr := cachedBundlePackage(packageHost)
+	if script {
+		checkRevision = digest(checkRevision + "|" + stamp(host))
+	}
+	if checkErr != nil || checkRevision != revision {
+		eligible = false
+	}
+	for _, step := range h.Chain {
+		f, err := readFacts(step.PID)
+		if err != nil || f.start != step.Start || f.exe != first.exe || f.uid != first.uid || f.mountNS != first.mountNS {
+			eligible = false
+		}
+	}
+	if eligible {
+		h.State, h.matched = "best-effort", true
+		h.Reason = "Best-effort application match from runtime capability, generation-checked process chain and canonical package entry; not verified code execution"
+		return h
+	}
 	h.Reason = fmt.Sprintf("process %d names bundle %s; command line and package metadata do not verify bundle execution", main, app)
 	if main != pid {
 		h.Reason = fmt.Sprintf("%s process %d → %s (parent chain and start times observed)", h.Chain[0].Type, pid, h.Reason)
@@ -228,7 +301,11 @@ var bundleCache = struct {
 }{m: map[string]bundleEntry{}}
 
 func cachedBundlePackage(path string) ([]byte, string, string, error) {
-	now := stamp(path)
+	stampPath := path
+	if st, err := os.Stat(path); err == nil && st.IsDir() {
+		stampPath = filepath.Join(path, "package.json")
+	}
+	now := stamp(stampPath)
 	if now == "" {
 		return readBundlePackage(path)
 	}
@@ -322,7 +399,13 @@ func readBundlePackage(path string) ([]byte, string, string, error) {
 
 // RuntimeRuleBlocked also rejects legacy "verified" hosted records. No current
 // mechanism proves bundle execution, so a legacy label cannot restore authority.
+func BestEffortElectron(a Application) bool {
+	return a.bestEffortElectron && a.Kind == "electron" && a.Hosted != nil && a.Hosted.State == "best-effort" && a.Runtime == a.Hosted.Runtime && a.Executable == a.Hosted.Bundle && a.Revision != ""
+}
 func RuntimeRuleBlocked(a *Application) string {
+	if a != nil && BestEffortElectron(*a) {
+		return ""
+	}
 	if a == nil || (a.Hosted == nil && a.Kind != "electron") {
 		return ""
 	}

@@ -46,7 +46,7 @@ export interface Application {
   hosted?: Hosted;
 }
 export interface Hosted {
-  state: 'verified' | 'unverified';
+  state: 'verified' | 'unverified' | 'best-effort';
   runtime: string;
   bundle?: string;
   package_name?: string;
@@ -590,7 +590,7 @@ function application(v: unknown): Application {
 function hosted(v: unknown): Hosted | undefined {
   if (v == null || typeof v !== 'object') return;
   const h = object(v);
-  if (!['verified', 'unverified'].includes(string(h.state))) return;
+  if (!['verified', 'unverified', 'best-effort'].includes(string(h.state))) return;
   const chain = Array.isArray(h.chain) ? h.chain.slice(0, 8).map(object) : [];
   return {
     state: string(h.state) as Hosted['state'],

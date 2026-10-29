@@ -247,7 +247,7 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
   if (hosted) {
     // Reported hosted context is distinct from permission authority.
     const l = section(details, 'Electron app', 'hosted').list;
-    row(l, 'State', hosted.state === 'verified' ? 'Verified by reporting backend' : 'Application unverified. Bundle metadata is display context only; application-wide Remember is unavailable.');
+    row(l, 'State', hosted.state === 'best-effort' ? 'Best-effort application match. Saved rules use the user, runtime and application entry; manipulated launch evidence can impersonate this identity.' : hosted.state === 'verified' ? 'Verified by reporting backend' : 'Application unverified. Bundle metadata is display context only; application-wide Remember is unavailable.');
     row(l, 'Runtime', hosted.runtime);
     if (hosted.bundle) row(l, hosted.state === 'verified' ? 'Bundle' : 'Observed bundle argument', hosted.bundle);
     if (hosted.package_name)

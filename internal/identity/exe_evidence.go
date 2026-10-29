@@ -546,6 +546,9 @@ func (a Application) KeyPath() string {
 
 // ApplicationKey derives the application key (user, kind, prefix, key path).
 func ApplicationKey(uid uint32, a Application) string {
+	if a.Kind == "electron" && a.Hosted != nil && a.Hosted.State == "best-effort" {
+		return digest(fmt.Sprintf("%d|electron-best-effort-v1|%s|%s", uid, a.Runtime, a.KeyPath()))
+	}
 	return digest(fmt.Sprintf("%d|%s|%s|%s", uid, a.Kind, a.Prefix, a.KeyPath()))
 }
 
@@ -648,6 +651,13 @@ func VerifyRetainedEvidence(a Application, uid uint32, ev ExecutableEvidence) er
 // VerifyInstanceExecutable proves the exact still-running instance executes
 // the retained revision (sandbox-only executables while the process runs).
 func VerifyInstanceExecutable(pid int, start string, a Application) error {
+	if BestEffortElectron(a) {
+		p, err := Inspect(pid)
+		if err != nil || p.Start != start || !BestEffortElectron(p.Application) || p.Application.Key != a.Key || p.Application.Revision != a.Revision {
+			return changed(CodeIdentityUnverifiable, "best-effort application instance exited or changed")
+		}
+		return nil
+	}
 	base := fmt.Sprintf("/proc/%d", pid)
 	target := base + "/exe"
 	if a.Kind == "wine" {

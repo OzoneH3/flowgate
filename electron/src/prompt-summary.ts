@@ -69,6 +69,8 @@ export function promptSummary(e: Ev, fallbackName: string): PromptSummary {
   // A runtime's bundle argument is display context, even when a launch wrapper
   // names a program. Keep the actual owner prominent without decorating it as
   // the claimed bundle or changing the backend's decision scope.
+  if (app?.hosted?.state === 'best-effort')
+    return {title: own, owner: (app.runtime || app.hosted.runtime).split('/').pop() || 'Electron', note: 'Best-effort application match', ownIdentity: true, launchedBy: launchedByName(e), destination: service || endpoint, endpoint: service ? endpoint : '', protocol: e.flow.protocol.toUpperCase()};
   if (app?.hosted?.state === 'unverified')
     return { title: own, owner: '', note: 'application unverified', ownIdentity: false, launchedBy: launchedByName(e), destination: service || endpoint, endpoint: service ? endpoint : '', protocol: e.flow.protocol.toUpperCase() };
   const invocation = provenance?.invocation;

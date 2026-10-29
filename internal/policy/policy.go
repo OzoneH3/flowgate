@@ -73,7 +73,7 @@ func (r Rule) FollowsUpdates() bool {
 func (r Rule) updateWitness(current ...identity.Application) bool {
 	for _, app := range current {
 		path := app.KeyPath()
-		supported := app.Kind == "native" || (app.Kind == "wine" && filepath.IsAbs(app.Prefix)) || (app.Kind == "electron" && app.Hosted != nil && app.Hosted.State == "verified")
+		supported := app.Kind == "native" || (app.Kind == "wine" && filepath.IsAbs(app.Prefix)) || identity.BestEffortElectron(app)
 		keyMatches := app.Key == r.Filter.Application || (r.CanShareRoot() && app.Key == r.RootApplication)
 		if supported && keyMatches && app.Revision != "" && identity.RuntimeRuleBlocked(&app) == "" && filepath.IsAbs(path) && filepath.Clean(path) == path && identity.ApplicationKey(r.Filter.UID, app) == r.Filter.Application {
 			return true
