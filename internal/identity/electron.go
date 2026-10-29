@@ -42,6 +42,7 @@ type Hosted struct {
 	State       string       `json:"state"` // best-effort or unverified; legacy records may say verified
 	Runtime     string       `json:"runtime"`
 	Bundle      string       `json:"bundle,omitempty"`
+	Scope       string       `json:"scope,omitempty"` // empty: application; node-utilities: separate package utility permission
 	PackageName string       `json:"package_name,omitempty"`
 	ProductName string       `json:"product_name,omitempty"`
 	Version     string       `json:"version,omitempty"`
@@ -248,11 +249,16 @@ func ResolveElectronApp(pid int, start string) *Hosted {
 	h.revision = revision
 	// Only known runtime capabilities and a fresh, corroborated candidate may
 	// mint the new best-effort identity. Legacy verified labels stay refused.
+	nodeUtility := false
 	eligible := electronRuntimeCapable(fmt.Sprintf("/proc/%d/exe", pid))
 	for _, step := range h.Chain {
 		stepArgs := cmdlineArgs(fmt.Sprintf("/proc/%d", step.PID))
 		if step.Type == "utility" && !hasArgument(stepArgs, "--utility-sub-type=network.mojom.NetworkService") {
-			eligible = false
+			if step.PID == pid && hasArgument(stepArgs, "--utility-sub-type=node.mojom.NodeService") && len(h.Chain) == 2 {
+				nodeUtility = true
+			} else {
+				eligible = false
+			}
 		}
 		if step.Type != "main" && step.Type != "utility" && step.Type != "renderer" && step.Type != "zygote" && step.Type != "gpu-process" {
 			eligible = false
@@ -260,6 +266,10 @@ func ResolveElectronApp(pid int, start string) *Hosted {
 	}
 	if strings.HasSuffix(host, ".asar") && !openArchiveMatches(main, host) {
 		eligible = false
+	}
+	if nodeUtility && !sharedPackageArchive(pid, main, app) {
+		h.Reason = "Node utility has no shared open archive belonging to the application package; separate utility matching unavailable"
+		return h
 	}
 	// Recheck package/entry after FD inspection, including package edits in an
 	// unchanged directory (directory mtime alone is not a package revision).
@@ -276,9 +286,19 @@ func ResolveElectronApp(pid int, start string) *Hosted {
 			eligible = false
 		}
 	}
+	if eligible && nodeUtility {
+		h.Scope = "node-utilities"
+		h.PackageName += " (Node utilities)"
+		if h.ProductName != "" {
+			h.ProductName += " (Node utilities)"
+		}
+	}
 	if eligible {
 		h.State, h.matched = "best-effort", true
 		h.Reason = "Best-effort application match from runtime capability, generation-checked process chain and canonical package entry; not verified code execution"
+		if nodeUtility {
+			h.Reason += "; separate Node utilities scope corroborated by a shared open package archive; covers utilities loading this package, not individual extensions"
+		}
 		return h
 	}
 	h.Reason = fmt.Sprintf("process %d names bundle %s; command line and package metadata do not verify bundle execution", main, app)

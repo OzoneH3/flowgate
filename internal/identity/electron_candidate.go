@@ -99,3 +99,60 @@ func openArchiveMatches(pid int, path string) bool {
 	}
 	return false
 }
+
+// sharedPackageArchive corroborates a separate package-utility association. It
+// never grants the main application's identity. Libraries can be shared by
+// different utility scripts: the advertised scope is the package utility group,
+// not a claim to identify individual extensions or attest executed code.
+func sharedPackageArchive(pid, main int, app string) bool {
+	root := app
+	if st, err := os.Stat(fmtProcRoot(main, app)); err != nil {
+		return false
+	} else if !st.IsDir() {
+		root = filepath.Dir(app)
+	}
+	dir := filepath.Join("/proc", strconv.Itoa(pid), "fd")
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) > 4096 {
+		return false
+	}
+	mainDir := filepath.Join("/proc", strconv.Itoa(main), "fd")
+	mainEntries, err := os.ReadDir(mainDir)
+	if err != nil || len(mainEntries) > 4096 {
+		return false
+	}
+	opened := make(map[[2]uint64]bool)
+	for _, entry := range mainEntries {
+		if st, err := os.Stat(filepath.Join(mainDir, entry.Name())); err == nil && st.Mode().IsRegular() {
+			dev, ino := devIno(st)
+			opened[[2]uint64{dev, ino}] = true
+		}
+	}
+	for _, entry := range entries {
+		fd := filepath.Join(dir, entry.Name())
+		path, err := filepath.EvalSymlinks(fd)
+		if err != nil || !strings.HasSuffix(path, ".asar") {
+			continue
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+			continue
+		}
+		owner, err := os.Stat(fd)
+		if err != nil || !owner.Mode().IsRegular() {
+			continue
+		}
+		visible, err := os.Stat(fmtProcRoot(main, path))
+		if err != nil || !os.SameFile(owner, visible) {
+			continue
+		}
+		dev, ino := devIno(owner)
+		if opened[[2]uint64{dev, ino}] {
+			return true
+		}
+	}
+	return false
+}
+func fmtProcRoot(pid int, path string) string {
+	return filepath.Join("/proc", strconv.Itoa(pid), "root") + path
+}

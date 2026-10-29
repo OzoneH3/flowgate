@@ -136,6 +136,10 @@ func DescribePermissionTarget(a Attribution) *PermissionTarget {
 		t.KeyBasis = "uid+runtime executable+canonical application entry; best-effort, not verified execution"
 		t.Remember = fmt.Sprintf("%s (%s), UID %d; best-effort match survives relaunches at this entry with the same runtime path", name, app.Executable, uid)
 		t.SharedWithNote = "Matching Electron network processes are covered; other application entries, users, runtimes and independent helpers remain separate. Manipulated launch/package evidence can impersonate this identity."
+		if app.Hosted.Scope == "node-utilities" {
+			t.KeyBasis += "; separate node-utilities scope"
+			t.SharedWithNote = "Covers this package's Node utilities with a shared open package archive, including hosted extensions. Individual extensions are not distinguished. Main application rules and unrelated helpers remain separate. This is a best-effort association, not verified code execution."
+		}
 		return t
 	}
 	if app.Kind == "wine" {

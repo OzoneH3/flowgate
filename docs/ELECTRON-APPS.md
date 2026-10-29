@@ -22,7 +22,15 @@ executable identity. Runtime capability is a hint, not a signature. Real-runtime
 qualification covers Electron 42 and 43, not every build or platform.
 
 Matching Chromium network-service processes use the application's identity.
-Independent Node utilities, Node-mode scripts and other helpers do not inherit it.
+Node utilities do not inherit it. A direct `node.mojom.NodeService` child can
+instead receive a separate **“Node utilities”** identity when it and its main
+process hold the same regular ASAR inode open within the canonical application
+package. This is additional best-effort association evidence, not code attestation.
+The saved scope covers that package's matching Node utilities, including utilities
+hosting extensions; it does not distinguish individual extensions or utility scripts
+sharing the package. Main-application rules never transfer to this scope. Different
+packages/users/runtimes remain separate. Node-mode scripts, unrelated executables,
+foreign archives and utilities without this evidence remain outside the scope.
 Detected inspection/injection modes and nonempty NODE_OPTIONS are refused. No
 application name, launcher path or server-specific exception is used.
 

@@ -547,6 +547,9 @@ func (a Application) KeyPath() string {
 // ApplicationKey derives the application key (user, kind, prefix, key path).
 func ApplicationKey(uid uint32, a Application) string {
 	if a.Kind == "electron" && a.Hosted != nil && a.Hosted.State == "best-effort" {
+		if a.Hosted.Scope == "node-utilities" {
+			return digest(fmt.Sprintf("%d|electron-node-utilities-v1|%s|%s", uid, a.Runtime, a.KeyPath()))
+		}
 		return digest(fmt.Sprintf("%d|electron-best-effort-v1|%s|%s", uid, a.Runtime, a.KeyPath()))
 	}
 	return digest(fmt.Sprintf("%d|%s|%s|%s", uid, a.Kind, a.Prefix, a.KeyPath()))
