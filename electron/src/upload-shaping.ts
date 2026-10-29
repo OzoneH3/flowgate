@@ -27,10 +27,12 @@ export interface UploadEdit { generation: string; expected_version: number; targ
 export interface BudgetEdit { generation: string; expected_version: number; budgets: { upload: number; download: number } }
 export function uploadTarget(row: Row, state: ClientState): UploadTarget | undefined {
   if (!state.observation?.connected) return;
-  if (row.displayApplication || row.runtimeApplication || row.applicationZone || row.inactive || !['application','process'].includes(row.kind)) return;
+  if (row.displayApplication || row.runtimeApplication || row.inactive || !['application','process'].includes(row.kind)) return;
   const p = row.process;
   if (!p || p.application.kind !== 'native' || p.application.hosted || !p.application.key || !p.application.revision) return;
-  return {uid:p.uid, application:p.application.key, revision:p.application.revision, label:row.label};
+  const zone=row.applicationZone;
+  if(zone && (!state.control?.capabilities?.includes(ZONE_CAPABILITY) || !state.control.networkZones || zone.model!==state.control.networkZones.model)) return;
+  return {uid:p.uid, application:p.application.key, revision:p.application.revision, label:row.label, ...(zone?{scope:zone.zone}:{})};
 }
 export function parseUpload(raw: unknown): UploadSnapshot {
   const r = raw as UploadSnapshot;

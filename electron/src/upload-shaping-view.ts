@@ -31,13 +31,13 @@ function priorityCoverageText(t:UploadTarget) {
 function paintButton(b:HTMLButtonElement,t:UploadTarget) {
   const zoneSettings=(view.snapshot?.configured_caps||[]).filter(c=>c.uid===t.uid&&c.application===t.application&&scopeOf(c)!=='all').map(c=>`${scopeLabel(scopeOf(c))}: UL ${capRate(c)/1000000} / DL ${capRate(c,'download')/1000000} Mbit/s, priority ${c.traffic_priority||'inherited'}`).join('\n');
   if(b.dataset.limitDirection==='priority'){
-    const configured=view.snapshot?.configured_caps.some(c=>c.uid===t.uid&&c.application===t.application&&c.traffic_priority!==undefined)===true;
+    const configured=view.snapshot?.configured_caps.some(c=>c.uid===t.uid&&c.application===t.application&&(scopeOf(t)==='all'||scopeOf(c)===scopeOf(t))&&c.traffic_priority!==undefined)===true;
     b.classList.toggle('upload-configured',configured);b.dataset.uploadState=prioritySummary(view,t);
     b.title=`Traffic priority · ${prioritySummary(view,t)}\n${budgetText()}\n${priorityCoverageText(t)}\nShaping only; separate from firewall rule priority.\n${zoneSettings}\n${view.message}`;
     return;
   }
   const direction=(b.dataset.limitDirection || 'upload') as LimitDirection, label=direction==='download'?'Download':'Upload';
-  const configured=view.snapshot?.configured_caps.some(c=>c.uid===t.uid&&c.application===t.application && capRate(c,direction)>0)===true;
+  const configured=view.snapshot?.configured_caps.some(c=>c.uid===t.uid&&c.application===t.application && (scopeOf(t)==='all'||scopeOf(c)===scopeOf(t)) && capRate(c,direction)>0)===true;
   b.classList.toggle('upload-configured',configured);
   b.dataset.uploadState=uploadSummary(view,t,direction);
   b.title=`${label} limit · ${uploadSummary(view,t,direction)}\n${coverage(t,direction)}\n${zoneSettings}\n${view.message}`;

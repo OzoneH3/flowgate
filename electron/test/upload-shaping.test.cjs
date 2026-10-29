@@ -215,3 +215,17 @@ test('shaping defaults validate independent exact rates and units without rule w
  for(const bad of [null,{}, {...d,priority:'critical'}, {...d,uploadBits:999999}, {...d,downloadBits:1000000001}, {...d,uploadUnit:'Mbps'}, {...d,enabled:true}])assert.throws(()=>validateShapingDefaults(bad));
  assert.deepEqual(DEFAULT_SHAPING,{priority:'normal',uploadBits:8000000,downloadBits:8000000,uploadUnit:'Mbit/s',downloadUnit:'Mbit/s'});
 });
+
+
+test('zone row targets retain verified native identity and require the current classification model',()=>{
+ const row={kind:'application',label:'Alpha, Local Network',process:{uid:1000,application:{key:'alpha',revision:'r',kind:'native'}},applicationZone:{zone:'local',model:'automatic-peer-v1',parentLabel:'Alpha'}};
+ const state={observation:{connected:true},control:{capabilities:['experimental-zone-shaping-v1'],networkZones:{model:'automatic-peer-v1'}}};
+ assert.deepEqual(uploadTarget(row,state),{uid:1000,application:'alpha',revision:'r',label:row.label,scope:'local'});
+ assert.equal(uploadTarget({...row,applicationZone:{...row.applicationZone,zone:'internet'}},state).scope,'internet');
+ assert.equal(uploadTarget({...row,applicationZone:{...row.applicationZone,model:'configured-prefix-v1'}},state),undefined);
+ assert.equal(uploadTarget(row,{...state,control:{...state.control,capabilities:[]}}),undefined);
+ assert.equal(uploadTarget(row,{...state,control:{capabilities:state.control.capabilities}}),undefined);
+ for(const changed of [{displayApplication:{}},{runtimeApplication:{}},{inactive:{}},{process:{...row.process,application:{...row.process.application,kind:'wine'}}},{process:{...row.process,application:{...row.process.application,hosted:true}}}])
+  assert.equal(uploadTarget({...row,...changed},state),undefined);
+ assert.equal(uploadTarget({...row,process:{...row.process,uid:1001}},state).uid,1001);
+});

@@ -67,6 +67,7 @@ function reply(q, monitor) {
     return {
       ...r,
       mode: monitor ? 'host-monitor' : 'daemon-monitor',
+      network_zones: {model:'automatic-peer-v1',revision:'synthetic-zones',local_prefixes:[],internet_prefixes:[],reason:'Synthetic UI classification definition'},
       events: [],
       rules: [],
       capabilities: [
@@ -75,6 +76,8 @@ function reply(q, monitor) {
         'experimental-native-download-v1',
         'experimental-traffic-priority-v1',
         'experimental-zone-shaping-v1',
+        'network-zone-policy-v1',
+        'automatic-network-zones-v1',
       ],
       permissions: {
         role: 'administrator',
@@ -312,6 +315,30 @@ try {
   await detached.locator('#uploadRate').fill('10');await detached.locator('#uploadSave').click();await detachedPopup.waitFor({state:'detached'});
   assert.equal(own('local').download_bits_per_second,10000000);assert.equal(own('internet').download_bits_per_second,6000000);assert.equal(own('all').download_bits_per_second,20000000);
   await detached.locator('#dockPane').click();evidence.steps.push({label:'detached Info own Local DL edit preserves Internet and All'});
+  await page.locator('#expand').click();
+  // Direct zone-row setters share the verified application's identity and scope.
+  const zoneSlot=(direction,scope)=>page.getByRole('button',{name:`${direction==='priority'?'Traffic priority':direction==='upload'?'Upload limit':'Download limit'} for Synthetic alpha, ${scope==='local'?'Local Network':'Internet'}`,exact:true}).first();
+  async function openZone(direction,scope){await zoneSlot(direction,scope).click();await popup.waitFor();await wait(()=>page.locator('#uploadZone').isEnabled());assert.equal(await page.locator('#uploadZone').inputValue(),scope);}
+  const beforeZoneOpen=writes().length;
+  await openZone('upload','local');await page.locator('#uploadRate').fill('7');await page.locator('#uploadSave').click();await popup.waitFor({state:'detached'});
+  assert.equal(own('local').bits_per_second,7000000);assert.equal(own('all').bits_per_second,12000000);assert.equal(own('local').download_bits_per_second,10000000);
+  assert.equal(writes().length,beforeZoneOpen+1);
+  await wait(async()=>await zoneSlot('upload','local').evaluate(b=>b.classList.contains('upload-configured')),'Local configured indicator');
+  assert.equal(await zoneSlot('upload','internet').evaluate(b=>b.classList.contains('upload-configured')),false);
+  await openZone('upload','local');await zone('internet');await close();
+  await openZone('upload','local');assert.equal(await page.locator('#uploadRate').inputValue(),'7');await page.screenshot({path:dir+'/zone-row-local-native.png'});await close();
+  await open('upload');assert.equal(await page.locator('#uploadZone').inputValue(),'all');await close();
+  await openZone('priority','local');await page.locator('#priorityLevel').selectOption('low');await page.locator('#uploadSave').click();await popup.waitFor({state:'detached'});
+  assert.equal(own('local').traffic_priority,'low');assert.equal(own('all').traffic_priority,'high');
+  await openZone('priority','internet');await close();assert.equal(await zoneSlot('priority','internet').evaluate(b=>b.classList.contains('upload-configured')),false);
+  await openZone('download','internet');assert.equal(await page.locator('#uploadRate').inputValue(),'6');await close();
+  await page.getByText('Synthetic alpha, Local Network',{exact:true}).first().click();
+  const zoneInfo=page.locator('#infoRules').getByRole('button',{name:'Download limit for Synthetic alpha, Local Network',exact:true});await zoneInfo.click();await popup.waitFor();await wait(()=>page.locator('#uploadZone').isEnabled());assert.equal(await page.locator('#uploadZone').inputValue(),'local');assert.equal(await page.locator('#uploadRate').inputValue(),'10');await close();
+  await page.locator('#infoPaneControls summary').click();await page.locator('[data-undock="info"]').click();
+  const zoneDetached=await wait(()=>app.windows().find(w=>w.url().includes('pane.html')&&w.url().includes('info')),'zone detached Info');
+  await zoneDetached.getByRole('button',{name:'Download limit for Synthetic alpha, Local Network',exact:true}).click();await zoneDetached.locator('#uploadLimitDialog').waitFor();await wait(()=>zoneDetached.locator('#uploadZone').isEnabled());assert.equal(await zoneDetached.locator('#uploadZone').inputValue(),'local');await zoneDetached.screenshot({path:dir+'/zone-row-detached-native.png'});await zoneDetached.keyboard.press('Escape');await zoneDetached.locator('#dockPane').click();
+  await openZone('upload','local');await page.locator('#uploadRemove').click();await popup.waitFor({state:'detached'});assert.equal(own('local').bits_per_second,0);assert.equal(own('local').download_bits_per_second,10000000);assert.equal(own('local').traffic_priority,'low');assert.equal(own('all').bits_per_second,12000000);
+  evidence.steps.push({label:'zone-row UL/DL/priority direct scope, own indicators, cancellation scope isolation, Local-only delete, inline and detached Info',caps:structuredClone(caps)});
   const count=writes().length;
   await open('upload');await zone('local');await page.locator('#uploadRate').fill('7');version++;
   await wait(()=>page.locator('#uploadSave').isDisabled(),'stale scope edit');assert.equal(await page.locator('#uploadRate').inputValue(),'7');await close();assert.equal(writes().length,count);
