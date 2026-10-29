@@ -7,10 +7,11 @@
     "517f001d7195490640fa17d3ca9def6b4b9b38da",
     "0e1703bb98e98470d66c10fcc438947db7fc0615",
     "2d7cd7ae222b051811446cda0a2136d8764e29ea",
-    "45a46011af102a5db642527a100a8b0485ed5c35"
+    "45a46011af102a5db642527a100a8b0485ed5c35",
+    "5a71aa23c0382d35bfad9de3e788c26989a1cabe"
   ],
   "rejected": [
     "66313d5deaa350dc4e77adda44e1b986fb8e2619"
   ],
-  "note": "User requested feature deployment. Exact release 45a46011 passed isolated release checks and preserves the current shaping launcher; no host shaping activation is authorized by this approval."
+  "note": "User requested fix and deployment of zone-row shaping controls. Exact 5a71aa23c0382d35bfad9de3e788c26989a1cabe passed release checks and visible scoped-setter verification; installed shaping launcher and helpers preserved."
 }
