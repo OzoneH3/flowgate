@@ -1342,6 +1342,7 @@ export interface EvaluationState {
   starting: boolean;
 }
 export interface Preferences {
+  shapingDefaults?: import('./upload-shaping').ShapingDefaults;
   displayUnit?: import('./display-units').DisplayUnit;
   keepInTray?: boolean;
   sidebar?: number;

@@ -205,3 +205,13 @@ test('zone capability gates writes and schema 3 preserves every scope and all-tr
  assert.equal(payload.schema,3);assert.deepEqual(payload.caps,[cap,{uid:1000,application:'native-alpha',scope:'internet',bits_per_second:2000000}]);
  assert.equal(payload.upload_budget_bits_per_second,20000000);assert.equal(payload.download_budget_bits_per_second,30000000);
 });
+
+
+test('shaping defaults validate independent exact rates and units without rule writes',()=>{
+ const {DEFAULT_SHAPING,validateShapingDefaults}=require('../dist/test/upload-shaping.cjs');
+ assert.equal(DEFAULT_SHAPING.priority,'normal');
+ const d={priority:'high',uploadBits:8388608,downloadBits:16000000,uploadUnit:'MB/s',downloadUnit:'Mbit/s'};
+ assert.deepEqual(validateShapingDefaults(d),d);
+ for(const bad of [null,{}, {...d,priority:'critical'}, {...d,uploadBits:999999}, {...d,downloadBits:1000000001}, {...d,uploadUnit:'Mbps'}, {...d,enabled:true}])assert.throws(()=>validateShapingDefaults(bad));
+ assert.deepEqual(DEFAULT_SHAPING,{priority:'normal',uploadBits:8000000,downloadBits:8000000,uploadUnit:'Mbit/s',downloadUnit:'Mbit/s'});
+});

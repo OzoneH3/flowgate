@@ -238,6 +238,29 @@ try {
     await page.locator('#uploadSave').click();
     await popup.waitFor({state:'detached'});
   }
+  // Persist defaults through the actual main-process preference IPC, never the backend.
+  await page.locator('#toolsMenu > summary').click();
+  await page.locator('#optionsMenu summary').click();
+  await page.locator('#defaultPriority').selectOption('high');
+  await page.locator('#defaultUploadLimit').fill('32');
+  await page.locator('#defaultDownloadLimit').fill('16');
+  await page.locator('#saveShapingDefaults').click();
+  await wait(async()=>await page.locator('#shapingDefaultsStatus').textContent()==='Defaults saved.');
+  await page.locator('#shapingDefaults').screenshot({path:dir+'/options-defaults.png'});
+  const storedDefaults=await page.evaluate(()=>window.flowgate.preferences());
+  assert.equal(storedDefaults.shapingDefaults.uploadBits,32000000);
+  assert.equal(storedDefaults.shapingDefaults.downloadBits,16000000);
+  assert.equal(storedDefaults.shapingDefaults.priority,'high');
+  assert.deepEqual(JSON.parse(fs.readFileSync(client+'/.workspace/electron-preferences.json','utf8')).ui.shapingDefaults,storedDefaults.shapingDefaults);
+  assert.equal(await page.evaluate(async()=>{try{await window.flowgate.preferences({shapingDefaults:{priority:'critical'}});return false;}catch{return true;}}),true);
+  await page.locator('#optionsMenu summary').click();
+  await open('upload');assert.equal(await page.locator('#uploadRate').inputValue(),'32');await close();
+  await open('download');assert.equal(await page.locator('#uploadRate').inputValue(),'16');await close();
+  await open('priority');assert.equal(await page.locator('#priorityLevel').inputValue(),'high');await close();
+  assert.equal(writes().length,0);
+  evidence.steps.push({label:'Options persists independent defaults; new popup values; invalid IPC refused; no shaping writes',defaults:storedDefaults.shapingDefaults});
+  // Keep the original zone regression defaults for the rest of this journey.
+  await page.evaluate(()=>window.flowgate.preferences({shapingDefaults:{priority:'normal',uploadBits:8000000,downloadBits:8000000,uploadUnit:'Mbit/s',downloadUnit:'Mbit/s'}}));
   await open('upload');
   assert.equal(await page.locator('#uploadZone').inputValue(),'all');
   const before=await popup.boundingBox();
@@ -259,6 +282,7 @@ try {
   assert.equal(own('all').bits_per_second,12000000);assert.equal(own('all').download_bits_per_second,20000000);
   assert.equal(own('internet').bits_per_second,4000000);assert.equal(own('internet').download_bits_per_second,6000000);
   assert.equal(own('local').bits_per_second,8000000);assert.equal(own('local').download_bits_per_second,9000000);
+  await page.evaluate(()=>window.flowgate.preferences({shapingDefaults:{priority:'high',uploadBits:32000000,downloadBits:16000000,uploadUnit:'Mbit/s',downloadUnit:'Mbit/s'}}));
   await open('upload'); await zone('internet');
   assert.equal(await page.locator('#uploadRate').inputValue(),'4');
   assert.equal(await page.locator('#uploadZoneHint').textContent(),'All applies');

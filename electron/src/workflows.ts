@@ -1,3 +1,4 @@
+import { setupShapingDefaults } from './shaping-defaults-view';
 import { setupEndpointPermissions } from './endpoint-view';
 import { canManageEndpoints, ENDPOINT_SCOPE, ENDPOINT_PRECEDENCE, ENDPOINT_LIFETIME } from './endpoint-policy';
 import { setupZoneMigration } from './zone-migration-view';
@@ -989,6 +990,7 @@ function selectRule() {
 }
 async function setupSizing() {
   let prefs: Preferences = await window.flowgate.preferences();
+  setupShapingDefaults(document.querySelector('#optionsMenu .menu-panel')!, prefs);
   const save = () =>
     void window.flowgate.preferences({
       sidebar: prefs.sidebar,

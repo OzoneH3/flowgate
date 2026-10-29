@@ -1,5 +1,5 @@
 import { popupPosition } from './popup-position';
-import {ZONE_CAPABILITY, scopeOf, scopeLabel, sameTarget, type LimitScope, uploadTarget, uploadSummary, limitCoverage, capRate, capPriority, prioritySummary, priorityCoverage, validateBudget, DOWNLOAD_CAPABILITY, PRIORITY_CAPABILITY, TRAFFIC_PRIORITIES, type TrafficPriority, type LimitDirection, UPLOAD_CAPABILITY, UPLOAD_RATE_UNITS, uploadRateBits, uploadRateValue, type UploadRateUnit, type UploadView, type UploadTarget} from './upload-shaping';
+import {DEFAULT_SHAPING, ZONE_CAPABILITY, scopeOf, scopeLabel, sameTarget, type LimitScope, uploadTarget, uploadSummary, limitCoverage, capRate, capPriority, prioritySummary, priorityCoverage, validateBudget, DOWNLOAD_CAPABILITY, PRIORITY_CAPABILITY, TRAFFIC_PRIORITIES, type TrafficPriority, type LimitDirection, UPLOAD_CAPABILITY, UPLOAD_RATE_UNITS, uploadRateBits, uploadRateValue, type UploadRateUnit, type UploadView, type UploadTarget} from './upload-shaping';
 import type {Row} from './model';
 import type {ClientState} from './protocol';
 let view:UploadView={supported:false,writable:false,message:'Unsupported: experimental upload controller is not enabled.'};
@@ -164,6 +164,7 @@ async function open(t:UploadTarget, anchor?:HTMLElement, direction:LimitKind='up
   const escape=(e:KeyboardEvent)=>{if(e.key==='Escape'){if([units,zone,level].some(s=>s.matches(':open')))return;e.preventDefault();e.stopPropagation();dismiss();}};
   dismissPopup=dismiss;document.addEventListener('pointerdown',outside,true);document.addEventListener('keydown',escape,true);window.addEventListener('resize',place);close.onclick=dismiss;
   detailsButton.onclick=()=>{details.hidden=!details.hidden;detailsButton.setAttribute('aria-expanded',String(!details.hidden));place();};
+  let defaults={...DEFAULT_SHAPING};
   let draft:UploadView|undefined, blocked=true, edited=false;
   const hasCap=()=>draft?.snapshot?.configured_caps.some(c=>sameTarget(c,t) && (direction==='priority'?c.traffic_priority!==undefined:capRate(c,direction)>0));
   const buttons=()=>{zone.disabled=blocked||!view.zoneSupported;const stale=!view.writable||(scopeOf(t)!=='all'&&!view.zoneSupported)||(direction==='download'&&!view.downloadSupported)||(isPriority&&!view.prioritySupported)||view.generation!==draft?.generation||view.snapshot?.version!==draft?.snapshot?.version;save.disabled=blocked||stale||!draft?.writable||(isPriority?((level.value!=='normal'||scopeOf(t)!=='all')&&!t.revision)||(level.value==='normal'&&scopeOf(t)==='all'&&!hasCap()):(enabled.checked&&!t.revision)||(!enabled.checked&&!hasCap()));remove.disabled=blocked||stale||!draft?.writable||!hasCap();};
@@ -175,7 +176,7 @@ async function open(t:UploadTarget, anchor?:HTMLElement, direction:LimitKind='up
     const c=draft?.snapshot?.configured_caps.find(c=>sameTarget(c,t));
     const saved=drafts.get(scopeOf(t));
     if(saved){input.value=saved.value;unit=saved.unit;units.value=unit;enabled.checked=saved.enabled;level.value=saved.level;edited=saved.edited;}
-    else {edited=false;level.value=capPriority(c);enabled.checked=true;input.value=uploadRateValue(capRate(c,direction==='priority'?'upload':direction)||8000000,unit);}
+    else {edited=false;level.value=c?.traffic_priority ?? defaults.priority;enabled.checked=true;unit=direction==='download'?defaults.downloadUnit:defaults.uploadUnit;units.value=unit;input.value=uploadRateValue(capRate(c,direction==='priority'?'upload':direction)||(direction==='download'?defaults.downloadBits:defaults.uploadBits),unit);}
     const all=draft?.snapshot?.configured_caps.find(c=>sameTarget(c,{...t,scope:'all'}));
     const inherited=scopeOf(t)!=='all' && (isPriority?!!all?.traffic_priority:!!capRate(all,direction as LimitDirection));
     zoneHint.textContent=inherited?'All applies':'';
@@ -184,7 +185,7 @@ async function open(t:UploadTarget, anchor?:HTMLElement, direction:LimitKind='up
     buttons();
   };
   zone.onchange=()=>{drafts.set(scopeOf(t),{value:input.value,unit,enabled:enabled.checked,level:level.value,edited});t.scope=zone.value as LimitScope;loadZone();paint();};
-  const read=async()=>{blocked=true;buttons();try{const sent=performance.now(),start=context;const v=await window.flowgate.uploadStatus();if(start!==context)throw Error('Connection changed; refresh again');adopt(v,sent);paint();if(!d.isConnected)return;draft=view;if(!edited)loadZone();summary.textContent=`${view.snapshot?.interface?'Interface '+view.snapshot.interface+'. ':''}${view.message} ${view.snapshot?.last_error||''}`;blocked=false;paint();if(!view.writable||view.snapshot?.last_error)reveal();}catch(e){summary.textContent=String(e);reveal();}buttons();};
+  const read=async()=>{blocked=true;buttons();try{const sent=performance.now(),start=context;const [v,prefs]=await Promise.all([window.flowgate.uploadStatus(),window.flowgate.preferences().catch(()=>undefined)]);defaults={...(prefs?.shapingDefaults || DEFAULT_SHAPING)};if(start!==context)throw Error('Connection changed; refresh again');adopt(v,sent);paint();if(!d.isConnected)return;draft=view;if(!edited)loadZone();summary.textContent=`${view.snapshot?.interface?'Interface '+view.snapshot.interface+'. ':''}${view.message} ${view.snapshot?.last_error||''}`;blocked=false;paint();if(!view.writable||view.snapshot?.last_error)reveal();}catch(e){summary.textContent=String(e);reveal();}buttons();};
   const apply=async(rate:number|null,prio?:TrafficPriority|null)=>{if(!draft?.generation||!draft.snapshot)return;blocked=true;buttons();try{const sent=performance.now(),start=context;const result=await window.flowgate.uploadConfigure(isPriority?{generation:draft.generation,expected_version:draft.snapshot.version,target:t,bits_per_second:null,priority:prio===undefined?null:prio}:{generation:draft.generation,expected_version:draft.snapshot.version,target:t,direction:direction as LimitDirection,bits_per_second:rate});if(start!==context)throw Error('Connection changed; refresh again');adopt(result,sent);paint();if(d.isConnected)dismiss();}catch(e){if(!d.isConnected)return;summary.textContent=String(e);reveal();}};
   save.onclick=()=>{try{if(isPriority){void apply(null,level.value as TrafficPriority);return;}void apply(enabled.checked?uploadRateBits(input.value,unit):null);}catch(e){summary.textContent=String(e instanceof Error?e.message:e);reveal();}};
   input.onkeydown=e=>{if(e.key==='Enter'&&!e.isComposing){e.preventDefault();if(!save.disabled)save.click();}};

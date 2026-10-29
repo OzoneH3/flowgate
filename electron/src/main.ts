@@ -1,3 +1,4 @@
+import { DEFAULT_SHAPING, validateShapingDefaults } from './upload-shaping';
 import { UploadShapingClient } from "./upload-shaping-client";
 import { UsageHistoryClient } from './usage-history-client';
 import { SessionExit, kdeSessionEnding } from './session-exit';
@@ -118,6 +119,8 @@ try {
 // New release bundles start without preferences: closing should keep requests
 // monitored in the tray. Preserve an explicit user opt-out.
 saved.ui = { keepInTray: true, ...saved.ui };
+try { saved.ui.shapingDefaults = validateShapingDefaults(saved.ui.shapingDefaults); }
+catch { saved.ui.shapingDefaults = {...DEFAULT_SHAPING}; }
 const persist = () => fs.writeFileSync(prefsFile, JSON.stringify(saved), { mode: 0o600 });
 const width = dimension(
     '--width',
@@ -932,14 +935,15 @@ app.whenReady().then(async () => {
     return background.requestQuit();
   });
   ipcMain.handle('preferences', (e, v) => {
-    trusted(e);
+    trusted(e, v === undefined); // detached Info may read defaults, never change preferences
     if (v !== undefined) {
       if (
         !v ||
         typeof v !== 'object' ||
-        Object.keys(v).some((k) => !['sidebar', 'columns', 'keepInTray', 'displayUnit', 'forAWhileSeconds'].includes(k))
+        Object.keys(v).some((k) => !['sidebar', 'columns', 'keepInTray', 'displayUnit', 'forAWhileSeconds', 'shapingDefaults'].includes(k))
       )
         throw Error('Invalid preferences');
+      const shapingDefaults = v.shapingDefaults !== undefined ? validateShapingDefaults(v.shapingDefaults) : undefined;
       if (v.forAWhileSeconds !== undefined && !validForAWhileSeconds(v.forAWhileSeconds))
         throw Error('Invalid For a while duration');
       if (
@@ -980,6 +984,7 @@ app.whenReady().then(async () => {
       }
       saved.ui = {
         ...saved.ui,
+        ...(shapingDefaults ? {shapingDefaults} : {}),
         ...(v.sidebar !== undefined ? { sidebar: v.sidebar } : {}),
         ...(v.columns !== undefined ? { columns } : {}),
         ...(v.displayUnit !== undefined ? { displayUnit: v.displayUnit } : {}),

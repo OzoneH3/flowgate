@@ -147,3 +147,23 @@ export function uploadRateValue(bits:number,unit:UploadRateUnit):string {
   while(remainder && fraction.length<33){remainder*=10n;fraction+=String(remainder/factor);remainder%=factor;}
   return String(whole)+(fraction?'.'+fraction:'');
 }
+
+// Frontend starting values only: saving these never creates a shaping rule.
+export interface ShapingDefaults {
+  priority: TrafficPriority;
+  uploadBits: number;
+  downloadBits: number;
+  uploadUnit: UploadRateUnit;
+  downloadUnit: UploadRateUnit;
+}
+export const DEFAULT_SHAPING: Readonly<ShapingDefaults> = {
+  priority: 'normal', uploadBits: 8000000, downloadBits: 8000000,
+  uploadUnit: 'Mbit/s', downloadUnit: 'Mbit/s',
+};
+export function validateShapingDefaults(value: unknown): ShapingDefaults {
+  const d=value as ShapingDefaults;
+  if(!d || typeof d!=='object' || Array.isArray(d) || Object.keys(d).some(k=>!Object.hasOwn(DEFAULT_SHAPING,k)) || !TRAFFIC_PRIORITIES.includes(d.priority)) throw Error('Invalid shaping defaults');
+  uploadRateValue(d.uploadBits,d.uploadUnit);
+  uploadRateValue(d.downloadBits,d.downloadUnit);
+  return {...d};
+}
