@@ -1182,6 +1182,7 @@ button.status-slot { position: relative; }
 #tree tr[aria-selected='true'] .status-strip { background: rgba(0,0,0,.28); border-color: rgba(255,255,255,.18); }
 .status-slot { display: inline-flex; align-items: center; justify-content: center; width: 19px; min-width: 19px; height: 18px; min-height: 18px; padding: 0; border: 0; background: transparent; color: #6f6f6f; font-size: 12px; line-height: 18px; text-align: center; }
 .status-slot.unavailable { cursor: default; }
+.status-slot[aria-hidden='true'] { visibility: hidden; pointer-events: none; }
 button.status-slot:hover:not(:disabled) { background: rgba(255,255,255,.08); border-radius: 3px; }
 button.status-slot .blocker-glyph { width: 14px; height: 14px; flex-basis: 14px; border-width: 1px; }
 button.status-slot.tone-none,button.status-slot.tone-unavailable { color: #6f6f6f; }
