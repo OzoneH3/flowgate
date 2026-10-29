@@ -260,7 +260,7 @@ export interface RequestEvent {
   // local-pair-v1: other endpoint of a same-host connection (exact reversed tuple).
   local_peer?: LocalPeer;
   remembered_filter?: RuleFilter;
-  scope_previews: Partial<Record<Scope | 'for-a-while', string>>;
+  scope_previews: Partial<Record<Scope | 'for-a-while' | 'process-remember', string>>;
   // Equivalent repeated requests share a group (backend `request_group`).
   request_group?: string;
   // stored-ask-v1: the stored Ask rule that caused this prompt (absent = default Ask).
@@ -734,7 +734,7 @@ function event(v: unknown): RequestEvent {
     a = object(e.attribution),
     scopes = object(e.scope_previews);
   const previews: RequestEvent['scope_previews'] = {};
-  for (const key of ['once', 'application', 'persistent', 'for-a-while'] as const)
+  for (const key of ['once', 'application', 'persistent', 'for-a-while', 'process-remember'] as const)
     if (typeof scopes[key] === 'string' && scopes[key]) previews[key] = scopes[key] as string;
   if (!string(e.id) || !Number.isFinite(Date.parse(string(e.deadline))))
     throw Error('Invalid request identity/deadline');

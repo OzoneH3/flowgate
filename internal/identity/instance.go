@@ -75,7 +75,7 @@ func (i Instance) Matches(p Process) bool {
 // the application is the running file (same stamp). Verified Electron app: the
 // instance pins the runtime file's own stamp; the bundle is the application.
 func instanceIdentity(p Process) bool {
-	if p.HolderWitness != "" || p.ExecutableRevision == "" || !LiveRuleable(p.Application) {
+	if p.HolderWitness != "" || p.ExecutableRevision == "" || (!LiveRuleable(p.Application) && !nativeProcessIdentity(p)) {
 		return false
 	}
 	return p.Application.Kind == "electron" || contentRevision(p.Application) || p.ExecutableRevision == p.Application.Revision
@@ -157,4 +157,26 @@ func (h *ProcessHandle) Close() {
 	if h.reason == "" {
 		h.reason = "process handle closed"
 	}
+}
+
+// NativeProcessAuthority verifies the executable identity of one native process.
+// Hosted metadata is deliberately not authority: this grants no bundle, parent,
+// sibling or future-process permissions.
+func NativeProcessAuthority(a Attribution) bool {
+	if a.Table != nil || !a.VisibilityComplete || len(a.Owners) != 1 || a.Application == nil {
+		return false
+	}
+	p := a.Owners[0]
+	app := a.Application
+	return p.Application.Key == app.Key && p.Application.Revision == app.Revision &&
+		app.Kind == "native" && app.Executable == p.Executable &&
+		app.Key == ApplicationKey(p.UID, *app) && nativeProcessIdentity(p) &&
+		p.PID > 0 && p.ThreadGroup == p.PID && p.Start != "" && p.BootID != "" &&
+		p.NetNS != "" && p.PIDNS != "" && p.MountNS != ""
+}
+func nativeProcessIdentity(p Process) bool {
+	a := p.Application
+	return p.HolderWitness == "" && a.Kind == "native" && a.Executable == p.Executable &&
+		p.ExecutableRevision != "" && a.Revision == p.ExecutableRevision &&
+		a.Key == ApplicationKey(p.UID, a) && (a.Hosted == nil || a.Hosted.Runtime == p.Executable)
 }

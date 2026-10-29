@@ -185,7 +185,7 @@ func (e *Engine) PreviewDecision(generation, id, action, scope, zone, revision s
 		return DecisionPreview{}, e.rejectPendingBindingLocked(v, a)
 	}
 	// Never an application-wide rule for a shared runtime whose app is unverified.
-	if why := identity.RuntimeRuleBlocked(a.Application); why != "" {
+	if why := identity.RuntimeRuleBlocked(a.Application); why != "" && !(o.Fields.Process && identity.NativeProcessAuthority(a)) {
 		return DecisionPreview{}, mutationError(identity.CodeIdentityUnverifiable, why)
 	}
 	rule := policy.Rule{Version: 1, Schema: 2, ID: "user:" + randomID(), Executable: a.Application.KeyPath(), Invocation: attributionInvocation(a), Priority: 100, Action: action, Created: now, Expires: now.Add(time.Duration(o.DurationSeconds) * time.Second), Filter: policy.Remembered(v.Flow, a)}
@@ -240,6 +240,9 @@ func (e *Engine) PreviewDecision(generation, id, action, scope, zone, revision s
 		lifetime = "persistent until disabled/deleted"
 	}
 	sentence := fmt.Sprintf("Remember %s; rule applies to %s; program %s (captured revision %s; saved application permissions follow updates) UID %d, %s %s, peer %s local service %d remote service %d; expiry %s. Current held request decided separately; existing admissions unchanged.", lifetime, zoneLabel, rule.Filter.Application, rule.Filter.Revision, rule.Filter.UID, rule.Filter.Direction, rule.Filter.Protocol, rule.Filter.RemoteAddress, rule.Filter.LocalPort, rule.Filter.RemotePort, rule.Expires.Format(time.RFC3339Nano))
+	if !rule.Filter.Process.IsZero() {
+		sentence = processLabel(rule.Filter.Process) + "; same direction and selected peer/protocol scope; ends on process exit or backend restart."
+	}
 	if replaces != nil {
 		sentence = fmt.Sprintf("Updates existing rule %s (version %d). ", replaces.ID, replaces.Version) + sentence
 	}

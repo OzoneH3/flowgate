@@ -131,7 +131,7 @@ export function destinationLine(s: PromptSummary, direction: string): string {
  */
 export function rememberLabel(t?: PermissionTarget): string {
   if (!t || t.kind === 'unavailable') return 'Unavailable: no verified application identity';
-  if (t.kind === 'runtime-unverified') return 'Unavailable: application unverified (the runtime runs many applications)';
+  if (t.kind === 'runtime-unverified') return t.remember || 'Unavailable: application unverified (the runtime runs many applications)';
   const name = t.label.replace(/ \(.*\)$/, '').replace(/ in prefix .*$/, '');
   const prefix = t.prefix ? shortPrefix(t.prefix) : '';
   switch (t.kind) {

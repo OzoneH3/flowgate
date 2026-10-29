@@ -165,7 +165,7 @@ func TestElectronBundleClaimIsDisplayOnly(t *testing.T) {
 		t.Fatalf("different executable inherited bundle identity: %+v %v", p3.Application, err)
 	}
 	target := DescribePermissionTarget(Attribution{Application: &a, Owners: []Process{p}, VisibilityComplete: true})
-	if target.Kind != "runtime-unverified" || !strings.HasPrefix(target.Remember, "Unavailable:") {
+	if target.Kind != "runtime-unverified" || !strings.HasPrefix(target.Remember, "This process only") {
 		t.Fatalf("target: %+v", target)
 	}
 }
@@ -203,7 +203,7 @@ func TestElectronUnverifiedKeepsRuntimeAndBlocksRules(t *testing.T) {
 				t.Fatal("an unverified runtime must not bind an application-wide rule")
 			}
 			target := DescribePermissionTarget(Attribution{Application: &a, Owners: []Process{p}, VisibilityComplete: true})
-			if target.Kind != "runtime-unverified" || !strings.HasPrefix(target.Remember, "Unavailable: ") || !strings.HasPrefix(target.ForAWhile, "Unavailable") {
+			if target.Kind != "runtime-unverified" || !strings.HasPrefix(target.Remember, "This process only") || !strings.HasPrefix(target.ForAWhile, "This verified native process") {
 				t.Fatalf("permission target: %+v", target)
 			}
 		})
@@ -279,7 +279,7 @@ func TestLaunchedBySkipsInfrastructure(t *testing.T) {
 	}
 }
 
-func TestElectronClaimDoesNotEnableProcessRules(t *testing.T) {
+func TestElectronClaimAllowsOnlyNativeProcessBinding(t *testing.T) {
 	runtime := fakeRuntime(t, "electron")
 	bundle := filepath.Join(t.TempDir(), "app.asar")
 	writeAsar(t, bundle, `{"name":"synthetic-alpha"}`, "")
@@ -289,8 +289,28 @@ func TestElectronClaimDoesNotEnableProcessRules(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := BindInstance("session", p); err == nil {
-			t.Fatal("unverified hosted runtime must not bind process instance")
+		b, err := BindInstance("session", p)
+		if err != nil || !b.Matches(p) {
+			t.Fatalf("native process binding: %v", err)
+		}
+		if LiveRuleable(p.Application) {
+			t.Fatal("bundle hints granted application authority")
+		}
+		other := p
+		other.PID++
+		other.ThreadGroup = other.PID
+		if b.Matches(other) {
+			t.Fatal("permission transferred to another process")
+		}
+		other = p
+		other.Start += "0"
+		if b.Matches(other) {
+			t.Fatal("permission transferred after relaunch")
+		}
+		other = p
+		other.Application.Kind = "electron"
+		if _, err := BindInstance("session", other); err == nil {
+			t.Fatal("legacy bundle identity revived")
 		}
 	}
 }

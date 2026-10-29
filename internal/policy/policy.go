@@ -89,7 +89,7 @@ func (r Rule) updateWitness(current ...identity.Application) bool {
 
 func (r Rule) MatchesApplication(key, revision string, uid uint32, current ...identity.Application) bool {
 	for _, app := range current {
-		if app.Key == key && identity.RuntimeRuleBlocked(&app) != "" {
+		if app.Key == key && identity.RuntimeRuleBlocked(&app) != "" && (r.Filter.Process.IsZero() || app.Kind != "native" || app.Executable != r.Filter.Process.Executable || app.Key != identity.ApplicationKey(uid, app)) {
 			return false
 		}
 	}
@@ -213,7 +213,7 @@ func EvaluateSessionObserved(rules []Rule, f identity.Flow, a identity.Attributi
 		// Keep old rules inspectable, but do not revive either bundle rules or
 		// native shared-runtime rules. Explicit AllPrograms scopes retain their
 		// normal UID, direction, network and protocol checks below.
-		if !x.AllPrograms && identity.RuntimeRuleBlocked(a.Application) != "" {
+		if !x.AllPrograms && identity.RuntimeRuleBlocked(a.Application) != "" && (x.Process.IsZero() || !identity.NativeProcessAuthority(a)) {
 			continue
 		}
 		if !x.Process.IsZero() && (session == "" || x.Process.Session != session || !a.VisibilityComplete || len(a.Owners) != 1 || len(a.Sockets) != 1 || !x.Process.Matches(a.Owners[0])) {

@@ -5,45 +5,34 @@ A system Electron runtime (`/usr/bin/electron`, `/usr/lib/electron43/electron`, 
 Heroic Games Launcher, for example, runs as `electron43 /usr/lib/heroic-games-launcher/app.asar`,
 and its sockets belong to the runtime's `--type=utility` network-service process.
 
-## Identification (`internal/identity/electron.go`)
+## Identity and permission scope
 
-`Inspect` resolves every process of a runtime named like that (`ResolveElectronApp`):
+Bundle arguments, package metadata and parent chains are display evidence, not
+proof that the bundle is executing. Since `de2c90b4`, FlowGate does not create or
+match application-wide permissions from these hints, including legacy entries
+labelled verified. The prompt keeps “application unverified”.
 
-1. From the socket owner up the parent chain (at most 6 steps) to the process without
-   `--type=` (the Electron main process). Every step must run the same runtime file, belong to
-   the same UID and mount namespace. Chromium's space-joined argv is split only when its first
-   token is exactly the process's executable path.
-2. The main process must not run in Node mode (`ELECTRON_RUN_AS_NODE`) or with inspector,
-   remote-debugging, `--require` or `--js-flags` options (other code could run inside it).
-3. Its first non-option argument is the bundle, resolved in the main process's own mount
-   namespace and cwd: an `.asar` archive or an app directory with `package.json` (`name`
-   required). An `.asar` `package.json` must match the archive's SHA-256 integrity when given.
-4. Every PID of the chain is re-read at the end: same start time and runtime, so a reused PID
-   can never attach a process to the wrong app.
+Remember can instead bind the exact verified native socket-owning process. The
+backend requires complete single-owner visibility, executable identity and stamp,
+UID, boot/start identity, namespaces and a thread-group leader; a pidfd pins the
+process lifetime. The Process checkbox is mandatory for this case. Rules retain
+direction and selected protocol/peer constraints. They stop matching on exit,
+identity change or daemon restart, even when the saved rule has no expiry. Another
+process, child, sibling or relaunch is not covered. Existing application rules are
+not converted, and no Allow is created without a user decision.
 
-Verified: `application.kind = "electron"`, `executable` = the bundle, `runtime` = the runtime,
-`revision` = the bundle's file stamp, `hosted` = the evidence (chain with PIDs/start ticks,
-package, integrity). The rule key is `uid + electron + bundle path`: Allow Heroic never allows
-other programs run by the same runtime. Applications that ship their own (renamed) Electron
-binary keep their ordinary executable identity.
-
-Unverified (chain broken or gone, missing/ambiguous bundle, unsafe options, integrity
-mismatch): the process keeps the runtime identity (`kind = "native"`, the runtime's key, so
-existing rules on the runtime still match it) with `hosted.state = "unverified"` and a reason.
-No application-wide rule can be created for it: Remember previews, legacy Remember decisions,
-rule-editor bases, Activity quick rules and future rules from ended requests are refused with
-`identity_unverifiable` (`identity.RuntimeRuleBlocked`). Once and For a while (process-scoped)
-stay available. `permission_target.kind = "runtime-unverified"`.
-
-Existing rules keyed on a runtime executable keep matching unverified processes of it, but no
-longer match processes verified as a specific Electron app (those have the bundle's key).
+For a while similarly covers only the verified native process for the selected
+duration. Unknown, worker-only, merged-owner and legacy bundle identity evidence
+remains unavailable. Old backends do not advertise the new `process-remember`
+scope offer, so the UI keeps Remember disabled with them. Ended unverified-runtime
+requests do not offer remembered application rules; use a current request.
 
 ## Presentation (`electron/src`)
 
 The permission window shows the app (e.g. **Heroic Games Launcher**, `socket owner electron`)
 and, in Details › Electron app, the state, runtime, bundle, package, integrity, chain and
-reason. Unverified: `electron` with `application unverified`; Remember is disabled with the
-backend's reason. The desktop name and icon come from the desktop entry whose launcher script
+reason. Unverified: `electron` with `application unverified`; Remember offers only the verified native process scope described above, or is disabled
+with the backend's reason when that scope is unavailable. The desktop name and icon come from the desktop entry whose launcher script
 names exactly that bundle (`/usr/bin/heroic`), or else a unique `StartupWMClass` equal to the
 package name — display only, never identity.
 
@@ -74,10 +63,9 @@ relationship, the relationships differ, the parent is unverified, or the parent 
 the helper is shown separately rather than guessed. Info View shows "Launched by … Display
 only".
 
-Process-scoped rules work for verified Electron app processes: the process binding keeps the
-application (bundle) revision and pins the running runtime file through
-`executable_revision` (empty for native processes, unchanged). Processes of an unverified
-runtime get no Activity rules at all (application or process); Once and For a while remain.
+Legacy bundle-based process bindings are not revived. The current prompt binds the
+native executable and process generation. Activity application-wide rules remain
+unavailable for unverified bundles.
 
 ## Rule Status display details
 

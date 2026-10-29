@@ -89,7 +89,7 @@ func leaseOwner(a identity.Attribution) (identity.Process, error) {
 	if app == nil || app.Key == "" || app.Revision == "" || a.Principal() == nil {
 		return identity.Process{}, mutationError("process_scope_unavailable", "For a while needs a verified application identity")
 	}
-	if why := identity.RuntimeRuleBlocked(app); why != "" {
+	if why := identity.RuntimeRuleBlocked(app); why != "" && !identity.NativeProcessAuthority(a) {
 		return identity.Process{}, mutationError("process_scope_unavailable", why)
 	}
 	if a.Table != nil {

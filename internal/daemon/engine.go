@@ -394,6 +394,9 @@ func (e *Engine) observeResolvedWithLinkLocked(f identity.Flow, token string, a 
 			v.ScopePreviews["application"] = strings.Replace(v.ScopePreviews["application"], "memory only", "saved to disk; absolute expiry survives restart", 1)
 			v.ScopePreviews["persistent"] = strings.Replace(v.ScopePreviews["application"], "Remember for one hour (saved to disk; absolute expiry survives restart)", "Persistent until disabled/deleted (saved to disk)", 1)
 		}
+		if identity.RuntimeRuleBlocked(a.Application) != "" && identity.NativeProcessAuthority(a) {
+			v.ScopePreviews["process-remember"] = "Remember this process only; ends on process exit or backend restart. Other processes and relaunches are not covered."
+		}
 		// Offered only when the request has one verified owning process.
 		if p, err := leaseOwner(a); err == nil {
 			v.ScopePreviews[ForAWhileScope] = forAWhilePreview(f, p, ForAWhileDuration)
@@ -568,7 +571,7 @@ func (e *Engine) decideLocked(id, action, scope string, uid uint32, admin bool, 
 		}
 		var remembered *policy.Rule
 		if remember {
-			if why := identity.RuntimeRuleBlocked(a.Application); why != "" {
+			if why := identity.RuntimeRuleBlocked(a.Application); why != "" && !(reviewed != nil && !reviewed.Filter.Process.IsZero() && identity.NativeProcessAuthority(a) && reviewed.Filter.Process.Matches(a.Owners[0])) {
 				return Event{}, mutationError(identity.CodeIdentityUnverifiable, why)
 			}
 			r := policy.Rule{Version: 1, Executable: a.Application.KeyPath(), Invocation: attributionInvocation(a), Schema: 2, ID: "user:" + v.ID, Priority: 100, Action: action, Filter: policy.Remembered(v.Flow, a), Created: now, Expires: now.Add(time.Hour)}

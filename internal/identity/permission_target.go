@@ -123,6 +123,10 @@ func DescribePermissionTarget(a Attribution) *PermissionTarget {
 		t.Label = fmt.Sprintf("%s runtime (application unverified)", name)
 		t.Remember = "Unavailable: " + why
 		t.ForAWhile = "Unavailable: hosted application execution is unverified; no process rule can be bound"
+		if NativeProcessAuthority(a) {
+			t.Remember = "This process only; ends on process exit or backend restart. Other processes and relaunches are not covered."
+			t.ForAWhile = "This verified native process only, for the selected duration; no other process or relaunch is covered"
+		}
 		t.SharedWithNote = fmt.Sprintf("%s is the observed executable; the claimed bundle is not permission authority", app.Executable)
 		return t
 	}

@@ -2681,13 +2681,20 @@ function updateDecisions() {
   // An ended request keeps Remember: it is the way to a rule for future connections.
   // An Electron runtime whose app is unverified: no application-wide rule (backend refuses too).
   const runtimeUnverified = e?.attribution.permission_target?.kind === 'runtime-unverified';
+  const processRemember = runtimeUnverified && !ended && !!e?.scope_previews['process-remember'];
+  if (processRemember) {
+    rememberFields = { ...rememberFields, process: true };
+    decisionZone = 'any';
+    const processBox = document.querySelector<HTMLInputElement>('#rememberPanel input[data-field=process]');
+    if (processBox) processBox.checked = true;
+  }
   if (toggle) {
-    toggle.disabled = runtimeUnverified || (ruleMode ? ruleDone || rulePinned || pacing : locked);
+    toggle.disabled = (runtimeUnverified && !processRemember) || (ruleMode ? ruleDone || rulePinned || pacing : locked);
     toggle.parentElement!.title = runtimeUnverified
       ? e!.attribution.permission_target!.remember
       : "Create rule and don't ask me again";
-    toggle.parentElement!.classList.toggle('unavailable', runtimeUnverified);
-    if (runtimeUnverified && rememberOn) setOption('remember', false);
+    toggle.parentElement!.classList.toggle('unavailable', runtimeUnverified && !processRemember);
+    if (runtimeUnverified && !processRemember && rememberOn) setOption('remember', false);
   }
   const scopeLine = $('permissionScope');
   if (scopeLine)
@@ -2725,7 +2732,7 @@ function updateDecisions() {
     for (const input of panel.querySelectorAll<HTMLInputElement>('input[data-field]')) {
       if (input.dataset.field === 'application') continue;
       if (!ruleMode) {
-        input.disabled = locked || input.dataset.available !== 'true';
+        input.disabled = locked || input.dataset.available !== 'true' || (processRemember && input.dataset.field === 'process');
         continue;
       }
       const endedProcess = input.dataset.field === 'process' && instanceEnded;
@@ -2784,7 +2791,7 @@ function updateDecisions() {
   }
   const zone = $<HTMLSelectElement>('decisionZone');
   if (zone) {
-    zone.disabled = !!scope?.disabled || !needsDecisionReview();
+    zone.disabled = !!scope?.disabled || !needsDecisionReview() || processRemember;
     zone.title = needsDecisionReview()
       ? 'Scope of the remembered rule'
       : 'Any network · backend upgrade required for remembered zone rules';

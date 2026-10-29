@@ -68,7 +68,7 @@ export function liveLeaseReason(e: ViewEvent | undefined, capabilities?: string[
   if (!forAWhileSupported(capabilities)) return 'For a while needs a newer FlowGate backend.';
   if (!e) return 'Unavailable: no current request.';
   const a = e.attribution, owner = a.owners.length === 1 ? a.owners[0] : undefined;
-  if (a.permission_target?.kind === 'runtime-unverified' || a.application?.hosted?.state === 'unverified')
+  if ((a.permission_target?.kind === 'runtime-unverified' || a.application?.hosted?.state === 'unverified') && !e.scope_previews['process-remember'])
     return a.permission_target?.for_a_while || 'Unavailable: hosted application execution is unverified.';
   if (!owner || a.runtime_table || (owner.thread_group_pid !== undefined && owner.thread_group_pid !== owner.pid))
     return 'Unavailable: needs one verified owning process leader.';

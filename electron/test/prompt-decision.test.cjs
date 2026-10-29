@@ -489,3 +489,15 @@ test('wire parsing retains the offered lease scope and the runtime refusal targe
   assert.equal(reply.events[0].attribution.permission_target.kind, 'runtime-unverified');
   assert.match(liveLeaseReason(reply.events[0], CAPS), /Unavailable/);
 });
+
+test('unverified runtime process offer survives parsing without enabling application scopes', () => {
+ const e = awaitingEvent();
+ e.attribution.permission_target = {kind:'runtime-unverified', label:'runtime', remember:'This process only', for_a_while:'This process only'};
+ e.scope_previews = {once:'Once', 'process-remember':'Verified process only', 'for-a-while':'Verified process only'};
+ const reply = parseReply({version:1,read_only:false,generation:'g',server_time:new Date().toISOString(),events:[e]});
+ assert.equal(reply.events[0].scope_previews['process-remember'],'Verified process only');
+ assert.equal(reply.events[0].scope_previews.application,undefined);
+ assert.equal(liveLeaseReason(reply.events[0],CAPS),'');
+ delete reply.events[0].scope_previews['process-remember'];
+ assert.notEqual(liveLeaseReason(reply.events[0],CAPS),'');
+});
