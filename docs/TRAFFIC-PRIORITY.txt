@@ -1,6 +1,10 @@
 Experimental per-application traffic priority (shared UL/DL limiter)
 ====================================================================
 
+Zone extension: see ZONE-SHAPING.txt for schema 3, scope overlap, directional
+hierarchies, effective leaf priority and conservative four-node admission. The
+legacy all-network behavior and existing limitations below remain applicable.
+
 Scope and separation
 --------------------
 One Low / Normal / High traffic priority per verified native application, applying to

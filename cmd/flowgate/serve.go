@@ -122,7 +122,7 @@ func serveCommand(args []string) error {
 		if !*administrator {
 			return fmt.Errorf("experimental upload requires explicit administrator")
 		}
-		manager, er := uploadshape.New(uploadshape.Options{Interface: *shapeInterface, Helpers: *shapeHelpers, State: *shapeState, ParentNetNS: *shapeParent, HostTrial: *shapeHost})
+		manager, er := uploadshape.New(uploadshape.Options{Zones: e.CurrentZones, Interface: *shapeInterface, Helpers: *shapeHelpers, State: *shapeState, ParentNetNS: *shapeParent, HostTrial: *shapeHost})
 		if er != nil {
 			return er
 		}

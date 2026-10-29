@@ -166,3 +166,42 @@ test('every coverage adoption is anchored at a timestamp captured before its req
  for(const a of calls)assert.match(a,/^\w+,(sent)$/,a);
  assert.ok(!/adopt\([^)]*performance\.now\(\)/.test(src));
 });
+
+test('zone edits preserve combined ceiling, other zone, opposite direction and explicit Normal',()=>{
+ const all={...cap,traffic_priority:'high'},local={...cap,scope:'local',bits_per_second:4000000,download_bits_per_second:6000000},internet={...cap,scope:'internet',bits_per_second:2000000};
+ const s=snap({configured_caps:[all,local,internet]});
+ const edited=replaceCap(s,{expected_version:1,target:internet,direction:'download',bits_per_second:3000000});
+ assert.deepEqual(edited.slice(0,2),[all,local]);assert.equal(edited[2].bits_per_second,2000000);
+ const normal=replaceCap({...s,configured_caps:edited},{expected_version:1,target:internet,priority:'normal',bits_per_second:null});
+ assert.equal(normal[2].traffic_priority,'normal');
+ const removed=replaceCap({...s,configured_caps:normal},{expected_version:1,target:internet,priority:null,bits_per_second:null});
+ assert.equal(removed[2].traffic_priority,undefined);assert.equal(removed[2].download_bits_per_second,3000000);
+ const deleted=replaceCap(s,{expected_version:1,target:internet,bits_per_second:null});assert.deepEqual(deleted,[all,local]);
+ assert.throws(()=>replaceCap(s,{expected_version:2,target:internet,bits_per_second:null}),/changed/);
+ assert.deepEqual(replaceCap(snap(),{expected_version:1,target:{...cap,scope:'all'},bits_per_second:null}),[]);
+ assert.throws(()=>replaceCap(s,{expected_version:1,target:{...cap,scope:'unknown'},bits_per_second:1000000}),/zone/);
+});
+test('zone coverage excludes other and unknown classifier assignments',()=>{
+ const target={...cap,scope:'internet'};
+ const s=snap({configured_caps:[target],kernel:{bindings:[{app:'1000:native-alpha',zone:'internet',covered:true,download:true},{app:'1000:native-alpha',zone:'local',covered:true,download:true},{app:'1000:native-alpha',zone:'',covered:true,download:true}]}});
+ assert.deepEqual(limitCoverage(s,target,'upload',false),{requested:1,confirmed:1});
+ assert.deepEqual(limitCoverage({...s,configured_caps:[cap]},cap,'upload',false),{requested:3,confirmed:3});
+ assert.deepEqual(limitCoverage(s,target,'upload',true),{requested:1,confirmed:0});
+});
+test('zoned hierarchy capacity rejected before submission',()=>{
+ const caps=Array.from({length:4},(_,i)=>({...cap,application:'synthetic-'+i,scope:'local'}));
+ assert.throws(()=>replaceCap(snap({configured_caps:caps}),{expected_version:1,target:cap,bits_per_second:1000000}),/capacity/);
+ assert.equal(replaceCap(snap({configured_caps:caps}),{expected_version:1,target:{...caps[0],scope:'internet'},bits_per_second:1000000}).length,5);
+});
+test('zone capability gates writes and schema 3 preserves every scope and all-traffic budgets',async t=>{
+ const h=await harness(t),target={...cap,scope:'internet',revision:'r1'};
+ await assert.rejects(h.client.configure({generation:'g1',expected_version:1,target,bits_per_second:2000000}),/Zone shaping/);
+ assert.equal(h.calls.length,0);
+ h.state.control.capabilities.push('experimental-traffic-priority-v1','experimental-zone-shaping-v1');
+ h.setSnapshot(snap({upload_budget_bits_per_second:20000000,download_budget_bits_per_second:30000000}));
+ const result=await h.client.configure({generation:'g1',expected_version:1,target,bits_per_second:2000000});
+ assert.equal(result.zoneSupported,true);
+ const payload=h.calls.find(c=>c.operation==='upload-configure').upload_config;
+ assert.equal(payload.schema,3);assert.deepEqual(payload.caps,[cap,{uid:1000,application:'native-alpha',scope:'internet',bits_per_second:2000000}]);
+ assert.equal(payload.upload_budget_bits_per_second,20000000);assert.equal(payload.download_budget_bits_per_second,30000000);
+});

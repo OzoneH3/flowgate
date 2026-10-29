@@ -92,6 +92,39 @@ def rates(req):
     return (rate(up) if up else 0), (rate(down) if down else 0), prio
 
 
+def zone_entry(e):
+    zones = e.get('zones') or {}
+    if not isinstance(zones, dict) or any(z not in ('local', 'internet') for z in zones):
+        raise ValueError('invalid zone scope')
+    out = {}
+    for z, v in zones.items():
+        if not isinstance(v, dict): raise ValueError('invalid zone setting')
+        up, down = v.get('rate') or 0, v.get('download_rate') or 0
+        entry = {'rate': rate(up) if up else 0, 'download_rate': rate(down) if down else 0}
+        if 'priority' in v: entry['priority'] = priority(v['priority'])
+        if not up and not down and 'priority' not in entry: raise ValueError('empty zone setting')
+        out[z] = entry
+    return out
+
+
+def zone_tuples(entry, parent, capkey, budgeted):
+    """Child floors share the parent's allocation; ceilings remain cumulative.
+    An explicit Normal overrides inheritance. Unknown uses only all settings.
+    HTB priority is a leaf parameter, never an interior scheduling guarantee.
+    """
+    zones = entry.get('zones', {})
+    prios = {z: priority(zones.get(z, {}).get('priority', entry.get('priority'))) for z in ('', 'local', 'internet')}
+    weights = {z: FLOOR_PERCENT[p] if budgeted else FLOOR_PERCENT['normal'] for z, p in prios.items()}
+    total = sum(weights.values())
+    out = {}
+    for z in weights:
+        ceiling = min(parent[1], zones.get(z, {}).get(capkey) or parent[1])
+        floor = min(ceiling, parent[0] * weights[z] // total)
+        if floor < MIN_FLOOR: raise ValueError('allocation_below_minimum')
+        out[z] = (floor, ceiling, HTB_PRIO[prios[z]] if budgeted else 0)
+    return out
+
+
 def queue_bytes(bits, mtu, gso=0):
     # At most ~25 ms of qdisc bytes, subject to a two-MTU floor; not TCP send buffers.
     # With segmentation offload one skb may carry gso bytes of payload (64 KiB by
@@ -1003,9 +1036,12 @@ class Controller:
     def direction_device(self, d):
         return (self.dev, self.handle) if d == 'ul' else (self.ifb, self.dl_handle)
 
+    def zone_direction(self, entry, d):
+        return any(bool(z.get('rate' if d == 'ul' else 'download_rate')) or ('priority' in z and bool(self.budgets.get(d))) for z in entry.get('zones', {}).values())
+
     def has_class(self, entry, d):
         cap = entry.get('rate' if d == 'ul' else 'download_rate', 0)
-        return bool(cap) or (entry.get('priority', 'normal') != 'normal' and bool(self.budgets.get(d)))
+        return bool(cap) or (entry.get('priority', 'normal') != 'normal' and bool(self.budgets.get(d))) or self.zone_direction(entry, d)
 
     def entry_for(self, app):
         return self.policy_apps.get(app) or self.apps.get(app) or {}
@@ -1020,17 +1056,28 @@ class Controller:
         # policy_apps); instantiated classes about to be retired never count.
         live = {a['minor']: (app, self.policy_apps[app]) for app, a in self.apps.items()
                 if app in self.policy_apps and self.has_class(self.policy_apps[app], d)}
-        if not b:
-            # Legacy recipe: independent hard caps, priority dormant.
-            return {m: (e[capkey], e[capkey], 0) for m, (app, e) in live.items()}, None
         population = {'default': ('normal', 0)}
         for app, e in self.policy_apps.items():
             if self.has_class(e, d):
                 population[app] = (e.get('priority', 'normal'), e.get(capkey, 0))
-        alloc = allocate(b, population)
+        alloc = allocate(b, population) if b else {app: (e.get(capkey) or 100_000_000_000, e.get(capkey) or 100_000_000_000, 0) for app, e in self.policy_apps.items() if self.has_class(e, d)}
+        # Validate child floors even for applications with no observed sockets.
+        children = {app: zone_tuples(e, alloc[app], capkey, bool(b)) for app, e in self.policy_apps.items() if self.zone_direction(e, d)}
         out = {m: alloc[app] for m, (app, e) in live.items()}
-        out[DEFAULT_MINOR] = alloc['default']
-        return out, b
+        for m, (app, e) in live.items():
+            for z, minor in (self.apps[app].get('zone_minors', {}) if self.zone_direction(e, d) else {}).items():
+                out[minor] = children[app][z]
+        if b: out[DEFAULT_MINOR] = alloc['default']
+        return out, b or None
+
+    def class_parent(self, minor):
+        for a in self.apps.values():
+            if minor in a.get('zone_minors', {}).values(): return a['minor']
+        return BUDGET_MINOR
+
+    def interior(self, minor, d):
+        return any(a['minor'] == minor and d in a.get('zone_dirs', ()) for a in self.apps.values())
+
 
     def leaf_memory(self, ceil):
         return queue_bytes(ceil, self.mtu, self.gso())
@@ -1052,8 +1099,8 @@ class Controller:
         before = dict(state)
         if was_budget and not b:
             self.publish_budget(d, False)  # withdraw marking before legacy tree
-        for minor in [m for m in state if m != DEFAULT_MINOR and m not in want]:
-            self.mutate('qdisc', 'del', 'dev', dev, 'parent', root(minor), 'handle', f'{minor:x}:')
+        for minor in sorted([m for m in state if m != DEFAULT_MINOR and m not in want], key=lambda m: self.interior(m, d)):
+            if not self.interior(minor, d): self.mutate('qdisc', 'del', 'dev', dev, 'parent', root(minor), 'handle', f'{minor:x}:')
             self.mutate('class', 'del', 'dev', dev, 'classid', root(minor))
             del state[minor]
         for minor, new in want.items():
@@ -1061,7 +1108,7 @@ class Controller:
             if old and old != new:
                 mid = (min(old[0], new[0]), min(old[1], new[1]), old[2])
                 if mid != old:
-                    self.mutate('class', 'change', 'dev', dev, 'parent', root(BUDGET_MINOR), 'classid', root(minor), *self.tuple_params(mid))
+                    self.mutate('class', 'change', 'dev', dev, 'parent', root(self.class_parent(minor)), 'classid', root(minor), *self.tuple_params(mid))
                     state[minor] = mid
         if b != self.applied_budget.get(d):
             parent = ['htb', 'rate', f'{b}bit', 'ceil', f'{b}bit', 'burst', str(burst_bytes(b, self.mtu, self.gso())), 'cburst', str(burst_bytes(b, self.mtu, self.gso())), 'quantum', str(self.mtu)] if b else ['htb', 'rate', '100gbit', 'ceil', '100gbit', 'quantum', str(self.mtu)]
@@ -1083,21 +1130,57 @@ class Controller:
         for minor, new in want.items():
             old = state.get(minor)
             if old is None and minor != DEFAULT_MINOR:
-                self.mutate('class', 'add', 'dev', dev, 'parent', root(BUDGET_MINOR), 'classid', root(minor), *self.tuple_params(new))
-                self.mutate('qdisc', 'add', 'dev', dev, 'parent', root(minor), 'handle', f'{minor:x}:', 'fq_codel', 'limit', '128', 'memory_limit', str(self.leaf_memory(new[1])), 'flows', '128', 'target', '5ms', 'interval', '100ms')
+                self.mutate('class', 'add', 'dev', dev, 'parent', root(self.class_parent(minor)), 'classid', root(minor), *self.tuple_params(new))
+                if not self.interior(minor, d): self.mutate('qdisc', 'add', 'dev', dev, 'parent', root(minor), 'handle', f'{minor:x}:', 'fq_codel', 'limit', '128', 'memory_limit', str(self.leaf_memory(new[1])), 'flows', '128', 'target', '5ms', 'interval', '100ms')
                 state[minor] = new
                 continue
             if old != new:
-                self.mutate('class', 'change', 'dev', dev, 'parent', root(BUDGET_MINOR), 'classid', root(minor), *self.tuple_params(new))
+                self.mutate('class', 'change', 'dev', dev, 'parent', root(self.class_parent(minor)), 'classid', root(minor), *self.tuple_params(new))
             # Leaf sizing follows the ceiling as it was BEFORE this batch, so a
             # pure decrease (already final after the shrink step) is resized too.
-            if minor != DEFAULT_MINOR and (before.get(minor) is None or before[minor][1] != new[1]):
+            if minor != DEFAULT_MINOR and not self.interior(minor, d) and (before.get(minor) is None or before[minor][1] != new[1]):
                 self.mutate('qdisc', 'change', 'dev', dev, 'parent', root(minor), 'handle', f'{minor:x}:', 'fq_codel', 'limit', '128', 'memory_limit', str(self.leaf_memory(new[1])), 'target', '5ms', 'interval', '100ms')
             elif minor == DEFAULT_MINOR and b and was_budget and self.applied_budget_before != b:
                 self.mutate('qdisc', 'change', 'dev', dev, 'parent', root(minor), 'handle', 'fffe:', 'fq_codel', 'limit', '128', 'memory_limit', str(self.leaf_memory(b)))
             state[minor] = new
         if b and not was_budget:
             self.publish_budget(d, True)  # marking only after the tree is ready
+
+    def prepare_zone_directions(self):
+        """Convert only the affected direction. Withdraw its map selection before
+        removing a leaf/children; retain the opposite direction's class and queue.
+        Topology changes have a bounded unshaped interval, reported Applying.
+        """
+        for app, a in self.apps.items():
+            e = self.policy_apps[app]
+            desired = {d for d in ('ul', 'dl') if self.zone_direction(e, d)}
+            previous = set(a.get('zone_dirs', ()))
+            if desired and not a.get('zone_minors'):
+                if self.next_minor + 2 > MAX_APP_MINOR: raise ValueError('class_generation_exhausted')
+                a['zone_minors'] = dict(zip(('', 'local', 'internet'), range(self.next_minor, self.next_minor + 3)))
+                self.next_minor += 3
+            a['transition_dirs'] = sorted(desired ^ previous)
+            for d in desired ^ previous:
+                for cookie, b in list(self.bindings.items()):
+                    if b['app'] != app: continue
+                    ids = list(self.class_ids(app, b.get('zone', '')))
+                    ids[0 if d == 'ul' else 1] = '0'
+                    self.k('bind', cookie, *ids)
+                dev, root = self.direction_device(d)
+                state = self.class_state[d]
+                if d in previous:
+                    for minor in a['zone_minors'].values():
+                        if minor in state:
+                            self.mutate('qdisc', 'del', 'dev', dev, 'parent', root(minor), 'handle', f'{minor:x}:')
+                            self.mutate('class', 'del', 'dev', dev, 'classid', root(minor))
+                            del state[minor]
+                    if a['minor'] in state:
+                        # Remove parent too; apply_direction recreates its fq_codel leaf.
+                        self.mutate('class', 'del', 'dev', dev, 'classid', root(a['minor']))
+                        del state[a['minor']]
+                elif a['minor'] in state:
+                    self.mutate('qdisc', 'del', 'dev', dev, 'parent', root(a['minor']), 'handle', f"{a['minor']:x}:")
+            a['zone_dirs'] = sorted(desired)
 
     def publish_budget(self, d, on):
         if d == 'ul':
@@ -1114,13 +1197,14 @@ class Controller:
             for d in ('ul', 'dl'):
                 self.apply_direction(d)
             for app in self.apps:
+                self.apps[app].pop('transition_dirs', None)
                 self.apps[app]['ul'] = self.class_state['ul'].get(self.apps[app]['minor'])
                 self.apps[app]['dl'] = self.class_state['dl'].get(self.apps[app]['minor'])
             for c, bnd in list(self.bindings.items()):
                 self.refresh_during_apply()
                 if c not in self.bindings:
                     continue
-                self.k('bind', c, *self.class_ids(bnd['app']))
+                self.k('bind', c, *self.class_ids(bnd['app'], bnd.get('zone', '')))
         finally:
             self.applying = False
 
@@ -1133,8 +1217,14 @@ class Controller:
         for app, e in apps.items():
             if not isinstance(app, str) or not re.fullmatch(r'[0-9]+:.{1,512}', app, re.S) or '\n' in app:
                 raise ValueError('invalid application key')
-            up, down, prio = rates(e)
+            zones = zone_entry(e)
+            up, down, prio = rates(e) if not zones else (rate(e['rate']) if e.get('rate') else 0, rate(e['download_rate']) if e.get('download_rate') else 0, priority(e.get('priority')))
             policy[app] = {'rate': up, 'download_rate': down, 'priority': prio}
+            if zones: policy[app]['zones'] = zones
+        if sum(4 if e.get('zones') else 1 for e in policy.values()) > MAX_APPS:
+            raise ValueError('class_capacity: at most 16 class nodes')
+        needed = sum(4 if e.get('zones') else 1 for app,e in policy.items() if app not in self.apps or bool(e.get('zones')) and not bool(self.apps[app].get('zone_minors')))
+        if self.next_minor + needed - 1 > MAX_APP_MINOR: raise ValueError('class_generation_exhausted')
         old = (self.budgets, self.policy_apps)
         self.budgets, self.policy_apps = budgets, policy
         try:
@@ -1150,6 +1240,8 @@ class Controller:
             for app, e in policy.items():
                 if app in self.apps:
                     self.apps[app].update(e)
+                    if 'zones' not in e: self.apps[app].pop('zones', None)
+            self.prepare_zone_directions()
             self.apply_policy()
         except Exception as exc:
             raise RuntimeError('policy application failed after validation: ' + str(exc)) from exc
@@ -1160,20 +1252,25 @@ class Controller:
         bits = rate(bits) if bits else 0
         download_bits = rate(download_bits) if download_bits else 0
         prio = priority(prio if prio is not None else self.entry_for(app).get('priority'))
-        if not bits and not download_bits and prio == 'normal':
+        if not bits and not download_bits and prio == 'normal' and not self.policy_apps.get(app, {}).get('zones'):
             raise ValueError('upload/download rate or non-Normal traffic priority required')
-        entry = {'rate': bits, 'download_rate': download_bits, 'priority': prio}
+        entry = dict(self.policy_apps.get(app, {}), rate=bits, download_rate=download_bits, priority=prio)
         if app not in self.apps:
-            if len(self.apps) >= MAX_APPS:
+            count = 4 if entry.get('zones') else 1
+            if sum(4 if a.get('zones') else 1 for a in self.apps.values()) + count > MAX_APPS:
                 raise ValueError('concurrent class capacity reached')
-            if self.next_minor > MAX_APP_MINOR:
+            if self.next_minor + count - 1 > MAX_APP_MINOR:
                 raise ValueError('class_generation_exhausted')
             minor = self.next_minor; self.next_minor += 1
             self.apps[app] = {'minor': minor, 'idle_since': time.monotonic(), 'ul': None, 'dl': None}
+            if entry.get('zones'):
+                self.apps[app]['zone_minors'] = dict(zip(('', 'local', 'internet'), range(self.next_minor, self.next_minor + 3)))
+                self.next_minor += 3
         previous = self.policy_apps.get(app)
         self.policy_apps[app] = entry
         self.apps[app].update(entry)
         try:
+            self.prepare_zone_directions()
             self.apply_policy()
         except ValueError:
             if previous is None:
@@ -1184,13 +1281,42 @@ class Controller:
         a = self.apps[app]
         a['burst_bytes'] = burst_bytes(bits or download_bits or MIN_RATE, self.mtu, self.gso()); a['leaf_memory_limit'] = queue_bytes(bits or download_bits or MIN_RATE, self.mtu, self.gso())
 
-    def class_ids(self, app):
+    def class_ids(self, app, zone=''):
         a = self.apps[app]
-        return (str(a['minor'] if a['minor'] in self.class_state['ul'] else 0),
-                str(a['minor'] if a['minor'] in self.class_state['dl'] else 0))
+        def selected(d):
+            if d in a.get('transition_dirs', ()): return '0'
+            minor = a.get('zone_minors', {}).get(zone, a['minor']) if d in a.get('zone_dirs', ()) else a['minor']
+            return str(minor if minor in self.class_state[d] else 0)
+        return selected('ul'), selected('dl')
+
+    def rezone(self, req):
+        self.applying = True
+        try: return self.rezone_bindings(req)
+        finally: self.applying = False
+
+    def rezone_bindings(self, req):
+        changes = req.get('bindings')
+        if not isinstance(changes, dict) or len(changes) > MAX_BINDINGS or any(z not in ('', 'local', 'internet') for z in changes.values()): raise ValueError('invalid reclassification')
+        self.verify()
+        for cookie, zone in changes.items():
+            b = self.bindings.get(cookie)
+            if b is None: continue
+            # Withdraw first, so a failed reclassification never renews the old zone.
+            self.k('del', cookie)
+            del self.bindings[cookie]
+            self.refresh_during_apply()
+            if not self.exists(b['descriptor']): continue
+            b['zone'] = zone
+            self.k('bind', cookie, *self.class_ids(b['app'], zone))
+            self.bindings[cookie] = b
+        return {'reclassified': True}
+
 
     def bind(self, req):
-        bits, download_bits, prio = rates(req)
+        zone = req.get('zone', '')
+        if zone not in ('', 'local', 'internet'): raise ValueError('invalid zone')
+        entry = self.policy_apps.get(req.get('expected_app'), {})
+        bits, download_bits, prio = rates(req) if not entry.get('zones') else (entry['rate'], entry['download_rate'], entry['priority'])
         self.verify()
         proto, local, remote = req['protocol'], req['local'], req['remote']
         if proto not in ('tcp', 'udp') or len(local) > 80 or len(remote) > 80:
@@ -1227,8 +1353,8 @@ class Controller:
         a = self.apps.get(app)
         if a is None or (a.get('rate'), a.get('download_rate', 0), a.get('priority', 'normal')) != (bits, download_bits, prio):
             self.set_cap(app, bits, download_bits, prio)
-        self.k('bind', cookie, *self.class_ids(app))
-        self.bindings[cookie] = {'app': app, 'inode': s['inode'], 'protocol': s['protocol'],
+        self.k('bind', cookie, *self.class_ids(app, zone))
+        self.bindings[cookie] = {'app': app, 'zone': zone, 'inode': s['inode'], 'protocol': s['protocol'],
                                  'cookie': cookie, 'netns': s['netns'], 'bound_at': time.time(), 'descriptor': descriptor}
         self.apps[app]['idle_since'] = time.monotonic()
         return {'app': app, 'cookie': cookie, 'scope': 'socket-binding', 'status': 'Active'}
@@ -1239,15 +1365,16 @@ class Controller:
         for c, b in list(self.bindings.items()):
             if b['app'] == app:
                 self.k('del', c); del self.bindings[c]
-        minor = self.apps[app]['minor']
-        # Removing a cap releases new traffic immediately; pending leaf packets
-        # may be purged. No class ID reuse within this controller generation.
-        for d in ('ul', 'dl'):
-            if minor in self.class_state[d]:
-                dev, root = self.direction_device(d)
-                self.mutate('qdisc', 'del', 'dev', dev, 'parent', root(minor), 'handle', f'{minor:x}:')
-                self.mutate('class', 'del', 'dev', dev, 'classid', root(minor))
-                del self.class_state[d][minor]
+        a = self.apps[app]
+        # Leaves first, then parent. No socket can target the interior class.
+        for minor in [*a.get('zone_minors', {}).values(), a['minor']]:
+            for d in ('ul', 'dl'):
+                if minor in self.class_state[d]:
+                    dev, root = self.direction_device(d)
+                    if not self.interior(minor, d): self.mutate('qdisc', 'del', 'dev', dev, 'parent', root(minor), 'handle', f'{minor:x}:')
+                    self.mutate('class', 'del', 'dev', dev, 'classid', root(minor))
+                    del self.class_state[d][minor]
+
         del self.apps[app]
 
     def tick(self, retire_idle=True):
@@ -1280,7 +1407,7 @@ class Controller:
             if not live[c]:
                 self.k('del', c); del self.bindings[c]
             else:
-                self.k('bind', c, *self.class_ids(b['app']))
+                self.k('bind', c, *self.class_ids(b['app'], b.get('zone', '')))
                 self.apps[b['app']]['idle_since'] = time.monotonic()
         if retire_idle:
             for app, a in list(self.apps.items()):
@@ -1315,7 +1442,7 @@ class Controller:
         # cannot make the reported verification age younger than it is at report time.
         verified_age_ms, verification = self.verification_observation()
         live = {b['cookie']: b for b in health['bindings'] if b['until'] > now}
-        covered_cookies = {c for c, b in self.bindings.items() if c in live and (str(live[c]['minor']), str(live[c].get('download', 0))) == self.class_ids(b['app'])}
+        covered_cookies = {c for c, b in self.bindings.items() if c in live and (str(live[c]['minor']), str(live[c].get('download', 0))) == self.class_ids(b['app'], b.get('zone', ''))}
         covered = len(covered_cookies)
         valid_until = min([health['config_until']] + [b['until'] for b in live.values()])
         if health['config_until'] <= now:
@@ -1356,7 +1483,7 @@ class Controller:
                 # Per-binding coverage is an observation from the SAME health read,
                 # never an authority token or an application-wide guarantee.
                 'bindings': [dict(b, covered=bool(covered and c in covered_cookies),
-                                  download=bool(b.get('protocol') == 'tcp' and self.apps[b['app']].get('download_rate')),
+                                  download=bool(b.get('protocol') == 'tcp' and int(self.class_ids(b['app'], b.get('zone', ''))[1])),
                                   upload_class=self.apps[b['app']]['minor'] in self.class_state['ul'],
                                   download_class=bool(b.get('protocol') == 'tcp' and self.apps[b['app']]['minor'] in self.class_state['dl']))
                              for c, b in self.bindings.items()], 'next_minor': self.next_minor, 'counters': counters,
@@ -1468,6 +1595,8 @@ def main():
                         req = json.loads(line); op = req['op']
                         if op == 'bind':
                             result = c.bind(req)
+                        elif op == 'rezone':
+                            result = c.rezone(req)
                         elif op == 'cap':
                             if req['app'] not in c.apps: raise ValueError('unknown application')
                             c.set_cap(req['app'], req.get('rate') or 0, req.get('download_rate') or 0, req.get('priority')); result = c.status()

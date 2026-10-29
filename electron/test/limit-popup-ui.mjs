@@ -253,7 +253,7 @@ try {
       };
     });
     assert.equal(m.popup.width, 266);
-    assert.equal(m.popup.height, 62);
+    assert.equal(m.popup.height, 91);
     assert.equal(m.checkbox.width, 16);
     assert.equal(m.checkbox.height, 16);
     assert.equal(m.rate.width, 96);

@@ -200,7 +200,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 					}
 					r := Response{Build: e.Build, Capabilities: []string{ConditionalDeleteCapability, ConditionalMutationCapability, "explicit-administrator-v1"}, Version: 1, Generation: e.Generation, ReadOnly: readonly, Mode: e.Mode, ServerTime: time.Now(), PeerUID: cred.Uid}
 					if e.UploadShaping != nil {
-						r.Capabilities = append(r.Capabilities, "experimental-native-upload-v1", "experimental-native-download-v1", "experimental-traffic-priority-v1")
+						r.Capabilities = append(r.Capabilities, "experimental-native-upload-v1", "experimental-native-download-v1", "experimental-traffic-priority-v1", "experimental-zone-shaping-v1")
 					}
 					if e.RuntimeChecks != nil {
 						r.RuntimeChecks = e.RuntimeChecks()

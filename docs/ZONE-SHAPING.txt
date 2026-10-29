@@ -1,0 +1,160 @@
+Zone-scoped UL/DL limits and traffic priority
+==========================================
+
+Contract
+--------
+This extends the shared experimental native UL/DL controller, not firewall rules.
+A cap entry is keyed by verified native application, UID and scope. Omitted scope,
+empty scope, and input "all" mean All networks (stored omitted). "local" and
+"internet" select the existing authoritative NetworkZones classifier. Unknown or
+ambiguous membership matches neither specific scope. No rule here grants permission.
+Existing executable/socket, protocol, topology and lease limitations remain.
+
+An all-network directional cap remains ONE combined ceiling across eligible sockets.
+A matching zone cap is an additional ceiling beneath it. Processes/sockets belonging
+to the same application and zone share that allowance; adding sockets adds no budget.
+Absent zone caps do not bypass the all-network cap. Unknown traffic uses only the
+all-network setting. Zone-only caps do not constrain other zones, except through an
+explicit existing shared directional budget. UL and DL settings are independent.
+
+Priority is an explicit FlowGate fallback contract: a zone's stored Low, Normal or
+High overrides the application's all-network priority for matching leaf queues.
+Deleting that priority restores inheritance; explicit zone Normal is not deletion.
+Unknown uses the all-network fallback. The all-network priority still determines the
+application's aggregate scheduler-floor allocation under the existing shared budget.
+Child floor allocations share that parent allocation using weights 10/15/20 for
+Low/Normal/High; each is capped by its own ceiling, with no redistribution. Actual
+borrowing depends on HTB hierarchy, eligibility and effective LEAF priority. Interior
+HTB priority is not an independent application ordering mechanism. No strict global
+priority ordering, receiver minimum, progress bound or latency guarantee is promised.
+Without the corresponding directional budget priority remains dormant, including
+child-floor weights (equal weights then). Existing budgets remain all eligible traffic;
+no Internet-only or additional budget has been introduced.
+
+Official references consulted 2026-10-29:
+https://netlimiter.com/docs/basic-concepts/rules
+https://netlimiter.com/docs/basic-concepts/zones
+https://netlimiter.com/docs/basic-concepts/limits
+https://netlimiter.com/docs/basic-concepts/priorities
+These document zone-scoped rules, Local/Internet zones and directional limits. They
+do not establish overlapping priority-rule precedence. Conjunctive ceilings and the
+specific-priority override above are FlowGate contracts, not claims of NetLimiter
+scheduler equivalence. NetLimiter documents automatic bandwidth detection; FlowGate
+continues to require explicit budgets. See TRAFFIC-PRIORITY.txt for existing limits.
+
+Representation, admission and migration
+--------------------------------------
+Schema 3 and capability experimental-zone-shaping-v1. Schema 1/2 legacy all-network
+settings retain their behavior. A request or stored configuration containing a zone
+requires schema 3: older full-replacement clients cannot erase it, including through
+Disable/Delete. Generation/version CAS and read-after-lost-ack reconciliation remain;
+no automatic write retry. Configuration remains session-scoped, not restart-persistent.
+
+Each zoned app reserves four nodes: application aggregate + unknown/local/internet
+children. Scope-specific hierarchy is materialized only in affected directions; an
+upload-only zone rule does not split the unchanged download queue. Directional flat/
+interior conversion withdraws only the affected binding direction before changing its
+queues, then republishes after application. This can briefly leave that direction
+unshaped while Applying; the opposite queue and configuration are retained. Deleting
+one scope preserves other scopes. Ordinary scalar edits keep the existing hierarchy.
+
+Admission is conservative: at most 16 class nodes (four fully zoned applications,
+or mixed zoned/legacy apps) and the existing 128 socket bindings. Configured population
+is validated before TC mutation, including unobserved apps. Each budget floor and child
+floor must be at least 256 kbit/s; a low all-network cap can therefore make a proposed
+priority split unrepresentable and is refused. This threshold is not delivered service.
+The allocator reserves fresh class-ID headroom; generation exhaustion is explicit.
+Ownership journal checks, foreign-object refusal and maintenance checkpoints are reused.
+
+The daemon classifies bindings using Engine.CurrentZones, including namespace/interface
+context, and reconciles changed labels on its existing worker cycle. Reclassification
+withdraws the old map binding before publishing its new leaf and retains executable/
+socket ownership proof. Failed renewal never makes old scope state newly authoritative.
+This is asynchronous classification reconciliation, not a packet-atomic topology change;
+previous bindings can remain until the next successful worker pass or lease expiry.
+Partial/unsupported and expired coverage remain explicit. No separate IP database,
+private-address test or route-derived zone classification is present.
+
+UI
+--
+The existing compact UL/DL/Priority popup adds All networks / Internet / Local Network.
+It edits the selected scope's own setting, with inherited effects in a short hint and
+tooltip. Drafts are retained per scope and across refresh, with stale CAS disabling Save.
+Opening, switching scope, Escape and cancellation do not write. Delete removes only
+the selected kind in that scope. Main Activity and docked/detached Info share the code.
+Unsupported zone capability disables the selector. Advanced retains detailed limits.
+
+Verification and physical trial
+-------------------------------
+See the final task report and .workspace/zone-receiver for exact receiver measurements,
+staged hashes and scope. Native GUI evidence is isolated synthetic-API evidence, not
+receiver proof. Existing unchanged recovery/protocol evidence is retained; it must not
+be relabeled as new hierarchy or physical-host coverage.
+
+Prepared-only physical trial plan (requires separate explicit authorization):
+1. Record the exact approved bundle, installed release/generation, FULL desired limiter
+   state/version, firewall rules hash, protection, collector status, updater pins and
+   enp7s0 qdiscs/filters/offloads. Stop on drift or foreign ownership. Do not alter pins.
+2. Use the established Unraid connection through enp7s0 for the genuine Local peer.
+   Genuine Internet validation additionally needs a user-controlled public TCP receiver
+   reachable outside the LAN (with authorization and sufficient measured capacity).
+   Labelling Unraid/private addresses Internet is only synthetic classification evidence.
+3. In a separately approved matched-release deployment window, use one native test app
+   with simultaneous Local/public connections, initially two sockets each direction/zone.
+   Record authoritative classifier results first. Use bounded 3 s settling + 8 s payload
+   measurement windows, explicitly distinguishing wire charging from receiver payload.
+   Verify independent caps then a combined all-network ceiling, priority and reverse swap
+   under an explicitly approved temporary shared budget below measured bottleneck rate.
+4. Preserve user entries. Create only identified test entries through generation/version
+   CAS; edit/delete one zone and verify all others, reverse direction and Deny unchanged.
+   Stop on connectivity loss, foreign mutation, unsupported status, expired leases or
+   sustained unexpected overshoot. No offload/route/VPN changes are part of the trial.
+5. Restore the captured desired state by fresh CAS, removing only trial-owned entries
+   and approved temporary budgets. Cleanup must use ownership-verified controller paths;
+   never delete a root qdisc blindly. Verify rules/protection/pins and original topology,
+   or the restored user's owned shaping objects if nonempty. Preserve journals on refusal.
+No physical trial, deployment, host restart, rule mutation or pin change is authorized by
+this implementation task or by this plan.
+
+Recorded isolated evidence (2026-10-29)
+--------------------------------------
+65 controller models, complete uploadshape race suite, targeted daemon zone/upload/
+download race checks, 18 limiter client tests and Electron build passed. Native visible
+sandboxed Electron fixture exercised create/edit/delete, drafts, Escape, stale edits,
+units, stable placement and docked/detached Info; compact captures are 266 x 91 pixels.
+It used a synthetic API, separate from real daemon receiver tests.
+
+Final focused receiver pass: .workspace/zone-receiver/run3-artifacts. With synthetic
+IPv4 Local / IPv6 Internet, same executable and multiple sockets, UL caps 8/4 Mbit/s
+measured 7.472/3.629; DL caps 12/6 measured 11.357/5.568. Repeated settled windows agree.
+All-network 9 UL / 14 DL plus child caps measured approximately 8.3/13.1 combined,
+including after Internet cap deletion. Under 40 Mbit/s budgets, same-app Local High /
+Internet Low measured UL 36.718/1.206 and DL 36.659/1.207; reverse swap measured
+UL 1.231/36.250 and DL 1.326/36.199. These are receiver payload rates, not charged-byte
+minimums or scheduling guarantees. Each phase offered eight denied packets, zero delivered.
+
+Capacity/cross-app: run2-artifacts, four zoned apps / 16 nodes / EIGHT idle bindings.
+A 14.61-second full edit retained positive leases at all 61 sampled instants: minimum
+binding margin 3808 ms, config margin 3813 ms. Capacity-phase completion gap 1441 ms,
+renewal span 8 ms; later cross-app whole-run maxima were 3457 ms and 1934 ms. These
+samples do not prove continuous coverage or behavior at 128 busy bindings. Cross-app
+priority reversal was observed (UL roughly 32.4/5.6 -> 5.8/31.8); automated cross-app
+assertions check the combined budget, not a promised share ratio.
+
+Real API regression: run4-artifacts and packaged-api-artifacts. Older schema overwrite
+and stale CAS rejected without mutation; deliberately lost receipt reconciled by read.
+Last UL-zone deletion and new UL-zone insertion preserved DL class/queue handles and
+receiver payload approximately 13.39 Mbit/s under its unchanged 14 Mbit/s cap.
+Live classification: reclassification-artifacts, test-only stdin driver using production
+Manager and Engine.CurrentZones with immutable classifier fixtures. Same four IPv4 socket
+cookies changed Local -> synthetic Internet -> Unknown without changing desired version.
+UL/DL map class IDs changed 3 -> 4 -> 2. Receiver UL/DL: 7.472/11.366 (8/12 caps),
+3.719/5.669 (4/6 caps), 9.403/13.303 (all-network 10/14 caps). No stale map cookie remained.
+Independent Deny and owned cleanup preserved fixture rules and restored original qdiscs.
+
+Each VM has no external NIC. Reused helper binaries/base image and per-run source/binary
+hashes are in staged manifests. New hierarchy foreign-object/crash injection, public
+connectivity, physical NIC events, 128 loaded bindings and WAN latency are NOT established.
+Existing unchanged ownership/recovery model and receiver evidence is reused, not relabelled.
+Independent source/UI/evidence review by /root/zone_review found no remaining blockers;
+this is distinct from the external fg RESEARCH session, whose participation was requested.

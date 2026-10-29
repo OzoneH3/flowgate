@@ -15,15 +15,18 @@ import (
 	"flowgate/internal/identity"
 )
 
+// MaxCaps is the shared class-node capacity: one legacy or four zoned nodes.
 const MaxCaps = 16
 
 type Cap struct {
+	Scope                 string `json:"scope,omitempty"`
 	UID                   uint32 `json:"uid"`
 	Application           string `json:"application"`
 	BitsPerSecond         uint64 `json:"bits_per_second"`
 	DownloadBitsPerSecond uint64 `json:"download_bits_per_second,omitempty"`
-	// One traffic priority for both directions: "low" or "high"; omitted means
-	// Normal. Shaping only, unrelated to firewall rule priority.
+	// One priority for both directions. Omitted is Normal at all scope and
+	// inheritance at a specific scope; explicit zone Normal overrides inheritance.
+	// Shaping only, unrelated to firewall rule priority.
 	TrafficPriority string `json:"traffic_priority,omitempty"`
 }
 
@@ -32,9 +35,8 @@ func (c Cap) key() string { return strconv.FormatUint(uint64(c.UID), 10) + ":" +
 type Config struct {
 	Enabled bool  `json:"enabled"`
 	Caps    []Cap `json:"caps"`
-	// Schema 2 is required whenever the request or the stored configuration
-	// carries traffic priority or a budget, so an older full-replacement client
-	// can never clear them by omission.
+	// Schema >=2 protects priority/budgets; schema 3 protects zone scopes in
+	// either requested or stored state from older full-replacement clients.
 	Schema         int    `json:"schema,omitempty"`
 	UploadBudget   uint64 `json:"upload_budget_bits_per_second,omitempty"`
 	DownloadBudget uint64 `json:"download_budget_bits_per_second,omitempty"`
@@ -48,7 +50,7 @@ const (
 	minFloor  = 256_000
 )
 
-var floorPercent = map[string]uint64{"low": 10, "": 15, "high": 20}
+var floorPercent = map[string]uint64{"low": 10, "": 15, "normal": 15, "high": 20}
 
 func advanced(c Config) bool {
 	if c.UploadBudget != 0 || c.DownloadBudget != 0 {
@@ -107,6 +109,13 @@ func allocationAdmitted(budget uint64, caps []Cap, download bool) bool {
 }
 
 type Binding struct {
+	Zone       string `json:"zone"`
+	Descriptor struct {
+		Local     string `json:"local"`
+		Remote    string `json:"remote"`
+		NetNS     string `json:"netns"`
+		Interface int    `json:"interface_index"`
+	} `json:"descriptor"`
 	App      string `json:"app"`
 	Cookie   string `json:"cookie"`
 	Covered  bool   `json:"covered"`
@@ -201,6 +210,7 @@ type DiscoveryStats struct {
 
 type Options struct {
 	Interface, Helpers, State, ParentNetNS string
+	Zones                                  func() identity.NetworkZones
 	HostTrial                              bool
 }
 type transport interface {
@@ -356,8 +366,8 @@ func verificationView(k *KernelStatus, sampleStart, now time.Time) (*int64, stri
 }
 
 func validateConfig(c Config) error {
-	if len(c.Caps) > MaxCaps || (!c.Enabled && (len(c.Caps) != 0 || c.UploadBudget != 0 || c.DownloadBudget != 0)) {
-		return fmt.Errorf("at most16 caps; disabled configuration must have no caps or budgets")
+	if len(c.Caps) > MaxCaps*3 || (!c.Enabled && (len(c.Caps) != 0 || c.UploadBudget != 0 || c.DownloadBudget != 0)) {
+		return fmt.Errorf("at most 48 scoped entries; disabled configuration must have no caps or budgets")
 	}
 	for _, b := range []uint64{c.UploadBudget, c.DownloadBudget} {
 		if b != 0 && (b < MinBudget || b > MaxBudget) {
@@ -366,15 +376,18 @@ func validateConfig(c Config) error {
 	}
 	seen := map[string]bool{}
 	for _, v := range c.Caps {
-		if len(v.Application) == 0 || len(v.Application) > 512 || strings.ContainsAny(v.Application, "\x00\r\n") || (v.TrafficPriority != "" && v.TrafficPriority != "low" && v.TrafficPriority != "high") || (v.BitsPerSecond == 0 && v.DownloadBitsPerSecond == 0 && v.TrafficPriority == "") || (v.BitsPerSecond != 0 && (v.BitsPerSecond < 1_000_000 || v.BitsPerSecond > 1_000_000_000)) || (v.DownloadBitsPerSecond != 0 && (v.DownloadBitsPerSecond < 1_000_000 || v.DownloadBitsPerSecond > 1_000_000_000)) {
+		if (v.Scope != "" && v.Scope != "local" && v.Scope != "internet") || len(v.Application) == 0 || len(v.Application) > 512 || strings.ContainsAny(v.Application, "\x00\r\n") || (v.TrafficPriority != "" && v.TrafficPriority != "low" && v.TrafficPriority != "high" && !(v.Scope != "" && v.TrafficPriority == "normal")) || (v.BitsPerSecond == 0 && v.DownloadBitsPerSecond == 0 && v.TrafficPriority == "") || (v.BitsPerSecond != 0 && (v.BitsPerSecond < 1_000_000 || v.BitsPerSecond > 1_000_000_000)) || (v.DownloadBitsPerSecond != 0 && (v.DownloadBitsPerSecond < 1_000_000 || v.DownloadBitsPerSecond > 1_000_000_000)) {
 			return fmt.Errorf("invalid native application cap or rate (1..1000Mbit/s)")
 		}
-		if seen[v.key()] {
+		if seen[v.key()+"\x00"+v.Scope] {
 			return fmt.Errorf("duplicate application cap")
 		}
-		seen[v.key()] = true
+		seen[v.key()+"\x00"+v.Scope] = true
 	}
-	if !allocationAdmitted(c.UploadBudget, c.Caps, false) || !allocationAdmitted(c.DownloadBudget, c.Caps, true) {
+	if err := validateZones(c); err != nil {
+		return err
+	}
+	if !allocationAdmitted(c.UploadBudget, aggregateCaps(c.Caps, c.UploadBudget, false), false) || !allocationAdmitted(c.DownloadBudget, aggregateCaps(c.Caps, c.DownloadBudget, true), true) {
 		return fmt.Errorf("allocation_below_minimum")
 	}
 	return nil
@@ -385,7 +398,10 @@ func validateConfig(c Config) error {
 func (m *Manager) Configure(expected uint64, c Config) (Snapshot, error) {
 	c.Caps = append([]Cap(nil), c.Caps...)
 	for i := range c.Caps {
-		if c.Caps[i].TrafficPriority == "normal" {
+		if c.Caps[i].Scope == "all" {
+			c.Caps[i].Scope = ""
+		}
+		if c.Caps[i].TrafficPriority == "normal" && c.Caps[i].Scope == "" {
 			c.Caps[i].TrafficPriority = "" // explicit Normal is the default
 		}
 	}
@@ -393,7 +409,7 @@ func (m *Manager) Configure(expected uint64, c Config) (Snapshot, error) {
 		return Snapshot{}, err
 	}
 	m.mu.Lock()
-	if (advanced(c) || advanced(m.cfg)) && c.Schema != 2 {
+	if ((zoned(c) || zoned(m.cfg)) && c.Schema != 3) || ((advanced(c) || advanced(m.cfg)) && c.Schema != 2 && c.Schema != 3) {
 		m.mu.Unlock()
 		return Snapshot{}, fmt.Errorf("schema_upgrade_required")
 	}
@@ -404,6 +420,12 @@ func (m *Manager) Configure(expected uint64, c Config) (Snapshot, error) {
 	if expected != m.snap.Version {
 		m.mu.Unlock()
 		return Snapshot{}, fmt.Errorf("stale_version")
+	}
+	// Leave a full policy generation of headroom for in-flight discovery. The
+	// worker rotates its owned generation before consuming the reserved tail.
+	if len(c.Caps) > 0 && m.snap.Kernel != nil && m.snap.Kernel.NextMinor > 0xffef-2*MaxCaps {
+		m.mu.Unlock()
+		return Snapshot{}, fmt.Errorf("class_generation_exhausted: wait for owned generation rotation")
 	}
 	c.Caps = append([]Cap(nil), c.Caps...)
 	m.cfg = c
@@ -628,23 +650,20 @@ func (m *Manager) run() {
 			// One full desired policy: configured population, budgets and
 			// priorities. The controller removes instantiated applications that
 			// are no longer configured and applies an ordered class batch.
-			apps := map[string]any{}
-			for _, c := range cfg.Caps {
-				apps[c.key()] = map[string]any{"rate": c.BitsPerSecond, "download_rate": c.DownloadBitsPerSecond, "priority": c.TrafficPriority}
-			}
+			apps := zonePolicy(cfg.Caps)
 			if _, err := call(t, map[string]any{"op": "policy", "upload_budget": cfg.UploadBudget, "download_budget": cfg.DownloadBudget, "apps": apps}); err != nil {
 				m.fail(err)
 				return
 			}
 			var changed []Cap
 			for _, c := range cfg.Caps {
-				if previousCaps[c.key()] != c {
+				if previousCaps[c.key()+"\x00"+c.Scope] != c {
 					changed = append(changed, c)
 				}
 			}
 			previousCaps = map[string]Cap{}
 			for _, c := range cfg.Caps {
-				previousCaps[c.key()] = c
+				previousCaps[c.key()+"\x00"+c.Scope] = c
 			}
 			priority = priorityQueue{}
 			if len(changed) > 0 {
@@ -677,7 +696,7 @@ func (m *Manager) run() {
 			m.fail(fmt.Errorf("controller unsupported: %s", ks.Fault))
 			return
 		}
-		if ks.NextMinor > 0xffef { // application ids exclude reserved budget/bypass/default
+		if ks.NextMinor > 0xffef-2*MaxCaps { // application ids exclude reserved budget/bypass/default
 			if err = t.Close(); err != nil {
 				m.fail(err)
 				return
@@ -687,6 +706,32 @@ func (m *Manager) run() {
 			bound = map[string]bool{}
 			m.gap("class_generation_rotation")
 			continue
+		}
+		if m.opts.Zones != nil && zoned(cfg) {
+			z := m.opts.Zones()
+			changes := map[string]string{}
+			for _, b := range ks.Bindings {
+				f, ok := bindingFlow(b)
+				if !ok {
+					if b.Zone != "" {
+						changes[b.Cookie] = ""
+					}
+					m.gap("zone_descriptor_unavailable")
+					continue
+				}
+				scope := z.ClassifyFlow(f)
+				zone := knownZone(scope)
+				if zone != b.Zone {
+					changes[b.Cookie] = zone
+				}
+			}
+			if len(changes) > 0 {
+				if _, err := call(t, map[string]any{"op": "rezone", "bindings": changes}); err != nil {
+					m.fail(err)
+					return
+				}
+				continue
+			}
 		}
 		bound = map[string]bool{}
 		for _, b := range ks.Bindings {
@@ -851,21 +896,30 @@ func (m *Manager) bind(t transport, h hint, version uint64) bool {
 	}
 	var rate, downloadRate uint64
 	var prio string
+	wanted := false
 	for _, c := range cfg.Caps {
 		if c.key() == h.app {
+			wanted = true
+			if c.Scope != "" {
+				continue
+			}
 			rate = c.BitsPerSecond
 			downloadRate = c.DownloadBitsPerSecond
 			prio = c.TrafficPriority
 		}
 	}
-	if rate == 0 && downloadRate == 0 && prio == "" {
+	if !wanted {
 		return false
 	}
 	if !validFlow(h.flow) {
 		m.gap("unsupported_flow")
 		return false
 	}
-	_, err := call(t, map[string]any{"op": "bind", "protocol": h.flow.Protocol, "local": h.flow.Local.String(), "remote": h.flow.Remote.String(), "rate": rate, "download_rate": downloadRate, "priority": prio, "expected_app": h.app, "expected_cookie": h.cookie})
+	zone := ""
+	if m.opts.Zones != nil {
+		zone = knownZone(m.opts.Zones().ClassifyFlow(h.flow))
+	}
+	_, err := call(t, map[string]any{"zone": zone, "op": "bind", "protocol": h.flow.Protocol, "local": h.flow.Local.String(), "remote": h.flow.Remote.String(), "rate": rate, "download_rate": downloadRate, "priority": prio, "expected_app": h.app, "expected_cookie": h.cookie})
 	if err != nil {
 		m.gap("binding_refused")
 		m.mu.Lock()
