@@ -8,10 +8,11 @@
     "0e1703bb98e98470d66c10fcc438947db7fc0615",
     "2d7cd7ae222b051811446cda0a2136d8764e29ea",
     "45a46011af102a5db642527a100a8b0485ed5c35",
-    "5a71aa23c0382d35bfad9de3e788c26989a1cabe"
+    "5a71aa23c0382d35bfad9de3e788c26989a1cabe",
+    "508354633cf234139525a79b2507a999f60acc9d"
   ],
   "rejected": [
     "66313d5deaa350dc4e77adda44e1b986fb8e2619"
   ],
-  "note": "User requested fix and deployment of zone-row shaping controls. Exact 5a71aa23c0382d35bfad9de3e788c26989a1cabe passed release checks and visible scoped-setter verification; installed shaping launcher and helpers preserved."
+  "note": "User-requested shared-runtime process decision fix. 508354633cf234139525a79b2507a999f60acc9d passed isolated release checks, 422 UI tests and native synthetic prompt/required-process preview checks. Existing launcher/shaping helpers preserved. No application-wide runtime authority or automatic permissions."
 }
