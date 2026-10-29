@@ -68,23 +68,28 @@ export function refreshUpload(state:ClientState) {
   void window.flowgate.uploadStatus().then(v=>{if(start===context){adopt(v,sent);paint();}}).catch(()=>{if(start===context){view={supported:true,writable:false,message:"Upload status unavailable"};paint();}}).finally(()=>{flight=false;});
 }
 export function uploadButton(row:Row,state:ClientState,direction:LimitDirection='upload') {
-  const t=uploadTarget(row,state), b=document.createElement('button');
+  const t=uploadTarget(row,state);
+  if(!t || !state.control.capabilities?.includes(UPLOAD_CAPABILITY) || (direction==='download' && !state.control.capabilities?.includes(DOWNLOAD_CAPABILITY))) return emptySlot();
+  const b=document.createElement('button');
   b.className='status-slot upload-limit'; b.dataset.uploadLimit='';b.dataset.limitDirection=direction;
   const label=direction==='download'?'Download':'Upload';
   b.setAttribute('aria-label',`${label} limit for ${row.label}`);b.setAttribute('aria-haspopup','dialog');b.setAttribute('aria-expanded','false');
   const dot=text('span','·');dot.className='slot-dot';b.append(dot,limitGlyph(direction));
-  if(t && (direction==='upload' || state.control.capabilities?.includes(DOWNLOAD_CAPABILITY))){targets.set(b,t);paintButton(b,t);b.onclick=e=>{e.stopPropagation();void open(t,b,direction);};}
-  else{b.disabled=true;b.classList.add('unavailable');b.title=direction==='download'&&!state.control.capabilities?.includes(DOWNLOAD_CAPABILITY)?'Unsupported: this daemon has no download limiter capability.':'Unsupported: select one verified native application or process. Runtime/shared identities are not supported.';}
+  targets.set(b,t);paintButton(b,t);b.onclick=e=>{e.stopPropagation();void open(t,b,direction);};
   return b;
 }
 export function priorityButton(row:Row,state:ClientState) {
-  const t=uploadTarget(row,state), b=document.createElement('button');
+  const t=uploadTarget(row,state);
+  if(!t || !state.control.capabilities?.includes(PRIORITY_CAPABILITY) || !state.control.capabilities?.includes(UPLOAD_CAPABILITY)) return emptySlot();
+  const b=document.createElement('button');
   b.className='status-slot upload-limit priority-control'; b.dataset.uploadLimit='';b.dataset.limitDirection='priority';
   b.setAttribute('aria-label',`Traffic priority for ${row.label}`);b.setAttribute('aria-haspopup','dialog');b.setAttribute('aria-expanded','false');
   const dot=text('span','·');dot.className='slot-dot';b.append(dot,limitGlyph('priority'));
-  if(t && state.control.capabilities?.includes(PRIORITY_CAPABILITY)){targets.set(b,t);paintButton(b,t);b.onclick=e=>{e.stopPropagation();void open(t,b,'priority');};}
-  else{b.disabled=true;b.classList.add('unavailable');b.title=!state.control.capabilities?.includes(PRIORITY_CAPABILITY)?'Unsupported: this daemon has no traffic priority capability.':'Unsupported: select one verified native application or process. Runtime/shared identities are not supported.';}
+  targets.set(b,t);paintButton(b,t);b.onclick=e=>{e.stopPropagation();void open(t,b,'priority');};
   return b;
+}
+function emptySlot() {
+  const slot=document.createElement('span');slot.className='status-slot';slot.setAttribute('aria-hidden','true');return slot;
 }
 export async function openUploadLimits() {
   const sent=performance.now(), start=context; const v=await window.flowgate.uploadStatus(); if(start!==context) throw Error("Connection changed; reopen limits"); adopt(v,sent);

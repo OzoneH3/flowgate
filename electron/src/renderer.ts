@@ -603,10 +603,9 @@ function statusStrip(r: Row) {
     if (slot.key === "ul-limit" || slot.key === "dl-limit") { strip.append(uploadButton(r,state,slot.key === "dl-limit" ? "download" : "upload")); continue; }
     if (slot.key === "priority") { strip.append(priorityButton(r,state)); continue; }
     if (!slot.direction) {
-      const dot = element('span', '', 'status-slot unavailable');
-      dot.append(element('span', '·', 'slot-dot'), statusFamilyGlyph(slot.key));
-      dot.title = `${slot.label}: not a FlowGate feature`;
-      strip.append(dot);
+      const empty = element('span', '', 'status-slot');
+      empty.setAttribute('aria-hidden', 'true');
+      strip.append(empty);
       continue;
     }
     const direction = slot.direction;
@@ -617,6 +616,7 @@ function statusStrip(r: Row) {
       r.kind === 'overview' ||
       r.kind === 'program' ||
       r.kind === 'launch' ||
+      r.kind === 'socket' ||
       (r.kind === 'network' && !state.control.capabilities?.includes(ZONE_CAPABILITY));
     let chip: RuleChip = { glyph: '', text: 'Not set', tone: 'none', detail: '' };
     let fallbackShown = false;
@@ -715,6 +715,12 @@ function statusStrip(r: Row) {
     if (inherited) {
       button.classList.add('policy-inherited');
       button.disabled = true;
+    }
+    if (button.disabled) {
+      const empty = element('span', '', 'status-slot');
+      empty.setAttribute('aria-hidden', 'true');
+      strip.append(empty);
+      continue;
     }
     button.title = inherited
       ? ''
