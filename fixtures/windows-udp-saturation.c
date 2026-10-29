@@ -13,7 +13,8 @@
 #include <windows.h>
 #define MAX_SOCKETS 64
 static char token[96];
-static unsigned port, datagrams = 20, interval = 50, count = 1;
+static unsigned port, datagrams = 20, interval = 50, count = 1, burst = 1;
+static int timed;
 static HANDLE go, sent_all;
 static volatile LONG finished;
 static SOCKET sockets[MAX_SOCKETS];
@@ -33,8 +34,8 @@ static unsigned number(const char *name, unsigned fallback, unsigned max) {
     for (; text[i] >= '0' && text[i] <= '9' && i < 6; i++) v = v * 10 + (unsigned)(text[i] - '0');
     return (i && v && v <= max) ? v : 0;
 }
-static unsigned append(char *out, unsigned at, unsigned v) {
-    char tmp[12]; unsigned n = 0;
+static unsigned append(char *out, unsigned at, unsigned long long v) {
+    char tmp[24]; unsigned n = 0;
     do { tmp[n++] = (char)('0' + v % 10); v /= 10; } while (v);
     while (n) out[at++] = tmp[--n];
     return at;
@@ -48,24 +49,31 @@ static DWORD WINAPI client(void *arg) {
     struct sockaddr_in a; for (unsigned i = 0; i < sizeof(a); i++) ((volatile char *)&a)[i] = 0;
     a.sin_family = AF_INET; a.sin_port = htons((unsigned short)port); a.sin_addr.s_addr = htonl(0x7f000001);
     if (WaitForSingleObject(go, INFINITE) != WAIT_OBJECT_0) return 10;
-    char msg[160]; unsigned base = 0;
+    char msg[256]; unsigned base = 0;
     while (token[base]) { msg[base] = token[base]; base++; }
     msg[base++] = '|'; base = append(msg, base, index); msg[base++] = '|';
     for (unsigned seq = 0; seq < datagrams; seq++) {
         unsigned len = append(msg, base, seq);
+        if (timed) {
+            FILETIME ft; GetSystemTimePreciseAsFileTime(&ft);
+            msg[len++] = '|'; len = append(msg, len, ((unsigned long long)ft.dwHighDateTime << 32) | ft.dwLowDateTime);
+            msg[len++] = '|'; while (len < sizeof(msg)) msg[len++] = 'x';
+        }
         attempted[index]++;
         if (sendto(s, msg, (int)len, 0, (struct sockaddr *)&a, sizeof(a)) == (int)len) ok[index]++; else failed[index]++;
-        Sleep(interval);
+        if ((seq + 1) % burst == 0) Sleep(interval * burst);
     }
     if (InterlockedIncrement(&finished) == (LONG)count) SetEvent(sent_all);
     Sleep(2000); closesocket(s); return 0;
 }
 void mainCRTStartup(void) {
+    char flag[8]; timed = GetEnvironmentVariableA("FLOWGATE_TEST_TIMED", flag, sizeof(flag)) != 0;
+    burst = number("FLOWGATE_TEST_BURST", 1, 64);
     count = number("FLOWGATE_TEST_SOCKETS", 1, MAX_SOCKETS);
     datagrams = number("FLOWGATE_TEST_DATAGRAMS", 20, 100000);
     interval = number("FLOWGATE_TEST_INTERVAL_MS", 50, 10000);
     port = number("FLOWGATE_TEST_PORT", 0, 65535);
-    if (!count || !datagrams || !interval || !port) fail("invalid numeric configuration", 2);
+    if (!count || !datagrams || !interval || !port || !burst) fail("invalid numeric configuration", 2);
     if (!GetEnvironmentVariableA("FLOWGATE_TEST_TOKEN", token, sizeof(token))) fail("missing token", 2);
     WSADATA w; if (WSAStartup(0x202, &w)) fail("WSAStartup", 3);
     go = CreateEventA(0, TRUE, FALSE, 0); sent_all = CreateEventA(0, TRUE, FALSE, 0);

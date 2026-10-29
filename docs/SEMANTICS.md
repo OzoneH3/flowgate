@@ -551,3 +551,20 @@ because activation was refused. Startup samples established sockets before the
 conntrack dump to avoid comparing newly established sockets with an older dump;
 a genuinely untracked established socket still refuses activation, naming its
 endpoints and inode for diagnosis.
+
+
+## Bounded Wine UDP dispatch hints
+
+Wine UDP admissions may reuse a routing hint for at most 250 ms from its initial
+native discovery, with 128 entries and at most 16 holders per entry. The key is
+the full flow, direction and network namespace; link-local, native and hosted
+cases are excluded. Only a complete positive Wine result seeds a hint, and hits
+do not renew its age. A hint is not application evidence or permission: it clears
+its application/association/table target and cannot bypass a fresh full kernel
+socket/holder census, identical inode/cookie, broker generation, two equal runtime
+owner tables, both holder-set checks and mapped image validation. Fresh holders
+are published only after validation. A mismatch invalidates the hint and permits
+one fresh initial lookup; incomplete results remain refused. Policy is evaluated
+for every packet, including changed Allow/Deny/Ask rules. Queue, deadline and
+snapshot-race limits remain unchanged. See [UDP attribution capacity](UDP-ATTRIBUTION-CAPACITY.md)
+for measured receiver scope and remaining latency/overload limitations.

@@ -338,6 +338,20 @@ func (w *WineTable) tryResolve(f Flow) (Attribution, bool) {
 	return w.resolveLocked(f), true
 }
 
+// resolveInitial shares the caller's native census only within this admission.
+// It never caches a permission or admits later arrivals. The runtime census
+// still bookends it with a fresh full Resolve and a second owner-table snapshot;
+// changes during slot/setup/table waits therefore fail the existing validators.
+func (w *WineTable) resolveInitial(f Flow, initial Attribution, wait bool) (Attribution, bool) {
+	if wait {
+		w.mu.Lock()
+	} else if !w.mu.TryLock() {
+		return Attribution{}, false
+	}
+	defer w.mu.Unlock()
+	return w.resolveAttributionLocked(f, initial), true
+}
+
 func (w *WineTable) resolveLocked(f Flow) Attribution {
 	return w.resolveAttributionLocked(f, Resolve(f))
 }
@@ -467,6 +481,10 @@ func (w *WineTable) finishCensus(f Flow, a, again Attribution, broker *Process, 
 		}
 	}
 	a.Fingerprint = digest(a.Fingerprint + revision)
+	// Publish current holders, not older dispatch metadata. Both holder sets
+	// have already been checked against the independently observed Wine image.
+	a.Owners = again.Owners
+	a.Sockets = again.Sockets
 	a.Application = &app
 	a.Status = "corroborated-runtime-table"
 	a.setReason(ReasonRuntimeOwnerObserved, "one verified Windows handle holder, exact socket endpoint and kernel cookie; broker FD is transport evidence, not the permission target")
@@ -476,6 +494,22 @@ func (w *WineTable) finishCensus(f Flow, a, again Attribution, broker *Process, 
 // Prove that the observer's mapped PE image uses this broker, not another
 // server with a coincident endpoint. A name or prefix alone is insufficient.
 func (w *WineTable) sameServer(broker *Process) bool { return w.helperPeers(broker) == 1 }
+
+// mayBeHelperPeer is an exclusion filter only. Unknown reads must reach the
+// original complete identity and final FD validation below.
+func mayBeHelperPeer(brokerFDs map[uint32]bool, peers map[uint32]uint32, fds map[uint32]bool, err error) bool {
+	if err != nil {
+		return true
+	}
+	for fd := range fds {
+		peer := peers[fd]
+		if brokerFDs[peer] && peers[peer] == fd {
+			return true
+		}
+	}
+	return false
+}
+
 func (w *WineTable) helperPeers(broker *Process) int {
 	bf, err := socketFDs(broker.PID)
 	if err != nil {
@@ -498,6 +532,10 @@ func (w *WineTable) helperPeers(broker *Process) int {
 		if err != nil {
 			continue
 		}
+		fds, scanErr := readSocketFDs(pid, true)
+		if !mayBeHelperPeer(bf, peers, fds, scanErr) {
+			continue
+		}
 		p, err := Inspect(pid)
 		if err != nil || p.Application.Prefix != w.prefix || p.UID != broker.UID || p.NetNS != broker.NetNS || p.MountNS != broker.MountNS {
 			continue
@@ -505,7 +543,7 @@ func (w *WineTable) helperPeers(broker *Process) int {
 		if p.Application.Executable != w.helper && !w.mappedObserver(p) {
 			continue
 		}
-		fds, err := socketFDs(pid)
+		fds, err = socketFDs(pid)
 		if err != nil {
 			continue
 		}
@@ -520,6 +558,32 @@ func (w *WineTable) helperPeers(broker *Process) int {
 	return matches
 }
 
+// mayBeWineProcess only excludes an observed native process. It uses the same
+// runtime predicate as Inspect, not an image-path/name heuristic. Prefix and PE
+// evidence are still established by Inspect and wineTableImageVisible. Errors
+// or generation/executable changes fall through to full inspection.
+func mayBeWineProcess(pid int) bool {
+	return wineProcessCandidate(pid, processStat, link, inspectProcessMaps)
+}
+
+func wineProcessCandidate(pid int, stat func(string) (string, int, error), readLink func(string) string, scan func(string, string) (string, bool, error)) bool {
+	base := fmt.Sprintf("/proc/%d", pid)
+	start, _, err := stat(base)
+	if err != nil {
+		return true
+	}
+	exe := readLink(base + "/exe")
+	if exe == "" {
+		return true
+	}
+	_, wine, err := scan(base+"/maps", exe)
+	if err != nil || wine {
+		return true
+	}
+	after, _, err := stat(base)
+	return err != nil || start != after || exe != readLink(base+"/exe")
+}
+
 // Public Windows process paths identify the application, but filesystem paths
 // alone cannot establish its loaded revision. Retain the existing mapped-image
 // corroboration and reject deleted mappings even if the path has been reused.
@@ -532,6 +596,9 @@ func (w *WineTable) imageRevisionVisible(broker *Process, path, revision string)
 	for _, e := range entries {
 		pid, err := strconv.Atoi(e.Name())
 		if err != nil {
+			continue
+		}
+		if !mayBeWineProcess(pid) {
 			continue
 		}
 		p, err := Inspect(pid)

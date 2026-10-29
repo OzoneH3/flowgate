@@ -30,7 +30,7 @@ type observedWine struct {
 	pins    int           // in-flight users; release happens at the last unpin
 	closed  bool
 	// resolve runs one census on this session; wait=false must not block.
-	resolve  func(f Flow, wait bool) (Attribution, bool)
+	resolve  func(f Flow, initial Attribution, wait bool) (Attribution, bool)
 	released bool
 }
 type WineObservers struct {
@@ -39,6 +39,7 @@ type WineObservers struct {
 	mu       sync.Mutex // guards sessions/closed/pins only; never held across setup or a census
 	options  WineObserverOptions
 	sessions map[string]*observedWine
+	dispatch map[string]*wineDispatchHint
 	closed   bool
 	census   chan struct{} // bounds concurrent session setups plus runtime censuses
 	// setupSession prepares a new session outside m.mu (tests substitute it).
@@ -117,6 +118,7 @@ func cleanupAll(sessions []*observedWine) {
 func (m *WineObservers) Close() {
 	m.mu.Lock()
 	m.closed = true
+	m.dispatch = nil
 	var retired []*observedWine
 	for k, s := range m.sessions {
 		retired = append(retired, m.retireLocked(k, s)...)
@@ -156,7 +158,32 @@ func (m *WineObservers) TryResolve(f Flow) (Attribution, bool) {
 }
 
 func (m *WineObservers) resolve(f Flow, wait bool) (Attribution, bool) {
-	a := Resolve(f)
+	return m.resolveDispatch(f, wait, Resolve)
+}
+
+func (m *WineObservers) resolveDispatch(f Flow, wait bool, resolveNative func(Flow) Attribution) (Attribution, bool) {
+	if hint := m.dispatchHint(f, time.Now()); hint != nil {
+		result, done := m.resolveAttribution(f, copyWineInitial(hint.initial), wait)
+		if !done {
+			return Attribution{}, false
+		}
+		if positiveWineDispatch(result) {
+			return result, true
+		}
+		m.forgetDispatch(f, hint)
+		// A hint never supplies a refusal or a permission: retry once from
+		// fresh discovery. Queue deadlines remain checked by the caller.
+	}
+	a := resolveNative(f)
+	observed := time.Now()
+	result, done := m.resolveAttribution(f, a, wait)
+	if done {
+		m.rememberDispatch(f, a, result, observed, time.Now())
+	}
+	return result, done
+}
+
+func (m *WineObservers) resolveAttribution(f Flow, a Attribution, wait bool) (Attribution, bool) {
 	var broker *Process
 	var bin string
 	candidates := a.Owners
@@ -270,7 +297,7 @@ func (m *WineObservers) sessionResolve(f Flow, a Attribution, broker *Process, b
 	}
 	record.pins++
 	m.mu.Unlock()
-	result, ok := m.useSession(f, record, broker, bin, setup, wait, fail)
+	result, ok := m.useSession(f, a, record, broker, bin, setup, wait, fail)
 	// A session retired by Close or prune while in use never donates evidence.
 	if m.unpin(record) && ok {
 		return fail("session retired during census"), true
@@ -278,7 +305,7 @@ func (m *WineObservers) sessionResolve(f Flow, a Attribution, broker *Process, b
 	return result, ok
 }
 
-func (m *WineObservers) useSession(f Flow, record *observedWine, broker *Process, bin string, setup, wait bool, fail func(string) Attribution) (Attribution, bool) {
+func (m *WineObservers) useSession(f Flow, initial Attribution, record *observedWine, broker *Process, bin string, setup, wait bool, fail func(string) Attribution) (Attribution, bool) {
 	if setup {
 		if m.setupSession != nil {
 			m.setupSession(record, broker, bin)
@@ -297,7 +324,7 @@ func (m *WineObservers) useSession(f Flow, record *observedWine, broker *Process
 	if record.resolve == nil {
 		return fail(record.failure), true
 	}
-	return record.resolve(f, wait)
+	return record.resolve(f, initial, wait)
 }
 
 // setup starts the census helper for one broker generation outside m.mu and
@@ -395,11 +422,8 @@ func (m *WineObservers) setup(record *observedWine, broker *Process, bin string)
 	session.Supported = true
 	w.startupDeadline = time.Time{}
 	record.table = w
-	record.resolve = func(f Flow, wait bool) (Attribution, bool) {
-		if wait {
-			return w.Resolve(f), true
-		}
-		return w.tryResolve(f)
+	record.resolve = func(f Flow, initial Attribution, wait bool) (Attribution, bool) {
+		return w.resolveInitial(f, initial, wait)
 	}
 }
 

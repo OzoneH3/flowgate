@@ -18,7 +18,7 @@ type fakeCensus struct {
 	entry chan struct{}
 }
 
-func (c *fakeCensus) resolve(f Flow, wait bool) (Attribution, bool) {
+func (c *fakeCensus) resolve(f Flow, _ Attribution, wait bool) (Attribution, bool) {
 	if wait {
 		c.mu.Lock()
 	} else if !c.mu.TryLock() {

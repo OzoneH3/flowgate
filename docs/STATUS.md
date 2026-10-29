@@ -19,15 +19,35 @@ are in [STATUS-HISTORY.md](STATUS-HISTORY.md) and
 - Administrator-reviewed exact outgoing TCP network-endpoint rules, including
   traffic with no userspace owner. These explicitly cover every matching program.
 
-Bandwidth shaping, priorities for network scheduling, quotas and recurring
-schedules are not implemented. Usage counters are partial observations, not
+Experimental bandwidth shaping and traffic priorities are included in matched
+releases with the documented partial coverage. Quotas and recurring schedules
+are not implemented. Usage counters are partial observations, not
 wire totals or proof of delivery. Opt-in durable usage history checkpoints these
 partial observations into a separate private bounded store, with authenticated
 user projection and explicit restart/retention gaps; see
 [USAGE-HISTORY.md](USAGE-HISTORY.md). Storage/API/GUI validation has separate
 scope and does not turn partial observations into billing or delivery evidence.
 
-## Current source versus deployed software
+## Current UDP attribution candidate (2026-10-30)
+
+The current inspected host release is `966d7886c41ee7805bdce905494d501d2ef4be7e`,
+with protection initially stopped. A later read-only check found a concurrent
+activation; this task did not activate or override it, deploy, or restart it.
+The default update pin remains `508354633cf234139525a79b2507a999f60acc9d`.
+The source corrects repeated Wine UDP discovery using bounded dispatch hints and
+necessary-condition prefilters while retaining fresh full ownership/runtime checks
+and current per-packet policy. In the documented isolated 125-packet/s comparison,
+allowed delivery improved from 6,112/7,500 to 7,500/7,500 and attribution-capacity
+counter deltas from 5,146 to 20: zero in the allowed-delivery window, 20 in the
+Deny/Ask-only window. Deny/prefix isolation and live policy edits passed.
+Inspection latency and deliberate-overload loss remain; the stopped-protection CPU
+observation is separate. See [the measured scope and limitations](UDP-ATTRIBUTION-CAPACITY.md).
+Shaping and Electron behavior are unchanged; their prior evidence is reused.
+
+## Historical profiling and releases (through 2026-10-25)
+
+The following records describe earlier experiments and deployments, not the
+current installed version, update pin or protection state.
 
 The deployed diagnostic backend/GUI release is
 `25dbb1a90e81f6fc2a150231cae699db87e430f3` (2026-10-25), based on performance

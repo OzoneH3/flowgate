@@ -25,7 +25,11 @@ type Association struct {
 	Assumptions   []string `json:"assumptions"`
 }
 
-func socketFDs(pid int) (map[uint32]bool, error) {
+func socketFDs(pid int) (map[uint32]bool, error) { return readSocketFDs(pid, false) }
+
+// Exclusion filters must distinguish a complete negative scan from a vanished
+// or unreadable descriptor. Existing evidence collectors keep their contract.
+func readSocketFDs(pid int, strict bool) (map[uint32]bool, error) {
 	base := fmt.Sprintf("/proc/%d/fd", pid)
 	entries, err := os.ReadDir(base)
 	if err != nil {
@@ -33,7 +37,10 @@ func socketFDs(pid int) (map[uint32]bool, error) {
 	}
 	out := map[uint32]bool{}
 	for _, fd := range entries {
-		s := link(base + "/" + fd.Name())
+		s, err := os.Readlink(base + "/" + fd.Name())
+		if strict && err != nil {
+			return nil, err
+		}
 		if strings.HasPrefix(s, "socket:[") {
 			v, e := strconv.ParseUint(strings.TrimSuffix(strings.TrimPrefix(s, "socket:["), "]"), 10, 32)
 			if e == nil {
