@@ -396,6 +396,10 @@ func (e *Engine) observeResolvedWithLinkLocked(f identity.Flow, token string, a 
 		}
 		if identity.RuntimeRuleBlocked(a.Application) != "" && identity.NativeProcessAuthority(a) {
 			v.ScopePreviews["process-remember"] = "Remember this process only; ends on process exit or backend restart. Other processes and relaunches are not covered."
+			v.ScopePreviews["application"] = v.ScopePreviews["process-remember"] + " Selected expiry also applies; Process is mandatory."
+			if e.SaveRules != nil {
+				v.ScopePreviews["persistent"] = v.ScopePreviews["process-remember"] + " Saved with no time expiry; Process is mandatory."
+			}
 		}
 		// Offered only when the request has one verified owning process.
 		if p, err := leaseOwner(a); err == nil {

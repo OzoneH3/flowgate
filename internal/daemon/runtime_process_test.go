@@ -26,8 +26,15 @@ func TestUnverifiedRuntimeProcessRememberAndLease(t *testing.T) {
 				t.Fatalf("native authority: %+v", p)
 			}
 			v := e.Observe(f, "udp")
-			if v.ScopePreviews["process-remember"] == "" || v.ScopePreviews["application"] != "" {
+			if v.ScopePreviews["process-remember"] == "" || v.ScopePreviews["persistent"] == "" {
 				t.Fatal(v.ScopePreviews)
+			}
+			// Neither the offered lifetime nor legacy direct APIs grants application scope.
+			if _, err := e.PreviewDecision(e.Generation, v.ID, "allow", "persistent", "any", e.Zones.Revision, p.UID, false, RememberOptions{Fields: &RememberFields{}}); code(err) != identity.CodeIdentityUnverifiable {
+				t.Fatalf("application preview: %v", err)
+			}
+			if _, err := e.Decide(v.ID, "allow", "persistent", p.UID, false); code(err) != identity.CodeIdentityUnverifiable {
+				t.Fatalf("legacy application decision: %v", err)
 			}
 			opts := RememberOptions{Fields: &RememberFields{Process: true}}
 			if mode == "remember" {
@@ -47,6 +54,11 @@ func TestUnverifiedRuntimeProcessRememberAndLease(t *testing.T) {
 				f.Remote = netip.AddrPortFrom(f.Remote.Addr(), f.Remote.Port()+1)
 				if got := e.Observe(f, "udp"); got.State != "allowed" {
 					t.Fatalf("repeat %d: %+v", i, got)
+				}
+			}
+			if mode == "remember" {
+				if action, _, _ := policy.EvaluateSession(e.rules, f, *a, e.Now(), "another-session"); action == "allow" {
+					t.Fatal("process rule survived backend restart")
 				}
 			}
 			original := *a
