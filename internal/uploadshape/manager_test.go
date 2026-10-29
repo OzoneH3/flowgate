@@ -27,7 +27,8 @@ func (f *model) Call(q map[string]any) (json.RawMessage, error) {
 func (f *model) Close() error { f.mu.Lock(); f.closed = true; f.mu.Unlock(); return nil }
 func until(t *testing.T, f func() bool) {
 	t.Helper()
-	end := time.Now().Add(3 * time.Second)
+	// Discovery can require three one-second ticks; allow for scheduling delay.
+	end := time.Now().Add(6 * time.Second)
 	for !f() {
 		if time.Now().After(end) {
 			t.Fatal("timeout")
