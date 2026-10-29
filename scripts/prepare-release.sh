@@ -59,7 +59,7 @@ cp .workspace/udp-collector "$backend/udp-collector"
 ordinary_peer_tests='^(TestDecisionLogAPIOnReadOnlyEndpoint|TestObservedCreationAuthorizationAndPersistence|TestTrafficAPIPermissionsAndProjection)$'
 # Kernel fixtures share one lab namespace; serialize packages even if GOFLAGS
 # requests parallelism, so their firewall tables/queues cannot interfere.
-build_step 6 "Isolated race and receiver checks" "$backend/go-race.log" scripts/lab.sh go test -race -p=1 ./... -skip "$ordinary_peer_tests"
+build_step 6 "Isolated race and receiver checks" "$backend/go-race.log" env FLOWGATE_LAB_PRIVATE_ROOT=1 scripts/lab.sh go test -race -p=1 ./... -skip "$ordinary_peer_tests"
 build_step 7 "API permission checks" "$logs/go-peer-race.log" go test -race ./internal/daemon -run "$ordinary_peer_tests"
 cat "$logs/go-peer-race.log" >> "$backend/go-race.log"
 build_step 8 "Go static checks" "$backend/go-vet.log" go vet ./...
