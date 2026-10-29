@@ -23,3 +23,10 @@
 - Report the scope actually tested. A receiver test with Remember enabled does
   not prove ordinary Allow avoids repeat prompts; API acknowledgement does not
   prove delivery; model tests do not prove native UI behavior.
+
+## Feature deployment
+
+- Deploy verified new features using the guarded release workflow unless the user
+  explicitly requests otherwise. Preserve existing firewall permissions, protection
+  mode, user preferences and owned shaping state; honor any narrower path or host
+  restrictions in the user's request.
