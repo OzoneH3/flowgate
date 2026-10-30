@@ -37,11 +37,13 @@ A diagnostic-only candidate adds manual, bounded timing/comparison capture; it i
 not a throughput fix and requires exact deployment/arming approval before the next
 user-coordinated window. See [the diagnostic contract and plan](UDP-CENSUS-DIAGNOSTICS.md).
 
-## Current UDP attribution candidate (2026-10-30)
+## Historical interim UDP candidate preparation (2026-10-30)
 
-The current inspected host release is `966d7886c41ee7805bdce905494d501d2ef4be7e`,
-with protection initially stopped. A later read-only check found a concurrent
-activation; this task did not activate or override it, deploy, or restart it.
+During preparation of the interim candidate, the inspected host release was
+`966d7886c41ee7805bdce905494d501d2ef4be7e`, with protection initially stopped.
+A later read-only check found a concurrent activation. These preparation records
+predate the approved deployment of `0df3273`; they do not describe the current
+installed release or protection state.
 The default update pin remains `508354633cf234139525a79b2507a999f60acc9d`.
 The source corrects repeated Wine UDP discovery using bounded dispatch hints and
 necessary-condition prefilters while retaining fresh full ownership/runtime checks

@@ -84,6 +84,9 @@ Environment=FLOWGATE_PROFILE_DIR=/var/lib/flowgate/diagnostics/udp-census-01
 Environment=FLOWGATE_PROFILE_MANUAL=1
 ```
 
+The temporary `/run` override disappears on reboot. If reboot occurs before
+capture, recheck arming and readiness; do not silently recreate it or start capture.
+
 The user must approve the exact candidate/hash, guarded install/restart and these
 arming writes. Preserve the freshest protection/rules/settings and actual prior
 release. Do not reuse an existing output directory or overwrite an existing
