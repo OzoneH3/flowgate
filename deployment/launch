@@ -55,4 +55,6 @@ environment={'PATH':'/usr/sbin:/usr/bin:/sbin:/bin','LANG':'C.UTF-8','NOTIFY_SOC
 # directory; no other inherited environment reaches the privileged backend.
 if os.environ.get('FLOWGATE_PROFILE_DIR'):
  environment['FLOWGATE_PROFILE_DIR']=os.environ['FLOWGATE_PROFILE_DIR']
+ if os.environ.get('FLOWGATE_PROFILE_MANUAL') == '1':
+  environment['FLOWGATE_PROFILE_MANUAL']='1'
 os.execve(args[0],args,environment)

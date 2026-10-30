@@ -1,6 +1,6 @@
 # Remaining Wine UDP census investigation
 
-The deployed interim release is `0df3273eb23488eac10b341e45dcf6973b7e2ddd`.
+The baseline interim release was `0df3273eb23488eac10b341e45dcf6973b7e2ddd`.
 The retained 120-second gameplay window recorded 4,029 **host-wide** attribution
 capacity drops and two census-capacity drops. All 83 sampled journal entries
 named the same UDP tuple, independently identified as the game under its existing
@@ -17,8 +17,9 @@ comparisons, so these cannot be reconstructed retrospectively.
 This change preserves policy, queue bounds, scheduling, identity contracts and
 all validation predicates. It adds no ownership reuse. Root must explicitly arm
 manual diagnostics with `FLOWGATE_PROFILE_DIR` and `FLOWGATE_PROFILE_MANUAL=1`.
-Without that configuration the capture is disabled. The existing startup-mode
-60-second profile remains available when manual mode is not set.
+Without both settings the capture is disabled, including a missing, empty or
+unknown manual flag. There is no automatic startup capture fallback. The
+privileged launcher forwards only the exact manual value `1`.
 
 An administrator can invoke `diagnostic-start` over the existing local control
 API with the exact daemon generation. The read-only endpoint cannot start it;
@@ -104,3 +105,14 @@ Only after measurement, implement and compare the general cost reduction against
 0df3273 in isolation, including receiver loss/latency/CPU, independent Deny, live
 policy edits and socket/holder transitions. Bounded ownership reuse, if needed,
 requires separate explicit approval of lifetime, invalidation and exposure window.
+
+## Launcher correction after diagnostic deployment
+
+The approved `e74a0228` bundle retained an experimental shaping launcher that
+forwarded the directory but dropped the manual flag. It therefore ran the old
+60-second startup profile without readiness. No START was issued and the planned
+120-second window never ran. The private startup evidence is retained separately;
+it is not the coordinated gameplay measurement. The correction forwards the
+manual flag and makes the backend reject directory-only configuration. Packaging
+must apply this correction to the retained experimental launcher, preserving its
+shaping arguments and helper artifacts. A new exact bundle/restart needs approval.

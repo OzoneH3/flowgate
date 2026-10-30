@@ -32,6 +32,15 @@ class LaunchEnvironment(unittest.TestCase):
   self.assertEqual(env['FLOWGATE_PROFILE_DIR'],'/private/profile;literal')
   self.assertEqual(set(env),{'PATH','LANG','NOTIFY_SOCKET','FLOWGATE_PROFILE_DIR'})
   self.assertNotIn('/private/profile;literal',args)
+ def test_manual_capture_opt_in_survives_launcher(self):
+  _,_,env=self.launch({'FLOWGATE_PROFILE_DIR':'/private/profile','FLOWGATE_PROFILE_MANUAL':'1'})
+  self.assertEqual(env['FLOWGATE_PROFILE_MANUAL'],'1')
+  self.assertEqual(set(env),{'PATH','LANG','NOTIFY_SOCKET','FLOWGATE_PROFILE_DIR','FLOWGATE_PROFILE_MANUAL'})
+ def test_unknown_manual_values_are_not_forwarded(self):
+  for value in ("", "0", "true", "unknown"):
+   self.assertNotIn("FLOWGATE_PROFILE_MANUAL",self.launch({"FLOWGATE_PROFILE_DIR":"/private/profile","FLOWGATE_PROFILE_MANUAL":value})[2])
+ def test_manual_flag_without_directory_does_not_arm(self):
+  self.assertNotIn('FLOWGATE_PROFILE_MANUAL',self.launch({'FLOWGATE_PROFILE_MANUAL':'1'})[2])
  def test_empty_opt_in_is_omitted(self):
   self.assertNotIn('FLOWGATE_PROFILE_DIR',self.launch({'FLOWGATE_PROFILE_DIR':''})[2])
 if __name__=='__main__':unittest.main()

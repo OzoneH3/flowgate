@@ -1,27 +1,27 @@
 # Private one-shot serve profiling
 
 This is diagnostic support, not a UDP throughput optimization. It is off by
-default and does not open a listener, add an API operation, or install a signal
-handler. Diagnostic release `25dbb1a90e81f6fc2a150231cae699db87e430f3` was explicitly
-approved and deployed; its one capture finished and the temporary override was
-removed. `bbee9b56d4ba10634142bfdff65edb6f60a6973e` remains the comparison
-baseline. Performance releases require separate deployment approval.
+default and opens no network listener. The current manual capture uses the local
+administrator API described in [UDP census diagnostics](UDP-CENSUS-DIAGNOSTICS.md).
+Earlier diagnostic releases supported automatic startup capture; that fallback
+has been removed after a launcher omitted the manual flag during deployment.
 
-A root administrator may set `FLOWGATE_PROFILE_DIR` in the service environment
-to an existing root-owned directory with mode 0700. The diagnostic build waits
-20 seconds after `serve` readiness, then targets one 60-second window (timer scheduling can add a small overrun;
-actual elapsed time is recorded).
-Shutdown cancels the capture. There is no retry or automatic second capture.
-Remove the temporary environment override after the window; no second restart
-is needed. Prepare a new output directory for a future explicitly approved run.
+A root administrator must set both `FLOWGATE_PROFILE_DIR` (an existing
+service-owned mode-0700 directory) and `FLOWGATE_PROFILE_MANUAL=1`. The launcher
+must forward both. A directory alone or any other manual value disables capture.
+The daemon waits for an administrator's generation-checked manual trigger and
+captures once for 120 seconds; shutdown cancels it. There is no retry or automatic
+second capture. Remove the temporary environment override after the window;
+no second restart is needed. Preparing another run requires explicit approval.
 
 All path components are opened without following symlinks. The final directory
 is checked and pinned by its descriptor. Four new files are created exclusively
 with mode 0600; existing files are never replaced. CPU and mutex profile files
-are limited to 8 MiB each, summary to 64 KiB. The small start marker contains no
+are limited to 8 MiB each, summary to 2 MiB. The small start marker contains no
 packet data. Errors disable diagnostics and are logged; protection continues.
 Profiles contain code stacks and executable mapping metadata; keep them private.
-No payloads, endpoint samples, process listings or profiling labels are collected.
+No payloads are collected. Bounded census evidence includes endpoint addresses,
+executable/prefix paths and socket/holder facts; retain it locally and privately.
 
 The capture includes:
 

@@ -27,44 +27,36 @@ var errLimit = errors.New("diagnostic output limit reached")
 // The root service environment is the sole opt-in. Each process captures once.
 func StartFromEnvironment(ctx context.Context, sample func() any) func() {
 	dir := os.Getenv("FLOWGATE_PROFILE_DIR")
-	if dir == "" {
+	// A directory alone must never start capture. In particular, launchers that
+	// omit the manual flag fail closed rather than selecting legacy startup mode.
+	if dir == "" || os.Getenv("FLOWGATE_PROFILE_MANUAL") != "1" {
 		return func() {}
 	}
 	child, cancel := context.WithCancel(ctx)
-	manualMode := os.Getenv("FLOWGATE_PROFILE_MANUAL") == "1"
-	var trigger chan struct{}
-	if manualMode {
-		manual.Lock()
-		if manual.trigger != nil {
-			manual.Unlock()
-			cancel()
-			return func() {}
-		}
-		trigger = make(chan struct{}, 1)
-		manual.trigger = trigger
-		manual.state = "armed"
+	manual.Lock()
+	if manual.trigger != nil {
 		manual.Unlock()
+		cancel()
+		return func() {}
 	}
+	trigger := make(chan struct{}, 1)
+	manual.trigger = trigger
+	manual.state = "armed"
+	manual.Unlock()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		delay, duration := 20*time.Second, 60*time.Second
-		if manualMode {
-			select {
-			case <-child.Done():
-				manualState("canceled", nil)
-				return
-			case <-trigger:
-			}
-			delay, duration = 0, 120*time.Second
-			manualState("starting", nil)
+		select {
+		case <-child.Done():
+			manualState("canceled", nil)
+			return
+		case <-trigger:
 		}
-		if err := capture(child, dir, delay, duration, sample); err != nil {
-			if manualMode {
-				manualState("failed", err)
-			}
+		manualState("starting", nil)
+		if err := capture(child, dir, 0, 120*time.Second, sample); err != nil {
+			manualState("failed", err)
 			log.Printf("private diagnostics: %v (enforcement unchanged)", err)
-		} else if manualMode {
+		} else {
 			manualState("finished", nil)
 		}
 	}()

@@ -326,3 +326,19 @@ func TestQueueEvidenceCannotExhaustWineRefusals(t *testing.T) {
 		t.Fatal(s.queueEvents, s.failures, len(s.evidence))
 	}
 }
+
+// Invalid environment must return before creating any background capture work.
+// A nil context makes an accidental WithCancel/startup fallback fail immediately.
+func TestEnvironmentRequiresExplicitManualMode(t *testing.T) {
+	for _, mode := range []string{"", "0", "true", "unknown"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Setenv("FLOWGATE_PROFILE_DIR", privateTemp(t))
+			t.Setenv("FLOWGATE_PROFILE_MANUAL", mode)
+			stop := StartFromEnvironment(nil, nil)
+			defer stop()
+			if ManualStatus()["state"] != "disabled" || active.Load() != nil {
+				t.Fatal("invalid opt-in armed capture", ManualStatus())
+			}
+		})
+	}
+}
