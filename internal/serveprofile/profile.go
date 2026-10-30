@@ -22,7 +22,8 @@ const profileLimit = 8 << 20
 
 var errLimit = errors.New("diagnostic output limit reached")
 
-// No network listener, API, signals, process list, payloads or automatic retries.
+// No network listener, signals, payloads or automatic retries. A configured
+// administrator may trigger the root-armed manual mode through the local API.
 // The root service environment is the sole opt-in. Each process captures once.
 func StartFromEnvironment(ctx context.Context, sample func() any) func() {
 	dir := os.Getenv("FLOWGATE_PROFILE_DIR")
@@ -30,11 +31,41 @@ func StartFromEnvironment(ctx context.Context, sample func() any) func() {
 		return func() {}
 	}
 	child, cancel := context.WithCancel(ctx)
+	manualMode := os.Getenv("FLOWGATE_PROFILE_MANUAL") == "1"
+	var trigger chan struct{}
+	if manualMode {
+		manual.Lock()
+		if manual.trigger != nil {
+			manual.Unlock()
+			cancel()
+			return func() {}
+		}
+		trigger = make(chan struct{}, 1)
+		manual.trigger = trigger
+		manual.state = "armed"
+		manual.Unlock()
+	}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		if err := capture(child, dir, 20*time.Second, 60*time.Second, sample); err != nil {
+		delay, duration := 20*time.Second, 60*time.Second
+		if manualMode {
+			select {
+			case <-child.Done():
+				manualState("canceled", nil)
+				return
+			case <-trigger:
+			}
+			delay, duration = 0, 120*time.Second
+			manualState("starting", nil)
+		}
+		if err := capture(child, dir, delay, duration, sample); err != nil {
+			if manualMode {
+				manualState("failed", err)
+			}
 			log.Printf("private diagnostics: %v (enforcement unchanged)", err)
+		} else if manualMode {
+			manualState("finished", nil)
 		}
 	}()
 	return func() { cancel(); <-done }
@@ -112,7 +143,7 @@ func usage() map[string]int64 {
 
 var captureMu sync.Mutex // Go CPU/mutex profiling is process-global.
 func capture(ctx context.Context, dir string, delay, duration time.Duration, samples ...func() any) error {
-	if duration <= 0 || duration > 60*time.Second || delay < 0 || delay > 60*time.Second {
+	if duration <= 0 || duration > 120*time.Second || delay < 0 || delay > 60*time.Second {
 		return fmt.Errorf("profile timing out of bounds")
 	}
 	timer := time.NewTimer(delay)
@@ -170,7 +201,12 @@ func capture(ctx context.Context, dir string, delay, duration time.Duration, sam
 		pprof.StopCPUProfile()
 		return err
 	}
-	log.Print("private diagnostics: 60-second maximum sample started")
+	manual.Lock()
+	if manual.state == "starting" {
+		manual.state = "running"
+	}
+	manual.Unlock()
+	log.Printf("private diagnostics: bounded sample started (maximum %.0f seconds)", duration.Seconds())
 	stop := time.NewTimer(duration)
 	canceled := false
 	select {
@@ -208,7 +244,7 @@ func capture(ctx context.Context, dir string, delay, duration time.Duration, sam
 	result["errors"] = errorsFound
 	result["mutex_sample_fraction"] = 20
 	result["interpretation"] = "CPU stack samples and process CPU delta are execution. Elapsed histograms include blocking/scheduling and overlap; do not add nested stages or compare them as CPU percentages. Mutex profile is sampled contention, not all off-CPU time. Worker visits include census retries. Verdicts are submission outcomes, not receiver delivery. No total offered network-packet denominator."
-	metadata := &cappedWriter{dst: files[2], left: 64 << 10}
+	metadata := &cappedWriter{dst: files[2], left: 2 << 20}
 	if err = json.NewEncoder(metadata).Encode(result); err != nil {
 		return err
 	}

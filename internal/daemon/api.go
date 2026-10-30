@@ -11,6 +11,7 @@ import (
 	"flowgate/internal/policy"
 	"flowgate/internal/queuehealth"
 	"flowgate/internal/readiness"
+	diagnostics "flowgate/internal/serveprofile"
 	"flowgate/internal/udpaccount"
 	"flowgate/internal/uploadshape"
 	"fmt"
@@ -65,6 +66,7 @@ type EnforcementStatus struct {
 	StopsAt time.Time `json:"stops_at"`
 }
 type Response struct {
+	Diagnostic       map[string]string           `json:"diagnostic,omitempty"`
 	UploadShaping    *uploadshape.Snapshot       `json:"upload_shaping,omitempty"`
 	UsageHistory     *accounting.HistorySnapshot `json:"usage_history,omitempty"`
 	HistorySettings  *accounting.HistorySettings `json:"history_settings,omitempty"`
@@ -319,6 +321,22 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 							r.Capabilities = append(r.Capabilities, NetworkEndpointCapability)
 						}
 						switch q.Operation {
+						case "diagnostic-status", "diagnostic-start":
+							if !admin {
+								r.ErrorCode, r.Error = "forbidden", "Administrator diagnostics only"
+							} else if q.Generation != e.Generation {
+								r.ErrorCode, r.Error = "stale_generation", "Daemon generation changed"
+							} else if q.Operation == "diagnostic-start" && readonly {
+								r.ErrorCode, r.Error = "read_only", "Read-only endpoint"
+							} else {
+								if q.Operation == "diagnostic-start" {
+									if err := diagnostics.StartManual(); err != nil {
+										r.ErrorCode, r.Error = "diagnostic_unavailable", err.Error()
+									}
+								}
+								r.Diagnostic = diagnostics.ManualStatus()
+							}
+
 						case "endpoint-rule-preview", "endpoint-rule-save":
 							if readonly {
 								r.ErrorCode, r.Error = "read_only", "Read-only endpoint"

@@ -2,6 +2,7 @@ package identity
 
 import (
 	"encoding/json"
+	diagnostics "flowgate/internal/serveprofile"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -111,7 +112,43 @@ func (w *WineTable) resolveDirect(f Flow, a Attribution) Attribution {
 	if e != nil {
 		return fail(ReasonRuntimeCensusUnavailable, e.Error())
 	}
-	if !directUnresolved(again) || fingerprint(a.Owners, a.Sockets) != fingerprint(again.Owners, again.Sockets) || !w.session.current() || !wineClientPeer(again.Owners[0], broker) || !w.sameServer(&broker) {
+	gate := "complete"
+	valid := func() bool {
+		if !directUnresolved(again) {
+			gate = "fresh_direct_unresolved"
+			return false
+		}
+		if fingerprint(a.Owners, a.Sockets) != fingerprint(again.Owners, again.Sockets) {
+			gate = "socket_holder_fingerprint"
+			return false
+		}
+		if !w.session.current() {
+			gate = "session_generation"
+			return false
+		}
+		if !wineClientPeer(again.Owners[0], broker) {
+			gate = "client_peer"
+			return false
+		}
+		if !w.sameServer(&broker) {
+			gate = "helper_peer"
+			return false
+		}
+		return true
+	}()
+	diagnostics.EvidenceKey(!valid, "direct:"+f.Key(), func() any {
+		matching := func(s tableSnapshot) []WindowsOwner {
+			var rows []WindowsOwner
+			for _, r := range s.Rows {
+				if r.UnixPID == a.Owners[0].PID {
+					rows = append(rows, r)
+				}
+			}
+			return rows
+		}
+		return map[string]any{"kind": "direct_bookends", "observation_only": true, "flow": f, "failed_gate": gate, "initial": diagnosticAttribution(a), "fresh": diagnosticAttribution(again), "first": diagnosticTable(first, matching(first)), "second": diagnosticTable(second, matching(second))}
+	})
+	if !valid {
 		return fail(ReasonRuntimeOwnershipChanged, "direct Wine ownership changed during process census")
 	}
 	proof := func(p Process, path, revision string) bool {

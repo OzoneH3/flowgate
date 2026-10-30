@@ -3,6 +3,7 @@ package identity
 // Explicit daemon startup configuration authorizes observation, never a rule.
 // Helpers run as the selected desktop UID, not with daemon privileges.
 import (
+	diagnostics "flowgate/internal/serveprofile"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -162,19 +163,36 @@ func (m *WineObservers) resolve(f Flow, wait bool) (Attribution, bool) {
 }
 
 func (m *WineObservers) resolveDispatch(f Flow, wait bool, resolveNative func(Flow) Attribution) (Attribution, bool) {
+	fallback := false
 	if hint := m.dispatchHint(f, time.Now()); hint != nil {
-		result, done := m.resolveAttribution(f, copyWineInitial(hint.initial), wait)
+		diagnostics.Count(diagnostics.WineHintHit, 1)
+		initial := copyWineInitial(hint.initial)
+		initial.diagnosticSource = "dispatch_hint"
+		initial.diagnosticHintAge = time.Since(hint.observed)
+		result, done := m.resolveAttribution(f, initial, wait)
 		if !done {
+			diagnostics.Count(diagnostics.WineBusy, 1)
 			return Attribution{}, false
 		}
 		if positiveWineDispatch(result) {
 			return result, true
 		}
+		diagnostics.Count(diagnostics.WineHintFallback, 1)
 		m.forgetDispatch(f, hint)
+		fallback = true
 		// A hint never supplies a refusal or a permission: retry once from
 		// fresh discovery. Queue deadlines remain checked by the caller.
 	}
 	a := resolveNative(f)
+	a.diagnosticSource = "fresh_dispatch"
+	if fallback {
+		a.diagnosticSource = "fresh_fallback"
+	}
+	if a.ReasonCode == ReasonNoSocketObserved {
+		diagnostics.EvidenceKey(true, "dispatch:"+f.Key(), func() any {
+			return map[string]any{"kind": "dispatch_no_socket", "flow": f, "initial": diagnosticAttribution(a), "observation_only": true}
+		})
+	}
 	observed := time.Now()
 	result, done := m.resolveAttribution(f, a, wait)
 	if done {
@@ -254,15 +272,18 @@ func (m *WineObservers) sessionResolve(f Flow, a Attribution, broker *Process, b
 		a.setReason(ReasonRuntimeObserverUnavailable, "Wine owner observer: "+reason)
 		return a
 	}
+	slot := diagnostics.Begin(diagnostics.WineSlotWait)
 	if wait {
 		m.census <- struct{}{}
 	} else {
 		select {
 		case m.census <- struct{}{}:
 		default:
+			slot.End()
 			return Attribution{}, false
 		}
 	}
+	slot.End()
 	defer func() { <-m.census }()
 
 	m.mu.Lock()
@@ -306,6 +327,8 @@ func (m *WineObservers) sessionResolve(f Flow, a Attribution, broker *Process, b
 }
 
 func (m *WineObservers) useSession(f Flow, initial Attribution, record *observedWine, broker *Process, bin string, setup, wait bool, fail func(string) Attribution) (Attribution, bool) {
+	sessionWait := diagnostics.Begin(diagnostics.WineSessionWait)
+	defer func() { sessionWait.End() }()
 	if setup {
 		if m.setupSession != nil {
 			m.setupSession(record, broker, bin)
@@ -324,6 +347,8 @@ func (m *WineObservers) useSession(f Flow, initial Attribution, record *observed
 	if record.resolve == nil {
 		return fail(record.failure), true
 	}
+	sessionWait.End()
+	sessionWait = diagnostics.Span{}
 	return record.resolve(f, initial, wait)
 }
 

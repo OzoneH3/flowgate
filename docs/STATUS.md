@@ -28,6 +28,15 @@ user projection and explicit restart/retention gaps; see
 [USAGE-HISTORY.md](USAGE-HISTORY.md). Storage/API/GUI validation has separate
 scope and does not turn partial observations into billing or delivery evidence.
 
+## Remaining census diagnostic preparation (2026-10-30)
+
+The interim UDP release `0df3273` is deployed. The subsequent bounded gameplay
+observation still recorded 4,029 host-wide attribution-capacity drops (all 83
+journal samples named the game tuple) and the user reported residual rubber-banding.
+A diagnostic-only candidate adds manual, bounded timing/comparison capture; it is
+not a throughput fix and requires exact deployment/arming approval before the next
+user-coordinated window. See [the diagnostic contract and plan](UDP-CENSUS-DIAGNOSTICS.md).
+
 ## Current UDP attribution candidate (2026-10-30)
 
 The current inspected host release is `966d7886c41ee7805bdce905494d501d2ef4be7e`,

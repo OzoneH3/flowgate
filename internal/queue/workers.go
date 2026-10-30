@@ -3,9 +3,9 @@ package queue
 import (
 	"context"
 	"flowgate/internal/daemon"
-	diagnostics "flowgate/internal/serveprofile"
 	"flowgate/internal/identity"
 	"flowgate/internal/queuehealth"
+	diagnostics "flowgate/internal/serveprofile"
 	"fmt"
 	"sync"
 	"time"
@@ -46,11 +46,12 @@ const MaxRecentPreferredTurns = 2
 const udpCoalesceWindow = 250 * time.Microsecond
 
 type packetJob struct {
-	id       uint32
-	size     int
-	flow     identity.Flow
-	token    string
-	deadline time.Time
+	id            uint32
+	size          int
+	flow          identity.Flow
+	token         string
+	deadline      time.Time
+	censusEntered time.Time
 }
 
 // The scheduling key is deliberately broader than a flow: all remotes on the
@@ -68,6 +69,7 @@ const (
 )
 
 type packetWorkers struct {
+	diagnosticActive         map[string]time.Time
 	coalesceWindow           time.Duration // constructor default; zero disables in benchmarks/tests
 	mu                       sync.Mutex
 	wake                     [2]*sync.Cond
@@ -178,7 +180,28 @@ func (w *packetWorkers) submitWait(ctx context.Context, p packetJob) (admitted b
 		if w.stopped {
 			mask |= 8
 		}
+		var rejection any
+		if mask&4 != 0 && !eligible && !diagnostics.ObservationTime().IsZero() {
+			holders := make([]map[string]any, 0, 2)
+			endpoints := 0
+			for k, c := range w.census {
+				if c {
+					endpoints++
+				}
+				if c && w.active[k] && len(w.jobs[k]) > 0 {
+					var elapsed any
+					if at := w.diagnosticActive[k]; !at.IsZero() {
+						elapsed = now.Sub(at).Nanoseconds()
+					}
+					holders = append(holders, map[string]any{"flow": w.jobs[k][0].flow, "batch": w.activeBatch[k], "started": w.diagnosticActive[k], "elapsed_ns": elapsed})
+				}
+			}
+			rejection = map[string]any{"kind": "census_rejection", "at": now, "flow": p.flow, "mask": mask, "census_count": w.censusCount, "census_bytes": w.censusBytes, "census_endpoints": endpoints, "global_count": w.count, "global_bytes": w.bytes, "active_census": holders}
+		}
 		w.mu.Unlock()
+		if rejection != nil {
+			diagnostics.QueueEvidence("queue:"+p.flow.Key(), func() any { return rejection })
+		}
 		if !eligible {
 			return false
 		}
@@ -280,6 +303,7 @@ func (w *packetWorkers) submit(p packetJob) bool {
 		w.wg.Add(1) // shutdown must wait for this drop before closing the queue socket
 	}
 	if lane == 1 {
+		p.censusEntered = diagnostics.ObservationTime()
 		w.censusCount++
 		w.censusBytes += p.size
 	}
@@ -428,6 +452,12 @@ func (w *packetWorkers) run(lane int) {
 		w.activeBatch[key] = n
 		w.active[key] = true
 		stop := w.stopped
+		if at := diagnostics.ObservationTime(); !at.IsZero() {
+			if w.diagnosticActive == nil {
+				w.diagnosticActive = map[string]time.Time{}
+			}
+			w.diagnosticActive[key] = at
+		}
 		w.mu.Unlock()
 		for _, item := range batch {
 			diagnostics.Since(diagnostics.QueueResidence, item.deadline.Add(-AttributionTimeout))
@@ -435,17 +465,27 @@ func (w *packetWorkers) run(lane int) {
 		diagnostics.Count(diagnostics.WorkerVisits, uint64(n))
 		diagnostics.Batch(n)
 		work := diagnostics.Begin(diagnostics.WorkerBatch)
+		var censusWork diagnostics.Span
+		if lane == 1 {
+			for _, item := range batch {
+				diagnostics.Since(diagnostics.CensusResidence, item.deadline.Add(-AttributionTimeout))
+				diagnostics.Since(diagnostics.CensusWait, item.censusEntered)
+			}
+			censusWork = diagnostics.Begin(diagnostics.CensusService)
+		}
 		var done bool
 		if n > 1 {
 			done = w.processBatch(batch, stop, lane == 1)
 		} else {
 			done = w.process(p, stop, lane == 1)
 		}
+		censusWork.End()
 		work.End()
 		if done {
 			diagnostics.Count(diagnostics.CompletedVisits, uint64(n))
 		}
 		w.mu.Lock()
+		delete(w.diagnosticActive, key)
 		if !done {
 			delete(w.recent, key)
 			// Move the entire endpoint, including its active head, without releasing
@@ -468,6 +508,10 @@ func (w *packetWorkers) run(lane int) {
 				// against the global count/byte bounds until its drop verdict is done.
 				tail := append([]packetJob(nil), q[keep:]...)
 				w.jobs[key] = q[:keep]
+				entered := diagnostics.ObservationTime()
+				for i := range w.jobs[key] {
+					w.jobs[key][i].censusEntered = entered
+				}
 				w.census[key] = true
 				w.censusCount += keep
 				w.censusBytes += size

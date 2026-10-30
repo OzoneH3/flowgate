@@ -203,3 +203,126 @@ func TestBoundedCaptureFinishesAndDisables(t *testing.T) {
 }
 
 func closeFD(fd int) { unix.Close(fd) }
+
+func TestManualCaptureDisabledAndOnce(t *testing.T) {
+	manual.Lock()
+	manual.trigger = nil
+	manual.state = ""
+	manual.detail = ""
+	manual.Unlock()
+	if StartManual() == nil || ManualStatus()["state"] != "disabled" {
+		t.Fatal("unarmed trigger")
+	}
+	trigger := make(chan struct{}, 1)
+	manual.Lock()
+	manual.trigger = trigger
+	manual.state = "armed"
+	manual.Unlock()
+	defer func() { manual.Lock(); manual.trigger = nil; manual.state = ""; manual.Unlock() }()
+	if err := StartManual(); err != nil {
+		t.Fatal(err)
+	}
+	if StartManual() == nil {
+		t.Fatal("duplicate accepted")
+	}
+	if ManualStatus()["state"] != "requested" {
+		t.Fatal(ManualStatus())
+	}
+	select {
+	case <-trigger:
+	default:
+		t.Fatal("missing trigger")
+	}
+}
+
+func TestBoundedEvidenceAndDisabledBuilder(t *testing.T) {
+	Evidence(true, func() any { t.Fatal("disabled builder"); return nil })
+	s := &session{from: time.Now(), until: time.Now().Add(time.Minute)}
+	active.Store(s)
+	defer active.Store(nil)
+	for i := 0; i < 100; i++ {
+		Evidence(true, func() any { return map[string]any{"cookie": "0123456789abcdef"} })
+	}
+	if len(s.evidence) != 32 || s.evidenceSkipped != 68 {
+		t.Fatal(len(s.evidence), s.evidenceSkipped)
+	}
+	Evidence(false, func() any { return "success" })
+	Evidence(false, func() any { t.Fatal("unbounded success rate"); return nil })
+	s.evidenceMu.Lock()
+	s.lastSuccess = time.Time{}
+	s.evidenceMu.Unlock()
+	Evidence(false, func() any { return string(bytes.Repeat([]byte("x"), 20000)) })
+	if len(s.evidence) != 33 {
+		t.Fatal("oversize retained", len(s.evidence))
+	}
+}
+
+func TestEvidencePerKeyQuotaKeepsOtherFlows(t *testing.T) {
+	s := &session{from: time.Now(), until: time.Now().Add(time.Minute)}
+	active.Store(s)
+	defer active.Store(nil)
+	for i := 0; i < 100; i++ {
+		EvidenceKey(true, "flow-a", func() any { return "a" })
+	}
+	EvidenceKey(true, "flow-b", func() any { return "b" })
+	if len(s.evidence) != 5 || s.quotas["flow-a"] != 4 {
+		t.Fatal("flow monopolized evidence", len(s.evidence), s.quotas)
+	}
+}
+
+func TestManualArmedWaitAndCancellation(t *testing.T) {
+	manual.Lock()
+	manual.trigger = nil
+	manual.state = ""
+	manual.detail = ""
+	manual.Unlock()
+	defer func() { manual.Lock(); manual.trigger = nil; manual.state = ""; manual.detail = ""; manual.Unlock() }()
+	dir := privateTemp(t)
+	t.Setenv("FLOWGATE_PROFILE_DIR", dir)
+	t.Setenv("FLOWGATE_PROFILE_MANUAL", "1")
+	ctx, cancel := context.WithCancel(context.Background())
+	stop := StartFromEnvironment(ctx, nil)
+	if ManualStatus()["state"] != "armed" {
+		t.Fatal(ManualStatus())
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 0 || active.Load() != nil {
+		t.Fatal("captured before readiness")
+	}
+	if err := StartManual(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for ManualStatus()["state"] != "running" && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if ManualStatus()["state"] != "running" {
+		t.Fatal(ManualStatus())
+	}
+	cancel()
+	stop()
+	if active.Load() != nil || StartManual() == nil {
+		t.Fatal("capture rearmed/left running")
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "summary.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v map[string]any
+	if json.Unmarshal(raw, &v) != nil || v["canceled"] != true {
+		t.Fatal(string(raw))
+	}
+}
+
+func TestQueueEvidenceCannotExhaustWineRefusals(t *testing.T) {
+	s := &session{from: time.Now(), until: time.Now().Add(time.Minute)}
+	active.Store(s)
+	defer active.Store(nil)
+	for i := 0; i < 40; i++ {
+		QueueEvidence(string(rune('a'+i)), func() any { return "queue" })
+	}
+	EvidenceKey(true, "wine", func() any { return "wine refusal" })
+	if s.queueEvents != 16 || s.failures != 1 || len(s.evidence) != 17 {
+		t.Fatal(s.queueEvents, s.failures, len(s.evidence))
+	}
+}

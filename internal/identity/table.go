@@ -5,6 +5,7 @@ package identity
 import (
 	"bufio"
 	"encoding/json"
+	diagnostics "flowgate/internal/serveprofile"
 	"fmt"
 	"io"
 	"net/netip"
@@ -50,13 +51,14 @@ type TableEvidence struct {
 	Generation string `json:"table_generation,omitempty"`
 }
 type tableSnapshot struct {
-	Kind     string         `json:"kind,omitempty"`
-	Family   int            `json:"family"`
-	Schema   int            `json:"schema"`
-	Version  string         `json:"version"`
-	Rows     []WindowsOwner `json:"rows"`
-	Complete bool           `json:"complete"`
-	Error    uint32         `json:"error"`
+	diagnosticBegin, diagnosticEnd time.Time
+	Kind                           string         `json:"kind,omitempty"`
+	Family                         int            `json:"family"`
+	Schema                         int            `json:"schema"`
+	Version                        string         `json:"version"`
+	Rows                           []WindowsOwner `json:"rows"`
+	Complete                       bool           `json:"complete"`
+	Error                          uint32         `json:"error"`
 }
 type WineTable struct {
 	mu                      sync.Mutex
@@ -204,8 +206,10 @@ func (w *WineTable) lifecycleExited() bool {
 func (w *WineTable) snapshot(proto string) (tableSnapshot, error) {
 	return w.snapshotFamily(proto, 4)
 }
-func (w *WineTable) snapshotFamily(proto string, family int) (tableSnapshot, error) {
-	var s tableSnapshot
+func (w *WineTable) snapshotFamily(proto string, family int) (s tableSnapshot, resultErr error) {
+	defer diagnostics.Begin(diagnostics.WineRuntimeQuery).End()
+	s.diagnosticBegin = diagnostics.ObservationTime()
+	defer func() { s.diagnosticEnd = diagnostics.ObservationTime() }()
 	if proto != "tcp" && proto != "udp" && proto != "process" {
 		return s, fmt.Errorf("unsupported census protocol")
 	}
@@ -343,11 +347,14 @@ func (w *WineTable) tryResolve(f Flow) (Attribution, bool) {
 // still bookends it with a fresh full Resolve and a second owner-table snapshot;
 // changes during slot/setup/table waits therefore fail the existing validators.
 func (w *WineTable) resolveInitial(f Flow, initial Attribution, wait bool) (Attribution, bool) {
+	lockSpan := diagnostics.Begin(diagnostics.WineLockWait)
 	if wait {
 		w.mu.Lock()
 	} else if !w.mu.TryLock() {
+		lockSpan.End()
 		return Attribution{}, false
 	}
+	lockSpan.End()
 	defer w.mu.Unlock()
 	return w.resolveAttributionLocked(f, initial), true
 }
@@ -436,8 +443,12 @@ func (w *WineTable) resolveAttributionLocked(f Flow, a Attribution) Attribution 
 }
 
 // Shared final validation for per-admission and batched observation censuses.
-func (w *WineTable) finishCensus(f Flow, a, again Attribution, broker *Process, first, second tableSnapshot, rows []WindowsOwner, imageVisible func(*Process, string, string) bool) Attribution {
+func (w *WineTable) finishCensus(f Flow, a, again Attribution, broker *Process, first, second tableSnapshot, rows []WindowsOwner, imageVisible func(*Process, string, string) bool) (result Attribution) {
+	defer diagnostics.Begin(diagnostics.WineFinalValidation).End()
 	rows2, err := selectTableRows(second, f)
+	initial := a
+	rowsValid := err == nil
+	defer func() { diagnosticBookends(f, initial, again, broker, first, second, rows, rows2, result, rowsValid) }()
 	if err != nil {
 		return a
 	}
@@ -511,6 +522,7 @@ func mayBeHelperPeer(brokerFDs map[uint32]bool, peers map[uint32]uint32, fds map
 }
 
 func (w *WineTable) helperPeers(broker *Process) int {
+	defer diagnostics.Begin(diagnostics.WineHelperValidation).End()
 	bf, err := socketFDs(broker.PID)
 	if err != nil {
 		return -1
@@ -588,6 +600,7 @@ func wineProcessCandidate(pid int, stat func(string) (string, int, error), readL
 // alone cannot establish its loaded revision. Retain the existing mapped-image
 // corroboration and reject deleted mappings even if the path has been reused.
 func (w *WineTable) imageRevisionVisible(broker *Process, path, revision string) bool {
+	defer diagnostics.Begin(diagnostics.WineImageValidation).End()
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
 		return false

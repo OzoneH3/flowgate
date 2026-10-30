@@ -1,6 +1,7 @@
 package identity
 
 import (
+	diagnostics "flowgate/internal/serveprofile"
 	"slices"
 	"time"
 )
@@ -57,6 +58,7 @@ func retryHolderIdentities(now func() time.Time, lim holderLimits, refresh func(
 	budget := &holderBudget{deadline: now().Add(lim.Time)}
 	var c HolderCensus
 	var out holderIdentities
+	var firstIssues []string
 	expire := func() {
 		out.Complete = false
 		out.retryTopology = false
@@ -75,7 +77,17 @@ func retryHolderIdentities(now func() time.Time, lim holderLimits, refresh func(
 			expire()
 			return c, out
 		}
+		if n > 0 {
+			diagnostics.Count(diagnostics.HolderRetry, 1)
+		}
 		c, out = attempt(budget)
+		if !diagnostics.ObservationTime().IsZero() {
+			if n == 0 {
+				firstIssues = append([]string(nil), out.Issues...)
+			}
+			out.diagnosticAttempts = n + 1
+			out.diagnosticFirstIssues = firstIssues
+		}
 		if now().After(budget.deadline) {
 			expire()
 			return c, out

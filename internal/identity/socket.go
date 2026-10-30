@@ -45,17 +45,26 @@ func (f Flow) Key() string {
 }
 
 type Attribution struct {
-	presentationTarget *permissionPresentation // immutable-list display only; never authority
-	Table              *TableEvidence          `json:"runtime_table,omitempty"`
-	VisibilityComplete bool                    `json:"visibility_complete"`
-	Association        *Association            `json:"association,omitempty"`
-	Status             string                  `json:"status"`
-	Reason             string                  `json:"reason"`
-	ReasonCode         string                  `json:"reason_code,omitempty"`
-	Owners             []Process               `json:"owners"`
-	Sockets            []Socket                `json:"sockets"`
-	Fingerprint        string                  `json:"fingerprint"`
-	Application        *Application            `json:"application,omitempty"`
+	diagnosticHolderAttempts                                        int
+	diagnosticFirstIssues                                           []string
+	diagnosticBegin, diagnosticEnd                                  time.Time
+	diagnosticDumpEnd, diagnosticRecheckBegin, diagnosticRecheckEnd time.Time
+	diagnosticRecheck                                               []Socket
+	diagnosticIssues                                                []string
+	diagnosticSocketIssues                                          map[string]string
+	diagnosticSource                                                string
+	diagnosticHintAge                                               time.Duration
+	presentationTarget                                              *permissionPresentation // immutable-list display only; never authority
+	Table                                                           *TableEvidence          `json:"runtime_table,omitempty"`
+	VisibilityComplete                                              bool                    `json:"visibility_complete"`
+	Association                                                     *Association            `json:"association,omitempty"`
+	Status                                                          string                  `json:"status"`
+	Reason                                                          string                  `json:"reason"`
+	ReasonCode                                                      string                  `json:"reason_code,omitempty"`
+	Owners                                                          []Process               `json:"owners"`
+	Sockets                                                         []Socket                `json:"sockets"`
+	Fingerprint                                                     string                  `json:"fingerprint"`
+	Application                                                     *Application            `json:"application,omitempty"`
 }
 
 func NetNS() string              { return link("/proc/self/ns/net") }
@@ -274,7 +283,9 @@ func inspectWithProvenance(pid int) (Process, error) {
 	return p, err
 }
 
-func Resolve(f Flow) Attribution {
+func Resolve(f Flow) (result Attribution) {
+	begin := diagnostics.ObservationTime()
+	defer func() { result.diagnosticBegin = begin; result.diagnosticEnd = diagnostics.ObservationTime() }()
 	defer diagnostics.Begin(diagnostics.FullResolve).End()
 	a := Attribution{Status: "unidentified", Reason: "no visible matching socket", ReasonCode: ReasonNoSocketObserved}
 	if f.NetNS != NetNS() {
@@ -283,6 +294,7 @@ func Resolve(f Flow) Attribution {
 	}
 	dump, _ := resolveDump(f)
 	sockets, e := dump()
+	a.diagnosticDumpEnd = diagnostics.ObservationTime()
 	if e != nil {
 		a.setReason(ReasonSocketCensusUnavailable, "socket diagnostics unavailable: "+e.Error())
 		return a
@@ -293,21 +305,34 @@ func Resolve(f Flow) Attribution {
 		wanted[fmt.Sprintf("socket:[%d]", s.Inode)] = true
 	}
 	if len(wanted) == 0 {
+		diagnosticNoSocket("resolve", f, sockets, begin)
 		return a
 	}
 	_, resolved := resolveHolderIdentities(wanted, inspectWithProvenance, nil)
+	if !begin.IsZero() {
+		a.diagnosticHolderAttempts = resolved.diagnosticAttempts
+		a.diagnosticFirstIssues = resolved.diagnosticFirstIssues
+		a.diagnosticIssues = resolved.Issues
+		a.diagnosticSocketIssues = resolved.SocketIssues
+	}
 	// Observed owners are evidence recorded before the recheck, so a failed
 	// recheck keeps them (without granting visibility or authority).
 	covered := collectOwners(&a, wanted, resolved.Owners)
 	// A process may retain a socket from a different network namespace. Scan every
 	// visible process, then verify the socket snapshot did not change mid-scan,
 	// using the same census provider as the first pass.
+	a.diagnosticRecheckBegin = diagnostics.ObservationTime()
 	again, err := dump()
+	a.diagnosticRecheckEnd = diagnostics.ObservationTime()
 	if err != nil {
 		a.setReason(ReasonSocketCensusUnavailable, "socket recheck unavailable")
 		return a
 	}
-	finalizeAttribution(&a, wanted, covered, !resolved.Complete, receivers(again, f))
+	current := receivers(again, f)
+	if !begin.IsZero() {
+		a.diagnosticRecheck = current
+	}
+	finalizeAttribution(&a, wanted, covered, !resolved.Complete, current)
 	return a
 }
 

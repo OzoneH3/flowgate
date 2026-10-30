@@ -95,11 +95,13 @@ type inspectedHolder struct {
 }
 
 type holderIdentities struct {
-	Owners       map[string][]Process
-	Complete     bool
-	Issues       []string
-	SocketIssues map[string]string
-	Unavailable  int
+	diagnosticAttempts    int
+	diagnosticFirstIssues []string
+	Owners                map[string][]Process
+	Complete              bool
+	Issues                []string
+	SocketIssues          map[string]string
+	Unavailable           int
 	// Reconciled counts holders whose task set changed within the same inspected
 	// table and passed full re-verification (every current member re-read twice,
 	// runtime classification re-run, descriptor and topology rechecked).

@@ -2,6 +2,7 @@ package identity
 
 import (
 	"encoding/json"
+	diagnostics "flowgate/internal/serveprofile"
 	"fmt"
 	"os"
 	"sort"
@@ -31,7 +32,12 @@ type PendingRevalidation struct {
 
 // ComparePendingBinding explains the existing strict fingerprint/attribution
 // rejection. It never turns a failed check into authority.
-func ComparePendingBinding(before, after Attribution, at time.Time) PendingRevalidation {
+func ComparePendingBinding(before, after Attribution, at time.Time) (result PendingRevalidation) {
+	defer func() {
+		diagnostics.EvidenceKey(true, "pending:"+before.Fingerprint, func() any {
+			return map[string]any{"kind": "pending_revalidation", "at": at, "before": diagnosticAttribution(before), "after": diagnosticAttribution(after), "result": result}
+		})
+	}()
 	r := PendingRevalidation{Code: "identity_changed", Reason: "Request binding changed; no decision or rule saved", CheckedAt: at}
 	add := func(field, a, b string) {
 		if a != b {

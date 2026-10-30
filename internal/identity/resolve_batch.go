@@ -45,6 +45,7 @@ func ResolveBatch(flows []Flow) []Attribution {
 		return out
 	}
 	defer diagnostics.Begin(diagnostics.FullResolve).End()
+	begin := diagnostics.ObservationTime()
 	ns := NetNS()
 	var local []int
 	for i, f := range flows {
@@ -76,6 +77,7 @@ func ResolveBatch(flows []Flow) []Attribution {
 			union[k] = true
 		}
 		if len(w) == 0 {
+			diagnosticNoSocket("discovery_batch", flows[i], sockets, begin)
 			continue // no receiver: Resolve returns here without a census
 		}
 		wanted[i] = w
