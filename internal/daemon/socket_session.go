@@ -8,12 +8,29 @@ import (
 	"fmt"
 )
 
+// SocketInterface identifies a link for presentation, not authorization.
+type SocketInterface struct {
+	Index uint32 `json:"index"`
+	Name  string `json:"name"`
+}
+
+// SocketInterfaceCoverage is a bounded snapshot from session activation.
+// New interfaces remain queue-only until the next protection session.
+type SocketInterfaceCoverage struct {
+	Installed          []SocketInterface `json:"installed"`
+	QueueOnly          []SocketInterface `json:"queue_only"`
+	QueueOnlyTotal     int               `json:"queue_only_total"`
+	QueueOnlyTruncated bool              `json:"queue_only_truncated"`
+	Maximum            int               `json:"maximum"`
+}
+
 // SocketSessionResolvers are trusted in-process resolvers, never API input.
 type SocketSessionResolvers struct {
-	Fresh       func(identity.Flow) identity.Attribution
-	Observed    func(identity.Flow) (identity.Attribution, uint64)
-	Group       func([]identity.Flow, func(int, *identity.Attribution))
-	Diagnostics func() map[string]any
+	Fresh             func(identity.Flow) identity.Attribution
+	Observed          func(identity.Flow) (identity.Attribution, uint64)
+	Group             func([]identity.Flow, func(int, *identity.Attribution))
+	Diagnostics       func() map[string]any
+	InterfaceCoverage *SocketInterfaceCoverage
 }
 
 // StartSessionSocketAuthorization is only called by the protection-session
@@ -31,6 +48,12 @@ func (e *Engine) StartSessionSocketAuthorization(ctx context.Context, b *socketg
 	s := e.socketAuthorization
 	s.productionSession = true
 	s.routeBound = true
+	if r.InterfaceCoverage != nil {
+		coverage := *r.InterfaceCoverage
+		coverage.Installed = append([]SocketInterface(nil), coverage.Installed...)
+		coverage.QueueOnly = append([]SocketInterface(nil), coverage.QueueOnly...)
+		s.interfaceCoverage = &coverage
+	}
 	s.batchCoordination = true
 	s.ordinaryObserved = r.Observed
 	s.resolveGroup = r.Group

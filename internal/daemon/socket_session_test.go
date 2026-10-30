@@ -86,3 +86,27 @@ func TestSocketSessionStopJoinsInFlightObservation(t *testing.T) {
 		t.Fatal("stop failed to join")
 	}
 }
+
+func TestSocketSessionCoverageIsDetached(t *testing.T) {
+	e := New(time.Second)
+	e.Mode = "daemon-monitor"
+	e.ZoneSource = func() identity.NetworkZones { return e.Zones }
+	_ = e.NetworkZonePublisher()
+	model := &grantModel{values: map[socketgrant.Key]socketgrant.Value{}}
+	b := socketgrant.RetainForSession(model)
+	c := &SocketInterfaceCoverage{Installed: []SocketInterface{{Index: 3, Name: "uplink"}}, QueueOnly: []SocketInterface{{Index: 4, Name: "vpn"}}, QueueOnlyTotal: 1, Maximum: 32}
+	r := SocketSessionResolvers{Fresh: func(identity.Flow) identity.Attribution { return identity.Attribution{} }, Observed: func(identity.Flow) (identity.Attribution, uint64) { return identity.Attribution{}, 0 }, InterfaceCoverage: c}
+	if err := e.StartSessionSocketAuthorization(context.Background(), b, r); err != nil {
+		t.Fatal(err)
+	}
+	defer e.StopSocketAuthorization()
+	c.Installed[0].Name = "mutated"
+	if err := e.listReads.publish(e); err != nil {
+		t.Fatal(err)
+	}
+	got := e.PublishedSocketAuthorizationStatus()["interface_coverage"].(map[string]any)
+	links := got["installed"].([]any)
+	if links[0].(map[string]any)["name"] != "uplink" || got["queue_only_total"] != float64(1) {
+		t.Fatalf("coverage not detached: %v", got)
+	}
+}

@@ -56,6 +56,7 @@ type socketAuthorization struct {
 	resolveGroup                                                                                                   func([]identity.Flow, func(int, *identity.Attribution))
 	groups, groupFlows                                                                                             uint64
 	observerDiagnostics                                                                                            func() map[string]any
+	interfaceCoverage                                                                                              *SocketInterfaceCoverage
 	renewalGaps, maxGapNS                                                                                          uint64
 	disabled                                                                                                       bool
 	checks, published, refused                                                                                     uint64
@@ -676,6 +677,9 @@ func (e *Engine) socketAuthorizationSummaryLocked() map[string]any {
 	}
 	if s.productionSession {
 		out["new_interfaces"] = "queue-until-next-protection-session"
+		if s.interfaceCoverage != nil {
+			out["interface_coverage"] = s.interfaceCoverage
+		}
 	}
 	if s.failure != nil {
 		out["failure"] = s.failure.Error()

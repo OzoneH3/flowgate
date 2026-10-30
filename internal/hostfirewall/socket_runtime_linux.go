@@ -33,6 +33,14 @@ func RoutedSocketSessionFactory(e *daemon.Engine, resolvers daemon.SocketSession
 		}
 		sessionResolvers := resolvers
 		installed, skipped := guard.Links(), guard.SkippedLinks()
+		coverage := &daemon.SocketInterfaceCoverage{Maximum: 32, QueueOnlyTotal: len(skipped), QueueOnlyTruncated: len(skipped) > 32}
+		for _, link := range installed {
+			coverage.Installed = append(coverage.Installed, daemon.SocketInterface{Index: link.Index, Name: link.Name})
+		}
+		for _, link := range skipped[:min(len(skipped), 32)] {
+			coverage.QueueOnly = append(coverage.QueueOnly, daemon.SocketInterface{Index: link.Index, Name: link.Name})
+		}
+		sessionResolvers.InterfaceCoverage = coverage
 		sessionResolvers.Diagnostics = func() map[string]any {
 			out := map[string]any{}
 			if resolvers.Diagnostics != nil {
