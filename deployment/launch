@@ -34,6 +34,7 @@ if not source_ready:
 # restricts observation to explicit runtimes/prefixes. This never creates a rule;
 # helpers join an existing broker as its desktop UID, never as root.
 args.extend(['--wine-helper',str(here/'wine-owner-observer.exe')])
+args.extend(['--holder-iterator-helper',str(here/'holder-iterator')])
 wine_config=pathlib.Path('/etc/flowgate/wine.json')
 if wine_config.exists():
  st=wine_config.stat()

@@ -123,21 +123,8 @@ func Inspect(pid int) (Process, error) {
 		a.Executable = ""
 		a.Revision = ""
 		a.Name = "Unresolved Wine process"
-		env := map[string]string{}
-		for _, v := range strings.Split(string(readBound(base+"/environ", 1<<20)), "\x00") {
-			k, val, ok := strings.Cut(v, "=")
-			if ok && (k == "WINEPREFIX" || k == "STEAM_COMPAT_DATA_PATH" || k == "SteamAppId") {
-				env[k] = val
-			}
-		}
-		prefix := env["WINEPREFIX"]
-		if prefix == "" && env["STEAM_COMPAT_DATA_PATH"] != "" {
-			prefix = filepath.Join(env["STEAM_COMPAT_DATA_PATH"], "pfx")
-		}
-		if canonical, err := filepath.EvalSymlinks(prefix); err == nil {
-			prefix = canonical
-		}
-		a.SteamAppID = env["SteamAppId"]
+		prefix, steamAppID := wineEnvironmentIdentity(string(readBound(base+"/environ", 1<<20)))
+		a.SteamAppID = steamAppID
 		a.Prefix = prefix
 		// Only argv[0], corroborated by an executable mapping, identifies the image. Arguments may name another program.
 		args := strings.Split(string(readBound(base+"/cmdline", 65536)), "\x00")

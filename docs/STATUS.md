@@ -1,3 +1,31 @@
+# Interim Wine UDP speedup release
+
+This release excludes the unfinished shared-observation work and retains
+independent per-flow ownership proofs. It enables the digest-verified per-TID
+holder iterator, adds necessary-condition Wine scan filters, and increases the
+census partition from 24 to 32 within global 48 packets (byte limits unchanged).
+
+Retained isolated broad comparison (q8177s6d), same workload and desktop-UID
+Wine fixtures, initial-user-namespace root daemon in private namespaces:
+- Sustained allowed delivery: 6806/7500 baseline, 7491/7500 candidate.
+- Wine median/p99 delivery latency: 152.45/228.67 -> 75.40/122.21 ms.
+- CPU: 149.30 -> 160.72 core-seconds per approximately 60.66 seconds.
+- Four-flow allowed delivery: 1333/7500 -> 3073/7500 (still poor).
+- Deliberate overload allowed delivery: 230/10000 -> 466/10000.
+- Native overload delivery: 365/609 -> 500/607; sustained native delivery
+  complete; four-flow native delivery 1820/1820 -> 1819/1820.
+- Separate Deny and other-prefix delivery remained zero; live policy changes
+  were exercised. These are receiver results, not GUI acceptance.
+- Diagnostics cover the first 120 seconds only; later rounds use receiver,
+  queue, CPU and iterator counters.
+
+This is not a gaming-latency fix or a CPU improvement. Nine sustained packets
+were still lost. Ownership-change/missing-socket refusals from earlier gameplay
+remain unexplained where precise comparison evidence was not captured.
+No actual game is named or special-cased in production.
+
+The following earlier status is retained as history:
+
 # FlowGate status
 
 This is the maintained status page. Historical deployment and acceptance notes

@@ -11,6 +11,7 @@ import (
 	"flowgate/internal/monitor"
 	"flowgate/internal/policy"
 	"flowgate/internal/queue"
+	diagnostics "flowgate/internal/serveprofile"
 	"flowgate/internal/store"
 	"flowgate/internal/udpaccount"
 	"fmt"
@@ -175,6 +176,10 @@ func serve() error {
 	fs.Var(&localZones, "zone-local", "repeatable local policy prefix for isolated acceptance")
 	socket := fs.String("socket", ".workspace/run/control.sock", "private socket path")
 	parent := fs.String("parent-netns", "", "original namespace identity (required)")
+	rootPID := fs.Int("root-lab-parent-pidns-fd", -1, "explicit root lab only: inherited parent PID namespace FD")
+	rootMount := fs.Int("root-lab-parent-mntns-fd", -1, "explicit root lab only: inherited parent mount namespace FD")
+	iteratorHelper := fs.String("holder-iterator-helper", "", "explicit reviewed per-task descriptor iterator loader")
+	wineUID := fs.Int("wine-uid", os.Getuid(), "desktop Wine UID; different UID requires isolated root lab")
 	direction := fs.String("direction", "incoming", "incoming/outgoing")
 	timeout := fs.Duration("timeout", 15*time.Second, "pending timeout")
 	discoverWine := fs.Bool("discover-wine", false, "discover same-user brokers and validate their live owner census in this isolated namespace")
@@ -191,14 +196,28 @@ func serve() error {
 		return fmt.Errorf("refusing enforcement without a different parent network namespace; use scripts/lab.sh")
 	}
 	uidmap, _ := os.ReadFile("/proc/self/uid_map")
-	if !strings.HasSuffix(strings.TrimSpace(string(uidmap)), "1") {
+	if *rootPID >= 0 || *rootMount >= 0 {
+		if err := isolatedRootLab(*rootPID, *rootMount); err != nil {
+			return err
+		}
+	} else if !strings.HasSuffix(strings.TrimSpace(string(uidmap)), "1") {
 		return fmt.Errorf("lab requires a single-user unprivileged user namespace")
+	}
+	if *wineUID < 0 || uint64(*wineUID) > uint64(^uint32(0)) || (*wineUID != os.Getuid() && *rootPID < 0) {
+		return fmt.Errorf("invalid lab Wine UID")
 	}
 	if *direction != "incoming" && *direction != "outgoing" {
 		return fmt.Errorf("invalid direction")
 	}
 	if *timeout < time.Second || *timeout > time.Minute {
 		return fmt.Errorf("timeout must be 1s..1m")
+	}
+	if *iteratorHelper != "" {
+		close, err := identity.EnableHolderIterator(*iteratorHelper, holderIteratorSHA256)
+		if err != nil {
+			return fmt.Errorf("isolated iterator required but unavailable: %w", err)
+		}
+		defer close()
 	}
 	p, err := filepath.Abs(*socket)
 	if err != nil {
@@ -262,7 +281,7 @@ func serve() error {
 				return err
 			}
 		}
-		options := identity.WineObserverOptions{Helper: *helper, UID: uint32(os.Getuid()), Scratch: *scratch, Discover: *discoverWine}
+		options := identity.WineObserverOptions{Helper: *helper, UID: uint32(*wineUID), Scratch: *scratch, Discover: *discoverWine}
 		if !*discoverWine {
 			options.RuntimeBins = strings.Split(*bins, ",")
 			options.Prefixes = strings.Split(*observe, ",")
@@ -324,6 +343,10 @@ func serve() error {
 	defer ro.Close()
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
+	stopProfile := diagnostics.StartFromEnvironment(ctx, func() any {
+		return map[string]any{"queue_health": e.QueueHealth.Snapshot(true), "holder_enumeration": identity.HolderEnumeration()}
+	})
+	defer stopProfile()
 	// Exclusive fixed table creation fails if present; cleanup is namespace-owned and table-specific.
 	hook := "input"
 	if *direction == "outgoing" {

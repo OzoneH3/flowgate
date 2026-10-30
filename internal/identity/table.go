@@ -544,6 +544,9 @@ func (w *WineTable) helperPeers(broker *Process) int {
 		if err != nil {
 			continue
 		}
+		if !mayHaveWinePrefix(pid, w.prefix) || !mayShareWineScope(pid, broker, true) || !mayShareWinePrefix(pid, w.prefix) {
+			continue
+		}
 		fds, scanErr := readSocketFDs(pid, true)
 		if !mayBeHelperPeer(bf, peers, fds, scanErr) {
 			continue
@@ -609,6 +612,9 @@ func (w *WineTable) imageRevisionVisible(broker *Process, path, revision string)
 	for _, e := range entries {
 		pid, err := strconv.Atoi(e.Name())
 		if err != nil {
+			continue
+		}
+		if !mayHaveWinePrefix(pid, w.prefix) || !mayShareWineScope(pid, broker, false) || !mayShareWinePrefix(pid, w.prefix) {
 			continue
 		}
 		if !mayBeWineProcess(pid) {

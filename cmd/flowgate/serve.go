@@ -55,6 +55,7 @@ func serveCommand(args []string) error {
 	tcpShared := fs.Bool("tcp-initiation-observe-shared", false, "explicit shared sockops observation; never changes callback/tuning fields; requires foreign close callbacks")
 	tcpCgroup := fs.String("tcp-initiation-cgroup", "/sys/fs/cgroup", "cgroup-v2 observation coverage; current network namespace only")
 	helper := fs.String("udp-helper", "", "reviewed UDP native helper; pinned at startup but never implicitly attached")
+	iteratorHelper := fs.String("holder-iterator-helper", "", "explicit reviewed task_file iterator loader; capability failure retains /proc")
 	allowProtection := fs.Bool("allow-protection", false, "explicit selected administrator authority for continuous Start/Stop")
 	protectionState := fs.String("protection-state", "/var/lib/flowgate/protection.json", "durable desired protection mode")
 	restoreUDP := fs.Bool("restore-udp", false, "restore previously authorized machine UDP monitoring independently of firewall")
@@ -91,6 +92,14 @@ func serveCommand(args []string) error {
 	}
 	if err := daemon.SecureDirectory(filepath.Dir(*database)); err != nil {
 		return err
+	}
+	if *iteratorHelper != "" {
+		close, err := identity.EnableHolderIterator(*iteratorHelper, holderIteratorSHA256)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "holder iterator unavailable; using /proc:", err)
+		} else {
+			defer close()
+		}
 	}
 	db, err := store.OpenExclusive(*database)
 	if err != nil {

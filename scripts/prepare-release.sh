@@ -45,7 +45,12 @@ if [ -f "$backend/manifest.json" ]; then
  echo "Backend bundle ready: $backend"
 else
  mkdir -p "$backend"
-build_step 1 "Build daemon" "$logs/build-daemon.log" go build -trimpath -ldflags "-X main.sourceRevision=$revision" -o "$backend/flowgate" ./cmd/flowgate
+build_step 1 "Build daemon and holder iterator" "$logs/build-daemon.log" sh -c '
+ scripts/build.sh holder-iterator
+ digest=$(sha256sum .workspace/holder-iterator | cut -d " " -f1)
+ go build -trimpath -ldflags "-X main.sourceRevision=$1 -X main.holderIteratorSHA256=$digest" -o "$2/flowgate" ./cmd/flowgate
+ cp .workspace/holder-iterator "$2/holder-iterator"
+' sh "$revision" "$backend"
 build_step 2 "Build receiver fixtures" "$logs/build-fixtures.log" go build -trimpath -o "$backend/native" ./fixtures/process-rule
 cp "$backend/native" "$backend/native-other"
 build_step 3 "Build Wine observer" "$logs/build-wine.log" scripts/build.sh wine-table
@@ -71,7 +76,7 @@ python3 - "$backend" "$revision" <<'PY'
 import hashlib,json,pathlib,sys
 b=pathlib.Path(sys.argv[1]);revision=sys.argv[2]
 evidence=[b/'go-race.log',b/'go-vet.log']
-executables=['flowgate','native','native-other','tcp-initiation','udp-collector','launch','control.py','recover.py','uninstall.py','install-monitoring.py','host-acceptance.py']
+executables=['flowgate','holder-iterator','native','native-other','tcp-initiation','udp-collector','launch','control.py','recover.py','uninstall.py','install-monitoring.py','host-acceptance.py']
 names=[*executables,'wine-owner-observer.exe','flowgate.service','flowgate-guard.service','50-flowgate-guard.conf',*[p.name for p in evidence]]
 import subprocess
 v=json.loads(subprocess.run([str(b/'flowgate'),'version'],check=True,capture_output=True,text=True,timeout=10).stdout)

@@ -162,6 +162,15 @@ func TestHolderChurnRealTopologies(t *testing.T) {
 		t.Skip("C compiler unavailable")
 	}
 	dir := t.TempDir()
+	// sockaddr_un has a short pathname limit. Keep the socket in this owned
+	// temp directory, addressed through its pinned directory FD, even when the
+	// workspace and nested test name are long.
+	socketDir, err := os.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { socketDir.Close() })
+	socketBase := fmt.Sprintf("/proc/%d/fd/%d", os.Getpid(), socketDir.Fd())
 	// Two distinct executables (separate directories, same source) so a
 	// transfer between them is a transfer between two synthetic applications.
 	alpha, beta := filepath.Join(dir, "alpha", "churn"), filepath.Join(dir, "beta", "churn")
@@ -254,11 +263,11 @@ func TestHolderChurnRealTopologies(t *testing.T) {
 		expectRefused(t, out, f.socket, "membership_changed", "holder_appeared")
 	})
 	t.Run("transfer to another executable with receiver topology change refuses", func(t *testing.T) {
-		path := filepath.Join(dir, "recv.sock")
+		path := filepath.Join(socketBase, "recv.sock")
 		f := startChurnFixture(t, alpha, "4", "tcp")
 		r := startChurnFixture(t, beta, "recv", path)
 		_, out := observeChurn(f.socket, func() {
-			f.command(t, "join", "JOINED ") // alpha's own churn stays reconcilable
+			f.command(t, "join", "JOINED ")  // alpha's own churn stays reconcilable
 			r.command(t, "recv", "SPAWNED ") // beta gains a thread, then the descriptor
 			f.command(t, "send "+path, "SENT")
 			r.received(t, f.socket)
@@ -290,7 +299,7 @@ func TestHolderChurnRealTopologies(t *testing.T) {
 		// holder_census.go: a descriptor passed later without a visible
 		// topology change is a snapshot boundary. This records the limitation;
 		// it must never be read as universal transfer detection.
-		path := filepath.Join(dir, "recv-pre.sock")
+		path := filepath.Join(socketBase, "recv-pre.sock")
 		f := startChurnFixture(t, alpha, "4", "udp")
 		r := startChurnFixture(t, beta, "recv-pre", path)
 		_, out := observeChurn(f.socket, func() {

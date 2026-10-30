@@ -2,12 +2,12 @@
 # Build selected targets only; never install or start host protection.
 set -eu
 cd "$(dirname "$0")/.."
-usage() { echo 'Usage: scripts/build.sh TARGET [TARGET ...]'; echo 'Targets: desktop electron windows wine-table tcp-initiation udp'; }
+usage() { echo 'Usage: scripts/build.sh TARGET [TARGET ...]'; echo 'Targets: desktop electron windows wine-table tcp-initiation udp holder-iterator'; }
 if [ "$#" -eq 1 ] && [ "$1" = --help ]; then usage; exit 0; fi
 [ "$#" -gt 0 ] || { usage >&2; exit 2; }
 # Reject the complete request before starting any build.
 for target in "$@"; do
- case "$target" in desktop|electron|windows|wine-table|tcp-initiation|udp) ;; *) usage >&2; exit 2 ;; esac
+ case "$target" in desktop|electron|windows|wine-table|tcp-initiation|udp|holder-iterator) ;; *) usage >&2; exit 2 ;; esac
 done
 . ./scripts/go-env.sh
 export npm_config_cache="$PWD/.workspace/npm-cache" XDG_CACHE_HOME="$PWD/.workspace/cache" electron_config_cache="$PWD/.workspace/electron-cache"
@@ -50,6 +50,13 @@ for target in "$@"; do
   clang -g -O2 -target bpf -isystem .workspace/tcp-initiation-build -c collectors/tcp-initiation/initiation.bpf.c -o .workspace/tcp-initiation-build/initiation.bpf.o
   bpftool gen skeleton .workspace/tcp-initiation-build/initiation.bpf.o > .workspace/tcp-initiation-build/initiation.skel.h
   cc -Wall -Wextra -Werror -O2 -I .workspace/tcp-initiation-build collectors/tcp-initiation/collector.c -o .workspace/tcp-initiation-collector $(pkg-config --cflags --libs libbpf)
+  ;;
+ holder-iterator)
+  mkdir -p .workspace/holder-iterator-build
+  bpftool btf dump file /sys/kernel/btf/vmlinux format c > .workspace/holder-iterator-build/vmlinux.h
+  clang -g -O2 -target bpf -isystem .workspace/holder-iterator-build -c collectors/holder-iterator/fds.bpf.c -o .workspace/holder-iterator-build/fds.bpf.o
+  bpftool gen skeleton .workspace/holder-iterator-build/fds.bpf.o > .workspace/holder-iterator-build/fds.skel.h
+  cc -Wall -Wextra -O2 -I .workspace/holder-iterator-build collectors/holder-iterator/loader.c -o .workspace/holder-iterator $(pkg-config --cflags --libs libbpf)
   ;;
  udp)
   mkdir -p .workspace/udp-build

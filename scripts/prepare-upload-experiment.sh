@@ -9,7 +9,10 @@ revision=$(git rev-parse HEAD)
 out="$PWD/.workspace/experimental-upload-bundles/$revision"
 [ ! -e "$out" ] || { echo 'Bundle already exists' >&2; exit 1; }
 mkdir -p "$out/backend" "$out/electron"
-go build -trimpath -ldflags "-X main.sourceRevision=$revision" -o "$out/backend/flowgate" ./cmd/flowgate
+scripts/build.sh holder-iterator
+digest=$(sha256sum .workspace/holder-iterator | cut -d " " -f1)
+cp .workspace/holder-iterator "$out/backend/holder-iterator"
+go build -trimpath -ldflags "-X main.sourceRevision=$revision -X main.holderIteratorSHA256=$digest" -o "$out/backend/flowgate" ./cmd/flowgate
 experimental/upload-shaper/build.sh "$out/helpers"
 npm --prefix electron run build
 cp -r electron/dist "$out/electron/dist"

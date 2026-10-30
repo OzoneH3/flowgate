@@ -12,6 +12,10 @@ import (
 
 var sourceRevision string
 
+// Set by the matched build after compiling the optional iterator loader.
+// Empty disables loading even if a helper path is supplied.
+var holderIteratorSHA256 string
+
 func buildIdentity() daemon.BuildIdentity {
 	b := daemon.BuildIdentity{Source: sourceRevision, MaxRuleSchema: policy.NetworkEndpointSchema}
 	if v, ok := debug.ReadBuildInfo(); ok {

@@ -2,6 +2,7 @@ package identity
 
 import (
 	"errors"
+	"flowgate/internal/fditer"
 	diagnostics "flowgate/internal/serveprofile"
 	"fmt"
 	"io"
@@ -83,6 +84,7 @@ var defaultHolderLimits = holderLimits{Groups: 8192, TasksPerGroup: 4096, Tasks:
 
 // holderProc is the /proc surface; tests substitute a model of it.
 type holderProc struct {
+	iterator  *fditer.Reader // optional fresh per-TID enumeration; never cached evidence
 	groups    func() ([]int, error)
 	tasks     func(tgid, max int) ([]int, error)
 	stat      func(tgid, tid int) (start string, zombie bool, err error)
@@ -315,7 +317,7 @@ func (p holderProc) scanGroup(tgid int, wanted map[string]bool, lim holderLimits
 	// descriptor budgets bound it.
 	for _, rep := range reps {
 		stopped, late := false, false
-		err := p.fds(tgid, rep, func(path, target string) bool {
+		err := p.scanFDTable(tgid, rep, lim.FDs-*fdCount, func(path, target string) bool {
 			if *fdCount++; *fdCount > lim.FDs {
 				stopped = true
 				return false
@@ -525,6 +527,7 @@ func readFDTable(base string, readlink func(string) (string, error), visit func(
 
 func procHolders() holderProc {
 	return holderProc{
+		iterator: holderIterator.Load(),
 		groups: func() ([]int, error) {
 			entries, err := os.ReadDir("/proc")
 			if err != nil {
