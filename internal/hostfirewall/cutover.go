@@ -63,6 +63,9 @@ func cutoverProfileWith(ctx context.Context, initial, stage, preserve, finish fu
 // foreign token refuses; a same-token structural change refuses activation and
 // remains subject to the ordinary owned-table rollback cleanup.
 func finishCutover(ctx context.Context, token, profile, expectedDigest string, bootstrap ...policy.BootstrapInterface) error {
+	return finishCutoverWithSocketGate(ctx, token, profile, expectedDigest, false, bootstrap...)
+}
+func finishCutoverWithSocketGate(ctx context.Context, token, profile, expectedDigest string, socketGate bool, bootstrap ...policy.BootstrapInterface) error {
 	present, err := owns(Record{Token: token})
 	if err != nil {
 		return err
@@ -80,9 +83,12 @@ func finishCutover(ctx context.Context, token, profile, expectedDigest string, b
 	if err = ctx.Err(); err != nil {
 		return err
 	}
-	return batch("delete table inet " + Table + "\n" + profileRules(token, profile, bootstrap...))
+	return batch("delete table inet " + Table + "\n" + profileRulesWithSocketGate(token, profile, socketGate, bootstrap...))
 }
 func activateProfile(ctx context.Context, token, profile string, claim func() error, bootstrap ...policy.BootstrapInterface) error {
+	return activateProfileWithSocketGate(ctx, token, profile, claim, false, bootstrap...)
+}
+func activateProfileWithSocketGate(ctx context.Context, token, profile string, claim func() error, socketGate bool, bootstrap ...policy.BootstrapInterface) error {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	var expectedDigest string
@@ -104,7 +110,7 @@ func activateProfile(ctx context.Context, token, profile string, claim func() er
 			return preserveConfirmed(ctx, fs, setMark)
 		},
 		func() error {
-			return finishCutover(ctx, token, profile, expectedDigest, bootstrap...)
+			return finishCutoverWithSocketGate(ctx, token, profile, expectedDigest, socketGate, bootstrap...)
 		},
 	)
 }

@@ -73,7 +73,9 @@ type TrafficManager interface {
 	Stop(...string) (udpaccount.Status, error)
 }
 type Engine struct {
-	QueueHealth queuehealth.Registry
+	socketAuthorization    *socketAuthorization // guarded by mu
+	zonePublisherInstalled bool
+	QueueHealth            queuehealth.Registry
 	// RuntimeChecks returns a cached read-only capability snapshot, independently of enforcement.
 	RuntimeChecks     func() []readiness.Check
 	Essential         *essential.Manager
@@ -277,7 +279,16 @@ func (e *Engine) PrepareUDPBatch(f identity.Flow, token string, count int, censu
 			return nil, false
 		}
 	} else {
-		a = e.Resolve(f)
+		var shared bool
+		if census {
+			a, shared = e.resolveSocketBatch(f)
+			if !shared {
+				a, shared = e.resolveSocketInitialBatch(f)
+			}
+		}
+		if !shared {
+			a = e.Resolve(f)
+		}
 	}
 	return func() Event {
 		if count == 0 {
@@ -320,7 +331,14 @@ func (e *Engine) ObserveResolved(f identity.Flow, token string, a identity.Attri
 	defer diagnostics.Begin(diagnostics.PolicyLocked).End()
 	e.peerPrefetched = peers
 	defer func() { e.peerPrefetched = nil; e.mu.Unlock() }()
-	return e.observeResolvedWithLinkLocked(f, token, a, &packetLinkObservation{device, known})
+	v := e.observeResolvedWithLinkLocked(f, token, a, &packetLinkObservation{device, known})
+	// Deny/Ask/Once traffic must not create background census work. Only a
+	// configured application Allow is a candidate; publication still requires
+	// its own fresh observation and current policy check.
+	if v.State == "allowed" && v.decided != nil && v.decided.Action == "allow" && v.decided.Filter.Application != "" {
+		e.trackSocketFlowLocked(f)
+	}
+	return v
 }
 
 // Caller holds e.mu. Shared by ordinary fresh attribution and explicit network
@@ -602,6 +620,9 @@ func (e *Engine) decideLocked(id, action, scope string, uid uint32, admin bool, 
 					next[i] = r
 				}
 			}
+			if err := e.revokeSocketGrantsLocked(); err != nil {
+				return Event{}, err
+			}
 			if e.SaveRules != nil {
 				if err := e.SaveRules(next); err != nil {
 					return Event{}, mutationError("persistence_failed", "rule persistence failed: "+err.Error())
@@ -686,6 +707,9 @@ func (e *Engine) SetRules(rules []policy.Rule) error {
 			next.Version++
 		}
 		rules[i] = next
+	}
+	if err := e.revokeSocketGrantsLocked(); err != nil {
+		return err
 	}
 	if changed && e.SaveRules != nil {
 		if err := e.SaveRules(rules); err != nil {
@@ -866,6 +890,9 @@ func (e *Engine) ChangeRule(generation, id, action string, expected *uint64, uid
 	}
 	if !found {
 		return mutationError("not_found", "rule no longer exists; reload authoritative state")
+	}
+	if err := e.revokeSocketGrantsLocked(); err != nil {
+		return err
 	}
 	if err := e.SaveRules(next); err != nil {
 		return mutationError("persistence_failed", "rule transaction failed; old policy retained: "+err.Error())

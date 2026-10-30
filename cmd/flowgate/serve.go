@@ -12,6 +12,7 @@ import (
 	"flowgate/internal/monitor"
 	"flowgate/internal/readiness"
 	diagnostics "flowgate/internal/serveprofile"
+	"flowgate/internal/socketgrant"
 	"flowgate/internal/store"
 	"flowgate/internal/tcpinit"
 	"flowgate/internal/udpaccount"
@@ -56,6 +57,7 @@ func serveCommand(args []string) error {
 	tcpCgroup := fs.String("tcp-initiation-cgroup", "/sys/fs/cgroup", "cgroup-v2 observation coverage; current network namespace only")
 	helper := fs.String("udp-helper", "", "reviewed UDP native helper; pinned at startup but never implicitly attached")
 	iteratorHelper := fs.String("holder-iterator-helper", "", "explicit reviewed task_file iterator loader; capability failure retains /proc")
+	socketAuthorization := fs.Bool("socket-authorization", false, "opt-in 250ms socket-bound IPv4 UDP output authorization; requires supported build and continuous protection")
 	allowProtection := fs.Bool("allow-protection", false, "explicit selected administrator authority for continuous Start/Stop")
 	protectionState := fs.String("protection-state", "/var/lib/flowgate/protection.json", "durable desired protection mode")
 	restoreUDP := fs.Bool("restore-udp", false, "restore previously authorized machine UDP monitoring independently of firewall")
@@ -77,6 +79,9 @@ func serveCommand(args []string) error {
 	}
 	if (*allowEvaluation || *allowProtection) && !*administrator {
 		return fmt.Errorf("--allow-evaluation requires --administrator")
+	}
+	if *socketAuthorization && !*allowProtection {
+		return fmt.Errorf("--socket-authorization requires --allow-protection")
 	}
 	if !filepath.IsAbs(*evaluationState) {
 		return fmt.Errorf("--evaluation-state must be absolute")
@@ -182,6 +187,13 @@ func serveCommand(args []string) error {
 	e.Activity = observer.Snapshot
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
+	socketResolvers := daemon.SocketSessionResolvers{
+		Fresh: identity.Resolve,
+		Observed: func(f identity.Flow) (identity.Attribution, uint64) {
+			start := socketgrant.BootNow()
+			return identity.Resolve(f), start
+		},
+	}
 	if *wineHelper != "" {
 		health := readiness.NewRuntimeMonitor()
 		e.RuntimeChecks = health.Snapshot
@@ -198,11 +210,12 @@ func serveCommand(args []string) error {
 		if err = os.Chown(scratch, int(peer), -1); err != nil {
 			return err
 		}
-		wines, er := identity.NewWineObservers(identity.WineObserverOptions{Discover: len(wineBins) == 0 && len(winePrefixes) == 0, Helper: *wineHelper, RuntimeBins: wineBins, Prefixes: winePrefixes, UID: peer, Scratch: scratch})
+		wines, er := identity.NewWineObservers(identity.WineObserverOptions{ReserveRenewalCapacity: *socketAuthorization, Discover: len(wineBins) == 0 && len(winePrefixes) == 0, Helper: *wineHelper, RuntimeBins: wineBins, Prefixes: winePrefixes, UID: peer, Scratch: scratch})
 		if er != nil {
 			return er
 		}
 		defer wines.Close()
+		socketResolvers = daemon.SocketSessionResolvers{Fresh: wines.ResolveFresh, Observed: wines.ResolveObserved, Group: wines.ResolveFrozenRuntime, Diagnostics: wines.RenewalStatus}
 		resolver := identity.NewUDPAttributionReuse(wines.Resolve)
 		resolver.Try = wines.TryResolve
 		e.Resolve, e.TryResolve = resolver.Resolve, resolver.TryResolve
@@ -210,7 +223,20 @@ func serveCommand(args []string) error {
 	} else if len(wineBins) > 0 || len(winePrefixes) > 0 {
 		return fmt.Errorf("Wine runtime/prefix selection requires --wine-helper")
 	}
-	zoneManager := identity.NewZoneManager(zones.Legacy())
+	// Construct outside Engine.mu: the initial refresh publishes through Engine.
+	zoneManager := identity.NewZoneManagerWithPublisher(zones.Legacy(), e.NetworkZonePublisher())
+	previousRuntimeChecks := e.RuntimeChecks
+	e.RuntimeChecks = func() []readiness.Check {
+		var checks []readiness.Check
+		if previousRuntimeChecks != nil {
+			checks = append(checks, previousRuntimeChecks()...)
+		}
+		err := zoneManager.PublicationError()
+		if retained := e.PublishedSocketAuthorizationFailure(); retained != nil {
+			err = retained
+		}
+		return append(checks, zonePublicationChecks(err)...)
+	}
 	e.ZoneSource = zoneManager.Snapshot
 	observer.ZoneSource = zoneManager.Snapshot
 	go zoneManager.Run(ctx)
@@ -219,6 +245,19 @@ func serveCommand(args []string) error {
 	observer.InitiationEvents = initiation.Sample
 	evaluation := hostfirewall.NewEvaluation(ctx, e, *evaluationState, *socket, *database)
 	e.Evaluation = evaluation
+	if *socketAuthorization {
+		if err = configureSocketAuthorization(evaluation, e, socketResolvers); err != nil {
+			return err
+		}
+	}
+	sessionRuntimeChecks := e.RuntimeChecks
+	e.RuntimeChecks = func() []readiness.Check {
+		var checks []readiness.Check
+		if sessionRuntimeChecks != nil {
+			checks = append(checks, sessionRuntimeChecks()...)
+		}
+		return append(checks, socketSessionChecks(evaluation.SocketSessionFailure())...)
+	}
 	if *allowProtection {
 		e.ConfigureEssential(ctx, essential.Default())
 		if err = e.RepairMigratedEssential(); err != nil {

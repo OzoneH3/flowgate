@@ -95,28 +95,29 @@ type Response struct {
 	RequestRule      *RequestRulePreview         `json:"request_rule_preview,omitempty"`
 	Replayed         bool                        `json:"replayed,omitempty"`
 
-	PolicyView         *PolicyView                       `json:"policy_view,omitempty"`
-	PolicyExplanations *PolicyExplanations               `json:"policy_explanations,omitempty"`
-	BackendMode        string                            `json:"backend_mode,omitempty"`
-	Stopping           bool                              `json:"stopping,omitempty"`
-	Permissions        *Permissions                      `json:"permissions,omitempty"`
-	Capabilities       []string                          `json:"capabilities,omitempty"`
-	HolderEnumeration  *identity.HolderEnumerationStatus `json:"holder_enumeration,omitempty"`
-	ErrorCode          string                            `json:"error_code,omitempty"`
-	DeletedRule        *DeletedRule                      `json:"deleted_rule,omitempty"`
-	SavedRule          *policy.Rule                      `json:"saved_rule,omitempty"`
-	ScopePreview       string                            `json:"scope_preview,omitempty"`
-	Enforcement        *EnforcementStatus                `json:"enforcement,omitempty"`
-	Rules              []policy.Rule                     `json:"rules,omitempty"`
-	Activity           *identity.ActivitySnapshot        `json:"activity,omitempty"`
-	Version            int                               `json:"version"`
-	Generation         string                            `json:"generation"`
-	ReadOnly           bool                              `json:"read_only"`
-	Mode               string                            `json:"mode"`
-	ServerTime         time.Time                         `json:"server_time"`
-	PeerUID            uint32                            `json:"peer_uid"`
-	Events             []Event                           `json:"events,omitempty"`
-	ProcessLeases      *[]ProcessLease                   `json:"process_leases,omitempty"`
+	PolicyView          *PolicyView                       `json:"policy_view,omitempty"`
+	PolicyExplanations  *PolicyExplanations               `json:"policy_explanations,omitempty"`
+	BackendMode         string                            `json:"backend_mode,omitempty"`
+	Stopping            bool                              `json:"stopping,omitempty"`
+	Permissions         *Permissions                      `json:"permissions,omitempty"`
+	Capabilities        []string                          `json:"capabilities,omitempty"`
+	HolderEnumeration   *identity.HolderEnumerationStatus `json:"holder_enumeration,omitempty"`
+	SocketAuthorization map[string]any                    `json:"socket_authorization,omitempty"`
+	ErrorCode           string                            `json:"error_code,omitempty"`
+	DeletedRule         *DeletedRule                      `json:"deleted_rule,omitempty"`
+	SavedRule           *policy.Rule                      `json:"saved_rule,omitempty"`
+	ScopePreview        string                            `json:"scope_preview,omitempty"`
+	Enforcement         *EnforcementStatus                `json:"enforcement,omitempty"`
+	Rules               []policy.Rule                     `json:"rules,omitempty"`
+	Activity            *identity.ActivitySnapshot        `json:"activity,omitempty"`
+	Version             int                               `json:"version"`
+	Generation          string                            `json:"generation"`
+	ReadOnly            bool                              `json:"read_only"`
+	Mode                string                            `json:"mode"`
+	ServerTime          time.Time                         `json:"server_time"`
+	PeerUID             uint32                            `json:"peer_uid"`
+	Events              []Event                           `json:"events,omitempty"`
+	ProcessLeases       *[]ProcessLease                   `json:"process_leases,omitempty"`
 	// queue-reconcile-v1: other requests this operation settled (left awaiting).
 	Settled []SettledRequest `json:"settled,omitempty"`
 	// request-for-a-while-v1: the lease created from an ended request, which
@@ -204,6 +205,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 					r := Response{Build: e.Build, Capabilities: []string{ConditionalDeleteCapability, ConditionalMutationCapability, "explicit-administrator-v1"}, Version: 1, Generation: e.Generation, ReadOnly: readonly, Mode: e.Mode, ServerTime: time.Now(), PeerUID: cred.Uid}
 					holders := identity.HolderEnumeration()
 					r.HolderEnumeration = &holders
+					r.SocketAuthorization = e.PublishedSocketAuthorizationStatus()
 					if e.UploadShaping != nil {
 						r.Capabilities = append(r.Capabilities, "experimental-native-upload-v1", "experimental-native-download-v1", "experimental-traffic-priority-v1", "experimental-zone-shaping-v1")
 					}

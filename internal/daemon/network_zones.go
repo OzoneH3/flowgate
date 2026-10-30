@@ -50,3 +50,46 @@ func ClassifyActivity(a identity.ActivitySnapshot, z identity.NetworkZones) iden
 	}
 	return a
 }
+
+// PublishNetworkZones serializes kernel revocation with zone publication and
+// renewal publication. commit must only publish the supplied immutable snapshot;
+// it must not call back into Engine or acquire a zone publication mutex. The
+// caller holds that publication mutex before entering this method.
+//
+// A failed accelerator cannot roll back an observed network change. Existing
+// kernel grants retain their absolute deadlines, while all future publication
+// stops and the failure is returned for status reporting.
+func (e *Engine) PublishNetworkZones(next identity.NetworkZones, commit func()) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	var revokeErr error
+	if next.Revision != e.Zones.Revision {
+		revokeErr = e.revokeSocketGrantsLocked()
+		if revokeErr != nil && e.socketAuthorization != nil {
+			e.socketAuthorization.disabled = true
+			e.socketAuthorization.failure = revokeErr
+		}
+	}
+	commit()
+	if next.Revision == e.Zones.Revision {
+		return revokeErr
+	}
+	e.Zones = next
+	for _, v := range e.events {
+		v.Flow.NetworkScope = next.ClassifyFlow(v.Flow)
+	}
+	e.resetCachedLocked("network classification revision changed")
+	if e.prefetched == nil && !e.settling {
+		e.settleLaterLocked()
+	}
+	return revokeErr
+}
+
+// NetworkZonePublisher installs the required publication transaction before a
+// dynamic zone source is exposed to optional kernel authorization.
+func (e *Engine) NetworkZonePublisher() func(identity.NetworkZones, func()) error {
+	e.mu.Lock()
+	e.zonePublisherInstalled = true
+	e.mu.Unlock()
+	return e.PublishNetworkZones
+}

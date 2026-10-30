@@ -20,11 +20,12 @@ import (
 // NetworkSnapshot contains configuration, never traffic counters or geolocation.
 // It is scoped to the daemon's network namespace, just like socket attribution.
 type NetworkLink struct {
-	Index   uint32 `json:"index"`
-	Name    string `json:"name"`
-	Kind    string `json:"kind"`
-	Flags   uint32 `json:"flags"`
-	Address string `json:"address"`
+	Index            uint32 `json:"index"`
+	Name             string `json:"name"`
+	Kind             string `json:"kind"`
+	Flags            uint32 `json:"flags"`
+	Address          string `json:"address"`
+	PermanentAddress string `json:"permanent_address,omitempty"`
 }
 type NetworkAddress struct {
 	Interface uint32 `json:"interface"`
@@ -127,6 +128,8 @@ func collectNetwork() (NetworkSnapshot, error) {
 						v.Name = strings.TrimRight(string(a.Data), "\x00")
 					case unix.IFLA_ADDRESS:
 						v.Address = hex.EncodeToString(a.Data)
+					case unix.IFLA_PERM_ADDRESS:
+						v.PermanentAddress = hex.EncodeToString(a.Data)
 					case unix.IFLA_LINKINFO:
 						nested, e := netlink.UnmarshalAttributes(a.Data)
 						if e != nil {
@@ -259,21 +262,50 @@ func CollectNetwork() NetworkSnapshot {
 // Route notifications trigger a refresh; a one-second census also recovers
 // from lost netlink events and refreshes failed collections automatically.
 type ZoneManager struct {
-	mu      sync.RWMutex
-	legacy  NetworkZones
-	current NetworkZones
+	publication      sync.Mutex // lock order: publication -> Engine -> snapshot mu
+	publisher        func(NetworkZones, func()) error
+	publicationError error
+	mu               sync.RWMutex
+	legacy           NetworkZones
+	current          NetworkZones
 }
 
 func NewZoneManager(legacy NetworkZones) *ZoneManager {
-	m := &ZoneManager{legacy: legacy}
+	return NewZoneManagerWithPublisher(legacy, nil)
+}
+
+// The publisher runs outside the snapshot lock. It must commit the snapshot
+// even when accelerator revocation fails; errors describe degraded enforcement.
+// Configure it at construction, before any Run or Refresh calls.
+func NewZoneManagerWithPublisher(legacy NetworkZones, publisher func(NetworkZones, func()) error) *ZoneManager {
+	m := &ZoneManager{legacy: legacy, publisher: publisher}
 	m.Refresh()
 	return m
 }
 func (m *ZoneManager) Refresh() {
+	m.publication.Lock()
+	defer m.publication.Unlock()
 	z := AutomaticNetworkZones(m.legacy, CollectNetwork())
+	m.publish(z)
+}
+
+// Caller holds publication. No Engine path may call Refresh under Engine.mu.
+func (m *ZoneManager) publish(z NetworkZones) {
+	commit := func() { m.mu.Lock(); m.current = z; m.mu.Unlock() }
+	var err error
+	if m.publisher == nil {
+		commit()
+	} else {
+		err = m.publisher(z, commit)
+	}
 	m.mu.Lock()
-	m.current = z
+	m.publicationError = err
 	m.mu.Unlock()
+}
+func (m *ZoneManager) PublicationError() error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.publicationError
 }
 func (m *ZoneManager) Snapshot() NetworkZones { m.mu.RLock(); defer m.mu.RUnlock(); return m.current }
 func (m *ZoneManager) Run(ctx context.Context) {

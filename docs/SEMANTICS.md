@@ -593,3 +593,75 @@ Prefix canonicalization is performed only after scope checks. Existing mutable
 environment/symlink races remain. Pre-existing missing-prefix normalization to
 "." and potentially blocking prefix filesystem resolution remain separate
 limitations; this release does not claim to repair them.
+
+
+## Socket-bound authorization candidate (not release-approved)
+
+The isolated candidate adds an explicit, default-off `serve
+--socket-authorization` option. It requires `--allow-protection` and the
+`socketprototype` build. It activates only within a continuous protection
+session with the `both` profile. This documents candidate behavior; existing
+installed launchers and host protection are unchanged.
+
+Only verified, explicit application-rule Allows can authorize IPv4 UDP output.
+A grant binds socket cookie, full local/remote tuple, direction, network
+namespace and the output interface observed by NFQUEUE. A cookie is not owner
+identity. Application/user/Wine-prefix proof and current policy remain mandatory.
+The actual output interface is checked by a numeric nft `meta oif` match;
+interface identity alone never supplies zone authority. A changed route misses
+the old entry and returns to the queue. ECMP may therefore cause queue fallback.
+
+Expiry is at most **250 ms from the start of fresh verification**, using
+BOOTTIME in userspace and the kernel, including suspend. Hits and later packets
+do not renew it. Policy/zone publication revokes prior generations; a failed
+revocation disables further publication. A stalled verifier cannot extend a
+grant. Descriptor sharing, inheritance and Wine logical transfers are not all
+synchronously observable: a denied recipient of an already-authorized socket
+can use its exact authorized destination until revocation or that hard expiry.
+The maximum ownership-transfer exposure is 250 ms, not zero. Previously admitted
+packets may still arrive later through network or shaping queues.
+
+Deny, Ask, ambiguous ownership, unsupported traffic and exhausted capacity use
+ordinary enforcement. TCP, IPv6 and incoming traffic remain on their existing
+paths. At most 64 entries/eight per application and 32 fixed interface instances
+are retained. Active IPv4 interfaces, preferring default routes, are selected at
+session start; skipped or newly created links remain queued. Link identity
+change or watcher uncertainty disables acceleration for the session; normal
+carrier/MTU changes do not. Status advises a deliberate protection restart to
+retry. Accelerator failure is optional degradation, not permission to stop the
+firewall or accept unverified traffic.
+
+The session installs fixed rules before recording its audited table digest.
+The record selects the digest format; legacy records retain legacy semantics.
+For the candidate format, only tagged socket-output numeric interface matches
+are normalized against stable before/after interface snapshots. Ambiguous
+snapshots are inconclusive, never silently accepted. Acceleration is disabled
+on uncertainty; repeated uncertainty fails the audit. All other rule content
+remains audited. Stop revokes before stopping the queue; resource release
+follows confirmed owned-table deletion. Crash grants expire independently of
+userspace, and recorded continuous recovery removes old kernel references.
+
+The fast path skips attribution queueing only. Later admission, limits and
+priority hooks must remain effective. Traffic accounting stays with the existing
+collector/ledger; authorization counters are diagnostic totals, not additional
+usage. The regular API publishes a compact, detached status snapshot without
+waiting for the policy lock; detailed renewal/observer histories are excluded
+from that periodic snapshot. Status is presentation, never authorization evidence.
+
+Three finite production-route Wine flood runs measured no post-startup loss or
+added-delay excursions above 10 ms, with maximum paired added delay below 1.3 ms.
+Startup still lost 25–26 of 15,000 offered packets per run. A separate no-flood
+run lost no packets but used about 1.07 additional CPU cores for one synthetic
+application with two sockets and a 128-process background population. The
+bounded host diagnostic measured eight complete native checks at 39–44 ms;
+it is not a full Wine renewal or host gameplay measurement.
+
+An isolated VM verified upload caps, a live cap edit, supported native TCP
+download limits and TCP priority competition while UDP acceleration was active.
+UDP download shaping is not supported by the existing shaper; UDP-versus-UDP
+priority and Wine shaping were not established by that fixture. These finite
+results do not establish an unconditional latency guarantee or final release
+acceptance. CPU work and startup packet loss remain open. Startup delay is
+accepted separately; startup packet loss has not been waived. Deployment requires
+a separate exact candidate review and explicit approval of the 250 ms transfer
+exposure.

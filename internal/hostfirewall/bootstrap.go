@@ -67,7 +67,7 @@ func refreshBootstrap(ctx context.Context, dir string, record *Record, next []po
 		if !present {
 			return fmt.Errorf("owned interception table disappeared during DHCP refresh")
 		}
-		before, err := nft("-j", "list", "table", "inet", Table)
+		before, err := tableListing(Table, record.DigestFormat)
 		if err != nil {
 			return err
 		}
@@ -85,13 +85,13 @@ func refreshBootstrap(ctx context.Context, dir string, record *Record, next []po
 		if err := batch(fmt.Sprintf("flush chain inet %s dhcp_input\nflush chain inet %s dhcp_output\n", Table, Table) + input + output); err != nil {
 			// nft transactions are atomic. Retry an unchanged table next tick;
 			// never excuse a partially changed or foreign table.
-			if unchanged, probeErr := tableDigest(); probeErr == nil && unchanged == record.TableDigest {
+			if unchanged, probeErr := tableDigestForFormat(Table, record.DigestFormat); probeErr == nil && unchanged == record.TableDigest {
 				log.Printf("WARNING: DHCP refresh transaction failed; retaining active scopes: %v", err)
 				return nil
 			}
 			return err
 		}
-		after, err := nft("-j", "list", "table", "inet", Table)
+		after, err := tableListing(Table, record.DigestFormat)
 		if err != nil {
 			return err
 		}

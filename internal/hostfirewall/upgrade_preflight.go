@@ -25,7 +25,7 @@ func UpgradePreflight(ctx context.Context, dir, profile string) ([]readiness.Che
 			return nil, err
 		}
 		if present {
-			digest, err := tableDigest()
+			digest, err := tableDigestForFormat(Table, r.DigestFormat)
 			if err != nil || digest != r.TableDigest || r.Start == "" || startID(r.PID) != r.Start {
 				return nil, fmt.Errorf("cannot verify current consumer and owned interception before upgrade")
 			}

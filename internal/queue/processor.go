@@ -5,6 +5,7 @@ import (
 	"flowgate/internal/daemon"
 	"flowgate/internal/identity"
 	"flowgate/internal/queuehealth"
+	"runtime/pprof"
 	"sync/atomic"
 	"time"
 )
@@ -76,6 +77,15 @@ func (p *packetProcessor) finish(j packetJob, v daemon.Event) {
 }
 
 func (p *packetProcessor) processBatch(jobs []packetJob, stopping, census bool) bool {
+	work := "queue_general"
+	if census {
+		work = "queue_census"
+	}
+	var done bool
+	pprof.Do(p.ctx, pprof.Labels("flowgate_work", work), func(context.Context) { done = p.processBatchProfiled(jobs, stopping, census) })
+	return done
+}
+func (p *packetProcessor) processBatchProfiled(jobs []packetJob, stopping, census bool) bool {
 	live := make([]packetJob, 0, len(jobs))
 	for _, j := range jobs {
 		if !stopping && p.ctx.Err() == nil && time.Now().Before(j.deadline) {

@@ -363,20 +363,29 @@ func (w *WineTable) resolveLocked(f Flow) Attribution {
 	return w.resolveAttributionLocked(f, Resolve(f))
 }
 
-func (w *WineTable) resolveAttributionLocked(f Flow, a Attribution) Attribution {
+type preparedWineCensus struct {
+	flow    Flow
+	initial Attribution
+	broker  *Process
+	family  int
+	first   tableSnapshot
+	rows    []WindowsOwner
+}
+
+func (w *WineTable) prepareCensusLocked(f Flow, a Attribution, serverValid func(*Process) bool) (*preparedWineCensus, Attribution) {
 	if w.session != nil && !w.session.current() {
 		a.Application = nil
 		a.Association = nil
 		a.setReason(ReasonRuntimeSessionChanged, "attached runtime session replaced; explicit reattachment required")
 		w.stop()
-		return a
+		return nil, a
 	}
 	// This adapter must never fall back to the weaker broker/client assumption.
 	trusted, err := os.Stat(w.broker)
 	if err != nil {
 		a.Application = nil
 		a.setReason(ReasonRuntimeBrokerUnavailable, "configured census broker unavailable")
-		return a
+		return nil, a
 	}
 	var broker *Process
 	for i := range a.Owners {
@@ -390,28 +399,28 @@ func (w *WineTable) resolveAttributionLocked(f Flow, a Attribution) Attribution 
 		// A sole unresolved owner can be the broker itself. Only dispatch to
 		// the direct-client capability after checking the pinned executable.
 		if directUnresolved(a) && w.session != nil {
-			return w.resolveDirect(f, a)
+			return nil, w.resolveDirect(f, a)
 		}
 		for _, p := range a.Owners {
 			if strings.HasPrefix(p.Application.Kind, "wine") && p.Application.Prefix == w.prefix {
 				a.Application = nil
 				a.Association = nil
 				a.setReason(ReasonRuntimeEvidenceIncomplete, "selected runtime lacks pinned broker evidence")
-				return a
+				return nil, a
 			}
 		}
-		return a // Native traffic retains its original behavior.
+		return nil, a // Native traffic retains its original behavior.
 	}
 	a.Application = nil
 	a.Association = nil
 	a.Status = "unidentified"
 	a.setReason(ReasonRuntimeEvidenceIncomplete, "Wine census relationship incomplete")
 	if !a.VisibilityComplete || len(a.Sockets) != 1 || broker.Application.Prefix != w.prefix || (f.Direction != "incoming" && f.Direction != "outgoing") {
-		return a
+		return nil, a
 	}
 	for _, p := range a.Owners {
 		if p.PID != broker.PID && (p.Application.Kind != "wine" || p.Application.Prefix != w.prefix || p.UID != broker.UID) {
-			return a
+			return nil, a
 		}
 	}
 	family := 4
@@ -420,26 +429,36 @@ func (w *WineTable) resolveAttributionLocked(f Flow, a Attribution) Attribution 
 	}
 	if family == 6 && f.Local.Addr().Is4() && (a.Sockets[0].V6Only == nil || *a.Sockets[0].V6Only) {
 		a.setReason(ReasonRuntimeEvidenceIncomplete, "IPv4 delivery to IPv6 socket requires observed dual-stack mode")
-		return a
+		return nil, a
 	}
 	first, rows, err := w.snapshotRows(f, family)
 	if err != nil {
 		a.setReason(ReasonRuntimeCensusUnavailable, err.Error())
-		return a
+		return nil, a
 	}
-	if !w.sameServer(broker) {
+	if !serverValid(broker) {
 		a.setReason(ReasonRuntimeEvidenceIncomplete, "helper/broker Unix peer relationship missing")
-		return a
+		return nil, a
 	}
-	// Bookend with fresh kernel cookies and FD-holder identities, then another
-	// runtime census. This detects observed changes, not adversarial ABA races.
-	again := Resolve(f)
-	second, err := w.snapshotFamily(f.Protocol, family)
+	return &preparedWineCensus{f, a, broker, family, first, rows}, Attribution{}
+}
+
+func (w *WineTable) completeCensusLocked(p *preparedWineCensus, again Attribution, imageVisible func(*Process, string, string) bool) Attribution {
+	second, err := w.snapshotFamily(p.flow.Protocol, p.family)
 	if err != nil {
+		a := p.initial
 		a.setReason(ReasonRuntimeCensusUnavailable, err.Error())
 		return a
 	}
-	return w.finishCensus(f, a, again, broker, first, second, rows, w.imageRevisionVisible)
+	return w.finishCensus(p.flow, p.initial, again, p.broker, p.first, second, p.rows, imageVisible)
+}
+
+func (w *WineTable) resolveAttributionLocked(f Flow, a Attribution) Attribution {
+	p, result := w.prepareCensusLocked(f, a, w.sameServer)
+	if p == nil {
+		return result
+	}
+	return w.completeCensusLocked(p, Resolve(f), w.imageRevisionVisible)
 }
 
 // Shared final validation for per-admission and batched observation censuses.

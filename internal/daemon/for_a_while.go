@@ -207,6 +207,9 @@ func (e *Engine) newLeaseLocked(v *Event, a identity.Attribution, action string,
 	if replaced == "" && len(e.processLeases) >= maxProcessLeases {
 		return nil, mutationError("capacity", "For-a-while lease capacity reached; wait for expiry")
 	}
+	if err := e.revokeSocketGrantsLocked(); err != nil {
+		return nil, err
+	}
 	return l, nil
 }
 

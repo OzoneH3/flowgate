@@ -1,0 +1,241 @@
+Socket-bound enforcement prototype — design and implementation status
+
+Scope and status
+The user authorized isolated development only. The checkout starts at deployed
+a70e572984e5c4c2a2c630697dadace9056fec9f. The original uncommitted shared-group
+implementation is untouched. No host installation, restart, protection edit,
+rules edit or shaping change belongs to this experiment.
+
+Current integration checkpoint (2026-10-30)
+The isolated implementation now includes a production protection-session owner,
+route-bound kernel instances, transactional zone revocation, optional failure
+status and an explicit default-OFF serve --socket-authorization option. The
+option requires --allow-protection and a socketprototype-tagged build with the
+BPF skeleton. No shipped launcher has been changed. Untagged builds reject the
+requested option explicitly; ordinary queue protection remains available.
+
+A real production-lifecycle fixture passed activation, live audit ticks,
+rename/delete/same-name re-add, optional factory failure, deliberate Stop,
+SIGKILL expiry, RecoverContinuous, and replacement-session cleanup:
+.workspace/socket-auth/session-scqvg09o (test binary 619347468a3c10966ac060cd4021dd64dc6ae5e2f190cf4f6b6a84da4f0d8ccc).
+The expiry assertion measures a private postrouting counter, not sendto errno.
+A live synthetic grant forwarded one packet; after SIGKILL+300ms the counter
+remained one. Recovery released the killed child's program references. Before
+and after host BPF inventories matched; the private /run tmpfs was verified
+before writing and the host test path remained absent. This is lifecycle
+coverage, not application attribution or production-path latency acceptance.
+
+The supported fast path is explicit application-rule Allow for native/Wine
+IPv4 UDP OUTPUT. Existing accounting uses the UDP collector/observed ledger;
+BPF authorization counters are separate and must never be added to that ledger.
+The gate precedes the attribution queue and leaves later admission/shaping
+hooks intact. Production-path Wine performance passed the finite three-run
+series recorded below (production-series-3domec58), with startup loss still
+unresolved. Shaping coexistence, host-population cost and the final matched
+release remain incomplete. Earlier historical latency evidence below used the
+legacy isolated ifindex-0 gate; it is not substituted for route-bound coverage.
+This is not a deployable or release-approved feature.
+
+The background scheduler admits only ordinary application-rule Allow outcomes;
+Deny/Ask/Once/lease/preset outcomes do not start background verification. Up to
+64 flows, eight grants per application and two concurrent full verifications
+are retained. Renewal is scheduled from the preceding start plus 100 ms, with
+an earliest-due timer capped at 25 ms and completion/new-flow wakes; no
+same-flow overlap. Selection uses a fresh clock under the engine lock and
+prioritizes earliest kernel expiry among due flows. Continuous coverage therefore
+requires sufficient worker capacity and completion before the old 250 ms hard
+deadline. Expiry never waits for that completion. Kernel last-seen counters
+select active flows, not extend permission; idle flows are removed after 1 s.
+
+Retained first integration: /home/flowgate-user/Apps/flowgate/.workspace/sg-zgdi635g.
+Allowed Wine delivered 735/750; observed receiver latency reached 131 ms at
+startup. The short later stream had no recorded renewal gap. These are raw
+receiver measurements, NOT added delay against an identical protection-off run.
+Deny and unruled separate-prefix streams each delivered zero. The run predates
+the scheduler restriction above. Host BPF inventories matched before/after.
+
+Proposed authorization contract for integration
+1. A full, successful existing resolver observation must prove the application,
+   executable revision, user, Wine prefix/runtime, process generation, complete
+   holders and socket evidence. No client-supplied application name or JSON hint
+   can create a grant. A cookie distinguishes sockets; it never proves ownership.
+2. Evaluate current policy under its normal serialization after verification.
+   Only an actual Allow may publish a grant. Ask, Deny, ambiguous, incomplete,
+   unsupported and expired evidence must use the ordinary enforcement path.
+   A prior Allow on a different destination is not sufficient.
+3. The initial experiment uses a 250 ms HARD maximum from the BEGINNING of full
+   verification, with CLOCK_BOOTTIME/bpf_ktime_get_boot_ns including suspend.
+   Publication after that deadline is refused. Hits and arrivals never extend it.
+   A renewal needs a new complete observation and current Allow evaluation.
+   This number is a prototype choice, NOT approval to deploy a reuse window.
+4. Each kernel entry is restricted to the actual packet socket cookie and exact
+   family/protocol/source/destination addresses and ports. Each map instance is
+   private to one network namespace and one direction. No reverse authorization.
+   Interface and authoritative zone classification must be validated for the
+   packet, or the integration must refuse fast-path publication. A route/zone
+   generation change invalidates certificates. Unsupported families, fragments,
+   extension headers and packets without cookies use the normal path.
+5. The userspace certificate also retains the exact verified app/user/prefix,
+   revision and holder evidence. Another application sharing/transferring the
+   SAME socket may use its grant until detected or expired: this is the explicit
+   changed guarantee, bounded by 250 ms from verification start, not transfer.
+   Socket close/replacement prevents cookie matching. Linux descriptor handoff,
+   inheritance and Wine logical ownership are not all synchronously observable.
+   No claim that a kernel hook identifies every Wine ownership transition.
+6. A new policy/zone generation must invalidate kernel grants BEFORE successful
+   mutation acknowledgement, coordinated with policy evaluation/publication.
+   A failed map revocation must disable/remove the fast gate; failure to do so
+   cannot be reported as a successful immediate revocation. Old grants still
+   have their hard kernel deadline as a backstop, not as acknowledgement proof.
+   Rule/lease expiry must shorten the grant deadline; relevant wall-clock changes
+   need conservative invalidation. No permanent or once-only rule is lengthened.
+7. A completed verification reporting changed/incomplete ownership removes the
+   affected grant immediately; a stalled verifier cannot refresh it. Background
+   renewal, retained entries and concurrent scans must have fixed bounds.
+   Capacity exhaustion means normal-path enforcement, never an implicit Allow.
+8. Fast acceptance must skip only FlowGate's attribution queue. It must still
+   traverse existing accounting, priority and upload/download shaping hooks.
+   Offer/refresh shaping bindings from verified identity using existing APIs.
+   If binding/accounting preservation cannot be established for a configured
+   mode, that mode cannot use the prototype fast path. This requires measured
+   kernel enforcement evidence, not just a control-plane acknowledgement.
+
+Hook being probed
+An xt_bpf revision-1 match is installed by nft_compat directly in an owned IPv4
+OUTPUT chain. FD_ELF uses the already-open socket-filter FD; the kernel holds its
+reference. There are no bpffs pins, socket marks, conntrack permissions or shared
+mangle chains. A successful BPF match followed by NF_ACCEPT terminates this
+chain, not later netfilter/shaping hooks. A missing rule must leave normal queue
+enforcement in place in the integration. The mechanism probe instead uses DROP
+as its default to make unauthorized delivery observable without a daemon.
+
+Expiry means the kernel authorization decision occurs before its deadline.
+Packets already accepted can be buffered in qdiscs or the network and arrive
+later. Report admission time and receiver delivery separately; do not claim
+that a deadline can withdraw packets already sent or eliminate network delay.
+
+Acceptance plan (not yet achieved)
+- Real daemon and Wine: two distinct synthetic apps, separate prefixes, allowed
+  to denied transfer including shared/inherited descriptors and logical runtime
+  handoff. Count deliveries during the exposure interval and after expiry.
+- Same UDP socket to several destinations; same tuple with replacement socket;
+  independent Deny/Ask; policy edit during verification and during traffic;
+  rule expiry; verifier stall; map exhaustion; missing gate; zone/interface and
+  namespace/direction isolation; real shaping and accounting.
+- Identical realistic population/traffic with protection off, baseline and
+  candidate. Include sustained, competing native flows, four-flow and overload.
+  Report offered/delivered/lost, median/p99/maximum latency and CPU per flow.
+- User clarified on 2026-10-30: a one-time new-connection startup delay is
+  acceptable and its optimization is deferred until after the first version.
+  Report cold-start delay and loss separately; do not hide them. Ongoing gameplay
+  including renewals must stay within <=10 ms added delay, without recurring
+  spikes. This does not authorize optimistic Allow or host deployment.
+- Finite passing measurements are not an unconditional latency guarantee.
+
+Probe operation
+check.py requires root to load BPF/netfilter in private PID/network/mount
+namespaces. It emits only seven loopback UDP datagrams and has a 20-second child
+deadline. Results and source/binary hashes stay under this checkout's .workspace.
+Rules disappear with the private network namespace even on failure. BPF program
+and link inventories are retained before/after, including one deferred-destruction
+retry. No automatic cleanup of unexpected objects is performed. nft_compat/xt_bpf
+may be globally auto-loaded by the kernel; they are not forcibly unloaded.
+
+Latest measured prototype (2026-10-30)
+Exact tested daemon SHA256:
+22be9988f20e96ea19c2b00d5d8435dc77841f6a0e05c2b29a4095c732da7fe0
+Result: /home/flowgate-user/Apps/flowgate/.workspace/ss-wklxa5ac
+Matched retained protection-off baseline:
+/home/flowgate-user/Apps/flowgate/.workspace/sa-ab5nr3bm/off
+Source-file and binary provenance are retained in each run's
+source-provenance.json; these are dirty isolated-checkout builds, not releases.
+
+Two allowed UDP sockets, 7500 sends each at 125pps, native competition and
+other-prefix Ask traffic; a second 60s round exercises independent Deny.
+Allowed delivery 14958/15000. All 42 losses are in the first 83 sequences;
+all receiver delays above 10ms are in the first 32. One renewal gap,14.32ms,
+at approximately0.649s after first-observed fixture BEGIN. No later gap.
+For sequence125 onward (fixed first-second boundary), each socket delivered
+7375/7375. Sequence-paired differences against the retained off run:
+ socket0: median0.008118ms,p99 0.072520ms,max1.067783ms
+ socket1: median0.008458ms,p99 0.052642ms,max0.746459ms
+These are sequential observations with scheduling noise, not a latency guarantee.
+Startup loss is reported, not excused by the user's startup-delay concession.
+
+Total daemon CPU366.59s over the two roughly60s rounds, versus310.69s in the
+prior paired candidate and68.10s protection-off. The difference includes normal
+Ask/Deny census work, not only renewal work. Grouping fell from465 to12;
+renewal census count rose518->1193. This is a material cost regression, not
+an unqualified performance win. The unchanged hard expiry remains250ms.
+
+Historical failures remain evidence: se-0rtfthr9 had end-of-round gaps/loss,
+and sa-ab5nr3bm/candidate had one3.66s renewal lapse causing a lost packet
+and170.865ms added delay. The scheduler change addresses demonstrated delayed
+starts; the earlier end-of-round failure has not been independently reproduced
+or conclusively explained. No host-population performance claim is made.
+
+Retained security evidence: synthetic actual-cookie/destination/expiry tests;
+real Wine transfer sv-ca_y6qas (17 denied-recipient packets until~130ms,
+none after250ms); verifier stall and policy transitions sv-j84rabat.
+These predate the scheduler change; they establish their tested scope, not
+full release acceptance of every integration path. Grouped resolver and
+scheduler focused race checks pass. Host shaping integration, per-app fast-path
+accounting, dynamic-zone integration, full incoming/IPv6 support, host gating,
+and guarded release packaging remain unfinished. No host deployment approved.
+
+Later retained performance evidence
+First-grant merge + frozen-batch coordination improved startup but did not
+eliminate loss. ig-7gicttk6: four controls lost 37/38/42/42 packets across two
+sockets; matched merge runs lost 29/22/25/26. First delivery remained about
+120-273ms; all eight short runs had no post-first-second loss and max <=1.5ms.
+Startup loss remains unacceptable without a separate user decision.
+
+oy-lsbnz928: six 60-second trials had no post-first-second loss or >10ms
+receiver delays; maxima were 3.7-6.1ms, native p99 1.16-1.44ms. These are
+receiver observations, not a new protection-off paired added-delay result.
+The proposed ordinary-yield intervention NEVER engaged and is excluded from
+production activation. Grouping remains variable; fewer censuses alone is not
+proof of CPU causality. Retained labeled profiles separate ordinary census and
+renewal CPU. The old endurance failure remains unresolved; successful repeats
+do not erase it. Final matched production-path measurements are still required.
+
+Next milestone, after separately approved deployment and successful real-workload
+acceptance: research-backed architecture audit of all existing FlowGate
+subsystems. That audit is not part of this fix or permission to expand its scope.
+
+2026-10-30 production-path series checkpoint (not deployment acceptance):
+Three consecutive route-bound production runs, each two60-second rounds and
+two allowed Wine sockets, had zero post-first-second receiver loss and zero
+paired added-delay excursions over10ms. Largest paired added delay after1s
+was1.253359ms across all six socket samples. Startup losses remained25/26/26
+packets per run and are NOT waived. Full evidence: production-series-3domec58.
+Flood workload daemonCPU274-275seconds versus21seconds protection off; this
+is not an isolated renewal-cost estimate or realistic gameplayCPU claim.
+
+Shaping coexistence scope correction: retained shaper reports UDP download
+uncovered, established native TCP download supported. Initial VM fixture
+incorrectly expected a UDP DL cap and failed in the no-gate control (7.88Mbit/s
+vs2Mbit/s). Failed evidence retained in socket-shaping-control-v1. No limiter
+change or threshold relaxation follows; corrected fixture tests supported TCP
+DL alongside accelerated UDP UL. UDP DL remains explicitly unsupported.
+
+2026-10-31 host timing and status checkpoint
+The explicitly approved bounded host diagnostic completed at
+.workspace/socket-auth/host-census-4sjj5qn4: 8/8 native-owned-socket checks complete,
+median40.662ms/max44.130ms, total0.324CPU seconds, 480processes/2030tasks,
+6107leaderFDentries, iterator3818/fallback0, unchanged BPF inventory. Zero sends,
+private network, no protection/service change. Native floor only, not full Wine
+renewal or gameplay acceptance. Independent reviewer verified the result.
+
+Periodic API status is now a compact detached presentation snapshot, not the
+large renewal/observer/GC diagnostics payload. It never supplies permission.
+The existing cached-list lock-independence test caught a new getter regression;
+fixed and focused race tests pass. Large diagnostic rings are not exposed by the
+normal API summary; evidence analyzers must not interpret absent rings as zeros.
+Detailed direct getter remains for explicit internal diagnostics/tests only.
+
+Task-topology optimization is a proposed measurement-only experiment, not wired
+into authority. Full per-TID descriptor coverage remains mandatory; opaque
+files-table pointer equality must never deduplicate or skip a table. No maximum
+expiry change is authorized. Startup retention remains unchanged pending the
+user's decision; measured startup packet loss has not been waived.

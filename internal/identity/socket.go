@@ -31,13 +31,14 @@ type Socket struct {
 	NetNS        string         `json:"netns"`
 }
 type Flow struct {
-	NetworkScope NetworkScope   `json:"network_scope"`
-	Protocol     string         `json:"protocol"`
-	Direction    string         `json:"direction"`
-	Local        netip.AddrPort `json:"local"`
-	Remote       netip.AddrPort `json:"remote"`
-	NetNS        string         `json:"netns"`
-	Interface    uint32         `json:"interface_index"`
+	queueOutputInterface uint32         // private NFQUEUE evidence, never decoded from API/collector JSON
+	NetworkScope         NetworkScope   `json:"network_scope"`
+	Protocol             string         `json:"protocol"`
+	Direction            string         `json:"direction"`
+	Local                netip.AddrPort `json:"local"`
+	Remote               netip.AddrPort `json:"remote"`
+	NetNS                string         `json:"netns"`
+	Interface            uint32         `json:"interface_index"`
 }
 
 func (f Flow) Key() string {
@@ -45,6 +46,7 @@ func (f Flow) Key() string {
 }
 
 type Attribution struct {
+	renewalPhase                                                    *renewalPhase // observation-only; never identity or policy evidence
 	diagnosticHolderAttempts                                        int
 	diagnosticFirstIssues                                           []string
 	diagnosticBegin, diagnosticEnd                                  time.Time

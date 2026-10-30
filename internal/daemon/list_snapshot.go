@@ -30,11 +30,13 @@ type ListSnapshot struct {
 }
 
 type publishedList struct {
-	targets    map[string]identity.PermissionTarget // presentation only, immutable after publish
-	data       []byte
-	hasPresets bool
-	revision   string
-	at         time.Time
+	targets       map[string]identity.PermissionTarget // presentation only, immutable after publish
+	data          []byte
+	socketStatus  []byte
+	socketFailure string
+	hasPresets    bool
+	revision      string
+	at            time.Time
 }
 type listReadState struct {
 	published   atomic.Pointer[publishedList]
@@ -81,12 +83,25 @@ func (s *listReadState) publish(e *Engine) error {
 	// Serializing under the lock severs every nested pointer/map/slice. Neither
 	// published bytes nor readers share mutable storage with the live engine.
 	data, err := json.Marshal(view)
+	status := e.socketAuthorizationSummaryLocked()
+	socketData, socketErr := json.Marshal(status)
+	var socketFailure string
+	if current := e.socketAuthorization; current != nil {
+		if current.failure != nil {
+			socketFailure = current.failure.Error()
+		} else if current.disabled {
+			socketFailure = "socket authorization disabled"
+		}
+	}
 	e.mu.Unlock()
+	if socketErr != nil {
+		return fmt.Errorf("publish socket status: %w", socketErr)
+	}
 	if err != nil {
 		return fmt.Errorf("publish request snapshot: %w", err)
 	}
 	s.revision++
-	s.published.Store(&publishedList{targets: targets, data: data, hasPresets: view.HasPresets, revision: view.Revision, at: view.At})
+	s.published.Store(&publishedList{targets: targets, data: data, socketStatus: socketData, socketFailure: socketFailure, hasPresets: view.HasPresets, revision: view.Revision, at: view.At})
 	return nil
 }
 
@@ -206,4 +221,28 @@ func (s *listReadState) publishAfter(e *Engine, operation string) error {
 	default:
 		return s.publish(e)
 	}
+}
+
+// PublishedSocketAuthorizationStatus is a detached presentation snapshot. It
+// never waits for the policy lock and must not be used as authorization evidence.
+func (e *Engine) PublishedSocketAuthorizationStatus() map[string]any {
+	p := e.listReads.published.Load()
+	if p == nil {
+		return nil
+	}
+	var status map[string]any
+	if json.Unmarshal(p.socketStatus, &status) != nil {
+		return nil
+	}
+	return status
+}
+
+// PublishedSocketAuthorizationFailure is presentation-only, refreshed with the
+// list snapshot; live revocation remains synchronous under the policy lock.
+func (e *Engine) PublishedSocketAuthorizationFailure() error {
+	p := e.listReads.published.Load()
+	if p == nil || p.socketFailure == "" {
+		return nil
+	}
+	return fmt.Errorf("%s", p.socketFailure)
 }

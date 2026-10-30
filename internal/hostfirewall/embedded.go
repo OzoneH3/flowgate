@@ -24,6 +24,9 @@ import (
 )
 
 type Evaluation struct {
+	socketFailure         error
+	socketFactory         SocketSessionFactory
+	socketSession         SocketSessionResources
 	continuous            bool
 	desiredMode           string
 	desiredPath           string
@@ -131,7 +134,7 @@ func (m *Evaluation) start(expected, request, profile string, continuous bool) (
 		m.mu.Unlock()
 		return m.Status(), lifecycleError("busy", "Readiness/evaluation operation still in flight")
 	}
-	if m.status.Cleanup == "unconfirmed" {
+	if m.status.Cleanup == "unconfirmed" || m.socketSession != nil {
 		m.mu.Unlock()
 		return m.Status(), lifecycleError("unavailable", "Owned resources require scoped recovery before another Start")
 	}
@@ -148,6 +151,7 @@ func (m *Evaluation) start(expected, request, profile string, continuous bool) (
 		m.mu.Unlock()
 		return m.Status(), lifecycleError("busy", "Stop continuous protection before starting evaluation")
 	}
+	m.socketFailure = nil
 	m.continuous = continuous
 	m.status.Profile = profile
 	m.status.DurationSeconds = 300
@@ -205,6 +209,9 @@ func (m *Evaluation) stop(expected string, continuous bool) (daemon.EvaluationSt
 			if continuous && os.IsNotExist(err) {
 				err = nil
 			}
+			if err == nil {
+				err = m.releaseSocketSession()
+			}
 			if err == nil && continuous {
 				err = RemoveGuard(m.dir)
 			}
@@ -214,16 +221,26 @@ func (m *Evaluation) stop(expected string, continuous bool) (daemon.EvaluationSt
 		m.status.State = "stopping"
 		m.status.ReasonCode = "stop_requested"
 		m.status.Reason = "Dropping held packets and removing only owned resources"
-		m.cancel()
+		cancel, session := m.cancel, m.socketSession
+		m.mu.Unlock()
+		var err error
+		if session != nil {
+			err = session.Disable()
+		}
+		cancel()
+		return m.Status(), err
 	}
 	m.mu.Unlock()
 	return m.Status(), nil
 }
 func (m *Evaluation) Close() {
 	m.mu.Lock()
-	cancel, done := m.cancel, m.done
+	cancel, done, session := m.cancel, m.done, m.socketSession
 	m.mu.Unlock()
 	if cancel != nil {
+		if session != nil {
+			_ = session.Disable()
+		}
 		cancel()
 		<-done
 	}
@@ -348,15 +365,26 @@ func (m *Evaluation) run(ctx context.Context, id string) {
 			if er := ctx.Err(); er != nil {
 				return er
 			}
-			if er := activateProfile(ctx, id, profile, func() error { r.MarksOwned = true; return save(m.dir, r) }, bootstrap...); er != nil {
+			m.mu.Lock()
+			socketEnabled := continuous && profile == "both" && m.socketFactory != nil
+			m.mu.Unlock()
+			if er := activateProfileWithSocketGate(ctx, id, profile, func() error { r.MarksOwned = true; return save(m.dir, r) }, socketEnabled, bootstrap...); er != nil {
 				return er
+			}
+			if socketEnabled {
+				if er := m.prepareSocketSession(runctx); er != nil {
+					return er
+				}
 			}
 			if m.afterInstall != nil {
 				if er := m.afterInstall(); er != nil {
 					return er
 				}
 			}
-			digest, er := tableDigest()
+			if socketEnabled {
+				r.DigestFormat = numericDigestFormat
+			}
+			digest, er := tableDigestForFormat(Table, r.DigestFormat)
 			if er != nil {
 				return er
 			}
@@ -396,6 +424,7 @@ func (m *Evaluation) run(ctx context.Context, id string) {
 			bootstrapPending := false
 			auditDone = make(chan struct{})
 			go func(record Record) {
+				inconclusiveAudits := 0
 				defer close(auditDone)
 				ticker := time.NewTicker(time.Second)
 				defer ticker.Stop()
@@ -410,10 +439,24 @@ func (m *Evaluation) run(ctx context.Context, id string) {
 						}
 						if er == nil {
 							var d string
-							d, er = tableDigest()
+							d, er = tableDigestForFormat(Table, record.DigestFormat)
+							if er == nil && d != expectedDigest && record.DigestFormat == numericDigestFormat {
+								// Re-read a name-resolved snapshot once before treating a
+								// possible concurrent interface-name swap as rule mutation.
+								d, er = tableDigestForFormat(Table, record.DigestFormat)
+							}
 							if er == nil && d != expectedDigest {
 								er = fmt.Errorf("owned interception table changed")
 							}
+						}
+						if errors.Is(er, errAuditInconclusive) {
+							inconclusiveAudits++
+							_ = m.e.DisableSocketAuthorization(er)
+							if inconclusiveAudits < 3 {
+								continue
+							}
+						} else {
+							inconclusiveAudits = 0
 						}
 						if er == nil && continuous && time.Since(lastSafety) >= 10*time.Second {
 							er = m.auditEnvironment(runctx, profile)
@@ -469,6 +512,11 @@ func (m *Evaluation) run(ctx context.Context, id string) {
 		})
 	})
 	cancelRun()
+	// No accelerator rule mutation: failed sessions retain their audited owner
+	// until exact table cleanup succeeds, including deliberate cleanup retries.
+	if stopErr := m.stopSocketSession(); stopErr != nil {
+		err = errors.Join(err, stopErr)
+	}
 	if auditDone != nil {
 		<-auditDone
 	}
@@ -517,6 +565,9 @@ func (m *Evaluation) run(ctx context.Context, id string) {
 		}
 	}
 	cleanupErr := cleanupEmbedded(m.dir, id)
+	if cleanupErr == nil {
+		cleanupErr = m.releaseSocketSession()
+	}
 	if cleanupErr == nil && continuous {
 		cleanupErr = RemoveGuard(m.dir)
 	}

@@ -173,12 +173,18 @@ func TestWineDispatchMismatchRetriesFreshOnce(t *testing.T) {
 	now := time.Now()
 	m.rememberDispatch(f, a, r, now, now)
 	calls := 0
-	got, done := m.resolveDispatch(f, true, func(Flow) Attribution {
+	before := renewalBootNow()
+	var admissionEnd uint64
+	got, fullStart := m.resolveObservedBefore(f, func(Flow) Attribution {
 		calls++
 		fresh := copyWineInitial(a)
 		fresh.Sockets[0].Cookie = "0200000000000000"
 		return fresh
-	})
+	}, func() { admissionEnd = renewalBootNow() })
+	if fullStart < admissionEnd || admissionEnd == 0 {
+		t.Fatal("scan witness preceded admission")
+	}
+	done := fullStart >= before && fullStart <= renewalBootNow()
 	if !done || !positiveWineDispatch(got) || calls != 1 || attempts != 2 {
 		t.Fatalf("fresh retry failed: done=%v calls=%d attempts=%d result=%+v", done, calls, attempts, got)
 	}
@@ -187,6 +193,10 @@ func TestWineDispatchMismatchRetriesFreshOnce(t *testing.T) {
 		t.Fatal("stale hint survived retry")
 	}
 
+	_, hintStart := m.resolveObservedBefore(f, func(Flow) Attribution { t.Fatal("valid hint should keep routing savings"); return Attribution{} }, func() { t.Fatal("hint hit delayed by admission") })
+	if hintStart != 0 {
+		t.Fatal("hint result reported a fresh initial observation")
+	}
 	observed := h.observed
 	_, done = m.resolveDispatch(f, true, func(Flow) Attribution { t.Fatal("valid hit rediscovered"); return Attribution{} })
 	if !done || m.dispatchHint(f, time.Now()).observed != observed {

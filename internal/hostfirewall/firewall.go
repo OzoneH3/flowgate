@@ -38,6 +38,7 @@ type Record struct {
 	Profile      string
 	MarksOwned   bool
 	TableDigest  string
+	DigestFormat string `json:"digest_format,omitempty"`
 	SocketInodes map[string]uint64
 	Token        string
 	PID          int
@@ -213,6 +214,10 @@ func preflightFor(profile string, administrator bool, zones ...identity.NetworkZ
 
 func rules(token string) string { return profileRules(token, "incoming") }
 func profileRules(token, profile string, bootstrap ...policy.BootstrapInterface) string {
+	return profileRulesWithSocketGate(token, profile, false, bootstrap...)
+}
+
+func profileRulesWithSocketGate(token, profile string, socketGate bool, bootstrap ...policy.BootstrapInterface) string {
 	r := fmt.Sprintf(`add table inet %s { comment "flowgate:%s"; }
 add chain inet %s input { type filter hook input priority 10; policy accept; }
 add chain inet %s output { type filter hook output priority 10; policy accept; }
@@ -247,6 +252,10 @@ add rule inet flowgate_host output meta l4proto tcp ct mark & 0x10000000 != 0 ct
 add rule inet flowgate_host output meta l4proto udp jump inspect
 add rule inet flowgate_host output counter drop
 `
+	}
+	if socketGate && profile == "both" {
+		const queuedUDP = "add rule inet flowgate_host output meta l4proto udp jump inspect\n"
+		r = strings.Replace(r, queuedUDP, "add chain inet flowgate_host socket_output\nadd rule inet flowgate_host output meta nfproto ipv4 meta l4proto udp jump socket_output\n"+queuedUDP, 1)
 	}
 	return scopedBootstrap(r, Table, bootstrap)
 }
@@ -347,7 +356,7 @@ func RunProfileAuthorized(ctx context.Context, dir, socket, database string, uid
 		if state == "active" {
 			if ok, err := owns(r); err != nil || !ok {
 				state = "degraded"
-			} else if digest, err := tableDigest(); err != nil || digest != r.TableDigest {
+			} else if digest, err := tableDigestForFormat(Table, r.DigestFormat); err != nil || digest != r.TableDigest {
 				state = "degraded"
 			}
 		}
@@ -399,7 +408,7 @@ func RunProfileAuthorized(ctx context.Context, dir, socket, database string, uid
 			return er
 		}
 		installed = true
-		digest, er := tableDigest()
+		digest, er := tableDigestForFormat(Table, r.DigestFormat)
 		if er != nil {
 			return er
 		}
@@ -525,7 +534,7 @@ func Status(dir string) (any, error) {
 		state = "degraded: consumer absent; undecided traffic blocked"
 	}
 	if present && live && r.State == "active" {
-		if d, e := tableDigest(); e != nil || d != r.TableDigest {
+		if d, e := tableDigestForFormat(Table, r.DigestFormat); e != nil || d != r.TableDigest {
 			state = "degraded: owned rules changed"
 		}
 	}
@@ -536,9 +545,53 @@ func Status(dir string) (any, error) {
 }
 
 // Counters vary with traffic; structural mutations must invalidate Active.
-func tableDigest() (string, error) { return tableDigestFor(Table) }
-func tableDigestFor(table string) (string, error) {
-	b, err := nft("-j", "list", "table", "inet", table)
+const numericDigestFormat = "json-numeric-v1"
+
+func tableDigest() (string, error)                { return tableDigestFor(Table) }
+func tableDigestFor(table string) (string, error) { return tableDigestForFormat(table, "") }
+func tableListingArgs(table, format string) ([]string, error) {
+	args := []string{"-j"}
+	switch format {
+	case "":
+	case numericDigestFormat:
+		args = append(args, "-n")
+	default:
+		return nil, fmt.Errorf("unsupported firewall digest format %q", format)
+	}
+	return append(args, "list", "table", "inet", table), nil
+}
+func tableListing(table, format string) ([]byte, error) {
+	args, err := tableListingArgs(table, format)
+	if err != nil {
+		return nil, err
+	}
+	if format == "" {
+		return nft(args...)
+	}
+	var last error
+	for attempt := 0; attempt < 3; attempt++ {
+		before, err := interfaceIndices()
+		if err != nil {
+			return nil, err
+		}
+		raw, err := nft(args...)
+		if err != nil {
+			return nil, err
+		}
+		after, err := interfaceIndices()
+		if err != nil {
+			return nil, err
+		}
+		canonical, err := canonicalInterfaceMatches(raw, before, after)
+		if err == nil {
+			return canonical, nil
+		}
+		last = err
+	}
+	return nil, last
+}
+func tableDigestForFormat(table, format string) (string, error) {
+	b, err := tableListing(table, format)
 	if err != nil {
 		return "", err
 	}

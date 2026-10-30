@@ -259,7 +259,7 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 					f.Interface = *a.InDev
 				}
 				if packetDirection == "outgoing" && a.OutDev != nil {
-					f.Interface = *a.OutDev
+					f = identity.WithQueueOutputInterface(f, *a.OutDev)
 				}
 				if selfConnect(f) {
 					var raw []byte

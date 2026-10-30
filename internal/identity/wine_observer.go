@@ -15,12 +15,13 @@ import (
 )
 
 type WineObserverOptions struct {
-	Discover    bool
-	Helper      string
-	RuntimeBins []string
-	Prefixes    []string
-	UID         uint32
-	Scratch     string
+	ReserveRenewalCapacity bool
+	Discover               bool
+	Helper                 string
+	RuntimeBins            []string
+	Prefixes               []string
+	UID                    uint32
+	Scratch                string
 }
 type observedWine struct {
 	broker  Process
@@ -35,7 +36,17 @@ type observedWine struct {
 	released bool
 }
 type WineObservers struct {
-	admissionDemand atomic.Int64 // waiting or running censuses; presentation yields to these
+	renewalPhases      renewalPhaseLog
+	ordinaryPhases     renewalPhaseLog
+	queueCensus        chan struct{} // prototype reservation: at most one ordinary census
+	renewalCount       atomic.Uint64
+	renewalTotalNS     atomic.Uint64
+	renewalWaitNS      atomic.Uint64
+	renewalServiceNS   atomic.Uint64
+	renewalCensusCount atomic.Uint64
+	renewalWaitMax     atomic.Uint64
+	renewalServiceMax  atomic.Uint64
+	admissionDemand    atomic.Int64 // waiting or running censuses; presentation yields to these
 
 	mu       sync.Mutex // guards sessions/closed/pins only; never held across setup or a census
 	options  WineObserverOptions
@@ -82,7 +93,11 @@ func NewWineObservers(o WineObserverOptions) (*WineObservers, error) {
 	if st, err := os.Stat(o.Scratch); err != nil || !st.IsDir() || st.Mode().Perm()&0077 != 0 {
 		return nil, fmt.Errorf("private existing observer scratch directory required")
 	}
-	return &WineObservers{options: o, sessions: map[string]*observedWine{}, census: make(chan struct{}, WineCensusLimit)}, nil
+	m := &WineObservers{options: o, sessions: map[string]*observedWine{}, census: make(chan struct{}, WineCensusLimit)}
+	if o.ReserveRenewalCapacity {
+		m.queueCensus = make(chan struct{}, 1)
+	}
+	return m, nil
 }
 
 // cleanup closes a retired session's helper and scratch. It runs outside m.mu,
@@ -150,6 +165,54 @@ func (m *WineObservers) Resolve(f Flow) Attribution {
 	return a
 }
 
+// ResolveObserved retains ordinary census admission and dispatch hint behavior.
+// The nonzero BOOTTIME start identifies a full native initial observation actually
+// performed during THIS call. Hint-only success returns zero. Trusted callers
+// must still validate complete identity, current policy and ticket generation.
+func (m *WineObservers) ResolveObserved(f Flow) (Attribution, uint64) {
+	return m.resolveObserved(f, Resolve)
+}
+
+// ResolveObservedAfter waits only before an actual full initial scan. Dispatch
+// hint hits never invoke before; the fresh witness is stamped after the wait.
+func (m *WineObservers) ResolveObservedAfter(f Flow, before func()) (Attribution, uint64) {
+	return m.resolveObservedBefore(f, Resolve, before)
+}
+func (m *WineObservers) resolveObserved(f Flow, native func(Flow) Attribution) (Attribution, uint64) {
+	return m.resolveObservedBefore(f, native, nil)
+}
+func (m *WineObservers) resolveObservedBefore(f Flow, native func(Flow) Attribution, before func()) (Attribution, uint64) {
+	var start uint64
+	a, done := m.resolveDispatch(f, true, func(flow Flow) Attribution {
+		if before != nil {
+			before()
+		}
+		start = renewalBootNow()
+		return native(flow)
+	})
+	if !done {
+		return a, 0
+	}
+	return a, start
+}
+
+// ResolveFresh is for the isolated socket authorization experiment. Unlike the
+// ordinary dispatch path it starts with a new kernel/holder observation, so a
+// grant deadline anchored before this call cannot hide an older initial hint.
+func (m *WineObservers) ResolveFresh(f Flow) (result Attribution) {
+	defer func() { result.renewalPhase = nil }()
+	started := time.Now()
+	defer func() { m.renewalCount.Add(1); m.renewalTotalNS.Add(uint64(time.Since(started))) }()
+	phase := &renewalPhase{Flow: f.Key(), Start: renewalBootNow(), GroupSize: 1}
+	defer func() { phase.Finished = renewalBootNow(); m.renewalPhases.add(*phase) }()
+	a := Resolve(f)
+	phase.InitialDone = renewalBootNow()
+	a.renewalPhase = phase
+	a.diagnosticSource = "fresh_socket_authorization"
+	result, _ = m.resolveAttributionPriority(f, a, true, true)
+	return result
+}
+
 // TryResolve never waits for a census slot, a session being set up, or a table
 // held by another census: it reports false instead. false is not evidence and
 // carries no verdict; the caller resolves later with Resolve or drops explicitly.
@@ -162,11 +225,28 @@ func (m *WineObservers) resolve(f Flow, wait bool) (Attribution, bool) {
 	return m.resolveDispatch(f, wait, Resolve)
 }
 
-func (m *WineObservers) resolveDispatch(f Flow, wait bool, resolveNative func(Flow) Attribution) (Attribution, bool) {
+func (m *WineObservers) resolveDispatch(f Flow, wait bool, resolveNative func(Flow) Attribution) (result Attribution, done bool) {
+	var phase *renewalPhase
+	if wait && m.queueCensus != nil {
+		phase = &renewalPhase{Flow: f.Key(), Start: renewalBootNow(), GroupSize: 1}
+	}
+	defer func() {
+		result.renewalPhase = nil
+		if phase != nil {
+			phase.Finished = renewalBootNow()
+			phase.Status = result.Status
+			m.ordinaryPhases.add(*phase)
+		}
+	}()
 	fallback := false
 	if hint := m.dispatchHint(f, time.Now()); hint != nil {
 		diagnostics.Count(diagnostics.WineHintHit, 1)
 		initial := copyWineInitial(hint.initial)
+		initial.renewalPhase = phase
+		if phase != nil {
+			phase.InitialDone = renewalBootNow()
+			phase.InitialSource = "hint"
+		}
 		initial.diagnosticSource = "dispatch_hint"
 		initial.diagnosticHintAge = time.Since(hint.observed)
 		result, done := m.resolveAttribution(f, initial, wait)
@@ -184,6 +264,14 @@ func (m *WineObservers) resolveDispatch(f Flow, wait bool, resolveNative func(Fl
 		// fresh discovery. Queue deadlines remain checked by the caller.
 	}
 	a := resolveNative(f)
+	a.renewalPhase = phase
+	if phase != nil {
+		phase.InitialDone = renewalBootNow()
+		phase.InitialSource = "fresh"
+		if fallback {
+			phase.InitialSource = "hint_then_fresh"
+		}
+	}
 	a.diagnosticSource = "fresh_dispatch"
 	if fallback {
 		a.diagnosticSource = "fresh_fallback"
@@ -194,7 +282,7 @@ func (m *WineObservers) resolveDispatch(f Flow, wait bool, resolveNative func(Fl
 		})
 	}
 	observed := time.Now()
-	result, done := m.resolveAttribution(f, a, wait)
+	result, done = m.resolveAttribution(f, a, wait)
 	if done {
 		m.rememberDispatch(f, a, result, observed, time.Now())
 	}
@@ -202,6 +290,17 @@ func (m *WineObservers) resolveDispatch(f Flow, wait bool, resolveNative func(Fl
 }
 
 func (m *WineObservers) resolveAttribution(f Flow, a Attribution, wait bool) (Attribution, bool) {
+	return m.resolveAttributionPriority(f, a, wait, false)
+}
+func (m *WineObservers) resolveAttributionPriority(f Flow, a Attribution, wait, priority bool) (Attribution, bool) {
+	broker, bin, a := m.selectBroker(a)
+	if broker == nil {
+		return a, true
+	}
+	return m.sessionResolvePriority(f, a, broker, bin, wait, priority)
+}
+
+func (m *WineObservers) selectBroker(a Attribution) (*Process, string, Attribution) {
 	var broker *Process
 	var bin string
 	candidates := a.Owners
@@ -244,7 +343,7 @@ func (m *WineObservers) resolveAttribution(f Flow, a Attribution, wait bool) (At
 						a.Application = nil
 						a.Association = nil
 						a.setReason(ReasonRuntimeOwnerAmbiguous, "multiple configured Wine brokers hold this socket")
-						return a, true
+						return nil, "", a
 					}
 					broker = p
 					bin = v
@@ -254,15 +353,18 @@ func (m *WineObservers) resolveAttribution(f Flow, a Attribution, wait bool) (At
 		}
 	}
 	if broker == nil {
-		return a, true
+		return nil, "", a
 	}
-	return m.sessionResolve(f, a, broker, bin, wait)
+	return broker, bin, a
 }
 
 // sessionResolve attributes a broker-held socket through its runtime session. The slot
 // is taken first; m.mu only guards lookup and pins and is never held while a
 // session is set up or a census runs.
 func (m *WineObservers) sessionResolve(f Flow, a Attribution, broker *Process, bin string, wait bool) (Attribution, bool) {
+	return m.sessionResolvePriority(f, a, broker, bin, wait, false)
+}
+func (m *WineObservers) sessionResolvePriority(f Flow, a Attribution, broker *Process, bin string, wait, priority bool, grouped ...*wineGroupSession) (Attribution, bool) {
 	m.admissionDemand.Add(1)
 	defer m.admissionDemand.Add(-1)
 	fail := func(reason string) Attribution {
@@ -272,19 +374,33 @@ func (m *WineObservers) sessionResolve(f Flow, a Attribution, broker *Process, b
 		a.setReason(ReasonRuntimeObserverUnavailable, "Wine owner observer: "+reason)
 		return a
 	}
-	slot := diagnostics.Begin(diagnostics.WineSlotWait)
-	if wait {
-		m.census <- struct{}{}
-	} else {
-		select {
-		case m.census <- struct{}{}:
-		default:
-			slot.End()
-			return Attribution{}, false
-		}
+	if a.renewalPhase != nil {
+		a.renewalPhase.SlotRequested = renewalBootNow()
 	}
+	waitStarted := time.Now()
+	slot := diagnostics.Begin(diagnostics.WineSlotWait)
+	release, ok := m.acquireCensus(wait, priority)
 	slot.End()
-	defer func() { <-m.census }()
+	if !ok {
+		return Attribution{}, false
+	}
+	defer release()
+	if a.renewalPhase != nil {
+		a.renewalPhase.SlotAcquired = renewalBootNow()
+		defer func() { a.renewalPhase.SessionDone = renewalBootNow() }()
+	}
+	if priority {
+		waitNS := uint64(time.Since(waitStarted))
+		m.renewalWaitNS.Add(waitNS)
+		renewalMaximum(&m.renewalWaitMax, waitNS)
+		serviceStarted := time.Now()
+		defer func() {
+			elapsed := uint64(time.Since(serviceStarted))
+			m.renewalServiceNS.Add(elapsed)
+			m.renewalCensusCount.Add(1)
+			renewalMaximum(&m.renewalServiceMax, elapsed)
+		}()
+	}
 
 	m.mu.Lock()
 	if m.closed {
@@ -318,15 +434,18 @@ func (m *WineObservers) sessionResolve(f Flow, a Attribution, broker *Process, b
 	}
 	record.pins++
 	m.mu.Unlock()
-	result, ok := m.useSession(f, a, record, broker, bin, setup, wait, fail)
+	result, ok := m.useSession(f, a, record, broker, bin, setup, wait, fail, grouped...)
 	// A session retired by Close or prune while in use never donates evidence.
 	if m.unpin(record) && ok {
+		if len(grouped) > 0 {
+			grouped[0].retired = true
+		}
 		return fail("session retired during census"), true
 	}
 	return result, ok
 }
 
-func (m *WineObservers) useSession(f Flow, initial Attribution, record *observedWine, broker *Process, bin string, setup, wait bool, fail func(string) Attribution) (Attribution, bool) {
+func (m *WineObservers) useSession(f Flow, initial Attribution, record *observedWine, broker *Process, bin string, setup, wait bool, fail func(string) Attribution, grouped ...*wineGroupSession) (Attribution, bool) {
 	sessionWait := diagnostics.Begin(diagnostics.WineSessionWait)
 	defer func() { sessionWait.End() }()
 	if setup {
@@ -349,6 +468,9 @@ func (m *WineObservers) useSession(f Flow, initial Attribution, record *observed
 	}
 	sessionWait.End()
 	sessionWait = diagnostics.Span{}
+	if len(grouped) > 0 && record.table != nil {
+		return grouped[0].resolve(record.table), true
+	}
 	return record.resolve(f, initial, wait)
 }
 
@@ -454,3 +576,57 @@ func (m *WineObservers) setup(record *observedWine, broker *Process, bin string)
 
 // Lab-only CLI boundary; production configuration is explicit root startup input.
 func WorkspaceObserverScratch(path string) (string, error) { return workspacePath(path) }
+
+// RenewalStatus reports cumulative wall time, not CPU. Post-slot time includes
+// session/table serialization and verification. Total includes initial discovery.
+func (m *WineObservers) RenewalStatus() map[string]any {
+	rows, overwritten := m.renewalPhases.snapshot()
+	ordinary, ordinaryLost := m.ordinaryPhases.snapshot()
+	return map[string]any{"ordinary_phase_timeline": ordinary, "ordinary_phase_overwritten": ordinaryLost, "phase_timeline": rows, "phase_timeline_overwritten": overwritten, "reserved": m.queueCensus != nil, "completed": m.renewalCount.Load(),
+		"total_wall_ns": m.renewalTotalNS.Load(), "slot_wait_wall_ns": m.renewalWaitNS.Load(),
+		"post_slot_wall_ns": m.renewalServiceNS.Load(), "census_completed": m.renewalCensusCount.Load(), "max_slot_wait_wall_ns": m.renewalWaitMax.Load(), "max_post_slot_wall_ns": m.renewalServiceMax.Load()}
+}
+
+// acquireCensus retains the total two-slot bound. In prototype reservation mode,
+// ordinary censuses hold at most one slot; fresh renewals can use either slot.
+// Nonwaiting callers never retain a partial admission on failure.
+func (m *WineObservers) acquireCensus(wait, priority bool) (func(), bool) {
+	ordinary := !priority && m.queueCensus != nil
+	if ordinary {
+		if wait {
+			m.queueCensus <- struct{}{}
+		} else {
+			select {
+			case m.queueCensus <- struct{}{}:
+			default:
+				return nil, false
+			}
+		}
+	}
+	if wait {
+		m.census <- struct{}{}
+	} else {
+		select {
+		case m.census <- struct{}{}:
+		default:
+			if ordinary {
+				<-m.queueCensus
+			}
+			return nil, false
+		}
+	}
+	return func() {
+		<-m.census
+		if ordinary {
+			<-m.queueCensus
+		}
+	}, true
+}
+
+func renewalMaximum(dst *atomic.Uint64, value uint64) {
+	for old := dst.Load(); value > old; old = dst.Load() {
+		if dst.CompareAndSwap(old, value) {
+			return
+		}
+	}
+}

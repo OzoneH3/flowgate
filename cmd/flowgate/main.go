@@ -12,6 +12,7 @@ import (
 	"flowgate/internal/policy"
 	"flowgate/internal/queue"
 	diagnostics "flowgate/internal/serveprofile"
+	"flowgate/internal/socketgrant"
 	"flowgate/internal/store"
 	"flowgate/internal/udpaccount"
 	"fmt"
@@ -179,6 +180,7 @@ func serve() error {
 	rootPID := fs.Int("root-lab-parent-pidns-fd", -1, "explicit root lab only: inherited parent PID namespace FD")
 	rootMount := fs.Int("root-lab-parent-mntns-fd", -1, "explicit root lab only: inherited parent mount namespace FD")
 	iteratorHelper := fs.String("holder-iterator-helper", "", "explicit reviewed per-task descriptor iterator loader")
+	socketAuth := fs.Bool("socket-authorization-prototype", false, "isolated IPv4 UDP OUTPUT authorization experiment; requires socketprototype build")
 	wineUID := fs.Int("wine-uid", os.Getuid(), "desktop Wine UID; different UID requires isolated root lab")
 	direction := fs.String("direction", "incoming", "incoming/outgoing")
 	timeout := fs.Duration("timeout", 15*time.Second, "pending timeout")
@@ -209,6 +211,9 @@ func serve() error {
 	if *direction != "incoming" && *direction != "outgoing" {
 		return fmt.Errorf("invalid direction")
 	}
+	if *socketAuth && (*direction != "outgoing" || *rootPID < 0) {
+		return fmt.Errorf("socket authorization requires isolated root OUTPUT lab")
+	}
 	if *timeout < time.Second || *timeout > time.Minute {
 		return fmt.Errorf("timeout must be 1s..1m")
 	}
@@ -224,6 +229,11 @@ func serve() error {
 		return err
 	}
 	e := daemon.New(*timeout)
+	freshSocketResolve := identity.Resolve
+	var freshSocketDiagnostics func() map[string]any
+	var ordinarySocketObserved func(identity.Flow) (identity.Attribution, uint64)
+	var ordinarySocketAdmission func(identity.Flow, func()) (identity.Attribution, uint64)
+	var freshSocketGroup func([]identity.Flow, func(int, *identity.Attribution))
 	defer e.CloseProcessTargets()
 	e.Mode = "isolated-lab"
 	e.Zones, err = configuredZones(localZones, nil)
@@ -281,7 +291,7 @@ func serve() error {
 				return err
 			}
 		}
-		options := identity.WineObserverOptions{Helper: *helper, UID: uint32(*wineUID), Scratch: *scratch, Discover: *discoverWine}
+		options := identity.WineObserverOptions{ReserveRenewalCapacity: *socketAuth, Helper: *helper, UID: uint32(*wineUID), Scratch: *scratch, Discover: *discoverWine}
 		if !*discoverWine {
 			options.RuntimeBins = strings.Split(*bins, ",")
 			options.Prefixes = strings.Split(*observe, ",")
@@ -293,6 +303,11 @@ func serve() error {
 			return err
 		}
 		defer observers.Close()
+		freshSocketResolve = observers.ResolveFresh
+		ordinarySocketObserved = observers.ResolveObserved
+		ordinarySocketAdmission = observers.ResolveObservedAfter
+		freshSocketDiagnostics = observers.RenewalStatus
+		freshSocketGroup = observers.ResolveFrozenRuntime
 		resolver := identity.NewUDPAttributionReuse(observers.Resolve)
 		resolver.Try = observers.TryResolve
 		e.Resolve, e.TryResolve = resolver.Resolve, resolver.TryResolve
@@ -306,6 +321,7 @@ func serve() error {
 			return err
 		}
 		defer observers.Close()
+		freshSocketResolve = observers.Resolve
 		e.Resolve = identity.NewUDPAttributionReuse(observers.Resolve).Resolve
 		b, _ := json.Marshal(observers.Sessions())
 		fmt.Fprintln(os.Stderr, "ATTACHED", string(b))
@@ -315,6 +331,7 @@ func serve() error {
 			return err
 		}
 		defer observer.Close()
+		freshSocketResolve = observer.Resolve
 		e.Resolve = identity.NewUDPAttributionReuse(observer.Resolve).Resolve
 	}
 	go observer.Run(activityCtx)
@@ -374,6 +391,41 @@ add rule inet flowgate_lab gate meta l4proto udp queue num 100
 			return fmt.Errorf("nft: %w: %s", err, b)
 		}
 		installed = true
+		if *socketAuth {
+			backend, err := socketgrant.OpenKernel()
+			if err != nil {
+				if backend != nil {
+					if cleanupErr := backend.Close(); cleanupErr != nil {
+						return fmt.Errorf("%w; partial gate cleanup: %v", err, cleanupErr)
+					}
+				}
+				return err
+			}
+			if err = e.StartSocketAuthorization(ctx, backend, freshSocketResolve, freshSocketDiagnostics); err != nil {
+				backend.Close()
+				return err
+			}
+			if os.Getenv("FLOWGATE_SOCKET_FIRST_GRANT_MERGE") == "1" {
+				if err = e.EnableSocketFirstGrantMerge(ordinarySocketObserved); err != nil {
+					return err
+				}
+			}
+			if os.Getenv("FLOWGATE_SOCKET_ORDINARY_YIELD") == "1" {
+				if err = e.EnableSocketOrdinaryYield(ordinarySocketAdmission); err != nil {
+					return err
+				}
+			}
+			if os.Getenv("FLOWGATE_SOCKET_BATCH_COORDINATION") == "1" {
+				if err = e.EnableSocketBatchCoordination(); err != nil {
+					return err
+				}
+			}
+			if freshSocketGroup != nil {
+				if err = e.EnableSocketRenewalGroups(freshSocketGroup); err != nil {
+					return err
+				}
+			}
+		}
 		fmt.Fprintln(os.Stderr, "READY: disposable namespace enforcement; v1 API", p)
 		return nil
 	})
