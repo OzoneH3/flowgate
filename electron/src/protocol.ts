@@ -152,10 +152,10 @@ export interface Traffic {
   upload_bps?: number;
   download_bps?: number;
 }
-export interface RuntimeApplication { application: Application; uid: number; evidence: RuntimeTable; }
+export interface RuntimeApplication { display_source?: string; application: Application; uid: number; evidence: RuntimeTable; }
 export interface RuntimeTable { runtime: string; prefix: string; broker_pid: number; broker_start_ticks: string; socket_cookie: string; uid: number; method: string; windows_handle_holders: {pid:number; creation_time:string; image:string}[]; }
 export interface SocketRow {
-  fast_path?: { state: 'authorized' | 'inactive' | 'unsupported' | 'unknown'; code: string; reason: string; sampled_at: string };
+  fast_path?: { state: 'in_use' | 'authorized' | 'inactive' | 'unsupported' | 'unknown'; code: string; reason: string; sampled_at: string };
 
   // Server evidence restricting process scope, never an application identity.
   holder_witness?: string;
@@ -1073,8 +1073,8 @@ export function parseReply(raw: unknown): Reply {
         if (!string(row.id)) throw Error('Invalid socket identity');
         return {
           id: string(row.id),
-          fast_path: row.fast_path ? (() => { const h=object(row.fast_path); if(!['authorized','inactive','unsupported','unknown'].includes(string(h.state)) || !string(h.code) || !string(h.reason) || string(h.reason).length>1024) throw Error('Invalid fast-path presentation'); return {state:h.state as 'authorized'|'inactive'|'unsupported'|'unknown',code:string(h.code),reason:string(h.reason),sampled_at:string(h.sampled_at)}; })() : undefined,
-          runtime_application: row.runtime_application ? (()=> {const r=object(row.runtime_application), evidence=parseRuntimeTable(r.evidence); if(!evidence)throw Error("Invalid runtime evidence");return {application:application(r.application),uid:number(r.uid),evidence};})() : undefined,
+          fast_path: row.fast_path ? (() => { const h=object(row.fast_path); if(!['in_use','authorized','inactive','unsupported','unknown'].includes(string(h.state)) || !string(h.code) || !string(h.reason) || string(h.reason).length>1024) throw Error('Invalid fast-path presentation'); return {state:h.state as 'in_use'|'authorized'|'inactive'|'unsupported'|'unknown',code:string(h.code),reason:string(h.reason),sampled_at:string(h.sampled_at)}; })() : undefined,
+          runtime_application: row.runtime_application ? (()=> {const r=object(row.runtime_application), evidence=parseRuntimeTable(r.evidence); if(!evidence)throw Error("Invalid runtime evidence");return {application:application(r.application),uid:number(r.uid),evidence,display_source:r.display_source===undefined?undefined:string(r.display_source)};})() : undefined,
           ownership: string(row.ownership),
           ownership_category: string(row.ownership_category),
           holder_witness: row.holder_witness === undefined || row.holder_witness === '' ? undefined : (() => {

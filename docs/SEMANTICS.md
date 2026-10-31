@@ -724,3 +724,20 @@ interface seen at verification, not a current route, packet hit or delivery
 guarantee. Unconnected UDP destination ambiguity and missing/stale backend evidence
 remain unknown. No extra kernel map reads, ownership checks or policy decisions
 are initiated by the indicator.
+
+
+Executable UDP indicator and retained display identity
+-----------------------------------------------------
+The executable row's UDP icon describes recent per-grant kernel hit observations,
+not Allow rules, TCP traffic or machine-wide totals. Recent means LastSeen within
+1.5s on BOOTTIME. Idle grants, ordinary checking, unsupported scope and unknown
+or stale evidence have distinct glyphs/tooltips. TCP-only and inactive rows retain
+the connected-peer observation dot. Socket-row badges are removed.
+
+When fresh Wine activity annotation yields to admission, a freshly observed exact
+netns/cookie/inode/UID socket may retain the application verified for its live
+grant. Info labels this as established-authorization display evidence, not a new
+ownership census. Closed rows are never recreated; conflicting identities stay
+unknown. This does not stabilize ungranted Wine sockets or change permissions.
+The publisher reads at most64 existing hit-stat keys after releasing the policy
+lock; API/UI readers do not initiate map reads, ownership checks or policy work.

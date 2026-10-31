@@ -3,6 +3,7 @@ package daemon
 import (
 	"flowgate/internal/identity"
 	"flowgate/internal/socketgrant"
+	"fmt"
 	"net/netip"
 	"testing"
 	"time"
@@ -118,5 +119,95 @@ func TestFastPathPresentationDisabledAndDetached(t *testing.T) {
 	e.listReads.published.Store(&publishedList{at: time.Now(), socketHints: hints})
 	if got := e.annotateSocketFastPath(identity.ActivitySnapshot{Rows: []identity.ActivityRow{row}}).Rows[0].FastPath; got.State != "inactive" || got.Code != "session_disabled" {
 		t.Fatal(got)
+	}
+}
+
+func TestFastPathBusySnapshotRetainsOnlyExactLiveGrantedRuntime(t *testing.T) {
+	e := New(time.Second)
+	row := identity.ActivityRow{ID: "live", Socket: identity.Socket{Protocol: "udp", NetNS: "ns", UID: 1000, Inode: 7, Cookie: "cookie", Local: netip.MustParseAddrPort("0.0.0.0:1234"), Remote: netip.MustParseAddrPort("0.0.0.0:0")}}
+	runtime := &identity.RuntimeApplication{UID: 1000, Application: identity.Application{Key: "synthetic-A", Revision: "rev-A", Prefix: "prefix-A", Kind: "wine"}, DisplaySource: "established-grant"}
+	grant := socketGrantHint{netns: "ns", cookie: "cookie", inode: 7, uid: 1000, application: "synthetic-A", revision: "rev-A", prefix: "prefix-A", runtime: runtime, active: true, statsKnown: true}
+	h := socketFastPathHints{available: true, grants: []socketGrantHint{grant}}
+	e.listReads.published.Store(&publishedList{at: time.Now(), socketHints: h})
+	// The Wine activity observer yielded to admission, leaving this NEW snapshot
+	// unannotated. The existing live authorization can supply display identity only.
+	for i := 0; i < 3; i++ {
+		out := e.annotateSocketFastPath(identity.ActivitySnapshot{Complete: true, Rows: []identity.ActivityRow{row}})
+		if out.Rows[0].RuntimeApplication == nil || out.Rows[0].RuntimeApplication.Application.Key != "synthetic-A" || out.Rows[0].FastPath.State != "in_use" {
+			t.Fatal("busy snapshot lost app/UDP activity", out.Rows[0])
+		}
+		if row.RuntimeApplication != nil {
+			t.Fatal("mutated source observer row")
+		}
+	}
+	for _, field := range []string{"cookie", "inode", "uid", "namespace"} {
+		other := row
+		switch field {
+		case "cookie":
+			other.Socket.Cookie = "other"
+		case "inode":
+			other.Socket.Inode = 8
+		case "uid":
+			other.Socket.UID = 1001
+		case "namespace":
+			other.Socket.NetNS = "other"
+		}
+		out := e.annotateSocketFastPath(identity.ActivitySnapshot{Complete: true, Rows: []identity.ActivityRow{other}})
+		if out.Rows[0].RuntimeApplication != nil || out.Rows[0].FastPath.State == "in_use" {
+			t.Fatal("cross-socket/user projection", field)
+		}
+	}
+	foreign := row
+	foreign.Owners = []string{"foreign"}
+	foreignSnapshot := identity.ActivitySnapshot{Complete: true, Rows: []identity.ActivityRow{foreign}, Processes: map[string]identity.ActivityProcess{"foreign": {UID: 1001}}}
+	foreignView := e.annotateSocketFastPath(activityFor(foreignSnapshot, 1001, false))
+	if len(foreignView.Rows) != 1 || foreignView.Rows[0].RuntimeApplication != nil || foreignView.Rows[0].FastPath.State != "unknown" {
+		t.Fatal("prior UID identity leaked through passed descriptor")
+	}
+	if len(e.annotateSocketFastPath(identity.ActivitySnapshot{Complete: true}).Rows) != 0 {
+		t.Fatal("resurrected closed row")
+	}
+	// A different exe OR prefix on this same cookie is ambiguous, never borrowed.
+	for _, prefix := range []string{"prefix-A", "prefix-B"} {
+		other := grant
+		other.application = "synthetic-B"
+		other.prefix = prefix
+		b := *runtime
+		b.Application.Key = "synthetic-B"
+		b.Application.Prefix = prefix
+		other.runtime = &b
+		h.grants = []socketGrantHint{grant, other}
+		e.listReads.published.Store(&publishedList{at: time.Now(), socketHints: h})
+		out := e.annotateSocketFastPath(identity.ActivitySnapshot{Complete: true, Rows: []identity.ActivityRow{row}}).Rows[0]
+		if out.RuntimeApplication != nil || out.FastPath.State != "unknown" {
+			t.Fatal("conflicting app/prefix borrowed identity", out)
+		}
+	}
+	h.grants = nil
+	e.listReads.published.Store(&publishedList{at: time.Now(), socketHints: h})
+	if out := e.annotateSocketFastPath(identity.ActivitySnapshot{Complete: true, Rows: []identity.ActivityRow{row}}).Rows[0]; out.RuntimeApplication != nil {
+		t.Fatal("association survived grant removal")
+	}
+}
+
+func TestFastPathHitSamplingBoundedRecentAndReadFailure(t *testing.T) {
+	now := socketgrant.BootNow()
+	reads := 0
+	h := socketFastPathHints{available: true, grants: make([]socketGrantHint, 64), stats: func(k socketgrant.Key) (socketgrant.Stats, error) {
+		reads++
+		if k.Cookie == 2 {
+			return socketgrant.Stats{}, fmt.Errorf("unavailable")
+		}
+		last := now - uint64(5*time.Second)
+		if k.Cookie == 1 {
+			last = now
+		}
+		return socketgrant.Stats{LastSeen: last}, nil
+	}}
+	h.grants[0].key.Cookie = 1
+	h.grants[1].key.Cookie = 2
+	h.sampleHits()
+	if reads != 64 || !h.grants[0].active || !h.grants[0].statsKnown || h.grants[1].statsKnown || h.grants[2].active || h.stats != nil {
+		t.Fatal("invalid hit sample or live reader retained", reads)
 	}
 }

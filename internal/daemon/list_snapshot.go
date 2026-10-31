@@ -96,6 +96,7 @@ func (s *listReadState) publish(e *Engine) error {
 		}
 	}
 	e.mu.Unlock()
+	socketHints.sampleHits()
 	if socketErr != nil {
 		return fmt.Errorf("publish socket status: %w", socketErr)
 	}

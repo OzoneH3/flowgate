@@ -1,4 +1,4 @@
-import { fastPathIndicator } from './fast-path';
+import { fastPathIndicator, appFastPathIndicator } from './fast-path';
 import { accountLabel } from './accounts';
 import {uploadButton, priorityButton, refreshUpload, openUploadLimits} from "./upload-shaping-view";
 import { setupObservedUsage, showObservedUsage, updateObservedUsage } from './observed-usage-view';
@@ -1589,15 +1589,16 @@ function renderTree() {
       ? 'Contains an observed established TCP or connected UDP socket. Not a firewall, delivery or reachability verdict.'
       : 'No observed connected peer; listening/bound sockets do not light this indicator.';
     led.setAttribute('aria-hidden', 'true');
+    const udpFast=r.kind==='application'&&!r.applicationZone?appFastPathIndicator(r.rows):undefined;
+    if (udpFast) {
+      led.textContent=udpFast.glyph;led.className='udp-fast-icon '+udpFast.state;
+      led.title=udpFast.title;led.dataset.sampledAt=udpFast.sampledAt;
+      led.removeAttribute('aria-hidden');led.setAttribute('role','img');led.setAttribute('aria-label',udpFast.title);led.tabIndex=0;
+    }
+
     const textLabel = element('span', rowLabel, 'row-name-text');
     if (r.kind === 'application' && displayKey && !r.applicationZone) textLabel.dataset.displayKey = displayKey;
     name.append(led, toggle, icon, textLabel);
-    if (r.socket) {
-      const fp=fastPathIndicator(r.socket);
-      const badge=element('span',fp.label,'fast-path-badge '+fp.className);
-      badge.title=fp.title; badge.dataset.sampledAt=r.socket.fast_path?.sampled_at || ""; badge.tabIndex=0; badge.setAttribute('aria-label',fp.label+': '+fp.title);
-      name.append(badge);
-    }
     if (r.identityNote) name.append(element('span', ' · ' + r.identityNote, 'row-inactive-note'));
     if (r.requestEvent && !r.process && !r.inactive && !r.rows.length)
       name.append(element('span', awaiting(r.requestEvent) ? ' · awaiting permission' : ' · recent request, no observed socket', 'row-inactive-note'));
@@ -1893,6 +1894,7 @@ function renderInfo() {
   if (r.runtimeApplication) {
     const a=r.runtimeApplication;
     field(info,'Windows application',a.application.executable);
+    if (a.display_source==='established-grant') field(info,'Identity observation','Last verified identity from initial authorization of this still-observed exact socket. Reused for display while fresh activity annotation is unavailable; not a new ownership census.');
     field(info,'Wine prefix',a.evidence.prefix);
     field(info,'Windows ownership',a.evidence.windows_handle_holders.map(h=>`PID ${h.pid} · creation ${h.creation_time} · ${h.image}`).join('\n'));
     field(info,'Unix socket holder',`wineserver PID ${a.evidence.broker_pid}, start ${a.evidence.broker_start_ticks}; socket cookie ${a.evidence.socket_cookie}`);
@@ -3163,10 +3165,10 @@ document.addEventListener('visibilitychange', () => {
 
 // Age the advisory badge locally even if backend updates stop. No API polling.
 if (!promptID) window.setInterval(() => {
-  for (const badge of document.querySelectorAll<HTMLElement>('.fast-path-badge')) {
+  for (const badge of document.querySelectorAll<HTMLElement>('.udp-fast-icon')) {
     const sampled=Date.parse(badge.dataset.sampledAt || '');
     if (Number.isFinite(sampled) && Date.now()-sampled>3000) {
-      badge.textContent='Fast path ?'; badge.className='fast-path-badge unknown';
+      badge.textContent='?'; badge.className='udp-fast-icon unknown';
       badge.title='Fast-path status is stale; current use is unknown.';
       badge.setAttribute('aria-label','Fast path unknown: '+badge.title);
     }

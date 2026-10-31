@@ -28,3 +28,25 @@ test('API parsing preserves a reported reason and legacy absence, rejecting inve
  raw.activity.rows[0].fast_path.state='all_traffic_delivered';
  assert.throws(()=>parseReply(raw),/Invalid fast-path/);
 });
+
+test('app UDP icon uses exact reported socket hits including unconnected UDP, never TCP totals',()=>{
+ const {appFastPathIndicator}=require('../dist/test/fast-path.cjs');
+ const udp=(state,reason='socket evidence')=>({socket:{protocol:'udp',remote:'0.0.0.0:0'},fast_path:{state,reason,sampled_at:new Date().toISOString()}});
+ assert.equal(appFastPathIndicator([{socket:{protocol:'tcp'},fast_path:{state:'in_use'}}]),undefined);
+ assert.equal(appFastPathIndicator([udp('in_use')]).state,'in-use');
+ assert.match(appFastPathIndicator([udp('in_use'),udp('inactive')]).title,/Other destinations/);
+ assert.equal(appFastPathIndicator([udp('authorized')]).state,'idle');
+ assert.equal(appFastPathIndicator([udp('inactive')]).state,'normal');
+ assert.equal(appFastPathIndicator([udp('unsupported')]).state,'unsupported');
+ assert.equal(appFastPathIndicator([{socket:{protocol:'udp'},traffic:{uploaded:99999}}]).state,'unknown');
+ const stale=udp('in_use');stale.fast_path.sampled_at=new Date(Date.now()-4000).toISOString();
+ assert.equal(appFastPathIndicator([stale]).state,'unknown');
+});
+
+test('retained exact-socket identity keeps the executable group and labels its provenance',()=>{
+ const {hierarchy}=require('../dist/test/model.cjs');
+ const row={id:'socket-A',owners:[],socket:{protocol:'udp',local:'0.0.0.0:1234',remote:'0.0.0.0:0',state:7},state:'unconnected',traffic:{available:false},runtime_application:{application:{key:'A',revision:'rev',name:'SyntheticAlpha.exe',kind:'wine',executable:'/prefix-A/alpha.exe'},uid:1000,evidence:{},display_source:'established-grant'}};
+ const activity={rows:[row],processes:{}};
+ const a=hierarchy(activity),b=hierarchy(JSON.parse(JSON.stringify(activity)));
+ assert.equal(a[0].id,b[0].id);assert.equal(a[0].label,'SyntheticAlpha.exe');assert.equal(a[0].identityNote,undefined);assert.equal(a[0].runtimeApplication.display_source,'established-grant');assert.equal(a[0].rows.length,1);
+});

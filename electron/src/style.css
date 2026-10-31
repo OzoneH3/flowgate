@@ -1901,3 +1901,9 @@ body.hide-sidebar #activityView > aside { display:none; }
 .fast-path-badge.unknown {color:#9aa6b3}
 .fast-path-badge.authorized {color:#9bc7b0}
 .fast-path-badge:focus-visible {outline:1px solid currentColor;outline-offset:2px}
+
+.udp-fast-icon {display:inline-flex;align-items:center;justify-content:center;flex:0 0 12px;width:12px;font-size:14px;line-height:1;color:#96a3b0}
+.udp-fast-icon.in-use {color:#63d88e;font-weight:700}
+.udp-fast-icon.idle {color:#9bc7b0}
+.udp-fast-icon.unknown {color:#b7a886}
+.udp-fast-icon:focus-visible {outline:1px solid currentColor;outline-offset:2px}
