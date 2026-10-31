@@ -1901,6 +1901,7 @@ function renderInfo() {
   if (r.runtimeApplication) {
     const a=r.runtimeApplication;
     field(info,'Windows application',a.application.executable);
+    if (a.display_source==='last-verified-partial-snapshot') field(info,'Identity observation',`Last verified at ${a.display_verified_at||'unknown'}. Current collection is incomplete: visible holders are an unchanged, non-empty subset of the previously verified holders. Retained for at most 3 seconds; missing holders are not claimed as currently observed. Display only, not authorization evidence.`);
     if (a.display_source==='last-verified-snapshot') field(info,'Identity observation',`Last verified at ${a.display_verified_at||'unknown'}. Retained for at most 3 seconds while fresh Wine annotation is unavailable; this exact socket and its visible holders are unchanged. Display only, not authorization evidence.`);
     if (a.display_source==='established-grant') field(info,'Identity observation','Last verified identity from initial authorization of this still-observed exact socket. Reused for display while fresh activity annotation is unavailable; not a new ownership census.');
     field(info,'Wine prefix',a.evidence.prefix);

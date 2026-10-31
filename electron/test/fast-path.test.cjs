@@ -76,3 +76,14 @@ test('last verified TCP and UDP annotations keep each executable and prefix grou
   assert.equal(busy[i].runtimeApplication.display_source,'last-verified-snapshot');
  }
 });
+
+test('partial last-verified provenance is not a new app identity or a fast-path claim',()=>{
+ const {hierarchy}=require('../dist/test/model.cjs');
+ const socket={id:'partial-tcp',owners:[],socket:{protocol:'tcp',cookie:'same-cookie'},traffic:{},runtime_application:{application:{key:'synthetic-A-prefix-A',revision:'r',kind:'wine',name:'SyntheticAlpha.exe'},uid:1000,evidence:{}}};
+ const fresh=hierarchy({rows:[socket],processes:{}})[0];const key=rowStructure(fresh,1,false,false);
+ socket.runtime_application.display_source='last-verified-partial-snapshot';socket.runtime_application.display_verified_at=new Date().toISOString();
+ const partial=hierarchy({complete:false,rows:[socket],processes:{}})[0];
+ assert.equal(partial.id,fresh.id);assert.equal(rowStructure(partial,1,false,false),key);
+ assert.equal(partial.runtimeApplication.display_source,'last-verified-partial-snapshot');
+ const {appFastPathIndicator}=require('../dist/test/fast-path.cjs');assert.equal(appFastPathIndicator(partial.rows),undefined);
+});

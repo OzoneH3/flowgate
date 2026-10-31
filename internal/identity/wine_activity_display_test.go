@@ -60,7 +60,7 @@ func TestWineActivityDisplayBusyRetainsExactTCPAndUDP(t *testing.T) {
 	}
 }
 func TestWineActivityDisplayChangesAndClosureDrop(t *testing.T) {
-	for _, change := range []string{"cookie", "inode", "namespace", "holder-start", "holder-set", "missing-holder", "uid", "exec", "prefix", "socket-state", "incomplete", "closed"} {
+	for _, change := range []string{"cookie", "inode", "namespace", "holder-start", "holder-set", "missing-holder", "uid", "exec", "prefix", "socket-state", "closed"} {
 		t.Run(change, func(t *testing.T) {
 			m := &WineObservers{}
 			s := displayFixture()
@@ -97,8 +97,6 @@ func TestWineActivityDisplayChangesAndClosureDrop(t *testing.T) {
 				next.Processes[r.Owners[0]] = p
 			case "socket-state":
 				r.Socket.State++
-			case "incomplete":
-				next.Complete = false
 			case "closed":
 				next.Rows = next.Rows[1:]
 			}
@@ -149,5 +147,66 @@ func TestWineActivityDisplayTTLNotExtendedAndCacheBounded(t *testing.T) {
 	m.retainWineActivityAnnotations(&next, now.Add(time.Second))
 	if len(m.activityDisplay.rows) != 0 || next.Rows[0].RuntimeApplication != nil {
 		t.Fatal("closed observer reused display identity")
+	}
+}
+
+func TestWineActivityDisplayIncompleteSubset(t *testing.T) {
+	for _, change := range []string{"same", "subset", "new-holder", "changed-holder", "empty", "foreign-uid", "complete-subset", "no-prior-proof"} {
+		t.Run(change, func(t *testing.T) {
+			m := &WineObservers{}
+			s := displayFixture()
+			now := time.Now()
+			if change != "no-prior-proof" {
+				m.retainWineActivityAnnotations(&s, now)
+			}
+			next := freshDisplayRows(s)
+			next.Complete = false
+			row := &next.Rows[0]
+			switch change {
+			case "subset", "complete-subset":
+				row.Owners = append([]string(nil), row.Owners[:1]...)
+			case "new-holder":
+				row.Owners = append(append([]string(nil), row.Owners...), "999:100")
+				next.Processes["999:100"] = ActivityProcess{PID: 999, Start: "100", UID: 1000}
+			case "changed-holder":
+				p := next.Processes[row.Owners[0]]
+				p.ExecutableRevision = "changed"
+				next.Processes[row.Owners[0]] = p
+			case "empty":
+				row.Owners = nil
+			case "foreign-uid":
+				p := next.Processes[row.Owners[0]]
+				p.UID++
+				next.Processes[row.Owners[0]] = p
+			}
+			if change == "complete-subset" {
+				next.Complete = true
+			}
+			m.retainWineActivityAnnotations(&next, now.Add(time.Second))
+			got := next.Rows[0].RuntimeApplication
+			keep := change == "same" || change == "subset"
+			if (got != nil) != keep {
+				t.Fatal("unexpected partial annotation", change, got)
+			}
+			if keep {
+				if got.DisplaySource != "last-verified-partial-snapshot" || got.Application.Key != s.Rows[0].RuntimeApplication.Application.Key {
+					t.Fatal("partial status or identity incorrect", got)
+				}
+				// A partial observation never turns its reduced holder set into a fresh
+				// baseline and never extends the timestamp or TTL.
+				later := freshDisplayRows(s)
+				m.retainWineActivityAnnotations(&later, now.Add(2*time.Second))
+				if later.Rows[0].RuntimeApplication == nil {
+					t.Fatal("lost original full holder baseline")
+				}
+				expired := freshDisplayRows(s)
+				expired.Complete = false
+				expired.Rows[0].Owners = expired.Rows[0].Owners[:1]
+				m.retainWineActivityAnnotations(&expired, now.Add(3*time.Second))
+				if expired.Rows[0].RuntimeApplication != nil {
+					t.Fatal("partial observations renewed TTL")
+				}
+			}
+		})
 	}
 }

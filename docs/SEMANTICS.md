@@ -778,7 +778,11 @@ Wine display annotation can remain on the same currently observed socket for up
 to three seconds. The match includes namespace, cookie, inode, UID, protocol,
 endpoints, socket state and the complete visible holder set (PID/start,
 namespaces, executable revision and application identity). A change or a closed
-socket removes that cached annotation; incomplete snapshots clear the cache.
+socket removes that cached annotation. Complete snapshots require the same full
+holder set. In an incomplete snapshot, a non-empty visible holder subset may
+retain the old label only when every visible holder is unchanged; new or changed
+holders reject retention. Missing holders are not claimed as currently observed,
+and Info explicitly labels the incomplete last-verified association.
 The cache is bounded to 2048 current rows and reusing an annotation never renews
 its age. Fresh annotations replace it normally.
 
