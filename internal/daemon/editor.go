@@ -445,7 +445,7 @@ func filtersOverlap(a, b policy.Filter) bool {
 
 // Caller holds e.mu: durable transaction completes before policy publication.
 func (e *Engine) publishRulesLocked(next []policy.Rule) error {
-	if err := e.revokeSocketGrantsLocked(); err != nil {
+	if err := e.reconcileSocketPolicyLocked(next); err != nil {
 		return err
 	}
 	if err := e.SaveRules(next); err != nil {

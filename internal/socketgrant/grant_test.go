@@ -282,3 +282,55 @@ func TestConnectionRevocationFallbackAndUnconfirmedFailure(t *testing.T) {
 		})
 	}
 }
+
+func TestConnectionPolicyTicketsIndependentOfLiveKernelEpoch(t *testing.T) {
+	m := &memoryGate{values: map[Key]Value{}}
+	s, err := NewConnection(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := Key{Cookie: 1}
+	old := s.Begin()
+	if ok, err := s.Publish(old, key, 0); err != nil || !ok {
+		t.Fatal(err)
+	}
+	before := m.values[key]
+	epoch := m.epoch
+	if err = s.InvalidateTickets(); err != nil {
+		t.Fatal(err)
+	}
+	if m.epoch != epoch || m.values[key] != before {
+		t.Fatal("ticket invalidation changed live authorization")
+	}
+	if ok, _ := s.Publish(old, Key{Cookie: 2}, 0); ok {
+		t.Fatal("old policy observation published")
+	}
+	if ok, err := s.Publish(s.Begin(), Key{Cookie: 2}, 0); err != nil || !ok {
+		t.Fatal(err)
+	}
+	if m.values[Key{Cookie: 2}].Generation != epoch {
+		t.Fatal("new grant mismatches live epoch")
+	}
+	limit := BootNow() + uint64(time.Second)
+	if err = s.Limit(key, limit); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Limit(key, limit+uint64(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Limit(key, 0); err != nil {
+		t.Fatal(err)
+	}
+	if m.values[key].Deadline != limit {
+		t.Fatal("policy re-evaluation lengthened permission")
+	}
+	if err = s.Limit(Key{Cookie: 3}, limit); err == nil {
+		t.Fatal("limit created new permission")
+	}
+	if err = s.Revoke(); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Limit(key, limit); err == nil {
+		t.Fatal("limit resurrected old epoch")
+	}
+}

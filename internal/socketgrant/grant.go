@@ -124,22 +124,23 @@ func (t Ticket) Start() uint64 { return t.start }
 func (t Ticket) Deadline() uint64 { return t.start + uint64(Window) }
 
 type Store struct {
-	mu          sync.Mutex
-	backend     Backend
-	generation  uint64
-	now         func() uint64
-	entries     map[Key]struct{}
-	closed      bool
-	cleanupDone bool
-	closing     bool
-	connection  bool
+	mu               sync.Mutex
+	backend          Backend
+	generation       uint64
+	policyGeneration uint64
+	now              func() uint64
+	entries          map[Key]Value
+	closed           bool
+	cleanupDone      bool
+	closing          bool
+	connection       bool
 }
 
 func New(b Backend) (*Store, error) {
 	if err := b.Epoch(1); err != nil {
 		return nil, err
 	}
-	return &Store{backend: b, generation: 1, now: BootNow, entries: make(map[Key]struct{})}, nil
+	return &Store{backend: b, generation: 1, policyGeneration: 1, now: BootNow, entries: make(map[Key]Value)}, nil
 }
 
 // NewConnection retains a verified connection until explicit revocation, closure
@@ -155,7 +156,7 @@ func NewConnection(b Backend) (*Store, error) {
 func (s *Store) Begin() Ticket {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return Ticket{s.now(), s.generation}
+	return Ticket{s.now(), s.policyGeneration}
 }
 
 // Publish is called only after successful fresh identity and current policy
@@ -165,7 +166,7 @@ func (s *Store) Publish(t Ticket, k Key, horizon uint64) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.now()
-	if s.closing || s.closed || t.start == 0 || t.generation != s.generation || now < t.start ||
+	if s.closing || s.closed || t.start == 0 || t.generation != s.policyGeneration || now < t.start ||
 		t.start > ^uint64(0)-uint64(Window) {
 		return false, nil
 	}
@@ -185,9 +186,42 @@ func (s *Store) Publish(t Ticket, k Key, horizon uint64) (bool, error) {
 	if err := s.backend.Put(k, Value{deadline, s.generation}); err != nil {
 		return false, err
 	}
-	s.entries[k] = struct{}{}
+	s.entries[k] = Value{deadline, s.generation}
 	return true, nil
 }
+
+// InvalidateTickets rejects observations begun under the preceding policy.
+// Existing kernel entries and their permission horizons are unchanged.
+func (s *Store) InvalidateTickets() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.connection || s.closing || s.closed || s.policyGeneration == ^uint64(0) {
+		return errors.New("cannot invalidate connection tickets")
+	}
+	s.policyGeneration++
+	return nil
+}
+
+// Limit only shortens an EXISTING connection permission; it cannot create a
+// grant, resurrect an old epoch, or extend its original allowing horizon.
+func (s *Store) Limit(k Key, horizon uint64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value, exists := s.entries[k]
+	if !s.connection || s.closing || s.closed || !exists || value.Generation != s.generation {
+		return errors.New("connection permission absent")
+	}
+	if horizon == 0 || (value.Deadline != 0 && value.Deadline <= horizon) {
+		return nil
+	}
+	value.Deadline = horizon
+	if err := s.backend.Put(k, value); err != nil {
+		return err
+	}
+	s.entries[k] = value
+	return nil
+}
+
 func (s *Store) Forget(k Key) error {
 	s.mu.Lock()
 	if s.closed {
@@ -213,7 +247,7 @@ func (s *Store) Revoke() error {
 	if s.closing || s.closed {
 		return errors.New("socket gate closed")
 	}
-	if s.generation == ^uint64(0) {
+	if s.generation == ^uint64(0) || s.policyGeneration == ^uint64(0) {
 		return errors.New("socket gate generation exhausted")
 	}
 	next := s.generation + 1
@@ -222,6 +256,7 @@ func (s *Store) Revoke() error {
 		return err
 	}
 	s.generation = next
+	s.policyGeneration++
 	// Keep the bounded key set: epoch revocation alone doesn't remove map slots.
 	return nil
 }

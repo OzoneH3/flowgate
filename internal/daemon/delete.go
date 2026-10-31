@@ -55,7 +55,7 @@ func (e *Engine) DeleteRule(generation, id string, expected *uint64, uid uint32,
 		next := make([]policy.Rule, 0, len(e.rules)-1)
 		next = append(next, e.rules[:i]...)
 		next = append(next, e.rules[i+1:]...)
-		if err := e.revokeSocketGrantsLocked(); err != nil {
+		if err := e.reconcileSocketPolicyLocked(next); err != nil {
 			return DeletedRule{}, err
 		}
 		if err := e.SaveRules(next); err != nil {

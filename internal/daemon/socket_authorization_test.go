@@ -17,10 +17,17 @@ type grantModel struct {
 	epoch       uint64
 	fail        bool
 	failNonzero bool
+	failPut     bool
 }
 
-func (m *grantModel) Put(k socketgrant.Key, v socketgrant.Value) error { m.values[k] = v; return nil }
-func (m *grantModel) Delete(k socketgrant.Key) error                   { delete(m.values, k); return nil }
+func (m *grantModel) Put(k socketgrant.Key, v socketgrant.Value) error {
+	if m.failPut {
+		return errors.New("put failed")
+	}
+	m.values[k] = v
+	return nil
+}
+func (m *grantModel) Delete(k socketgrant.Key) error { delete(m.values, k); return nil }
 func (m *grantModel) Epoch(n uint64) error {
 	if m.fail || (m.failNonzero && n != 0) {
 		return errors.New("write failed")

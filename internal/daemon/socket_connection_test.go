@@ -3,6 +3,7 @@ package daemon
 import (
 	"errors"
 	"flowgate/internal/identity"
+	"flowgate/internal/policy"
 	"flowgate/internal/socketgrant"
 	"net/netip"
 	"testing"
@@ -132,5 +133,96 @@ func TestConnectionNinthTupleKeepsOrdinaryQueueFallback(t *testing.T) {
 	}
 	if len(m.values) != 8 {
 		t.Fatalf("per-application bound changed: %d", len(m.values))
+	}
+}
+
+func TestConnectionPolicyEditKeepsOtherApplicationAndRejectsOldInitial(t *testing.T) {
+	e, s, f, _, m := connectionFixture(t)
+	ticket := s.store.Begin()
+	original := m.values[f.key]
+	epoch := m.epoch
+	other := e.rules[0]
+	other.ID = "other-app"
+	other.Filter.Application = "independent-app-and-prefix"
+	other.Action = "block"
+	next := append(append([]policy.Rule(nil), e.rules...), other)
+	if err := e.reconcileSocketPolicyLocked(next); err != nil {
+		t.Fatal(err)
+	}
+	if !f.haveKey || m.values[f.key] != original || m.epoch != epoch {
+		t.Fatal("unrelated edit interrupted established permission")
+	}
+	if ok, _ := s.store.Publish(ticket, socketgrant.Key{Cookie: 999}, 0); ok {
+		t.Fatal("pre-edit initial proof survived policy edit")
+	}
+}
+
+func TestConnectionPolicyReevaluationUsesNormalPrecedenceAndScope(t *testing.T) {
+	for _, kind := range []string{"app-deny", "scope-removed", "generic-deny", "generic-lower-weight", "tcp-endpoint", "deleted", "ask"} {
+		t.Run(kind, func(t *testing.T) {
+			e, _, f, _, m := connectionFixture(t)
+			next := append([]policy.Rule(nil), e.rules...)
+			shouldKeep := false
+			switch kind {
+			case "app-deny":
+				next[0].Action = "block"
+			case "ask":
+				next[0].Action = "ask"
+			case "scope-removed":
+				next[0].Filter.RemoteAddress = "203.0.113.1"
+			case "deleted":
+				next = nil
+			case "generic-deny":
+				next = []policy.Rule{{ID: "machine", Schema: 2, Action: "block", Filter: policy.Filter{AllPrograms: true, AllUIDs: true, Direction: "outgoing", Protocol: "udp", RemoteAddress: "*"}}}
+			case "generic-lower-weight":
+				next = append(next, policy.Rule{ID: "machine", Schema: 2, Action: "block", Filter: policy.Filter{AllPrograms: true, AllUIDs: true, Direction: "outgoing", Protocol: "udp", RemoteAddress: "*"}})
+				shouldKeep = true
+			case "tcp-endpoint":
+				next = append(next, policy.Rule{ID: "endpoint", Schema: 7, NetworkEndpoint: true, Priority: 100, Action: "block", Filter: policy.Filter{AllPrograms: true, AllUIDs: true, Direction: "outgoing", Protocol: "tcp", RemoteAddress: f.flow.Remote.Addr().String(), RemotePort: f.flow.Remote.Port()}})
+				shouldKeep = true
+			}
+			if err := e.reconcileSocketPolicyLocked(next); err != nil {
+				t.Fatal(err)
+			}
+			if f.haveKey != shouldKeep || (len(m.values) == 1) != shouldKeep {
+				t.Fatalf("keep=%v expected %v", f.haveKey, shouldKeep)
+			}
+		})
+	}
+}
+
+func TestConnectionPolicyHorizonOnlyShortensAndSnapshotIsDetached(t *testing.T) {
+	e, _, f, a, m := connectionFixture(t)
+	// Mutating the transient resolver value cannot change retained identity.
+	a.Application.Key = "mutated"
+	a.Owners[0].UID = 987
+	next := append([]policy.Rule(nil), e.rules...)
+	next[0].Expires = e.Now().Add(time.Second)
+	if err := e.reconcileSocketPolicyLocked(next); err != nil {
+		t.Fatal(err)
+	}
+	first := m.values[f.key].Deadline
+	if !f.haveKey || first == 0 {
+		t.Fatal("unchanged owner lost grant or expiry absent")
+	}
+	next[0].Expires = e.Now().Add(time.Hour)
+	if err := e.reconcileSocketPolicyLocked(next); err != nil {
+		t.Fatal(err)
+	}
+	if m.values[f.key].Deadline != first {
+		t.Fatal("policy extension widened the live permission horizon")
+	}
+}
+
+func TestConnectionPolicyLimitFailureDisablesInsteadOfAcknowledgingOldGrant(t *testing.T) {
+	e, s, _, _, m := connectionFixture(t)
+	next := append([]policy.Rule(nil), e.rules...)
+	next[0].Expires = e.Now().Add(time.Second)
+	m.failPut = true
+	if err := e.reconcileSocketPolicyLocked(next); err != nil {
+		t.Fatal("confirmed epoch disable should preserve queue policy edits", err)
+	}
+	if !s.disabled || m.epoch != 0 {
+		t.Fatal("shortening error left live kernel permission")
 	}
 }

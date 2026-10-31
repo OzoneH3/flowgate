@@ -12,6 +12,7 @@ import (
 
 type socketFlow struct {
 	authorizedRevision               string
+	connectionPolicy                 *identity.Attribution
 	observationDone                  chan struct{}
 	alignmentAttempted               bool
 	alignmentLastAttempt             time.Time
@@ -470,6 +471,7 @@ func (e *Engine) finishSocketAuthorizationLocked(s *socketAuthorization, f *sock
 		if s.connectionScoped {
 			f.deadline = 0
 			f.authorizedRevision = a.Application.Revision
+			f.connectionPolicy = snapshotConnectionPolicy(a)
 			f.next = time.Now().Add(connectionCheckInterval)
 		}
 		if horizon != 0 && (f.deadline == 0 || horizon < f.deadline) {

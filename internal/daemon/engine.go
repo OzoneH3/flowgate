@@ -632,7 +632,7 @@ func (e *Engine) decideLocked(id, action, scope string, uid uint32, admin bool, 
 					next[i] = r
 				}
 			}
-			if err := e.revokeSocketGrantsLocked(); err != nil {
+			if err := e.reconcileSocketPolicyLocked(next); err != nil {
 				return Event{}, err
 			}
 			if e.SaveRules != nil {
@@ -903,7 +903,7 @@ func (e *Engine) ChangeRule(generation, id, action string, expected *uint64, uid
 	if !found {
 		return mutationError("not_found", "rule no longer exists; reload authoritative state")
 	}
-	if err := e.revokeSocketGrantsLocked(); err != nil {
+	if err := e.reconcileSocketPolicyLocked(next); err != nil {
 		return err
 	}
 	if err := e.SaveRules(next); err != nil {

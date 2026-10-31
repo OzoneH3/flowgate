@@ -647,6 +647,20 @@ on uncertainty; repeated uncertainty fails the audit. All other rule content
 remains audited. Stop revokes before stopping the queue; resource release
 follows confirmed owned-table deletion.
 
+Known limitation: background checks compare application identity, not a handoff
+to another instance of the same executable. That handoff can retain the prior
+connection authorization, including its original process context, until socket
+closure or an applicable policy/application-identity revocation. Process-instance
+handoff detection is deferred; no bounded transfer-detection guarantee is made.
+
+Rule edits re-evaluate each existing connection against the complete new policy
+using its detached, initially verified identity and exact flow. Still-allowed
+connections keep their grants; denied, unsupported or now-unmatched grants are
+removed before the edit is acknowledged. A shorter temporary horizon is applied
+in the kernel; an edit never extends the existing horizon. In-flight first
+observations are invalidated separately from the kernel epoch. Zone/interface
+changes and wholesale policy replacement retain conservative global revocation.
+
 Normal protection activation also preserves already-confirmed connections via
 the existing conntrack cutover mechanism, independently of socket grants. A
 protection restart alone therefore does not prove those connections were

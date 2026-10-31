@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"flowgate/internal/identity"
+	"flowgate/internal/policy"
 	"flowgate/internal/socketgrant"
 	"fmt"
 	"runtime/pprof"
@@ -157,4 +158,111 @@ func (e *Engine) failConnectionAuthorizationLocked(s *socketAuthorization, cause
 	} else {
 		s.disabled = true
 	}
+}
+
+// Detached evidence for policy re-evaluation of this already-authorized socket.
+// It carries no fresh-proof marker and is never used to authorize a new tuple.
+func snapshotConnectionPolicy(a identity.Attribution) *identity.Attribution {
+	cloneApp := func(app identity.Application) identity.Application {
+		app.Evidence = append([]string(nil), app.Evidence...)
+		if app.Hosted != nil {
+			h := *app.Hosted
+			h.Chain = append([]identity.HostedStep(nil), h.Chain...)
+			app.Hosted = &h
+		}
+		return app
+	}
+	out := identity.Attribution{VisibilityComplete: a.VisibilityComplete, Status: a.Status, Reason: a.Reason, ReasonCode: a.ReasonCode, Fingerprint: a.Fingerprint, Sockets: append([]identity.Socket(nil), a.Sockets...), Owners: append([]identity.Process(nil), a.Owners...)}
+	if a.Application != nil {
+		app := cloneApp(*a.Application)
+		out.Application = &app
+	}
+	for i := range out.Owners {
+		out.Owners[i].Application = cloneApp(out.Owners[i].Application)
+		out.Owners[i].Provenance = nil
+	}
+	if a.Table != nil {
+		table := *a.Table
+		table.Owners = append([]identity.WindowsOwner(nil), a.Table.Owners...)
+		out.Table = &table
+	}
+	if a.Association != nil {
+		association := *a.Association
+		association.Evidence = append([]string(nil), association.Evidence...)
+		association.Assumptions = append([]string(nil), association.Assumptions...)
+		out.Association = &association
+	}
+	return &out
+}
+
+// A rule edit must revoke changed permissions, without sending still-allowed
+// established connections through identity discovery again. The engine lock
+// covers evaluation, confirmed kernel changes and policy publication.
+func (e *Engine) reconcileSocketPolicyLocked(next []policy.Rule) error {
+	s := e.socketAuthorization
+	if s == nil || !s.connectionScoped || s.disabled || s.failure != nil {
+		return e.revokeSocketGrantsLocked()
+	}
+	if err := s.store.InvalidateTickets(); err != nil {
+		e.failConnectionAuthorizationLocked(s, err)
+		if s.disabled {
+			return nil
+		}
+		return s.failure
+	}
+	now := e.Now()
+	for key, f := range s.flows {
+		keep := false
+		horizon := uint64(0)
+		if f.haveKey && f.connectionPolicy != nil {
+			a := *f.connectionPolicy
+			bound, ok := socketgrant.KeyForQueuedOutput(f.flow, a)
+			if ok && bound == f.key && a.Application.Key == f.application && a.Application.Revision == f.authorizedRevision {
+				action, id, _ := e.evaluateLocked(next, f.flow, a, now)
+				var rule *policy.Rule
+				for i := range next {
+					if next[i].ID == id {
+						rule = &next[i]
+						break
+					}
+				}
+				// Keep exactly the initially-supported explicit app permission class.
+				keep = action == "allow" && rule != nil && !rule.NetworkEndpoint && rule.Preset == nil && rule.Filter.Application == a.Application.Key && rule.Filter.UID == a.Principal().UID && rule.Filter.Process.IsZero() && rule.Filter.InterfaceIndex == 0 && rule.Filter.InterfaceName == "" && rule.Filter.PeerService.Application == "" && !rule.Filter.AllPrograms && !rule.Filter.AllUIDs && e.leaseForLocked(f.flow, a, now) == nil
+				if keep && !rule.Expires.IsZero() {
+					remaining := rule.Expires.Sub(now)
+					if remaining <= 0 {
+						keep = false
+					} else {
+						horizon = socketgrant.BootNow() + uint64(remaining)
+					}
+				}
+			}
+		}
+		if keep && (f.deadline == 0 || socketgrant.BootNow() < f.deadline) {
+			if horizon != 0 && (f.deadline == 0 || horizon < f.deadline) {
+				if err := s.store.Limit(f.key, horizon); err != nil {
+					e.failConnectionAuthorizationLocked(s, err)
+					if s.disabled {
+						return nil
+					}
+					return s.failure
+				}
+				f.deadline = horizon
+			}
+			continue
+		}
+		if f.haveKey {
+			if err := s.store.Forget(f.key); err != nil {
+				e.failConnectionAuthorizationLocked(s, err)
+				if s.disabled {
+					return nil
+				}
+				return s.failure
+			}
+			f.haveKey = false
+		}
+		f.completeObservationWait()
+		delete(s.flows, key)
+	}
+	return nil
 }
