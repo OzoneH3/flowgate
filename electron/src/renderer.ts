@@ -80,7 +80,7 @@ import {
   authoritativeZonePolicy,
   authoritativeProcessPolicy,
 } from './policy';
-import { ruleStatus, ruleState, ruleDescription, ownConfigured, zoneConfigured } from './rule-status';
+import { ruleStatus, ruleState, ruleDescription, ownConfigured, zoneConfigured, runningRuleInventory } from './rule-status';
 import { canDecide, canManageRules } from './protocol';
 import type { Application } from './protocol';
 import { verifiedLaunch } from './provenance';
@@ -604,6 +604,7 @@ function statusStrip(r: Row) {
   const authoritative = state.control.capabilities?.includes(POLICY_CAPABILITY);
   const result = authoritative ? authoritativePolicy(r, state) : undefined;
   const processPolicy = authoritativeProcessPolicy(r, state);
+  const runningInventory=runningRuleInventory(r,state,!!result?.application||!!processPolicy);
   for (const slot of STATUS_SLOTS) {
     if (slot.key === "ul-limit" || slot.key === "dl-limit") { strip.append(uploadButton(r,state,slot.key === "dl-limit" ? "download" : "upload")); continue; }
     if (slot.key === "priority") { strip.append(priorityButton(r,state)); continue; }
@@ -665,6 +666,10 @@ function statusStrip(r: Row) {
         scoped: own.scoped,
       };
       title = `${slot.label} (not running · stored rules): ${chip.text}\n${chip.detail}`;
+    } else if (runningInventory) {
+      const rules=runningInventory[direction],own=ownConfigured(rules,runningInventory.now);
+      chip={glyph:'',text:own.text,tone:own.tone,detail:rules.map(rule=>ruleDescription(rule,runningInventory.now)).join('\n'),scoped:own.scoped};
+      title=`${slot.label}: ${chip.text} · saved rules for this observed running process\n${chip.detail}\nSocket attribution is unavailable; this is configured policy, not a verdict for its traffic.`;
     } else if (authoritative) {
       // NetLimiter Rule Status: the node's OWN rule; scoped rules only add a "+N scoped" hint.
       const summary = processPolicy?.[direction] || result?.application?.[direction];
@@ -746,6 +751,10 @@ function statusStrip(r: Row) {
         showInactiveRules(button, r, direction);
         return;
       }
+      if (runningInventory) {
+        showInactiveRules(button, r, direction);
+        return;
+      }
       if (presentation?.panes.info !== 'docked') showFloatingRuleStatus();
       activityPolicy?.activate(direction, undefined, button);
     };
@@ -755,11 +764,12 @@ function statusStrip(r: Row) {
   return cell;
 }
 function showInactiveRules(anchor: HTMLElement, r: Row, direction: 'incoming' | 'outgoing') {
-  if (!r.inactive || !state) return;
+  if ((!r.inactive && !(r.kind==='application'&&r.process)) || !state) return;
   const status = ruleStatus(r, state);
   const allStatus = ruleStatus({...r, applicationZone: undefined}, state);
   openInactiveRules(anchor, {
-    label: r.applicationZone ? r.label : r.presentationLabel || appNames.get(JSON.stringify([r.inactive.key, r.inactive.revision, r.inactive.executable])) || r.label,
+    label: r.applicationZone ? r.label : r.presentationLabel || (r.inactive?appNames.get(JSON.stringify([r.inactive.key,r.inactive.revision,r.inactive.executable])):undefined) || r.label,
+    presenceLabel: r.inactive?undefined:'running process observed',
     direction,
     rules: status.available ? status[direction] : [],
     generation: state.control.generation,
@@ -1893,6 +1903,12 @@ function renderInfo() {
     field(info,'Measurement','Zone-attributed traffic intervals are not supplied by the backend; no lifetime totals are relabelled.');
     field(info,'Enforcement',state.control.protection?.state||state.control.enforcement?.state||'Unknown');
     commit();return;
+  }
+  if(r.kind==='application'&&!r.applicationZone&&r.process) {
+    field(info,'Running application',r.process.application.executable||r.process.executable);
+    field(info,'Observed processes',r.children.filter(c=>c.kind==='process'&&c.process).map(c=>`PID ${c.process!.pid} · start ${c.process!.start_ticks}`).join('\n')||`PID ${r.process.pid} · start ${r.process.start_ticks}`);
+    field(info,'Application identity',`${r.process.application.key} · revision ${r.process.application.revision} · ${accountLabel(r.process.uid)}`);
+    if(!r.rows.length) field(info,'Connections','No socket is currently attributed to this application. Its process identity and saved rules are still available; no traffic ownership is inferred.');
   }
   if(r.kind==='application'&&!r.applicationZone) {
     const details=appFastPathDetails(r.rows);

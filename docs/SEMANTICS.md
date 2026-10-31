@@ -792,3 +792,24 @@ packet verdict, grant renewal or reason to skip admission verification. The
 existing granted-UDP display path remains separate. Longer annotation outages
 can still fall back to unknown after the three-second limit. No saved rules are
 created, removed or changed by either display path.
+
+### Running application rows and saved-rule indicators
+
+In the default All sockets view, an identified process in Activity's UID-projected
+process table can supply an application row even when socket-to-application
+annotation is unavailable. The row uses the same application/revision/UID key as
+a socket-annotated row. Unknown/shared sockets stay in their existing groups;
+this does not assign their traffic to the identified process. Active/Listening
+filters retain their explicit socket-state semantics.
+
+If no current socket-associated policy summary is available, the rule column
+shows the exact observed executable/user's saved rule inventory using the same
+Allow/Deny glyphs. The tooltip names this as stored configuration, not a verdict
+for current traffic. Edits use the existing version-checked stored-rule workflow;
+new rules require the existing saved-rule basis or a fresh observed-rule verifier.
+The UI does not infer permission from a name, launch relationship or shared socket.
+
+Activity's process table includes observed socket holders, not every running
+process. An application cannot appear through this path before its executable
+is identified, or while its process is absent from that table. This change adds
+no census, polling, process enumeration or permission evaluation.

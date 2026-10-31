@@ -55,6 +55,19 @@ export function ruleStatus(row: Row, state: ClientState): RuleStatus {
     'Listed scoped rules for this application identity/UID (this revision, or rules following updates of the same verified program); not a verdict for any connection. Policy precedence remains in Go.';
   return result;
 }
+// A current process identity can name its saved rules without establishing any
+// socket ownership. Never substitute this inventory for an effective verdict.
+export function runningRuleInventory(row: Row, state: ClientState, hasPolicyAssociation: boolean): RuleStatus | undefined {
+  if (row.kind!=='application' || !row.process || row.inactive || hasPolicyAssociation) return;
+  const p=row.process;
+  const runtime=row.runtimeApplication;
+  if (runtime && (runtime.application.key!==p.application.key || runtime.application.revision!==p.application.revision || runtime.uid!==p.uid)) return;
+  if (row.displayApplication && (row.displayApplication.key!==p.application.key || row.displayApplication.revision!==p.application.revision)) return;
+  // Name the stored inventory from the currently observed process, not from a
+  // shared socket, request, display label or inferred ownership association.
+  const inventory=ruleStatus({...row,runtimeApplication:undefined,displayApplication:undefined},state);
+  return inventory.available?inventory:undefined;
+}
 export function ruleState(rule: Rule, now: number) {
   const expiry = rule.expires && !rule.expires.startsWith('0001-') ? Date.parse(rule.expires) : NaN;
   if (Number.isFinite(expiry) && expiry <= now) return 'expired';

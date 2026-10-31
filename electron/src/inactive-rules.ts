@@ -9,6 +9,7 @@ import { confirmRuleDelete, openRule } from './workflows';
 
 export interface InactiveRulesOptions {
   label: string;
+  presenceLabel?: string;
   direction: 'incoming' | 'outgoing';
   rules: Rule[];
   generation: string;
@@ -137,7 +138,7 @@ export function openInactiveRules(anchor: HTMLElement, o: InactiveRulesOptions) 
   root.setAttribute('role', 'dialog');
   root.setAttribute('aria-label', `${o.label} · ${o.direction} rules`);
   root.tabIndex = -1;
-  root.append(el('div', `${o.label} · ${o.direction === 'incoming' ? 'In' : 'Out'} · not running`, 'inactive-rules-title'));
+  root.append(el('div', `${o.label} · ${o.direction === 'incoming' ? 'In' : 'Out'} · ${o.presenceLabel || 'not running'}`, 'inactive-rules-title'));
   const status = el('p', '', 'inactive-rules-status');
   status.setAttribute('role', 'status');
   let busy = false;

@@ -329,6 +329,23 @@ export function hierarchy(activity: Activity, query = '', filter = 'all'): Row[]
       pid: owners.length === 1 ? owners[0].pid : undefined,
     });
   }
+  // A known running application is not contingent on a socket->app annotation.
+  // The UID-projected process table supplies presence/identity only. Shared or
+  // unattributed sockets remain in their existing groups and add no app traffic.
+  if (filter === 'all') for (const p of Object.values(activity.processes).sort((a,b)=>(a.pid||0)-(b.pid||0) || String(a.id||'').localeCompare(String(b.id||'')))) {
+    const app=p.application;
+    if (!app?.key || !app.revision || !['native','wine','electron'].includes(app.kind||'') || !Number.isSafeInteger(p.pid) || p.pid<=0 || !p.start_ticks || !Number.isSafeInteger(p.uid) || p.uid<0) continue;
+    const key=`${app.key}|${app.revision}|uid:${p.uid}`;
+    let a=apps.get(key);
+    if (!a) {
+      if (![app.name,app.display_name,app.executable,p.executable,String(p.pid)].filter(Boolean).join(' ').toLowerCase().includes(query.toLowerCase())) continue;
+      a={id:'app:'+key,kind:'application',label:(app.kind==='wine'?app.name:app.display_name)||app.name||app.executable,children:[],rows:[],process:p};
+      apps.set(key,a);roots.push(a);
+    }
+    if (a.kind!=='application') continue;
+    if (!a.process) a.process=p;
+
+  }
   if (lifecycle) lifecycle.label = `Kernel TCP lifecycle (${lifecycle.rows.length})`;
   return nestLaunchedApplications(roots);
 }
