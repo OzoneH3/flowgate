@@ -42,6 +42,9 @@ func (m *WineObservers) dispatchHint(f Flow, now time.Time) *wineDispatchHint {
 	defer m.mu.Unlock()
 	h := m.dispatch[f.Key()]
 	if h != nil && (now.Before(h.observed) || now.Sub(h.observed) >= wineDispatchTTL) {
+		if h.pending {
+			m.pendingDispatchExpired.Add(1)
+		}
 		delete(m.dispatch, f.Key())
 		return nil
 	}
@@ -93,6 +96,9 @@ func (m *WineObservers) rememberRoutingDispatch(f Flow, initial Attribution, obs
 	}
 	for key, h := range m.dispatch {
 		if now.Before(h.observed) || now.Sub(h.observed) >= wineDispatchTTL {
+			if h.pending {
+				m.pendingDispatchExpired.Add(1)
+			}
 			delete(m.dispatch, key)
 		}
 	}

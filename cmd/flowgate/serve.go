@@ -57,7 +57,7 @@ func serveCommand(args []string) error {
 	tcpCgroup := fs.String("tcp-initiation-cgroup", "/sys/fs/cgroup", "cgroup-v2 observation coverage; current network namespace only")
 	helper := fs.String("udp-helper", "", "reviewed UDP native helper; pinned at startup but never implicitly attached")
 	iteratorHelper := fs.String("holder-iterator-helper", "", "explicit reviewed task_file iterator loader; capability failure retains /proc")
-	socketAuthorization := fs.Bool("socket-authorization", false, "opt-in 250ms socket-bound IPv4 UDP output authorization; requires supported build and continuous protection")
+	socketAuthorization := fs.Bool("socket-authorization", false, "opt-in connection-lifetime socket-bound IPv4 UDP output authorization; requires supported build and continuous protection")
 	allowProtection := fs.Bool("allow-protection", false, "explicit selected administrator authority for continuous Start/Stop")
 	protectionState := fs.String("protection-state", "/var/lib/flowgate/protection.json", "durable desired protection mode")
 	restoreUDP := fs.Bool("restore-udp", false, "restore previously authorized machine UDP monitoring independently of firewall")

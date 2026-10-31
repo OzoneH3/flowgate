@@ -101,12 +101,13 @@ func TestWineDispatchNeverStoresIncompleteOrOtherRuntime(t *testing.T) {
 }
 
 func TestWineDispatchFreshCensusRejectsReuseAndBrokerChanges(t *testing.T) {
-	for _, scenario := range []string{"new-socket", "other-app-same-prefix", "other-prefix", "broker-restart", "broker-exec", "incomplete"} {
+	for _, scenario := range []string{"new-socket", "other-app-same-prefix", "other-prefix", "broker-restart", "broker-exec", "incomplete", "owner-gone"} {
 		t.Run(scenario, func(t *testing.T) {
 			f, initial, result := dispatchFixture()
 			m := WineObservers{}
 			now := time.Now()
-			m.rememberDispatch(f, initial, result, now, now)
+			_ = result
+			m.rememberRoutingDispatch(f, initial, now, now, true)
 			h := m.dispatchHint(f, now)
 			a := copyWineInitial(h.initial)
 			again := copyWineInitial(initial)
@@ -122,6 +123,8 @@ func TestWineDispatchFreshCensusRejectsReuseAndBrokerChanges(t *testing.T) {
 				again.Owners[0].ExecutableRevision = "new"
 			case "incomplete":
 				again.VisibilityComplete = false
+			case "owner-gone":
+				again.Owners = nil
 			}
 			w := WineTable{prefix: "/prefix-one"}
 			got := w.finishCensus(f, a, again, &a.Owners[0], snap, snap, []WindowsOwner{row}, func(*Process, string, string) bool { t.Fatal("changed evidence reached image proof"); return true })
@@ -257,7 +260,8 @@ func TestWineDispatchSameCookieCannotTransferApplicationOrPrefix(t *testing.T) {
 			a.Owners = append(a.Owners, client)
 			m := WineObservers{}
 			now := time.Now()
-			m.rememberDispatch(f, a, r, now, now)
+			_ = r
+			m.rememberRoutingDispatch(f, a, now, now, true)
 			h := m.dispatchHint(f, now)
 			initial := copyWineInitial(h.initial)
 			again := copyWineInitial(a)
