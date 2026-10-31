@@ -1506,7 +1506,7 @@ function renderTree() {
         cached.policyRevision = treePolicyRevision;
       }
       const status=cached.node.querySelector<HTMLElement>('.connection-status-slot');
-      if(status) updateConnectionStatus(status,r);
+      if(status) {updateConnectionStatus(status,r);if(!r.inactive) cached.node.title=status.title;}
       ordered.push(cached.node);
       continue;
     }
@@ -1585,8 +1585,8 @@ function renderTree() {
       if (direction.state === 'listening') rowLabel = r.socket.socket.local;
       if (direction.state === 'unconnected') rowLabel = r.socket.socket.local;
     }
-    // Every row uses the identical slot. No native hover tooltip is attached:
-    // a click opens the existing persistent Info panel instead.
+    // Every row uses the identical slot. Hover explains the observation;
+    // clicking also opens the persistent Info panel.
     const clickable=r.kind==='application'&&!r.applicationZone;
     const led=element(clickable?'button':'span','','connection-status-slot');
     if(clickable) {
@@ -1598,6 +1598,7 @@ function renderTree() {
       };
     } else led.setAttribute('aria-hidden','true');
     updateConnectionStatus(led,r);
+    if(!r.inactive) tr.title=led.title;
     const textLabel = element('span', rowLabel, 'row-name-text');
     if (r.kind === 'application' && displayKey && !r.applicationZone) textLabel.dataset.displayKey = displayKey;
     name.append(led, toggle, icon, textLabel);

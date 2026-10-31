@@ -8,6 +8,8 @@ export function updateConnectionStatus(slot: HTMLElement, row: Row) {
   const markup=statusIconMarkup(mode as 'in-use'|'idle'|'on'|'off');
   if(slot.dataset.statusShape!==mode) {slot.innerHTML=markup;slot.dataset.statusShape=mode;}
   slot.className='connection-status-slot '+mode;
-  if (row.kind==='application'&&!row.applicationZone) slot.setAttribute('aria-label','Open Info: '+(appFastPathDetails(row.rows)?.title||'Connected-peer observation; no UDP fast-path evidence.'));
+  const detail=appFastPathDetails(row.rows)?.title||'Connected-peer observation; no UDP fast-path evidence.';
+  slot.title=detail;
+  if (row.kind==='application'&&!row.applicationZone) slot.setAttribute('aria-label','Open Info: '+detail);
 }
 

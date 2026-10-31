@@ -229,3 +229,18 @@ test('zone row targets retain verified native identity and require the current c
   assert.equal(uploadTarget({...row,...changed},state),undefined);
  assert.equal(uploadTarget({...row,process:{...row.process,uid:1001}},state).uid,1001);
 });
+
+test('unavailable shaping explains runtime scope and host journal without creating a target',()=>{
+ const {shapingUnavailableReason,uploadTarget,UPLOAD_CAPABILITY,DOWNLOAD_CAPABILITY,PRIORITY_CAPABILITY}=require('../dist/test/upload-shaping.cjs');
+ const row={kind:'application',label:'Synthetic Windows app',runtimeApplication:{application:{kind:'wine'}}};
+ const state={observation:{connected:true},control:{connected:true,readOnly:false,permissions:{role:'administrator'},capabilities:[UPLOAD_CAPABILITY,DOWNLOAD_CAPABILITY,PRIORITY_CAPABILITY]}};
+ const view={supported:true,writable:true,message:'unavailable',snapshot:{status:'Unsupported',last_error:'Owned journal remains; explicit configuration required for verified reconciliation'}};
+ for(const kind of ['upload','download','priority']) {
+  const reason=shapingUnavailableReason(row,state,view,kind);
+  assert.match(reason,/Wine\/runtime or shared-owner/);assert.match(reason,/Owned journal remains/);
+ }
+ assert.equal(uploadTarget(row,state),undefined);
+ const native={kind:'application',process:{uid:1000,application:{kind:'native',key:'synthetic-native',revision:'r'}}};
+ assert.equal(shapingUnavailableReason(native,state,{supported:true,writable:true,message:'ready'},'upload'),undefined);
+ assert.match(shapingUnavailableReason(native,state,view,'priority'),/Host shaping unavailable/);
+});

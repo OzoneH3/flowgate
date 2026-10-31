@@ -93,7 +93,7 @@ func (h *socketFastPathHints) sampleHits() {
 }
 
 func (h socketFastPathHints) matchingSocket(row identity.ActivityRow) []socketGrantHint {
-	if row.Socket.Protocol != "udp" || !row.Socket.Local.Addr().Is4() {
+	if row.Socket.Protocol != "udp" {
 		return nil
 	}
 	var out []socketGrantHint
@@ -176,7 +176,7 @@ func (e *Engine) annotateSocketFastPath(snapshot identity.ActivitySnapshot) iden
 				hint.State = "unsupported"
 				hint.Code = "protocol_outside_scope"
 				hint.Reason = "This UDP accelerator does not apply to TCP. Established TCP can already use its ordinary kernel path."
-			case !row.Socket.Local.Addr().Is4() || !row.Socket.Remote.Addr().Is4():
+			case len(matches) == 0 && (!row.Socket.Local.Addr().Is4() || !row.Socket.Remote.Addr().Is4()):
 				hint.State = "unsupported"
 				hint.Code = "family_outside_scope"
 				hint.Reason = "This accelerator supports IPv4 UDP only; this connection uses the ordinary path."

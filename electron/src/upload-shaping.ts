@@ -34,6 +34,19 @@ export function uploadTarget(row: Row, state: ClientState): UploadTarget | undef
   if(zone && (!state.control?.capabilities?.includes(ZONE_CAPABILITY) || !state.control.networkZones || zone.model!==state.control.networkZones.model)) return;
   return {uid:p.uid, application:p.application.key, revision:p.application.revision, label:row.label, ...(zone?{scope:zone.zone}:{})};
 }
+// Presentation only. Keep the existing target authority and eligibility unchanged.
+export function shapingUnavailableReason(row: Row, state: ClientState, view: UploadView, kind: LimitDirection|'priority'): string | undefined {
+  const reasons:string[]=[];
+  if (!state.observation?.connected) reasons.push('Current socket observation is disconnected.');
+  else if (row.runtimeApplication || row.displayApplication || row.process?.application.kind==='wine') reasons.push('Wine/runtime or shared-owner application shaping is not supported; only verified native application sockets are eligible.');
+  else if (!uploadTarget(row,state)) reasons.push('No current eligible native application target is available for this row.');
+  if (!state.control?.connected) reasons.push('The control connection is disconnected.');
+  else if (!state.control.capabilities?.includes(UPLOAD_CAPABILITY) || (kind==='download'&&!state.control.capabilities?.includes(DOWNLOAD_CAPABILITY)) || (kind==='priority'&&!state.control.capabilities?.includes(PRIORITY_CAPABILITY))) reasons.push('This backend does not provide the requested shaping capability.');
+  else if (state.control.permissions?.role!=='administrator' || state.control.readOnly) reasons.push('Shaping changes require an administrator with write access.');
+  if (!view.supported || view.snapshot?.status==='Unsupported') reasons.push('Host shaping unavailable: '+(view.snapshot?.last_error||view.message||'Status unavailable.'));
+  else if (!view.writable) reasons.push(view.message||'Host shaping is read-only.');
+  return reasons.length ? reasons.join(' ') : undefined;
+}
 export function parseUpload(raw: unknown): UploadSnapshot {
   const r = raw as UploadSnapshot;
   if (r && r.configured_caps === null) r.configured_caps = [];

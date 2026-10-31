@@ -754,3 +754,19 @@ Sampling timestamps/status and retained-vs-fresh display provenance update in
 place, not by replacing the row; real socket/application identity changes still
 invalidate the structural key. Unchanged SVG nodes remain unchanged. No smoothing
 or hysteresis is added to conceal grant or activity-state changes.
+
+### Socket status presentation on dual-stack UDP sockets
+
+The application status icon can report existing IPv4 fast-path grants on an
+unconnected dual-stack socket. Display matching uses the exact namespace,
+cookie, inode and UID, and checks the visible holders' UIDs. A wildcard `::`
+address on the socket row does not make its IPv4 grants disappear from the
+presentation. This does not enable IPv6 acceleration, create permissions, or
+claim that every destination uses the fast path. Recent-hit and idle states
+remain observations of the existing grants.
+
+The status slot is 16 pixels and supports both a hover explanation and the
+persistent Info panel. Application shaping controls explain unavailable runtime,
+shared-owner, capability and host-controller states without changing shaping
+eligibility or configuration. Saved rule changes are independent of these display
+annotations; a disappearing row indicator is not evidence that a rule was deleted.

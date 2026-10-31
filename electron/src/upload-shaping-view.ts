@@ -1,6 +1,6 @@
 import { showAccountIn } from './accounts';
 import { popupPosition } from './popup-position';
-import {DEFAULT_SHAPING, ZONE_CAPABILITY, scopeOf, scopeLabel, sameTarget, type LimitScope, uploadTarget, uploadSummary, limitCoverage, capRate, capPriority, prioritySummary, priorityCoverage, validateBudget, DOWNLOAD_CAPABILITY, PRIORITY_CAPABILITY, TRAFFIC_PRIORITIES, type TrafficPriority, type LimitDirection, UPLOAD_CAPABILITY, UPLOAD_RATE_UNITS, uploadRateBits, uploadRateValue, type UploadRateUnit, type UploadView, type UploadTarget} from './upload-shaping';
+import {DEFAULT_SHAPING, shapingUnavailableReason, ZONE_CAPABILITY, scopeOf, scopeLabel, sameTarget, type LimitScope, uploadTarget, uploadSummary, limitCoverage, capRate, capPriority, prioritySummary, priorityCoverage, validateBudget, DOWNLOAD_CAPABILITY, PRIORITY_CAPABILITY, TRAFFIC_PRIORITIES, type TrafficPriority, type LimitDirection, UPLOAD_CAPABILITY, UPLOAD_RATE_UNITS, uploadRateBits, uploadRateValue, type UploadRateUnit, type UploadView, type UploadTarget} from './upload-shaping';
 import type {Row} from './model';
 import type {ClientState} from './protocol';
 let view:UploadView={supported:false,writable:false,message:'Unsupported: experimental upload controller is not enabled.'};
@@ -15,6 +15,15 @@ let dismissPopup: (()=>void)|undefined;
 function adopt(v:UploadView,start:number) { if(v.generation===view.generation && v.snapshot && view.snapshot && v.snapshot.version<view.snapshot.version)return; view=v; leaseDeadline=start+Math.max(0, v.snapshot?.coverage_valid_for_ms||0); }
 function coverageExpired() { return view.snapshot?.coverage_snapshot_expired || performance.now()>=leaseDeadline; }
 const targets=new WeakMap<HTMLElement,UploadTarget>();
+const buttonRows=new WeakMap<HTMLElement,{row:Row,state:ClientState,kind:LimitKind}>();
+function paintAvailability(b:HTMLButtonElement) {
+  const item=buttonRows.get(b);if(!item)return;
+  const reason=shapingUnavailableReason(item.row,latestState||item.state,view,item.kind);
+  b.disabled=!!reason;
+  b.setAttribute('aria-label',`${item.kind} for ${item.row.label}`);
+  if(reason){b.title=reason;b.setAttribute('aria-label',`${item.kind} unavailable for ${item.row.label}: ${reason}`);}
+}
+
 const text=<K extends keyof HTMLElementTagNameMap>(tag:K,value:string)=>{const e=document.createElement(tag);e.textContent=value;return e;};
 function coverage(t:UploadTarget, direction:LimitDirection='upload') {
   const c=limitCoverage(view.snapshot,t,direction,coverageExpired());
@@ -47,7 +56,7 @@ function paint() {
   const live=document.getElementById('uploadCoverageLive');
   if(live && dialogTarget) live.textContent=dialogDirection==='priority'?`${prioritySummary(view,dialogTarget)} · ${budgetText()} ${priorityCoverageText(dialogTarget)} ${view.message} ${view.snapshot?.last_error||''}`:`${uploadSummary(view,dialogTarget,dialogDirection)} · ${coverage(dialogTarget,dialogDirection)} ${view.message} ${view.snapshot?.last_error||''}`;
   for(const b of document.querySelectorAll<HTMLButtonElement>('[data-upload-limit]')) {
-    const t=targets.get(b); if(t)paintButton(b,t);
+    const t=targets.get(b); if(t)paintButton(b,t);paintAvailability(b);
   }
 }
 function limitGlyph(direction:LimitKind) {
@@ -71,23 +80,23 @@ export function refreshUpload(state:ClientState) {
 }
 export function uploadButton(row:Row,state:ClientState,direction:LimitDirection='upload') {
   const t=uploadTarget(row,state);
-  if(!t || !state.control.capabilities?.includes(UPLOAD_CAPABILITY) || (direction==='download' && !state.control.capabilities?.includes(DOWNLOAD_CAPABILITY))) return emptySlot();
+  if(!['application','process'].includes(row.kind)) return emptySlot();
   const b=document.createElement('button');
   b.className='status-slot upload-limit'; b.dataset.uploadLimit='';b.dataset.limitDirection=direction;
   const label=direction==='download'?'Download':'Upload';
   b.setAttribute('aria-label',`${label} limit for ${row.label}`);b.setAttribute('aria-haspopup','dialog');b.setAttribute('aria-expanded','false');
   const dot=text('span','·');dot.className='slot-dot';b.append(dot,limitGlyph(direction));
-  targets.set(b,t);paintButton(b,t);b.onclick=e=>{e.stopPropagation();void open(t,b,direction);};
+  buttonRows.set(b,{row,state,kind:direction});if(t){targets.set(b,t);paintButton(b,t);b.onclick=e=>{e.stopPropagation();void open(t,b,direction);};}paintAvailability(b);
   return b;
 }
 export function priorityButton(row:Row,state:ClientState) {
   const t=uploadTarget(row,state);
-  if(!t || !state.control.capabilities?.includes(PRIORITY_CAPABILITY) || !state.control.capabilities?.includes(UPLOAD_CAPABILITY)) return emptySlot();
+  if(!['application','process'].includes(row.kind)) return emptySlot();
   const b=document.createElement('button');
   b.className='status-slot upload-limit priority-control'; b.dataset.uploadLimit='';b.dataset.limitDirection='priority';
   b.setAttribute('aria-label',`Traffic priority for ${row.label}`);b.setAttribute('aria-haspopup','dialog');b.setAttribute('aria-expanded','false');
   const dot=text('span','·');dot.className='slot-dot';b.append(dot,limitGlyph('priority'));
-  targets.set(b,t);paintButton(b,t);b.onclick=e=>{e.stopPropagation();void open(t,b,'priority');};
+  buttonRows.set(b,{row,state,kind:'priority'});if(t){targets.set(b,t);paintButton(b,t);b.onclick=e=>{e.stopPropagation();void open(t,b,'priority');};}paintAvailability(b);
   return b;
 }
 function emptySlot() {
