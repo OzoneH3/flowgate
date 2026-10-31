@@ -357,6 +357,40 @@ add rule inet fg_crash_observer post ip saddr 198.18.1.1 ip daddr 198.18.1.2 udp
 	if replacement.SocketSessionFailure() != nil {
 		t.Fatal(replacement.SocketSessionFailure())
 	}
+	// Normal activation deliberately preserves confirmed pre-existing
+	// connections via conntrack, independently of socket grants. Record that
+	// path, then clear only this fixture tuple's reserved bits to isolate the
+	// fresh-map assertion. This is not a production behavior change.
+	originalAddress, err := unix.Getsockname(fd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalPort := uint16(originalAddress.(*unix.SockaddrInet4).Port)
+	confirmed, err := flows()
+	if err != nil {
+		t.Fatal(err)
+	}
+	conntrackEvidence, _ := json.MarshalIndent(confirmed, "", "  ")
+	_ = os.WriteFile(filepath.Join(crashDir, "replacement-conntrack-before-test-clear.json"), conntrackEvidence, 0600)
+	if stats, er := replacement.socketSession.(*routedSocketSession).backend.Totals(); er != nil || stats.Packets != 0 {
+		t.Fatal("replacement maps not fresh before fixture clear", stats, er)
+	}
+	foundPreserved := false
+	for _, flow := range confirmed {
+		if flow.TupleOrig.Proto.Protocol == 17 && flow.TupleOrig.Proto.SourcePort == originalPort && flow.TupleOrig.Proto.DestinationPort == 45678 && flow.TupleOrig.IP.SourceAddress.String() == "198.18.1.1" && flow.TupleOrig.IP.DestinationAddress.String() == "198.18.1.2" {
+			if flow.Mark&preserved == 0 {
+				t.Fatal("fixture did not expose startup preservation")
+			}
+			if err = setMark(flow, 0); err != nil {
+				t.Fatal(err)
+			}
+			foundPreserved = true
+		}
+	}
+	if !foundPreserved {
+		t.Fatal("original conntrack tuple missing")
+	}
+	t.Log("confirmed pre-existing tuple had preserved mark; cleared only fixture reserved bits before grant-isolation check")
 	// The replacement owns fresh maps; the still-open original socket must
 	// queue again rather than inherit any lifetime grant from the killed owner.
 	oldSendDone := make(chan error, 1)
@@ -365,7 +399,13 @@ add rule inet fg_crash_observer post ip saddr 198.18.1.1 ip daddr 198.18.1.2 udp
 	}()
 	time.Sleep(100 * time.Millisecond)
 	if got := countEgress(); got != 2 {
-		t.Fatalf("old grant crossed restart: egress %d", got)
+		stats, er := replacement.socketSession.(*routedSocketSession).backend.Totals()
+		raw, _ := exec.Command("nft", "-j", "list", "ruleset").CombinedOutput()
+		_ = os.WriteFile(filepath.Join(crashDir, "replacement-failed-rules.json"), raw, 0600)
+		ct, _ := flows()
+		raw, _ = json.MarshalIndent(ct, "", "  ")
+		_ = os.WriteFile(filepath.Join(crashDir, "replacement-failed-conntrack.json"), raw, 0600)
+		t.Fatalf("old socket egressed after fixture mark clear: count %d fast stats %v error %v", got, stats, er)
 	}
 	if stats, er := replacement.socketSession.(*routedSocketSession).backend.Totals(); er != nil || stats.Packets != 0 {
 		t.Fatal("replacement inherited fast permission", stats, er)

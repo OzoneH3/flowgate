@@ -647,6 +647,11 @@ on uncertainty; repeated uncertainty fails the audit. All other rule content
 remains audited. Stop revokes before stopping the queue; resource release
 follows confirmed owned-table deletion.
 
+Normal protection activation also preserves already-confirmed connections via
+the existing conntrack cutover mechanism, independently of socket grants. A
+protection restart alone therefore does not prove those connections were
+re-attributed or denied.
+
 A daemon crash does not time-expire existing connection grants: already
 authorized live tuples can continue until cleanup, socket close or a kernel
 permission deadline. New tuples still queue without a listener and cannot inherit
