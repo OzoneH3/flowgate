@@ -741,3 +741,16 @@ ownership census. Closed rows are never recreated; conflicting identities stay
 unknown. This does not stabilize ungranted Wine sockets or change permissions.
 The publisher reads at most64 existing hit-stat keys after releasing the policy
 lock; API/UI readers do not initiate map reads, ownership checks or policy work.
+
+
+Status-slot presentation refinement
+-----------------------------------
+All rows use the same fixed12px SVG slot. Only live-granted UDP applications get
+an active/idle fast-path symbol; other rows retain the connected-peer dot. Unknown
+or unsupported explanations are available in Info without question-mark symbols
+on ordinary applications. Click the application status control or select its row
+for a persistent Fast path explanation. No native hover tooltip is required.
+Sampling timestamps/status and retained-vs-fresh display provenance update in
+place, not by replacing the row; real socket/application identity changes still
+invalidate the structural key. Unchanged SVG nodes remain unchanged. No smoothing
+or hysteresis is added to conceal grant or activity-state changes.

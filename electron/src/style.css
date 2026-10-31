@@ -1207,8 +1207,6 @@ button.status-slot.policy-fallback .blocker-glyph { opacity: .5; }
 #tree th.col-rule_status button { padding-top: 0; }
 #tree:focus-visible { outline: 0; }
 #activityView #info > dt,#activityView #info > dd { padding: 1px 0; line-height: 18px; }
-.online-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin: 0 5px 0 -8px; vertical-align: middle; background: transparent; }
-.online-dot.on { background: #8bc34a; }
 #tree .name.depth-0 { padding-left: 16px; }
 .connection-listening { color: #f5a623; }
 .visually-hidden { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); opacity: 0; pointer-events: none; }
@@ -1895,15 +1893,14 @@ body.hide-sidebar #activityView > aside { display:none; }
 .shaping-defaults p { color: var(--fg-muted); margin: 8px 0; }
 #shapingDefaultsStatus { margin-left: 8px; }
 
-.fast-path-badge {margin-left:6px;padding:0 3px;border:1px solid currentColor;border-radius:3px;font-size:10px;white-space:nowrap;opacity:.8}
-.fast-path-badge.unsupported {color:#9aa6b3}
-.fast-path-badge.inactive {color:#b7a886}
-.fast-path-badge.unknown {color:#9aa6b3}
-.fast-path-badge.authorized {color:#9bc7b0}
-.fast-path-badge:focus-visible {outline:1px solid currentColor;outline-offset:2px}
 
-.udp-fast-icon {display:inline-flex;align-items:center;justify-content:center;flex:0 0 12px;width:12px;font-size:14px;line-height:1;color:#96a3b0}
-.udp-fast-icon.in-use {color:#63d88e;font-weight:700}
-.udp-fast-icon.idle {color:#9bc7b0}
-.udp-fast-icon.unknown {color:#b7a886}
-.udp-fast-icon:focus-visible {outline:1px solid currentColor;outline-offset:2px}
+
+.connection-status-slot {display:inline-flex;align-items:center;justify-content:center;flex:0 0 12px;width:12px;height:12px;min-height:12px;max-height:12px;min-width:12px;margin:0 5px 0 -8px;padding:0;border:0;background:transparent;border-radius:0;vertical-align:middle;color:#8bc34a;line-height:0;box-sizing:border-box}
+.connection-status-slot svg {display:block;width:12px;height:12px;fill:currentColor;flex:none}
+.connection-status-slot.off {color:transparent}
+.connection-status-slot.in-use {color:#63d88e}
+.connection-status-slot.idle {color:#9bc7b0}
+button.connection-status-slot {cursor:pointer}
+button.connection-status-slot:focus-visible {outline:1px solid currentColor;outline-offset:2px}
+
+button.connection-status-slot:hover:not(:disabled),button.connection-status-slot:active:not(:disabled) {background:transparent}

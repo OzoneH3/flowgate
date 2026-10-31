@@ -1,4 +1,5 @@
-import { fastPathIndicator, appFastPathIndicator } from './fast-path';
+import { updateConnectionStatus } from './status-slot';
+import { fastPathIndicator, appFastPathDetails } from './fast-path';
 import { accountLabel } from './accounts';
 import {uploadButton, priorityButton, refreshUpload, openUploadLimits} from "./upload-shaping-view";
 import { setupObservedUsage, showObservedUsage, updateObservedUsage } from './observed-usage-view';
@@ -1504,6 +1505,8 @@ function renderTree() {
         if (previous.innerHTML !== policy.innerHTML) previous.replaceWith(policy);
         cached.policyRevision = treePolicyRevision;
       }
+      const status=cached.node.querySelector<HTMLElement>('.connection-status-slot');
+      if(status) updateConnectionStatus(status,r);
       ordered.push(cached.node);
       continue;
     }
@@ -1582,20 +1585,19 @@ function renderTree() {
       if (direction.state === 'listening') rowLabel = r.socket.socket.local;
       if (direction.state === 'unconnected') rowLabel = r.socket.socket.local;
     }
-    // A dot is a connected-peer observation, not simply a row-exists indicator.
-    const connected = hasObservedConnection(r);
-    const led = element('span', '', 'online-dot' + (connected ? ' on' : ''));
-    led.title = connected
-      ? 'Contains an observed established TCP or connected UDP socket. Not a firewall, delivery or reachability verdict.'
-      : 'No observed connected peer; listening/bound sockets do not light this indicator.';
-    led.setAttribute('aria-hidden', 'true');
-    const udpFast=r.kind==='application'&&!r.applicationZone?appFastPathIndicator(r.rows):undefined;
-    if (udpFast) {
-      led.textContent=udpFast.glyph;led.className='udp-fast-icon '+udpFast.state;
-      led.title=udpFast.title;led.dataset.sampledAt=udpFast.sampledAt;
-      led.removeAttribute('aria-hidden');led.setAttribute('role','img');led.setAttribute('aria-label',udpFast.title);led.tabIndex=0;
-    }
-
+    // Every row uses the identical slot. No native hover tooltip is attached:
+    // a click opens the existing persistent Info panel instead.
+    const clickable=r.kind==='application'&&!r.applicationZone;
+    const led=element(clickable?'button':'span','','connection-status-slot');
+    if(clickable) {
+      (led as HTMLButtonElement).type='button';
+      led.onclick=(event)=>{
+        event.stopPropagation();selected=r.id;
+        for(const row of document.querySelectorAll<HTMLElement>('#rows tr')) row.setAttribute('aria-selected',String(row.dataset.id===selected));
+        renderInfo();void window.flowgate.paneControl('info','open').catch(message);
+      };
+    } else led.setAttribute('aria-hidden','true');
+    updateConnectionStatus(led,r);
     const textLabel = element('span', rowLabel, 'row-name-text');
     if (r.kind === 'application' && displayKey && !r.applicationZone) textLabel.dataset.displayKey = displayKey;
     name.append(led, toggle, icon, textLabel);
@@ -1890,6 +1892,10 @@ function renderInfo() {
     field(info,'Measurement','Zone-attributed traffic intervals are not supplied by the backend; no lifetime totals are relabelled.');
     field(info,'Enforcement',state.control.protection?.state||state.control.enforcement?.state||'Unknown');
     commit();return;
+  }
+  if(r.kind==='application'&&!r.applicationZone) {
+    const details=appFastPathDetails(r.rows);
+    field(info,'Fast path',details?.title||'No UDP fast-path evidence for this application. The dot describes an observed connected peer, not permission or delivery.');
   }
   if (r.runtimeApplication) {
     const a=r.runtimeApplication;
@@ -3163,14 +3169,11 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-// Age the advisory badge locally even if backend updates stop. No API polling.
+// Age status locally without replacing rows or starting API/ownership work.
 if (!promptID) window.setInterval(() => {
-  for (const badge of document.querySelectorAll<HTMLElement>('.udp-fast-icon')) {
-    const sampled=Date.parse(badge.dataset.sampledAt || '');
-    if (Number.isFinite(sampled) && Date.now()-sampled>3000) {
-      badge.textContent='?'; badge.className='udp-fast-icon unknown';
-      badge.title='Fast-path status is stale; current use is unknown.';
-      badge.setAttribute('aria-label','Fast path unknown: '+badge.title);
-    }
+  for(const tr of document.querySelectorAll<HTMLElement>('#rows tr')) {
+    const row=allRows(roots).find(r=>r.id===tr.dataset.id);
+    const slot=tr.querySelector<HTMLElement>('.connection-status-slot');
+    if(row&&slot) updateConnectionStatus(slot,row);
   }
 },1000);
