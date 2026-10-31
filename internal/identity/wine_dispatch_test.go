@@ -278,3 +278,55 @@ func TestWineDispatchSameCookieCannotTransferApplicationOrPrefix(t *testing.T) {
 		})
 	}
 }
+
+func TestPendingWineDispatchReusesOnlyRoutingDiscovery(t *testing.T) {
+	f, a, r := dispatchFixture()
+	bin := t.TempDir()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Symlink(exe, filepath.Join(bin, "wineserver")); err != nil {
+		t.Fatal(err)
+	}
+	start, _, err := processStat(fmt.Sprintf("/proc/%d", os.Getpid()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.Owners[0].PID = os.Getpid()
+	a.Owners[0].Start = start
+	a.Owners[0].UID = uint32(os.Getuid())
+	m := WineObservers{options: WineObserverOptions{UID: uint32(os.Getuid()), RuntimeBins: []string{bin}, Prefixes: []string{"/prefix-one"}}, sessions: map[string]*observedWine{}, census: make(chan struct{}, WineCensusLimit)}
+	defer m.Close()
+	m.setupSession = func(record *observedWine, _ *Process, _ string) {
+		defer close(record.ready)
+		record.resolve = func(_ Flow, initial Attribution, _ bool) (Attribution, bool) {
+			if initial.Application != nil || initial.Table != nil || initial.FreshConnectionProof() {
+				t.Error("routing hint carried permission")
+			}
+			return r, true
+		}
+	}
+	// Both slots occupied: native discovery completes but runtime admission cannot.
+	m.census <- struct{}{}
+	m.census <- struct{}{}
+	calls := 0
+	got, done := m.resolveDispatch(f, false, func(Flow) Attribution { calls++; return a })
+	if done || got.Application != nil || calls != 1 || m.pendingDispatchStored.Load() != 1 {
+		t.Fatal("busy discovery was not retained without decision", done, calls)
+	}
+	<-m.census
+	<-m.census
+	h := m.dispatchHint(f, time.Now())
+	if h == nil || !h.pending {
+		t.Fatal("no pending route hint")
+	}
+	got, done = m.resolveDispatch(f, true, func(Flow) Attribution { t.Fatal("duplicated native discovery"); return Attribution{} })
+	if !done || !positiveWineDispatch(got) || m.pendingDispatchUsed.Load() != 1 {
+		t.Fatal("fresh runtime resolution did not complete")
+	}
+	// Its TTL does not extend on a hit, and another tuple cannot borrow it.
+	if m.dispatchHint(f, h.observed.Add(wineDispatchTTL)) != nil {
+		t.Fatal("pending hint extended")
+	}
+}

@@ -761,6 +761,10 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 								} else if e.Activity == nil {
 									r.Error = "observer unavailable"
 								}
+								if r.Activity != nil {
+									snapshot := e.annotateSocketFastPath(*r.Activity)
+									r.Activity = &snapshot
+								}
 							}
 						case "zone-migration-preview", "zone-migration-save":
 							if readonly || !permissions.CanManageRules {

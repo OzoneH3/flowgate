@@ -34,7 +34,17 @@ type RuntimeApplication struct {
 	UID         uint32        `json:"uid"`
 	Evidence    TableEvidence `json:"evidence"`
 }
+
+// FastPathPresentation is advisory API output, never permission authority.
+type FastPathPresentation struct {
+	State     string    `json:"state"`
+	Code      string    `json:"code"`
+	Reason    string    `json:"reason"`
+	SampledAt time.Time `json:"sampled_at"`
+}
+
 type ActivityRow struct {
+	FastPath *FastPathPresentation `json:"fast_path,omitempty"`
 	// Per-socket snapshot witness; never a permission key. A process may also
 	// hold other sockets through only its leader table.
 	HolderWitness      string              `json:"holder_witness,omitempty"`

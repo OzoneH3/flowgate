@@ -36,17 +36,19 @@ type observedWine struct {
 	released bool
 }
 type WineObservers struct {
-	renewalPhases      renewalPhaseLog
-	ordinaryPhases     renewalPhaseLog
-	queueCensus        chan struct{} // prototype reservation: at most one ordinary census
-	renewalCount       atomic.Uint64
-	renewalTotalNS     atomic.Uint64
-	renewalWaitNS      atomic.Uint64
-	renewalServiceNS   atomic.Uint64
-	renewalCensusCount atomic.Uint64
-	renewalWaitMax     atomic.Uint64
-	renewalServiceMax  atomic.Uint64
-	admissionDemand    atomic.Int64 // waiting or running censuses; presentation yields to these
+	pendingDispatchStored atomic.Uint64
+	pendingDispatchUsed   atomic.Uint64
+	renewalPhases         renewalPhaseLog
+	ordinaryPhases        renewalPhaseLog
+	queueCensus           chan struct{} // prototype reservation: at most one ordinary census
+	renewalCount          atomic.Uint64
+	renewalTotalNS        atomic.Uint64
+	renewalWaitNS         atomic.Uint64
+	renewalServiceNS      atomic.Uint64
+	renewalCensusCount    atomic.Uint64
+	renewalWaitMax        atomic.Uint64
+	renewalServiceMax     atomic.Uint64
+	admissionDemand       atomic.Int64 // waiting or running censuses; presentation yields to these
 
 	mu       sync.Mutex // guards sessions/closed/pins only; never held across setup or a census
 	options  WineObserverOptions
@@ -241,6 +243,9 @@ func (m *WineObservers) resolveDispatch(f Flow, wait bool, resolveNative func(Fl
 	fallback := false
 	if hint := m.dispatchHint(f, time.Now()); hint != nil {
 		diagnostics.Count(diagnostics.WineHintHit, 1)
+		if hint.pending {
+			m.pendingDispatchUsed.Add(1)
+		}
 		initial := copyWineInitial(hint.initial)
 		initial.renewalPhase = phase
 		if phase != nil {
@@ -285,6 +290,8 @@ func (m *WineObservers) resolveDispatch(f Flow, wait bool, resolveNative func(Fl
 	result, done = m.resolveAttribution(f, a, wait)
 	if done {
 		m.rememberDispatch(f, a, result, observed, time.Now())
+	} else if !wait {
+		m.rememberRoutingDispatch(f, a, observed, time.Now(), true)
 	}
 	return result, done
 }
@@ -582,7 +589,7 @@ func WorkspaceObserverScratch(path string) (string, error) { return workspacePat
 func (m *WineObservers) RenewalStatus() map[string]any {
 	rows, overwritten := m.renewalPhases.snapshot()
 	ordinary, ordinaryLost := m.ordinaryPhases.snapshot()
-	return map[string]any{"ordinary_phase_timeline": ordinary, "ordinary_phase_overwritten": ordinaryLost, "phase_timeline": rows, "phase_timeline_overwritten": overwritten, "reserved": m.queueCensus != nil, "completed": m.renewalCount.Load(),
+	return map[string]any{"pending_dispatch_stored": m.pendingDispatchStored.Load(), "pending_dispatch_used": m.pendingDispatchUsed.Load(), "ordinary_phase_timeline": ordinary, "ordinary_phase_overwritten": ordinaryLost, "phase_timeline": rows, "phase_timeline_overwritten": overwritten, "reserved": m.queueCensus != nil, "completed": m.renewalCount.Load(),
 		"total_wall_ns": m.renewalTotalNS.Load(), "slot_wait_wall_ns": m.renewalWaitNS.Load(),
 		"post_slot_wall_ns": m.renewalServiceNS.Load(), "census_completed": m.renewalCensusCount.Load(), "max_slot_wait_wall_ns": m.renewalWaitMax.Load(), "max_post_slot_wall_ns": m.renewalServiceMax.Load()}
 }

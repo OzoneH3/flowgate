@@ -34,6 +34,7 @@ await build({
     'src/endpoint-policy.ts',
     'src/endpoint-rules.ts',
     'src/connection-presentation.ts',
+    'src/fast-path.ts',
     'src/automatic-prompts.ts',
     'src/decision-remember.ts',
     'src/request-rule.ts',

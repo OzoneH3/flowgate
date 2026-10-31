@@ -16,6 +16,7 @@ const wineDispatchMax = 128
 type wineDispatchHint struct {
 	initial  Attribution
 	observed time.Time
+	pending  bool
 }
 
 func positiveWineDispatch(a Attribution) bool {
@@ -59,7 +60,17 @@ func (m *WineObservers) forgetDispatch(f Flow, hint *wineDispatchHint) {
 }
 
 func (m *WineObservers) rememberDispatch(f Flow, initial, result Attribution, observed, now time.Time) {
-	if !reuseEligible(f) || !positiveWineDispatch(result) || !initial.VisibilityComplete || len(initial.Sockets) != 1 || len(initial.Owners) == 0 || len(initial.Owners) > 16 || now.Before(observed) || now.Sub(observed) >= wineDispatchTTL {
+	if !positiveWineDispatch(result) {
+		return
+	}
+	m.rememberRoutingDispatch(f, initial, observed, now, false)
+}
+
+// A nonwaiting admission can discover the broker before the runtime lane is
+// available. Preserve only its routing hint; the next call still needs the full
+// fresh runtime/holder/cookie proof. This avoids repeating that same discovery.
+func (m *WineObservers) rememberRoutingDispatch(f Flow, initial Attribution, observed, now time.Time, pending bool) {
+	if !reuseEligible(f) || !initial.VisibilityComplete || len(initial.Sockets) != 1 || len(initial.Owners) == 0 || len(initial.Owners) > 16 || now.Before(observed) || now.Sub(observed) >= wineDispatchTTL {
 		return
 	}
 	for _, p := range initial.Owners {
@@ -89,5 +100,8 @@ func (m *WineObservers) rememberDispatch(f Flow, initial, result Attribution, ob
 	if m.dispatch[key] == nil && len(m.dispatch) >= wineDispatchMax {
 		return
 	}
-	m.dispatch[key] = &wineDispatchHint{initial: copyWineInitial(initial), observed: observed}
+	m.dispatch[key] = &wineDispatchHint{initial: copyWineInitial(initial), observed: observed, pending: pending}
+	if pending {
+		m.pendingDispatchStored.Add(1)
+	}
 }

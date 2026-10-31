@@ -1894,3 +1894,10 @@ body.hide-sidebar #activityView > aside { display:none; }
 .shaping-defaults select { min-width: 85px; }
 .shaping-defaults p { color: var(--fg-muted); margin: 8px 0; }
 #shapingDefaultsStatus { margin-left: 8px; }
+
+.fast-path-badge {margin-left:6px;padding:0 3px;border:1px solid currentColor;border-radius:3px;font-size:10px;white-space:nowrap;opacity:.8}
+.fast-path-badge.unsupported {color:#9aa6b3}
+.fast-path-badge.inactive {color:#b7a886}
+.fast-path-badge.unknown {color:#9aa6b3}
+.fast-path-badge.authorized {color:#9bc7b0}
+.fast-path-badge:focus-visible {outline:1px solid currentColor;outline-offset:2px}

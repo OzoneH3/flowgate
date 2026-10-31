@@ -32,6 +32,7 @@ type ListSnapshot struct {
 type publishedList struct {
 	targets       map[string]identity.PermissionTarget // presentation only, immutable after publish
 	data          []byte
+	socketHints   socketFastPathHints
 	socketStatus  []byte
 	socketFailure string
 	hasPresets    bool
@@ -84,6 +85,7 @@ func (s *listReadState) publish(e *Engine) error {
 	// published bytes nor readers share mutable storage with the live engine.
 	data, err := json.Marshal(view)
 	status := e.socketAuthorizationSummaryLocked()
+	socketHints := e.socketFastPathHintsLocked()
 	socketData, socketErr := json.Marshal(status)
 	var socketFailure string
 	if current := e.socketAuthorization; current != nil {
@@ -101,7 +103,7 @@ func (s *listReadState) publish(e *Engine) error {
 		return fmt.Errorf("publish request snapshot: %w", err)
 	}
 	s.revision++
-	s.published.Store(&publishedList{targets: targets, data: data, socketStatus: socketData, socketFailure: socketFailure, hasPresets: view.HasPresets, revision: view.Revision, at: view.At})
+	s.published.Store(&publishedList{socketHints: socketHints, targets: targets, data: data, socketStatus: socketData, socketFailure: socketFailure, hasPresets: view.HasPresets, revision: view.Revision, at: view.At})
 	return nil
 }
 
