@@ -30,10 +30,11 @@ type ActivityProcess struct {
 	ExecutableRevision string `json:"executable_revision,omitempty"`
 }
 type RuntimeApplication struct {
-	DisplaySource string        `json:"display_source,omitempty"` // presentation only; never a fresh identity observation
-	Application   Application   `json:"application"`
-	UID           uint32        `json:"uid"`
-	Evidence      TableEvidence `json:"evidence"`
+	DisplayVerifiedAt string        `json:"display_verified_at,omitempty"` // display only; never a proof timestamp
+	DisplaySource     string        `json:"display_source,omitempty"`      // presentation only; never a fresh identity observation
+	Application       Application   `json:"application"`
+	UID               uint32        `json:"uid"`
+	Evidence          TableEvidence `json:"evidence"`
 }
 
 // FastPathPresentation is advisory API output, never permission authority.

@@ -36,6 +36,7 @@ type observedWine struct {
 	released bool
 }
 type WineObservers struct {
+	activityDisplay    wineActivityDisplay // display-only; never read by a resolver
 	renewalPhases      renewalPhaseLog
 	ordinaryPhases     renewalPhaseLog
 	queueCensus        chan struct{} // prototype reservation: at most one ordinary census
@@ -141,6 +142,10 @@ func (m *WineObservers) Close() {
 	}
 	m.mu.Unlock()
 	cleanupAll(retired)
+	m.activityDisplay.mu.Lock()
+	m.activityDisplay.closed = true
+	m.activityDisplay.rows = nil
+	m.activityDisplay.mu.Unlock()
 }
 
 // unpin ends one use. It reports whether the session was retired meanwhile, in

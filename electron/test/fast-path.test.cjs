@@ -60,3 +60,19 @@ test('sample timestamps and retained provenance do not churn DOM, but actual soc
  assert.equal(rowStructure(row,1,false,false),key);
  socket.socket.cookie='cookie-B';assert.notEqual(rowStructure(row,1,false,false),key);
 });
+
+test('last verified TCP and UDP annotations keep each executable and prefix grouped without DOM churn',()=>{
+ const {hierarchy}=require('../dist/test/model.cjs');
+ const rows=[];
+ for(const prefix of ['A','B'])for(const app of ['Alpha','Beta'])for(const protocol of ['tcp','udp']) rows.push({id:`${app}-${prefix}-${protocol}`,owners:[],socket:{protocol,local:'[::]:1234',remote:'[::]:0',cookie:`${app}-${prefix}-${protocol}`},traffic:{},runtime_application:{application:{key:`${app}-${prefix}`,revision:'rev',kind:'wine',name:`Synthetic${app}.exe`,executable:`/prefix-${prefix}/${app}.exe`,prefix:`/prefix-${prefix}`},uid:1000,evidence:{}}});
+ const fresh=hierarchy({rows,processes:{}});
+ const retained=JSON.parse(JSON.stringify(rows));
+ for(const r of retained){r.runtime_application.display_source='last-verified-snapshot';r.runtime_application.display_verified_at=new Date().toISOString();}
+ const busy=hierarchy({rows:retained,processes:{}});
+ assert.equal(fresh.length,4);assert.equal(busy.length,4);
+ for(let i=0;i<fresh.length;i++){
+  assert.equal(busy[i].id,fresh[i].id);assert.equal(busy[i].rows.length,2);assert.equal(busy[i].label,fresh[i].label);
+  assert.equal(rowStructure(busy[i],1,false,false),rowStructure(fresh[i],1,false,false));
+  assert.equal(busy[i].runtimeApplication.display_source,'last-verified-snapshot');
+ }
+});

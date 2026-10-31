@@ -23,8 +23,13 @@ func activityTable(s Socket) activityTableKey {
 
 // AnnotateActivity batches all sockets of a broker, rather than repeatedly
 // spending the refresh budget on the same first eight sockets. No association
-// survives between snapshots. Admission still uses its independent census.
+// is used as permission evidence. Admission still uses its independent census.
 func (m *WineObservers) AnnotateActivity(s *ActivitySnapshot) {
+	m.annotateActivityFresh(s)
+	m.retainWineActivityAnnotations(s, time.Now())
+}
+
+func (m *WineObservers) annotateActivityFresh(s *ActivitySnapshot) {
 	if !s.Complete || m.admissionDemand.Load() != 0 {
 		return
 	}

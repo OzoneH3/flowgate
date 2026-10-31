@@ -770,3 +770,21 @@ persistent Info panel. Application shaping controls explain unavailable runtime,
 shared-owner, capability and host-controller states without changing shaping
 eligibility or configuration. Saved rule changes are independent of these display
 annotations; a disappearing row indicator is not evidence that a rule was deleted.
+
+### Short retention of Wine activity annotations
+
+When the activity observer yields to attribution work, a previously verified
+Wine display annotation can remain on the same currently observed socket for up
+to three seconds. The match includes namespace, cookie, inode, UID, protocol,
+endpoints, socket state and the complete visible holder set (PID/start,
+namespaces, executable revision and application identity). A change or a closed
+socket removes that cached annotation; incomplete snapshots clear the cache.
+The cache is bounded to 2048 current rows and reusing an annotation never renews
+its age. Fresh annotations replace it normally.
+
+Info labels retained annotations with their last verification time. This cache
+is read only by activity presentation: it is never an ownership proof, permission,
+packet verdict, grant renewal or reason to skip admission verification. The
+existing granted-UDP display path remains separate. Longer annotation outages
+can still fall back to unknown after the three-second limit. No saved rules are
+created, removed or changed by either display path.

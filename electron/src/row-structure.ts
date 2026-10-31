@@ -7,7 +7,7 @@ const structure = (r: SocketRow) => {
   // Sampling timestamps/status and retained-vs-fresh display provenance have
   // an in-place update path; they do not change the socket/application identity.
   if (!runtime) return rest;
-  const { display_source: _source, ...identity } = runtime;
+  const { display_source: _source, display_verified_at: _verified, ...identity } = runtime;
   return { ...rest, runtime_application: identity };
 };
 export function rowStructure(r: Row, depth: number, selected: boolean, expanded: boolean) {
