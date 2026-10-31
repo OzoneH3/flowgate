@@ -8,6 +8,7 @@ import (
 	"flowgate/internal/daemon"
 	"flowgate/internal/identity"
 	"flowgate/internal/socketgrant"
+	"fmt"
 	"sync"
 )
 
@@ -16,6 +17,9 @@ import (
 // its private chain, before recording the final table digest.
 func RoutedSocketSessionFactory(e *daemon.Engine, resolvers daemon.SocketSessionResolvers) SocketSessionFactory {
 	return func(ctx context.Context, table, chain string) (SocketSessionResources, error) {
+		if err := socketgrant.EnsureBPFMatch(); err != nil {
+			return nil, err
+		}
 		guard, err := identity.NewLinkGuard()
 		if err != nil {
 			return nil, err
@@ -28,7 +32,7 @@ func RoutedSocketSessionFactory(e *daemon.Engine, resolvers daemon.SocketSession
 		owner := &routedSocketSession{engine: e, backend: socketgrant.RetainForSession(kernel), guard: guard}
 		for _, link := range guard.Links() {
 			if err = kernel.AddInterface(link.Index); err != nil {
-				return owner, err
+				return owner, fmt.Errorf("install socket gate on interface %d: %w", link.Index, err)
 			}
 		}
 		sessionResolvers := resolvers

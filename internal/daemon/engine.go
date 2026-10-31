@@ -337,6 +337,18 @@ func (e *Engine) ObserveResolved(f identity.Flow, token string, a identity.Attri
 	// its own fresh observation and current policy check.
 	if v.State == "allowed" && v.decided != nil && v.decided.Action == "allow" && v.decided.Filter.Application != "" {
 		e.trackSocketFlowLocked(f)
+		// The first complete identity proof and current Allow are enough for a
+		// connection grant. Do not force a second ownership scan to authorize
+		// the connection we just verified. Reused native evidence cannot seed.
+		if s := e.socketAuthorization; s != nil && s.connectionScoped && a.FreshConnectionProof() {
+			if tracked := s.flows[s.flowKey(f)]; tracked != nil && !tracked.haveKey {
+				e.finishSocketAuthorizationLocked(s, tracked, s.store.Begin(), a)
+				if tracked.haveKey {
+					tracked.firstGrantSource = "initial_verified_decision"
+					tracked.next = time.Now().Add(connectionCheckInterval)
+				}
+			}
+		}
 	}
 	return v
 }

@@ -46,6 +46,7 @@ func (f Flow) Key() string {
 }
 
 type Attribution struct {
+	freshConnectionProof                                            bool          // set only by complete observation, never JSON or reuse
 	renewalPhase                                                    *renewalPhase // observation-only; never identity or policy evidence
 	diagnosticHolderAttempts                                        int
 	diagnosticFirstIssues                                           []string
@@ -68,6 +69,10 @@ type Attribution struct {
 	Fingerprint                                                     string                  `json:"fingerprint"`
 	Application                                                     *Application            `json:"application,omitempty"`
 }
+
+// FreshConnectionProof identifies a complete observation from THIS resolver
+// call, not native reuse or presentation data. It is not itself permission.
+func (a Attribution) FreshConnectionProof() bool { return a.freshConnectionProof }
 
 func NetNS() string              { return link("/proc/self/ns/net") }
 func Sockets() ([]Socket, error) { return SocketsLimited(0) }
@@ -404,6 +409,7 @@ func finalizeAttribution(a *Attribution, wanted map[string]bool, covered int, in
 	}
 	app := p.Application
 	a.Application = &app
+	a.freshConnectionProof = true
 }
 func ParseFlow(protocol, direction, local, remote string) (Flow, error) {
 	l, e := netip.ParseAddrPort(local)

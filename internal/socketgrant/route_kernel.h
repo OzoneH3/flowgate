@@ -9,6 +9,7 @@ int fg_route_put(struct fg_route_gate *,void *,void *);
 int fg_route_delete(struct fg_route_gate *,void *);
 int fg_route_stats(struct fg_route_gate *,void *,void *);
 int fg_route_totals(struct fg_route_gate *,void *);
+int fg_route_detach(struct fg_route_gate *);
 int fg_route_close(struct fg_route_gate *);
 int fg_route_release_removed(struct fg_route_gate *);
 #endif

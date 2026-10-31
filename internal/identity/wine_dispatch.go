@@ -28,6 +28,7 @@ func copyWineInitial(a Attribution) Attribution {
 	// Even an unexpected routing fallback must never donate an application.
 	a.Application, a.Association, a.Table = nil, nil, nil
 	a.presentationTarget = nil
+	a.freshConnectionProof = false
 	a.renewalPhase = nil
 	return a
 }

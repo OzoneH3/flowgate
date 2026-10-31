@@ -210,7 +210,7 @@ func serveCommand(args []string) error {
 		if err = os.Chown(scratch, int(peer), -1); err != nil {
 			return err
 		}
-		wines, er := identity.NewWineObservers(identity.WineObserverOptions{ReserveRenewalCapacity: *socketAuthorization, Discover: len(wineBins) == 0 && len(winePrefixes) == 0, Helper: *wineHelper, RuntimeBins: wineBins, Prefixes: winePrefixes, UID: peer, Scratch: scratch})
+		wines, er := identity.NewWineObservers(identity.WineObserverOptions{ReserveRenewalCapacity: false, Discover: len(wineBins) == 0 && len(winePrefixes) == 0, Helper: *wineHelper, RuntimeBins: wineBins, Prefixes: winePrefixes, UID: peer, Scratch: scratch})
 		if er != nil {
 			return er
 		}

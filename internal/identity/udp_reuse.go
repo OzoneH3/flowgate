@@ -147,6 +147,7 @@ func (r *UDPAttributionReuse) reuse(f Flow, key string) (Attribution, bool) {
 		return Attribution{}, false
 	}
 	a := entry.attribution
+	a.freshConnectionProof = false
 	a.Owners = append([]Process(nil), a.Owners...)
 	a.Sockets = append([]Socket(nil), a.Sockets...)
 	stored := entry.facts

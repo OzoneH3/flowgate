@@ -132,6 +132,7 @@ type Store struct {
 	closed      bool
 	cleanupDone bool
 	closing     bool
+	connection  bool
 }
 
 func New(b Backend) (*Store, error) {
@@ -140,6 +141,17 @@ func New(b Backend) (*Store, error) {
 	}
 	return &Store{backend: b, generation: 1, now: BootNow, entries: make(map[Key]struct{})}, nil
 }
+
+// NewConnection retains a verified connection until explicit revocation, closure
+// or its allowing rule's horizon. Observation latency never supplies an expiry.
+func NewConnection(b Backend) (*Store, error) {
+	s, err := New(b)
+	if err == nil {
+		s.connection = true
+	}
+	return s, err
+}
+
 func (s *Store) Begin() Ticket {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -158,10 +170,13 @@ func (s *Store) Publish(t Ticket, k Key, horizon uint64) (bool, error) {
 		return false, nil
 	}
 	deadline := t.start + uint64(Window)
-	if horizon != 0 && horizon < deadline {
+	if s.connection {
+		deadline = 0
+	}
+	if horizon != 0 && (deadline == 0 || horizon < deadline) {
 		deadline = horizon
 	}
-	if now >= deadline {
+	if deadline != 0 && now >= deadline {
 		return false, nil
 	}
 	if _, exists := s.entries[k]; !exists && len(s.entries) >= MaxEntries {
@@ -175,16 +190,23 @@ func (s *Store) Publish(t Ticket, k Key, horizon uint64) (bool, error) {
 }
 func (s *Store) Forget(k Key) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.closed {
+		s.mu.Unlock()
 		return nil
 	}
 	if err := s.backend.Delete(k); err != nil {
+		connection := s.connection
+		s.mu.Unlock()
+		if connection {
+			return errors.Join(err, s.Close())
+		}
 		return err
 	}
 	delete(s.entries, k)
+	s.mu.Unlock()
 	return nil
 }
+
 func (s *Store) Revoke() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -212,7 +234,28 @@ func (s *Store) Close() error {
 	}
 	if !s.closed {
 		if err := s.backend.Epoch(0); err != nil {
-			return err
+			// A lifetime grant has no ownership timeout to rescue revocation.
+			// Delete every owned key when the epoch write fails. The session
+			// wrapper then blocks further writes without mutating audited rules.
+			if !s.connection {
+				return err
+			}
+			for k := range s.entries {
+				if deleteErr := s.backend.Delete(k); deleteErr != nil {
+					return s.emergencyCloseLocked(errors.Join(err, deleteErr))
+				}
+				delete(s.entries, k)
+			}
+			closer, ok := s.backend.(interface{ CloseAfterGrantDeletion() error })
+			if !ok {
+				return err
+			}
+			if closeErr := closer.CloseAfterGrantDeletion(); closeErr != nil {
+				return errors.Join(err, closeErr)
+			}
+			s.closed = true
+			s.cleanupDone = true
+			return nil
 		}
 		s.closed = true
 	}
@@ -221,6 +264,22 @@ func (s *Store) Close() error {
 	if err := s.backend.Close(); err != nil {
 		return err
 	}
+	s.cleanupDone = true
+	return nil
+}
+
+// Emergency detachment is the last resort when both map revocation paths fail.
+// It removes only exact owned accelerator rules; the session audit must report
+// the resulting change rather than claiming its original digest still matches.
+func (s *Store) emergencyCloseLocked(cause error) error {
+	emergency, ok := s.backend.(interface{ EmergencyDisable() error })
+	if !ok {
+		return cause
+	}
+	if err := emergency.EmergencyDisable(); err != nil {
+		return errors.Join(cause, err)
+	}
+	s.closed = true
 	s.cleanupDone = true
 	return nil
 }

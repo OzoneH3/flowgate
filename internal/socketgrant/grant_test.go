@@ -2,7 +2,9 @@ package socketgrant
 
 import (
 	"errors"
+	"fmt"
 	"testing"
+	"time"
 )
 
 type memoryGate struct {
@@ -173,5 +175,110 @@ func TestCloseFailedEpochPreventsNewPublicationAndRetries(t *testing.T) {
 	}
 	if err := s.Close(); err != nil || b.epoch != 0 {
 		t.Fatal("failed epoch not retried")
+	}
+}
+
+func TestConnectionGrantObservationLatencyDoesNotExpire(t *testing.T) {
+	m := &memoryGate{values: map[Key]Value{}}
+	s, err := NewConnection(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := uint64(1)
+	s.now = func() uint64 { return n }
+	ticket := s.Begin()
+	n += uint64(30 * time.Second)
+	k := Key{Cookie: 7}
+	ok, err := s.Publish(ticket, k, 0)
+	if err != nil || !ok || m.values[k].Deadline != 0 {
+		t.Fatal("slow initial proof produced an ownership expiry", err, m.values)
+	}
+	if err = s.Revoke(); err != nil {
+		t.Fatal(err)
+	}
+	if m.values[k].Generation == m.epoch {
+		t.Fatal("policy revocation failed")
+	}
+	if ok, _ = s.Publish(ticket, k, 0); ok {
+		t.Fatal("pre-policy ticket resurrected permission")
+	}
+	horizon := n + uint64(time.Second)
+	if ok, err = s.Publish(s.Begin(), k, horizon); err != nil || !ok || m.values[k].Deadline != horizon {
+		t.Fatal("temporary horizon lost")
+	}
+	n = horizon
+	if ok, _ = s.Publish(s.Begin(), k, horizon); ok {
+		t.Fatal("expired temporary rule granted")
+	}
+}
+
+func TestConnectionEpochFailureDeletesBeforeConfirmingDisable(t *testing.T) {
+	m := &memoryGate{values: map[Key]Value{}}
+	b := RetainForSession(m)
+	s, err := NewConnection(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.Publish(s.Begin(), Key{Cookie: 1}, 0); err != nil || !ok {
+		t.Fatal(err)
+	}
+	m.fail = true
+	if err = s.Close(); err != nil {
+		t.Fatal("known keys not cleared on epoch failure", err)
+	}
+	if len(m.values) != 0 {
+		t.Fatal("permission remained")
+	}
+	if b.Put(Key{Cookie: 2}, Value{}) == nil {
+		t.Fatal("closed session accepted publication")
+	}
+}
+
+type brokenConnectionGate struct {
+	memoryGate
+	deleteFails, detachFails bool
+	detached                 int
+}
+
+func (g *brokenConnectionGate) Delete(k Key) error {
+	if g.deleteFails {
+		return errors.New("delete failed")
+	}
+	return g.memoryGate.Delete(k)
+}
+func (g *brokenConnectionGate) EmergencyDisable() error {
+	g.detached++
+	if g.detachFails {
+		return errors.New("detach failed")
+	}
+	g.values = map[Key]Value{}
+	return nil
+}
+func TestConnectionRevocationFallbackAndUnconfirmedFailure(t *testing.T) {
+	for _, detachFails := range []bool{false, true} {
+		t.Run(fmt.Sprint(detachFails), func(t *testing.T) {
+			g := &brokenConnectionGate{memoryGate: memoryGate{values: map[Key]Value{}}}
+			s, err := NewConnection(RetainForSession(g))
+			if err != nil {
+				t.Fatal(err)
+			}
+			k := Key{Cookie: 5}
+			if ok, err := s.Publish(s.Begin(), k, 0); err != nil || !ok {
+				t.Fatal(err)
+			}
+			g.fail = true
+			g.deleteFails = true
+			g.detachFails = detachFails
+			err = s.Close()
+			if (err != nil) != detachFails || g.detached != 1 {
+				t.Fatal("incorrect revocation acknowledgement", err)
+			}
+			if !detachFails && len(g.values) != 0 {
+				t.Fatal("detached grant survived")
+			}
+			if ok, _ := s.Publish(s.Begin(), k, 0); ok {
+				t.Fatal("failure reopened publication")
+			}
+		})
 	}
 }

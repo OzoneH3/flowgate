@@ -120,3 +120,12 @@ func (k *RoutedKernel) CloseAfterTableDeletion() error {
 	k.p = nil
 	return nil
 }
+
+func (k *RoutedKernel) EmergencyDisable() error {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if k.p == nil {
+		return nil
+	}
+	return code(C.fg_route_detach(k.p))
+}

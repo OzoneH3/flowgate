@@ -611,15 +611,22 @@ The actual output interface is checked by a numeric nft `meta oif` match;
 interface identity alone never supplies zone authority. A changed route misses
 the old entry and returns to the queue. ECMP may therefore cause queue fallback.
 
-Expiry is at most **250 ms from the start of fresh verification**, using
-BOOTTIME in userspace and the kernel, including suspend. Hits and later packets
-do not renew it. Policy/zone publication revokes prior generations; a failed
-revocation disables further publication. A stalled verifier cannot extend a
-grant. Descriptor sharing, inheritance and Wine logical transfers are not all
-synchronously observable: a denied recipient of an already-authorized socket
-can use its exact authorized destination until revocation or that hard expiry.
-The maximum ownership-transfer exposure is 250 ms, not zero. Previously admitted
-packets may still arrive later through network or shaping queues.
+The production connection path verifies identity and current policy initially,
+then retains the exact authorized socket/destination/direction. It has **no
+250 ms ownership-renewal deadline**. A temporary allowing rule still supplies a
+hard BOOTTIME deadline in the kernel. Packet hits never extend that deadline.
+Policy and zone publication revoke prior generations; new decisions use current
+policy. A policy edit currently re-queues affected and other tracked tuples once.
+An optional asynchronous check every five seconds per connection can revoke on
+positive complete evidence of a different executable, user, prefix, revision or
+socket cookie. Failed, slow or inconclusive checks do not remove authorizations
+and established packets do not wait for them. There is no guaranteed ownership-
+transfer detection bound: a recipient of an already-authorized socket can use
+that exact destination until a confirmed change, socket close, policy/zone/link
+revocation or temporary-rule expiry. This is deliberately different from the
+previous 250 ms trial contract. Unknown or unverified new connections still queue.
+A complete kernel UDP snapshot cleans closed cookies; an idle but live socket
+is not expired. A new socket has a different cookie and cannot inherit a grant.
 
 Deny, Ask, ambiguous ownership, unsupported traffic and exhausted capacity use
 ordinary enforcement. TCP, IPv6 and incoming traffic remain on their existing
@@ -638,8 +645,13 @@ are normalized against stable before/after interface snapshots. Ambiguous
 snapshots are inconclusive, never silently accepted. Acceleration is disabled
 on uncertainty; repeated uncertainty fails the audit. All other rule content
 remains audited. Stop revokes before stopping the queue; resource release
-follows confirmed owned-table deletion. Crash grants expire independently of
-userspace, and recorded continuous recovery removes old kernel references.
+follows confirmed owned-table deletion.
+
+A daemon crash does not time-expire existing connection grants: already
+authorized live tuples can continue until cleanup, socket close or a kernel
+permission deadline. New tuples still queue without a listener and cannot inherit
+permission. Recorded continuous recovery removes old kernel references before
+a new session authorizes traffic.
 
 The fast path skips attribution queueing only. Later admission, limits and
 priority hooks must remain effective. Traffic accounting stays with the existing
@@ -648,13 +660,11 @@ usage. The regular API publishes a compact, detached status snapshot without
 waiting for the policy lock; detailed renewal/observer histories are excluded
 from that periodic snapshot. Status is presentation, never authorization evidence.
 
-Three finite production-route Wine flood runs measured no post-startup loss or
-added-delay excursions above 10 ms, with maximum paired added delay below 1.3 ms.
-Startup still lost 25–26 of 15,000 offered packets per run. A separate no-flood
-run lost no packets but used about 1.07 additional CPU cores for one synthetic
-application with two sockets and a 128-process background population. The
-bounded host diagnostic measured eight complete native checks at 39–44 ms;
-it is not a full Wine renewal or host gameplay measurement.
+Earlier finite 250 ms renewal trials are retained as historical evidence, not
+acceptance for this connection-lifetime candidate. Receiver delivery, startup,
+steady-state maximum added delay, loss and policy changes are rechecked on the
+exact new candidate. Shaping/accounting and unchanged route/destination scopes
+reuse unaffected evidence.
 
 An isolated VM verified upload caps, a live cap edit, supported native TCP
 download limits and TCP priority competition while UDP acceleration was active.
@@ -663,5 +673,5 @@ priority and Wine shaping were not established by that fixture. These finite
 results do not establish an unconditional latency guarantee or final release
 acceptance. CPU work and startup packet loss remain open. Startup delay is
 accepted separately; startup packet loss has not been waived. Deployment requires
-a separate exact candidate review and explicit approval of the 250 ms transfer
-exposure.
+a separate exact candidate review and deployment approval. Connection-lifetime
+ownership-transfer and crash behavior must be presented explicitly.

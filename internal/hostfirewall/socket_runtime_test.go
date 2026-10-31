@@ -43,7 +43,7 @@ func TestRoutedProtectionSessionPrivateNamespace(t *testing.T) {
 		if child.SocketSessionFailure() != nil {
 			t.Fatal(child.SocketSessionFailure())
 		}
-		// Synthetic grant only: isolate crash/expiry lifecycle from identity.
+		// Synthetic connection grant only: isolate crash/recovery lifecycle from identity.
 		sa, err := unix.Getsockname(3)
 		if err != nil {
 			t.Fatal(err)
@@ -64,7 +64,7 @@ func TestRoutedProtectionSessionPrivateNamespace(t *testing.T) {
 		if err = owner.backend.Epoch(77); err != nil {
 			t.Fatal(err)
 		}
-		deadline := socketgrant.BootNow() + uint64(socketgrant.Window)
+		deadline := uint64(0)
 		if err = owner.backend.Put(key, socketgrant.Value{Deadline: deadline, Generation: 77}); err != nil {
 			t.Fatal(err)
 		}
@@ -312,11 +312,25 @@ add rule inet fg_crash_observer post ip saddr 198.18.1.1 ip daddr 198.18.1.2 udp
 		}
 		_ = os.WriteFile(filepath.Join(crashDir, name), raw, 0600)
 	}
-	sendErr := unix.Sendto(fd, []byte("expired"), 0, &unix.SockaddrInet4{Addr: [4]byte{198, 18, 1, 2}, Port: 45678})
-	if got := countEgress(); got != 1 {
-		t.Fatalf("expired packet reached postrouting: count %d", got)
+	sendErr := unix.Sendto(fd, []byte("existing-connection-after-crash"), 0, &unix.SockaddrInet4{Addr: [4]byte{198, 18, 1, 2}, Port: 45678})
+	if got := countEgress(); got != 2 {
+		t.Fatalf("lifetime connection unexpectedly expired after crash: count %d", got)
 	}
-	_ = os.WriteFile(filepath.Join(crashDir, "expiry-egress.txt"), []byte(fmt.Sprintf("live=1 after_expiry=1 send_error=%v\n", sendErr)), 0600)
+	newFD, er := unix.Socket(unix.AF_INET, unix.SOCK_DGRAM|unix.SOCK_CLOEXEC, 0)
+	if er != nil {
+		t.Fatal(er)
+	}
+	defer unix.Close(newFD)
+	if er = unix.Bind(newFD, &unix.SockaddrInet4{Addr: [4]byte{198, 18, 1, 1}}); er != nil {
+		t.Fatal(er)
+	}
+	if er = unix.Sendto(newFD, []byte("new-unverified-socket-after-crash"), 0, &unix.SockaddrInet4{Addr: [4]byte{198, 18, 1, 2}, Port: 45678}); er != nil && !errors.Is(er, unix.EPERM) {
+		t.Fatal(er)
+	}
+	if got := countEgress(); got != 2 {
+		t.Fatalf("new unverified connection inherited crashed grant: count %d", got)
+	}
+	_ = os.WriteFile(filepath.Join(crashDir, "connection-crash-egress.txt"), []byte(fmt.Sprintf("live=1 existing_after_crash=2 new_socket_after_crash=2 send_error=%v\n", sendErr)), 0600)
 	if reflect.DeepEqual(sessionProgramIDs(t), baselinePrograms) {
 		t.Fatal("crash fixture had no surviving nft program reference")
 	}
@@ -343,10 +357,31 @@ add rule inet fg_crash_observer post ip saddr 198.18.1.1 ip daddr 198.18.1.2 udp
 	if replacement.SocketSessionFailure() != nil {
 		t.Fatal(replacement.SocketSessionFailure())
 	}
+	// The replacement owns fresh maps; the still-open original socket must
+	// queue again rather than inherit any lifetime grant from the killed owner.
+	oldSendDone := make(chan error, 1)
+	go func() {
+		oldSendDone <- unix.Sendto(fd, []byte("old-socket-new-session"), 0, &unix.SockaddrInet4{Addr: [4]byte{198, 18, 1, 2}, Port: 45678})
+	}()
+	time.Sleep(100 * time.Millisecond)
+	if got := countEgress(); got != 2 {
+		t.Fatalf("old grant crossed restart: egress %d", got)
+	}
+	if stats, er := replacement.socketSession.(*routedSocketSession).backend.Totals(); er != nil || stats.Packets != 0 {
+		t.Fatal("replacement inherited fast permission", stats, er)
+	}
 	if _, err = replacement.ProtectionStop(fresh.ID); err != nil {
 		t.Fatal(err)
 	}
 	waitEvaluation(t, replacement, "stopped")
+	select {
+	case <-oldSendDone:
+	case <-time.After(time.Second):
+		t.Fatal("old send did not settle after stop")
+	}
+	if got := countEgress(); got != 2 {
+		t.Fatalf("stop reinjected an unverified packet: egress %d", got)
+	}
 	t.Log("PASS activation + real audit ticks + rename/delete/readd + optional failure + SIGKILL/RecoverContinuous/new session + cleanup; no grant/performance claim")
 }
 

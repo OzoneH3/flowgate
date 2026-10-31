@@ -517,6 +517,7 @@ func (w *WineTable) finishCensus(f Flow, a, again Attribution, broker *Process, 
 	a.Sockets = again.Sockets
 	a.Application = &app
 	a.Status = "corroborated-runtime-table"
+	a.freshConnectionProof = true
 	a.setReason(ReasonRuntimeOwnerObserved, "one verified Windows handle holder, exact socket endpoint and kernel cookie; broker FD is transport evidence, not the permission target")
 	return a
 }

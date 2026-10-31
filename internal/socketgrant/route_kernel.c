@@ -130,3 +130,12 @@ int fg_route_release_removed(struct fg_route_gate *g) {
  for(unsigned i=0;i<g->count;i++)route_gate_bpf__destroy(g->instances[i].b);
  route_gate_bpf__destroy(g->base);free(g);return 0;
 }
+
+// Fatal map-write fallback: no grant can match after every owned rule is gone.
+// Resources stay owned until normal verified table cleanup/release.
+int fg_route_detach(struct fg_route_gate *g) {
+ if(!g)return 0;
+ g->closing=1;
+ for(unsigned i=0;i<g->count;i++) {int result=fg_rule_remove(&g->instances[i].rule);if(result)return result;}
+ return 0;
+}

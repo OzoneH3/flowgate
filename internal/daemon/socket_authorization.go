@@ -11,6 +11,7 @@ import (
 )
 
 type socketFlow struct {
+	authorizedRevision               string
 	observationDone                  chan struct{}
 	alignmentAttempted               bool
 	alignmentLastAttempt             time.Time
@@ -35,6 +36,10 @@ type socketFlow struct {
 	next                             time.Time
 }
 type socketAuthorization struct {
+	revocationUnconfirmed                                                                                          bool
+	connectionScoped                                                                                               bool
+	backgroundInconclusive, confirmedChanges, closedConnections                                                    uint64
+	socketSnapshot                                                                                                 func() ([]identity.Socket, error)
 	cancel                                                                                                         context.CancelFunc
 	done                                                                                                           chan struct{}
 	jobs                                                                                                           *sync.WaitGroup
@@ -76,16 +81,20 @@ func (e *Engine) StartSocketAuthorization(ctx context.Context, b socketgrant.Bac
 	if e.Mode != "isolated-lab" || e.ZoneSource != nil || e.UploadShaping != nil || resolve == nil || e.socketAuthorization != nil {
 		return fmt.Errorf("socket authorization requires isolated lab, static zones and no shaping manager")
 	}
-	return e.startSocketAuthorizationLocked(ctx, b, resolve, diagnostics...)
+	return e.startSocketAuthorizationLocked(ctx, b, resolve, false, diagnostics...)
 }
 
-func (e *Engine) startSocketAuthorizationLocked(ctx context.Context, b socketgrant.Backend, resolve func(identity.Flow) identity.Attribution, diagnostics ...func() map[string]any) error {
-	store, err := socketgrant.New(b)
+func (e *Engine) startSocketAuthorizationLocked(ctx context.Context, b socketgrant.Backend, resolve func(identity.Flow) identity.Attribution, connectionScoped bool, diagnostics ...func() map[string]any) error {
+	newStore := socketgrant.New
+	if connectionScoped {
+		newStore = socketgrant.NewConnection
+	}
+	store, err := newStore(b)
 	if err != nil {
 		return err
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	s := &socketAuthorization{cancel: cancel, done: make(chan struct{}), jobs: &sync.WaitGroup{}, ctx: ctx, wake: make(chan struct{}, 1), store: store, resolve: resolve, flows: map[string]*socketFlow{}}
+	s := &socketAuthorization{connectionScoped: connectionScoped, socketSnapshot: identity.UDPSockets, cancel: cancel, done: make(chan struct{}), jobs: &sync.WaitGroup{}, ctx: ctx, wake: make(chan struct{}, 1), store: store, resolve: resolve, flows: map[string]*socketFlow{}}
 	if len(diagnostics) > 0 {
 		s.observerDiagnostics = diagnostics[0]
 	}
@@ -107,6 +116,10 @@ func (e *Engine) resolveSocketBatch(flow identity.Flow) (identity.Attribution, b
 		return identity.Attribution{}, false
 	}
 	if !s.observeQueueRoute(flow) {
+		e.mu.Unlock()
+		return identity.Attribution{}, false
+	}
+	if s.connectionScoped {
 		e.mu.Unlock()
 		return identity.Attribution{}, false
 	}
@@ -196,6 +209,13 @@ func (e *Engine) revokeSocketGrantsLocked() error {
 		return fmt.Errorf("socket authorization unavailable: %w", s.failure)
 	}
 	if err := s.store.Revoke(); err != nil {
+		if s.connectionScoped {
+			e.failConnectionAuthorizationLocked(s, err)
+			if s.disabled {
+				return nil
+			}
+			return s.failure
+		}
 		s.failure = err
 		// Disable the gate instead of making ordinary policy edits depend on
 		// a broken accelerator. Only a confirmed kernel epoch=0 is sufficient.
@@ -205,9 +225,25 @@ func (e *Engine) revokeSocketGrantsLocked() error {
 		}
 		return fmt.Errorf("kernel revocation failed: %w", err)
 	}
+	if s.connectionScoped {
+		for key, f := range s.flows {
+			if f.haveKey {
+				if err := s.store.Forget(f.key); err != nil {
+					e.failConnectionAuthorizationLocked(s, err)
+					return err
+				}
+			}
+			f.completeObservationWait()
+			delete(s.flows, key)
+		}
+	}
 	return nil
 }
 func (e *Engine) runSocketAuthorization(ctx context.Context, s *socketAuthorization) {
+	if s.connectionScoped {
+		e.runConnectionAuthorization(ctx, s)
+		return
+	}
 	if s.done != nil {
 		defer close(s.done)
 	}
@@ -338,6 +374,10 @@ func (s *socketAuthorization) nextRenewalWake(now time.Time) time.Duration {
 }
 
 func (e *Engine) finishSocketAuthorizationLocked(s *socketAuthorization, f *socketFlow, ticket socketgrant.Ticket, a identity.Attribution) {
+	if s.connectionScoped && f.haveKey {
+		e.checkConnectionObservationLocked(s, f, a)
+		return
+	}
 	remove := func() {
 		if f.haveKey {
 			if err := s.store.Forget(f.key); err != nil {
@@ -427,7 +467,12 @@ func (e *Engine) finishSocketAuthorizationLocked(s *socketAuthorization, f *sock
 			f.firstGrantSource = "separate_scan"
 		}
 		f.deadline = ticket.Deadline()
-		if horizon != 0 && horizon < f.deadline {
+		if s.connectionScoped {
+			f.deadline = 0
+			f.authorizedRevision = a.Application.Revision
+			f.next = time.Now().Add(connectionCheckInterval)
+		}
+		if horizon != 0 && (f.deadline == 0 || horizon < f.deadline) {
 			f.deadline = horizon
 		}
 		s.published++
@@ -475,6 +520,9 @@ func (e *Engine) socketAuthorizationStatusLocked(gc map[string]any) map[string]a
 	out["renewal_gaps"] = s.renewalGaps
 	out["max_renewal_gap_ms"] = float64(s.maxGapNS) / 1e6
 	out["ordinary_yield"] = map[string]any{"enabled": s.ordinaryYield, "count": s.ordinaryYieldCount, "wait_ns": s.ordinaryYieldNS, "max_wait_ns": s.ordinaryYieldMaxNS, "cap_hits": s.ordinaryYieldCaps}
+	if s.connectionScoped {
+		connectionStatus(out, s)
+	}
 	out["route_bound"] = s.routeBound
 	out["route_moves"] = s.routeMoves
 	out["disabled"] = s.disabled
@@ -691,6 +739,9 @@ func (e *Engine) socketAuthorizationSummaryLocked() map[string]any {
 			out["fast_packets"] = totals.Packets
 			out["fast_bytes"] = totals.Bytes
 		}
+	}
+	if s.connectionScoped {
+		connectionStatus(out, s)
 	}
 	return out
 }

@@ -107,3 +107,31 @@ func (s *SessionBackend) ReleaseAfterTableDeletion() error {
 	s.released = true
 	return nil
 }
+
+// CloseAfterGrantDeletion is called only by Store after every owned grant key
+// was positively deleted. Resource release remains the firewall session owner's
+// responsibility. No audited rule changes and no further publication are allowed.
+func (s *SessionBackend) CloseAfterGrantDeletion() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closing = true
+	s.disabled = true
+	return nil
+}
+
+// EmergencyDisable bypasses a broken epoch/map write only by positively
+// removing the exact owned accelerator references. A failed detach is explicit.
+func (s *SessionBackend) EmergencyDisable() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closing = true
+	emergency, ok := s.backend.(interface{ EmergencyDisable() error })
+	if !ok {
+		return errors.New("kernel revocation unconfirmed: backend cannot detach accelerator")
+	}
+	if err := emergency.EmergencyDisable(); err != nil {
+		return err
+	}
+	s.disabled = true
+	return nil
+}

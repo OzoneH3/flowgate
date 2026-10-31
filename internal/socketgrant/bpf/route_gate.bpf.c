@@ -59,7 +59,7 @@ int socket_gate(struct __sk_buff *skb) {
   if (!v || !generation || !*generation || v->generation != *generation) return 0;
   // BOOTTIME includes suspend: resume cannot extend an old authorization.
   __u64 now = bpf_ktime_get_boot_ns();
-  if (now >= v->deadline_ns) return 0;
+  if (v->deadline_ns && now >= v->deadline_ns) return 0;
   struct gate_stats *s = bpf_map_lookup_elem(&hit_stats, &key);
   if (s) {
     __sync_fetch_and_add(&s->packets, 1);

@@ -24,7 +24,7 @@ func TestSocketSessionRequiresZonePublisherAndFreshState(t *testing.T) {
 	}
 	e.mu.Lock()
 	s := e.socketAuthorization
-	if !s.routeBound || !s.productionSession || !s.batchCoordination || s.ordinaryObserved == nil || s.ordinaryYield {
+	if !s.routeBound || !s.productionSession || s.batchCoordination || !s.connectionScoped || s.ordinaryObserved == nil || s.ordinaryYield {
 		t.Fatal("wrong production scope/options")
 	}
 	e.mu.Unlock()

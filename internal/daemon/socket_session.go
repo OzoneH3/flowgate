@@ -42,7 +42,7 @@ func (e *Engine) StartSessionSocketAuthorization(ctx context.Context, b *socketg
 	if e.Mode != "daemon-monitor" || e.ZoneSource == nil || !e.zonePublisherInstalled || b == nil || r.Fresh == nil || r.Observed == nil || e.socketAuthorization != nil {
 		return errors.New("session authorization requires daemon, zone publication transaction, routed backend and fresh resolvers")
 	}
-	if err := e.startSocketAuthorizationLocked(ctx, b, r.Fresh, r.Diagnostics); err != nil {
+	if err := e.startSocketAuthorizationLocked(ctx, b, r.Fresh, true, r.Diagnostics); err != nil {
 		return err
 	}
 	s := e.socketAuthorization
@@ -54,7 +54,7 @@ func (e *Engine) StartSessionSocketAuthorization(ctx context.Context, b *socketg
 		coverage.QueueOnly = append([]SocketInterface(nil), coverage.QueueOnly...)
 		s.interfaceCoverage = &coverage
 	}
-	s.batchCoordination = true
+	s.batchCoordination = !s.connectionScoped
 	s.ordinaryObserved = r.Observed
 	s.resolveGroup = r.Group
 	return nil
@@ -75,7 +75,8 @@ func (e *Engine) DisableSocketAuthorization(reason error) error {
 	}
 	s.failure = reason
 	if err := s.store.Close(); err != nil {
-		s.failure = fmt.Errorf("%v; disabling epoch: %w", reason, err)
+		s.failure = fmt.Errorf("KERNEL REVOCATION UNCONFIRMED: %v; disabling epoch: %w", reason, err)
+		s.revocationUnconfirmed = s.connectionScoped
 		return s.failure
 	}
 	return nil

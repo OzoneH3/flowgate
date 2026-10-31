@@ -26,3 +26,10 @@ func TestSocketSessionFailureIsOptionalAndExplicit(t *testing.T) {
 		t.Fatal(checks)
 	}
 }
+
+func TestUnconfirmedConnectionRevocationIsBlocked(t *testing.T) {
+	checks := zonePublicationChecks(errors.New("KERNEL REVOCATION UNCONFIRMED: injected"))
+	if len(checks) != 1 || checks[0].Status != readiness.Blocked {
+		t.Fatal("unsafe revocation shown as optional", checks)
+	}
+}
