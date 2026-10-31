@@ -199,6 +199,7 @@ func snapshotConnectionPolicy(a identity.Attribution) *identity.Attribution {
 // established connections through identity discovery again. The engine lock
 // covers evaluation, confirmed kernel changes and policy publication.
 func (e *Engine) reconcileSocketPolicyLocked(next []policy.Rule) error {
+	e.queuePolicyEpoch.Add(1)
 	s := e.socketAuthorization
 	if s == nil || !s.connectionScoped || s.disabled || s.failure != nil {
 		return e.revokeSocketGrantsLocked()

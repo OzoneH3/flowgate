@@ -13,15 +13,16 @@ import (
 // Function boundaries allow testing packet lifetime without a privileged queue.
 // Only observe may create a prompt; verdict reports the action actually sent.
 type packetProcessor struct {
-	batchObserve func(identity.Flow, string, int, bool) (func() daemon.Event, bool)
-	ctx          context.Context
-	observe      func(identity.Flow, string) daemon.Event
-	tryObserve   func(identity.Flow, string) (daemon.Event, bool)
-	retain       func(uint32, int, daemon.Event) bool
-	record       func(daemon.Event, string, error)
-	verdict      func(uint32, bool) (bool, error)
-	expired      *atomic.Uint64
-	diagnostic   func(queuehealth.Cause)
+	decisionObserved func(daemon.Event, bool)
+	batchObserve     func(identity.Flow, string, int, bool) (func() daemon.Event, bool)
+	ctx              context.Context
+	observe          func(identity.Flow, string) daemon.Event
+	tryObserve       func(identity.Flow, string) (daemon.Event, bool)
+	retain           func(uint32, int, daemon.Event) bool
+	record           func(daemon.Event, string, error)
+	verdict          func(uint32, bool) (bool, error)
+	expired          *atomic.Uint64
+	diagnostic       func(queuehealth.Cause)
 }
 
 func (p *packetProcessor) process(j packetJob, stopping bool) {
@@ -57,6 +58,9 @@ func (p *packetProcessor) finish(j packetJob, v daemon.Event) {
 	live := p.ctx.Err() == nil && time.Now().Before(j.deadline) && time.Now().Before(v.Deadline)
 	if live && v.State == "awaiting-decision" {
 		if p.retain(j.id, j.size, v) {
+			if p.decisionObserved != nil {
+				p.decisionObserved(v, false)
+			}
 			p.record(v, daemon.VerdictHeld, nil)
 			return
 		}
@@ -67,6 +71,9 @@ func (p *packetProcessor) finish(j packetJob, v daemon.Event) {
 		p.rejection(stoppingOrCancelled(p.ctx, false))
 	}
 	allowed, err := p.verdict(j.id, live && v.State == "allowed")
+	if p.decisionObserved != nil && err == nil {
+		p.decisionObserved(v, allowed)
+	}
 	outcome := daemon.VerdictDropped
 	if err != nil {
 		outcome = daemon.VerdictFailed

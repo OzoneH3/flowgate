@@ -175,13 +175,20 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 		}
 		verdictPacket(p.id, false)
 	})
+	workers.enableFirstProofHolding(e.QueuePolicyEpoch)
+	processor.decisionObserved = workers.noteInitialDecision
 	workers.admissionRejected = func(mask uint8) { admissionLimits[mask&31].Add(1) }
 	health.GaugeSource(func() queuehealth.Gauges {
 		g := workers.healthGauges()
 		g.RetainedPackets, g.RetainedBytes = retained.gauges()
 		return g
 	})
+	var lastFirst firstProofCounters
 	report := func() {
+		if h := workers.firstProofStats(); h != lastFirst {
+			lastFirst = h
+			log.Printf("queue %d: first-proof holding admissions=%d reclaimed-denied-tails=%d bounds per-connection=32 packets/256KiB total=48 packets/1MiB; deadlines unchanged", number, h.Admitted, h.Displaced)
+		}
 		if n := selfFailures.Swap(0); n != 0 {
 			reason := "unknown"
 			if r := selfFailureReason.Load(); r != nil {

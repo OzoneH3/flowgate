@@ -615,8 +615,9 @@ The production connection path verifies identity and current policy initially,
 then retains the exact authorized socket/destination/direction. It has **no
 250 ms ownership-renewal deadline**. A temporary allowing rule still supplies a
 hard BOOTTIME deadline in the kernel. Packet hits never extend that deadline.
-Policy and zone publication revoke prior generations; new decisions use current
-policy. A policy edit currently re-queues affected and other tracked tuples once.
+Rule edits invalidate pending initial observations and re-evaluate established
+grants; still-allowed explicit application Allows keep their fast path. Zone/interface
+changes and wholesale policy replacement revoke the kernel generation.
 An optional asynchronous check every five seconds per connection can revoke on
 positive complete evidence of a different executable, user, prefix, revision or
 socket cookie. Failed, slow or inconclusive checks do not remove authorizations
@@ -694,3 +695,32 @@ acceptance. CPU work and startup packet loss remain open. Startup delay is
 accepted separately; startup packet loss has not been waived. Deployment requires
 a separate exact candidate review and deployment approval. Connection-lifetime
 ownership-transfer and crash behavior must be presented explicitly.
+
+
+Initial-proof holding (outgoing IPv4 UDP)
+----------------------------------------
+The attribution scheduler may hold up to32 outstanding packets/256KiB per exact
+connection while its FIRST decision is pending. Existing overall48 packets/1MiB,
+128-packet kernel queue and5s per-packet deadline are unchanged. This is scheduling
+only: no packet passes before its normal identity/current-policy decision. Initial
+proofs may use space outside the ordinary32-packet/512KiB census subset and reclaim
+waiting tails only from actual blocked, never-allowed flows. Active work and the
+separate Ask/prompt retainer are untouched. First-proof preference has bounded
+overtaking; receive-callback pressure uses the existing2ms attempt and10ms/100ms
+aggregate burst budget, not a longer stall. Established socket grants remain on
+the existing kernel path and are not re-attributed by this mechanism.
+
+The1024-row scheduling history expires incomplete attempts at their original
+packet deadline; completed records expire within30s (or earlier rule expiry) and
+only completed records can be evicted when full. Policy/zone changes invalidate
+its generation. Rebinding, expiry, eviction or a policy edit can make a flow look
+new for SCHEDULING again; this never supplies an identity, cached Allow, or a
+permission extension. Capacity is finite: simultaneous startups can still exceed
+the unchanged global budget, and no universal zero-loss claim is made.
+
+Connection rows expose advisory fast-path states: grant present, inactive,
+unsupported or unknown, with a reason and sample time. A grant describes the
+interface seen at verification, not a current route, packet hit or delivery
+guarantee. Unconnected UDP destination ambiguity and missing/stale backend evidence
+remain unknown. No extra kernel map reads, ownership checks or policy decisions
+are initiated by the indicator.

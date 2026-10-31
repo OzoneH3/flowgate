@@ -52,6 +52,7 @@ type packetJob struct {
 	token         string
 	deadline      time.Time
 	censusEntered time.Time
+	firstProof    bool
 }
 
 // The scheduling key is deliberately broader than a flow: all remotes on the
@@ -69,30 +70,38 @@ const (
 )
 
 type packetWorkers struct {
-	diagnosticActive         map[string]time.Time
-	coalesceWindow           time.Duration // constructor default; zero disables in benchmarks/tests
-	mu                       sync.Mutex
-	wake                     [2]*sync.Cond
-	jobs                     map[string][]packetJob // includes active jobs, even across lane transfer
-	activeBatch              map[string]int
-	active                   map[string]bool      // heads currently owned by workers cannot be displaced
-	recent                   map[string]time.Time // bounded scheduling hints, never ownership/policy evidence
-	recentPreferredTurns     int                  // bounded overtaking of the oldest general endpoint
-	census                   map[string]bool      // ordering only; never permission authority
-	ready                    [2][]string
-	count, bytes             int
-	censusCount, censusBytes int
-	burstWindow              time.Time
-	burstSpent               time.Duration
-	stopped                  bool
-	capacity                 chan struct{}
-	stopping                 chan struct{}
-	displacing               bool // at most one callback-owned displaced packet at a time
-	wg                       sync.WaitGroup
-	processBatch             func([]packetJob, bool, bool) bool
-	process                  func(packetJob, bool, bool) bool // true = completed, false = needs census
-	reject                   func(packetJob, rejectionCause)  // lane overflow or shutdown, exactly one drop
-	admissionRejected        func(uint8)                      // last observed limit mask, diagnostics only
+	firstHolding                        bool
+	firstSeen                           map[string]firstProofDecision
+	policyEpoch                         func() uint64
+	seenEpoch                           uint64
+	firstAdmissions, firstDisplacements uint64
+	firstEvictions, firstFull           uint64
+	nextFirstPrune                      time.Time
+	firstPreferredTurns                 int
+	diagnosticActive                    map[string]time.Time
+	coalesceWindow                      time.Duration // constructor default; zero disables in benchmarks/tests
+	mu                                  sync.Mutex
+	wake                                [2]*sync.Cond
+	jobs                                map[string][]packetJob // includes active jobs, even across lane transfer
+	activeBatch                         map[string]int
+	active                              map[string]bool      // heads currently owned by workers cannot be displaced
+	recent                              map[string]time.Time // bounded scheduling hints, never ownership/policy evidence
+	recentPreferredTurns                int                  // bounded overtaking of the oldest general endpoint
+	census                              map[string]bool      // ordering only; never permission authority
+	ready                               [2][]string
+	count, bytes                        int
+	censusCount, censusBytes            int
+	burstWindow                         time.Time
+	burstSpent                          time.Duration
+	stopped                             bool
+	capacity                            chan struct{}
+	stopping                            chan struct{}
+	displacing                          bool // at most one callback-owned displaced packet at a time
+	wg                                  sync.WaitGroup
+	processBatch                        func([]packetJob, bool, bool) bool
+	process                             func(packetJob, bool, bool) bool // true = completed, false = needs census
+	reject                              func(packetJob, rejectionCause)  // lane overflow or shutdown, exactly one drop
+	admissionRejected                   func(uint8)                      // last observed limit mask, diagnostics only
 }
 
 // Single-lane adapter used by ordering/bounds tests.
@@ -153,12 +162,13 @@ func (w *packetWorkers) submitWait(ctx context.Context, p packetJob) (admitted b
 		// This is scheduling only: every admitted packet still gets a fresh
 		// attribution/policy check. Global count/byte bounds never increase; the
 		// per-endpoint bound counts waiting packets (see endpointFullLocked).
-		endpointFull := w.endpointFullLocked(key, p.size)
+		endpointFull := w.endpointFullForLocked(p)
 		now := time.Now()
 		remaining := w.endpointWaitBudgetLocked(now)
-		burst := endpointFull && !w.census[key] && (w.active[key] || w.recentlyCompletedLocked(key, now)) && remaining > 0
-		eligible := !w.stopped && (!endpointFull || burst) &&
-			(!w.census[key] || (w.censusCount < MaxCensusPackets && p.size <= MaxCensusBytes-w.censusBytes))
+		firstPressure := w.firstEligibleLocked(p) && (endpointFull || w.count >= MaxAttributionPackets || p.size > MaxAttributionBytes-w.bytes)
+		burst := (firstPressure || endpointFull && !w.census[key] && (w.active[key] || w.recentlyCompletedLocked(key, now))) && remaining > 0
+		eligible := !w.stopped && (!firstPressure || burst) && (!endpointFull || burst) &&
+			(!w.census[key] || w.censusRoomLocked(p))
 		full := endpointFull || w.count >= MaxAttributionPackets || p.size > MaxAttributionBytes-w.bytes
 		mask = 0
 		if endpointFull {
@@ -167,14 +177,14 @@ func (w *packetWorkers) submitWait(ctx context.Context, p packetJob) (admitted b
 			if w.active[key] {
 				waiting -= w.activeBatch[key]
 			}
-			if waiting < MaxAttributionPerEndpoint {
+			if waiting < MaxAttributionPerEndpoint && !w.firstEligibleLocked(p) {
 				mask |= 16
 			} // shared global reserve, not a full waiting batch
 		}
 		if w.count >= MaxAttributionPackets || p.size > MaxAttributionBytes-w.bytes {
 			mask |= 2
 		}
-		if w.census[key] && (w.censusCount >= MaxCensusPackets || p.size > MaxCensusBytes-w.censusBytes) {
+		if w.census[key] && !w.censusRoomLocked(p) {
 			mask |= 4
 		}
 		if w.stopped {
@@ -274,13 +284,14 @@ func (w *packetWorkers) submit(p packetJob) bool {
 	w.mu.Lock()
 	key := p.key()
 	q := w.jobs[key]
-	if w.stopped || p.size < 0 || p.size > MaxAttributionBytes || w.endpointFullLocked(key, p.size) {
+	p.firstProof = w.firstEligibleLocked(p)
+	if w.stopped || p.size < 0 || p.size > MaxAttributionBytes || w.endpointFullForLocked(p) {
 		w.mu.Unlock()
 		return false
 	}
 	lane := 0
 	if w.census[key] {
-		if w.censusCount >= MaxCensusPackets || p.size > MaxCensusBytes-w.censusBytes {
+		if !w.censusRoomLocked(p) {
 			w.mu.Unlock()
 			return false
 		}
@@ -290,11 +301,16 @@ func (w *packetWorkers) submit(p packetJob) bool {
 	if w.count >= MaxAttributionPackets || p.size > MaxAttributionBytes-w.bytes {
 		// Census followers do not compete for general capacity. Only the
 		// callback owns a displaced drop; concurrent submitters cannot accumulate it.
-		if lane == 1 || w.reject == nil || w.displacing {
+		if (lane == 1 && !p.firstProof) || w.reject == nil || w.displacing {
 			w.mu.Unlock()
 			return false
 		}
-		displaced = w.displaceLocked(p, key, len(q))
+		if p.firstProof {
+			displaced = w.displaceDeniedTailLocked(p, key)
+		}
+		if displaced == nil && lane == 0 && !p.firstProof {
+			displaced = w.displaceLocked(p, key, len(q))
+		}
 		if displaced == nil {
 			w.mu.Unlock()
 			return false
@@ -306,6 +322,16 @@ func (w *packetWorkers) submit(p packetJob) bool {
 		p.censusEntered = diagnostics.ObservationTime()
 		w.censusCount++
 		w.censusBytes += p.size
+	}
+	if p.firstProof {
+		if w.firstSeen == nil {
+			w.firstSeen = map[string]firstProofDecision{}
+		}
+		if _, ok := w.firstSeen[p.flow.Key()]; !ok {
+			w.makeFirstRoomLocked()
+			w.firstSeen[p.flow.Key()] = firstProofDecision{until: p.deadline}
+		}
+		w.firstAdmissions++
 	}
 	w.jobs[key] = append(q, p)
 	w.count++
@@ -404,6 +430,21 @@ func (w *packetWorkers) run(lane int) {
 		// Keep short-burst priority, but bound how often hot endpoints can
 		// overtake the oldest queued general endpoint. Then require a FIFO turn.
 		next := 0
+		if lane == 1 && w.firstPreferredTurns < MaxRecentPreferredTurns {
+			for i, k := range w.ready[1] {
+				if w.jobs[k][0].firstProof {
+					next = i
+					break
+				}
+			}
+		}
+		if lane == 1 {
+			if next > 0 {
+				w.firstPreferredTurns++
+			} else {
+				w.firstPreferredTurns = 0
+			}
+		}
 		if lane == 0 && w.recentPreferredTurns < MaxRecentPreferredTurns {
 			now := time.Now()
 			for i, key := range w.ready[lane] {
@@ -499,11 +540,11 @@ func (w *packetWorkers) run(lane int) {
 			for _, j := range q {
 				size += j.size
 			}
-			for keep > MaxAttributionPerEndpoint && keep > n && (keep > MaxCensusPackets-w.censusCount || size > MaxCensusBytes-w.censusBytes) {
+			for keep > MaxAttributionPerEndpoint && keep > n && !w.queueCensusRoomLocked(q[:keep]) {
 				keep--
 				size -= q[keep].size
 			}
-			if lane == 0 && !w.stopped && keep <= MaxCensusPackets-w.censusCount && size <= MaxCensusBytes-w.censusBytes {
+			if lane == 0 && !w.stopped && w.queueCensusRoomLocked(q[:keep]) {
 				// The trimmed tail is detached from the endpoint but stays charged
 				// against the global count/byte bounds until its drop verdict is done.
 				tail := append([]packetJob(nil), q[keep:]...)
@@ -618,5 +659,5 @@ func (w *packetWorkers) stop() {
 func (w *packetWorkers) healthGauges() queuehealth.Gauges {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return queuehealth.Gauges{AttributionPackets: w.count, AttributionBytes: w.bytes, CensusPackets: w.censusCount, CensusBytes: w.censusBytes, ActiveWorkers: len(w.activeBatch)}
+	return queuehealth.Gauges{FirstProofAdmissions: fmt.Sprint(w.firstAdmissions), FirstProofDisplacements: fmt.Sprint(w.firstDisplacements), FirstProofHistory: len(w.firstSeen), FirstProofHistoryEvictions: fmt.Sprint(w.firstEvictions), FirstProofHistoryFull: fmt.Sprint(w.firstFull), AttributionPackets: w.count, AttributionBytes: w.bytes, CensusPackets: w.censusCount, CensusBytes: w.censusBytes, ActiveWorkers: len(w.activeBatch)}
 }

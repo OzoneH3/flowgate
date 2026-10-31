@@ -171,6 +171,7 @@ func (e *Engine) settlePendingLocked(reason string) {
 // Settling awaiting requests is requested here and runs after e.mu is released
 // (see requestSettleLocked); they keep waiting meanwhile and nothing is admitted.
 func (e *Engine) resetCachedLocked(reason string) {
+	e.queuePolicyEpoch.Add(1)
 	e.settlePendingLocked(reason)
 	e.dropCachedLocked()
 }

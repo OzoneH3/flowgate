@@ -16,10 +16,12 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 type Event struct {
+	queuePolicyEpoch uint64
 	ID               string               `json:"id"`
 	Flow             identity.Flow        `json:"flow"`
 	Attribution      identity.Attribution `json:"attribution"`
@@ -73,6 +75,7 @@ type TrafficManager interface {
 	Stop(...string) (udpaccount.Status, error)
 }
 type Engine struct {
+	queuePolicyEpoch       atomic.Uint64
 	socketAuthorization    *socketAuthorization // guarded by mu
 	zonePublisherInstalled bool
 	QueueHealth            queuehealth.Registry
@@ -376,11 +379,12 @@ func (e *Engine) observeResolvedWithLinkLocked(f identity.Flow, token string, a 
 			valid = true
 		}
 		if valid {
+			old.queuePolicyEpoch = e.queuePolicyEpoch.Load()
 			return *old
 		}
 	}
 
-	v := Event{ID: randomID(), Flow: f, Attribution: a, FirstSeen: now, Deadline: now.Add(e.Timeout), Rule: rule, Conflicts: conflicts, Token: token, Permission: "once: this TCP connection or UDP tuple for 30 seconds; exact application and remote endpoint"}
+	v := Event{queuePolicyEpoch: e.queuePolicyEpoch.Load(), ID: randomID(), Flow: f, Attribution: a, FirstSeen: now, Deadline: now.Add(e.Timeout), Rule: rule, Conflicts: conflicts, Token: token, Permission: "once: this TCP connection or UDP tuple for 30 seconds; exact application and remote endpoint"}
 	v.logAttemptID, v.logDeadline = v.ID, v.Deadline
 	// Unsafe ownership is deliberately re-evaluated for every packet. Preserve
 	// only its logging identity within a fixed lease, never its verdict authority.

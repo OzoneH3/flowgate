@@ -37,13 +37,18 @@ const (
 var names = [...]string{"attribution_capacity_rejections", "census_capacity_rejections", "fairness_displacement_rejections", "deadline_rejections", "shutdown_rejections", "retention_capacity_rejections", "retained_deadline_rejections", "retained_shutdown_rejections", "parse_rejections", "missing_payload_rejections", "netlink_overflow_notifications", "receive_failures", "verdict_failures", "self_tracking_failures"}
 
 type Gauges struct {
-	AttributionPackets int `json:"attribution_packets"`
-	AttributionBytes   int `json:"attribution_bytes"`
-	CensusPackets      int `json:"census_packets"`
-	CensusBytes        int `json:"census_bytes"`
-	ActiveWorkers      int `json:"active_workers"`
-	RetainedPackets    int `json:"retained_packets"`
-	RetainedBytes      int `json:"retained_bytes"`
+	FirstProofAdmissions       string `json:"first_proof_admissions,omitempty"`
+	FirstProofDisplacements    string `json:"first_proof_denied_tails_reclaimed,omitempty"`
+	FirstProofHistory          int    `json:"first_proof_history_rows,omitempty"`
+	FirstProofHistoryEvictions string `json:"first_proof_history_evictions,omitempty"`
+	FirstProofHistoryFull      string `json:"first_proof_history_full_observations,omitempty"`
+	AttributionPackets         int    `json:"attribution_packets"`
+	AttributionBytes           int    `json:"attribution_bytes"`
+	CensusPackets              int    `json:"census_packets"`
+	CensusBytes                int    `json:"census_bytes"`
+	ActiveWorkers              int    `json:"active_workers"`
+	RetainedPackets            int    `json:"retained_packets"`
+	RetainedBytes              int    `json:"retained_bytes"`
 }
 type View struct {
 	Generation  string            `json:"generation"`
