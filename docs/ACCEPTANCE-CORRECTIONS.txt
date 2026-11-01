@@ -1,0 +1,18 @@
+Targeted corrections to the tested 93eaa868 release
+
+D1: zone priority inheritance
+The zone popup previously preselected the Options default even when it inherited
+an All-networks priority, and confirming it created a zone override. The prepared
+D1 correction supplies the inherited selection. An untouched inherited OK now
+closes without a configuration request. The visible hint distinguishes Inherited
+from Override. Deliberate selections and Delete use the existing scoped merge,
+preserving upload/download settings. An explicit override equal to the inherited
+value requires selecting a different value and back before OK (two steps).
+
+Verified: 436 existing Electron unit tests pass; sandboxed native Electron with a
+synthetic API verifies inherited High/Low, zero writes on untouched OK, explicit
+Normal, deliberate changes, Delete restoring inheritance, UL/DL preservation and
+explicit equal override. No real GUI preferences, host settings or protection
+were read or changed by this test. Evidence is in the separate workspace:
+.workspace/acceptance-corrections-evidence/d1-unit-3.log and d1-gui-2.log,
+with detailed native-GUI evidence under .workspace/cgui/run-FAW9fQ/.
