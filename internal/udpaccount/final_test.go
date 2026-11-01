@@ -31,3 +31,16 @@ func TestFinalSnapshotsConsumeOnceAndBounded(t *testing.T) {
 		t.Fatal("overflow hidden or unbounded", len(v.Retired), v.FinalsLost)
 	}
 }
+
+func TestSlowCollectorDoesNotConsumeUnusableFinal(t *testing.T) {
+	s := &session{state: identity.UDPSnapshot{Collected: time.Now().Add(-5 * time.Second), Retired: map[string]identity.UDPCount{"closed": {Uploaded: 24}}}}
+	s.accountingSnapshot()
+	if len(s.snapshot().Retired) != 1 {
+		t.Fatal("stale unusable final consumed")
+	}
+	// A subsequent fresh publication carries that pending final forward.
+	s.publishSnapshot(identity.UDPSnapshot{Collected: time.Now()}, nil)
+	if s.accountingSnapshot().Retired["closed"].Uploaded != 24 || len(s.accountingSnapshot().Retired) != 0 {
+		t.Fatal("final lost or replayed after slow cycle")
+	}
+}

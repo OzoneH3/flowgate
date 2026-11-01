@@ -87,3 +87,22 @@ func TestSocketHandoffNoFlowPermissionFromHighWater(t *testing.T) {
 		t.Fatal("completed exact flow not published")
 	}
 }
+
+func TestSocketHandoffFailureAndDeferredCountsArePublished(t *testing.T) {
+	e, s, f, a, _ := connectionFixture(t)
+	s.store.Forget(f.key)
+	f.haveKey = false
+	s.productionSession = true
+	h := e.StartSocketQueueHandoff(func() (uint32, bool) { return 1, true })
+	h.Received(1, f.flow)
+	e.finishSocketAuthorizationLocked(s, f, s.store.Begin(), a)
+	status := e.socketAuthorizationSummaryLocked()
+	if status["deferred_grants"] != 1 || status["handoff_failed"] != false {
+		t.Fatal(status)
+	}
+	h.Verdicted(1, false)
+	status = e.socketAuthorizationSummaryLocked()
+	if status["handoff_failed"] != true || status["handoff_failure"] != "kernel verdict write failed" {
+		t.Fatal(status)
+	}
+}
