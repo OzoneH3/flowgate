@@ -20,11 +20,11 @@ def saturated(a,b,direction):
 
 # P1: unchanged continuously-backlogged senders; four actual sockets/app/direction.
 configure([cap('A',prio='low'),cap('B',prio='high')],ub=16_000_000,db=16_000_000)
-ups={};downs={};keys={};dlcookies={};active=[]
+ups={};downs={};keys={};dlcookies={};ulcookies={};active=[]
 for n in ('A','B'):
- ups[n]=[];keys[n]=[]
+ ups[n]=[];keys[n]=[];ulcookies[n]=set()
  for j in range(4):
-  u=spawn(EXE[n],f'p1-{n}-ul-{j}');active.append(u);ups[n].append(u);i=open_retry(u,'OPEN 4 1 1 1 0 43003','p1-ul');keys[n].append(flowkey('tcp',i))
+  u=spawn(EXE[n],f'p1-{n}-ul-{j}');active.append(u);ups[n].append(u);i=open_retry(u,'OPEN 4 1 1 1 0 43003','p1-ul');keys[n].append(flowkey('tcp',i));ulcookies[n].add(i['sockets'][0]['cookie'])
  d=spawn(EXE[n],f'p1-{n}-dl');active.append(d);downs[n]=d;di=open_retry(d,'OPEN 4 1 4 1 0 43005','p1-dl');dlcookies[n]={x['cookie'] for x in di['sockets']}
 wait(lambda s:all(all(any(x['app']==appkey(n) and x.get('download_class') and x.get('cookie')==cookie for x in bindings(s)) for cookie in dlcookies[n]) for n in ('A','B')),60)
 for us in ups.values():
@@ -34,6 +34,18 @@ shares={}
 for phase in ('A-low','A-high','normal-control','A-low-repeat'):
  cfg=[] if phase=='normal-control' else [cap('A',prio='low' if phase in ('A-low','A-low-repeat') else 'high'),cap('B',prio='high' if phase in ('A-low','A-low-repeat') else 'low')]
  configure(cfg,ub=16_000_000,db=16_000_000)
+ binding_start=time.monotonic()
+ try:
+  if phase!='normal-control':
+   wait(lambda s:all(all(any(x['app']==appkey(n) and x.get('upload_class') and x.get('cookie')==cookie for x in bindings(s)) for cookie in ulcookies[n]) and all(any(x['app']==appkey(n) and x.get('download_class') and x.get('cookie')==cookie for x in bindings(s)) for cookie in dlcookies[n]) for n in ('A','B')),60)
+  else:
+   wait(lambda s:not any(x.get('upload_class') or x.get('download_class') for x in bindings(s)),60)
+ except RuntimeError as exc:
+  if 'wait timeout' not in str(exc):raise
+  shares[phase]=[];results['P1-binding-'+phase]={'result':'Inconclusive'}
+  record('P1-phase-binding',phase=phase,result='Inconclusive',reason='binding timeout',seconds=time.monotonic()-binding_start,status=status())
+  continue
+ record('P1-phase-binding',phase=phase,seconds=time.monotonic()-binding_start,status=status(),upload_cookies={k:sorted(v) for k,v in ulcookies.items()},download_cookies={k:sorted(v) for k,v in dlcookies.items()})
  for d in downs.values():write(d,'DRAIN 2000')
  for d in downs.values():line(d)
  windows=[]
@@ -49,7 +61,7 @@ for phase in ('A-low','A-high','normal-control','A-low-repeat'):
  shares[phase]=windows;record('P1-priority',phase=phase,windows=windows,normal_control='both unconfigured; shared fffe default class' if phase=='normal-control' else None,offered='4 continuously backlogged TCP sockets/app/direction; no cap; identical offered workload across swaps')
 from priority_assess import assess,assess_game
 for direction in ('upload','download'):
- assessment=assess(shares,direction);record('P1-effect',direction=direction,**assessment);results['P1-effect-'+direction]={'result':assessment['result']}
+ assessment=assess(shares,direction) if all(len(shares.get(p,[]))==2 for p in ('A-low','A-high','normal-control','A-low-repeat')) else {'result':'Inconclusive','reason':'phase binding timeout'};record('P1-effect',direction=direction,**assessment);results['P1-effect-'+direction]={'result':assessment['result']}
 for p in active:stopchild(p)
 wait(lambda s:not bindings(s),60)
 

@@ -21,8 +21,14 @@ def verdict(values):
     return 'Pass' if all(v is True or v == 'Pass' for v in values) else 'Inconclusive'
 
 stages = []
-for path in sorted(list(r.glob('extensions-v2/*/evidence/results.json')) + list(r.glob('policy-v3/*/evidence/results.json')) + list(r.glob('priority-A1-*/evidence/results.json'))):
+for path in sorted(list(r.glob('extensions-v2/*/evidence/results.json')) + list(r.glob('policy-v3/*/evidence/results.json')) + list(r.glob('P1-v3/*/evidence/results.json'))):
     values = read(path)
+    superseded = {}
+    if 'extensions-v2' in str(path):
+        for key in ('P1-effect-upload','P1-effect-download'):
+            if key in values:
+                superseded[key] = values[key]
+                values[key] = {'result':'Not tested'}
     records_path = path.with_name('records.json')
     p2 = [x for x in read(records_path) if x.get('kind') == 'P2-game'] if records_path.is_file() else []
     p2_assessment = None
@@ -40,12 +46,12 @@ for path in sorted(list(r.glob('extensions-v2/*/evidence/results.json')) + list(
         values['P2-benefit'] = {'result': state}
     rows = [{'assertion': key, 'status': verdict(item.values()), 'checks': item}
             for key, item in values.items()]
-    stages.append({'kind': 'supplementary priority A1' if 'priority-A1-' in str(path) else 'policy/validation' if 'policy-v3' in str(path) else 'extensions', 'mode': path.parents[1].name,
+    stages.append({'kind': 'corrected priority P1' if 'P1-v3' in str(path) else 'policy/validation' if 'policy-v3' in str(path) else 'extensions', 'mode': path.parents[1].name,
                    'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
-                   'counts': dict(collections.Counter(x['status'] for x in rows)), 'rows': rows, 'p2_assessment': p2_assessment})
+                   'counts': dict(collections.Counter(x['status'] for x in rows)), 'rows': rows, 'p2_assessment': p2_assessment, 'superseded_priority_effects': superseded, 'superseded_reason': 'control phase rebinding was not awaited; see P1-v3' if superseded else None})
 for path in r.glob('lifecycle-v2/evidence/lifecycle-results.json'):
     stages.append({'kind': 'kernel components', 'path': str(path), 'rows': read(path)})
-for path in (list(r.glob('reference-v3/evidence/results.json')) or list(r.glob('reference-v2/evidence/results.json'))):
+for path in (list(r.glob('reference-v4/evidence/results.json')) or list(r.glob('reference-v2/evidence/results.json'))):
     stages.append({'kind': 'off + shaper disabled reference', 'path': str(path), 'checks': read(path)})
 models = {}
 for name in ['focused-go-3.jsonl', 'focused-race.jsonl', 'accounting-components-final.jsonl']:
