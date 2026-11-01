@@ -21,3 +21,14 @@ with detailed native-GUI evidence under .workspace/cgui/run-FAW9fQ/.
 Refinement: d1-explicit-unit.log (436/436), d1-explicit-gui.log and
 .workspace/cgui/run-kMaIbn/ (10/10 verdicts), including a same-value override
 remaining fixed after an All-networks change.
+
+A1: registered UDP counters survive unrelated unregistered-cookie misses
+The collector's miss count describes operations on cookies not in its HASH map.
+It does not invalidate other registered cookies' monotonic counters. The ledger
+now reports the gap while retaining those cookies' generation/owner baselines.
+Collector-generation changes, counter regressions and ownership changes retain
+their existing conservative behavior. No permission or fast-hit counting changes.
+Before: edge-v3 real collector A +300000 socket bytes, +248400 application bytes
+while B caused 48 misses (51600 lost); isolated unit expected120000 got0.
+After: accounting race tests pass, including stronger registered-byte conservation.
+Receiver recheck is pending; final-close tail is a separate unresolved correction.

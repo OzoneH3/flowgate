@@ -243,11 +243,9 @@ func (l *Ledger) Observe(s identity.ActivitySnapshot) {
 	if s.UDP != nil {
 		if l.udpGeneration == s.UDP.Generation && l.udpMissed != s.UDP.Missed {
 			l.gap()
-			for key, b := range l.previous {
-				if b.source == UDP {
-					delete(l.previous, key)
-				}
-			}
+			// Misses concern unregistered cookies, not counters of already
+			// registered cookies. Preserve their monotonic, generation-scoped
+			// baselines; each still needs matching ownership bookends below.
 		}
 		l.udpGeneration, l.udpMissed = s.UDP.Generation, s.UDP.Missed
 	}

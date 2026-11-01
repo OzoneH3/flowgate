@@ -143,8 +143,8 @@ func TestUDPSourcesGenerationMissedAndRepeatedSample(t *testing.T) {
 	s = udp(4, 200, "new")
 	s.UDP.Missed = 1
 	l.Observe(s)
-	if sum(l, 1000) != 50 {
-		t.Fatal("collector loss donated", sum(l, 1000))
+	if sum(l, 1000) != 70 {
+		t.Fatal("registered collector bytes lost", sum(l, 1000))
 	}
 	s = udp(5, 200, "new")
 	s.UDP.Missed = 1
@@ -159,7 +159,7 @@ func TestUDPSourcesGenerationMissedAndRepeatedSample(t *testing.T) {
 	s.UDP.SampleNS = 6e9
 	s.Rows[0].Traffic.Uploaded = 240
 	l.Observe(s)
-	if unassigned(l, UDP) != "40" || sum(l, 1000) != 50 {
+	if unassigned(l, UDP) != "40" || sum(l, 1000) != 70 {
 		t.Fatal("repeated sample advanced owner baseline", l.Snapshot(0, true))
 	}
 	for _, e := range l.Snapshot(1000, false).Entries {
@@ -491,5 +491,19 @@ func TestBackwardUDPClockOneCoverageBreak(t *testing.T) {
 	l.Observe(s)
 	if l.Snapshot(0, true).Gaps != "1" || sum(l, 1000) != 5 {
 		t.Fatal(l.Snapshot(0, true))
+	}
+}
+
+func TestRegisteredUDPConservedWhenOtherCookiesMiss(t *testing.T) {
+	l := New()
+	l.Observe(udp(1, 0, "collector"))
+	s := udp(2, 120000, "collector")
+	s.UDP.Missed = 9
+	l.Observe(s)
+	if got := sum(l, 1000); got != 120000 {
+		t.Fatalf("unrelated unregistered operations erased registered payload: got %d want120000", got)
+	}
+	if l.Snapshot(0, true).Gaps == "0" {
+		t.Fatal("unregistered gap hidden")
 	}
 }
