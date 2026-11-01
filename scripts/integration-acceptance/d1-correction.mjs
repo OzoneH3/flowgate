@@ -279,7 +279,7 @@ try {
   // Case 4: Local DL rate save after case 3 keeps whatever priority is stored.
   await saveRate('download', 'local', '6');
   obs.dl_rate_save_local = { stored_local: own('local') };
-  obs.expect_preselect_inherited = obs.internet_popup_preselected === 'high' && obs.local_popup_preselected === 'high';
+  obs.expect_preselect_inherited = obs.internet_popup_preselected === 'inherit' && obs.local_popup_preselected === 'inherit';
   const verdict = {
     preselects_inherited: obs.expect_preselect_inherited,
     rate_save_preserves_inheritance: obs.rate_save_local.stored_local?.traffic_priority === undefined && obs.rate_save_local.stored_all?.traffic_priority === 'high',
@@ -291,15 +291,17 @@ try {
   assert.equal(obs.internet_save_enabled,true);
   assert.equal(obs.untouched_ok_internet.wrote,false);
   assert.equal(obs.untouched_ok_local.wrote,false);
-  assert.match(obs.internet_popup_hint,/Inherited: high/);
+  assert.match(obs.internet_popup_hint,/Inherited: High/);
   await open('priority');await zone('all');await page.locator('#priorityLevel').selectOption('low');await page.locator('#uploadSave').click();await popup.waitFor({state:'detached'});
-  await open('priority');await zone('local');assert.equal(await page.locator('#priorityLevel').inputValue(),'low');assert.match(await page.locator('#uploadZoneHint').innerText(),/Inherited: low/);
+  await open('priority');await zone('local');assert.equal(await page.locator('#priorityLevel').inputValue(),'inherit');assert.match(await page.locator('#uploadZoneHint').innerText(),/Inherited: Low/);
   const lowWrites=writes().length;await page.locator('#uploadSave').click();await popup.waitFor({state:'detached'});assert.equal(writes().length,lowWrites);
   const rates=()=>[own('local')?.bits_per_second,own('local')?.download_bits_per_second];const originalRates=rates();
   await open('priority');await zone('local');await page.locator('#priorityLevel').selectOption('normal');const changed=writes().length;await page.locator('#uploadSave').click();await popup.waitFor({state:'detached'});assert.equal(writes().length,changed+1);assert.equal(own('local').traffic_priority,'normal');assert.deepEqual(rates(),originalRates);
-  await open('priority');await zone('local');assert.equal(await page.locator('#priorityLevel').inputValue(),'normal');assert.match(await page.locator('#uploadZoneHint').innerText(),/Override: normal/);await page.locator('#uploadRemove').click();await popup.waitFor({state:'detached'});assert.equal(own('local').traffic_priority,undefined);assert.deepEqual(rates(),originalRates);
-  await open('priority');await zone('local');assert.equal(await page.locator('#priorityLevel').inputValue(),'low');await page.locator('#priorityLevel').selectOption('high');await page.locator('#priorityLevel').selectOption('low');await page.locator('#uploadSave').click();await popup.waitFor({state:'detached'});assert.equal(own('local').traffic_priority,'low');assert.deepEqual(rates(),originalRates);
-  verdict.low_inherited_untouched_zero_writes=true;verdict.explicit_normal_and_delete_preserve_rates=true;verdict.explicit_equal_supported_after_change_and_back=true;
+  await open('priority');await zone('local');assert.equal(await page.locator('#priorityLevel').inputValue(),'normal');assert.match(await page.locator('#uploadZoneHint').innerText(),/Override: Normal/);await page.locator('#uploadRemove').click();await popup.waitFor({state:'detached'});assert.equal(own('local').traffic_priority,undefined);assert.deepEqual(rates(),originalRates);
+  await open('priority');await zone('local');assert.equal(await page.locator('#priorityLevel').inputValue(),'inherit');await page.locator('#priorityLevel').selectOption('low');await page.locator('#uploadSave').click();await popup.waitFor({state:'detached'});assert.equal(own('local').traffic_priority,'low');assert.deepEqual(rates(),originalRates);
+  verdict.low_inherited_untouched_zero_writes=true;verdict.explicit_normal_and_delete_preserve_rates=true;await open('priority');await zone('all');await page.locator('#priorityLevel').selectOption('high');await page.locator('#uploadSave').click();await popup.waitFor({state:'detached'});assert.equal(own('local').traffic_priority,'low');assert.deepEqual(rates(),originalRates);
+  await open('priority');await zone('local');assert.equal(await page.locator('#priorityLevel').inputValue(),'low');await page.locator('#priorityLevel').selectOption('inherit');await page.locator('#uploadSave').click();await popup.waitFor({state:'detached'});assert.equal(own('local').traffic_priority,undefined);assert.deepEqual(rates(),originalRates);
+  verdict.explicit_equal_discoverable_and_stable_after_all_change=true;verdict.inherited_selection_removes_override=true;
   evidence.observations = obs; evidence.verdict = verdict;
   evidence.steps.push({label:'zone priority inheritance request/stored-result', verdict});
   evidence.pass = Object.values(verdict).every(Boolean);

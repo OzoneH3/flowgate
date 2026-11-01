@@ -6,8 +6,10 @@ an All-networks priority, and confirming it created a zone override. The prepare
 D1 correction supplies the inherited selection. An untouched inherited OK now
 closes without a configuration request. The visible hint distinguishes Inherited
 from Override. Deliberate selections and Delete use the existing scoped merge,
-preserving upload/download settings. An explicit override equal to the inherited
-value requires selecting a different value and back before OK (two steps).
+preserving upload/download settings. The selector has an explicit Inherited (High/Normal/Low) entry. Selecting a
+priority directly creates an override, including the same value as inherited;
+a later All-networks edit does not change that override. Selecting Inherited
+removes only the zone priority override.
 
 Verified: 436 existing Electron unit tests pass; sandboxed native Electron with a
 synthetic API verifies inherited High/Low, zero writes on untouched OK, explicit
@@ -16,3 +18,6 @@ explicit equal override. No real GUI preferences, host settings or protection
 were read or changed by this test. Evidence is in the separate workspace:
 .workspace/acceptance-corrections-evidence/d1-unit-3.log and d1-gui-2.log,
 with detailed native-GUI evidence under .workspace/cgui/run-FAW9fQ/.
+Refinement: d1-explicit-unit.log (436/436), d1-explicit-gui.log and
+.workspace/cgui/run-kMaIbn/ (10/10 verdicts), including a same-value override
+remaining fixed after an All-networks change.
