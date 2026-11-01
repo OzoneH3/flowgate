@@ -142,7 +142,7 @@ func TestUDPBatchPacketDeadlinesAndCancellation(t *testing.T) {
 			var expired atomic.Uint64
 			sent := map[uint32]bool{}
 			js := []packetJob{job(1, 8000), job(2, 8000)}
-			p := packetProcessor{ctx: ctx, expired: &expired, record: func(daemon.Event, string, error) {}, verdict: func(id uint32, allow bool) (bool, error) { sent[id] = allow; return allow, nil }, batchObserve: func(_ identity.Flow, _ string, n int, _ bool) (func() daemon.Event, bool) {
+			p := packetProcessor{ctx: ctx, expired: &expired, record: func(daemon.Event, string, error) {}, verdict: func(id uint32, allow bool, _ func() bool) (bool, error) { sent[id] = allow; return allow, nil }, batchObserve: func(_ identity.Flow, _ string, n int, _ bool) (func() daemon.Event, bool) {
 				if mode == "busy" {
 					return nil, false
 				}
@@ -189,7 +189,7 @@ func TestUDPBatchPolicyEditBetweenVerdictsAppliesToRemainingPackets(t *testing.T
 	}
 	var expired atomic.Uint64
 	verdicts := []bool{}
-	p := packetProcessor{ctx: context.Background(), expired: &expired, batchObserve: e.PrepareUDPBatch, record: func(daemon.Event, string, error) {}, verdict: func(_ uint32, allow bool) (bool, error) {
+	p := packetProcessor{ctx: context.Background(), expired: &expired, batchObserve: e.PrepareUDPBatch, record: func(daemon.Event, string, error) {}, verdict: func(_ uint32, allow bool, _ func() bool) (bool, error) {
 		verdicts = append(verdicts, allow)
 		if len(verdicts) == 1 {
 			rule.Action = "block"

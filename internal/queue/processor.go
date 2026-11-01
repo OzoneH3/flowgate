@@ -20,9 +20,10 @@ type packetProcessor struct {
 	tryObserve       func(identity.Flow, string) (daemon.Event, bool)
 	retain           func(uint32, int, daemon.Event) bool
 	record           func(daemon.Event, string, error)
-	verdict          func(uint32, bool) (bool, error)
+	verdict          func(uint32, bool, func() bool) (bool, error)
 	expired          *atomic.Uint64
 	diagnostic       func(queuehealth.Cause)
+	policyEpoch      func() uint64
 }
 
 func (p *packetProcessor) process(j packetJob, stopping bool) {
@@ -35,7 +36,7 @@ func (p *packetProcessor) processStage(j packetJob, stopping, census bool) bool 
 	if stopping || p.ctx.Err() != nil || !time.Now().Before(j.deadline) {
 		p.expired.Add(1)
 		p.rejection(stoppingOrCancelled(p.ctx, stopping))
-		p.verdict(j.id, false)
+		p.verdict(j.id, false, nil)
 		return true
 	}
 	// Observe resolves fresh ownership, then evaluates current policy. Never
@@ -70,7 +71,14 @@ func (p *packetProcessor) finish(j packetJob, v daemon.Event) {
 		p.expired.Add(1)
 		p.rejection(stoppingOrCancelled(p.ctx, false))
 	}
-	allowed, err := p.verdict(j.id, live && v.State == "allowed")
+	// A write-timeout retry may re-send Allow only while the decision still holds.
+	valid := func() bool {
+		epoch, until := v.QueueSchedulingHint()
+		now := time.Now()
+		return p.ctx.Err() == nil && p.policyEpoch != nil && p.policyEpoch() == epoch &&
+			now.Before(j.deadline) && (until.IsZero() || now.Before(until))
+	}
+	allowed, err := p.verdict(j.id, live && v.State == "allowed", valid)
 	if p.decisionObserved != nil && err == nil {
 		p.decisionObserved(v, allowed)
 	}
@@ -115,7 +123,7 @@ func (p *packetProcessor) processBatchProfiled(jobs []packetJob, stopping, censu
 		} else {
 			p.expired.Add(1)
 			p.rejection(stoppingOrCancelled(p.ctx, stopping))
-			p.verdict(j.id, false)
+			p.verdict(j.id, false, nil)
 		}
 	}
 	return true

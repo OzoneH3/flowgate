@@ -115,7 +115,9 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 		selfFailureReason.Store(&reason)
 	}
 	var selfUpdates sync.Map // packet ID -> exact kernel connection update; removed on every verdict
-	submitVerdict := func(id uint32, allow bool) (bool, error) {
+	// valid reports whether a decided Allow may still be re-sent after a write
+	// timeout; nil means no such evidence, so a retried Allow becomes Drop.
+	submitVerdict := func(id uint32, allow bool, valid func() bool) (bool, error) {
 		defer diagnostics.Begin(diagnostics.Verdict).End()
 		if allow && ctx.Err() != nil {
 			health.Add(queuehealth.Shutdown)
@@ -132,7 +134,7 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 			health.Add(queuehealth.Shutdown)
 			allow = false
 		}
-		send := func() error {
+		send := func(allow bool) error {
 			if allow && labMark {
 				return nf.SetVerdictWithOption(id, nfqueue.NfAccept, nfqueue.WithConnMark(Mark))
 			} else if allow {
@@ -140,7 +142,8 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 			}
 			return nf.SetVerdict(id, nfqueue.NfDrop)
 		}
-		err = retryVerdictWrite(send, func() { health.Add(queuehealth.VerdictWriteRetry) })
+		keep := func() bool { return ctx.Err() == nil && valid != nil && valid() }
+		allow, err = retryVerdictWrite(send, allow, keep, func() { health.Add(queuehealth.VerdictWriteRetry) })
 		if err != nil {
 			health.Add(queuehealth.VerdictFailure)
 			fail(err)
@@ -155,7 +158,7 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 		return allow, err
 	}
 	verdictPacket := func(id uint32, allow bool) error {
-		_, err := submitVerdict(id, allow)
+		_, err := submitVerdict(id, allow, nil)
 		return err
 	}
 	var overloaded, expired, censusOverflow, displaced, receiveOverflow atomic.Uint64
@@ -164,7 +167,7 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 	// to distinguish a game's failed admission from unrelated background traffic.
 	var overloadedSample atomic.Pointer[identity.Flow]
 	var admissionLimits [32]atomic.Uint64
-	processor := packetProcessor{batchObserve: e.PrepareUDPBatch, ctx: ctx, observe: e.Observe, tryObserve: e.TryObserve, retain: retained.Add, record: e.RecordPacketOutcome, verdict: submitVerdict, expired: &expired, diagnostic: health.Add}
+	processor := packetProcessor{policyEpoch: e.QueuePolicyEpoch, batchObserve: e.PrepareUDPBatch, ctx: ctx, observe: e.Observe, tryObserve: e.TryObserve, retain: retained.Add, record: e.RecordPacketOutcome, verdict: submitVerdict, expired: &expired, diagnostic: health.Add}
 	workers := newPacketBatchLanes(AttributionWorkers, CensusWorkers, processor.processStage, processor.processBatch, func(p packetJob, cause rejectionCause) {
 		if cause == rejectShutdown {
 			health.Add(queuehealth.Shutdown)
@@ -359,13 +362,20 @@ const verdictWriteAttempts = 4
 // the packet then remains queued and undecided, and repeating the identical
 // verdict changes no permission. Any other error, or a timeout persisting for
 // every bounded attempt, is returned to the existing fail-closed path.
-func retryVerdictWrite(send func() error, retried func()) error {
-	err := send()
+//
+// Before every retry a decided Allow must still be valid (queue alive, same
+// policy epoch, packet and temporary-rule horizons not passed); otherwise the
+// retry sends Drop. The returned bool is the verdict actually last sent.
+func retryVerdictWrite(send func(bool) error, allow bool, valid func() bool, retried func()) (bool, error) {
+	err := send(allow)
 	for attempt := 1; err != nil && verdictWriteTimedOut(err) && attempt < verdictWriteAttempts; attempt++ {
 		retried()
-		err = send()
+		if allow && !valid() {
+			allow = false
+		}
+		err = send(allow)
 	}
-	return err
+	return allow, err
 }
 
 func verdictWriteTimedOut(err error) bool {

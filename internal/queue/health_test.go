@@ -37,7 +37,7 @@ func TestProcessorHealthRejectionExactlyOnce(t *testing.T) {
 					v.State = "blocked"
 				}
 				return v
-			}, retain: func(uint32, int, daemon.Event) bool { return mode == "held" }, record: func(daemon.Event, string, error) {}, verdict: func(_ uint32, allow bool) (bool, error) { sent++; return allow, nil }}
+			}, retain: func(uint32, int, daemon.Event) bool { return mode == "held" }, record: func(daemon.Event, string, error) {}, verdict: func(_ uint32, allow bool, _ func() bool) (bool, error) { sent++; return allow, nil }}
 			p.process(j, false)
 			var want []queuehealth.Cause
 			switch mode {

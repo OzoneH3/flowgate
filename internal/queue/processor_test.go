@@ -45,7 +45,7 @@ func TestPacketProcessorLifetimes(t *testing.T) {
 				},
 				retain: func(uint32, int, daemon.Event) bool { retained++; return test != "retention-full" },
 				record: func(_ daemon.Event, s string, _ error) { outcome = s },
-				verdict: func(_ uint32, allow bool) (bool, error) {
+				verdict: func(_ uint32, allow bool, _ func() bool) (bool, error) {
 					sent++
 					actual = allow
 					if test == "sender-dropped" {
@@ -112,7 +112,7 @@ func TestPacketProcessorDoesNotTransferWindowsPermission(t *testing.T) {
 	p := packetProcessor{ctx: context.Background(), observe: e.Observe, expired: &expired,
 		retain:  func(uint32, int, daemon.Event) bool { held = true; return true },
 		record:  func(daemon.Event, string, error) {},
-		verdict: func(_ uint32, a bool) (bool, error) { allowed = a; return a, nil },
+		verdict: func(_ uint32, a bool, _ func() bool) (bool, error) { allowed = a; return a, nil },
 	}
 	j := job(1, 8000)
 	p.process(j, false)
@@ -158,7 +158,7 @@ func TestPacketProcessorChecksAdmissionDeadlineAfterResolution(t *testing.T) {
 				t.Error(s)
 			}
 		},
-		verdict: func(_ uint32, a bool) (bool, error) {
+		verdict: func(_ uint32, a bool, _ func() bool) (bool, error) {
 			sent = true
 			if a {
 				t.Error("expired admission allowed")
@@ -183,7 +183,7 @@ func TestPacketProcessorDefersWithoutCreatingOrSubmittingVerdict(t *testing.T) {
 		},
 		retain:  func(uint32, int, daemon.Event) bool { t.Fatal("busy result retained as prompt"); return false },
 		record:  func(daemon.Event, string, error) { recorded++ },
-		verdict: func(_ uint32, allow bool) (bool, error) { sent++; return allow, nil },
+		verdict: func(_ uint32, allow bool, _ func() bool) (bool, error) { sent++; return allow, nil },
 	}
 	j := job(1, 8000)
 	if p.processStage(j, false, false) {
