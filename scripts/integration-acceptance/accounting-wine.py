@@ -52,5 +52,12 @@ for n,c in wine_cases.items():
 results['wine-separation']={'four_distinct_verified_keys':len({c['application']['key'] for c in wine_cases.values()})==4}
 rx=peerop('stats');results['wine-separation']['denied_prefix_app_no_delivery']=sum(rx.get('bBeta-'+str(i),{}).get('received',0) for i in (0,1))==0
 record('wine-receiver',receiver=rx)
+monitors=[after['monitor'] for before,after in phases.values()]
+results['wine-tracing-diagnostics']={
+ 'skip_counter_available':all(m.get('tracing_skipped_runs') is not None for m in monitors),
+ 'nonzero_skips_are_partial':all(not m.get('tracing_skipped_runs') or m.get('partial') is True for m in monitors),
+ 'no_missing_byte_estimate':all(not m.get('tracing_skipped_runs') or 'missing bytes are unknown' in m.get('reason','') for m in monitors),
+}
+record('wine-tracing-diagnostics',checks=results['wine-tracing-diagnostics'],scope='Coverage diagnostics only; exact syscall-byte assertions remain independent and may Fail')
 record('wine-coverage',scope='real Win64 game-like two-socket streams; UID0 guest; receiver and successful-call counts separate; no Wine shaping')
 s=api();api('traffic-stop',generation=GEN,collector_generation=s['traffic_monitor']['generation'])

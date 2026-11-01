@@ -137,3 +137,18 @@ Tracing coverage limitation (accounting honesty; no byte reconstruction)
   reporting of existing coverage, not a newly introduced traffic loss.
 - Moving the accounting attachment to a narrower kernel hook is deferred; no
   speculative BPF/authorization change was added to conceal this limitation.
+
+Final route-fresh measurements and continuity scope
+- Final route-fresh candidates B3/B4:13.44/12.81 seconds vs baseline A1/A2
+  14.54/15.82 (means13.12 vs15.18, roughly14%). Two runs/arm; final B runs were
+  later, not interleaved. Controls drifted in both directions and the tc
+  micro-normalizer was noisy. This is a modest consistent-direction1-3s
+  reduction with fewer topology verifications, not a dramatic/significant claim.
+  Fresh route checks remain32/arm, and native probes/lazy class mutation dominate.
+- The extended combined continuity fixture preserved7500/7500 fast accepts,
+  exact7500x1242 class bytes, zero receiver loss/reorder, unchanged C class/settings
+  and no new C grant or bind across the edits. First/last receiver times bracket
+  all edits. The first chunk also had p99~272ms/max370ms under bulk load; later
+  chunks had p99<2.5ms. This continuity PASS is NOT a latency PASS. A matching
+  baseline comparison and the exact final-source regressions are separate
+  artifacts in the handoff; no speculative optimization was added for the tail.

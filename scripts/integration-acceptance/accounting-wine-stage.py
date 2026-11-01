@@ -5,6 +5,7 @@ No Wine, collector or firewall is executed on the host.
 import argparse,pathlib,subprocess,shutil,json,hashlib,os,re
 p=argparse.ArgumentParser();p.add_argument('--output',type=pathlib.Path,required=True);p.add_argument('--backend',type=pathlib.Path,required=True);p.add_argument('--collector',type=pathlib.Path,required=True);p.add_argument('--wine-runtime',type=pathlib.Path);p.add_argument('--wine-prefix-template',type=pathlib.Path);p.add_argument('--wine-helper',type=pathlib.Path);a,rest=p.parse_known_args();H=pathlib.Path(__file__).resolve().parent;root=H.parents[3];out=a.output.resolve();assert '.workspace' in out.parts
 subprocess.run(['python3',str(H/'accounting-stage.py'),'--output',str(out),'--case-file',str(H/'accounting-wine.py'),'--backend',str(a.backend),'--collector',str(a.collector),*rest],check=True)
+host_tmp=out/'host-tmp';host_tmp.mkdir();os.environ['TMPDIR']=str(host_tmp)
 o=out/'overlay';w=o/'work/m1';guest=pathlib.Path('/work/m1');runtime=a.wine_runtime or root/'.workspace/udp-capacity/proton';prefix=a.wine_prefix_template or root/'.workspace/proton-launcher-fixture/run11/prefix-a/pfx';fixture=H/'wine-fixture'
 sha=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
 for sub in ['files/bin','files/lib/wine/x86_64-unix','files/lib/wine/x86_64-windows','files/lib/x86_64-linux-gnu','files/share/wine']:

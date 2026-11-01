@@ -40,6 +40,24 @@ def setup(P,R,children):
    info=json.loads(subprocess.check_output([str(P/'inspect'),'inspect',str(pid)],text=True))
    assert info['application']['kind']=='wine',info
    cases[name]={'process':p,'pid':pid,'application':info['application'],'trace':trace,'go':go,'measure':measure}
+ # Initialize services with foreground applications ALREADY holding the broker.
+ # A standalone wineboot can exit its last foreground client and stop the broker.
+ service_runs=[]
+ for prefix in ('a','b'):
+  env=dict(os.environ,WINEPREFIX=str(P/('prefix-'+prefix)),WINEDEBUG='+service,+ntoskrnl',WINEESYNC='0',WINEFSYNC='0',WINE_NTSYNC='0',WINE_DISABLE_FAST_SYNC='1',WINEDLLOVERRIDES='mscoree,mshtml=',HOME=str(R),TMPDIR=str(R),DISPLAY='',WAYLAND_DISPLAY='',LD_LIBRARY_PATH=str(P/'proton/files/lib/x86_64-linux-gnu'))
+  begin=time.monotonic()
+  with (R/('wineboot-live-'+prefix+'.txt')).open('w') as output:
+   proc=subprocess.Popen([str(P/'proton/files/bin/wine'),r'C:\windows\system32\wineboot.exe','-u'],env=env,stdout=output,stderr=subprocess.STDOUT)
+   try:code=proc.wait(45)
+   except subprocess.TimeoutExpired:proc.kill();proc.wait();code=-1
+  service_runs.append(dict(prefix=prefix,seconds=time.monotonic()-begin,returncode=code))
+ processes=[]
+ for f in pathlib.Path('/proc').glob('[0-9]*/cmdline'):
+  try:
+   args=f.read_bytes().replace(b'\0',b' ').decode(errors='replace')
+   if any(n in args for n in ('services.exe','winedevice.exe','wineserver')):processes.append(dict(pid=f.parent.name,argv=args[:1024]))
+  except OSError:pass
+ (R/'wine-services-live.json').write_text(json.dumps(dict(initialized=service_runs,processes=processes),indent=2))
  # Diagnostic-only helper round trips in the same broker, before protection.
  import select
  probes=[]

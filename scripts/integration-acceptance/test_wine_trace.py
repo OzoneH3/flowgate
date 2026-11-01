@@ -3,7 +3,7 @@ spec=importlib.util.spec_from_file_location('wine_trace',pathlib.Path(__file__).
 class TraceReturns(unittest.TestCase):
  def test_struct_fields_are_not_return_values_and_resumes_keep_the_tid(self):
   # This directory is always beneath the explicitly supplied workspace TMPDIR.
-  with tempfile.TemporaryDirectory() as d:
+  with tempfile.TemporaryDirectory(dir=pathlib.Path(__file__).resolve().parents[2]/'.workspace') as d:
    p=pathlib.Path(d)/'aAlpha-linux.txt';p.write_text('''12 1.0 sendmsg(22<UDP:[0.0.0.0:1]>, {msg_namelen=16, msg_iov=[{iov_base="aAlpha|0|125|xxx", iov_len=256}]}, 0) = 256 <0.1>
 13 1.1 sendmsg(23<UDP:[0.0.0.0:2]>, {msg_namelen=16, msg_iov=[{iov_base="aAlpha|1|125|xxx", iov_len=256}]}, 0 <unfinished ...>
 13 1.2 <... sendmsg resumed>) = -1 EAGAIN (Resource temporarily unavailable) <0.1>
