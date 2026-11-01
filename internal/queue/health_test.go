@@ -28,6 +28,8 @@ func TestProcessorHealthRejectionExactlyOnce(t *testing.T) {
 			p := packetProcessor{ctx: ctx, expired: &expired, diagnostic: func(c queuehealth.Cause) { got = append(got, c) }, observe: func(identity.Flow, string) daemon.Event {
 				v := daemon.Event{State: "allowed", Deadline: time.Now().Add(time.Minute)}
 				if mode == "deadline-during" {
+					// A Once admission's 30-second flow lease expires during observation.
+					v.Rule = "once:test"
 					v.Deadline = time.Now().Add(-time.Second)
 				}
 				if mode == "retention" || mode == "held" {

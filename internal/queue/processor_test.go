@@ -41,7 +41,12 @@ func TestPacketProcessorLifetimes(t *testing.T) {
 					if test == "cancelled-during" {
 						cancel()
 					}
-					return daemon.Event{State: state, Deadline: deadline}
+					rule := ""
+					if test == "expired-during" {
+						// The permission horizon (a Once flow lease) passes during observation.
+						rule = "once:test"
+					}
+					return daemon.Event{State: state, Deadline: deadline, Rule: rule}
 				},
 				retain: func(uint32, int, daemon.Event) bool { retained++; return test != "retention-full" },
 				record: func(_ daemon.Event, s string, _ error) { outcome = s },

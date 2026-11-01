@@ -6,6 +6,7 @@ import (
 	"flowgate/internal/identity"
 	"flowgate/internal/queuehealth"
 	"runtime/pprof"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -55,8 +56,25 @@ func (p *packetProcessor) processStage(j packetJob, stopping, census bool) bool 
 	return true
 }
 
+// eventHorizon is when a decided event stops authorizing a verdict (zero: no
+// event-level horizon; the packet deadline still applies). For an ordinary
+// rule-allowed event, Deadline is only Observe's cache lifetime, which it reuses
+// until just before then, so it must not drop the packet; a temporary deciding
+// rule's expiry still bounds it. Once/For-a-while admissions are 30-second flow
+// leases whose Deadline is the permission horizon. Other states keep Deadline.
+func eventHorizon(v daemon.Event) time.Time {
+	_, until := v.QueueSchedulingHint()
+	if v.State == "allowed" && (strings.HasPrefix(v.Rule, "once:") || strings.HasPrefix(v.Rule, "while:")) &&
+		(until.IsZero() || v.Deadline.Before(until)) {
+		return v.Deadline
+	}
+	return until
+}
+
 func (p *packetProcessor) finish(j packetJob, v daemon.Event) {
-	live := p.ctx.Err() == nil && time.Now().Before(j.deadline) && time.Now().Before(v.Deadline)
+	horizon := eventHorizon(v)
+	now := time.Now()
+	live := p.ctx.Err() == nil && now.Before(j.deadline) && (horizon.IsZero() || now.Before(horizon))
 	if live && v.State == "awaiting-decision" {
 		if p.retain(j.id, j.size, v) {
 			if p.decisionObserved != nil {
@@ -73,7 +91,8 @@ func (p *packetProcessor) finish(j packetJob, v daemon.Event) {
 	}
 	// A write-timeout retry may re-send Allow only while the decision still holds.
 	valid := func() bool {
-		epoch, until := v.QueueSchedulingHint()
+		epoch, _ := v.QueueSchedulingHint()
+		until := eventHorizon(v)
 		now := time.Now()
 		return p.ctx.Err() == nil && p.policyEpoch != nil && p.policyEpoch() == epoch &&
 			now.Before(j.deadline) && (until.IsZero() || now.Before(until))
