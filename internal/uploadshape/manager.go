@@ -867,6 +867,7 @@ func (m *Manager) run() {
 				m.discovered(stats)
 				continue
 			}
+			var batch []hint
 			for i, s := range candidates {
 				app, cookie := eligible(attributions[i])
 				if app == "" {
@@ -878,10 +879,9 @@ func (m *Manager) run() {
 					continue
 				}
 				stats.EligibleCandidates++
-				if m.bind(t, hint{flows[i], app, cookie}, version) {
-					stats.BindRequests++
-				}
+				batch = append(batch, hint{flows[i], app, cookie})
 			}
+			stats.BindRequests += uint64(m.bindMany(t, batch, version))
 			m.discovered(stats)
 		}
 	}
@@ -889,10 +889,10 @@ func (m *Manager) run() {
 
 // bind asks the controller to prove and bind one socket; it reports whether a
 // controller request was actually issued (false for stale/uncapped/invalid).
-func (m *Manager) bind(t transport, h hint, version uint64) bool {
+func (m *Manager) bindingRequest(h hint, version uint64) map[string]any {
 	cfg, v, closed := m.current()
 	if v != version || closed || !cfg.Enabled {
-		return false
+		return nil
 	}
 	var rate, downloadRate uint64
 	var prio string
@@ -909,25 +909,86 @@ func (m *Manager) bind(t transport, h hint, version uint64) bool {
 		}
 	}
 	if !wanted {
-		return false
+		return nil
 	}
 	if !validFlow(h.flow) {
 		m.gap("unsupported_flow")
-		return false
+		return nil
 	}
 	zone := ""
 	if m.opts.Zones != nil {
 		zone = knownZone(m.opts.Zones().ClassifyFlow(h.flow))
 	}
-	_, err := call(t, map[string]any{"zone": zone, "op": "bind", "protocol": h.flow.Protocol, "local": h.flow.Local.String(), "remote": h.flow.Remote.String(), "rate": rate, "download_rate": downloadRate, "priority": prio, "expected_app": h.app, "expected_cookie": h.cookie})
-	if err != nil {
-		m.gap("binding_refused")
-		m.mu.Lock()
-		m.snap.LastError = err.Error()
-		m.mu.Unlock()
+	return map[string]any{"zone": zone, "op": "bind", "protocol": h.flow.Protocol, "local": h.flow.Local.String(), "remote": h.flow.Remote.String(), "rate": rate, "download_rate": downloadRate, "priority": prio, "expected_app": h.app, "expected_cookie": h.cookie}
+}
+func (m *Manager) bindingError(err error) {
+	if err == nil {
+		return
 	}
+	m.gap("binding_refused")
+	m.mu.Lock()
+	m.snap.LastError = err.Error()
+	m.mu.Unlock()
+}
+func (m *Manager) bind(t transport, h hint, version uint64) bool {
+	q := m.bindingRequest(h, version)
+	if q == nil {
+		return false
+	}
+	_, err := call(t, q)
+	m.bindingError(err)
 	return true
 }
+
+// Discovery has already frozen at most eight candidates. Every member still
+// receives the controller's ordinary fresh native proof; only the serial
+// topology work is shared. Every route check remains per socket. Queue hints
+// retain the single-bind path.
+func (m *Manager) bindMany(t transport, hints []hint, version uint64) int {
+	if len(hints) > identity.MaxResolveBatch {
+		m.gap("binding_batch_overflow")
+		return 0
+	}
+	rows := []map[string]any{}
+	for _, h := range hints {
+		if q := m.bindingRequest(h, version); q != nil {
+			rows = append(rows, q)
+		}
+	}
+	if len(rows) == 0 {
+		return 0
+	}
+	if _, v, closed := m.current(); closed || v != version {
+		return 0
+	}
+	raw, err := call(t, map[string]any{"op": "bind_many", "bindings": rows})
+	if err == nil {
+		var reply struct {
+			Bindings []struct {
+				Cookie string `json:"cookie"`
+				Error  string `json:"error"`
+			} `json:"bindings"`
+		}
+		if err = json.Unmarshal(raw, &reply); err == nil {
+			if len(reply.Bindings) != len(rows) {
+				err = fmt.Errorf("incomplete binding batch reply")
+			} else {
+				for i, r := range reply.Bindings {
+					if r.Cookie != rows[i]["expected_cookie"] {
+						err = fmt.Errorf("binding batch cookie mismatch")
+						break
+					}
+					if r.Error != "" {
+						m.bindingError(fmt.Errorf("%s", r.Error))
+					}
+				}
+			}
+		}
+	}
+	m.bindingError(err)
+	return len(rows)
+}
+
 func validFlow(f identity.Flow) bool {
 	return (f.Protocol == "tcp" || f.Protocol == "udp") && f.Local.IsValid() && f.Remote.IsValid() && f.Remote.Port() != 0 && !f.Remote.Addr().IsUnspecified()
 }

@@ -1312,12 +1312,12 @@ class Controller:
         return {'reclassified': True}
 
 
-    def bind(self, req):
+    def bind(self, req, *, verified=False):
         zone = req.get('zone', '')
         if zone not in ('', 'local', 'internet'): raise ValueError('invalid zone')
         entry = self.policy_apps.get(req.get('expected_app'), {})
         bits, download_bits, prio = rates(req) if not entry.get('zones') else (entry['rate'], entry['download_rate'], entry['priority'])
-        self.verify()
+        if not verified: self.verify()
         proto, local, remote = req['protocol'], req['local'], req['remote']
         if proto not in ('tcp', 'udp') or len(local) > 80 or len(remote) > 80:
             raise ValueError('unsupported flow')
@@ -1358,6 +1358,44 @@ class Controller:
                                  'cookie': cookie, 'netns': s['netns'], 'bound_at': time.time(), 'descriptor': descriptor}
         self.apps[app]['idle_since'] = time.monotonic()
         return {'app': app, 'cookie': cookie, 'scope': 'socket-binding', 'status': 'Active'}
+
+    def bind_many(self, req):
+        rows = req.get('bindings')
+        if not isinstance(rows, list) or not 1 <= len(rows) <= 8:
+            raise ValueError('binding batch must contain 1..8 flows')
+        if any(not isinstance(r, dict) or not r.get('expected_cookie') or not r.get('expected_app') for r in rows):
+            raise ValueError('binding batch requires exact expected identities')
+        if len({r['expected_cookie'] for r in rows}) != len(rows):
+            raise ValueError('duplicate binding cookie')
+        # One fresh topology bracket for this serial, bounded command. The
+        # ordinary proof and mutation guards remain intact for every member.
+        self.verify()
+        results = []; published = []
+        try:
+            for row in rows:
+                if time.monotonic() - self.last_tick >= 1:
+                    self.tick(retire_idle=False)
+                try:
+                    result = self.bind(row, verified=True)
+                    published.append(row['expected_cookie'])
+                except (ValueError, KeyError) as exc:
+                    result = {'cookie': row['expected_cookie'], 'error': str(exc)}
+                results.append(result)
+            self.verify()
+        except Exception as exc:
+            # No coverage may survive a failed closing topology bookend.
+            # Attempt every withdrawal even if one map operation fails, then
+            # enter the existing fatal fallback rather than ACK a partial batch.
+            failures = []
+            for cookie in published:
+                try:
+                    self.k('del', cookie)
+                    self.bindings.pop(cookie, None)
+                except Exception as withdrawal:
+                    failures.append(str(withdrawal))
+            raise RuntimeError('binding batch topology failed: ' + str(exc) +
+                               ('; withdrawal failed: ' + '; '.join(failures) if failures else '')) from exc
+        return {'status': 'Partial', 'bindings': results}
 
     def remove(self, app):
         if app not in self.apps:
@@ -1595,6 +1633,8 @@ def main():
                         req = json.loads(line); op = req['op']
                         if op == 'bind':
                             result = c.bind(req)
+                        elif op == 'bind_many':
+                            result = c.bind_many(req)
                         elif op == 'rezone':
                             result = c.rezone(req)
                         elif op == 'cap':

@@ -511,6 +511,65 @@ class StatusObservationTests(unittest.TestCase):
         r = m1.Controller.status(c)
         self.assertGreaterEqual(r['verified_age_ms'], 300, r)
 
+class BindingBatchTests(unittest.TestCase):
+    def fixture(self):
+        c=object.__new__(m1.Controller);c.bindings={};events=[];c.last_tick=time.monotonic();c.tick=lambda retire_idle=False:None
+        c.verify=lambda:events.append('verify')
+        def bind(row,**kw):
+            events.append(('bind',row['expected_cookie'],kw['verified'],kw.get('routes_seen')))
+            if row.get('refuse'):raise ValueError('changed owner')
+            c.bindings[row['expected_cookie']]={'app':row['expected_app']}
+            return {'cookie':row['expected_cookie'],'app':row['expected_app']}
+        c.bind=bind;c.k=lambda *args:events.append(args)
+        return c,events
+    def rows(self):return [{'expected_cookie':'one','expected_app':'0:alpha'},{'expected_cookie':'two','expected_app':'0:beta'}]
+    def test_brackets_and_isolates_refused_member(self):
+        c,events=self.fixture();rows=self.rows();rows[0]['refuse']=True
+        result=c.bind_many({'bindings':rows})
+        self.assertEqual(events[0],'verify');self.assertEqual(events[-1],'verify')
+        self.assertEqual(events[1][2:],events[2][2:])
+        self.assertEqual(result['bindings'][0]['error'],'changed owner')
+        self.assertEqual(result['bindings'][1]['cookie'],'two')
+        self.assertEqual(set(c.bindings),{'two'})
+    def test_closing_failure_removes_all_batch_publications(self):
+        c,events=self.fixture();n=[0]
+        def verify():
+            n[0]+=1
+            if n[0]==2:raise RuntimeError('foreign topology')
+        c.verify=verify
+        with self.assertRaisesRegex(RuntimeError,'foreign topology'):c.bind_many({'bindings':self.rows()})
+        self.assertEqual(c.bindings,{})
+        self.assertEqual(events[-2:],[('del','one'),('del','two')])
+    def test_precheck_failure_publishes_nothing(self):
+        c,events=self.fixture()
+        def refuse():raise RuntimeError('foreign topology')
+        c.verify=refuse
+        with self.assertRaises(RuntimeError):c.bind_many({'bindings':self.rows()})
+        self.assertEqual(events,[])
+    def test_long_batch_checkpoints_existing_bindings_without_retirement(self):
+        from unittest.mock import patch
+        c,events=self.fixture();clock=[0.0];c.last_tick=0;renewals=[]
+        c.bindings['existing']={'app':'0:unrelated'}
+        original_bind=c.bind
+        def bind(row,**kw):
+            clock[0]+=2.5
+            return original_bind(row,**kw)
+        def tick(retire_idle=True):
+            self.assertFalse(retire_idle)
+            self.assertIn('existing',c.bindings)
+            renewals.append(clock[0]);c.last_tick=clock[0]
+        c.bind=bind;c.tick=tick
+        rows=[{'expected_cookie':str(i),'expected_app':'0:alpha'} for i in range(8)]
+        with patch.object(m1.time,'monotonic',side_effect=lambda:clock[0]):c.bind_many({'bindings':rows})
+        self.assertEqual(renewals,[2.5,5,7.5,10,12.5,15,17.5])
+        self.assertIn('existing',c.bindings)
+
+    def test_batch_bounds_and_duplicate_identity(self):
+        c,events=self.fixture()
+        for rows in ([],self.rows()*5,[self.rows()[0]]*2,[{}]):
+            with self.assertRaises(ValueError):c.bind_many({'bindings':rows})
+        self.assertEqual(events,[])
+
 class CompatibilityTests(unittest.TestCase):
     def topology(self):
         return {'qdiscs': [{'kind':'fq_codel','handle':'0:','root':True,'options':
@@ -891,3 +950,19 @@ class TrafficPriorityTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class BindingRouteFreshnessTests(unittest.TestCase):
+    def test_each_member_checks_current_route_even_for_the_same_ip_pair(self):
+        c=object.__new__(m1.Controller);init_policy(c);c.bindings={};c.base=Path('/unused');c.ns='net:[1]';c.dev='owned0';c.last_tick=time.monotonic();c.verify=lambda:None;c.exists=lambda d:True;c.class_ids=lambda app,zone:(1,0);c.k=lambda *a:None
+        app='0:alpha';c.apps={app:{'rate':2000000,'download_rate':0,'priority':'normal'}};routes=[];proofs=[]
+        def call(*args):
+            if args[0]=='ip':
+                routes.append(args);return json.dumps([{'dev':'owned0' if len(routes)==1 else 'foreign0'}])
+            proofs.append(args)
+            return json.dumps({'application':{'key':'alpha'},'owners':[{'uid':0}], 'sockets':[{'cookie':'0000000000000001','netns':'net:[1]','family':2,'protocol':'tcp','local':'10.0.0.1:1','remote':'10.0.0.2:2','inode':1,'uid':0}]})
+        c.call=call
+        rows=[dict(protocol='tcp',local='10.0.0.1:'+str(n),remote='10.0.0.2:2',rate=2000000,expected_app=app,expected_cookie=f'{n:016x}') for n in (1,2)]
+        reply=c.bind_many({'bindings':rows})
+        self.assertEqual(len(routes),2);self.assertEqual(len(proofs),1)
+        self.assertEqual(reply['bindings'][0]['cookie'],'0000000000000001')
+        self.assertIn('selected interface',reply['bindings'][1]['error'])

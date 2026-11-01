@@ -79,3 +79,25 @@ Startup queue-to-fast-path handoff
   Time-to-grant61.7..628ms; max startup receiver delay111.608ms. Original and
   superseded diagnostic runs remain intact. These startup numbers are separate
   from established-traffic results and do not waive original load-test findings.
+
+Bounded shaping discovery binding batch
+- The measured re-add delay is serialized work, not an authorization timer:
+  per-socket topology verification and fresh native proof, plus lazy creation of
+  each application's direction classes and its verified mutations.
+- Discovery submits at most eight exact candidates to bind_many. One opening
+  and closing topology verification bracket the command; every member retains
+  its fresh route check, native owner proof, cookie/application checks, exact
+  socket existence check and guarded class mutation. Queue hints remain single
+  binds. Per-member identity refusal does not transfer permission or settings.
+- Closing verification failure withdraws every map binding published by the
+  batch and takes the existing fail-closed shaping fallback. Maintenance runs
+  between members when the one-second checkpoint is due, without idle retirement,
+  to preserve existing five-second SHAPING leases. Firewall grants have no lease.
+- Foreign topology changes that are reverted within the observation bracket
+  remain an ABA limitation; the bracket is wider than a single-bind observation.
+- Initial controlled A/B/A/B measured edit-to-public-coverage14.54/15.82 seconds
+  vs11.53/10.85. These first candidates also shared routes; that shortcut was
+  removed after review because topology verification does not verify routes.
+  Final per-socket-route measurements are recorded separately, not inferred.
+- Native proof, lazy class creation and mutation cost remain. An acknowledgement
+  means configuration accepted, never complete socket coverage.
