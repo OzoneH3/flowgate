@@ -103,14 +103,14 @@ test('download writes require capability and keep upload policy and rate intact'
 });
 
 test('download coverage excludes upload-only bindings and expired leases',()=>{
- const s=snap({configured_caps:[{...cap,download_bits_per_second:16000000}],kernel:{bindings:[{app:'1000:native-alpha',covered:true,download:true},{app:'1000:native-alpha',covered:true,download:false},{app:'1000:native-alpha',covered:false,download:true},{app:'1001:other',covered:true,download:true}]}});
+ const s=snap({configured_caps:[{...cap,download_bits_per_second:16000000}],kernel:{bindings:[{app:'1000:native-alpha',covered:true,download:true,upload_class:true,download_class:true},{app:'1000:native-alpha',covered:true,download:false,upload_class:true,download_class:false},{app:'1000:native-alpha',covered:false,download:true},{app:'1001:other',covered:true,download:true,upload_class:true,download_class:true}]}});
  assert.deepEqual(limitCoverage(s,cap,'download',false),{requested:3,confirmed:1});
  assert.deepEqual(limitCoverage(s,cap,'upload',false),{requested:3,confirmed:2});
  assert.deepEqual(limitCoverage(s,cap,'download',true),{requested:3,confirmed:0});
 });
 
 test('coverage is zero for an unconfigured direction even when the other direction is bound',()=>{
- const kernel={bindings:[{app:'1000:native-alpha',covered:true,download:true}]};
+ const kernel={bindings:[{app:'1000:native-alpha',covered:true,download:true,upload_class:true,download_class:true}]};
  const down=snap({configured_caps:[{...cap,bits_per_second:0,download_bits_per_second:16000000}],kernel});
  assert.deepEqual(limitCoverage(down,cap,'upload',false),{requested:0,confirmed:0});
  assert.deepEqual(limitCoverage(down,cap,'download',false),{requested:1,confirmed:1});
@@ -183,7 +183,7 @@ test('zone edits preserve combined ceiling, other zone, opposite direction and e
 });
 test('zone coverage excludes other and unknown classifier assignments',()=>{
  const target={...cap,scope:'internet'};
- const s=snap({configured_caps:[target],kernel:{bindings:[{app:'1000:native-alpha',zone:'internet',covered:true,download:true},{app:'1000:native-alpha',zone:'local',covered:true,download:true},{app:'1000:native-alpha',zone:'',covered:true,download:true}]}});
+ const s=snap({configured_caps:[target],kernel:{bindings:[{app:'1000:native-alpha',zone:'internet',covered:true,download:true,upload_class:true,download_class:true},{app:'1000:native-alpha',zone:'local',covered:true,download:true,upload_class:true,download_class:true},{app:'1000:native-alpha',zone:'',covered:true,download:true,upload_class:true,download_class:true}]}});
  assert.deepEqual(limitCoverage(s,target,'upload',false),{requested:1,confirmed:1});
  assert.deepEqual(limitCoverage({...s,configured_caps:[cap]},cap,'upload',false),{requested:3,confirmed:3});
  assert.deepEqual(limitCoverage(s,target,'upload',true),{requested:1,confirmed:0});
@@ -243,4 +243,11 @@ test('unavailable shaping explains runtime scope and host journal without creati
  const native={kind:'application',process:{uid:1000,application:{kind:'native',key:'synthetic-native',revision:'r'}}};
  assert.equal(shapingUnavailableReason(native,state,{supported:true,writable:true,message:'ready'},'upload'),undefined);
  assert.match(shapingUnavailableReason(native,state,view,'priority'),/Host shaping unavailable/);
+});
+
+test('direction coverage requires the actual class, not another direction or an acknowledged configuration',()=>{
+ const s=snap({configured_caps:[{...cap,download_bits_per_second:16000000}],kernel:{bindings:[{app:'1000:native-alpha',covered:true,download:true,upload_class:false,download_class:true}]}});
+ assert.deepEqual(limitCoverage(s,cap,'upload',false),{requested:1,confirmed:0});
+ assert.deepEqual(limitCoverage(s,cap,'download',false),{requested:1,confirmed:1});
+ assert.deepEqual(limitCoverage({...s,kernel:{bindings:[]}},cap,'upload',false),{requested:0,confirmed:0});
 });

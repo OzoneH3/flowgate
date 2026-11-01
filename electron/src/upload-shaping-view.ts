@@ -27,7 +27,8 @@ function paintAvailability(b:HTMLButtonElement) {
 const text=<K extends keyof HTMLElementTagNameMap>(tag:K,value:string)=>{const e=document.createElement(tag);e.textContent=value;return e;};
 function coverage(t:UploadTarget, direction:LimitDirection='upload') {
   const c=limitCoverage(view.snapshot,t,direction,coverageExpired());
-  return `${c.confirmed} confirmed / ${c.requested} requested socket bindings. Coverage is partial; not an application-wide guarantee.${direction==='download'?' Established TCP only; UDP, listeners, fragments and IPv6 extension headers are uncovered.':''}`;
+  const reason=view.snapshot?.status==='Applying'?'Configuration pending.':coverageExpired()?'Coverage observation expired; awaiting fresh verification.':c.confirmed<c.requested||!c.requested?'Pending socket discovery, fresh ownership proof and class binding; configuration acknowledgement does not confirm coverage.':'Only these observed sockets are confirmed.';
+  return `${c.confirmed} confirmed / ${c.requested} requested socket bindings. ${reason} Coverage is partial; not an application-wide guarantee.${direction==='download'?' Established TCP only; UDP, listeners, fragments and IPv6 extension headers are uncovered.':''}`;
 }
 function budgetText() {
   const s=view.snapshot, f=(n?:number)=>n?`${n/1000000} Mbit/s`:'none (priority inactive)';

@@ -127,7 +127,7 @@ export function limitCoverage(s:UploadSnapshot | undefined, t:UploadTarget, dire
   const cap=s?.configured_caps.find(c=>sameTarget(c,t));
   if(!capRate(cap,direction))return {requested:0,confirmed:0};
   const rows=s?.kernel?.bindings?.filter(b=>b.app===`${t.uid}:${t.application}` && (scopeOf(t)==='all' || b.zone===scopeOf(t)))||[];
-  return {requested:rows.length,confirmed:expired?0:rows.filter(b=>b.covered===true && (direction!=='download' || b.download===true)).length};
+  return {requested:rows.length,confirmed:expired?0:rows.filter(b=>b.covered===true && (direction==='upload'?b.upload_class===true:b.download_class===true && b.download===true)).length};
 }
 export function uploadSummary(v: UploadView, t?: UploadTarget, direction: LimitDirection = 'upload'): string {
   if (!v.supported || !v.snapshot || (direction==='download' && !v.downloadSupported)) return 'Unsupported';

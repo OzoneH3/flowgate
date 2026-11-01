@@ -101,3 +101,14 @@ Bounded shaping discovery binding batch
   Final per-socket-route measurements are recorded separately, not inferred.
 - Native proof, lazy class creation and mutation cost remain. An acknowledgement
   means configuration accepted, never complete socket coverage.
+
+Direction-specific coverage display (separate GUI correction)
+- A binding is confirmed only when it is covered AND the requested direction's
+  class exists; download also requires the supported TCP download binding.
+  A download-only class cannot confirm upload coverage. Missing/stale evidence
+  remains unconfirmed. Tooltips explain pending discovery/proof/class binding
+  and explicitly distinguish acknowledgement from coverage.
+-437 Electron unit tests passed. Sandboxed native Electron with a synthetic API
+  passed six direction/refresh/no-write checks (run-mJJSYG); D1 inheritance
+  repeated10/10 on the same dist (run-VjYvDe). These are presentation evidence,
+  not receiver or shaping proof. The separate Not running group is unchanged.
