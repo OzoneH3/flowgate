@@ -95,6 +95,11 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 		return err
 	}
 	defer nf.Close()
+	var handoff *daemon.SocketQueueHandoff
+	if !labMark {
+		handoff = e.StartSocketQueueHandoff(func() (uint32, bool) { return queueSequence(number) })
+		defer handoff.Close()
+	}
 	health := e.QueueHealth.Start(number, direction)
 	defer health.End()
 	retained := &Retainer{diagnostic: health.Add}
@@ -155,6 +160,7 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 		} else {
 			diagnostics.Count(diagnostics.VerdictDrop, 1)
 		}
+		handoff.Verdicted(id, err == nil)
 		return allow, err
 	}
 	verdictPacket := func(id uint32, allow bool) error {
@@ -274,6 +280,7 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 				if packetDirection == "outgoing" && a.OutDev != nil {
 					f = identity.WithQueueOutputInterface(f, *a.OutDev)
 				}
+				handoff.Received(*a.PacketID, f)
 				if selfConnect(f) {
 					var raw []byte
 					if a.Ct != nil {
@@ -301,11 +308,13 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 					health.Add(queuehealth.AttributionCapacity)
 				}
 			} else {
+				handoff.Received(*a.PacketID, identity.Flow{})
 				health.Add(queuehealth.ParseRejected)
 			}
 		} else if ctx.Err() != nil {
 			health.Add(queuehealth.Shutdown)
 		} else {
+			handoff.Received(*a.PacketID, identity.Flow{})
 			health.Add(queuehealth.PayloadMissing)
 		}
 		if err := verdictPacket(*a.PacketID, false); err != nil {

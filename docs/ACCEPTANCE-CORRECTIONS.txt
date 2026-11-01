@@ -58,3 +58,24 @@ Registered UDP usage conservation (separate from packet delivery)
   unrelated misses; the 24000-byte close tail is conserved without stale-owner
   assignment; incomplete observation conserves 300000 bytes as unattributed.
   These tests do not establish delivery from accounting counters.
+
+Startup queue-to-fast-path handoff
+- Causal baseline trace confirmed in all six new flows: a never-queued sequence
+  reached the receiver before a lower queued sequence's Allow verdict completed.
+  The grant map was published before the queued initial batch drained.
+- A production grant now waits for all daemon-known packets of that exact flow
+  to finish their kernel verdict writes, and for received queue-ID high-water to
+  equal the kernel queue's current id_sequence immediately before publication.
+  It retains the original fresh-proof ticket and re-evaluates current policy;
+  policy invalidation, Deny and temporary expiry cannot revive an old decision.
+- No timer, periodic authorization expiry, unrelated-flow drain, BPF change or
+  steady-state holding was added. A failed/missing fence delays new acceleration;
+  ordinary protection continues. Registry/write failures are explicit diagnostics.
+- Residual: a packet entering the queue between the sequence read and map write
+  is not covered by that fence. This change closes the observed overtaking window
+  and is not a general transport ordering guarantee.
+- Candidate trace: 18 flows at two pacings, each125/125, zero reorder/overtakes;
+  untruncated3955 events. Established3750/3750, zero reorder, max5.794ms.
+  Time-to-grant61.7..628ms; max startup receiver delay111.608ms. Original and
+  superseded diagnostic runs remain intact. These startup numbers are separate
+  from established-traffic results and do not waive original load-test findings.
