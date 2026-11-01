@@ -160,6 +160,7 @@ func (c *ActivityCollector) Collect() ActivitySnapshot {
 		}
 		c.measure(&out, out.Started)
 		if out.UDP != nil {
+			out.UDP.AccountingRows = out.UDP.Rows
 			out.UDP.Rows = nil
 		} // expose health, not a duplicate cookie map
 		out.Collected = time.Now()

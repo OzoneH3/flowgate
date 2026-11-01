@@ -89,6 +89,13 @@ type baseline struct {
 // until restart, explicitly reporting the loss of coverage. Memory is bounded by
 // fixed row counts and bounded metadata; baselines retain hashes, not processes.
 type Ledger struct {
+	udpRawPrevious                    map[string]baseline
+	udpRawGeneration, udpRawNamespace string
+	udpRawSample                      int64
+	udpRawMissed                      uint64
+	udpRawTail                        bool
+	udpRawFinalsLost                  uint64
+
 	mu               sync.Mutex
 	epoch            string
 	started, sampled time.Time
@@ -221,11 +228,20 @@ func (l *Ledger) Observe(s identity.ActivitySnapshot) {
 	if s.UDP != nil && s.UDP.State == "active" && s.UDP.Generation != "" && len(s.UDP.Generation) <= 256 && s.UDP.SampleNS > 0 && !s.UDP.Collected.IsZero() && s.Collected.Sub(s.UDP.Collected) >= 0 && s.Collected.Sub(s.UDP.Collected) < 4*time.Second {
 		l.sources[1] = Source{UDP, "active", "Successful UDP API return bytes; not wire bytes or delivery"}
 	}
+	rawUDP := s.UDP != nil && s.UDP.AccountingRows != nil
+	rawActive := rawUDP && l.sources[1].State == "active"
+	if rawUDP {
+		l.observeRawUDP(s, s.Complete && s.Error == "" && !discontinuity && !invalidTime)
+	}
 	if discontinuity || !s.Complete || s.Error != "" || invalidTime {
 		l.gap()
 		clear(l.previous)
 		if !s.Complete || s.Error != "" || invalidTime {
 			for i := range l.sources {
+				if i == 1 && rawActive {
+					l.sources[i].Reason = "Registered UDP payload conserved; incomplete ownership goes to unattributed"
+					continue
+				}
 				l.sources[i].State = "unavailable"
 				l.sources[i].Reason = "Collection incomplete or timestamp invalid; counters rebaseline"
 			}
@@ -240,7 +256,7 @@ func (l *Ledger) Observe(s identity.ActivitySnapshot) {
 		l.gap()
 		return
 	}
-	if s.UDP != nil {
+	if s.UDP != nil && !rawUDP {
 		if l.udpGeneration == s.UDP.Generation && l.udpMissed != s.UDP.Missed {
 			l.gap()
 			// Misses concern unregistered cookies, not counters of already
@@ -262,6 +278,9 @@ func (l *Ledger) Observe(s identity.ActivitySnapshot) {
 				continue
 			}
 		case UDP:
+			if rawUDP {
+				continue
+			} // source counters already reduced independently
 			if r.Socket.Protocol != "udp" || l.sources[1].State != "active" || s.UDP.NetNS != r.Socket.NetNS {
 				continue
 			}

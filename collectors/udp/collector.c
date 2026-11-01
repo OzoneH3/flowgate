@@ -112,15 +112,25 @@ int main(int argc, char **argv) {
     }
     if (stopped)
       break;
+    printf("{\"rows\":[");
+    size_t printed = 0;
+    // A closed cookie's last successful-return counters must be exported before
+    // deletion. It has no fresh holder evidence: the consumer keeps it unassigned.
     for (size_t i = 0; i < count; i++) {
       int keep = 0;
       for (size_t j = 0; j < n; j++)
-        if (active[i] == wanted[j])
-          keep = 1;
-      if (!keep)
-        bpf_map_delete_elem(fd, &active[i]);
+        if (active[i] == wanted[j]) keep = 1;
+      if (!keep) {
+        struct counter c = {0};
+        if (bpf_map_lookup_and_delete_elem(fd, &active[i], &c)) {
+          fprintf(stderr, "final counter extraction failed\n"); stopped = 1; break;
+        }
+        printf("%s{\"cookie\":\"%016" PRIx64 "\",\"uploaded\":%" PRIu64
+               ",\"downloaded\":%" PRIu64 ",\"retired\":true}",
+               printed++ ? "," : "", active[i], c.up, c.down);
+      }
     }
-    printf("{\"rows\":[");
+    if (stopped) break;
     for (size_t i = 0; i < n; i++) {
       struct counter c = {0};
       int existed = bpf_map_lookup_elem(fd, &wanted[i], &c) == 0;
@@ -131,7 +141,7 @@ int main(int argc, char **argv) {
       }
       printf("%s{\"cookie\":\"%016" PRIx64 "\",\"uploaded\":%" PRIu64
              ",\"downloaded\":%" PRIu64 ",\"new\":%s}",
-             i ? "," : "", wanted[i], c.up, c.down, existed ? "false" : "true");
+             printed++ ? "," : "", wanted[i], c.up, c.down, existed ? "false" : "true");
     }
     uint32_t z = 0;
     uint64_t lost = 0;

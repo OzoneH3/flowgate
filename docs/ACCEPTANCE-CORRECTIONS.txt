@@ -32,3 +32,29 @@ Before: edge-v3 real collector A +300000 socket bytes, +248400 application bytes
 while B caused 48 misses (51600 lost); isolated unit expected120000 got0.
 After: accounting race tests pass, including stronger registered-byte conservation.
 Receiver recheck is pending; final-close tail is a separate unresolved correction.
+
+Registered UDP usage conservation (separate from packet delivery)
+- Accounting uses successful socket send/receive return payload bytes, excluding
+  errors, headers, recv MSG_PEEK and MSG_ERRQUEUE. TCP retains its existing
+  transport-payload/retransmission semantics. Authorization hit counters are not
+  added to either ledger.
+- A miss for an unregistered socket reports a gap but does not erase other
+  registered cookie cursors. Collection generation/namespace changes still
+  rebaseline with an explicit gap.
+- Registered raw counter deltas survive incomplete ownership snapshots. Only
+  identical verified holder/application/UID/executable/Wine-prefix/runtime
+  identities at both observation bookends can receive application credit;
+  uncertain intervals and close tails are conserved as unattributed usage.
+- The UDP helper atomically reads-and-deletes a retired hash entry (Linux >=5.14)
+  before returning its final value. A bounded 2048-final mailbox is consumed once
+  by the observer ledger feed; API/status reads do not consume it. Overflow is
+  explicit via final_snapshots_lost. Process/helper restarts cannot replay an old
+  lifetime total; discontinuities remain gaps. Unregistered operations are still
+  outside the collector's coverage and remain reported as misses.
+- Baseline receiver evidence: unrelated misses erased 51600 of A's 300000 bytes;
+  the 24000-byte close tail vanished; a deterministic incomplete ownership
+  observation discarded 300000 bytes despite the collector counting them.
+- Corrected real-collector edge tests: A gets exactly 300000 bytes despite rising
+  unrelated misses; the 24000-byte close tail is conserved without stale-owner
+  assignment; incomplete observation conserves 300000 bytes as unattributed.
+  These tests do not establish delivery from accounting counters.

@@ -36,8 +36,20 @@ func generation() string {
 	return hex.EncodeToString(b[:])
 }
 func (s *session) snapshot() identity.UDPSnapshot { s.mu.Lock(); defer s.mu.Unlock(); return s.state }
-func (s *session) failure() error                 { s.mu.Lock(); defer s.mu.Unlock(); return s.err }
-func (s *session) close()                         { s.cancel(); <-s.done }
+
+// Only the daemon observer consumes final snapshots, once; status/API polling
+// remains a pure read and cannot move an accounting cursor.
+func (s *session) accountingSnapshot() identity.UDPSnapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := s.state
+	if time.Since(s.state.Collected) <= 4*time.Second {
+		s.state.Retired = nil
+	}
+	return out
+}
+func (s *session) failure() error { s.mu.Lock(); defer s.mu.Unlock(); return s.err }
+func (s *session) close()         { s.cancel(); <-s.done }
 func startSession(parent context.Context, helper string, uid uint32, machine bool) (*session, error) {
 	ns, err := os.Stat("/proc/self/ns/net")
 	if err != nil {
@@ -181,10 +193,11 @@ func (s *session) sample(input io.Writer, output io.Reader, ready chan<- error) 
 				Uploaded   uint64 `json:"uploaded"`
 				Downloaded uint64 `json:"downloaded"`
 				New        bool   `json:"new"`
+				Retired    bool   `json:"retired"`
 			}
 			Missed uint64 `json:"missed_operations"`
 		}
-		if err = json.Unmarshal(scan.Bytes(), &raw); err != nil || len(raw.Rows) > 2048 {
+		if err = json.Unmarshal(scan.Bytes(), &raw); err != nil || len(raw.Rows) > 4096 {
 			return fmt.Errorf("invalid/oversized UDP helper snapshot")
 		}
 		now := time.Now()
@@ -193,6 +206,7 @@ func (s *session) sample(input io.Writer, output io.Reader, ready chan<- error) 
 		state.SampleNS = time.Since(start).Nanoseconds()
 		state.Missed = raw.Missed
 		state.Rows = map[string]identity.UDPCount{}
+		finals := map[string]identity.UDPCount{}
 		state.Reason = "UDP API-reported socket payload bytes; socket totals across all peers; not delivery evidence"
 		if state.Missed > 0 {
 			state.Reason += "; partial coverage: unregistered-cookie operations missed"
@@ -205,6 +219,16 @@ func (s *session) sample(input io.Writer, output io.Reader, ready chan<- error) 
 			var b [8]byte
 			binary.NativeEndian.PutUint64(b[:], v)
 			key := hex.EncodeToString(b[:])
+			if r.Retired {
+				if kept[key] || since[key].IsZero() {
+					return fmt.Errorf("unregistered final helper cookie")
+				}
+				if _, ok := finals[key]; ok {
+					return fmt.Errorf("duplicate final helper cookie")
+				}
+				finals[key] = identity.UDPCount{Uploaded: r.Uploaded, Downloaded: r.Downloaded, Since: since[key]}
+				continue
+			}
 			if !kept[key] {
 				return fmt.Errorf("unregistered helper cookie")
 			}
@@ -224,9 +248,7 @@ func (s *session) sample(input io.Writer, output io.Reader, ready chan<- error) 
 				delete(since, key)
 			}
 		}
-		s.mu.Lock()
-		s.state = state
-		s.mu.Unlock()
+		s.publishSnapshot(state, finals)
 		select {
 		case <-s.ctx.Done():
 			return s.ctx.Err()
@@ -234,4 +256,27 @@ func (s *session) sample(input io.Writer, output io.Reader, ready chan<- error) 
 		}
 	}
 	return s.ctx.Err()
+}
+
+func (s *session) publishSnapshot(state identity.UDPSnapshot, finals map[string]identity.UDPCount) {
+	s.mu.Lock()
+	// Merge only under the publication mutex: a concurrent consume must not
+	// resurrect final values copied at the beginning of this sampling pass.
+	state.Retired = make(map[string]identity.UDPCount, len(s.state.Retired)+len(finals))
+	for key, value := range s.state.Retired {
+		state.Retired[key] = value
+	}
+	state.FinalsLost = s.state.FinalsLost
+	for key, value := range finals {
+		if len(state.Retired) >= 2048 {
+			state.FinalsLost++
+			continue
+		}
+		state.Retired[key] = value
+	}
+	if state.FinalsLost > 0 {
+		state.Reason += "; partial coverage: final counter snapshot capacity exceeded"
+	}
+	s.state = state
+	s.mu.Unlock()
 }

@@ -24,6 +24,7 @@ type Status struct {
 	NetNS      string    `json:"netns"`
 	Scope      string    `json:"scope"`
 	Partial    bool      `json:"partial"`
+	FinalsLost uint64    `json:"final_snapshots_lost,omitempty"`
 	Missed     uint64    `json:"missed_operations"`
 	Collected  time.Time `json:"collected,omitempty"`
 }
@@ -98,7 +99,8 @@ func (m *Manager) Status() Status {
 		s := m.run.snapshot()
 		out.Collected = s.Collected
 		out.Missed = s.Missed
-		out.Partial = s.Missed > 0
+		out.Partial = s.Missed > 0 || s.FinalsLost > 0
+		out.FinalsLost = s.FinalsLost
 		out.Reason = s.Reason
 		if time.Since(s.Collected) > 4*time.Second {
 			out.Partial = true
@@ -247,11 +249,20 @@ func (m *Manager) Stop(expected ...string) (Status, error) {
 		return m.Status(), fmt.Errorf("collector stop pending; no replacement started")
 	}
 }
-func (m *Manager) Snapshot() identity.UDPSnapshot {
+func (m *Manager) Snapshot() identity.UDPSnapshot { return m.snapshot(false) }
+
+// AccountingSnapshot is reserved for the single observer, not API reads.
+func (m *Manager) AccountingSnapshot() identity.UDPSnapshot { return m.snapshot(true) }
+func (m *Manager) snapshot(consume bool) identity.UDPSnapshot {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.status.State == "active" && m.run != nil {
-		s := m.run.snapshot()
+		var s identity.UDPSnapshot
+		if consume {
+			s = m.run.accountingSnapshot()
+		} else {
+			s = m.run.snapshot()
+		}
 		if time.Since(s.Collected) <= 4*time.Second {
 			s.Generation = m.status.Generation
 			return s

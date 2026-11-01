@@ -183,7 +183,7 @@ func serveCommand(args []string) error {
 	defer history.Close()
 	observer.Observed = e.ObservedUsage.Observe
 	observer.Zones = zones
-	observer.UDP = traffic.Snapshot
+	observer.UDP = traffic.AccountingSnapshot
 	e.Activity = observer.Snapshot
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()

@@ -9,6 +9,11 @@ type UDPCount struct {
 	Since      time.Time `json:"since"`
 }
 type UDPSnapshot struct {
+	// Private observation feed. Never serialized or projected to an API client.
+	AccountingRows map[string]UDPCount `json:"-"`
+	Retired        map[string]UDPCount `json:"-"`
+	FinalsLost     uint64              `json:"final_snapshots_lost,omitempty"`
+
 	Machine    bool                `json:"machine_scope,omitempty"`
 	SampleNS   int64               `json:"sample_ns"`
 	Version    int                 `json:"version"`
