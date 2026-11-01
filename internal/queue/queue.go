@@ -14,6 +14,7 @@ import (
 	"github.com/mdlayher/netlink"
 	"log"
 	"net/netip"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -131,13 +132,15 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 			health.Add(queuehealth.Shutdown)
 			allow = false
 		}
-		if allow && labMark {
-			err = nf.SetVerdictWithOption(id, nfqueue.NfAccept, nfqueue.WithConnMark(Mark))
-		} else if allow {
-			err = nf.SetVerdict(id, nfqueue.NfAccept)
-		} else {
-			err = nf.SetVerdict(id, nfqueue.NfDrop)
+		send := func() error {
+			if allow && labMark {
+				return nf.SetVerdictWithOption(id, nfqueue.NfAccept, nfqueue.WithConnMark(Mark))
+			} else if allow {
+				return nf.SetVerdict(id, nfqueue.NfAccept)
+			}
+			return nf.SetVerdict(id, nfqueue.NfDrop)
 		}
+		err = retryVerdictWrite(send, func() { health.Add(queuehealth.VerdictWriteRetry) })
 		if err != nil {
 			health.Add(queuehealth.VerdictFailure)
 			fail(err)
@@ -345,6 +348,32 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 			}
 		}
 	}
+}
+
+// verdictWriteAttempts bounds how often one identical verdict is re-sent.
+const verdictWriteAttempts = 4
+
+// retryVerdictWrite re-sends the same verdict only when the netlink write
+// deadline expired. The library arms the deadline immediately before the write,
+// so a descheduled goroutine can miss it without the kernel receiving anything;
+// the packet then remains queued and undecided, and repeating the identical
+// verdict changes no permission. Any other error, or a timeout persisting for
+// every bounded attempt, is returned to the existing fail-closed path.
+func retryVerdictWrite(send func() error, retried func()) error {
+	err := send()
+	for attempt := 1; err != nil && verdictWriteTimedOut(err) && attempt < verdictWriteAttempts; attempt++ {
+		retried()
+		err = send()
+	}
+	return err
+}
+
+func verdictWriteTimedOut(err error) bool {
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		return true
+	}
+	var timeout interface{ Timeout() bool }
+	return errors.As(err, &timeout) && timeout.Timeout()
 }
 
 // ENOBUFS reports lost netlink messages, not loss of the queue binding. Continue

@@ -31,10 +31,13 @@ const (
 	ReceiveFailure
 	VerdictFailure
 	SelfTrackingFailure
+	// VerdictWriteRetry counts identical verdicts re-sent after a netlink
+	// write deadline expired before delivery; the packet stayed queued.
+	VerdictWriteRetry
 	causeCount
 )
 
-var names = [...]string{"attribution_capacity_rejections", "census_capacity_rejections", "fairness_displacement_rejections", "deadline_rejections", "shutdown_rejections", "retention_capacity_rejections", "retained_deadline_rejections", "retained_shutdown_rejections", "parse_rejections", "missing_payload_rejections", "netlink_overflow_notifications", "receive_failures", "verdict_failures", "self_tracking_failures"}
+var names = [...]string{"attribution_capacity_rejections", "census_capacity_rejections", "fairness_displacement_rejections", "deadline_rejections", "shutdown_rejections", "retention_capacity_rejections", "retained_deadline_rejections", "retained_shutdown_rejections", "parse_rejections", "missing_payload_rejections", "netlink_overflow_notifications", "receive_failures", "verdict_failures", "self_tracking_failures", "verdict_write_retries"}
 
 type Gauges struct {
 	FirstProofAdmissions       string `json:"first_proof_admissions,omitempty"`
