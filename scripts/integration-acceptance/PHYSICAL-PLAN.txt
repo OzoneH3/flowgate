@@ -1,0 +1,19 @@
+Separate bounded physical confirmation — NOT executed / NOT authorized by this task
+
+Prerequisites: exact candidate and manifest, explicit later user authorization for
+any temporary rules or host profile changes, Unraid endpoint/container permission,
+rollback and preservation checks. No password, system module or host changes by
+this suite. Keep working installed pass-through and all rules/settings intact.
+
+One isolated UDP/TCP echo receiver container on Unraid; exact synthetic native and
+Wine executables, >=2 applications/prefixes with explicit temporary scoped rules.
+Match off/protected/fast arms only after specific live protection approval.
+Baseline, initial burst N2/N6, stable UDP125pps plus TCP bulk, live UL/DL/priority
+edits; sequence-matched echoed RTT and receiver logs. Startup separated by grant
+boundary. ~10ms added unconstrained target, occasional outliers recorded. Hard
+cap checks use receiver payload over settled windows plus kernel charge evidence;
+not ICMP and not API acknowledgements. Record CPU daemon/clients/recorder separately.
+15 minute total traffic cap; bounded rates and bytes, timeouts, no saturating WAN.
+Abort on protection fault, unrelated settings change or receiver overload. Revert
+only exact temporary rules/config, verify freshly recorded rule/settings digests,
+container list and no recorder left. No automated host approval or deployment.

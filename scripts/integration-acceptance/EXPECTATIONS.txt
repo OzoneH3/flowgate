@@ -1,0 +1,90 @@
+FlowGate integration acceptance contract — expected results BEFORE execution
+
+Version: 1. Baseline source 93eaa868ec2a1f98c0b66b27a682e2f332a23746.
+No production changes. Exact released binaries, helpers and controller; tests live
+in a detached worktree. No host daemon/API/settings access, deployment or recovery.
+Only capped TCG guests with internal-only virtual links, no host share, uplink or
+socket bridge. Retained evidence is versioned separately, never relabelled current.
+
+CORE: all 144 matrix.json IDs, not a representative sample.
+Mode fast = protected with socket authorization enabled, require actual eligible
+IPv4 outgoing UDP hits; protected = same firewall without accelerator; off = daemon
+monitoring with no owned firewall table, shaping remains independently requested.
+Off is a protection-off comparison, not automatically a no-shaping comparison.
+Limits none/UL/DL/both mean native application caps of 2 Mbit/s per configured
+direction. Priority low/normal/high applies both directions. Budgets none/UL/DL/both
+are independent 16 Mbit/s ceilings. A normal-only All entry is omitted (normal is
+normalised to absent and a normal-only entry is invalid); assert invalid input in
+validation extension. Low/high with no budget is dormant, not a guarantee.
+All core cells use scope All; All/Local/Internet is a separate scope extension,
+including runtime Unknown (uses All only). Explicit zone Normal overrides inherited
+priority; omitted zone priority inherits. All cap and specific zone cap are
+conjunctive; app cap combines all eligible sockets. No promised priority fairness,
+minimum bandwidth, latency bound or strict ordering. Hard caps always win.
+
+Each cell: same application retains connected IPv4 UDP game stream plus two TCP
+upload sockets and established TCP download while config changes. Wait for applied
+version and verified bindings, record tc/IFB trees and health. Assert fast hits keep
+growing in fast mode, no accelerator in other modes; record published/closed/check
+counters across edits without treating cumulative counts as trial events. Deny
+sender must transmit, receive zero in protected arms; off must receive it. Off
+must have no flowgate_host table. Record application receiver payload, never sender
+write totals as delivery. Settled capped aggregate receiver rate <= cap*1.25 over
+>=3s (token bucket / TCP transient allowance); >0 required, lower throughput is
+reported separately (TCG saturation cannot establish physical capacity). Two
+upload sockets combined, not one cap each. A quiet UDP run is measured separately
+from constrained bulk; deliberate shared-cap queueing is not processing overhead.
+Budgets without contention only prove configured hierarchy/coverage, not priority
+advantage. Contending priority extension swaps priorities and records service,
+without inventing fairness requirements. Capture every cell even after failure;
+missing prerequisites/cells are Not tested, never pass or silently unsupported.
+
+MEASUREMENTS: receiver sequence count, duplicates/reordering/late>10ms, startup
+(first 125 sequences OR explicit grant boundary), established p50/p95/p99/max;
+echo RTT for matching echo workloads, one-way delay labelled as such otherwise.
+No ICMP substitution. CPU daemon and fixture/recording split where available;
+queue pressure/rejection deltas, actual hits, coverage snapshots. Match workload
+and protection-off arm. ~10ms added unconstrained is target, occasional small
+outliers are observations. No automatic redesign or tuning to pass.
+
+CAPABILITY EXTENSIONS (explicit support, not a Cartesian claim):
+- Native TCP IPv4/IPv6 outgoing: ordinary authorization; UL/DL established shaping.
+- Native connected IPv4 UDP outgoing: accelerator eligibility; UL experimental
+  non-GSO only; DL per-app unsupported (aggregate default may apply).
+- IPv6 UDP, incoming traffic and unconnected sockets: ordinary protection;
+  no IPv6/incoming grant. Dual-stack row may describe an IPv4 grant only.
+- Wine/Proton: independent exe/UID/prefix authorization, >=2 synthetic apps and
+  >=2 prefixes with negative transfer checks; shaping per Wine app unsupported.
+- Electron/shared owners: no inherited permission or shaping capability claim.
+- Off arm: no protection claims; reject/new scopes not enabled just for tests.
+
+LIFECYCLE / POLICY / LOAD extensions: explicit Allow, Deny, Ask/Remember ordinary
+Allow repeat behavior, temp expiry, unrelated policy edit continuity, applicable
+revocation, zone reclassification, socket close/replacement/relaunch, cookie reuse,
+slow/inconclusive background observation, controller loss/recovery, socket-map
+errors and cold reboot initialization. Reuse exact valid prior evidence, identify
+version/code equivalence and scope; otherwise Not tested. No short renewal leases
+or randomized auditing. Quiet, bulk, simultaneous N=2/N=6 starts, bursts and
+rebind churn; representative Wine processes/sockets, not idle PIDs only.
+
+GUI: visible isolated browser/Electron fixture using real renderer/CSS. Selection
+and rule inventory stable through refreshes/process-only/socket views; tooltips,
+Info, separate Not running group, disabled shaping explanations, configured vs
+confirmed coverage. Model test is not visible GUI proof; browser is not installed
+Electron. Record distinction. No live GUI changes.
+
+REPORT: Pass / Fail / Unsupported / Not tested per ID with expected, observed,
+provenance and evidence. Publish complete denominator/omissions. Physical Unraid
+plan is separate, requires later authorization; never started by this suite.
+
+Primary local contracts: docs/SEMANTICS.md, TRAFFIC-PRIORITY.txt,
+ZONE-SHAPING.txt, DOWNLOAD-LIMITER.txt, internal/uploadshape and controller.py.
+RESEARCH must review this expectation contract before result assessment.
+
+RESEARCH amendments before execution: off-mode shaping is source-supported but not
+previously documented/validated; record binding wait, roots and coverage, do not
+assume Offer hints outside protection. Both is the protected profile. Combined
+UL cap includes TCP + connected UDP payload, so contention loss under deliberate
+cap is reported, not mistaken for unconstrained loss. Priorities clamp at 2M in
+core; contending extension required for actual borrowing observations. Class
+byte deltas are required to establish accelerated UDP shaping coverage.

@@ -1,0 +1,12 @@
+FROZEN spec v2.1 for candidate 93eaa868ec2a1f98c0b66b27a682e2f332a23746 by fg RESEARCH (a17295f2), 2026-11-01T17:37:27+01:00.
+Supersedes FROZEN.txt (v2). Change: SPEC §7 P1 fixed 1.5 ratio withdrawn; noise-referenced effect + swap response + drift; P2 saturation precondition. Core expectations (expected.py, matrix-v2.json) unchanged.
+
+4d1be8893dee50751b17dbaf3cf12bc8b75a5fb5ed061bfdfdb67173afd7a3f1  SPEC.md
+e874bf7160bf5253ba24bd0e838243fd34b47b9b0a8b1d2b49e116203855c906  expected.py
+e35dc1a99fbd4e689bedae9cf12812b3a35aa11612832358c6d2f63715c07e24  matrix-v2.json
+255422b997f980eb882fd1a19d230d8e1d2c05d0d56abf6570abfff6c53f427c  provenance.md
+84bcb97a3075ea6cd1ad5174e081bd110ef44a38fa51b8c514020cacb72281f0  evidence-map.md
+cf358900454e1696d8a0caca4f61ed635fe8f2843e90045defc6ce193f776446  gui-zone-default.md
+17e6dc34d4ec2abd364da164315dbc08d721956078c8a3acdf9119e7aad3950c  gui-zone-default.mjs
+ee8b242b9ec1999578e67ac1065f25240782fd5c850971569b8e03be52a67c4a  independent-review.md
+59691ad3b84ce9b277672adcaf87cb2fb63cd967799b1d4e20193cee7d0d005d  DEFECTS.md

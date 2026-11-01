@@ -1,0 +1,8 @@
+First execution: unchanged backend/GUI source93eaa868ec2a1f98c0b66b27a682e2f332a23746.
+Expected contract: spec/FROZEN-v2.1.txt, SPEC.md, ERRATA.md.
+Local evidence root: /home/flowgate-user/Apps/flowgate/.workspace/integration-acceptance
+Human report: REPORT.txt; exact144 core: complete-core-v4/core-report.json +.md
+Index: evidence-index.json. Final stage record: SERIES-DONE.json.
+Independent RESEARCH assessment: /home/flowgate-user/Apps/flowgate/.workspace/research-assessment/FINAL-NOTE.md
+Raw superseded attempts remain retained. Never count Inconclusive/Skip/missing as Pass.
+This commit contains tests/specification only, no production or deployment change.
