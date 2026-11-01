@@ -1,0 +1,9 @@
+#!/usr/bin/env python3
+"""Diagnostic observer fault only; source/root must be workspace, never installed."""
+import argparse,pathlib,json,subprocess,os,hashlib
+p=argparse.ArgumentParser();p.add_argument('--source',type=pathlib.Path,required=True);p.add_argument('--output',type=pathlib.Path,required=True);a=p.parse_args();assert '.workspace' in a.source.resolve().parts and '.workspace' in a.output.resolve().parts;assert not a.output.exists();a.output.mkdir()
+f=a.source/'internal/monitor/observer.go';s=f.read_text().replace('"encoding/json"','"encoding/json"\n"os"').replace('func (o *Observer) publish(snapshot identity.ActivitySnapshot) {','func (o *Observer) publish(snapshot identity.ActivitySnapshot) {\n if _,err:=os.Stat("/work/.workspace/m1/force-incomplete");err==nil {snapshot.Complete=false;snapshot.Issues=append(snapshot.Issues,"TEST-ONLY incomplete observation fault")}')
+c=a.output/'observer.go';c.write_text(s);overlay=a.output/'overlay.json';overlay.write_text(json.dumps({'Replace':{str(f):str(c)}}))
+env=dict(os.environ,GOMAXPROCS='2',TMPDIR='/home/flowgate-user/Apps/flowgate/.workspace/t',GOTMPDIR='/home/flowgate-user/Apps/flowgate/.workspace/t',GOCACHE='/home/flowgate-user/Apps/flowgate/.workspace/socket-enforcement-release/source/.workspace/go-cache')
+subprocess.run(['go','build','-overlay',str(overlay),'-tags','socketprototype','-o',str(a.output/'flowgate-incomplete'),'./cmd/flowgate'],cwd=a.source,env=env,check=True)
+(a.output/'provenance.json').write_text(json.dumps({'source':str(a.source),'source_head':subprocess.check_output(['git','rev-parse','HEAD'],cwd=a.source,text=True).strip(),'test_only':True,'observer_source_sha256':hashlib.sha256(f.read_bytes()).hexdigest(),'overlay_sha256':hashlib.sha256(c.read_bytes()).hexdigest(),'backend_sha256':hashlib.sha256((a.output/'flowgate-incomplete').read_bytes()).hexdigest()},indent=2))

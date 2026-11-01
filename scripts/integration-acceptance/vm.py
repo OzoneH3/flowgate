@@ -94,7 +94,7 @@ print('M1_EXPORT_END',flush=True)
 def run(a):
  out=under(a.output,a.workspace);assert not (out/'serial.log').exists(),'never overwrite evidence'
  for n,digest in json.loads((out/'image-hashes.json').read_text()).items():assert sha(out/n)==digest,n
- args=['timeout',str(a.timeout),'qemu-system-x86_64','-accel','tcg,thread=single','-cpu','max','-smp','1','-m','2048','-no-reboot','-nographic','-monitor','none','-nic','none','-kernel',str(out/'vmlinuz'),'-initrd',str(out/'initramfs.gz'),'-append','console=ttyS0 rdinit=/init panic=1 quiet']
+ args=['timeout',str(a.timeout),'qemu-system-x86_64','-accel','tcg,thread=single','-cpu','max','-smp','1','-m',str(a.memory_mib),'-no-reboot','-nographic','-monitor','none','-nic','none','-kernel',str(out/'vmlinuz'),'-initrd',str(out/'initramfs.gz'),'-append','console=ttyS0 rdinit=/init panic=1 quiet']
  (out/'command.json').write_text(json.dumps(args,indent=2))
  with (out/'serial.log').open('wb') as f:r=subprocess.run(args,stdout=f,stderr=subprocess.STDOUT)
  export=False;ev=out/'evidence';ev.mkdir()
@@ -112,7 +112,7 @@ def run(a):
  return 0 if ok else 1
 
 if __name__=='__main__':
- ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('operation',choices=['stage','run']);ap.add_argument('--workspace',type=pathlib.Path,required=True);ap.add_argument('--output',type=pathlib.Path,required=True);ap.add_argument('--cells',default='');ap.add_argument('--case',choices=['core','extensions','reference'],default='core');ap.add_argument('--mode',choices=['fast','protected','off']);ap.add_argument('--release',type=pathlib.Path);ap.add_argument('--helpers',type=pathlib.Path);ap.add_argument('--kernel',type=pathlib.Path);ap.add_argument('--base-initrd',type=pathlib.Path);ap.add_argument('--kernel-release',default='7.3.0-4-cachyos');ap.add_argument('--timeout',type=int,default=1800)
+ ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('operation',choices=['stage','run']);ap.add_argument('--workspace',type=pathlib.Path,required=True);ap.add_argument('--output',type=pathlib.Path,required=True);ap.add_argument('--cells',default='');ap.add_argument('--case',choices=['core','extensions','reference'],default='core');ap.add_argument('--mode',choices=['fast','protected','off']);ap.add_argument('--release',type=pathlib.Path);ap.add_argument('--helpers',type=pathlib.Path);ap.add_argument('--kernel',type=pathlib.Path);ap.add_argument('--base-initrd',type=pathlib.Path);ap.add_argument('--kernel-release',default='7.3.0-4-cachyos');ap.add_argument('--timeout',type=int,default=1800);ap.add_argument('--memory-mib',type=int,choices=[2048,4096],default=2048)
  a=ap.parse_args();assert 1<=a.timeout<=3600
  if a.operation=='stage':
   assert all([a.mode,a.release,a.helpers,a.kernel,a.base_initrd]);assert all(c.isalnum() or c in '-,' for c in a.cells);stage(a)

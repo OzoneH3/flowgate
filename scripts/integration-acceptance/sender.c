@@ -116,7 +116,8 @@ static void opens(int count, int localport) {
 }
 static void sends(const char *tag, int count, int delay) {
   uint64_t begin = ns();
-  int ok = 0, errors = 0;
+  int ok = 0, errors = 0, errno_counts[256] = {0};
+  uint64_t return_bytes=0;
   unsigned char b[1200] = {0};
   snprintf((char *)b, 16, "%.15s", tag);
   for (int i = 0;
@@ -132,8 +133,10 @@ static void sends(const char *tag, int count, int delay) {
                              (void *)&dst, dl);
       if (n <= 0) {
         errors++;
+        if(n<0 && errno>0 && errno<256)errno_counts[errno]++;else errno_counts[0]++;
         break;
       }
+      return_bytes += n;
       off += n;
     } while (stream && off < sizeof(b));
     if (off == sizeof(b))
@@ -143,8 +146,9 @@ static void sends(const char *tag, int count, int delay) {
       nanosleep(&pause, 0);
     }
   }
-  printf("{\"sent\":%d,\"errors\":%d,\"elapsed_ns\":%llu}\n", ok, errors,
+  printf("{\"sent\":%d,\"errors\":%d,\"successful_return_bytes\":%llu,\"elapsed_ns\":%llu,\"errno_counts\":{", ok, errors,(unsigned long long)return_bytes,
          (unsigned long long)(ns() - begin));
+  int printed=0;for(int e=0;e<256;e++){if(!errno_counts[e])continue;printf("%s\"%d\":%d",printed++?",":"",e,errno_counts[e]);}printf("}}\n");
 }
 #ifndef SOL_UDP
 #define SOL_UDP 17
