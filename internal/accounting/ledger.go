@@ -93,6 +93,8 @@ type Ledger struct {
 	udpRawGeneration, udpRawNamespace string
 	udpRawSample                      int64
 	udpRawMissed                      uint64
+	udpRawSkipped                     uint64
+	udpRawSkippedKnown                bool
 	udpRawTail                        bool
 	udpRawFinalsLost                  uint64
 

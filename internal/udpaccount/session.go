@@ -195,7 +195,8 @@ func (s *session) sample(input io.Writer, output io.Reader, ready chan<- error) 
 				New        bool   `json:"new"`
 				Retired    bool   `json:"retired"`
 			}
-			Missed uint64 `json:"missed_operations"`
+			Missed         uint64  `json:"missed_operations"`
+			TracingSkipped *uint64 `json:"tracing_skipped_runs"`
 		}
 		if err = json.Unmarshal(scan.Bytes(), &raw); err != nil || len(raw.Rows) > 4096 {
 			return fmt.Errorf("invalid/oversized UDP helper snapshot")
@@ -205,12 +206,10 @@ func (s *session) sample(input io.Writer, output io.Reader, ready chan<- error) 
 		state.Collected = now
 		state.SampleNS = time.Since(start).Nanoseconds()
 		state.Missed = raw.Missed
+		state.TracingSkipped = raw.TracingSkipped
 		state.Rows = map[string]identity.UDPCount{}
 		finals := map[string]identity.UDPCount{}
-		state.Reason = "UDP API-reported socket payload bytes; socket totals across all peers; not delivery evidence"
-		if state.Missed > 0 {
-			state.Reason += "; partial coverage: unregistered-cookie operations missed"
-		}
+		state.Reason = sampleReason(state)
 		for _, r := range raw.Rows {
 			v, err := strconv.ParseUint(r.Cookie, 16, 64)
 			if err != nil {
@@ -279,4 +278,15 @@ func (s *session) publishSnapshot(state identity.UDPSnapshot, finals map[string]
 	}
 	s.state = state
 	s.mu.Unlock()
+}
+
+func sampleReason(state identity.UDPSnapshot) string {
+	reason := "UDP API-reported socket payload bytes; socket totals across all peers; not delivery evidence"
+	if gap := state.TracingGapReason(); gap != "" {
+		reason += "; " + gap
+	}
+	if state.Missed > 0 {
+		reason += "; partial coverage: unregistered-cookie operations missed"
+	}
+	return reason
 }

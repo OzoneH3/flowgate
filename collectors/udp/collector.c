@@ -24,6 +24,22 @@ static void stop(int sig) {
   (void)sig;
   stopped = 1;
 }
+// Read only these two owned program FDs. Raw tracepoint recursion skips can
+// occur before our UDP filter runs, so their count is NOT UDP-specific and
+// cannot be converted to bytes or attributed to a socket.
+static int tracing_skips(struct udp_bpf *s, uint64_t *total) {
+  int fds[] = {bpf_program__fd(s->progs.fg_udp_sent),
+               bpf_program__fd(s->progs.fg_udp_received)};
+  *total = 0;
+  for (size_t i = 0; i < 2; i++) {
+    struct bpf_prog_info info = {0}; uint32_t length = sizeof(info);
+    if (bpf_obj_get_info_by_fd(fds[i], &info, &length) ||
+        length < offsetof(struct bpf_prog_info, recursion_misses) + sizeof(info.recursion_misses) ||
+        UINT64_MAX - *total < info.recursion_misses) return -1;
+    *total += info.recursion_misses;
+  }
+  return 0;
+}
 // Line protocol is private stdin/stdout to the owning Go collector only.
 // Caller supplies the current bounded inet_diag cookie set; never
 // FD/PID/tuples.
@@ -83,6 +99,8 @@ int main(int argc, char **argv) {
     udp_bpf__destroy(s);
     return 1;
   }
+  uint64_t skip_baseline = 0;
+  int skip_baseline_known = tracing_skips(s, &skip_baseline) == 0;
   signal(SIGTERM, stop);
   signal(SIGINT, stop);
   int fd = bpf_map__fd(s->maps.counters), lossfd = bpf_map__fd(s->maps.misses);
@@ -146,7 +164,17 @@ int main(int argc, char **argv) {
     uint32_t z = 0;
     uint64_t lost = 0;
     bpf_map_lookup_elem(lossfd, &z, &lost);
-    printf("],\"missed_operations\":%" PRIu64 "}\n", lost);
+    uint64_t skipped = 0;
+    int skip_known = tracing_skips(s, &skipped) == 0;
+    if (skip_known && skip_baseline_known && skipped < skip_baseline) {
+      fprintf(stderr, "owned tracing skip counter regressed\n"); stopped = 1; break;
+    }
+    // If the baseline was unavailable, report unknown for this generation.
+    // Byte collection still works; never manufacture a retrospective baseline.
+    printf("],\"missed_operations\":%" PRIu64 ",\"tracing_skipped_runs\":", lost);
+    if (skip_known && skip_baseline_known) printf("%" PRIu64, skipped - skip_baseline);
+    else printf("null");
+    printf("}\n");
     fflush(stdout);
     memcpy(active, wanted, n * sizeof(uint64_t));
     count = n;

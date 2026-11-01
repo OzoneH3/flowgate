@@ -16,17 +16,18 @@ import (
 // Manager belongs to the existing Go daemon. It owns one optional native helper,
 // no second Unix server/Go process, no queue/firewall and no automatic Start.
 type Status struct {
-	State      string    `json:"state"`
-	Available  bool      `json:"available"` // static prerequisite checks only, not load success
-	ReasonCode string    `json:"reason_code"`
-	Reason     string    `json:"reason"`
-	Generation string    `json:"generation,omitempty"`
-	NetNS      string    `json:"netns"`
-	Scope      string    `json:"scope"`
-	Partial    bool      `json:"partial"`
-	FinalsLost uint64    `json:"final_snapshots_lost,omitempty"`
-	Missed     uint64    `json:"missed_operations"`
-	Collected  time.Time `json:"collected,omitempty"`
+	TracingSkipped *uint64   `json:"tracing_skipped_runs,omitempty"`
+	State          string    `json:"state"`
+	Available      bool      `json:"available"` // static prerequisite checks only, not load success
+	ReasonCode     string    `json:"reason_code"`
+	Reason         string    `json:"reason"`
+	Generation     string    `json:"generation,omitempty"`
+	NetNS          string    `json:"netns"`
+	Scope          string    `json:"scope"`
+	Partial        bool      `json:"partial"`
+	FinalsLost     uint64    `json:"final_snapshots_lost,omitempty"`
+	Missed         uint64    `json:"missed_operations"`
+	Collected      time.Time `json:"collected,omitempty"`
 }
 type Manager struct {
 	mu       sync.Mutex
@@ -99,7 +100,8 @@ func (m *Manager) Status() Status {
 		s := m.run.snapshot()
 		out.Collected = s.Collected
 		out.Missed = s.Missed
-		out.Partial = s.Missed > 0 || s.FinalsLost > 0
+		out.TracingSkipped = s.TracingSkipped
+		out.Partial = s.Missed > 0 || s.FinalsLost > 0 || s.TracingGapReason() != ""
 		out.FinalsLost = s.FinalsLost
 		out.Reason = s.Reason
 		if time.Since(s.Collected) > 4*time.Second {

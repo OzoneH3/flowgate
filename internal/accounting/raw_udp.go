@@ -26,6 +26,8 @@ func (l *Ledger) observeRawUDP(s identity.ActivitySnapshot, ownersValid bool) {
 		l.udpRawNamespace = u.NetNS
 		l.udpRawSample = 0
 		l.udpRawMissed = u.Missed
+		l.udpRawSkipped = 0
+		l.udpRawSkippedKnown = false
 	}
 	if l.udpRawPrevious == nil {
 		l.udpRawPrevious = map[string]baseline{}
@@ -35,6 +37,19 @@ func (l *Ledger) observeRawUDP(s identity.ActivitySnapshot, ownersValid bool) {
 		l.udpRawMissed = u.Missed
 	}
 	l.sources[1].Reason = "Registered successful UDP API payload bytes; not delivery; uncertain ownership and post-observation close tails are unattributed"
+	if reason := u.TracingGapReason(); reason != "" {
+		l.sources[1].Reason += "; " + reason
+	}
+	if u.TracingSkipped != nil {
+		if *u.TracingSkipped != l.udpRawSkipped {
+			l.gap()
+		}
+		l.udpRawSkipped = *u.TracingSkipped
+		l.udpRawSkippedKnown = true
+	} else if l.udpRawSample == 0 || l.udpRawSkippedKnown {
+		l.gap()
+		l.udpRawSkippedKnown = false
+	}
 	owners := map[string]baseline{}
 	if ownersValid {
 		for _, r := range s.Rows {

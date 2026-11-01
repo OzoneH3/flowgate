@@ -102,6 +102,10 @@ func (c *ActivityCollector) measure(out *ActivitySnapshot, now time.Time) {
 				t.Definition = "udp-api-reported"
 				t.Source = "BPF sock_send_length/sock_recv_length (socket totals, all peers)"
 				t.Reason = "Successful send return bytes and non-PEEK/non-ERRQUEUE receive return bytes; not wire traffic or remote delivery. MSG_TRUNC can report full datagram; ordinary truncated receive reports copied size. Socket totals across all peers."
+				if reason := out.UDP.TracingGapReason(); reason != "" {
+					t.Partial = true
+					t.Reason += " " + reason
+				}
 				if out.UDP.Missed > 0 {
 					t.Partial = true
 					t.Reason += " Partial: collector missed operations before cookie registration or hit coverage limits"

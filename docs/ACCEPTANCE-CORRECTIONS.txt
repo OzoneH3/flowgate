@@ -112,3 +112,28 @@ Direction-specific coverage display (separate GUI correction)
   passed six direction/refresh/no-write checks (run-mJJSYG); D1 inheritance
   repeated10/10 on the same dist (run-VjYvDe). These are presentation evidence,
   not receiver or shaping proof. The separate Not running group is unchanged.
+
+Tracing coverage limitation (accounting honesty; no byte reconstruction)
+- Native protected IPv4: successful-return300000 bytes, raw collector298800,
+  ledger/history preserve298800; IPv6 exact. Fast and protection-off both passed
+  the12 socket/download/ledger/history checks. No missing/double-counted bytes
+  were introduced by the ledger reducer in these runs.
+- Wine diagnostic v6: every measured application window had500 successful Linux
+  sendmsg returns x256=128000, but raw BPF counters and ledger conserved127744.
+  Its four one-datagram shortfalls are real. Tracing recursion-skip counters rose
+  outside the BPF program, before the UDP filter; they count ALL socket families,
+  so they bound possible missed invocations and cannot identify UDP loss or bytes.
+- Diagnostic v7 verified this counter remains available with kernel BPF runtime
+  statistics OFF (run_cnt stays0, recursion_misses increases). No host sysctl was
+  changed. Exact syscall conservation is NOT established under tracing skips.
+- The helper now samples recursion_misses using only its own two program FDs,
+  relative to their attach-time baseline. A separate tracing_skipped_runs field
+  reports these possible omissions; it never changes missed_operations or adds
+  estimated bytes. Nonzero values mark socket/monitor coverage partial and add
+  an explicit ledger gap. Unknown/older-kernel diagnostics report null/partial,
+  while byte collection continues. Counter regression remains an explicit fault.
+- On busy hosts, other socket-family activity may make UDP coverage read partial
+  even when the measured UDP bytes happened to be exact. This is conservative
+  reporting of existing coverage, not a newly introduced traffic loss.
+- Moving the accounting attachment to a narrower kernel hook is deferred; no
+  speculative BPF/authorization change was added to conceal this limitation.

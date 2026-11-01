@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"flowgate/internal/identity"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
 
 func rawUDP(seq, up uint64) identity.ActivitySnapshot {
 	s := udp(seq, up, "collector")
+	zero := uint64(0)
+	s.UDP.TracingSkipped = &zero
 	s.Rows[0].Socket.NetNS = s.UDP.NetNS
 	s.UDP.AccountingRows = map[string]identity.UDPCount{"cookie": {Uploaded: up, Since: fixtureStart}}
 	return s
@@ -148,5 +151,29 @@ func TestRawUDPWineTwoApplicationsTwoPrefixesNoCrossCredit(t *testing.T) {
 		if e.Uploaded != want {
 			t.Fatal(e)
 		}
+	}
+}
+
+func TestTracingSkipsReportGapWithoutEstimatingBytes(t *testing.T) {
+	l := New()
+	l.Observe(rawUDP(1, 0))
+	before := l.Snapshot(0, true)
+	s := rawUDP(2, 1200)
+	skips := uint64(7)
+	s.UDP.TracingSkipped = &skips
+	l.Observe(s)
+	got := l.Snapshot(0, true)
+	if got.Gaps == before.Gaps || len(got.Entries) != 1 || got.Entries[0].Uploaded != "1200" {
+		t.Fatal(got)
+	}
+	if !strings.Contains(l.sources[1].Reason, "missing bytes are unknown") {
+		t.Fatal(got.Sources)
+	}
+	s = rawUDP(3, 2400)
+	s.UDP.TracingSkipped = &skips
+	l.Observe(s)
+	again := l.Snapshot(0, true)
+	if again.Gaps != got.Gaps || again.Entries[0].Uploaded != "2400" {
+		t.Fatal(again)
 	}
 }
