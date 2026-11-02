@@ -161,7 +161,7 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 		_, err := submitVerdict(id, allow, nil)
 		return err
 	}
-	var overloaded, expired, censusOverflow, displaced, receiveOverflow atomic.Uint64
+	var overloaded, expired, censusOverflow, displaced, receiveOverflow, missingTargets atomic.Uint64
 	// Keep one bounded sample, without packet payload or an inferred owner. A
 	// capacity rejection occurs before attribution and otherwise leaves no way
 	// to distinguish a game's failed admission from unrelated background traffic.
@@ -201,6 +201,9 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 				reason = *r
 			}
 			log.Printf("queue %d: self-connection tracking failures %d: %s", number, n, reason)
+		}
+		if n := missingTargets.Swap(0); n != 0 {
+			log.Printf("queue %d: %d stale verdict target acknowledgements; queued packet already removed (e.g. device down); own binding verified; continuing protection, no delivery inferred", number, n)
 		}
 		if n := receiveOverflow.Swap(0); n != 0 {
 			log.Printf("queue %d: %d netlink receive overflow notifications; packets may have been dropped; continuing protection", number, n)
@@ -313,14 +316,14 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 		}
 		return 0
 	}, func(err error) int {
-		if ctx.Err() == nil {
-			if errors.Is(err, unix.ENOBUFS) {
-				health.Add(queuehealth.NetlinkOverflow)
-			} else {
-				health.Add(queuehealth.ReceiveFailure)
+		return receiveBoundQueueError(ctx, err, &receiveOverflow, fail, func() bool {
+			return queueStillOwned(number, nf.Con.PID())
+		}, func(c queuehealth.Cause) {
+			health.Add(c)
+			if c == queuehealth.VerdictTargetGone {
+				missingTargets.Add(1)
 			}
-		}
-		return receiveError(ctx, err, &receiveOverflow, fail)
+		})
 	})
 	if err != nil {
 		return err

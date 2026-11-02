@@ -1,0 +1,39 @@
+Queue packet removed on device down: narrow error recovery
+
+Live c9 incident: daemon stayed alive; protection consumer failed closed with
+'netlink receive: no such file or directory' immediately after ppp0 went down.
+The daemon PID/generation did not change. User explicitly stopped protection.
+No restart/re-enable is part of this diagnosis/correction preparation.
+
+Real kernel guest reproduction using the exact go-nfqueue/netlink dependencies:
+queue a UDP packet on a dummy device; hold its verdict; set the device down.
+/proc queue length changes1 ->0 while queue number and own portid remain equal.
+The subsequent verdict SEND succeeds; asynchronous receive returns OpError
+receive / raw ENOENT / nonzero sequence. The prior handler calls fail(). The
+queue itself can still receive/deliver an unrelated loopback UDP packet.
+This demonstrates the component mechanism; the live incident did not capture
+its original netlink error payload, so exact packet/request identity is unknown.
+
+Correction: only a raw kernel error ACK (netlink.OpError, receive, direct errno
+ENOENT, nonzero sequence), plus a FRESH exact queue number/portid ownership proof,
+may continue. The proof reads this netns's /proc/net/netfilter/nfnetlink_queue.
+Missing, foreign, duplicate, malformed or inaccessible ownership fails closed.
+Syscall ENOENT, unknown sequence/operation and other errors are not excused.
+The library's public SetVerdict API does not expose its generated send sequence;
+no claim of matching the ACK to a specific sent packet is made. Config requests
+finish synchronously before the callback; steady-state requests are verdicts.
+No cache or periodic scan. Recovery only observes a packet already gone: it
+sends no new Allow, no retry/replay, no exemption or inherited permission.
+
+New queue-health verdict_target_gone counter uses OPERATIONS, not delivered
+packets. The once-per-second diagnostic reports the count and lack of delivery
+proof. The error no longer increments receive_failures if narrowly recovered.
+No interface attribution is invented: the ACK has no retained interface hint.
+Existing successful-write verdict counters mean submission, not receiver delivery.
+
+Tests: owned/missing/foreign/unknown queue proof; raw syscall-vs-kernel errno;
+wrong op/zero sequence/other errno; malformed/duplicate proc data;100 ACK burst;
+ENOBUFS and cancellation unchanged; actual device-down/error ACK plus surviving
+unrelated traffic in a triple-guarded disposable VM. This component test is not
+a full daemon end-to-end VPN test. No public connectivity, no host kernel action.
+Authorization/temporary-expiry/slow-observation/queue regressions remain separate.
