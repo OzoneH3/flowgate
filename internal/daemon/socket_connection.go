@@ -115,7 +115,7 @@ func (e *Engine) runConnectionAuthorization(ctx context.Context, s *socketAuthor
 			now := time.Now()
 			var chosen *socketFlow
 			for _, f := range s.flows {
-				if f.busy || f.deferredGrant != nil || now.Before(f.next) {
+				if f.busy || now.Before(f.next) {
 					continue
 				}
 				if chosen == nil || (chosen.haveKey && !f.haveKey) || (chosen.haveKey == f.haveKey && f.next.Before(chosen.next)) {

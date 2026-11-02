@@ -77,7 +77,6 @@ type TrafficManager interface {
 type Engine struct {
 	queuePolicyEpoch       atomic.Uint64
 	socketAuthorization    *socketAuthorization // guarded by mu
-	socketQueueHandoff     *SocketQueueHandoff
 	zonePublisherInstalled bool
 	QueueHealth            queuehealth.Registry
 	// RuntimeChecks returns a cached read-only capability snapshot, independently of enforcement.

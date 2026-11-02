@@ -1,0 +1,32 @@
+Fast-path recovery: selective startup-deferral revert
+
+b31fe194 has a normal-use regression, not an accepted extreme-load limitation.
+The production grant waits for received queue id == current kernel id_sequence,
+then is retried only after the SAME flow's later verdict. Continuous unrelated
+UDP can keep equality false; the scheduler skips deferred flows forever.
+A deterministic reproduction on exact b31 fails the progress invariant after 98
+unrelated receive/verdict completions and no new target packet.
+
+A fixed checkpoint alone is insufficient: a SAME-flow packet may cross the
+old gate and enter the queue after the checkpoint and before grant publication.
+The b31 check also has this fence-read/publication race (reproduced). Closing it
+requires coordinating kernel arrival with publication, beyond a narrow userspace
+fence adjustment. Reliable pass-through takes priority over startup ordering.
+
+This candidate therefore reverts the entire startup deferral mechanism from
+3aec4087, including scheduler skip, queue receive/verdict hooks, per-packet engine
+locking, fence reader, deferred state, status fields and deferral tests. It keeps
+accounting conservation/diagnostics, UI inheritance/coverage, shaping bind_many,
+verdict retry and policy-horizon corrections unchanged.
+
+Trade-off: as in 93eaa868, initial queued packets MAY be overtaken by packets
+accepted after the grant publishes. The predecessor trace confirmed overtaking
+in all 6 flows (44 instances). No perfect startup-order claim is made. Existing
+lifetime authorization, temporary horizons, revocation, slow-observation behavior,
+verified socket/UID/executable/Wine-prefix/zone isolation remain unchanged.
+
+Verification is focused: competing UDP plus an idle-after-proof target, actual
+fast use after proof and established continuity, plus authorization/queue/store
+regression families. No full matrix, host restart, deployment or rollback is
+performed by preparing this correction. b31 must not be selected for a new release
+as though its normal-use fast-path regression were an accepted limitation.

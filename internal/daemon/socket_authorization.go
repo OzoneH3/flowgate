@@ -10,12 +10,7 @@ import (
 	"time"
 )
 
-type socketDeferredGrant struct {
-	ticket      socketgrant.Ticket
-	attribution identity.Attribution
-}
 type socketFlow struct {
-	deferredGrant                    *socketDeferredGrant
 	authorizedRevision               string
 	connectionPolicy                 *identity.Attribution
 	observationDone                  chan struct{}
@@ -449,13 +444,6 @@ func (e *Engine) finishSocketAuthorizationLocked(s *socketAuthorization, f *sock
 		}
 		horizon = socketgrant.BootNow() + uint64(remaining)
 	}
-	// Initial queued packets must finish before later packets can accelerate.
-	if s.productionSession && !f.haveKey && !e.socketHandoffReadyLocked(s, f) {
-		f.deferredGrant = &socketDeferredGrant{ticket, a}
-		f.completeObservationWait()
-		return
-	}
-	f.deferredGrant = nil
 	allowed, err := s.store.Publish(ticket, k, horizon)
 	if err != nil {
 		s.failure = err
@@ -526,7 +514,6 @@ func (e *Engine) socketAuthorizationStatusLocked(gc map[string]any) map[string]a
 	}
 	out["batch_coordination"] = map[string]any{"enabled": s.batchCoordination, "claims": s.batchClaims, "scheduler_delivered": s.batchDelivered, "timeouts": s.batchTimeouts, "wait_ns": s.batchWaitNS, "max_wait_ns": s.batchMaxWaitNS, "second_claimant": s.batchSecondClaimant, "missing_emit": s.batchMissingEmit}
 	out["first_grant_merge"] = map[string]any{"enabled": s.ordinaryObserved != nil, "checks": s.initialMergeChecks, "fresh": s.initialMergeFresh, "published": s.initialMergePublished}
-	e.socketHandoffStatusLocked(out, s)
 	out["gc_pause_history"] = gc
 	out["renewal_timeline"], out["renewal_timeline_overwritten"] = s.renewalTrace()
 	out["alignment"] = map[string]uint64{"deferrals": s.alignmentDeferrals, "successes": s.alignmentSuccesses, "wait_ns": s.alignmentWaitNS, "max_wait_ns": s.alignmentMaxWaitNS, "subsequent_lapses": s.alignmentLapses}
@@ -755,7 +742,6 @@ func (e *Engine) socketAuthorizationSummaryLocked() map[string]any {
 			out["fast_bytes"] = totals.Bytes
 		}
 	}
-	e.socketHandoffStatusLocked(out, s)
 	if s.connectionScoped {
 		connectionStatus(out, s)
 	}

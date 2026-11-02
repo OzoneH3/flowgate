@@ -1,3 +1,8 @@
+SUPERSEDED STARTUP ASSESSMENT: see FAST-PATH-RECOVERY.txt. The startup
+deferral described below caused a normal-use activation regression in b31fe194
+and is selectively reverted. Earlier ordering results remain historical evidence,
+not a claim of reliable pass-through under competing traffic.
+
 Targeted corrections to the tested 93eaa868 release
 
 D1: zone priority inheritance
