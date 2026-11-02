@@ -1,0 +1,52 @@
+Owner-only FUSE executable observation
+
+An owner-only FUSE mount can refuse root's executable stat/open while root can
+still see a task, its executable link, mappings and socket descriptors. A missing
+file revision must not become pathname-only application authority.
+
+Only executable metadata inspection and native retained executable evidence can
+use this fallback. Generic path stamps, ancestry/display inspection and ordinary
+readable executables do not spawn it. Nothing changes the firewall, default Ask,
+application key, UID/zone/Wine separation, socket ownership proof or fast grants.
+
+On EACCES only, root checks a fixed canonical /proc/PID[/task/TID]/exe target,
+the target's homogeneous non-root real/effective/saved/filesystem UID and GID,
+supplementary groups, and its longest applicable mountinfo entry. That entry
+must be owner-only FUSE with exact user_id/group_id and no allow_other. The
+executable's exact executable mapping supplies device/inode independently.
+
+A fork/exec child of the same daemon binary gets those exact UID/GID/groups,
+an isolated network namespace and a minimal environment. It sets no-new-privs,
+non-dumpable, and clears capabilities before reading. The daemon never changes
+credentials. Both child and parent bookend task/group generation, executable
+link, credentials/groups, mount namespace and mapped device/inode. The result
+must be a regular file with that device/inode. Any mismatch or failed read keeps
+the original refusal. No command-line, parent-process, display name or FUSE
+fsname is permission authority.
+
+The existing inode:size:mtime:ctime revision is preserved. Retention computes
+the same SHA256 from the opened executable and obeys the existing digest size
+and per-minute budget. It does not add a hash to a cache shared with other
+mounts, and claims no stable host backing file. Retention after the process
+exits can therefore remain unavailable. There is no metadata time cache.
+
+Limits: four concurrent helpers, two seconds per invocation, bounded arguments
+and output; overload/timeouts remain explicit attribution failures. One helper
+is used per FUSE Inspect; holder member checks can require additional fresh
+metadata observations. All work is on observation/initial attribution, never
+on established fast-packet handling. Non-dumpable target processes may refuse
+the same-user proc read; this version fails closed in that case.
+
+Temporary FUSE mount paths can change on every launch. The existing application
+key still uses the verified executable path and UID. This change restores
+verified live identities and prompts; it DOES NOT make AppImage permission
+keys stable across remounts. A new launch can require a new decision. Do not
+anchor identity to a claimed carrier path, fsname, launcher or parent process.
+
+Trust model: this is ordinary local snapshot evidence, not code attestation.
+The user controls the FUSE server and may serve different file bytes/metadata
+than the executed pages. A credential-dropped helper is also the user's process;
+non-dumpability is set early but is not a claim of protection from a hostile
+owner on every kernel/ptrace configuration. Root independently verifies the
+mapped device/inode, process generation and exact UID/path target; helper data
+never merges another application or user's permission.

@@ -220,6 +220,9 @@ func captureEvidence(target, nsPath string, owner Process, app Application, aliv
 	}
 	f, err := os.Open(target)
 	if err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			return captureOwnerFuseEvidence(target, nsPath, owner, app, alive)
+		}
 		return nil, fmt.Errorf("executable unreadable: %v", err)
 	}
 	keep := false

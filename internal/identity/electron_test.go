@@ -22,6 +22,13 @@ import (
 // starts a "--type=utility" child of itself and prints its PID; "orphan" does
 // the same and exits, so the child loses its verified parent.
 func TestMain(m *testing.M) {
+	if len(os.Args) > 1 && os.Args[1] == OwnerExecutableHelper {
+		if err := RunOwnerExecutableHelper(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 	switch os.Getenv("FLOWGATE_FAKE_ELECTRON") {
 	case "main", "orphan":
 		c := exec.Command(os.Args[0], "--type=utility", "--utility-sub-type=network.mojom.NetworkService")

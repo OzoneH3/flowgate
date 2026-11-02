@@ -107,10 +107,15 @@ func Inspect(pid int) (Process, error) {
 		return p, e
 	}
 	p.UID = st.Sys().(*syscall.Stat_t).Uid
-	exeInfo, _ := os.Stat(base + "/exe")
-	p.ExecutableRevision = stamp(base + "/exe")
+	exeInfo, _ := executableStat(base + "/exe")
+	if exeInfo != nil {
+		p.ExecutableRevision = statStamp(exeInfo)
+	}
 	p.Cgroup = strings.TrimSpace(string(readBound(base+"/cgroup", 4096)))
-	a := Application{Kind: "native", Name: filepath.Base(p.Executable), Executable: p.Executable, Revision: stamp(base + "/exe"), Evidence: []string{"proc exe; PID plus start time"}}
+	a := Application{Kind: "native", Name: filepath.Base(p.Executable), Executable: p.Executable, Revision: p.ExecutableRevision, Evidence: []string{"proc exe; PID plus start time"}}
+	if _, ok := exeInfo.(ownerExeInfo); ok {
+		a.Evidence = append(a.Evidence, "owner-credential-fuse-read; mapped inode and process generation bookended")
+	}
 	// Loader names are conservative refusal hints, not permission evidence.
 	// A directory containing "wine" says nothing about the executable in it.
 	maps, wine, err := inspectProcessMaps(base+"/maps", p.Executable)
@@ -210,7 +215,7 @@ func Inspect(pid int) (Process, error) {
 		a.ExecutableStatus = "linked"
 	}
 	if a.Kind == "native" {
-		if st, err := os.Stat(base + "/exe"); err == nil {
+		if st := exeInfo; st != nil {
 			a.ExecutableStatus = "linked"
 			if st.Sys().(*syscall.Stat_t).Nlink == 0 {
 				a.ExecutableStatus = "deleted"

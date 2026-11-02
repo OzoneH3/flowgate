@@ -34,7 +34,10 @@ func readHolderFacts(h Holder, m HolderMember) (holderTaskFacts, error) {
 	if err != nil || start != m.Start {
 		return holderTaskFacts{}, fmt.Errorf("holder generation changed")
 	}
-	f := holderTaskFacts{Start: start, Exe: link(base + "/exe"), Revision: stamp(base + "/exe"), NetNS: link(base + "/ns/net"), MountNS: link(base + "/ns/mnt"), PIDNS: link(base + "/ns/pid")}
+	f := holderTaskFacts{Start: start, Exe: link(base + "/exe"), NetNS: link(base + "/ns/net"), MountNS: link(base + "/ns/mnt"), PIDNS: link(base + "/ns/pid")}
+	if st, err := executableStat(base + "/exe"); err == nil {
+		f.Revision = statStamp(st)
+	}
 	status := readBound(base+"/status", 65537)
 	if len(status) == 0 || len(status) > 65536 || strings.Contains(string(status), "State:\tZ") {
 		return f, fmt.Errorf("holder status unavailable")

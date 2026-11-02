@@ -45,6 +45,10 @@ func main() {
 		return
 	}
 	switch os.Args[1] {
+	case identity.OwnerExecutableHelper:
+		if err := identity.RunOwnerExecutableHelper(os.Args[2:]); err != nil {
+			fatal(err)
+		}
 	case "system-networking-inspect":
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
