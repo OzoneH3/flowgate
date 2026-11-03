@@ -4,7 +4,7 @@ package policy
 // (editor preview, policy explanation, documentation) so they cannot drift.
 
 // PrecedenceSentence states the evaluator's order (see Precedes).
-const PrecedenceSentence = NetworkEndpointPrecedence + " Among matching active rules (the newest saved setting of each program scope): higher target weight wins (process 4 › application 3 › zone 2 › all programs 1); then higher priority; then Deny › Allow › Ask; then a user rule over a preset; then the smaller rule ID."
+const PrecedenceSentence = NetworkEndpointPrecedence + " Among matching active rules (the newest saved setting of each program scope): higher target weight wins (process 4 › application 3 › zone 2 › all programs 1); then higher priority; then a Local or Internet rule over an All networks rule; then Deny › Allow › Ask; then a user rule over a preset; then the smaller rule ID."
 
 // LoopbackSentence explains the same-host exception (DefaultLoopback).
 const LoopbackSentence = "Traffic to this machine itself (loopback or this exact host address) is allowed by default; only rules naming a loopback address or this exact host address apply to it, so a rule for any address does not."
@@ -16,6 +16,9 @@ func Precedes(a, b Rule) bool {
 	}
 	if a.Priority != b.Priority {
 		return a.Priority > b.Priority
+	}
+	if az, bz := a.Filter.NetworkZone != "", b.Filter.NetworkZone != ""; az != bz {
+		return az
 	}
 	if ra, rb := actionRank(a.Action), actionRank(b.Action); ra != rb {
 		return ra < rb
@@ -34,6 +37,8 @@ func DecidingFactor(a, b Rule) string {
 		return "higher target weight"
 	case a.Priority != b.Priority:
 		return "higher priority"
+	case (a.Filter.NetworkZone != "") != (b.Filter.NetworkZone != ""):
+		return "Local or Internet rule overrides All networks rule at equal priority"
 	case actionRank(a.Action) != actionRank(b.Action):
 		return "Deny › Allow › Ask at equal weight and priority"
 	case (a.Preset == nil) != (b.Preset == nil):

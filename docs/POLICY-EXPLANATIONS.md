@@ -99,7 +99,8 @@ context has `status:evaluated`, recorded `flow`/identity, `configured_action`,
 coverage/runtime default and **`historical_decision:false`**.
 
 This directly calls the existing `policy.Evaluate`: same active-rule matching,
-`policy.Precedes` ordering (weight, priority, Deny › Allow › Ask, user over
+`policy.Precedes` ordering (weight, priority, named Local/Internet zone over All networks,
+Deny › Allow › Ask, user over
 preset, smallest ID), the same-host default Allow, unsafe-attribution Block and
 rule-free Ask. It does not resolve ownership again, invoke Observe/RetainedState,
 expire pending events, consume packets, evaluate cached Once grants, or publish

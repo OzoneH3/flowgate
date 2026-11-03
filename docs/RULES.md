@@ -29,7 +29,7 @@ Precedence (`policy.Precedes`, the same comparator the evaluator sorts with, and
 the source of the sentence shown in previews and explanations): among matching
 active rules (the newest saved setting of each program scope), higher target
 weight wins (process 4 › application 3 › zone 2 › all programs 1); then higher
-priority; then Deny › Allow › Ask; then a user rule over a preset; then the
+priority; then a matching Local or Internet rule over All networks; then Deny › Allow › Ask; then a user rule over a preset; then the
 lexicographically smaller rule ID. No match asks.
 
 Traffic to this machine itself (loopback or this exact host address) is allowed

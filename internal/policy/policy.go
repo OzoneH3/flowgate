@@ -287,9 +287,8 @@ func EvaluateSessionObserved(rules []Rule, f identity.Flow, a identity.Attributi
 			matches = kept
 		}
 	}
-	// NetLimiter Blocker: higher weight first; explicit priorities within a
-	// weight; at equal weight Deny, then Allow, then Ask (observed 5.3.28); a
-	// user policy over a preset; then ID. Shared with every explanation.
+	// Shared precedence includes FlowGate named-zone overrides at equal priority.
+	// Within the same scope the observed Deny/Allow/Ask ordering is preserved.
 	sort.Slice(matches, func(i, j int) bool { return Precedes(matches[i], matches[j]) })
 	var ids []string
 	for _, r := range matches {

@@ -53,8 +53,13 @@ Read-only companions reject creation/mutation. Existing selected-user privacy re
 machine fallback rule documents contain no foreign application identity.
 
 Matching process tier wins over application tier, which wins over all-program zone
-tier. Within each tier preserve priority descending, ID ascending. A named zone does
-not silently outrank an Any-zone rule in the same tier. Application/process identity,
+tier. Within each tier, higher explicit priority wins. At equal priority, a matching
+Local or Internet rule overrides an All networks (Any-zone) rule, for both Allow and
+Block and for incoming and outgoing traffic independently. Within the same zone
+scope, Deny wins over Allow, then Ask; user rules win over presets, then smaller
+rule IDs win. Unknown classifications do not match named zones and retain the
+All networks fallback. This zone tie-break is an explicit FlowGate behavior change;
+it is not a new NetLimiter parity claim. Application/process identity,
 session lifetime, exclusive ownership and inactive-after-restart inventory remain.
 Existing schema0..3 and Any-zone behavior are unchanged. Old strict readers refuse
 schema4 rather than ignore zone/global fields; never delete/strip documents to downgrade.
