@@ -52,7 +52,7 @@ func RoutedSocketSessionFactory(e *daemon.Engine, resolvers daemon.SocketSession
 					out[k] = v
 				}
 			}
-			out["interface_coverage"] = map[string]any{"installed": append([]identity.NetworkLink(nil), installed...), "queue_only": append([]identity.NetworkLink(nil), skipped...), "maximum": 32, "new_links": "queue until next protection session", "link_identity_change": "acceleration disabled until deliberate protection restart"}
+			out["interface_coverage"] = map[string]any{"installed": append([]identity.NetworkLink(nil), installed...), "queue_only": append([]identity.NetworkLink(nil), skipped...), "maximum": 32, "new_links": "queue until next protection session", "link_identity_change": "changed interface retired; surviving interfaces retain acceleration", "coverage_scope": "activation snapshot; current coverage is in socket_authorization.interface_coverage"}
 			return out
 		}
 		if err = e.StartSessionSocketAuthorization(ctx, owner.backend, sessionResolvers); err != nil {
@@ -64,7 +64,9 @@ func RoutedSocketSessionFactory(e *daemon.Engine, resolvers daemon.SocketSession
 		owner.done = make(chan struct{})
 		go func() {
 			defer close(owner.done)
-			err := guard.Run(watchctx)
+			err := guard.RunRetiring(watchctx, func(link identity.NetworkLink, reason string) error {
+				return e.RetireSocketInterface(link.Index, reason)
+			})
 			if watchctx.Err() == nil {
 				// Never remove a rule behind the owner's digest. This session remains
 				// queued after identity uncertainty; a deliberate restart can rebuild.

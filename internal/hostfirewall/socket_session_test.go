@@ -104,3 +104,27 @@ func TestDigestFormatIsExplicitAndLegacyCompatible(t *testing.T) {
 		t.Fatal("unknown format accepted")
 	}
 }
+
+func TestSocketSessionFreshStartClearsOldFailure(t *testing.T) {
+	m := &Evaluation{}
+	attempts := 0
+	m.ConfigureSocketSession(func(context.Context, string, string) (SocketSessionResources, error) {
+		attempts++
+		if attempts == 1 {
+			return &testSocketSession{}, errors.New("old optional setup failure")
+		}
+		return &testSocketSession{}, nil
+	})
+	if err := m.prepareSocketSession(context.Background()); err != nil || m.SocketSessionFailure() == nil {
+		t.Fatal("missing old failure", err)
+	}
+	if err := m.stopSocketSession(); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.releaseSocketSession(); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.prepareSocketSession(context.Background()); err != nil || m.SocketSessionFailure() != nil {
+		t.Fatal("failure survived fresh start", err, m.SocketSessionFailure())
+	}
+}

@@ -63,7 +63,8 @@ struct fg_route_gate *fg_route_open(const char *table,const char *chain,int *err
  struct fg_route_gate *g=calloc(1,sizeof(*g));if(!g){*error=-ENOMEM;return NULL;}
  strcpy(g->table,table);strcpy(g->chain,chain);
  // Base program has constant zero: it can never match and is never attached.
- // It owns the one bounded map set reused by all interface instances.
+ // Grants and statistics are shared. Each interface keeps its OWN epoch
+ // so retiring one link cannot revoke unrelated links.
  g->base=route_gate_bpf__open_and_load();
  if(!g->base){*error=errno?-errno:-EIO;free(g);return NULL;}
  *error=0;return g;
@@ -78,7 +79,7 @@ int fg_route_add(struct fg_route_gate *g,uint32_t ifindex) {
  instance->b=route_gate_bpf__open();if(!instance->b)return errno?-errno:-ENOMEM;
  instance->ifindex=ifindex;instance->b->rodata->output_ifindex=ifindex;
  #define REUSE(name) do {result=bpf_map__reuse_fd(instance->b->maps.name,bpf_map__fd(g->base->maps.name));if(result)goto failed_load;} while(0)
- REUSE(grants);REUSE(epoch);REUSE(hit_stats);REUSE(totals);
+ REUSE(grants);REUSE(hit_stats);REUSE(totals);
  #undef REUSE
  result=route_gate_bpf__load(instance->b);if(result)goto failed_load;
  // From this point a failed ACK may leave a rule; retain the complete owner.
@@ -92,7 +93,22 @@ failed_load:
 int fg_route_epoch(struct fg_route_gate *g,uint64_t value) {
  if(value && g->closing)return -ESHUTDOWN;
  uint32_t zero=0;
- return bpf_map_update_elem(bpf_map__fd(g->base->maps.epoch),&zero,&value,BPF_ANY)?-errno:0;
+ if(bpf_map_update_elem(bpf_map__fd(g->base->maps.epoch),&zero,&value,BPF_ANY))return -errno;
+ for(unsigned i=0;i<g->count;i++) {
+  uint64_t next=g->instances[i].ready?value:0;
+  if(bpf_map_update_elem(bpf_map__fd(g->instances[i].b->maps.epoch),&zero,&next,BPF_ANY))return -errno;
+ }
+ return 0;
+}
+int fg_route_retire(struct fg_route_gate *g,uint32_t ifindex) {
+ if(g->closing)return -ESHUTDOWN;
+ for(unsigned i=0;i<g->count;i++)if(g->instances[i].ifindex==ifindex) {
+  uint32_t zero=0;uint64_t disabled=0;
+  if(bpf_map_update_elem(bpf_map__fd(g->instances[i].b->maps.epoch),&zero,&disabled,BPF_ANY))return -errno;
+  // Never re-enable this numeric index in this session, even after reuse.
+  g->instances[i].ready=0;return 0;
+ }
+ return -ENODEV;
 }
 int fg_route_put(struct fg_route_gate *g,void *raw,void *value) {
  if(g->closing)return -ESHUTDOWN;

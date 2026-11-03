@@ -4,6 +4,7 @@
 struct fg_route_gate;
 struct fg_route_gate *fg_route_open(const char *,const char *,int *);
 int fg_route_add(struct fg_route_gate *,uint32_t);
+int fg_route_retire(struct fg_route_gate *,uint32_t);
 int fg_route_epoch(struct fg_route_gate *,uint64_t);
 int fg_route_put(struct fg_route_gate *,void *,void *);
 int fg_route_delete(struct fg_route_gate *,void *);

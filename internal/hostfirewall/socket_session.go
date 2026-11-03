@@ -70,6 +70,9 @@ func (m *Evaluation) prepareSocketSession(ctx context.Context) error {
 	owner, err := factory(ctx, Table, "socket_output")
 	m.mu.Lock()
 	m.socketSession = owner
+	if err == nil && owner != nil {
+		m.socketFailure = nil
+	}
 	m.mu.Unlock()
 	if err == nil && owner == nil {
 		err = errors.New("socket session factory returned no owner")

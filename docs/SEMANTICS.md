@@ -633,10 +633,19 @@ Deny, Ask, ambiguous ownership, unsupported traffic and exhausted capacity use
 ordinary enforcement. TCP, IPv6 and incoming traffic remain on their existing
 paths. At most 64 entries/eight per application and 32 fixed interface instances
 are retained. Active IPv4 interfaces, preferring default routes, are selected at
-session start; skipped or newly created links remain queued. Link identity
-change or watcher uncertainty disables acceleration for the session; normal
-carrier/MTU changes do not. Status advises a deliberate protection restart to
-retry. Accelerator failure is optional degradation, not permission to stop the
+session start; skipped or newly created links remain queued. An observed link
+identity change or deletion permanently retires only that interface instance:
+its private epoch becomes zero before its grants are removed. Surviving
+interfaces keep their existing lifetime grants. The same numeric interface
+index cannot be re-enabled in that session, even after delete/recreate; a new
+protection session can verify it again. Status separates installed and retired
+interfaces. Carrier/MTU changes do not retire a link. Watcher loss, malformed
+notifications, namespace uncertainty or an unconfirmed retirement still disable
+acceleration globally. Network-zone changes retain their existing global
+revalidation behavior. Netlink observation is asynchronous; no instantaneous
+link-generation detection guarantee is made. Stop/start creates fresh maps and
+retirement state and clears an old optional setup failure only after successful
+setup. Accelerator failure is optional degradation, not permission to stop the
 firewall or accept unverified traffic.
 
 The session installs fixed rules before recording its audited table digest.

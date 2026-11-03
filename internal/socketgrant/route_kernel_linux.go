@@ -39,7 +39,8 @@ func OpenRoutedKernel(table, chain string) (*RoutedKernel, error) {
 }
 
 // AddInterface must only be called for a link instance whose identity is being
-// monitored by the owning session. Reusing a number after link replacement
+// monitored by the owning session, before the initial Epoch enables grants.
+// Reusing a number after link replacement
 // requires revocation and reconstruction, never this idempotent call alone.
 func (k *RoutedKernel) AddInterface(ifindex uint32) error {
 	k.mu.Lock()
@@ -128,4 +129,15 @@ func (k *RoutedKernel) EmergencyDisable() error {
 		return nil
 	}
 	return code(C.fg_route_detach(k.p))
+}
+
+// RetireInterface disables only this instance's epoch. Its audited rule stays
+// present, matching no packet. Index reuse remains queued until a new session.
+func (k *RoutedKernel) RetireInterface(index uint32) error {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if k.p == nil {
+		return errors.New("route gate closed")
+	}
+	return code(C.fg_route_retire(k.p, C.uint32_t(index)))
 }

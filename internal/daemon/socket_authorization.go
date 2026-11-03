@@ -63,6 +63,7 @@ type socketAuthorization struct {
 	groups, groupFlows                                                                                             uint64
 	observerDiagnostics                                                                                            func() map[string]any
 	interfaceCoverage                                                                                              *SocketInterfaceCoverage
+	retiredInterfaces                                                                                              map[uint32]string
 	renewalGaps, maxGapNS                                                                                          uint64
 	disabled                                                                                                       bool
 	checks, published, refused                                                                                     uint64
@@ -511,6 +512,9 @@ func (e *Engine) socketAuthorizationStatusLocked(gc map[string]any) map[string]a
 	if s.productionSession {
 		out["scope"] = "ipv4-udp-output-queue-interface"
 		out["new_interfaces"] = "queue-until-next-protection-session"
+		if s.interfaceCoverage != nil {
+			out["interface_coverage"] = s.interfaceCoverage.clone()
+		}
 	}
 	out["batch_coordination"] = map[string]any{"enabled": s.batchCoordination, "claims": s.batchClaims, "scheduler_delivered": s.batchDelivered, "timeouts": s.batchTimeouts, "wait_ns": s.batchWaitNS, "max_wait_ns": s.batchMaxWaitNS, "second_claimant": s.batchSecondClaimant, "missing_emit": s.batchMissingEmit}
 	out["first_grant_merge"] = map[string]any{"enabled": s.ordinaryObserved != nil, "checks": s.initialMergeChecks, "fresh": s.initialMergeFresh, "published": s.initialMergePublished}
@@ -728,7 +732,7 @@ func (e *Engine) socketAuthorizationSummaryLocked() map[string]any {
 	if s.productionSession {
 		out["new_interfaces"] = "queue-until-next-protection-session"
 		if s.interfaceCoverage != nil {
-			out["interface_coverage"] = s.interfaceCoverage
+			out["interface_coverage"] = s.interfaceCoverage.clone()
 		}
 	}
 	if s.failure != nil {

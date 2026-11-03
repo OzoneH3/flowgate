@@ -135,3 +135,16 @@ func (s *SessionBackend) EmergencyDisable() error {
 	s.disabled = true
 	return nil
 }
+
+func (s *SessionBackend) RetireInterface(index uint32) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closing || s.released {
+		return errors.New("session gate closed")
+	}
+	r, ok := s.backend.(interface{ RetireInterface(uint32) error })
+	if !ok {
+		return errors.New("backend cannot retire one interface")
+	}
+	return r.RetireInterface(index)
+}

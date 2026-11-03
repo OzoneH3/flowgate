@@ -150,11 +150,11 @@ func TestRoutedProtectionSessionPrivateNamespace(t *testing.T) {
 		t.Fatal(err)
 	}
 	until := time.Now().Add(3 * time.Second)
-	for e.SocketAuthorizationFailure() == nil && time.Now().Before(until) {
+	for len(e.SocketAuthorizationStatus()["interface_coverage"].(*daemon.SocketInterfaceCoverage).Retired) == 0 && time.Now().Before(until) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if e.SocketAuthorizationFailure() == nil {
-		t.Fatal("installed link deletion did not disable")
+	if e.SocketAuthorizationFailure() != nil || len(e.SocketAuthorizationStatus()["interface_coverage"].(*daemon.SocketInterfaceCoverage).Retired) != 1 {
+		t.Fatal("link retirement disabled session or was not observed", e.SocketAuthorizationStatus())
 	}
 	afterListing, _ := nft("-j", "list", "table", "inet", Table)
 	_ = os.WriteFile(filepath.Join(dir, "rules-after.json"), afterListing, 0600)
@@ -216,6 +216,24 @@ func TestRoutedProtectionSessionPrivateNamespace(t *testing.T) {
 	if stopped.Cleanup != "confirmed" || m.socketSession != nil {
 		t.Fatal("fallback cleanup incomplete", stopped)
 	}
+	// A successful off/on following optional setup failure must be genuinely fresh.
+	if err = m.ConfigureSocketSession(factory); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = m.ProtectionStart(stopped.ID, strings.Repeat("a", 32), "both"); err != nil {
+		t.Fatal(err)
+	}
+	freshAfterFailure := waitEvaluation(t, m, "active")
+	if m.SocketSessionFailure() != nil || e.SocketAuthorizationFailure() != nil || e.SocketAuthorizationStatus() == nil {
+		t.Fatal("off/on retained failure", m.SocketSessionFailure(), e.SocketAuthorizationStatus())
+	}
+	if len(e.SocketAuthorizationStatus()["interface_coverage"].(*daemon.SocketInterfaceCoverage).Retired) != 0 {
+		t.Fatal("retirement leaked into new session")
+	}
+	if _, err = m.ProtectionStop(freshAfterFailure.ID); err != nil {
+		t.Fatal(err)
+	}
+	waitEvaluation(t, m, "stopped")
 	crashDir := filepath.Join(dir, "crash")
 	if err = os.Mkdir(crashDir, 0700); err != nil {
 		t.Fatal(err)

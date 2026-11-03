@@ -21,7 +21,7 @@ func (s *socketAuthorization) observeQueueRoute(flow identity.Flow) bool {
 		return true
 	}
 	outdev, ok := flow.QueueOutputInterface()
-	if !ok {
+	if !ok || s.retiredInterfaces[outdev] != "" {
 		return false
 	}
 	for key, old := range s.flows {

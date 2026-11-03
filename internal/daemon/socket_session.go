@@ -21,6 +21,7 @@ type SocketInterfaceCoverage struct {
 	QueueOnly          []SocketInterface `json:"queue_only"`
 	QueueOnlyTotal     int               `json:"queue_only_total"`
 	QueueOnlyTruncated bool              `json:"queue_only_truncated"`
+	Retired            []SocketInterface `json:"retired,omitempty"`
 	Maximum            int               `json:"maximum"`
 }
 
@@ -52,6 +53,7 @@ func (e *Engine) StartSessionSocketAuthorization(ctx context.Context, b *socketg
 		coverage := *r.InterfaceCoverage
 		coverage.Installed = append([]SocketInterface(nil), coverage.Installed...)
 		coverage.QueueOnly = append([]SocketInterface(nil), coverage.QueueOnly...)
+		coverage.Retired = append([]SocketInterface(nil), coverage.Retired...)
 		s.interfaceCoverage = &coverage
 	}
 	s.batchCoordination = !s.connectionScoped
@@ -110,4 +112,55 @@ func (e *Engine) StopSocketAuthorization() error {
 	}
 	e.mu.Unlock()
 	return err
+}
+
+// RetireSocketInterface preserves all unrelated grants. It mutates maps only,
+// never the session's audited firewall rules or application policy.
+func (e *Engine) RetireSocketInterface(index uint32, reason string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	s := e.socketAuthorization
+	if s == nil || s.disabled {
+		return nil
+	}
+	if err := s.store.RetireInterface(index); err != nil {
+		e.failConnectionAuthorizationLocked(s, fmt.Errorf("retire interface %d: %w", index, err))
+		return s.failure
+	}
+	if s.retiredInterfaces == nil {
+		s.retiredInterfaces = map[uint32]string{}
+	}
+	if reason == "" {
+		reason = "interface retired"
+	}
+	s.retiredInterfaces[index] = reason
+	for key, f := range s.flows {
+		outdev, ok := f.flow.QueueOutputInterface()
+		if (ok && outdev == index) || (f.haveKey && f.key.Interface == index) {
+			f.haveKey = false
+			f.completeObservationWait()
+			s.completeSocketBatchLocked(f, nil, false)
+			delete(s.flows, key)
+		}
+	}
+	if c := s.interfaceCoverage; c != nil {
+		kept := c.Installed[:0]
+		for _, link := range c.Installed {
+			if link.Index == index {
+				c.Retired = append(c.Retired, link)
+			} else {
+				kept = append(kept, link)
+			}
+		}
+		c.Installed = kept
+	}
+	return nil
+}
+
+func (c *SocketInterfaceCoverage) clone() *SocketInterfaceCoverage {
+	v := *c
+	v.Installed = append([]SocketInterface(nil), c.Installed...)
+	v.QueueOnly = append([]SocketInterface(nil), c.QueueOnly...)
+	v.Retired = append([]SocketInterface(nil), c.Retired...)
+	return &v
 }

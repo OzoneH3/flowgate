@@ -3,6 +3,7 @@ package identity
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"github.com/mdlayher/netlink"
 	"golang.org/x/sys/unix"
 	"testing"
@@ -82,5 +83,31 @@ func TestGateLinkSelectionBoundsAndPrioritizesUplink(t *testing.T) {
 		if link.Index == 1 || link.Index == 2 {
 			t.Fatal("loopback/down accelerated")
 		}
+	}
+}
+
+func TestLinkGuardRetiresOnlyChangedInstance(t *testing.T) {
+	a := NetworkLink{Index: 7, Name: "uplink-a", Kind: "dummy"}
+	b := NetworkLink{Index: 8, Name: "uplink-b", Kind: "dummy"}
+	calls := map[uint32]int{}
+	g := &LinkGuard{links: []NetworkLink{a, b}, retire: func(v NetworkLink, reason string) error { calls[v.Index]++; return nil }}
+	if err := g.observe([]netlink.Message{linkMessage(t, unix.RTM_DELLINK, a), linkMessage(t, unix.RTM_NEWLINK, a)}); err != nil {
+		t.Fatal(err)
+	}
+	if calls[7] != 1 || calls[8] != 0 {
+		t.Fatal(calls)
+	}
+	if err := g.observe([]netlink.Message{linkMessage(t, unix.RTM_DELLINK, a), linkMessage(t, unix.RTM_DELLINK, b)}); err != nil {
+		t.Fatal(err)
+	}
+	if calls[7] != 1 || calls[8] != 1 {
+		t.Fatal("surviving link no longer watched", calls)
+	}
+	if g.observe([]netlink.Message{{Header: netlink.Header{Type: unix.NLMSG_OVERRUN}}}) == nil {
+		t.Fatal("lost events accepted")
+	}
+	fresh := &LinkGuard{links: []NetworkLink{a}, retire: func(NetworkLink, string) error { return errors.New("map write failed") }}
+	if fresh.observe([]netlink.Message{linkMessage(t, unix.RTM_DELLINK, a)}) == nil || fresh.retired[7] {
+		t.Fatal("unconfirmed retirement accepted")
 	}
 }

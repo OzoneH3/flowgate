@@ -334,3 +334,70 @@ func TestConnectionPolicyTicketsIndependentOfLiveKernelEpoch(t *testing.T) {
 		t.Fatal("limit resurrected old epoch")
 	}
 }
+
+type retiringGate struct {
+	memoryGate
+	retired   map[uint32]bool
+	retireErr error
+}
+
+func (g *retiringGate) RetireInterface(i uint32) error {
+	if g.retireErr != nil {
+		return g.retireErr
+	}
+	g.retired[i] = true
+	return nil
+}
+func TestInterfaceRetirementPreservesOtherLifetimeGrants(t *testing.T) {
+	g := &retiringGate{memoryGate: memoryGate{values: map[Key]Value{}}, retired: map[uint32]bool{}}
+	s, err := NewConnection(RetainForSession(g))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, b := Key{Cookie: 1, Interface: 7}, Key{Cookie: 2, Interface: 8}
+	ticket := s.Begin()
+	for _, k := range []Key{a, b} {
+		if ok, err := s.Publish(ticket, k, 0); !ok || err != nil {
+			t.Fatal(ok, err)
+		}
+	}
+	before := g.values[b]
+	if err = s.RetireInterface(7); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := g.values[a]; ok || g.values[b] != before || !g.retired[7] || g.retired[8] {
+		t.Fatal("unrelated grant changed")
+	}
+	for _, ticket := range []Ticket{ticket, s.Begin()} {
+		if ok, err := s.Publish(ticket, a, 0); ok || err != nil {
+			t.Fatal("retired index reused", ok, err)
+		}
+	}
+	b.Cookie = 3
+	if ok, err := s.Publish(ticket, b, 0); !ok || err != nil {
+		t.Fatal("unrelated in-flight ticket invalidated", ok, err)
+	}
+	if err = s.Revoke(); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := s.Publish(s.Begin(), a, 0); ok {
+		t.Fatal("policy epoch resurrected retired interface")
+	}
+	fresh, err := NewConnection(&retiringGate{memoryGate: memoryGate{values: map[Key]Value{}}, retired: map[uint32]bool{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := fresh.Publish(fresh.Begin(), a, 0); !ok || err != nil {
+		t.Fatal("retirement leaked into next session", err)
+	}
+}
+func TestInterfaceRetirementRequiresConfirmedKernelBarrier(t *testing.T) {
+	g := &retiringGate{memoryGate: memoryGate{values: map[Key]Value{}}, retired: map[uint32]bool{}, retireErr: errors.New("epoch write failed")}
+	s, err := NewConnection(g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.RetireInterface(7) == nil {
+		t.Fatal("unconfirmed kernel barrier accepted")
+	}
+}

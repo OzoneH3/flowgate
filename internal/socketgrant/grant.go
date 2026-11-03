@@ -124,16 +124,17 @@ func (t Ticket) Start() uint64 { return t.start }
 func (t Ticket) Deadline() uint64 { return t.start + uint64(Window) }
 
 type Store struct {
-	mu               sync.Mutex
-	backend          Backend
-	generation       uint64
-	policyGeneration uint64
-	now              func() uint64
-	entries          map[Key]Value
-	closed           bool
-	cleanupDone      bool
-	closing          bool
-	connection       bool
+	mu                sync.Mutex
+	backend           Backend
+	generation        uint64
+	policyGeneration  uint64
+	now               func() uint64
+	entries           map[Key]Value
+	retiredInterfaces map[uint32]bool
+	closed            bool
+	cleanupDone       bool
+	closing           bool
+	connection        bool
 }
 
 func New(b Backend) (*Store, error) {
@@ -166,7 +167,7 @@ func (s *Store) Publish(t Ticket, k Key, horizon uint64) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.now()
-	if s.closing || s.closed || t.start == 0 || t.generation != s.policyGeneration || now < t.start ||
+	if s.closing || s.closed || s.retiredInterfaces[k.Interface] || t.start == 0 || t.generation != s.policyGeneration || now < t.start ||
 		t.start > ^uint64(0)-uint64(Window) {
 		return false, nil
 	}
@@ -316,5 +317,39 @@ func (s *Store) emergencyCloseLocked(cause error) error {
 	}
 	s.closed = true
 	s.cleanupDone = true
+	return nil
+}
+
+// RetireInterface first confirms a kernel instance disable, then removes only
+// its grants. Tombstones reject both old tickets and future publications.
+// Unrelated connection grants, horizons and tickets remain unchanged.
+func (s *Store) RetireInterface(index uint32) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if index == 0 || s.closing || s.closed {
+		return errors.New("cannot retire interface")
+	}
+	if s.retiredInterfaces[index] {
+		return nil
+	}
+	r, ok := s.backend.(interface{ RetireInterface(uint32) error })
+	if !ok {
+		return errors.New("backend cannot retire one interface")
+	}
+	if err := r.RetireInterface(index); err != nil {
+		return err
+	}
+	if s.retiredInterfaces == nil {
+		s.retiredInterfaces = map[uint32]bool{}
+	}
+	s.retiredInterfaces[index] = true
+	for k := range s.entries {
+		if k.Interface == index {
+			if err := s.backend.Delete(k); err != nil {
+				return err
+			}
+			delete(s.entries, k)
+		}
+	}
 	return nil
 }

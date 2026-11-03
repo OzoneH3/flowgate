@@ -23,6 +23,8 @@ type LinkGuard struct {
 	links   []NetworkLink
 	netns   string
 	skipped []NetworkLink
+	retired map[uint32]bool
+	retire  func(NetworkLink, string) error
 }
 
 func NewLinkGuard() (*LinkGuard, error) {
@@ -98,12 +100,16 @@ func (g *LinkGuard) observe(messages []netlink.Message) error {
 			return err
 		}
 		for _, old := range g.links {
-			if old.Index == v.Index {
+			if old.Index == v.Index && !g.retired[v.Index] {
 				if m.Header.Type == unix.RTM_DELLINK {
-					return fmt.Errorf("installed interface %d was deleted", v.Index)
+					if err := g.retireLink(old, "deleted"); err != nil {
+						return err
+					}
 				}
-				if !sameLinkIdentity(old, v) {
-					return fmt.Errorf("installed interface %d identity changed", v.Index)
+				if m.Header.Type == unix.RTM_NEWLINK && !sameLinkIdentity(old, v) {
+					if err := g.retireLink(old, "identity changed"); err != nil {
+						return err
+					}
 				}
 			}
 		}
@@ -111,7 +117,8 @@ func (g *LinkGuard) observe(messages []netlink.Message) error {
 	return nil
 }
 
-// Run returns on the first identity uncertainty. Carrier, flags, MTU and
+// Run returns on the first identity uncertainty unless RunRetiring supplies
+// a confirmed per-interface retirement callback. Carrier, flags, MTU and
 // operstate changes do not disable acceleration. Caller must invalidate before
 // rebuilding; simply seeing the same ifindex again never restores permission.
 func (g *LinkGuard) Run(ctx context.Context) error {
@@ -181,4 +188,24 @@ func selectGateLinks(snapshot NetworkSnapshot) (installed, skipped []NetworkLink
 	}
 	sort.Slice(skipped, func(i, j int) bool { return skipped[i].Index < skipped[j].Index })
 	return installed, skipped
+}
+
+// RunRetiring handles positively observed instance changes locally. Loss,
+// malformed input and namespace uncertainty remain session-wide failures.
+func (g *LinkGuard) RunRetiring(ctx context.Context, retire func(NetworkLink, string) error) error {
+	g.retire = retire
+	return g.Run(ctx)
+}
+func (g *LinkGuard) retireLink(link NetworkLink, reason string) error {
+	if g.retire == nil {
+		return fmt.Errorf("installed interface %d %s", link.Index, reason)
+	}
+	if err := g.retire(link, reason); err != nil {
+		return err
+	}
+	if g.retired == nil {
+		g.retired = map[uint32]bool{}
+	}
+	g.retired[link.Index] = true
+	return nil
 }
