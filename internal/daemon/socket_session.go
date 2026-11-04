@@ -8,7 +8,8 @@ import (
 	"fmt"
 )
 
-// SocketInterface identifies a link for presentation, not authorization.
+// SocketInterface identifies an installed gate capability for routing/status.
+// It never supplies application ownership, zone or permission authority.
 type SocketInterface struct {
 	Index uint32 `json:"index"`
 	Name  string `json:"name"`

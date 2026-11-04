@@ -9,10 +9,12 @@ import (
 	"errors"
 	"flowgate/internal/daemon"
 	"flowgate/internal/identity"
+	"flowgate/internal/policy"
 	"flowgate/internal/socketgrant"
 	"fmt"
 	"golang.org/x/sys/unix"
 	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -139,6 +141,59 @@ func TestRoutedProtectionSessionPrivateNamespace(t *testing.T) {
 	if e.SocketAuthorizationFailure() != nil {
 		t.Fatal(e.SocketAuthorizationFailure())
 	}
+	// Exercise a fresh queued flow on an interface created AFTER activation.
+	// Synthetic trusted identity isolates the real Engine/backend publication path
+	// from process discovery. This is not evidence of native application ownership.
+	if err = exec.Command("ip", "link", "add", "fgnew0", "type", "dummy").Run(); err != nil {
+		t.Fatal(err)
+	}
+	defer exec.Command("ip", "link", "del", "fgnew0").Run()
+	if err = exec.Command("ip", "addr", "add", "198.18.9.1/24", "dev", "fgnew0").Run(); err != nil {
+		t.Fatal(err)
+	}
+	if err = exec.Command("ip", "link", "set", "fgnew0", "up").Run(); err != nil {
+		t.Fatal(err)
+	}
+	newLink, err := net.InterfaceByName("fgnew0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := identity.Application{Kind: "native", Executable: "/synthetic/new-link-app", Revision: "synthetic-revision"}
+	app.Key = identity.ApplicationKey(0, app)
+	flow := identity.WithQueueOutputInterface(identity.Flow{Protocol: "udp", Direction: "outgoing", NetNS: identity.NetNS(), Local: netip.MustParseAddrPort("198.18.9.1:41000"), Remote: netip.MustParseAddrPort("198.18.9.2:41001")}, uint32(newLink.Index))
+	attribution := identity.Attribution{VisibilityComplete: true, Status: "directly-associated", Fingerprint: "fresh-synthetic-new-link", Application: &app, Owners: []identity.Process{{UID: 0, PID: os.Getpid(), Start: "fixture", NetNS: flow.NetNS}}, Sockets: []identity.Socket{{Protocol: "udp", NetNS: flow.NetNS, Inode: 1, Cookie: "0100000000000000", Local: flow.Local}}}
+	if err = e.SetRules([]policy.Rule{{ID: "synthetic-new-link-allow", Schema: 2, Action: "allow", Filter: policy.Filter{Application: app.Key, Revision: app.Revision, UID: 0, Protocol: "udp", Direction: "outgoing", RemoteAddress: "*"}}}); err != nil {
+		t.Fatal(err)
+	}
+	oldResolve := e.Resolve
+	e.Resolve = func(identity.Flow) identity.Attribution { return attribution }
+	if err = e.EnableSocketFirstGrantMerge(func(identity.Flow) (identity.Attribution, uint64) { return attribution, socketgrant.BootNow() }); err != nil {
+		t.Fatal(err)
+	}
+	for n := 0; n < 3; n++ {
+		emit, ok := e.PrepareUDPBatch(flow, "new-link-proof", 1, true)
+		if !ok {
+			t.Fatal("ordinary queue admission refused")
+		}
+		if event := emit(); event.State != "allowed" {
+			t.Fatal("ordinary Allow lost", event)
+		}
+		if err = e.SocketAuthorizationFailure(); err != nil {
+			t.Fatal("new uncovered interface poisoned acceleration", err)
+		}
+	}
+	status := e.SocketAuthorizationStatus()
+	if status["published"] != uint64(0) || status["entries"] != 0 {
+		t.Fatal("uncovered link allocated an acceleration grant", status)
+	}
+	e.Resolve = oldResolve
+	if err = e.EnableSocketFirstGrantMerge(resolver.Observed); err != nil {
+		t.Fatal(err)
+	}
+	if err = e.SetRules(nil); err != nil {
+		t.Fatal(err)
+	}
+	t.Log("new-interface ordinary Allow survives, no grant or accelerator failure")
 	if err = exec.Command("ip", "link", "set", "fgsession0", "name", "fgsession1").Run(); err != nil {
 		t.Fatal(err)
 	}

@@ -633,7 +633,10 @@ Deny, Ask, ambiguous ownership, unsupported traffic and exhausted capacity use
 ordinary enforcement. TCP, IPv6 and incoming traffic remain on their existing
 paths. At most 64 entries/eight per application and 32 fixed interface instances
 are retained. Active IPv4 interfaces, preferring default routes, are selected at
-session start; skipped or newly created links remain queued. An observed link
+session start; skipped or newly created links remain queued. Production grant
+admission and publication require membership in the installed session coverage;
+an uncovered output interface is an ordinary verification path, not a backend
+write failure that disables other interfaces. An observed link
 identity change or deletion permanently retires only that interface instance:
 its private epoch becomes zero before its grants are removed. Surviving
 interfaces keep their existing lifetime grants. The same numeric interface

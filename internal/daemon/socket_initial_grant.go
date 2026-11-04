@@ -65,7 +65,7 @@ func (e *Engine) resolveSocketInitialBatch(flow identity.Flow) (identity.Attribu
 	if e.socketAuthorization != s || s.failure != nil || s.disabled || observation == 0 || observation < ticket.Start() || observation > socketgrant.BootNow() || s.flows[s.flowKey(flow)] != nil || len(s.flows) >= socketgrant.MaxEntries {
 		return a, true
 	}
-	if outdev, ok := flow.QueueOutputInterface(); ok && s.retiredInterfaces[outdev] != "" {
+	if !s.coversQueueRoute(flow) {
 		return a, true
 	}
 	s.initialMergeFresh++

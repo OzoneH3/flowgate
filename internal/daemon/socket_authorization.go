@@ -376,10 +376,6 @@ func (s *socketAuthorization) nextRenewalWake(now time.Time) time.Duration {
 }
 
 func (e *Engine) finishSocketAuthorizationLocked(s *socketAuthorization, f *socketFlow, ticket socketgrant.Ticket, a identity.Attribution) {
-	if s.connectionScoped && f.haveKey {
-		e.checkConnectionObservationLocked(s, f, a)
-		return
-	}
 	remove := func() {
 		if f.haveKey {
 			if err := s.store.Forget(f.key); err != nil {
@@ -389,6 +385,16 @@ func (e *Engine) finishSocketAuthorizationLocked(s *socketAuthorization, f *sock
 		}
 	}
 	if s.routeBound && s.flows[s.flowKey(f.flow)] != f {
+		return
+	}
+	if !s.coversQueueRoute(f.flow) {
+		remove()
+		f.completeObservationWait()
+		delete(s.flows, s.flowKey(f.flow))
+		return
+	}
+	if s.connectionScoped && f.haveKey {
+		e.checkConnectionObservationLocked(s, f, a)
 		return
 	}
 	k, ok := socketgrant.KeyFor(f.flow, a)
