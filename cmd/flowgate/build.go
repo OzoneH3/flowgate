@@ -17,7 +17,7 @@ var sourceRevision string
 var holderIteratorSHA256 string
 
 func buildIdentity() daemon.BuildIdentity {
-	b := daemon.BuildIdentity{Source: sourceRevision, MaxRuleSchema: policy.NetworkEndpointSchema}
+	b := daemon.BuildIdentity{Source: sourceRevision, MaxRuleSchema: policy.NetworkEndpointSchema, HolderIteratorSHA256: holderIteratorSHA256}
 	if v, ok := debug.ReadBuildInfo(); ok {
 		for _, s := range v.Settings {
 			switch s.Key {

@@ -44,7 +44,7 @@ class Preparation(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(dir=ROOT / '.workspace')
         self.root = Path(self.temp.name)
-        names = ['scripts/prepare-release.sh', 'scripts/check.sh', 'scripts/build.sh', 'scripts/go-env.sh',
+        names = ['scripts/build-matched-daemon.py', 'scripts/prepare-release.sh', 'scripts/check.sh', 'scripts/build.sh', 'scripts/go-env.sh',
                  'scripts/lib/update_and_start.py', 'scripts/lib/build_progress.py', 'scripts/install-monitoring.py', 'scripts/host-daily-acceptance.py',
                  'deployment/launch', 'deployment/control.py', 'deployment/recover.py', 'deployment/uninstall.py',
                  'deployment/systemd/flowgate.service', 'deployment/systemd/flowgate-guard.service',

@@ -47,8 +47,7 @@ else
  mkdir -p "$backend"
 build_step 1 "Build daemon and holder iterator" "$logs/build-daemon.log" sh -c '
  scripts/build.sh holder-iterator
- digest=$(sha256sum .workspace/holder-iterator | cut -d " " -f1)
- go build -trimpath -ldflags "-X main.sourceRevision=$1 -X main.holderIteratorSHA256=$digest" -o "$2/flowgate" ./cmd/flowgate
+ python3 scripts/build-matched-daemon.py --revision "$1" --loader .workspace/holder-iterator --output "$2/flowgate"
  cp .workspace/holder-iterator "$2/holder-iterator"
 ' sh "$revision" "$backend"
 build_step 2 "Build receiver fixtures" "$logs/build-fixtures.log" go build -trimpath -o "$backend/native" ./fixtures/process-rule
