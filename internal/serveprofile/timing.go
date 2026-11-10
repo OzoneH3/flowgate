@@ -1,4 +1,4 @@
-// Package diagnostics provides one-shot, opt-in, private serve profiling.
+// Package serveprofile provides explicit, bounded, private daemon profiling.
 // Timings are elapsed (including blocking), not CPU; nested stages must not be summed.
 package serveprofile
 

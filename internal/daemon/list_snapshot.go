@@ -1,12 +1,14 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"flowgate/internal/identity"
 	"flowgate/internal/policy"
 	"fmt"
 	"log"
 	"net"
+	"runtime/pprof"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -15,6 +17,8 @@ import (
 
 const ListSnapshotCapability = "request-list-snapshot-v1"
 const listSnapshotInterval = 250 * time.Millisecond
+
+var apiPublishProfileContext = pprof.WithLabels(context.Background(), pprof.Labels("flowgate_work", "api_publish"))
 
 // ListSnapshot is presentation state, never permission authority. Publication
 // captures one engine generation; each reader gets its own deeply copied view.
@@ -170,6 +174,7 @@ func (s *listReadState) acquire(e *Engine) (func(), error) {
 		stop, done := make(chan struct{}), make(chan struct{})
 		s.stop, s.done = stop, done
 		go func() {
+			pprof.SetGoroutineLabels(apiPublishProfileContext)
 			defer close(done)
 			ticker := time.NewTicker(listSnapshotInterval)
 			defer ticker.Stop()
@@ -218,7 +223,8 @@ func (l *snapshotListener) Close() error {
 // conservatively publish so adding a mutation cannot silently omit its barrier.
 func (s *listReadState) publishAfter(e *Engine, operation string) error {
 	switch operation {
-	case "decision-log", "decision-log-get", "traffic-status", "essential-status",
+	case "profile-status", "profile-start", "profile-stop", "profile-fetch",
+		"decision-log", "decision-log-get", "traffic-status", "essential-status",
 		"evaluation-readiness", "protection-readiness", "policy-view", "policy-explain", "decision-status":
 		return nil
 	default:

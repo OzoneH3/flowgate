@@ -289,6 +289,11 @@ func serveCommand(args []string) error {
 			return err
 		}
 	}
+	// Bounded, explicit administrator captures are available without an opt-in
+	// environment file or restart. Idle construction does not start profiling.
+	// Close before engine/helper teardown so a capture cannot sample freed state.
+	e.Profiler = diagnostics.NewRecorder(ctx, func() any { return e.ProfileSnapshot() })
+	defer e.Profiler.Close()
 	api, err := daemon.Serve(*socket, e, false)
 	if err != nil {
 		return err

@@ -3,10 +3,12 @@
 package uploadshape
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/pprof"
 	"strconv"
 	"strings"
 	"sync"
@@ -558,6 +560,8 @@ func (m *Manager) fail(err error) {
 }
 func call(t transport, q map[string]any) (json.RawMessage, error) { return t.Call(q) }
 func (m *Manager) run() {
+	ctx := pprof.WithLabels(context.Background(), pprof.Labels("flowgate_work", "shaping"))
+	pprof.SetGoroutineLabels(ctx)
 	// One worker serializes configuration and all helper commands; no IO under
 	// daemon policy lock or Manager.mu. No automatic restart after an unknown fault.
 	restartOnEnable := false

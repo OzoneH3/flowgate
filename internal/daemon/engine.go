@@ -3,6 +3,7 @@ package daemon
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"flowgate/internal/accounting"
 	"flowgate/internal/decisionlog"
 	"flowgate/internal/essential"
@@ -79,6 +80,8 @@ type Engine struct {
 	socketAuthorization    *socketAuthorization // guarded by mu
 	zonePublisherInstalled bool
 	QueueHealth            queuehealth.Registry
+	// Profiler is configured before API startup; nil leaves profiling unavailable.
+	Profiler *diagnostics.Recorder
 	// RuntimeChecks returns a cached read-only capability snapshot, independently of enforcement.
 	RuntimeChecks     func() []readiness.Check
 	Essential         *essential.Manager
@@ -919,4 +922,67 @@ func (e *Engine) ChangeRule(generation, id, action string, expected *uint64, uid
 	// re-evaluated against the new policy instead of being dropped.
 	e.resetCachedLocked("rule " + action)
 	return nil
+}
+
+// ProfileSnapshot reads already-published observation state. It neither scans
+// processes nor consumes accounting rows. The shape Snapshot deep-copy is done
+// only at capture bookends; that small setup/finish cost is outside CPU totals.
+func (e *Engine) ProfileSnapshot() map[string]any {
+	out := map[string]any{
+		"build": e.Build, "generation": e.Generation,
+		"queue_health":       e.QueueHealth.Snapshot(true),
+		"holder_enumeration": identity.HolderEnumeration(),
+	}
+	if p := e.listReads.published.Load(); p != nil {
+		out["snapshot_revision"], out["snapshot_at"] = p.revision, p.at
+		var gate map[string]any
+		if json.Unmarshal(p.socketStatus, &gate) == nil && gate != nil {
+			aggregate := map[string]any{}
+			for _, key := range []string{
+				"window_ms", "scope", "route_bound", "disabled", "entries", "active",
+				"checks", "published", "late_or_capacity", "renewal_groups", "grouped_flows",
+				"renewal_gaps", "max_renewal_gap_ms", "route_moves", "failure", "counter_error",
+				"fast_packets", "fast_bytes", "revocation_unconfirmed", "authorization",
+				"ownership_renewal_required", "background_check_interval_ms", "background_inconclusive",
+				"confirmed_changes", "closed_connections",
+			} {
+				if v, ok := gate[key]; ok {
+					// Never retain nested fields if the presentation schema changes.
+					switch x := v.(type) {
+					case string:
+						if len(x) <= 512 {
+							aggregate[key] = x
+						}
+					case float64, bool:
+						aggregate[key] = x
+					}
+				}
+			}
+			aggregate["flows_count"] = aggregate["entries"]
+			out["socket_authorization"] = aggregate
+		}
+	}
+	if e.Traffic != nil {
+		out["collector"] = e.Traffic.Status()
+	}
+	if e.Activity != nil {
+		activity := e.Activity()
+		out["activity"] = map[string]any{
+			"sequence": activity.Sequence, "started": activity.Started,
+			"collected": activity.Collected, "duration_ms": activity.DurationMS,
+			"complete": activity.Complete, "error": activity.Error,
+			"rows": len(activity.Rows), "processes": len(activity.Processes),
+			"inaccessible_processes": activity.Inaccessible,
+		}
+	}
+	if e.UploadShaping != nil {
+		shape := e.UploadShaping.Snapshot()
+		out["shaping"] = map[string]any{
+			"enabled": shape.Enabled, "status": shape.Status,
+			"version": shape.Version, "applied_version": shape.AppliedVersion,
+			"interface": shape.Interface, "configured_caps": len(shape.Caps),
+			"discovery": shape.Discovery, "last_error": shape.LastError,
+		}
+	}
+	return out
 }

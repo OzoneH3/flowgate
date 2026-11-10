@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"flowgate/internal/identity"
+	"flowgate/internal/serveprofile"
 	"sync"
 	"time"
 )
@@ -32,7 +33,8 @@ func (o *Observer) Run(ctx context.Context) {
 		if o.ZoneSource != nil {
 			collector.Zones = o.ZoneSource()
 		}
-		snapshot := collector.Collect()
+		var snapshot identity.ActivitySnapshot
+		serveprofile.Work(ctx, "activity_collection", func() { snapshot = collector.Collect() })
 		o.publish(snapshot)
 		timer := time.NewTimer(o.interval)
 		select {
@@ -58,7 +60,7 @@ func (o *Observer) Snapshot() identity.ActivitySnapshot {
 
 func (o *Observer) publish(snapshot identity.ActivitySnapshot) {
 	if o.Annotate != nil {
-		o.Annotate(&snapshot)
+		serveprofile.Work(context.Background(), "activity_wine", func() { o.Annotate(&snapshot) })
 	}
 	// Cap serialized API retention as well as row/process counts. Never return an
 	// old success as current after a failure or oversized snapshot.
@@ -69,7 +71,7 @@ func (o *Observer) publish(snapshot identity.ActivitySnapshot) {
 		snapshot.Error = "Snapshot exceeded 3 MiB response budget"
 	}
 	if o.Observed != nil {
-		o.Observed(snapshot)
+		serveprofile.Work(context.Background(), "accounting", func() { o.Observed(snapshot) })
 	}
 	o.mu.Lock()
 	o.snapshot = snapshot

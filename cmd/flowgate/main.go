@@ -41,7 +41,7 @@ func main() {
 	identity.WineBrokerExecutable = os.Getenv("FLOWGATE_WINE_BROKER")
 
 	if len(os.Args) < 2 {
-		fmt.Printf("%s: doctor | runtime-discover | sockets | process PID | attribute | pending | decide | rule-delete | monitor-setup | monitor-backup | monitor-stop | serve | observe | serve-lab | host-start | host-status | host-stop | host-recover\n", productName)
+		fmt.Printf("%s: doctor | profile | runtime-discover | sockets | process PID | attribute | pending | decide | rule-delete | monitor-setup | monitor-backup | monitor-stop | serve | observe | serve-lab | host-start | host-status | host-stop | host-recover\n", productName)
 		return
 	}
 	switch os.Args[1] {
@@ -65,6 +65,10 @@ func main() {
 		}{s, rules, issues, true})
 	case "version":
 		output(buildIdentity())
+	case "profile":
+		if err := profileCommand(os.Args[2:], os.Stdout); err != nil {
+			fatal(err)
+		}
 	case "protection-guard", "protection-recover":
 		if err := protectionLocalCommand(os.Args[1], os.Args[2:]); err != nil {
 			fatal(err)

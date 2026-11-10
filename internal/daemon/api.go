@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"flowgate/internal/accounting"
@@ -19,12 +20,19 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime/pprof"
 	"strings"
 	"syscall"
 	"time"
 )
 
+const DaemonProfileCapability = "daemon-profile-v1"
+
+var apiProfileContext = pprof.WithLabels(context.Background(), pprof.Labels("flowgate_work", "api"))
+
 type Request struct {
+	ProfileArtifact     string                     `json:"profile_artifact,omitempty"`
+	ProfileOffset       int64                      `json:"profile_offset,omitempty"`
 	UploadConfig        *uploadshape.Config        `json:"upload_config,omitempty"`
 	HistoryQuery        *accounting.HistoryQuery   `json:"history_query,omitempty"`
 	HistoryOptions      *accounting.HistoryOptions `json:"history_options,omitempty"`
@@ -66,6 +74,8 @@ type EnforcementStatus struct {
 	StopsAt time.Time `json:"stops_at"`
 }
 type Response struct {
+	Profile          *diagnostics.Status         `json:"profile,omitempty"`
+	ProfileChunk     *diagnostics.ArtifactChunk  `json:"profile_chunk,omitempty"`
 	Diagnostic       map[string]string           `json:"diagnostic,omitempty"`
 	UploadShaping    *uploadshape.Snapshot       `json:"upload_shaping,omitempty"`
 	UsageHistory     *accounting.HistorySnapshot `json:"usage_history,omitempty"`
@@ -189,6 +199,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 			select {
 			case slots <- struct{}{}:
 				go func() {
+					pprof.SetGoroutineLabels(apiProfileContext)
 					defer func() { <-slots }()
 					defer c.Close()
 					c.SetDeadline(time.Now().Add(3 * time.Second))
@@ -279,6 +290,9 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						}
 					}
 					admin := e.administrator(cred.Uid)
+					if e.Profiler != nil && admin && !readonly {
+						r.Capabilities = append(r.Capabilities, DaemonProfileCapability)
+					}
 					health := e.QueueHealth.Snapshot(admin)
 					r.QueueHealth = &health
 					r.Capabilities = append(r.Capabilities, queuehealth.Capability)
@@ -326,6 +340,9 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 							r.Capabilities = append(r.Capabilities, NetworkEndpointCapability)
 						}
 						switch q.Operation {
+						case "profile-status", "profile-start", "profile-stop", "profile-fetch":
+							e.profileRequest(q, admin, readonly, &r)
+
 						case "diagnostic-status", "diagnostic-start":
 							if !admin {
 								r.ErrorCode, r.Error = "forbidden", "Administrator diagnostics only"
@@ -1066,4 +1083,50 @@ func trafficStatusFor(s udpaccount.Status, admin bool) udpaccount.Status {
 		s.Reason = "User-scoped measurements only; collector lifecycle/global telemetry require explicit administration"
 	}
 	return s
+}
+
+// profileRequest shares the primary endpoint's authenticated administrator role.
+// Profiling metadata and artifacts can contain other users' stacks and paths, so
+// even status/fetch are denied on the monitor endpoint and to ordinary peers.
+func (e *Engine) profileRequest(q Request, admin, readonly bool, r *Response) {
+	if !admin {
+		r.ErrorCode, r.Error = "forbidden", "Administrator profiling only"
+		return
+	}
+	if readonly {
+		r.ErrorCode, r.Error = "read_only", "Profiling requires the primary control endpoint"
+		return
+	}
+	if q.Generation != e.Generation {
+		r.ErrorCode, r.Error = "stale_generation", "Daemon generation changed"
+		return
+	}
+	if e.Profiler == nil {
+		r.ErrorCode, r.Error = "profile_unavailable", "Daemon profiler is unavailable"
+		return
+	}
+	var status diagnostics.Status
+	var err error
+	switch q.Operation {
+	case "profile-status":
+		status = e.Profiler.Status()
+	case "profile-start":
+		status, err = e.Profiler.Start(q.DurationSeconds)
+	case "profile-stop":
+		status, err = e.Profiler.Stop(q.ID)
+	case "profile-fetch":
+		chunk, fetchErr := e.Profiler.Fetch(q.ID, q.ProfileArtifact, q.ProfileOffset)
+		err = fetchErr
+		if err == nil {
+			r.ProfileChunk = &chunk
+		}
+		status = e.Profiler.Status()
+	default:
+		r.ErrorCode, r.Error = "invalid_request", "Unknown profiling operation"
+		return
+	}
+	r.Profile = &status
+	if err != nil {
+		r.ErrorCode, r.Error = "profile_failed", err.Error()
+	}
 }
