@@ -1,0 +1,38 @@
+Census-local Wine transport metadata reuse
+
+Baseline: eede4fe9. Scope: one fresh descriptor-table census invocation.
+For N socket holders on the same proven table class with M current members,
+the baseline Wine path requests N inspections and 2*N*M member-facts reads.
+The candidate reuses the first verified process observation for the remaining
+socket descriptors, then invokes the inspector again and reads every member
+at the far end. For N>1 this is two inspection callbacks and 3*M facts reads;
+a one-socket class retains the original one inspection and 2*M reads.
+
+The key includes thread group, group generation, leader-exit state, and the
+first member's task generation. All member sets must be identical. Reuse is
+only for existing exact-native identities and live-leader Wine transports
+with an explicit prefix/runtime; it does not introduce Wine worker support,
+merge distinct table classes, or broaden native-only churn reconciliation.
+The entry dies with the invocation; failed/retried censuses cannot reuse it.
+
+All socket descriptor checks and the final topology/FD census remain. Every
+member's credentials, executable/revision, namespaces and task generation
+are read before and after; any final mismatch invalidates every socket that
+used that observation. The inspection callback is rerun at the far bookend.
+Authorization supplies fresh Inspect. Ordinary Activity retains its existing
+guarded metadata cache, so callback counts are not necessarily FullInspect
+counts. Wine kind, runtime, prefix and image path are compared explicitly as
+well as the process/application fingerprint, including unresolved metadata.
+
+This is common transport-process metadata, not Windows permission authority.
+Per-socket kernel evidence, Windows owner tables, broker peer validation and
+application/prefix consistency checks are unchanged. Grant lifetimes,
+background-check scheduling and packet fast-path code are unchanged. The
+separate BPF holder iterator optimization is excluded.
+
+Evidence and limitations
+Focused tests cover 1/2/256 sockets, no cross-census reuse, two synthetic
+applications across two prefixes, per-descriptor/topology failures and process
+identity changes. The existing Wine Activity/dispatch/owner-table tests remain
+in use. Actual CPU and coverage comparison is reported separately in the exact
+candidate evidence package; fewer calls alone do not demonstrate improvement.

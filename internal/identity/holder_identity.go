@@ -123,7 +123,8 @@ func inspectHolderIdentities(c HolderCensus, inspect func(int) (Process, error))
 }
 
 // A proven descriptor-table class is identified only within this immutable
-// census. Reuse below is native-only, never shared across snapshots or processes.
+// census. Reuse is transport metadata only, never shared across snapshots or
+// processes and never a substitute for per-socket Wine owner-table evidence.
 type holderInspectionKey struct {
 	group        int
 	start        string
@@ -135,7 +136,7 @@ func inspectionKey(h Holder) holderInspectionKey {
 	return holderInspectionKey{h.TGID, h.GroupStart, h.LeaderExited, h.Members[0]}
 }
 
-type nativeHolderInspection struct {
+type holderInspection struct {
 	invalid  bool
 	selected holderTaskFacts
 	holder   Holder
@@ -168,7 +169,7 @@ func inspectHolderIdentitiesWith(c HolderCensus, inspect func(int) (Process, err
 		out.Unavailable = len(failedTasks)
 	}
 	classes := map[string][]inspectedHolder{}
-	native := map[holderInspectionKey]*nativeHolderInspection{}
+	inspections := map[holderInspectionKey]*holderInspection{}
 	for _, h := range c.Holders {
 		if late() {
 			fail("time_limit")
@@ -179,7 +180,7 @@ func inspectHolderIdentitiesWith(c HolderCensus, inspect func(int) (Process, err
 			continue
 		}
 		if h.Proven {
-			if old := native[inspectionKey(h)]; old != nil {
+			if old := inspections[inspectionKey(h)]; old != nil {
 				if !slices.Equal(old.holder.Members, h.Members) {
 					old.invalid = true
 					failSocket(h, "holder_members_changed")
@@ -253,10 +254,10 @@ func inspectHolderIdentitiesWith(c HolderCensus, inspect func(int) (Process, err
 			failSocket(h, "runtime_worker_unverified")
 			continue
 		}
-		if h.Proven && exactNativeHolder(p) {
+		if h.Proven && reusableHolderMetadata(p) {
 			copyHolder := h
 			copyHolder.Members = slices.Clone(h.Members)
-			native[inspectionKey(h)] = &nativeHolderInspection{holder: copyHolder, before: before, process: p, selected: f, holders: []Holder{h}}
+			inspections[inspectionKey(h)] = &holderInspection{holder: copyHolder, before: before, process: p, selected: f, holders: []Holder{h}}
 		}
 		classes[h.Socket] = append(classes[h.Socket], inspectedHolder{h, f, p})
 	}
@@ -264,9 +265,9 @@ func inspectHolderIdentitiesWith(c HolderCensus, inspect func(int) (Process, err
 		fail("time_limit")
 		return out
 	}
-	// A changed native member withdraws every socket that shared its inspection,
+	// A changed member withdraws every socket that shared its inspection,
 	// including the first. RecheckDetail still verifies topology and every FD.
-	for key, entry := range native {
+	for key, entry := range inspections {
 		if len(entry.holders) == 1 && !entry.invalid {
 			continue
 		} // unchanged single-socket path
@@ -275,10 +276,11 @@ func inspectHolderIdentitiesWith(c HolderCensus, inspect func(int) (Process, err
 			fail("time_limit")
 			return out
 		}
-		// Also re-inspect runtime classification once at the far bookend. Raw
-		// executable facts alone cannot detect a process loading a runtime.
+		// Re-run the inspection callback at the far bookend. Authorization uses
+		// fresh Inspect; Activity retains its existing guarded metadata cache.
+		// Raw executable facts alone cannot detect a runtime classification change.
 		current, err := inspect(entry.process.PID)
-		if err != nil || !exactNativeHolder(current) || current.ThreadGroup != entry.process.ThreadGroup || current.Application.Prefix != entry.process.Application.Prefix || fingerprint([]Process{current}, nil) != fingerprint([]Process{entry.process}, nil) {
+		if err != nil || !sameHolderMetadata(entry.process, current) {
 			valid = false
 		}
 		for i, m := range entry.holder.Members {
@@ -343,7 +345,7 @@ func inspectHolderIdentitiesWith(c HolderCensus, inspect func(int) (Process, err
 		if code == "" {
 			for _, s := range staged {
 				e := classes[s.socket][s.index]
-				if n := native[inspectionKey(e.holder)]; n != nil {
+				if n := inspections[inspectionKey(e.holder)]; n != nil {
 					n.holder.Members = slices.Clone(s.holder.Members)
 					n.before = s.first
 				}
@@ -578,6 +580,36 @@ func reconcileHolderChurn(tgid int, detail HolderRecheck, classes map[string][]i
 		return err.Error(), nil
 	}
 	return "", staged
+}
+
+// reusableHolderMetadata shares a verified transport process, not an application
+// permission. Wine still needs independent Windows owner-table and prefix proof
+// for every socket. Worker-only runtime holders and separate table classes keep
+// their existing refusal/ambiguity behavior.
+func reusableHolderMetadata(p Process) bool {
+	if exactNativeHolder(p) {
+		return true
+	}
+	return p.PID == p.ThreadGroup && p.Application.Hosted == nil &&
+		(p.Application.Kind == "wine" || p.Application.Kind == "wine-unresolved") &&
+		p.Application.Runtime == p.Executable && p.Application.Prefix != ""
+}
+
+func sameHolderMetadata(before, after Process) bool {
+	if exactNativeHolder(before) {
+		// Preserve the existing native-only comparison unchanged.
+		return exactNativeHolder(after) && before.ThreadGroup == after.ThreadGroup &&
+			before.Application.Prefix == after.Application.Prefix &&
+			fingerprint([]Process{before}, nil) == fingerprint([]Process{after}, nil)
+	}
+	if !reusableHolderMetadata(after) || before.ThreadGroup != after.ThreadGroup ||
+		before.Application.Kind != after.Application.Kind ||
+		before.Application.Runtime != after.Application.Runtime ||
+		before.Application.Prefix != after.Application.Prefix ||
+		before.Application.Executable != after.Application.Executable {
+		return false
+	}
+	return fingerprint([]Process{before}, nil) == fingerprint([]Process{after}, nil)
 }
 
 func exactNativeHolder(p Process) bool {
