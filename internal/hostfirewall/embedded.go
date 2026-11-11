@@ -41,8 +41,9 @@ type Evaluation struct {
 	duration              time.Duration // fixed five minutes in production; shortened by in-package tests only
 	probe                 func() []readiness.Check
 	runner                func(context.Context, func() error) error
-	prepare               func() (string, error) // in-package fault fixture only
-	afterInstall          func() error           // in-package partial activation failure fixture only
+	prepare               func() (string, error)      // in-package fault fixture only
+	establishedPreflight  func(context.Context) error // fresh read-only compatibility check
+	afterInstall          func() error                // in-package partial activation failure fixture only
 }
 
 func NewEvaluation(ctx context.Context, e *daemon.Engine, dir, socket, database string) *Evaluation {
@@ -58,6 +59,7 @@ func NewEvaluation(ctx context.Context, e *daemon.Engine, dir, socket, database 
 	m.runner = func(ctx context.Context, ready func() error) error {
 		return queue.RunConfigured(ctx, e, m.Status().Profile, Queue, false, ready)
 	}
+	m.establishedPreflight = checkEstablishedTCP
 	m.prepare = func() (string, error) { return PrepareSession(m.dir, filepath.Dir(m.socket), m.database) }
 	return m
 }
@@ -142,6 +144,7 @@ func (m *Evaluation) start(expected, request, profile string, continuous bool) (
 		m.mu.Unlock()
 		return m.Status(), lifecycleError("unavailable", "Daemon shutting down")
 	}
+	fromMonitoring := continuous && m.desiredMode == "monitoring"
 	if continuous {
 		if err := m.saveDesired(profile); err != nil {
 			m.mu.Unlock()
@@ -173,7 +176,7 @@ func (m *Evaluation) start(expected, request, profile string, continuous bool) (
 	m.done = make(chan struct{})
 	id := m.status.ID
 	m.mu.Unlock()
-	go m.run(ctx, id)
+	go m.run(ctx, id, fromMonitoring)
 	return m.Status(), nil
 }
 func (m *Evaluation) Stop(expected string) (daemon.EvaluationStatus, error) {
@@ -256,6 +259,11 @@ func (m *Evaluation) finishLocked(err error, clean bool) {
 		m.status.State = "failed"
 		m.status.ReasonCode = "activation_failed"
 		m.status.Reason = err.Error()
+		if _, unsupported := err.(*unsupportedEstablishedTCP); unsupported && clean && m.desiredMode == "monitoring" {
+			m.status.State = "stopped"
+			m.status.ReasonCode = "unsupported_established_tcp"
+			m.status.Reason = "Activation refused; monitoring remains available: " + err.Error()
+		}
 		var failure *readiness.Failure
 		if errors.As(err, &failure) {
 			m.status.ReasonCode = failure.Check.Code
@@ -287,7 +295,49 @@ func (m *Evaluation) finishLocked(err error, clean bool) {
 	m.cancel = nil
 	close(m.done)
 }
-func (m *Evaluation) run(ctx context.Context, id string) {
+
+// The caller has identified the sole, pre-claim compatibility refusal from an
+// explicit monitoring activation. Persist monitoring before cleanup, as Stop
+// does, so a crash resumes that exact owned cleanup instead of retrying Both.
+func (m *Evaluation) finishUnsupported(id string, refusal error, validate, cleanup func() error) (bool, error) {
+	m.mu.Lock()
+	current := m.status.ID == id && (m.status.State == "starting" || m.status.State == "stopping")
+	m.mu.Unlock()
+	if !current {
+		return true, nil
+	}
+	if validate != nil {
+		if err := validate(); err != nil {
+			return false, errors.Join(refusal, err)
+		}
+	}
+	m.mu.Lock()
+	if m.status.ID != id || (m.status.State != "starting" && m.status.State != "stopping") {
+		m.mu.Unlock()
+		return true, nil // Another lifecycle is never ours to finish or clean.
+	}
+	deliberateStop := m.desiredMode == "monitoring"
+	var err error
+	if !deliberateStop {
+		err = m.saveDesired("monitoring")
+	}
+	m.mu.Unlock()
+	if err != nil {
+		return false, errors.Join(refusal, err)
+	}
+	if cleanup != nil {
+		if err := cleanup(); err != nil {
+			return false, errors.Join(refusal, err)
+		}
+	}
+	if deliberateStop {
+		refusal = nil
+	}
+	m.finish(refusal, true)
+	return true, nil
+}
+
+func (m *Evaluation) run(ctx context.Context, id string, fromMonitoring bool) {
 	m.mu.Lock()
 	continuous, profile := m.continuous, m.status.Profile
 	m.mu.Unlock()
@@ -307,13 +357,75 @@ func (m *Evaluation) run(ctx context.Context, id string) {
 		m.finish(err, true)
 		return
 	}
+	// Only a deliberate attempt from clean monitoring can return to monitoring
+	// on this specific compatibility refusal. Persisted protection restoration and
+	// every other failure retain their existing fail-closed behaviour.
+	refuseCleanly := false
+	if continuous && fromMonitoring {
+		present, err := guardOwned(m.dir)
+		if err != nil {
+			m.finish(err, false)
+			return
+		}
+		refuseCleanly = !present
+		if refuseCleanly {
+			err := m.establishedPreflight(ctx)
+			if _, unsupported := err.(*unsupportedEstablishedTCP); unsupported {
+				handled, refusalErr := m.finishUnsupported(id, err, func() error {
+					present, er := guardOwned(m.dir)
+					if er != nil {
+						return er
+					}
+					if present {
+						return fmt.Errorf("guard appeared after activation preflight")
+					}
+					return nil
+				}, nil)
+				if handled {
+					return
+				}
+				err = refusalErr // Integrity/I/O failure uses the ordinary failure guard.
+			}
+			if err != nil {
+				m.mu.Lock()
+				if m.desiredMode == "monitoring" {
+					m.finishLocked(nil, true)
+					m.mu.Unlock()
+					return
+				}
+				m.mu.Unlock()
+				if guardErr := InstallGuard(m.dir, m.e.ApprovedBootstrap()...); guardErr != nil {
+					err = errors.Join(err, guardErr)
+				}
+				// Stop may have raced guard installation; commit under the same lock as
+				// saveDesired, or finish its exact-owned cleanup instead of losing Stop.
+				m.mu.Lock()
+				if m.desiredMode != "monitoring" {
+					m.finishLocked(err, false)
+					m.mu.Unlock()
+					return
+				}
+				m.mu.Unlock()
+				cleanupErr := RemoveGuard(m.dir)
+				m.finish(cleanupErr, cleanupErr == nil)
+				return
+			}
+		}
+	}
 	bootstrap := m.e.ApprovedBootstrap()
 	if ctx.Err() != nil {
 		m.finish(nil, true)
 		return
 	}
+	var activationGuard guardRecord
 	if continuous {
 		if err := InstallGuard(m.dir, bootstrap...); err != nil {
+			m.finish(err, false)
+			return
+		}
+		var err error
+		activationGuard, err = guardMetadata(m.dir)
+		if err != nil {
 			m.finish(err, false)
 			return
 		}
@@ -514,7 +626,8 @@ func (m *Evaluation) run(ctx context.Context, id string) {
 	cancelRun()
 	// No accelerator rule mutation: failed sessions retain their audited owner
 	// until exact table cleanup succeeds, including deliberate cleanup retries.
-	if stopErr := m.stopSocketSession(); stopErr != nil {
+	stopErr := m.stopSocketSession()
+	if stopErr != nil {
 		err = errors.Join(err, stopErr)
 	}
 	if auditDone != nil {
@@ -539,6 +652,43 @@ func (m *Evaluation) run(ctx context.Context, id string) {
 		m.status.Cleanup = "unconfirmed"
 		m.mu.Unlock()
 		<-ctx.Done()
+	}
+	// A post-preflight compatibility race is still returned before claim or
+	// installation. Never classify joined teardown/integrity errors as refusals.
+	if _, unsupported := err.(*unsupportedEstablishedTCP); unsupported && refuseCleanly && !activated && !auditFailed && stopErr == nil && ctx.Err() == nil {
+		validateGuard := func() error {
+			yes, er := guardOwned(m.dir)
+			if er != nil {
+				return er
+			}
+			if !yes {
+				return fmt.Errorf("activation guard disappeared")
+			}
+			actual, er := guardMetadata(m.dir)
+			if er != nil {
+				return er
+			}
+			if actual != activationGuard {
+				return fmt.Errorf("activation guard generation changed")
+			}
+			return nil
+		}
+		handled, refusalErr := m.finishUnsupported(id, err, validateGuard, func() error {
+			if er := cleanupEmbedded(m.dir, id); er != nil {
+				return er
+			}
+			if er := m.releaseSocketSession(); er != nil {
+				return er
+			}
+			if er := validateGuard(); er != nil {
+				return er
+			}
+			return RemoveGuard(m.dir)
+		})
+		if !handled {
+			finish(refusalErr, false)
+		}
+		return
 	}
 	if continuous {
 		m.mu.Lock()

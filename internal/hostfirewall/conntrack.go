@@ -71,6 +71,69 @@ func setMark(f ct.Flow, value uint32) error {
 	}
 	return err
 }
+
+// unsupportedEstablishedTCP is a compatibility refusal, not proof of lost
+// ownership or a failed consumer. It is produced only before claiming marks.
+type unsupportedEstablishedTCP struct{ socket identity.Socket }
+
+func (e *unsupportedEstablishedTCP) Error() string {
+	s := e.socket
+	return fmt.Sprintf("established TCP socket %s -> %s (inode %d) lacks a pre-existing conntrack entry; refusing activation to preserve it", s.Local, s.Remote, s.Inode)
+}
+
+// Read-only early check. bootstrapSnapshots repeats the same proof immediately
+// before claim, because sockets and conntrack can change after this observation.
+func checkEstablishedTCP(ctx context.Context) error {
+	sockets, err := identity.Sockets()
+	if err != nil {
+		return err
+	}
+	fs, err := flows()
+	if err != nil {
+		return err
+	}
+	return validateBootstrap(ctx, sockets, fs)
+}
+
+// The ordering matches activation: a mark collision is an integrity failure,
+// even when the same snapshot also contains an unsupported established socket.
+func validateBootstrap(ctx context.Context, sockets []identity.Socket, fs []ct.Flow) error {
+	for _, f := range fs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if f.Mark&mask != 0 {
+			return fmt.Errorf("reserved conntrack bits already occupied; recover previous owned run first")
+		}
+	}
+	return validateEstablishedTCP(ctx, sockets, fs)
+}
+
+func validateEstablishedTCP(ctx context.Context, sockets []identity.Socket, fs []ct.Flow) error {
+	known := map[string]bool{}
+	for _, f := range fs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		for _, t := range []ct.Tuple{f.TupleOrig, f.TupleReply} {
+			if t.Proto.Protocol == 6 {
+				a := netip.AddrPortFrom(t.IP.SourceAddress.Unmap(), t.Proto.SourcePort)
+				b := netip.AddrPortFrom(t.IP.DestinationAddress.Unmap(), t.Proto.DestinationPort)
+				known[a.String()+"|"+b.String()] = true
+			}
+		}
+	}
+	for _, s := range sockets {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if s.Protocol == "tcp" && s.State == 1 && !known[s.Local.String()+"|"+s.Remote.String()] {
+			return &unsupportedEstablishedTCP{socket: s}
+		}
+	}
+	return nil
+}
+
 func bootstrap(claim func() error) error { return bootstrapContext(context.Background(), claim) }
 func bootstrapContext(ctx context.Context, claim func() error) error {
 	return bootstrapSnapshots(ctx, claim, identity.Sockets, flows, setMark)
@@ -87,33 +150,8 @@ func bootstrapSnapshots(ctx context.Context, claim func() error, socketSnapshot 
 	if err != nil {
 		return err
 	}
-	for _, f := range fs {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if f.Mark&mask != 0 {
-			return fmt.Errorf("reserved conntrack bits already occupied; recover previous owned run first")
-		}
-	}
-	// Refuse to strand established TCP sockets that were never tracked before
-	// activation (for example a host with conntrack hooks previously inactive).
-	known := map[string]bool{}
-	for _, f := range fs {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		for _, t := range []ct.Tuple{f.TupleOrig, f.TupleReply} {
-			if t.Proto.Protocol == 6 {
-				a := netip.AddrPortFrom(t.IP.SourceAddress.Unmap(), t.Proto.SourcePort)
-				b := netip.AddrPortFrom(t.IP.DestinationAddress.Unmap(), t.Proto.DestinationPort)
-				known[a.String()+"|"+b.String()] = true
-			}
-		}
-	}
-	for _, s := range sockets {
-		if s.Protocol == "tcp" && s.State == 1 && !known[s.Local.String()+"|"+s.Remote.String()] {
-			return fmt.Errorf("established TCP socket %s -> %s (inode %d) lacks a pre-existing conntrack entry; refusing activation to preserve it", s.Local, s.Remote, s.Inode)
-		}
+	if err := validateBootstrap(ctx, sockets, fs); err != nil {
+		return err
 	}
 	if err := claim(); err != nil {
 		return err
