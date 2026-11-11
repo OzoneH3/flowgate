@@ -166,19 +166,20 @@ func (w *WineTable) activityBatch(s *ActivitySnapshot, indices []int, broker *Pr
 	if e != nil || !w.session.current() || w.helperPeersCounted(broker, true) != 1 {
 		return nil
 	}
-	// Image mapping evidence is shared only within this single fresh census.
-	images := map[string]bool{}
+	// Discovery is shared across distinct image requests in this fresh pass.
+	// All three helper barriers above and every per-socket check below remain.
+	var images map[wineImageKey]bool
 	visible := func(b *Process, path, revision string) bool {
 		if !proceed() {
 			return false
 		}
-		key := path + "|" + revision
-		if v, ok := images[key]; ok {
-			return v
+		if images == nil {
+			images = w.activityImagesVisible(b, w.activityImageKeys(s, indices, second, proceed), proceed)
+			if images == nil {
+				images = map[wineImageKey]bool{}
+			}
 		}
-		v := w.imageRevisionVisibleCounted(b, path, revision, true)
-		images[key] = v
-		return v
+		return images[wineImageKey{path, revision}]
 	}
 	result := w.annotateCensus(s, &fresh, sockets, indices, broker, first, second, visible)
 	if !proceed() {
