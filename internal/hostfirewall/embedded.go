@@ -684,7 +684,11 @@ func (m *Evaluation) run(ctx context.Context, id string, fromMonitoring bool) {
 			if er := validateGuard(); er != nil {
 				return er
 			}
-			return RemoveGuard(m.dir)
+			if er := RemoveGuard(m.dir); er != nil {
+				return er
+			}
+			releaseOwner()
+			return nil
 		})
 		if !handled {
 			finish(refusalErr, false)
