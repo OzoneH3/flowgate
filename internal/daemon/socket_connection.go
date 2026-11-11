@@ -125,29 +125,99 @@ func (e *Engine) runConnectionAuthorization(ctx context.Context, s *socketAuthor
 			if chosen == nil || (chosen.haveKey && s.active != 0) {
 				break
 			}
-			f := chosen
-			f.busy = true
+			group := s.connectionCheckGroup(chosen, now)
+			for _, f := range group {
+				f.busy = true
+			}
 			s.active++
 			s.jobs.Add(1)
 			ticket := s.store.Begin()
-			go func() {
-				var a identity.Attribution
-				pprof.Do(ctx, pprof.Labels("flowgate_work", "socket_connection_check"), func(context.Context) { a = s.resolve(f.flow) })
-				e.mu.Lock()
-				if ctx.Err() == nil && e.socketAuthorization == s && s.failure == nil && !s.disabled && s.flows[s.flowKey(f.flow)] == f {
-					e.finishSocketAuthorizationLocked(s, f, ticket, a)
-					s.checks++
-				}
-				f.busy = false
-				f.next = time.Now().Add(connectionCheckInterval)
-				s.active--
-				s.jobs.Done()
-				e.mu.Unlock()
-				s.wakeScheduler()
-			}()
+			if len(group) > 1 {
+				s.groups++
+				s.groupFlows += uint64(len(group))
+			}
+			go e.resolveConnectionChecks(ctx, s, group, ticket)
 		}
 		e.mu.Unlock()
 	}
+}
+
+// Only already-due established runtime sockets may share a fresh observation.
+// No arrival wait, cadence alignment, initial grant or saved proof is involved.
+func (s *socketAuthorization) connectionCheckGroup(chosen *socketFlow, now time.Time) []*socketFlow {
+	group := []*socketFlow{chosen}
+	if s.resolveGroup == nil || !chosen.haveKey || !chosen.runtime {
+		return group
+	}
+	for _, f := range s.flows {
+		if len(group) == identity.MaxRuntimeObservationFlows {
+			break
+		}
+		if !f.busy && !f.next.After(now) && renewalPeers(chosen, f) {
+			group = append(group, f)
+		}
+	}
+	return group
+}
+
+func (e *Engine) resolveConnectionChecks(ctx context.Context, s *socketAuthorization, group []*socketFlow, ticket socketgrant.Ticket) {
+	defer func() {
+		e.mu.Lock()
+		s.active--
+		s.jobs.Done()
+		e.mu.Unlock()
+		s.wakeScheduler()
+	}()
+	// Existing grouped resolvers may emit from independent prefix goroutines.
+	// The engine lock serializes completion and also guards this per-pass set.
+	completed := make([]bool, len(group))
+	emit := func(i int, a *identity.Attribution) {
+		e.mu.Lock()
+		if i < 0 || i >= len(group) || completed[i] {
+			e.mu.Unlock()
+			return
+		}
+		completed[i] = true
+		e.mu.Unlock()
+		f := group[i]
+		if a == nil {
+			fresh := s.resolve(f.flow)
+			a = &fresh
+		}
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		if ctx.Err() == nil && e.socketAuthorization == s && s.failure == nil && !s.disabled && s.flows[s.flowKey(f.flow)] == f {
+			e.finishSocketAuthorizationLocked(s, f, ticket, *a)
+			s.checks++
+		}
+		f.busy = false
+		f.next = time.Now().Add(connectionCheckInterval)
+	}
+	pprof.Do(ctx, pprof.Labels("flowgate_work", "socket_connection_check"), func(context.Context) {
+		if len(group) == 1 {
+			a := s.resolve(group[0].flow)
+			emit(0, &a)
+		} else {
+			flows := make([]identity.Flow, len(group))
+			for i, f := range group {
+				flows[i] = f.flow
+			}
+			s.resolveGroup(flows, emit)
+		}
+	})
+	// A missing result is inconclusive, never a reason to remove an existing
+	// grant or leave its scheduling state stuck. It gets the same next cadence.
+	e.mu.Lock()
+	for i, f := range group {
+		if !completed[i] {
+			if ctx.Err() == nil && e.socketAuthorization == s && s.failure == nil && !s.disabled && s.flows[s.flowKey(f.flow)] == f {
+				s.backgroundInconclusive++
+			}
+			f.busy = false
+			f.next = time.Now().Add(connectionCheckInterval)
+		}
+	}
+	e.mu.Unlock()
 }
 
 func (e *Engine) failConnectionAuthorizationLocked(s *socketAuthorization, cause error) {
