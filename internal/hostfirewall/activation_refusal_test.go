@@ -196,6 +196,15 @@ func TestActivationRefusalKernelRace(t *testing.T) {
 		<-locked
 	}
 	m.establishedPreflight = func(ctx context.Context) error {
+		if mode == "stop-foreign-guard" {
+			if err := createUntracked(ctx); err != nil {
+				return err
+			}
+			refusal := checkEstablishedTCP(ctx)
+			close(entered)
+			<-release
+			return refusal
+		}
 		if mode == "stop-guard-race" {
 			close(entered)
 			<-release
@@ -257,23 +266,31 @@ func TestActivationRefusalKernelRace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mode == "stop-race" || mode == "stop-guard-race" {
+	if mode == "stop-race" || mode == "stop-guard-race" || mode == "stop-foreign-guard" {
 		<-entered
 		if mode == "stop-guard-race" {
 			close(release)
 			time.Sleep(100 * time.Millisecond)
 		}
+		if mode == "stop-foreign-guard" {
+			if err := InstallGuard(m.dir); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := nft("add", "rule", "inet", GuardTable, "output", "counter"); err != nil {
+				t.Fatal(err)
+			}
+		}
 		if _, err := m.ProtectionStop(started.ID); err != nil {
 			t.Fatal(err)
 		}
-		if mode == "stop-race" {
+		if mode == "stop-race" || mode == "stop-foreign-guard" {
 			close(release)
 		} else {
 			close(unlockGuard)
 		}
 	}
 	expected := "stopped"
-	if mode == "foreign-guard" || mode == "joined-error" || mode == "persisted-both" || mode == "preexisting-guard" || mode == "persistence-error" {
+	if mode == "foreign-guard" || mode == "joined-error" || mode == "persisted-both" || mode == "preexisting-guard" || mode == "persistence-error" || mode == "stop-foreign-guard" {
 		expected = "degraded"
 	}
 	waitEvaluation(t, m, expected)

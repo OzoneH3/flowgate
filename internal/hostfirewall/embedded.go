@@ -389,8 +389,9 @@ func (m *Evaluation) run(ctx context.Context, id string, fromMonitoring bool) {
 			if err != nil {
 				m.mu.Lock()
 				if m.desiredMode == "monitoring" {
-					m.finishLocked(nil, true)
 					m.mu.Unlock()
+					cleanupErr := RemoveGuard(m.dir)
+					m.finish(cleanupErr, cleanupErr == nil)
 					return
 				}
 				m.mu.Unlock()
