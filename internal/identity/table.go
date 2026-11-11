@@ -662,10 +662,7 @@ func (w *WineTable) imageRevisionVisibleCounted(broker *Process, path, revision 
 		if err != nil || p.Application.Prefix != w.prefix || p.UID != broker.UID || p.NetNS != broker.NetNS {
 			continue
 		}
-		if activity {
-			diagnostics.Count(diagnostics.ActivityImageMaps, 1)
-		}
-		maps := string(readBound("/proc/"+e.Name()+"/maps", 2<<20))
+		maps := readWineImageMaps(pid, activity)
 		if strings.Contains(maps, path+" (deleted)") {
 			return false
 		}
@@ -700,15 +697,21 @@ func (w *WineTable) imageRevisionVisibleCounted(broker *Process, path, revision 
 			}
 			if activity {
 				diagnostics.Count(diagnostics.ActivityImageInspections, 1)
-				diagnostics.Count(diagnostics.ActivityImageMaps, 1)
 			}
 			current, err := Inspect(p.PID)
-			if err == nil && related && current.Start == p.Start && current.UID == p.UID && current.NetNS == p.NetNS && current.MountNS == p.MountNS && current.Application.Prefix == w.prefix && wineTableImageVisible(current, path, revision, string(readBound("/proc/"+e.Name()+"/maps", 2<<20))) {
+			if err == nil && related && current.Start == p.Start && current.UID == p.UID && current.NetNS == p.NetNS && current.MountNS == p.MountNS && current.Application.Prefix == w.prefix && wineTableImageVisible(current, path, revision, readWineImageMaps(pid, activity)) {
 				found = true
 			}
 		}
 	}
 	return found
+}
+
+func readWineImageMaps(pid int, activity bool) string {
+	if activity {
+		diagnostics.Count(diagnostics.ActivityImageMaps, 1)
+	}
+	return string(readBound(fmt.Sprintf("/proc/%d/maps", pid), 2<<20))
 }
 
 // Broker-only and broker+same-client snapshots have the same authority when
