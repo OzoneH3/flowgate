@@ -542,6 +542,10 @@ func mayBeHelperPeer(brokerFDs map[uint32]bool, peers map[uint32]uint32, fds map
 }
 
 func (w *WineTable) helperPeers(broker *Process) int {
+	return w.helperPeersCounted(broker, false)
+}
+
+func (w *WineTable) helperPeersCounted(broker *Process, activity bool) int {
 	defer diagnostics.Begin(diagnostics.WineHelperValidation).End()
 	bf, err := socketFDs(broker.PID)
 	if err != nil {
@@ -550,6 +554,9 @@ func (w *WineTable) helperPeers(broker *Process) int {
 	peers, err := unixPeers()
 	if err != nil {
 		return -1
+	}
+	if activity {
+		diagnostics.Count(diagnostics.ActivityHelperProcessPasses, 1)
 	}
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
@@ -623,7 +630,15 @@ func wineProcessCandidate(pid int, stat func(string) (string, int, error), readL
 // alone cannot establish its loaded revision. Retain the existing mapped-image
 // corroboration and reject deleted mappings even if the path has been reused.
 func (w *WineTable) imageRevisionVisible(broker *Process, path, revision string) bool {
+	return w.imageRevisionVisibleCounted(broker, path, revision, false)
+}
+
+func (w *WineTable) imageRevisionVisibleCounted(broker *Process, path, revision string, activity bool) bool {
 	defer diagnostics.Begin(diagnostics.WineImageValidation).End()
+	if activity {
+		diagnostics.Count(diagnostics.ActivityImageRequests, 1)
+		diagnostics.Count(diagnostics.ActivityImageProcessPasses, 1)
+	}
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
 		return false
@@ -640,22 +655,37 @@ func (w *WineTable) imageRevisionVisible(broker *Process, path, revision string)
 		if !mayBeWineProcess(pid) {
 			continue
 		}
+		if activity {
+			diagnostics.Count(diagnostics.ActivityImageInspections, 1)
+		}
 		p, err := Inspect(pid)
 		if err != nil || p.Application.Prefix != w.prefix || p.UID != broker.UID || p.NetNS != broker.NetNS {
 			continue
+		}
+		if activity {
+			diagnostics.Count(diagnostics.ActivityImageMaps, 1)
 		}
 		maps := string(readBound("/proc/"+e.Name()+"/maps", 2<<20))
 		if strings.Contains(maps, path+" (deleted)") {
 			return false
 		}
 		if wineTableImageVisible(p, path, revision, maps) {
+			if activity {
+				diagnostics.Count(diagnostics.ActivityImageFDs, 1)
+			}
 			cf, err := socketFDs(p.PID)
 			if err != nil {
 				continue
 			}
+			if activity {
+				diagnostics.Count(diagnostics.ActivityImageFDs, 1)
+			}
 			bf, err := socketFDs(broker.PID)
 			if err != nil {
 				continue
+			}
+			if activity {
+				diagnostics.Count(diagnostics.ActivityImagePeers, 1)
 			}
 			peers, err := unixPeers()
 			if err != nil {
@@ -667,6 +697,10 @@ func (w *WineTable) imageRevisionVisible(broker *Process, path, revision string)
 					related = true
 					break
 				}
+			}
+			if activity {
+				diagnostics.Count(diagnostics.ActivityImageInspections, 1)
+				diagnostics.Count(diagnostics.ActivityImageMaps, 1)
 			}
 			current, err := Inspect(p.PID)
 			if err == nil && related && current.Start == p.Start && current.UID == p.UID && current.NetNS == p.NetNS && current.MountNS == p.MountNS && current.Application.Prefix == w.prefix && wineTableImageVisible(current, path, revision, string(readBound("/proc/"+e.Name()+"/maps", 2<<20))) {

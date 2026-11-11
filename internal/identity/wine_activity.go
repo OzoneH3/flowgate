@@ -122,7 +122,7 @@ func (w *WineTable) activityBatch(s *ActivitySnapshot, indices []int, broker *Pr
 		}
 	}()
 	generation := w.generation
-	if w.dead || w.lost.Load() || w.session == nil || !w.session.current() || !w.sameServer(broker) {
+	if w.dead || w.lost.Load() || w.session == nil || !w.session.current() || w.helperPeersCounted(broker, true) != 1 {
 		return nil
 	}
 	first := map[activityTableKey]tableSnapshot{}
@@ -146,7 +146,7 @@ func (w *WineTable) activityBatch(s *ActivitySnapshot, indices []int, broker *Pr
 	if !acquired {
 		return nil
 	}
-	if !fresh.Complete || w.dead || w.lost.Load() || w.generation != generation || w.session == nil || !w.session.current() || !w.sameServer(broker) {
+	if !fresh.Complete || w.dead || w.lost.Load() || w.generation != generation || w.session == nil || !w.session.current() || w.helperPeersCounted(broker, true) != 1 {
 		return nil
 	}
 	for key := range first {
@@ -163,7 +163,7 @@ func (w *WineTable) activityBatch(s *ActivitySnapshot, indices []int, broker *Pr
 		return nil
 	}
 	sockets, e := SocketsLimited(2048)
-	if e != nil || !w.session.current() || !w.sameServer(broker) {
+	if e != nil || !w.session.current() || w.helperPeersCounted(broker, true) != 1 {
 		return nil
 	}
 	// Image mapping evidence is shared only within this single fresh census.
@@ -176,7 +176,7 @@ func (w *WineTable) activityBatch(s *ActivitySnapshot, indices []int, broker *Pr
 		if v, ok := images[key]; ok {
 			return v
 		}
-		v := w.imageRevisionVisible(b, path, revision)
+		v := w.imageRevisionVisibleCounted(b, path, revision, true)
 		images[key] = v
 		return v
 	}

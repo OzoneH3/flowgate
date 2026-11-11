@@ -63,10 +63,17 @@ const (
 	HolderIteratorTables
 	HolderIteratorFallback
 	HolderProcTables
+	ActivityHelperProcessPasses
+	ActivityImageRequests
+	ActivityImageProcessPasses
+	ActivityImageInspections
+	ActivityImageMaps
+	ActivityImageFDs
+	ActivityImagePeers
 	counterCount
 )
 
-var counterNames = [...]string{"callback_offered", "parsed", "parsed_udp", "parsed_tcp", "admitted", "admission_rejected", "worker_packet_visits", "completed_packet_visits", "allow_verdicts", "drop_verdicts", "verdict_errors", "wine_hint_hit", "wine_hint_fresh_fallback", "holder_second_attempt", "wine_hint_busy", "holder_iterator_tables", "holder_iterator_fallback", "holder_proc_tables"}
+var counterNames = [...]string{"callback_offered", "parsed", "parsed_udp", "parsed_tcp", "admitted", "admission_rejected", "worker_packet_visits", "completed_packet_visits", "allow_verdicts", "drop_verdicts", "verdict_errors", "wine_hint_hit", "wine_hint_fresh_fallback", "holder_second_attempt", "wine_hint_busy", "holder_iterator_tables", "holder_iterator_fallback", "holder_proc_tables", "activity_helper_process_passes", "activity_image_requests", "activity_image_process_passes", "activity_image_inspections", "activity_image_maps", "activity_image_fds", "activity_image_peers"}
 
 type bucket struct {
 	count, nanos atomic.Uint64
