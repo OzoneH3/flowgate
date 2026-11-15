@@ -3,6 +3,7 @@ package identity
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -205,6 +206,9 @@ func CaptureExecutable(owner Process, app Application) (*RetainedExecutable, err
 		s, _, err := processStat(base)
 		if err != nil || s != owner.Start {
 			return fmt.Errorf("process %d is no longer the attributed instance", owner.PID)
+		}
+		if app.AppImage != nil {
+			return VerifyInstanceExecutable(owner.PID, owner.Start, app)
 		}
 		return nil
 	}
@@ -535,6 +539,9 @@ func sandboxKeyPath(pid int, mountNS, nsPath string, st os.FileInfo) string {
 
 // KeyPath is the path the application key is derived from.
 func (a Application) KeyPath() string {
+	if verifiedAppImage(a) {
+		return a.AppImage.Container + "!/" + a.AppImage.RelativeExecutable
+	}
 	if a.HostExecutable != "" {
 		return a.HostExecutable
 	}
@@ -549,6 +556,11 @@ func (a Application) KeyPath() string {
 
 // ApplicationKey derives the application key (user, kind, prefix, key path).
 func ApplicationKey(uid uint32, a Application) string {
+	if verifiedAppImage(a) {
+		// Length-delimited fields cannot collide with ordinary native paths.
+		b, _ := json.Marshal([]any{uid, "appimage-v1", a.AppImage.Container, a.AppImage.RelativeExecutable})
+		return digest(string(b))
+	}
 	if a.Kind == "electron" && a.Hosted != nil && a.Hosted.State == "best-effort" {
 		if a.Hosted.Scope == "node-utilities" {
 			return digest(fmt.Sprintf("%d|electron-node-utilities-v1|%s|%s", uid, a.Runtime, a.KeyPath()))
@@ -657,6 +669,13 @@ func VerifyRetainedEvidence(a Application, uid uint32, ev ExecutableEvidence) er
 // VerifyInstanceExecutable proves the exact still-running instance executes
 // the retained revision (sandbox-only executables while the process runs).
 func VerifyInstanceExecutable(pid int, start string, a Application) error {
+	if a.AppImage != nil {
+		p, err := Inspect(pid)
+		if err != nil || p.Start != start || !verifiedAppImage(p.Application) || p.Application.Key != a.Key || p.Application.Revision != a.Revision || p.Application.AppImage.ContainerRevision != a.AppImage.ContainerRevision {
+			return changed(CodeIdentityUnverifiable, "AppImage instance or provider changed")
+		}
+		return nil
+	}
 	if BestEffortElectron(a) {
 		p, err := Inspect(pid)
 		if err != nil || p.Start != start || !BestEffortElectron(p.Application) || p.Application.Key != a.Key || p.Application.Revision != a.Revision {

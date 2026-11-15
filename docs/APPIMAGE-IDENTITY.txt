@@ -1,0 +1,89 @@
+Persistent native AppImage identity
+=================================
+
+A random FUSE mount directory is not a stable executable location. For a
+supported self-mounting runtime, FlowGate uses a separate application-key domain:
+UID + canonical archive pathname + executable path relative to the mounted root.
+Each inner executable remains independent. Another archive path, even containing
+identical bytes, and another UID do not inherit a permission. Incoming/outgoing,
+rule scopes, revisions and update-following policy retain their existing meaning.
+No display name, parent process, mount label or environment value is authority.
+
+Supported evidence
+------------------
+This implementation supports the x86_64 AppImageKit effcebc type-2 runtime whose
+first 188392 bytes have SHA256:
+24da8e0e149b7211cbfb00a545189a1101cb18d1f27d4cfc1895837d2c30bc30
+This is a runtime implementation pin shared by different applications, not an
+application allow-list. A SquashFS superblock must immediately follow that prefix.
+
+The target remains a verified native executable. Existing owner-credential FUSE
+metadata checks, mapped device/inode and process-generation bookends still apply.
+Its owner-only FUSE mount must be a read-only whole-filesystem mount. Kernel
+fdinfo fuse_connection binds that mount's device to its live transport holders.
+
+Every process's task FD tables are examined, including private non-leader tables.
+Unknown holders are refused, not skipped. Each holder must execute the supported
+runtime from the canonical archive inode and hold that same archive open. Other
+readable regular-file inputs (including stdin) are refused. The validated reader
+retains its input descriptor while serving FUSE; TARGET_APPIMAGE selecting a
+different archive therefore does not acquire the first archive's permission.
+
+Executable mappings must match their backing bytes. Archive executable mappings
+must stay within the validated runtime prefix. Other executable mappings must be
+root-owned, not writable by non-root users, have protected parent directories,
+and represent the supported libc/loader/libfuse/libz/libdl/libpthread/librt roles.
+Anonymous/injected code and unrelated preload libraries are unsupported. Kernel
+vdso/vsyscall mappings are the explicit kernel-code exceptions.
+
+Full holder discovery is repeated independently before and after the observation.
+There is no positive locator or identity cache. A missing/unreadable/changing
+observation, unknown runtime, private/delegated unknown holder or discovery-budget
+exhaustion falls back to the existing per-mount native identity, with the reason
+included in executable evidence. It does not create an automatic Allow.
+
+Primary implementation references
+---------------------------------
+https://github.com/AppImage/AppImageKit/blob/effcebc/src/runtime.c
+  Selects the input path; computes ELF-end offset; passes read-only offset and
+  input path into fusefs_main. TARGET_APPIMAGE is an external-input mode.
+https://github.com/AppImage/AppImageKit/tree/effcebc/lib/libappimage
+  Submodule 13f401a4a384ec59ec9a144e2a7006adf751571f.
+https://github.com/AppImage/libappimage/blob/13f401a4a384ec59ec9a144e2a7006adf751571f/cmake/dependencies.cmake
+  Pins embedded squashfuse 1f98030. Its patches rename the low-level entry point
+  to fusefs_main, add the mounted callback and implement libfuse dlopen dispatch.
+https://github.com/vasi/squashfuse/blob/1f98030/util.c
+https://github.com/vasi/squashfuse/blob/1f98030/fs.c
+https://github.com/vasi/squashfuse/blob/1f98030/ll.c
+  sqfs_open_image retains the successful input FD, sqfs_init stores it, block
+  reads use fs->fd and fs->offset, and FUSE callbacks use that reader instance.
+The retained validation evidence also includes disassembly of these functions
+from the exact pinned runtime. This is not a claim of an upstream reproducible
+build or vendor signature verification.
+
+Limits and migration
+--------------------
+Existing temporary-path rules are not guessed or migrated. A user needs one new
+saved permission for the stable identity. A temporary/once Allow remains temporary.
+Moving the archive to a different canonical path creates a new identity. Updates
+at the same path follow the existing explicit update-following rule contract.
+
+This covers native executable files inside the supported mount. It does not add
+stable script identity for an external Python/shell interpreter, extracted
+AppImages, arbitrary FUSE servers or unvalidated runtime prefixes. Older kernels
+without fuse_connection reporting retain the old identity. A changed runtime
+prefix may require additional implementation validation before being supported.
+
+Observations are bounded, live snapshots, not an atomic freeze of the system or
+an anti-debugging attestation. A same-UID debugger can change process memory or
+transfer descriptors later, as with ordinary native process evidence. Unrelated
+FD churn or a large task population can make discovery inconclusive; the explicit
+fallback may still cause a new prompt. No cache hides that missing evidence.
+
+Validation scope
+----------------
+Disconnected guest tests use distinct synthetic archives, separate UIDs, separate
+inner executables and multiple random mounts. Independent receiver tests exercise
+saved Allow/Deny, relaunch, daemon restart in the guest and revocation. API-driven
+Remember tests do not prove native GUI behavior or persistence of a once Allow.
+No installed-host migration or deployment is implied by these tests.

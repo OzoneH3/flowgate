@@ -169,6 +169,14 @@ func DescribePermissionTarget(a Attribution) *PermissionTarget {
 		}
 		return t
 	}
+	if verifiedAppImage(*app) {
+		t.Kind = "application"
+		t.Label = name + " (AppImage)"
+		t.KeyBasis = "uid+kernel-bound AppImage archive path+inner executable path"
+		t.Remember = fmt.Sprintf("%s in %s, UID %d; saved permissions survive temporary remounts at this archive path", app.AppImage.RelativeExecutable, app.AppImage.Container, uid)
+		t.SharedWithNote = "Other archives, executable paths inside the archive and users remain separate. Moving the archive requires a new decision. This is live filesystem/provider evidence, not code attestation."
+		return t
+	}
 	t.KeyBasis = "uid+executable path; revision = file stamp"
 	if contentRevision(*app) {
 		t.KeyBasis = "uid+verified runtime deployment path; revision = SHA-256 of executable content"

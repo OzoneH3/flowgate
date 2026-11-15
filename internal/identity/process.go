@@ -16,7 +16,8 @@ import (
 )
 
 type Application struct {
-	bestEffortElectron bool // resolver-issued; never restored from client or stored JSON
+	AppImage           *AppImageIdentity `json:"appimage,omitempty"`
+	bestEffortElectron bool              // resolver-issued; never restored from client or stored JSON
 
 	DisplayName       string `json:"display_name,omitempty"`
 	DisplayExecutable string `json:"display_executable,omitempty"`
@@ -221,6 +222,16 @@ func Inspect(pid int) (Process, error) {
 				a.ExecutableStatus = "deleted"
 				a.DisplayExecutable = strings.TrimSuffix(a.Executable, " (deleted)")
 				a.DisplayName = filepath.Base(a.DisplayExecutable)
+			}
+		}
+	}
+	if a.Kind == "native" && a.Revision != "" {
+		if _, ownerFuse := exeInfo.(ownerExeInfo); ownerFuse {
+			if bound, err := observeAppImage(pid, exeInfo); err == nil {
+				a.AppImage = bound
+				a.Evidence = append(a.Evidence, "AppImage: validated runtime, self-archive descriptor and FUSE task census; UID and inner executable remain separate")
+			} else {
+				a.Evidence = append(a.Evidence, "AppImage persistent identity unavailable: "+err.Error())
 			}
 		}
 	}
