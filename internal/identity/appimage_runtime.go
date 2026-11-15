@@ -106,6 +106,12 @@ func appImageTableScan(base string, connection uint64, visit func(path, target s
 		// Do not stat unrelated files here: owner-only FUSE getattr can reject
 		// even root. Every non-anonymous descriptor still needs its full record.
 		target, err := os.Readlink(base + "/fd/" + fd.Name())
+		if errors.Is(err, os.ErrNotExist) {
+			// A listed FD closed before observation; it is not a current
+			// holder. Budget was charged. Task generation and any previously
+			// matched FUSE descriptors are still independently rechecked.
+			continue
+		}
 		if err != nil {
 			return found, fmt.Errorf("FUSE descriptor link unavailable: %s/%s: %w", base, fd.Name(), err)
 		}
@@ -115,6 +121,9 @@ func appImageTableScan(base string, connection uint64, visit func(path, target s
 		// fdinfo is kernel-owned and does not stat the object behind the FD.
 		// Stat would fail on unrelated owner-only FUSE files even for root.
 		raw, e := appImageReadBound(base+"/fdinfo/"+fd.Name(), 4096)
+		if errors.Is(e, os.ErrNotExist) {
+			continue // closed between link and fdinfo; same charged observation
+		}
 		if e != nil || len(raw) > 4096 {
 			return found, fmt.Errorf("FUSE descriptor observation unavailable: %s/%s: %w", base, fd.Name(), e)
 		}

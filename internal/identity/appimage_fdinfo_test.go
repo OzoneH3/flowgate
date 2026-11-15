@@ -73,8 +73,14 @@ func TestAppImageHolderNonAnonymousEvidenceStaysStrict(t *testing.T) {
 			if err := os.Remove(filepath.Join(base, "fdinfo/3")); err != nil {
 				t.Fatal(err)
 			}
+			if got, err := appImageHolderScan(base, 42); got || err != nil {
+				t.Fatal("closed unobserved descriptor treated as holder/error")
+			}
+			if err := os.Mkdir(filepath.Join(base, "fdinfo/3"), 0700); err != nil {
+				t.Fatal(err)
+			}
 			if _, err := appImageHolderScan(base, 42); err == nil {
-				t.Fatal("missing descriptor observation accepted")
+				t.Fatal("unreadable fdinfo accepted")
 			}
 		})
 	}
@@ -165,11 +171,11 @@ func TestAppImageTableBudgetAndPartialEvidence(t *testing.T) {
 			}
 			return true
 		})
-		if !holds || !errors.Is(err, os.ErrNotExist) || attempts != 2 || matches != 1 {
+		if !holds || err != nil || attempts != 2 || matches != 1 {
 			t.Fatalf("holds=%v err=%v attempts=%d matches=%d", holds, err, attempts, matches)
 		}
 	})
-	t.Run("failed-retries-charge-each-attempt", func(t *testing.T) {
+	t.Run("unobserved-closed-descriptor-is-charged", func(t *testing.T) {
 		base := fixture(t, 1)
 		attempts := 0
 		holds, err := appImageStableHolderScan(func() (bool, error) {
@@ -189,10 +195,60 @@ func TestAppImageTableBudgetAndPartialEvidence(t *testing.T) {
 			}
 			return "same-generation", nil
 		})
-		if holds || !errors.Is(err, os.ErrNotExist) || attempts != 3 {
+		if holds || err != nil || attempts != 1 {
 			t.Fatalf("holds=%v err=%v attempts=%d", holds, err, attempts)
 		}
 	})
+	t.Run("fdinfo-closed-before-observation", func(t *testing.T) {
+		base := fixture(t, 1)
+		if err := os.Remove(filepath.Join(base, "fdinfo/3")); err != nil {
+			t.Fatal(err)
+		}
+		attempts := 0
+		holds, err := appImageTableScan(base, 42, func(path, target string) bool { attempts++; return true })
+		if holds || err != nil || attempts != 1 {
+			t.Fatalf("holds=%v err=%v attempts=%d", holds, err, attempts)
+		}
+	})
+	t.Run("known-holder-recheck-refuses-close-or-reuse", func(t *testing.T) {
+		for _, changed := range []string{"closed", "reused", "unreadable"} {
+			t.Run(changed, func(t *testing.T) {
+				base := fixture(t, 1)
+				f := &censusProc{groups: map[int]map[int]*censusTask{100: {100: {start: "1", table: 1}}}, tables: map[int]map[int]string{1: {3: "fuse-connection:[42]"}}}
+				p := f.proc()
+				p.fds = func(tgid, tid int, visit func(string, string) bool) error {
+					_, err := appImageTableScan(base, 42, func(path, target string) bool { return visit("/proc/100/task/100/fd/"+filepath.Base(path), target) })
+					return err
+				}
+				p.readlink = func(path string) (string, error) {
+					if changed == "unreadable" && f.links > 0 {
+						return "", os.ErrPermission
+					}
+					raw, err := appImageReadBound(filepath.Join(base, "fdinfo", filepath.Base(path)), 4096)
+					if err != nil {
+						return "", err
+					}
+					n, err := fuseConnection(string(raw))
+					return fmt.Sprintf("fuse-connection:[%d]", n), err
+				}
+				c := p.census(map[string]bool{"fuse-connection:[42]": true}, defaultHolderLimits)
+				if !c.Complete || len(c.Holders) != 1 {
+					t.Fatalf("census incomplete: %+v", c)
+				}
+				if changed == "closed" {
+					os.Remove(filepath.Join(base, "fdinfo/3"))
+				} else if changed == "reused" {
+					os.WriteFile(filepath.Join(base, "fdinfo/3"), []byte("fuse_connection: 43\n"), 0600)
+				} else {
+					f.links = 1
+				}
+				if c.Recheck() == nil {
+					t.Fatal("changed known holder accepted")
+				}
+			})
+		}
+	})
+
 }
 
 func TestAppImageRuntimeMetadataIsNotCode(t *testing.T) {

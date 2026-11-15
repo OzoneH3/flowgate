@@ -33,9 +33,12 @@ Every process's task FD tables are examined, including private non-leader tables
 KCMP_FILES can prove shared tables, which are scanned once; every member of a
 matching table still needs its own provider validation. Anonymous kernel objects
 are excluded from FUSE fdinfo parsing; all other FD records remain checked.
-Transient per-FD disappearance before finding a matching holder permits at most
-two complete table retries, charged to the same budget and generation-bookended.
-A known-holder failure, unreadable record or exhausted retry stays inconclusive.
+A listed FD confirmed closed (ENOENT) before observing a FUSE connection is
+charged to the budget and contributes no current holder, matching the shared
+socket census. It does not discard any previously matched FUSE descriptor.
+Inventory failures, other read errors and malformed records remain inconclusive.
+Every observed holder FD is rechecked; closure/reuse refuses. Process generation
+and topology are bookended, and two independent full censuses remain mandatory.
 Unknown holders are refused, not skipped. Each holder must execute the supported
 runtime from the canonical archive inode and hold that same archive open. Other
 readable regular-file inputs (including stdin) are refused. The validated reader
