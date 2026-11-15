@@ -4,8 +4,6 @@ package identity
 // executing inode's read-only FUSE filesystem to an actual /dev/fuse holder,
 // then require that holder to execute and hold open the same type-2 AppImage.
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -117,8 +115,8 @@ func appImageHeader(path string) (os.FileInfo, error) {
 	}
 	// The marker is only a format hint. Permission authority requires the exact
 	// validated runtime implementation, including its embedded SquashFS reader.
-	h := sha256.New()
-	if _, e = io.CopyN(h, f, appImageRuntimeSize); e != nil || hex.EncodeToString(h.Sum(nil)) != appImageRuntimeSHA256 {
+	prefix := make([]byte, appImageRuntimeSize)
+	if _, e = io.ReadFull(f, prefix); e != nil || appImageRuntimeDigest(prefix) != appImageRuntimeSHA256 {
 		return nil, fmt.Errorf("unsupported AppImage runtime implementation")
 	}
 	var magic [4]byte
@@ -253,54 +251,64 @@ func verifyAppImageFDs(base, fuseFD, archiveFD string, connection uint64, exe os
 	return nil
 }
 
-func discoverAppImageProvider(r ownerExeRequest, m appImageMount) (appImageProvider, error) {
-	entries, e := os.ReadDir("/proc")
-	if e != nil || len(entries) > 8192 {
-		return appImageProvider{}, fmt.Errorf("process discovery unavailable")
+// Reuse the descriptor-table census's KCMP_FILES and generation/recheck logic.
+// The socket iterator does not enumerate FUSE devices, so this scoped census
+// uses fresh proc observations. Table sharing never grants process authority:
+// every task in every matching table must pass provider validation separately.
+func appImageProviderCensus(connection uint64) HolderCensus {
+	p := procHolders()
+	p.iterator = nil
+	token := fmt.Sprintf("fuse-connection:[%d]", connection)
+	p.fds = func(tgid, tid int, visit func(path, target string) bool) error {
+		base := fmt.Sprintf("/proc/%d/task/%d", tgid, tid)
+		_, err := appImageStableHolderScan(func() (bool, error) {
+			return appImageTableScan(base, connection, visit)
+		}, func() (string, error) { start, _, err := processStat(base); return start, err })
+		if err != nil {
+			// Exhausted or known-holder failures must not become a topology
+			// retry that erases the partial observation. Budget already charged.
+			return fmt.Errorf("FUSE table observation failed: %v", err)
+		}
+		return nil
 	}
-	deadline := time.Now().Add(250 * time.Millisecond)
+	p.readlink = func(path string) (string, error) {
+		// Recheck the exact matched FD against its kernel connection ID, not its
+		// display path. fdinfo errors cannot become an empty/nonmatching result.
+		raw, err := appImageReadBound(filepath.Join(filepath.Dir(filepath.Dir(path)), "fdinfo", filepath.Base(path)), 4096)
+		if err != nil {
+			return "", err
+		}
+		n, err := fuseConnection(string(raw))
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("fuse-connection:[%d]", n), nil
+	}
+	lim := defaultHolderLimits
+	lim.Time = 250 * time.Millisecond
+	return p.census(map[string]bool{token: true}, lim)
+}
+
+func discoverAppImageProvider(r ownerExeRequest, m appImageMount) (appImageProvider, error) {
+	census := appImageProviderCensus(m.Connection)
+	if !census.Complete {
+		return appImageProvider{}, fmt.Errorf("FUSE holder census incomplete: %v", census.Issues)
+	}
 	var found *appImageProvider
-	for _, d := range entries {
-		if time.Now().After(deadline) {
-			return appImageProvider{}, fmt.Errorf("AppImage discovery budget")
-		}
-		_, e := strconv.Atoi(d.Name())
-		if e != nil {
-			continue
-		}
-		tasks, e := os.ReadDir("/proc/" + d.Name() + "/task")
-		if os.IsNotExist(e) {
-			continue
-		}
-		if e != nil || len(tasks) > 4096 {
-			return appImageProvider{}, fmt.Errorf("FUSE task census unavailable")
-		}
-		for _, task := range tasks {
-			if time.Now().After(deadline) {
-				return appImageProvider{}, fmt.Errorf("AppImage task discovery budget")
-			}
-			tid, e := strconv.Atoi(task.Name())
-			if e != nil {
-				return appImageProvider{}, e
-			}
-			holds, e := appImageConnectionHolder("/proc/"+d.Name()+"/task/"+task.Name(), m.Connection)
-			if e != nil {
-				return appImageProvider{}, e
-			}
-			if !holds {
-				continue
-			}
-			// Each task may have an independently unshared descriptor table, including
-			// after its group leader exits. Unknown holders cannot be silently skipped.
-			p, e := inspectAppImageProvider(appImageLocator{PID: tid}, r, m)
-			if e != nil {
-				return p, fmt.Errorf("unverified FUSE holder %d: %w", tid, e)
+	for _, h := range census.Holders {
+		for _, member := range h.Members {
+			p, err := inspectAppImageProvider(appImageLocator{PID: member.TID, Start: member.Start}, r, m)
+			if err != nil {
+				return p, fmt.Errorf("unverified FUSE holder %d: %w", member.TID, err)
 			}
 			if found != nil && (found.Dev != p.Dev || found.Ino != p.Ino || found.Locator.Path != p.Locator.Path) {
 				return p, fmt.Errorf("ambiguous AppImage provider")
 			}
 			found = &p
 		}
+	}
+	if err := census.Recheck(); err != nil {
+		return appImageProvider{}, fmt.Errorf("FUSE holder census changed: %w", err)
 	}
 	if found == nil {
 		return appImageProvider{}, fmt.Errorf("no verified AppImage provider")

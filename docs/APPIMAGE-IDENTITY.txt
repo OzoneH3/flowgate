@@ -12,10 +12,17 @@ No display name, parent process, mount label or environment value is authority.
 Supported evidence
 ------------------
 This implementation supports the x86_64 AppImageKit effcebc type-2 runtime whose
-first 188392 bytes have SHA256:
+first 188392 bytes, with the four fixed packaging-metadata ranges below zeroed,
+have SHA256:
 24da8e0e149b7211cbfb00a545189a1101cb18d1f27d4cfc1895837d2c30bc30
 This is a runtime implementation pin shared by different applications, not an
 application allow-list. A SquashFS superblock must immediately follow that prefix.
+For this exact layout only, normalize .digest_md5 (175704,16), .upd_info
+(175720,1024), .sha256_sig (176744,1024), and .sig_key (177768,8192).
+All ELF/program/section headers, offsets, flags, loaded runtime code/data and
+remaining bytes stay pinned. These fields are package metadata, not runtime code
+or permission/signature authority. No section names from an untrusted file select
+what is ignored. Runtime signature authentication is not claimed.
 
 The target remains a verified native executable. Existing owner-credential FUSE
 metadata checks, mapped device/inode and process-generation bookends still apply.
@@ -23,6 +30,12 @@ Its owner-only FUSE mount must be a read-only whole-filesystem mount. Kernel
 fdinfo fuse_connection binds that mount's device to its live transport holders.
 
 Every process's task FD tables are examined, including private non-leader tables.
+KCMP_FILES can prove shared tables, which are scanned once; every member of a
+matching table still needs its own provider validation. Anonymous kernel objects
+are excluded from FUSE fdinfo parsing; all other FD records remain checked.
+Transient per-FD disappearance before finding a matching holder permits at most
+two complete table retries, charged to the same budget and generation-bookended.
+A known-holder failure, unreadable record or exhausted retry stays inconclusive.
 Unknown holders are refused, not skipped. Each holder must execute the supported
 runtime from the canonical archive inode and hold that same archive open. Other
 readable regular-file inputs (including stdin) are refused. The validated reader
@@ -30,7 +43,14 @@ retains its input descriptor while serving FUSE; TARGET_APPIMAGE selecting a
 different archive therefore does not acquire the first archive's permission.
 
 Executable mappings must match their backing bytes. Archive executable mappings
-must stay within the validated runtime prefix. Other executable mappings must be
+must be the single supported non-PIE mapping (0x400000..0x42b000, file offset 0).
+Its last page includes packaging metadata as page padding: not every executable-
+mapped byte is hash-pinned. The validated runtime uses those fields as metadata,
+not as an input-reader implementation or execution target. Additional/relocated
+archive executable mappings are refused. This does not attest against a debugger
+redirecting control flow into existing padding. On filesystems such as Btrfs,
+a maps/stat device mismatch requires the kernel map_files entry to prove the
+same mapped file; inode equality alone is insufficient. Other mappings must be
 root-owned, not writable by non-root users, have protected parent directories,
 and represent the supported libc/loader/libfuse/libz/libdl/libpthread/librt roles.
 Anonymous/injected code and unrelated preload libraries are unsupported. Kernel
@@ -57,6 +77,12 @@ https://github.com/vasi/squashfuse/blob/1f98030/fs.c
 https://github.com/vasi/squashfuse/blob/1f98030/ll.c
   sqfs_open_image retains the successful input FD, sqfs_init stores it, block
   reads use fs->fd and fs->offset, and FUSE callbacks use that reader instance.
+https://raw.githubusercontent.com/torvalds/linux/master/fs/anon_inodes.c
+https://raw.githubusercontent.com/torvalds/linux/master/fs/fuse/dev.c
+  Anonymous-inode magic-link formatting versus FUSE character-device fdinfo.
+https://raw.githubusercontent.com/torvalds/linux/master/fs/btrfs/inode.c
+https://man7.org/linux/man-pages/man5/proc_pid_map_files.5.html
+  Subvolume stat devices and kernel mapped-file references.
 The retained validation evidence also includes disassembly of these functions
 from the exact pinned runtime. This is not a claim of an upstream reproducible
 build or vendor signature verification.

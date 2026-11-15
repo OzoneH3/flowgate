@@ -2,7 +2,10 @@ package identity
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"debug/elf"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -21,15 +24,66 @@ import (
 const appImageRuntimeSize int64 = 188392
 const appImageRuntimeSHA256 = "24da8e0e149b7211cbfb00a545189a1101cb18d1f27d4cfc1895837d2c30bc30"
 
+// AppImage packaging fills these non-ALLOC sections after producing the
+// runtime. They follow the last PT_LOAD file byte (175704) in this exact
+// implementation. Only these fixed bytes are normalized: ELF/program/section
+// headers, their flags/offsets, and all loaded code/data remain in the pin. An
+// altered ELF layout therefore cannot pass. Metadata can occupy the exact
+// supported executable page padding, but never an added/relocated RX mapping.
+// This recognizes a runtime implementation, not a signature or update authority.
+func appImageRuntimeDigest(prefix []byte) string {
+	if int64(len(prefix)) != appImageRuntimeSize {
+		return ""
+	}
+	normalized := append([]byte(nil), prefix...)
+	for _, section := range [][2]int{{175704, 16}, {175720, 1024}, {176744, 1024}, {177768, 8192}} {
+		clear(normalized[section[0] : section[0]+section[1]])
+	}
+	sum := sha256.Sum256(normalized)
+	return hex.EncodeToString(sum[:])
+}
+
 // Scan all processes, including those that do not look like AppImages. A FUSE
 // connection can be passed to a process in another UID or mount namespace.
 // Disappearance is inconclusive if a descriptor inventory was already opened.
 func appImageConnectionHolder(base string, connection uint64) (bool, error) {
-	dir, e := os.Open(base + "/fd")
-	if os.IsNotExist(e) {
+	return appImageStableHolderScan(func() (bool, error) { return appImageHolderScan(base, connection) }, func() (string, error) {
+		start, _, err := processStat(base)
+		return start, err
+	})
+}
+
+// Discard a transiently interrupted inventory in full, never splice or skip an
+// entry. A known holder, generation change, or persistent error stays refused.
+func appImageStableHolderScan(scan func() (bool, error), generation func() (string, error)) (bool, error) {
+	start, err := generation()
+	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
+	} // task gone before observation
+	if err != nil {
+		return false, err
 	}
+	for attempt := 0; attempt < 3; attempt++ {
+		holds, err := scan()
+		end, changed := generation()
+		if changed != nil || end != start {
+			return holds, fmt.Errorf("FUSE task generation changed")
+		}
+		if err == nil || holds || !errors.Is(err, os.ErrNotExist) || attempt == 2 {
+			return holds, err
+		}
+	}
+	panic("unreachable")
+}
+
+func appImageHolderScan(base string, connection uint64) (bool, error) {
+	return appImageTableScan(base, connection, nil)
+}
+
+func appImageTableScan(base string, connection uint64, visit func(path, target string) bool) (bool, error) {
+	dir, e := os.Open(base + "/fd")
 	if e != nil {
+		// Not retriable: a task/table disappearing is not per-FD churn.
 		return false, fmt.Errorf("FUSE holder inventory unavailable: %s", base)
 	}
 	defer dir.Close()
@@ -39,21 +93,45 @@ func appImageConnectionHolder(base string, connection uint64) (bool, error) {
 	}
 	found := false
 	for _, fd := range fds {
+		// Charge every attempted FD, including failed/retried and anonymous
+		// observations, before doing work. A matching update below adds a
+		// conservative extra budget charge; it preserves partial positives.
+		path := base + "/fd/" + fd.Name()
+		if visit != nil && !visit(path, "") {
+			return found, nil
+		}
+		// The kernel formats anonymous-inode magic links as "anon_inode:...".
+		// These are not character-device /dev/fuse handles. In particular epoll
+		// and inotify fdinfo grow with registrations and need not fit 4 KiB.
+		// Do not stat unrelated files here: owner-only FUSE getattr can reject
+		// even root. Every non-anonymous descriptor still needs its full record.
+		target, err := os.Readlink(base + "/fd/" + fd.Name())
+		if err != nil {
+			return found, fmt.Errorf("FUSE descriptor link unavailable: %s/%s: %w", base, fd.Name(), err)
+		}
+		if strings.HasPrefix(target, "anon_inode:") {
+			continue
+		}
 		// fdinfo is kernel-owned and does not stat the object behind the FD.
 		// Stat would fail on unrelated owner-only FUSE files even for root.
 		raw, e := appImageReadBound(base+"/fdinfo/"+fd.Name(), 4096)
 		if e != nil || len(raw) > 4096 {
-			return false, fmt.Errorf("FUSE descriptor observation unavailable: %s/%s", base, fd.Name())
+			return found, fmt.Errorf("FUSE descriptor observation unavailable: %s/%s: %w", base, fd.Name(), e)
 		}
 		if !strings.Contains(string(raw), "fuse_connection:") {
 			continue
 		}
 		n, e := fuseConnection(string(raw))
 		if e != nil {
-			return false, e
+			return found, e
 		}
+		matched := ""
 		if n == connection {
 			found = true
+			matched = fmt.Sprintf("fuse-connection:[%d]", connection)
+		}
+		if matched != "" && visit != nil && !visit(path, matched) {
+			return found, nil
 		}
 	}
 	return found, nil
@@ -137,15 +215,14 @@ func appImageRuntimeMappings(base string, exe os.FileInfo) error {
 			disk.Close()
 			return e
 		}
-		d, i := devIno(st)
-		if d != unix.Mkdev(uint32(major), uint32(minor)) || i != ino {
+		if !appImageMappedFile(st, unix.Mkdev(uint32(major), uint32(minor)), ino, fmt.Sprintf("%s/map_files/%x-%x", base, lo, hi), os.Stat) {
 			disk.Close()
 			return fmt.Errorf("runtime mapped file changed")
 		}
 		if os.SameFile(st, exe) {
-			if off+hi-lo > uint64(appImageRuntimeSize) {
+			if !appImageRuntimeCodeRange(lo, hi, off, runtimeSeen) {
 				disk.Close()
-				return fmt.Errorf("archive code outside validated runtime prefix")
+				return fmt.Errorf("unsupported archive executable mapping")
 			}
 			runtimeSeen = true
 		} else if !appImageSystemCode(f[5]) || !appImageRuntimeDSO(disk) {
@@ -222,4 +299,27 @@ func appImageReadBound(path string, limit int64) ([]byte, error) {
 		return nil, fmt.Errorf("AppImage observation exceeds bound")
 	}
 	return b, nil
+}
+
+// Btrfs maps report the superblock device, while stat reports the subvolume
+// device. Resolve the kernel mapping itself on a mismatch; inode equality alone
+// cannot distinguish files in different subvolumes. Unreadable proof refuses.
+func appImageMappedFile(info os.FileInfo, device, inode uint64, mapping string, stat func(string) (os.FileInfo, error)) bool {
+	d, i := devIno(info)
+	if i != inode {
+		return false
+	}
+	if d == device {
+		return true
+	}
+	mapped, err := stat(mapping)
+	return err == nil && os.SameFile(info, mapped)
+}
+
+// The pinned non-PIE runtime has exactly this one executable PT_LOAD mapping.
+// Its final page includes non-ALLOC packaging metadata as ordinary page padding.
+// Do not admit extra/relocated mappings of unhashed metadata as executable code.
+// This remains a live-process check, not protection against a same-UID debugger.
+func appImageRuntimeCodeRange(lo, hi, offset uint64, seen bool) bool {
+	return !seen && lo == 0x400000 && hi == 0x42b000 && offset == 0
 }
