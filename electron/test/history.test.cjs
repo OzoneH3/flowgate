@@ -196,3 +196,47 @@ test('legend totals are source-specific socket counters, not rates; 10min is bou
   f.send([row('unavailable', 'tcp', ['p'], { available: false })]);
   assert.equal(f.view('app:app|r|uid:1000').points.at(-1).uploaded, undefined);
 });
+
+test('socket churn does not fragment a continuous measured aggregate', () => {
+  const f = fixture();
+  f.send([row('steady')]);
+  f.send([row('steady')]);
+  for (let i = 0; i < 8; i++) {
+    f.send([row('steady'), row('short-lived-' + i)]);
+    const aggregate = f.view('overview').points.at(-1);
+    assert.equal(aggregate.up, 8);
+    assert.equal(aggregate.breakUpBefore, false);
+    assert.equal(aggregate.breakDownBefore, false);
+    assert.equal(f.view('short-lived-' + i).points.at(-1).breakUpBefore, true);
+  }
+  f.h.observe({ connected: false, generation: 'g' });
+  assert.equal(f.view('overview').points.at(-1).up, undefined);
+  f.send([row('steady')]);
+  assert.equal(f.view('overview').points.at(-1).up, undefined);
+});
+test('aggregate continuity requires a valid contributor in that direction', () => {
+  const f = fixture();
+  const downloadOnly = () => row('steady', 'tcp', ['p'], { upload_bps: undefined });
+  f.send([downloadOnly()]);
+  f.send([downloadOnly()]);
+  f.send([downloadOnly(), row('new')]);
+  let p = f.view('overview').points.at(-1);
+  assert.equal(p.breakUpBefore, true);
+  assert.equal(p.breakDownBefore, false);
+  assert.equal(p.partial, true);
+  f.send([row('replacement')]);
+  p = f.view('overview').points.at(-1);
+  assert.equal(p.breakBefore, true);
+  assert.equal(p.breakUpBefore, true);
+  assert.equal(p.breakDownBefore, true);
+});
+test('missing publication breaks aggregate even with a stable measured contributor', () => {
+  const f = fixture();
+  f.send([row('steady')]);
+  f.send([row('steady')]);
+  f.send([row('steady'), row('new')], { activity: { sequence: 5 } });
+  const p = f.view('overview').points.at(-1);
+  assert.equal(p.breakUpBefore, true);
+  assert.equal(p.breakDownBefore, true);
+  assert.match(p.note, /Missing observation/);
+});

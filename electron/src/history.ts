@@ -13,6 +13,8 @@ export interface GraphPoint {
   partial: boolean;
   note: string;
   breakBefore: boolean;
+  breakUpBefore?: boolean;
+  breakDownBefore?: boolean;
 }
 export interface GraphView {
   revision: number;
@@ -243,7 +245,13 @@ export class TrafficHistory {
           up: knownUp.length ? knownUp.reduce((n, p) => n + p.up!, 0) : undefined,
           down: knownDown.length ? knownDown.reduce((n, p) => n + p.down!, 0) : undefined,
           partial,
-          breakBefore: points.some((p) => p.breakBefore),
+          // A new/reset socket must not break the measured aggregate from other
+          // continuous sockets. Check each direction's contributing rates: a
+          // download-only observation cannot establish upload continuity.
+          // Global gaps mark every constituent, so they still break both lines.
+          breakBefore: points.every((p) => p.breakBefore),
+          breakUpBefore: knownUp.every((p) => p.breakBefore),
+          breakDownBefore: knownDown.every((p) => p.breakBefore),
           note: notes.join(' · ').slice(0, 512) || 'Measured',
         });
       }

@@ -457,7 +457,8 @@ export class TrafficGraph {
         }
         const x = left + (w * (p.at - range.start)) / range.span,
           y = top + h * (1 - value / ceilings[key]);
-        if (!continuous || p.breakBefore) c.moveTo(x, y);
+        const breakBefore = (key === 'up' ? p.breakUpBefore : p.breakDownBefore) ?? p.breakBefore;
+        if (!continuous || breakBefore) c.moveTo(x, y);
         else c.lineTo(x, y);
         c.fillRect(x - 1, y - 1, 2, 2);
         continuous = true;
