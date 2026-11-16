@@ -1,0 +1,37 @@
+Connection ownership rechecks
+
+Settings > Connection ownership checks controls periodic identity verification of
+already-authorized accelerated IPv4 UDP output connections. Enabled by default.
+An administrator on the writable primary daemon endpoint can turn it off without
+restarting protection. The setting is stored in the private rule database and
+survives daemon restarts; it is machine-wide, not a GUI-only preference.
+
+Off skips only the selection of already-granted sockets for periodic ownership
+observations. Initial fresh proofs, per-socket policy decisions, policy edits,
+permission deadlines, kernel-cookie closure cleanup, Activity and accounting
+remain unchanged. Grants remain connection-lifetime grants. In-flight checks may
+finish and apply their normal results. On resumes normal already-due scheduling;
+it neither resets deadlines nor triggers a special full-system scan.
+
+Security tradeoff: later socket owner, executable or prefix changes that would
+normally be discovered by a background check may remain undetected while Off.
+This includes transferred descriptors. It does not transfer permission for new
+sockets, create an Allow, change TCP admission policy, or disable the firewall.
+There is no bounded ownership-change detection time with these checks Off.
+
+API capability connection-check-settings-v1:
+connection-check-status returns connection_checks {enabled,revision}.
+connection-check-configure requires generation plus connection_checks
+{enabled,expected_revision}; enabled must be explicit. Primary authenticated
+administrator authority and exact revision CAS are mandatory. Persistence commits
+before the running scheduler changes. On failure the old setting remains.
+
+The UI never automatically retries a save. A known pre-send connection failure
+can be followed by Refresh. If a sent request loses its acknowledgement, refresh
+unlocks when the version has advanced; unchanged version alone cannot disprove a
+still-pending write. In that genuinely ambiguous case editing remains locked for
+that daemon/endpoint context rather than risking an automatic replay.
+
+Recovery: older daemons ignore the independent settings table and revert to their
+enabled behavior. Do not represent an older-backend rollback as preserving Off.
+This source change does not install, restart or change the user's live settings.

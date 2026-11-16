@@ -321,6 +321,7 @@ export interface Permissions {
   can_decide: boolean;
 }
 export interface Reply {
+ connection_checks?:unknown;
   upload_shaping?: unknown;
   endpoint_preview?: EndpointPreview;
   observed_usage?: unknown;
@@ -541,6 +542,7 @@ export interface Bridge {
   promptLayout(value: { height: number; pointerDown: boolean; keysDown: string[]; remember: boolean }): Promise<void>;
   dismissPrompt(): Promise<void>;
   decisionLog(): Promise<DecisionLogState>;
+  connectionChecks(options?:unknown):Promise<import('./connection-checks').CheckView>;
   usageHistory(query: unknown): Promise<import('./usage-history-client').HistoryState>;
   usageHistoryConfigure(options: unknown): Promise<import('./usage-history-client').HistoryState>;
   observedUsage(): Promise<import('./observed-usage-client').UsageState>;
@@ -884,6 +886,7 @@ export function parseReply(raw: unknown): Reply {
     observed_usage: r.observed_usage,
     usage_history: r.usage_history,
     history_settings: r.history_settings,
+    connection_checks: r.connection_checks,
     upload_shaping: r.upload_shaping,
     decision_preview: r.decision_preview,
     decision_receipt: r.decision_receipt,

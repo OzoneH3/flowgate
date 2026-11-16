@@ -31,6 +31,7 @@ const DaemonProfileCapability = "daemon-profile-v1"
 var apiProfileContext = pprof.WithLabels(context.Background(), pprof.Labels("flowgate_work", "api"))
 
 type Request struct {
+	ConnectionChecks    *ConnectionCheckOptions    `json:"connection_checks,omitempty"`
 	ProfileArtifact     string                     `json:"profile_artifact,omitempty"`
 	ProfileOffset       int64                      `json:"profile_offset,omitempty"`
 	UploadConfig        *uploadshape.Config        `json:"upload_config,omitempty"`
@@ -74,6 +75,7 @@ type EnforcementStatus struct {
 	StopsAt time.Time `json:"stops_at"`
 }
 type Response struct {
+	ConnectionChecks *ConnectionCheckSettings    `json:"connection_checks,omitempty"`
 	Profile          *diagnostics.Status         `json:"profile,omitempty"`
 	ProfileChunk     *diagnostics.ArtifactChunk  `json:"profile_chunk,omitempty"`
 	Diagnostic       map[string]string           `json:"diagnostic,omitempty"`
@@ -339,7 +341,24 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						if admin && permissions.CanManageMachineRules && !readonly {
 							r.Capabilities = append(r.Capabilities, NetworkEndpointCapability)
 						}
+						if e.saveConnectionChecks != nil {
+							r.Capabilities = append(r.Capabilities, ConnectionChecksCapability)
+						}
 						switch q.Operation {
+						case "connection-check-status", "connection-check-configure":
+							var v ConnectionCheckSettings
+							var er error
+							if q.Operation == "connection-check-status" {
+								v = e.ConnectionChecks()
+							} else if q.ConnectionChecks == nil {
+								er = mutationError("invalid_request", "Explicit connection settings required")
+							} else {
+								v, er = e.ConfigureConnectionChecks(q.Generation, *q.ConnectionChecks, admin, readonly || !permissions.CanManageMachineRules)
+							}
+							usageHistoryError(&r, er)
+							if er == nil {
+								r.ConnectionChecks = &v
+							}
 						case "profile-status", "profile-start", "profile-stop", "profile-fetch":
 							e.profileRequest(q, admin, readonly, &r)
 

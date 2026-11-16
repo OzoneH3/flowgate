@@ -76,10 +76,13 @@ type TrafficManager interface {
 	Stop(...string) (udpaccount.Status, error)
 }
 type Engine struct {
-	queuePolicyEpoch       atomic.Uint64
-	socketAuthorization    *socketAuthorization // guarded by mu
-	zonePublisherInstalled bool
-	QueueHealth            queuehealth.Registry
+	queuePolicyEpoch         atomic.Uint64
+	connectionChecksDisabled bool
+	connectionChecksRevision uint64
+	saveConnectionChecks     func(bool, uint64) error
+	socketAuthorization      *socketAuthorization // guarded by mu
+	zonePublisherInstalled   bool
+	QueueHealth              queuehealth.Registry
 	// Profiler is configured before API startup; nil leaves profiling unavailable.
 	Profiler *diagnostics.Recorder
 	// RuntimeChecks returns a cached read-only capability snapshot, independently of enforcement.
@@ -929,7 +932,7 @@ func (e *Engine) ChangeRule(generation, id, action string, expected *uint64, uid
 // only at capture bookends; that small setup/finish cost is outside CPU totals.
 func (e *Engine) ProfileSnapshot() map[string]any {
 	out := map[string]any{
-		"build": e.Build, "generation": e.Generation,
+		"build": e.Build, "generation": e.Generation, "connection_checks": e.ConnectionChecks(),
 		"queue_health":       e.QueueHealth.Snapshot(true),
 		"holder_enumeration": identity.HolderEnumeration(),
 	}

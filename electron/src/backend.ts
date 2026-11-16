@@ -38,6 +38,9 @@ import {
 import { forAWhileDurations, forAWhileSupported, type ProcessLease } from './process-lease';
 import { endedLeaseAvailable, validateEndedLease, type EndedLeaseChoice } from './prompt-decision';
 import { LOCAL_PAIR_CAPABILITY, pairResultText, validatePairChoice, type PairChoice, type PairResult } from './local-pair';
+export class BackendCallError extends Error {
+ constructor(error:Error,readonly requestMayHaveBeenSent:boolean){super(error.message,{cause:error});this.name="BackendCallError";if("code" in error)Object.assign(this,{code:error.code});}
+}
 export function call(path: string, request: object, timeoutMs = 3500): Promise<Reply> {
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 20000)
     throw Error('Invalid backend timeout');
@@ -46,12 +49,13 @@ export function call(path: string, request: object, timeoutMs = 3500): Promise<R
     let chunks: Buffer[] = [];
     let size = 0;
     let finished = false;
+    let sent = false;
     const done = (error?: Error, value?: Reply) => {
       if (finished) return;
       finished = true;
       if (deadline) clearTimeout(deadline);
       socket.destroy();
-      error ? reject(error) : resolve(value!);
+      error ? reject(new BackendCallError(error,sent)) : resolve(value!);
     };
     // Longer discovery requests also have an absolute bound, not just idle timeout.
     const deadline =
@@ -61,7 +65,7 @@ export function call(path: string, request: object, timeoutMs = 3500): Promise<R
     socket.setTimeout(timeoutMs, () => done(Error('Backend timed out')));
     socket.on('error', (e) => done(e));
     socket.on('end', () => done(Error('Backend closed without acknowledgement')));
-    socket.on('connect', () => socket.write(JSON.stringify({ version: 1, ...request }) + '\n'));
+    socket.on('connect', () => { sent=true;socket.write(JSON.stringify({ version: 1, ...request }) + '\n'); });
     socket.on('data', (dataChunk) => {
       const chunk = Buffer.isBuffer(dataChunk) ? dataChunk : Buffer.from(dataChunk);
       size += chunk.length;

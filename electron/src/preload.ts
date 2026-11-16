@@ -84,6 +84,7 @@ const api: Bridge = {
   dismissPrompt: () => ipcRenderer.invoke('prompt:dismiss'),
   decisionLog: () => ipcRenderer.invoke('log:state'),
   observedUsage: () => ipcRenderer.invoke('usage:read'),
+  connectionChecks: (v) => ipcRenderer.invoke('connection-checks',v),
   usageHistory: (q) => ipcRenderer.invoke('history:read', q),
   usageHistoryConfigure: (o) => ipcRenderer.invoke('history:configure', o),
   decisionLogVisible: (v) => ipcRenderer.invoke('log:visible', v),

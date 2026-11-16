@@ -1,6 +1,7 @@
 import { accountName } from './account-lookup';
 import { DEFAULT_SHAPING, validateShapingDefaults } from './upload-shaping';
 import { UploadShapingClient } from "./upload-shaping-client";
+import { ConnectionChecksClient } from './connection-checks';
 import { UsageHistoryClient } from './usage-history-client';
 import { SessionExit, kdeSessionEnding } from './session-exit';
 import { EndpointRules } from './endpoint-rules';
@@ -821,6 +822,8 @@ app.whenReady().then(async () => {
   const decisionLog = new DecisionLogClient(backend);
   const observedUsage = new ObservedUsageClient(backend);
   const usageHistory = new UsageHistoryClient(backend);
+  const connectionChecks = new ConnectionChecksClient(backend);
+  ipcMain.handle('connection-checks',(e,v:unknown)=>{trusted(e);return connectionChecks.request(v);});
   ipcMain.handle('history:read', (e, q: unknown) => {
     presentationSender(e);
     return usageHistory.read(q);
