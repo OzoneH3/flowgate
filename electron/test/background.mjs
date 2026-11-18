@@ -305,7 +305,7 @@ try {
   await app.evaluate(({ dialog }) => {
     dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false });
   }); // Confirmation response simulated; actual Quit handler runs.
-  menuClick('Quit FlowGate');
+  menuClick('Quit FlowGate UI');
   await wait(() => electronProcess.exitCode !== null);
   assert.equal(fs.existsSync(`/proc/${ownedObserverPID}`), false);
   assert.equal(

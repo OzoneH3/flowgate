@@ -268,8 +268,9 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
   $('requestsView').after(view);
   endpointUI = setupEndpointPermissions();
   for (const [id, label] of [
-    ['optionsMenu', 'Options'],
-    ['controlMenu', 'Control'],
+    ['optionsMenu', 'Desktop preferences'],
+    ['monitoringMenu', 'Traffic monitoring'],
+    ['controlMenu', 'Firewall'],
   ]) {
     const menu = node('details', '');
     menu.id = id;
@@ -282,19 +283,12 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
     for (const menu of document.querySelectorAll<HTMLDetailsElement>('.desktop-menu[open]'))
       if (!menu.contains(event.target as Node)) menu.open = false;
   });
-  for (const menu of document.querySelectorAll<HTMLDetailsElement>('.desktop-menu'))
-    menu.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') {
-        event.stopPropagation();
-        menu.open = false;
-        (menu.querySelector('summary') as HTMLElement).focus();
-      }
-    });
   const evaluation = node('section', '');
   evaluation.className = 'evaluationbar';
   evaluation.innerHTML = `<select id="evalProfile" aria-label="Evaluation profile"><option value="incoming">Incoming only</option><option value="both" disabled>Both directions · support not advertised</option></select><button id="evalStart">Start 5-minute evaluation…</button><button id="evalStop">Stop evaluation</button><button id="evalCancel" hidden>Cancel authentication</button><button id="evalStatus">Status</button><button id="evalRecover">Recovery…</button><span id="evaluationStatus" role="status"></span>`;
   document.querySelector('#controlMenu .menu-panel')!.append(evaluation);
   setupProtectionControls();
+  setupConnectionChecks($('controlMenu').querySelector<HTMLElement>('.menu-panel')!);
   migrationUI = setupZoneMigration();
   const confirmation = node('dialog', '');
   confirmation.id = 'confirmation';
@@ -597,7 +591,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
   const tools = node('div', '');
   tools.className = 'extendedbar';
   tools.innerHTML = `<button id="extendedEnable">Enable extended monitoring…</button><button id="extendedStop">Stop extended monitoring</button><span id="extendedStatus"></span>`;
-  document.querySelector('#controlMenu .menu-panel')!.append(tools);
+  document.querySelector('#monitoringMenu .menu-panel')!.append(tools);
   const perform = async (a: 'enable' | 'stop') => {
     try {
       extendedError = '';
@@ -989,7 +983,6 @@ function selectRule() {
 async function setupSizing() {
   let prefs: Preferences = await window.flowgate.preferences();
   setupShapingDefaults(document.querySelector('#optionsMenu .menu-panel')!, prefs);
-  setupConnectionChecks(document.querySelector('#optionsMenu .menu-panel')!);
   const save = () =>
     void window.flowgate.preferences({
       sidebar: prefs.sidebar,
@@ -998,14 +991,13 @@ async function setupSizing() {
     });
   const controls = node('section', '');
   controls.className = 'backgroundbar';
-  controls.innerHTML = `<label><input type="checkbox" id="keepInTray"> Keep running in the tray when the window closes</label><span>When enabled, closing hides this window; requests stay monitored. Quit exits the frontend only.</span><button id="quitFlowGate">Quit FlowGate…</button><span id="backgroundStatus" role="status"></span>`;
+  controls.innerHTML = `<label><input type="checkbox" id="keepInTray"> Keep running in the tray when the window closes</label><span>When enabled, closing hides this window; requests stay monitored. Use File to quit the UI.</span><span id="backgroundStatus" role="status"></span>`;
   document.querySelector('#optionsMenu .menu-panel')!.append(controls);
   $<HTMLInputElement>('keepInTray').checked = prefs.keepInTray === true;
   $('keepInTray').onchange = () => {
     prefs.keepInTray = $<HTMLInputElement>('keepInTray').checked;
     save();
   };
-  $('quitFlowGate').onclick = () => void window.flowgate.quit();
   let checking = false;
   const refresh = async () => {
     if (checking || document.hidden) return;

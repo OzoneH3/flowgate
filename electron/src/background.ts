@@ -123,7 +123,8 @@ export class Background {
         { label: enforcement, enabled: false },
         { label: `Extended monitoring: ${udp}`, enabled: false },
         { type: 'separator' },
-        { label: 'Quit FlowGate…', click: () => void this.requestQuit() },
+        { label: 'Daemon protection keeps running if active.', enabled: false },
+        { label: 'Quit FlowGate UI', click: () => void this.requestQuit() },
       ]),
     );
   }
@@ -145,11 +146,11 @@ export class Background {
     try {
       const result = await dialog.showMessageBox(this.main, {
         type: 'question',
-        title: 'Quit FlowGate',
-        message: 'Quit FlowGate and stop request monitoring?',
+        title: 'Quit FlowGate UI',
+        message: 'Quit the UI and stop request notifications?',
         detail:
           'Only this interface and its owned read-only observer exit. Independent daemon protection and UDP collection are not stopped. Their state may be active or unknown; bounded evaluation keeps its original deadline. Without the interface, unanswered requests can time out and be denied. You will no longer receive request notifications.',
-        buttons: ['Keep running', 'Quit FlowGate'],
+        buttons: ['Keep running', 'Quit FlowGate UI'],
         defaultId: 0,
         cancelId: 0,
         noLink: true,

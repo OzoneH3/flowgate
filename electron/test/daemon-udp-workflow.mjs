@@ -122,7 +122,7 @@ try {
           (r.traffic.uploaded > 0 || r.traffic.downloaded > 0),
       ),
     );
-    await page.locator('#controlMenu').evaluate((e) => (e.open = false));
+    await page.locator('#monitoringMenu').evaluate((e) => (e.open = false));
     await page.click('#expand');
     if (receiverFile) {
       // Receiver counts are cumulative since fixture start; the collector counts from attachment.
@@ -198,7 +198,7 @@ try {
     await page.setViewportSize({ width: 1280, height: 896 });
   } else {
     assert(first.reason_code);
-    await page.locator('#controlMenu').evaluate((e) => (e.open = true));
+    await page.locator('#monitoringMenu').evaluate((e) => (e.open = true));
     await wait(async () =>
       (await page.locator('#extendedStatus').innerText()).includes(first.reason_code),
     );
@@ -209,7 +209,7 @@ try {
     await page.setViewportSize({ width: 1280, height: 896 });
   }
   for (const id of fixtureIds) beforeStop.set(id, (await graph(id)).points);
-  await page.locator('#controlMenu').evaluate((e) => (e.open = true));
+  await page.locator('#monitoringMenu').evaluate((e) => (e.open = true));
   await wait(() => page.locator('#extendedStop').isEnabled());
   await page.click('#extendedStop');
   await wait(async () => (await snap()).control.trafficMonitor.state === 'disabled');
@@ -222,7 +222,7 @@ try {
   });
   // Unavailable after Stop is rendered as unknown, never as zero; graphs stop measuring.
   for (const id of fixtureIds) {
-    await page.locator('#controlMenu').evaluate((e) => (e.open = false));
+    await page.locator('#monitoringMenu').evaluate((e) => (e.open = false));
     await wait(async () => {
       const c = await cells(id);
       return !c || (c[7] === '—' && c[8] === '—');

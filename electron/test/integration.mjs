@@ -249,7 +249,7 @@ try {
   await app.evaluate(({ dialog }) => {
     dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false });
   });
-  click('Quit FlowGate');
+  click('Quit FlowGate UI');
   await wait(() => ep.exitCode !== null);
   await wait(() => !fs.existsSync(`/proc/${observerPID}`));
   assert.equal((await command('status')).state, 'active');

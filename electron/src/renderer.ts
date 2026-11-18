@@ -902,7 +902,7 @@ if (promptID) {
     }
   });
 } else {
-  root.innerHTML = `<header class="toolbar"><strong class="brand">FLOWGATE</strong><span id="buildVersion" class="build-version"></span><span id="toolbarUnits" class="toolbar-units"><label for="displayUnits">Units</label><select id="displayUnits" aria-label="Display units" title="Display only: bytes or bits, decimal SI prefixes (1 KB = 1000 B). Accounting sources stay separate."></select></span><span id="observerStatus" class="toolbar-status"></span><span id="controlStatus" class="toolbar-status"></span><span class="toolbar-layout"><select id="layoutPreset" aria-label="Window layout"><option value="chart">Default with Chart</option><option value="plain">Default</option><option value="activity">Activity only</option></select></span><input id="search" type="search" aria-label="Search Activity" placeholder="Search"></header><nav class="tabs" aria-label="Views"><button id="activityTab" aria-selected="true">Activity</button><button id="requestsTab" aria-selected="false">Pending requests <span id="pendingCount">0</span></button><span id="tabsPaneControls" class="pane-controls"></span></nav><main id="activityView"><section class="activity-main"><div class="filterbar"><select id="activitySource" aria-label="Activity measurement source"><option value="tcp">TCP</option><option value="udp">UDP</option></select><button id="uploadLimits">Upload limits</button><button id="rateMode" aria-pressed="false" title="Switch the two traffic columns between current rate and total transferred">Rate</button><select id="columnPreset" aria-label="Column preset"><option value="status">Status</option><option value="details">Details</option></select><select id="filter" aria-label="Socket filter"><option value="all">All sockets</option><option value="active">Active TCP / connected UDP</option><option value="listening">Listening TCP / bound UDP</option></select><span class="filterbar-icons"><button id="expand" class="icon-button" title="Expand all" aria-label="Expand all">⊞</button><button id="collapse" class="icon-button" title="Collapse all" aria-label="Collapse all">⊟</button><button id="refreshNow" class="icon-button" title="Refresh now" aria-label="Refresh now">↻</button></span></div><div class="table-scroll"><table id="tree" role="treegrid" tabindex="0" aria-label="Application process socket activity"><thead><tr id="headers"></tr></thead><tbody id="rows"></tbody></table></div><div id="activitySummary" class="summary"></div></section><aside><h2>Info View<span id="infoPaneControls" class="pane-controls"></span></h2><h3 id="selectedName">FlowGate Activity</h3><div id="selectedExecutable"></div><div class="info-scroll"><h3 id="infoProperties" class="info-section-title">Overview</h3><dl id="info"></dl><section id="infoRules"></section><section class="info-tools"><h3 class="info-section-title">Tools</h3><button id="infoOpenRules">Rule list</button><button id="infoOpenLog">Decision log</button><button id="infoOpenPending">Pending requests</button></section></div><section id="trafficGraph"></section></aside></main><main id="requestsView" hidden><section class="request-list"><h2>Pending requests</h2><p class="hint">One row per group of identical requests; a decision answers its oldest request. Dismissal grants nothing. Closing FlowGate leaves an independent controller running.</p><div class="table-scroll"><table id="requests"><thead><tr><th>Application</th><th>Direction</th><th>Protocol</th><th>Remote endpoint</th><th>Requests</th><th>State</th></tr></thead><tbody id="requestRows"></tbody></table></div><section id="temporaryDecisions" class="temporary-decisions" hidden><h3 title="For a while decisions: in memory only, never saved as rules">Temporary decisions</h3><div id="leaseRows"></div></section><section id="permissionResultsView" class="permission-results" hidden><h3 title="Outcomes of Allow/Deny submissions; the permission window hides on the click">Results</h3><ol id="permissionResultRows"></ol></section></section><aside class="request-sidebar"><h2>Connection permission</h2><div id="requestDetails"></div></aside></main><footer><span id="footerSummary"></span><button id="resultsAttention" class="link-button results-attention" hidden></button><span id="feedback" role="status" aria-live="polite"></span></footer>`;
+  root.innerHTML = `<header class="toolbar"><strong class="brand">FLOWGATE</strong><span id="buildVersion" class="build-version"></span><span id="toolbarUnits" class="toolbar-units"><label for="displayUnits">Units</label><select id="displayUnits" aria-label="Display units" title="Display only: bytes or bits, decimal SI prefixes (1 KB = 1000 B). Accounting sources stay separate."></select></span><span id="observerStatus" class="toolbar-status"></span><span id="controlStatus" class="toolbar-status"></span><input id="search" type="search" aria-label="Search Activity" placeholder="Search"></header><nav class="tabs" aria-label="Views"><button id="activityTab" aria-selected="true">Activity</button><button id="requestsTab" aria-selected="false">Pending requests <span id="pendingCount">0</span></button><span id="tabsPaneControls" class="pane-controls"></span></nav><main id="activityView"><section class="activity-main"><div class="filterbar"><select id="activitySource" aria-label="Activity measurement source"><option value="tcp">TCP</option><option value="udp">UDP</option></select><button id="uploadLimits">Upload limits</button><button id="rateMode" aria-pressed="false" title="Switch the two traffic columns between current rate and total transferred">Rate</button><select id="columnPreset" aria-label="Column preset"><option value="status">Status</option><option value="details">Details</option></select><select id="filter" aria-label="Socket filter"><option value="all">All sockets</option><option value="active">Active TCP / connected UDP</option><option value="listening">Listening TCP / bound UDP</option></select><span class="filterbar-icons"><button id="expand" class="icon-button" title="Expand all" aria-label="Expand all">⊞</button><button id="collapse" class="icon-button" title="Collapse all" aria-label="Collapse all">⊟</button><button id="refreshNow" class="icon-button" title="Refresh now" aria-label="Refresh now">↻</button></span></div><div class="table-scroll"><table id="tree" role="treegrid" tabindex="0" aria-label="Application process socket activity"><thead><tr id="headers"></tr></thead><tbody id="rows"></tbody></table></div><div id="activitySummary" class="summary"></div></section><aside><h2>Info View<span id="infoPaneControls" class="pane-controls"></span></h2><h3 id="selectedName">FlowGate Activity</h3><div id="selectedExecutable"></div><div class="info-scroll"><h3 id="infoProperties" class="info-section-title">Overview</h3><dl id="info"></dl><section id="infoRules"></section><section class="info-tools"><h3 class="info-section-title">Tools</h3><button id="infoOpenRules">Rule list</button><button id="infoOpenLog">Decision log</button><button id="infoOpenPending">Pending requests</button></section></div><section id="trafficGraph"></section></aside></main><main id="requestsView" hidden><section class="request-list"><h2>Pending requests</h2><p class="hint">One row per group of identical requests; a decision answers its oldest request. Dismissal grants nothing. Closing FlowGate leaves an independent controller running.</p><div class="table-scroll"><table id="requests"><thead><tr><th>Application</th><th>Direction</th><th>Protocol</th><th>Remote endpoint</th><th>Requests</th><th>State</th></tr></thead><tbody id="requestRows"></tbody></table></div><section id="temporaryDecisions" class="temporary-decisions" hidden><h3 title="For a while decisions: in memory only, never saved as rules">Temporary decisions</h3><div id="leaseRows"></div></section><section id="permissionResultsView" class="permission-results" hidden><h3 title="Outcomes of Allow/Deny submissions; the permission window hides on the click">Results</h3><ol id="permissionResultRows"></ol></section></section><aside class="request-sidebar"><h2>Connection permission</h2><div id="requestDetails"></div></aside></main><footer><span id="footerSummary"></span><button id="resultsAttention" class="link-button results-attention" hidden></button><span id="feedback" role="status" aria-live="polite"></span></footer>`;
   // The GUI's own release identity (verified against its bundle manifest).
   void window.flowgate
     .guiBuild()
@@ -1182,8 +1182,11 @@ function applyPanes() {
           : 'Open pane';
   }
   const layout = $<HTMLSelectElement>('layoutPreset');
-  if (layout)
-    layout.value = info !== 'docked' ? 'activity' : chart === 'docked' ? 'chart' : 'plain';
+  if (layout) {
+    if (info === 'detached' || chart === 'detached' || (info === 'hidden' && chart === 'docked'))
+      layout.value = '';
+    else layout.value = info === 'hidden' ? 'activity' : chart === 'docked' ? 'chart' : 'plain';
+  }
   void graph?.update(selected, sequence + ':panes');
 }
 function setPane(key: 'info' | 'chart', open: boolean) {
@@ -1279,15 +1282,21 @@ function setupMainMenus(windowMenu: HTMLElement) {
   const file = make('fileMenu', 'File'),
     tools = make('toolsMenu', 'Tools'),
     help = make('helpMenu', 'Help');
-  const exit = element('button', 'Quit FlowGate…');
-  exit.onclick = () => void window.flowgate.quit();
-  file.lastElementChild!.append(exit);
-  const control = $('controlMenu'),
-    options = $('optionsMenu');
-  // The stateful controls keep their existing IDs and authorization paths, inside Tools.
+  const quit = element('button', 'Quit FlowGate UI');
+  const quitNote = element('p', 'Daemon protection keeps running if active.', 'menu-note');
+  quitNote.id = 'quitUiNote';
+  quit.setAttribute('aria-describedby', quitNote.id);
+  quit.onclick = () => void window.flowgate.quit();
+  file.lastElementChild!.append(quit, quitNote);
+  const control = $<HTMLDetailsElement>('controlMenu'),
+    monitoring = $<HTMLDetailsElement>('monitoringMenu'),
+    options = $<HTMLDetailsElement>('optionsMenu');
   const controlTitle = control.querySelector('summary')!;
-  controlTitle.dataset.menuLabel = 'Firewall';
-  tools.lastElementChild!.append(control, element('hr'), options);
+  const sourceLabel = element('label', 'Activity display source', 'menu-control');
+  sourceLabel.append($('activitySource'));
+  sourceLabel.title = 'Changes the measurements shown in Activity. Collection keeps its current state.';
+  options.querySelector('.menu-panel')!.prepend(sourceLabel);
+  tools.lastElementChild!.append(control, element('hr'), monitoring, element('hr'), options);
   const about = element('button', 'About FlowGate');
   const dialog = element('dialog');
   dialog.id = 'aboutFlowGate';
@@ -1308,7 +1317,18 @@ function setupMainMenus(windowMenu: HTMLElement) {
   };
   help.lastElementChild!.append(about);
   const windowPanel = windowMenu.querySelector('.menu-panel')!;
-  windowPanel.append(element('hr'), element('div', 'Views', 'menu-heading'));
+  const layout = element('label', 'Layout preset', 'menu-control');
+  const presets = element('select');
+  presets.id = 'layoutPreset';
+  presets.setAttribute('aria-label', 'Window layout');
+  const custom = new Option('Custom layout', '');
+  custom.disabled = true;
+  presets.add(custom);
+  presets.add(new Option('Default with Chart', 'chart'));
+  presets.add(new Option('Default', 'plain'));
+  presets.add(new Option('Activity only', 'activity'));
+  layout.append(presets);
+  windowPanel.append(element('hr'), layout, element('hr'), element('div', 'Views', 'menu-heading'));
   for (const [label, id] of [
     ['Activity', 'activityTab'],
     ['Rule list', 'rulesTab'],
@@ -1328,14 +1348,13 @@ function setupMainMenus(windowMenu: HTMLElement) {
   // Preserve an obvious state entry point; text is updated by the existing evaluation state.
   const status = element('button', 'Firewall controls', 'firewall-state');
   status.id = 'firewallMenuStatus';
-  const openFirewall = (target: HTMLElement) => {
-    (tools as HTMLDetailsElement).open = true;
-    (control as HTMLDetailsElement).open = true;
+  const openTool = (section: HTMLDetailsElement, target: HTMLElement) => {
+    for (const item of [control, monitoring, options]) item.open = item === section;
+    tools.open = true;
     target.focus();
   };
-  status.onclick = () => openFirewall(controlTitle);
-  $('extendedStatus').tabIndex = -1;
-  $('extendedBadge').onclick = () => openFirewall($('extendedStatus'));
+  status.onclick = () => openTool(control, controlTitle);
+  $('extendedBadge').onclick = () => openTool(monitoring, monitoring.querySelector('summary')!);
   $('toolbarUnits').after(status);
   // Advisory runtime health beside, not inside, the protection entry (its text is ellipsized).
   const health = element('span', '', 'runtime-health');
@@ -1365,7 +1384,7 @@ function setupMainMenus(windowMenu: HTMLElement) {
   });
   for (const menu of toolbar.querySelectorAll<HTMLDetailsElement>('.desktop-menu'))
     menu.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && menu.open) {
         e.stopPropagation();
         menu.open = false;
         menu.querySelector<HTMLElement>('summary')?.focus();
@@ -1404,9 +1423,6 @@ function setupPaneControls() {
   void window.flowgate
     .preferences()
     .then((p) => applyUnit(isDisplayUnit(p.displayUnit) ? p.displayUnit : 'autoByte'));
-  const sourceLabel = element('label', 'Accounting source ', 'source-control');
-  sourceLabel.append($('activitySource'));
-  document.querySelector('#controlMenu .menu-panel')!.prepend(sourceLabel);
   setupMainMenus(windowMenu);
   $<HTMLSelectElement>('layoutPreset').onchange = () => {
     const v = $<HTMLSelectElement>('layoutPreset').value;

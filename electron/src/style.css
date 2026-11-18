@@ -1280,7 +1280,6 @@ body.hide-chart #activityView #trafficGraph { display: none; }
 .toolbar-units select { height: 24px; min-height: 24px; width: 92px; padding: 0 4px; font-size: 12px; }
 .toolbar-status { font-size: 12px; color: var(--fg-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
 .toolbar .separator { display: none; }
-.toolbar-layout select { height: 24px; min-height: 24px; width: 126px; font-size: 12px; padding: 0 4px; }
 .toolbar #search { order: 9; flex: 0 1 320px; width: 320px; min-width: 120px; height: 24px; margin-left: auto; font-size: 12px; }
 .tabs { height: 30px; padding: 2px 0 0; }
 .tabs button { font-size: 12px; padding: 0 8px; height: 22px; min-height: 22px; line-height: 22px; border-radius: 0; }
@@ -1288,7 +1287,6 @@ body.hide-chart #activityView #trafficGraph { display: none; }
 #activityView .filterbar #rateMode { min-width: 88px; height: 24px; min-height: 24px; padding: 0 10px; font-size: 12px; background: #2b2b2b; border: 1px solid #5a5a5a; }
 #activityView .filterbar #rateMode[aria-pressed='true'] { background: #3a3a3a; }
 #activityView .filterbar #columnPreset { width: 72px; height: 24px; min-height: 24px; font-size: 12px; padding: 0 4px; margin-left: 4px; }
-#activityView .filterbar #activitySource { display: none; }
 .filter-group { margin-left: 2px; }
 .filterbar-icons { margin-left: auto; display: inline-flex; gap: 6px; }
 .icon-button { width: 26px; min-width: 26px; height: 24px; min-height: 24px; padding: 0; border: 0; background: transparent; color: #d0d0d0; font-size: 14px; line-height: 24px; }
@@ -1322,7 +1320,7 @@ body.preset-status #tree th.col-filler, body.preset-status #tree td.filler { dis
 #app > footer { flex-wrap: nowrap; overflow: hidden; }
 #app:has(#activityView:not([hidden])) > footer #footerSummary { flex: 0 0 auto; max-width: 100%; font-size: 11px; }
 .toolbar-status { max-width: 220px; }
-@media (max-width: 1000px) { .toolbar-layout { display: none; } .toolbar-status { max-width: 150px; } }
+@media (max-width: 1000px) { .toolbar-status { max-width: 150px; } }
 @media (max-width: 900px) { #observerStatus { display: none; } #controlStatus { max-width: 170px; } .toolbar #search { flex-basis: 150px; } }
 /* Review fixes: visible endpoint marker, compact matrix columns inside the full-width box. */
 .qs-scope { white-space: normal; overflow: visible; text-overflow: clip; margin: 0 0 4px; font-size: 11px; line-height: 14px; }
@@ -1347,8 +1345,9 @@ body.preset-status #tree th.col-filler, body.preset-status #tree td.filler { dis
   .toolbar #toolsMenu > .menu-panel { left: 8px; top: 100%; }
 }
 .toolbar :is(#fileMenu, #helpMenu) > .menu-panel { width: max-content; }
-.source-control { display: flex; align-items: center; gap: 8px; padding: 5px 8px; }
-.source-control select { min-width: 120px; }
+.menu-control { display: flex; align-items: center; gap: 8px; padding: 5px 8px; }
+.menu-control select { min-width: 120px; }
+.menu-note { margin: 0; padding: 4px 8px; color: var(--fg-muted); font-size: 11px; }
 .toolbar .firewall-state { white-space: nowrap; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
 .toolbar .runtime-health { flex: 0 1 auto; min-width: 7em; max-width: 320px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 1px 6px; border: 1px solid #c9a227; border-radius: 3px; color: #ffd27a; background: #3a3110; font-size: 11px; }
 .toolbar .runtime-health[hidden] { display: none; }
