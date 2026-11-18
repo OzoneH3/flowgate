@@ -250,6 +250,12 @@ def preflight(api, payload, backend, desktop_config):
             raise RuntimeError('Current release is not a verified managed predecessor')
     uid = api['administrator_uid'](host, former is not None)
     account = pwd.getpwuid(uid)
+    previous_record = DATA / 'standalone.json'
+    if existing(previous_record):
+        installed_record = read_record(previous_record)
+        if installed_record['uid'] != uid:
+            raise RuntimeError('The enrolled desktop UID changed; inspect before upgrading')
+        desktop_config = desktop_config or installed_record['desktop_config']
     desktop_config = desktop_config or str(Path(account.pw_dir) / '.config')
     if not Path(desktop_config).is_absolute() or Path(desktop_config).resolve().is_relative_to(
         Path('/usr/local/lib/flowgate')
@@ -368,7 +374,9 @@ def install(options, payload, manifest, backend):
         raise RuntimeError('This exact release is already installed')
     release = manifest['release']
     gui_files = {name[4:]: entry for name, entry in manifest['files'].items() if name.startswith('gui/')}
-    immutable_tree(payload / 'gui', BASE / 'gui' / release, gui_files)
+    gui_payload = BASE / 'gui' / release
+    immutable_tree(payload / 'gui', gui_payload, gui_files)
+    desktop(uid, xdg, gui_payload / 'flowgate-ui', '--check-autostart', options.import_preferences)
 
     # Pin the rescue executable and lifecycle script independently of current.
     rescue = secure_directory(BASE / 'rescue' / release)
@@ -387,6 +395,7 @@ def install(options, payload, manifest, backend):
         'rescue': {name: digest(rescue / name) for name in ('flowgate', 'release.py', 'install-monitoring.py')},
         'files': backend['files'], 'gui': gui_files, 'uid': uid, 'desktop_config': xdg,
         'previous_mode': selected,
+        'previous_unit_hashes': {name: old[1]['files'][name] for name in UNITS} if old else {},
     }
     if DATA.is_symlink():
         raise RuntimeError('Unsafe state directory')
@@ -451,11 +460,19 @@ def install(options, payload, manifest, backend):
 def cleanup(api, host, record):
     if owned_journal():
         raise RuntimeError('Retained shaping ownership journal; verified reconciliation required')
+    for name in UNITS:
+        unit = Path('/etc/systemd/system') / name
+        allowed = {record['files'][name], (record.get('previous_unit_hashes') or {}).get(name)}
+        if existing(unit) and digest(secure_file(unit)) not in allowed:
+            raise RuntimeError(f'Edited unit preserved: {unit}')
     rescue = BASE / 'rescue' / record['release'] / 'flowgate'
     if digest(secure_file(rescue)) != record['rescue']['flowgate']:
         raise RuntimeError('Rescue executable failed verification')
     atomic(DATA / 'protection.json', MONITORING)
-    host.run('systemctl', 'stop', *UNITS)
+    # Stop the consumer first. A legacy Requires edge may still bind
+    # NetworkManager to the guard during an interrupted first migration.
+    if (Path('/etc/systemd/system') / UNITS[0]).exists():
+        host.run('systemctl', 'stop', UNITS[0])
     if host.daemon_pids():
         raise RuntimeError('Unexpected FlowGate process remains')
     host.run(str(rescue), 'protection-recover', '--state', str(STATE))
@@ -556,16 +573,20 @@ def uninstall(options, api, host, record, pending):
     if existing(login_helper):
         desktop(record['uid'], record['desktop_config'], login_helper, '--check-autostart')
     cleanup(api, host, record)
-    host.run('systemctl', 'disable', *UNITS)
+    units = [name for name in UNITS if (Path('/etc/systemd/system') / name).exists()]
+    if units:
+        host.run('systemctl', 'disable', '--now', *units)
     if existing(login_helper):
+        desktop(record['uid'], record['desktop_config'], login_helper, '--stop-installed')
         desktop(record['uid'], record['desktop_config'], login_helper, '--remove-autostart')
     for name in UNITS:
         (Path('/etc/systemd/system') / name).unlink(missing_ok=True)
     host.run('systemctl', 'daemon-reload')
     for path in files:
         path.unlink(missing_ok=True)
-    if current_release() == release:
-        (BASE / 'current').unlink()
+    link = BASE / 'current'
+    if link.is_symlink() and link.resolve() == release:
+        link.unlink()
     for root in (gui, release):
         if root.is_dir():
             shutil.rmtree(root)

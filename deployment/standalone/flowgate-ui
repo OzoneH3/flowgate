@@ -5,6 +5,8 @@ import json
 import os
 from pathlib import Path
 import re
+import signal
+import time
 import subprocess
 import tempfile
 
@@ -57,8 +59,6 @@ def configure_login(options, config):
         if old is not None:
             login.unlink()
         return
-    if options.check_autostart:
-        return
     if options.restore_autostart:
         backup = config / 'flowgate/autostart.before-migration.desktop'
         if backup.is_file():
@@ -76,8 +76,10 @@ def configure_login(options, config):
         target = config / 'flowgate/electron-preferences.json'
         if target.is_symlink() or (target.exists() and target.read_bytes() != data):
             raise RuntimeError('Different installed preferences exist; compare before importing')
-        if not target.exists():
+        if not options.check_autostart and not target.exists():
             atomic_user_file(target, data)
+    if options.check_autostart:
+        return
     if old is not None:
         data, command = old
         if command != LOGIN_EXEC:
@@ -91,6 +93,44 @@ def configure_login(options, config):
         atomic_user_file(login, DESKTOP.read_bytes())
 
 
+def stop_installed():
+    gui_root = BASE / 'gui'
+    processes = []
+    try:
+        for proc in Path('/proc').iterdir():
+            if not proc.name.isdigit():
+                continue
+            try:
+                if proc.stat().st_uid != os.getuid():
+                    continue
+                fd = os.pidfd_open(int(proc.name))
+                try:
+                    executable = (proc / 'exe').readlink()
+                    parts = executable.relative_to(gui_root).parts
+                    if len(parts) != 3 or parts[-2:] != ('runtime', 'electron'):
+                        continue
+                    signal.pidfd_send_signal(fd, signal.SIGTERM)
+                    processes.append(fd)
+                    fd = None
+                finally:
+                    if fd is not None:
+                        os.close(fd)
+            except (OSError, ValueError):
+                continue
+        import select
+        end = time.monotonic() + 5
+        while processes:
+            readable, _, _ = select.select(processes, [], [], max(0, end - time.monotonic()))
+            if not readable:
+                raise RuntimeError('Close the running FlowGate GUI, then retry uninstall')
+            for fd in readable:
+                os.close(fd)
+                processes.remove(fd)
+    finally:
+        for fd in processes:
+            os.close(fd)
+
+
 def launch():
     current = (BASE / 'current').resolve(strict=True)
     if current.parent != BASE / 'releases':
@@ -101,6 +141,9 @@ def launch():
     runtime_dir = Path(os.environ.get('XDG_RUNTIME_DIR', ''))
     if not runtime_dir.is_absolute() or runtime_dir.stat().st_uid != os.getuid():
         raise RuntimeError('A valid desktop runtime directory is required')
+    desktop_config = user_dir('XDG_CONFIG_HOME', Path.home() / '.config')
+    if any('.workspace' in directory.resolve().parts for directory in (config, runtime_dir, desktop_config)):
+        raise RuntimeError('Installed GUI directories must be outside .workspace')
     cache = config / 'flowgate'
     cache.mkdir(mode=0o700, parents=True, exist_ok=True)
     env = dict(os.environ, FLOWGATE_INSTALLED='1', TMPDIR=str(runtime_dir))
@@ -127,11 +170,14 @@ def main():
     group.add_argument('--check-autostart', action='store_true')
     group.add_argument('--remove-autostart', action='store_true')
     group.add_argument('--restore-autostart', action='store_true')
+    group.add_argument('--stop-installed', action='store_true')
     parser.add_argument('--import-preferences', type=Path)
     options = parser.parse_args()
     if os.getuid() == 0:
         parser.error('Run as the desktop user')
-    if any(vars(options).values()):
+    if options.stop_installed:
+        stop_installed()
+    elif any(vars(options).values()):
         configure_login(options, user_dir('XDG_CONFIG_HOME', Path.home() / '.config'))
     else:
         launch()

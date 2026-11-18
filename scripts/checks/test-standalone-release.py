@@ -116,7 +116,8 @@ class ReleaseChecks(unittest.TestCase):
     def test_cleanup_uses_independent_rescue_and_requires_verified_tables(self):
         host = Mock()
         pin = 'a' * 64
-        record = {'release': 'candidate', 'rescue': {'flowgate': pin}}
+        record = {'release': 'candidate', 'rescue': {'flowgate': pin},
+                  'files': {name: pin for name in release['UNITS']}}
         ops = {'flowgate_tables': Mock(return_value=['flowgate_guard'])}
         host.daemon_pids.return_value = []
         with patch.dict(scope, BASE=self.root, DATA=self.root, secure_file=lambda p: p,

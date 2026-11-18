@@ -87,6 +87,7 @@ def pack(version, output):
         shutil.copyfile(electron / 'package.json', gui / 'electron/package.json')
         shutil.copytree(electron / 'node_modules/electron/dist', gui / 'runtime')
         shutil.copyfile(ROOT / 'electron/fontconfig_isolation.py', gui / 'fontconfig_isolation.py')
+        shutil.copy2(HERE / 'flowgate-ui', gui / 'flowgate-ui')
         for path in staging.rglob('*'):
             if path.is_symlink():
                 raise RuntimeError(f'Symlink in release payload: {path}')
