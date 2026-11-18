@@ -8,6 +8,10 @@ applications, users and supported Wine prefixes, not their launchers.
 
 ## Install or update a release
 
+The [standalone package workflow](docs/STANDALONE-RELEASE.md) uses `make package`,
+`make preflight`, `make install`, `make recover` and `make uninstall`.
+The checkout-based commands below remain available for development.
+
 Run from a clean, committed `master` checkout:
 
 ```sh

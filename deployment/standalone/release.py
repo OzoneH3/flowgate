@@ -568,7 +568,7 @@ def recover(options, api, host, record, pending):
             link.symlink_to(selected)
             link.replace(BASE / 'current')
             fsync_dir(BASE)
-    host.run('systemctl', 'reset-failed', *UNITS)
+    api['reset_failed_units'](host)
     host.run('systemctl', 'start', 'flowgate.service')
     api['wait_monitoring'](host, manifest, api['rule_inventory'](DATA / 'rules.db'))
     if pending:

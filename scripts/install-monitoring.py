@@ -266,6 +266,12 @@ def wait_monitoring(h, manifest, expected_rules):
     return response
 
 
+def reset_failed_units(h):
+    for unit in UNITS:
+        if h.run('systemctl', 'show', '-p', 'ActiveState', '--value', unit).strip() == 'failed':
+            h.run('systemctl', 'reset-failed', unit)
+
+
 def rollback(h, backup, data, base, previous, snapshot, unit_enabled):
     """Called only after the failed writer is stopped and interception is absent."""
     release, manifest = previous
@@ -304,7 +310,7 @@ def rollback(h, backup, data, base, previous, snapshot, unit_enabled):
     os.replace(link, base / 'current')
     h.run('systemctl', 'daemon-reload')
     h.run('systemd-analyze', 'verify', '/etc/systemd/system/flowgate.service', '/etc/systemd/system/flowgate-guard.service')
-    h.run('systemctl', 'reset-failed', 'flowgate.service', 'flowgate-guard.service')
+    reset_failed_units(h)
     for unit, enabled in unit_enabled.items():
         h.run('systemctl', 'enable' if enabled else 'disable', unit)
     h.run('systemctl', 'start', 'flowgate.service')
@@ -325,7 +331,7 @@ def restart_unchanged(h, base, data, previous):
     if json.loads((data / 'protection.json').read_bytes()).get('mode') != 'monitoring':
         raise RuntimeError('Original persisted protection intent is not monitoring')
     expected = rule_inventory(data / 'rules.db')
-    h.run('systemctl', 'reset-failed', 'flowgate.service', 'flowgate-guard.service')
+    reset_failed_units(h)
     h.run('systemctl', 'start', 'flowgate.service')
     return wait_monitoring(h, manifest, expected)
 

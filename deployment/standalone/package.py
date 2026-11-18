@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Create a curated offline package from make build output."""
+import datetime
 import hashlib
 import json
 from pathlib import Path
@@ -88,6 +89,11 @@ def pack(version, output):
         shutil.copytree(electron / 'node_modules/electron/dist', gui / 'runtime')
         shutil.copyfile(ROOT / 'electron/fontconfig_isolation.py', gui / 'fontconfig_isolation.py')
         shutil.copy2(HERE / 'flowgate-ui', gui / 'flowgate-ui')
+        write_json(gui / 'matched-manifest.json', {
+            'source': source, 'version': version,
+            'built_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            'files': {str(p.relative_to(gui)): digest(p) for p in (gui / 'electron').rglob('*') if p.is_file()},
+        })
         for path in staging.rglob('*'):
             if path.is_symlink():
                 raise RuntimeError(f'Symlink in release payload: {path}')
