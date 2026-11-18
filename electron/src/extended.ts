@@ -14,11 +14,12 @@ export class ExtendedMonitoring {
   constructor(
     private root: string,
     private backend?: Backend,
+    private installed = false,
   ) {
     if (backend) this.daemon = new DaemonMonitoring(backend);
   }
   view(active: boolean): ExtendedState {
-    if (this.daemon?.supported()) return this.daemon.view();
+    if (this.daemon && (this.installed || this.daemon.supported())) return this.daemon.view();
     if (active || Date.now() > this.pendingUntil) this.state.busy = false;
     return {
       ...this.state,
@@ -32,7 +33,7 @@ export class ExtendedMonitoring {
     };
   }
   async action(value: unknown) {
-    if (this.daemon?.supported()) return this.daemon.action(value);
+    if (this.daemon && (this.installed || this.daemon.supported())) return this.daemon.action(value);
     if (value !== 'enable' && value !== 'stop') throw Error('Invalid extended monitoring action');
     if (this.state.busy)
       throw Error('A collector operation is pending; inspect its authentication terminal');

@@ -77,8 +77,22 @@ if (app.commandLine.getSwitchValue('ozone-platform') === 'wayland') {
   app.commandLine.appendSwitch('use-angle', 'gl');
   app.commandLine.appendSwitch('use-webgpu-adapter', 'opengles');
 }
-const workspace = path.resolve(__dirname, '../../.workspace');
-fs.mkdirSync(workspace, { recursive: true });
+const installed = process.env.FLOWGATE_INSTALLED === '1';
+function userDirectory(variable: string, fallback: string) {
+  const value = process.env[variable];
+  return value && path.isAbsolute(value) ? value : fallback;
+}
+const runtime = process.env.XDG_RUNTIME_DIR;
+if (installed && (!runtime || !path.isAbsolute(runtime)))
+  throw Error('FlowGate requires an absolute XDG_RUNTIME_DIR in the desktop session.');
+const workspace = installed
+  ? path.join(runtime!, 'flowgate')
+  : path.resolve(__dirname, '../../.workspace');
+const config = installed
+  ? path.join(userDirectory('XDG_CONFIG_HOME', path.join(app.getPath('home'), '.config')), 'flowgate')
+  : workspace;
+for (const dir of new Set([workspace, config]))
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 const profile = fs.mkdtempSync(path.join(workspace, 'electron-profile-'));
 app.setPath('userData', profile);
 app.setPath('sessionData', profile);
@@ -114,7 +128,7 @@ let saved: {
   // Reviewed Essential interface exclusions; validated by Essential on load.
   essential?: { excluded_interfaces?: unknown };
 } = {};
-const prefsFile = path.join(workspace, 'electron-preferences.json');
+const prefsFile = path.join(config, 'electron-preferences.json');
 try {
   saved = JSON.parse(fs.readFileSync(prefsFile, 'utf8'));
 } catch {}
@@ -849,7 +863,7 @@ app.whenReady().then(async () => {
       trusted(e);
       return handler(v);
     });
-  const extended = new ExtendedMonitoring(path.resolve(__dirname, '../..'), backend);
+  const extended = new ExtendedMonitoring(path.resolve(__dirname, '../..'), backend, installed);
   ipcMain.handle('extended:action', (e, a) => {
     trusted(e);
     return extended.action(a);
@@ -910,6 +924,7 @@ app.whenReady().then(async () => {
     path.resolve(__dirname, '../..'),
     backend,
     controller || '/run/flowgate-api/control.sock',
+    installed,
   );
   for (const [channel, handler] of Object.entries({
     'rule:draft': (v: unknown) => rules.draft(v),

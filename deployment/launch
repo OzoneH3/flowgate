@@ -58,4 +58,18 @@ if os.environ.get('FLOWGATE_PROFILE_DIR'):
  environment['FLOWGATE_PROFILE_DIR']=os.environ['FLOWGATE_PROFILE_DIR']
  if os.environ.get('FLOWGATE_PROFILE_MANUAL') == '1':
   environment['FLOWGATE_PROFILE_MANUAL']='1'
+if (here / 'standalone-release.json').is_file():
+ args.append('--socket-authorization')
+ shape_config = pathlib.Path('/etc/flowgate/shaping.json')
+ if shape_config.exists() or shape_config.is_symlink():
+  if shape_config.is_symlink() or not shape_config.is_file():
+   raise SystemExit('Unsafe shaping configuration')
+  st = shape_config.stat()
+  if st.st_uid != 0 or st.st_mode & 0o022 or st.st_size > 4096:
+   raise SystemExit('Unsafe shaping configuration')
+  import re
+  interface = json.loads(shape_config.read_text()).get('interface')
+  if not isinstance(interface, str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,15}', interface):
+   raise SystemExit('Invalid shaping interface')
+  args.extend(['--experimental-upload-host-trial','--experimental-upload-interface',interface,'--experimental-upload-helpers',str(here),'--experimental-upload-state','/var/lib/flowgate/upload-experiment'])
 os.execve(args[0],args,environment)

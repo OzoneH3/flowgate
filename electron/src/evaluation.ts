@@ -19,24 +19,25 @@ export class Evaluation {
     started: number;
     ready: boolean;
   }[] = [];
-  private timer: NodeJS.Timeout;
+  private timer?: NodeJS.Timeout;
   private daemon: DaemonEvaluation;
   view(): EvaluationState {
-    return this.daemon.supported() ? this.daemon.view() : { ...this.state, mode: 'legacy' };
+    return this.installed || this.daemon.supported() ? this.daemon.view() : { ...this.state, mode: 'legacy' };
   }
   constructor(
     private root: string,
     private backend: Backend,
     private endpoint = '/run/flowgate-api/control.sock',
+    private installed = false,
   ) {
     this.daemon = new DaemonEvaluation(backend);
-    this.timer = setInterval(() => void this.poll(), 300);
+    if (!installed) this.timer = setInterval(() => void this.poll(), 300);
   }
   close() {
     clearInterval(this.timer);
   } // Detached terminal and controller retain their original deadline.
   async action(action: unknown, profile: unknown) {
-    if (this.daemon.supported()) return this.daemon.action(action, profile);
+    if (this.installed || this.daemon.supported()) return this.daemon.action(action, profile);
     if (
       typeof action !== 'string' ||
       !['start', 'stop', 'status', 'recover', 'cancel'].includes(String(action)) ||

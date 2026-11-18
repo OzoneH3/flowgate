@@ -1,0 +1,144 @@
+#!/usr/bin/python3 -I
+"""Unprivileged stable launcher and migration of the current user's login entry."""
+import argparse
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import tempfile
+
+BASE = Path('/usr/local/lib/flowgate')
+DESKTOP = Path('/usr/local/share/applications/flowgate.desktop')
+LOGIN_EXEC = b'Exec=/usr/local/bin/flowgate-ui'
+LEGACY_EXEC = re.compile(
+    rb'Exec="/[^"\r\n]+/\.workspace/automatic-zone-releases/[a-f0-9]{40}/launch-ui"'
+    rb' --observer /run/flowgate-api/daemon.sock.monitor --control /run/flowgate-api/daemon.sock'
+)
+
+
+def user_dir(name, default):
+    value = Path(os.environ.get(name) or default)
+    return value if value.is_absolute() else Path(default)
+
+
+def managed_login(path):
+    if not path.exists() and not path.is_symlink():
+        return None
+    if path.is_symlink() or not path.is_file() or path.stat().st_uid != os.getuid():
+        raise RuntimeError('Unsafe login entry: ' + str(path))
+    data = path.read_bytes()
+    lines = data.splitlines()
+    commands = [line for line in lines if line.startswith(b'Exec=')]
+    if b'X-FlowGate-Managed=true' not in lines or len(commands) != 1 or not (
+        commands[0] == LOGIN_EXEC or LEGACY_EXEC.fullmatch(commands[0])
+    ):
+        raise RuntimeError('Existing login entry is not managed by FlowGate: ' + str(path))
+    return data, commands[0]
+
+
+def atomic_user_file(path, data):
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as file:
+        temporary = Path(file.name)
+        try:
+            file.write(data)
+            file.flush()
+            os.fsync(file.fileno())
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+
+def configure_login(options, config):
+    login = config / 'autostart/flowgate.desktop'
+    old = managed_login(login)
+    if options.remove_autostart:
+        if old is not None:
+            login.unlink()
+        return
+    if options.check_autostart:
+        return
+    if options.restore_autostart:
+        backup = config / 'flowgate/autostart.before-migration.desktop'
+        if backup.is_file():
+            prior = managed_login(backup)
+            if old and old[1] == LOGIN_EXEC and prior and prior[1] != LOGIN_EXEC:
+                atomic_user_file(login, old[0].replace(LOGIN_EXEC, prior[1], 1))
+        return
+    if options.import_preferences:
+        source = options.import_preferences
+        if source.is_symlink() or not source.is_file() or source.stat().st_size > 1024 * 1024:
+            raise RuntimeError('Invalid preferences import source')
+        data = source.read_bytes()
+        if not isinstance(json.loads(data), dict):
+            raise RuntimeError('Invalid preferences object')
+        target = config / 'flowgate/electron-preferences.json'
+        if target.is_symlink() or (target.exists() and target.read_bytes() != data):
+            raise RuntimeError('Different installed preferences exist; compare before importing')
+        if not target.exists():
+            atomic_user_file(target, data)
+    if old is not None:
+        data, command = old
+        if command != LOGIN_EXEC:
+            backup = config / 'flowgate/autostart.before-migration.desktop'
+            if backup.is_symlink() or (backup.exists() and backup.read_bytes() != data):
+                raise RuntimeError('Different login migration backup exists')
+            if not backup.exists():
+                atomic_user_file(backup, data)
+            atomic_user_file(login, data.replace(command, LOGIN_EXEC, 1))
+    elif options.enable_autostart:
+        atomic_user_file(login, DESKTOP.read_bytes())
+
+
+def launch():
+    current = (BASE / 'current').resolve(strict=True)
+    if current.parent != BASE / 'releases':
+        raise RuntimeError('Invalid FlowGate release pointer')
+    payload = BASE / 'gui' / current.name
+    runtime = payload / 'runtime'
+    config = user_dir('XDG_CACHE_HOME', Path.home() / '.cache')
+    runtime_dir = Path(os.environ.get('XDG_RUNTIME_DIR', ''))
+    if not runtime_dir.is_absolute() or runtime_dir.stat().st_uid != os.getuid():
+        raise RuntimeError('A valid desktop runtime directory is required')
+    cache = config / 'flowgate'
+    cache.mkdir(mode=0o700, parents=True, exist_ok=True)
+    env = dict(os.environ, FLOWGATE_INSTALLED='1', TMPDIR=str(runtime_dir))
+    fontconfig = subprocess.run(
+        ['/usr/bin/python3', '-I', str(payload / 'fontconfig_isolation.py'), str(cache), str(runtime)],
+        env=env, capture_output=True, text=True, timeout=5,
+    )
+    if fontconfig.returncode == 0 and fontconfig.stdout.strip():
+        env['FONTCONFIG_FILE'] = fontconfig.stdout.strip()
+    executable = runtime / 'electron'
+    platform = 'wayland' if env.get('WAYLAND_DISPLAY') else 'x11'
+    os.execve(executable, [
+        str(executable), '--ozone-platform=' + platform, str(payload / 'electron'),
+        '--observer', '/run/flowgate-api/daemon.sock.monitor',
+        '--control', '/run/flowgate-api/daemon.sock',
+    ], env)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('--migrate-autostart', action='store_true')
+    group.add_argument('--enable-autostart', action='store_true')
+    group.add_argument('--check-autostart', action='store_true')
+    group.add_argument('--remove-autostart', action='store_true')
+    group.add_argument('--restore-autostart', action='store_true')
+    parser.add_argument('--import-preferences', type=Path)
+    options = parser.parse_args()
+    if os.getuid() == 0:
+        parser.error('Run as the desktop user')
+    if any(vars(options).values()):
+        configure_login(options, user_dir('XDG_CONFIG_HOME', Path.home() / '.config'))
+    else:
+        launch()
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise SystemExit(str(exc))

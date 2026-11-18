@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=FlowGate
+Comment=Review network activity and connection requests
+Exec=/usr/local/bin/flowgate-ui
+Icon=flowgate
+Terminal=false
+Categories=System;Network;
+X-FlowGate-Managed=true

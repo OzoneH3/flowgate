@@ -230,7 +230,7 @@ def previous_release(h, base, releases):
     if release.parent != releases or release.is_symlink():
         raise RuntimeError('Previous release is outside retained releases')
     manifest = previous_release_for_path(h, base, release)
-    if not all(name in manifest['files'] for name in ['flowgate', 'launch', *UNITS, *TOOLS]):
+    if not all(name in manifest['files'] for name in ['flowgate', 'launch', *UNITS, 'control.py', 'recover.py', 'uninstall.py']):
         raise RuntimeError('Previous release is incomplete')
     # Only a managed service can be restarted with a verified old configuration.
     if not h.path('/etc/systemd/system/flowgate.service').is_file():
@@ -362,8 +362,10 @@ def install(h, bundle, stamp):
         os.close(descriptor)
 
 
-def install_locked(h,bundle,stamp):
- manifest=json.loads((bundle/'manifest.json').read_text());assert manifest['isolated_passed']is True
+def install_locked(h,bundle,stamp, *, extra_config=None, verify_extra=None, standalone=False):
+ manifest=json.loads((bundle/'manifest.json').read_text())
+ if not standalone and manifest['isolated_passed'] is not True:
+  raise RuntimeError('Prepared bundle did not pass legacy qualification')
  base=safe_dir(h,'/usr/local/lib/flowgate',0o755);releases=safe_dir(h,'/usr/local/lib/flowgate/releases',0o755)
  name=manifest['release'];assert name and '/'not in name and name not in('.','..')
  release=releases/name
@@ -420,7 +422,8 @@ def install_locked(h,bundle,stamp):
  etc=safe_dir(h,'/etc/flowgate',0o755)
  backup=safe_dir(h,'/var/lib/flowgate/backups',0o700)/f'{name}-monitoring-{stamp}'
  backup.mkdir(mode=0o700)
- snapshot_paths=[data/'rules.db',data/'decisions.db',etc/'zones.json',etc/'administrator.json',*[h.path('/etc/systemd/system')/u for u in UNITS],drop,*map(h.path,TOOLS.values())]
+ extra_config=extra_config or {}
+ snapshot_paths=[*extra_config,data/'rules.db',data/'decisions.db',etc/'zones.json',etc/'administrator.json',*[h.path('/etc/systemd/system')/u for u in UNITS],drop,*map(h.path,TOOLS.values())]
  for path in [*snapshot_paths,data/'protection.json']:
   if path.is_symlink()or(path.exists()and not path.is_file()):raise RuntimeError('Unsafe installation state: '+str(path))
  quiesced=False
@@ -481,13 +484,16 @@ def install_locked(h,bundle,stamp):
    z=(before or{}).get('network_zones')or{}
    atomic(h,etc/'zones.json',json.dumps({'local':z.get('local_prefixes',[]),'internet':z.get('internet_prefixes',[])}).encode(),0o600)
   atomic(h,data/'protection.json',MONITORING,0o600)
+  for path, contents in extra_config.items():atomic(h,path,contents,0o600)
   # 7. Switch artifacts. Units only; the NM Requires= drop-in is deliberately absent.
   link=base/'.current-new'
   if link.is_symlink():link.unlink()
   link.symlink_to(release);os.replace(link,cur)
   for u in UNITS:atomic(h,h.path('/etc/systemd/system')/u,(release/u).read_bytes())
   if drop.exists():drop.unlink()
-  for src,dest in TOOLS.items():atomic(h,dest,(release/src).read_bytes(),0o755)
+  for src,dest in TOOLS.items():
+   safe_dir(h,pathlib.Path(dest).parent,0o755)
+   atomic(h,dest,(release/src).read_bytes(),0o755 if src in manifest['executables'] else 0o644)
   h.run('systemctl','daemon-reload')
   h.run('systemd-analyze','verify','/etc/systemd/system/flowgate.service','/etc/systemd/system/flowgate-guard.service')
   h.run('systemctl','disable','flowgate-guard.service')  # pulled in by flowgate.service only; never WantedBy network-pre
@@ -501,6 +507,7 @@ def install_locked(h,bundle,stamp):
   pids=h.daemon_pids()
   if len(pids)!=1:problems.append(('daemon processes',pids))
   if problems:raise RuntimeError('Monitoring verification failed: '+json.dumps(problems,default=str))
+  if verify_extra is not None:verify_extra(r)
   final={'generation':r['generation'],'build':r['build'],'protection':r['protection'],'enforcement':r['enforcement'],'traffic_monitor':r.get('traffic_monitor'),'rules':api_inventory(r),'capabilities':r['capabilities'],'permissions':r.get('permissions'),'owned_tables':tables,'daemon_pids':pids,'nm_dropin_installed':h.path(DROPIN).exists()}
   atomic(h,backup/'runtime-final.json',json.dumps(final,indent=2).encode(),0o600)
   print('INSTALLED IN MONITORING ONLY',name,'generation',r['generation'],'rules',len(final['rules']),'protection stopped; no interception; backup',backup)
