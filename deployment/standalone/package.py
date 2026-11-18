@@ -81,6 +81,7 @@ def pack(version, output):
         write_json(backend / 'manifest.json', {
             'release': release, 'source': source, 'max_rule_schema': build['max_rule_schema'],
             'isolated_passed': False, 'executables': executables,
+            'state_compatibility': 'flowgate-rules-and-settings-v1',
             'files': {p.name: digest(p) for p in sorted(backend.iterdir())},
         })
         electron = BUILD / 'electron'

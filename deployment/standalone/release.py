@@ -261,7 +261,7 @@ def shaping_status(host, generation):
     return response.get('upload_shaping') or {}
 
 
-def preflight(api, payload, backend, desktop_config):
+def preflight(api, backend_dir, backend, desktop_config):
     host = api['Host']()
     former = current_release()
     old = None
@@ -287,7 +287,7 @@ def preflight(api, payload, backend, desktop_config):
     if any(existing(path) for path in (LEGACY, LEGACY_GRANT)) and not (DATA / 'standalone.json').exists():
         print('Legacy update helper or privilege grant detected. Left for separately verified removal.')
     api['require_rule_schemas'](DATA / 'rules.db', api['manifest_rule_schema'](backend))
-    daemon = payload / 'backend/flowgate'
+    daemon = backend_dir / 'flowgate'
     build = json.loads(host.run(str(daemon), 'version'))
     if build.get('source') != backend['source'] or build.get('max_rule_schema') != backend['max_rule_schema']:
         raise RuntimeError('Candidate executable has an incompatible build declaration')
@@ -338,7 +338,7 @@ def preflight(api, payload, backend, desktop_config):
             continue
         reverse = {Path(dest): name for name, dest in FILES.items()}
         name = reverse.get(path, '50-flowgate-guard.conf' if path == Path(api['DROPIN']) else path.name)
-        approved = {(payload / 'backend' / name).read_bytes()}
+        approved = {(backend_dir / name).read_bytes()}
         if old and name in old[1]['files']:
             approved.add((old[0] / name).read_bytes())
         if path.read_bytes() not in approved:
@@ -387,7 +387,7 @@ def install(options, payload, manifest, backend):
     if (DATA / 'standalone-pending.json').exists():
         raise RuntimeError('An interrupted update requires local recovery')
     host, old, before, selected, collector, config, uid, xdg = preflight(
-        api, payload, backend, options.desktop_config,
+        api, payload / 'backend', backend, options.desktop_config,
     )
     if options.operation == 'preflight':
         print(f"Preflight passed for {manifest['release']}. Current protection: {selected}.")
@@ -435,7 +435,7 @@ def install(options, payload, manifest, backend):
     atomic(TOOLS / 'rescue', RESCUE_ENTRY, 0o755)
     atomic(TOOLS / 'rescue-release.py', (rescue / 'release.py').read_bytes(), 0o755)
 
-    shaping_status_before = shaping_status(host, before['generation']) if before else {}
+    before_settings = saved_settings(host, before) if before else None
     if selected != 'monitoring':
         _, fresh = host.api()
         if (fresh['generation'], fresh['protection'], api['api_inventory'](fresh)) != (
@@ -448,21 +448,8 @@ def install(options, payload, manifest, backend):
 
     def verify_extra(response):
         if before:
-            previous_shape = shaping_status_before
-            current_shape = shaping_status(host, response['generation'])
-            keys = ('status', 'enabled', 'interface', 'deployment_mode', 'configured_caps',
-                    'upload_budget_bits_per_second', 'download_budget_bits_per_second')
-            if {key: current_shape.get(key) for key in keys} != {
-                key: previous_shape.get(key) for key in keys
-            }:
-                raise RuntimeError('Shaping availability or configuration changed')
-        if collector in ('active', 'stopped'):
-            observed = response.get('traffic_monitor') or {}
-            if observed.get('state') != collector:
-                host.api('traffic-start' if collector == 'active' else 'traffic-stop',
-                         generation=response['generation'], collector_generation=observed.get('generation', ''))
-                wait_for(host, response['generation'],
-                         lambda v: (v.get('traffic_monitor') or {}).get('state') == collector)
+            verify_saved_settings(host, before_settings, response)
+        restore_collector(host, collector, response)
         if owned_journal():
             raise RuntimeError('Shaping journal appeared during install')
 
@@ -491,6 +478,130 @@ def install(options, payload, manifest, backend):
                 raise RuntimeError(f'Restoring {selected} could not be verified; use local recovery') from exc
     desktop(uid, xdg, Path(FILES['flowgate-ui']), '--migrate-autostart', options.import_preferences)
     print(f"Installed {release}; protection mode {selected}. Launch with flowgate-ui.")
+
+
+SHAPE_SETTINGS = (
+    'status', 'enabled', 'interface', 'deployment_mode', 'configured_caps',
+    'upload_budget_bits_per_second', 'download_budget_bits_per_second',
+)
+ZONE_OBSERVATIONS = {'revision', 'network_revision', 'network_state', 'network'}
+
+
+def saved_settings(host, response):
+    generation = response['generation']
+    shape = shaping_status(host, generation)
+    zones = response.get('network_zones') or {}
+    if zones.get('model') == 'automatic-peer-v1':
+        zones = {key: value for key, value in zones.items() if key not in ZONE_OBSERVATIONS}
+    receipt = host.api('connection-check-status', generation=generation, allow_error=True)[1]
+    if receipt.get('error') and receipt.get('error_code') != 'unavailable':
+        raise RuntimeError(receipt['error'])
+    return {
+        'shaping': {key: shape.get(key) for key in SHAPE_SETTINGS},
+        'zones': zones,
+        'connection_checks': receipt.get('connection_checks'),
+    }
+
+
+def verify_saved_settings(host, expected, response):
+    actual = saved_settings(host, response)
+    for name, value in expected.items():
+        if actual[name] != value:
+            raise RuntimeError(f'Saved {name} differs after switching the executable')
+
+
+def restore_collector(host, expected, response):
+    if expected not in ('active', 'stopped'):
+        return
+    observed = response.get('traffic_monitor') or {}
+    if observed.get('state') != expected:
+        host.api('traffic-start' if expected == 'active' else 'traffic-stop',
+                 generation=response['generation'], collector_generation=observed.get('generation', ''))
+        wait_for(host, response['generation'],
+                 lambda value: (value.get('traffic_monitor') or {}).get('state') == expected)
+
+
+def rollback_build(api, host, record):
+    """Downgrade the executable using the current database as the source."""
+    previous = record.get('previous')
+    if not previous:
+        raise RuntimeError('No verified predecessor is recorded')
+    old = BASE / 'releases' / previous
+    receipt = DATA / 'release-receipts' / (previous + '.json')
+    if not RELEASE_ID.fullmatch(previous) or not receipt.is_file():
+        raise RuntimeError(
+            'Previous release has no trusted standalone state contract. Current data and '
+            'protection are untouched. Use a compatible package, or export and review the '
+            'older install backup separately if you explicitly intend to discard later changes.'
+        )
+    prior = read_record(receipt)
+    if prior['release'] != previous:
+        raise RuntimeError('Previous release receipt does not match')
+    current = current_release()
+    if current != BASE / 'releases' / record['release']:
+        raise RuntimeError('Current executable is not verified. Use local rescue before rollback.')
+    candidate = api['previous_release_for_path'](host, BASE, old)
+    installed = api['previous_release_for_path'](host, BASE, current)
+    if candidate['files'] != prior['files'] or installed['files'] != record['files']:
+        raise RuntimeError('Installed release does not match its verified receipt')
+    contract = installed.get('state_compatibility')
+    if not contract or contract != candidate.get('state_compatibility'):
+        raise RuntimeError(
+            'Previous executable does not declare compatibility with the current settings and '
+            'database. No changes made. Select a compatible package or review the older '
+            'backup separately without replacing current data.'
+        )
+    gui = BASE / 'gui' / previous
+    if not gui.is_dir():
+        raise RuntimeError('Matching previous desktop payload is unavailable')
+    immutable_tree(gui, gui, prior['gui'])
+
+    # This includes the stored-rule ceiling and shaping checks before Stop.
+    host, _, before, selected, collector, config, uid, xdg = preflight(
+        api, old, candidate, record['desktop_config'],
+    )
+    if config:
+        raise RuntimeError('Rollback would require unexpected changes to shaping configuration')
+    settings = saved_settings(host, before)
+    stamp = time.strftime('%Y%m%dT%H%M%S') + '-' + uuid.uuid4().hex[:8]
+    pending = DATA / 'standalone-pending.json'
+    attempt = dict(
+        prior, previous=current.name, stamp=stamp, previous_mode=selected,
+        previous_unit_hashes={name: installed['files'][name] for name in UNITS},
+        uid=uid, desktop_config=xdg,
+    )
+    _, fresh = host.api()
+    if (fresh['generation'], fresh['protection']) != (before['generation'], before['protection']) or owned_journal():
+        raise RuntimeError('Host state changed during rollback preflight')
+    write_record(pending, attempt)
+    if selected != 'monitoring':
+        host.api('protection-stop', generation=before['generation'],
+                 protection_id=before['protection']['id'])
+        wait_for(host, before['generation'], lambda state: check_mode(api, host, state, 'monitoring'))
+
+    backup = DATA / 'backups' / (previous + '-monitoring-' + stamp)
+
+    def verify_latest(response):
+        newest = api['rule_documents'](backup / 'rules.db')
+        if api['rule_documents'](DATA / 'rules.db') != newest:
+            raise RuntimeError('The previous executable did not retain the newest rule documents')
+        verify_saved_settings(host, settings, response)
+        restore_collector(host, collector, response)
+
+    try:
+        api['install_locked'](host, old, stamp, verify_extra=verify_latest, standalone=True)
+    except api['RollbackComplete']:
+        pending.unlink()
+        fsync_dir(DATA)
+        raise RuntimeError(
+            'Downgrade failed verification. The newer executable and latest state were '
+            'restored in monitoring. No older database was activated.'
+        ) from None
+    write_record(receipt, attempt)
+    write_record(DATA / 'standalone.json', attempt)
+    pending.unlink()
+    fsync_dir(DATA)
+    print(f'Selected {previous} in monitoring with the latest saved rules and settings.')
 
 
 def cleanup(api, host, record):
@@ -538,11 +649,15 @@ def restore_previous(api, host, record):
 
 
 def recover(options, api, host, record, pending):
+    if options.rollback:
+        if pending:
+            raise RuntimeError('An installation is incomplete. Run recover without --rollback for failed-install recovery.')
+        return rollback_build(api, host, record)
     cleanup(api, host, record)
     if options.stop_only:
         print('FlowGate stopped; monitoring intent saved and no managed interception remains.')
         return
-    if options.rollback or pending and record.get('previous'):
+    if pending and record.get('previous'):
         # Preserve the previous desktop login when reverting the first migration.
         # A standalone predecessor still uses the same stable launcher.
         launcher = Path(FILES['flowgate-ui'])
@@ -551,14 +666,7 @@ def recover(options, api, host, record, pending):
         ).is_dir():
             desktop(record['uid'], record['desktop_config'], launcher, '--restore-autostart')
         restore_previous(api, host, record)
-        if pending:
-            pending.unlink()
-        else:
-            receipt = DATA / 'release-receipts' / (record['previous'] + '.json')
-            if receipt.exists():
-                write_record(DATA / 'standalone.json', read_record(receipt))
-            else:
-                (DATA / 'standalone.json').unlink()
+        pending.unlink()
         fsync_dir(DATA)
         return
     selected = BASE / 'releases' / record['release']
