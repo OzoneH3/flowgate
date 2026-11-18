@@ -28,12 +28,12 @@ class Host:
  """Every privileged boundary. Tests substitute a temp-root/mocked implementation."""
  def path(self,p):return pathlib.Path(p)
  def run(self,*argv):return subprocess.run(argv,check=True,text=True,capture_output=True,timeout=90).stdout
- def api(self,op='list',timeout=5,**q):
+ def api(self,op='list',timeout=5,*,allow_error=False,**q):
   with socket.socket(socket.AF_UNIX)as s:
    s.settimeout(timeout);s.connect('/run/flowgate-api/daemon.sock')
    pid,uid,_=struct.unpack('3i',s.getsockopt(socket.SOL_SOCKET,socket.SO_PEERCRED,12));assert uid==0,'API peer is not root'
    s.sendall((json.dumps(dict(version=1,operation=op,**q))+'\n').encode());r=json.loads(s.makefile('rb').readline())
-   assert not r.get('error'),r
+   if r.get('error') and not allow_error:raise RuntimeError(r['error'])
    return pid,r
  def daemon_pids(self):
   out=[]
@@ -246,7 +246,7 @@ def wait_api(h):
             break
         try:
             return h.api(timeout=min(2, remaining))
-        except (OSError, ValueError, AssertionError):
+        except (OSError, ValueError, RuntimeError, AssertionError):
             h.sleep(min(.25, max(0, deadline - time.monotonic())))
     raise RuntimeError('Daemon API did not become ready within verification deadline')
 
@@ -277,7 +277,10 @@ def rollback(h, backup, data, base, previous, snapshot, unit_enabled):
         if entry and sha((backup / entry['file']).read_bytes()) != entry['sha256']:
             raise RuntimeError('Rollback backup integrity check failed')
     failed = backup / 'failed-state'
-    failed.mkdir(mode=0o700)
+    if failed.exists():
+        failed = pathlib.Path(tempfile.mkdtemp(prefix='failed-state-retry-', dir=backup))
+    else:
+        failed.mkdir(mode=0o700)
     for db in ['rules.db', 'decisions.db']:
         for suffix in ['', '-wal', '-shm', '-journal']:
             path = data / (db + suffix)

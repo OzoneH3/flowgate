@@ -247,6 +247,15 @@ def wait_for(host, generation, predicate):
         time.sleep(.25)
 
 
+def shaping_status(host, generation):
+    _, response = host.api('upload-status', generation=generation, allow_error=True)
+    if response.get('error'):
+        if response.get('error_code') == 'unavailable':
+            return {}
+        raise RuntimeError(response['error'])
+    return response.get('upload_shaping') or {}
+
+
 def preflight(api, payload, backend, desktop_config):
     host = api['Host']()
     former = current_release()
@@ -289,8 +298,7 @@ def preflight(api, payload, backend, desktop_config):
         live = response['build']
         if live.get('source') != old[1]['source'] or live.get('executable_sha256') != old[1]['files']['flowgate'] or live.get('modified') is not False:
             raise RuntimeError('Running backend does not match the current release')
-        _, shape = host.api('upload-status', generation=response['generation'])
-        shape = shape.get('upload_shaping') or {}
+        shape = shaping_status(host, response['generation'])
         if (shape.get('status') not in ('Disabled', 'Unsupported', None) or
             shape.get('enabled') or shape.get('configured_caps') or
             shape.get('upload_budget_bits_per_second') or shape.get('download_budget_bits_per_second')):
@@ -419,6 +427,7 @@ def install(options, payload, manifest, backend):
     atomic(TOOLS / 'rescue', b'#!/bin/sh\nexec /usr/bin/python3 -I /usr/local/libexec/flowgate/rescue-release.py recover "$@"\n', 0o755)
     atomic(TOOLS / 'rescue-release.py', (rescue / 'release.py').read_bytes(), 0o755)
 
+    shaping_status_before = shaping_status(host, before['generation']) if before else {}
     if selected != 'monitoring':
         _, fresh = host.api()
         if (fresh['generation'], fresh['protection'], api['api_inventory'](fresh)) != (
@@ -430,6 +439,15 @@ def install(options, payload, manifest, backend):
         wait_for(host, before['generation'], lambda v: check_mode(api, host, v, 'monitoring'))
 
     def verify_extra(response):
+        if before:
+            previous_shape = shaping_status_before
+            current_shape = shaping_status(host, response['generation'])
+            keys = ('status', 'enabled', 'interface', 'deployment_mode', 'configured_caps',
+                    'upload_budget_bits_per_second', 'download_budget_bits_per_second')
+            if {key: current_shape.get(key) for key in keys} != {
+                key: previous_shape.get(key) for key in keys
+            }:
+                raise RuntimeError('Shaping availability or configuration changed')
         if collector in ('active', 'stopped'):
             observed = response.get('traffic_monitor') or {}
             if observed.get('state') != collector:
