@@ -41,6 +41,7 @@ FILES = {
 RELEASE_ID = re.compile(r'[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9]+(?:\.[A-Za-z0-9]+)*)?-[a-f0-9]{12}')
 HEX = re.compile(r'[a-f0-9]{64}')
 MONITORING = b'{"schema":1,"mode":"monitoring"}'
+RESCUE_ENTRY = b'#!/bin/sh\nexec /usr/bin/python3 -I /usr/local/libexec/flowgate/rescue-release.py recover "$@"\n'
 
 
 def digest(path):
@@ -424,7 +425,7 @@ def install(options, payload, manifest, backend):
     pending = DATA / 'standalone-pending.json'
     write_record(pending, record)
     # Keep a fixed rescue entry point even during the first install or a power loss.
-    atomic(TOOLS / 'rescue', b'#!/bin/sh\nexec /usr/bin/python3 -I /usr/local/libexec/flowgate/rescue-release.py recover "$@"\n', 0o755)
+    atomic(TOOLS / 'rescue', RESCUE_ENTRY, 0o755)
     atomic(TOOLS / 'rescue-release.py', (rescue / 'release.py').read_bytes(), 0o755)
 
     shaping_status_before = shaping_status(host, before['generation']) if before else {}
@@ -589,14 +590,48 @@ def uninstall(options, api, host, record, pending):
             raise RuntimeError(f'Edited managed file preserved: {path}')
     if existing(Path(api['DROPIN'])):
         raise RuntimeError('Legacy NetworkManager drop-in present; inspect before removal')
-    gui = BASE / 'gui' / record['release']
-    if existing(gui):
-        immutable_tree(gui, gui, record['gui'])
+    link = BASE / 'current'
     release = BASE / 'releases' / record['release']
-    if existing(release):
-        api['previous_release_for_path'](host, BASE, release)
-        if {p.name for p in release.iterdir()} != {*record['files'], 'manifest.json'}:
-            raise RuntimeError('Additional release files require ownership inspection')
+    if existing(link) and (not link.is_symlink() or link.resolve() != release):
+        raise RuntimeError('Current points outside the registered installation')
+    receipts_dir = DATA / 'release-receipts'
+    registered = {record['release']: record}
+    for path in receipts_dir.glob('*.json'):
+        entry = read_record(path)
+        if path.stem != entry['release'] or not RELEASE_ID.fullmatch(path.stem):
+            raise RuntimeError(f'Invalid retained release receipt: {path}')
+        registered[path.stem] = entry
+    remove = []
+    rescue_script_hashes = set()
+    for release_name, entry in registered.items():
+        gui = BASE / 'gui' / release_name
+        if existing(gui):
+            immutable_tree(gui, gui, entry['gui'])
+            remove.append(gui)
+        backend = BASE / 'releases' / release_name
+        if existing(backend):
+            manifest = api['previous_release_for_path'](host, BASE, backend)
+            if manifest['files'] != entry['files'] or {p.name for p in backend.iterdir()} != {
+                *entry['files'], 'manifest.json'
+            }:
+                raise RuntimeError(f'Additional or changed release files: {backend}')
+            remove.append(backend)
+        rescue = BASE / 'rescue' / release_name
+        rescue_script_hashes.add(entry['rescue']['release.py'])
+        if existing(rescue):
+            secure_directory(rescue)
+            if {p.name for p in rescue.iterdir()} != set(entry['rescue']) or any(
+                digest(secure_file(rescue / name)) != checksum
+                for name, checksum in entry['rescue'].items()
+            ):
+                raise RuntimeError(f'Changed rescue directory: {rescue}')
+            remove.append(rescue)
+    rescue_cli = TOOLS / 'rescue'
+    rescue_script = TOOLS / 'rescue-release.py'
+    if existing(rescue_cli) and secure_file(rescue_cli).read_bytes() != RESCUE_ENTRY:
+        raise RuntimeError('Edited rescue launcher preserved')
+    if existing(rescue_script) and digest(secure_file(rescue_script)) not in rescue_script_hashes:
+        raise RuntimeError('Edited rescue tool preserved')
     launcher = Path(FILES['flowgate-ui'])
     login_helper = launcher if existing(launcher) else release / 'flowgate-ui'
     if existing(login_helper):
@@ -613,12 +648,13 @@ def uninstall(options, api, host, record, pending):
     host.run('systemctl', 'daemon-reload')
     for path in files:
         path.unlink(missing_ok=True)
-    link = BASE / 'current'
-    if link.is_symlink() and link.resolve() == release:
-        link.unlink()
-    for root in (gui, release):
-        if root.is_dir():
-            shutil.rmtree(root)
+    link.unlink(missing_ok=True)
+    for root in remove:
+        shutil.rmtree(root)
+    for release_name in registered:
+        (receipts_dir / (release_name + '.json')).unlink(missing_ok=True)
+    rescue_cli.unlink(missing_ok=True)
+    rescue_script.unlink(missing_ok=True)
     if options.purge:
         for root in (ETC, DATA):
             if root.is_symlink() or not root.is_dir() or root.stat().st_uid != 0:
@@ -626,7 +662,7 @@ def uninstall(options, api, host, record, pending):
             shutil.rmtree(root)
     else:
         (DATA / 'standalone.json').unlink(missing_ok=True)
-    print('FlowGate services and managed active release removed. Previous releases and user preferences retained.')
+    print('FlowGate services and registered standalone releases removed. Legacy releases and user preferences retained.')
 
 
 def main():
