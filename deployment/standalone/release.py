@@ -57,7 +57,14 @@ def secure_file(path):
 
 def secure_directory(path):
     for parent in reversed([path, *path.parents]):
-        parent.mkdir(exist_ok=True, mode=0o755)
+        try:
+            parent.mkdir(mode=0o755)
+        except FileExistsError:
+            pass
+        else:
+            # The process umask is restrictive for backups. Public installed
+            # binaries still need traversable root-owned parent directories.
+            parent.chmod(0o755)
         status = parent.lstat()
         if not stat.S_ISDIR(status.st_mode) or status.st_uid != 0 or status.st_mode & 0o022:
             raise RuntimeError(f'Unsafe managed directory: {parent}')
@@ -362,17 +369,20 @@ def immutable_tree(source, target, expected):
 
 def install(options, payload, manifest, backend):
     api = module(payload / 'backend/install-monitoring.py')
+    if (DATA / 'standalone-pending.json').exists():
+        raise RuntimeError('An interrupted update requires local recovery')
     host, old, before, selected, collector, config, uid, xdg = preflight(
         api, payload, backend, options.desktop_config,
     )
     if options.operation == 'preflight':
         print(f"Preflight passed for {manifest['release']}. Current protection: {selected}.")
         return
-    if (DATA / 'standalone-pending.json').exists():
-        raise RuntimeError('An interrupted update requires local recovery')
     if old is not None and old[0].name == manifest['release']:
         raise RuntimeError('This exact release is already installed')
     release = manifest['release']
+    secure_directory(BASE / 'releases')
+    for path in FILES.values():
+        secure_directory(Path(path).parent)
     gui_files = {name[4:]: entry for name, entry in manifest['files'].items() if name.startswith('gui/')}
     gui_payload = BASE / 'gui' / release
     immutable_tree(payload / 'gui', gui_payload, gui_files)
