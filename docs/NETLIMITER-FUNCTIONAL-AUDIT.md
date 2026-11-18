@@ -268,7 +268,7 @@ Evidence directory: `.workspace/netlimiter-audit-01a16a05/`. Official documentat
 
 Follow-up evidence is in `followup-scope-tests.log` and `followup-scope-source.json` in the evidence directory. The full baseline gate was not rerun on the follow-up commits; their verification must not be combined into a claim that one final revision passed every check.
 
-Historical evidence availability: `.workspace/scope-retention.log`, referenced by `docs/HISTORY.md`, was reported accidentally deleted by another session during this audit and is unavailable. It is not an artifact supporting this audit's fresh results. The new baseline-check logs are separate evidence and do not reconstruct that historical run.
+Historical evidence availability: `.workspace/scope-retention.log`, referenced by the [pre-desktop backend record](https://github.com/OzoneH3/flowgate/blob/f17f443b8f221e2bf6fabbd756f4af4329096875/docs/HISTORY.md), was reported accidentally deleted by another session during this audit and is unavailable. It is not an artifact supporting this audit's fresh results. The new baseline-check logs are separate evidence and do not reconstruct that historical run.
 
 Not newly exercised: installed NetLimiter UI or network behavior; native Electron or Qt desktop journeys; real Wine/Proton runtime acceptance; the optional `--wine` suite; optional UDP BPF and TCP-initiation collector attachment; arbitrary namespaces/distributions; throughput/saturation benchmarks; real VPN combinations; live installer/update/reboot recovery. Historical or peer-provided results may guide follow-up but do not extend this fresh run's scope.
 

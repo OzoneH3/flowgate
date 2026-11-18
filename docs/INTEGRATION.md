@@ -3,8 +3,7 @@
 [STATUS.md](STATUS.md) maintains current scope and the last recorded deployment.
 Source, installed daemon and GUI are independently versioned artifacts; compare
 actual build metadata before interpreting a feature or acceptance result.
-Historical release pairings and integration journeys are retained in
-[INTEGRATION-HISTORY.md](INTEGRATION-HISTORY.md).
+[Historical integration results](https://github.com/OzoneH3/flowgate/blob/f17f443b8f221e2bf6fabbd756f4af4329096875/docs/INTEGRATION-HISTORY.md) record earlier release pairings and test runs.
 
 - API and authorization: [API.md](API.md), [RULES.md](RULES.md).
 - Attribution and runtime bounds: [ATTRIBUTION.md](ATTRIBUTION.md), [WINE.md](WINE.md).

@@ -28,9 +28,8 @@ The following earlier status is retained as history:
 
 # FlowGate status
 
-This is the maintained status page. Historical deployment and acceptance notes
-are in [STATUS-HISTORY.md](STATUS-HISTORY.md) and
-[HANDOFF-HISTORY.md](HANDOFF-HISTORY.md). They do not describe the live host.
+Earlier deployment and acceptance notes are indexed in the
+[historical records](HANDOFF.md#historical-records).
 
 ## Implemented
 

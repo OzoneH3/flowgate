@@ -7,7 +7,7 @@ Reference specification: NetLimiter official documentation
 [Pending requests](https://netlimiter.com/docs/basic-concepts/blocker/pending-requests))
 and the installed NetLimiter 5.3.28 observed in WinBoat
 (`.workspace/coordination/1f879934-netlimiter-permission-observed.md`, captures in
-`.workspace/nl-perm/shots/`). The project-wide parity matrix is `docs/NETLIMITER-PARITY.md`.
+`.workspace/nl-perm/shots/`). See the [project-wide functionality audit](NETLIMITER-FUNCTIONAL-AUDIT.md).
 
 ## Defect that started this increment
 

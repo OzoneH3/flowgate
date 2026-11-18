@@ -8,8 +8,7 @@ SHA256 ?=
 DESKTOP_FLAGS ?= --migrate-autostart
 INSTALL_FLAGS ?=
 RECOVER_FLAGS ?=
-UNDESKTOP_FLAGS ?= --migrate-autostart
-INSTALL_FLAGS ?=
+UNINSTALL_FLAGS ?=
 
 .PHONY: help build check package preflight install desktop recover uninstall clean
 help:
