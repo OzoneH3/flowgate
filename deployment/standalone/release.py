@@ -399,6 +399,7 @@ def install(options, payload, manifest, backend):
     }
     if DATA.is_symlink():
         raise RuntimeError('Unsafe state directory')
+    secure_directory(DATA.parent)
     DATA.mkdir(mode=0o700, exist_ok=True)
     if DATA.stat().st_uid != 0 or DATA.stat().st_mode & 0o077:
         raise RuntimeError('FlowGate state directory is not private')
