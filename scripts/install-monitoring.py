@@ -371,7 +371,8 @@ def install(h, bundle, stamp):
         os.close(descriptor)
 
 
-def install_locked(h,bundle,stamp, *, extra_config=None, verify_extra=None, standalone=False):
+def install_locked(h,bundle,stamp, *, extra_config=None, verify_extra=None,
+                   before_quiesce=None, standalone=False):
  manifest=json.loads((bundle/'manifest.json').read_text())
  if not standalone and manifest['isolated_passed'] is not True:
   raise RuntimeError('Prepared bundle did not pass legacy qualification')
@@ -437,6 +438,8 @@ def install_locked(h,bundle,stamp, *, extra_config=None, verify_extra=None, stan
   if path.is_symlink()or(path.exists()and not path.is_file()):raise RuntimeError('Unsafe installation state: '+str(path))
  quiesced=False
  try:
+  # Final read while the old writer is available. A refusal leaves it running.
+  if before_quiesce is not None:before_quiesce()
   # Quiesce the old writer BEFORE taking the rollback database snapshot.
   if running:
    if (h.path('/etc/systemd/system')/'flowgate.service').exists():h.run('systemctl','stop','flowgate.service')

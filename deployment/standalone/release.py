@@ -295,6 +295,7 @@ def preflight(api, backend_dir, backend, desktop_config):
     selected = 'monitoring'
     extra_config = {}
     collector = None
+    settings = None
     if old:
         _, response = host.api()
         selected = response['protection']['desired_mode']
@@ -314,6 +315,7 @@ def preflight(api, backend_dir, backend, desktop_config):
                 raise RuntimeError('Host shaping interface or state cannot be preserved')
             if not existing(SHAPING):
                 extra_config[SHAPING] = json.dumps({'interface': interface}).encode()
+        settings = saved_settings(host, response, shape=shape)
         collector = (response.get('traffic_monitor') or {}).get('state')
         if collector not in (None, 'unavailable', 'active', 'stopped'):
             raise RuntimeError('Current collector is not settled')
@@ -343,7 +345,7 @@ def preflight(api, backend_dir, backend, desktop_config):
             approved.add((old[0] / name).read_bytes())
         if path.read_bytes() not in approved:
             raise RuntimeError(f'Existing path has unmanaged bytes: {path}')
-    return host, old, response, selected, collector, extra_config, uid, desktop_config
+    return host, old, response, selected, collector, extra_config, uid, desktop_config, settings
 
 
 def desktop(user, config, program, action, preferences=None):
@@ -386,7 +388,7 @@ def install(options, payload, manifest, backend):
     api = module(payload / 'backend/install-monitoring.py')
     if (DATA / 'standalone-pending.json').exists():
         raise RuntimeError('An interrupted update requires local recovery')
-    host, old, before, selected, collector, config, uid, xdg = preflight(
+    host, old, before, selected, collector, config, uid, xdg, settings = preflight(
         api, payload / 'backend', backend, options.desktop_config,
     )
     if options.operation == 'preflight':
@@ -435,27 +437,21 @@ def install(options, payload, manifest, backend):
     atomic(TOOLS / 'rescue', RESCUE_ENTRY, 0o755)
     atomic(TOOLS / 'rescue-release.py', (rescue / 'release.py').read_bytes(), 0o755)
 
-    before_settings = saved_settings(host, before) if before else None
-    if selected != 'monitoring':
-        _, fresh = host.api()
-        if (fresh['generation'], fresh['protection'], api['api_inventory'](fresh)) != (
-            before['generation'], before['protection'], api['api_inventory'](before)
-        ) or owned_journal():
-            pending.unlink()
-            raise RuntimeError('Host state changed after preflight')
-        host.api('protection-stop', generation=before['generation'], protection_id=before['protection']['id'])
-        wait_for(host, before['generation'], lambda v: check_mode(api, host, v, 'monitoring'))
-
     def verify_extra(response):
-        if before:
-            verify_saved_settings(host, before_settings, response)
+        if settings is not None:
+            verify_saved_settings(host, settings, response)
         restore_collector(host, collector, response)
         if owned_journal():
             raise RuntimeError('Shaping journal appeared during install')
 
     try:
+        before_quiesce = prepare_switch(api, host, before, settings, selected)
         api['install_locked'](host, payload / 'backend', stamp, extra_config=config,
-                              verify_extra=verify_extra, standalone=True)
+                              verify_extra=verify_extra, before_quiesce=before_quiesce, standalone=True)
+    except PreflightChanged:
+        pending.unlink()
+        fsync_dir(DATA)
+        raise
     except api['RollbackComplete']:
         pending.unlink()
         fsync_dir(DATA)
@@ -487,9 +483,10 @@ SHAPE_SETTINGS = (
 ZONE_OBSERVATIONS = {'revision', 'network_revision', 'network_state', 'network'}
 
 
-def saved_settings(host, response):
+def saved_settings(host, response, *, shape=None):
     generation = response['generation']
-    shape = shaping_status(host, generation)
+    if shape is None:
+        shape = shaping_status(host, generation)
     zones = response.get('network_zones') or {}
     if zones.get('model') == 'automatic-peer-v1':
         zones = {key: value for key, value in zones.items() if key not in ZONE_OBSERVATIONS}
@@ -519,6 +516,47 @@ def restore_collector(host, expected, response):
                  generation=response['generation'], collector_generation=observed.get('generation', ''))
         wait_for(host, response['generation'],
                  lambda value: (value.get('traffic_monitor') or {}).get('state') == expected)
+
+
+class PreflightChanged(RuntimeError):
+    """The verified transition has not reached service shutdown."""
+
+
+def verify_before_switch(api, host, before, settings, protection):
+    try:
+        _, fresh = host.api()
+        if fresh['generation'] != before['generation'] or fresh['protection'] != protection:
+            raise RuntimeError('daemon or protection changed')
+        if api['api_inventory'](fresh) != api['api_inventory'](before):
+            raise RuntimeError('rules changed')
+        old_collector = before.get('traffic_monitor') or {}
+        new_collector = fresh.get('traffic_monitor') or {}
+        if any(old_collector.get(key) != new_collector.get(key) for key in ('state', 'generation')):
+            raise RuntimeError('collector changed')
+        current = saved_settings(host, fresh)
+        for name, value in settings.items():
+            if current[name] != value:
+                raise RuntimeError(f'{name} changed')
+        if owned_journal():
+            raise RuntimeError('shaping ownership journal appeared')
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise PreflightChanged(f'State changed after preflight: {exc}. Retry from a fresh preflight.') from exc
+
+
+def prepare_switch(api, host, before, settings, selected):
+    if before is None:
+        return None
+    expected = before['protection']
+    verify_before_switch(api, host, before, settings, expected)
+    if selected != 'monitoring':
+        host.api('protection-stop', generation=before['generation'], protection_id=expected['id'])
+        stopped = wait_for(host, before['generation'], lambda state: check_mode(api, host, state, 'monitoring'))
+        expected = stopped['protection']
+
+    def before_quiesce():
+        verify_before_switch(api, host, before, settings, expected)
+
+    return before_quiesce
 
 
 def rollback_build(api, host, record):
@@ -557,12 +595,11 @@ def rollback_build(api, host, record):
     immutable_tree(gui, gui, prior['gui'])
 
     # This includes the stored-rule ceiling and shaping checks before Stop.
-    host, _, before, selected, collector, config, uid, xdg = preflight(
+    host, _, before, selected, collector, config, uid, xdg, settings = preflight(
         api, old, candidate, record['desktop_config'],
     )
     if config:
         raise RuntimeError('Rollback would require unexpected changes to shaping configuration')
-    settings = saved_settings(host, before)
     stamp = time.strftime('%Y%m%dT%H%M%S') + '-' + uuid.uuid4().hex[:8]
     pending = DATA / 'standalone-pending.json'
     attempt = dict(
@@ -570,14 +607,7 @@ def rollback_build(api, host, record):
         previous_unit_hashes={name: installed['files'][name] for name in UNITS},
         uid=uid, desktop_config=xdg,
     )
-    _, fresh = host.api()
-    if (fresh['generation'], fresh['protection']) != (before['generation'], before['protection']) or owned_journal():
-        raise RuntimeError('Host state changed during rollback preflight')
     write_record(pending, attempt)
-    if selected != 'monitoring':
-        host.api('protection-stop', generation=before['generation'],
-                 protection_id=before['protection']['id'])
-        wait_for(host, before['generation'], lambda state: check_mode(api, host, state, 'monitoring'))
 
     backup = DATA / 'backups' / (previous + '-monitoring-' + stamp)
 
@@ -589,7 +619,13 @@ def rollback_build(api, host, record):
         restore_collector(host, collector, response)
 
     try:
-        api['install_locked'](host, old, stamp, verify_extra=verify_latest, standalone=True)
+        before_quiesce = prepare_switch(api, host, before, settings, selected)
+        api['install_locked'](host, old, stamp, verify_extra=verify_latest,
+                              before_quiesce=before_quiesce, standalone=True)
+    except PreflightChanged:
+        pending.unlink()
+        fsync_dir(DATA)
+        raise
     except api['RollbackComplete']:
         pending.unlink()
         fsync_dir(DATA)

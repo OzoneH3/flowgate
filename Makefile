@@ -28,6 +28,7 @@ build:
 
 check:
 	PYTHONDONTWRITEBYTECODE=1 python3 scripts/checks/test-standalone-release.py
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/checks/test-standalone-freshness.py
 
 package: build check
 	python3 -B deployment/standalone/package.py "$(VERSION)" "$(ARTIFACT)"
