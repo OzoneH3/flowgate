@@ -614,10 +614,6 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
   badge.id = 'extendedBadge';
   badge.title = 'Extended UDP monitoring; independent of firewall enforcement';
   document.querySelector('.toolbar')!.insertBefore(badge, $('observerStatus'));
-  badge.onclick = () => {
-    $<HTMLDetailsElement>('controlMenu').open = true;
-    $('extendedEnable').focus();
-  };
   $('extendedEnable').onclick = async () => {
     const e = await window.flowgate.extendedState();
     confirmAction(
@@ -1063,17 +1059,10 @@ async function setupSizing() {
       };
     };
   }
-  const headers = [...document.querySelectorAll<HTMLElement>('#headers th')];
-  const resizeTable = () => {
-    $('tree').style.width =
-      headers.reduce(
-        (n, h) => n + parseFloat(h.style.width || String(h.getBoundingClientRect().width)),
-        0,
-      ) + 'px';
-  };
-  for (const h of headers) {
+  for (const h of document.querySelectorAll<HTMLElement>('#headers th:not(.col-filler)')) {
     const key = h.className.slice(4);
-    h.style.width = (prefs.columns?.[key] || h.getBoundingClientRect().width) + 'px';
+    const saved = prefs.columns?.[key];
+    if (saved) h.style.width = saved + 'px';
     const grip = node('span', '');
     grip.className = 'column-grip';
     h.append(grip);
@@ -1084,16 +1073,15 @@ async function setupSizing() {
         w = h.getBoundingClientRect().width;
       grip.onpointermove = (e) => {
         h.style.width = Math.max(45, Math.min(700, w + e.clientX - start)) + 'px';
-        resizeTable();
       };
       grip.onpointerup = () => {
         grip.onpointermove = null;
+        if (!h.style.width) return;
         prefs.columns = { ...prefs.columns, [key]: Math.round(parseFloat(h.style.width)) };
         save();
       };
     };
   }
-  resizeTable();
 }
 
 export function confirmRuleDelete(r: Rule, generation: string) {

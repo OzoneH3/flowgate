@@ -930,6 +930,11 @@ if (promptID) {
   for (const [key, title] of columns) {
     const th = element('th');
     th.className = 'col-' + key;
+    if (key === 'filler') {
+      th.setAttribute('aria-hidden', 'true');
+      $('headers').append(th);
+      continue;
+    }
     const b = element('button', title);
     if (key === 'download_bps' || key === 'upload_bps') {
       b.classList.add('rate-header');
@@ -1191,10 +1196,11 @@ function paneControls(self?: 'info' | 'chart', summaryText = '▾') {
   summary.title = 'Window menu';
   summary.setAttribute(
     'aria-label',
-    (self ? paneList().find((p) => p.key === self)!.label : 'Activity') + ' window menu',
+    self ? paneList().find((p) => p.key === self)!.label + ' window menu' :
+      summaryText === 'Window' ? 'Window menu' : 'Activity window menu',
   );
   const panel = element('div', '', 'menu-panel');
-  panel.append(element('div', 'Open Window', 'menu-heading'));
+  panel.append(element('div', 'Panes', 'menu-heading'));
   for (const pane of paneList()) {
     const item = element('button', pane.label);
     item.dataset.pane = pane.key;
@@ -1273,7 +1279,7 @@ function setupMainMenus(windowMenu: HTMLElement) {
   const file = make('fileMenu', 'File'),
     tools = make('toolsMenu', 'Tools'),
     help = make('helpMenu', 'Help');
-  const exit = element('button', 'Exit FlowGate…');
+  const exit = element('button', 'Quit FlowGate…');
   exit.onclick = () => void window.flowgate.quit();
   file.lastElementChild!.append(exit);
   const control = $('controlMenu'),
@@ -1302,6 +1308,7 @@ function setupMainMenus(windowMenu: HTMLElement) {
   };
   help.lastElementChild!.append(about);
   const windowPanel = windowMenu.querySelector('.menu-panel')!;
+  windowPanel.append(element('hr'), element('div', 'Views', 'menu-heading'));
   for (const [label, id] of [
     ['Activity', 'activityTab'],
     ['Rule list', 'rulesTab'],
@@ -1321,10 +1328,14 @@ function setupMainMenus(windowMenu: HTMLElement) {
   // Preserve an obvious state entry point; text is updated by the existing evaluation state.
   const status = element('button', 'Firewall controls', 'firewall-state');
   status.id = 'firewallMenuStatus';
-  status.onclick = () => {
+  const openFirewall = (target: HTMLElement) => {
     (tools as HTMLDetailsElement).open = true;
     (control as HTMLDetailsElement).open = true;
+    target.focus();
   };
+  status.onclick = () => openFirewall(controlTitle);
+  $('extendedStatus').tabIndex = -1;
+  $('extendedBadge').onclick = () => openFirewall($('extendedStatus'));
   $('toolbarUnits').after(status);
   // Advisory runtime health beside, not inside, the protection entry (its text is ellipsized).
   const health = element('span', '', 'runtime-health');
@@ -1454,7 +1465,7 @@ const renderedRows = new Map<
 >();
 let treePolicyRevision = 0;
 function renderTree() {
-  for (const th of document.querySelectorAll<HTMLElement>('#headers th')) {
+  for (const th of document.querySelectorAll<HTMLElement>('#headers th:not(.col-filler)')) {
     const key = th.className.replace('col-', '');
     const actual =
       key === 'download_bps' ? rateKeys()[0] : key === 'upload_bps' ? rateKeys()[1] : key;
@@ -1655,7 +1666,9 @@ function renderTree() {
       td.title = value ?? '';
       tr.append(td);
     }
-    tr.append(element('td', '', 'filler'));
+    const filler = element('td', '', 'filler');
+    filler.setAttribute('aria-hidden', 'true');
+    tr.append(filler);
     // Replace the old keyed node in place before ordering. Leaving it in tbody
     // shifts every following sibling and turns one selection change into N moves.
     replaceKeyedRow(cached?.node, tr);
