@@ -27,6 +27,7 @@ if [ ! -d "$stage/electron/node_modules" ]; then
 fi
 npm --prefix "$stage/electron" run build
 test -x "$stage/electron/node_modules/electron/dist/electron"
+scripts/build-socket-authorization.sh
 scripts/build.sh holder-iterator tcp-initiation udp wine-table
 experimental/upload-shaper/build.sh "$stage/shaping"
 python3 -B scripts/build-matched-daemon.py --revision "$revision" \
