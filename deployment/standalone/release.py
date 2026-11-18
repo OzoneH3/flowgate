@@ -227,11 +227,15 @@ def owned_journal():
 
 
 def check_mode(api, host, response, selected):
-    return (response.get('protection') or {}).get('desired_mode') == selected and (
-        response.get('protection') or {}
-    ).get('state') == ('stopped' if selected == 'monitoring' else 'active') and (
-        selected != 'monitoring' or not api['flowgate_tables'](host)
-    )
+    protection = response.get('protection') or {}
+    enforcement = response.get('enforcement') or {}
+    if protection.get('desired_mode') != selected:
+        return False
+    if selected == 'monitoring':
+        return (protection.get('state') == enforcement.get('state') == 'stopped'
+                and not api['flowgate_tables'](host))
+    return (protection.get('state') == enforcement.get('state') == 'active'
+            and protection.get('profile') == enforcement.get('profile') == selected)
 
 
 def wait_for(host, generation, predicate):
@@ -356,7 +360,9 @@ def immutable_tree(source, target, expected):
     if not existing(target):
         with tempfile.TemporaryDirectory(dir=target.parent) as folder:
             stage = Path(folder) / 'tree'
-            shutil.copytree(source, stage)
+            # Source was verified in a private stage on this same filesystem.
+            # Rename it into place so an upgrade does not need another GUI copy.
+            source.rename(stage)
             for directory in [stage, *[p for p in stage.rglob('*') if p.is_dir()]]:
                 directory.chmod(0o755)
             stage.replace(target)
@@ -423,6 +429,7 @@ def install(options, payload, manifest, backend):
     if DATA.stat().st_uid != 0 or DATA.stat().st_mode & 0o077:
         raise RuntimeError('FlowGate state directory is not private')
     pending = DATA / 'standalone-pending.json'
+    write_record(DATA / 'release-receipts' / (release + '.json'), record)
     write_record(pending, record)
     # Keep a fixed rescue entry point even during the first install or a power loss.
     atomic(TOOLS / 'rescue', RESCUE_ENTRY, 0o755)
@@ -466,7 +473,6 @@ def install(options, payload, manifest, backend):
         pending.unlink()
         fsync_dir(DATA)
         raise RuntimeError('Previous release and database restored in monitoring') from None
-    write_record(DATA / 'release-receipts' / (release + '.json'), record)
     write_record(DATA / 'standalone.json', record)
     pending.unlink()
     fsync_dir(DATA)
