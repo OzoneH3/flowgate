@@ -1,9 +1,11 @@
 package daemon
 
 import (
+	"crypto/sha256"
 	"flowgate/internal/identity"
 	"flowgate/internal/policy"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -146,6 +148,36 @@ func preservesTemporaryAsk(v *Event, old *policy.Rule, rule policy.Rule, now tim
 		rule.Created.After(old.Created) && old.ProgramScope() == rule.ProgramScope()
 }
 
+// Existing unmarked rules carry no proof that Remember created them. Reserve
+// an ID namespace for new overlays so reuse needs no rule schema migration.
+func rememberAskPrefix(askID string) string {
+	hash := sha256.Sum256([]byte(askID))
+	return fmt.Sprintf("%s%x:", policy.RememberOverlayIDPrefix, hash[:12])
+}
+
+func reusableRememberOverlay(old, ask *policy.Rule, now time.Time) bool {
+	return old != nil && ask != nil && strings.HasPrefix(old.ID, rememberAskPrefix(ask.ID)) &&
+		old.FollowsUpdates() && !old.Disabled && (old.Action == "allow" || old.Action == "block") &&
+		!old.Expires.IsZero() && !now.Before(old.Expires) && old.ProgramScope() == ask.ProgramScope()
+}
+
+func (e *Engine) rememberTarget(rule policy.Rule, now time.Time, app identity.Application) *policy.Rule {
+	want := canonicalRuleFilter(rule, app)
+	var expired *policy.Rule
+	for _, old := range policy.CurrentProgramRules(e.rules, now) {
+		if old.Preset != nil || canonicalRuleFilter(old, app) != want {
+			continue
+		}
+		if old.Expires.IsZero() || now.Before(old.Expires) {
+			return &old
+		}
+		if expired == nil {
+			expired = &old
+		}
+	}
+	return expired
+}
+
 func (e *Engine) PreviewDecision(generation, id, action, scope, zone, revision string, uid uint32, admin bool, opts ...RememberOptions) (DecisionPreview, error) {
 	var o RememberOptions
 	if len(opts) > 0 {
@@ -229,22 +261,25 @@ func (e *Engine) PreviewDecision(generation, id, action, scope, zone, revision s
 		e.bindZoneModel(&rule)
 	}
 	var replaces, preservedAsk *RuleVersionRef
-	if old := e.ruleLocked(duplicate(e.rules, rule, now, *a.Application)); preservesTemporaryAsk(v, old, rule, now) {
+	old := e.rememberTarget(rule, now, *a.Application)
+	if preservesTemporaryAsk(v, old, rule, now) {
 		rule.Priority = old.Priority
 		preservedAsk = &RuleVersionRef{old.ID, old.Version}
-	} else {
-		// Other exact-scope Remember operations retain the existing update path.
-		for _, old := range e.rules {
-			if old.Preset != nil || canonicalRuleFilter(old, *a.Application) != canonicalRuleFilter(rule, *a.Application) {
-				continue
+		rule.ID = rememberAskPrefix(old.ID) + randomID()[:24]
+		for i := range e.rules {
+			slot := &e.rules[i]
+			if reusableRememberOverlay(slot, old, now) && slot.Version < ^uint64(0) {
+				rule.ID, rule.Version = slot.ID, slot.Version+1
+				replaces = &RuleVersionRef{slot.ID, slot.Version}
+				break
 			}
-			if old.Version == ^uint64(0) {
-				return DecisionPreview{}, mutationError("capacity", "Rule version exhausted")
-			}
-			rule.ID, rule.Created, rule.Priority, rule.Version = old.ID, old.Created, old.Priority, old.Version+1
-			replaces = &RuleVersionRef{old.ID, old.Version}
-			break
 		}
+	} else if old != nil {
+		if old.Version == ^uint64(0) {
+			return DecisionPreview{}, mutationError("capacity", "Rule version exhausted")
+		}
+		rule.ID, rule.Created, rule.Priority, rule.Version = old.ID, old.Created, old.Priority, old.Version+1
+		replaces = &RuleVersionRef{old.ID, old.Version}
 	}
 	expiry := now.Add(30 * time.Second)
 	if v.Deadline.Before(expiry) {
@@ -379,6 +414,17 @@ func (e *Engine) decideReviewedLocked(generation, id, action, scope, zone, revis
 		old := e.ruleLocked(ref.ID)
 		if old == nil || old.Version != ref.Version || !preservesTemporaryAsk(current, old, v.Rule, e.Now()) {
 			return Event{}, policy.Rule{}, false, mutationError("policy_conflict", "The preserved Ask changed since review; review again")
+		}
+		if replacement := v.Replaces; replacement != nil {
+			slot := e.ruleLocked(replacement.ID)
+			if !reusableRememberOverlay(slot, old, e.Now()) || slot.Version != replacement.Version {
+				return Event{}, policy.Rule{}, false, mutationError("policy_conflict", "The temporary rule changed since review; review again")
+			}
+		}
+	} else if ref := v.Replaces; ref != nil {
+		old := e.rememberTarget(v.Rule, e.Now(), *current.Attribution.Application)
+		if old == nil || old.ID != ref.ID || old.Version != ref.Version {
+			return Event{}, policy.Rule{}, false, mutationError("policy_conflict", "The remembered rule changed since review; review again")
 		}
 	}
 	out, err := e.decideLocked(id, action, scope, uid, admin, &v.Rule, v.ScopePreview, v.ExpiresAt, ForAWhileDuration)

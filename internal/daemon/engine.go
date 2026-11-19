@@ -604,9 +604,6 @@ func (e *Engine) decideLocked(id, action, scope string, uid uint32, admin bool, 
 		if a.Application == nil || a.Fingerprint != v.Attribution.Fingerprint {
 			return Event{}, e.rejectPendingBindingLocked(v, a)
 		}
-		if remember && len(e.rules) >= 256 {
-			return Event{}, mutationError("capacity", "rule capacity reached")
-		}
 		var lease *processLease
 		if scope == ForAWhileScope {
 			// Validated before any mutation: refusal leaves the request pending.
@@ -629,16 +626,16 @@ func (e *Engine) decideLocked(id, action, scope string, uid uint32, admin bool, 
 				r = *reviewed
 			}
 			r = e.rootScope(r)
-			next := append(append([]policy.Rule{}, e.rules...), r)
-			if other := duplicate(e.rules, r, now, *a.Application); other != "" {
-				old := e.ruleLocked(other)
-				if reviewed == nil || !preservesTemporaryAsk(v, old, r, now) || r.Priority != old.Priority {
-					return Event{}, fmt.Errorf("duplicate scope exists as %s; edit the existing rule", other)
-				}
-				if _, winner, _ := e.evaluateLocked(next, v.Flow, a, now); winner != r.ID {
-					return Event{}, mutationError("policy_conflict", "Temporary remembered rule no longer wins; review again")
-				}
+			old := e.ruleLocked(duplicate(e.rules, r, now, *a.Application))
+			overlay := old != nil && old.ID != r.ID
+			if overlay && (reviewed == nil || !preservesTemporaryAsk(v, old, r, now) || r.Priority != old.Priority) {
+				return Event{}, fmt.Errorf("duplicate scope exists as %s; edit the existing rule", old.ID)
 			}
+			reuse := overlay && reusableRememberOverlay(e.ruleLocked(r.ID), old, now)
+			if len(e.rules) >= 256 && !reuse {
+				return Event{}, mutationError("capacity", "rule capacity reached")
+			}
+			next := append(append([]policy.Rule{}, e.rules...), r)
 			for i, old := range e.rules {
 				if reviewed != nil && old.ID == r.ID {
 					if old.Version+1 != r.Version || canonicalRuleFilter(old, *a.Application) != canonicalRuleFilter(r, *a.Application) {
@@ -646,6 +643,12 @@ func (e *Engine) decideLocked(id, action, scope string, uid uint32, admin bool, 
 					}
 					next = append([]policy.Rule{}, e.rules...)
 					next[i] = r
+					break
+				}
+			}
+			if overlay {
+				if _, winner, _ := e.evaluateLocked(next, v.Flow, a, now); winner != r.ID {
+					return Event{}, mutationError("policy_conflict", "Temporary remembered rule no longer wins; review again")
 				}
 			}
 			if err := e.reconcileSocketPolicyLocked(next); err != nil {

@@ -140,8 +140,37 @@ try {
     (await afterWindow.locator('#askSource').textContent())?.includes(expectedSource));
   await afterWindow.screenshot({ path: path.join(run, 'after-expiry.png') });
   assert.equal(await count(), before + 3);
-  await answer(after.id, 'block');
-  await held(0);
+  const permanentAction = process.env.FLOWGATE_TEST_PERMANENT_ACTION;
+  if (permanentAction) {
+    assert(!baseline && ['allow', 'block'].includes(permanentAction));
+    await afterWindow.locator('#rememberToggle').check();
+    await afterWindow.locator('#rememberDuration').selectOption('0');
+    await wait('permanent Ask replacement preview', async () => {
+      const summary = await afterWindow.locator('#rememberSummary').innerText();
+      return summary.includes('replaces Ask rule ' + ask.id);
+    });
+    await afterWindow.locator('#' + permanentAction).click();
+    await wait('permanent choice on original Ask ID', async () =>
+      (await call('list')).rules.some((rule) => rule.id === ask.id && rule.action === permanentAction));
+    if (permanentAction === 'allow') await wait('held receiver write', async () => await count() === before + 4);
+    await held(0);
+    await command({ op: 'close', name: 'alpha' });
+    const permanentBefore = await count();
+    const since = new Date().toISOString();
+    await command(outgoing);
+    await wait('next matching decision', async () =>
+      (await call('decision-log', { decision_query: { since, limit: 20 } })).decision_log.records.some((record) =>
+        record.kind === 'final' && record.decision?.rule?.id === ask.id &&
+        record.decision.action === permanentAction));
+    if (permanentAction === 'allow') await wait('fresh receiver write', async () => await count() === permanentBefore + 1);
+    else await new Promise((resolve) => setTimeout(resolve, 800));
+    assert.equal(await count(), permanentBefore + Number(permanentAction === 'allow'));
+    console.log('PASS permanent ' + permanentAction + ' reused original Ask ID ' + ask.id +
+      '; next matching TCP receiver delta ' + Number(permanentAction === 'allow'));
+  } else {
+    await answer(after.id, 'block');
+    await held(0);
+  }
   console.log('PASS before expiry: two held plus one fresh attempt delivered; after expiry: ' +
     (baseline ? 'default Ask prompted' : 'original stored Ask prompted') + ', no additional delivery');
   console.log('Screenshots: ' + run);
