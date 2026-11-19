@@ -3,6 +3,7 @@ import { inventoryStamp } from './inventory-coherence';
 import {
   REMEMBER_ZONE_CAPABILITY,
   REMEMBER_FIELDS_CAPABILITY,
+  REMEMBER_REVIEW_CHANGED,
   parseDecisionPreview,
   agreesWithDecision,
   sameRememberedRule,
@@ -852,8 +853,12 @@ export class Backend {
     const { id, created, expires } = old.rule;
     this.decisionPreviews.delete(old.token);
     if (JSON.stringify(fresh.replaces) !== JSON.stringify(old.replaces) ||
-        !sameRememberedRule({ ...fresh.rule, id: fresh.replaces ? fresh.rule.id : id, created, expires }, old.rule))
-      throw Error('The reviewed rule changed. Refresh the review before saving.');
+        !sameRememberedRule({ ...fresh.rule, id: fresh.replaces ? fresh.rule.id : id, created, expires }, old.rule)) {
+      for (const [token, entry] of this.decisionPreviews)
+        if (!entry.sent && entry.choice.id === d.id && entry.choice.generation === d.generation)
+          this.decisionPreviews.delete(token);
+      throw Error(REMEMBER_REVIEW_CHANGED + 'The reviewed rule changed. Refresh the review before saving.');
+    }
     return { ...d, preview_token: fresh.token };
   }
   async decide(raw: Decision, onRuleAcknowledged?: () => void, renewTimedReview = false): Promise<Attempt> {

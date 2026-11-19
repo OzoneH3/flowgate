@@ -12,6 +12,7 @@ import { PROTECTION_CAPABILITY, stateProtection } from './protection-model';
 import { advanceClock } from './state-clock';
 import {
   REMEMBER_ZONE_CAPABILITY,
+  REMEMBER_REVIEW_CHANGED,
   DEFAULT_REMEMBER,
   rememberDecision,
   rememberFieldsSupported,
@@ -2576,7 +2577,22 @@ async function decideFromCard(id: string, action: 'allow' | 'block') {
     // Thrown before or instead of a decision (e.g. For a while refused): nothing
     // was decided, so the request stays answerable with another choice.
     localSubmitted.delete(key);
-    note(e, shortError(errorText(error)), errorText(error));
+    const message = errorText(error);
+    if (
+      message.startsWith(REMEMBER_REVIEW_CHANGED) &&
+      state.control.generation === decision.generation &&
+      currentEvent()?.id === e.id &&
+      preview && decisionReviews[action]?.token === preview.token
+    ) {
+      ++reviewSequence;
+      clearTimeout(reviewTimer);
+      decisionReviews = {};
+      reviewFor = '';
+      reviewChecking = false;
+      reviewMessage = message.slice(REMEMBER_REVIEW_CHANGED.length);
+    } else {
+      note(e, shortError(message), message);
+    }
   }
   updateDecisions();
 }

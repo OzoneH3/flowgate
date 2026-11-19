@@ -6,6 +6,7 @@ export const REMEMBER_ZONE_CAPABILITY = 'decision-zone-remember-v1';
 // Remember: application always; protocol, process, remote address and remote
 // (incoming: local) port optional; optional expiry duration.
 export const REMEMBER_FIELDS_CAPABILITY = 'decision-remember-fields-v1';
+export const REMEMBER_REVIEW_CHANGED = 'remember_review_changed: ';
 export type RememberFields = NonNullable<Decision['remember']>;
 export const DEFAULT_REMEMBER: RememberFields = Object.freeze({
   address: false,

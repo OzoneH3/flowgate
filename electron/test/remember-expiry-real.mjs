@@ -166,7 +166,8 @@ try {
       await held(0);
       await closeAlpha();
     };
-    for (const clearRemember of [false, true]) {
+    for (const scenario of timedQueue ? ['refresh', 'keep', 'clear'] : ['keep', 'clear']) {
+      const clearRemember = scenario === 'clear';
       await closeAlpha();
       const before = await count();
       await command(outgoing);
@@ -200,9 +201,31 @@ try {
         return summary.includes(peerB.host) && !summary.includes(outgoing.host) &&
           summary.includes(timedQueue ? '1m0s' : 'persistent') && summary;
       });
-      await bWindow.screenshot({ path: path.join(run, clearRemember ? 'queued-b-before-clear.png' : 'queued-b-remember.png') });
+      await bWindow.screenshot({ path: path.join(run, 'queued-b-' + scenario + '.png') });
+      let competingRule;
+      if (scenario === 'refresh') {
+        const competingDraft = {
+          ...draft, application_policy: false, action: 'block', disabled: true, remote_address: peerB.host,
+        };
+        const { observed_preview } = await call('observed-rule-preview', {
+          observed_target: ready.alpha_target, observed_draft: competingDraft,
+        });
+        ({ saved_rule: competingRule } = await call('observed-rule-save', {
+          preview_token: observed_preview.token, observed_draft: competingDraft,
+        }));
+        await bWindow.locator('#allow').click();
+        await wait('visible Refresh review', () => bWindow.locator('#refreshDecision').isVisible());
+        assert.equal((await held(1))[0].id, b.id);
+        assert.equal(await count(), before);
+        assert.deepEqual((await call('list')).rules.find((rule) => rule.id === competingRule.id), competingRule);
+        assert.equal(await bWindow.locator('#allow').isEnabled(), false);
+        await bWindow.screenshot({ path: path.join(run, 'queued-b-review-refused.png') });
+        await bWindow.locator('#refreshDecision').click();
+        await wait('review names replacement rule', async () =>
+          (await bWindow.locator('#rememberSummary').innerText()).includes(competingRule.id));
+      }
       if (clearRemember) await bWindow.locator('#rememberToggle').uncheck();
-      if (timedQueue && !clearRemember) await new Promise((resolve) => setTimeout(resolve, 12000));
+      if (timedQueue && scenario === 'keep') await new Promise((resolve) => setTimeout(resolve, 12000));
       const clickedBAt = Date.now();
       await bWindow.locator('#allow').click();
       await held(0);
@@ -210,7 +233,7 @@ try {
       const { lines } = await command({ op: 'peer-counts' });
       assert(lines.at(-1).includes(peerB.host));
       const { rules } = await call('list');
-      const denyA = rules.find((r) => r.action === 'block');
+      const denyA = rules.find((r) => r.action === 'block' && r.filter.remote_address === outgoing.host);
       const allowB = rules.find((r) => r.action === 'allow');
       assert.deepEqual(rules.find((r) => r.id === ask.id), ask);
       assert.deepEqual(denyA.filter, { ...ask.filter, remote_address: outgoing.host });
@@ -223,7 +246,13 @@ try {
         await checkRestoredAsk(peerB);
       } else {
         assert.deepEqual(allowB.filter, { ...ask.filter, remote_address: peerB.host });
-        if (timedQueue) {
+        if (competingRule) {
+          assert.equal(allowB.id, competingRule.id);
+          assert.equal(allowB.version, competingRule.version + 1);
+          await attemptWith(allowB, peerB);
+          console.log('PASS queued review conflict: no delivery or save on first click, visible Refresh review showed ' +
+            competingRule.id + ' and the next click saved version ' + allowB.version + '; B delivered 1.');
+        } else if (timedQueue) {
           const deadlineA = Date.parse(denyA.expires), deadlineB = Date.parse(allowB.expires);
           assert.equal(deadlineB - Date.parse(allowB.created), 60000);
           assert(deadlineB - deadlineA >= 10000, 'deadlines must track the gap between clicks');
