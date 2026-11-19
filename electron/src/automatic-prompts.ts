@@ -2,6 +2,7 @@ import {
   canDecide,
   validateDecision,
   type ClientState,
+  type Decision,
   type RequestEvent,
   type Rule,
   type ViewEvent,
@@ -75,6 +76,46 @@ export function askSource(e: RequestEvent, rules?: Rule[]) {
 export function groupOf(state: ClientState, id: string) {
   const e = state.control.events.find((e) => e.id === id);
   return e ? groupKey(e) : undefined;
+}
+// Capture the already-waiting peers before submitting a permanent address choice.
+// Only the checkbox selection can carry over, never the resolved rule or its preview.
+export function queuedAddressRemember(state: ClientState, choice: Decision) {
+  const fields = choice.remember;
+  if (
+    state.control.generation !== choice.generation ||
+    choice.scope !== 'persistent' ||
+    !fields?.address || fields.process || fields.port || fields.protocol
+  ) return;
+  const events = state.control.events;
+  const source = events.find((e) => e.id === choice.id);
+  if (
+    !source?.ask_rule || source.flow.direction !== 'outgoing' || source.flow.protocol !== 'tcp' ||
+    !source.attribution.visibility_complete || source.attribution.owners.length !== 1
+  ) return;
+  const [owner] = source.attribution.owners;
+  const ask = source.ask_rule;
+  const filter = source.remembered_filter;
+  if (!owner.start_ticks || !filter?.application || !filter.revision || !filter.remote_address) return;
+  const matches = (e: ViewEvent) => {
+    if (
+      e.id === source.id || !awaiting(e) || e.attempt || !e.scope_previews.persistent ||
+      e.ask_rule?.id !== ask.id || e.ask_rule.version !== ask.version ||
+      e.flow.direction !== source.flow.direction || e.flow.protocol !== source.flow.protocol ||
+      e.flow.netns !== source.flow.netns ||
+      !e.attribution.visibility_complete || e.attribution.owners.length !== 1
+    ) return false;
+    const [peer] = e.attribution.owners;
+    const target = e.remembered_filter;
+    return peer.pid === owner.pid && peer.start_ticks === owner.start_ticks && peer.uid === owner.uid &&
+      target?.application === filter.application && target.revision === filter.revision &&
+      target.uid === filter.uid && !!target.remote_address && target.remote_address !== filter.remote_address &&
+      e.attribution.permission_target?.prefix === source.attribution.permission_target?.prefix &&
+      e.attribution.runtime_table?.prefix === source.attribution.runtime_table?.prefix;
+  };
+  const ids = new Set(events.filter(matches).map((e) => e.id));
+  if (!ids.size) return;
+  return (generation: string, event: ViewEvent) =>
+    generation === choice.generation && ids.has(event.id) && matches(event);
 }
 // One foreground card at a time (NetLimiter): the representative of the oldest
 // group. A dismissed group never auto-opens again in that daemon generation.

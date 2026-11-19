@@ -6,6 +6,7 @@ const {
   boundDecision,
   requestGroups,
   askSource,
+  queuedAddressRemember,
 } = require('../dist/test/automatic-prompts.cjs');
 const state = (ids, generation = 'g') => ({
   control: {
@@ -15,6 +16,40 @@ const state = (ids, generation = 'g') => ({
     permissions: { can_decide: true },
     events: ids.map((id) => ({ id, state: 'awaiting-decision', remainingMs: 1000 })),
   },
+});
+test('queued address Remember stays on already waiting peers of the same Ask and owner', () => {
+  const s = state(['a', 'b']);
+  const request = (e, address) => ({
+    ...e,
+    flow: { direction: 'outgoing', protocol: 'tcp', netns: 'net' },
+    ask_rule: { id: 'ask', version: 1 },
+    scope_previews: { persistent: 'available' },
+    attribution: {
+      visibility_complete: true,
+      owners: [{ pid: 1, start_ticks: '23', uid: 1000 }],
+      permission_target: { prefix: '/prefix' },
+    },
+    remembered_filter: { application: 'app', revision: 'rev', uid: 1000, remote_address: address },
+  });
+  const [a, b] = s.control.events.map((e, i) => request(e, '192.0.2.' + (i + 1)));
+  s.control.events = [a, b];
+  const choice = {
+    generation: 'g', id: 'a', scope: 'persistent',
+    remember: { address: true, process: false, protocol: false, port: false },
+  };
+  const carry = queuedAddressRemember(s, choice);
+  assert.equal(carry('g', b), true);
+  assert.equal(carry('g', { ...b, id: 'late-arrival' }), false);
+  assert.equal(carry('next-generation', b), false);
+  assert.equal(carry('g', { ...b, ask_rule: { id: 'different-ask', version: 1 } }), false);
+  const owner = b.attribution.owners[0];
+  for (const change of [{ start_ticks: '24' }, { uid: 1001 }]) {
+    assert.equal(carry('g', { ...b, attribution: { ...b.attribution, owners: [{ ...owner, ...change }] } }), false);
+  }
+  assert.equal(carry('g', { ...b, attribution: { ...b.attribution, permission_target: { prefix: '/other' } } }), false);
+  assert.equal(carry('g', { ...b, remembered_filter: { ...b.remembered_filter, application: 'other' } }), false);
+  assert.equal(queuedAddressRemember(s, { ...choice, scope: 'application' }), undefined);
+  assert.equal(queuedAddressRemember(s, { ...choice, remember: { ...choice.remember, port: true } }), undefined);
 });
 // 51 identical attempts (same backend request_group), delivered out of order.
 const burst = (n = 51, extra = []) => {

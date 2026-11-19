@@ -114,8 +114,9 @@ import {
   type Metric,
 } from './model';
 const root = document.querySelector<HTMLDivElement>('#app')!;
-const promptGeneration = new URL(location.href).searchParams.get('generation');
-const promptID = new URL(location.href).searchParams.get('request');
+const promptParams = new URL(location.href).searchParams;
+const promptGeneration = promptParams.get('generation');
+const promptID = promptParams.get('request');
 const applicationCallers = new ApplicationCallers();
 let state: ClientState;
 let selected = 'overview';
@@ -155,8 +156,8 @@ let reviewSequence = 0,
   reviewMessage = '',
   reviewFor = '';
 // decision-remember-fields-v1 (NetLimiter 5.3.28): Remember unchecked = Once.
-let rememberOn = false,
-  rememberFields: RememberFields = { ...DEFAULT_REMEMBER },
+let rememberOn = !!promptID && promptParams.get('rememberAddress') === '1',
+  rememberFields: RememberFields = { ...DEFAULT_REMEMBER, address: rememberOn },
   rememberDuration = 0,
   reviewTimer: ReturnType<typeof setTimeout> | undefined;
 // decision-for-a-while-v1: For a while checkbox (exclusive with Remember, see process-lease).
