@@ -629,10 +629,16 @@ func (e *Engine) decideLocked(id, action, scope string, uid uint32, admin bool, 
 				r = *reviewed
 			}
 			r = e.rootScope(r)
-			if other := duplicate(e.rules, r, now, *a.Application); other != "" {
-				return Event{}, fmt.Errorf("duplicate scope exists as %s; edit the existing rule", other)
-			}
 			next := append(append([]policy.Rule{}, e.rules...), r)
+			if other := duplicate(e.rules, r, now, *a.Application); other != "" {
+				old := e.ruleLocked(other)
+				if reviewed == nil || !preservesTemporaryAsk(v, old, r, now) || r.Priority != old.Priority {
+					return Event{}, fmt.Errorf("duplicate scope exists as %s; edit the existing rule", other)
+				}
+				if _, winner, _ := e.evaluateLocked(next, v.Flow, a, now); winner != r.ID {
+					return Event{}, mutationError("policy_conflict", "Temporary remembered rule no longer wins; review again")
+				}
+			}
 			for i, old := range e.rules {
 				if reviewed != nil && old.ID == r.ID {
 					if old.Version+1 != r.Version || canonicalRuleFilter(old, *a.Application) != canonicalRuleFilter(r, *a.Application) {

@@ -75,14 +75,15 @@ type DecisionReceipt struct {
 	SavedRule *policy.Rule    `json:"saved_rule,omitempty"`
 }
 type decisionPreview struct {
-	View        DecisionPreview
-	UID         uint32
-	Admin       bool
-	Fingerprint string
-	Flow        identity.Flow
-	Until       time.Time
-	Committed   *Event
-	Settled     []SettledRequest
+	View         DecisionPreview
+	UID          uint32
+	Admin        bool
+	Fingerprint  string
+	Flow         identity.Flow
+	Until        time.Time
+	PreservedAsk *RuleVersionRef
+	Committed    *Event
+	Settled      []SettledRequest
 	// settledDone closes once Settled is final for a committed decision; the
 	// committing call may still be settling other requests outside e.mu.
 	settledDone chan struct{}
@@ -135,6 +136,16 @@ func (e *Engine) decisionClassification(v *Event, revision, zone string) (identi
 	}
 	return current, nil
 }
+
+// A finite decision may overlay the exact program Ask that opened the prompt.
+// The existing program-scope expiry path restores that Ask when the overlay ends.
+func preservesTemporaryAsk(v *Event, old *policy.Rule, rule policy.Rule, now time.Time) bool {
+	return old != nil && v.AskRule != nil && v.AskRule.ID == old.ID && v.AskRule.Version == old.Version &&
+		old.Action == "ask" && !old.Disabled && old.FollowsUpdates() && rule.FollowsUpdates() &&
+		now.Before(rule.Expires) && (old.Expires.IsZero() || old.Expires.After(rule.Expires)) &&
+		rule.Created.After(old.Created) && old.ProgramScope() == rule.ProgramScope()
+}
+
 func (e *Engine) PreviewDecision(generation, id, action, scope, zone, revision string, uid uint32, admin bool, opts ...RememberOptions) (DecisionPreview, error) {
 	var o RememberOptions
 	if len(opts) > 0 {
@@ -217,11 +228,16 @@ func (e *Engine) PreviewDecision(generation, id, action, scope, zone, revision s
 		rule.Filter.NetworkZone = zone
 		e.bindZoneModel(&rule)
 	}
-	// Remembering a scope that already has a user rule updates that exact rule
-	// (same ID, version+1) instead of failing or adding a duplicate.
-	var replaces *RuleVersionRef
-	for _, old := range e.rules {
-		if old.Preset == nil && canonicalRuleFilter(old, *a.Application) == canonicalRuleFilter(rule, *a.Application) {
+	var replaces, preservedAsk *RuleVersionRef
+	if old := e.ruleLocked(duplicate(e.rules, rule, now, *a.Application)); preservesTemporaryAsk(v, old, rule, now) {
+		rule.Priority = old.Priority
+		preservedAsk = &RuleVersionRef{old.ID, old.Version}
+	} else {
+		// Other exact-scope Remember operations retain the existing update path.
+		for _, old := range e.rules {
+			if old.Preset != nil || canonicalRuleFilter(old, *a.Application) != canonicalRuleFilter(rule, *a.Application) {
+				continue
+			}
 			if old.Version == ^uint64(0) {
 				return DecisionPreview{}, mutationError("capacity", "Rule version exhausted")
 			}
@@ -235,13 +251,16 @@ func (e *Engine) PreviewDecision(generation, id, action, scope, zone, revision s
 		expiry = v.Deadline
 	}
 	zoneLabel := map[string]string{"any": "Any network", "local": "Local Network", "internet": "Internet"}[zone]
-	lifetime := "one hour"
+	lifetime := (time.Duration(o.DurationSeconds) * time.Second).String()
 	if scope == "persistent" {
 		lifetime = "persistent until disabled/deleted"
 	}
 	sentence := fmt.Sprintf("Remember %s; rule applies to %s; program %s (captured revision %s; saved application permissions follow updates) UID %d, %s %s, peer %s local service %d remote service %d; expiry %s. Current held request decided separately; existing admissions unchanged.", lifetime, zoneLabel, rule.Filter.Application, rule.Filter.Revision, rule.Filter.UID, rule.Filter.Direction, rule.Filter.Protocol, rule.Filter.RemoteAddress, rule.Filter.LocalPort, rule.Filter.RemotePort, rule.Expires.Format(time.RFC3339Nano))
 	if !rule.Filter.Process.IsZero() {
 		sentence = processLabel(rule.Filter.Process) + "; same direction and selected peer/protocol scope; ends on process exit or backend restart."
+	}
+	if preservedAsk != nil {
+		sentence = "Keeps the existing Ask rule for after expiry. " + sentence
 	}
 	if replaces != nil {
 		sentence = fmt.Sprintf("Updates existing rule %s (version %d). ", replaces.ID, replaces.Version) + sentence
@@ -274,7 +293,7 @@ func (e *Engine) PreviewDecision(generation, id, action, scope, zone, revision s
 	if e.decisionPreviews == nil {
 		e.decisionPreviews = map[string]*decisionPreview{}
 	}
-	e.decisionPreviews[view.Token] = &decisionPreview{View: view, UID: uid, Admin: admin, Fingerprint: a.Fingerprint, Flow: v.Flow, Until: expiry}
+	e.decisionPreviews[view.Token] = &decisionPreview{View: view, UID: uid, Admin: admin, Fingerprint: a.Fingerprint, Flow: v.Flow, Until: expiry, PreservedAsk: preservedAsk}
 	return view, nil
 }
 func (e *Engine) decisionPreviewFor(generation, token string, uid uint32, admin bool) (*decisionPreview, error) {
@@ -355,6 +374,12 @@ func (e *Engine) decideReviewedLocked(generation, id, action, scope, zone, revis
 	}
 	if _, err = e.decisionClassification(current, revision, zone); err != nil {
 		return Event{}, policy.Rule{}, false, err
+	}
+	if ref := p.PreservedAsk; ref != nil {
+		old := e.ruleLocked(ref.ID)
+		if old == nil || old.Version != ref.Version || !preservesTemporaryAsk(current, old, v.Rule, e.Now()) {
+			return Event{}, policy.Rule{}, false, mutationError("policy_conflict", "The preserved Ask changed since review; review again")
+		}
 	}
 	out, err := e.decideLocked(id, action, scope, uid, admin, &v.Rule, v.ScopePreview, v.ExpiresAt, ForAWhileDuration)
 	if err != nil {

@@ -109,7 +109,7 @@ func main() {
 			// Optional explicit destination inside the private fixture prefixes.
 			Host string `json:"host"`
 			Port int    `json:"port"`
-			// UDP only: datagrams on the same socket (same tuple) and their spacing.
+			// Writes on the same socket and their spacing.
 			Repeat     int `json:"repeat"`
 			IntervalMS int `json:"interval_ms"`
 		}
@@ -188,8 +188,8 @@ func main() {
 			}
 			repeat, interval := 1, 300*time.Millisecond
 			if q.Repeat != 0 {
-				if q.Protocol != "udp" || q.Repeat < 1 || q.Repeat > 30 {
-					panic("repeat is for UDP only, 1..30")
+				if q.Repeat < 1 || q.Repeat > 30 {
+					panic("repeat must be 1..30")
 				}
 				repeat = q.Repeat
 			}

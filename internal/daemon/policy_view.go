@@ -215,8 +215,10 @@ func summaryFor(a PolicyIdentity, direction, mode string, h *EnforcementStatus, 
 		ref.Kind = ruleKind(f)
 		out.Rules = append(out.Rules, ref)
 		if ref.Kind == "application" {
-			x := ref
-			out.ApplicationRule = &x
+			if out.ApplicationRule == nil || !ref.Expired || out.ApplicationRule.Expired {
+				x := ref
+				out.ApplicationRule = &x
+			}
 		} else {
 			out.ScopedRules++
 		}

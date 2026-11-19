@@ -3,7 +3,7 @@
 Driven through the same primary API the Electron setter uses. Private namespaces
 only (scripts/lab.sh); never touches host policy.
 """
-import json,time
+import datetime,json,time
 
 def check(g):
     api,wait,log,target,infos,children,RUN,ask,remote=g['api'],g['wait'],g['log'],g['target'],g['infos'],g['children'],g['RUN'],g['ask'],g['remote']
@@ -69,6 +69,73 @@ def check(g):
     r=api('rule-save',generation=gen(),id=deny['id'],expected_version=deny['version'],rule=dict(deny,disabled=True));assert not r.get('error'),r
     assert send('alpha','tcp','10.79.0.3',44000),'disabled scoped Deny still applied'
     log('PASS scoped Deny override (equal weight Deny-first), application/scoped separation in policy view, scoped rule edit')
+    def logged(endpoint, action, rule, since):
+        return next((row for row in api('decision-log',decision_query={'limit':80,'since':since})['decision_log']['records']
+            if row['kind']=='final' and row['flow']['remote']==endpoint
+            and row['decision']['action']==action and row['decision'].get('rule',{}).get('id')==rule),None)
+    # A machine Local Deny has lower target weight than this application Allow.
+    zr=api()['network_zones']['revision']
+    zone_target=dict(zone='local',scope='machine')
+    zone_draft=dict(direction='outgoing',protocol='*',action='block',remote_address='*',
+                    local_port=0,remote_port=0,disabled=False,expires='0001-01-01T00:00:00Z')
+    pv=api('zone-rule-preview',generation=gen(),zone_revision=zr,zone_target=zone_target,observed_draft=zone_draft)
+    assert not pv.get('error'),pv
+    sv=api('zone-rule-save',generation=gen(),zone_revision=zr,zone_target=zone_target,
+           observed_draft=zone_draft,preview_token=pv['zone_preview']['token'])
+    assert not sv.get('error'),sv
+    broad=sv['saved_rule']
+    assert broad['priority']==app['priority']
+    since=datetime.datetime.now(datetime.timezone.utc).isoformat()
+    assert send('alpha','tcp','10.79.0.2',43000)
+    wait(lambda:logged('10.79.0.2:43000','allow',app['id'],since))
+    g['delete'](broad)
+    log('PASS equal-priority application Allow defeats all-program Local Block (receiver delivered)')
+    # Same program, priorities and service port. Change only the peer zone or
+    # whether the connection was admitted before the Local Deny.
+    zr=api()['network_zones']['revision']
+    same_service=('tcp','10.79.0.2',43000)
+    before=len(peer_lines())
+    ask(children['alpha'],'send',protocol='tcp',host=same_service[1],port=same_service[2],
+        repeat=2,interval_ms=3000)
+    wait(lambda:len(peer_lines())==before+1)
+    _,local_deny=save('alpha',draft('outgoing','block',network_zone='local',zone_revision=zr))
+    assert local_deny['priority']==app['priority']
+    wait(lambda:len(peer_lines())==before+2,5)
+    since=datetime.datetime.now(datetime.timezone.utc).isoformat()
+    assert not send('alpha',*same_service)
+    wait(lambda:logged('10.79.0.2:43000','block',local_deny['id'],since))
+    assert send('alpha','tcp','fd79::2',43000,True)
+    wait(lambda:logged('[fd79::2]:43000','allow',app['id'],since))
+    log('PASS Local vs All networks: existing TCP second write delivered; fresh Local Deny selected/zero delivery; fresh non-Local Allow selected/delivered')
+    # Toggle and expire the winning Local override on fresh attempts in each direction.
+    # Before expiry, use UDP to keep the receiver checks independent of TCP retry timing.
+    def edit_override(rule, **changes):
+        state=api()
+        result=api('rule-save',generation=state['generation'],zone_revision=state['network_zones']['revision'],
+                   id=rule['id'],expected_version=rule['version'],rule=dict(rule,**changes))
+        assert not result.get('error'),result.get('error')
+        return result['saved_rule']
+    for direction in ('outgoing','incoming'):
+        if direction=='incoming':
+            _,base_in=save('alpha',draft(direction,'allow'))
+            _,override=save('alpha',draft(direction,'block',network_zone='local',zone_revision=zr))
+            def probe(allowed):
+                g['incoming']('alpha','udp',False,allowed)
+        else:
+            override=local_deny
+            def probe(allowed):
+                assert send('alpha','udp','10.79.0.3',43001)==allowed
+        probe(False)
+        override=edit_override(override,disabled=True)
+        probe(True)
+        deadline=datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(seconds=14)
+        override=edit_override(override,disabled=False,expires=deadline.isoformat())
+        probe(False)
+        time.sleep(max(0,(deadline-datetime.datetime.now(datetime.timezone.utc)).total_seconds())+.15)
+        probe(True)
+        g['delete'](override)
+        if direction=='incoming':g['delete'](base_in)
+        log('PASS '+direction+' fresh receiver: winning Local Block 0; disabled Block falls back to Allow; re-enabled Block 0; expired Block falls back to Allow')
     # 7. Explicit zone restriction: Local-only application Allow (10.79/24 local, fd79::/64 internet).
     api('rule-delete',generation=gen(),id=app['id'],expected_version=app['version'])
     zr=api()['network_zones']['revision']

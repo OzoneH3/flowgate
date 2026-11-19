@@ -319,3 +319,62 @@ func TestApplicationSetterAsk(t *testing.T) {
 		t.Fatal("stored-ask-v1 not advertised")
 	}
 }
+
+func TestTemporaryRememberRestoresExactAskAtExpiry(t *testing.T) {
+	for _, action := range []string{"allow", "block"} {
+		t.Run(action, func(t *testing.T) {
+			e, flow, a, now := fixture()
+			a.Application.Executable = "/fixture/program"
+			a.Application.Kind = "native"
+			a.Application.Key = identity.ApplicationKey(1000, *a.Application)
+			e.SaveRules = func([]policy.Rule) error { return nil }
+			ask := policy.Rule{Schema: 2, ID: "user:ask", Version: 3, Priority: 135,
+				Action: "ask", Created: now.Add(-time.Hour), Executable: a.Application.KeyPath(),
+				Filter: policy.Filter{Application: a.Application.Key, Revision: a.Application.Revision, UID: 1000,
+					Direction: "incoming", Protocol: "*", RemoteAddress: "*"}}
+			if err := e.SetRules([]policy.Rule{ask}); err != nil {
+				t.Fatal(err)
+			}
+			request := e.Observe(flow, "udp")
+			opts := RememberOptions{Fields: &RememberFields{}, DurationSeconds: 60}
+			preview, err := e.PreviewDecision(e.Generation, request.ID, action, "application", "any", e.Zones.Revision, 1000, false, opts)
+			if err != nil || preview.Replaces != nil || preview.Rule.ID == ask.ID || preview.Rule.Priority != ask.Priority {
+				t.Fatalf("temporary Remember must preserve the original Ask: %+v %v", preview, err)
+			}
+			_, saved, _, err := e.DecideReviewed(e.Generation, request.ID, action, "application", "any", e.Zones.Revision, preview.Token, 1000, false, opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rules := e.Rules(1000, false)
+			if len(rules) != 2 {
+				t.Fatalf("expected temporary choice and original Ask, got %+v", rules)
+			}
+			if got := e.ruleLocked(ask.ID); got == nil || *got != ask {
+				t.Fatalf("original Ask changed: %+v", got)
+			}
+			if err := e.SetRules(rules); err != nil || len(e.Rules(1000, false)) != 2 {
+				t.Fatalf("loading the saved rules removed the fallback: %v", err)
+			}
+			if got := e.canonicalPolicyRuleLocked(ask, *a.Application); got == nil || got.ID != saved.ID {
+				t.Fatalf("quick setter must target the current override: %+v", got)
+			}
+			for _, tc := range []struct {
+				offset     time.Duration
+				action, id string
+			}{{-time.Nanosecond, action, saved.ID}, {0, "ask", ask.ID}, {time.Second, "ask", ask.ID}} {
+				got, id, _ := policy.Evaluate(e.Rules(1000, false), flow, *a, saved.Expires.Add(tc.offset))
+				if got != tc.action || id != tc.id {
+					t.Fatalf("offset %s: got %s/%s; want %s/%s", tc.offset, got, id, tc.action, tc.id)
+				}
+			}
+			*now = saved.Expires
+			if got := e.canonicalPolicyRuleLocked(ask, *a.Application); got == nil || got.ID != ask.ID {
+				t.Fatalf("quick setter must return to the original Ask: %+v", got)
+			}
+			if got := summaryFor(PolicyIdentity{Key: a.Application.Key, Revision: a.Application.Revision, UID: 1000},
+				"incoming", e.Mode, nil, e.Rules(1000, false), *now, *a.Application).ApplicationRule; got == nil || got.ID != ask.ID {
+				t.Fatalf("policy view must return to the original Ask: %+v", got)
+			}
+		})
+	}
+}

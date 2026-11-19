@@ -352,7 +352,8 @@ func (e *Engine) SaveObservedRule(generation, token string, draft ObservedDraft,
 		for i, r := range e.rules {
 			if r.ID == ref.ID {
 				at = i
-				if r.Version != ref.Version || e.canonicalPolicyRuleLocked(candidate, p.View.Application) == nil {
+				own := e.canonicalPolicyRuleLocked(candidate, p.View.Application)
+				if r.Version != ref.Version || own == nil || own.ID != ref.ID {
 					at = -2
 				}
 			}
@@ -412,14 +413,20 @@ func (e *Engine) canonicalPolicyRuleLocked(c policy.Rule, current ...identity.Ap
 	if want.Protocol != "*" || want.RemoteAddress != "*" || want.LocalPort != 0 || want.RemotePort != 0 || want.AllPrograms {
 		return nil
 	}
-	for i := range e.rules {
-		r := &e.rules[i]
-		filter := canonicalRuleFilter(*r, current...)
-		if r.Preset == nil && filter == want {
-			return r
+	now := e.Now()
+	var expired *policy.Rule
+	for _, rule := range policy.CurrentProgramRules(e.rules, now) {
+		if rule.Preset != nil || canonicalRuleFilter(rule, current...) != want {
+			continue
+		}
+		if rule.Expires.IsZero() || now.Before(rule.Expires) {
+			return &rule
+		}
+		if expired == nil {
+			expired = &rule
 		}
 	}
-	return nil
+	return expired
 }
 
 // Runtime application creation never assigns the broker a Windows process identity.
