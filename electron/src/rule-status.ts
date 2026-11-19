@@ -80,6 +80,23 @@ export function ruleState(rule: Rule, now: number) {
         ? 'ask'
         : 'unknown';
 }
+export function isRuleMasked(rule: Rule, control: ClientState['control']): boolean | undefined {
+  const policy = control.policy;
+  if (!control.connected || !policy || policy.snapshot.generation !== control.generation ||
+      (policy.snapshot.valid_until && Date.parse(policy.snapshot.valid_until) <= (control.serverNow ?? Infinity))) return;
+  const entry = policy.rule_eligibility?.[rule.id];
+  if (entry?.version === String(rule.version)) return entry.masked;
+}
+
+export function savedRuleState(rule: Rule, control: ClientState['control']): string {
+  if (ruleState(rule, control.serverNow ?? NaN) === 'expired') return 'Expired';
+  if (rule.disabled) return 'Disabled';
+  if (control.rule_states?.[rule.id]?.state === 'inactive') return 'Inactive target';
+  const masked = isRuleMasked(rule, control);
+  if (masked === true) return 'Masked by newer rule';
+  return masked === false ? 'Enabled' : 'Enabled (stored)';
+}
+
 /** Revision wording for a stored rule; following is reported by the daemon, never inferred. */
 export const revisionScope = (rule: Rule) =>
   `revision ${rule.filter.revision}${rule.follows_updates ? ' (recorded; follows updates of this program)' : ''}`;

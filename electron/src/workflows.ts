@@ -10,7 +10,7 @@ import { ANY_PROTOCOL_CAPABILITY, PROCESS_CAPABILITY, targetLabel } from './proc
 import { renderDaemonEvaluation } from './evaluation-view';
 import { canManageRules, STORED_ASK_CAPABILITY } from './protocol';
 import { reviewedScope, previewSeconds } from './editor-presentation';
-import { revisionScope } from './rule-status';
+import { revisionScope, savedRuleState } from './rule-status';
 import type {
   ClientState,
   Rule,
@@ -783,15 +783,7 @@ export function updateWorkflows(next: ClientState) {
   migrationUI?.update(next, selected);
   updateButtons();
   const rules = state.control.rules || [],
-    sig = JSON.stringify([
-      rules,
-      state.control.rule_states,
-      rules.map(
-        (r) =>
-          Date.parse(r.expires) > 0 &&
-          Date.parse(r.expires) <= (state.control.serverNow ?? Date.now()),
-      ),
-    ]);
+    sig = JSON.stringify([rules, state.control.rule_states, rules.map((r) => savedRuleState(r, next.control))]);
   if (sig !== signature) {
     signature = sig;
     const body = $('ruleRows');
@@ -813,14 +805,7 @@ export function updateWorkflows(next: ClientState) {
             ? 'This daemon session / until process exit'
             : 'No expiry'
           : r.expires,
-        Date.parse(r.expires) > 0 &&
-        Date.parse(r.expires) <= (state.control.serverNow ?? Date.now())
-          ? 'Expired'
-          : r.disabled
-            ? 'Disabled'
-            : state.control.rule_states?.[r.id]?.state === 'inactive'
-              ? 'Inactive target'
-              : 'Enabled',
+        savedRuleState(r, state.control),
       ]) {
         const td = node('td', value);
         td.title = value;
@@ -960,7 +945,7 @@ function selectRule() {
               : 'No expiry'
             : r.expires,
         ],
-        ['Enabled', r.disabled ? 'No' : 'Yes (expiry still applies)'],
+        ['Rule state', savedRuleState(r, state.control)],
         ['Priority', String(r.priority)],
         [
           'Application identity',

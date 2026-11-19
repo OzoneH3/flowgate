@@ -34,6 +34,11 @@ Response `policy_view` is one bounded batch, not a per-row query:
   `evaluated_at`, optional `valid_until` (next visible rule expiry), `meaning`.
 - `activity_sequence` (decimal string), `activity_collected`, `activity_available`,
   `complete`, optional `reason`; Activity and policy have separate collection times.
+- `rule_eligibility` maps visible saved rule IDs to their decimal-string
+  `version` and a `masked` flag from the daemon's exact-scope replacement
+  logic. Disabled temporary rules can mask an older rule until expiry.
+  The flag describes replacement only. Enabled state, target lifetime, and
+  matching a particular connection have their own evidence.
 - `applications[]`: `ref`, `identity:{key,revision,uid}`, `process_ids`, `incoming`
   and `outgoing` summaries. Match exact backend identity, never name/icon/PID alone.
 - `rows[]`: stable `row_id`, `status` observed_native/unavailable, `reason`, optional

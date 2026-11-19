@@ -29,7 +29,7 @@ import {
   type PolicyRuleRef,
   type DirectionPolicy,
 } from './policy';
-import { ruleStatus, ruleState, ownConfigured, zoneConfigured } from './rule-status';
+import { ruleStatus, ruleState, isRuleMasked, ownConfigured, zoneConfigured } from './rule-status';
 import {
   ownRuleChip,
   ownShape,
@@ -80,6 +80,23 @@ export function selectionInventory(row: Row, state: ClientState) {
     : undefined;
   const fallback = ruleStatus(row, state);
   const zone = authoritativeZonePolicy(row, state);
+  const stored = directions.flatMap((d) => fallback[d]).map((r) => {
+    const stateLabel = ruleState(r, fallback.now);
+    return {
+      id: r.id,
+      version: String(r.version),
+      action: r.action,
+      priority: r.priority,
+      scope: r.filter,
+      disabled: r.disabled,
+      expired: stateLabel === 'expired',
+      active: ['allow', 'block', 'ask'].includes(stateLabel),
+      expires: r.expires,
+      stored_only: true,
+      masked: isRuleMasked(r, state.control) === true,
+    };
+  });
+  const maskedRules = stored.filter((r) => r.masked && !r.disabled && !r.expired);
   const zoneIDs = new Set(
     processPolicy?.zone_fallback_rule_ids || app?.zone_fallback_rule_ids || [],
   );
@@ -96,19 +113,7 @@ export function selectionInventory(row: Row, state: ClientState) {
                 .rules
             : app?.[d].rules || []),
         ])
-      : directions.flatMap((d) =>
-          fallback[d].map((r) => ({
-            id: r.id,
-            version: String(r.version),
-            action: r.action,
-            priority: r.priority,
-            scope: r.filter,
-            disabled: r.disabled,
-            expired: ruleState(r, fallback.now) === 'expired',
-            active: ['allow', 'block'].includes(ruleState(r, fallback.now)),
-            expires: r.expires,
-          })),
-        );
+      : stored;
   const rules = row.applicationZone ? unfilteredRules.filter(r=>matchesApplicationZone(r.scope,row.applicationZone!)) : unfilteredRules;
   const candidates =
     (app || processPolicy) &&
@@ -127,6 +132,7 @@ export function selectionInventory(row: Row, state: ClientState) {
     zone,
     zoneFallback,
     rules,
+    maskedRules,
     available: authoritative ? !!app || !!processPolicy || !!zone : fallback.available,
     complete: authoritative && !!state.control.policy?.complete,
     reason: authoritative
@@ -392,6 +398,7 @@ export class ActivityPolicy {
       row.process?.id,
       row.socket?.initiation,
       inv.rules,
+      inv.maskedRules,
       inv.available,
       inv.complete,
       inv.reason,
@@ -619,15 +626,13 @@ export class ActivityPolicy {
       );
       wrap.append(note);
     }
-    if (inv.rules.length || inv.zoneFallback.length) {
+    if (inv.rules.length || inv.zoneFallback.length || inv.maskedRules.length) {
       const details = el('details', '', 'rule-details');
       details.open = detailsOpen;
-      details.append(
-        el(
-          'summary',
-          `${inv.rules.length} rule${inv.rules.length === 1 ? '' : 's'}${inv.zoneFallback.length ? ' + ' + inv.zoneFallback.length + ' zone fallback' : ''}`,
-        ),
-      );
+      const counts = [`${inv.rules.length} rule${inv.rules.length === 1 ? '' : 's'}`];
+      if (inv.zoneFallback.length) counts.push(`${inv.zoneFallback.length} zone fallback`);
+      if (inv.maskedRules.length) counts.push(`${inv.maskedRules.length} masked`);
+      details.append(el('summary', counts.join(' + ')));
       const busy = !!this.pending && this.pending.phase !== 'error';
       // Own (whole-target) rules first; scoped rules are a separate list, never the node state.
       const groups: [string, PolicyRuleRef[], boolean][] = [
@@ -660,6 +665,7 @@ export class ActivityPolicy {
           for (const ref of scoped.filter((r) => r.scope.direction === d))
             details.append(this.ruleLine(ref, inv, busy));
       }
+      for (const ref of inv.maskedRules) details.append(this.maskedLine(ref));
       details.append(
         el(
           'p',
@@ -1037,6 +1043,10 @@ export class ActivityPolicy {
       if (blocked) box.append(el('p', blocked, 'rule-note'));
     }
     if (scoped.length) box.append(this.scopedList(scoped, busy, !!pop.networkZone));
+    for (const ref of inv.maskedRules) {
+      if (ref.scope.direction === direction && tier === 'application' &&
+          (ref.scope.network_zone || '') === (pop.networkZone || '')) box.append(this.maskedLine(ref));
+    }
     if (this.pending && this.pending.rowId === this.row?.id) box.append(this.reviewBox());
     return box;
   }
@@ -1145,7 +1155,17 @@ export class ActivityPolicy {
     if (this.checking) box.append(el('span', 'Checking…', 'qs-checking'));
     if (setBlocked) box.append(el('p', setBlocked, 'rule-note'));
   }
-  // Scoped rules are separate from the node state: inspect, edit (Advanced) or delete each one.
+  private maskedLine(ref: PolicyRuleRef) {
+    const line = el('div', '', 'qs-scoped-rule');
+    line.dataset.ruleId = ref.id;
+    line.append(
+      el('span', actionWord(ref.action)),
+      el('span', shortScope(ref), 'activity-rule-scope'),
+      el('span', 'Masked by newer rule', 'rule-enabled-state'),
+    );
+    return line;
+  }
+  // Scoped rules are separate from the node state.
   private scopedList(refs: PolicyRuleRef[], busy: boolean, zoned: boolean) {
     const c = this.state!.control;
     const wrap = el('div', '', 'qs-scoped');
@@ -1234,6 +1254,10 @@ export class ActivityPolicy {
       });
     };
     row.append(enabled);
+    if (ref?.stored_only) {
+      const label = foreign ? actionWord(ref.action) + ' · ' + refState(ref) : refState(ref);
+      row.append(el('span', label, 'rule-enabled-state'));
+    }
     if (foreign)
       row.title =
         ref!.action === 'ask'

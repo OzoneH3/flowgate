@@ -467,3 +467,42 @@ func TestPolicyViewConstrainedRulesAreScopedNotUniform(t *testing.T) {
 		t.Fatalf("unconstrained rules: %q", s.Configured)
 	}
 }
+
+func TestPolicyViewRuleEligibilityAtExpiry(t *testing.T) {
+	e, _, a, now := summaryFixture(t)
+	expires := now.Add(time.Minute)
+	old := policy.Rule{Schema: 2, ID: "older-allow", Version: 3, Action: "allow", Priority: 100,
+		Created: now.Add(-time.Hour), Executable: "/fixture/app",
+		Filter: policy.Filter{Application: a.Application.Key, Revision: a.Application.Revision, UID: 1000,
+			Direction: "outgoing", Protocol: "tcp", RemoteAddress: "*", RemotePort: 3389}}
+	temporary := old
+	temporary.ID, temporary.Action, temporary.Disabled = "temporary-deny", "block", true
+	temporary.Created, temporary.Expires = *now, expires
+	temporary.Filter.Revision = "previous-revision"
+	control := old
+	control.ID, control.Filter.RemotePort = "different-scope", 3390
+	ask := old
+	ask.ID, ask.Action, ask.Filter.Direction = "enabled-ask", "ask", "incoming"
+	foreign := old
+	foreign.ID, foreign.Filter.UID = "foreign", 1001
+	if err := e.SetRules([]policy.Rule{old, temporary, control, ask, foreign}); err != nil {
+		t.Fatal(err)
+	}
+	for _, offset := range []time.Duration{-time.Nanosecond, 0, time.Nanosecond} {
+		*now = expires.Add(offset)
+		view := viewFor(t, e, nil)
+		want := map[string]PolicyRuleEligibility{
+			old.ID: {"3", offset < 0}, temporary.ID: {"3", false},
+			control.ID: {"3", false}, ask.ID: {"3", false},
+		}
+		if !reflect.DeepEqual(view.RuleEligibility, want) {
+			t.Fatalf("offset %v: got %+v, want %+v", offset, view.RuleEligibility, want)
+		}
+		if offset < 0 && (view.Snapshot.ValidUntil == nil || !view.Snapshot.ValidUntil.Equal(expires)) {
+			t.Fatal("disabled temporary mask must invalidate the snapshot at expiry")
+		}
+		if refs := view.Applications[0].Incoming.Rules; len(refs) != 1 || refs[0].Action != "ask" || !refs[0].Active {
+			t.Fatalf("enabled Ask missing: %+v", refs)
+		}
+	}
+}

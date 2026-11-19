@@ -35,7 +35,7 @@ export const knownAction = (action: string) => action === 'allow' || action === 
 // Presentable stored actions (Ask is shown as Ask even when this daemon cannot write it).
 export const storedAction = (action: string) => knownAction(action) || action === 'ask';
 export const refState = (r: PolicyRuleRef) =>
-  r.expired ? 'Expired' : r.disabled ? 'Disabled' : r.active ? 'Enabled' : 'Inactive';
+  r.expired ? 'Expired' : r.disabled ? 'Disabled' : r.stored_only ? 'Enabled (stored)' : r.active ? 'Enabled' : 'Inactive';
 export function shortScope(r: PolicyRuleRef) {
   const f = r.scope;
   const parts = [

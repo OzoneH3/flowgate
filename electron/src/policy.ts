@@ -8,6 +8,7 @@ export const POLICY_CAPABILITY = 'policy-explanations-v1';
 // place); never a scoped rule. Without it the direction summary carries no application_rule.
 export const APPLICATION_POLICY_CAPABILITY = 'application-policy-v1';
 export interface PolicyRuleRef {
+  stored_only?: boolean;
   root_application?: string;
   // Daemon-derived, read-only: this saved application rule also covers updated
   // revisions of the same verified program. Never computed by the client.
@@ -72,6 +73,7 @@ export interface ProcessPolicy {
   application_outgoing: DirectionPolicy;
 }
 export interface PolicyView {
+  rule_eligibility?: Record<string, { version: string; masked: boolean }>;
   network_endpoints?: PolicyRuleRef[];
   network_zones?: NetworkZones;
   zones?: { zone: NetworkZone; incoming: DirectionPolicy; outgoing: DirectionPolicy }[];
@@ -235,7 +237,13 @@ function direction(v: unknown, expected: string): DirectionPolicy {
 export function parsePolicyView(raw: unknown): PolicyView {
   const v = obj(raw),
     s = obj(v.snapshot);
+  const eligibility = v.rule_eligibility === undefined ? undefined : Object.entries(obj(v.rule_eligibility));
+  if (eligibility && eligibility.length > 8192) throw Error('Invalid rule eligibility batch');
   const view: PolicyView = {
+    rule_eligibility: eligibility && Object.fromEntries(eligibility.map(([id, raw]) => {
+      const entry = obj(raw);
+      return [id, { version: decimal(entry.version), masked: bool(entry.masked) }];
+    })),
     network_endpoints: v.network_endpoints === undefined ? undefined : list(v.network_endpoints,8192).map(ruleRef),
     network_zones: parseNetworkZones(v.network_zones),
     zones:

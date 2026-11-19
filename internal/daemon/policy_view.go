@@ -91,6 +91,14 @@ type PolicySnapshot struct {
 	ValidUntil  *time.Time `json:"valid_until,omitempty"` // next visible rule expiry, not a lease
 	Meaning     string     `json:"meaning"`
 }
+
+// PolicyRuleEligibility reports only exact-scope replacement, separate from
+// enabled state, target lifetime and matching a specific connection.
+type PolicyRuleEligibility struct {
+	Version string `json:"version"`
+	Masked  bool   `json:"masked"`
+}
+
 type PolicyView struct {
 	NetworkEndpoints  []PolicyRuleRef       `json:"network_endpoints"`
 	NetworkZones      identity.NetworkZones `json:"network_zones"`
@@ -104,6 +112,8 @@ type PolicyView struct {
 	Reason            string                `json:"reason,omitempty"`
 	Applications      []ApplicationPolicy   `json:"applications"`
 	Rows              []PolicyAssociation   `json:"rows"`
+
+	RuleEligibility map[string]PolicyRuleEligibility `json:"rule_eligibility"`
 }
 type PolicyExplanation struct {
 	EventID            string          `json:"event_id"`
@@ -329,6 +339,14 @@ func (e *Engine) PolicyView(generation, expected string, uid uint32, admin bool,
 	activity = ClassifyActivity(activity, e.Zones)
 	out := PolicyView{NetworkZones: e.Zones, Zones: e.zoneViews(rules, h, snapshot.EvaluatedAt), Snapshot: snapshot, ActivitySequence: strconv.FormatUint(activity.Sequence, 10), ActivityCollected: activity.Collected, Applications: []ApplicationPolicy{}, Rows: []PolicyAssociation{}, Complete: activity.Complete}
 	now := snapshot.EvaluatedAt
+	current := make(map[string]bool, len(rules))
+	for _, r := range policy.CurrentProgramRules(rules, now) {
+		current[r.ID] = true
+	}
+	out.RuleEligibility = make(map[string]PolicyRuleEligibility, len(rules))
+	for _, r := range rules {
+		out.RuleEligibility[r.ID] = PolicyRuleEligibility{Version: strconv.FormatUint(r.Version, 10), Masked: !current[r.ID]}
+	}
 	out.NetworkEndpoints = []PolicyRuleRef{}
 	for _, r := range rules {
 		if r.NetworkEndpoint {
