@@ -39,18 +39,16 @@ traffic, it cannot use that application's saved permission for the decision.
 The standalone release candidate targets **Linux x86-64 with systemd**. At
 revision `a488e44`, GitHub had no published installer. [GitHub Releases](https://github.com/OzoneH3/flowgate/releases)
 
-Install the [build prerequisites](docs/STANDALONE-RELEASE.md), then run these
-commands in order from a fresh, clean checkout.
+Install the [build prerequisites](docs/STANDALONE-RELEASE.md), then build the
+package from a clean checkout.
 
 ```sh
-scripts/build.sh electron
 make package
 ```
 
-The first command downloads the pinned Electron runtime. At `a488e44`,
-starting with `make package` alone compiles the UI and then stops at the
-missing runtime. The package build writes the archive, offline bootstrap and
-SHA-256 receipts to `.workspace/dist/`.
+The build installs the pinned Electron runtime when needed, compiles the desktop
+and native components, and runs the release checks. The archive, offline
+bootstrap and SHA-256 receipts are written to `.workspace/dist/`.
 
 For an existing archive and bootstrap, verify their SHA-256 digests against
 values from a trusted source before installation. The

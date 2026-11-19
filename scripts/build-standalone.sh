@@ -25,8 +25,12 @@ if [ ! -d "$stage/electron/node_modules" ]; then
     npm --prefix "$stage/electron" ci
   fi
 fi
+node "$stage/electron/node_modules/electron/install.js"
+if [ ! -x "$stage/electron/node_modules/electron/dist/electron" ]; then
+  echo 'The Electron runtime installer did not produce a runnable Linux binary.' >&2
+  exit 1
+fi
 npm --prefix "$stage/electron" run build
-test -x "$stage/electron/node_modules/electron/dist/electron"
 scripts/build-socket-authorization.sh
 scripts/build.sh holder-iterator tcp-initiation udp wine-table
 experimental/upload-shaper/build.sh "$stage/shaping"

@@ -4,9 +4,10 @@ The source build uses GNU Make. Installation uses an exact offline archive. The 
 
 Build prerequisites are Go and a C toolchain, Clang with BPF support, bpftool, libbpf, libmnl and libnftnl development files, a kernel BTF file, Wine development headers and import libraries, Python 3, Node and the Electron dependencies in the lockfile. The installed host needs systemd, Python 3, iproute2, nftables, runuser, the dynamically linked system libraries and the kernel features checked by FlowGate. BPF, traffic collector and Wine features still depend on their individual runtime checks.
 
+The package target installs the pinned Electron runtime when needed, builds the
+desktop and native components, and runs the release checks.
+
 ```sh
-make build
-make check
 make package VERSION=0.1.0-rc.1
 ```
 
