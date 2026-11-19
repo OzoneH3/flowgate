@@ -15,6 +15,7 @@ func TestProductionPublicationDoesNotRequireQueueQuietOrAnotherPacket(t *testing
 		}
 		f.haveKey = false
 		s.productionSession = true
+		s.interfaceCoverage = &SocketInterfaceCoverage{Installed: []SocketInterface{{Index: 3}}}
 		e.finishSocketAuthorizationLocked(s, f, s.store.Begin(), a)
 		if !f.haveKey || len(m.values) != 1 || m.values[f.key].Deadline != 0 {
 			t.Fatal("valid production proof failed to publish a lifetime grant")
@@ -25,6 +26,7 @@ func TestProductionPublicationDoesNotRequireQueueQuietOrAnotherPacket(t *testing
 func TestProductionUnrelatedAdmissionsDoNotHoldEstablishedGrant(t *testing.T) {
 	e, s, established, a, m := connectionFixture(t)
 	s.productionSession = true
+	s.interfaceCoverage = &SocketInterfaceCoverage{Installed: []SocketInterface{{Index: 3}}}
 	key := established.key
 	value := m.values[key]
 	for i := 0; i < 100; i++ {
