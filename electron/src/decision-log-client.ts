@@ -4,7 +4,6 @@ import {
   DecisionLogStore,
   LogError,
   logCopyRequest,
-  loadedOutcome,
   parsePage,
   parseRecord,
   validateFilter,
@@ -123,26 +122,15 @@ export class DecisionLogClient {
     if (typeof id !== 'string' || !id || id.length > 64) throw Error('Invalid record ID');
     const target = this.target();
     if (!target) return { note: 'Outcome lookup unavailable while disconnected.' };
-    const missing = { note: 'No recorded outcome available.' };
+    if (!target.outcomeLookup) return { note: 'Linked outcomes require a newer daemon.' };
     try {
-      let operation = 'decision-log-outcome';
-      let decisionID = id;
-      if (!target.outcomeLookup) {
-        // Older daemons can recheck a known pair by record ID.
-        const pending = await call(target.path, { operation: 'decision-log-get', decision_id: id });
-        if (pending.error_code === 'not_found') return missing;
-        if (pending.error || !pending.decision_record) throw Error(pending.error || 'Pending record unavailable');
-        const final = loadedOutcome(parseRecord(pending.decision_record), this.store.view().records);
-        if (!final) return { note: 'Cross-page outcome lookup unavailable on this daemon.' };
-        operation = 'decision-log-get';
-        decisionID = final.id;
-      }
-      const r = await call(target.path, { operation, decision_id: decisionID });
-      if (r.error_code === 'not_found') return missing;
+      const r = await call(target.path, { operation: 'decision-log-outcome', decision_id: id });
+      if (r.error_code === 'not_found') return { note: 'No recorded outcome available.' };
       if (r.error || r.error_code || !r.decision_record) throw Error(r.error || r.error_code || 'Invalid response');
       const record = parseRecord(r.decision_record);
       if (record.kind !== 'final') throw Error('Invalid outcome record');
-      if (this.target()?.path !== target.path) throw Error('Daemon connection changed');
+      const current = this.target();
+      if (current?.path !== target.path || !current.outcomeLookup) throw Error('Daemon connection changed');
       return { record, note: '' };
     } catch (e) {
       return { note: 'Outcome lookup failed: ' + (e as Error).message };

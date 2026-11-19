@@ -2,7 +2,6 @@ import { accountLabel } from './accounts';
 import { ENDPOINT_SCOPE, ENDPOINT_PRECEDENCE } from './endpoint-policy';
 import {
   LOG_SOURCES,
-  loadedOutcome,
   directionLabel,
   healthSummary,
   outcomeLabel,
@@ -31,7 +30,7 @@ let selected = '';
 let visible = false;
 let signature = '';
 let detailVersion = 0;
-let shownDetail: { record: LogRecord; note: string } | undefined;
+let shownDetail: { record: LogRecord; note: string; outcomeOf?: string } | undefined;
 let newAbove = 0;
 let polling = false;
 let iconFor: (app: Application) => HTMLElement = () => el('span');
@@ -168,7 +167,13 @@ async function applyFilter() {
   render();
   $('logScroll').scrollTop = 0;
 }
-if (typeof window !== 'undefined') window.addEventListener('flowgate-account-name', () => { if (visible && shownDetail) renderDetail(shownDetail.record, shownDetail.note); });
+if (typeof window !== 'undefined') {
+  window.addEventListener('flowgate-account-name', () => {
+    if (visible && shownDetail) {
+      renderDetail(shownDetail.record, shownDetail.note, shownDetail.outcomeOf);
+    }
+  });
+}
 export async function showDecisionLog(show: boolean) {
   if (visible === show) return;
   visible = show;
@@ -183,8 +188,13 @@ async function poll() {
   if (!visible || polling) return;
   polling = true;
   try {
+    const previous = current;
     current = await window.flowgate.decisionLog();
     render();
+    if (shownDetail?.record.kind === 'pending' &&
+        (previous?.supported !== current.supported || previous?.outcomeLookup !== current.outcomeLookup)) {
+      renderDetail(shownDetail.record, shownDetail.note);
+    }
   } finally {
     polling = false;
   }
@@ -388,8 +398,9 @@ async function showDetail(id: string, outcome = false) {
     if (outcome) box.append(backToPending(id));
     return;
   }
-  shownDetail = { record, note };
-  renderDetail(record, note);
+  const outcomeOf = outcome ? id : undefined;
+  shownDetail = { record, note, outcomeOf };
+  renderDetail(record, note, outcomeOf);
 }
 
 function backToPending(id: string) {
@@ -398,10 +409,9 @@ function backToPending(id: string) {
   return back;
 }
 
-function renderDetail(r: LogRecord, note: string) {
+function renderDetail(r: LogRecord, note: string, outcomeOf?: string) {
   const box = $('logDetails');
   const parts: HTMLElement[] = [el('h3', `${outcomeLabel(r)} · ${time(r.time)}`)];
-  const outcomeOf = selected === r.id ? undefined : selected;
   if (outcomeOf) parts.push(backToPending(outcomeOf));
   if (note) parts.push(el('p', note, 'hint'));
   const section = (title: string) => {
@@ -436,14 +446,16 @@ function renderDetail(r: LogRecord, note: string) {
         : 'Final disposition',
     );
     if (r.kind === 'pending') {
-      if (!r.request_id || !r.generation) {
+      if (current?.supported && !current.outcomeLookup) {
+        parts.push(el('p', 'Linked outcomes require a newer daemon.', 'hint'));
+      } else if (!r.request_id || !r.generation) {
         parts.push(el('p', 'No recorded outcome available.', 'hint'));
-      } else if (current?.outcomeLookup || loadedOutcome(r, current?.records || [])) {
+      } else if (current?.outcomeLookup) {
         const link = el('button', 'Open recorded outcome');
         link.onclick = () => void showDetail(r.id, true);
         parts.push(link);
       } else {
-        parts.push(el('p', 'Outcome not loaded. Cross-page lookup unavailable on this daemon.', 'hint'));
+        parts.push(el('p', 'Outcome lookup unavailable.', 'hint'));
       }
     }
     const v = section('Kernel verdict');

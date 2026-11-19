@@ -11,6 +11,9 @@ const root = path.resolve(import.meta.dirname, '../..'),
 let variant = 'unsupported';
 let navigation = [];
 let missingId = '';
+let outcomeCapability = false;
+let outcomeError = '';
+const outcomeRequests = [];
 const prefPath = path.join(root, '.workspace/electron-preferences.json');
 const preferences = fs.existsSync(prefPath) ? fs.readFileSync(prefPath) : undefined;
 const base = (readonly) => ({
@@ -23,7 +26,7 @@ const base = (readonly) => ({
   capabilities: [
     'explicit-administrator-v1',
     ...(variant === 'unsupported' ? [] : ['decision-log-v1']),
-    ...(variant === 'navigation' ? ['decision-log-outcome-v1'] : []),
+    ...(outcomeCapability ? ['decision-log-outcome-v1'] : []),
   ],
   permissions: {
     role: 'administrator',
@@ -205,12 +208,13 @@ try {
                   ),
                 };
         if (q.operation === 'decision-log-outcome') {
-          const origin = navigation.find((x) => x.kind === 'pending' && x.id === q.decision_id);
-          const final = origin && navigation.find((x) => x.kind === 'final' &&
-            x.generation === origin.generation && x.request_id === origin.request_id);
-          r = final && final.id !== missingId
-            ? { ...r, decision_record: final }
-            : { ...r, error_code: 'not_found', error: 'Unavailable' };
+          outcomeRequests.push(q.decision_id);
+          const origin = navigation.find((x) => x.kind === 'pending' && x.id === q.decision_id && x.id !== missingId);
+          const finals = origin ? navigation.filter((x) => x.kind === 'final' && x.id !== missingId &&
+            x.generation === origin.generation && x.request_id === origin.request_id) : [];
+          r = outcomeCapability && !outcomeError && finals.length === 1
+            ? { ...r, decision_record: finals[0] }
+            : { ...r, error_code: outcomeError || 'not_found', error: 'Unavailable' };
         }
         s.end(JSON.stringify(r) + '\n');
       }),
@@ -281,7 +285,7 @@ try {
   // A missing final in a loaded page must not become evidence of absent history.
   await p.click('#logRows tr[data-id="syn-7"]');
   await until(
-    async () => /Outcome not loaded/.test(await p.locator('#logDetails').innerText()),
+    async () => /Linked outcomes require a newer daemon/.test(await p.locator('#logDetails').innerText()),
     'unloaded outcome',
   );
   assert.doesNotMatch(await p.locator('#logDetails').innerText(), /outcome was not recorded/i);
@@ -317,6 +321,8 @@ try {
     r.flow.remote = '[2001:db8:ffff:abcd:5678:90ab:cdef:9876]:443';
     return r;
   });
+  navigation[178].generation = navigation[179].generation = 'earlier-daemon';
+  navigation[0].request_id = navigation[179].request_id;
   navigation[178].kind = 'pending';
   navigation[178].request_id = navigation[179].request_id;
   navigation[177].kind = 'pending'; // no final with this request ID is loaded
@@ -330,13 +336,38 @@ try {
     navigation[i].verdict = { state: 'held', detail: '' };
   }
   variant = 'navigation';
-  await until(() => p.evaluate(async () => (await window.flowgate.decisionLog()).outcomeLookup), 'outcome capability');
   await p.setViewportSize({ width: 1280, height: 760 });
   await p.click('#logClear');
   await until(
     async () => (await p.locator('#logRows tr').count()) === 100,
     'navigation first page',
   );
+  const openOutcome = () => p.getByRole('button', { name: 'Open recorded outcome', exact: true });
+  const detail = () => p.locator('#logDetails').innerText();
+  const shown = (id) => until(async () => (await detail()).includes('Record ID\n' + id), 'shown ' + id);
+  const checkCopy = async (name, expected, result = 'Copied') => {
+    const sentinel = 'seed for ' + name;
+    await app.evaluate(({ clipboard }, value) => clipboard.writeText(value), sentinel);
+    const button = await p.getByRole('button', { name, exact: true }).elementHandle();
+    await button.click();
+    await until(async () => (await button.textContent()) === result, result + ' for ' + name);
+    const value = await app.evaluate(({ clipboard }) => clipboard.readText());
+    if (typeof expected === 'function') expected(JSON.parse(value));
+    else assert.equal(value, expected ?? sentinel);
+  };
+
+  await p.click('#logRows tr[data-id="syn-179"]');
+  await until(async () => /Linked outcomes require a newer daemon/.test(await detail()), 'legacy explanation');
+  assert.equal(await p.locator('#logRows tr[data-id="syn-180"]').count(), 1, 'matching final loaded on legacy daemon');
+  assert.equal(await openOutcome().count(), 0);
+  await p.click('#logRows tr[data-id="syn-180"]');
+  await checkCopy('Copy record', (r) => assert.equal(r.id, 'syn-180'));
+  await checkCopy('Copy local endpoint', navigation[179].flow.local);
+  await checkCopy('Copy remote endpoint', navigation[179].flow.remote);
+  assert.deepEqual(outcomeRequests, []);
+  console.log('PASS legacy browsing and copying with a loaded matching final and no outcome link');
+  outcomeCapability = true;
+  await until(() => p.evaluate(async () => (await window.flowgate.decisionLog()).outcomeLookup), 'outcome capability');
   await p.click('#logRows tr[data-id="syn-178"]');
   await p.getByRole('button', { name: 'Open recorded outcome' }).click();
   await until(
@@ -361,11 +392,7 @@ try {
     async () => /Copy remote endpoint/.test(await p.locator('#logDetails').innerText()),
     'endpoint copy',
   );
-  await p.getByRole('button', { name: 'Copy remote endpoint' }).click();
-  assert.equal(
-    await app.evaluate(({ clipboard }) => clipboard.readText()),
-    navigation[179].flow.remote,
-  );
+  await checkCopy('Copy remote endpoint', navigation[179].flow.remote);
   await p.getByRole('button', { name: 'Only this application' }).click();
   await until(
     async () => await p.locator('#logApplication').isVisible(),
@@ -465,12 +492,63 @@ try {
   assert.deepEqual(await rows(), pendingRows);
   assert.equal(await top(), anchor);
   assert.equal(await origin.getAttribute('aria-selected'), 'true');
-  await app.evaluate(({ clipboard }) => clipboard.clear());
-  await p.getByRole('button', { name: 'Copy remote endpoint' }).click();
-  assert.equal(await app.evaluate(({ clipboard }) => clipboard.readText()), navigation[179].flow.remote);
-  await p.getByRole('button', { name: 'Back to pending record' }).click();
-  await until(async () => /Record ID\s+syn-179\b/.test(await p.locator('#logDetails').innerText()), 'return to origin');
+  const historicalCopy = (r) => {
+    assert.equal(r.id, 'syn-180');
+    assert.equal(r.generation, 'earlier-daemon');
+  };
+  const copies = [
+    ['Copy record', historicalCopy],
+    ['Copy local endpoint', navigation[179].flow.local],
+    ['Copy remote endpoint', navigation[179].flow.remote],
+  ];
+  const copyOutcome = async (name, expected, result) => {
+    const before = outcomeRequests.length;
+    await checkCopy(name, expected, result);
+    assert.deepEqual(outcomeRequests.slice(before), ['syn-179']);
+  };
+  for (const [name, expected] of copies) await copyOutcome(name, expected);
+
+  const back = () => p.getByRole('button', { name: 'Back to pending record' }).click();
+  const duplicate = { ...navigation[179], id: 'ambiguous-final' };
+  for (const failure of ['pending hidden', 'final hidden', 'unavailable', 'ambiguous']) {
+    const setFailure = (active) => {
+      if (failure === 'pending hidden') missingId = active ? 'syn-179' : '';
+      if (failure === 'final hidden') missingId = active ? 'syn-180' : '';
+      if (failure === 'unavailable') outcomeError = active ? 'unavailable' : '';
+      if (failure === 'ambiguous') {
+        if (active) navigation.push(duplicate);
+        else navigation.pop();
+      }
+    };
+    await back();
+    await shown('syn-179');
+    setFailure(true);
+    await openOutcome().click();
+    await until(async () => /No recorded outcome available|Outcome lookup failed/.test(await detail()), 'failed open');
+    assert.equal(await p.getByRole('button', { name: 'Copy record', exact: true }).count(), 0);
+
+    setFailure(false);
+    await back();
+    await shown('syn-179');
+    await openOutcome().click();
+    await shown('syn-180');
+    setFailure(true);
+    for (const [name] of copies) await copyOutcome(name, undefined, 'Copy unavailable');
+    setFailure(false);
+  }
+  await back();
+  await shown('syn-179');
+  await openOutcome().click();
+  await shown('syn-180');
+  outcomeCapability = false;
+  await until(() => p.evaluate(async () => !(await window.flowgate.decisionLog()).outcomeLookup), 'older daemon after opening');
+  const beforeDowngradeCopies = outcomeRequests.length;
+  for (const [name] of copies) await checkCopy(name, undefined, 'Copy unavailable');
+  assert.equal(outcomeRequests.length, beforeDowngradeCopies);
+  await back();
+  await shown('syn-179');
   assert.equal(await top(), anchor);
+  console.log('PASS historical linked copies and clipboard preservation on hidden, unavailable and ambiguous outcomes');
   console.log('PASS cross-page outcome with Pending selected, 350 newer events and preserved scroll');
   console.log(
     'PASS SYNTHETIC navigation: missing/known/unavailable outcomes, copy IPv6, filters, paging, anchor, keyboard, pause/latest; ' +

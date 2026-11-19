@@ -611,17 +611,6 @@ export function healthSummary(h: LogHealth | undefined) {
   return { level, text: [head, ...notes, removed, retention].filter(Boolean).join(' · ') };
 }
 
-// A page is incomplete history. Only link explicit nonempty request identities in
-// the same daemon generation; never mistake reused event IDs for a relationship.
-export function loadedOutcome(pending: LogRecord, records: LogRecord[]) {
-  if (pending.kind !== 'pending' || !pending.request_id || !pending.generation) return undefined;
-  return records.find(
-    (r) =>
-      r.kind === 'final' &&
-      r.request_id === pending.request_id &&
-      r.generation === pending.generation,
-  );
-}
 export function logCopyRequest(value: unknown): { id: string; endpoint?: 'local' | 'remote'; outcomeOf?: string } {
   const v = typeof value === 'string' ? { id: value } : obj(value);
   if (

@@ -873,8 +873,9 @@ primary controller when it advertises the capability, otherwise the read-only co
   delivery is always "Not observed by FlowGate".** **Open recorded outcome** resolves a pending record across pages and filters on
   daemons with `decision-log-outcome-v1`. The details pane keeps the pending row
   selected. **Back to pending record** returns to that row’s details. If no visible
-  final can be resolved, the pane says **No recorded outcome available.** Older
-  daemons support links to finals already loaded in the list.
+  final can be resolved, the pane says **No recorded outcome available.** Linked copy actions
+  look up the pending record again before writing to the clipboard. Older daemons
+  support normal browsing and copying. Linked outcomes require a newer daemon.
 - The current rule is shown separately (same version / changed since / no longer
   exists, plus "View current rule…" through the versioned editor). Deletion is only
   claimed on a rule-managing connection; elsewhere current state is "not available".
