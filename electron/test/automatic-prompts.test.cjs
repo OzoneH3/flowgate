@@ -70,8 +70,9 @@ test('queued address Remember stays on already waiting peers of the same Ask and
   s.control.events = [aPort, bOtherAddress];
   assert.deepEqual(queuedRemember(s, portChoice)('g', bOtherAddress), { field: 'port', duration: 0 });
   const timedPort = { ...portChoice, scope: 'application', duration_seconds: 60 };
-  assert.deepEqual(queuedRemember(s, timedPort)('g', bOtherAddress), { field: 'port', duration: 60 });
-  assert.equal(queuedRemember(s, { ...timedPort, duration_seconds: 300 }), undefined);
+  for (const { seconds } of REMEMBER_DURATIONS.filter(({ seconds }) => seconds > 0))
+    assert.deepEqual(queuedRemember(s, { ...timedPort, duration_seconds: seconds })('g', bOtherAddress), { field: 'port', duration: seconds });
+  assert.equal(queuedRemember(s, { ...timedPort, duration_seconds: 120 }), undefined);
 });
 // 51 identical attempts (same backend request_group), delivered out of order.
 const burst = (n = 51, extra = []) => {

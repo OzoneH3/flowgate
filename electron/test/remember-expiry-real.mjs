@@ -184,7 +184,6 @@ try {
     const queueDuration = process.env.FLOWGATE_TEST_QUEUE_DURATION || '0';
     assert(['0', '60', '300'].includes(queueDuration));
     const queueSeconds = Number(queueDuration);
-    assert(!portScope || queueSeconds <= 60);
     const queueSummary = queueSeconds ? `for ${queueSeconds / 60}m0s` : 'persistent';
     const checkRestoredAsk = async (peer) => {
       const received = await count();
