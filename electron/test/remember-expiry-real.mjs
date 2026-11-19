@@ -55,13 +55,18 @@ const command = async (request) => {
   });
 };
 const outgoing = { op: 'outgoing', name: 'alpha', protocol: 'tcp', host: '10.79.0.2', port: 43000 };
-const portScope = process.env.FLOWGATE_TEST_QUEUE_SCOPE === 'port';
-const differentPortAddress = portScope && process.env.FLOWGATE_TEST_QUEUE_DIFF_ADDRESS === '1';
+const queueScope = process.env.FLOWGATE_TEST_QUEUE_SCOPE || 'address';
+assert(['address', 'port', 'endpoint'].includes(queueScope));
+const endpointScope = queueScope === 'endpoint';
+const portScope = queueScope !== 'address';
+const addressScope = queueScope !== 'port';
+const differentPortAddress = queueScope === 'port' && process.env.FLOWGATE_TEST_QUEUE_DIFF_ADDRESS === '1';
 const peerB = {
-  ...outgoing, host: !portScope || differentPortAddress ? '10.79.0.3' : outgoing.host,
+  ...outgoing, host: addressScope || differentPortAddress ? '10.79.0.3' : outgoing.host,
   port: portScope ? 44000 : outgoing.port,
 };
 const crossPort = { ...peerB, host: outgoing.host };
+const crossAddress = { ...outgoing, host: peerB.host };
 const controlPort = { ...outgoing, port: 44002 };
 const count = async () => (await command({ op: 'peer-counts' })).lines.length;
 const pending = async () => ((await call('list')).events || []).filter((e) =>
@@ -88,17 +93,19 @@ try {
     });
     return saved_rule;
   };
-  if (differentPortAddress) {
+  if (differentPortAddress || endpointScope) {
     const allow = await saveDraft({ ...draft, action: 'allow' });
-    const before = await count();
-    await command(crossPort);
-    await wait('cross-address Allow control delivered', async () => await count() === before + 1);
-    const { lines } = await command({ op: 'peer-counts' });
-    assert(lines.at(-1).includes(`('${crossPort.host}', ${crossPort.port})`));
-    await command({ op: 'close', name: 'alpha' });
-    await command({ op: 'settle', name: 'alpha' });
+    for (const target of endpointScope ? [outgoing, peerB, crossPort, crossAddress] : [crossPort]) {
+      const before = await count();
+      await command(target);
+      await wait('Allow control delivered', async () => await count() === before + 1);
+      const { lines } = await command({ op: 'peer-counts' });
+      assert(lines.at(-1).includes(`('${target.host}', ${target.port})`));
+      await command({ op: 'close', name: 'alpha' });
+      await command({ op: 'settle', name: 'alpha' });
+      console.log('PASS endpoint reachable under Allow: ' + target.host + ':' + target.port);
+    }
     await call('rule-delete', { id: allow.id, expected_version: allow.version });
-    console.log('PASS cross-address endpoint reachable under Allow: ' + crossPort.host + ':' + crossPort.port);
   }
   const ask = await saveDraft(draft);
   desktop = await _electron.launch({
@@ -177,13 +184,18 @@ try {
     }
   };
   if (!baseline) {
-    const scopeField = portScope ? 'port' : 'address';
-    const scopeValue = (peer) => portScope ? String(peer.port) : peer.host;
-    const scopeFilter = (peer) => portScope ? { remote_port: peer.port } : { remote_address: peer.host };
+    const scopeFields = ['address', 'port'].filter((field) => field === 'address' ? addressScope : portScope);
+    const fieldValue = (peer, field) => field === 'address' ? peer.host : String(peer.port);
+    const scopeValues = (peer) => scopeFields.map((field) => fieldValue(peer, field));
+    const scopeFilter = (peer) => ({
+      ...(addressScope ? { remote_address: peer.host } : {}),
+      ...(portScope ? { remote_port: peer.port } : {}),
+    });
     const scopedFilter = (peer) => ({ ...ask.filter, ...scopeFilter(peer) });
     const queueDuration = process.env.FLOWGATE_TEST_QUEUE_DURATION || '0';
     assert(['0', '60', '300'].includes(queueDuration));
     const queueSeconds = Number(queueDuration);
+    assert(!endpointScope || !queueSeconds);
     const queueSummary = queueSeconds ? `for ${queueSeconds / 60}m0s` : 'persistent';
     const checkRestoredAsk = async (peer) => {
       const received = await count();
@@ -193,6 +205,7 @@ try {
       assert.equal(fresh.rule, ask.id);
       assert.equal(await count(), received);
       const freshWindow = await prompt(fresh.id);
+      assert((await freshWindow.locator('#askSource').textContent()).includes(ask.id));
       assert.equal(await freshWindow.locator('#rememberToggle').isChecked(), false);
       await freshWindow.locator('#allow').click();
       await wait('restored Ask delivered after Allow Once', async () => await count() === received + 1);
@@ -218,9 +231,11 @@ try {
       assert.equal(b.rule, ask.id);
       await aWindow.locator('#rememberToggle').check();
       await aWindow.locator('#rememberDuration').selectOption(queueDuration);
-      await aWindow.locator(`input[data-field="${scopeField}"]`).check();
-      await wait('review scoped to A', async () =>
-        (await aWindow.locator('#rememberSummary').innerText()).includes(scopeValue(outgoing)));
+      for (const field of scopeFields) await aWindow.locator(`input[data-field="${field}"]`).check();
+      await wait('review scoped to A', async () => {
+        const summary = await aWindow.locator('#rememberSummary').innerText();
+        return scopeValues(outgoing).every((value) => summary.includes(value));
+      });
       await aWindow.locator('#block').click();
       const bWindow = await wait('automatic handoff to B', async () => {
         const w = desktop.windows().find((w) => new URL(w.url() || 'about:blank').searchParams.get('request') === b.id);
@@ -230,14 +245,16 @@ try {
       assert.equal(await count(), before);
       assert(await bWindow.locator('#rememberToggle').isChecked());
       assert.equal(await bWindow.locator('#rememberDuration').inputValue(), queueDuration);
-      const selectedField = bWindow.locator(`input[data-field="${scopeField}"]`);
-      assert(await selectedField.isChecked());
-      assert((await selectedField.locator('..').innerText()).includes(scopeValue(peerB)));
-      for (const field of ['protocol', 'address', 'port', 'process'])
-        assert.equal(await bWindow.locator(`input[data-field="${field}"]`).isChecked(), field === scopeField);
+      for (const field of ['protocol', 'address', 'port', 'process']) {
+        const input = bWindow.locator(`input[data-field="${field}"]`);
+        const selected = scopeFields.includes(field);
+        assert.equal(await input.isChecked(), selected);
+        if (selected) assert((await input.locator('..').innerText()).includes(fieldValue(peerB, field)));
+      }
       const bSummary = await wait('fresh reviewed scope for B', async () => {
         const summary = await bWindow.locator('#rememberSummary').innerText();
-        return summary.includes(scopeValue(peerB)) && !summary.includes(scopeValue(outgoing)) &&
+        return scopeValues(peerB).every((value) => summary.includes(value)) &&
+          scopeValues(outgoing).every((value) => !summary.includes(value)) &&
           summary.includes(queueSummary) && (!competingRule || summary.includes(competingRule.id)) && summary;
       });
       await bWindow.screenshot({ path: path.join(run, 'queued-b-' + scenario + '.png') });
@@ -268,7 +285,8 @@ try {
       assert(lines.at(-1).includes(`('${peerB.host}', ${peerB.port})`));
       const { rules } = await call('list');
       const denyA = rules.find((r) => r.action === 'block' &&
-        (portScope ? r.filter.remote_port === outgoing.port : r.filter.remote_address === outgoing.host));
+        (!portScope || r.filter.remote_port === outgoing.port) &&
+        (!addressScope || r.filter.remote_address === outgoing.host));
       const allowB = rules.find((r) => r.action === 'allow');
       assert.deepEqual(rules.find((r) => r.id === ask.id), ask);
       assert.deepEqual(denyA.filter, scopedFilter(outgoing));
@@ -276,7 +294,12 @@ try {
       else assert.equal(denyA.expires, ask.expires);
       assert.equal(rules.length, clearRemember ? 2 : 3);
       await attemptWith(denyA);
-      if (portScope) {
+      if (endpointScope) {
+        for (const crossed of [crossPort, crossAddress]) {
+          await checkRestoredAsk(crossed);
+          console.log(`PASS crossed ${crossed.host}:${crossed.port}: Ask ${ask.id}, receiver 0 held / 1 after Allow Once.`);
+        }
+      } else if (portScope) {
         await checkRestoredAsk(controlPort);
         console.log('PASS control port ' + controlPort.port + ': Ask ' + ask.id + ', receiver 0 held / 1 after Allow Once.');
       }
@@ -327,10 +350,10 @@ try {
         const { rules } = await call('list');
         return rules.length === 1 && rules[0].id === ask.id;
       });
-      console.log('PASS queued Remember (' + scopeField + '): A saved ' + denyA.id + ' for ' + scopeValue(outgoing) +
+      console.log('PASS queued Remember (' + queueScope + '): A saved ' + denyA.id + ' for ' + scopeValues(outgoing).join(' / ') +
         ' and fresh A delivered 0; original B ' + b.id + ' delivered 1; ' +
         (clearRemember ? 'cleared Remember saved no B rule, fresh B prompted under ' + ask.id
-          : 'untouched Allow saved ' + allowB.id + ' for ' + scopeValue(peerB) + ', fresh B delivered 1'));
+          : 'untouched Allow saved ' + allowB.id + ' for ' + scopeValues(peerB).join(' / ') + ', fresh B delivered 1'));
     }
     await closeAlpha();
   }

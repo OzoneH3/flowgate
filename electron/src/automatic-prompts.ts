@@ -78,15 +78,15 @@ export function groupOf(state: ClientState, id: string) {
   return e ? groupKey(e) : undefined;
 }
 export interface QueuedRememberSelection {
-  field: 'address' | 'port';
+  field: 'address' | 'port' | 'endpoint';
   duration: number;
 }
 export function queuedRememberSelection(choice: Decision): QueuedRememberSelection | undefined {
   const fields = choice.remember;
-  if (!fields || fields.process || fields.protocol || fields.address === fields.port) return;
-  const field = fields.address ? 'address' : 'port';
+  if (!fields || fields.process || fields.protocol || (!fields.address && !fields.port)) return;
+  const field = fields.address && fields.port ? 'endpoint' : fields.address ? 'address' : 'port';
   if (choice.scope === 'persistent') return { field, duration: 0 };
-  if (choice.scope !== 'application' || !choice.duration_seconds) return;
+  if (field === 'endpoint' || choice.scope !== 'application' || !choice.duration_seconds) return;
   const preset = REMEMBER_DURATIONS.find(({ seconds }) => seconds === choice.duration_seconds);
   if (preset) return { field, duration: preset.seconds };
 }
@@ -116,9 +116,10 @@ export function queuedRemember(state: ClientState, choice: Decision) {
     const [peer] = e.attribution.owners;
     const target = e.remembered_filter;
     if (!target?.remote_address) return false;
-    const nextEndpoint = selection.field === 'address'
-      ? target.remote_address !== filter.remote_address
-      : !!filter.remote_port && !!target.remote_port && target.remote_port !== filter.remote_port;
+    const addressChanged = target.remote_address !== filter.remote_address;
+    const portChanged = !!filter.remote_port && !!target.remote_port && target.remote_port !== filter.remote_port;
+    const nextEndpoint = selection.field === 'address' ? addressChanged :
+      portChanged && (selection.field === 'port' || addressChanged);
     return peer.pid === owner.pid && peer.start_ticks === owner.start_ticks && peer.uid === owner.uid &&
       target.application === filter.application && target.revision === filter.revision &&
       target.uid === filter.uid && nextEndpoint &&
