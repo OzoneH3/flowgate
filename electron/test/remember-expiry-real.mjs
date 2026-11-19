@@ -55,6 +55,14 @@ const command = async (request) => {
   });
 };
 const outgoing = { op: 'outgoing', name: 'alpha', protocol: 'tcp', host: '10.79.0.2', port: 43000 };
+const portScope = process.env.FLOWGATE_TEST_QUEUE_SCOPE === 'port';
+const differentPortAddress = portScope && process.env.FLOWGATE_TEST_QUEUE_DIFF_ADDRESS === '1';
+const peerB = {
+  ...outgoing, host: !portScope || differentPortAddress ? '10.79.0.3' : outgoing.host,
+  port: portScope ? 44000 : outgoing.port,
+};
+const crossPort = { ...peerB, host: outgoing.host };
+const controlPort = { ...outgoing, port: 44002 };
 const count = async () => (await command({ op: 'peer-counts' })).lines.length;
 const pending = async () => ((await call('list')).events || []).filter((e) =>
   e.state === 'awaiting-decision' && e.attribution.owners.some((p) => p.pid === alpha.pid));
@@ -71,8 +79,28 @@ try {
   assert.equal((initial.rules || []).length, 0, 'requires fresh disposable fixture');
   const draft = { target_scope: 'application', direction: 'outgoing', protocol: '*',
     action: 'ask', remote_address: '*', local_port: 0, remote_port: 0, disabled: false, application_policy: true, expires: '0001-01-01T00:00:00Z' };
-  const { observed_preview } = await call('observed-rule-preview', { observed_target: ready.alpha_target, observed_draft: draft });
-  const { saved_rule: ask } = await call('observed-rule-save', { preview_token: observed_preview.token, observed_draft: draft });
+  const saveDraft = async (observed_draft) => {
+    const { observed_preview } = await call('observed-rule-preview', {
+      observed_target: ready.alpha_target, observed_draft,
+    });
+    const { saved_rule } = await call('observed-rule-save', {
+      preview_token: observed_preview.token, observed_draft,
+    });
+    return saved_rule;
+  };
+  if (differentPortAddress) {
+    const allow = await saveDraft({ ...draft, action: 'allow' });
+    const before = await count();
+    await command(crossPort);
+    await wait('cross-address Allow control delivered', async () => await count() === before + 1);
+    const { lines } = await command({ op: 'peer-counts' });
+    assert(lines.at(-1).includes(`('${crossPort.host}', ${crossPort.port})`));
+    await command({ op: 'close', name: 'alpha' });
+    await command({ op: 'settle', name: 'alpha' });
+    await call('rule-delete', { id: allow.id, expected_version: allow.version });
+    console.log('PASS cross-address endpoint reachable under Allow: ' + crossPort.host + ':' + crossPort.port);
+  }
+  const ask = await saveDraft(draft);
   desktop = await _electron.launch({
     chromiumSandbox: true,
     args: ['--ozone-platform=wayland', path.join(root, 'electron'),
@@ -126,6 +154,7 @@ try {
     const record = await wait('matching choice in Decision Log', async () =>
       (await call('decision-log', { decision_query: { since, limit: 20 } })).decision_log.records.find((r) =>
         r.generation === generation && r.kind === 'final' &&
+        r.flow?.remote === request.host + ':' + request.port &&
         r.decision?.rule?.id === rule.id && r.decision.action === rule.action));
     if (rule.action === 'allow') await wait('fresh receiver write', async () => await count() === received + 1);
     else await new Promise((resolve) => setTimeout(resolve, 800));
@@ -148,18 +177,14 @@ try {
     }
   };
   if (!baseline) {
-    const portScope = process.env.FLOWGATE_TEST_QUEUE_SCOPE === 'port';
-    const peerB = portScope ? { ...outgoing, port: 44000 } : { ...outgoing, host: '10.79.0.3' };
-    const controlPort = { ...outgoing, port: 44002 };
     const scopeField = portScope ? 'port' : 'address';
     const scopeValue = (peer) => portScope ? String(peer.port) : peer.host;
-    const scopedFilter = (peer) => ({
-      ...ask.filter, ...(portScope ? { remote_port: peer.port } : { remote_address: peer.host }),
-    });
+    const scopeFilter = (peer) => portScope ? { remote_port: peer.port } : { remote_address: peer.host };
+    const scopedFilter = (peer) => ({ ...ask.filter, ...scopeFilter(peer) });
     const queueDuration = process.env.FLOWGATE_TEST_QUEUE_DURATION || '0';
     assert(['0', '60', '300'].includes(queueDuration));
     const queueSeconds = Number(queueDuration);
-    assert(!portScope || !queueSeconds);
+    assert(!portScope || queueSeconds <= 60);
     const queueSummary = queueSeconds ? `for ${queueSeconds / 60}m0s` : 'persistent';
     const checkRestoredAsk = async (peer) => {
       const received = await count();
@@ -180,15 +205,9 @@ try {
       await closeAlpha();
       let competingRule;
       if (scenario === 'refresh') {
-        const competingDraft = {
-          ...draft, application_policy: false, action: 'block', disabled: true, remote_address: peerB.host,
-        };
-        const { observed_preview } = await call('observed-rule-preview', {
-          observed_target: ready.alpha_target, observed_draft: competingDraft,
+        competingRule = await saveDraft({
+          ...draft, ...scopeFilter(peerB), application_policy: false, action: 'block', disabled: true,
         });
-        ({ saved_rule: competingRule } = await call('observed-rule-save', {
-          preview_token: observed_preview.token, observed_draft: competingDraft,
-        }));
       }
       const before = await count();
       await command(outgoing);
@@ -258,11 +277,20 @@ try {
       else assert.equal(denyA.expires, ask.expires);
       assert.equal(rules.length, clearRemember ? 2 : 3);
       await attemptWith(denyA);
+      if (portScope) {
+        await checkRestoredAsk(controlPort);
+        console.log('PASS control port ' + controlPort.port + ': Ask ' + ask.id + ', receiver 0 held / 1 after Allow Once.');
+      }
       if (clearRemember) {
         assert.equal(allowB, undefined);
         await checkRestoredAsk(peerB);
       } else {
         assert.deepEqual(allowB.filter, scopedFilter(peerB));
+        if (differentPortAddress) {
+          await attemptWith(allowB, crossPort);
+          console.log('PASS saved rule ' + allowB.id + ' allowed ' + crossPort.host + ':' + crossPort.port +
+            ' (B port at A address), receiver 1.');
+        }
         if (competingRule) {
           assert.equal(allowB.id, competingRule.id);
           assert.equal(allowB.version, competingRule.version + 1);
@@ -293,10 +321,6 @@ try {
           assert.equal(allowB.expires, ask.expires);
           await attemptWith(allowB, peerB);
         }
-      }
-      if (portScope) {
-        await checkRestoredAsk(controlPort);
-        console.log('PASS control port ' + controlPort.port + ': Ask ' + ask.id + ', receiver 0 held / 1 after Allow Once.');
       }
       if (allowB) await mutate(allowB.id, 'deleteRule');
       await mutate(denyA.id, 'deleteRule');

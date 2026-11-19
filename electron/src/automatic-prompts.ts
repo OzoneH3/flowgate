@@ -86,7 +86,8 @@ export function queuedRememberSelection(choice: Decision): QueuedRememberSelecti
   if (!fields || fields.process || fields.protocol || fields.address === fields.port) return;
   const field = fields.address ? 'address' : 'port';
   if (choice.scope === 'persistent') return { field, duration: 0 };
-  if (field !== 'address' || choice.scope !== 'application' || !choice.duration_seconds) return;
+  if (choice.scope !== 'application' || !choice.duration_seconds ||
+      (field === 'port' && choice.duration_seconds !== 60)) return;
   const preset = REMEMBER_DURATIONS.find(({ seconds }) => seconds === choice.duration_seconds);
   if (preset) return { field, duration: preset.seconds };
 }
@@ -118,8 +119,7 @@ export function queuedRemember(state: ClientState, choice: Decision) {
     if (!target?.remote_address) return false;
     const nextEndpoint = selection.field === 'address'
       ? target.remote_address !== filter.remote_address
-      : target.remote_address === filter.remote_address && !!filter.remote_port &&
-        !!target.remote_port && target.remote_port !== filter.remote_port;
+      : !!filter.remote_port && !!target.remote_port && target.remote_port !== filter.remote_port;
     return peer.pid === owner.pid && peer.start_ticks === owner.start_ticks && peer.uid === owner.uid &&
       target.application === filter.application && target.revision === filter.revision &&
       target.uid === filter.uid && nextEndpoint &&
