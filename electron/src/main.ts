@@ -11,7 +11,7 @@ import { matchesApplicationZone } from './application-zones';
 import { Essential } from './essential';
 import { Protection } from './protection';
 import { placeKDEPrompt, resizeKDEPrompt, PROMPT_TITLE, promptTitle } from './prompt-placement';
-import { AutomaticPrompts, PROMPT_HEIGHT, PROMPT_WIDTH, addressRememberDuration, edgePosition, boundDecision, groupOf, inputSettled, queuedAddressRemember } from './automatic-prompts';
+import { AutomaticPrompts, PROMPT_HEIGHT, PROMPT_WIDTH, edgePosition, boundDecision, groupOf, inputSettled, queuedRemember, queuedRememberSelection, type QueuedRememberSelection } from './automatic-prompts';
 import { leaseHolds } from './process-lease';
 import {
   app,
@@ -155,7 +155,7 @@ const APP_ICON = path.join(__dirname, 'flowgate.png');
 let main: BrowserWindow;
 let prompt: BrowserWindow | undefined;
 let promptRemember = false;
-let nextAddressRemember: ReturnType<typeof queuedAddressRemember>;
+let nextRemember: ReturnType<typeof queuedRemember>;
 const automaticPrompts = new AutomaticPrompts();
 // Keep the old native window until release: its input stream must not reach a new card.
 const TRANSITION_MS = 650;
@@ -177,22 +177,22 @@ function pacePrompt() {
   transitionTimer = setTimeout(automaticDecision, TRANSITION_MS + 10);
 }
 const promptRefs = new Map<number, RequestRef>();
-const promptURL = (ref: RequestRef, rememberAddress?: number) =>
+const promptURL = (ref: RequestRef, remember?: QueuedRememberSelection) =>
   'flowgate://app/index.html?request=' +
   encodeURIComponent(ref.id) +
   '&generation=' +
   encodeURIComponent(ref.generation) +
-  (rememberAddress === undefined ? '' : '&rememberAddress=' + rememberAddress);
+  (remember ? '&rememberField=' + remember.field + '&rememberDuration=' + remember.duration : '');
 // The one permission window shows one request card. Switching card reuses the
 // window: rebinding promptRefs first makes decisions from the old card fail closed.
-function retarget(ref: RequestRef, reload = false, rememberAddress?: number) {
+function retarget(ref: RequestRef, reload = false, remember?: QueuedRememberSelection) {
   const w = prompt!,
     current = promptRefs.get(w.webContents.id);
   if (!reload && current?.id === ref.id && current.generation === ref.generation) {
     promptRefs.set(w.webContents.id, { ...current, group: ref.group ?? current.group });
     return;
   }
-  promptRemember = rememberAddress !== undefined;
+  promptRemember = !!remember;
   promptRefs.set(w.webContents.id, ref);
   promptContentHeights.delete(w.webContents.id);
   promptReadyAt.set(w.webContents.id, Date.now() + TRANSITION_MS);
@@ -216,7 +216,7 @@ function retarget(ref: RequestRef, reload = false, rememberAddress?: number) {
     else w.showInactive();
   });
   promptLayouts.set(w.webContents.id, reset);
-  void w.loadURL(promptURL(ref, rememberAddress));
+  void w.loadURL(promptURL(ref, remember));
 }
 // Temporary Allow/Deny hides at once; remembered saves hide after acknowledgement.
 // The submission outcome, including refusals
@@ -251,15 +251,15 @@ function trackResult<T>(
 }
 // Closed by FlowGate because its request group is settled: not a user dismissal.
 let promptAutoClosing = false;
-function openDecision(ref: RequestRef, rememberAddress?: number) {
+function openDecision(ref: RequestRef, remember?: QueuedRememberSelection) {
   // A hidden window (answered or dismissed) always presents a fresh card.
   const hidden = promptIdle;
-  nextAddressRemember = undefined;
+  nextRemember = undefined;
   promptIdle = false;
   promptDismissed = false;
   ref = { ...ref, group: ref.group ?? groupOf(backend.view(), ref.id) };
   if (prompt && !prompt.isDestroyed()) {
-    retarget(ref, hidden, hidden ? rememberAddress : undefined);
+    retarget(ref, hidden, hidden ? remember : undefined);
     return;
   }
   prompt = windowFor(true, ref.id, ref.generation, ref.group);
@@ -309,7 +309,7 @@ function automaticDecision() {
   if (!promptInputSettled()) return;
   transitionUntil = 0;
   const event = next && view.control.events.find((e) => e.id === next.id && e.remainingMs > 1000);
-  if (next && event) openDecision(next, nextAddressRemember?.(next.generation, event));
+  if (next && event) openDecision(next, nextRemember?.(next.generation, event));
 }
 const windows = new Set<BrowserWindow>();
 let backend: Backend;
@@ -1064,14 +1064,16 @@ app.whenReady().then(async () => {
       throw Error('Permission presentation is transitioning');
     const promptRef = promptRefs.get(e.sender.id);
     const d = boundDecision(value, promptRef);
-    const carry = promptRef && queuedAddressRemember(backend.view(), d);
-    const duration = addressRememberDuration(d);
-    const renewTimedReview = !!promptRef && !!duration &&
-      new URL(e.senderFrame!.url).searchParams.get('rememberAddress') === String(duration);
+    const carry = promptRef && queuedRemember(backend.view(), d);
+    const selection = queuedRememberSelection(d);
+    const params = new URL(e.senderFrame!.url).searchParams;
+    const renewTimedReview = !!promptRef && !!selection?.duration &&
+      params.get('rememberField') === selection.field &&
+      params.get('rememberDuration') === String(selection.duration);
     const run = backend.decide(d, carry && (() => {
       const ref = promptRefs.get(e.sender.id);
       if (ref?.id !== d.id || ref.generation !== d.generation || promptIdle || promptDismissed) return;
-      nextAddressRemember = carry;
+      nextRemember = carry;
       promptAnswered(e.sender);
     }), renewTimedReview);
     if (d.scope === 'once' || d.scope === 'for-a-while') promptAnswered(e.sender);

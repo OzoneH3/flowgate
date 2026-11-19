@@ -77,18 +77,24 @@ export function groupOf(state: ClientState, id: string) {
   const e = state.control.events.find((e) => e.id === id);
   return e ? groupKey(e) : undefined;
 }
-export function addressRememberDuration(choice: Decision) {
-  const fields = choice.remember;
-  if (!fields?.address || fields.process || fields.port || fields.protocol) return;
-  if (choice.scope === 'persistent') return 0;
-  if (choice.scope === 'application' && choice.duration_seconds)
-    return REMEMBER_DURATIONS.find(({ seconds }) => seconds === choice.duration_seconds)?.seconds;
+export interface QueuedRememberSelection {
+  field: 'address' | 'port';
+  duration: number;
 }
-// Capture already-waiting peers before submitting an address choice.
-// Carry the selected duration, never an absolute expiry, rule, or preview.
-export function queuedAddressRemember(state: ClientState, choice: Decision) {
-  const duration = addressRememberDuration(choice);
-  if (state.control.generation !== choice.generation || duration === undefined) return;
+export function queuedRememberSelection(choice: Decision): QueuedRememberSelection | undefined {
+  const fields = choice.remember;
+  if (!fields || fields.process || fields.protocol || fields.address === fields.port) return;
+  const field = fields.address ? 'address' : 'port';
+  if (choice.scope === 'persistent') return { field, duration: 0 };
+  if (field !== 'address' || choice.scope !== 'application' || !choice.duration_seconds) return;
+  const preset = REMEMBER_DURATIONS.find(({ seconds }) => seconds === choice.duration_seconds);
+  if (preset) return { field, duration: preset.seconds };
+}
+// Capture already-waiting peers before submitting a scoped choice. Carry the
+// settings alone so the next card gets its own endpoint and review.
+export function queuedRemember(state: ClientState, choice: Decision) {
+  const selection = queuedRememberSelection(choice);
+  if (state.control.generation !== choice.generation || !selection) return;
   const events = state.control.events;
   const source = events.find((e) => e.id === choice.id);
   if (
@@ -109,16 +115,21 @@ export function queuedAddressRemember(state: ClientState, choice: Decision) {
     ) return false;
     const [peer] = e.attribution.owners;
     const target = e.remembered_filter;
+    if (!target?.remote_address) return false;
+    const nextEndpoint = selection.field === 'address'
+      ? target.remote_address !== filter.remote_address
+      : target.remote_address === filter.remote_address && !!filter.remote_port &&
+        !!target.remote_port && target.remote_port !== filter.remote_port;
     return peer.pid === owner.pid && peer.start_ticks === owner.start_ticks && peer.uid === owner.uid &&
-      target?.application === filter.application && target.revision === filter.revision &&
-      target.uid === filter.uid && !!target.remote_address && target.remote_address !== filter.remote_address &&
+      target.application === filter.application && target.revision === filter.revision &&
+      target.uid === filter.uid && nextEndpoint &&
       e.attribution.permission_target?.prefix === source.attribution.permission_target?.prefix &&
       e.attribution.runtime_table?.prefix === source.attribution.runtime_table?.prefix;
   };
   const ids = new Set(events.filter(matches).map((e) => e.id));
   if (!ids.size) return;
   return (generation: string, event: ViewEvent) =>
-    generation === choice.generation && ids.has(event.id) && matches(event) ? duration : undefined;
+    generation === choice.generation && ids.has(event.id) && matches(event) ? selection : undefined;
 }
 // One foreground card at a time (NetLimiter): the representative of the oldest
 // group. A dismissed group never auto-opens again in that daemon generation.

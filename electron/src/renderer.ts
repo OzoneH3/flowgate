@@ -158,12 +158,15 @@ let reviewSequence = 0,
   reviewMessage = '',
   reviewFor = '';
 // decision-remember-fields-v1 (NetLimiter 5.3.28): Remember unchecked = Once.
-const queuedAddressDuration = promptID ? REMEMBER_DURATIONS.find(
-  ({ seconds }) => String(seconds) === promptParams.get('rememberAddress'),
-)?.seconds : undefined;
-let rememberOn = queuedAddressDuration !== undefined,
-  rememberFields: RememberFields = { ...DEFAULT_REMEMBER, address: rememberOn },
-  rememberDuration = queuedAddressDuration ?? 0,
+const queuedField = promptID && promptParams.get('rememberField');
+const queuedDuration = REMEMBER_DURATIONS.find(
+  ({ seconds }) => String(seconds) === promptParams.get('rememberDuration'),
+)?.seconds;
+const queuedAddress = queuedField === 'address' && queuedDuration !== undefined;
+const queuedPort = queuedField === 'port' && queuedDuration === 0;
+let rememberOn = queuedAddress || queuedPort,
+  rememberFields: RememberFields = { ...DEFAULT_REMEMBER, address: queuedAddress, port: queuedPort },
+  rememberDuration = queuedAddress ? queuedDuration : 0,
   reviewTimer: ReturnType<typeof setTimeout> | undefined;
 // decision-for-a-while-v1: For a while checkbox (exclusive with Remember, see process-lease).
 let forAWhileOn = false;

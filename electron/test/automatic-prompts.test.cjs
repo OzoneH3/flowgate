@@ -6,7 +6,7 @@ const {
   boundDecision,
   requestGroups,
   askSource,
-  queuedAddressRemember,
+  queuedRemember,
 } = require('../dist/test/automatic-prompts.cjs');
 const { REMEMBER_DURATIONS } = require('../dist/test/decision-remember.cjs');
 const state = (ids, generation = 'g') => ({
@@ -38,8 +38,8 @@ test('queued address Remember stays on already waiting peers of the same Ask and
     generation: 'g', id: 'a', scope: 'persistent',
     remember: { address: true, process: false, protocol: false, port: false },
   };
-  const carry = queuedAddressRemember(s, choice);
-  assert.equal(carry('g', b), 0);
+  const carry = queuedRemember(s, choice);
+  assert.deepEqual(carry('g', b), { field: 'address', duration: 0 });
   assert.equal(carry('g', { ...b, id: 'late-arrival' }), undefined);
   assert.equal(carry('next-generation', b), undefined);
   assert.equal(carry('g', { ...b, ask_rule: { id: 'different-ask', version: 1 } }), undefined);
@@ -51,10 +51,23 @@ test('queued address Remember stays on already waiting peers of the same Ask and
   assert.equal(carry('g', { ...b, remembered_filter: { ...b.remembered_filter, application: 'other' } }), undefined);
   const timed = { ...choice, scope: 'application', duration_seconds: 60 };
   for (const { seconds } of REMEMBER_DURATIONS.filter(({ seconds }) => seconds > 0))
-    assert.equal(queuedAddressRemember(s, { ...timed, duration_seconds: seconds })('g', b), seconds);
-  assert.equal(queuedAddressRemember(s, timed)('g', { ...b, scope_previews: { persistent: 'available' } }), undefined);
-  assert.equal(queuedAddressRemember(s, { ...timed, duration_seconds: 120 }), undefined);
-  assert.equal(queuedAddressRemember(s, { ...choice, remember: { ...choice.remember, port: true } }), undefined);
+    assert.deepEqual(queuedRemember(s, { ...timed, duration_seconds: seconds })('g', b), { field: 'address', duration: seconds });
+  assert.equal(queuedRemember(s, timed)('g', { ...b, scope_previews: { persistent: 'available' } }), undefined);
+  assert.equal(queuedRemember(s, { ...timed, duration_seconds: 120 }), undefined);
+  assert.equal(queuedRemember(s, { ...choice, remember: { ...choice.remember, port: true } }), undefined);
+
+  const portChoice = { ...choice, remember: { ...choice.remember, address: false, port: true } };
+  const withPort = (event, port) => ({
+    ...event,
+    remembered_filter: { ...event.remembered_filter, remote_address: '192.0.2.1', remote_port: port },
+  });
+  const aPort = withPort(a, 443), bPort = withPort(b, 8443);
+  s.control.events = [aPort, bPort];
+  const carryPort = queuedRemember(s, portChoice);
+  assert.deepEqual(carryPort('g', bPort), { field: 'port', duration: 0 });
+  assert.equal(carryPort('g', withPort(b, 443)), undefined);
+  assert.equal(carryPort('g', { ...bPort, remembered_filter: { ...bPort.remembered_filter, remote_address: '192.0.2.2' } }), undefined);
+  assert.equal(queuedRemember(s, { ...portChoice, scope: 'application', duration_seconds: 60 }), undefined);
 });
 // 51 identical attempts (same backend request_group), delivered out of order.
 const burst = (n = 51, extra = []) => {

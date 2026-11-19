@@ -24,10 +24,10 @@ for raw in sys.stdin:
         q=json.loads(raw);op=q['op'];v6=q.get('v6',False);family=socket.AF_INET6 if v6 else socket.AF_INET
         if op=='setup':
             for args in [['link','set','lo','up'],['link','set','fgpeer','up'],['addr','add','10.79.0.2/24','dev','fgpeer'],['addr','add','10.79.0.3/24','dev','fgpeer'],['-6','addr','add','fd79::2/64','dev','fgpeer','nodad'],['-6','addr','add','fd79::3/64','dev','fgpeer','nodad'],['-6','addr','add','fe80::2/64','dev','fgpeer','nodad']]:subprocess.run(['ip',*args],check=True)
-            # Two destinations x two service ports (TCP 43000/44000, UDP 43001/44001).
+            # Each destination also has a third TCP port for the queued port-rule control.
             DESTS=[(socket.AF_INET,'10.79.0.2'),(socket.AF_INET6,'fd79::2'),(socket.AF_INET,'10.79.0.3'),(socket.AF_INET6,'fd79::3')]
             for fam,addr in DESTS:
-                for tcp_port in (43000,44000):
+                for tcp_port in (43000,44000,44002):
                     s=socket.socket(fam,socket.SOCK_STREAM);s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);s.bind((addr,tcp_port));s.listen();threading.Thread(target=listen,args=(s,),daemon=True).start()
                         
             def udp_echo(s):
