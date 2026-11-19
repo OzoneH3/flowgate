@@ -1,3 +1,5 @@
+<img src="electron/assets/flowgate.png" alt="FlowGate app icon" width="96" align="right">
+
 # FlowGate
 
 **See which apps are online and decide what they can connect to.**
@@ -9,6 +11,10 @@ the desktop. The per-app monitoring and control workflow takes inspiration from
 
 [Try the desktop](#try-the-desktop) · [Install FlowGate](#install-flowgate) ·
 [Documentation](#documentation)
+
+![FlowGate main window showing the Activity list, selected application details, and upload and download charts](docs/images/flowgate-main-window.png)
+
+*The Activity view with sample traffic.*
 
 ## What you can do
 
