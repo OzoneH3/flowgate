@@ -247,6 +247,29 @@ test('zone choice is previewed once, exact reviewed rule is committed', async (t
   assert.deepEqual(counts(), { commits: 1, previews: 1, queries: 0 });
   await assert.rejects(() => b.decide({ ...d, preview_token: p.token }));
 });
+test('validated save reaches the queued handoff before publication and a slow rule refresh', async (t) => {
+  const { b, d } = await setup(t);
+  const p = await b.previewDecision(d);
+  let releaseRefresh;
+  const refresh = new Promise((resolve) => { releaseRefresh = resolve; });
+  const order = [];
+  b.refreshRuleContext = () => {
+    order.push('refresh');
+    return refresh;
+  };
+  b.changed = (state) => {
+    if (state.control.events.find((e) => e.id === d.id)?.attempt?.phase === 'acknowledged' &&
+        !order.includes('publication')) order.push('publication');
+  };
+  const decision = b.decide({ ...d, preview_token: p.token }, () => order.push('handoff'));
+  try {
+    await until(() => order.includes('refresh'), 'post-save rule refresh');
+    assert.deepEqual(order, ['handoff', 'publication', 'refresh']);
+  } finally {
+    releaseRefresh();
+    await decision;
+  }
+});
 test('wrong preview zone and unknown connection cannot create named permission', async (t) => {
   const a = await setup(t, { mismatch: true });
   await assert.rejects(() => a.b.previewDecision(a.d));

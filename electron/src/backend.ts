@@ -842,14 +842,14 @@ export class Backend {
     }
     return result;
   }
-  async decide(raw: Decision): Promise<Attempt> {
+  async decide(raw: Decision, onRuleAcknowledged?: () => void): Promise<Attempt> {
     const d = validateDecision(raw);
     // For a while creates an in-memory lease, not a rule: no rule mutation lock.
     return d.scope === 'once' || d.scope === 'for-a-while'
       ? this.decideInner(d)
-      : this.ruleMutation(() => this.decideInner(d));
+      : this.ruleMutation(() => this.decideInner(d, onRuleAcknowledged));
   }
-  private async decideInner(raw: Decision): Promise<Attempt> {
+  private async decideInner(raw: Decision, onRuleAcknowledged?: () => void): Promise<Attempt> {
     const d = validateDecision(raw);
     const c = this.state.control;
     const e = this.reply?.events.find((e) => e.id === d.id);
@@ -955,7 +955,11 @@ export class Backend {
       this.reconcileAfter = this.listIssued;
     }
     // A reply from an old connection must never mutate a new session.
-    if (this.state.control.generation === d.generation) this.attempts.set(d.id, result);
+    if (this.state.control.generation === d.generation) {
+      this.attempts.set(d.id, result);
+      // The queued prompt can advance on this publication while rule context refreshes.
+      if (result.phase === 'acknowledged' && result.rule) onRuleAcknowledged?.();
+    }
     this.emit();
     this.reconcileSoon();
     if (result.phase === 'unknown' && result.reconcile)

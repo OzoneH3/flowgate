@@ -1065,12 +1065,16 @@ app.whenReady().then(async () => {
     const promptRef = promptRefs.get(e.sender.id);
     const d = boundDecision(value, promptRef);
     const carry = promptRef && queuedAddressRemember(backend.view(), d);
-    const run = backend.decide(d);
+    const run = backend.decide(d, carry && (() => {
+      const ref = promptRefs.get(e.sender.id);
+      if (ref?.id !== d.id || ref.generation !== d.generation || promptIdle || promptDismissed) return;
+      nextAddressRemember = carry;
+      promptAnswered(e.sender);
+    }));
     if (d.scope === 'once' || d.scope === 'for-a-while') promptAnswered(e.sender);
     else void run.then(a => {
       const ref=promptRefs.get(e.sender.id);
       if (a.phase === 'acknowledged' && ref?.id === d.id && ref.generation === d.generation) {
-        if (a.rule && !promptIdle && !promptDismissed) nextAddressRemember = carry;
         promptAnswered(e.sender);
       }
     }, () => {});
