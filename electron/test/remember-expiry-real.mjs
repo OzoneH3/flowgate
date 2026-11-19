@@ -107,6 +107,49 @@ try {
     assert.equal((await call('list')).rules.length, 1);
     console.log('PASS ' + action + ' once settled one attempt; next prompted; receiver delta ' + Number(action === 'allow'));
   }
+  const closeAlpha = async () => {
+    await command({ op: 'close', name: 'alpha' });
+    await command({ op: 'settle', name: 'alpha' });
+  };
+  const ruleRow = (id) => main.locator(`#ruleRows tr[data-id="${id}"]`);
+  const assertEnabledChoice = async (rule) => {
+    await main.locator('#rulesTab').click();
+    await wait('masked Ask and enabled saved choice', async () =>
+      (await ruleRow(ask.id).locator('td').allTextContents()).at(-1) === 'Masked by newer rule' &&
+      (await ruleRow(rule.id).locator('td').allTextContents()).at(-1) === 'Enabled');
+  };
+  const attemptWith = async (rule) => {
+    await closeAlpha();
+    const received = await count();
+    const since = new Date().toISOString();
+    await command(outgoing);
+    const record = await wait('matching choice in Decision Log', async () =>
+      (await call('decision-log', { decision_query: { since, limit: 20 } })).decision_log.records.find((r) =>
+        r.generation === generation && r.kind === 'final' &&
+        r.decision?.rule?.id === rule.id && r.decision.action === rule.action));
+    if (rule.action === 'allow') await wait('fresh receiver write', async () => await count() === received + 1);
+    else await new Promise((resolve) => setTimeout(resolve, 800));
+    assert.equal(await count(), received + Number(rule.action === 'allow'));
+    assert.equal((await pending()).length, 0);
+    await main.locator('#decisionLogTab').click();
+    await main.locator(`#logRows tr[data-id="${record.id}"]`).click();
+    await wait('shown historical winner', async () =>
+      (await main.locator('#logDetails').innerText()).includes(rule.id));
+  };
+  const mutate = async (id, button) => {
+    await main.locator('#rulesTab').click();
+    await ruleRow(id).click();
+    await main.locator('#' + button).click();
+    if (button === 'toggleRule') {
+      await main.locator('#previewRule').click();
+      await main.locator('#saveRule').click();
+    } else {
+      await main.locator('#confirmYes').click();
+    }
+  };
+  const timedAction = process.env.FLOWGATE_TEST_TIMED_ACTION || 'allow';
+  assert(['allow', 'block'].includes(timedAction));
+  const timedDeliveries = Number(timedAction === 'allow');
   const before = await count();
   await command({ op: 'batch', items: [outgoing, outgoing] });
   const [request] = await held(2);
@@ -119,19 +162,60 @@ try {
   });
   assert.equal(/replaces Ask rule/.test(summary), baseline, summary);
   await window.screenshot({ path: path.join(run, 'remember.png') });
-  await window.locator('#allow').click();
+  await window.locator('#' + timedAction).click();
   const list = await wait('remembered rule', async () => {
     const state = await call('list');
-    return state.rules.some((r) => r.action === 'allow') && state;
+    return state.rules.some((r) => r.action === timedAction) && state;
   });
-  const saved = list.rules.find((r) => r.action === 'allow');
+  const saved = list.rules.find((r) => r.action === timedAction);
   assert.equal(saved.id === ask.id, baseline);
   assert.equal(list.rules.some((r) => r.id === ask.id && r.action === 'ask'), !baseline);
-  await wait('both receivers delivered', async () => await count() === before + 2);
   await held(0);
-  await command(outgoing);
-  await wait('fresh attempt delivered before expiry', async () => await count() === before + 3);
+  if (timedDeliveries) await wait('both held attempts delivered', async () => await count() === before + 2);
+  await closeAlpha();
+  assert.equal(await count(), before + 2 * timedDeliveries);
+  await attemptWith(saved);
+  await closeAlpha();
+  if (!baseline) {
+    await mutate(saved.id, 'toggleRule');
+    await wait('timed choice disabled and source Ask enabled', async () =>
+      (await ruleRow(saved.id).locator('td').allTextContents()).at(-1) === 'Disabled' &&
+      (await ruleRow(ask.id).locator('td').allTextContents()).at(-1) === 'Enabled');
+    const disabled = (await call('list')).rules.find((rule) => rule.id === saved.id);
+    assert.equal(disabled.expires, saved.expires);
+    assert(Date.now() < Date.parse(saved.expires));
+    const received = await count();
+    const since = new Date().toISOString();
+    await command(outgoing);
+    const [request] = await held(1);
+    assert.equal(request.rule, ask.id);
+    const disabledWindow = await prompt(request.id);
+    await wait('timed disable shows original Ask source', async () =>
+      (await disabledWindow.locator('#askSource').textContent())?.includes(ask.id));
+    await wait('timed disable Ask in Decision Log', async () =>
+      (await call('decision-log', { decision_query: { since, limit: 20 } })).decision_log.records.some((record) =>
+        record.kind === 'pending' && record.request_id === request.id && record.decision?.rule?.id === ask.id));
+    await disabledWindow.screenshot({ path: path.join(run, 'timed-disabled-ask.png') });
+    assert.equal(await count(), received);
+    await disabledWindow.locator('#allow').click();
+    await wait('disabled timed choice held until Allow Once', async () => await count() === received + 1);
+    await held(0);
+    await closeAlpha();
+    await mutate(saved.id, 'toggleRule');
+    await assertEnabledChoice(saved);
+    const reenabled = (await call('list')).rules.find((rule) => rule.id === saved.id);
+    assert.equal(reenabled.expires, saved.expires);
+    assert.equal(reenabled.version, saved.version + 2);
+    assert(Date.now() < Date.parse(saved.expires));
+    await attemptWith(saved);
+    await closeAlpha();
+    console.log('PASS timed ' + timedAction + ', rule ' + saved.id + ' expires ' + saved.expires +
+      '; enabled and re-enabled receiver +'+ timedDeliveries +
+      '; disabled source ' + ask.id + ' receiver 0 held / 1 after Allow Once; deadline unchanged');
+  }
   await new Promise((resolve) => setTimeout(resolve, Math.max(0, Date.parse(saved.expires) - Date.now() + 500)));
+  const expiryCount = await count();
+  const expirySince = new Date().toISOString();
   await command(outgoing);
   const [after] = await held(1);
   assert.equal(after.rule, baseline ? 'default-ask' : ask.id);
@@ -140,17 +224,32 @@ try {
   await wait('prompt source ' + expectedSource, async () =>
     (await afterWindow.locator('#askSource').textContent())?.includes(expectedSource));
   await afterWindow.screenshot({ path: path.join(run, 'after-expiry.png') });
-  assert.equal(await count(), before + 3);
+  await wait('expired choice fallback in Decision Log', async () =>
+    (await call('decision-log', { decision_query: { since: expirySince, limit: 20 } })).decision_log.records.some((record) =>
+      record.kind === 'pending' && record.request_id === after.id &&
+      (baseline ? record.decision?.source === 'default_ask' : record.decision?.rule?.id === ask.id)));
+  assert.equal(await count(), expiryCount);
+  await afterWindow.locator('#allow').click();
+  await wait('expired choice held until Allow Once', async () => await count() === expiryCount + 1);
+  await held(0);
+  console.log('PASS timed expiry: ' + (baseline ? 'default Ask' : ask.id) +
+    ' prompted, receiver 0 held / 1 after Allow Once');
   const permanentAction = process.env.FLOWGATE_TEST_PERMANENT_ACTION;
   if (permanentAction) {
     assert(!baseline && ['allow', 'block'].includes(permanentAction));
-    await afterWindow.locator('#rememberToggle').check();
-    await afterWindow.locator('#rememberDuration').selectOption('0');
+    await closeAlpha();
+    const beforePermanent = await count();
+    await command(outgoing);
+    const [permanentRequest] = await held(1);
+    assert.equal(permanentRequest.rule, ask.id);
+    const permanentWindow = await prompt(permanentRequest.id);
+    await permanentWindow.locator('#rememberToggle').check();
+    await permanentWindow.locator('#rememberDuration').selectOption('0');
     await wait('permanent Ask retention preview', async () => {
-      const summary = await afterWindow.locator('#rememberSummary').innerText();
+      const summary = await permanentWindow.locator('#rememberSummary').innerText();
       return summary.includes('keeps Ask rule ' + ask.id) && summary.includes('saves a separate rule');
     });
-    await afterWindow.locator('#' + permanentAction).click();
+    await permanentWindow.locator('#' + permanentAction).click();
     const remembered = await wait('separate permanent choice', async () => {
       const rules = (await call('list')).rules;
       const rule = rules.find((r) => r.action === permanentAction && r.expires.startsWith('0001-'));
@@ -161,37 +260,11 @@ try {
       return rule;
     });
     const deliveries = Number(permanentAction === 'allow');
-    if (deliveries) await wait('held receiver write', async () => await count() === before + 4);
+    if (deliveries) await wait('held receiver write', async () => await count() === beforePermanent + 1);
     await held(0);
 
-    const closeAlpha = async () => {
-      await command({ op: 'close', name: 'alpha' });
-      await command({ op: 'settle', name: 'alpha' });
-    };
-    const ruleRow = (id) => main.locator(`#ruleRows tr[data-id="${id}"]`);
-    const inventory = async () => {
-      await main.locator('#rulesTab').click();
-      await wait('masked Ask and enabled saved choice', async () =>
-        (await ruleRow(ask.id).locator('td').allTextContents()).at(-1) === 'Masked by newer rule' &&
-        (await ruleRow(remembered.id).locator('td').allTextContents()).at(-1) === 'Enabled');
-    };
-    const attempt = async () => {
-      await closeAlpha();
-      const received = await count();
-      const since = new Date().toISOString();
-      await command(outgoing);
-      const record = await wait('matching choice in Decision Log', async () =>
-        (await call('decision-log', { decision_query: { since, limit: 20 } })).decision_log.records.find((r) =>
-          r.generation === generation && r.kind === 'final' &&
-          r.decision?.rule?.id === remembered.id && r.decision.action === permanentAction));
-      if (deliveries) await wait('fresh receiver write', async () => await count() === received + 1);
-      else await new Promise((resolve) => setTimeout(resolve, 800));
-      assert.equal(await count(), received + deliveries);
-      await main.locator('#decisionLogTab').click();
-      await main.locator(`#logRows tr[data-id="${record.id}"]`).click();
-      await wait('shown historical winner', async () =>
-        (await main.locator('#logDetails').innerText()).includes(remembered.id));
-    };
+    const inventory = () => assertEnabledChoice(remembered);
+    const attempt = () => attemptWith(remembered);
     await inventory();
     await attempt();
 
@@ -207,20 +280,9 @@ try {
     await inventory();
     await attempt();
 
-    const mutate = async (button) => {
-      await main.locator('#rulesTab').click();
-      await ruleRow(remembered.id).click();
-      await main.locator('#' + button).click();
-      if (button === 'toggleRule') {
-        await main.locator('#previewRule').click();
-        await main.locator('#saveRule').click();
-      } else {
-        await main.locator('#confirmYes').click();
-      }
-    };
     // Retire the preceding blocked connect before allowing new requests to prompt.
     await closeAlpha();
-    await mutate('toggleRule');
+    await mutate(remembered.id, 'toggleRule');
     await wait('disabled choice and Ask status', async () =>
       (await ruleRow(remembered.id).locator('td').allTextContents()).at(-1) === 'Disabled' &&
       (await ruleRow(ask.id).locator('td').allTextContents()).at(-1) === 'Enabled');
@@ -240,11 +302,11 @@ try {
     await held(0);
     await closeAlpha();
 
-    await mutate('toggleRule');
+    await mutate(remembered.id, 'toggleRule');
     await inventory();
     await attempt();
     await closeAlpha();
-    await mutate('deleteRule');
+    await mutate(remembered.id, 'deleteRule');
     await wait('delete reveals original Ask', async () =>
       (await ruleRow(remembered.id).count()) === 0 &&
       (await ruleRow(ask.id).locator('td').allTextContents()).at(-1) === 'Enabled');
@@ -268,12 +330,7 @@ try {
       ' before and after restart and re-enable; disabled source ' + disabledAsk.rule +
       '; deleted restored explicit Ask, receiver 0 held / 1 after each answer');
 
-  } else {
-    await answer(after.id, 'block');
-    await held(0);
   }
-  console.log('PASS before expiry: two held plus one fresh attempt delivered; after expiry: ' +
-    (baseline ? 'default Ask prompted' : 'original stored Ask prompted') + ', no additional delivery');
   console.log('Screenshots: ' + run);
 } finally {
   if (desktop) {

@@ -84,7 +84,7 @@ func CurrentProgramRules(rules []Rule, now time.Time) []Rule {
 }
 
 // EffectiveProgramRules also exposes the retained Ask under a disabled
-// permanent application-wide remembered choice. Keep the disabled choice in the
+// application-wide remembered choice before expiry. Keep the disabled choice in the
 // result so inventory can describe both rules and the quick setter keeps its target.
 func EffectiveProgramRules(rules []Rule, now time.Time) []Rule {
 	return programRules(rules, now, true)
@@ -111,7 +111,8 @@ func programRules(rules []Rule, now time.Time, restoreAsk bool) []Rule {
 		if r.Created.Before(latest[scope]) {
 			continue
 		}
-		if restoreAsk && r.Disabled && (r.Action == "allow" || r.Action == "block") && r.Expires.IsZero() && strings.HasPrefix(r.ID, RememberOverlayIDPrefix) {
+		if restoreAsk && r.Disabled && (r.Action == "allow" || r.Action == "block") &&
+			(r.Expires.IsZero() || now.Before(r.Expires)) && strings.HasPrefix(r.ID, RememberOverlayIDPrefix) {
 			if ask := retainedApplicationAsk(r, scope, rules, now); ask != nil {
 				out = append(out, *ask)
 			}

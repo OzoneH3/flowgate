@@ -180,7 +180,7 @@ func TestRuntimeUpdateWitnessMustBeValidAndExact(t *testing.T) {
 	}
 }
 
-func TestDisabledPermanentRememberedChoiceRestoresOnlyItsApplicationAsk(t *testing.T) {
+func TestDisabledRememberedChoiceRestoresOnlyItsApplicationAsk(t *testing.T) {
 	now := time.Now()
 	ask := Rule{ID: "user:ask", Schema: 2, Executable: "/fixture/program", Action: "ask",
 		Created: now.Add(-time.Minute), Filter: Filter{Direction: "outgoing", Protocol: "*",
@@ -194,11 +194,12 @@ func TestDisabledPermanentRememberedChoiceRestoresOnlyItsApplicationAsk(t *testi
 	}{
 		{"disabled permanent", nil, true},
 		{"enabled permanent", func(_, b *Rule) []Rule { b.Disabled = false; return nil }, false},
-		{"disabled timed", func(_, b *Rule) []Rule { b.Expires = now.Add(time.Minute); return nil }, false},
+		{"disabled timed Block", func(_, b *Rule) []Rule { b.Expires = now.Add(time.Minute); return nil }, true},
 		{"ordinary disabled", func(_, b *Rule) []Rule { b.ID = "user:direct"; return nil }, false},
 		{"disabled permanent Allow", func(_, b *Rule) []Rule { b.Action = "allow"; return nil }, true},
 		{"enabled permanent Allow", func(_, b *Rule) []Rule { b.Action, b.Disabled = "allow", false; return nil }, false},
-		{"disabled timed Allow", func(_, b *Rule) []Rule { b.Action, b.Expires = "allow", now.Add(time.Minute); return nil }, false},
+		{"disabled timed Allow", func(_, b *Rule) []Rule { b.Action, b.Expires = "allow", now.Add(time.Minute); return nil }, true},
+		{"ordinary disabled timed", func(_, b *Rule) []Rule { b.ID, b.Expires = "user:direct-timed", now.Add(time.Minute); return nil }, false},
 		{"unbound Ask", func(a, _ *Rule) []Rule { a.ID = "user:other-ask"; return nil }, false},
 		{"disabled Ask", func(a, _ *Rule) []Rule { a.Disabled = true; return nil }, false},
 		{"expired Ask", func(a, _ *Rule) []Rule { a.Expires = now; return nil }, false},
