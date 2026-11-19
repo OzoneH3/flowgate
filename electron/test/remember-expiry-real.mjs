@@ -61,13 +61,19 @@ const endpointScope = queueScope === 'endpoint';
 const portScope = queueScope !== 'address';
 const addressScope = queueScope !== 'port';
 const differentPortAddress = queueScope === 'port' && process.env.FLOWGATE_TEST_QUEUE_DIFF_ADDRESS === '1';
+const sharedEndpointField = process.env.FLOWGATE_TEST_QUEUE_SHARED || '';
+assert(['', 'address', 'port'].includes(sharedEndpointField) && (!sharedEndpointField || endpointScope));
+const alternateHost = '10.79.0.3';
+const alternatePort = 44000;
 const peerB = {
-  ...outgoing, host: addressScope || differentPortAddress ? '10.79.0.3' : outgoing.host,
-  port: portScope ? 44000 : outgoing.port,
+  ...outgoing, host: (addressScope || differentPortAddress) && sharedEndpointField !== 'address' ? alternateHost : outgoing.host,
+  port: portScope && sharedEndpointField !== 'port' ? alternatePort : outgoing.port,
 };
 const crossPort = { ...peerB, host: outgoing.host };
 const crossAddress = { ...outgoing, host: peerB.host };
 const controlPort = { ...outgoing, port: 44002 };
+const crossedEndpoints = sharedEndpointField === 'address' ? [{ ...peerB, host: alternateHost }] :
+  sharedEndpointField === 'port' ? [{ ...peerB, port: alternatePort }] : [crossPort, crossAddress];
 const count = async () => (await command({ op: 'peer-counts' })).lines.length;
 const pending = async () => ((await call('list')).events || []).filter((e) =>
   e.state === 'awaiting-decision' && e.attribution.owners.some((p) => p.pid === alpha.pid));
@@ -95,7 +101,7 @@ try {
   };
   if (differentPortAddress || endpointScope) {
     const allow = await saveDraft({ ...draft, action: 'allow' });
-    for (const target of endpointScope ? [outgoing, peerB, crossPort, crossAddress] : [crossPort]) {
+    for (const target of endpointScope ? [outgoing, peerB, ...crossedEndpoints] : [crossPort]) {
       const before = await count();
       await command(target);
       await wait('Allow control delivered', async () => await count() === before + 1);
@@ -195,7 +201,7 @@ try {
     const queueDuration = process.env.FLOWGATE_TEST_QUEUE_DURATION || '0';
     assert(['0', '60', '300'].includes(queueDuration));
     const queueSeconds = Number(queueDuration);
-    assert(!endpointScope || !queueSeconds);
+    assert(!endpointScope || queueSeconds === 0 || queueSeconds === 60);
     const queueSummary = queueSeconds ? `for ${queueSeconds / 60}m0s` : 'persistent';
     const checkRestoredAsk = async (peer) => {
       const received = await count();
@@ -254,7 +260,8 @@ try {
       const bSummary = await wait('fresh reviewed scope for B', async () => {
         const summary = await bWindow.locator('#rememberSummary').innerText();
         return scopeValues(peerB).every((value) => summary.includes(value)) &&
-          scopeValues(outgoing).every((value) => !summary.includes(value)) &&
+          scopeFields.every((field) => fieldValue(outgoing, field) === fieldValue(peerB, field) ||
+            !summary.includes(fieldValue(outgoing, field))) &&
           summary.includes(queueSummary) && (!competingRule || summary.includes(competingRule.id)) && summary;
       });
       await bWindow.screenshot({ path: path.join(run, 'queued-b-' + scenario + '.png') });
@@ -295,7 +302,7 @@ try {
       assert.equal(rules.length, clearRemember ? 2 : 3);
       await attemptWith(denyA);
       if (endpointScope) {
-        for (const crossed of [crossPort, crossAddress]) {
+        for (const crossed of crossedEndpoints) {
           await checkRestoredAsk(crossed);
           console.log(`PASS crossed ${crossed.host}:${crossed.port}: Ask ${ask.id}, receiver 0 held / 1 after Allow Once.`);
         }
