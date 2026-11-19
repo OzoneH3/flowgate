@@ -135,7 +135,10 @@ try {
   const [after] = await held(1);
   assert.equal(after.rule, baseline ? 'default-ask' : ask.id);
   const afterWindow = await prompt(after.id);
-  assert.equal(/Asked by rule/.test(await afterWindow.locator('#requestDetails').innerText()), !baseline);
+  const expectedSource = baseline ? 'default Ask' : ask.id;
+  await wait('prompt source ' + expectedSource, async () =>
+    (await afterWindow.locator('#askSource').textContent())?.includes(expectedSource));
+  await afterWindow.screenshot({ path: path.join(run, 'after-expiry.png') });
   assert.equal(await count(), before + 3);
   await answer(after.id, 'block');
   await held(0);
