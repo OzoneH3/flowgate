@@ -1,244 +1,156 @@
 # FlowGate
 
-FlowGate is a Linux application firewall and socket monitor. Its installed Go
-service runs as root and can protect incoming traffic or both incoming and
-outgoing traffic. The Electron desktop and Qt development client run unprivileged.
-To inspect a host from a source checkout, start with the
-[read-only diagnostics](#diagnose-before-explicit-activation).
+**See which apps are online and decide what they can connect to.**
 
-**Process discovery can fail.** A process may exit before FlowGate inspects its
-socket, access restrictions may hide the owner, or several applications may
-share the socket. When FlowGate cannot verify which application owns the
-traffic, it cannot use that application's saved permission for the decision.
-[Process and socket attribution](docs/ATTRIBUTION.md)
+FlowGate is a Linux application firewall and network monitor. See live traffic
+by app, allow or block connections, and look up past firewall decisions from
+the desktop. The per-app monitoring and control workflow takes inspiration from
+[NetLimiter](https://netlimiter.com/).
 
-## What FlowGate controls
+[Try the desktop](#try-the-desktop) · [Install FlowGate](#install-flowgate) ·
+[Documentation](#documentation)
 
-- **Firewall.** Allow or block supported TCP and UDP traffic by verified
-  application, user and direction. TCP rules govern new connections. Changing a
-  rule to Block leaves already-admitted TCP connections open. [Rule semantics](docs/SEMANTICS.md)
-- **Wine and Proton.** On supported runtimes, permissions distinguish Windows
-  executables and Wine prefixes. The launcher regression exercises two Windows
-  programs in one prefix and repeats one in a second prefix. A receiver checks
-  delivery after Allow and Block and after relaunch with a remembered rule.
+## What you can do
+
+- **See network activity.** Browse active sockets by app and process, watch
+  live upload and download charts, and opt in to keeping 1, 7, or 30 days of
+  data. [Usage history](docs/USAGE-HISTORY.md)
+- **Decide what gets through.** Allow or block supported TCP and UDP traffic by
+  verified application, user, and direction. Make a temporary choice at a prompt or
+  save a rule for future connections. [How rules work](docs/SEMANTICS.md)
+- **Find out what the firewall decided.** Look up recorded firewall decisions
+  and their reasons. Usage and decision records reflect what FlowGate observed.
+  Both can have gaps. [Decision Log](docs/DECISION-LOG.md)
+- **Set separate rules for Windows apps.** With supported Wine and Proton
+  runtimes, FlowGate distinguishes Windows executables and Wine prefixes.
   [Tested runtimes and scope](docs/PROTON-LAUNCHER-REGRESSION.md)
-- **Bandwidth controls (experimental).** Upload and download caps and traffic
-  priorities apply to eligible native application sockets. Download shaping
-  covers established TCP on supported routes. UDP downloads and VPN/TUN paths
-  fall outside that profile. Quotas and recurring schedules are unimplemented.
-  [Zone limits and priorities](docs/ZONE-SHAPING.txt) · [Download coverage](docs/DOWNLOAD-LIMITER.txt)
-- **Usage history.** Live charts show recent activity. Administrators can also
-  enable durable history for 1, 7 or 30 days. Totals reflect what the collectors
-  observed and can have gaps across restarts or periods without collection.
-  [Observed usage history](docs/USAGE-HISTORY.md)
+- **Limit bandwidth (experimental).** Apply limits and priorities to eligible
+  native app traffic. Download limits cover established TCP on supported routes.
+  [Limits and priorities](docs/ZONE-SHAPING.txt) ·
+  [Download coverage](docs/DOWNLOAD-LIMITER.txt)
 
-## Install or update a release
+## Try the desktop
 
-### Standalone package
-
-The standalone release candidate targets **Linux x86-64 with systemd**. At
-revision `a488e44`, GitHub had no published installer. [GitHub Releases](https://github.com/OzoneH3/flowgate/releases)
-
-Install the [build prerequisites](docs/STANDALONE-RELEASE.md), then build the
-package from a clean checkout.
+From a source checkout, run this as your desktop user. The launcher builds the
+Electron app and starts a local read-only observer for live Activity. See the
+[desktop prerequisites](electron/README.md) for Go, Node, npm, Python and
+Electron runtime requirements.
 
 ```sh
-make package
+./scripts/run-electron.sh
 ```
 
-The build installs the pinned Electron runtime when needed, compiles the desktop
-and native components, and runs the release checks. The archive, offline
-bootstrap and SHA-256 receipts are written to `.workspace/dist/`.
+This preview requires no service installation or firewall activation. To use
+rules and protection, connect the desktop to an installed FlowGate daemon.
 
-For an existing archive and bootstrap, verify their SHA-256 digests against
-values from a trusted source before installation. The
-[standalone guide](docs/STANDALONE-RELEASE.md) covers preflight, installation,
-recovery, rollback and removal.
+## Install FlowGate
 
-### Checkout-based updater
+The standalone release candidate targets **64-bit x86 Linux with systemd**.
+There is currently no installer on [GitHub Releases](https://github.com/OzoneH3/flowgate/releases).
 
-This development workflow requires prepared backend and Electron bundles for the
-exact revision in [the release pin](deployment/default-release). At `a488e44`,
-the pin was `5083546`, which was absent from the public Git history. A fresh
-public checkout therefore stops at the missing-bundle check, even on a dry run.
+1. Check the [build and system requirements](docs/STANDALONE-RELEASE.md).
+2. Run `make package` from a clean, committed checkout. The archive, offline
+   installer, and SHA-256 receipts go to `.workspace/dist/`.
+3. Follow the [standalone installation guide](docs/STANDALONE-RELEASE.md) to
+   verify the files, run preflight, and install. The same guide covers rollback
+   and uninstall.
+4. Open **FlowGate** from the application menu or run `flowgate-ui`.
 
-Once both pinned bundles are in `.workspace/`, preview and apply the update
-from a clean, committed `master` checkout.
+A fresh install starts in **Monitoring**. When you're ready to enable
+protection, review essential networking first. Then choose **Incoming only**
+or **Incoming + outgoing**, select **Check readiness**, and use **Start protection**.
+The system service runs as root and continues running when the desktop closes.
+Use **Stop protection** to return to monitoring. [Essential networking](docs/ESSENTIAL-NETWORKING.md)
 
-```sh
-# Preview a local update without preparing or installing a bundle:
-./scripts/update-and-start.sh --local --profile preserve --dry-run
-# Check and install the prepared bundles, verify the result, and relaunch the GUI:
-./scripts/update-and-start.sh --local --profile preserve
-```
+## Good to know
 
-`--local` skips upstream access. `--profile preserve` keeps the existing protection
-mode; on a new installation it selects monitoring. Omitting `--profile` also
-preserves the mode. To explicitly enable Both from another mode, use
-`--profile both --acknowledge-outgoing-blocking` after reviewing Essential
-networking and root-local recovery. Continuous protection has no automatic
-countdown; no DNS/DHCP/service permissions are added automatically. Candidate
-compatibility checks precede stopping the current protection. Authentication uses
-sudo or the optional [passwordless local update helper](#passwordless-local-updates).
-
-On a clean `master` checkout at the approved revision, `scripts/prepare-release.sh`
-builds matched backend and Electron bundles under `.workspace/`. For a deliberate
-monitoring-only installation, use `python3 scripts/install-prepared.py --bundle PATH`
-with the backend bundle printed by preparation. See
-[deployment and rollback](docs/DAILY-DEPLOYMENT.md) and
-[current command options](scripts/README.md).
-
-The installer provides `flowgate.service` and its startup guard. Protection state
-is separate from service state: a running daemon can be monitoring, active,
-starting or degraded. Check the GUI's reported state rather than assuming that a
-running service means protection is active. Closing the GUI does not stop the
-installed daemon or its protection. Explicit Stop returns to monitoring; a
-failure can retain fail-closed interception until recovery.
-
-Source HEAD, the installed daemon and the running GUI may differ. The GUI header
-shows its release and recorded build date/time and flags a different daemon
-build. Use `flowgate version` on the specific binary being inspected; historical
-host states in the linked evidence documents are not current status reports.
-
-Maintained source/operational scope: [STATUS.md](docs/STATUS.md).
-
-## Connect to the installed daemon
-
-```sh
-scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock
-```
-
-This development launcher builds the checkout's Electron client and attaches to
-the existing daemon and companion monitor socket. It does not install a release
-or start protection. The released GUI is launched by the updater. Activity,
-prompts and stored-rule operations depend on the authenticated account's
-capabilities. The root daemon grants machine administration to its configured
-administrator UID; clients do not gain authority from their display labels.
-See [authorization](docs/AUTHORIZATION.md).
-
-## Network compatibility
-
-Compatibility checks inspect live interfaces, firewall rules, queues and routing
-marks without vendor-specific exemptions. TUN traffic remains subject to ordinary
-application rules. WireGuard and XFRM interfaces are currently refused; conflicting
-or unprovable mark operations also refuse activation. Passing preflight is not a
-guarantee for every VPN configuration or a forwarded-traffic enforcement claim.
-The old `tailscale-inspect` command has been removed. Use the diagnostics below.
+- **An app needs verified ownership.** When a socket is shared, its owner has
+  exited, or FlowGate can't inspect it, the app's saved permission cannot be
+  applied on the strength of a guess. [How ownership is verified](docs/ATTRIBUTION.md)
+- **TCP rules govern new connections.** Setting a rule to Block leaves
+  already-admitted TCP connections open. [Connection and rule semantics](docs/SEMANTICS.md)
+- **VPN support depends on the setup.** TUN traffic is subject to ordinary
+  application rules. WireGuard and XFRM interfaces currently prevent activation.
+  Use the read-only checks to investigate firewall, routing, or VPN conflicts.
+  [Network compatibility](docs/COEXISTENCE.md) · [Diagnostics](docs/DIAGNOSTICS.md)
 
 ## Diagnose before explicit activation
 
-```sh
-. scripts/go-env.sh
-go build -o .workspace/flowgate ./cmd/flowgate
-.workspace/flowgate doctor
-.workspace/flowgate doctor --json
-```
-
-Doctor is read-only, never requests sudo or starts enforcement/collection.
-“Ready” applies only to the named completed check; “Not checked” includes privilege
-and intentionally unattempted queue/BPF attachment. Activation additionally requires the selected profile to pass live compatibility
-checks. A read-only diagnostic result does not itself activate protection.
-See [diagnostics and actionable startup errors](docs/DIAGNOSTICS.md) for the exact
-optional user-run privileged inspection command and existing Stop/recovery paths.
-
-## Development desktop clients
-
-```sh
-scripts/run-electron.sh
-# Qt observer / bounded evaluation client:
-scripts/run-desktop.sh
-```
-
-Without an existing daemon/controller argument, these launchers start their own
-read-only observer. They do not install a service or automatically enable
-protection. Electron provides Activity, live charts, pending requests, saved-rule
-editing, decision history, and capability-gated protection controls.
-
-**Keep running in the tray** defaults to enabled for new preferences; an explicit
-opt-out is preserved. With it enabled, closing the main window hides it.
-**Quit FlowGate…** exits the client and cleans up its owned observer, while an
-independent daemon continues running. See [Electron behavior](electron/README.md).
-
-The Qt client has a smaller workflow set; it is not feature-equivalent to
-Electron. Both clients use conditional rule deletion. Qt preserves exact uint64
-versions; Electron refuses versions above JavaScript's safe integer range rather
-than submitting rounded values. Neither automatically retries deletion.
-
-See the [Qt client guide](desktop/README.md) for the live monitor, five-minute
-host evaluation, isolated demo and desktop checks.
-
-## Backend and runtime adapter
+Run `flowgate doctor` if FlowGate is installed, or build the command from your
+checkout. Doctor reports what it could check without changing firewall settings
+or requesting sudo.
 
 ```sh
 . scripts/go-env.sh
 go build -o .workspace/flowgate ./cmd/flowgate
 .workspace/flowgate doctor
-.workspace/flowgate sockets
-.workspace/flowgate pending --socket /absolute/private/directory/control.sock
 ```
 
-The core has no Qt, KDE, graphical-session, systemd, NetworkManager or cloud
-dependency. Its authenticated v1 Unix API preserves separate monitor and mutation
-permissions. Incoming remembered rules use the remote address and local service
-port, unrestricted client source port; outgoing rules preserve destination scope.
-TCP authorization controls connection initiation, not continuous ownership or
-forced disconnection of admitted connections. See [semantics](docs/SEMANTICS.md).
+Use `doctor --json` for structured output. FlowGate also runs live compatibility
+checks when you enable protection. [Read the diagnostic and recovery guide](docs/DIAGNOSTICS.md)
 
-The packaged daemon includes the Wine/Proton owner observer. Its runtime and
-prefix selection follows the installed configuration; supported runtime discovery
-can launch an observer in an existing prefix. The standalone read-only observer
-launcher is a separate mode. Runtime support is capability/build-gated, and
-missing or ambiguous ownership remains explicit. Helper lifecycle coverage does
-not prove every runtime's full attribution path or every game launch. See the
-current integration and observer-lifetime sections of [WINE.md](docs/WINE.md).
+## Documentation
 
-[Current status](docs/STATUS.md) · [Integration map](docs/INTEGRATION.md) ·
-[Development handoff and historical records](docs/HANDOFF.md)
+| I want to… | Read |
+| --- | --- |
+| Use Activity, prompts, the tray, and saved rules | [Electron desktop guide](electron/README.md) |
+| Know who can see traffic or edit rules | [Authorization](docs/AUTHORIZATION.md) |
+| Check supported Wine/Proton versions and attribution | [Wine and Proton guide](docs/WINE.md) |
+| Prepare a developer release or recover an installation | [Deployment and rollback](docs/DAILY-DEPLOYMENT.md) · [Script reference](scripts/README.md) |
+| Work on the Unix API, Qt client, or core | [API](docs/API.md) · [Qt client](desktop/README.md) · [Integration map](docs/INTEGRATION.md) |
+| Review project status and test evidence | [Status](docs/STATUS.md) · [Historical records](docs/HANDOFF.md) |
 
-Desktop branding: CMake `-DFLOWGATE_PRODUCT_NAME=NewName`. CLI branding:
-`go build -ldflags '-X main.productName=NewName'`. Binaries use native shared
-libraries; no static/portable deployment claim. Other distributions and arm64
-remain unvalidated.
+<details>
+<summary>Checkout-based updates and developer tools</summary>
+
+Use [the checkout updater](docs/DAILY-DEPLOYMENT.md) only with matched backend
+and Electron bundles for the exact [pinned revision](deployment/default-release).
+A fresh public clone may not contain that revision. From a clean, committed
+`master` checkout with the prepared bundles in `.workspace/`, preview the
+update and then apply it.
+
+```sh
+./scripts/update-and-start.sh --local --profile preserve --dry-run
+./scripts/update-and-start.sh --local --profile preserve
+```
+
+This workflow preserves the existing protection mode. The
+[standalone guide](docs/STANDALONE-RELEASE.md) covers the source package
+workflow and migration.
+
+Connect a checkout build to an existing installed daemon with
+`./scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock`. The
+launcher attaches without starting or stopping the daemon. Compare the builds
+shown in the desktop header or run `flowgate version` on a particular binary.
+
+The optional [passwordless local update helper](#passwordless-local-updates)
+applies to checkout-based updates.
+
+</details>
 
 ### Passwordless local updates
 
-To authorize the current desktop account once, run from this checkout:
+<details>
+<summary>Setup, permissions, and removal</summary>
+
+The updater normally uses sudo. To authorize the current desktop account to
+install local builds without an interactive password prompt, run this once from
+a trusted checkout.
 
 ```sh
 sudo /usr/bin/python3 -I scripts/setup-passwordless-update.py
 ```
 
-This installs a root-owned `/usr/local/libexec/flowgate-update-helper` and an
-account-specific `/etc/sudoers.d/flowgate-local-update` rule. It does not install
-a release or change protection. After setup, the ordinary updater automatically
-uses the helper without a password, including when run by an agent:
+This grants that account the ability to install local code that runs as root.
+The helper is root-owned and restricts commands to the updater's supported
+operations. Bundle hashes check consistency. Use only trusted local source and
+builds. The updater still verifies the bundle and checks compatibility before
+it stops existing protection.
 
-```sh
-./scripts/update-and-start.sh --local --profile preserve
-```
-
-If an installed daemon cannot be queried, `--recover-stopped` explicitly permits
-monitoring-only recovery. It is a recovery option, not the normal update path.
-
-**Trust boundary:** authorizing local updates grants the selected account the
-ability to install code that runs as root. Bundle hashes check consistency, not
-a trusted publisher signature. Only enable this for an account whose local
-source/builds you trust. The authorization is not tied to a login group and does
-not grant a general passwordless Python or shell command.
-
-The helper accepts only check, candidate preflight, staged monitoring install,
-and the explicitly requested Wine-discovery configuration operation. Existing
-bundle verification, candidate compatibility checks, rollback and protection
-restoration remain in effect. The helper keeps its staging code in root-owned
-storage; it does not import Python modules from the checkout. A broken or
-unauthorized installed helper refuses the update before stopping protection.
-Its staging code can be refreshed by rerunning the one-time setup when needed.
-
-To revoke passwordless updates:
+Remove the authorization and helper to return the updater to ordinary sudo.
 
 ```sh
 sudo rm /etc/sudoers.d/flowgate-local-update /usr/local/libexec/flowgate-update-helper
 ```
 
-The updater then returns to its existing sudo authentication path. Removing the
-helper does not uninstall FlowGate or change running protection.
+</details>
