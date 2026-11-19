@@ -123,6 +123,11 @@ try:
      else:raise ValueError('batch accepts incoming/outgoing only')
      results.append(r)
     result={'started':results}
+   elif op=='restart':
+    assert a.hold_enforcement and not a.continuous, 'restart command requires the isolated host fixture'
+    previous=api()['generation'];stop();current=start()
+    assert current['generation']!=previous and current['enforcement']['state']=='active',current
+    result={'generation':current['generation']}
    elif op=='exit':children[name].terminate();children[name].wait(5);result={'exited':name}
    elif op=='exec':children[name].stdin.write('{"op":"exec"}\n');children[name].stdin.flush();result={'exec':name}
    elif op=='launch':

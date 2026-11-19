@@ -17,7 +17,7 @@ func rememberStorageFixture(t *testing.T, askID string) (*Engine, identity.Flow,
 	a.Application.Executable = "/fixture/program"
 	a.Application.Kind = "native"
 	a.Application.Key = identity.ApplicationKey(1000, *a.Application)
-	db, err := store.Open(filepath.Join(t.TempDir(), "rules.db"))
+	db, err := store.OpenExclusive(filepath.Join(t.TempDir(), "rules.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,8 +57,8 @@ func TestPersistentRememberAfterExpiredOverlay(t *testing.T) {
 				}
 				options := RememberOptions{Fields: &RememberFields{}}
 				preview, err := e.PreviewDecision(e.Generation, v.ID, action, "persistent", "any", e.Zones.Revision, 1000, false, options)
-				if err != nil || preview.Replaces == nil || preview.Replaces.ID != ask.ID || preview.Replaces.Version != ask.Version {
-					t.Fatalf("wrong reviewed target: %+v %v", preview.Replaces, err)
+				if err != nil || preview.Replaces != nil || preview.Rule.ID == ask.ID || !preview.Rule.Expires.IsZero() {
+					t.Fatalf("wrong reviewed choice: %+v %v", preview, err)
 				}
 				// Simulate a concurrent version change without replacing the pending request.
 				e.mu.Lock()
@@ -72,12 +72,27 @@ func TestPersistentRememberAfterExpiredOverlay(t *testing.T) {
 					t.Fatal("stale preview saved")
 				}
 				preview, err = e.PreviewDecision(e.Generation, v.ID, action, "persistent", "any", e.Zones.Revision, 1000, false, options)
-				if err != nil || preview.Replaces == nil || preview.Replaces.Version != ask.Version+1 || preview.Replaces.ID != ask.ID {
+				if err != nil || preview.Replaces != nil || preview.Rule.ID == ask.ID {
 					t.Fatalf("wrong refreshed target: %+v %v", preview.Replaces, err)
 				}
 				_, saved, _, err := e.DecideReviewed(e.Generation, v.ID, action, "persistent", "any", e.Zones.Revision, preview.Token, 1000, false, options)
-				if err != nil || saved.ID != ask.ID || saved.Action != action || saved.Version != ask.Version+2 {
+				if err != nil || saved.ID != preview.Rule.ID || saved.Action != action || saved.Version != 1 || saved.ProgramScope() != ask.ProgramScope() {
 					t.Fatalf("wrong save: %+v %v", saved, err)
+				}
+				// Authoritative startup cleanup must keep the Ask and its separate choice.
+				rules, err = db.LoadCurrent(*now)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := e.SetRules(rules); err != nil {
+					t.Fatal(err)
+				}
+				ask.Version++ // The intervening edit is the only Ask version change.
+				if got := e.ruleLocked(ask.ID); got == nil || *got != ask {
+					t.Fatalf("changed original Ask: %+v", got)
+				}
+				if got := e.ruleLocked(saved.ID); got == nil || *got != saved {
+					t.Fatalf("lost remembered choice: %+v", got)
 				}
 				next, _ := identity.ParseFlow("udp", "incoming", "127.0.0.1:80", "127.0.0.1:9100")
 				got := e.Observe(next, "udp")
@@ -85,7 +100,24 @@ func TestPersistentRememberAfterExpiredOverlay(t *testing.T) {
 				if got.State != want || got.Rule != saved.ID {
 					t.Fatalf("fresh attempt got %s/%s, want %s/%s", got.State, got.Rule, want, saved.ID)
 				}
-				t.Logf("storage first %s; prompt %s; preview and saved %s; next %s", rules[0].ID, v.AskRule.ID, saved.ID, got.State)
+				t.Logf("prompt %s; preview and saved %s; next %s", v.AskRule.ID, saved.ID, got.State)
+				disabled := saved
+				disabled.Disabled = true
+				edit, _, err := e.EditRule(saved.ID, "", &saved.Version, disabled, 1000, false, true)
+				if err != nil || edit.ID != saved.ID || edit.Version != saved.Version+1 {
+					t.Fatalf("direct disable must update selected rule in place: %+v %v", edit, err)
+				}
+				fallback, _ := identity.ParseFlow("udp", "incoming", "127.0.0.1:80", "127.0.0.1:9101")
+				if got := e.Observe(fallback, "udp"); got.State != "awaiting-decision" || got.AskRule != nil {
+					t.Fatalf("disabled newer rule must still mask the explicit Ask: %+v", got)
+				}
+				if _, err := e.DeleteRule(e.Generation, edit.ID, &edit.Version, 1000, false); err != nil {
+					t.Fatal(err)
+				}
+				restored, _ := identity.ParseFlow("udp", "incoming", "127.0.0.1:80", "127.0.0.1:9102")
+				if got := e.Observe(restored, "udp"); got.State != "awaiting-decision" || got.AskRule == nil || got.AskRule.ID != ask.ID {
+					t.Fatalf("delete did not restore original Ask: %+v", got)
+				}
 			})
 		}
 	}
@@ -161,13 +193,18 @@ func TestRepeatedTemporaryRememberReusesOneSlotAcrossReloads(t *testing.T) {
 	}
 	v := e.Observe(flow, "udp")
 	permanent := RememberOptions{Fields: &RememberFields{}}
-	p, err := e.PreviewDecision(e.Generation, v.ID, "allow", "persistent", "any", e.Zones.Revision, 1000, false, permanent)
-	if err != nil || p.Replaces == nil || p.Replaces.ID != ask.ID {
-		t.Fatalf("permanent Remember should still target the Ask: %+v %v", p.Replaces, err)
-	}
-	_, _, _, err = e.DecideReviewed(e.Generation, v.ID, "allow", "persistent", "any", e.Zones.Revision, p.Token, 1000, false, permanent)
-	var refusal *RuleMutationError
-	if !errors.As(err, &refusal) || refusal.Code != "capacity" || len(e.Rules(1000, false)) != 256 {
-		t.Fatalf("permanent Remember must still respect capacity: %v", err)
+	for _, action := range []string{"allow", "block"} {
+		p, err := e.PreviewDecision(e.Generation, v.ID, action, "persistent", "any", e.Zones.Revision, 1000, false, permanent)
+		if err != nil || p.Replaces != nil || p.Rule.ID == ask.ID {
+			t.Fatalf("permanent Remember should preview a distinct choice: %+v %v", p, err)
+		}
+		_, _, _, err = e.DecideReviewed(e.Generation, v.ID, action, "persistent", "any", e.Zones.Revision, p.Token, 1000, false, permanent)
+		var refusal *RuleMutationError
+		if !errors.As(err, &refusal) || refusal.Code != "capacity" || len(e.Rules(1000, false)) != 256 {
+			t.Fatalf("permanent Remember must still respect capacity: %v", err)
+		}
+		if got := e.ruleLocked(ask.ID); got == nil || *got != ask {
+			t.Fatalf("refusal changed the original Ask: %+v", got)
+		}
 	}
 }

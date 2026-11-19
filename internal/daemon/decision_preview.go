@@ -139,13 +139,19 @@ func (e *Engine) decisionClassification(v *Event, revision, zone string) (identi
 	return current, nil
 }
 
-// A finite decision may overlay the exact program Ask that opened the prompt.
-// The existing program-scope expiry path restores that Ask when the overlay ends.
-func preservesTemporaryAsk(v *Event, old *policy.Rule, rule policy.Rule, now time.Time) bool {
-	return old != nil && v.AskRule != nil && v.AskRule.ID == old.ID && v.AskRule.Version == old.Version &&
-		old.Action == "ask" && !old.Disabled && old.FollowsUpdates() && rule.FollowsUpdates() &&
-		now.Before(rule.Expires) && (old.Expires.IsZero() || old.Expires.After(rule.Expires)) &&
-		rule.Created.After(old.Created) && old.ProgramScope() == rule.ProgramScope()
+// Remember may overlay the exact program Ask that opened the prompt.
+func preservesPromptAsk(v *Event, old *policy.Rule, rule policy.Rule, now time.Time) bool {
+	if old == nil || v.AskRule == nil || v.AskRule.ID != old.ID ||
+		old.Action != "ask" || old.Disabled || !old.FollowsUpdates() || !rule.FollowsUpdates() ||
+		(!old.Expires.IsZero() && !now.Before(old.Expires)) ||
+		!rule.Created.After(old.Created) || old.ProgramScope() != rule.ProgramScope() {
+		return false
+	}
+	if rule.Expires.IsZero() {
+		return true
+	}
+	return v.AskRule.Version == old.Version && now.Before(rule.Expires) &&
+		(old.Expires.IsZero() || old.Expires.After(rule.Expires))
 }
 
 // Existing unmarked rules carry no proof that Remember created them. Reserve
@@ -262,16 +268,18 @@ func (e *Engine) PreviewDecision(generation, id, action, scope, zone, revision s
 	}
 	var replaces, preservedAsk *RuleVersionRef
 	old := e.rememberTarget(rule, now, *a.Application)
-	if preservesTemporaryAsk(v, old, rule, now) {
+	if preservesPromptAsk(v, old, rule, now) {
 		rule.Priority = old.Priority
 		preservedAsk = &RuleVersionRef{old.ID, old.Version}
 		rule.ID = rememberAskPrefix(old.ID) + randomID()[:24]
-		for i := range e.rules {
-			slot := &e.rules[i]
-			if reusableRememberOverlay(slot, old, now) && slot.Version < ^uint64(0) {
-				rule.ID, rule.Version = slot.ID, slot.Version+1
-				replaces = &RuleVersionRef{slot.ID, slot.Version}
-				break
+		if !rule.Expires.IsZero() {
+			for i := range e.rules {
+				slot := &e.rules[i]
+				if reusableRememberOverlay(slot, old, now) && slot.Version < ^uint64(0) {
+					rule.ID, rule.Version = slot.ID, slot.Version+1
+					replaces = &RuleVersionRef{slot.ID, slot.Version}
+					break
+				}
 			}
 		}
 	} else if old != nil {
@@ -295,7 +303,11 @@ func (e *Engine) PreviewDecision(generation, id, action, scope, zone, revision s
 		sentence = processLabel(rule.Filter.Process) + "; same direction and selected peer/protocol scope; ends on process exit or backend restart."
 	}
 	if preservedAsk != nil {
-		sentence = "Keeps the existing Ask rule for after expiry. " + sentence
+		if rule.Expires.IsZero() {
+			sentence = "Saves a separate rule and keeps the existing Ask rule. " + sentence
+		} else {
+			sentence = "Keeps the existing Ask rule for after expiry. " + sentence
+		}
 	}
 	if replaces != nil {
 		sentence = fmt.Sprintf("Updates existing rule %s (version %d). ", replaces.ID, replaces.Version) + sentence
@@ -324,7 +336,11 @@ func (e *Engine) PreviewDecision(generation, id, action, scope, zone, revision s
 	if scope == "application" {
 		duration = o.DurationSeconds
 	}
-	view := DecisionPreview{Token: randomID(), ExpiresAt: expiry, Generation: generation, EventID: id, Action: action, Scope: scope, NetworkZone: zone, ZoneRevision: revision, ConnectionNetwork: network, Rule: rule, ScopePreview: sentence, Remember: *o.Fields, DurationSeconds: duration, Summary: rememberSummary(a.Application.Name, rule, scope, duration), Replaces: replaces}
+	summary := rememberSummary(a.Application.Name, rule, scope, duration)
+	if preservedAsk != nil && rule.Expires.IsZero() {
+		summary += " · keeps Ask rule " + preservedAsk.ID + " (saves a separate rule)"
+	}
+	view := DecisionPreview{Token: randomID(), ExpiresAt: expiry, Generation: generation, EventID: id, Action: action, Scope: scope, NetworkZone: zone, ZoneRevision: revision, ConnectionNetwork: network, Rule: rule, ScopePreview: sentence, Remember: *o.Fields, DurationSeconds: duration, Summary: summary, Replaces: replaces}
 	if e.decisionPreviews == nil {
 		e.decisionPreviews = map[string]*decisionPreview{}
 	}
@@ -412,7 +428,7 @@ func (e *Engine) decideReviewedLocked(generation, id, action, scope, zone, revis
 	}
 	if ref := p.PreservedAsk; ref != nil {
 		old := e.ruleLocked(ref.ID)
-		if old == nil || old.Version != ref.Version || !preservesTemporaryAsk(current, old, v.Rule, e.Now()) {
+		if old == nil || old.Version != ref.Version || !preservesPromptAsk(current, old, v.Rule, e.Now()) {
 			return Event{}, policy.Rule{}, false, mutationError("policy_conflict", "The preserved Ask changed since review; review again")
 		}
 		if replacement := v.Replaces; replacement != nil {

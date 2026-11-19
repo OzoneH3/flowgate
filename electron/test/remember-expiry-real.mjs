@@ -17,7 +17,8 @@ assert.equal(ready.profile, 'both');
 for (const file of [ready.socket, ready.monitor_socket, ready.command]) {
   assert(path.resolve(file).startsWith(dir + '/'));
 }
-const { alpha, generation } = ready;
+const { alpha } = ready;
+let { generation } = ready;
 const wait = async (label, fn, ms = 12000) => {
   const end = Date.now() + ms;
   while (Date.now() < end) {
@@ -145,28 +146,112 @@ try {
     assert(!baseline && ['allow', 'block'].includes(permanentAction));
     await afterWindow.locator('#rememberToggle').check();
     await afterWindow.locator('#rememberDuration').selectOption('0');
-    await wait('permanent Ask replacement preview', async () => {
+    await wait('permanent Ask retention preview', async () => {
       const summary = await afterWindow.locator('#rememberSummary').innerText();
-      return summary.includes('replaces Ask rule ' + ask.id);
+      return summary.includes('keeps Ask rule ' + ask.id) && summary.includes('saves a separate rule');
     });
     await afterWindow.locator('#' + permanentAction).click();
-    await wait('permanent choice on original Ask ID', async () =>
-      (await call('list')).rules.some((rule) => rule.id === ask.id && rule.action === permanentAction));
-    if (permanentAction === 'allow') await wait('held receiver write', async () => await count() === before + 4);
+    const remembered = await wait('separate permanent choice', async () => {
+      const rules = (await call('list')).rules;
+      const rule = rules.find((r) => r.action === permanentAction && r.expires.startsWith('0001-'));
+      if (!rule) return false;
+      assert.notEqual(rule.id, ask.id);
+      assert.deepEqual(rules.find((r) => r.id === ask.id), ask);
+      assert.deepEqual(rule.filter, ask.filter);
+      return rule;
+    });
+    const deliveries = Number(permanentAction === 'allow');
+    if (deliveries) await wait('held receiver write', async () => await count() === before + 4);
     await held(0);
+
+    const ruleRow = (id) => main.locator(`#ruleRows tr[data-id="${id}"]`);
+    const inventory = async () => {
+      await main.locator('#rulesTab').click();
+      await wait('masked Ask and enabled saved choice', async () =>
+        (await ruleRow(ask.id).locator('td').allTextContents()).at(-1) === 'Masked by newer rule' &&
+        (await ruleRow(remembered.id).locator('td').allTextContents()).at(-1) === 'Enabled');
+    };
+    const attempt = async () => {
+      await command({ op: 'close', name: 'alpha' });
+      const received = await count();
+      const since = new Date().toISOString();
+      await command(outgoing);
+      const record = await wait('matching choice in Decision Log', async () =>
+        (await call('decision-log', { decision_query: { since, limit: 20 } })).decision_log.records.find((r) =>
+          r.generation === generation && r.kind === 'final' &&
+          r.decision?.rule?.id === remembered.id && r.decision.action === permanentAction));
+      if (deliveries) await wait('fresh receiver write', async () => await count() === received + 1);
+      else await new Promise((resolve) => setTimeout(resolve, 800));
+      assert.equal(await count(), received + deliveries);
+      await main.locator('#decisionLogTab').click();
+      await main.locator(`#logRows tr[data-id="${record.id}"]`).click();
+      await wait('shown historical winner', async () =>
+        (await main.locator('#logDetails').innerText()).includes(remembered.id));
+    };
+    await inventory();
+    await attempt();
+
     await command({ op: 'close', name: 'alpha' });
-    const permanentBefore = await count();
-    const since = new Date().toISOString();
+    const oldGeneration = generation;
+    ({ generation } = await command({ op: 'restart' }));
+    assert.notEqual(generation, oldGeneration);
+    const reloaded = (await call('list')).rules;
+    assert.deepEqual(reloaded.find((r) => r.id === ask.id), ask);
+    assert.deepEqual(reloaded.find((r) => r.id === remembered.id), remembered);
+    await wait('desktop reconnected to restarted daemon', () =>
+      main.evaluate(async (g) => (await window.flowgate.snapshot()).control.generation === g, generation));
+    await inventory();
+    await attempt();
+
+    const mutate = async (button) => {
+      await main.locator('#rulesTab').click();
+      await ruleRow(remembered.id).click();
+      await main.locator('#' + button).click();
+      if (button === 'toggleRule') {
+        await main.locator('#previewRule').click();
+        await main.locator('#saveRule').click();
+      } else {
+        await main.locator('#confirmYes').click();
+      }
+    };
+    await mutate('toggleRule');
+    await wait('disabled choice still masks Ask', async () =>
+      (await ruleRow(remembered.id).locator('td').allTextContents()).at(-1) === 'Disabled' &&
+      (await ruleRow(ask.id).locator('td').allTextContents()).at(-1) === 'Masked by newer rule');
+    await command({ op: 'close', name: 'alpha' });
+    const disabledCount = await count();
     await command(outgoing);
-    await wait('next matching decision', async () =>
-      (await call('decision-log', { decision_query: { since, limit: 20 } })).decision_log.records.some((record) =>
-        record.kind === 'final' && record.decision?.rule?.id === ask.id &&
-        record.decision.action === permanentAction));
-    if (permanentAction === 'allow') await wait('fresh receiver write', async () => await count() === permanentBefore + 1);
-    else await new Promise((resolve) => setTimeout(resolve, 800));
-    assert.equal(await count(), permanentBefore + Number(permanentAction === 'allow'));
-    console.log('PASS permanent ' + permanentAction + ' reused original Ask ID ' + ask.id +
-      '; next matching TCP receiver delta ' + Number(permanentAction === 'allow'));
+    const [defaultAsk] = await held(1);
+    assert.equal(defaultAsk.rule, 'default-ask');
+    assert.equal(await count(), disabledCount);
+    await command({ op: 'close', name: 'alpha' });
+
+    await mutate('toggleRule');
+    await inventory();
+    await mutate('deleteRule');
+    await wait('delete reveals original Ask', async () =>
+      (await ruleRow(remembered.id).count()) === 0 &&
+      (await ruleRow(ask.id).locator('td').allTextContents()).at(-1) === 'Enabled');
+    await command({ op: 'close', name: 'alpha' });
+    const deleteCount = await count();
+    await command(outgoing);
+    // A closed probe can stay in the pending list until its deadline. Match
+    // the new TCP attempt by its distinct local endpoint.
+    const restored = await wait('fresh attempt held by restored Ask', async () =>
+      (await pending()).find((request) => request.flow.local !== defaultAsk.flow.local));
+    const restoredWindow = await prompt(restored.id);
+    await wait('restored explicit Ask source', async () =>
+      (await restoredWindow.locator('#askSource').textContent())?.includes(ask.id));
+    assert.equal(restored.rule, ask.id);
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    assert.equal((await pending()).some((request) => request.id === restored.id), true);
+    assert.equal(await count(), deleteCount);
+    await restoredWindow.locator('#allow').click();
+    await wait('restored Ask released only after answer', async () => await count() === deleteCount + 1);
+    console.log('PASS permanent ' + permanentAction + ': Ask ' + ask.id + ' v' + ask.version +
+      ', saved ' + remembered.id + ' v' + remembered.version + '; TCP receiver delta ' + deliveries +
+      ' before and after restart; disabled default Ask; deleted restored explicit Ask, receiver 0 held / 1 after answer');
+
   } else {
     await answer(after.id, 'block');
     await held(0);

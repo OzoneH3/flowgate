@@ -628,10 +628,10 @@ func (e *Engine) decideLocked(id, action, scope string, uid uint32, admin bool, 
 			r = e.rootScope(r)
 			old := e.ruleLocked(duplicate(e.rules, r, now, *a.Application))
 			overlay := old != nil && old.ID != r.ID
-			if overlay && (reviewed == nil || !preservesTemporaryAsk(v, old, r, now) || r.Priority != old.Priority) {
+			if overlay && (reviewed == nil || !preservesPromptAsk(v, old, r, now) || r.Priority != old.Priority) {
 				return Event{}, fmt.Errorf("duplicate scope exists as %s; edit the existing rule", old.ID)
 			}
-			reuse := overlay && reusableRememberOverlay(e.ruleLocked(r.ID), old, now)
+			reuse := overlay && !r.Expires.IsZero() && reusableRememberOverlay(e.ruleLocked(r.ID), old, now)
 			if len(e.rules) >= 256 && !reuse {
 				return Event{}, mutationError("capacity", "rule capacity reached")
 			}
@@ -648,7 +648,7 @@ func (e *Engine) decideLocked(id, action, scope string, uid uint32, admin bool, 
 			}
 			if overlay {
 				if _, winner, _ := e.evaluateLocked(next, v.Flow, a, now); winner != r.ID {
-					return Event{}, mutationError("policy_conflict", "Temporary remembered rule no longer wins; review again")
+					return Event{}, mutationError("policy_conflict", "Remembered rule no longer wins; review again")
 				}
 			}
 			if err := e.reconcileSocketPolicyLocked(next); err != nil {
