@@ -149,6 +149,23 @@ try {
   };
   if (!baseline) {
     const peerB = { ...outgoing, host: '10.79.0.3' };
+    const queueDuration = process.env.FLOWGATE_TEST_QUEUE_DURATION || '0';
+    assert(['0', '60'].includes(queueDuration));
+    const timedQueue = queueDuration === '60';
+    const checkRestoredAsk = async (peer) => {
+      const received = await count();
+      await command(peer);
+      const [fresh] = await held(1);
+      assert.equal(fresh.flow.remote, peer.host + ':' + peer.port);
+      assert.equal(fresh.rule, ask.id);
+      assert.equal(await count(), received);
+      const freshWindow = await prompt(fresh.id);
+      assert.equal(await freshWindow.locator('#rememberToggle').isChecked(), false);
+      await freshWindow.locator('#allow').click();
+      await wait('restored Ask delivered after Allow Once', async () => await count() === received + 1);
+      await held(0);
+      await closeAlpha();
+    };
     for (const clearRemember of [false, true]) {
       await closeAlpha();
       const before = await count();
@@ -160,7 +177,7 @@ try {
       assert.equal(b.flow.remote, peerB.host + ':' + peerB.port);
       assert.equal(b.rule, ask.id);
       await aWindow.locator('#rememberToggle').check();
-      await aWindow.locator('#rememberDuration').selectOption('0');
+      await aWindow.locator('#rememberDuration').selectOption(queueDuration);
       await aWindow.locator('input[data-field="address"]').check();
       await wait('review scoped to A', async () =>
         (await aWindow.locator('#rememberSummary').innerText()).includes(outgoing.host));
@@ -172,18 +189,21 @@ try {
       assert.equal((await held(1))[0].id, b.id);
       assert.equal(await count(), before);
       assert(await bWindow.locator('#rememberToggle').isChecked());
-      assert.equal(await bWindow.locator('#rememberDuration').inputValue(), '0');
+      assert.equal(await bWindow.locator('#rememberDuration').inputValue(), queueDuration);
       const addressField = bWindow.locator('input[data-field="address"]');
       assert(await addressField.isChecked());
       assert((await addressField.locator('..').innerText()).includes(peerB.host));
       for (const field of ['protocol', 'port', 'process'])
         assert.equal(await bWindow.locator(`input[data-field="${field}"]`).isChecked(), false);
-      await wait('fresh reviewed scope for B', async () => {
+      const bSummary = await wait('fresh reviewed scope for B', async () => {
         const summary = await bWindow.locator('#rememberSummary').innerText();
-        return summary.includes(peerB.host) && !summary.includes(outgoing.host) && summary.includes('persistent');
+        return summary.includes(peerB.host) && !summary.includes(outgoing.host) &&
+          summary.includes(timedQueue ? '1m0s' : 'persistent') && summary;
       });
       await bWindow.screenshot({ path: path.join(run, clearRemember ? 'queued-b-before-clear.png' : 'queued-b-remember.png') });
       if (clearRemember) await bWindow.locator('#rememberToggle').uncheck();
+      if (timedQueue && !clearRemember) await new Promise((resolve) => setTimeout(resolve, 12000));
+      const clickedBAt = Date.now();
       await bWindow.locator('#allow').click();
       await held(0);
       await wait('only B delivered after its answer', async () => await count() === before + 1);
@@ -194,25 +214,33 @@ try {
       const allowB = rules.find((r) => r.action === 'allow');
       assert.deepEqual(rules.find((r) => r.id === ask.id), ask);
       assert.deepEqual(denyA.filter, { ...ask.filter, remote_address: outgoing.host });
-      assert.equal(denyA.expires, ask.expires);
+      if (timedQueue) assert.equal(Date.parse(denyA.expires) - Date.parse(denyA.created), 60000);
+      else assert.equal(denyA.expires, ask.expires);
       assert.equal(rules.length, clearRemember ? 2 : 3);
       await attemptWith(denyA);
       if (clearRemember) {
         assert.equal(allowB, undefined);
-        const received = await count();
-        await command(peerB);
-        const [freshB] = await held(1);
-        assert.equal(freshB.rule, ask.id);
-        assert.equal(await count(), received);
-        const freshWindow = await prompt(freshB.id);
-        assert.equal(await freshWindow.locator('#rememberToggle').isChecked(), false);
-        await freshWindow.locator('#allow').click();
-        await wait('fresh B delivered after Allow Once', async () => await count() === received + 1);
-        await held(0);
+        await checkRestoredAsk(peerB);
       } else {
         assert.deepEqual(allowB.filter, { ...ask.filter, remote_address: peerB.host });
-        assert.equal(allowB.expires, ask.expires);
-        await attemptWith(allowB, peerB);
+        if (timedQueue) {
+          const deadlineA = Date.parse(denyA.expires), deadlineB = Date.parse(allowB.expires);
+          assert.equal(deadlineB - Date.parse(allowB.created), 60000);
+          assert(deadlineB - deadlineA >= 10000, 'deadlines must track the gap between clicks');
+          assert(deadlineB - clickedBAt >= 59500, 'waiting on B must not shorten the saved duration');
+          await wait('A deadline', () => Date.now() > deadlineA + 250, 70000);
+          await checkRestoredAsk(outgoing);
+          assert(Date.now() < deadlineB, 'B probe must start between the deadlines');
+          await attemptWith(allowB, peerB);
+          await wait('B deadline', () => Date.now() > deadlineB + 250, 25000);
+          await checkRestoredAsk(peerB);
+          console.log('PASS timed queue: B preview ' + bSummary + '; deadlines A ' + denyA.expires + ', B ' + allowB.expires +
+            '; between deadlines A prompted under ' + ask.id + ' (0 held / 1 after Allow Once), B delivered 1;' +
+            ' after B deadline the same Ask prompted (0 held / 1 after Allow Once).');
+        } else {
+          assert.equal(allowB.expires, ask.expires);
+          await attemptWith(allowB, peerB);
+        }
         await mutate(allowB.id, 'deleteRule');
       }
       await mutate(denyA.id, 'deleteRule');

@@ -23,7 +23,7 @@ test('queued address Remember stays on already waiting peers of the same Ask and
     ...e,
     flow: { direction: 'outgoing', protocol: 'tcp', netns: 'net' },
     ask_rule: { id: 'ask', version: 1 },
-    scope_previews: { persistent: 'available' },
+    scope_previews: { persistent: 'available', application: 'available' },
     attribution: {
       visibility_complete: true,
       owners: [{ pid: 1, start_ticks: '23', uid: 1000 }],
@@ -38,17 +38,20 @@ test('queued address Remember stays on already waiting peers of the same Ask and
     remember: { address: true, process: false, protocol: false, port: false },
   };
   const carry = queuedAddressRemember(s, choice);
-  assert.equal(carry('g', b), true);
-  assert.equal(carry('g', { ...b, id: 'late-arrival' }), false);
-  assert.equal(carry('next-generation', b), false);
-  assert.equal(carry('g', { ...b, ask_rule: { id: 'different-ask', version: 1 } }), false);
+  assert.equal(carry('g', b), 0);
+  assert.equal(carry('g', { ...b, id: 'late-arrival' }), undefined);
+  assert.equal(carry('next-generation', b), undefined);
+  assert.equal(carry('g', { ...b, ask_rule: { id: 'different-ask', version: 1 } }), undefined);
   const owner = b.attribution.owners[0];
   for (const change of [{ start_ticks: '24' }, { uid: 1001 }]) {
-    assert.equal(carry('g', { ...b, attribution: { ...b.attribution, owners: [{ ...owner, ...change }] } }), false);
+    assert.equal(carry('g', { ...b, attribution: { ...b.attribution, owners: [{ ...owner, ...change }] } }), undefined);
   }
-  assert.equal(carry('g', { ...b, attribution: { ...b.attribution, permission_target: { prefix: '/other' } } }), false);
-  assert.equal(carry('g', { ...b, remembered_filter: { ...b.remembered_filter, application: 'other' } }), false);
-  assert.equal(queuedAddressRemember(s, { ...choice, scope: 'application' }), undefined);
+  assert.equal(carry('g', { ...b, attribution: { ...b.attribution, permission_target: { prefix: '/other' } } }), undefined);
+  assert.equal(carry('g', { ...b, remembered_filter: { ...b.remembered_filter, application: 'other' } }), undefined);
+  const timed = { ...choice, scope: 'application', duration_seconds: 60 };
+  assert.equal(queuedAddressRemember(s, timed)('g', b), 60);
+  assert.equal(queuedAddressRemember(s, timed)('g', { ...b, scope_previews: { persistent: 'available' } }), undefined);
+  assert.equal(queuedAddressRemember(s, { ...timed, duration_seconds: 300 }), undefined);
   assert.equal(queuedAddressRemember(s, { ...choice, remember: { ...choice.remember, port: true } }), undefined);
 });
 // 51 identical attempts (same backend request_group), delivered out of order.

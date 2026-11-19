@@ -270,6 +270,22 @@ test('validated save reaches the queued handoff before publication and a slow ru
     await decision;
   }
 });
+test('inherited timed Remember commits a renewed preview for the same request and filter', async (t) => {
+  const { b, d, counts, sent } = await setup(t, { fields: true });
+  const choice = {
+    ...d, scope: 'application', network_zone: 'any', duration_seconds: 60,
+    remember: { address: true, process: false, port: false, protocol: false },
+  };
+  const original = await b.previewDecision(choice);
+  const result = await b.decide({ ...choice, preview_token: original.token }, undefined, true);
+  assert.equal(result.phase, 'acknowledged');
+  assert.deepEqual(result.rule.filter, original.rule.filter);
+  assert.notEqual(result.rule.id, original.rule.id);
+  const commit = sent.find((q) => q.operation === 'decide');
+  assert.equal(commit.id, choice.id);
+  assert.notEqual(commit.preview_token, original.token);
+  assert.deepEqual(counts(), { commits: 1, previews: 2, queries: 0 });
+});
 test('wrong preview zone and unknown connection cannot create named permission', async (t) => {
   const a = await setup(t, { mismatch: true });
   await assert.rejects(() => a.b.previewDecision(a.d));

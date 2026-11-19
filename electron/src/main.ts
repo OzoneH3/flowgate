@@ -177,22 +177,22 @@ function pacePrompt() {
   transitionTimer = setTimeout(automaticDecision, TRANSITION_MS + 10);
 }
 const promptRefs = new Map<number, RequestRef>();
-const promptURL = (ref: RequestRef, rememberAddress = false) =>
+const promptURL = (ref: RequestRef, rememberAddress?: number) =>
   'flowgate://app/index.html?request=' +
   encodeURIComponent(ref.id) +
   '&generation=' +
   encodeURIComponent(ref.generation) +
-  (rememberAddress ? '&rememberAddress=1' : '');
+  (rememberAddress === undefined ? '' : '&rememberAddress=' + rememberAddress);
 // The one permission window shows one request card. Switching card reuses the
 // window: rebinding promptRefs first makes decisions from the old card fail closed.
-function retarget(ref: RequestRef, reload = false, rememberAddress = false) {
+function retarget(ref: RequestRef, reload = false, rememberAddress?: number) {
   const w = prompt!,
     current = promptRefs.get(w.webContents.id);
   if (!reload && current?.id === ref.id && current.generation === ref.generation) {
     promptRefs.set(w.webContents.id, { ...current, group: ref.group ?? current.group });
     return;
   }
-  promptRemember = rememberAddress;
+  promptRemember = rememberAddress !== undefined;
   promptRefs.set(w.webContents.id, ref);
   promptContentHeights.delete(w.webContents.id);
   promptReadyAt.set(w.webContents.id, Date.now() + TRANSITION_MS);
@@ -251,7 +251,7 @@ function trackResult<T>(
 }
 // Closed by FlowGate because its request group is settled: not a user dismissal.
 let promptAutoClosing = false;
-function openDecision(ref: RequestRef, rememberAddress = false) {
+function openDecision(ref: RequestRef, rememberAddress?: number) {
   // A hidden window (answered or dismissed) always presents a fresh card.
   const hidden = promptIdle;
   nextAddressRemember = undefined;
@@ -259,7 +259,7 @@ function openDecision(ref: RequestRef, rememberAddress = false) {
   promptDismissed = false;
   ref = { ...ref, group: ref.group ?? groupOf(backend.view(), ref.id) };
   if (prompt && !prompt.isDestroyed()) {
-    retarget(ref, hidden, hidden && rememberAddress);
+    retarget(ref, hidden, hidden ? rememberAddress : undefined);
     return;
   }
   prompt = windowFor(true, ref.id, ref.generation, ref.group);
@@ -1065,12 +1065,15 @@ app.whenReady().then(async () => {
     const promptRef = promptRefs.get(e.sender.id);
     const d = boundDecision(value, promptRef);
     const carry = promptRef && queuedAddressRemember(backend.view(), d);
+    const renewTimedReview = promptRef && d.scope === 'application' && d.duration_seconds === 60 &&
+      d.remember?.address && !d.remember.process && !d.remember.port && !d.remember.protocol &&
+      new URL(e.senderFrame!.url).searchParams.get('rememberAddress') === '60';
     const run = backend.decide(d, carry && (() => {
       const ref = promptRefs.get(e.sender.id);
       if (ref?.id !== d.id || ref.generation !== d.generation || promptIdle || promptDismissed) return;
       nextAddressRemember = carry;
       promptAnswered(e.sender);
-    }));
+    }), renewTimedReview);
     if (d.scope === 'once' || d.scope === 'for-a-while') promptAnswered(e.sender);
     else void run.then(a => {
       const ref=promptRefs.get(e.sender.id);

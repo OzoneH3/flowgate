@@ -628,7 +628,7 @@ export class Backend {
       throw Error('Request is no longer actionable');
     return e;
   }
-  async previewDecision(raw: Decision): Promise<DecisionPreview> {
+  async previewDecision(raw: Decision, renew = false): Promise<DecisionPreview> {
     const d = validateDecision(raw),
       c = this.state.control,
       e = this.decisionEvent(d);
@@ -653,7 +653,7 @@ export class Backend {
     for (const [token, v] of this.decisionPreviews) {
       if (Date.parse(v.preview.expires_at) <= this.now() && !v.sent)
         this.decisionPreviews.delete(token);
-      else if (!v.sent && JSON.stringify(v.choice) === key) return v.preview;
+      else if (!renew && !v.sent && JSON.stringify(v.choice) === key) return v.preview;
     }
     const r = await call(this.controller!, { operation: 'decision-preview', ...d });
     if (r.error) {
@@ -842,12 +842,29 @@ export class Backend {
     }
     return result;
   }
-  async decide(raw: Decision, onRuleAcknowledged?: () => void): Promise<Attempt> {
+  // Renew the inherited timed review at the click while keeping the reviewed
+  // scope and any replacement version. The daemon still mints the expiry.
+  private async renewTimedReview(d: Decision): Promise<Decision> {
+    const current = d.preview_token && this.decisionPreviews.get(d.preview_token);
+    if (!current || current.sent) throw Error('Fresh decision preview required');
+    const old = agreesWithDecision(current.preview, d, this.decisionEvent(d), this.now());
+    const fresh = await this.previewDecision({ ...d, preview_token: undefined }, true);
+    const { id, created, expires } = old.rule;
+    this.decisionPreviews.delete(old.token);
+    if (JSON.stringify(fresh.replaces) !== JSON.stringify(old.replaces) ||
+        !sameRememberedRule({ ...fresh.rule, id: fresh.replaces ? fresh.rule.id : id, created, expires }, old.rule))
+      throw Error('The reviewed rule changed. Refresh the review before saving.');
+    return { ...d, preview_token: fresh.token };
+  }
+  async decide(raw: Decision, onRuleAcknowledged?: () => void, renewTimedReview = false): Promise<Attempt> {
     const d = validateDecision(raw);
     // For a while creates an in-memory lease, not a rule: no rule mutation lock.
     return d.scope === 'once' || d.scope === 'for-a-while'
       ? this.decideInner(d)
-      : this.ruleMutation(() => this.decideInner(d, onRuleAcknowledged));
+      : this.ruleMutation(async () => this.decideInner(
+          renewTimedReview ? await this.renewTimedReview(d) : d,
+          onRuleAcknowledged,
+        ));
   }
   private async decideInner(raw: Decision, onRuleAcknowledged?: () => void): Promise<Attempt> {
     const d = validateDecision(raw);

@@ -77,13 +77,15 @@ export function groupOf(state: ClientState, id: string) {
   const e = state.control.events.find((e) => e.id === id);
   return e ? groupKey(e) : undefined;
 }
-// Capture the already-waiting peers before submitting a permanent address choice.
-// Only the checkbox selection can carry over, never the resolved rule or its preview.
+// Capture already-waiting peers before submitting a supported address choice.
+// Carry the selected duration, never an absolute expiry, rule, or preview.
 export function queuedAddressRemember(state: ClientState, choice: Decision) {
   const fields = choice.remember;
+  const duration = choice.scope === 'persistent' ? 0 :
+    choice.scope === 'application' && choice.duration_seconds === 60 ? 60 : undefined;
   if (
     state.control.generation !== choice.generation ||
-    choice.scope !== 'persistent' ||
+    duration === undefined ||
     !fields?.address || fields.process || fields.port || fields.protocol
   ) return;
   const events = state.control.events;
@@ -98,7 +100,7 @@ export function queuedAddressRemember(state: ClientState, choice: Decision) {
   if (!owner.start_ticks || !filter?.application || !filter.revision || !filter.remote_address) return;
   const matches = (e: ViewEvent) => {
     if (
-      e.id === source.id || !awaiting(e) || e.attempt || !e.scope_previews.persistent ||
+      e.id === source.id || !awaiting(e) || e.attempt || !e.scope_previews[choice.scope] ||
       e.ask_rule?.id !== ask.id || e.ask_rule.version !== ask.version ||
       e.flow.direction !== source.flow.direction || e.flow.protocol !== source.flow.protocol ||
       e.flow.netns !== source.flow.netns ||
@@ -115,7 +117,7 @@ export function queuedAddressRemember(state: ClientState, choice: Decision) {
   const ids = new Set(events.filter(matches).map((e) => e.id));
   if (!ids.size) return;
   return (generation: string, event: ViewEvent) =>
-    generation === choice.generation && ids.has(event.id) && matches(event);
+    generation === choice.generation && ids.has(event.id) && matches(event) ? duration : undefined;
 }
 // One foreground card at a time (NetLimiter): the representative of the oldest
 // group. A dismissed group never auto-opens again in that daemon generation.
