@@ -27,6 +27,10 @@ func TestRememberZonePreviewCommitReceipt(t *testing.T) {
 	if p.Rule.Schema != 4 || p.Rule.Filter.NetworkZone != "local" || p.Rule.Filter.Application != "app" || p.Rule.Filter.Protocol != "udp" || p.Rule.Filter.LocalPort != 80 || p.Rule.Filter.RemoteAddress != "127.0.0.1" {
 		t.Fatal(p)
 	}
+	unused, err := e.PreviewDecision(e.Generation, v.ID, "block", "application", "local", e.Zones.Revision, 1000, false)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, _, _, err = e.DecideReviewed(e.Generation, v.ID, "block", "application", "local", e.Zones.Revision, p.Token, 1000, false); err == nil {
 		t.Fatal("action changed")
 	}
@@ -43,6 +47,9 @@ func TestRememberZonePreviewCommitReceipt(t *testing.T) {
 	wg.Wait()
 	if len(e.rules) != 1 || e.rules[0].Filter.NetworkZone != "local" {
 		t.Fatal(e.rules)
+	}
+	if _, err = e.DecisionStatus(e.Generation, unused.Token, 1000, false); err == nil {
+		t.Fatal("unused preview still retains a slot for the decided request")
 	}
 	*now = now.Add(time.Minute)
 	e.List(1000, false) // event eviction does not erase receipt

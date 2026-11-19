@@ -11,7 +11,7 @@ import { matchesApplicationZone } from './application-zones';
 import { Essential } from './essential';
 import { Protection } from './protection';
 import { placeKDEPrompt, resizeKDEPrompt, PROMPT_TITLE, promptTitle } from './prompt-placement';
-import { AutomaticPrompts, PROMPT_HEIGHT, PROMPT_WIDTH, edgePosition, boundDecision, groupOf, inputSettled, queuedAddressRemember } from './automatic-prompts';
+import { AutomaticPrompts, PROMPT_HEIGHT, PROMPT_WIDTH, addressRememberDuration, edgePosition, boundDecision, groupOf, inputSettled, queuedAddressRemember } from './automatic-prompts';
 import { leaseHolds } from './process-lease';
 import {
   app,
@@ -1065,9 +1065,9 @@ app.whenReady().then(async () => {
     const promptRef = promptRefs.get(e.sender.id);
     const d = boundDecision(value, promptRef);
     const carry = promptRef && queuedAddressRemember(backend.view(), d);
-    const renewTimedReview = promptRef && d.scope === 'application' && d.duration_seconds === 60 &&
-      d.remember?.address && !d.remember.process && !d.remember.port && !d.remember.protocol &&
-      new URL(e.senderFrame!.url).searchParams.get('rememberAddress') === '60';
+    const duration = addressRememberDuration(d);
+    const renewTimedReview = !!promptRef && !!duration &&
+      new URL(e.senderFrame!.url).searchParams.get('rememberAddress') === String(duration);
     const run = backend.decide(d, carry && (() => {
       const ref = promptRefs.get(e.sender.id);
       if (ref?.id !== d.id || ref.generation !== d.generation || promptIdle || promptDismissed) return;

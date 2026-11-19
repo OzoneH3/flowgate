@@ -8,7 +8,7 @@ import {
   type ViewEvent,
 } from './protocol';
 import { requestRuleAvailable } from './request-rule';
-import { reviewFailureOf } from './decision-remember';
+import { REMEMBER_DURATIONS, reviewFailureOf } from './decision-remember';
 import type { RequestRef } from './notifications';
 export interface RequestGroup {
   key: string;
@@ -77,17 +77,18 @@ export function groupOf(state: ClientState, id: string) {
   const e = state.control.events.find((e) => e.id === id);
   return e ? groupKey(e) : undefined;
 }
-// Capture already-waiting peers before submitting a supported address choice.
+export function addressRememberDuration(choice: Decision) {
+  const fields = choice.remember;
+  if (!fields?.address || fields.process || fields.port || fields.protocol) return;
+  if (choice.scope === 'persistent') return 0;
+  if (choice.scope === 'application' && choice.duration_seconds)
+    return REMEMBER_DURATIONS.find(({ seconds }) => seconds === choice.duration_seconds)?.seconds;
+}
+// Capture already-waiting peers before submitting an address choice.
 // Carry the selected duration, never an absolute expiry, rule, or preview.
 export function queuedAddressRemember(state: ClientState, choice: Decision) {
-  const fields = choice.remember;
-  const duration = choice.scope === 'persistent' ? 0 :
-    choice.scope === 'application' && choice.duration_seconds === 60 ? 60 : undefined;
-  if (
-    state.control.generation !== choice.generation ||
-    duration === undefined ||
-    !fields?.address || fields.process || fields.port || fields.protocol
-  ) return;
+  const duration = addressRememberDuration(choice);
+  if (state.control.generation !== choice.generation || duration === undefined) return;
   const events = state.control.events;
   const source = events.find((e) => e.id === choice.id);
   if (

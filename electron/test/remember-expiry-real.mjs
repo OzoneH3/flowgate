@@ -150,8 +150,9 @@ try {
   if (!baseline) {
     const peerB = { ...outgoing, host: '10.79.0.3' };
     const queueDuration = process.env.FLOWGATE_TEST_QUEUE_DURATION || '0';
-    assert(['0', '60'].includes(queueDuration));
-    const timedQueue = queueDuration === '60';
+    assert(['0', '60', '300'].includes(queueDuration));
+    const queueSeconds = Number(queueDuration);
+    const queueSummary = queueSeconds ? `for ${queueSeconds / 60}m0s` : 'persistent';
     const checkRestoredAsk = async (peer) => {
       const received = await count();
       await command(peer);
@@ -166,9 +167,21 @@ try {
       await held(0);
       await closeAlpha();
     };
-    for (const scenario of timedQueue ? ['refresh', 'keep', 'clear'] : ['keep', 'clear']) {
+    for (const scenario of queueSeconds ? ['refresh', 'keep', 'clear'] : ['keep', 'clear']) {
       const clearRemember = scenario === 'clear';
       await closeAlpha();
+      let competingRule;
+      if (scenario === 'refresh') {
+        const competingDraft = {
+          ...draft, application_policy: false, action: 'block', disabled: true, remote_address: peerB.host,
+        };
+        const { observed_preview } = await call('observed-rule-preview', {
+          observed_target: ready.alpha_target, observed_draft: competingDraft,
+        });
+        ({ saved_rule: competingRule } = await call('observed-rule-save', {
+          preview_token: observed_preview.token, observed_draft: competingDraft,
+        }));
+      }
       const before = await count();
       await command(outgoing);
       const [a] = await held(1);
@@ -199,20 +212,15 @@ try {
       const bSummary = await wait('fresh reviewed scope for B', async () => {
         const summary = await bWindow.locator('#rememberSummary').innerText();
         return summary.includes(peerB.host) && !summary.includes(outgoing.host) &&
-          summary.includes(timedQueue ? '1m0s' : 'persistent') && summary;
+          summary.includes(queueSummary) && (!competingRule || summary.includes(competingRule.id)) && summary;
       });
       await bWindow.screenshot({ path: path.join(run, 'queued-b-' + scenario + '.png') });
-      let competingRule;
-      if (scenario === 'refresh') {
-        const competingDraft = {
-          ...draft, application_policy: false, action: 'block', disabled: true, remote_address: peerB.host,
-        };
-        const { observed_preview } = await call('observed-rule-preview', {
-          observed_target: ready.alpha_target, observed_draft: competingDraft,
-        });
-        ({ saved_rule: competingRule } = await call('observed-rule-save', {
-          preview_token: observed_preview.token, observed_draft: competingDraft,
+      if (competingRule) {
+        const versionBefore = competingRule.version;
+        ({ saved_rule: competingRule } = await call('rule-save', {
+          id: competingRule.id, expected_version: versionBefore, rule: { ...competingRule, action: 'allow' },
         }));
+        assert.equal(competingRule.version, versionBefore + 1);
         await bWindow.locator('#allow').click();
         await wait('visible Refresh review', () => bWindow.locator('#refreshDecision').isVisible());
         assert.equal((await held(1))[0].id, b.id);
@@ -225,7 +233,7 @@ try {
           (await bWindow.locator('#rememberSummary').innerText()).includes(competingRule.id));
       }
       if (clearRemember) await bWindow.locator('#rememberToggle').uncheck();
-      if (timedQueue && scenario === 'keep') await new Promise((resolve) => setTimeout(resolve, 12000));
+      if (queueSeconds && scenario === 'keep') await new Promise((resolve) => setTimeout(resolve, 12000));
       const clickedBAt = Date.now();
       await bWindow.locator('#allow').click();
       await held(0);
@@ -237,7 +245,7 @@ try {
       const allowB = rules.find((r) => r.action === 'allow');
       assert.deepEqual(rules.find((r) => r.id === ask.id), ask);
       assert.deepEqual(denyA.filter, { ...ask.filter, remote_address: outgoing.host });
-      if (timedQueue) assert.equal(Date.parse(denyA.expires) - Date.parse(denyA.created), 60000);
+      if (queueSeconds) assert.equal(Date.parse(denyA.expires) - Date.parse(denyA.created), queueSeconds * 1000);
       else assert.equal(denyA.expires, ask.expires);
       assert.equal(rules.length, clearRemember ? 2 : 3);
       await attemptWith(denyA);
@@ -252,20 +260,26 @@ try {
           await attemptWith(allowB, peerB);
           console.log('PASS queued review conflict: no delivery or save on first click, visible Refresh review showed ' +
             competingRule.id + ' and the next click saved version ' + allowB.version + '; B delivered 1.');
-        } else if (timedQueue) {
+        } else if (queueSeconds) {
           const deadlineA = Date.parse(denyA.expires), deadlineB = Date.parse(allowB.expires);
-          assert.equal(deadlineB - Date.parse(allowB.created), 60000);
+          assert.equal(deadlineB - Date.parse(allowB.created), queueSeconds * 1000);
           assert(deadlineB - deadlineA >= 10000, 'deadlines must track the gap between clicks');
-          assert(deadlineB - clickedBAt >= 59500, 'waiting on B must not shorten the saved duration');
-          await wait('A deadline', () => Date.now() > deadlineA + 250, 70000);
-          await checkRestoredAsk(outgoing);
-          assert(Date.now() < deadlineB, 'B probe must start between the deadlines');
-          await attemptWith(allowB, peerB);
-          await wait('B deadline', () => Date.now() > deadlineB + 250, 25000);
-          await checkRestoredAsk(peerB);
-          console.log('PASS timed queue: B preview ' + bSummary + '; deadlines A ' + denyA.expires + ', B ' + allowB.expires +
-            '; between deadlines A prompted under ' + ask.id + ' (0 held / 1 after Allow Once), B delivered 1;' +
-            ' after B deadline the same Ask prompted (0 held / 1 after Allow Once).');
+          assert(deadlineB - clickedBAt >= queueSeconds * 1000 - 500, 'waiting on B must not shorten the saved duration');
+          console.log('PASS timed queue: B preview ' + bSummary + '; click ' + new Date(clickedBAt).toISOString() +
+            '; deadlines A ' + denyA.expires + ', B ' + allowB.expires +
+            '; B lifetime from click ' + (deadlineB - clickedBAt) + ' ms.');
+          if (queueSeconds === 60) {
+            await wait('A deadline', () => Date.now() > deadlineA + 250, 70000);
+            await checkRestoredAsk(outgoing);
+            assert(Date.now() < deadlineB, 'B probe must start between the deadlines');
+            await attemptWith(allowB, peerB);
+            await wait('B deadline', () => Date.now() > deadlineB + 250, 25000);
+            await checkRestoredAsk(peerB);
+            console.log('PASS queued expiry: between deadlines A prompted under ' + ask.id +
+              ' (0 held / 1 after Allow Once), B delivered 1; after B deadline the same Ask prompted.');
+          } else {
+            await attemptWith(allowB, peerB);
+          }
         } else {
           assert.equal(allowB.expires, ask.expires);
           await attemptWith(allowB, peerB);

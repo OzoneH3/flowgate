@@ -442,6 +442,13 @@ func (e *Engine) decideReviewedLocked(generation, id, action, scope, zone, revis
 	p.Committed = &out
 	p.settledDone = make(chan struct{})
 	p.Until = e.Now().Add(5 * time.Minute)
+	// The request has been decided. Keep receipts for committed tokens and
+	// release the other reviews for this request before the next queue card.
+	for token, other := range e.decisionPreviews {
+		if other.View.EventID == id && other.UID == uid && other.Admin == admin && other.Committed == nil {
+			delete(e.decisionPreviews, token)
+		}
+	}
 	return out, v.Rule, false, nil
 }
 func (e *Engine) DecisionStatus(generation, token string, uid uint32, admin bool) (DecisionReceipt, error) {

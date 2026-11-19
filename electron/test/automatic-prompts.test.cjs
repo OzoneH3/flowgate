@@ -8,6 +8,7 @@ const {
   askSource,
   queuedAddressRemember,
 } = require('../dist/test/automatic-prompts.cjs');
+const { REMEMBER_DURATIONS } = require('../dist/test/decision-remember.cjs');
 const state = (ids, generation = 'g') => ({
   control: {
     connected: true,
@@ -49,9 +50,10 @@ test('queued address Remember stays on already waiting peers of the same Ask and
   assert.equal(carry('g', { ...b, attribution: { ...b.attribution, permission_target: { prefix: '/other' } } }), undefined);
   assert.equal(carry('g', { ...b, remembered_filter: { ...b.remembered_filter, application: 'other' } }), undefined);
   const timed = { ...choice, scope: 'application', duration_seconds: 60 };
-  assert.equal(queuedAddressRemember(s, timed)('g', b), 60);
+  for (const { seconds } of REMEMBER_DURATIONS.filter(({ seconds }) => seconds > 0))
+    assert.equal(queuedAddressRemember(s, { ...timed, duration_seconds: seconds })('g', b), seconds);
   assert.equal(queuedAddressRemember(s, timed)('g', { ...b, scope_previews: { persistent: 'available' } }), undefined);
-  assert.equal(queuedAddressRemember(s, { ...timed, duration_seconds: 300 }), undefined);
+  assert.equal(queuedAddressRemember(s, { ...timed, duration_seconds: 120 }), undefined);
   assert.equal(queuedAddressRemember(s, { ...choice, remember: { ...choice.remember, port: true } }), undefined);
 });
 // 51 identical attempts (same backend request_group), delivered out of order.

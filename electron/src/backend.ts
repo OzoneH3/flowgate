@@ -853,7 +853,10 @@ export class Backend {
     const { id, created, expires } = old.rule;
     this.decisionPreviews.delete(old.token);
     if (JSON.stringify(fresh.replaces) !== JSON.stringify(old.replaces) ||
-        !sameRememberedRule({ ...fresh.rule, id: fresh.replaces ? fresh.rule.id : id, created, expires }, old.rule)) {
+        !sameRememberedRule({
+          ...fresh.rule, id: fresh.replaces ? fresh.rule.id : id,
+          created: fresh.replaces ? fresh.rule.created : created, expires,
+        }, old.rule)) {
       for (const [token, entry] of this.decisionPreviews)
         if (!entry.sent && entry.choice.id === d.id && entry.choice.generation === d.generation)
           this.decisionPreviews.delete(token);
