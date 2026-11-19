@@ -34,7 +34,8 @@ restarted, granted this permission, or used for enforcement in this increment.**
 
 ## Decision log
 
-Additive `decision-log-v1` (`decision-log`, `decision-log-get`); exact request,
+Capabilities include `decision-log-v1` for paging and detail, and
+`decision-log-outcome-v1` for resolving a visible pending record to its final. See the
 record, health, cursor, visibility and error contract in [DECISION-LOG.md](DECISION-LOG.md).
 
 

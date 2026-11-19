@@ -870,8 +870,11 @@ primary controller when it advertises the capability, otherwise the read-only co
 - Details show decision-time evidence only: outcome, source, scope, recorded reason,
   deciding UID, kernel verdict, recorded application identity and attribution, rule
   snapshot (ID/version/filter). **Allow is a policy decision plus verdict submission;
-  delivery is always "Not observed by FlowGate".** A pending record links only to a
-  loaded final record with the same nonempty request ID and daemon generation, otherwise "Outcome not loaded" (a page/filter is not the complete history).
+  delivery is always "Not observed by FlowGate".** **Open recorded outcome** resolves a pending record across pages and filters on
+  daemons with `decision-log-outcome-v1`. The details pane keeps the pending row
+  selected. **Back to pending record** returns to that row’s details. If no visible
+  final can be resolved, the pane says **No recorded outcome available.** Older
+  daemons support links to finals already loaded in the list.
 - The current rule is shown separately (same version / changed since / no longer
   exists, plus "View current rule…" through the versioned editor). Deletion is only
   claimed on a rule-managing connection; elsewhere current state is "not available".
@@ -952,10 +955,8 @@ lookup, filtering, paging and restart, not durable rule-editor operations.
   validated loaded-record selector (no arbitrary clipboard text or file access).
 - Time, Application, Decision and Source are first and remain visible at 860×600.
   Protocol/direction/endpoints remain in details when narrow. Pending rows say
-  **Pending record**, explicitly historical and never actionable. A known loaded
-  outcome has an **Open recorded outcome** button. Its authoritative `not_found`
-  response says **Outcome unavailable**, with retention/authorization uncertainty;
-  no relationship lookup or entire-log scan is attempted.
+  **Pending record**, explicitly historical and never actionable. The original navigation release linked finals already loaded in the list.
+  Cross-page lookup is described above.
 
 Verification: build/typecheck and 11 focused model tests passed. Sandboxed native
 Wayland presentation/navigation runner `node electron/test/decision-log-display.mjs`

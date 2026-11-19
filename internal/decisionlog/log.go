@@ -120,6 +120,11 @@ func Open(path, generation, mode string, recording bool) (*Log, error) {
 	if err = migrate(db); err != nil {
 		return fail(err)
 	}
+	// An additive index also covers retained schema-v1 records from older daemons.
+	if _, err = db.Exec(`CREATE INDEX IF NOT EXISTS decisions_outcome ON decisions(
+		json_extract(document,'$.generation'), json_extract(document,'$.request_id')) WHERE kind='final'`); err != nil {
+		return fail(err)
+	}
 	var check string
 	if err = db.QueryRow("PRAGMA quick_check").Scan(&check); err != nil || check != "ok" {
 		return fail(fmt.Errorf("decision log integrity failure: %s: %v", check, err))

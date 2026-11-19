@@ -550,10 +550,11 @@ export interface Bridge {
   decisionLogFilter(filter: LogFilter): Promise<DecisionLogState>;
   decisionLogOlder(): Promise<DecisionLogState>;
   decisionLogLive(live: boolean): Promise<DecisionLogState>;
+  decisionLogOutcome(id: string): Promise<{ record?: LogRecord; note: string }>;
   decisionLogDetail(
     id: string,
   ): Promise<{ record?: LogRecord; note: string; unavailable?: boolean }>;
-  decisionLogCopy(id: string, endpoint?: 'local' | 'remote'): Promise<void>;
+  decisionLogCopy(id: string, endpoint?: 'local' | 'remote', outcomeOf?: string): Promise<void>;
 }
 declare global {
   interface Window {

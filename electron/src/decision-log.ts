@@ -622,15 +622,16 @@ export function loadedOutcome(pending: LogRecord, records: LogRecord[]) {
       r.generation === pending.generation,
   );
 }
-export function logCopyRequest(value: unknown): { id: string; endpoint?: 'local' | 'remote' } {
+export function logCopyRequest(value: unknown): { id: string; endpoint?: 'local' | 'remote'; outcomeOf?: string } {
   const v = typeof value === 'string' ? { id: value } : obj(value);
   if (
     typeof v.id !== 'string' ||
     !v.id ||
     v.id.length > 256 ||
-    Object.keys(v).some((k) => !['id', 'endpoint'].includes(k)) ||
+    Object.keys(v).some((k) => !['id', 'endpoint', 'outcomeOf'].includes(k)) ||
+    (v.outcomeOf !== undefined && (typeof v.outcomeOf !== 'string' || !v.outcomeOf || v.outcomeOf.length > 64)) ||
     (v.endpoint !== undefined && v.endpoint !== 'local' && v.endpoint !== 'remote')
   )
     throw Error('Invalid log copy request');
-  return { id: v.id, endpoint: v.endpoint as 'local' | 'remote' | undefined };
+  return { id: v.id, endpoint: v.endpoint as 'local' | 'remote' | undefined, ...(v.outcomeOf ? { outcomeOf: v.outcomeOf as string } : {}) };
 }

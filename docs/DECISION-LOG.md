@@ -26,8 +26,8 @@ ownership → block), `capacity` (pending capacity/prompt rate → block), `user
 request), `rule_edit` (a committed editor rule decided the pending request),
 `shutdown` (daemon stopped while pending). A `pending` record is normally followed
 by a final with the same `request_id`; after a crash (not a clean stop) a pending
-record can remain without a final. An absent final in a loaded page/filter means
-**Outcome not loaded**, not proof that no final was recorded.
+record can remain without a final. **Open recorded outcome** searches retained history independently of the page
+or filter. A missing or invisible final leaves the outcome unknown.
 
 Deduplication follows an engine admission attempt (`request_id`), not a minute of
 matching action/rule/endpoint values. A TCP attempt uses namespace, direction,
@@ -143,6 +143,13 @@ Response `decision_log`: `records`, `has_more`, `next_before`, `next_after`, `or
 `decision_record`. Errors: `invalid_request`, `invalid_cursor` (malformed cursor or
 `log_id` mismatch → restart at newest), `not_found` (unknown, pruned **or not
 visible** — existence is not disclosed), `unavailable`.
+
+With the additional capability `decision-log-outcome-v1`, send
+`{"version":1,"operation":"decision-log-outcome","decision_id":"<pending record ID>"}`
+on either endpoint. The daemon returns the unique visible final as `decision_record`.
+Both records must be visible to the caller and share a nonempty daemon generation
+and request ID. An index on final records covers existing history. Missing,
+pruned, ambiguous and inaccessible links return the same `not_found` response.
 
 Health: `log_id` (changes only when the file is recreated), `state`
 (`ok|degraded|unavailable`), `recording`, `buffered`, `dropped`, `write_failures`,

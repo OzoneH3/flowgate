@@ -101,6 +101,71 @@ func TestMigrationAndRuleStoreIndependence(t *testing.T) {
 	}
 }
 
+func TestRecordedOutcomeLookup(t *testing.T) {
+	l := open(t, filepath.Join(t.TempDir(), "d.db"))
+	defer l.Close()
+	pending := rec(u(1000), time.Now(), "pending")
+	pending.Kind, pending.RequestID = KindPending, "attempt"
+	final := rec(u(1000), time.Now(), "allow")
+	final.RequestID = pending.RequestID
+	otherGeneration := final
+	otherGeneration.ID, otherGeneration.Generation = NewRecordID(), "another run"
+
+	writeNow(t, l, pending, otherGeneration)
+	expectMissing := func(id string, uid uint32, admin bool) {
+		t.Helper()
+		_, err := l.Outcome(id, uid, admin)
+		var qe *QueryError
+		if !errors.As(err, &qe) || qe.Code != "not_found" {
+			t.Fatalf("lookup %s: %v", id, err)
+		}
+	}
+	expectMissing(pending.ID, 1000, false)
+	writeNow(t, l, final)
+	newer := make([]Record, 300)
+	for i := range newer {
+		r := rec(u(1000), time.Now(), "block")
+		r.RequestID = fmt.Sprintf("other-%d", i)
+		newer[i] = r
+	}
+	writeNow(t, l, newer...)
+	got, err := l.Outcome(pending.ID, 1000, false)
+	if err != nil || got.ID != final.ID || got.Decision.Action != "allow" {
+		t.Fatalf("wrong final: %+v, %v", got, err)
+	}
+	expectMissing(pending.ID, 2000, false)
+	expectMissing(final.ID, 1000, true)
+	expectMissing("pruned", 1000, false)
+	for i, owner := range []*uint32{u(2000), nil} {
+		p, f := pending, final
+		p.ID, f.ID = NewRecordID(), NewRecordID()
+		p.RequestID = fmt.Sprintf("visibility-%d", i)
+		f.RequestID, f.PrincipalUID = p.RequestID, owner
+		writeNow(t, l, p, f)
+		expectMissing(p.ID, 1000, false)
+		expectMissing(p.ID, 2000, false)
+		if got, err := l.Outcome(p.ID, 0, true); err != nil || got.ID != f.ID {
+			t.Fatalf("administrator lookup: %+v, %v", got, err)
+		}
+	}
+	duplicate := final
+	duplicate.ID = NewRecordID()
+	writeNow(t, l, duplicate)
+	expectMissing(pending.ID, 0, true)
+	for _, field := range []string{"generation", "request_id"} {
+		p := pending
+		f := final
+		p.ID, f.ID = NewRecordID(), NewRecordID()
+		if field == "generation" {
+			p.Generation, f.Generation = "", ""
+		} else {
+			p.RequestID, f.RequestID = "", ""
+		}
+		writeNow(t, l, p, f)
+		expectMissing(p.ID, 1000, true)
+	}
+}
+
 func TestRetentionByAgeAndCount(t *testing.T) {
 	l := open(t, filepath.Join(t.TempDir(), "d.db"))
 	defer l.Close()

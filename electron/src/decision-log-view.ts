@@ -30,7 +30,8 @@ let client: ClientState | undefined;
 let selected = '';
 let visible = false;
 let signature = '';
-let detailFor = '';
+let detailVersion = 0;
+let shownDetail: { record: LogRecord; note: string } | undefined;
 let newAbove = 0;
 let polling = false;
 let iconFor: (app: Application) => HTMLElement = () => el('span');
@@ -159,14 +160,15 @@ function filter(): LogFilter {
 }
 async function applyFilter() {
   selected = '';
-  detailFor = '';
+  detailVersion++;
+  shownDetail = undefined;
   newAbove = 0;
   $('logDetails').replaceChildren(el('p', 'Select a record.', 'hint'));
   current = await window.flowgate.decisionLogFilter(filter());
   render();
   $('logScroll').scrollTop = 0;
 }
-if (typeof window !== 'undefined') window.addEventListener('flowgate-account-name', () => { if (visible && detailFor) void showDetail(detailFor); });
+if (typeof window !== 'undefined') window.addEventListener('flowgate-account-name', () => { if (visible && shownDetail) renderDetail(shownDetail.record, shownDetail.note); });
 export async function showDecisionLog(show: boolean) {
   if (visible === show) return;
   visible = show;
@@ -175,7 +177,7 @@ export async function showDecisionLog(show: boolean) {
 }
 export function updateDecisionLog(state: ClientState) {
   client = state;
-  if (visible && detailFor) renderRuleComparison();
+  if (visible && shownDetail) renderRuleComparison(shownDetail.record);
 }
 async function poll() {
   if (!visible || polling) return;
@@ -358,12 +360,12 @@ function render() {
   status.title = status.textContent;
 }
 
-function select(id: string, outcome = false) {
+function select(id: string) {
   selected = id;
   for (const tr of document.querySelectorAll<HTMLElement>('#logRows tr'))
     tr.setAttribute('aria-selected', String(tr.dataset.id === id));
   $('logTable').setAttribute('aria-activedescendant', 'log-record-' + id);
-  void showDetail(id, outcome);
+  void showDetail(id);
 }
 
 const field = (dl: HTMLElement, label: string, value: string | number | null | undefined, title?: string) => {
@@ -373,23 +375,35 @@ const field = (dl: HTMLElement, label: string, value: string | number | null | u
   dl.append(el('dt', label), detail);
 };
 async function showDetail(id: string, outcome = false) {
-  detailFor = id;
-  const { record: r, note, unavailable } = await window.flowgate.decisionLogDetail(id);
-  if (detailFor !== id) return;
+  const version = ++detailVersion;
+  shownDetail = undefined;
   const box = $('logDetails');
-  if (!r) {
-    box.replaceChildren(
-      el(
-        'p',
-        (outcome && unavailable ? 'Outcome unavailable. ' : '') + (note || 'Record unavailable.'),
-        'hint',
-      ),
-    );
+  box.replaceChildren(el('p', outcome ? 'Looking up recorded outcome…' : 'Loading record…', 'hint'));
+  const { record, note } = outcome
+    ? await window.flowgate.decisionLogOutcome(id)
+    : await window.flowgate.decisionLogDetail(id);
+  if (version !== detailVersion) return;
+  if (!record) {
+    box.replaceChildren(el('p', note || 'Record unavailable.', 'hint'));
+    if (outcome) box.append(backToPending(id));
     return;
   }
+  shownDetail = { record, note };
+  renderDetail(record, note);
+}
+
+function backToPending(id: string) {
+  const back = el('button', 'Back to pending record');
+  back.onclick = () => select(id);
+  return back;
+}
+
+function renderDetail(r: LogRecord, note: string) {
+  const box = $('logDetails');
   const parts: HTMLElement[] = [el('h3', `${outcomeLabel(r)} · ${time(r.time)}`)];
-  if (note)
-    parts.push(el('p', (outcome && unavailable ? 'Outcome unavailable. ' : '') + note, 'hint'));
+  const outcomeOf = selected === r.id ? undefined : selected;
+  if (outcomeOf) parts.push(backToPending(outcomeOf));
+  if (note) parts.push(el('p', note, 'hint'));
   const section = (title: string) => {
     parts.push(el('h4', title));
     const dl = el('dl');
@@ -422,21 +436,14 @@ async function showDetail(id: string, outcome = false) {
         : 'Final disposition',
     );
     if (r.kind === 'pending') {
-      // Link only to a final record actually present; never infer an outcome.
-      const final = loadedOutcome(r, current?.records || []);
-      parts.push(
-        el(
-          'p',
-          final
-            ? `Outcome recorded in sequence ${final.sequence}: ${outcomeLabel(final)} (${sourceLabel(final.decision?.source || '')}).`
-            : 'Outcome not loaded. No final record with this request ID is present in the loaded page/filter; this does not establish whether a final was recorded.',
-          'hint',
-        ),
-      );
-      if (final) {
+      if (!r.request_id || !r.generation) {
+        parts.push(el('p', 'No recorded outcome available.', 'hint'));
+      } else if (current?.outcomeLookup || loadedOutcome(r, current?.records || [])) {
         const link = el('button', 'Open recorded outcome');
-        link.onclick = () => select(final.id, true);
+        link.onclick = () => void showDetail(r.id, true);
         parts.push(link);
+      } else {
+        parts.push(el('p', 'Outcome not loaded. Cross-page lookup unavailable on this daemon.', 'hint'));
       }
     }
     const v = section('Kernel verdict');
@@ -456,7 +463,7 @@ async function showDetail(id: string, outcome = false) {
       copy.title = r.flow[side];
       copy.onclick = async () => {
         try {
-          await window.flowgate.decisionLogCopy(r.id, side);
+          await window.flowgate.decisionLogCopy(r.id, side, outcomeOf);
           copy.textContent = 'Copied';
         } catch {
           copy.textContent = 'Copy unavailable';
@@ -515,7 +522,7 @@ async function showDetail(id: string, outcome = false) {
   const copy = el('button', 'Copy record');
   copy.onclick = async () => {
     try {
-      await window.flowgate.decisionLogCopy(r.id);
+      await window.flowgate.decisionLogCopy(r.id, undefined, outcomeOf);
       copy.textContent = 'Copied';
     } catch {
       copy.textContent = 'Copy unavailable';
@@ -537,11 +544,10 @@ async function showDetail(id: string, outcome = false) {
 }
 
 // Current rule state is shown separately from the decision-time snapshot.
-function renderRuleComparison(record?: LogRecord) {
+function renderRuleComparison(record: LogRecord) {
   const box = $('logRuleCompare');
   if (!box) return;
-  const r = record || current?.records.find((x) => x.id === detailFor);
-  const snapshot = r?.decision?.rule;
+  const snapshot = record.decision?.rule;
   if (!snapshot) return;
   const c = client?.control;
   // Only a rule-managing connection returns the full inventory; elsewhere an absent rule

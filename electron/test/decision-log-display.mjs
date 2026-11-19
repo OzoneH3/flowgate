@@ -23,6 +23,7 @@ const base = (readonly) => ({
   capabilities: [
     'explicit-administrator-v1',
     ...(variant === 'unsupported' ? [] : ['decision-log-v1']),
+    ...(variant === 'navigation' ? ['decision-log-outcome-v1'] : []),
   ],
   permissions: {
     role: 'administrator',
@@ -203,6 +204,14 @@ try {
                     (x) => x.id === q.decision_id,
                   ),
                 };
+        if (q.operation === 'decision-log-outcome') {
+          const origin = navigation.find((x) => x.kind === 'pending' && x.id === q.decision_id);
+          const final = origin && navigation.find((x) => x.kind === 'final' &&
+            x.generation === origin.generation && x.request_id === origin.request_id);
+          r = final && final.id !== missingId
+            ? { ...r, decision_record: final }
+            : { ...r, error_code: 'not_found', error: 'Unavailable' };
+        }
         s.end(JSON.stringify(r) + '\n');
       }),
     );
@@ -226,20 +235,24 @@ try {
       TMPDIR: path.join(root, '.workspace/tmp'),
     },
   });
-  const p = await app.firstWindow();
+  const until = async (fn, what) => {
+    for (let i = 0; i < 100; i++) {
+      const result = await fn();
+      if (result) return result;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw Error('Timeout: ' + what);
+  };
+  const p = await until(
+    () => app.windows().find((w) => w.url() === 'flowgate://app/index.html'),
+    'main desktop window',
+  );
   await p.setViewportSize({ width: 1280, height: 760 });
   await p
     .locator('.brand')
     .evaluate((e) => (e.textContent = 'FlowGate · SYNTHETIC DECISION LOG STATES'));
   await p.click('#decisionLogTab');
   const empty = () => p.locator('#logEmpty').innerText();
-  const until = async (fn, what) => {
-    for (let i = 0; i < 100; i++) {
-      if (await fn()) return;
-      await p.waitForTimeout(100);
-    }
-    throw Error('Timeout: ' + what);
-  };
   await until(async () => /does not provide a decision log/.test(await empty()), 'unsupported');
   variant = 'forbidden';
   await until(async () => /Permission denied/.test(await empty()), 'forbidden');
@@ -317,6 +330,7 @@ try {
     navigation[i].verdict = { state: 'held', detail: '' };
   }
   variant = 'navigation';
+  await until(() => p.evaluate(async () => (await window.flowgate.decisionLog()).outcomeLookup), 'outcome capability');
   await p.setViewportSize({ width: 1280, height: 760 });
   await p.click('#logClear');
   await until(
@@ -324,8 +338,9 @@ try {
     'navigation first page',
   );
   await p.click('#logRows tr[data-id="syn-178"]');
+  await p.getByRole('button', { name: 'Open recorded outcome' }).click();
   await until(
-    async () => /Outcome not loaded/.test(await p.locator('#logDetails').innerText()),
+    async () => /No recorded outcome available\./.test(await p.locator('#logDetails').innerText()),
     'missing outcome',
   );
   assert.doesNotMatch(await p.locator('#logDetails').innerText(), /outcome was not recorded/);
@@ -337,7 +352,7 @@ try {
   missingId = 'syn-180';
   await p.getByRole('button', { name: 'Open recorded outcome' }).click();
   await until(
-    async () => /Outcome unavailable/.test(await p.locator('#logDetails').innerText()),
+    async () => /No recorded outcome available\./.test(await p.locator('#logDetails').innerText()),
     'authoritative not_found',
   );
   missingId = '';
@@ -430,6 +445,33 @@ try {
   await p.screenshot({ path: path.join(dir, 'navigation-narrow.png') });
   await p.click('#logClear');
   await until(async () => !(await p.locator('#logClear').isVisible()), 'clear filters');
+  for (let i = 183; i <= 532; i++) {
+    const pending = i % 5 === 0;
+    const r = record(i, pending ? 'pending' : 'block', pending ? 'default_ask' : 'user');
+    if (pending) r.kind = 'pending';
+    navigation.push(r);
+  }
+  await p.selectOption('#logAction', 'pending');
+  const origin = p.locator('#logRows tr[data-id="syn-179"]');
+  await origin.click();
+  const anchor = await top();
+  assert(anchor > 0, 'pending row is below the fold');
+  const rows = () => p.locator('#logRows tr').evaluateAll((rs) => rs.map((r) => r.dataset.id));
+  const pendingRows = await rows();
+  assert(!pendingRows.includes('syn-180'));
+  await p.getByRole('button', { name: 'Open recorded outcome' }).click();
+  await until(async () => /Record ID\s+syn-180\b/.test(await p.locator('#logDetails').innerText()), 'cross-page outcome');
+  assert.equal(await p.locator('#logAction').inputValue(), 'pending');
+  assert.deepEqual(await rows(), pendingRows);
+  assert.equal(await top(), anchor);
+  assert.equal(await origin.getAttribute('aria-selected'), 'true');
+  await app.evaluate(({ clipboard }) => clipboard.clear());
+  await p.getByRole('button', { name: 'Copy remote endpoint' }).click();
+  assert.equal(await app.evaluate(({ clipboard }) => clipboard.readText()), navigation[179].flow.remote);
+  await p.getByRole('button', { name: 'Back to pending record' }).click();
+  await until(async () => /Record ID\s+syn-179\b/.test(await p.locator('#logDetails').innerText()), 'return to origin');
+  assert.equal(await top(), anchor);
+  console.log('PASS cross-page outcome with Pending selected, 350 newer events and preserved scroll');
   console.log(
     'PASS SYNTHETIC navigation: missing/known/unavailable outcomes, copy IPv6, filters, paging, anchor, keyboard, pause/latest; ' +
       dir,

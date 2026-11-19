@@ -224,7 +224,7 @@ func (l *snapshotListener) Close() error {
 func (s *listReadState) publishAfter(e *Engine, operation string) error {
 	switch operation {
 	case "profile-status", "profile-start", "profile-stop", "profile-fetch",
-		"decision-log", "decision-log-get", "traffic-status", "essential-status",
+		"decision-log", "decision-log-get", "decision-log-outcome", "traffic-status", "essential-status",
 		"evaluation-readiness", "protection-readiness", "policy-view", "policy-explain", "decision-status":
 		return nil
 	default:

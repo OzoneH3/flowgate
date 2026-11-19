@@ -234,6 +234,7 @@ test('copy bridge permits only a loaded record id and a specific endpoint select
     { id: '' },
     { id: 'r1', endpoint: 'file' },
     { id: 'r1', text: 'arbitrary' },
+    { id: 'r1', outcomeOf: {} },
   ])
     assert.throws(() => L.logCopyRequest(value));
 });

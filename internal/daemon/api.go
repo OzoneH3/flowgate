@@ -254,7 +254,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						r.Capabilities = append(r.Capabilities, "daemon-udp-monitor-v1")
 					}
 					if e.Decisions != nil {
-						r.Capabilities = append(r.Capabilities, DecisionLogCapability)
+						r.Capabilities = append(r.Capabilities, DecisionLogCapability, DecisionLogOutcomeCapability)
 					}
 					if e.UsageHistory != nil {
 						r.Capabilities = append(r.Capabilities, accounting.HistoryCapability)
@@ -527,7 +527,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 									}
 								}
 							}
-						case "decision-log", "decision-log-get":
+						case "decision-log", "decision-log-get", "decision-log-outcome":
 							// Read-only history on either endpoint; no mutation, deletion or
 							// administration exists. Visibility follows observation scope.
 							if e.Decisions == nil {
@@ -543,7 +543,11 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 								}
 								decisionError(&r, err)
 							} else {
-								rec, err := e.Decisions.Get(q.DecisionID, cred.Uid, admin)
+								lookup := e.Decisions.Get
+								if q.Operation == "decision-log-outcome" {
+									lookup = e.Decisions.Outcome
+								}
+								rec, err := lookup(q.DecisionID, cred.Uid, admin)
 								if err == nil {
 									r.DecisionRecord = &rec
 								}

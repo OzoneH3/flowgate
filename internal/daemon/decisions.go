@@ -13,6 +13,7 @@ import (
 
 // DecisionLogCapability is advertised when a decision log is configured.
 const DecisionLogCapability = "decision-log-v1"
+const DecisionLogOutcomeCapability = "decision-log-outcome-v1"
 
 // Verdict outcomes reported by the queue for the packet that produced an event.
 const (

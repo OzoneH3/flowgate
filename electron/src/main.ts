@@ -857,7 +857,8 @@ app.whenReady().then(async () => {
     'log:older': () => decisionLog.older(),
     'log:live': (v: unknown) => decisionLog.setLive(v),
     'log:detail': (v: unknown) => decisionLog.detail(v),
-    'log:copy': (v: unknown) => clipboard.writeText(decisionLog.copyText(v)),
+    'log:outcome': (v: unknown) => decisionLog.outcome(v),
+    'log:copy': async (v: unknown) => clipboard.writeText(await decisionLog.copyText(v)),
   }))
     ipcMain.handle(channel, (e, v) => {
       trusted(e);

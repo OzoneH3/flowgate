@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -197,6 +198,9 @@ func TestDecisionLogAPIOnReadOnlyEndpoint(t *testing.T) {
 	e.Decisions = l
 	v := e.Observe(f, "udp")
 	e.RecordPacketOutcome(v, VerdictHeld, nil)
+	if _, err := e.Decide(v.ID, "allow", "once", uid, false); err != nil {
+		t.Fatal(err)
+	}
 	a.Owners[0].UID = uid + 1 // a foreign principal's request
 	g := f
 	g.Remote = netip.AddrPortFrom(g.Remote.Addr(), 9001)
@@ -218,16 +222,22 @@ func TestDecisionLogAPIOnReadOnlyEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	found := false
-	for _, c := range r.Capabilities {
-		found = found || c == DecisionLogCapability
+	for _, capability := range []string{DecisionLogCapability, DecisionLogOutcomeCapability} {
+		if !slices.Contains(r.Capabilities, capability) {
+			t.Fatalf("missing capability %s", capability)
+		}
 	}
 	p := r.DecisionLog
-	if !found || p == nil || len(p.Records) != 1 || p.Records[0].RequestID != v.ID || p.Scope != "self" || p.Health.Recording || p.Health.LogID == "" {
+	if p == nil || len(p.Records) != 2 || p.Records[0].RequestID != v.ID || p.Scope != "self" || p.Health.Recording || p.Health.LogID == "" {
 		t.Fatalf("ordinary read-only peer: %+v", r)
 	}
 	if _, err = Call(path, Request{Version: 1, Operation: "decision-log-get", DecisionID: p.Records[0].ID}); err != nil {
 		t.Fatal(err)
+	}
+	outcome, err := Call(path, Request{Version: 1, Operation: "decision-log-outcome", DecisionID: p.Records[1].ID})
+	if err != nil || outcome.DecisionRecord == nil || outcome.DecisionRecord.ID != p.Records[0].ID ||
+		outcome.DecisionRecord.Kind != decisionlog.KindFinal {
+		t.Fatalf("outcome after restart: %+v, %v", outcome, err)
 	}
 	for q, code := range map[string]string{`{"limit":500}`: "invalid_request", `{"before":"x"}`: "invalid_cursor", `{"log_id":"stale"}`: "invalid_cursor"} {
 		if r, _ := Call(path, Request{Version: 1, Operation: "decision-log", DecisionQuery: json.RawMessage(q)}); r.ErrorCode != code {

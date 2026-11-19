@@ -225,6 +225,40 @@ func (l *Log) Get(id string, uid uint32, admin bool) (Record, error) {
 	}
 	return decode(seq, doc, admin)
 }
+
+// Outcome resolves both ends of the link within one database snapshot.
+func (l *Log) Outcome(pendingID string, uid uint32, admin bool) (Record, error) {
+	if l == nil || l.db == nil {
+		return Record{}, qerr("unavailable", "decision log unavailable: %v", l.causeText())
+	}
+	if pendingID == "" || len(pendingID) > 64 {
+		return Record{}, qerr("invalid_request", "decision_id required")
+	}
+	query := `SELECT f.seq, f.document FROM decisions AS p JOIN decisions AS f
+		ON json_extract(f.document,'$.generation') = json_extract(p.document,'$.generation')
+		AND json_extract(f.document,'$.request_id') = json_extract(p.document,'$.request_id')
+		WHERE p.id = ? AND p.kind = 'pending' AND f.kind = 'final'
+		AND json_extract(p.document,'$.generation') <> ''
+		AND json_extract(p.document,'$.request_id') <> ''`
+	args := []any{pendingID}
+	if !admin {
+		query += " AND p.owner_uid = ? AND f.owner_uid = ?"
+		args = append(args, uid, uid)
+	}
+	var seq int64
+	var doc string
+	// A damaged or legacy log with conflicting visible finals has no exact outcome.
+	query += " GROUP BY p.id HAVING COUNT(*) = 1"
+	err := l.db.QueryRow(query, args...).Scan(&seq, &doc)
+	if err == sql.ErrNoRows {
+		return Record{}, qerr("not_found", "no recorded outcome available")
+	}
+	if err != nil {
+		return Record{}, qerr("unavailable", "decision log lookup failed: %v", err)
+	}
+	return decode(seq, doc, admin)
+}
+
 func decode(seq int64, doc string, admin bool) (Record, error) {
 	var r Record
 	if err := json.Unmarshal([]byte(doc), &r); err != nil {
