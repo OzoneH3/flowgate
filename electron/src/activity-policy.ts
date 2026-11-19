@@ -869,7 +869,9 @@ export class ActivityPolicy {
     // Never route an application-level action into a scoped rule: the setter acts on the node's
     // own rule only. Older daemons: endpoint-wide rules stand in for it; scoped ones are listed.
     const rules = policy ? (own ? [own] : []) : inv.zone || this.row?.applicationZone ? all : all.filter(ownShape);
-    const scoped = all.filter((r) => r.id !== own?.id && !rules.some((x) => x.id === r.id));
+    const additional = all.filter((r) => r.id !== own?.id && !rules.some((x) => x.id === r.id));
+    const wholeApplication = additional.filter((r) => policy && tier === 'application' && !pop.networkZone && !inv.zone && ownShape(r));
+    const scoped = additional.filter((r) => !wholeApplication.includes(r));
     const targetShort = inv.zone
       ? `All programs · ${pop.principal === 'machine' ? 'all users' : 'current user'}`
       : tier === 'process'
@@ -1042,7 +1044,9 @@ export class ActivityPolicy {
       if (this.checking) box.append(el('span', 'Checking…', 'qs-checking'));
       if (blocked) box.append(el('p', blocked, 'rule-note'));
     }
-    if (scoped.length) box.append(this.scopedList(scoped, busy, !!pop.networkZone));
+    if (wholeApplication.length)
+      box.append(this.ruleList(wholeApplication, busy, 'Additional whole-application rules'));
+    if (scoped.length) box.append(this.ruleList(scoped, busy, pop.networkZone ? 'Other rules' : 'Scoped rules'));
     for (const ref of inv.maskedRules) {
       if (ref.scope.direction === direction && tier === 'application' &&
           (ref.scope.network_zone || '') === (pop.networkZone || '')) box.append(this.maskedLine(ref));
@@ -1165,11 +1169,11 @@ export class ActivityPolicy {
     );
     return line;
   }
-  // Scoped rules are separate from the node state.
-  private scopedList(refs: PolicyRuleRef[], busy: boolean, zoned: boolean) {
+  // Additional rules are separate from the canonical setter target.
+  private ruleList(refs: PolicyRuleRef[], busy: boolean, heading: string) {
     const c = this.state!.control;
     const wrap = el('div', '', 'qs-scoped');
-    wrap.append(el('h4', `${zoned ? 'Other' : 'Scoped'} rules (${refs.length})`));
+    wrap.append(el('h4', `${heading} (${refs.length})`));
     for (const ref of refs) {
       const line = el('div', '', 'qs-scoped-rule');
       line.dataset.ruleId = ref.id;

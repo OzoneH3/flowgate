@@ -27,6 +27,9 @@ const control = makeRule('different-scope', 'allow', 'outgoing', 3390);
 const temporary = { ...old, id: 'temporary-deny', action: 'block', disabled: true,
   created: iso(start - 10_000), expires: expiry, filter: { ...old.filter, revision: 'previous' } };
 const rules = [ask, old, temporary, control];
+const remembered = { ...makeRule('remembered-block', 'block', 'incoming', 0), disabled: true };
+const scopedIncoming = makeRule('scoped-incoming-control', 'allow', 'incoming', 443);
+let retainedAsk = false;
 let compatibility = true;
 let expired = false;
 let sequence = 0;
@@ -36,7 +39,7 @@ function direction(direction, selected, time, applicationRule = null) {
   const refs = selected.map((r) => ({
     id: r.id, version: String(r.version), action: r.action, priority: r.priority, expires: r.expires,
     scope: r.filter, disabled: r.disabled, expired: r.expires === expiry && time >= Date.parse(expiry),
-    active: !r.disabled, kind: r === ask ? 'application' : 'scoped',
+    active: !r.disabled, kind: r === ask || r === remembered ? 'application' : 'scoped',
   }));
   return {
     direction, configured: applicationRule ? 'uniform' : 'scoped', action: applicationRule?.action,
@@ -44,7 +47,8 @@ function direction(direction, selected, time, applicationRule = null) {
     disabled_rules: refs.filter((r) => r.disabled).length, expired_rules: refs.filter((r) => r.expired).length,
     potential_overlapping_actions: false, configured_default: { known: true, action: 'ask', reason: 'Fixture' },
     runtime_default: { known: false, reason: 'Monitoring' }, enforcement,
-    application_rule: applicationRule ? refs[0] : null, scoped_rules: applicationRule ? 0 : refs.length,
+    application_rule: refs.find((r) => r.id === applicationRule?.id) ?? null,
+    scoped_rules: refs.filter((r) => r.kind === 'scoped').length,
   };
 }
 
@@ -65,20 +69,22 @@ function receive(readOnly) {
     const activity = observedActivity;
     const response = {
       version: 1, generation, read_only: readOnly, mode: readOnly ? 'host-monitor' : 'daemon-monitor',
-      server_time: now, activity, enforcement, rules, events: [],
+      server_time: now, activity, enforcement, rules: retainedAsk ? [...rules, remembered, scopedIncoming] : rules, events: [],
       capabilities: ['explicit-administrator-v1', 'stored-ask-v1',
         ...(compatibility ? [] : ['policy-explanations-v1', 'application-policy-v1'])],
       permissions: { role: 'administrator', observation_scope: 'machine', policy_scope: 'machine',
         can_manage_rules: !readOnly, can_decide: false },
     };
     if (request.operation === 'policy-view') response.policy_view = {
-      snapshot: { generation, token: expired ? 'after' : 'before', sequence: String(++sequence),
+      snapshot: { generation, token: retainedAsk ? 'retained' : expired ? 'after' : 'before', sequence: String(++sequence),
         evaluated_at: now, valid_until: expired ? undefined : expiry, meaning: 'Fixture' },
       activity_sequence: String(activity.sequence), activity_collected: activity.collected,
       activity_available: true, complete: true,
       rule_eligibility: Object.fromEntries(rules.map((r) => [r.id, { version: '1', masked: r === old && !expired }])),
       applications: [{ ref: 'fixture', identity: { key: appIdentity.key, revision: appIdentity.revision, uid: 1000 },
-        process_ids: [processID], incoming: direction('incoming', [ask], time, ask),
+        process_ids: [processID], incoming: retainedAsk
+          ? direction('incoming', [ask, remembered, scopedIncoming], time, remembered)
+          : direction('incoming', [ask], time, ask),
         outgoing: direction('outgoing', expired ? [old, temporary, control] : [temporary, control], time) }],
       rows: [{ row_id: 'fixture-socket', status: 'observed_native', reason: 'Fixture',
         application_ref: 'fixture', decision_authority: false }],
@@ -162,6 +168,21 @@ try {
   await label(state(control.id), 'Enabled');
   await wait('selected rule restored', async () => /Rule state\s+Enabled/.test(await page.locator('#ruleInfo').innerText()));
   console.log('Open Rules inventory and selected detail also refreshed from Masked by newer rule to Enabled');
+
+  retainedAsk = true;
+  await wait('fixture shows retained Ask', async () => (await snapshot()).control.policy?.snapshot?.token === 'retained');
+  await page.click('#activityTab');
+  await select();
+  await cell('incoming').click();
+  await label(popupState(ask.id), 'Enabled');
+  await label(popup.locator('.qs-scoped').filter({ has: page.locator('[data-rule-id="ask"]') }).locator('h4'),
+    'Additional whole-application rules (1)');
+  await label(popup.locator('.qs-scoped').filter({ has: page.locator('[data-rule-id="scoped-incoming-control"]') }).locator('h4'),
+    'Scoped rules (1)');
+  const canonical = popup.locator('[data-focus="qs:remembered-block:enabled"]');
+  assert.equal(await canonical.count(), 1);
+  assert.equal(await canonical.isChecked(), false);
+  console.log('Retained Ask / Enabled under Additional whole-application rules; scoped control kept separate; disabled Block stays the canonical setter target');
 } finally {
   if (desktop) {
     await desktop.evaluate(({ app }) => app.exit()).catch(() => {});
