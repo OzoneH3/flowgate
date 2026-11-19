@@ -180,7 +180,7 @@ func TestRuntimeUpdateWitnessMustBeValidAndExact(t *testing.T) {
 	}
 }
 
-func TestDisabledPermanentRememberedBlockRestoresOnlyItsApplicationAsk(t *testing.T) {
+func TestDisabledPermanentRememberedChoiceRestoresOnlyItsApplicationAsk(t *testing.T) {
 	now := time.Now()
 	ask := Rule{ID: "user:ask", Schema: 2, Executable: "/fixture/program", Action: "ask",
 		Created: now.Add(-time.Minute), Filter: Filter{Direction: "outgoing", Protocol: "*",
@@ -196,7 +196,9 @@ func TestDisabledPermanentRememberedBlockRestoresOnlyItsApplicationAsk(t *testin
 		{"enabled permanent", func(_, b *Rule) []Rule { b.Disabled = false; return nil }, false},
 		{"disabled timed", func(_, b *Rule) []Rule { b.Expires = now.Add(time.Minute); return nil }, false},
 		{"ordinary disabled", func(_, b *Rule) []Rule { b.ID = "user:direct"; return nil }, false},
-		{"disabled permanent Allow", func(_, b *Rule) []Rule { b.Action = "allow"; return nil }, false},
+		{"disabled permanent Allow", func(_, b *Rule) []Rule { b.Action = "allow"; return nil }, true},
+		{"enabled permanent Allow", func(_, b *Rule) []Rule { b.Action, b.Disabled = "allow", false; return nil }, false},
+		{"disabled timed Allow", func(_, b *Rule) []Rule { b.Action, b.Expires = "allow", now.Add(time.Minute); return nil }, false},
 		{"unbound Ask", func(a, _ *Rule) []Rule { a.ID = "user:other-ask"; return nil }, false},
 		{"disabled Ask", func(a, _ *Rule) []Rule { a.Disabled = true; return nil }, false},
 		{"expired Ask", func(a, _ *Rule) []Rule { a.Expires = now; return nil }, false},
@@ -225,7 +227,7 @@ func TestDisabledPermanentRememberedBlockRestoresOnlyItsApplicationAsk(t *testin
 				effective := EffectiveProgramRules(ordered, now)
 				if tc.want {
 					if len(effective) != 2 || effective[0].ID != a.ID || effective[1].ID != b.ID {
-						t.Fatalf("expected retained Ask followed by its disabled Block: %+v", effective)
+						t.Fatalf("expected retained Ask followed by its disabled choice: %+v", effective)
 					}
 				} else if len(effective) != 1 || effective[0].ID != b.ID {
 					t.Fatalf("unexpected active fallback: %+v", effective)

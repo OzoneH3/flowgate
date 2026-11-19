@@ -27,7 +27,7 @@ const control = makeRule('different-scope', 'allow', 'outgoing', 3390);
 const temporary = { ...old, id: 'temporary-deny', action: 'block', disabled: true,
   created: iso(start - 10_000), expires: expiry, filter: { ...old.filter, revision: 'previous' } };
 const rules = [ask, old, temporary, control];
-const remembered = { ...makeRule('remembered-block', 'block', 'incoming', 0), disabled: true };
+const remembered = { ...makeRule('remembered-choice', 'block', 'incoming', 0), disabled: true };
 const scopedIncoming = makeRule('scoped-incoming-control', 'allow', 'incoming', 443);
 let retainedAsk = false;
 let compatibility = true;
@@ -76,7 +76,7 @@ function receive(readOnly) {
         can_manage_rules: !readOnly, can_decide: false },
     };
     if (request.operation === 'policy-view') response.policy_view = {
-      snapshot: { generation, token: retainedAsk ? 'retained' : expired ? 'after' : 'before', sequence: String(++sequence),
+      snapshot: { generation, token: retainedAsk ? 'retained-' + remembered.action : expired ? 'after' : 'before', sequence: String(++sequence),
         evaluated_at: now, valid_until: expired ? undefined : expiry, meaning: 'Fixture' },
       activity_sequence: String(activity.sequence), activity_collected: activity.collected,
       activity_available: true, complete: true,
@@ -170,7 +170,7 @@ try {
   console.log('Open Rules inventory and selected detail also refreshed from Masked by newer rule to Enabled');
 
   retainedAsk = true;
-  await wait('fixture shows retained Ask', async () => (await snapshot()).control.policy?.snapshot?.token === 'retained');
+  await wait('fixture shows retained Ask', async () => (await snapshot()).control.policy?.snapshot?.token === 'retained-block');
   await page.click('#activityTab');
   await select();
   await cell('incoming').click();
@@ -179,10 +179,17 @@ try {
     'Additional whole-application rules (1)');
   await label(popup.locator('.qs-scoped').filter({ has: page.locator('[data-rule-id="scoped-incoming-control"]') }).locator('h4'),
     'Scoped rules (1)');
-  const canonical = popup.locator('[data-focus="qs:remembered-block:enabled"]');
+  const canonical = popup.locator('[data-focus="qs:remembered-choice:enabled"]');
   assert.equal(await canonical.count(), 1);
   assert.equal(await canonical.isChecked(), false);
-  console.log('Retained Ask / Enabled under Additional whole-application rules; scoped control kept separate; disabled Block stays the canonical setter target');
+  assert.equal(await popup.locator('.qs-block.current').count(), 1);
+  remembered.action = 'allow';
+  await wait('refreshed canonical Allow', async () => await popup.locator('.qs-allow.current').count() === 1);
+  await label(popupState(ask.id), 'Enabled');
+  await label(popup.locator('.qs-scoped').filter({ has: page.locator('[data-rule-id="ask"]') }).locator('h4'),
+    'Additional whole-application rules (1)');
+  assert.equal(await canonical.isChecked(), false);
+  console.log('Open popup: restored Ask / Enabled under Additional whole-application rules; disabled Block and Allow remain canonical');
 } finally {
   if (desktop) {
     await desktop.evaluate(({ app }) => app.exit()).catch(() => {});

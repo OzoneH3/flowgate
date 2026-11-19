@@ -109,12 +109,8 @@ func TestPersistentRememberAfterExpiredOverlay(t *testing.T) {
 				}
 				fallback, _ := identity.ParseFlow("udp", "incoming", "127.0.0.1:80", "127.0.0.1:9101")
 				got = e.Observe(fallback, "udp")
-				wantSource := "default-ask"
-				if action == "block" {
-					wantSource = ask.ID
-				}
-				if got.State != "awaiting-decision" || got.Rule != wantSource {
-					t.Fatalf("disabled choice prompted from %s, want %s: %+v", got.Rule, wantSource, got)
+				if got.State != "awaiting-decision" || got.Rule != ask.ID || got.AskRule == nil || got.AskRule.ID != ask.ID {
+					t.Fatalf("disabled choice did not restore original Ask %s: %+v", ask.ID, got)
 				}
 				if _, err := e.DeleteRule(e.Generation, edit.ID, &edit.Version, 1000, false); err != nil {
 					t.Fatal(err)

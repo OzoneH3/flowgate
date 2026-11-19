@@ -221,20 +221,17 @@ try {
     // Retire the preceding blocked connect before allowing new requests to prompt.
     await closeAlpha();
     await mutate('toggleRule');
-    const disabledSource = permanentAction === 'block' ? ask.id : 'default-ask';
-    const disabledAskStatus = permanentAction === 'block' ? 'Enabled' : 'Masked by newer rule';
     await wait('disabled choice and Ask status', async () =>
       (await ruleRow(remembered.id).locator('td').allTextContents()).at(-1) === 'Disabled' &&
-      (await ruleRow(ask.id).locator('td').allTextContents()).at(-1) === disabledAskStatus);
+      (await ruleRow(ask.id).locator('td').allTextContents()).at(-1) === 'Enabled');
     await closeAlpha();
     const disabledCount = await count();
     await command(outgoing);
     const [disabledAsk] = await held(1);
-    assert.equal(disabledAsk.rule, disabledSource);
+    assert.equal(disabledAsk.rule, ask.id);
     const disabledWindow = await prompt(disabledAsk.id);
     await wait('disabled choice prompt source', async () =>
-      (await disabledWindow.locator('#askSource').textContent())?.includes(
-        disabledSource === 'default-ask' ? 'default Ask' : disabledSource));
+      (await disabledWindow.locator('#askSource').textContent())?.includes(ask.id));
     await disabledWindow.screenshot({ path: path.join(run, 'disabled-choice-ask.png') });
     assert.equal((await pending()).some((request) => request.id === disabledAsk.id), true);
     assert.equal(await count(), disabledCount);
@@ -268,7 +265,7 @@ try {
     await wait('restored Ask released only after answer', async () => await count() === deleteCount + 1);
     console.log('PASS permanent ' + permanentAction + ': Ask ' + ask.id + ' v' + ask.version +
       ', saved ' + remembered.id + ' v' + remembered.version + '; TCP receiver delta ' + deliveries +
-      ' before and after restart and re-enable; disabled source ' + disabledSource +
+      ' before and after restart and re-enable; disabled source ' + disabledAsk.rule +
       '; deleted restored explicit Ask, receiver 0 held / 1 after each answer');
 
   } else {

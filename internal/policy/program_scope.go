@@ -84,7 +84,7 @@ func CurrentProgramRules(rules []Rule, now time.Time) []Rule {
 }
 
 // EffectiveProgramRules also exposes the retained Ask under a disabled
-// permanent application-wide remembered Block. Keep the disabled Block in the
+// permanent application-wide remembered choice. Keep the disabled choice in the
 // result so inventory can describe both rules and the quick setter keeps its target.
 func EffectiveProgramRules(rules []Rule, now time.Time) []Rule {
 	return programRules(rules, now, true)
@@ -111,7 +111,7 @@ func programRules(rules []Rule, now time.Time, restoreAsk bool) []Rule {
 		if r.Created.Before(latest[scope]) {
 			continue
 		}
-		if restoreAsk && r.Disabled && r.Action == "block" && r.Expires.IsZero() && strings.HasPrefix(r.ID, RememberOverlayIDPrefix) {
+		if restoreAsk && r.Disabled && (r.Action == "allow" || r.Action == "block") && r.Expires.IsZero() && strings.HasPrefix(r.ID, RememberOverlayIDPrefix) {
 			if ask := retainedApplicationAsk(r, scope, rules, now); ask != nil {
 				out = append(out, *ask)
 			}
@@ -122,8 +122,8 @@ func programRules(rules []Rule, now time.Time, restoreAsk bool) []Rule {
 }
 
 // Revive only the proven source Ask, and only when no other current record
-// would take its place if the disabled Block were removed.
-func retainedApplicationAsk(block Rule, scope Filter, rules []Rule, now time.Time) *Rule {
+// would take its place if the disabled choice were removed.
+func retainedApplicationAsk(choice Rule, scope Filter, rules []Rule, now time.Time) *Rule {
 	if scope.NetworkZone != "" || scope.Protocol != "*" || scope.RemoteAddress != "*" ||
 		scope.Remote != "" || scope.LocalPort != 0 || scope.RemotePort != 0 || scope.LocalAddress != "" ||
 		scope.InterfaceIndex != 0 || scope.InterfaceName != "" || scope.PeerService != (PeerService{}) {
@@ -133,11 +133,11 @@ func retainedApplicationAsk(block Rule, scope Filter, rules []Rule, now time.Tim
 	ambiguous := false
 	for i := range rules {
 		r := &rules[i]
-		if r.ID == block.ID || !r.FollowsUpdates() || (!r.Expires.IsZero() && !now.Before(r.Expires)) ||
+		if r.ID == choice.ID || !r.FollowsUpdates() || (!r.Expires.IsZero() && !now.Before(r.Expires)) ||
 			r.ProgramScope() != scope {
 			continue
 		}
-		if !r.Created.Before(block.Created) {
+		if !r.Created.Before(choice.Created) {
 			return nil
 		}
 		if prior == nil || r.Created.After(prior.Created) {
@@ -147,7 +147,7 @@ func retainedApplicationAsk(block Rule, scope Filter, rules []Rule, now time.Tim
 			ambiguous = true
 		}
 	}
-	if prior == nil || ambiguous || prior.Disabled || prior.Action != "ask" || !strings.HasPrefix(block.ID, RememberAskPrefix(prior.ID)) {
+	if prior == nil || ambiguous || prior.Disabled || prior.Action != "ask" || !strings.HasPrefix(choice.ID, RememberAskPrefix(prior.ID)) {
 		return nil
 	}
 	return prior
