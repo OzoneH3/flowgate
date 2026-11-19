@@ -108,8 +108,13 @@ func TestPersistentRememberAfterExpiredOverlay(t *testing.T) {
 					t.Fatalf("direct disable must update selected rule in place: %+v %v", edit, err)
 				}
 				fallback, _ := identity.ParseFlow("udp", "incoming", "127.0.0.1:80", "127.0.0.1:9101")
-				if got := e.Observe(fallback, "udp"); got.State != "awaiting-decision" || got.AskRule != nil {
-					t.Fatalf("disabled newer rule must still mask the explicit Ask: %+v", got)
+				got = e.Observe(fallback, "udp")
+				wantSource := "default-ask"
+				if action == "block" {
+					wantSource = ask.ID
+				}
+				if got.State != "awaiting-decision" || got.Rule != wantSource {
+					t.Fatalf("disabled choice prompted from %s, want %s: %+v", got.Rule, wantSource, got)
 				}
 				if _, err := e.DeleteRule(e.Generation, edit.ID, &edit.Version, 1000, false); err != nil {
 					t.Fatal(err)

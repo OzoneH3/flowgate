@@ -47,7 +47,7 @@ func (f Filter) targetsLocalFlow(flow identity.Flow) bool {
 // still undergo ordinary ownership checks. No application permission is inferred.
 func LoopbackRules(rules []Rule, f identity.Flow, now time.Time) []Rule {
 	out := []Rule{}
-	for _, r := range CurrentProgramRules(rules, now) {
+	for _, r := range EffectiveProgramRules(rules, now) {
 		x := r.Filter
 		if r.NetworkEndpoint || r.Disabled || (!r.Expires.IsZero() && !now.Before(r.Expires)) || !x.targetsLocalFlow(f) || x.Direction != f.Direction || !ProtocolMatches(x.Protocol, f.Protocol) {
 			continue

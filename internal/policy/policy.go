@@ -204,7 +204,7 @@ func EvaluateSessionObserved(rules []Rule, f identity.Flow, a identity.Attributi
 		return "block", "unsafe-attribution", nil
 	}
 	var matches []Rule
-	for _, r := range CurrentProgramRules(rules, now) {
+	for _, r := range EffectiveProgramRules(rules, now) {
 		if r.NetworkEndpoint {
 			continue
 		}

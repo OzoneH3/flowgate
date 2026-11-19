@@ -203,7 +203,7 @@ func summaryFor(a PolicyIdentity, direction, mode string, h *EnforcementStatus, 
 	actions := map[string]bool{}
 	broad := map[string]bool{}
 	active := []policy.Rule{}
-	for _, r := range policy.CurrentProgramRules(rules, now) {
+	for _, r := range policy.EffectiveProgramRules(rules, now) {
 		f := r.Filter
 		if !f.Process.IsZero() || f.AllPrograms {
 			continue
@@ -289,7 +289,7 @@ func (e *Engine) snapshotLocked(uid uint32, admin bool, h *EnforcementStatus, ex
 	sort.Slice(rules, func(i, j int) bool { return rules[i].ID < rules[j].ID })
 	refs := make([]PolicyRuleRef, 0, len(rules))
 	var expiry *time.Time
-	for _, r := range policy.CurrentProgramRules(rules, now) {
+	for _, r := range policy.EffectiveProgramRules(rules, now) {
 		refs = append(refs, e.ruleRefLocked(r, now))
 		if now.Before(r.Expires) && (expiry == nil || r.Expires.Before(*expiry)) {
 			t := r.Expires
@@ -342,7 +342,7 @@ func (e *Engine) PolicyView(generation, expected string, uid uint32, admin bool,
 	out := PolicyView{NetworkZones: e.Zones, Zones: e.zoneViews(rules, h, snapshot.EvaluatedAt), Snapshot: snapshot, ActivitySequence: strconv.FormatUint(activity.Sequence, 10), ActivityCollected: activity.Collected, Applications: []ApplicationPolicy{}, Rows: []PolicyAssociation{}, Complete: activity.Complete}
 	now := snapshot.EvaluatedAt
 	current := make(map[string]bool, len(rules))
-	for _, r := range policy.CurrentProgramRules(rules, now) {
+	for _, r := range policy.EffectiveProgramRules(rules, now) {
 		current[r.ID] = true
 	}
 	out.RuleEligibility = make(map[string]PolicyRuleEligibility, len(rules))
@@ -489,7 +489,7 @@ func (e *Engine) PolicyExplain(generation, expected string, eventIDs []string, u
 			result.Identity = &PolicyIdentity{a.Key, a.Revision, found.Attribution.Principal().UID}
 		}
 		for _, id := range ids {
-			for _, r := range policy.CurrentProgramRules(rules, snapshot.EvaluatedAt) {
+			for _, r := range policy.EffectiveProgramRules(rules, snapshot.EvaluatedAt) {
 				if r.ID == id {
 					result.Matching = append(result.Matching, e.ruleRefLocked(r, snapshot.EvaluatedAt))
 					break

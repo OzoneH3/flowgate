@@ -179,3 +179,58 @@ func TestRuntimeUpdateWitnessMustBeValidAndExact(t *testing.T) {
 		}
 	}
 }
+
+func TestDisabledPermanentRememberedBlockRestoresOnlyItsApplicationAsk(t *testing.T) {
+	now := time.Now()
+	ask := Rule{ID: "user:ask", Schema: 2, Executable: "/fixture/program", Action: "ask",
+		Created: now.Add(-time.Minute), Filter: Filter{Direction: "outgoing", Protocol: "*",
+			RemoteAddress: "*", Application: "app", Revision: "rev", UID: 1000}}
+	block := ask
+	block.ID, block.Action, block.Created, block.Disabled = RememberAskPrefix(ask.ID)+"choice", "block", now, true
+	for _, tc := range []struct {
+		name   string
+		change func(*Rule, *Rule) []Rule
+		want   bool
+	}{
+		{"disabled permanent", nil, true},
+		{"enabled permanent", func(_, b *Rule) []Rule { b.Disabled = false; return nil }, false},
+		{"disabled timed", func(_, b *Rule) []Rule { b.Expires = now.Add(time.Minute); return nil }, false},
+		{"ordinary disabled", func(_, b *Rule) []Rule { b.ID = "user:direct"; return nil }, false},
+		{"disabled permanent Allow", func(_, b *Rule) []Rule { b.Action = "allow"; return nil }, false},
+		{"unbound Ask", func(a, _ *Rule) []Rule { a.ID = "user:other-ask"; return nil }, false},
+		{"disabled Ask", func(a, _ *Rule) []Rule { a.Disabled = true; return nil }, false},
+		{"expired Ask", func(a, _ *Rule) []Rule { a.Expires = now; return nil }, false},
+		{"scoped Remember", func(a, b *Rule) []Rule {
+			a.Filter.RemotePort, b.Filter.RemotePort = 443, 443
+			return nil
+		}, false},
+		{"intervening ordinary mask", func(a, _ *Rule) []Rule {
+			intervening := *a
+			intervening.ID, intervening.Created, intervening.Disabled = "user:ordinary", now.Add(-time.Second), true
+			return []Rule{intervening}
+		}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, b := ask, block
+			rules := []Rule{a, b}
+			if tc.change != nil {
+				extra := tc.change(&a, &b)
+				rules = append([]Rule{a, b}, extra...)
+			}
+			for _, ordered := range [][]Rule{rules, append([]Rule{b, a}, rules[2:]...)} {
+				configured := CurrentProgramRules(ordered, now)
+				if len(configured) != 1 || configured[0].ID != b.ID {
+					t.Fatalf("canonical edit target changed: %+v", configured)
+				}
+				effective := EffectiveProgramRules(ordered, now)
+				if tc.want {
+					if len(effective) != 2 || effective[0].ID != a.ID || effective[1].ID != b.ID {
+						t.Fatalf("expected retained Ask followed by its disabled Block: %+v", effective)
+					}
+				} else if len(effective) != 1 || effective[0].ID != b.ID {
+					t.Fatalf("unexpected active fallback: %+v", effective)
+				}
+			}
+		})
+	}
+}

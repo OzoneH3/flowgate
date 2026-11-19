@@ -164,6 +164,10 @@ try {
     if (deliveries) await wait('held receiver write', async () => await count() === before + 4);
     await held(0);
 
+    const closeAlpha = async () => {
+      await command({ op: 'close', name: 'alpha' });
+      await command({ op: 'settle', name: 'alpha' });
+    };
     const ruleRow = (id) => main.locator(`#ruleRows tr[data-id="${id}"]`);
     const inventory = async () => {
       await main.locator('#rulesTab').click();
@@ -172,7 +176,7 @@ try {
         (await ruleRow(remembered.id).locator('td').allTextContents()).at(-1) === 'Enabled');
     };
     const attempt = async () => {
-      await command({ op: 'close', name: 'alpha' });
+      await closeAlpha();
       const received = await count();
       const since = new Date().toISOString();
       await command(outgoing);
@@ -191,7 +195,7 @@ try {
     await inventory();
     await attempt();
 
-    await command({ op: 'close', name: 'alpha' });
+    await closeAlpha();
     const oldGeneration = generation;
     ({ generation } = await command({ op: 'restart' }));
     assert.notEqual(generation, oldGeneration);
@@ -214,31 +218,45 @@ try {
         await main.locator('#confirmYes').click();
       }
     };
+    // Retire the preceding blocked connect before allowing new requests to prompt.
+    await closeAlpha();
     await mutate('toggleRule');
-    await wait('disabled choice still masks Ask', async () =>
+    const disabledSource = permanentAction === 'block' ? ask.id : 'default-ask';
+    const disabledAskStatus = permanentAction === 'block' ? 'Enabled' : 'Masked by newer rule';
+    await wait('disabled choice and Ask status', async () =>
       (await ruleRow(remembered.id).locator('td').allTextContents()).at(-1) === 'Disabled' &&
-      (await ruleRow(ask.id).locator('td').allTextContents()).at(-1) === 'Masked by newer rule');
-    await command({ op: 'close', name: 'alpha' });
+      (await ruleRow(ask.id).locator('td').allTextContents()).at(-1) === disabledAskStatus);
+    await closeAlpha();
     const disabledCount = await count();
     await command(outgoing);
-    const [defaultAsk] = await held(1);
-    assert.equal(defaultAsk.rule, 'default-ask');
+    const [disabledAsk] = await held(1);
+    assert.equal(disabledAsk.rule, disabledSource);
+    const disabledWindow = await prompt(disabledAsk.id);
+    await wait('disabled choice prompt source', async () =>
+      (await disabledWindow.locator('#askSource').textContent())?.includes(
+        disabledSource === 'default-ask' ? 'default Ask' : disabledSource));
+    await disabledWindow.screenshot({ path: path.join(run, 'disabled-choice-ask.png') });
+    assert.equal((await pending()).some((request) => request.id === disabledAsk.id), true);
     assert.equal(await count(), disabledCount);
-    await command({ op: 'close', name: 'alpha' });
+    await disabledWindow.locator('#allow').click();
+    await wait('disabled choice held until Allow Once', async () => await count() === disabledCount + 1);
+    await held(0);
+    await closeAlpha();
 
     await mutate('toggleRule');
     await inventory();
+    await attempt();
+    await closeAlpha();
     await mutate('deleteRule');
     await wait('delete reveals original Ask', async () =>
       (await ruleRow(remembered.id).count()) === 0 &&
       (await ruleRow(ask.id).locator('td').allTextContents()).at(-1) === 'Enabled');
-    await command({ op: 'close', name: 'alpha' });
+    await closeAlpha();
     const deleteCount = await count();
     await command(outgoing);
-    // A closed probe can stay in the pending list until its deadline. Match
-    // the new TCP attempt by its distinct local endpoint.
-    const restored = await wait('fresh attempt held by restored Ask', async () =>
-      (await pending()).find((request) => request.flow.local !== defaultAsk.flow.local));
+    const [restored] = await held(1);
+    assert.notEqual(restored.id, disabledAsk.id);
+
     const restoredWindow = await prompt(restored.id);
     await wait('restored explicit Ask source', async () =>
       (await restoredWindow.locator('#askSource').textContent())?.includes(ask.id));
@@ -250,7 +268,8 @@ try {
     await wait('restored Ask released only after answer', async () => await count() === deleteCount + 1);
     console.log('PASS permanent ' + permanentAction + ': Ask ' + ask.id + ' v' + ask.version +
       ', saved ' + remembered.id + ' v' + remembered.version + '; TCP receiver delta ' + deliveries +
-      ' before and after restart; disabled default Ask; deleted restored explicit Ask, receiver 0 held / 1 after answer');
+      ' before and after restart and re-enable; disabled source ' + disabledSource +
+      '; deleted restored explicit Ask, receiver 0 held / 1 after each answer');
 
   } else {
     await answer(after.id, 'block');

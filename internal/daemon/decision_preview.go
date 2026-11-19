@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"crypto/sha256"
 	"flowgate/internal/identity"
 	"flowgate/internal/policy"
 	"fmt"
@@ -154,15 +153,8 @@ func preservesPromptAsk(v *Event, old *policy.Rule, rule policy.Rule, now time.T
 		(old.Expires.IsZero() || old.Expires.After(rule.Expires))
 }
 
-// Existing unmarked rules carry no proof that Remember created them. Reserve
-// an ID namespace for new overlays so reuse needs no rule schema migration.
-func rememberAskPrefix(askID string) string {
-	hash := sha256.Sum256([]byte(askID))
-	return fmt.Sprintf("%s%x:", policy.RememberOverlayIDPrefix, hash[:12])
-}
-
 func reusableRememberOverlay(old, ask *policy.Rule, now time.Time) bool {
-	return old != nil && ask != nil && strings.HasPrefix(old.ID, rememberAskPrefix(ask.ID)) &&
+	return old != nil && ask != nil && strings.HasPrefix(old.ID, policy.RememberAskPrefix(ask.ID)) &&
 		old.FollowsUpdates() && !old.Disabled && (old.Action == "allow" || old.Action == "block") &&
 		!old.Expires.IsZero() && !now.Before(old.Expires) && old.ProgramScope() == ask.ProgramScope()
 }
@@ -271,7 +263,7 @@ func (e *Engine) PreviewDecision(generation, id, action, scope, zone, revision s
 	if preservesPromptAsk(v, old, rule, now) {
 		rule.Priority = old.Priority
 		preservedAsk = &RuleVersionRef{old.ID, old.Version}
-		rule.ID = rememberAskPrefix(old.ID) + randomID()[:24]
+		rule.ID = policy.RememberAskPrefix(old.ID) + randomID()[:24]
 		if !rule.Expires.IsZero() {
 			for i := range e.rules {
 				slot := &e.rules[i]
