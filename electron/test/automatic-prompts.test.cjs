@@ -81,9 +81,12 @@ test('queued address Remember stays on already waiting peers of the same Ask and
   assert.deepEqual(carryEndpoint('g', bSamePort), { field: 'endpoint', duration: 0 });
   assert.equal(carryEndpoint('g', withPort(b, 443)), undefined);
   assert.equal(carryEndpoint('g', { ...bOtherAddress, remembered_filter: { ...bOtherAddress.remembered_filter, remote_port: 0 } }), undefined);
-  const timedEndpoint = { ...endpointChoice, scope: 'application', duration_seconds: 60 };
-  assert.deepEqual(queuedRemember(s, timedEndpoint)('g', bOtherAddress), { field: 'endpoint', duration: 60 });
-  assert.equal(queuedRemember(s, { ...timedEndpoint, duration_seconds: 300 }), undefined);
+  const timedEndpoint = { ...endpointChoice, scope: 'application' };
+  for (const { seconds } of REMEMBER_DURATIONS.filter(({ seconds }) => seconds > 0)) {
+    const carryTimedEndpoint = queuedRemember(s, { ...timedEndpoint, duration_seconds: seconds });
+    assert.deepEqual(carryTimedEndpoint('g', bOtherAddress), { field: 'endpoint', duration: seconds });
+  }
+  assert.equal(queuedRemember(s, { ...timedEndpoint, duration_seconds: 120 }), undefined);
 });
 // 51 identical attempts (same backend request_group), delivered out of order.
 const burst = (n = 51, extra = []) => {

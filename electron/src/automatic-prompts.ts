@@ -87,7 +87,6 @@ export function queuedRememberSelection(choice: Decision): QueuedRememberSelecti
   const field = fields.address && fields.port ? 'endpoint' : fields.address ? 'address' : 'port';
   if (choice.scope === 'persistent') return { field, duration: 0 };
   if (choice.scope !== 'application' || !choice.duration_seconds) return;
-  if (field === 'endpoint' && choice.duration_seconds !== 60) return;
   const preset = REMEMBER_DURATIONS.find(({ seconds }) => seconds === choice.duration_seconds);
   if (preset) return { field, duration: preset.seconds };
 }

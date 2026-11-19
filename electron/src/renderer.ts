@@ -162,9 +162,8 @@ const queuedField = promptID && promptParams.get('rememberField');
 const queuedDuration = REMEMBER_DURATIONS.find(
   ({ seconds }) => String(seconds) === promptParams.get('rememberDuration'),
 )?.seconds;
-const queuedEndpoint = queuedField === 'endpoint' && (queuedDuration === 0 || queuedDuration === 60);
-const queuedAddress = queuedEndpoint || (queuedField === 'address' && queuedDuration !== undefined);
-const queuedPort = queuedEndpoint || (queuedField === 'port' && queuedDuration !== undefined);
+const queuedAddress = queuedDuration !== undefined && (queuedField === 'address' || queuedField === 'endpoint');
+const queuedPort = queuedDuration !== undefined && (queuedField === 'port' || queuedField === 'endpoint');
 let rememberOn = queuedAddress || queuedPort,
   rememberFields: RememberFields = { ...DEFAULT_REMEMBER, address: queuedAddress, port: queuedPort },
   rememberDuration = rememberOn ? queuedDuration ?? 0 : 0,
