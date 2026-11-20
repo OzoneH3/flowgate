@@ -839,8 +839,7 @@ func (e *Engine) RetainedState(id, fingerprint string) string {
 		} else {
 			v.Reason = "decision lease expired before retained verdict"
 		}
-		v.finalLogged = false // a revised disposition of an earlier Allow
-		e.recordFinal(v, "block", "identity_changed", "", v.Reason+"; held packets drop", nil, nil, "deferred", "")
+		e.recordRetainedBlock(v, "identity_changed", v.Reason+"; held packets drop", nil)
 		return "drop"
 	}
 	// Current configured Block overrides even a cached Once grant. Process tier
@@ -848,8 +847,7 @@ func (e *Engine) RetainedState(id, fingerprint string) string {
 	if action, rule, matches := e.evaluateLocked(e.rules, v.Flow, a, e.Now()); action == "block" {
 		v.State, v.Rule, v.Reason = "blocked", rule, "Current configured Block superseded retained admission"
 		v.Conflicts, v.decided = matches, e.ruleLocked(rule)
-		v.finalLogged = false
-		e.recordFinal(v, "block", "policy_change", "", v.Reason, v.decided, nil, "deferred", "")
+		e.recordRetainedBlock(v, "policy_change", v.Reason, v.decided)
 		return "drop"
 	}
 	// Once grants use the event lease; remembered grants must still be live.

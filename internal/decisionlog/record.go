@@ -117,6 +117,9 @@ type Record struct {
 	Gap      *Gap   `json:"gap,omitempty"`
 
 	Revalidation *identity.PendingRevalidation `json:"revalidation,omitempty"`
+	// RelatedRequestID associates a later packet audit with an earlier request
+	// without making the audit its linked outcome.
+	RelatedRequestID string `json:"related_request_id,omitempty"`
 }
 
 func Snapshot(r policy.Rule) *RuleSnapshot {

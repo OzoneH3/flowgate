@@ -85,7 +85,25 @@ func (e *Engine) recordFinal(v *Event, action, source, scope, reason string, rul
 		return
 	}
 	v.finalLogged = true
+	e.writeDecisionRecord(e.baseRecord(v, decisionlog.KindFinal), v, action, source, scope, reason, rule, by, verdict, detail)
+}
+
+// A late rejection is still a Block, but cannot replace or compete with a
+// request's already recorded outcome. Use the same audit and visibility fields.
+func (e *Engine) recordRetainedBlock(v *Event, source, reason string, rule *policy.Rule) {
+	if e.Decisions == nil {
+		return
+	}
+	if !v.finalLogged {
+		e.recordFinal(v, "block", source, "", reason, rule, nil, "deferred", "")
+		return
+	}
 	r := e.baseRecord(v, decisionlog.KindFinal)
+	r.RelatedRequestID, r.RequestID = r.RequestID, ""
+	e.writeDecisionRecord(r, v, "block", source, "", reason, rule, nil, "deferred", "")
+}
+
+func (e *Engine) writeDecisionRecord(r decisionlog.Record, v *Event, action, source, scope, reason string, rule *policy.Rule, by *uint32, verdict, detail string) {
 	if rule != nil && rule.NetworkEndpoint {
 		scope = "network-endpoint"
 	}

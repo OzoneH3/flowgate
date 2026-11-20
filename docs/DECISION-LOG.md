@@ -29,6 +29,12 @@ by a final with the same `request_id`; after a crash (not a clean stop) a pendin
 record can remain without a final. **Open recorded outcome** searches retained history independently of the page
 or filter. A missing or invisible final leaves the outcome unknown.
 
+If the daemon later blocks a held packet during the final ownership or policy
+check, it records a separate Block with the recheck reason. That row uses
+`related_request_id` to identify the earlier request. The original request's
+outcome remains the earlier decision. An identity rejection while the request
+is still pending is itself the linked final Block.
+
 Deduplication follows an engine admission attempt (`request_id`), not a minute of
 matching action/rule/endpoint values. A TCP attempt uses namespace, direction,
 protocol, endpoints and initial SYN sequence within the engine lease. Retransmitted
