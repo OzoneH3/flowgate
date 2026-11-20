@@ -173,6 +173,7 @@ func compatibleNFT(b []byte) error {
 		}
 		var r struct {
 			Family, Table, Chain string
+			Handle               uint64
 			Expr                 any
 		}
 		if json.Unmarshal(raw, &r) != nil || r.Expr == nil {
@@ -194,6 +195,19 @@ func compatibleNFT(b []byte) error {
 							return fmt.Errorf("opaque mark table cannot be exported")
 						}
 					case "conntrack", "addrtype", "MASQUERADE", "DNAT", "SNAT":
+					case "icmp", "icmp6", "hl", "rt", "LOG", "REJECT":
+						// These matches inspect protocol headers. LOG continues
+						// traversal and REJECT denies the packet like native
+						// reject. None uses reserved marks to choose a verdict.
+						ip := r.Family == "ip"
+						ip6 := r.Family == "ip6"
+						match := xt["type"] == "match" && (ip && xt["name"] == "icmp" ||
+							ip6 && (xt["name"] == "icmp6" || xt["name"] == "hl" || xt["name"] == "rt"))
+						target := xt["type"] == "target" && (ip || ip6) &&
+							(xt["name"] == "LOG" || xt["name"] == "REJECT")
+						if len(x) != 1 || len(xt) != 2 || !(match || target) {
+							return fmt.Errorf("unsupported opaque expression %v (%v)", xt["name"], xt["type"])
+						}
 					default:
 						return fmt.Errorf("unsupported opaque expression %v", xt["name"])
 					}
@@ -239,6 +253,9 @@ func compatibleNFT(b []byte) error {
 			return nil
 		}
 		if err := visit(r.Expr); err != nil {
+			if r.Handle != 0 {
+				return fmt.Errorf("%s/%s/%s rule handle %d: %w", r.Family, r.Table, r.Chain, r.Handle, err)
+			}
 			return fmt.Errorf("%s/%s/%s: %w", r.Family, r.Table, r.Chain, err)
 		}
 	}

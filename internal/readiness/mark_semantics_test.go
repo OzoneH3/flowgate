@@ -111,3 +111,46 @@ func TestNativeMarkReadsAreBounded(t *testing.T) {
 		}
 	}
 }
+
+// Stock CachyOS UFW showed these four handles as xt matches. The parallel
+// iptables-nft export identified ICMP types 3, 11, 12 and 8 in the same order.
+func TestStockUFWICMPCompatibility(t *testing.T) {
+	var rules []string
+	for handle := 102; handle <= 105; handle++ {
+		rules = append(rules, fmt.Sprintf(`{"rule":{"family":"ip","table":"filter","chain":"ufw-before-input","handle":%d,"expr":[{"match":{"op":"==","left":{"payload":{"protocol":"ip","field":"protocol"}},"right":"icmp"}},{"xt":{"type":"match","name":"icmp"}},{"counter":{"packets":0,"bytes":0}},{"accept":null}]}}`, handle))
+	}
+	rules = append(rules,
+		`{"rule":{"family":"ip","table":"filter","chain":"ufw-after-logging-input","handle":135,"expr":[{"limit":{"rate":3,"burst":10,"per":"minute"}},{"counter":{"packets":9,"bytes":513}},{"xt":{"type":"target","name":"LOG"}}]}}`,
+		`{"rule":{"family":"ip","table":"filter","chain":"ufw-user-limit","handle":141,"expr":[{"counter":{"packets":0,"bytes":0}},{"xt":{"type":"target","name":"REJECT"}}]}}`,
+		`{"rule":{"family":"ip6","table":"filter","chain":"ufw6-before-input","handle":52,"expr":[{"xt":{"type":"match","name":"rt"}},{"counter":{"packets":0,"bytes":0}},{"drop":null}]}}`,
+		`{"rule":{"family":"ip6","table":"filter","chain":"ufw6-before-input","handle":66,"expr":[{"match":{"op":"==","left":{"meta":{"key":"l4proto"}},"right":"ipv6-icmp"}},{"xt":{"type":"match","name":"icmp6"}},{"xt":{"type":"match","name":"hl"}},{"counter":{"packets":0,"bytes":0}},{"accept":null}]}}`,
+	)
+	nft := `{"nftables":[` + strings.Join(rules, ",") + `]}`
+	env := fakeEnv()
+	env.Run = func(_ context.Context, cmd string, args ...string) ([]byte, error) {
+		if cmd == "ip" {
+			return []byte(`[]`), nil
+		}
+		t.Fatalf("pure ICMP compatibility should not need a side export: %s %v", cmd, args)
+		return nil, nil
+	}
+	if check := compatibleFirewallRules(context.Background(), env, []byte(nft)); check.Status != Ready {
+		t.Fatal(check)
+	}
+	for _, tc := range []struct{ old, replacement string }{
+		{`"type":"match","name":"icmp"`, `"type":"target","name":"icmp"`},
+		{`"type":"match","name":"icmp"`, `"type":"match","name":"recent"`},
+		{`"type":"match","name":"icmp"`, `"type":"match","name":"icmp6"`},
+		{`"type":"match","name":"icmp"`, `"name":"icmp"`},
+		{`{"accept":null}`, `{"queue":{"num":101}}`},
+	} {
+		check := compatibleFirewallRules(context.Background(), env,
+			[]byte(strings.Replace(nft, tc.old, tc.replacement, 1)))
+		if check.Status != Blocked || !strings.Contains(check.Detail, "ip/filter/ufw-before-input rule handle 102") {
+			t.Fatalf("unproven expression not localized: %+v", check)
+		}
+	}
+	if err := compatibleNFT([]byte(strings.Replace(nft, `"type":"target","name":"LOG"`, `"type":"watcher","name":"LOG"`, 1))); err == nil || !strings.Contains(err.Error(), "ufw-after-logging-input rule handle 135") {
+		t.Fatalf("wrong-kind LOG did not remain blocked: %v", err)
+	}
+}
