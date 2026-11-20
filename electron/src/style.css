@@ -1744,8 +1744,9 @@ body.hide-sidebar #activityView > aside { display:none; }
 .inactive-rule-add-label { color:#bbb; }
 .inactive-rule-add .qs-row-links { margin-left:auto; }
 /* Release identity beside the title: GUI release + build date/time; daemon only on mismatch. */
-.build-version { margin-left: 6px; font-size: 11px; color: #8a8f98; white-space: nowrap; }
-.build-version.mismatch { color: #d9a441; }
+#aboutFlowGate { width: min(480px, calc(100vw - 36px)); }
+#aboutFlowGate .about-build { white-space: pre-line; overflow-wrap: anywhere; line-height: 1.6; }
+
 
 /* Backend-owned cumulative observations; independent from live Activity rates. */
 #observedUsageView .usage-main { padding: 38px 10px 10px; }

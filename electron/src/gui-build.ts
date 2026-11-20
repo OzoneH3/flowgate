@@ -68,5 +68,9 @@ export function readGuiBuild(appPath: string): GuiBuild {
     typeof manifest.built_at === 'string' && ISO.test(manifest.built_at) && Number.isFinite(Date.parse(manifest.built_at))
       ? manifest.built_at
       : undefined;
-  return { state: 'verified', source, builtAt, reason: 'GUI files match the release manifest.' };
+  const version = typeof manifest.version === 'string' &&
+    manifest.version.length <= 64 &&
+    /^\d+\.\d+\.\d+(?:-[a-zA-Z0-9]+(?:\.[a-zA-Z0-9]+)*)?$/.test(manifest.version)
+    ? manifest.version : undefined;
+  return { state: 'verified', source, builtAt, ...(version ? { version } : {}), reason: 'GUI files match the release manifest.' };
 }

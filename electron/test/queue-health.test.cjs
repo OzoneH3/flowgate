@@ -10,6 +10,20 @@ test('queue warning is connected-only and clears independently of cumulative tot
 test('ordinary queue health has no invented machine detail',()=>{
  const h=parseQueueHealth({state:'pressure',sampled_at:now});assert.equal(h.sessions,undefined);assert.match(queueHealthWarning(true,h).text,/Queue pressure/);
 });
+test('daemon first-proof totals coexist with numeric queue gauges', () => {
+ const raw = {...admin, state: 'ready', sessions: [{...admin.sessions[0], gauges: {
+   active_workers: 0, first_proof_history_rows: 9, first_proof_admissions: '18446744073709551615',
+   first_proof_denied_tails_reclaimed: '0', first_proof_history_evictions: '0',
+   first_proof_history_full_observations: '0',
+ }}]};
+ const ready = parseQueueHealth(raw);
+ assert.equal(ready.state, 'ready');
+ assert.equal(ready.sessions[0].gauges.first_proof_admissions, '18446744073709551615');
+ assert.equal(queueHealthWarning(true, ready), undefined);
+ raw.sessions[0].gauges.first_proof_admissions = '18446744073709551616';
+ assert.match(queueHealthWarning(true, parseQueueHealth(raw)).title, /GUI could not read/);
+ assert.match(queueHealthWarning(true, parseQueueHealth({state:'unavailable',sampled_at:now})).title, /daemon reports/);
+});
 test('bad diagnostics never reject connection or imply readiness',()=>{
  for(const bad of [null,{}, {state:'future',sampled_at:now},{...admin,sessions:Array(9).fill(admin.sessions[0])},{...admin,sessions:[{...admin.sessions[0],counters:{deadline_rejections:3}}]},{...admin,sessions:[{...admin.sessions[0],counters:{deadline_rejections:'18446744073709551616'}}]},{...admin,sessions:[{...admin.sessions[0],gauges:{active_workers:-1}}]}]) assert.equal(parseQueueHealth(bad).state,'unavailable');
 });

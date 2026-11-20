@@ -1,4 +1,5 @@
 import type { ClientState } from './protocol';
+import { evaluationLabel } from './evaluation-model';
 export const PROTECTION_CAPABILITY = 'continuous-firewall-v1';
 export type ProtectionProfile = 'incoming' | 'both';
 export interface ProtectionStatus {
@@ -117,6 +118,50 @@ export function stateProtection(state: ClientState) {
     ? state.control
     : state.observation;
   return protectionLabel(source.protection, source.connected);
+}
+
+export function firewallPresentation(control?: ClientState['control']) {
+  let status = 'Connecting';
+  let detail = 'Waiting for the firewall controller.';
+  let countdown = '';
+  if (control?.connected) {
+    const p = control.protection;
+    const e = control.enforcement;
+    const evaluation = !e?.state || control.evaluation?.state === e.state
+      ? control.evaluation : undefined;
+    const current = p?.state || e?.state || evaluation?.state;
+    if (current === 'active') {
+      const profile = p?.profile || evaluation?.profile || e?.profile;
+      status = profile === 'both' ? 'Both' : profile === 'incoming' ? 'Incoming' : 'Active';
+    } else if (current === 'stopped') {
+      const cleanup = p?.cleanup || evaluation?.cleanup;
+      status = cleanup === 'unconfirmed' || cleanup === 'pending' ? 'Check cleanup' : 'Off';
+    } else if (current && current !== 'unknown') {
+      status = current.charAt(0).toUpperCase() + current.slice(1);
+    } else {
+      status = 'Unavailable';
+    }
+    if (p) {
+      detail = [protectionLabel(p, true), p.reason].filter(Boolean).join('\n');
+    } else if (evaluation) {
+      const remaining = Date.parse(evaluation.stops_at) - (control.serverNow ?? Date.now());
+      detail = evaluationLabel(evaluation, remaining);
+      if (evaluation.state === 'active') {
+        const seconds = Math.ceil(remaining / 1000);
+        countdown = seconds > 0
+          ? `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+          : 'confirming expiry';
+      }
+    } else if (e) {
+      detail = [status === 'Off' ? 'Firewall is off.' : 'Firewall status: ' + status, e.detail].filter(Boolean).join('\n');
+    } else {
+      detail = 'Connected to the daemon, but no enforcement status was reported.';
+    }
+  } else if (control) {
+    status = 'Offline';
+    detail = 'The firewall controller is disconnected. Current enforcement could not be confirmed.';
+  }
+  return { status, detail, menu: 'Firewall · ' + (countdown || status) };
 }
 
 /**

@@ -590,7 +590,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
   }, 500);
   const tools = node('div', '');
   tools.className = 'extendedbar';
-  tools.innerHTML = `<button id="extendedEnable">Enable extended monitoring…</button><button id="extendedStop">Stop extended monitoring</button><span id="extendedStatus"></span>`;
+  tools.innerHTML = `<button id="extendedEnable">Start UDP monitoring…</button><button id="extendedStop">Stop UDP monitoring…</button><span id="extendedStatus" role="status"></span>`;
   document.querySelector('#monitoringMenu .menu-panel')!.append(tools);
   const perform = async (a: 'enable' | 'stop') => {
     try {
@@ -604,21 +604,29 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
     }
   };
   let extendedError = '';
-  const badge = node('button', 'UDP monitoring') as HTMLButtonElement;
+  const badge = node('button', 'UDP: …') as HTMLButtonElement;
   badge.id = 'extendedBadge';
   badge.title = 'Extended UDP monitoring; independent of firewall enforcement';
   document.querySelector('.toolbar')!.insertBefore(badge, $('observerStatus'));
-  $('extendedEnable').onclick = async () => {
-    const e = await window.flowgate.extendedState();
-    confirmAction(
-      'Extended UDP monitoring',
-      e.mode === 'daemon'
-        ? 'Enable UDP measurement in the connected daemon? No sudo prompt or firewall change. UDP counts socket API bytes across all peers, separate from TCP transport bytes. Collection continues when FlowGate closes until explicitly stopped.'
-        : 'Use legacy UDP collection? This backend does not advertise daemon-owned monitoring. Authenticate separately in the terminal. No firewall activation; socket API bytes remain separate from TCP transport bytes.',
-      () => perform('enable'),
-    );
+  const review = async (action: 'enable' | 'stop') => {
+    try {
+      const e = await window.flowgate.extendedState();
+      const starting = action === 'enable';
+      if (!(starting ? e.canEnable : e.canStop))
+        throw Error('UDP monitoring status changed. Review the current state in Tools.');
+      const label = starting ? 'Start UDP monitoring' : 'Stop UDP monitoring';
+      const text = starting
+        ? 'FlowGate will measure UDP socket bytes across all peers. UDP measurements are separate from TCP measurements. Collection keeps running when you close the GUI. ' +
+          (e.mode === 'daemon' ? 'The daemon handles the request without a sudo prompt.' : 'The legacy collector requires authentication in a separate terminal.')
+        : 'FlowGate will stop collecting new UDP measurements and live UDP rates will become unavailable. Previously recorded usage remains available.';
+      confirmAction(label, text + ' TCP monitoring and firewall protection stay as they are.', () => perform(action), label);
+    } catch (error) {
+      extendedError = String(error);
+      $('extendedStatus').textContent = extendedError;
+    }
   };
-  $('extendedStop').onclick = () => perform('stop');
+  $('extendedEnable').onclick = () => void review('enable');
+  $('extendedStop').onclick = () => void review('stop');
   let extendedBusy = false;
   setInterval(async () => {
     if (extendedBusy || document.hidden) return;
@@ -627,18 +635,22 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
       const e = await window.flowgate.extendedState(),
         u = state?.observation.activity?.udp;
       const label = e.mode === 'daemon' ? e.state : u?.state || 'disabled';
-      badge.textContent = `UDP monitoring · ${label}${e.partial ? ' *' : ''}`;
-      badge.title = `Extended monitoring (${e.mode === 'daemon' ? 'daemon-owned' : 'legacy'}) · ${e.message}`;
+      const short = label === 'active' ? 'On' : label === 'disabled' ? 'Off'
+        : label === 'unknown' ? 'Offline' : label === 'unsupported' ? 'Unavailable'
+        : label.charAt(0).toUpperCase() + label.slice(1);
+      badge.textContent = `UDP: ${short}${e.partial ? '*' : ''}`;
+      badge.title = `UDP monitoring: ${label}${e.partial ? ' (partial coverage)' : ''}. ${e.message}`;
+      badge.setAttribute('aria-label', `UDP monitoring: ${short}${e.partial ? ', partial coverage' : ''}`);
       $('extendedStatus').textContent =
         e.mode === 'daemon'
           ? `${e.state}${e.partial ? ' · partial coverage' : ''} · Measurements: ${e.canView ? 'permitted' : 'not authorized'} · Collector control: ${e.canControl ? 'permitted' : 'read-only'}. ${e.message} ${extendedError}`
           : `Legacy path · UDP ${label} · ${u?.reason || 'No collector snapshot'} · ${extendedError || e.message}`;
-      $<HTMLButtonElement>('extendedEnable').textContent =
-        e.mode === 'daemon' ? 'Enable extended monitoring…' : 'Enable legacy monitoring…';
       $<HTMLButtonElement>('extendedEnable').disabled = !e.canEnable;
       $<HTMLButtonElement>('extendedStop').disabled = !e.canStop;
     } catch (e) {
-      badge.textContent = 'UDP monitoring · unknown';
+      badge.textContent = 'UDP: Unavailable';
+      badge.title = 'UDP monitoring status could not be read.';
+      badge.setAttribute('aria-label', 'UDP monitoring: unavailable');
       $('extendedStatus').textContent = String(e);
       $<HTMLButtonElement>('extendedEnable').disabled = true;
       $<HTMLButtonElement>('extendedStop').disabled = true;

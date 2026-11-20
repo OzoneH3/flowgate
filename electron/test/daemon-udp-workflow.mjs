@@ -212,6 +212,13 @@ try {
   await page.locator('#monitoringMenu').evaluate((e) => (e.open = true));
   await wait(() => page.locator('#extendedStop').isEnabled());
   await page.click('#extendedStop');
+  await page.locator('#confirmation').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#confirmTitle').textContent(), 'Stop UDP monitoring');
+  assert.match(await page.locator('#confirmText').textContent(), /live UDP rates will become unavailable/);
+  await page.click('#confirmNo');
+  assert.equal((await snap()).control.trafficMonitor.state, expected);
+  await page.click('#extendedStop');
+  await page.click('#confirmYes');
   await wait(async () => (await snap()).control.trafficMonitor.state === 'disabled');
   await wait(async () => {
     const rows = (await snap()).observation.activity?.rows || [];

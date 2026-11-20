@@ -2,7 +2,7 @@
 // monitoring only, stopped, failed, starting or unknown (nothing is being blocked).
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { protectionActive } = require('../dist/test/protection-model.cjs');
+const { firewallPresentation, protectionActive } = require('../dist/test/protection-model.cjs');
 
 test('blue only when protection is active and connected', () => {
   const { PROTECTION_CAPABILITY } = require('../dist/test/protection-model.cjs');
@@ -17,4 +17,15 @@ test('blue only when protection is active and connected', () => {
   // Legacy backend without the protection capability: enforcement state.
   assert.equal(protectionActive({ observation: {}, control: { capabilities: [], connected: true, enforcement: { state: 'active' } } }), true);
   assert.equal(protectionActive({ observation: {}, control: { capabilities: [], connected: true, enforcement: { state: 'stopped' } } }), false);
+});
+
+test('firewall badge uses current enforcement and explains missing status', () => {
+  const control = {
+    connected: true,
+    enforcement: { state: 'active', profile: 'both' },
+    evaluation: { state: 'stopped' },
+  };
+  assert.equal(firewallPresentation(control).menu, 'Firewall · Both');
+  assert.equal(firewallPresentation({ ...control, connected: false }).status, 'Offline');
+  assert.match(firewallPresentation({ connected: true }).detail, /no enforcement status was reported/);
 });

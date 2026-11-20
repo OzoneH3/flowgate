@@ -5,6 +5,7 @@
 export interface GuiBuild {
   state: 'verified' | 'unverified' | 'unavailable';
   source?: string;
+  version?: string;
   builtAt?: string;
   reason: string;
 }
@@ -29,7 +30,7 @@ export function formatBuildTime(iso: string, timeZone?: string, locale?: string)
   }).format(new Date(iso));
 }
 
-/** Header text (GUI release + build date/time) and tooltip; daemon only compared. */
+/** Build identity and daemon comparison for the About dialog. */
 export function headerVersion(gui: GuiBuild | undefined, daemon: DaemonBuild | undefined, timeZone?: string, locale?: string) {
   const lines: string[] = [];
   let text: string, mismatch = false;
@@ -38,7 +39,11 @@ export function headerVersion(gui: GuiBuild | undefined, daemon: DaemonBuild | u
     lines.push('GUI build: checking');
   } else if (gui.state === 'verified') {
     text = gui.source!.slice(0, 7) + ' · ' + (gui.builtAt ? 'built ' + formatBuildTime(gui.builtAt, timeZone, locale) : 'build time unavailable');
-    lines.push('GUI release: ' + gui.source + ' (' + gui.reason + ')', 'Built: ' + (gui.builtAt ?? 'not recorded by this release'));
+    lines.push(
+      ...(gui.version ? ['Version: ' + gui.version] : []),
+      'GUI revision: ' + gui.source,
+      'Built: ' + (gui.builtAt ? formatBuildTime(gui.builtAt, timeZone, locale) : 'not recorded by this release'),
+    );
   } else {
     text = gui.state === 'unverified' ? 'unverified build' : 'version unavailable';
     lines.push('GUI build: ' + gui.reason);

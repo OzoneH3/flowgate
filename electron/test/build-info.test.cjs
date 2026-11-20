@@ -1,4 +1,4 @@
-// GUI release identity in the header: verified against its own bundle manifest;
+// About shows the GUI identity verified against its own bundle manifest;
 // the daemon build is compared only. No package version or launch time is used.
 const { test } = require('node:test'),
   assert = require('node:assert/strict'),
@@ -60,8 +60,8 @@ test('daemon build parsing is fail-soft and accepts source or revision', () => {
   assert.deepEqual(parseDaemonBuild({ revision: B, modified: true }), { source: B, modified: true });
   for (const bad of [undefined, null, [], 'x', { source: 'short' }, {}]) assert.equal(parseDaemonBuild(bad), undefined);
 });
-test('header shows GUI release with date, time and zone; daemon only compared', () => {
-  const gui = { state: 'verified', source: A, builtAt: '2026-10-23T17:51:09Z', reason: 'ok' };
+test('About shows the GUI version, date, time and zone alongside the daemon revision', () => {
+  const gui = { state: 'verified', source: A, version: '0.1.0-rc.7', builtAt: '2026-10-23T17:51:09Z', reason: 'ok' };
   // Explicit locales: no assumption about the system's 12/24-hour clock.
   const same = headerVersion(gui, { source: A, modified: false }, 'UTC', 'de-DE');
   assert.equal(same.text, 'aaaaaaa · built 23.10.2026, 17:51 UTC');
@@ -72,8 +72,9 @@ test('header shows GUI release with date, time and zone; daemon only compared', 
   for (const p of parts.filter((p) => p.type === 'hour' || p.type === 'minute')) assert.ok(sys.includes(p.value), p.type + ' in ' + sys);
   assert.ok(sys.includes('2026') && sys.includes('UTC'), sys);
   assert.equal(same.mismatch, false);
-  assert.match(same.title, /GUI release: a{40}/);
-  assert.match(same.title, /Built: 2026-10-23T17:51:09Z/);
+  assert.match(same.title, /Version: 0\.1\.0-rc\.7/);
+  assert.match(same.title, /GUI revision: a{40}/);
+  assert.match(same.title, /Built: 23\.10\.2026, 17:51 UTC/);
   assert.match(same.title, /Daemon build: b{0}a{40}/);
   const other = headerVersion(gui, { source: B, modified: true }, 'UTC');
   assert.equal(other.mismatch, true);

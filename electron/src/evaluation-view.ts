@@ -3,7 +3,9 @@ const $ = (id: string) => document.getElementById(id)!;
 // Updates text/disabled state in place, preserving keyboard focus and open details.
 export function renderDaemonEvaluation(e: EvaluationState) {
   const status = $('evaluationStatus');
-  status.textContent = `${e.label}. ${e.message}`;
+  status.textContent = e.status
+    ? `${e.label}. ${e.message}`
+    : `Five-minute evaluation status unavailable. ${e.message}`;
   const section = status.parentElement!;
   let details = document.getElementById('evaluationChecks') as HTMLDetailsElement | null;
   if (!details) {
@@ -37,11 +39,4 @@ export function renderDaemonEvaluation(e: EvaluationState) {
   $('evalStop').textContent = 'Stop firewall evaluation';
   $('evalCancel').hidden = true;
   $('evalRecover').hidden = true;
-  const summary = document.querySelector('#controlMenu > summary')!;
-  const secs = Math.max(0, Math.ceil((e.remainingMs || 0) / 1000));
-  summary.textContent =
-    e.phase === 'active'
-      ? `Firewall · ${secs ? `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}` : 'confirming expiry'}`
-      : `Firewall · ${e.busy ? 'pending' : e.status?.readiness.state === 'checking' ? 'checking' : e.status?.readiness.state === 'blocked' && e.phase === 'stopped' ? 'blocked' : e.phase}`;
-  (summary as HTMLElement).title = e.label || '';
 }

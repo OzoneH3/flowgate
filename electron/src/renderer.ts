@@ -8,7 +8,7 @@ import { ApplicationCallers } from './application-callers';
 import { replaceKeyedRow } from './keyed-rows';
 import { rowStructure } from './row-structure';
 import { acceptsPublication } from './publication';
-import { PROTECTION_CAPABILITY, stateProtection } from './protection-model';
+import { firewallPresentation } from './protection-model';
 import { advanceClock } from './state-clock';
 import {
   REMEMBER_ZONE_CAPABILITY,
@@ -911,14 +911,14 @@ if (promptID) {
     }
   });
 } else {
-  root.innerHTML = `<header class="toolbar"><strong class="brand">FLOWGATE</strong><span id="buildVersion" class="build-version"></span><span id="toolbarUnits" class="toolbar-units"><label for="displayUnits">Units</label><select id="displayUnits" aria-label="Display units" title="Display only: bytes or bits, decimal SI prefixes (1 KB = 1000 B). Accounting sources stay separate."></select></span><span id="observerStatus" class="toolbar-status"></span><span id="controlStatus" class="toolbar-status"></span><input id="search" type="search" aria-label="Search Activity" placeholder="Search"></header><nav class="tabs" aria-label="Views"><button id="activityTab" aria-selected="true">Activity</button><button id="requestsTab" aria-selected="false">Pending requests <span id="pendingCount">0</span></button><span id="tabsPaneControls" class="pane-controls"></span></nav><main id="activityView"><section class="activity-main"><div class="filterbar"><select id="activitySource" aria-label="Activity measurement source"><option value="tcp">TCP</option><option value="udp">UDP</option></select><button id="uploadLimits">Upload limits</button><button id="rateMode" aria-pressed="false" title="Switch the two traffic columns between current rate and total transferred">Rate</button><select id="columnPreset" aria-label="Column preset"><option value="status">Status</option><option value="details">Details</option></select><select id="filter" aria-label="Socket filter"><option value="all">All sockets</option><option value="active">Active TCP / connected UDP</option><option value="listening">Listening TCP / bound UDP</option></select><span class="filterbar-icons"><button id="expand" class="icon-button" title="Expand all" aria-label="Expand all">⊞</button><button id="collapse" class="icon-button" title="Collapse all" aria-label="Collapse all">⊟</button><button id="refreshNow" class="icon-button" title="Refresh now" aria-label="Refresh now">↻</button></span></div><div class="table-scroll"><table id="tree" role="treegrid" tabindex="0" aria-label="Application process socket activity"><thead><tr id="headers"></tr></thead><tbody id="rows"></tbody></table></div><div id="activitySummary" class="summary"></div></section><aside><h2>Info View<span id="infoPaneControls" class="pane-controls"></span></h2><h3 id="selectedName">FlowGate Activity</h3><div id="selectedExecutable"></div><div class="info-scroll"><h3 id="infoProperties" class="info-section-title">Overview</h3><dl id="info"></dl><section id="infoRules"></section><section class="info-tools"><h3 class="info-section-title">Tools</h3><button id="infoOpenRules">Rule list</button><button id="infoOpenLog">Decision log</button><button id="infoOpenPending">Pending requests</button></section></div><section id="trafficGraph"></section></aside></main><main id="requestsView" hidden><section class="request-list"><h2>Pending requests</h2><p class="hint">One row per group of identical requests; a decision answers its oldest request. Dismissal grants nothing. Closing FlowGate leaves an independent controller running.</p><div class="table-scroll"><table id="requests"><thead><tr><th>Application</th><th>Direction</th><th>Protocol</th><th>Remote endpoint</th><th>Requests</th><th>State</th></tr></thead><tbody id="requestRows"></tbody></table></div><section id="temporaryDecisions" class="temporary-decisions" hidden><h3 title="For a while decisions: in memory only, never saved as rules">Temporary decisions</h3><div id="leaseRows"></div></section><section id="permissionResultsView" class="permission-results" hidden><h3 title="Outcomes of Allow/Deny submissions; the permission window hides on the click">Results</h3><ol id="permissionResultRows"></ol></section></section><aside class="request-sidebar"><h2>Connection permission</h2><div id="requestDetails"></div></aside></main><footer><span id="footerSummary"></span><button id="resultsAttention" class="link-button results-attention" hidden></button><span id="feedback" role="status" aria-live="polite"></span></footer>`;
+  root.innerHTML = `<header class="toolbar"><strong class="brand">FLOWGATE</strong><span id="toolbarUnits" class="toolbar-units"><label for="displayUnits">Units</label><select id="displayUnits" aria-label="Display units" title="Display only: bytes or bits, decimal SI prefixes (1 KB = 1000 B). Accounting sources stay separate."></select></span><span id="observerStatus" class="toolbar-status"></span><span id="controlStatus" class="toolbar-status"></span><input id="search" type="search" aria-label="Search Activity" placeholder="Search"></header><nav class="tabs" aria-label="Views"><button id="activityTab" aria-selected="true">Activity</button><button id="requestsTab" aria-selected="false">Pending requests <span id="pendingCount">0</span></button><span id="tabsPaneControls" class="pane-controls"></span></nav><main id="activityView"><section class="activity-main"><div class="filterbar"><select id="activitySource" aria-label="Activity measurement source"><option value="tcp">TCP</option><option value="udp">UDP</option></select><button id="uploadLimits">Upload limits</button><button id="rateMode" aria-pressed="false" title="Switch the two traffic columns between current rate and total transferred">Rate</button><select id="columnPreset" aria-label="Column preset"><option value="status">Status</option><option value="details">Details</option></select><select id="filter" aria-label="Socket filter"><option value="all">All sockets</option><option value="active">Active TCP / connected UDP</option><option value="listening">Listening TCP / bound UDP</option></select><span class="filterbar-icons"><button id="expand" class="icon-button" title="Expand all" aria-label="Expand all">⊞</button><button id="collapse" class="icon-button" title="Collapse all" aria-label="Collapse all">⊟</button><button id="refreshNow" class="icon-button" title="Refresh now" aria-label="Refresh now">↻</button></span></div><div class="table-scroll"><table id="tree" role="treegrid" tabindex="0" aria-label="Application process socket activity"><thead><tr id="headers"></tr></thead><tbody id="rows"></tbody></table></div><div id="activitySummary" class="summary"></div></section><aside><h2>Info View<span id="infoPaneControls" class="pane-controls"></span></h2><h3 id="selectedName">FlowGate Activity</h3><div id="selectedExecutable"></div><div class="info-scroll"><h3 id="infoProperties" class="info-section-title">Overview</h3><dl id="info"></dl><section id="infoRules"></section><section class="info-tools"><h3 class="info-section-title">Tools</h3><button id="infoOpenRules">Rule list</button><button id="infoOpenLog">Decision log</button><button id="infoOpenPending">Pending requests</button></section></div><section id="trafficGraph"></section></aside></main><main id="requestsView" hidden><section class="request-list"><h2>Pending requests</h2><p class="hint">One row per group of identical requests; a decision answers its oldest request. Dismissal grants nothing. Closing FlowGate leaves an independent controller running.</p><div class="table-scroll"><table id="requests"><thead><tr><th>Application</th><th>Direction</th><th>Protocol</th><th>Remote endpoint</th><th>Requests</th><th>State</th></tr></thead><tbody id="requestRows"></tbody></table></div><section id="temporaryDecisions" class="temporary-decisions" hidden><h3 title="For a while decisions: in memory only, never saved as rules">Temporary decisions</h3><div id="leaseRows"></div></section><section id="permissionResultsView" class="permission-results" hidden><h3 title="Outcomes of Allow/Deny submissions; the permission window hides on the click">Results</h3><ol id="permissionResultRows"></ol></section></section><aside class="request-sidebar"><h2>Connection permission</h2><div id="requestDetails"></div></aside></main><footer><span id="footerSummary"></span><button id="resultsAttention" class="link-button results-attention" hidden></button><span id="feedback" role="status" aria-live="polite"></span></footer>`;
   // The GUI's own release identity (verified against its bundle manifest).
   void window.flowgate
     .guiBuild()
     .catch(() => ({ state: 'unavailable', reason: 'GUI build identity could not be read.' }) as GuiBuild)
     .then((b) => {
       guiBuild = b;
-      renderBuildVersion();
+      renderAboutBuild();
 
     });
   const columns = [
@@ -1253,17 +1253,15 @@ function paneControls(self?: 'info' | 'chart', summaryText = '▾') {
 function updateFirewallStatus() {
   const status = document.getElementById('firewallMenuStatus');
   if (!status) return;
-  const summary = document.querySelector('#controlMenu > summary');
-  status.textContent = state?.control.capabilities?.includes(PROTECTION_CAPABILITY)
-    ? stateProtection(state)
-    : state?.control.capabilities?.includes('daemon-evaluation-v1')
-      ? summary?.textContent || 'Firewall · unknown'
-      : !state?.control.connected
-        ? 'Firewall · unavailable'
-        : `Firewall · ${state.control.enforcement?.state || 'unknown'}`;
-  status.title =
-    document.getElementById('controlStatus')?.title ||
-    'Enforcement state unavailable. Monitoring never implies protection.';
+  const firewall = firewallPresentation(state?.control);
+  status.textContent = 'FW: ' + firewall.status;
+  status.title = firewall.detail;
+  status.setAttribute('aria-label', 'Firewall: ' + firewall.status);
+  const summary = document.querySelector<HTMLElement>('#controlMenu > summary');
+  if (summary) {
+    summary.textContent = firewall.menu;
+    summary.title = firewall.detail;
+  }
   const health = document.getElementById('runtimeHealth');
   if (health) {
     const badge = runtimeBadge(!!state?.control.connected, state?.control.runtimeChecks);
@@ -1309,12 +1307,15 @@ function setupMainMenus(windowMenu: HTMLElement) {
   const about = element('button', 'About FlowGate');
   const dialog = element('dialog');
   dialog.id = 'aboutFlowGate';
+  dialog.setAttribute('aria-labelledby', 'aboutTitle');
+  const heading = element('h2', 'About FlowGate');
+  heading.id = 'aboutTitle';
+  const build = element('p', '', 'about-build');
+  build.id = 'aboutBuild';
   dialog.append(
-    element('h2', 'FlowGate'),
-    element(
-      'p',
-      'Activity, stored firewall policy and explicit bounded evaluation. Monitoring and firewall enforcement are separate.',
-    ),
+    heading,
+    element('p', 'View network activity, manage per-app firewall rules, and review connection decisions.'),
+    build,
   );
   const close = element('button', 'Close');
   close.onclick = () => dialog.close();
@@ -1322,6 +1323,7 @@ function setupMainMenus(windowMenu: HTMLElement) {
   document.body.append(dialog);
   about.onclick = () => {
     (help as HTMLDetailsElement).open = false;
+    renderAboutBuild();
     dialog.showModal();
   };
   help.lastElementChild!.append(about);
@@ -1377,12 +1379,6 @@ function setupMainMenus(windowMenu: HTMLElement) {
   queue.setAttribute('role', 'status');
   queue.tabIndex = 0;
   health.after(queue);
-  new MutationObserver(updateFirewallStatus).observe(controlTitle, {
-    childList: true,
-    characterData: true,
-    subtree: true,
-    attributes: true,
-  });
   updateFirewallStatus();
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
@@ -3015,14 +3011,12 @@ function updateDecisions() {
   measurePrompt();
 }
 let guiBuild: GuiBuild | undefined;
-function renderBuildVersion() {
-  const el = document.getElementById('buildVersion');
+function renderAboutBuild() {
+  const el = document.getElementById('aboutBuild');
   if (!el) return;
   // guiBuild() may resolve before the first state publication.
   const v = headerVersion(guiBuild, state?.control.connected ? state.control.daemonBuild : undefined);
-  el.textContent = v.text;
-  el.title = v.title;
-  el.classList.toggle('mismatch', v.mismatch);
+  el.textContent = v.title + (v.mismatch ? '\nThe GUI and daemon are running different revisions.' : '');
 }
 function consume(next: ClientState) {
   if (!acceptsPublication(state, next)) return;
@@ -3040,7 +3034,7 @@ function consume(next: ClientState) {
         (state.control.connected && state.control.readOnly ? ' · read-only' : '') +
         (degraded ? ' · ' + degraded.text : '');
   while (cardResults.size > 128) cardResults.delete(cardResults.keys().next().value!);
-  renderBuildVersion();
+  renderAboutBuild();
   $('controlStatus').title = [
     state.control.message,
     state.control.enforcement?.detail,
