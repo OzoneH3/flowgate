@@ -1684,3 +1684,30 @@ button.connection-status-slot {cursor:pointer}
 button.connection-status-slot:focus-visible {outline:1px solid currentColor;outline-offset:2px}
 
 button.connection-status-slot:hover:not(:disabled),button.connection-status-slot:active:not(:disabled) {background:transparent}
+
+.inspector-tabs {
+  display: flex;
+  gap: 8px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--fg-border);
+}
+.inspector-tabs[hidden] { display: none; }
+.inspector-tabs button {
+  padding: 5px 3px;
+  color: var(--fg-muted);
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+}
+.inspector-tabs button[aria-selected=true] {
+  color: var(--fg-text);
+  border-bottom-color: var(--desktop-accent, var(--fg-tab));
+}
+.inspector-evidence { margin: 10px 0; }
+.inspector-evidence dt { color: var(--fg-muted); font-weight: 600; }
+.inspector-evidence dd {
+  margin: 2px 0 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+#info > button { grid-column: 1 / -1; justify-self: start; }

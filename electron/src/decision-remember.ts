@@ -71,6 +71,8 @@ export const rememberKey = (choice: RememberChoice) =>
 export interface RememberOption {
   field: keyof RememberFields | 'application';
   label: string;
+  caption: string;
+  value: string;
   available: boolean;
   reason?: string;
 }
@@ -84,10 +86,11 @@ export function rememberOptions(e: RequestEvent, applicationName: string): Remem
       ? f?.local_port || portOf(e.flow.local)
       : f?.remote_port || portOf(e.flow.remote);
   return [
-    { field: 'application', label: applicationName, available: true },
-    { field: 'protocol', label: e.flow.protocol.toUpperCase() || 'Protocol', available: true },
+    { field: 'application', label: applicationName, caption: 'Application', value: applicationName, available: true },
+    { field: 'protocol', label: e.flow.protocol.toUpperCase() || 'Protocol', caption: 'Protocol', value: e.flow.protocol.toUpperCase(), available: true },
     {
       field: 'process',
+      caption: 'Process', value: owner ? String(owner.pid) : '',
       label: owner ? `Process ${owner.pid}` : 'Process',
       available: !!owner && e.attribution.visibility_complete && !e.attribution.runtime_table,
       reason:
@@ -95,9 +98,10 @@ export function rememberOptions(e: RequestEvent, applicationName: string): Remem
           ? 'Only this process instance; inactive when it exits'
           : 'Needs one verified owning process',
     },
-    { field: 'address', label: `Remote address ${address}`, available: !!address },
+    { field: 'address', label: `Remote address ${address}`, caption: 'Remote address', value: address, available: !!address },
     {
       field: 'port',
+      caption: incoming ? 'Local port' : 'Remote port', value: String(port || ''),
       label: `${incoming ? 'Local port' : 'Remote port'} ${port || ''}`.trim(),
       available: !!port,
     },

@@ -46,7 +46,7 @@ that window or choosing **Decide later** sends no verdict.
 
 ## Custom CSS
 
-Put either stylesheet in `$XDG_CONFIG_HOME/flowgate/` or, if
+Put custom stylesheets in `$XDG_CONFIG_HOME/flowgate/` or, if
 `XDG_CONFIG_HOME` is unset, in `~/.config/flowgate/`.
 
 - `style.css` overrides shared styles in the main window and detached panes.
@@ -58,6 +58,14 @@ The files load after the bundled styles. You can put just the rules you want
 to change in them. Restart FlowGate to apply changes to open windows.
 Removing the files restores the bundled appearance. The files must be regular
 files up to 1 MiB each.
+
+Signal Deck is the bundled default for the [desktop and detached panes](themes/signal-deck.css)
+and the [permission popup](themes/signal-deck-popup.css). The four overrides above load
+after it. To use the previous base appearance, place empty regular files named
+`theme.css` and `popup-theme.css` in the same config directory. To use the optional
+[Night Relay pixel-art theme](themes/night-relay.css), copy it under those two
+names instead. Each file replaces only its corresponding theme. Remove the theme
+files and restart to restore Signal Deck.
 
 For example, put this in `desktop-layout.css` to change the toolbar height and
 the default width of the docked sidebar. An explicitly resized sidebar keeps

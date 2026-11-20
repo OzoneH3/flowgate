@@ -1,0 +1,260 @@
+/* Signal Deck permission window theme, bundled as popup-theme.css. */
+:root {
+  --surface: #0e181c;
+  --inset: #091216;
+  --line: #536c73;
+  --text: #f1f6f5;
+  --muted: #b0c3c9;
+  --accent: #c8f326;
+  --cyan: #69e4e0;
+  --panel: #152227;
+  --rim: #273b41;
+  --gutter: clamp(12px, 3vw, 24px);
+  --control-height: 44px;
+  color: var(--text);
+  background: var(--surface);
+}
+.prompt-shell { background: var(--surface); }
+.prompt-heading {
+  padding: 8px var(--gutter);
+  background: repeating-linear-gradient(130deg, #324347 0 3px, transparent 3px 7px) left / 12px 100% no-repeat,
+    linear-gradient(115deg, #132327, #091216);
+}
+.prompt-heading strong {
+  margin-left: 4px;
+  padding: 3px 0 3px 34px;
+  color: var(--accent);
+  font-size: 16px;
+  letter-spacing: .045em;
+  background: url('flowgate.png') left center / 26px no-repeat;
+}
+#promptPending { color: var(--text); }
+#promptBody { padding: 16px var(--gutter); }
+#requestCard {
+  grid-template-columns: minmax(6.1em, .85fr) minmax(0, 1.25fr) minmax(0, .85fr) minmax(5em, auto);
+  grid-template-areas:
+    'identity identity identity pid'
+    'direction direction status status'
+    'destination destination destination destination'
+    'headLabel headAddress headAddress headPort'
+    'local localAddress localAddress localPort'
+    'remote remoteAddress remoteAddress remotePort'
+    'more options options options'
+    'details details details details'
+    'network network network network'
+    'onceNote onceNote onceNote onceNote'
+    'leaseNote leaseNote leaseNote leaseNote'
+    'remember remember remember remember'
+    'reconcile reconcile future future'
+    'decisions decisions decisions decisions';
+}
+#requestIdentity { align-self: center; padding: 0 10px 4px 0; }
+#requestIdentity > .nl-label { font-size: 12px; }
+#requestApplication { margin: 0; font-size: clamp(24px, 4.2vw, 34px); }
+#requestApplication strong { min-width: 0; }
+.application-icon {
+  color: var(--cyan);
+  background: #11282c;
+  border: 1px solid #479c9e;
+  border-radius: 7px 2px;
+}
+#connectionFields, #fieldLocal, #fieldRemote, .request-meta { display: contents; }
+#connectionFields > dt:has(+ #fieldApplication),
+#fieldApplication, #connectionFields > dt:has(+ #fieldProcess) { display: none; }
+#fieldProcess {
+  grid-area: pid;
+  align-self: center;
+  justify-self: end;
+  max-width: 15em;
+  padding: 3px 9px;
+  color: #d9e6e8;
+  background: var(--inset);
+  border: 1px solid var(--line);
+  border-radius: 6px 2px;
+  font: 600 13px/1.5 ui-monospace, monospace;
+}
+#connectionHeader, #requestPeer {
+  justify-content: flex-start;
+  color: var(--text);
+  background: transparent;
+  padding: 5px 0;
+  border-radius: 0;
+}
+#connectionHeader { align-self: center; font-weight: 600; }
+#connectionHeader .nl-direction { color: var(--cyan); }
+.nl-direction.nl-in::before { content: '←'; }
+.nl-direction.nl-out::before { content: '→'; }
+#cardCollapse { width: 22px; height: 22px; border-color: var(--line); }
+#requestPeer { color: var(--muted); font-size: 13px; margin-bottom: 6px; }
+#requestStatusLine {
+  grid-area: status;
+  align-self: center;
+  justify-self: end;
+  color: #ffd77e;
+  font-variant-numeric: tabular-nums;
+}
+#requestStatusLine.ended { white-space: normal; }
+#connectionFields > dt:has(+ #fieldLocal) { grid-area: local; }
+#connectionFields > dt:has(+ #fieldRemote) { grid-area: remote; }
+#fieldLocal .nl-address { grid-area: localAddress; }
+#fieldRemote .nl-address { grid-area: remoteAddress; }
+#fieldLocal .nl-port-group { grid-area: localPort; }
+#fieldRemote .nl-port-group { grid-area: remotePort; }
+#connectionFields > dt, #connectionFields .nl-address, #connectionFields .nl-port-group {
+  margin: 0;
+  padding: 8px 9px;
+  border-block: 1px solid var(--rim);
+  background: var(--panel);
+}
+#connectionFields > dt { color: var(--text); font-weight: 600; }
+#connectionFields .nl-address, #connectionFields .nl-port-group { font: 14px/1.5 ui-monospace, monospace; }
+#connectionFields > dt:has(+ #fieldRemote), #connectionFields #fieldRemote > span {
+  background: #133036;
+  border-color: #32666b;
+  color: #aaeae8;
+}
+#fieldRemote > .nl-port-group, #fieldLocal > .nl-port-group { min-width: 5em; }
+#detailsToggle { grid-area: more; justify-self: start; align-self: center; color: var(--cyan); }
+#decisionOptions { justify-content: flex-end; }
+#rememberPanel {
+  grid-template-columns: minmax(0, 1fr);
+  padding: 8px 14px 12px;
+  gap: 0;
+  margin: 6px 0;
+  border: 1px solid var(--line);
+  border-radius: 9px 2px;
+  background: var(--inset);
+}
+#rememberPanel legend { color: var(--text); font-weight: 700; }
+#rememberScope { padding: 0 0 7px; color: var(--muted); font-size: 13px; }
+#rememberPanel .remember-field {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--rim);
+  gap: 10px;
+}
+#rememberPanel .remember-duration { margin-top: 9px; }
+input[type=checkbox] { accent-color: var(--cyan); }
+.prompt-shell :is(button, select) { border-radius: 6px 2px; }
+.prompt-shell :focus-visible { outline-color: var(--cyan); }
+
+/* The footer reserves a slot for the existing decision buttons. Anchor
+   positioning keeps them above feedback when the controller adds a message. */
+.prompt-shell footer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.8fr);
+  align-items: stretch;
+  gap: 0 12px;
+  padding: 10px var(--gutter);
+  background: var(--inset);
+}
+#controlStatus { grid-column: 1 / -1; }
+#controlStatus:not(:empty) { margin-bottom: 6px; }
+#dismiss {
+  grid-column: 1;
+  justify-self: stretch;
+  min-height: var(--control-height);
+  margin: 0;
+  background: #203136;
+  font-weight: 600;
+}
+#decisionActions { justify-content: flex-end; }
+#decisionActions button {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--control-height);
+  padding: 5px 8px;
+  font-size: 17px;
+}
+#allow { color: #e4ffb9; border-color: var(--accent); background: #22331e; }
+#block { color: #ffd1d4; border-color: #e67c87; background: #332027; }
+#allow::before { color: #a4f650; }
+#block::before { color: #ff7384; }
+@supports (position-anchor: --popup-actions) {
+  .prompt-shell footer::after {
+    content: '';
+    grid-column: 2;
+    anchor-name: --popup-actions;
+    min-height: var(--control-height);
+  }
+  #decisionActions {
+    position: fixed;
+    position-anchor: --popup-actions;
+    inset: anchor(top) anchor(right) anchor(bottom) anchor(left);
+    margin: 0;
+    padding: 0;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    background: transparent;
+  }
+}
+@media (max-width: 560px) {
+  #requestCard {
+    grid-template-columns: minmax(5.5em, auto) minmax(0, 1fr) minmax(4.5em, auto);
+    grid-template-areas:
+      'identity identity identity'
+      'pid pid pid'
+      'direction direction status'
+      'destination destination destination'
+      'headLabel headAddress headPort'
+      'local localAddress localPort'
+      'remote remoteAddress remotePort'
+      'more options options'
+      'details details details'
+      'network network network'
+      'onceNote onceNote onceNote'
+      'leaseNote leaseNote leaseNote'
+      'remember remember remember'
+      'reconcile reconcile reconcile'
+      'future future future'
+      'decisions decisions decisions';
+  }
+  #fieldProcess { justify-self: start; margin: 4px 0; }
+  #requestStatusLine { text-align: right; }
+  #decisionOptions { gap: 4px 9px; font-size: 13px; }
+  #connectionFields > dt, #connectionFields .nl-address, #connectionFields .nl-port-group { padding: 6px 4px; font-size: 12px; }
+  .prompt-shell footer { gap: 0 6px; }
+  #decisionActions { gap: 5px; }
+  #decisionActions button { font-size: 14px; padding-inline: 3px; }
+  #dismiss { padding-inline: 5px; }
+}
+
+/* Direction already identifies the two sides. Keep a named peer or service. */
+#requestSummary:has(#connectionFields:not([hidden])) .peer-is-address #requestPeer { display: none; }
+#requestCard:has(#requestSummary:not([hidden]) #connectionFields:not([hidden]))::before {
+  content: 'Endpoint';
+  grid-area: headLabel;
+  color: var(--accent);
+}
+#connectionFields::before { content: 'Address'; grid-area: headAddress; }
+#connectionFields::after { content: 'Port'; grid-area: headPort; }
+#requestCard::before, #connectionFields::before, #connectionFields::after {
+  padding: 6px 9px;
+  margin-top: 8px;
+  font-size: 13px;
+  font-weight: 650;
+  background: var(--inset);
+  border-top: 1px solid var(--line);
+}
+#connectionFields .nl-port-label { display: none; }
+#connectionFields, .request-meta { padding: 0; }
+#rememberPanel .remember-field:has(.scope-value) {
+  display: grid;
+  grid-template-columns: 18px minmax(7em, .7fr) minmax(0, 1fr);
+}
+.remember-field .scope-label { display: none; }
+.remember-field :is(.scope-caption, .scope-value) { display: block; }
+.scope-value { color: var(--muted); }
+#detailsToggle { padding-block: 8px; }
+#requestIdentity { padding-bottom: 8px; }
+#rememberPanel legend::before { content: ''; display: inline-block; width: 6px; height: .8em; background: var(--accent); transform: skewX(-28deg); margin-right: 8px; }
+
+#connectionHeader:has(.scope-layout-protocol) .nl-bar-text,
+#rememberPanel .scope-default-title { display: none; }
+#connectionHeader .scope-layout-direction, #rememberPanel .scope-layout-title { display: inline; }
+#connectionHeader .scope-layout-protocol {
+  display: inline;
+  padding-left: 9px;
+  border-left: 1px solid var(--line);
+  color: var(--muted);
+}
+#requestSummary:has(.nl-direction:is(.nl-in,.nl-out)) #requestIdentity > .nl-label { display: none; }

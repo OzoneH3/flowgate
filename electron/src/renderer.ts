@@ -1,3 +1,4 @@
+import { setupInspectorTabs } from './inspector-tabs';
 import { updateConnectionStatus } from './status-slot';
 import { fastPathIndicator, appFastPathDetails } from './fast-path';
 import { accountLabel } from './accounts';
@@ -149,6 +150,7 @@ let rateMode: 'rate' | 'total' = 'rate';
 let retainedSelection: { generation: string; row: Row } | undefined;
 let measurementSource: 'tcp' | 'udp' = 'tcp';
 let graph: TrafficGraph | undefined;
+let updateInspector: ReturnType<typeof setupInspectorTabs>;
 let activityPolicy: ActivityPolicy | undefined;
 let selectedRequest = promptID ?? '';
 let chosenScope: Scope = 'once';
@@ -997,6 +999,7 @@ if (promptID) {
     change: (chart) => void window.flowgate.paneUpdate({ chart }).catch(message),
     source: (source) => void window.flowgate.paneUpdate({ source }).catch(message),
   });
+  updateInspector = setupInspectorTabs($('info'));
   setupPaneControls();
   activityPolicy = new ActivityPolicy($('infoRules'));
   $('uploadLimits').onclick=()=>void openUploadLimits().catch(e=>message(String(e)));
@@ -1769,43 +1772,8 @@ function renderTree() {
 function renderInfo() {
   syncSelection();
   void graph?.update(selected, sequence);
-  const live = $('info');
   const info = element('dl');
-  const commit = () => {
-    const details = element('details', '', 'info-technical');
-    details.open = !!live.querySelector('details[open]');
-    details.append(element('summary', 'Identity and measurement details'));
-    const technical = element('dl');
-    for (const dt of Array.from(info.querySelectorAll('dt'))) {
-      if (
-        [
-          'Executable',
-          'Executable status',
-          'Recorded caller paths',
-          'Script',
-          'Identity',
-          'Totals',
-          'Evidence',
-          'Socket identity',
-          'Ownership evidence category',
-          'Measurement',
-          'Rule inventory',
-          'Incoming rule scopes',
-          'Outgoing rule scopes',
-        ].includes(dt.textContent || '')
-      ) {
-        const dd = dt.nextElementSibling;
-        technical.append(dt);
-        if (dd) technical.append(dd);
-      }
-    }
-    if (technical.childElementCount) {
-      details.append(technical);
-      info.append(details);
-    }
-    // Preserve text selection and expanded details during unchanged polling.
-    if (live.textContent !== info.textContent) live.replaceChildren(...Array.from(info.childNodes));
-  };
+  const commit = () => updateInspector(info, JSON.stringify([selected, state.control.generation]));
   const liveRow = allRows(roots).find((r) => r.id === selected);
   if (liveRow && ['process', 'socket'].includes(liveRow.kind))
     retainedSelection = { generation: state.control.generation, row: liveRow };
@@ -1842,9 +1810,17 @@ function renderInfo() {
       : '');
   $('selectedExecutable').hidden = !pathText;
   const selectedName = $('selectedName');
-  if (selectedName.dataset.identity !== (r?.id || '') || selectedName.dataset.label !== (r?.label || '')) {
+  const application = r?.process?.application || r?.inactive;
+  const installedName = application && appNames.get(JSON.stringify([
+    application.key, application.revision, application.executable,
+  ]));
+  const applicationName = r?.process
+    ? installedName || r.process.application.display_name || r.process.application.name.replace(/ \(deleted\)$/, '')
+    : r?.presentationLabel || installedName || r?.label || '';
+  if (selectedName.dataset.identity !== (r?.id || '') || selectedName.dataset.label !== (r?.label || '') || selectedName.dataset.appName !== applicationName) {
     selectedName.dataset.identity = r?.id || '';
-    // The chart legend names the selected entity (reference), not the type word shown as title.
+    selectedName.dataset.appName = applicationName;
+    // The chart legend follows the selected tree row.
     selectedName.dataset.label = r?.label || '';
     selectedName.replaceChildren(
       ...(r ? [installedIcon(r.displayApplication || rowApplication(r), r.kind)] : []),
@@ -1852,7 +1828,7 @@ function renderInfo() {
         !r
           ? 'FlowGate Activity'
           : r.kind === 'application'
-            ? 'Application'
+            ? (r.applicationZone ? r.label : applicationName)
             : r.kind === 'launch'
               ? 'Game launch'
               : r.kind === 'process'
@@ -1989,9 +1965,9 @@ function renderInfo() {
     commit();return;
   }
   if(r.kind==='application'&&!r.applicationZone&&r.process) {
-    field(info,'Running application',r.process.application.executable||r.process.executable);
+    if (r.process.application.executable && r.process.application.executable !== r.process.executable)
+      field(info, 'Running application', r.process.application.executable);
     field(info,'Observed processes',r.children.filter(c=>c.kind==='process'&&c.process).map(c=>`PID ${c.process!.pid} · start ${c.process!.start_ticks}`).join('\n')||`PID ${r.process.pid} · start ${r.process.start_ticks}`);
-    field(info,'Application identity',`${r.process.application.key} · revision ${r.process.application.revision} · ${accountLabel(r.process.uid)}`);
     if(!r.rows.length) field(info,'Connections','No socket is currently attributed to this application. Its process identity and saved rules are still available; no traffic ownership is inferred.');
   }
   if(r.kind==='application'&&!r.applicationZone) {
@@ -2012,12 +1988,12 @@ function renderInfo() {
   if (r.requestEvent) {
     const e=r.requestEvent;
     field(info, 'Last request', `${e.state} · ${e.flow.direction} ${e.flow.protocol} · ${e.flow.remote}`);
-    field(info, 'Request reason', e.reason || 'Awaiting decision');
+    if (e.reason) field(info, 'Request reason', e.reason);
     if (e.attribution.reason_code)
       field(info, 'Recorded attribution category', `${attributionReasonLabel(e.attribution.reason_code)} (${e.attribution.reason_code})`);
     field(info, 'Recorded executable', e.attribution.application?.executable || 'Unknown');
     field(info, 'Recorded caller', e.attribution.owners.map(p => `${p.pid} · ${p.provenance?.invocation?.path || p.provenance?.parent?.invocation?.path || p.provenance?.parent?.executable || 'caller unavailable'}`).join('\n'));
-    field(info, 'Observation', 'Request evidence retained by the daemon; absence of a current socket does not establish that the process exited.');
+    field(info, 'Request history', 'Request evidence retained by the daemon; absence of a current socket does not establish that the process exited.');
     if (awaiting(e) || requestRuleAvailable(e, state.control.capabilities)) {
       const review=element('button', awaiting(e) ? 'Review pending request' : 'Create rule for future connections');
       review.onclick=()=>{selectRequest(e.id); $('requestsTab').click(); renderRequests();};
@@ -2032,24 +2008,7 @@ function renderInfo() {
       'Common application of shared holders. Not a firewall permission target.',
     );
   }
-  if (r.kind === 'application' || r.kind === 'process')
-    field(
-      info,
-      'Name',
-      r.process?.application
-        ? appNames.get(
-            JSON.stringify([
-              r.process.application.key,
-              r.process.application.revision,
-              r.process.application.executable,
-            ]),
-          ) ||
-            r.process.application.display_name ||
-            r.process.application.name.replace(/ \(deleted\)$/, '')
-        : r.inactive
-          ? r.presentationLabel || appNames.get(JSON.stringify([r.inactive.key, r.inactive.revision, r.inactive.executable])) || r.label
-          : r.label,
-    );
+  if (r.kind === 'process') field(info, 'Name', applicationName);
   if (r.inactive) {
     // Not running: only its stored rules are known; nothing is observed or verified now.
     field(info, 'State', 'Not currently observed · listed because stored rules name this application');
@@ -2122,7 +2081,7 @@ function renderInfo() {
     field(info, 'User', accountLabel(r.process.uid));
     field(
       info,
-      'Identity',
+      'Application identity',
       `${r.process.application.key}\nRevision: ${r.process.application.revision}`,
     );
     const launch = r.process.provenance;

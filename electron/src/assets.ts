@@ -6,6 +6,8 @@ const assets: Record<string, string> = {
   'index.html': 'text/html',
   'prompt.html': 'text/html',
   'permission-popup.css': 'text/css',
+  'theme.css': 'text/css',
+  'popup-theme.css': 'text/css',
   'style.css': 'text/css',
   'desktop-layout.css': 'text/css',
   'pane.css': 'text/css',
@@ -23,6 +25,8 @@ export function bundledAsset(name: string): string | undefined {
 }
 
 const userStyles: Record<string, string> = {
+  'theme.css': 'theme.css',
+  'popup-theme.css': 'popup-theme.css',
   'user-style.css': 'style.css',
   'user-desktop-layout.css': 'desktop-layout.css',
   'user-pane.css': 'pane.css',
@@ -31,9 +35,10 @@ const userStyles: Record<string, string> = {
 const maxStyleBytes = 1024 * 1024;
 
 // Only the listed routes can read user configuration. Missing or invalid files
-// serve an empty stylesheet so the bundled theme can still load.
+// skip the override. Theme slots fall back to their bundled asset.
 export function userStylesheet(name: string, directory: string): string | undefined {
   if (!Object.hasOwn(userStyles, name)) return undefined;
+  const fallback = bundledAsset(name) ? undefined : '';
   try {
     const fd = fs.openSync(
       path.join(directory, userStyles[name]),
@@ -41,14 +46,14 @@ export function userStylesheet(name: string, directory: string): string | undefi
     );
     try {
       const file = fs.fstatSync(fd);
-      if (!file.isFile() || file.size > maxStyleBytes) return '';
+      if (!file.isFile() || file.size > maxStyleBytes) return fallback;
       const bytes = Buffer.alloc(file.size + 1);
       const length = fs.readSync(fd, bytes);
-      return length === file.size ? bytes.toString('utf8', 0, length) : '';
+      return length === file.size ? bytes.toString('utf8', 0, length) : fallback;
     } finally {
       fs.closeSync(fd);
     }
   } catch {
-    return '';
+    return fallback;
   }
 }

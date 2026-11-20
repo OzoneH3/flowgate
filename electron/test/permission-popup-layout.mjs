@@ -18,6 +18,9 @@ const endpoint = path.join(run, 'api');
 const observer = path.join(run, 'obs');
 const config = path.join(run, 'config');
 await fs.mkdir(path.join(config, 'flowgate'), { recursive: true });
+// Exercise the original base layout with window-specific user overrides.
+for (const slot of ['theme.css', 'popup-theme.css'])
+  await fs.writeFile(path.join(config, 'flowgate', slot), '');
 await fs.writeFile(path.join(config, 'flowgate', 'style.css'), ':root { --fixture-user-style: desktop; }');
 await fs.writeFile(
   path.join(config, 'flowgate', 'desktop-layout.css'),
@@ -239,9 +242,9 @@ try {
     page.evaluate(() => Array.from(document.styleSheets, (s) => new URL(s.href).pathname));
   const main = app.windows().find((p) => p.url().endsWith('/index.html'));
   assert.deepEqual(await sheets(main), [
-    '/style.css', '/desktop-layout.css', '/user-style.css', '/user-desktop-layout.css',
+    '/style.css', '/desktop-layout.css', '/theme.css', '/user-style.css', '/user-desktop-layout.css',
   ]);
-  assert.deepEqual(await sheets(prompt), ['/permission-popup.css', '/user-permission-popup.css']);
+  assert.deepEqual(await sheets(prompt), ['/permission-popup.css', '/popup-theme.css', '/user-permission-popup.css']);
   const appliedStyle = (page) => page.evaluate(() =>
     getComputedStyle(document.documentElement).getPropertyValue('--fixture-user-style').trim());
   assert.equal(await appliedStyle(main), 'main');
@@ -264,6 +267,15 @@ try {
   await sidebar.waitFor();
   await grip.waitFor();
   assert.match(await sidebar.locator('#selectedName').getAttribute('data-label'), /Atlas Sync/i);
+  assert.match(await sidebar.locator('#selectedName').innerText(), /Atlas Sync/i);
+  const overviewTab = sidebar.getByRole('tab', { name: 'Overview', exact: true });
+  const diagnosticsTab = sidebar.getByRole('tab', { name: 'Diagnostics' });
+  assert.equal(await overviewTab.getAttribute('aria-selected'), 'true');
+  assert.doesNotMatch(await sidebar.locator('#info').innerText(), /Application identity|Fast path/);
+  await overviewTab.press('ArrowRight');
+  assert.match(await sidebar.getByRole('tabpanel', { name: 'Diagnostics' }).innerText(), /Application identity/);
+  await diagnosticsTab.press('Home');
+  assert(await sidebar.getByRole('tabpanel', { name: 'Overview' }).isVisible());
   const sidebarWidth = () => sidebar.evaluate((el) => getComputedStyle(el).width);
   assert.equal(await sidebarWidth(), '300px');
   assert.equal((await chart.boundingBox()).width, chartWidth);
@@ -458,7 +470,7 @@ try {
   await pane.waitForURL('flowgate://app/pane.html?pane=info');
   await pane.waitForLoadState('load');
   assert.deepEqual(await sheets(pane), [
-    '/style.css', '/pane.css', '/user-style.css', '/user-pane.css',
+    '/style.css', '/pane.css', '/theme.css', '/user-style.css', '/user-pane.css',
   ]);
   assert.equal(await appliedStyle(pane), 'pane');
   assert.equal(

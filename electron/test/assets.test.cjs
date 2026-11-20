@@ -10,11 +10,11 @@ test('bundled Selawik faces have explicit font MIME types', () => {
   assert.equal(bundledAsset('renderer.js'), 'text/javascript');
   assert.equal(bundledAsset('flowgate.png'), 'image/png');
   assert.equal(bundledAsset('flowgate-off.png'), 'image/png');
-  for (const name of ['style.css', 'desktop-layout.css', 'pane.css', 'permission-popup.css'])
+  for (const name of ['style.css', 'desktop-layout.css', 'pane.css', 'permission-popup.css', 'theme.css', 'popup-theme.css'])
     assert.equal(bundledAsset(name), 'text/css');
 });
 
-test('only the four user stylesheet routes read bounded regular config files', (t) => {
+test('user stylesheet routes read bounded regular config files', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'flowgate-css-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   for (const [name, value] of [['desktop-layout.css', 'desktop'], ['pane.css', 'pane']]) {
@@ -25,6 +25,16 @@ test('only the four user stylesheet routes read bounded regular config files', (
     assert.equal(userStylesheet(route, dir), style);
     assert.equal(userStylesheet(name, dir), undefined);
     assert.equal(userStylesheet('../' + route, dir), undefined);
+  }
+  for (const slot of ['theme.css', 'popup-theme.css']) {
+    const file = path.join(dir, slot);
+    assert.equal(userStylesheet(slot, dir), undefined);
+    fs.writeFileSync(file, '');
+    assert.equal(userStylesheet(slot, dir), '');
+    fs.writeFileSync(file, ':root { color: lime; }');
+    assert.equal(userStylesheet(slot, dir), ':root { color: lime; }');
+    fs.writeFileSync(file, Buffer.alloc(1024 * 1024 + 1));
+    assert.equal(userStylesheet(slot, dir), undefined);
   }
   const desktop = path.join(dir, 'style.css');
   const popup = path.join(dir, 'permission-popup.css');

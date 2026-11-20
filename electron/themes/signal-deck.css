@@ -1,0 +1,210 @@
+/* Signal Deck desktop theme, bundled as theme.css. */
+:root {
+  color-scheme: dark;
+  --desktop-chrome: #0b1216;
+  --desktop-raised: #151f24;
+  --desktop-control: #17252a;
+  --desktop-accent: #c6f226;
+  --fg-content: #0e161a;
+  --fg-section: #1b292e;
+  --fg-border: #4c636a;
+  --fg-selected: #16484f;
+  --fg-tab: var(--desktop-accent);
+  --fg-text: #edf5f3;
+  --fg-muted: #b2c6c9;
+  --fg-chart-down: #31e6e2;
+  --fg-chart-up: #c194ff;
+  --fg-upload-text: #ddbbff;
+  --fg-allow: #94ee7c;
+  --fg-block: #ff9297;
+  --fg-row-height: 30px;
+  --desktop-sidebar-width: 32vw;
+  --desktop-toolbar-height: 48px;
+  --desktop-tabs-height: 39px;
+  --desktop-traffic-chart-height: clamp(136px, 18vh, 185px);
+  --surface: var(--fg-content);
+  --inset: var(--desktop-chrome);
+  --line: var(--fg-border);
+  --text: var(--fg-text);
+  --muted: var(--fg-muted);
+  --accent: var(--desktop-accent);
+  --panel-header: linear-gradient(110deg, #213035, #121c20 76%);
+  --stripe: repeating-linear-gradient(130deg, #283a3e 0 3px, #10191d 3px 7px);
+  font-family: 'Segoe UI', Selawik, system-ui, sans-serif;
+  accent-color: var(--accent);
+}
+
+#app > .toolbar, .prompt-heading, .detached-heading {
+  background: var(--panel-header);
+  border-bottom: 1px solid var(--fg-border);
+}
+#app > .toolbar { padding-inline: 0 12px; }
+.toolbar .brand {
+  display: inline-flex;
+  align-items: center;
+  align-self: stretch;
+  gap: 10px;
+  padding: 0 28px 0 18px;
+  color: var(--accent);
+  font: 800 17px/1 system-ui, sans-serif;
+  letter-spacing: .1em;
+  background: linear-gradient(125deg, #152223 0 88%, var(--accent) 88% 89%, transparent 89%);
+}
+.toolbar .brand::before {
+  content: '';
+  width: 26px;
+  height: 26px;
+  flex: none;
+  background: url('flowgate.png') center / contain no-repeat;
+}
+#app .toolbar #search {
+  height: 30px;
+  border: 1px solid #649b9f;
+  border-radius: 8px 2px;
+  background: #0b1418;
+  color: var(--text);
+}
+#app > .tabs {
+  background: var(--stripe) right center / 32px 100% no-repeat, var(--inset);
+  border-bottom-color: var(--fg-border);
+  gap: 0;
+}
+#app > .tabs > button {
+  height: 28px;
+  padding-inline: 15px;
+  border-radius: 0;
+  color: var(--text);
+  border-right: 1px solid #34464b;
+}
+#app > .tabs > button[aria-selected=true] {
+  color: var(--accent);
+  background: #192426;
+  box-shadow: inset 0 -3px var(--accent);
+}
+#activityView:not([hidden]) { padding-inline: 8px; padding-bottom: 6px; }
+@media (min-width: 1050px) {
+  #activityView:not([hidden]) {
+    grid-template-areas: 'chart grip details' 'table grip details';
+    padding-top: calc(var(--desktop-tabs-height) + 8px);
+  }
+}
+#activityView > aside { margin: 4px 0 0; }
+#activityView .sidebar-grip {
+  background: transparent;
+  width: 9px;
+}
+#activityView .sidebar-grip:hover { background: var(--fg-selected); }
+
+/* Short corner bevels belong to the panel frames. Controls can still draw
+   focus rings and menus outside their parent panels. */
+#activityView > #trafficGraph, #app main > aside, #activityView .activity-main {
+  border: 1px solid var(--fg-border);
+  border-radius: 12px 2px;
+  background: var(--fg-content);
+}
+#activityView > #trafficGraph { margin: 4px 0 8px; }
+#activityView > #trafficGraph .graph-heading,
+#activityView .filterbar, #activityView aside > h2 {
+  border-radius: 11px 1px 0 0;
+  background: var(--panel-header);
+  color: var(--text);
+}
+#activityView .graph-heading h2 { background: transparent; }
+#activityView .graph-heading h2, #activityView aside > h2 {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 650;
+}
+#activityView .graph-heading h2::before, #activityView aside > h2::before,
+.detached-heading h2::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: .85em;
+  margin: 0 9px 0 3px;
+  background: var(--accent);
+  transform: skewX(-28deg);
+}
+#activityView .filterbar {
+  flex-basis: 39px;
+  padding-inline: 8px;
+}
+#app .filterbar button[aria-checked=true],
+#activityView .filterbar #rateMode[aria-pressed=true] {
+  color: var(--accent);
+  background: #1b2920;
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+#activityView .activity-main > .table-scroll {
+  border: 0;
+  border-top: 1px solid var(--fg-border);
+  border-radius: 0;
+}
+#app #tree th { background: #162226; }
+#app #tree td {
+  font-size: 13px;
+  border-bottom: 1px solid #253438;
+}
+#app #tree td.numeric { font-variant-numeric: tabular-nums; }
+#app #tree tbody tr[aria-selected=true] > td {
+  background: #123c42;
+  box-shadow: inset 0 1px var(--fg-chart-down), inset 0 -1px var(--fg-chart-down);
+}
+#app #tree tr[aria-selected=true] > td:first-child { border-left: 2px solid var(--fg-chart-down); }
+#app #tree tr[aria-selected=true] > td:last-child { border-right: 2px solid var(--fg-chart-down); }
+#app #tree td:is(.down, .up) .rate-value { background: transparent; }
+#app .row-icon { stroke: #a6d3dc; }
+#app #selectedName { font-size: 20px; }
+#activityView .info-section-title, #paneContent .info-section-title {
+  padding: 6px 8px;
+  color: var(--fg-text);
+  background: var(--panel-header);
+  border: 1px solid #3b5056;
+  border-radius: 6px 1px;
+  font-weight: 600;
+}
+#activityView #info, #paneContent #info { border-radius: 6px 1px; }
+#app #info > button {
+  grid-column: 1 / -1;
+  justify-self: start;
+  padding: 4px 10px;
+  border: 1px solid #719497;
+  background: var(--desktop-control);
+  color: #c5f4f2;
+  border-radius: 5px 1px;
+}
+#app .rule-cell { background-color: var(--desktop-control); }
+#app .summary { background: var(--inset); border-radius: 0 0 11px 1px; }
+#app > footer, .prompt-shell footer {
+  background: var(--stripe) right bottom / 28px 6px no-repeat, var(--inset);
+  border-top-color: var(--fg-border);
+}
+.prompt-heading strong { color: var(--accent); }
+.prompt-shell { background: var(--surface); }
+.prompt-shell :is(button, select, #connectionFields, #rememberPanel) {
+  border-radius: 6px 2px;
+}
+.prompt-shell :is(button, select) { background-color: var(--desktop-control); }
+.prompt-shell :is(#connectionHeader, #requestPeer) {
+  color: #d5fffb;
+  background: var(--fg-selected);
+  box-shadow: inset 0 -1px var(--fg-chart-down);
+}
+.prompt-shell #allow { background: var(--accent); color: #11180c; }
+.prompt-shell #block { color: var(--fg-block); border-color: #97646b; }
+.prompt-shell .link-button { background: transparent; }
+#app :is(button, select, input, summary, table, tr, .sidebar-grip):focus-visible {
+  outline: 2px solid var(--fg-chart-down);
+  outline-offset: -2px;
+}
+@media (min-width: 1050px) {
+  #app > .tabs > button, #app .toolbar .desktop-menu > summary { font-size: 14px; }
+  #activityView #info, #tree th button { font-size: 13px; }
+}
+@media (max-width: 950px) {
+  .toolbar .brand { font-size: 13px; gap: 4px; padding-inline: 5px 10px; }
+  .toolbar .brand::before { width: 18px; height: 18px; }
+  #app > .tabs > button { padding-inline: 8px; }
+  #activityView:not([hidden]) { padding-inline: 4px; }
+  #activityView .filterbar { padding-inline: 2px; }
+}

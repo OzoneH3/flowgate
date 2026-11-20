@@ -76,6 +76,12 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
   chevron.setAttribute('aria-label', 'Collapse connection details');
   chevron.setAttribute('aria-expanded', 'true');
   bar.append(chevron, el('span', '', `nl-direction nl-${e.flow.direction === 'incoming' ? 'in' : 'out'}`), el('span', connectionHeader(e.flow), 'nl-bar-text'));
+  if (o.popup && e.flow.family) {
+    const direction = e.flow.direction === 'incoming' ? 'Incoming' : e.flow.direction === 'outgoing' ? 'Outgoing' : 'Unknown';
+    const family = e.flow.family === 'ipv4' ? 'IPv4' : 'IPv6';
+    bar.append(el('span', `${direction} connection`, 'scope-layout-direction'),
+      el('span', `${protocol} / ${family}`, 'scope-layout-protocol'));
+  }
   const sides = fromTo(e, summary);
   const programCell = () => {
     // The game's own metadata (icon) never renames the verified title.
@@ -173,6 +179,8 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
       dd.append(group);
     }
   }
+  const peer = sides.from.kind === 'peer' ? sides.from : sides.to;
+  if (o.popup && peer.kind === 'peer' && peer.text === f.remote.address) addClass(box, 'peer-is-address');
   if (o.popup) route.append(box, bar, fields);
   else route.append(bar, box, fields);
   const meta = el('div', '', 'request-meta nl-links');
@@ -348,7 +356,10 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
   if (o.rememberMode) {
     const panel = el('fieldset', '', 'remember-panel', 'rememberPanel');
     panel.hidden = true;
-    panel.append(el('legend', 'Create rule for:'));
+    const legend = el('legend');
+    if (o.popup) legend.append(el('span', 'Create rule for:', 'scope-default-title'), el('span', 'Rule scope', 'scope-layout-title'));
+    else legend.textContent = 'Create rule for:';
+    panel.append(legend);
     // What the rule covers, concisely, before the click (helper/prefix scope).
     const target = el('p', rememberLabel(e.attribution.permission_target), 'remember-scope', 'rememberScope');
     if (e.attribution.permission_target?.shared_with_note) target.title = e.attribution.permission_target.shared_with_note;
@@ -364,7 +375,10 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
         input.disabled = true;
         label.title = 'The rule always applies to this application';
       } else label.title = option.reason || '';
-      label.append(input, ' ' + option.label);
+      if (o.popup) {
+        label.append(input, el('span', option.label, 'scope-label'),
+          el('span', option.caption, 'scope-caption'), el('span', option.value || 'Unavailable', 'scope-value'));
+      } else label.append(input, ' ' + option.label);
       panel.append(label);
     }
     const durationLabel = el('label', 'Rule expires after: ', 'remember-duration'),

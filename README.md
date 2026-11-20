@@ -12,11 +12,10 @@ the desktop. The per-app monitoring and control workflow takes inspiration from
 [Try the desktop](#try-the-desktop) · [Install FlowGate](#install-flowgate) ·
 [Documentation](#documentation)
 
-![FlowGate Activity view with a full-width traffic chart above the app table and details for the selected demo app](docs/images/flowgate-main-window.png)
+![FlowGate Activity view with the traffic chart above the app table and the selected app’s Overview at right](docs/images/flowgate-main-window.png)
 
-*Activity opens with the traffic chart above the app table. Select a row to
-see its details, or return to the all-applications overview to give the table
-the full width.*
+*The Activity view shows simulated traffic. On wide windows,
+the inspector sits beside the traffic chart and app table.*
 
 ## What you can do
 
@@ -37,7 +36,7 @@ the full width.*
   [Limits and priorities](docs/ZONE-SHAPING.txt) ·
   [Download coverage](docs/DOWNLOAD-LIMITER.txt)
 
-![FlowGate Ask prompt for an outgoing TCP connection from a disposable app, with its remote endpoint, Remember options, duration, and Allow and Deny buttons visible](docs/images/flowgate-ask-remember.png)
+![FlowGate Ask prompt for an outgoing TCP connection from a demo app, with its remote endpoint, Remember options, duration, and Allow and Deny buttons visible](docs/images/flowgate-ask-remember.png)
 
 *An outgoing Ask prompt with Remember expanded and a five-minute duration selected.*
 

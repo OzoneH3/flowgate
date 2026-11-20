@@ -1,3 +1,4 @@
+import { setupInspectorTabs } from './inspector-tabs';
 import { accountLabel } from './accounts';
 import { refreshUpload } from "./upload-shaping-view";
 import { zoneLabel } from './network-zones';
@@ -38,6 +39,7 @@ units.onchange = () =>
 source.onchange = () =>
   void window.flowgate.paneUpdate({ source: source.value as 'tcp' | 'udp' }).catch(message);
 const content = document.getElementById('paneContent')!;
+let updateInspector: ReturnType<typeof setupInspectorTabs>;
 let frame: PaneFrame | undefined,
   graph: TrafficGraph | undefined,
   policy: ActivityPolicy | undefined;
@@ -57,7 +59,8 @@ if (kind === 'chart') {
   });
 } else {
   content.innerHTML =
-    '<h3 id="selectedName"></h3><div id="selectedExecutable"></div><div class="info-scroll"><h3 class="info-section-title">Properties</h3><dl id="info"></dl><section id="infoRules"></section></div><p class="pane-action-hint">Quick actions use the shared rule service. Advanced editing opens in Activity.</p>';
+    '<h3 id="selectedName"></h3><div id="selectedExecutable"></div><div class="info-scroll"><h3 class="info-section-title">Properties</h3><dl id="info"></dl><section id="infoRules"></section></div><p class="pane-action-hint">Advanced rule editing opens in Activity.</p>';
+  updateInspector = setupInspectorTabs(document.getElementById('info')!);
   const delegate = (action: PolicyEntry) => {
     if (!frame) return;
     void window.flowgate
@@ -113,7 +116,7 @@ function consume(next: PaneFrame) {
   }
   const fields: [string, string][] = [];
   if (r) {
-    fields.push(['Name', r.kind === 'process' ? r.process?.application.name || r.label : r.label]);
+    if (r.kind !== 'application') fields.push(['Name', r.kind === 'process' ? r.process?.application.name || r.label : r.label]);
     if (r.process)
       fields.push(
         ['User', accountLabel(r.process.uid)],
@@ -122,9 +125,11 @@ function consume(next: PaneFrame) {
           : []),
         [
           'Application identity',
-          `${r.process.application.key}\n${r.process.application.revision}${r.process.application.executable_status === 'deleted' || r.process.executable.endsWith(' (deleted)') ? '\nReplaced/deleted running image; installed icon/name are display metadata only.' : ''}`,
+          `${r.process.application.key}\n${r.process.application.revision}`,
         ],
       );
+    if (r.process?.application.executable_status === 'deleted' || r.process?.executable.endsWith(' (deleted)'))
+      fields.push(['Executable status', 'Replaced/deleted running image. Installed icon/name are display metadata only.']);
     fields.push(['Visible sockets', r.applicationZone?'—':String(r.rows.length)]);
     if(r.applicationZone){
       fields.push(['Scope',zoneLabel(r.applicationZone.zone)+' · '+r.applicationZone.model],['Measurement','Zone-attributed measurements are unavailable; parent lifetime counters are not relabelled.']);
@@ -157,13 +162,13 @@ function consume(next: PaneFrame) {
         'Selected item is no longer visible. No process or application target is rebound.',
       ]);
   } else fields.push(['Selection', 'Select an application, process or connection in Activity.']);
-  const stamp = JSON.stringify([p.selection, fields, r?.process?.executable]);
+  const stamp = JSON.stringify([p.selection, p.generation, fields, r?.label, r?.presentationLabel, r?.process?.application.display_name, r?.process?.executable]);
   if (stamp !== signature) {
     signature = stamp;
     const title = document.getElementById('selectedName')!;
     title.textContent =
       r?.kind === 'application'
-        ? 'Application'
+        ? (r.applicationZone ? r.label : r.process?.application.display_name || r.presentationLabel || r.label)
         : r?.kind === 'process'
           ? `Process ${r.pid}`
           : r?.kind === 'socket'
@@ -177,19 +182,9 @@ function consume(next: PaneFrame) {
         '',
       );
     document.getElementById('selectedExecutable')!.textContent = executable;
-    const dl = document.getElementById('info')!;
-    dl.replaceChildren();
-    const technical = document.createElement('details');
-    technical.className = 'info-technical';
-    technical.append(el('summary', 'Identity details'));
-    const inner = document.createElement('dl');
-    for (const [k, v] of fields)
-      if (k === 'Application identity') inner.append(el('dt', k), el('dd', v));
-      else dl.append(el('dt', k), el('dd', v));
-    if (inner.childElementCount) {
-      technical.append(inner);
-      dl.append(technical);
-    }
+    const dl = document.createElement('dl');
+    for (const [k, v] of fields) dl.append(el('dt', k), el('dd', v));
+    updateInspector(dl, JSON.stringify([p.selection, p.generation]));
     const app =
       r && (!r.socket || r.socket.owners.length === 1)
         ? r.displayApplication || r.process?.application
@@ -199,10 +194,12 @@ function consume(next: PaneFrame) {
       void window.flowgate
         .applicationMetadata([key])
         .then((icons) => {
-          if (frame?.presentation.selection !== p.selection) return;
+          if (signature !== stamp) return;
           const metadata = icons[key];
           const url = metadata.icon;
-          if (metadata.name) {
+          if (metadata.name && r?.kind === 'application' && !r.applicationZone) {
+            title.textContent = metadata.name;
+          } else if (metadata.name && r?.kind === 'process') {
             const value = document.querySelector('#info dd');
             if (value) value.textContent = metadata.name;
           }

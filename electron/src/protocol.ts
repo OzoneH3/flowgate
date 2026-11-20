@@ -241,6 +241,7 @@ export interface RequestEvent {
   flow: {
     direction: string;
     protocol: string;
+    family?: 'ipv4' | 'ipv6';
     local: string;
     remote: string;
     netns?: string;
@@ -754,6 +755,7 @@ function event(v: unknown): RequestEvent {
     flow: {
       direction: string(f.direction),
       protocol: string(f.protocol),
+      family: f.family === 'ipv4' || f.family === 'ipv6' ? f.family : undefined,
       local: string(f.local),
       remote: string(f.remote),
       netns: typeof f.netns === 'string' ? f.netns.slice(0, 128) : undefined,

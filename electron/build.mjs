@@ -115,6 +115,8 @@ for (const file of [
   'style.css', 'desktop-layout.css', 'pane.css', 'permission-popup.css',
 ]) await copyFile(`src/${file}`, `dist/${file}`);
 
+await copyFile('themes/signal-deck.css', 'dist/theme.css');
+await copyFile('themes/signal-deck-popup.css', 'dist/popup-theme.css');
 await copyFile('assets/flowgate-tray.png', 'dist/flowgate-tray.png');
 await copyFile('assets/flowgate.png', 'dist/flowgate.png');
 await copyFile('assets/flowgate-tray-off.png', 'dist/flowgate-tray-off.png');

@@ -1,0 +1,161 @@
+/* Night Relay • optional FlowGate skin.
+   Copy this sheet as style.css and permission-popup.css in the FlowGate
+   config directory. Artwork uses CSS gradients, with no asset requests. */
+:root {
+  color-scheme: dark;
+  --desktop-chrome: #0b0a16;
+  --desktop-raised: #1d1a3b;
+  --desktop-control: #30274c;
+  --desktop-accent: #d7b0ff;
+  --fg-content: #0f0e1e;
+  --fg-section: #302643;
+  --fg-border: #55446f;
+  --fg-selected: #313677;
+  --fg-tab: var(--desktop-accent);
+  --fg-text: #f5effa;
+  --fg-muted: #c1accd;
+  --fg-download-cell: #171b3e;
+  --fg-upload-cell: #311937;
+  --fg-upload-text: #f5b8f4;
+  --fg-chart-down: #69aaff;
+  --fg-chart-up: #fb48fc;
+  --fg-allow: #b7d4ff;
+  --fg-block: #ff97ac;
+  --surface: var(--fg-content);
+  --inset: var(--desktop-chrome);
+  --line: var(--fg-border);
+  --text: var(--fg-text);
+  --muted: var(--fg-muted);
+  --accent: var(--desktop-accent);
+  --scene-height: 64px;
+  --desktop-toolbar-height: calc(42px + var(--scene-height));
+  --console-font: ui-monospace, 'Liberation Mono', monospace;
+  accent-color: var(--accent);
+}
+
+/* Keep the controls below the illustration, including at narrow widths. */
+#app > .toolbar, .prompt-heading, .detached-heading {
+  position: relative;
+  background-color: var(--desktop-chrome);
+  border-bottom-color: #674f7e;
+}
+#app > .toolbar { padding-top: calc(var(--scene-height) + 4px); }
+.prompt-heading { --scene-height: 42px; padding-top: calc(var(--scene-height) + 8px); }
+.detached-heading {
+  --scene-height: 24px;
+  height: calc(var(--scene-height) + 30px);
+  min-height: calc(var(--scene-height) + 30px);
+  padding-top: var(--scene-height);
+}
+:is(.toolbar, .prompt-heading, .detached-heading)::before,
+:is(.toolbar, .prompt-heading, .detached-heading)::after {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: var(--scene-height);
+  pointer-events: none;
+}
+
+/* Violet hour over the rail district. Hard stops give the sun a stepped outline.
+   The three strips of distant roofs have different repeat distances. */
+:is(.toolbar, .prompt-heading, .detached-heading)::before {
+  --glider: #191637;
+  --roof: #412a70;
+  --dusk: #67518f;
+  --sun: #e1cbee;
+  background:
+    /* A passing rail shuttle with three blue windows and a running light. */
+    repeating-linear-gradient(90deg, #1780fd 0 4px, var(--glider) 4px 6px) 40% 36% / 18px 2px no-repeat,
+    linear-gradient(90deg, #fb48fc 2px, var(--glider) 2px) 40% 38% / 32px 4px no-repeat,
+    linear-gradient(var(--glider), var(--glider)) 40% 34% / 20px 6px no-repeat,
+    linear-gradient(90deg, transparent 68%, var(--roof) 68% 86%, transparent 86%) 0 100% / 92px 27% repeat-x,
+    linear-gradient(90deg, transparent 24%, var(--roof) 24% 47%, transparent 47%) 0 100% / 126px 40% repeat-x,
+    linear-gradient(90deg, transparent 15%, var(--dusk) 15% 48%, transparent 48%) 0 100% / 78px 52% repeat-x,
+    repeating-linear-gradient(0deg, transparent 0 4px, #998ddf 4px 6px) 79% 60% / 44px 18px no-repeat,
+    linear-gradient(var(--sun), var(--sun)) 79% 35% / 32px 36px no-repeat,
+    linear-gradient(var(--sun), var(--sun)) 79% 35% / 40px 28px no-repeat,
+    linear-gradient(var(--sun), var(--sun)) 79% 35% / 44px 16px no-repeat,
+    linear-gradient(90deg, #e1cbee 2px, transparent 2px) 31px 14% / 149px 2px repeat-x,
+    linear-gradient(90deg, #998ddf 2px, transparent 2px) 93px 31% / 201px 2px repeat-x,
+    linear-gradient(#0e0d1d 0 16%, #1d1a3b 16% 30%, #303676 30% 46%, #504978 46% 60%, #87729b 60% 78%, #b59bb5 78%);
+}
+
+/* The mask cuts the antennae, roofs and elevated rail out of one illuminated
+   facade. The opaque horizontal bands break the window columns into pixels. */
+:is(.toolbar, .prompt-heading, .detached-heading)::after {
+  --solid: linear-gradient(#000, #000);
+  mask:
+    linear-gradient(90deg, #000 2px, transparent 2px) 29px bottom / 218px 94% repeat-x,
+    linear-gradient(90deg, #000 14px, transparent 14px) 23px bottom / 218px 73% repeat-x,
+    linear-gradient(90deg, #000 32px, transparent 32px) 14px bottom / 218px 58% repeat-x,
+    linear-gradient(90deg, #000 16px, transparent 16px) 86px bottom / 144px 46% repeat-x,
+    linear-gradient(90deg, #000 28px, transparent 28px) 80px bottom / 144px 36% repeat-x,
+    linear-gradient(90deg, #000 46px, transparent 46px) 142px bottom / 254px 27% repeat-x,
+    var(--solid) left bottom / 100% 5px no-repeat;
+  background:
+    linear-gradient(90deg, #fb48fc 2px, transparent 2px) 29px 6% / 218px 2px repeat-x,
+    linear-gradient(90deg, #1780fd 12px, transparent 12px) 19px 64% / 218px 3px repeat-x,
+    linear-gradient(90deg, #fb48fc 14px, transparent 14px) 86px 80% / 144px 3px repeat-x,
+    linear-gradient(to top, #0a0a16 0 2px, #49356a 2px 4px, transparent 4px),
+    repeating-linear-gradient(to top, #100d20 0 4px, transparent 4px 6px),
+    repeating-linear-gradient(90deg, #241431 0 4px, #998ddf 4px 6px, #191637 6px 12px, #167af4 12px 14px, #15102a 14px 22px);
+}
+
+.toolbar .brand, .prompt-heading strong, .detached-heading h2,
+#app .graph-heading h2, #app aside > h2, #app .table-scroll th {
+  font-family: var(--console-font);
+}
+.toolbar .brand, .prompt-heading strong {
+  color: var(--accent);
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-shadow: 1px 1px #412a70;
+}
+#app > .tabs > button, #app .menu-panel, #app .table-scroll, #app main > aside,
+#app .toolbar #search, #app :is(.toolbar, .filterbar) select,
+#app .filterbar button:not(.icon-button), #activityView .filterbar #rateMode,
+#activityView > #trafficGraph, #activityView > #trafficGraph .graph-heading,
+#app #connectionFields, #app #rememberPanel, #app #connectionHeader,
+#app #requestPeer, .prompt-shell :is(button, select, .application-icon) {
+  border-radius: 0;
+}
+#app > .tabs > button[aria-selected='true'] {
+  background: #0d44b7;
+  color: #ffffff;
+  box-shadow: inset 0 -3px #fb48fc;
+}
+#app :is(.graph-heading, .detached-heading, .filterbar, .summary),
+#app :is(.menu-panel, #ruleEditor, .quick-popup, .activity-quick, dialog) {
+  background-color: var(--desktop-raised);
+  color: var(--fg-text);
+  border-color: var(--fg-border);
+}
+#app :is(.graph-heading h2, .info-section-title), #paneContent > #selectedName {
+  color: var(--accent);
+}
+#app > footer, .prompt-shell footer { box-shadow: inset 0 1px #49356a; }
+#app .rule-direction, #app .rule-cell { background-color: var(--desktop-control); }
+#app .table-scroll td.numeric, .prompt-shell #connectionFields dd {
+  font-family: var(--console-font);
+  font-variant-numeric: tabular-nums;
+}
+.prompt-shell { background: var(--surface); }
+.prompt-shell :is(button, select, .application-icon) {
+  background-color: var(--desktop-control);
+  border-color: var(--line);
+}
+.prompt-shell :is(#requestPeer, #connectionHeader) {
+  color: #e1cbee;
+  background: #252252;
+  box-shadow: inset 0 -2px #167af4;
+}
+.prompt-shell #connectionFields { background: var(--desktop-raised); }
+.prompt-shell #allow { background: var(--fg-allow); color: #0b0a16; }
+.prompt-shell #block { border-color: var(--fg-block); color: #ffb9db; }
+#app :is(button, input, select, summary, table, tr, .sidebar-grip):focus-visible {
+  outline-color: #f4b0ff;
+}
+@media (max-height: 650px) {
+  :root { --scene-height: 28px; }
+  .prompt-heading, .detached-heading { --scene-height: 16px; }
+}
