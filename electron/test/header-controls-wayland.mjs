@@ -99,7 +99,20 @@ try {
   assert.equal(await helpOpen(), false, 'pressing another heading closes the previous menu');
   assert.equal(await page.locator('#toolsMenu').evaluate((node) => node.open), true);
   await page.mouse.up();
+  for (const id of ['controlMenu', 'monitoringMenu', 'optionsMenu']) {
+    const section = page.locator('#' + id);
+    await section.locator('summary').first().hover();
+    await page.mouse.down();
+    assert.equal(await section.evaluate((node) => node.open), true, id + ' opens on press');
+    await page.mouse.up();
+    assert.equal(await section.evaluate((node) => node.open), true, id + ' stays open on release');
+  }
   await help.click();
+  const iconsRow = await page.getByRole('button', { name: 'Icons and symbols' }).boundingBox();
+  const aboutRow = await page.getByRole('button', { name: 'About FlowGate' }).boundingBox();
+  assert.equal(iconsRow.x, aboutRow.x);
+  assert.equal(iconsRow.width, aboutRow.width);
+  assert.ok(aboutRow.y >= iconsRow.y + iconsRow.height);
   await page.getByRole('button', { name: 'About FlowGate' }).click();
   await page.locator('#aboutBuild').getByText('Version: 0.1.0-rc.7', { exact: false }).waitFor();
   const about = await page.locator('#aboutBuild').textContent();

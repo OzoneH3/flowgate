@@ -1389,7 +1389,7 @@ function setupMainMenus(windowMenu: HTMLElement) {
   onToolbarMenuPress(status, () => openTool(control, controlTitle));
   onToolbarMenuPress($('extendedBadge'), () => openTool(monitoring, monitoring.querySelector('summary')!));
   $('toolbarUnits').after(status);
-  for (const menu of [file, tools, windowMenu.querySelector('details')!, help]) {
+  for (const menu of [file, tools, windowMenu.querySelector('details')!, help, control, monitoring, options]) {
     onToolbarMenuPress(menu.querySelector('summary')!, () => { menu.open = !menu.open; });
   }
   // Advisory runtime health beside, not inside, the protection entry (its text is ellipsized).
