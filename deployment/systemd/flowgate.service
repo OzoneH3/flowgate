@@ -9,9 +9,11 @@ StartLimitBurst=5
 [Service]
 Type=notify
 NotifyAccess=main
-ExecStartPre=/usr/local/lib/flowgate/current/flowgate monitor-setup
-ExecStartPre=/usr/local/lib/flowgate/current/flowgate protection-guard --state /run/flowgate-enforcement --desired /var/lib/flowgate/protection.json --bootstrap-database /var/lib/flowgate/rules.db
-ExecStart=/usr/local/lib/flowgate/current/launch
+# Enter through the distro's standard executable label. On Fedora, executing
+# directly from /usr/local/lib would leave these programs in SELinux init_t.
+ExecStartPre=/usr/bin/env /usr/local/lib/flowgate/current/flowgate monitor-setup
+ExecStartPre=/usr/bin/env /usr/local/lib/flowgate/current/flowgate protection-guard --state /run/flowgate-enforcement --desired /var/lib/flowgate/protection.json --bootstrap-database /var/lib/flowgate/rules.db
+ExecStart=/usr/bin/env /usr/local/lib/flowgate/current/launch
 Restart=on-failure
 RestartSec=3s
 TimeoutStartSec=60s
