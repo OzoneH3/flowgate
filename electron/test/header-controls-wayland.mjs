@@ -136,8 +136,19 @@ try {
   assert.deepEqual(operations, []);
   await page.locator('#confirmYes').click();
 
-  await page.getByRole('button', { name: 'UDP monitoring: On' }).waitFor();
-  await page.locator('#extendedBadge').click();
+  const udpBadge = page.getByRole('button', { name: 'UDP monitoring: On' });
+  await udpBadge.waitFor();
+  const firewallBadge = page.getByRole('button', { name: 'Firewall: Both' });
+  const background = (button) => button.evaluate((node) => getComputedStyle(node).backgroundColor);
+  await firewallBadge.hover();
+  const hoverColor = await background(firewallBadge);
+  assert.notEqual(await background(udpBadge), hoverColor);
+  await udpBadge.hover();
+  assert.equal(await background(udpBadge), hoverColor);
+  await udpBadge.click();
+  const udpDetails = page.locator('#extendedStatus');
+  assert.ok(await udpDetails.evaluate((node) => parseFloat(getComputedStyle(node).fontSize) >= 14));
+  assert.ok(await udpDetails.evaluate((node) => node.scrollHeight <= node.clientHeight));
   await page.locator('#extendedStop').click();
   await page.locator('#confirmation').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#confirmTitle').textContent(), 'Stop UDP monitoring');

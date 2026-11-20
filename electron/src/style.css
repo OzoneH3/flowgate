@@ -653,13 +653,12 @@ dialog::backdrop {
   flex-wrap: wrap;
   padding-bottom: 4px;
   align-items: center;
+  font-size: 14px;
 }
 .extendedbar span {
-  font-size: 11px;
   flex-basis: 100%;
-  color: #aaa;
-  max-height: 32px;
-  overflow: auto;
+  color: var(--fg-text);
+  line-height: 1.45;
   overflow-wrap: anywhere;
 }
 
@@ -981,7 +980,7 @@ td.up { color: #c7daa8; background: #344b20; }
 #ruleEditor #scopeSummary { font-size: 12px; line-height: 1.35; }
 
 /* Compact independent UDP status; lifecycle details stay in the existing Control menu. */
-#extendedBadge { font-size: 11px; min-height: 22px; height: 22px; padding: 1px 5px; background: transparent; border-color: var(--fg-border); flex-shrink: 0; }
+#extendedBadge { min-height: 22px; height: 22px; padding: 1px 5px; border-color: var(--fg-border); flex-shrink: 0; }
 @media(max-width:950px) { #extendedBadge { max-width: 180px; overflow: hidden; text-overflow: ellipsis; } }
 
 /* Decision log: same density as Rules; gaps and degraded health stay visible. */
