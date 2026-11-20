@@ -82,7 +82,24 @@ try {
   assert.equal(await page.locator('.toolbar').getByText('Activity · machine', { exact: false }).count(), 0);
   await page.locator('#footerSummary').getByText('Partial visibility', { exact: false }).waitFor();
   assert.match(await page.locator('#info').textContent(), /Machine · current network namespace.*Partial visibility/s);
-  await page.locator('#helpMenu > summary').click();
+  const help = page.locator('#helpMenu > summary');
+  const helpOpen = () => help.evaluate((node) => node.parentElement.open);
+  await help.hover();
+  await page.mouse.down();
+  assert.equal(await helpOpen(), true, 'Help opens before mouse-up');
+  await page.mouse.up();
+  assert.equal(await helpOpen(), true, 'mouse-up does not toggle Help again');
+  await page.mouse.down();
+  assert.equal(await helpOpen(), false, 'a second press closes Help');
+  await page.mouse.up();
+  await help.press('Enter');
+  assert.equal(await helpOpen(), true, 'keyboard activation still opens Help');
+  await page.locator('#toolsMenu > summary').hover();
+  await page.mouse.down();
+  assert.equal(await helpOpen(), false, 'pressing another heading closes the previous menu');
+  assert.equal(await page.locator('#toolsMenu').evaluate((node) => node.open), true);
+  await page.mouse.up();
+  await help.click();
   await page.getByRole('button', { name: 'About FlowGate' }).click();
   await page.locator('#aboutBuild').getByText('Version: 0.1.0-rc.7', { exact: false }).waitFor();
   const about = await page.locator('#aboutBuild').textContent();
@@ -90,7 +107,6 @@ try {
   assert.ok(about.includes('Daemon build: ' + revision));
   await page.locator('#aboutFlowGate').getByRole('button', { name: 'Close' }).click();
 
-  const help = page.locator('#helpMenu > summary');
   await help.click();
   await page.getByRole('button', { name: 'Icons and symbols' }).click();
   const guide = page.getByRole('dialog', { name: 'Icons and symbols' });
@@ -105,9 +121,12 @@ try {
   await guide.screenshot({ path: path.join(run, 'icons-and-symbols.png') });
   await page.keyboard.press('Escape');
   await guide.waitFor({ state: 'hidden' });
-  assert.equal(await help.evaluate((node) => node === document.activeElement), true);
+  await page.waitForFunction(() => document.activeElement === document.querySelector('#helpMenu > summary'));
 
-  await page.getByRole('button', { name: 'Firewall: Both' }).click();
+  await page.getByRole('button', { name: 'Firewall: Both' }).hover();
+  await page.mouse.down();
+  assert.equal(await page.locator('#controlMenu').evaluate((node) => node.open), true);
+  await page.mouse.up();
   assert.equal(await page.locator('#controlMenu > summary').textContent(), 'Firewall · Both');
   await page.locator('#extendedBadge').click();
   await page.locator('#extendedEnable').click();

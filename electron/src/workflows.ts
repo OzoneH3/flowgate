@@ -282,7 +282,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
   document.addEventListener('pointerdown', (event) => {
     for (const menu of document.querySelectorAll<HTMLDetailsElement>('.desktop-menu[open]'))
       if (!menu.contains(event.target as Node)) menu.open = false;
-  });
+  }, { capture: true });
   const evaluation = node('section', '');
   evaluation.className = 'evaluationbar';
   evaluation.innerHTML = `<select id="evalProfile" aria-label="Evaluation profile"><option value="incoming">Incoming only</option><option value="both" disabled>Both directions · support not advertised</option></select><button id="evalStart">Start 5-minute evaluation…</button><button id="evalStop">Stop evaluation</button><button id="evalCancel" hidden>Cancel authentication</button><button id="evalStatus">Status</button><button id="evalRecover">Recovery…</button><span id="evaluationStatus" role="status"></span>`;

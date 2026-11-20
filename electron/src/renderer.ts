@@ -1279,6 +1279,20 @@ function updateFirewallStatus() {
   }
 
 }
+function onToolbarMenuPress(trigger: HTMLElement, open: () => void) {
+  trigger.addEventListener('pointerdown', (event) => {
+    if (event.pointerType !== 'mouse' || event.button !== 0) return;
+    event.preventDefault();
+    trigger.focus({ preventScroll: true });
+    open();
+  });
+  trigger.addEventListener('click', (event) => {
+    // The mouse press already acted. Keep the native summary click for
+    // keyboard and touch, and give the shortcut buttons the same support.
+    if (event.pointerType === 'mouse' && event.button === 0) event.preventDefault();
+    else if (trigger instanceof HTMLButtonElement) open();
+  });
+}
 function setupMainMenus(windowMenu: HTMLElement) {
   const toolbar = document.querySelector('.toolbar')!;
   const make = (id: string, title: string) => {
@@ -1372,9 +1386,12 @@ function setupMainMenus(windowMenu: HTMLElement) {
     tools.open = true;
     target.focus();
   };
-  status.onclick = () => openTool(control, controlTitle);
-  $('extendedBadge').onclick = () => openTool(monitoring, monitoring.querySelector('summary')!);
+  onToolbarMenuPress(status, () => openTool(control, controlTitle));
+  onToolbarMenuPress($('extendedBadge'), () => openTool(monitoring, monitoring.querySelector('summary')!));
   $('toolbarUnits').after(status);
+  for (const menu of [file, tools, windowMenu.querySelector('details')!, help]) {
+    onToolbarMenuPress(menu.querySelector('summary')!, () => { menu.open = !menu.open; });
+  }
   // Advisory runtime health beside, not inside, the protection entry (its text is ellipsized).
   const health = element('span', '', 'runtime-health');
   health.id = 'runtimeHealth';
