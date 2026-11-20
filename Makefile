@@ -1,7 +1,7 @@
 SHELL := /bin/sh
 .DEFAULT_GOAL := help
 
-VERSION ?= 0.1.0-rc.1
+VERSION ?= 0.1.0-rc.7
 ARTIFACT := $(CURDIR)/.workspace/dist/flowgate-$(VERSION)-linux-x86_64.tar.gz
 BUNDLE ?= $(ARTIFACT)
 SHA256 ?=
@@ -15,7 +15,7 @@ help:
 	@printf '%s\n' 'make build        Build the daemon, desktop and helpers' \
 	  'make check        Run focused release checks' \
 	  'make package      Create an offline installer bundle and SHA256 receipt' \
-	  'make update       Build, verify, and install the daemon and desktop (VERSION=...)' \
+	  'make update       Build, verify, and install this checkout (VERSION=$(VERSION))' \
 	  'make preflight    Check a package against the installed state' \
 	  'make install      Install a verified package (BUNDLE=... SHA256=...)' \
 	  'make desktop      Migrate the current user login or import preferences' \

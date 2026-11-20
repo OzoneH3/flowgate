@@ -8,18 +8,18 @@ The package target installs the pinned Electron runtime when needed, builds the
 desktop and native components, and runs the release checks.
 
 ```sh
-make package VERSION=0.1.0-rc.1
+make package
 ```
 
 Build from a clean committed revision. The build and package targets write to .workspace. The archive and the offline bootstrap land in .workspace/dist. Copy them to a convenient location. Distribute their SHA256 digests through the trusted release channel. Check the bootstrap itself against the trusted digest before executing it as root. The archive SHA256 is an argument and the bootstrap verifies privately staged bytes before parsing the payload or running any packaged code.
 
-To build and upgrade the installed daemon and desktop on this machine in one command, use a new release version:
+To build and upgrade the installed daemon and desktop on this machine in one command:
 
 ```sh
-make update VERSION=0.1.0-rc.7
+make update
 ```
 
-This packages the current commit, verifies the archive against its checksum receipt, then runs preflight and install in order. Run it as the intended desktop user. Preflight and install invoke sudo. Close any older desktop window and launch `flowgate-ui` after the update.
+This packages the current committed checkout using the release version in the Makefile, verifies the archive against its checksum receipt, then runs preflight and install in order. Run it as the intended desktop user. Preflight and install invoke sudo. Close any older desktop window and launch `flowgate-ui` after the update.
 
 ```sh
 make preflight BUNDLE=/absolute/path/to/flowgate.tar.gz SHA256=<trusted-sha256>
