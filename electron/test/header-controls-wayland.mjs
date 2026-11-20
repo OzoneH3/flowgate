@@ -90,6 +90,23 @@ try {
   assert.ok(about.includes('Daemon build: ' + revision));
   await page.locator('#aboutFlowGate').getByRole('button', { name: 'Close' }).click();
 
+  const help = page.locator('#helpMenu > summary');
+  await help.click();
+  await page.getByRole('button', { name: 'Icons and symbols' }).click();
+  const guide = page.getByRole('dialog', { name: 'Icons and symbols' });
+  await guide.waitFor({ state: 'visible' });
+  assert.equal(await guide.getByRole('heading', { name: 'Connection observations' }).count(), 1);
+  assert.equal(await guide.locator('.status-slot:not(.upload-configured) svg').count(), 7);
+  assert.equal(await guide.locator('.blocker-glyph.tone-allow').textContent(), '✓');
+  assert.match(await guide.textContent(), /Partial coverage/);
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll('#iconGuide img')].every((icon) => icon.naturalWidth > 0),
+  );
+  await guide.screenshot({ path: path.join(run, 'icons-and-symbols.png') });
+  await page.keyboard.press('Escape');
+  await guide.waitFor({ state: 'hidden' });
+  assert.equal(await help.evaluate((node) => node === document.activeElement), true);
+
   await page.getByRole('button', { name: 'Firewall: Both' }).click();
   assert.equal(await page.locator('#controlMenu > summary').textContent(), 'Firewall · Both');
   await page.locator('#extendedBadge').click();
@@ -117,7 +134,7 @@ try {
   activityAvailable = false;
   await page.locator('#footerSummary').getByText('Activity unavailable', { exact: false }).waitFor();
   assert.match(await page.locator('#info').textContent(), /Activity unavailable/);
-  console.log('PASS Wayland About, firewall labels, UDP confirmations and Activity status', run);
+  console.log('PASS Wayland icon guide, About, firewall labels, UDP confirmations and Activity status', run);
 } finally {
   if (app) await app.evaluate(({ app }) => app.exit()).catch(() => {});
   control.close();

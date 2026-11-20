@@ -60,7 +60,7 @@ function paint() {
     const t=targets.get(b); if(t)paintButton(b,t);paintAvailability(b);
   }
 }
-function limitGlyph(direction:LimitKind) {
+export function limitGlyph(direction:LimitKind) {
   const span=text('span','');span.className='slot-icon '+(direction==='priority'?'family-priority':direction==='upload'?'family-ul-limit':'family-dl-limit');
   const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
   svg.setAttribute('viewBox','0 0 16 16');svg.setAttribute('aria-hidden','true');

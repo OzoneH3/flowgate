@@ -5,6 +5,8 @@ const assets: Record<string, string> = {
   'renderer.js': 'text/javascript',
   'pane.html': 'text/html',
   'pane.js': 'text/javascript',
+  'flowgate.png': 'image/png',
+  'flowgate-off.png': 'image/png',
   'fonts/selawk.ttf': 'font/ttf',
   'fonts/selawksb.ttf': 'font/ttf',
   'fonts/selawkb.ttf': 'font/ttf',

@@ -1744,6 +1744,19 @@ body.hide-sidebar #activityView > aside { display:none; }
 /* Release identity beside the title: GUI release + build date/time; daemon only on mismatch. */
 #aboutFlowGate { width: min(480px, calc(100vw - 36px)); }
 #aboutFlowGate .about-build { white-space: pre-line; overflow-wrap: anywhere; line-height: 1.6; }
+#iconGuide { width: min(610px, calc(100vw - 36px)); max-height: calc(100vh - 36px); padding: 14px; }
+#iconGuide[open] { display: flex; flex-direction: column; }
+#iconGuide h2 { padding: 0 0 10px; font-size: 16px; }
+.icon-guide-body { overflow: auto; padding-right: 8px; }
+.icon-guide-body h3 { margin: 10px 0 5px; font-size: 13px; }
+.icon-guide-body dl { display: grid; grid-template-columns: minmax(132px, 38%) minmax(0, 1fr); gap: 7px 10px; margin: 0 0 12px; line-height: 1.4; }
+.icon-guide-body dt { display: flex; align-items: flex-start; gap: 6px; font-weight: 600; }
+.icon-guide-body dd { margin: 0; }
+.icon-guide-sample { width: 40px; flex: 0 0 40px; display: inline-flex; justify-content: center; align-items: center; white-space: nowrap; }
+.icon-guide-sample :is(.row-icon, .connection-direction, .connection-status-slot) { margin: 0; }
+.icon-guide-sample .status-slot .slot-icon { display: inline-flex; }
+.icon-guide-sample img { width: 18px; height: 18px; }
+#iconGuide > footer { display: flex; justify-content: flex-end; margin-top: 10px; }
 
 
 /* Backend-owned cumulative observations; independent from live Activity rates. */

@@ -75,6 +75,7 @@ import type { Presentation, PaneFrame } from './pane-model';
 import { DISPLAY_UNITS, displayAmount, isDisplayUnit, type DisplayUnit } from './display-units';
 import { initiationPresentation } from './initiation';
 import { ActivityPolicy, STATUS_SLOTS, blockerGlyph } from './activity-policy';
+import { createIconGuide } from './icon-guide';
 import { ruleChip, ownRuleChip, type RuleChip } from './rule-chip';
 import {
   POLICY_CAPABILITY,
@@ -1326,7 +1327,14 @@ function setupMainMenus(windowMenu: HTMLElement) {
     renderAboutBuild();
     dialog.showModal();
   };
-  help.lastElementChild!.append(about);
+  const icons = element('button', 'Icons and symbols');
+  const iconGuide = createIconGuide(rowIcon, statusFamilyGlyph);
+  icons.onclick = () => {
+    (help as HTMLDetailsElement).open = false;
+    iconGuide.showModal();
+  };
+  iconGuide.onclose = () => help.querySelector<HTMLElement>('summary')?.focus();
+  help.lastElementChild!.append(icons, about);
   const windowPanel = windowMenu.querySelector('.menu-panel')!;
   const layout = element('label', 'Layout preset', 'menu-control');
   const presets = element('select');

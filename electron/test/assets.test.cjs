@@ -5,6 +5,8 @@ test('bundled Selawik faces have explicit font MIME types', () => {
   for (const name of ['selawk', 'selawksb', 'selawkb'])
     assert.equal(bundledAsset(`fonts/${name}.ttf`), 'font/ttf');
   assert.equal(bundledAsset('renderer.js'), 'text/javascript');
+  assert.equal(bundledAsset('flowgate.png'), 'image/png');
+  assert.equal(bundledAsset('flowgate-off.png'), 'image/png');
 });
 test('asset table rejects arbitrary files, traversal and inherited properties', () => {
   for (const name of [
