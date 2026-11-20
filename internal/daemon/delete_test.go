@@ -3,6 +3,7 @@ package daemon
 import (
 	"database/sql"
 	"encoding/json"
+	"flowgate/internal/identity"
 	"flowgate/internal/policy"
 	"flowgate/internal/store"
 	"net"
@@ -322,6 +323,69 @@ func TestConditionalDeleteLostResponse(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	assertCode(t, callResponse(a.path, a.deleteRequest()), "not_found")
+}
+
+func TestConditionalDeleteAcknowledgesBeforePendingRecheck(t *testing.T) {
+	entered, release := make(chan struct{}), make(chan struct{})
+	var pending Event
+	var fallback policy.Rule
+	a := newDeleteAPI(t, func(e *Engine, s *store.Store) {
+		fallback = e.rules[0]
+		fallback.ID = "older-allow"
+		fallback.Executable = "/fixture/program"
+		fallback.Created = fallback.Created.Add(-time.Second)
+		ask := e.rules[0]
+		ask.Action = "ask"
+		ask.Executable = fallback.Executable
+		e.rules = []policy.Rule{fallback, ask}
+		if err := s.Replace(e.rules); err != nil {
+			t.Fatal(err)
+		}
+		_, flow, _, _ := fixture()
+		pending = e.Observe(flow, "held")
+		if pending.State != "awaiting-decision" || pending.Rule != ask.ID {
+			t.Fatal(pending)
+		}
+		resolve := e.Resolve
+		e.Resolve = func(f identity.Flow) identity.Attribution {
+			close(entered)
+			<-release
+			return resolve(f)
+		}
+	})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	defer unblock()
+	reply := make(chan Response, 1)
+	go func() { reply <- callResponse(a.path, a.deleteRequest()) }()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("delete did not schedule a pending identity recheck")
+	}
+	select {
+	case r := <-reply:
+		if r.Generation != a.e.Generation || r.Error != "" || r.DeletedRule == nil ||
+			*r.DeletedRule != (DeletedRule{ID: a.rule.ID, Version: a.rule.Version}) {
+			t.Fatalf("invalid deletion acknowledgement: %+v", r)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("delete acknowledgement waited for the pending identity recheck")
+	}
+	if r := callResponse(a.path, Request{Version: 1, Operation: "list"}); len(r.Rules) != 1 || r.Rules[0].ID != fallback.ID {
+		t.Fatalf("delete acknowledgement preceded rule publication: %+v", r.Rules)
+	}
+	if state := stateOf(a.e, pending.ID); state != "awaiting-decision" {
+		t.Fatalf("request changed before its identity recheck: %s", state)
+	}
+	unblock()
+	deadline := time.Now().Add(time.Second)
+	for stateOf(a.e, pending.ID) != "allowed" {
+		if time.Now().After(deadline) {
+			t.Fatal("the original request did not settle under the retained Allow")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 func TestConditionalDeleteVersionExhaustion(t *testing.T) {
