@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -33,7 +34,7 @@ type request struct {
 	Op, Label string
 }
 
-func probe(source, remote string) error {
+func probe(source, remote string, download bool) error {
 	local := &net.TCPAddr{IP: net.ParseIP(source)}
 	listener, err := net.ListenTCP("tcp4", local)
 	if err != nil {
@@ -66,6 +67,9 @@ func probe(source, remote string) error {
 
 	var conn *net.TCPConn
 	var sending chan error
+	var reading chan error
+	var bytesRead atomic.Uint64
+	epoch := time.Now()
 	handle := func(q request) (map[string]any, error) {
 		answer := map[string]any{}
 		switch q.Op {
@@ -90,8 +94,34 @@ func probe(source, remote string) error {
 				return nil, err
 			}
 			answer["inode"], answer["local"], answer["remote"] = i, conn.LocalAddr().String(), conn.RemoteAddr().String()
+			if download {
+				reading = make(chan error, 1)
+				go func(stream *net.TCPConn, done chan<- error) {
+					buf := make([]byte, 128<<10)
+					for {
+						n, err := stream.Read(buf)
+						bytesRead.Add(uint64(n))
+						if err != nil {
+							done <- err
+							close(done)
+							return
+						}
+					}
+				}(conn, reading)
+			}
+		case "sample":
+			if reading == nil {
+				return nil, errors.New("need an established download stream")
+			}
+			select {
+			case err := <-reading:
+				return nil, fmt.Errorf("download stream closed: %v", err)
+			default:
+				answer["monotonic_ns"] = time.Since(epoch).Nanoseconds()
+				answer["bytes"] = bytesRead.Load()
+			}
 		case "start":
-			if conn == nil || sending != nil {
+			if download || conn == nil || sending != nil {
 				return nil, errors.New("need an idle open stream")
 			}
 			if err := conn.SetWriteDeadline(time.Now().Add(20 * time.Second)); err != nil {
@@ -132,6 +162,9 @@ func probe(source, remote string) error {
 			if sending != nil {
 				<-sending
 			}
+			if reading != nil {
+				<-reading
+			}
 		}
 	}()
 	for scanner.Scan() {
@@ -152,11 +185,11 @@ func probe(source, remote string) error {
 }
 
 func main() {
-	if len(os.Args) != 3 {
-		fmt.Fprintln(os.Stderr, "usage: probe SOURCE_IP DESTINATION_IP:PORT")
+	if len(os.Args) != 4 || (os.Args[3] != "upload" && os.Args[3] != "download") {
+		fmt.Fprintln(os.Stderr, "usage: probe SOURCE_IP DESTINATION_IP:PORT upload|download")
 		os.Exit(2)
 	}
-	if err := probe(os.Args[1], os.Args[2]); err != nil {
+	if err := probe(os.Args[1], os.Args[2], os.Args[3] == "download"); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

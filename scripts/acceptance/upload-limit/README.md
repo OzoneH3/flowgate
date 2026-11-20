@@ -1,4 +1,4 @@
-# Per-application upload limit acceptance
+# Per-application bandwidth limit acceptance
 
 Run from the FlowGate checkout after coordinating one disposable Debian guest
 with flowgate-lab. The default locations are the sibling flowgate-lab checkout,
@@ -9,6 +9,12 @@ its Debian 13 profile, and the locally packaged RC8 `13e3029a` pair under
 python3 -B scripts/acceptance/upload-limit/run.py
 ```
 
+For download, use the host as sender on the same TCP connections:
+
+```sh
+python3 -B scripts/acceptance/upload-limit/run.py --direction download
+```
+
 Use `--lab`, `--profile`, or `--dist` to override those locations. The tested lab
 runner is `75af5ee`. The runner checks both package digests and the installed
 daemon's source and executable digests. Go builds two distinct static native
@@ -16,14 +22,16 @@ test executables. Use `--local-check` for a loopback test of the probes, receive
 and rate calculations without a guest.
 
 Only the guest opts into the packaged shaping controller. The test checks the
-existing single-queue NIC preflight, installs `ethtool` from the guest's Debian
-repositories if absent, and uses the lab's existing TCP link and SSH
-transport, and opens one verified stream per application under the same enrolled
-UID. Both streams use the same source interface and the same host receiver
+existing single-queue NIC preflight and installs `ethtool` from the guest's Debian
+repositories if absent. It uses the existing TCP link and SSH transport and
+opens one verified stream per application under the same enrolled
+UID. Both streams use the same guest interface and the same host service
 address and port. Shaping state is changed on the primary Unix socket with the
 current daemon generation and expected version. The test waits for applied
-configuration and an upload binding for A's exact socket cookie before measuring
-the capped phase. The receiver counts payload bytes independently of FlowGate.
+configuration and a binding for the selected direction on A's exact socket
+cookie before measuring the capped phase. Payload bytes are counted at the host
+for upload and inside each guest application for download. The download case
+also requires a positive IFB redirect counter delta during A's capped phase.
 
 | Check | Criterion |
 |---|---|
@@ -35,11 +43,11 @@ the capped phase. The receiver counts payload bytes independently of FlowGate.
 
 The values use decimal Mbit/s from receiver bytes and monotonic elapsed time.
 Each sample uses a seven-second window after three seconds of warm-up.
-Applications upload in separate windows to avoid sharing the link's throughput
+Applications transfer in separate windows to avoid sharing the link's throughput
 during measurement. The same sockets are retained throughout.
 
-An unsupported interface or inadequate route is inconclusive and returns
-nonzero. Other failures also return nonzero. The lab removes the guest overlay.
-See `.workspace/application-upload-limit/runs/` for phase results, receiver
-counters, stream identities, API replies, and shaping status and counters before
-and after measurements.
+An unsupported interface, missing download binding, or inadequate route is
+inconclusive and returns nonzero. Other failures also return nonzero. The lab
+removes the guest overlay. See `.workspace/application-upload-limit/runs/` or
+`.workspace/application-download-limit/runs/` for phase results, receiver
+counters, stream identities, API replies, and shaping status and counters.

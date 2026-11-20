@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Measure the packaged per-application upload cap in one disposable Debian guest."""
+"""Measure a packaged per-application bandwidth cap in one disposable Debian guest."""
 import argparse
 from contextlib import ExitStack
+from functools import partial
 import json
 import os
 from pathlib import Path
@@ -50,20 +51,31 @@ def build_probes():
     return output
 
 
-def measure(probe, receiver, label, *, warmup=WARMUP, window=WINDOW):
-    probe.call(op="start")
+def measure(probe, receiver, label, *, direction, warmup=WARMUP, window=WINDOW):
+    host_before = receiver.sample(label)
+    assert host_before["connections"] == 1, host_before
+    if direction == "download":
+        receiver.start(label)
+        sample = lambda: probe.call(op="sample")
+    else:
+        probe.call(op="start")
+        sample = lambda: receiver.sample(label)
     try:
         time.sleep(warmup)
-        before = receiver.sample(label)
+        before = sample()
         time.sleep(window)
-        after = receiver.sample(label)
+        after = sample()
     finally:
-        probe.call(op="stop")
-    assert before["connections"] == after["connections"] == 1, (before, after)
+        if direction == "download":
+            receiver.stop(label)
+        else:
+            probe.call(op="stop")
+    host_after = receiver.sample(label)
+    assert host_after["connections"] == 1 and host_after["peer"] == host_before["peer"], host_after
     elapsed = (after["monotonic_ns"] - before["monotonic_ns"]) / 1e9
     delivered = after["bytes"] - before["bytes"]
     return {"bytes": delivered, "seconds": elapsed, "bits_per_second": delivered * 8 / elapsed,
-            "start": before, "end": after}
+            "start": before, "end": after, "host_start": host_before, "host_end": host_after}
 
 
 def in_range(value, target, tolerance):
@@ -138,11 +150,14 @@ def verify_stream(api, probe, stream, wait_for):
     return wait_for(current, 15, f"unverified native TCP stream for probe {hello['probe']}")
 
 
-def exercise(api, probes, receiver, nic, record, report, stack):
+def exercise(api, probes, receiver, nic, record, report, stack, direction):
     from scenarios import Scenario
-    from vm import wait_for
+    from vm import FixtureError, wait_for
 
-    generation = api()["generation"]
+    context = api()
+    generation = context["generation"]
+    if f"experimental-native-{direction}-v1" not in context["capabilities"]:
+        raise Inconclusive(f"the installed daemon lacks the {direction} limiter capability")
 
     def status():
         result = api("upload-status", generation=generation)["upload_shaping"]
@@ -174,6 +189,8 @@ def exercise(api, probes, receiver, nic, record, report, stack):
     identities = {}
     for label, probe in probes.items():
         stream = probe.call(op="open", label=label)
+        wait_for(lambda: receiver.sample(label)["connections"] == 1, 5,
+                 f"host service did not receive probe {label}'s stream label")
         proof = verify_stream(api, probe, stream, wait_for)
         p, sock = proof["process"], proof["socket"]
         assert (p["uid"], p["application"]["key"]) == (
@@ -196,17 +213,24 @@ def exercise(api, probes, receiver, nic, record, report, stack):
         for label, probe in probes.items():
             if name == "limit-removed" and label == "B":
                 continue
-            row["receiver"][label] = measure(probe, receiver, label)
+            row["receiver"][label] = measure(probe, receiver, label, direction=direction)
             row["status_after_" + label] = status()
         record("phase", {"phase": name, **row})
         return row
 
     baseline = phase("baseline")["receiver"]
     cap = select_rate(baseline)
-    caps = [{"uid": a["uid"], "application": a["application"]["key"], "bits_per_second": cap}]
+    rate_field = "download_bits_per_second" if direction == "download" else "bits_per_second"
+    caps = [{"uid": a["uid"], "application": a["application"]["key"], rate_field: cap}]
     cleanup = True
     try:
-        record("limit-applied", configure(caps))
+        applied = configure(caps)
+        assert len(applied["configured_caps"]) == 1
+        configured = applied["configured_caps"][0]
+        assert all(configured[key] == val for key, val in caps[0].items()), configured
+        if direction == "download":
+            assert configured.get("bits_per_second", 0) == 0, configured
+        record("limit-applied", applied)
 
         def a_covered():
             current = status()
@@ -214,15 +238,29 @@ def exercise(api, probes, receiver, nic, record, report, stack):
                 raise RuntimeError(f"upload controller fault: {current.get('last_error')}")
             kernel = current.get("kernel") or {}
             for binding in kernel.get("bindings") or []:
-                if (binding["covered"] and binding["upload_class"]
+                if (binding["covered"] and binding[f"{direction}_class"]
+                        and (direction == "upload" or binding["download"])
                         and binding["cookie"] == identities["A"]["socket"]["cookie"]
                         and binding["app"] == f'{a["uid"]}:{a["application"]["key"]}'):
                     return current
             return None
 
-        coverage = wait_for(a_covered, 25, "the original A socket did not obtain upload coverage")
+        missing = f"the original A socket did not obtain {direction} coverage"
+        try:
+            coverage = wait_for(a_covered, 25, missing)
+        except FixtureError as exc:
+            if direction != "download" or str(exc) != missing:
+                raise
+            record("missing-download-coverage", status())
+            raise Inconclusive(str(exc)) from exc
         record("a-covered", coverage)
         limited = phase("a-limited", cap)
+        if direction == "download":
+            before = limited["status_before"]["kernel"]["download"]["redirected"]
+            after = limited["status_after_A"]["kernel"]["download"]["redirected"]
+            delta = {key: after[key] - before[key] for key in ("bytes", "packets")}
+            report["download_redirected_delta"] = delta
+            record("download-redirected-delta", delta)
         record("limit-removed", configure([]))
         cleanup = False
         recovered = phase("limit-removed")
@@ -238,63 +276,72 @@ def exercise(api, probes, receiver, nic, record, report, stack):
                                 baseline["A"]["bits_per_second"], BASELINE_TOLERANCE),
     }
     report["verdicts"] = verdicts
+    if direction == "download":
+        verdicts["download_counters_advanced"] = all(val > 0 for val in delta.values())
     assert all(verdicts.values()), verdicts
 
 
-def run_case(lab, sut, names, release, evidence, unused_host, *, diagnose_rule_delete=False):
+def run_case(lab, sut, names, release, evidence, unused_host, *, direction, binaries,
+             diagnose_rule_delete=False):
     from lab import FlowGate, activate, configure_sut, recorder, save
 
-    report = {"phases": {}, "verdict": "fail"}
-    output = lab.directory / f"{NAME}.json"
+    name = f"application-{direction}-limit"
+    report = {"phases": {}, "verdict": "fail", "direction": direction}
+    output = lab.directory / f"{name}.json"
     record = recorder(output.with_suffix(".jsonl"))
     record("criteria", {"cap_ratio": CAP_TOLERANCE, "baseline_ratio": BASELINE_TOLERANCE,
                         "warmup_s": WARMUP, "window_s": WINDOW, "headroom": HEADROOM,
                         "min_cap_bps": MIN_CAP, "max_cap_bps": MAX_CAP})
     try:
-        assert names == [NAME] and release["source"] == BUILD
+        assert names == [name] and release["source"] == BUILD
         configure_sut(sut)
         nic = setup_interface(sut, record)
         for label in "AB":
-            sut.upload(PROBES / f"upload-{label}", f"upload-{label}")
-        sut.run("chmod 700 fg-lab/upload-A fg-lab/upload-B")
+            sut.upload(binaries / f"upload-{label}", f"{direction}-{label}")
+        sut.run(f"chmod 700 fg-lab/{direction}-A fg-lab/{direction}-B")
         with ExitStack() as stack:
-            receiver = stack.enter_context(Receiver("AB"))
+            receiver = stack.enter_context(Receiver("AB", download=direction == "download"))
 
             def channel(command, label):
                 ch = sut.channel(command, label)
                 stack.callback(ch.close)
                 return ch
 
-            probes = {label: channel(f"fg-lab/upload-{label} {SOURCE} {DESTINATION}:{receiver.port}",
-                                     f"upload-{label}") for label in "AB"}
+            probes = {label: channel(f"fg-lab/{direction}-{label} {SOURCE} "
+                                     f"{DESTINATION}:{receiver.port} {direction}",
+                                     f"{direction}-{label}") for label in "AB"}
             api = FlowGate(channel(f"python3 fg-lab/guest_tools.py flowgate {API}", "api"), record)
             activate(api, release)
             evidence["phase"] = "scenarios"
-            exercise(api, probes, receiver, nic, record, report, stack)
+            exercise(api, probes, receiver, nic, record, report, stack, direction)
         report["verdict"] = "pass"
-        evidence["scenarios"][NAME] = "pass"
-        print(f"PASS {NAME}", flush=True)
+        evidence["scenarios"][name] = "pass"
+        print(f"PASS {name}", flush=True)
     except Inconclusive as exc:
         report.update(verdict="inconclusive", reason=str(exc))
-        evidence["scenarios"][NAME] = "inconclusive"
+        evidence["scenarios"][name] = "inconclusive"
         raise
     finally:
         save(output, report)
 
 
-def local_check(folder, vm):
-    with Receiver("AB") as receiver, ExitStack() as stack:
+def local_check(folder, vm, direction):
+    with Receiver("AB", download=direction == "download") as receiver, ExitStack() as stack:
         probes = {}
         for label in "AB":
-            probe = vm.Channel([folder / f"upload-{label}", "127.0.0.1", f"127.0.0.1:{receiver.port}"],
-                               folder / f"local-{label}.log")
+            probe = vm.Channel([folder / f"upload-{label}", "127.0.0.1",
+                                f"127.0.0.1:{receiver.port}", direction],
+                               folder / f"local-{direction}-{label}.log")
             stack.callback(probe.close)
             assert probe.hello["probe"] == label
             probe.call(op="open", label=label)
+            vm.wait_for(lambda: receiver.sample(label)["connections"] == 1, 3, "stream label lost")
             probes[label] = probe
-        measurements = {label: measure(probe, receiver, label, warmup=0.2, window=0.5)
+        measurements = {label: measure(probe, receiver, label, direction=direction, warmup=0.2, window=0.5)
                         for label, probe in probes.items()}
+        again = measure(probes["A"], receiver, "A", direction=direction, warmup=0.2, window=0.5)
         assert all(row["bytes"] > 0 for row in measurements.values()), measurements
+        assert again["bytes"] > 0 and again["host_end"]["peer"] == measurements["A"]["host_end"]["peer"], again
         assert probes["A"].hello["exe"] != probes["B"].hello["exe"]
         assert select_rate({label: {"bits_per_second": 30_000_000} for label in probes}) == 6_000_000
         assert in_range(4_000_000, 4_000_000, CAP_TOLERANCE)
@@ -309,22 +356,23 @@ def main():
     parser.add_argument("--profile", type=Path, default=ROOT.parent / "flowgate-lab/profiles/debian-13.json")
     parser.add_argument("--dist", type=Path, default=ROOT / "build/dist/rc8-13e3029a")
     parser.add_argument("--local-check", action="store_true")
+    parser.add_argument("--direction", choices=("upload", "download"), default="upload")
     args = parser.parse_args()
     sys.path.insert(0, str(args.lab.resolve()))
     import lab
     import vm
 
-    global PROBES
-    PROBES = build_probes()
+    binaries = build_probes()
     if args.local_check:
-        return local_check(PROBES, vm)
-    vm.RUNS = ROOT / ".workspace" / NAME / "runs"
-    lab.run_cases = run_case
+        return local_check(binaries, vm, args.direction)
+    name = f"application-{args.direction}-limit"
+    vm.RUNS = ROOT / ".workspace" / name / "runs"
+    lab.run_cases = partial(run_case, direction=args.direction, binaries=binaries)
     args.archive = args.dist / ARCHIVE
     args.archive_sha256 = ARCHIVE_SHA256
     args.installer = args.dist / "flowgate-release.py"
     args.installer_sha256 = INSTALLER_SHA256
-    args.scenario = [NAME]
+    args.scenario = [name]
     args.keep_failed = False
     return lab.run(args)
 
