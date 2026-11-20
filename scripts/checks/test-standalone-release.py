@@ -28,6 +28,66 @@ class ReleaseChecks(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
 
+    def admin_layout(self):
+        # Use real directory/symlink modes and targets, simulating root ownership.
+        local = self.root / 'local'
+        local.mkdir()
+        (local / 'bin').mkdir()
+        lstat = Path.lstat
+
+        def owned(path):
+            status = lstat(path)
+            return types.SimpleNamespace(st_mode=status.st_mode, st_uid=0)
+
+        paths = patch.dict(scope, LOCAL=local)
+        owners = patch.object(Path, 'lstat', owned)
+        for fixture in (paths, owners):
+            fixture.start()
+            self.addCleanup(fixture.stop)
+        return local
+
+    def assert_admin_destinations(self, directory):
+        operations = {'TOOLS': {}}
+        with patch.dict(scope, secure_file=lambda path: path), patch('runpy.run_path', return_value=operations):
+            module = release['module'](self.root / 'verified-bootstrap')
+        paths = module['TOOLS']
+        for source, command in release['ADMIN_FILES'].items():
+            self.assertEqual(paths[source], str(directory / command))
+        for name in set(release['FILES']) - set(release['ADMIN_FILES']):
+            self.assertEqual(paths[name], release['FILES'][name])
+
+    def test_real_local_sbin(self):
+        local = self.admin_layout()
+        (local / 'sbin').mkdir()
+        self.assert_admin_destinations(local / 'sbin')
+
+    def test_local_sbin_alias_to_bin(self):
+        local = self.admin_layout()
+        sbin = local / 'sbin'
+        for target in ('bin', str(local / 'bin')):
+            with self.subTest(target=target):
+                sbin.symlink_to(target)
+                self.assert_admin_destinations(local / 'bin')
+                self.assertEqual(os.readlink(sbin), target)
+                sbin.unlink()
+
+    def test_refuses_unexpected_local_sbin_alias(self):
+        local = self.admin_layout()
+        (local / 'other').mkdir()
+        (local / 'sbin').symlink_to('other')
+        with self.assertRaisesRegex(RuntimeError, 'Unexpected administrative directory alias'):
+            release['installation_files']()
+
+    def test_refuses_writable_admin_destination_or_parent(self):
+        local = self.admin_layout()
+        (local / 'sbin').symlink_to('bin')
+        for directory in (local / 'bin', local):
+            with self.subTest(directory=directory):
+                directory.chmod(0o775)
+                with self.assertRaisesRegex(RuntimeError, 'Unsafe managed directory'):
+                    release['installation_files']()
+                directory.chmod(0o755)
+
     def test_runuser_resolves_system_sbin_and_ignores_path(self):
         sbin = self.root / 'sbin'
         bin_dir = self.root / 'bin'

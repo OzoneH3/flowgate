@@ -28,10 +28,14 @@ UNITS = ('flowgate.service', 'flowgate-guard.service')
 SHAPING = ETC / 'shaping.json'
 LEGACY = Path('/usr/local/libexec/flowgate-update-helper')
 LEGACY_GRANT = Path('/etc/sudoers.d/flowgate-local-update')
+LOCAL = Path('/usr/local')
+ADMIN_FILES = {
+    'control.py': 'flowgate-control',
+    'recover.py': 'flowgate-recover',
+    'uninstall.py': 'flowgate-uninstall',
+}
 FILES = {
-    'control.py': '/usr/local/sbin/flowgate-control',
-    'recover.py': '/usr/local/sbin/flowgate-recover',
-    'uninstall.py': '/usr/local/sbin/flowgate-uninstall',
+    **{name: str(LOCAL / 'sbin' / command) for name, command in ADMIN_FILES.items()},
     'release.py': str(TOOLS / 'release.py'),
     'install-monitoring.py': str(TOOLS / 'install-monitoring.py'),
     'flowgate-ui': '/usr/local/bin/flowgate-ui',
@@ -136,6 +140,30 @@ def remove_electron_profile():
     fsync_dir(APPARMOR_PROFILE.parent)
 
 
+def check_directory(path, status):
+    if not stat.S_ISDIR(status.st_mode) or status.st_uid != 0 or status.st_mode & 0o022:
+        raise RuntimeError(f'Unsafe managed directory: {path}')
+
+
+def installation_files():
+    # Verify the ancestors without following links or creating directories.
+    for parent in reversed([LOCAL, *LOCAL.parents]):
+        if existing(parent):
+            check_directory(parent, parent.lstat())
+    admin = LOCAL / 'sbin'
+    if existing(admin):
+        status = admin.lstat()
+        if stat.S_ISLNK(status.st_mode):
+            bin_dir = LOCAL / 'bin'
+            if status.st_uid != 0 or os.readlink(admin) not in ('bin', str(bin_dir)):
+                raise RuntimeError(f'Unexpected administrative directory alias: {admin}')
+            # Operate on the real directory, leaving the distro alias intact.
+            admin = bin_dir
+            status = admin.lstat()
+        check_directory(admin, status)
+    return {**FILES, **{name: str(admin / command) for name, command in ADMIN_FILES.items()}}
+
+
 def secure_directory(path):
     for parent in reversed([path, *path.parents]):
         try:
@@ -146,9 +174,7 @@ def secure_directory(path):
             # The process umask is restrictive for backups. Public installed
             # binaries still need traversable root-owned parent directories.
             parent.chmod(0o755)
-        status = parent.lstat()
-        if not stat.S_ISDIR(status.st_mode) or status.st_uid != 0 or status.st_mode & 0o022:
-            raise RuntimeError(f'Unsafe managed directory: {parent}')
+        check_directory(parent, parent.lstat())
     return path
 
 
@@ -279,7 +305,7 @@ def module(path):
     secure_file(path)
     api = runpy.run_path(str(path))
     # Use the established installer and include each stable file in its backup.
-    api['TOOLS'].update(FILES)
+    api['TOOLS'].update(installation_files())
     return api
 
 
@@ -411,14 +437,14 @@ def preflight(api, backend_dir, backend, desktop_config):
                     raise RuntimeError(f"Kernel preflight refused: {check['id']}: {check.get('detail')}")
     elif api['flowgate_tables'](host) or host.daemon_pids():
         raise RuntimeError('Existing FlowGate process or tables lack a managed installation')
-    for path in (SHAPING, Path(api['DROPIN']), *(Path(x) for x in FILES.values()),
+    for path in (SHAPING, Path(api['DROPIN']), *(Path(x) for x in api['TOOLS'].values()),
                  *(Path('/etc/systemd/system') / name for name in UNITS)):
         if not existing(path):
             continue
         secure_file(path)
         if path == SHAPING:
             continue
-        reverse = {Path(dest): name for name, dest in FILES.items()}
+        reverse = {Path(dest): name for name, dest in api['TOOLS'].items()}
         name = reverse.get(path, '50-flowgate-guard.conf' if path == Path(api['DROPIN']) else path.name)
         approved = {(backend_dir / name).read_bytes()}
         if old and name in old[1]['files']:
@@ -481,7 +507,7 @@ def install(options, payload, manifest, backend):
         raise RuntimeError('This exact release is already installed')
     release = manifest['release']
     secure_directory(BASE / 'releases')
-    for path in FILES.values():
+    for path in api['TOOLS'].values():
         secure_directory(Path(path).parent)
     gui_files = {name[4:]: entry for name, entry in manifest['files'].items() if name.startswith('gui/')}
     gui_payload = BASE / 'gui' / release
@@ -759,7 +785,7 @@ def restore_previous(api, host, record):
     install_record = read_record(backup / 'install-record.json')
     allowed = {DATA / name for name in ('rules.db', 'decisions.db')}
     allowed.update({ETC / 'zones.json', ETC / 'administrator.json', SHAPING, Path(api['DROPIN'])})
-    allowed.update(Path(path) for path in FILES.values())
+    allowed.update(Path(path) for path in api['TOOLS'].values())
     allowed.update(Path('/etc/systemd/system') / name for name in UNITS)
     for name, item in snapshot.items():
         if Path(name) not in allowed or item is not None and not re.fullmatch(r'rollback-[0-9]+', item['file']):
@@ -820,7 +846,7 @@ def uninstall(options, api, host, record, pending):
     if pending:
         raise RuntimeError('Resolve the interrupted install before uninstalling')
     electron_profile_exists()
-    files = {Path(dst): record['files'][name] for name, dst in FILES.items()}
+    files = {Path(dst): record['files'][name] for name, dst in api['TOOLS'].items()}
     files.update({Path('/etc/systemd/system') / name: record['files'][name] for name in UNITS})
     for path, expected in files.items():
         if existing(path) and digest(secure_file(path)) != expected:

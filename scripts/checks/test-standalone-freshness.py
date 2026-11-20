@@ -71,6 +71,7 @@ class StateFreshness(unittest.TestCase):
             check_mode=lambda api, host, state, selected: state['protection']['desired_mode'] == selected,
         )
         patcher.start()
+        self.api['TOOLS'] = scope['FILES']
         self.addCleanup(patcher.stop)
         stat = Path.stat
 
