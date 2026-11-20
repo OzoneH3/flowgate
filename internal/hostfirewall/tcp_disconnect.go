@@ -63,9 +63,7 @@ func matchEstablishedTCP(sockets []identity.Socket, fs []ct.Flow) []daemon.Estab
 	}
 	for _, flow := range fs {
 		orig, reply := flow.TupleOrig, flow.TupleReply
-		if orig.Proto.Protocol != unix.IPPROTO_TCP || reply.Proto.Protocol != unix.IPPROTO_TCP ||
-			!flow.Status.Confirmed() || !flow.Status.SeenReply() || !flow.Status.Assured() ||
-			flow.ProtoInfo.TCP == nil || flow.ProtoInfo.TCP.State != 3 { // TCP_CONNTRACK_ESTABLISHED
+		if orig.Proto.Protocol != unix.IPPROTO_TCP || reply.Proto.Protocol != unix.IPPROTO_TCP {
 			continue
 		}
 		src := endpoint(orig.IP.SourceAddress, orig.Proto.SourcePort)
@@ -87,12 +85,21 @@ func matchEstablishedTCP(sockets []identity.Socket, fs []ct.Flow) []daemon.Estab
 		if src.Addr().IsLinkLocalUnicast() || dst.Addr().IsLinkLocalUnicast() {
 			continue
 		}
+		// A TCP row can veto a direction even before it can prove one.
+		tcp := flow.ProtoInfo.TCP
+		const established = 3 // TCP_CONNTRACK_ESTABLISHED
+		if !flow.Status.Confirmed() || !flow.Status.SeenReply() || !flow.Status.Assured() ||
+			tcp == nil || tcp.State != established {
+			add(outgoing, "")
+			add(incoming, "")
+			continue
+		}
 		// A preserved connection may have been picked up midstream, so its
 		// original tuple alone is not proof of the TCP initiator. A connection
 		// admitted through the owned TCP SYN policy has that evidence.
 		// Conntrack decodes nf_ct_tcp_flags as a big-endian uint16. The
 		// flags are the high byte and the low byte is the mask.
-		flags := byte((flow.ProtoInfo.TCP.OriginalFlags | flow.ProtoInfo.TCP.ReplyFlags) >> 8)
+		flags := byte((tcp.OriginalFlags | tcp.ReplyFlags) >> 8)
 		const simultaneousOpen = 0x80 // IP_CT_TCP_SIMULTANEOUS_OPEN
 		if flow.Mark&mask != approved || flow.Status.Expected() || flags&simultaneousOpen != 0 {
 			add(outgoing, "")

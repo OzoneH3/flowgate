@@ -57,6 +57,43 @@ func TestMatchEstablishedTCPRequiresUnambiguousAdmittedDirection(t *testing.T) {
 		check(flow, nat)
 		check(nat, flow)
 	})
+	for _, tc := range []struct {
+		name string
+		edit func(*ct.Flow)
+	}{
+		{"unassured", func(row *ct.Flow) { row.Status.Value &^= ct.StatusAssured }},
+		{"not established", func(row *ct.Flow) { row.ProtoInfo.TCP = &ct.ProtoInfoTCP{State: 2} }},
+	} {
+		t.Run("translated competitor "+tc.name, func(t *testing.T) {
+			row := flow
+			row.Zone = 2
+			row.Status.Value |= ct.StatusSrcNAT
+			third := netip.MustParseAddrPort("10.0.0.3:33220")
+			fourth := netip.MustParseAddrPort("10.0.0.4:33220")
+			row.TupleOrig = tuple(third, b)
+			row.TupleReply = tuple(b, a) // Only the reply overlaps.
+			tc.edit(&row)
+			unrelated := row
+			unrelated.TupleReply = tuple(b, fourth)
+			for _, order := range []struct {
+				name string
+				rows func(ct.Flow) []ct.Flow
+			}{
+				{"eligible first", func(other ct.Flow) []ct.Flow { return []ct.Flow{flow, other} }},
+				{"competitor first", func(other ct.Flow) []ct.Flow { return []ct.Flow{other, flow} }},
+			} {
+				t.Run(order.name, func(t *testing.T) {
+					if got := matchEstablishedTCP([]identity.Socket{s}, order.rows(row)); len(got) != 0 {
+						t.Errorf("competing reply must veto the abort candidate, got %+v", got)
+					}
+					if got := matchEstablishedTCP([]identity.Socket{s}, order.rows(unrelated)); len(got) != 1 ||
+						got[0].Flow.Direction != "outgoing" || got[0].Socket.Cookie != s.Cookie {
+						t.Errorf("unrelated row must leave the socket eligible, got %+v", got)
+					}
+				})
+			}
+		})
+	}
 	for _, flag := range []struct {
 		name            string
 		original, reply uint16
