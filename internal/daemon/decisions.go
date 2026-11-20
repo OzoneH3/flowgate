@@ -98,7 +98,7 @@ func (e *Engine) recordFinal(v *Event, action, source, scope, reason string, rul
 		r.Decision.DecidedByUID = &uid
 	}
 	r.Verdict = &decisionlog.Verdict{State: verdict, Detail: detail}
-	if verdict == "deferred" {
+	if verdict == "deferred" && detail == "" {
 		r.Verdict.Detail = "applies to held packets at the next queue flush and to later packets of this flow lease"
 	}
 	e.Decisions.Record(r)

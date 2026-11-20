@@ -5,6 +5,7 @@ import (
 	"flowgate/internal/identity"
 	"flowgate/internal/policy"
 	"fmt"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -195,6 +196,73 @@ func TestStoredAskStillPromptsAfterOnce(t *testing.T) {
 	}
 	if _, settled, err := x.e.DecideSettled(a.ID, "allow", "once", 0, 1000, false); err != nil || len(settled) != 0 || stateOf(x.e, b.ID) != "awaiting-decision" {
 		t.Fatal("Once on an Ask prompt settled another Ask prompt", err, settled)
+	}
+}
+
+func TestUDPApplicationAskOnceRetainedAndLaterDatagrams(t *testing.T) {
+	for _, tc := range []struct {
+		name, protocol, direction, address, action, retained string
+		reprompt                                             bool
+	}{
+		{"outbound UDP Allow Once", "udp", "outgoing", "*", "allow", "drop", false},
+		{"outbound UDP Block Once", "udp", "outgoing", "*", "block", "drop", false},
+		{"inbound UDP Allow Once", "udp", "incoming", "*", "allow", "allow", false},
+		{"inbound UDP Block Once", "udp", "incoming", "*", "block", "drop", true},
+		{"default Ask Allow Once", "udp", "outgoing", "", "allow", "allow", false},
+		{"default Ask Block Once", "udp", "incoming", "", "block", "drop", false},
+		{"address-scoped Ask", "udp", "outgoing", "192.0.2.1", "allow", "allow", false},
+		{"outbound TCP Allow Once", "tcp", "outgoing", "*", "allow", "allow", false},
+		{"inbound TCP Block Once", "tcp", "incoming", "*", "block", "drop", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			x := newQueueFixture(t)
+			p := x.proc(42, "10", 1000)
+			f, err := identity.ParseFlow(tc.protocol, tc.direction, "10.0.0.1:40001", "192.0.2.1:443")
+			if err != nil {
+				t.Fatal(err)
+			}
+			a := whileAttribution(p, "app", "rev", "/opt/app")
+			x.owners[f.Local.String()+">"+f.Remote.String()] = a
+			if tc.address != "" {
+				x.e.rules = []policy.Rule{{ID: "ask", Version: 1, Schema: 2, Action: "ask", Executable: "/opt/app",
+					Filter: policy.Filter{Application: "app", Revision: "rev", UID: 1000, Direction: tc.direction, Protocol: "*", RemoteAddress: tc.address}}}
+			}
+			pending := x.e.Observe(f, "first")
+			if got := x.e.RetainedState(pending.ID, a.Fingerprint); got != "pending" {
+				t.Fatalf("before decision: %s", got)
+			}
+			if _, err := x.e.Decide(pending.ID, tc.action, "once", 1000, false); err != nil {
+				t.Fatal(err)
+			}
+			if got := x.e.RetainedState(pending.ID, a.Fingerprint); got != tc.retained {
+				t.Fatalf("held packet: got %s, want %s", got, tc.retained)
+			}
+			state := map[string]string{"allow": "allowed", "block": "blocked"}[tc.action]
+			later := x.e.Observe(f, "first")
+			if tc.reprompt {
+				if later.ID == pending.ID || later.State != "awaiting-decision" || later.AskRule == nil || later.AskRule.ID != "ask" {
+					t.Fatal("later inbound datagram did not reach a new request under the original Ask", later)
+				}
+				if _, err := x.e.Decide(later.ID, "allow", "once", 1000, false); err != nil {
+					t.Fatal(err)
+				}
+				if x.e.RetainedState(later.ID, a.Fingerprint) != "allow" || x.e.RetainedState(pending.ID, a.Fingerprint) != "drop" {
+					t.Fatal("answering the new request did not admit only its held datagram")
+				}
+			} else if later.ID != pending.ID || later.State != state {
+				t.Fatal("same socket did not retain the Once decision", later)
+			}
+			if f.Direction == "outgoing" {
+				f.Local = netip.AddrPortFrom(f.Local.Addr(), f.Local.Port()+1)
+			} else {
+				f.Remote = netip.AddrPortFrom(f.Remote.Addr(), f.Remote.Port()+1)
+			}
+			x.owners[f.Local.String()+">"+f.Remote.String()] = a
+			if fresh := x.e.Observe(f, "fresh"); fresh.ID == pending.ID || fresh.State != "awaiting-decision" ||
+				(tc.address != "" && (fresh.AskRule == nil || fresh.AskRule.ID != "ask")) {
+				t.Fatal("fresh socket did not reach the original Ask", fresh)
+			}
+		})
 	}
 }
 

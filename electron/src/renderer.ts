@@ -2752,7 +2752,7 @@ function updateDecisions() {
       : temporary
         ? liveLeaseUnavailable || FOR_A_WHILE_TOOLTIP
         : rememberMode()
-          ? 'Once: this connection attempt only; creates no rule'
+          ? (e?.scope_previews.once || 'Once: this connection attempt only') + ' · creates no rule'
           : e?.scope_previews[chosenScope] || '';
   }
   const locked =

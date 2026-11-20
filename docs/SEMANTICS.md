@@ -165,10 +165,14 @@ are picked up on the next activation. ICMP/ICMPv6 and non-TCP/UDP remain outside
 application policy. No forwarding coverage is claimed.
 
 Unknown/ambiguous ownership, timeout and overload drop. A one-shot UDP datagram
-can be held and released without retry, but its socket must remain observable:
-if a sender closes before delayed revalidation it fails closed. Local loopback
-between different applications may require sender and receiver decisions; there
-is no blanket local exemption. Other-UID application traffic can be blocked
+can be held and released without retry if its socket remains observable.
+If a sender closes before delayed revalidation it fails closed.
+Allow Once from an explicit, whole-application outbound Ask discards already
+queued datagrams and allows later sends on the same UDP tuple for 30 seconds.
+Block Once from an explicit, whole-application inbound Ask drops queued
+datagrams and lets a later send on the same tuple prompt again.
+Local loopback between different applications may require sender and receiver
+decisions. There is no blanket local exemption. Other-UID application traffic can be blocked
 without becoming actionable for the selected user's policy client.
 
 Remembered outgoing defaults: application/revision/UID, outgoing, protocol,

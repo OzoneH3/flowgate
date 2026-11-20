@@ -61,15 +61,30 @@ type Event struct {
 	// Decision-log bookkeeping (never serialized): the rule exactly as evaluated,
 	// whether this result was a capacity refusal, and record-once flags so packet
 	// retransmissions and repeated handling never produce duplicate records.
-	decided       *policy.Rule
-	capacity      bool
-	historyOnly   bool // immediate policy outcome; no held decision or Once lease depends on it
-	pendingLogged bool
-	finalLogged   bool
-	logAttemptID  string
-	logDeadline   time.Time
-	leaseID       string
+	decided              *policy.Rule
+	capacity             bool
+	historyOnly          bool // immediate policy outcome; no held decision or Once lease depends on it
+	pendingLogged        bool
+	finalLogged          bool
+	logAttemptID         string
+	logDeadline          time.Time
+	leaseID              string
+	discardHeldDatagrams bool
+	repromptAfterOnce    bool
 }
+
+// The direction-specific UDP Once behavior was verified for an explicit
+// whole-application Ask in NetLimiter 5.3.28.0.
+func wholeApplicationUDPAsk(v *Event) bool {
+	r := v.decided
+	return v.Flow.Protocol == "udp" && v.AskRule != nil && r != nil && r.FollowsUpdates() &&
+		r.ProgramScope() == (policy.Filter{Application: r.Filter.Application, UID: r.Filter.UID,
+			Direction: v.Flow.Direction, Protocol: "*", RemoteAddress: "*"})
+}
+
+const outboundUDPOnceDetail = "Allow Once permits later datagrams on this UDP tuple for 30 seconds. Already queued datagrams will be discarded."
+const inboundUDPBlockOnceDetail = "Block Once drops queued datagrams. The next datagram can open a new request."
+
 type TrafficManager interface {
 	Status() udpaccount.Status
 	Start(...string) (udpaccount.Status, error)
@@ -384,7 +399,7 @@ func (e *Engine) observeResolvedWithLinkLocked(f identity.Flow, token string, a 
 		if (strings.HasPrefix(old.Rule, "once:") || strings.HasPrefix(old.Rule, leaseRulePrefix)) && base == "ask" {
 			valid = true
 		}
-		if valid {
+		if valid && !old.repromptAfterOnce {
 			old.queuePolicyEpoch = e.queuePolicyEpoch.Load()
 			return *old
 		}
@@ -465,6 +480,13 @@ func (e *Engine) observeResolvedWithLinkLocked(f identity.Flow, token string, a 
 		if v.decided != nil && v.decided.Action == "ask" {
 			v.AskRule = &RuleVersionRef{v.decided.ID, v.decided.Version}
 			v.Reason = "stored Ask rule " + v.decided.ID + " requires a decision; " + v.Reason
+			if v.ScopePreviews["once"] != "" && wholeApplicationUDPAsk(&v) {
+				if v.Flow.Direction == "outgoing" {
+					v.ScopePreviews["once"] = outboundUDPOnceDetail
+				} else {
+					v.ScopePreviews["once"] += " " + inboundUDPBlockOnceDetail
+				}
+			}
 		}
 	}
 	if v.decided != nil && v.decided.NetworkEndpoint {
@@ -676,7 +698,18 @@ func (e *Engine) decideLocked(id, action, scope string, uid uint32, admin bool, 
 			}
 			reason = "explicit user decision; " + lease.reason()
 		}
-		e.recordFinal(v, action, "user", scope, reason, remembered, &uid, "deferred", "")
+		detail := ""
+		if scope == "once" && wholeApplicationUDPAsk(v) {
+			switch {
+			case action == "allow" && v.Flow.Direction == "outgoing":
+				v.discardHeldDatagrams = true
+				detail = outboundUDPOnceDetail
+			case action == "block" && v.Flow.Direction == "incoming":
+				v.repromptAfterOnce = true
+				detail = inboundUDPBlockOnceDetail
+			}
+		}
+		e.recordFinal(v, action, "user", scope, reason, remembered, &uid, "deferred", detail)
 		e.markRetainedDecidedLocked(v.ID)
 		if lease != nil {
 			// Other requests of this process and direction that are still waiting
@@ -843,7 +876,7 @@ func (e *Engine) retainedEventLocked(id, fingerprint string) (*Event, string) {
 		if v.State == "awaiting-decision" {
 			return v, "pending"
 		}
-		if v.State != "allowed" {
+		if v.State != "allowed" || v.discardHeldDatagrams {
 			return v, "drop"
 		}
 		return v, "allowed"
