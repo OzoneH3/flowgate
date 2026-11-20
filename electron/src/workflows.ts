@@ -607,7 +607,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
   const badge = node('button', 'UDP: …') as HTMLButtonElement;
   badge.id = 'extendedBadge';
   badge.title = 'Extended UDP monitoring; independent of firewall enforcement';
-  document.querySelector('.toolbar')!.insertBefore(badge, $('observerStatus'));
+  $('search').before(badge);
   const review = async (action: 'enable' | 'stop') => {
     try {
       const e = await window.flowgate.extendedState();

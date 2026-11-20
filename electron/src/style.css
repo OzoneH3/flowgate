@@ -713,7 +713,6 @@ dialog::backdrop {
 #activitySource { width: 105px; }
 #activityView .filterbar #expand { margin-left: auto; }
 .brand { font-size: 14px; color: #c7d951; }
-#observerStatus { margin-left: auto; font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
 #controlStatus { max-width: 34%; font-size: 11px; white-space: nowrap; }
 .desktop-menu { position: relative; flex-shrink: 0; }
 .desktop-menu > summary { list-style: none; padding: 4px 7px; cursor: pointer; }
@@ -837,7 +836,7 @@ td.up { color: #c7daa8; background: #344b20; }
 #ruleEditor footer button { min-height: 28px; }
 @media(max-width:950px) {
  .toolbar { gap: 4px; }.brand { font-size: 12px; }.desktop-menu > summary { padding: 4px; }
- #observerStatus { max-width: 31%; } #controlStatus { max-width: 29%; }
+ #controlStatus { max-width: 29%; }
  .filterbar input { flex-basis: auto; width: auto; }.filterbar select { max-width: 105px; }
  .filterbar button { font-size: 11px; padding: 3px 4px; }
  .activity-main { min-width: 320px; }
@@ -1321,7 +1320,7 @@ body.preset-status #tree th.col-filler, body.preset-status #tree td.filler { dis
 #app:has(#activityView:not([hidden])) > footer #footerSummary { flex: 0 0 auto; max-width: 100%; font-size: 11px; }
 .toolbar-status { max-width: 220px; }
 @media (max-width: 1000px) { .toolbar-status { max-width: 150px; } }
-@media (max-width: 900px) { #observerStatus { display: none; } #controlStatus { max-width: 170px; } .toolbar #search { flex-basis: 150px; } }
+@media (max-width: 900px) { #controlStatus { max-width: 170px; } .toolbar #search { flex-basis: 150px; } }
 /* Review fixes: visible endpoint marker, compact matrix columns inside the full-width box. */
 .qs-scope { white-space: normal; overflow: visible; text-overflow: clip; margin: 0 0 4px; font-size: 11px; line-height: 14px; }
 .qs-endpoint { display: inline-block; margin: -2px 0 5px; padding: 0 6px; border: 1px solid #4a4a4a; border-radius: 9px; font-size: 10px; line-height: 16px; color: #c8c8c8; }
@@ -1355,11 +1354,10 @@ body.preset-status #tree th.col-filler, body.preset-status #tree td.filler { dis
 .toolbar:has(> .runtime-health:not([hidden])) #search { min-width: 60px; }
 .toolbar:has(> .runtime-health:not([hidden])) #extendedBadge { flex-shrink: 1; min-width: 4em; overflow: hidden; text-overflow: ellipsis; } /* Other advisories yield room so nothing leaves the window. */
 .toolbar #controlStatus { display: none; } /* Same state remains in the firewall entry and Tools review. */
-.toolbar #observerStatus { max-width: 115px; font-size: 11px; }
 .graph-sample { position: absolute; z-index: 7; left: 15px; right: 10px; bottom: 77px; padding: 8px; border: 1px solid var(--fg-border); background: var(--fg-content); box-shadow: 0 2px 8px #0008; font-size: 11px; line-height: 1.4; }
 .graph-values > span { white-space: nowrap; }
 #trafficCanvas:focus-visible { outline: 1px solid var(--fg-selected); outline-offset: -1px; }
-@media (max-width: 1000px) { .toolbar { gap: 5px; } .toolbar #observerStatus { display: none; } .toolbar .brand { margin-right: 0; font-size: 13px; } .toolbar-units select { width: 82px; } }
+@media (max-width: 1000px) { .toolbar { gap: 5px; } .toolbar .brand { margin-right: 0; font-size: 13px; } .toolbar-units select { width: 82px; } }
 
 /* Independent Info View and Traffic Chart docking; one sidebar can hold either. */
 body.hide-info:not(.hide-sidebar) #activityView > aside { display:flex; }

@@ -24,6 +24,7 @@ fs.writeFileSync(path.join(run, 'matched-manifest.json'), JSON.stringify({
 }));
 
 let udp = 'disabled';
+let activityAvailable = true;
 const operations = [];
 const serve = (readonly) => net.createServer((socket) => socket.once('data', (data) => {
   const { operation } = JSON.parse(data);
@@ -55,7 +56,9 @@ const serve = (readonly) => net.createServer((socket) => socket.once('data', (da
       state: udp, available: true, partial: false, scope: 'machine',
       generation: 'collector', reason_code: udp, reason: 'Test collector.',
     },
-    ...(readonly ? { activity: { collected: now, complete: true, processes: {}, rows: [] } } : {}),
+    ...(readonly && activityAvailable
+      ? { activity: { sequence: 1, collected: now, complete: false, processes: {}, rows: [] } }
+      : {}),
     events: [], rules: [],
   }) + '\n');
 }));
@@ -76,6 +79,9 @@ try {
   );
   await page.getByRole('button', { name: 'Firewall: Both' }).waitFor();
   assert.equal(await page.locator('.toolbar').getByText(revision.slice(0, 7)).count(), 0);
+  assert.equal(await page.locator('.toolbar').getByText('Activity · machine', { exact: false }).count(), 0);
+  await page.locator('#footerSummary').getByText('Partial visibility', { exact: false }).waitFor();
+  assert.match(await page.locator('#info').textContent(), /Machine · current network namespace.*Partial visibility/s);
   await page.locator('#helpMenu > summary').click();
   await page.getByRole('button', { name: 'About FlowGate' }).click();
   await page.locator('#aboutBuild').getByText('Version: 0.1.0-rc.7', { exact: false }).waitFor();
@@ -108,7 +114,10 @@ try {
   await page.getByRole('button', { name: 'UDP monitoring: Off' }).waitFor();
   assert.deepEqual(operations, ['traffic-start', 'traffic-stop']);
   assert.equal(await page.locator('#controlMenu > summary').textContent(), 'Firewall · Both');
-  console.log('PASS Wayland About, matching firewall labels, and UDP start/cancel/stop', run);
+  activityAvailable = false;
+  await page.locator('#footerSummary').getByText('Activity unavailable', { exact: false }).waitFor();
+  assert.match(await page.locator('#info').textContent(), /Activity unavailable/);
+  console.log('PASS Wayland About, firewall labels, UDP confirmations and Activity status', run);
 } finally {
   if (app) await app.evaluate(({ app }) => app.exit()).catch(() => {});
   control.close();
