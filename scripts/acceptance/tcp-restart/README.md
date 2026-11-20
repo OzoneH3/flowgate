@@ -32,7 +32,8 @@ stream. A guest-only read of conntrack verifies the original tuple, row ID and
 FlowGate mark bits without sending a packet on that tuple.
 
 The runner restarts the installed daemon with the original streams still open.
-It waits for a new active protection generation and verifies the saved rules.
+It resets the guest unit’s start counter before each deliberate restart, then
+waits for a new active protection generation and verifies the saved rules.
 Each variant opens new sockets and creates its own rules.
 
 | Variant | FlowGate mark bits before enable | Target Local after enable | Target Internet and other Local | Fresh target Local |

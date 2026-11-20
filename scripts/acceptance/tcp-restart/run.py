@@ -112,6 +112,10 @@ def run_case(runner, lab, sut, names, release, evidence, host, helper):
             evidence["phase"] = "scenarios"
 
             def restart():
+                # Installation and fixture setup already started this unit
+                # several times. Reset its disposable-guest start counter so
+                # the restart under test is never rejected by systemd.
+                sut.run("sudo -n systemctl reset-failed flowgate.service")
                 record("restart-command", service.call())
 
             target, other = (Retained(api, probe, host, record, restart) for probe in (alpha, beta))
