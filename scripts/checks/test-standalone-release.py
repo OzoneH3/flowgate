@@ -82,6 +82,39 @@ class ReleaseChecks(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'Unexpected package member'):
             self.unpack(archive, digest)
 
+    def test_reload_switches_to_current_installed_gui(self):
+        base = self.root / 'installed'
+        release_dir = base / 'releases' / 'new'
+        release_dir.mkdir(parents=True)
+        (base / 'current').symlink_to(release_dir)
+        env = {
+            'WAYLAND_DISPLAY': 'wayland-fixture',
+            'XDG_RUNTIME_DIR': str(self.root / 'session'),
+            'XDG_CONFIG_HOME': str(self.root / 'config'),
+            'XDG_CACHE_HOME': str(self.root / 'cache'),
+        }
+        Path(env['XDG_RUNTIME_DIR']).mkdir()
+        # Production refuses workspace-backed session paths. The mock keeps
+        # all test directories private while preserving that check separately.
+        scope = ui['launch'].__globals__
+        with patch.dict(os.environ, env, clear=True), patch.dict(scope, BASE=base, stop_installed=Mock()), \
+                patch.object(Path, 'resolve', autospec=True,
+                             side_effect=lambda path, **_: release_dir if path.name == 'current' else Path('/fixture') / path.name), \
+                patch('subprocess.run', return_value=types.SimpleNamespace(returncode=1)), \
+                patch('subprocess.Popen') as start:
+            start.side_effect = lambda *args, **kwargs: scope['stop_installed'].assert_called_once()
+            ui['launch'](reload=True)
+        args, kwargs = start.call_args
+        self.assertEqual(args[0][0], str(base / 'gui/new/runtime/electron'))
+        self.assertTrue(kwargs['start_new_session'])
+
+    def test_reload_headless_does_not_stop_gui(self):
+        with patch.dict(os.environ, {}, clear=True), \
+                patch.dict(ui['launch'].__globals__, stop_installed=Mock()) as launcher, \
+                patch('builtins.print'):
+            ui['launch'](reload=True)
+            launcher['stop_installed'].assert_not_called()
+
     def test_desktop_migration_preserves_opt_out_and_import(self):
         entry = self.root / 'autostart/flowgate.desktop'
         entry.parent.mkdir()

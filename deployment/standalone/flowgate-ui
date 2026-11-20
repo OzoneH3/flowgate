@@ -122,7 +122,7 @@ def stop_installed():
         while processes:
             readable, _, _ = select.select(processes, [], [], max(0, end - time.monotonic()))
             if not readable:
-                raise RuntimeError('Close the running FlowGate GUI, then retry uninstall')
+                raise RuntimeError('Close the running FlowGate GUI, then retry')
             for fd in readable:
                 os.close(fd)
                 processes.remove(fd)
@@ -131,7 +131,10 @@ def stop_installed():
             os.close(fd)
 
 
-def launch():
+def launch(reload=False):
+    if reload and not (os.environ.get('WAYLAND_DISPLAY') or os.environ.get('DISPLAY')):
+        print('FlowGate update complete. Launch flowgate-ui from your desktop session.')
+        return
     current = (BASE / 'current').resolve(strict=True)
     if current.parent != BASE / 'releases':
         raise RuntimeError('Invalid FlowGate release pointer')
@@ -155,11 +158,17 @@ def launch():
         env['FONTCONFIG_FILE'] = fontconfig.stdout.strip()
     executable = runtime / 'electron'
     platform = 'wayland' if env.get('WAYLAND_DISPLAY') else 'x11'
-    os.execve(executable, [
+    argv = [
         str(executable), '--ozone-platform=' + platform, str(payload / 'electron'),
         '--observer', '/run/flowgate-api/daemon.sock.monitor',
         '--control', '/run/flowgate-api/daemon.sock',
-    ], env)
+    ]
+    if reload:
+        stop_installed()
+        subprocess.Popen(argv, env=env, start_new_session=True, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        os.execve(executable, argv, env)
 
 
 def main():
@@ -171,12 +180,15 @@ def main():
     group.add_argument('--remove-autostart', action='store_true')
     group.add_argument('--restore-autostart', action='store_true')
     group.add_argument('--stop-installed', action='store_true')
+    group.add_argument('--reload-installed', action='store_true')
     parser.add_argument('--import-preferences', type=Path)
     options = parser.parse_args()
     if os.getuid() == 0:
         parser.error('Run as the desktop user')
     if options.stop_installed:
         stop_installed()
+    elif options.reload_installed:
+        launch(reload=True)
     elif any(vars(options).values()):
         configure_login(options, user_dir('XDG_CONFIG_HOME', Path.home() / '.config'))
     else:

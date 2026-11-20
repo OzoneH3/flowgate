@@ -19,7 +19,7 @@ To build and upgrade the installed daemon and desktop on this machine in one com
 make update
 ```
 
-This packages the current committed checkout using the release version in the Makefile, verifies the archive against its checksum receipt, then runs preflight and install in order. Run it as the intended desktop user. Preflight and install invoke sudo. Close any older desktop window and launch `flowgate-ui` after the update.
+This builds the current committed checkout in .workspace, verifies the archive against its checksum receipt, then runs preflight and install in order. Run it as the intended desktop user. Preflight and install invoke sudo. From a desktop session, the command then closes the old installed GUI and starts the version matching the new daemon from /usr/local/lib/flowgate.
 
 ```sh
 make preflight BUNDLE=/absolute/path/to/flowgate.tar.gz SHA256=<trusted-sha256>

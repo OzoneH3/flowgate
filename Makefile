@@ -41,6 +41,7 @@ update: package
 	  digest=$$(cut -d ' ' -f 1 "$$artifact.sha256"); \
 	  $(MAKE) preflight BUNDLE="$$artifact" SHA256="$$digest"; \
 	  $(MAKE) install BUNDLE="$$artifact" SHA256="$$digest"
+	/usr/local/bin/flowgate-ui --reload-installed
 
 preflight install:
 	@test -n "$(SHA256)" || { printf '%s\n' 'Set SHA256 to the verified package digest'; exit 2; }
