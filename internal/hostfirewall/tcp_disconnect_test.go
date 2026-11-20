@@ -8,7 +8,7 @@ import (
 	ct "github.com/ti-mo/conntrack"
 )
 
-func TestMatchEstablishedTCPRequiresUnambiguousAdmittedDirection(t *testing.T) {
+func TestMatchEstablishedTCPRequiresUnambiguousDirection(t *testing.T) {
 	a, b := netip.MustParseAddrPort("10.0.0.1:33220"), netip.MustParseAddrPort("10.0.0.2:443")
 	tuple := func(src, dst netip.AddrPort) (v ct.Tuple) {
 		v.IP.SourceAddress, v.IP.DestinationAddress = src.Addr(), dst.Addr()
@@ -112,9 +112,44 @@ func TestMatchEstablishedTCPRequiresUnambiguousAdmittedDirection(t *testing.T) {
 		})
 	}
 	startup := flow
-	startup.Mark |= preserved
-	check("", startup)
+	startup.Mark = preserved
+	check("outgoing", startup)
+	s.Local, s.Remote = b, a
+	check("incoming", startup)
+	s.Local, s.Remote = a, b
 	check("", flow, startup)
+	withTraffic := startup
+	withTraffic.Mark |= approved
+	check("outgoing", withTraffic)
+	check("", flow, withTraffic)
+	for _, tc := range []struct {
+		name            string
+		original, reply uint16
+		want            string
+	}{
+		{"original loose tracking", 0x0800, 0x0000, ""},
+		{"reply loose tracking", 0x0000, 0x0800, ""},
+		{"liberal mask only", 0x0108, 0x0008, "outgoing"},
+		{"simultaneous open", 0x0000, 0x8000, ""},
+	} {
+		t.Run("preserved "+tc.name, func(t *testing.T) {
+			for _, row := range []ct.Flow{startup, withTraffic} {
+				row.ProtoInfo.TCP = &ct.ProtoInfoTCP{State: 3, OriginalFlags: tc.original, ReplyFlags: tc.reply}
+				got := matchEstablishedTCP([]identity.Socket{s}, []ct.Flow{row})
+				if tc.want == "" && len(got) != 0 ||
+					tc.want != "" && (len(got) != 1 || got[0].Flow.Direction != tc.want || got[0].Socket.Cookie != s.Cookie) {
+					t.Errorf("mark %#x: wanted direction %q for exact socket, got %+v", row.Mark, tc.want, got)
+				}
+				if got := matchEstablishedTCP([]identity.Socket{s}, []ct.Flow{row, flow}); len(got) != 0 {
+					t.Errorf("mark %#x: competing row must veto, got %+v", row.Mark, got)
+				}
+			}
+		})
+	}
+	unmarked := flow
+	unmarked.Mark = 0
+	check("", unmarked)
+	check("", flow, unmarked)
 	handshake := flow
 	handshake.ProtoInfo.TCP = &ct.ProtoInfoTCP{State: 2}
 	check("", handshake)

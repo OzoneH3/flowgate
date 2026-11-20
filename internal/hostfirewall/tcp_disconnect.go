@@ -94,14 +94,19 @@ func matchEstablishedTCP(sockets []identity.Socket, fs []ct.Flow) []daemon.Estab
 			add(incoming, "")
 			continue
 		}
-		// A preserved connection may have been picked up midstream, so its
-		// original tuple alone is not proof of the TCP initiator. A connection
-		// admitted through the owned TCP SYN policy has that evidence.
 		// Conntrack decodes nf_ct_tcp_flags as a big-endian uint16. The
 		// flags are the high byte and the low byte is the mask.
 		flags := byte((tcp.OriginalFlags | tcp.ReplyFlags) >> 8)
-		const simultaneousOpen = 0x80 // IP_CT_TCP_SIMULTANEOUS_OPEN
-		if flow.Mark&mask != approved || flow.Status.Expected() || flags&simultaneousOpen != 0 {
+		const (
+			beLiberal        = 0x08 // IP_CT_TCP_FLAG_BE_LIBERAL
+			simultaneousOpen = 0x80 // IP_CT_TCP_SIMULTANEOUS_OPEN
+		)
+		// Linux sets BE_LIBERAL on entries it creates by picking up an
+		// existing stream midflight. The preserved mark covers those too,
+		// even if later traffic also sets the approved bit.
+		mark := flow.Mark & mask
+		directionKnown := mark == approved || (mark&preserved != 0 && flags&beLiberal == 0)
+		if !directionKnown || flow.Status.Expected() || flags&simultaneousOpen != 0 {
 			add(outgoing, "")
 			add(incoming, "")
 			continue
