@@ -60,6 +60,38 @@ sudo /usr/bin/python3 -I ./flowgate-release.py install --bundle ./flowgate.tar.g
 
 Invoke fresh installation with sudo from the intended desktop administrator's account. Fresh installation starts monitoring. Upgrades authenticate and verify the candidate, check existing policy schema, preserve configuration, snapshot the stopped writer's state, and verify monitoring before restoring the previously active mode. A retained shaping journal or configured shaping requires a verified transition before upgrade. Installation preserves the disabled host-trial interface of a legacy installation when one is reported and verified.
 
+### Fedora 45 recovery from the RC8 collector failure
+
+On Fedora 45, build `7b3e8e51` can report a failed UDP collector and refuse an
+in-place update with `Current collector is not settled`. Collector Stop reports
+`disabled`, which these RC8 installers also reject. Monitoring recovery restarts
+the old daemon and its collector in the same service context.
+
+To move from `7b3e8e51` to `64a07da1`, use the non-purge uninstall and then
+install the verified replacement. This preserves the saved rules database at
+`/var/lib/flowgate/rules.db`. Use the enrolled desktop administrator's account.
+Obtain the archive, offline installer, and receipts for the replacement, and
+check the SHA-256 values against the trusted release channel before removing
+the old installation.
+
+```sh
+bundle=flowgate-0.1.0-rc.8-linux-x86_64.tar.gz
+/usr/bin/sha256sum -c "$bundle.sha256" flowgate-release.py.sha256 &&
+digest=$(cut -d ' ' -f 1 "$bundle.sha256") &&
+sudo /usr/local/sbin/flowgate-uninstall &&
+sudo test -s /var/lib/flowgate/rules.db &&
+sudo /usr/bin/python3 -I -B ./flowgate-release.py preflight --bundle "$bundle" --sha256 "$digest" &&
+sudo /usr/bin/python3 -I -B ./flowgate-release.py install --bundle "$bundle" --sha256 "$digest" &&
+flowgate-control status
+```
+
+Omit `--purge` to retain the database. Protection stays off during removal and
+reinstallation. After verifying the active collector and the saved rules in
+the Rules view, re-enable the appropriate protection mode and reapply any
+automatic desktop launch preference. This path
+removes the registered predecessor, so the new installation has no
+`flowgate-recover --rollback` target.
+
 Launch the new UI from the application menu or with flowgate-ui. Close any older desktop session copy before launching it. The installed GUI stores preferences in XDG_CONFIG_HOME/flowgate and transient state in XDG_RUNTIME_DIR/flowgate. The installer updates the enrolled user's managed login entry while preserving its opt-out flags. It saves the original entry for migration rollback. It does not enable an absent login entry. For a non-default config root pass --desktop-config during install. For a legacy preference import, compare the saved files from the old GUI releases and pass --import-preferences with the selected absolute path using INSTALL_FLAGS. The import refuses to overwrite different installed preferences.
 
 ```sh
