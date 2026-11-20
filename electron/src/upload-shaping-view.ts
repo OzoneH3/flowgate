@@ -1,5 +1,6 @@
 import { showAccountIn } from './accounts';
 import { popupPosition } from './popup-position';
+import { networkScopeChoices } from './network-scope-choices';
 import {DEFAULT_SHAPING, shapingUnavailableReason, ZONE_CAPABILITY, scopeOf, scopeLabel, sameTarget, type LimitScope, uploadTarget, uploadSummary, limitCoverage, capRate, capPriority, prioritySummary, priorityCoverage, validateBudget, DOWNLOAD_CAPABILITY, PRIORITY_CAPABILITY, TRAFFIC_PRIORITIES, type TrafficPriority, type LimitDirection, UPLOAD_CAPABILITY, UPLOAD_RATE_UNITS, uploadRateBits, uploadRateValue, type UploadRateUnit, type UploadView, type UploadTarget} from './upload-shaping';
 import type {Row} from './model';
 import type {ClientState} from './protocol';
@@ -19,9 +20,10 @@ const buttonRows=new WeakMap<HTMLElement,{row:Row,state:ClientState,kind:LimitKi
 function paintAvailability(b:HTMLButtonElement) {
   const item=buttonRows.get(b);if(!item)return;
   const reason=shapingUnavailableReason(item.row,latestState||item.state,view,item.kind);
+  const label=item.kind==='priority'?'Traffic priority':item.kind==='download'?'Download limit':'Upload limit';
   b.disabled=!!reason;
-  b.setAttribute('aria-label',`${item.kind} for ${item.row.label}`);
-  if(reason){b.title=reason;b.setAttribute('aria-label',`${item.kind} unavailable for ${item.row.label}: ${reason}`);}
+  b.setAttribute('aria-label',`${label} for ${item.row.label}`);
+  if(reason){b.title=reason;b.setAttribute('aria-label',`${label} unavailable for ${item.row.label}: ${reason}`);}
 }
 
 const text=<K extends keyof HTMLElementTagNameMap>(tag:K,value:string)=>{const e=document.createElement(tag);e.textContent=value;return e;};
@@ -39,18 +41,17 @@ function priorityCoverageText(t:UploadTarget) {
   return `${c.confirmed} confirmed / ${c.requested} requested socket bindings in budgeted directions. Coverage is partial; not an application-wide guarantee.`;
 }
 function paintButton(b:HTMLButtonElement,t:UploadTarget) {
-  const zoneSettings=(view.snapshot?.configured_caps||[]).filter(c=>c.uid===t.uid&&c.application===t.application&&scopeOf(c)!=='all').map(c=>`${scopeLabel(scopeOf(c))}: UL ${capRate(c)/1000000} / DL ${capRate(c,'download')/1000000} Mbit/s, priority ${c.traffic_priority||'inherited'}`).join('\n');
   if(b.dataset.limitDirection==='priority'){
     const configured=view.snapshot?.configured_caps.some(c=>c.uid===t.uid&&c.application===t.application&&(scopeOf(t)==='all'||scopeOf(c)===scopeOf(t))&&c.traffic_priority!==undefined)===true;
     b.classList.toggle('upload-configured',configured);b.dataset.uploadState=prioritySummary(view,t);
-    b.title=`Traffic priority · ${prioritySummary(view,t)}\n${budgetText()}\n${priorityCoverageText(t)}\nShaping only; separate from firewall rule priority.\n${zoneSettings}\n${view.message}`;
+    b.title=`Traffic priority · ${prioritySummary(view,t)}`;
     return;
   }
   const direction=(b.dataset.limitDirection || 'upload') as LimitDirection, label=direction==='download'?'Download':'Upload';
   const configured=view.snapshot?.configured_caps.some(c=>c.uid===t.uid&&c.application===t.application && (scopeOf(t)==='all'||scopeOf(c)===scopeOf(t)) && capRate(c,direction)>0)===true;
   b.classList.toggle('upload-configured',configured);
   b.dataset.uploadState=uploadSummary(view,t,direction);
-  b.title=`${label} limit · ${uploadSummary(view,t,direction)}\n${coverage(t,direction)}\n${zoneSettings}\n${view.message}`;
+  b.title=`${label} limit · ${uploadSummary(view,t,direction)}`;
 }
 function paint() {
   updateActions?.();
@@ -140,11 +141,18 @@ async function open(t:UploadTarget, anchor?:HTMLElement, direction:LimitKind='up
   t={...t};dialogTarget=t;dialogDirection=direction;
   const isPriority=direction==='priority';
   const label=isPriority?'Traffic priority':direction==='download'?'Download':'Upload';
-  const d=document.createElement('section');d.id='uploadLimitDialog';d.className='quick-popup upload-limit-popup';
-  d.setAttribute('role','dialog');d.setAttribute('aria-labelledby','uploadLimitTitle');d.dataset.direction=direction;d.tabIndex=-1;
-  const heading=text('h3',`${isPriority?label:label+' limit'} · ${t.label||t.application}`);heading.id='uploadLimitTitle';heading.className='visually-hidden';
+  const d=document.createElement('section');d.id='uploadLimitDialog';d.className='quick-popup quick-editor upload-limit-popup';
+  d.setAttribute('role','dialog');d.setAttribute('aria-labelledby','uploadLimitKind uploadLimitTitle');d.dataset.direction=direction;d.tabIndex=-1;
+  const header=text('header','');header.className='quick-editor-header';
+  const title=text('div','');title.className='quick-editor-title';
+  const kind=text('div',isPriority?label:label+' limit');kind.id='uploadLimitKind';kind.className='quick-editor-kind';
+  const heading=text('h3',t.label||t.application);heading.id='uploadLimitTitle';heading.className='quick-editor-name';
+  const close=text('button','×');close.id='uploadClose';close.className='quick-editor-close';
+  close.setAttribute('aria-label',isPriority?'Close priority editor':'Close limit editor');
+  title.append(kind,heading);header.append(title,close);
   const row=text('div','');row.className='upload-setter-row';
-  const enabled=document.createElement('input');enabled.type='checkbox';enabled.id='uploadEnabled';enabled.setAttribute('aria-label',`Enable ${direction} limit`);enabled.title='Uncheck and press OK to remove this limit; disabled limits are not stored.';
+  const enabled=document.createElement('input');enabled.type='checkbox';enabled.id='uploadEnabled';enabled.setAttribute('aria-label',`Enable ${direction} limit`);enabled.title='Uncheck and press OK to remove the limit.';
+  const enabledLabel=text('label','');enabledLabel.className='quick-editor-enabled';enabledLabel.append(enabled,text('span','Limit enabled'));
   const input=document.createElement('input');input.id='uploadRate';input.type='text';input.inputMode='decimal';input.value='8';input.setAttribute('aria-label',`${label} rate`);input.autocomplete='off';input.spellcheck=false;
   const units=document.createElement('select');units.id='uploadUnits';units.setAttribute('aria-label',`${label} rate units`);
   for(const unit of UPLOAD_RATE_UNITS)units.add(new Option(unit,unit));units.value='Mbit/s';
@@ -152,27 +160,29 @@ async function open(t:UploadTarget, anchor?:HTMLElement, direction:LimitKind='up
   const save=text('button','OK');save.id='uploadSave';
   const level=document.createElement('select');level.id='priorityLevel';level.setAttribute('aria-label','Traffic priority');
   for(const p of TRAFFIC_PRIORITIES)level.add(new Option(p[0].toUpperCase()+p.slice(1),p));level.value='normal';
-  if(isPriority){row.classList.add('priority-setter-row');row.append(level,save);}else row.append(enabled,input,units,save);
+  if(isPriority){row.classList.add('priority-setter-row');row.append(level);}else row.append(enabledLabel,input,units);
   const actions=text('div','');actions.className='upload-setter-actions';
-  const zone=document.createElement('select');zone.id='uploadZone';zone.setAttribute('aria-label','Network zone');
-  for(const scope of ['all','internet','local'] as const)zone.add(new Option(scopeLabel(scope),scope));zone.value=scopeOf(t);
+  const zone=networkScopeChoices('uploadZone',scopeOf(t),(scope)=>{
+    drafts.set(scopeOf(t),{value:input.value,unit,enabled:enabled.checked,level:level.value,edited});
+    t.scope=scope;loadZone();paint();place();
+  });
   const zoneHint=text('span','');zoneHint.id='uploadZoneHint';zoneHint.className='hint';
   const zoneRow=text('div','');zoneRow.className='upload-zone-row';zoneRow.append(zone,zoneHint);
   const detailsButton=text('button','Advanced');detailsButton.id='uploadDetails';detailsButton.setAttribute('aria-expanded','false');detailsButton.setAttribute('aria-controls','uploadDetailsBody');detailsButton.title='Advanced limit status, coverage and refresh';
-  const remove=text('button','Delete');remove.id='uploadRemove';actions.append(detailsButton,remove);
+  const remove=text('button','Delete');remove.id='uploadRemove';actions.append(detailsButton,remove,save);
   const details=text('div','');details.id='uploadDetailsBody';details.hidden=true;
   const summary=text('p','Reading current configuration…');summary.id='uploadCoverage';summary.setAttribute('role','status');
   const live=text('p','');live.id='uploadCoverageLive';
   const detail=text('p',isPriority?'Experimental traffic priority for this application in both directions: under a saturated local budget, higher priority is favored. This is best effort: Low traffic may be very slow or stall, with no minimum delivery rate or bounded progress. Only connected host-local sockets of verified native applications on the selected interface; unbudgeted directions are inactive. Per-app download priority covers established TCP only; eligible connected UDP uses the shared default class. Shaping only; firewall Allow/Deny and rule priority are separate. No latency guarantee. Ends at daemon restart.':(direction==='download'?'Download: established TCP only; UDP, listeners, fragments and IPv6 extension headers are uncovered. Limits schedule local delivery, not upstream link capacity. ':'')+'Experimental: verified native sockets on the selected interface only; first traffic and unsupported sockets may escape. UDP GSO unsupported; TCP caps receiver-tested. Firewall Allow/Deny is separate. Socket assignment survives exec/transfer until close or fresh rebinding. Limits end at daemon restart. Byte prefixes use 1024; bit prefixes use 1000.');detail.className='hint';
-  const refresh=text('button','Refresh / review'),close=text('button','Close');refresh.id='uploadRefresh';close.id='uploadClose';
-  details.append(live,summary,detail,text('p','Zone limits also respect the combined All networks cap. Explicit zone priorities override All networks; Delete restores inheritance. The All networks priority determines the application’s parent allocation; zone priority controls leaf borrowing, including competition with other applications for shared-budget capacity, without strict global ordering. Shared directional budgets cover all traffic. Unknown classifications use All networks only. The unknown queue retains its scheduler allocation while idle; active queues may borrow unused capacity up to their ceilings. Zone settings never grant firewall permission.'),refresh,close);
-  d.append(heading,row,zoneRow,actions,details);document.body.append(d);anchor?.setAttribute('aria-expanded','true');
+  const refresh=text('button','Refresh / review');refresh.id='uploadRefresh';
+  details.append(live,summary,detail,text('p','Zone limits also respect the combined All networks cap. Explicit zone priorities override All networks; Delete restores inheritance. The All networks priority determines the application’s parent allocation; zone priority controls leaf borrowing, including competition with other applications for shared-budget capacity, without strict global ordering. Shared directional budgets cover all traffic. Unknown classifications use All networks only. The unknown queue retains its scheduler allocation while idle; active queues may borrow unused capacity up to their ceilings. Zone settings never grant firewall permission.'),refresh);
+  d.append(header,zoneRow,row,actions,details);document.body.append(d);anchor?.setAttribute('aria-expanded','true');
   const bounds=anchor?.getBoundingClientRect() || {left:8,top:8,bottom:8};
   const place=()=>{const current=anchor?.isConnected?anchor.getBoundingClientRect():bounds;const pos=popupPosition(current,d.offsetWidth,d.offsetHeight,{width:innerWidth,height:innerHeight});d.style.left=pos.left+'px';d.style.top=pos.top+'px';};
   const reveal=()=>{details.hidden=false;detailsButton.setAttribute('aria-expanded','true');place();};
   const dismiss=()=>{d.remove();anchor?.setAttribute('aria-expanded','false');document.removeEventListener('pointerdown',outside,true);document.removeEventListener('keydown',escape,true);window.removeEventListener('resize',place);if(dismissPopup===dismiss)dismissPopup=undefined;if(anchor?.isConnected)anchor.focus({preventScroll:true});};
   const outside=(e:PointerEvent)=>{if(!d.contains(e.target as Node)&&!anchor?.contains(e.target as Node))dismiss();};
-  const escape=(e:KeyboardEvent)=>{if(e.key==='Escape'){if([units,zone,level].some(s=>s.matches(':open')))return;e.preventDefault();e.stopPropagation();dismiss();}};
+  const escape=(e:KeyboardEvent)=>{if(e.key==='Escape'){if([units,level].some(s=>s.matches(':open')))return;e.preventDefault();e.stopPropagation();dismiss();}};
   dismissPopup=dismiss;document.addEventListener('pointerdown',outside,true);document.addEventListener('keydown',escape,true);window.addEventListener('resize',place);close.onclick=dismiss;
   detailsButton.onclick=()=>{details.hidden=!details.hidden;detailsButton.setAttribute('aria-expanded',String(!details.hidden));place();};
   let defaults={...DEFAULT_SHAPING};
@@ -194,11 +204,10 @@ async function open(t:UploadTarget, anchor?:HTMLElement, direction:LimitKind='up
     const all=draft?.snapshot?.configured_caps.find(c=>sameTarget(c,{...t,scope:'all'}));
     const inherited=scopeOf(t)!=='all' && (isPriority?!!all?.traffic_priority:!!capRate(all,direction as LimitDirection));
     zoneHint.textContent=isPriority&&scopeOf(t)!=='all'?(c?.traffic_priority!==undefined?`Override: ${c.traffic_priority[0].toUpperCase()+c.traffic_priority.slice(1)}`:`Inherited: ${inheritedPriority[0].toUpperCase()+inheritedPriority.slice(1)} (All networks)`):(inherited?'All applies':'');
-    zoneHint.title=isPriority?'The selected zone’s explicit priority overrides All networks. Delete restores the inherited priority. Shared UL/DL budgets still cover all traffic.':'All networks remains one combined ceiling across zones; this zone’s limit also applies. Delete removes only this zone’s setting.';
-    zone.title=view.zoneSupported?'Edit this zone’s own setting. Unknown classifications match All networks only.':'Zone shaping is unsupported by this daemon; All networks remains available.';
+    zoneHint.title=isPriority?'Delete to restore the All networks priority.':'Both the zone and All networks limits apply.';
+    zone.title=view.zoneSupported?'Unknown networks use All networks.':'This daemon supports All networks only.';
     buttons();
   };
-  zone.onchange=()=>{drafts.set(scopeOf(t),{value:input.value,unit,enabled:enabled.checked,level:level.value,edited});t.scope=zone.value as LimitScope;loadZone();paint();};
   const read=async()=>{blocked=true;buttons();try{const sent=performance.now(),start=context;const [v,prefs]=await Promise.all([window.flowgate.uploadStatus(),window.flowgate.preferences().catch(()=>undefined)]);defaults={...(prefs?.shapingDefaults || DEFAULT_SHAPING)};if(start!==context)throw Error('Connection changed; refresh again');adopt(v,sent);paint();if(!d.isConnected)return;draft=view;if(!edited)loadZone();summary.textContent=`${view.snapshot?.interface?'Interface '+view.snapshot.interface+'. ':''}${view.message} ${view.snapshot?.last_error||''}`;blocked=false;paint();if(!view.writable||view.snapshot?.last_error)reveal();}catch(e){summary.textContent=String(e);reveal();}buttons();};
   const apply=async(rate:number|null,prio?:TrafficPriority|null)=>{if(!draft?.generation||!draft.snapshot)return;blocked=true;buttons();try{const sent=performance.now(),start=context;const result=await window.flowgate.uploadConfigure(isPriority?{generation:draft.generation,expected_version:draft.snapshot.version,target:t,bits_per_second:null,priority:prio===undefined?null:prio}:{generation:draft.generation,expected_version:draft.snapshot.version,target:t,direction:direction as LimitDirection,bits_per_second:rate});if(start!==context)throw Error('Connection changed; refresh again');adopt(result,sent);paint();if(d.isConnected)dismiss();}catch(e){if(!d.isConnected)return;summary.textContent=String(e);reveal();}};
   save.onclick=()=>{try{if(isPriority&&scopeOf(t)!=='all'&&!hasCap()&&!edited){dismiss();return;}if(isPriority){if(level.value==='inherit'){if(hasCap())void apply(null,null);else dismiss();}else void apply(null,level.value as TrafficPriority);return;}void apply(enabled.checked?uploadRateBits(input.value,unit):null);}catch(e){summary.textContent=String(e instanceof Error?e.message:e);reveal();}};

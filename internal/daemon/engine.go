@@ -95,6 +95,9 @@ type Engine struct {
 	connectionChecksDisabled bool
 	connectionChecksRevision uint64
 	saveConnectionChecks     func(bool, uint64) error
+	decisionTimeout          time.Duration
+	decisionTimeoutRevision  uint64
+	saveDecisionTimeout      func(int, uint64) error
 	socketAuthorization      *socketAuthorization // guarded by mu
 	zonePublisherInstalled   bool
 	tcpDisconnect            *tcpDisconnect // configured before API startup
@@ -478,6 +481,8 @@ func (e *Engine) observeResolvedWithLinkLocked(f identity.Flow, token string, a 
 		v.Reason = "blocked by rule or unresolved ownership"
 	default:
 		v.State = "awaiting-decision"
+		v.Deadline = now.Add(e.decisionTimeoutLocked())
+		v.logDeadline = v.Deadline
 		v.Reason = "initial packets retained within queue bounds until the decision deadline; excess packets drop"
 		if v.decided != nil && v.decided.Action == "ask" {
 			v.AskRule = &RuleVersionRef{v.decided.ID, v.decided.Version}

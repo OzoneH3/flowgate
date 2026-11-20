@@ -1,11 +1,12 @@
 import { accountLabel } from './accounts';
 import { setupConnectionChecks } from './connection-checks-view';
+import { setupDecisionTimeout } from './decision-timeout-view';
 import { setupShapingDefaults } from './shaping-defaults-view';
 import { setupEndpointPermissions } from './endpoint-view';
 import { canManageEndpoints, ENDPOINT_SCOPE, ENDPOINT_PRECEDENCE, ENDPOINT_LIFETIME } from './endpoint-policy';
 import { setupZoneMigration } from './zone-migration-view';
 import { setupProtectionControls } from './protection-view';
-import { ZONE_CAPABILITY, zoneLabel, zoneRuleLabel, zoneDefinitionDetails } from './network-zones';
+import { ZONE_CAPABILITY, zoneLabel, zoneRuleLabel } from './network-zones';
 import { ANY_PROTOCOL_CAPABILITY, PROCESS_CAPABILITY, targetLabel } from './process-rules';
 import { renderDaemonEvaluation } from './evaluation-view';
 import { canManageRules, STORED_ASK_CAPABILITY } from './protocol';
@@ -153,9 +154,9 @@ export async function openRule(source: RuleSource, options: EditorOptions = {}) 
     $<HTMLSelectElement>('editZone').disabled =
       !!source.id || !!source.zone || !state?.control.capabilities?.includes(ZONE_CAPABILITY);
     $('editZone').title = source.id
-      ? 'Network scope is immutable. Create a new rule to change zone.'
+      ? 'Create a new rule to change the network scope.'
       : state?.control.capabilities?.includes(ZONE_CAPABILITY)
-        ? zoneDefinitionDetails(state.control.networkZones)
+        ? 'Choose the network scope.'
         : 'Backend update required';
     if (r.filter.all_programs)
       $('editorApplication').textContent =
@@ -283,6 +284,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
     for (const menu of document.querySelectorAll<HTMLDetailsElement>('.desktop-menu[open]'))
       if (!menu.contains(event.target as Node)) menu.open = false;
   }, { capture: true });
+  setupDecisionTimeout($<HTMLDetailsElement>('optionsMenu'));
   const evaluation = node('section', '');
   evaluation.className = 'evaluationbar';
   evaluation.innerHTML = `<select id="evalProfile" aria-label="Evaluation profile"><option value="incoming">Incoming only</option><option value="both" disabled>Both directions · support not advertised</option></select><button id="evalStart">Start 5-minute evaluation…</button><button id="evalStop">Stop evaluation</button><button id="evalCancel" hidden>Cancel authentication</button><button id="evalStatus">Status</button><button id="evalRecover">Recovery…</button><span id="evaluationStatus" role="status"></span>`;
@@ -606,7 +608,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
   let extendedError = '';
   const badge = node('button', 'UDP: …') as HTMLButtonElement;
   badge.id = 'extendedBadge';
-  badge.title = 'Extended UDP monitoring; independent of firewall enforcement';
+  badge.title = 'Open UDP monitoring controls';
   $('search').before(badge);
   const review = async (action: 'enable' | 'stop') => {
     try {
@@ -639,7 +641,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
         : label === 'unknown' ? 'Offline' : label === 'unsupported' ? 'Unavailable'
         : label.charAt(0).toUpperCase() + label.slice(1);
       badge.textContent = `UDP: ${short}${e.partial ? '*' : ''}`;
-      badge.title = `UDP monitoring: ${label}${e.partial ? ' (partial coverage)' : ''}. ${e.message}`;
+      badge.title = `UDP monitoring: ${label}${e.partial ? ' · partial coverage' : ''}`;
       badge.setAttribute('aria-label', `UDP monitoring: ${short}${e.partial ? ', partial coverage' : ''}`);
       $('extendedStatus').textContent =
         e.mode === 'daemon'
@@ -649,7 +651,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
       $<HTMLButtonElement>('extendedStop').disabled = !e.canStop;
     } catch (e) {
       badge.textContent = 'UDP: Unavailable';
-      badge.title = 'UDP monitoring status could not be read.';
+      badge.title = 'UDP monitoring status unavailable';
       badge.setAttribute('aria-label', 'UDP monitoring: unavailable');
       $('extendedStatus').textContent = String(e);
       $<HTMLButtonElement>('extendedEnable').disabled = true;
@@ -846,8 +848,8 @@ export function updateWorkflows(next: ClientState) {
   if (endpointSelected && !canManageEndpoints(state.control)) $<HTMLButtonElement>('deleteRule').disabled = true;
   for (const id of ['editRule', 'toggleRule']) {
     $<HTMLButtonElement>(id).disabled ||= presetSelected || endpointSelected;
-    $<HTMLButtonElement>(id).title = endpointSelected ? 'Endpoint scope is immutable. Delete and recreate through Endpoint permission.' : presetSelected
-      ? 'Legacy preset scope; manage through the administrative Essential API.'
+    $<HTMLButtonElement>(id).title = endpointSelected ? 'Recreate through Endpoint permission to change scope.' : presetSelected
+      ? 'Manage this legacy preset through the Essential API.'
       : '';
   }
   const compatible = state.control.capabilities?.includes('conditional-rule-delete-v1');

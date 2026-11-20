@@ -6,6 +6,7 @@ import { acceptsPublication } from './publication';
 import { PROTECTION_CAPABILITY, stateProtection } from './protection-model';
 import { ActivityPolicy } from './activity-policy';
 import { TrafficGraph } from './graph';
+import { setupTooltips } from './tooltip';
 import { DISPLAY_UNITS } from './display-units';
 import type { PaneFrame, PolicyEntry } from './pane-model';
 import { scopeZoneText } from './connection-presentation';
@@ -13,6 +14,7 @@ import { initiationPresentation } from './initiation';
 import { trafficDetails, sum } from './model';
 const kind = new URL(location.href).searchParams.get('pane') === 'info' ? 'info' : 'chart';
 const root = document.getElementById('app')!;
+setupTooltips();
 const el = (tag: string, text = '', cls = '') => {
   const e = document.createElement(tag);
   e.textContent = text;
@@ -53,10 +55,14 @@ if (kind === 'chart') {
     void window.flowgate
       .paneUpdate({ chart: { seconds: Number(windowSelect.value), end: undefined, paused: false } })
       .catch(message);
-  graph = new TrafficGraph(content, {
-    change: (chart) => void window.flowgate.paneUpdate({ chart }).catch(message),
-    source: (source) => void window.flowgate.paneUpdate({ source }).catch(message),
-  });
+  graph = new TrafficGraph(
+    content,
+    {
+      change: (chart) => void window.flowgate.paneUpdate({ chart }).catch(message),
+      source: (source) => void window.flowgate.paneUpdate({ source }).catch(message),
+    },
+    root.querySelector<HTMLElement>('.detached-heading')!,
+  );
 } else {
   content.innerHTML =
     '<h3 id="selectedName"></h3><div id="selectedExecutable"></div><div class="info-scroll"><h3 class="info-section-title">Properties</h3><dl id="info"></dl><section id="infoRules"></section></div><p class="pane-action-hint">Advanced rule editing opens in Activity.</p>';

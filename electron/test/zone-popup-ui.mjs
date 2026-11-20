@@ -78,12 +78,13 @@ function reply(q, monitor) {
         'experimental-zone-shaping-v1',
         'network-zone-policy-v1',
         'automatic-network-zones-v1',
+        'observed-rule-create-v1',
       ],
       permissions: {
         role: 'administrator',
         observation_scope: 'machine',
         policy_scope: 'machine',
-        can_manage_rules: false,
+        can_manage_rules: true,
         can_manage_machine_rules: false,
         can_decide: false,
       },
@@ -223,17 +224,45 @@ try {
     await page.locator('#expand').click();
     return false;
   }, 'native candidate');
+  await page.locator('#expand').click();
+  const ruleSlot = page.locator('#rows tr[data-id^="process:"] .policy-cell[data-direction=outgoing]').first();
+  await ruleSlot.click();
+  const rulePopup = page.locator('.quick-rule-editor');
+  const ruleScopes = rulePopup.getByRole('group', { name: 'Network scope' });
+  await ruleScopes.getByRole('radio', { name: 'Any', exact: true }).waitFor();
+  assert.deepEqual(await ruleScopes.locator('label').allTextContents(), ['Any', 'Internet', 'Local']);
+  const anyRuleScope = ruleScopes.getByRole('radio', { name: 'Any', exact: true });
+  assert(await anyRuleScope.isChecked());
+  await anyRuleScope.focus();
+  await page.keyboard.press('ArrowRight');
+  assert(await ruleScopes.getByRole('radio', { name: 'Internet', exact: true }).isChecked());
+  await ruleScopes.getByRole('radio', { name: 'Local', exact: true }).check();
+  assert(await ruleScopes.getByRole('radio', { name: 'Local', exact: true }).isChecked());
+  assert(!(await anyRuleScope.isChecked()));
+  await page.mouse.move(10, 10);
+  await rulePopup.screenshot({ path: dir + '/rule-editor.png' });
+  await page.setViewportSize({ width: 360, height: 280 });
+  await wait(() => rulePopup.evaluate((editor) => {
+    const { top, left, right, bottom } = editor.getBoundingClientRect();
+    return left >= 0 && top >= 0 && right <= innerWidth && bottom <= innerHeight
+      && editor.scrollWidth <= editor.clientWidth;
+  }), 'rule editor fits narrow viewport');
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await rulePopup.getByRole('button', { name: 'Close rule editor' }).click();
+  await rulePopup.waitFor({ state: 'detached' });
+  assert(await ruleSlot.evaluate((button) => document.activeElement === button));
+
   const popup = page.locator('#uploadLimitDialog');
   async function open(direction) {
     await slot(direction).click();
     await popup.waitFor();
-    await wait(() => page.locator('#uploadZone').isEnabled(), 'reviewed configuration');
+    await wait(() => page.locator('#uploadZone input:checked').isEnabled(), 'reviewed configuration');
   }
   async function close() {
     await page.keyboard.press('Escape');
     await popup.waitFor({ state: 'detached' });
   }
-  const zone = (name) => page.locator('#uploadZone').selectOption(name);
+  const zone = (name) => page.locator(`#uploadZone input[value=${name}]`).check();
   const own = (scope) => caps.find(c => (c.scope || 'all') === scope);
   async function saveRate(direction, scope, rate) {
     await open(direction); await zone(scope);
@@ -259,13 +288,15 @@ try {
   await page.locator('#optionsMenu summary').click();
   await open('upload');assert.equal(await page.locator('#uploadRate').inputValue(),'32');await close();
   await open('download');assert.equal(await page.locator('#uploadRate').inputValue(),'16');await close();
-  await open('priority');assert.equal(await page.locator('#priorityLevel').inputValue(),'high');await close();
+  await open('priority');assert.equal(await page.locator('#priorityLevel').inputValue(),'high');
+  await popup.screenshot({path:dir+'/priority-editor.png'});await close();
   assert.equal(writes().length,0);
   evidence.steps.push({label:'Options persists independent defaults; new popup values; invalid IPC refused; no shaping writes',defaults:storedDefaults.shapingDefaults});
   // Keep the original zone regression defaults for the rest of this journey.
   await page.evaluate(()=>window.flowgate.preferences({shapingDefaults:{priority:'normal',uploadBits:8000000,downloadBits:8000000,uploadUnit:'Mbit/s',downloadUnit:'Mbit/s'}}));
   await open('upload');
-  assert.equal(await page.locator('#uploadZone').inputValue(),'all');
+  await popup.screenshot({path:dir+'/limit-editor.png'});
+  assert.equal(await page.locator('#uploadZone input:checked').inputValue(),'all');
   const before=await popup.boundingBox();
   await page.locator('#uploadRate').fill('17');
   await zone('internet'); await page.locator('#uploadRate').fill('4');
@@ -304,13 +335,13 @@ try {
   evidence.steps.push({label:'create both directions in three scopes; edit/Enter; explicit Normal then Delete; delete Internet UL preserves Internet DL, Local and All',caps:structuredClone(caps)});
   await page.getByText('Synthetic alpha',{exact:true}).first().click();
   const infoButton=page.locator('#infoRules').getByRole('button',{name:'Download limit for Synthetic alpha',exact:true});
-  await infoButton.click();await popup.waitFor();await wait(()=>page.locator('#uploadZone').isEnabled());await zone('local');
+  await infoButton.click();await popup.waitFor();await wait(()=>page.locator('#uploadZone input:checked').isEnabled());await zone('local');
   assert.equal(await page.locator('#uploadRate').inputValue(),'9');await popup.screenshot({path:dir+'/info-local-popup.png'});await close();
   await page.locator('#infoPaneControls summary').click();await page.locator('[data-undock="info"]').click();
   const detached=await wait(()=>app.windows().find(w=>w.url().includes('pane.html')&&w.url().includes('info')),'detached Info');
   await detached.getByRole('button',{name:'Download limit for Synthetic alpha',exact:true}).click();
-  const detachedPopup=detached.locator('#uploadLimitDialog');await detachedPopup.waitFor();await wait(()=>detached.locator('#uploadZone').isEnabled());
-  await detached.locator('#uploadZone').selectOption('local');assert.equal(await detached.locator('#uploadRate').inputValue(),'9');
+  const detachedPopup=detached.locator('#uploadLimitDialog');await detachedPopup.waitFor();await wait(()=>detached.locator('#uploadZone input:checked').isEnabled());
+  await detached.locator('#uploadZone input[value=local]').check();assert.equal(await detached.locator('#uploadRate').inputValue(),'9');
   await detachedPopup.screenshot({path:dir+'/detached-info-local-popup.png'});await detached.screenshot({path:dir+'/detached-info-native.png'});
   await detached.locator('#uploadRate').fill('10');await detached.locator('#uploadSave').click();await detachedPopup.waitFor({state:'detached'});
   assert.equal(own('local').download_bits_per_second,10000000);assert.equal(own('internet').download_bits_per_second,6000000);assert.equal(own('all').download_bits_per_second,20000000);
@@ -318,7 +349,7 @@ try {
   await page.locator('#expand').click();
   // Direct zone-row setters share the verified application's identity and scope.
   const zoneSlot=(direction,scope)=>page.getByRole('button',{name:`${direction==='priority'?'Traffic priority':direction==='upload'?'Upload limit':'Download limit'} for Synthetic alpha, ${scope==='local'?'Local Network':'Internet'}`,exact:true}).first();
-  async function openZone(direction,scope){await zoneSlot(direction,scope).click();await popup.waitFor();await wait(()=>page.locator('#uploadZone').isEnabled());assert.equal(await page.locator('#uploadZone').inputValue(),scope);}
+  async function openZone(direction,scope){await zoneSlot(direction,scope).click();await popup.waitFor();await wait(()=>page.locator('#uploadZone input:checked').isEnabled());assert.equal(await page.locator('#uploadZone input:checked').inputValue(),scope);}
   const beforeZoneOpen=writes().length;
   await openZone('upload','local');await page.locator('#uploadRate').fill('7');await page.locator('#uploadSave').click();await popup.waitFor({state:'detached'});
   assert.equal(own('local').bits_per_second,7000000);assert.equal(own('all').bits_per_second,12000000);assert.equal(own('local').download_bits_per_second,10000000);
@@ -327,16 +358,16 @@ try {
   assert.equal(await zoneSlot('upload','internet').evaluate(b=>b.classList.contains('upload-configured')),false);
   await openZone('upload','local');await zone('internet');await close();
   await openZone('upload','local');assert.equal(await page.locator('#uploadRate').inputValue(),'7');await page.screenshot({path:dir+'/zone-row-local-native.png'});await close();
-  await open('upload');assert.equal(await page.locator('#uploadZone').inputValue(),'all');await close();
+  await open('upload');assert.equal(await page.locator('#uploadZone input:checked').inputValue(),'all');await close();
   await openZone('priority','local');await page.locator('#priorityLevel').selectOption('low');await page.locator('#uploadSave').click();await popup.waitFor({state:'detached'});
   assert.equal(own('local').traffic_priority,'low');assert.equal(own('all').traffic_priority,'high');
   await openZone('priority','internet');await close();assert.equal(await zoneSlot('priority','internet').evaluate(b=>b.classList.contains('upload-configured')),false);
   await openZone('download','internet');assert.equal(await page.locator('#uploadRate').inputValue(),'6');await close();
   await page.getByText('Synthetic alpha, Local Network',{exact:true}).first().click();
-  const zoneInfo=page.locator('#infoRules').getByRole('button',{name:'Download limit for Synthetic alpha, Local Network',exact:true});await zoneInfo.click();await popup.waitFor();await wait(()=>page.locator('#uploadZone').isEnabled());assert.equal(await page.locator('#uploadZone').inputValue(),'local');assert.equal(await page.locator('#uploadRate').inputValue(),'10');await close();
+  const zoneInfo=page.locator('#infoRules').getByRole('button',{name:'Download limit for Synthetic alpha, Local Network',exact:true});await zoneInfo.click();await popup.waitFor();await wait(()=>page.locator('#uploadZone input:checked').isEnabled());assert.equal(await page.locator('#uploadZone input:checked').inputValue(),'local');assert.equal(await page.locator('#uploadRate').inputValue(),'10');await close();
   await page.locator('#infoPaneControls summary').click();await page.locator('[data-undock="info"]').click();
   const zoneDetached=await wait(()=>app.windows().find(w=>w.url().includes('pane.html')&&w.url().includes('info')),'zone detached Info');
-  await zoneDetached.getByRole('button',{name:'Download limit for Synthetic alpha, Local Network',exact:true}).click();await zoneDetached.locator('#uploadLimitDialog').waitFor();await wait(()=>zoneDetached.locator('#uploadZone').isEnabled());assert.equal(await zoneDetached.locator('#uploadZone').inputValue(),'local');await zoneDetached.screenshot({path:dir+'/zone-row-detached-native.png'});await zoneDetached.keyboard.press('Escape');await zoneDetached.locator('#dockPane').click();
+  await zoneDetached.getByRole('button',{name:'Download limit for Synthetic alpha, Local Network',exact:true}).click();await zoneDetached.locator('#uploadLimitDialog').waitFor();await wait(()=>zoneDetached.locator('#uploadZone input:checked').isEnabled());assert.equal(await zoneDetached.locator('#uploadZone input:checked').inputValue(),'local');await zoneDetached.screenshot({path:dir+'/zone-row-detached-native.png'});await zoneDetached.keyboard.press('Escape');await zoneDetached.locator('#dockPane').click();
   await openZone('upload','local');await page.locator('#uploadRemove').click();await popup.waitFor({state:'detached'});assert.equal(own('local').bits_per_second,0);assert.equal(own('local').download_bits_per_second,10000000);assert.equal(own('local').traffic_priority,'low');assert.equal(own('all').bits_per_second,12000000);
   evidence.steps.push({label:'zone-row UL/DL/priority direct scope, own indicators, cancellation scope isolation, Local-only delete, inline and detached Info',caps:structuredClone(caps)});
   const count=writes().length;

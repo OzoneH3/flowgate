@@ -18,6 +18,7 @@ export class TrafficGraph {
   private settings = chartDefaults();
   private hoverAt?: number;
   private paint?: number;
+  private header: HTMLElement;
   private canvas: HTMLCanvasElement;
   private selector: HTMLSelectElement;
   private drag?: {
@@ -31,12 +32,50 @@ export class TrafficGraph {
   constructor(
     private host: HTMLElement,
     private controls: Controls = {},
+    header?: HTMLElement,
   ) {
-    host.innerHTML =
-      '<header class="graph-heading"><h2>Traffic chart</h2><div class="graph-controls"><select id="graphSource" aria-label="Measurement source"><option value="tcp">TCP transport payload</option><option value="udp">UDP API-reported bytes</option></select><select id="graphWindow" aria-label="History window"><option value="60">60 s</option><option value="300">5 min</option><option value="600">10 min</option></select></div></header><div id="graphValues" class="graph-values"></div><canvas id="trafficCanvas" role="img" tabindex="0" aria-label="Observed upload and download rates over time"></canvas><button id="graphPause" class="graph-pause" aria-label="Pause chart">❚❚</button><button id="graphLive" class="graph-live" title="Return to live (Home)" aria-label="Return to live">↻</button><p id="graphStatus"></p><div id="graphSample" class="graph-sample" hidden role="status"><span></span><div><button id="graphPrevious" aria-label="Previous observed sample">‹</button><button id="graphNext" aria-label="Next observed sample">›</button><button id="graphSampleClose">Close</button></div></div><details class="graph-explanation"><summary>Measurement details</summary><p class="graph-scope">All observed sockets, independent of table filters. History starts here; gaps are not zero. TCP transport and UDP API payload are separate sources. Totals include local socket perspectives. Drag to pan; wheel or +/− zoom. Left/Right inspect recorded samples, Page Up/Down pan, Home returns live. Observation spacing is not a delivery verdict or exact one-second accounting.</p></details>';
+    host.classList.add('traffic-chart');
+    host.innerHTML = `
+      <canvas id="trafficCanvas" role="img" tabindex="0" aria-label="Observed upload and download rates over time"></canvas>
+      <div id="graphSample" class="graph-sample ui-readout" hidden role="status">
+        <span></span><div>
+          <button id="graphPrevious" aria-label="Previous observed sample">‹</button>
+          <button id="graphNext" aria-label="Next observed sample">›</button>
+          <button id="graphSampleClose">Close</button>
+        </div>
+      </div>`;
+    this.header = header ?? document.createElement('header');
+    this.header.classList.add('graph-heading');
+    if (!header) {
+      this.header.innerHTML = '<h2>Traffic chart</h2>';
+      host.prepend(this.header);
+    }
+    this.header.querySelector('h2')!.insertAdjacentHTML('afterend', `
+      <div class="graph-controls" hidden>
+        <select id="graphSource" aria-label="Measurement source">
+          <option value="tcp">TCP transport payload</option><option value="udp">UDP API-reported bytes</option>
+        </select>
+        <select id="graphWindow" aria-label="History window">
+          <option value="60">60 s</option><option value="300">5 min</option><option value="600">10 min</option>
+        </select>
+      </div>
+      <div id="graphValues" class="graph-values"></div>
+      <span class="graph-selection"></span>
+      <div class="graph-actions">
+        <details class="graph-explanation">
+          <summary aria-label="Measurement details"><span class="graph-details-prefix">Measurement </span>details</summary>
+          <div class="graph-detail-content">
+            <p id="graphStatus"></p>
+            <p id="graphContext"></p>
+            <p class="graph-scope">History starts here; gaps are not zero. TCP transport and UDP API payload are separate sources. Totals include local socket perspectives. Drag to pan; wheel or +/− zoom. Left/Right inspect recorded samples, Page Up/Down pan, Home returns live. Observation spacing is not a delivery verdict or exact one-second accounting.</p>
+          </div>
+        </details>
+        <button id="graphPause" aria-label="Pause chart" aria-pressed="false">❚❚</button>
+        <button id="graphLive" title="Return to live (Home)" aria-label="Return to live" disabled>↻</button>
+      </div>`);
     this.canvas = host.querySelector('canvas')!;
-    this.canvas.title =
-      'Drag to pan; wheel/right-drag or +/− to zoom; Left/Right samples; Home live. Pausing never stops collection.';
+    this.canvas.setAttribute('aria-description',
+      'Drag to pan; wheel/right-drag or +/− to zoom; Left/Right samples; Home live. Pausing never stops collection.');
     this.canvas.oncontextmenu = (e) => e.preventDefault();
     this.canvas.onpointerdown = (e) => {
       if (!this.view || ![0, 2].includes(e.button)) return;
@@ -91,7 +130,8 @@ export class TrafficGraph {
         this.apply({ seconds: this.settings.seconds, end: this.settings.end, paused: false });
       else if (e.button === 0) {
         this.inspect(e.offsetX);
-        this.apply({ sampleAt: this.hoverAt });
+        if (this.hoverAt !== undefined)
+          this.apply({ sampleAt: Math.max(0, this.hoverAt) });
       }
     };
     this.canvas.onpointercancel = () => {
@@ -141,12 +181,12 @@ export class TrafficGraph {
         host.querySelector<HTMLElement>('#graphSample')!.hidden = true;
       }
     };
-    host.querySelector<HTMLButtonElement>('#graphPause')!.onclick = () =>
+    this.header.querySelector<HTMLButtonElement>('#graphPause')!.onclick = () =>
       this.apply({
         paused: !this.settings.paused,
         end: this.settings.paused ? undefined : this.view?.now,
       });
-    host.querySelector<HTMLButtonElement>('#graphLive')!.onclick = () => this.live();
+    this.header.querySelector<HTMLButtonElement>('#graphLive')!.onclick = () => this.live();
     host.querySelector<HTMLButtonElement>('#graphPrevious')!.onclick = () => this.navigate(-1);
     host.querySelector<HTMLButtonElement>('#graphNext')!.onclick = () => this.navigate(1);
     host.querySelector<HTMLButtonElement>('#graphSampleClose')!.onclick = () => {
@@ -154,12 +194,12 @@ export class TrafficGraph {
       this.apply({ sampleAt: undefined });
       host.querySelector<HTMLElement>('#graphSample')!.hidden = true;
     };
-    this.selector = host.querySelector('#graphSource')!;
+    this.selector = this.header.querySelector('#graphSource')!;
     this.selector.onchange = () => {
       this.setSource(this.selector.value as Source);
       this.controls.source?.(this.source);
     };
-    host.querySelector<HTMLSelectElement>('#graphWindow')!.onchange = (e) =>
+    this.header.querySelector<HTMLSelectElement>('#graphWindow')!.onchange = (e) =>
       this.apply({
         seconds: Number((e.target as HTMLSelectElement).value),
         end: undefined,
@@ -215,15 +255,15 @@ export class TrafficGraph {
     void this.update(this.lastId || this.id, this.lastStamp);
   }
   private sync() {
-    const pause = this.host.querySelector<HTMLButtonElement>('#graphPause')!;
+    const pause = this.header.querySelector<HTMLButtonElement>('#graphPause')!;
     pause.textContent = this.settings.paused ? '▶' : '❚❚';
     pause.title = this.settings.paused
-      ? 'Continue refreshing the chart'
-      : 'Pause refreshing the chart';
+      ? 'Resume chart'
+      : 'Pause chart';
     pause.setAttribute('aria-pressed', String(this.settings.paused));
-    this.host.querySelector<HTMLButtonElement>('#graphLive')!.disabled =
+    this.header.querySelector<HTMLButtonElement>('#graphLive')!.disabled =
       !this.settings.paused && this.settings.end === undefined;
-    (this.host.querySelector('#graphWindow') as HTMLSelectElement).value = String(
+    this.header.querySelector<HTMLSelectElement>('#graphWindow')!.value = String(
       this.settings.seconds,
     );
   }
@@ -266,6 +306,7 @@ export class TrafficGraph {
       undefined,
     );
     box.hidden = false;
+    box.classList.toggle('pinned', this.settings.sampleAt !== undefined);
     const requested =
       this.view.wallNow !== undefined ? this.view.wallNow - (this.view.now - at) : undefined;
     if (!point || Math.abs(point.at - at) > 2000)
@@ -321,7 +362,7 @@ export class TrafficGraph {
       this.view = view;
       this.draw();
     } catch (e) {
-      this.host.querySelector('#graphStatus')!.textContent = String(e);
+      this.header.querySelector('#graphStatus')!.textContent = String(e);
     }
   }
   private draw() {
@@ -343,21 +384,18 @@ export class TrafficGraph {
       points = range.points,
       latest = points.at(-1);
     const current = v.connected && latest && v.now - latest.at < 5000 ? latest : undefined;
-    const values = this.host.querySelector('#graphValues')!;
+    const values = this.header.querySelector('#graphValues')!;
     // Reuse legend buttons so polling cannot steal keyboard focus.
     if (!values.childElementCount) {
       for (const [key, label, cls] of [
         ['download', 'Download', 'graph-download'],
-        ['selection', '', 'graph-selection'],
         ['upload', 'Upload', 'graph-upload'],
       ] as const) {
-        const item = document.createElement(key === 'selection' ? 'span' : 'button');
+        const item = document.createElement('button');
         item.className = cls;
         item.setAttribute('data-series', key);
-        if (key !== 'selection') {
-          item.setAttribute('aria-label', `Toggle ${label.toLowerCase()} series`);
-          item.onclick = () => this.apply({ [key]: !this.settings[key] });
-        }
+        item.setAttribute('aria-label', `Toggle ${label.toLowerCase()} series`);
+        item.onclick = () => this.apply({ [key]: !this.settings[key] });
         values.append(item);
       }
     }
@@ -365,18 +403,18 @@ export class TrafficGraph {
       const node = values.querySelector<HTMLElement>(`[data-series="${key}"]`)!;
       node.textContent = `${key === 'download' ? 'Download' : 'Upload'} (${displayAmount(key === 'download' ? latest?.downloaded : latest?.uploaded, false, this.unit)}${latest?.partial ? ' *' : ''})`;
       node.setAttribute('aria-pressed', String(this.settings[key]));
-      node.classList.toggle('series-hidden', !this.settings[key]);
-      node.title = `Observed socket totals; ${this.source.toUpperCase()} source only, not unique Internet usage. ${current ? 'Current' : 'Historical/unavailable'} rate: ${displayAmount(key === 'download' ? current?.down : current?.up, true, this.unit)}.`;
+      node.title = `${this.source.toUpperCase()} socket measurements · ${current ? 'current' : 'historical/unavailable'} rate: ${displayAmount(key === 'download' ? current?.down : current?.up, true, this.unit)}.`;
     }
-    values.querySelector('[data-series=selection]')!.textContent = v.label;
+    const selection = this.header.querySelector<HTMLElement>('.graph-selection')!;
+    selection.textContent = selection.title = v.label;
     const status = !v.connected
       ? 'Observer disconnected — history retained; gaps'
       : !latest
         ? 'No observed samples in this source/window'
         : latest.note;
-    this.host.querySelector('#graphStatus')!.textContent =
+    this.header.querySelector('#graphStatus')!.textContent =
       `${this.settings.paused ? 'Paused' : this.settings.end !== undefined ? 'Historical' : 'Live'} · ${Math.round(this.settings.seconds)} s · ${status}${latest?.partial ? ' · Partial coverage' : ''}${v.limited ? ' · History shortened by memory bound' : ''}`;
-    this.host.title = `${v.label}\n${v.message}\n${latest?.note || ''}`;
+    this.header.querySelector('#graphContext')!.textContent = v.message;
     this.sync();
     this.sample();
     const dpr = window.devicePixelRatio || 1;
@@ -467,7 +505,7 @@ export class TrafficGraph {
     }
     this.canvas.setAttribute(
       'aria-label',
-      `${this.source === 'tcp' ? 'TCP transport payload' : 'UDP API-reported bytes'}; ${values.textContent}; ${status}. ${this.settings.end !== undefined ? 'Historical' : 'Live'} window ${Math.round(this.settings.seconds)} seconds. Gaps are unavailable, not zero.`,
+      `${this.source === 'tcp' ? 'TCP transport payload' : 'UDP API-reported bytes'}; ${v.label}; ${Array.from(values.children, (child) => child.textContent).join('; ')}; ${status}. ${this.settings.end !== undefined ? 'Historical' : 'Live'} window ${Math.round(this.settings.seconds)} seconds. Gaps are unavailable, not zero.`,
     );
   }
 }

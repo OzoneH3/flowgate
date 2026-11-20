@@ -2,6 +2,7 @@ import { accountName } from './account-lookup';
 import { DEFAULT_SHAPING, validateShapingDefaults } from './upload-shaping';
 import { UploadShapingClient } from "./upload-shaping-client";
 import { ConnectionChecksClient } from './connection-checks';
+import { decisionTimeout } from './decision-timeout';
 import { UsageHistoryClient } from './usage-history-client';
 import { SessionExit, kdeSessionEnding } from './session-exit';
 import { EndpointRules } from './endpoint-rules';
@@ -847,6 +848,11 @@ app.whenReady().then(async () => {
   const usageHistory = new UsageHistoryClient(backend);
   const connectionChecks = new ConnectionChecksClient(backend);
   ipcMain.handle('connection-checks',(e,v:unknown)=>{trusted(e);return connectionChecks.request(v);});
+  ipcMain.handle('decision-timeout', (e, edit: unknown) => {
+    trusted(e);
+    if (e.sender !== main.webContents) throw Error('Open Desktop preferences to change the permission popup timeout.');
+    return decisionTimeout(backend, edit);
+  });
   ipcMain.handle('history:read', (e, q: unknown) => {
     presentationSender(e);
     return usageHistory.read(q);

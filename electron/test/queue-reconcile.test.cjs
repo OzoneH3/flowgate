@@ -412,7 +412,7 @@ test('card: duration selector beside the decision controls, hidden until For a w
   // Old backend (only 15 s): no selector.
   assert.equal(card(ev('a'), { forAWhileDurations: [15] }).byId('forAWhileDuration'), undefined);
   const src = fs.readFileSync(path.join(__dirname, '../src/renderer.ts'), 'utf8');
-  assert.match(src, /\$\('forAWhileDurationWrap'\)\.hidden = !showLease/);
+  assert.match(src, /\$\('forAWhileDurationWrap'\)\.hidden = !promptID && !showLease/);
   assert.match(src, /preferences\(\{ forAWhileSeconds: seconds \}\)/, 'choice persisted in preferences');
   assert.match(src, /scope: 'for-a-while' as const,\s*\/\/[^\n]*\n\s*\.\.\.\(forAWhileSeconds !== 15/, 'card decision carries the selected duration');
 });

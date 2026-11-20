@@ -125,7 +125,8 @@ try {
   const guide = page.getByRole('dialog', { name: 'Icons and symbols' });
   await guide.waitFor({ state: 'visible' });
   assert.equal(await guide.getByRole('heading', { name: 'Connection observations' }).count(), 1);
-  assert.equal(await guide.locator('.status-slot:not(.upload-configured) svg').count(), 7);
+  assert.equal(await guide.locator('.status-slot:not(.upload-configured) svg').count(), 5);
+  assert.doesNotMatch(await guide.textContent(), /Quota/i);
   assert.equal(await guide.locator('.blocker-glyph.tone-allow').textContent(), '✓');
   assert.match(await guide.textContent(), /Partial coverage/);
   await page.waitForFunction(() =>

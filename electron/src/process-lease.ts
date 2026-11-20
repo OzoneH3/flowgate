@@ -11,7 +11,7 @@ export const DEFAULT_FOR_A_WHILE_SECONDS = 3600;
 // Initial explanation; the renderer fills in the selected duration.
 export const FOR_A_WHILE_NOTE = 'This process instance · all remote addresses and ports · this direction · not saved as a rule.';
 export const FOR_A_WHILE_TOOLTIP =
-  'Allow or deny this connection and new TCP/UDP connections from this process to any address and port for the selected duration. Ends if the process exits. Not saved as a rule.';
+  'This process and direction, any TCP/UDP peer. Ends on process exit. No rule saved.';
 export const forAWhileSupported = (capabilities?: string[]) =>
   !!capabilities?.includes(FOR_A_WHILE_CAPABILITY);
 

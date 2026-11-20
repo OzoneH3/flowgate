@@ -122,7 +122,7 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
       const by = el('span', '', 'request-owner nl-owner', 'requestLaunchedBy');
       const label = el('span', summary.launchedBy, 'nl-owner-name');
       by.append(el('span', 'launched by ', 'nl-owner-label'), label);
-      by.title = `${parent?.name} (PID ${parent?.pid}) started this program; rules still apply to ${summary.owner || summary.title} itself`;
+      by.title = `Started by ${parent?.name} (PID ${parent?.pid}). Rules apply to ${summary.owner || summary.title}.`;
       if (parent?.application?.key)
         void window.flowgate
           .applicationMetadata([JSON.stringify([parent.application.key, parent.application.revision, parent.application.executable])])
@@ -330,12 +330,22 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
     button.type = 'button';
     actions.append(button);
   }
-  if (o.rememberMode)
+  if (!o.popup && o.rememberMode)
     options.append(checkbox('rememberToggle', 'Remember', 'remember-toggle', "Create rule and don't ask me again"));
-  if (o.forAWhile)
+  if (o.popup && o.forAWhile) {
+    for (const [id, label, style] of [
+      ['allowForAWhile', 'Allow for a while', 'allow'],
+      ['blockForAWhile', 'Deny for a while', 'block'],
+    ] as const) {
+      const button = el('button', label, style + ' while-action', id);
+      button.type = 'button';
+      button.disabled = true;
+      actions.append(button);
+    }
+  }
+  if (!o.popup && o.forAWhile)
     options.append(checkbox('forAWhileToggle', 'For a while', 'option-toggle for-a-while-toggle', FOR_A_WHILE_TOOLTIP));
-  if (o.forAWhile && (o.forAWhileDurations?.length ?? 0) > 1) {
-    // Shown only while For a while is checked (renderer), beside Allow/Deny.
+  if (o.forAWhile && (o.popup || (o.forAWhileDurations?.length ?? 0) > 1)) {
     const wrap = el('span', '', 'for-a-while-duration', 'forAWhileDurationWrap'),
       select = el('select', '', '', 'forAWhileDuration');
     select.setAttribute('aria-label', 'For a while duration');
@@ -357,7 +367,7 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
     const panel = el('fieldset', '', 'remember-panel', 'rememberPanel');
     panel.hidden = true;
     const legend = el('legend');
-    if (o.popup) legend.append(el('span', 'Create rule for:', 'scope-default-title'), el('span', 'Rule scope', 'scope-layout-title'));
+    if (o.popup) legend.textContent = 'Rule scope';
     else legend.textContent = 'Create rule for:';
     panel.append(legend);
     // What the rule covers, concisely, before the click (helper/prefix scope).
@@ -373,7 +383,7 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
       if (option.field === 'application') {
         input.checked = true;
         input.disabled = true;
-        label.title = 'The rule always applies to this application';
+        label.title = 'Application is always included';
       } else label.title = option.reason || '';
       if (o.popup) {
         label.append(input, el('span', option.label, 'scope-label'),
@@ -381,10 +391,11 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
       } else label.append(input, ' ' + option.label);
       panel.append(label);
     }
-    const durationLabel = el('label', 'Rule expires after: ', 'remember-duration'),
+    const durationLabel = el('label', o.popup ? 'Rule duration: ' : 'Rule expires after: ', 'remember-duration'),
       duration = el('select', '', '', 'rememberDuration');
+    if (o.popup) duration.append(new Option('This connection only', 'once'));
     for (const d of REMEMBER_DURATIONS) duration.append(new Option(d.label, String(d.seconds)));
-    duration.title = 'At expiry, the rule stops matching. Expiry does not immediately delete the saved rule.';
+    duration.title = 'The saved rule stops matching at expiry.';
     durationLabel.append(duration);
     const summary = el('p', '', 'remember-summary', 'rememberSummary');
     summary.setAttribute('role', 'status');

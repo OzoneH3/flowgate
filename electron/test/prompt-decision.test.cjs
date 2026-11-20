@@ -79,7 +79,7 @@ test('For a while and Remember are mutually exclusive in both directions (one co
   });
   assert.equal(
     lease.FOR_A_WHILE_TOOLTIP,
-    'Allow or deny this connection and new TCP/UDP connections from this process to any address and port for the selected duration. Ends if the process exits. Not saved as a rule.',
+    'This process and direction, any TCP/UDP peer. Ends on process exit. No rule saved.',
   );
 });
 

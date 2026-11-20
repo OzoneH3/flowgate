@@ -49,15 +49,15 @@ export function compactUDPOnce(event: Pick<RequestEvent, 'flow' | 'ask_rule' | '
   if (event.flow.direction === 'outgoing' && preview === outgoingUDPOnce) {
     return {
       summary: 'Allow drops waiting datagrams and permits later sends for 30 seconds. Deny drops both.',
-      allow: outgoingUDPOnce + ' No rule is saved.',
-      block: 'Deny drops waiting datagrams and blocks later sends on this UDP tuple for 30 seconds. No rule is saved.',
+      allow: 'Drops waiting datagrams. Allows later sends on this UDP tuple for 30 s.',
+      block: 'Drops waiting datagrams. Blocks this UDP tuple for 30 s.',
     };
   }
   if (event.flow.direction === 'incoming' && preview.endsWith(' ' + incomingUDPOnce)) {
     return {
       summary: 'Allow permits waiting datagrams and later sends for 30 seconds. Deny drops waiting datagrams. The next send can prompt again.',
-      allow: 'Allow permits waiting datagrams and later sends on this UDP tuple for 30 seconds. No rule is saved.',
-      block: 'Deny drops waiting datagrams. The next send can prompt again. No rule is saved.',
+      allow: 'Allows waiting datagrams and later sends on this UDP tuple for 30 s.',
+      block: 'Drops waiting datagrams. The next send can prompt again.',
     };
   }
 }

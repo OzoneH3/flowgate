@@ -31,6 +31,7 @@ const DaemonProfileCapability = "daemon-profile-v1"
 var apiProfileContext = pprof.WithLabels(context.Background(), pprof.Labels("flowgate_work", "api"))
 
 type Request struct {
+	DecisionTimeout     *DecisionTimeoutOptions    `json:"decision_timeout,omitempty"`
 	ConnectionChecks    *ConnectionCheckOptions    `json:"connection_checks,omitempty"`
 	ProfileArtifact     string                     `json:"profile_artifact,omitempty"`
 	ProfileOffset       int64                      `json:"profile_offset,omitempty"`
@@ -76,6 +77,7 @@ type EnforcementStatus struct {
 	StopsAt time.Time `json:"stops_at"`
 }
 type Response struct {
+	DecisionTimeout  *DecisionTimeoutSettings    `json:"decision_timeout,omitempty"`
 	ConnectionChecks *ConnectionCheckSettings    `json:"connection_checks,omitempty"`
 	Profile          *diagnostics.Status         `json:"profile,omitempty"`
 	ProfileChunk     *diagnostics.ArtifactChunk  `json:"profile_chunk,omitempty"`
@@ -345,7 +347,26 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						if e.saveConnectionChecks != nil {
 							r.Capabilities = append(r.Capabilities, ConnectionChecksCapability)
 						}
+						if e.saveDecisionTimeout != nil {
+							r.Capabilities = append(r.Capabilities, DecisionTimeoutCapability)
+						}
 						switch q.Operation {
+						case "decision-timeout-status", "decision-timeout-configure":
+							var v DecisionTimeoutSettings
+							var er error
+							if e.saveDecisionTimeout == nil {
+								er = mutationError("unavailable", "Persistent decision timeout is unavailable")
+							} else if q.Operation == "decision-timeout-status" {
+								v = e.DecisionTimeoutSettings()
+							} else if q.DecisionTimeout == nil {
+								er = mutationError("invalid_request", "Explicit decision timeout required")
+							} else {
+								v, er = e.ConfigureDecisionTimeout(q.Generation, *q.DecisionTimeout, admin, readonly || !permissions.CanManageMachineRules)
+							}
+							usageHistoryError(&r, er)
+							if er == nil {
+								r.DecisionTimeout = &v
+							}
 						case "connection-check-status", "connection-check-configure":
 							var v ConnectionCheckSettings
 							var er error

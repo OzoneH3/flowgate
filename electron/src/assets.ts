@@ -9,6 +9,7 @@ const assets: Record<string, string> = {
   'theme.css': 'text/css',
   'popup-theme.css': 'text/css',
   'style.css': 'text/css',
+  'tooltip.css': 'text/css',
   'desktop-layout.css': 'text/css',
   'pane.css': 'text/css',
   'renderer.js': 'text/javascript',

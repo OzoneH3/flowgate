@@ -255,7 +255,7 @@ function row(r: LogRecord) {
     'log-outcome ' + (r.kind === 'pending' ? 'pending' : r.decision?.action || ''),
   );
   const reason = el('td', sourceLabel(r.decision?.source || ''));
-  reason.title = [reasonSummary(r), r.decision?.reason].filter(Boolean).join(' · ');
+  reason.title = r.decision ? reasonSummary(r) : '';
   const endpoint = (value: string | undefined) => {
     const cell = el('td', value || '—');
     cell.title = value || '';
@@ -301,8 +301,8 @@ function render() {
   $<HTMLButtonElement>('logLatest').disabled = !s.connected || !s.supported || s.busy;
   live.setAttribute('aria-pressed', String(s.live));
   live.title = s.live
-    ? 'Following new records. Click to pause.'
-    : 'Paused: the list does not change. Click to follow new records.';
+    ? 'Pause new records'
+    : 'Follow new records';
   const appButton = $('logApplication');
   appButton.hidden = !application;
   appButton.textContent = application

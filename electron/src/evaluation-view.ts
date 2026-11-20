@@ -30,7 +30,7 @@ export function renderDaemonEvaluation(e: EvaluationState) {
   ($('evalProfile') as HTMLSelectElement).value = 'incoming';
   ($('evalProfile') as HTMLSelectElement).disabled = true;
   $('evalProfile').title =
-    'Only incoming evaluation is supported by daemon-evaluation-v1. Outgoing traffic is not covered.';
+    'Incoming evaluation only.';
   ($('evalStart') as HTMLButtonElement).disabled = !e.canStart;
   ($('evalStop') as HTMLButtonElement).disabled = !e.canStop;
   ($('evalStatus') as HTMLButtonElement).disabled = !e.canCheck;

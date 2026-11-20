@@ -168,7 +168,7 @@ export function openInactiveRules(anchor: HTMLElement, o: InactiveRulesOptions) 
     enabled.type = 'checkbox';
     enabled.checked = !rule.disabled;
     enabled.disabled = !editable;
-    enabled.title = rule.disabled ? 'Enable this rule' : 'Disable this rule (kept, not deleted)';
+    enabled.title = rule.disabled ? 'Enable this rule' : 'Disable this rule';
     enabled.setAttribute('aria-label', 'Rule enabled');
     enabled.onchange = () => void run(() => changeStoredRule(rule, rule.action as Action, !enabled.checked));
     line.append(enabled);
@@ -181,7 +181,7 @@ export function openInactiveRules(anchor: HTMLElement, o: InactiveRulesOptions) 
       if (current) b.classList.add('current');
       b.setAttribute('aria-pressed', String(current));
       b.disabled = !editable || current;
-      b.title = current ? `Current action: ${word(action)}.` : `Change this rule to ${word(action)}; scope and lifetime stay the same.`;
+      b.title = current ? `Current action: ${word(action)}.` : `Set ${word(action)}. Keep scope and expiry.`;
       b.onclick = () => void run(() => changeStoredRule(rule, action, rule.disabled));
       line.append(b);
     }
@@ -217,7 +217,7 @@ export function openInactiveRules(anchor: HTMLElement, o: InactiveRulesOptions) 
       b.type = 'button';
       b.append(el('span', glyph(action), 'blocker-glyph tone-' + action), ' ' + word(action));
       b.disabled = !o.canManage;
-      b.title = `Add a ${word(action)} rule for ${o.direction === 'incoming' ? 'incoming' : 'outgoing'} TCP + UDP on ${o.networkZone || 'all networks'}, for this program only.`;
+      b.title = `${word(action)} · this app · ${o.direction} TCP/UDP · ${o.networkZone || 'all networks'}`;
       b.onclick = () => void run(() => addStoredRule(o.basisRuleId!, o.direction, action, o.networkZone));
       add.append(b);
     }

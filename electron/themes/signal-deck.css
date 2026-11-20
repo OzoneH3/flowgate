@@ -52,10 +52,12 @@
 }
 .toolbar .brand::before {
   content: '';
-  width: 26px;
-  height: 26px;
   flex: none;
-  background: url('flowgate.png') center / contain no-repeat;
+  width: 24px;
+  height: 20px;
+  background: var(--accent);
+  clip-path: polygon(0 100%, 0 55%, 18% 55%, 18% 29%, 37% 29%, 37% 0,
+    100% 0, 100% 23%, 56% 23%, 56% 43%, 88% 43%, 88% 68%, 47% 68%, 47% 100%, 28% 100%, 28% 76%, 18% 76%, 18% 100%);
 }
 #app .toolbar #search {
   height: 30px;
@@ -203,7 +205,7 @@
 }
 @media (max-width: 950px) {
   .toolbar .brand { font-size: 13px; gap: 4px; padding-inline: 5px 10px; }
-  .toolbar .brand::before { width: 18px; height: 18px; }
+  .toolbar .brand::before { width: 14px; height: 13px; }
   #app > .tabs > button { padding-inline: 8px; }
   #activityView:not([hidden]) { padding-inline: 4px; }
   #activityView .filterbar { padding-inline: 2px; }

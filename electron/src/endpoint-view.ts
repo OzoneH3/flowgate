@@ -27,7 +27,7 @@ export function setupEndpointPermissions() {
   const controls = () => {
     const authority = !!state && canManageEndpoints(state.control);
     button.disabled = !authority;
-    button.title = authority ? 'Create a reviewed machine-wide endpoint rule' : 'Endpoint permissions require a connected administrator and backend support.';
+    button.title = authority ? 'Create a reviewed machine-wide endpoint rule' : 'Requires an authorized administrator and daemon support.';
     el<HTMLButtonElement>('endpointPreview').disabled = busy || unknown || !authority;
     el<HTMLButtonElement>('endpointSave').disabled = busy || unknown || !authority || !review || !ack.checked || review.expiresAt <= now();
     el<HTMLButtonElement>('endpointClose').disabled = busy;

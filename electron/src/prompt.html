@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>FlowGate</title>
     <link rel="stylesheet" href="permission-popup.css" />
+    <link rel="stylesheet" href="tooltip.css" />
     <link rel="stylesheet" href="popup-theme.css" />
     <link rel="stylesheet" href="user-permission-popup.css" />
     <script src="renderer.js" defer></script>
@@ -18,7 +19,7 @@
           <button id="closePrompt" aria-label="Dismiss permission window">×</button>
         </header>
         <div id="promptBody"><div id="requestDetails"></div></div>
-        <footer><span id="controlStatus"></span><button id="dismiss">Decide later</button></footer>
+        <footer><span id="controlStatus"></span><div id="promptQueueControls"><button id="dismiss">Decide later</button><div id="promptLeaseDuration" hidden></div></div></footer>
         <div id="feedback" role="status" aria-live="polite"></div>
       </section>
     </div>

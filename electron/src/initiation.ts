@@ -9,6 +9,7 @@ export function initiationPresentation(row: SocketRow) {
       label: incoming ? 'Incoming' : 'Outgoing',
       glyph: incoming ? '←' : '→',
       className: incoming ? 'connection-incoming' : 'connection-outgoing',
+      hover: incoming ? 'The peer initiated this connection' : 'This app initiated the connection',
       title: `${incoming ? 'Incoming: accepted an initiation' : 'Outgoing: initiated the connection'}\n${i.reason}\nEvidence: ${i.source}${i.observed_at ? ' · observed ' + i.observed_at : ''}\nInitiation is independent of upload/download; this is not a firewall verdict.`,
     };
   }
@@ -21,6 +22,7 @@ export function initiationPresentation(row: SocketRow) {
       label: legacy === 'incoming' ? 'Incoming' : 'Outgoing',
       glyph: legacy === 'incoming' ? '←' : '→',
       className: legacy === 'incoming' ? 'connection-incoming' : 'connection-outgoing',
+      hover: `Initiation: ${legacy} (legacy report)`,
       title: `Backend-reported ${legacy} initiation (legacy format). Not byte-flow direction or a verdict.`,
     };
   const state =
@@ -47,6 +49,7 @@ export function initiationPresentation(row: SocketRow) {
             ? '↔'
             : '?',
     className: state === 'listening' ? 'connection-listening' : 'connection-neutral',
+    hover: label,
     title: `${label}\n${i?.reason || 'No trustworthy initiation observation supplied.'}${i?.source ? '\nEvidence: ' + i.source + (i.generation ? '\nGeneration: ' + i.generation : '') : ''}\nNo direction is inferred from endpoints or traffic.`,
   };
 }

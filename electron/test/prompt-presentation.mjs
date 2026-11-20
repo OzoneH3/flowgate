@@ -255,6 +255,7 @@ try {
         seenRequests.push(new URL(frame.url()).searchParams.get('request'));
     });
     await prompt.locator('#allow').waitFor();
+    await prompt.locator('#rememberDuration').selectOption('once');
     await sleep(3400);
     result.compact = await snapshot('compact');
     assert.equal(result.compact.active, false, 'automatic opening must not activate');
@@ -278,7 +279,7 @@ try {
     );
     assert(prefs.sandbox && prefs.contextIsolation && !prefs.nodeIntegration);
     // A real pointer click may focus the popup normally.
-    const checkRect = await prompt.locator('#rememberToggle').boundingBox();
+    const checkRect = await prompt.locator('#requestApplication strong').boundingBox();
     const target = {
       x: result.compact.geometry.x + checkRect.x + checkRect.width / 2,
       y: result.compact.geometry.y + checkRect.y + checkRect.height / 2,
@@ -305,7 +306,7 @@ try {
       true,
       'deliberate click focuses normally',
     );
-    await prompt.locator('#rememberToggle').check();
+    await prompt.locator('#rememberDuration').selectOption('0');
     await sleep(700);
     result.expanded = await snapshot('expanded');
     assert(result.expanded.geometry.height > 590);
@@ -332,7 +333,7 @@ try {
     result.details = await snapshot('details');
     await prompt.screenshot({ path: path.join(run, 'expanded-details.png') });
     await prompt.locator('summary').click();
-    await prompt.locator('#rememberToggle').uncheck();
+    await prompt.locator('#rememberDuration').selectOption('once');
     await sleep(700);
     result.collapsed = await snapshot('collapsed');
     assert.equal(result.collapsed.geometry.height, 590);
@@ -363,9 +364,10 @@ try {
     await sleep(100);
     assert(await prompt.locator('#allow').isDisabled(), 'new presentation starts disabled');
     assert(
-      await prompt.locator('#rememberToggle').isDisabled(),
+      await prompt.locator('#rememberDuration').isDisabled(),
       'new options advertise the same readiness gate',
     );
+    await prompt.locator('#rememberDuration').selectOption('once');
     await wait(() => prompt.locator('#allow').isEnabled());
     await sleep(500);
     result.reset = await snapshot('reset');
@@ -414,7 +416,7 @@ try {
         .find((w) => w.webContents.getURL().includes('?request=repeat1'))
         .setSize(400, 400),
     );
-    await prompt.locator('#rememberToggle').check();
+    await prompt.locator('#rememberDuration').selectOption('0');
     await sleep(700);
     await prompt.locator('#promptBody').evaluate((el) => (el.scrollTop = el.scrollHeight));
     const decisionRect = await prompt.locator('#allow').boundingBox();

@@ -149,6 +149,7 @@ input[type=checkbox] { accent-color: var(--cyan); }
 }
 #controlStatus { grid-column: 1 / -1; }
 #controlStatus:not(:empty) { margin-bottom: 6px; }
+#promptQueueControls { grid-column: 1; margin-left: 0; }
 #dismiss {
   grid-column: 1;
   justify-self: stretch;
@@ -165,6 +166,7 @@ input[type=checkbox] { accent-color: var(--cyan); }
   padding: 5px 8px;
   font-size: 17px;
 }
+#decisionActions .while-action { font-size: 13px; min-height: 32px; }
 #allow { color: #e4ffb9; border-color: var(--accent); background: #22331e; }
 #block { color: #ffd1d4; border-color: #e67c87; background: #332027; }
 #allow::before { color: #a4f650; }
@@ -175,6 +177,9 @@ input[type=checkbox] { accent-color: var(--cyan); }
     grid-column: 2;
     anchor-name: --popup-actions;
     min-height: var(--control-height);
+  }
+  .prompt-shell:has(.while-action) footer::after {
+    min-height: calc(var(--control-height) + 42px);
   }
   #decisionActions {
     position: fixed;
@@ -249,8 +254,7 @@ input[type=checkbox] { accent-color: var(--cyan); }
 #rememberPanel legend::before { content: ''; display: inline-block; width: 6px; height: .8em; background: var(--accent); transform: skewX(-28deg); margin-right: 8px; }
 
 #connectionHeader:has(.scope-layout-protocol) .nl-bar-text,
-#rememberPanel .scope-default-title { display: none; }
-#connectionHeader .scope-layout-direction, #rememberPanel .scope-layout-title { display: inline; }
+#connectionHeader .scope-layout-direction { display: inline; }
 #connectionHeader .scope-layout-protocol {
   display: inline;
   padding-left: 9px;

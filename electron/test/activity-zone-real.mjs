@@ -83,7 +83,7 @@ try {
       .click();
     await page.locator('.quick-popup').waitFor();
     const shell = Date.now() - started;
-    if (zone) await page.locator('[data-focus="qs-zone"]').selectOption(zone);
+    if (zone) await page.locator(`#qs-zone input[value=${zone}]`).check();
     await page.locator('[data-focus="qs:new:' + action + '"]').click();
     await wait(async () => (await page.locator('.quick-popup').count()) === 0);
     result.timings ??= [];
@@ -108,7 +108,7 @@ try {
   const info = app.windows().find((w) => w.url().includes('pane=info'));
   info.on('pageerror', (e) => result.errors.push(String(e)));
   await info.locator('[data-focus="cell:process:incoming"]').click();
-  await info.locator('[data-focus="qs-zone"]').selectOption('internet');
+  await info.locator('#qs-zone input[value=internet]').check();
   await info.locator('[data-focus="qs:new:block"]').click();
   await wait(async () => (await info.locator('.quick-popup').count()) === 0);
   rules = (await call({ operation: 'list' })).rules;

@@ -313,6 +313,11 @@ func RunProfileAuthorized(ctx context.Context, dir, socket, database string, uid
 		return err
 	}
 	e := daemon.New(timeout)
+	timeoutSeconds, timeoutRevision, err := db.DecisionTimeout()
+	if err != nil {
+		return err
+	}
+	e.InitDecisionTimeout(timeoutSeconds, timeoutRevision, db.SaveDecisionTimeout)
 	if len(zones) > 0 {
 		e.Zones = zones[0]
 	}

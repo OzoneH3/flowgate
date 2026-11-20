@@ -233,18 +233,15 @@ try {
       const box = (e) => {
           const r = e.getBoundingClientRect();
           return { x: r.x, y: r.y, width: r.width, height: r.height };
-        },
-        s = getComputedStyle(d);
+        };
       return {
         popup: box(d),
         checkbox: box(d.querySelector('#uploadEnabled')),
         rate: box(d.querySelector('#uploadRate')),
         units: box(d.querySelector('#uploadUnits')),
         ok: box(d.querySelector('#uploadSave')),
-        border: s.borderColor,
-        borderWidth: s.borderWidth,
-        background: s.backgroundColor,
-        radius: s.borderRadius,
+        heading: d.querySelector('#uploadLimitTitle').textContent,
+        scopes: [...d.querySelectorAll('#uploadZone label')].map((e) => e.textContent),
         focused: document.activeElement?.id,
         selection: [
           d.querySelector('#uploadRate').selectionStart,
@@ -252,17 +249,12 @@ try {
         ],
       };
     });
-    assert.equal(m.popup.width, 266);
-    assert.equal(m.popup.height, 91);
-    assert.equal(m.checkbox.width, 16);
-    assert.equal(m.checkbox.height, 16);
-    assert.equal(m.rate.width, 96);
-    assert.equal(m.rate.height, 26);
-    assert.equal(m.units.width, 74);
-    assert.equal(m.ok.width, 34);
-    assert.equal(m.border, 'rgb(205, 220, 57)');
-    assert.equal(m.borderWidth, '3px');
-    assert.equal(m.background, 'rgb(34, 34, 34)');
+    assert(m.popup.width >= 360);
+    assert(m.rate.height >= 34 && m.ok.height >= 34);
+    assert(m.units.x >= m.rate.x + m.rate.width);
+    assert(m.ok.y >= m.rate.y + m.rate.height);
+    assert.equal(m.heading, 'Synthetic alpha');
+    assert.deepEqual(m.scopes, ['Any', 'Internet', 'Local']);
     assert.equal(m.focused, 'uploadRate');
     assert.equal(m.selection[0], 0);
     assert.equal(m.selection[1], (await page.locator('#uploadRate').inputValue()).length);
@@ -462,17 +454,12 @@ try {
   await page.screenshot({ path: dir + '/expanded-360.png' });
   await close();
   await page.setViewportSize({ width: 1280, height: 720 });
+  await open('upload');
   readOnly = true;
-  await wait(async () => {
-    await slot('upload').click();
-    await sleep(200);
-    return await page.locator('#uploadSave').isDisabled();
-  }, 'read-only');
+  await page.locator('#uploadDetails').click();
+  await page.locator('#uploadRefresh').click();
+  await wait(() => page.locator('#uploadSave').isDisabled(), 'read-only');
   assert(await page.locator('#uploadRemove').isDisabled());
-  assert.equal(
-    await page.locator('#uploadSave').evaluate((e) => getComputedStyle(e).color),
-    'rgb(119, 119, 119)',
-  );
   assert.equal(writes().length, 6);
   await close();
   assert.equal(evidence.errors.length, 0);

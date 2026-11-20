@@ -225,7 +225,7 @@ func (s *listReadState) publishAfter(e *Engine, operation string) error {
 	switch operation {
 	case "profile-status", "profile-start", "profile-stop", "profile-fetch",
 		"decision-log", "decision-log-get", "decision-log-outcome", "traffic-status", "essential-status",
-		"evaluation-readiness", "protection-readiness", "policy-view", "policy-explain", "decision-status":
+		"evaluation-readiness", "protection-readiness", "policy-view", "policy-explain", "decision-status", "decision-timeout-status":
 		return nil
 	default:
 		return s.publish(e)

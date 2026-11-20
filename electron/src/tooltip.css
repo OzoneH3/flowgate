@@ -1,0 +1,23 @@
+.ui-readout {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--fg-border, var(--line));
+  border-radius: 6px;
+  background: var(--fg-content, var(--surface));
+  color: var(--fg-text, var(--text));
+  box-shadow: 0 4px 14px #0009;
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+#flowgateTooltip {
+  position: fixed;
+  inset: auto;
+  max-width: min(350px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow: hidden;
+  font-family: inherit;
+  white-space: pre-line;
+  pointer-events: none;
+}

@@ -45,7 +45,7 @@ const generation = 'fixture';
 const start = Date.now();
 const once = 'Only this held connection.';
 const decisions = [];
-function request(id, name, direction) {
+function request(id, name, direction, seconds = 180) {
   const application = {
     name,
     key: id,
@@ -56,7 +56,7 @@ function request(id, name, direction) {
   return {
     id,
     state: 'awaiting-decision',
-    deadline: new Date(start + 180000).toISOString(),
+    deadline: new Date(Date.now() + seconds * 1000).toISOString(),
     first_seen: new Date(start + (direction === 'outgoing' ? 0 : 1)).toISOString(),
     flow: {
       direction,
@@ -99,15 +99,29 @@ function request(id, name, direction) {
       once,
       application: 'This application for one hour.',
       persistent: 'This application.',
+      'for-a-while': 'This process instance.',
     },
   };
 }
 const first = request('atlas-sync', 'Atlas Sync', 'outgoing');
 const second = request('long-client', 'Archive' + 'Synchronization'.repeat(10), 'incoming');
 let events = [first, second];
+let timeoutSeconds = 30;
+let timeoutRevision = 1;
+const timeoutEdits = [];
 function reply(q) {
   const now = new Date().toISOString();
   const r = { version: 1, generation, server_time: now, mode: 'isolated-lab', read_only: false };
+  if (q.operation === 'decision-timeout-status' || q.operation === 'decision-timeout-configure') {
+    if (q.operation === 'decision-timeout-configure') {
+      assert.equal(q.generation, generation);
+      assert.equal(q.decision_timeout.expected_revision, String(timeoutRevision));
+      timeoutEdits.push(q.decision_timeout.seconds);
+      timeoutSeconds = q.decision_timeout.seconds;
+      timeoutRevision++;
+    }
+    return { ...r, decision_timeout: { seconds: timeoutSeconds, revision: String(timeoutRevision) } };
+  }
   if (q.operation === 'decide') {
     decisions.push(q);
     const event = events.find((e) => e.id === q.id);
@@ -150,8 +164,11 @@ function reply(q) {
     capabilities: [
       'decision-remember-fields-v1',
       'decision-for-a-while-v1',
+      'decision-for-a-while-durations-v1',
       'network-zone-policy-v1',
+      'decision-timeout-settings-v1',
     ],
+    for_a_while_durations: [15, 60, 3600],
     network_zones: {
       model: 'configured-prefix-v1',
       revision: 'zones',
@@ -164,6 +181,7 @@ function reply(q) {
       policy_scope: 'machine',
       observation_scope: 'machine',
       can_manage_rules: true,
+      can_manage_machine_rules: true,
       can_decide: true,
     },
     events,
@@ -241,15 +259,45 @@ try {
   const sheets = (page) =>
     page.evaluate(() => Array.from(document.styleSheets, (s) => new URL(s.href).pathname));
   const main = app.windows().find((p) => p.url().endsWith('/index.html'));
+  main.setDefaultTimeout(12000);
   assert.deepEqual(await sheets(main), [
-    '/style.css', '/desktop-layout.css', '/theme.css', '/user-style.css', '/user-desktop-layout.css',
+    '/style.css', '/tooltip.css', '/desktop-layout.css', '/theme.css', '/user-style.css', '/user-desktop-layout.css',
   ]);
-  assert.deepEqual(await sheets(prompt), ['/permission-popup.css', '/popup-theme.css', '/user-permission-popup.css']);
+  assert.deepEqual(await sheets(prompt), ['/permission-popup.css', '/tooltip.css', '/popup-theme.css', '/user-permission-popup.css']);
   const appliedStyle = (page) => page.evaluate(() =>
     getComputedStyle(document.documentElement).getPropertyValue('--fixture-user-style').trim());
   assert.equal(await appliedStyle(main), 'main');
   assert.equal(await appliedStyle(prompt), 'permission');
   assert.equal(await main.locator('.toolbar').evaluate((el) => getComputedStyle(el).height), '47px');
+  await main.locator('#toolsMenu > summary').click();
+  await main.locator('#optionsMenu > summary').click();
+  const timeout = main.getByRole('spinbutton', { name: 'Decision timeout (seconds)' });
+  const saveTimeout = main.locator('#decisionTimeoutSave');
+  await main.waitForFunction(() => document.querySelector('#decisionTimeoutSeconds')?.value === '30');
+  assert(await saveTimeout.isDisabled());
+  await timeout.fill('1');
+  assert(await saveTimeout.isDisabled());
+  await timeout.fill('61');
+  assert(await saveTimeout.isDisabled());
+  await timeout.fill('45');
+  await saveTimeout.click();
+  await main.waitForFunction(() => document.querySelector('#decisionTimeoutStatus')?.textContent === 'Saved for new requests.');
+  assert.deepEqual(timeoutEdits, [45]);
+  await main.locator('#decisionTimeoutRefresh').click();
+  await main.waitForFunction(() => !document.querySelector('#decisionTimeoutSeconds')?.disabled);
+  assert.equal(await timeout.inputValue(), '45');
+  assert(parseInt(await prompt.locator('.expiry').textContent(), 10) > 60, 'an active request retains its own deadline');
+  await main.screenshot({ path: path.join(run, 'permission-timeout.png') });
+  await main.locator('#optionsMenu > summary').click();
+  await main.locator('#toolsMenu > summary').click();
+  const rateMode = main.locator('#rateMode');
+  await rateMode.hover();
+  const desktopTooltip = main.getByRole('tooltip');
+  await desktopTooltip.waitFor();
+  assert.match(await desktopTooltip.innerText(), /cumulative|rates|rate/i);
+  await main.screenshot({ path: path.join(run, 'app-tooltip.png') });
+  await main.keyboard.press('Escape');
+  await desktopTooltip.waitFor({ state: 'hidden' });
   const appRow = main.locator('#rows tr[data-id^="app:"]').filter({ hasText: 'Atlas Sync' });
   const chart = main.locator('#trafficGraph');
   const table = main.locator('#activityView .table-scroll');
@@ -259,6 +307,43 @@ try {
   await sidebar.waitFor({ state: 'hidden' });
   await grip.waitFor({ state: 'hidden' });
   await chart.waitFor();
+  const fillsPlot = (page, detached = false) => page.evaluate((detached) => {
+    const canvas = document.querySelector('#trafficCanvas').getBoundingClientRect();
+    const panel = document.querySelector(detached ? '#paneContent' : '#trafficGraph').getBoundingClientRect();
+    const header = document.querySelector('.graph-heading').getBoundingClientRect();
+    return Math.abs((detached ? panel.top : header.bottom) - canvas.top) <= 1
+      && Math.abs(panel.bottom - canvas.bottom) <= 1
+      && Math.abs(panel.width - canvas.width) <= 2;
+  }, detached);
+  const chartHeader = chart.locator('.graph-heading');
+  const sample = chart.locator('#graphSample');
+  const download = chartHeader.getByRole('button', { name: 'Toggle download series' });
+  await download.waitFor();
+  assert(await chartHeader.getByRole('button', { name: 'Toggle upload series' }).isVisible());
+  assert(await fillsPlot(main));
+  const measurement = chartHeader.locator('.graph-explanation summary');
+  assert(await chartHeader.locator('#graphStatus').isHidden());
+  await measurement.click();
+  assert.match(await chartHeader.locator('#graphStatus').innerText(), /Live ·/);
+  assert(await fillsPlot(main));
+  await measurement.click();
+  const downloadHelp = await download.getAttribute('title');
+  assert(downloadHelp);
+  await download.hover();
+  await desktopTooltip.waitFor();
+  assert.equal(await desktopTooltip.innerText(), downloadHelp);
+  assert((await desktopTooltip.boundingBox()).width <= 350);
+  await chart.locator('#trafficCanvas').hover();
+  await desktopTooltip.waitFor({ state: 'hidden' });
+  assert.equal(await download.getAttribute('title'), downloadHelp);
+  await sample.waitFor();
+  assert((await sample.boundingBox()).width <= 350);
+  assert(await sample.getByRole('button', { name: 'Close' }).isHidden());
+  await chart.screenshot({ path: path.join(run, 'chart-sample.png') });
+  await chart.locator('#trafficCanvas').click();
+  await sample.getByRole('button', { name: 'Close' }).click();
+  await main.mouse.move(5, 5);
+  await sample.waitFor({ state: 'hidden' });
   const chartWidth = (await chart.boundingBox()).width;
   const fullTableWidth = (await table.boundingBox()).width;
   assert.equal(chartWidth, fullTableWidth);
@@ -266,6 +351,14 @@ try {
   await appRow.click();
   await sidebar.waitFor();
   await grip.waitFor();
+  const rules = sidebar.getByRole('table', { name: 'Rules by type and initiation direction' });
+  await rules.waitFor();
+  assert.deepEqual(await rules.locator('th[scope="row"]').allTextContents(), [
+    'Blocker',
+    'Limit',
+    'Priority',
+  ]);
+  assert.equal(await appRow.locator('.status-strip > .status-slot').count(), 5);
   assert.match(await sidebar.locator('#selectedName').getAttribute('data-label'), /Atlas Sync/i);
   assert.match(await sidebar.locator('#selectedName').innerText(), /Atlas Sync/i);
   const overviewTab = sidebar.getByRole('tab', { name: 'Overview', exact: true });
@@ -290,6 +383,7 @@ try {
   const narrowSidebar = await sidebar.boundingBox();
   assert(narrowSidebar.x + narrowSidebar.width <= 800);
   assert(narrowSidebar.y >= narrowChart.y + narrowChart.height);
+  assert(await fillsPlot(main));
   await main.screenshot({ path: path.join(run, 'activity-narrow.png') });
   await main.setViewportSize(viewport);
   await chart.locator('.pane-close').click();
@@ -307,7 +401,6 @@ try {
     await prompt.evaluate(() => document.fonts.ready);
     await prompt.screenshot({ path: path.join(run, name + '.png') });
   };
-  const size = () => prompt.evaluate(() => ({ width: innerWidth, height: innerHeight }));
   const bounds = (selector) => prompt.locator(selector).boundingBox();
   const active = () => prompt.evaluate(() => document.activeElement.id);
   async function tabTo(id) {
@@ -318,7 +411,7 @@ try {
     assert.fail('Tab could not reach ' + id);
   }
   async function visibleActions() {
-    for (const id of ['allow', 'block']) {
+    for (const id of ['allow', 'block', 'allowForAWhile', 'blockForAWhile']) {
       assert(
         await prompt.locator('#' + id).evaluate((button) => {
           const r = button.getBoundingClientRect();
@@ -335,7 +428,10 @@ try {
     }
   }
   const allow = prompt.getByRole('button', { name: '✓ Allow', exact: true });
-  const remember = prompt.getByRole('checkbox', { name: 'Remember', exact: true });
+  const ruleDuration = prompt.locator('#rememberDuration');
+  const leaseDuration = prompt.getByRole('combobox', { name: 'For a while duration' });
+  const allowTemporary = prompt.locator('#allowForAWhile');
+  const denyTemporary = prompt.locator('#blockForAWhile');
   const native = await app.browserWindow(prompt);
   await native.evaluate((w) => w.focus());
   const heading = prompt.getByRole('heading', {
@@ -346,13 +442,56 @@ try {
   assert(await allow.isEnabled());
   assert(await prompt.getByRole('button', { name: '× Deny', exact: true }).isEnabled());
   assert.equal(await prompt.locator('#promptPending').innerText(), 'Pending requests (2)');
-  assert.match(await allow.getAttribute('title'), /Only this held connection/);
+  assert.match(await allow.getAttribute('title'), /this application/i);
+  await allow.hover();
+  const permissionTooltip = prompt.getByRole('tooltip');
+  await permissionTooltip.waitFor();
+  assert.match(await permissionTooltip.innerText(), /this application/i);
+  await prompt.mouse.move(3, 3);
+  await permissionTooltip.waitFor({ state: 'hidden' });
+  assert.equal(await prompt.locator('#rememberToggle, #forAWhileToggle').count(), 0);
+  assert.equal(await ruleDuration.inputValue(), '0');
+  assert(await prompt.locator('#rememberPanel').isVisible());
+  assert((await bounds('#allowForAWhile')).y >= (await bounds('#allow')).y + (await bounds('#allow')).height);
+  assert((await bounds('#blockForAWhile')).y >= (await bounds('#block')).y + (await bounds('#block')).height);
+  assert((await bounds('#forAWhileDuration')).y >= (await bounds('#dismiss')).y + (await bounds('#dismiss')).height);
+  assert(await allowTemporary.isEnabled());
+  assert(await denyTemporary.isEnabled());
   const identity = await bounds('#requestIdentity'),
     peer = await bounds('#requestPeer');
   assert(peer.y >= identity.y + identity.height - 1);
   assert.equal(peer.y, (await bounds('#connectionHeader')).y);
-  assert.deepEqual(await size(), { width: 745, height: 590 });
   await visibleActions();
+  await shot('default');
+  const theme = path.join(config, 'flowgate', 'popup-theme.css');
+  const reloadTheme = (version) => prompt.locator('link[href^="popup-theme.css"]').evaluate(
+    (link, version) => new Promise((resolve, reject) => {
+      link.onload = resolve;
+      link.onerror = reject;
+      link.setAttribute('href', 'popup-theme.css?' + version);
+    }),
+    version,
+  );
+  await fs.copyFile(path.join(electronDir, 'themes', 'signal-deck-popup.css'), theme);
+  await reloadTheme('signal-deck');
+  try {
+    await prompt.waitForFunction(() => {
+      const rect = (id) => document.getElementById(id).getBoundingClientRect();
+      const below = (top, bottom) => rect(bottom).top >= rect(top).bottom
+        && Math.abs(rect(bottom).left - rect(top).left) < 2;
+      return rect('dismiss').top === rect('allow').top
+        && below('allow', 'allowForAWhile')
+        && below('block', 'blockForAWhile')
+        && below('dismiss', 'forAWhileDuration');
+    });
+    await visibleActions();
+    await shot('signal-deck');
+  } finally {
+    await fs.writeFile(theme, '');
+    await reloadTheme('base');
+  }
+  const originalAllow = await allow.elementHandle();
+  await ruleDuration.selectOption('once');
   await shot('compact');
 
   await tabTo('cardCollapse');
@@ -369,13 +508,9 @@ try {
   await prompt.keyboard.press('Enter');
   assert.equal(await active(), 'detailsToggle');
 
-  const originalAllow = await allow.elementHandle();
-  await tabTo('rememberToggle');
-  await prompt.keyboard.press('Space');
-  await prompt.waitForFunction(() => document.querySelector('#rememberPanel')?.hidden === false);
+  await ruleDuration.selectOption('0');
   await prompt.waitForFunction(() => document.querySelector('#allow')?.disabled === false);
   await prompt.waitForFunction(() => innerHeight > 590);
-  assert.equal(await active(), 'rememberToggle');
   assert.match(await prompt.locator('#scopePreview').textContent(), /This application/);
   assert(await originalAllow.evaluate((node) => node === document.querySelector('#allow')));
   await visibleActions();
@@ -416,18 +551,14 @@ try {
     assert(status.y < (await bounds('#connectionFields')).y);
     assert((await bounds('#requestPeer')).y < (await bounds('#requestIdentity')).y);
     assert(await originalAllow.evaluate((node) => node === document.querySelector('#allow')));
-    assert(await remember.isChecked());
-    assert.equal(await active(), 'rememberToggle');
+    assert.equal(await ruleDuration.inputValue(), '0');
     await shot('alternate');
   } finally {
     await native.evaluate((w, key) => w.webContents.removeInsertedCSS(key), key);
     await fs.unlink(alternate);
   }
-  await prompt.keyboard.press('Space');
-  assert.equal(await remember.isChecked(), false);
-  await prompt.waitForFunction(
-    () => innerHeight === 590 && !document.querySelector('#allow').disabled,
-  );
+  await ruleDuration.selectOption('once');
+  await prompt.waitForFunction(() => !document.querySelector('#allow').disabled);
   await tabTo('allow');
   assert.equal(decisions.length, 0);
   await prompt.keyboard.press('Enter');
@@ -438,13 +569,14 @@ try {
     [{ action: 'allow', scope: 'once', id: first.id }],
   );
   assert.equal(await prompt.locator('#promptPending').innerText(), 'Pending requests (1)');
-  assert.equal(await remember.isChecked(), false);
+  assert.equal(await ruleDuration.inputValue(), '0');
   assert.match(await prompt.locator('#connectionHeader').innerText(), /Incoming/);
   assert.equal(await prompt.locator('#requestPeer .nl-label').textContent(), 'From');
   const name = second.attribution.application.name;
   assert(await prompt.getByRole('heading', { level: 1, name, exact: true }).isVisible());
 
   // Chromium viewport emulation keeps the desktop work area unchanged.
+  await ruleDuration.selectOption('once');
   await prompt.setViewportSize({ width: 360, height: 400 });
   await prompt.waitForFunction(() => innerWidth === 360 && innerHeight === 400);
   assert(
@@ -459,18 +591,60 @@ try {
   assert(await prompt.locator('#promptBody').evaluate((el) => el.scrollWidth <= el.clientWidth));
   await visibleActions();
   await shot('long-compact');
-  await remember.check();
+  await ruleDuration.selectOption('0');
   await prompt.waitForFunction(() => !document.querySelector('#allow').disabled);
   await prompt.locator('#rememberDuration').scrollIntoViewIfNeeded();
   assert(await prompt.locator('#promptBody').evaluate((el) => el.scrollWidth <= el.clientWidth));
   assert.equal(decisions.length, 1);
+  const third = request('third-client', 'Another queued application', 'outgoing', timeoutSeconds);
+  events.push(third);
+  await leaseDuration.selectOption('60');
+  await tabTo('allowForAWhile');
+  await prompt.keyboard.press('Enter');
+  for (let i = 0; i < 40 && decisions.length < 2; i++)
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(decisions.length, 2);
+  assert.equal(decisions[1].id, second.id);
+  assert.equal(decisions[1].action, 'allow');
+  assert.equal(decisions[1].scope, 'for-a-while');
+  assert.equal(decisions[1].duration_seconds, 60);
+  assert.equal(await requestWindow(third.id), prompt);
+  await prompt.getByRole('heading', { level: 1, name: third.attribution.application.name }).waitFor();
+  const nextCountdown = parseInt(await prompt.locator('.expiry').textContent(), 10);
+  assert(nextCountdown > 0 && nextCountdown <= 45);
+  await denyTemporary.waitFor();
+  await prompt.waitForFunction(() => !document.querySelector('#blockForAWhile').disabled);
+  assert.equal(await leaseDuration.inputValue(), '60');
+  await denyTemporary.click();
+  for (let i = 0; i < 40 && decisions.length < 3; i++)
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(decisions.length, 3);
+  assert.equal(decisions[2].id, third.id);
+  assert.equal(decisions[2].action, 'block');
+  assert.equal(decisions[2].scope, 'for-a-while');
+  assert.equal(decisions[2].duration_seconds, 60);
+  const chartOpened = app.waitForEvent('window');
+  await main.evaluate(() => window.flowgate.paneControl('chart', 'undock'));
+  const detachedChart = await chartOpened;
+  await detachedChart.waitForURL('flowgate://app/pane.html?pane=chart');
+  const detachedHeader = detachedChart.locator('.detached-heading');
+  await detachedHeader.getByRole('button', { name: 'Toggle upload series' }).waitFor();
+  await detachedChart.setViewportSize({ width: 390, height: 300 });
+  assert.equal(await detachedChart.locator('.graph-heading').count(), 1);
+  assert(await fillsPlot(detachedChart, true));
+  assert(await detachedHeader.locator('#dockPane').isVisible());
+  await detachedHeader.getByRole('button', { name: 'Pause chart' }).click();
+  assert.equal(await detachedHeader.locator('#graphPause').getAttribute('aria-pressed'), 'true');
+  await detachedHeader.getByRole('button', { name: 'Return to live' }).click();
+  assert.equal(await detachedHeader.locator('#graphPause').getAttribute('aria-pressed'), 'false');
+  await detachedChart.screenshot({ path: path.join(run, 'chart-detached.png') });
   const paneOpened = app.waitForEvent('window');
   await main.evaluate(() => window.flowgate.paneControl('info', 'undock'));
   const pane = await paneOpened;
   await pane.waitForURL('flowgate://app/pane.html?pane=info');
   await pane.waitForLoadState('load');
   assert.deepEqual(await sheets(pane), [
-    '/style.css', '/pane.css', '/theme.css', '/user-style.css', '/user-pane.css',
+    '/style.css', '/tooltip.css', '/pane.css', '/theme.css', '/user-style.css', '/user-pane.css',
   ]);
   assert.equal(await appliedStyle(pane), 'pane');
   assert.equal(

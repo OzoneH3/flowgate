@@ -89,8 +89,6 @@ export function createIconGuide(
     'Upload rate limit.',
     'Firewall rules for connections initiated by the remote peer.',
     'Firewall rules for connections initiated by the local application.',
-    'Incoming quota position. Quotas are currently unavailable.',
-    'Outgoing quota position. Quotas are currently unavailable.',
   ];
   section('Rule Status strip, left to right', STATUS_SLOTS.map(({ key, label }, index) => {
     const slot = symbol('', 'status-slot');

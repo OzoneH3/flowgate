@@ -85,6 +85,7 @@ const api: Bridge = {
   decisionLog: () => ipcRenderer.invoke('log:state'),
   observedUsage: () => ipcRenderer.invoke('usage:read'),
   connectionChecks: (v) => ipcRenderer.invoke('connection-checks',v),
+  decisionTimeout: (edit) => ipcRenderer.invoke('decision-timeout', edit),
   usageHistory: (q) => ipcRenderer.invoke('history:read', q),
   usageHistoryConfigure: (o) => ipcRenderer.invoke('history:configure', o),
   decisionLogVisible: (v) => ipcRenderer.invoke('log:visible', v),

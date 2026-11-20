@@ -243,8 +243,7 @@ try {
   const prompt = await wait(() => app.windows().find((p) => p.url().includes('?request=')));
   await prompt.waitForSelector('#allow');
   assert.equal(received(44001), 0);
-  await prompt.uncheck('#rememberToggle');
-  await prompt.uncheck('#forAWhileToggle');
+  await prompt.selectOption('#rememberDuration', 'once');
   await prompt.screenshot({ path: path.join(run, 'automatic-prompt.png') });
   await prompt.click('#allow');
   await wait(() => received(44001) === 1);
@@ -253,8 +252,7 @@ try {
   await close();
   await command('send', { port: 44003 });
   const blockPrompt = await wait(() => app.windows().find((p) => p.url().includes('?request=')));
-  await blockPrompt.uncheck('#rememberToggle');
-  await blockPrompt.uncheck('#forAWhileToggle');
+  await blockPrompt.selectOption('#rememberDuration', 'once');
   await blockPrompt.click('#block');
   await sleep(250);
   assert.equal(received(44003), 0);

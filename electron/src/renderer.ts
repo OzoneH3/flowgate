@@ -1,4 +1,5 @@
 import { setupInspectorTabs } from './inspector-tabs';
+import { setupTooltips } from './tooltip';
 import { updateConnectionStatus } from './status-slot';
 import { fastPathIndicator, appFastPathDetails } from './fast-path';
 import { accountLabel } from './accounts';
@@ -118,6 +119,7 @@ import {
   type Metric,
 } from './model';
 const root = document.querySelector<HTMLDivElement>('#app')!;
+setupTooltips();
 const promptParams = new URL(location.href).searchParams;
 const promptGeneration = promptParams.get('generation');
 const promptID = promptParams.get('request');
@@ -160,18 +162,20 @@ let reviewSequence = 0,
   reviewChecking = false,
   reviewMessage = '',
   reviewFor = '';
-// decision-remember-fields-v1 (NetLimiter 5.3.28): Remember unchecked = Once.
+// A queued answer can carry its reviewed rule fields into the next popup.
 const queuedField = promptID && promptParams.get('rememberField');
 const queuedDuration = REMEMBER_DURATIONS.find(
   ({ seconds }) => String(seconds) === promptParams.get('rememberDuration'),
 )?.seconds;
 const queuedAddress = queuedDuration !== undefined && (queuedField === 'address' || queuedField === 'endpoint');
 const queuedPort = queuedDuration !== undefined && (queuedField === 'port' || queuedField === 'endpoint');
-let rememberOn = queuedAddress || queuedPort,
+// Only an intentional rule edit keeps an ended request open for rule review.
+let popupRuleEdited = queuedAddress || queuedPort;
+let rememberOn = Boolean(promptID),
   rememberFields: RememberFields = { ...DEFAULT_REMEMBER, address: queuedAddress, port: queuedPort },
   rememberDuration = rememberOn ? queuedDuration ?? 0 : 0,
   reviewTimer: ReturnType<typeof setTimeout> | undefined;
-// decision-for-a-while-v1: For a while checkbox (exclusive with Remember, see process-lease).
+// The Pending requests sidebar still uses mutually exclusive checkboxes.
 let forAWhileOn = false;
 // decision-for-a-while-durations-v1 (FlowGate extension): the selected lease
 // duration; defaults to the user's last choice when the backend allows it.
@@ -520,7 +524,7 @@ function installedIcon(app: Application | undefined, kind: Row['kind']) {
               for (const node of document.querySelectorAll<HTMLElement>('[data-icon-key]'))
                 if (node.dataset.iconKey === key && !url) {
                   node.replaceChildren(rowIcon(metadata.fallback));
-                  node.title = metadata.fallback === 'service' ? 'Service executable (installed system service metadata)' : 'Command-line program (terminal or executable-location metadata)';
+                  node.title = metadata.fallback === 'service' ? 'Installed system service' : 'Command-line program';
                 }
             }
             if (metadata.name) {
@@ -592,8 +596,6 @@ function statusFamilyGlyph(key: string) {
       ? 'M10 2h3v12h-3M2 8h8M7 5l3 3-3 3'
       : key === 'out-blocker'
         ? 'M6 2H3v12h3M6 8h8M11 5l3 3-3 3'
-      : key.includes('quota')
-        ? 'M8 1l6 3v8l-6 3-6-3V4zM8 1v14M2 4l6 4 6-4'
         : key === 'dl-limit'
           ? 'M8 3v10M4 9l4 4 4-4'
           : 'M8 13V3M4 7l4-4 4 4',
@@ -651,21 +653,21 @@ function statusStrip(r: Row) {
       title = r.kind === 'network' ? NETWORK_UNAVAILABLE : 'Machine: no rules at this level.';
     } else if (r.kind === 'socket') {
       chip = { glyph: '', text: '', tone: 'none', detail: '' };
-      title = `${slot.label}: connections carry no rules; see the holder process.`;
+      title = `${slot.label}: View rules on the owning process.`;
     } else if (r.kind === 'inactive-group') {
       chip = { glyph: '', text: '', tone: 'none', detail: '' };
-      title = 'Expand to view saved programs and edit their individual rules.';
+      title = 'Expand to edit saved app rules.';
     } else if (r.kind === 'program') {
       chip = { glyph: '', text: '', tone: 'none', detail: '' };
-      title = 'Expand this program to edit each account’s permissions.';
+      title = 'Expand to edit rules per user.';
     } else if (r.kind === 'launch') {
       chip = { glyph: '', text: '', tone: 'none', detail: '' };
-      title = `${slot.label}: launch group (display only); rules apply to each process below.`;
+      title = `${slot.label}: Rules apply to each process below.`;
     } else if (r.applicationZone) {
       const rules=status.available?status[direction]:[];
       const own=zoneConfigured(rules,status.now);
-      chip={glyph:'',text:own.text,tone:status.available?own.tone:'unavailable',detail:rules.map(rule=>ruleDescription(rule,status.now)).join('\n')};
-      title=`${r.label} · ${direction} · exact application/zone stored rules\n${chip.detail}\nConfigured policy, not a connection verdict. Parent application rule and global zone policies remain separate.`;
+      chip={glyph:'',text:own.text,tone:status.available?own.tone:'unavailable',detail:''};
+      title=`${slot.label}: ${chip.text} · this app and network`;
     } else if (r.inactive) {
       // Not running: the backend summarizes live processes only; list its stored rules.
       const rules = status.available ? status[direction] : [],
@@ -674,14 +676,14 @@ function statusStrip(r: Row) {
         glyph: '',
         text: own.text,
         tone: own.tone,
-        detail: rules.map((rule) => ruleDescription(rule, status.now)).join('\n'),
+        detail: '',
         scoped: own.scoped,
       };
-      title = `${slot.label} (not running · stored rules): ${chip.text}\n${chip.detail}`;
+      title = `${slot.label}: ${chip.text} · app closed`;
     } else if (runningInventory) {
       const rules=runningInventory[direction],own=ownConfigured(rules,runningInventory.now);
-      chip={glyph:'',text:own.text,tone:own.tone,detail:rules.map(rule=>ruleDescription(rule,runningInventory.now)).join('\n'),scoped:own.scoped};
-      title=`${slot.label}: ${chip.text} · saved rules for this observed running process\n${chip.detail}\nSocket attribution is unavailable; this is configured policy, not a verdict for its traffic.`;
+      chip={glyph:'',text:own.text,tone:own.tone,detail:'',scoped:own.scoped};
+      title=`${slot.label}: ${chip.text} · socket owner unverified`;
     } else if (authoritative) {
       // NetLimiter Rule Status: the node's OWN rule; scoped rules only add a "+N scoped" hint.
       const summary = processPolicy?.[direction] || result?.application?.[direction];
@@ -712,7 +714,7 @@ function statusStrip(r: Row) {
       const appNote =
         fallback && fallback.tone !== 'none' ? `\nApplication rule applies: ${fallback.text}` : '';
       title = summary
-        ? `${slot.label}: ${chip.text}${appNote}\n${chip.detail}\n${summary.reason}\nEnforcement: ${summary.enforcement.state} · ${summary.enforcement.reason}`
+        ? `${slot.label}: ${chip.text}${appNote}\nEnforcement: ${summary.enforcement.state}`
         : `${slot.label}: ${result?.reason || 'unavailable'}`;
       if (!summary) chip = { glyph: '', text: 'Unavailable', tone: 'unavailable', detail: '' };
     } else if (status.available) {
@@ -722,10 +724,10 @@ function statusStrip(r: Row) {
         glyph: '',
         text: own.text,
         tone: own.tone,
-        detail: rules.map((rule) => ruleDescription(rule, status.now)).join('\n'),
+        detail: '',
         scoped: own.scoped,
       };
-      title = `${slot.label} (compatibility inventory): ${chip.text}\n${chip.detail}`;
+      title = `${slot.label}: ${chip.text} · saved rules only`;
     } else title = `${slot.label}: ${status.reason}`;
     if (['allow', 'block', 'ask', 'mixed', 'off'].includes(chip.tone))
       button.append(blockerGlyph(chip));
@@ -832,10 +834,11 @@ function measurePrompt() {
       parseFloat(padding.paddingTop) +
       parseFloat(padding.paddingBottom);
     const keysDown = [...promptKeysDown].sort();
-    const signature = Math.ceil(height) + ':' + pointerDown + ':' + keysDown.join(',') + ':' + rememberOn;
+    const reviewingRule = rememberOn && popupRuleEdited;
+    const signature = Math.ceil(height) + ':' + pointerDown + ':' + keysDown.join(',') + ':' + reviewingRule;
     if (signature === lastPromptLayout) return;
     lastPromptLayout = signature;
-    void window.flowgate.promptLayout({ height, pointerDown, keysDown, remember: rememberOn }).then(() => {
+    void window.flowgate.promptLayout({ height, pointerDown, keysDown, remember: reviewingRule }).then(() => {
       if (!promptLayoutReady) {
         promptLayoutReady = true;
         promptStableAt = performance.now() + 650;
@@ -915,7 +918,7 @@ if (promptID) {
     }
   });
 } else {
-  root.innerHTML = `<header class="toolbar"><strong class="brand">FLOWGATE</strong><span id="toolbarUnits" class="toolbar-units"><label for="displayUnits">Units</label><select id="displayUnits" aria-label="Display units" title="Display only: bytes or bits, decimal SI prefixes (1 KB = 1000 B). Accounting sources stay separate."></select></span><span id="controlStatus" class="toolbar-status"></span><input id="search" type="search" aria-label="Search Activity" placeholder="Search"></header><nav class="tabs" aria-label="Views"><button id="activityTab" aria-selected="true">Activity</button><button id="requestsTab" aria-selected="false">Pending requests <span id="pendingCount">0</span></button><span id="tabsPaneControls" class="pane-controls"></span></nav><main id="activityView"><section id="trafficGraph"></section><section class="activity-main"><div class="filterbar"><select id="activitySource" aria-label="Activity measurement source"><option value="tcp">TCP</option><option value="udp">UDP</option></select><button id="uploadLimits">Upload limits</button><button id="rateMode" aria-pressed="false" title="Switch the two traffic columns between current rate and total transferred">Rate</button><select id="columnPreset" aria-label="Column preset"><option value="status">Status</option><option value="details">Details</option></select><select id="filter" aria-label="Socket filter"><option value="all">All sockets</option><option value="active">Active TCP / connected UDP</option><option value="listening">Listening TCP / bound UDP</option></select><span class="filterbar-icons"><button id="expand" class="icon-button" title="Expand all" aria-label="Expand all">⊞</button><button id="collapse" class="icon-button" title="Collapse all" aria-label="Collapse all">⊟</button><button id="refreshNow" class="icon-button" title="Refresh now" aria-label="Refresh now">↻</button></span></div><div class="table-scroll"><table id="tree" role="treegrid" tabindex="0" aria-label="Application process socket activity"><thead><tr id="headers"></tr></thead><tbody id="rows"></tbody></table></div><div id="activitySummary" class="summary"></div></section><aside id="activityDetails" hidden><h2>App details<span id="infoPaneControls" class="pane-controls"></span></h2><h3 id="selectedName">FlowGate Activity</h3><div id="selectedExecutable"></div><div class="info-scroll"><h3 id="infoProperties" class="info-section-title">Overview</h3><dl id="info"></dl><section id="infoRules"></section><section class="info-tools"><h3 class="info-section-title">Tools</h3><button id="infoOpenRules">Rule list</button><button id="infoOpenLog">Decision log</button><button id="infoOpenPending">Pending requests</button></section></div></aside></main><main id="requestsView" hidden><section class="request-list"><h2>Pending requests</h2><p class="hint">One row per group of identical requests; a decision answers its oldest request. Dismissal grants nothing. Closing FlowGate leaves an independent controller running.</p><div class="table-scroll"><table id="requests"><thead><tr><th>Application</th><th>Direction</th><th>Protocol</th><th>Remote endpoint</th><th>Requests</th><th>State</th></tr></thead><tbody id="requestRows"></tbody></table></div><section id="temporaryDecisions" class="temporary-decisions" hidden><h3 title="For a while decisions: in memory only, never saved as rules">Temporary decisions</h3><div id="leaseRows"></div></section><section id="permissionResultsView" class="permission-results" hidden><h3 title="Outcomes of Allow/Deny submissions; the permission window hides on the click">Results</h3><ol id="permissionResultRows"></ol></section></section><aside class="request-sidebar"><h2>Connection permission</h2><div id="requestDetails"></div></aside></main><footer><span id="footerSummary"></span><button id="resultsAttention" class="link-button results-attention" hidden></button><span id="feedback" role="status" aria-live="polite"></span></footer>`;
+  root.innerHTML = `<header class="toolbar"><strong class="brand">FLOWGATE</strong><span id="toolbarUnits" class="toolbar-units"><label for="displayUnits">Units</label><select id="displayUnits" aria-label="Display units" title="Display bytes or bits using decimal units."></select></span><span id="controlStatus" class="toolbar-status"></span><input id="search" type="search" aria-label="Search Activity" placeholder="Search"></header><nav class="tabs" aria-label="Views"><button id="activityTab" aria-selected="true">Activity</button><button id="requestsTab" aria-selected="false">Pending requests <span id="pendingCount">0</span></button><span id="tabsPaneControls" class="pane-controls"></span></nav><main id="activityView"><section id="trafficGraph"></section><section class="activity-main"><div class="filterbar"><select id="activitySource" aria-label="Activity measurement source"><option value="tcp">TCP</option><option value="udp">UDP</option></select><button id="uploadLimits">Upload limits</button><button id="rateMode" aria-pressed="false" title="Switch between rate and total traffic">Rate</button><select id="columnPreset" aria-label="Column preset"><option value="status">Status</option><option value="details">Details</option></select><select id="filter" aria-label="Socket filter"><option value="all">All sockets</option><option value="active">Active TCP / connected UDP</option><option value="listening">Listening TCP / bound UDP</option></select><span class="filterbar-icons"><button id="expand" class="icon-button" title="Expand all" aria-label="Expand all">⊞</button><button id="collapse" class="icon-button" title="Collapse all" aria-label="Collapse all">⊟</button><button id="refreshNow" class="icon-button" title="Refresh now" aria-label="Refresh now">↻</button></span></div><div class="table-scroll"><table id="tree" role="treegrid" tabindex="0" aria-label="Application process socket activity"><thead><tr id="headers"></tr></thead><tbody id="rows"></tbody></table></div><div id="activitySummary" class="summary"></div></section><aside id="activityDetails" hidden><h2>App details<span id="infoPaneControls" class="pane-controls"></span></h2><h3 id="selectedName">FlowGate Activity</h3><div id="selectedExecutable"></div><div class="info-scroll"><h3 id="infoProperties" class="info-section-title">Overview</h3><dl id="info"></dl><section id="infoRules"></section><section class="info-tools"><h3 class="info-section-title">Tools</h3><button id="infoOpenRules">Rule list</button><button id="infoOpenLog">Decision log</button><button id="infoOpenPending">Pending requests</button></section></div></aside></main><main id="requestsView" hidden><section class="request-list"><h2>Pending requests</h2><p class="hint">One row per group of identical requests; a decision answers its oldest request. Dismissal grants nothing. Closing FlowGate leaves an independent controller running.</p><div class="table-scroll"><table id="requests"><thead><tr><th>Application</th><th>Direction</th><th>Protocol</th><th>Remote endpoint</th><th>Requests</th><th>State</th></tr></thead><tbody id="requestRows"></tbody></table></div><section id="temporaryDecisions" class="temporary-decisions" hidden><h3 title="Temporary decisions are kept in memory">Temporary decisions</h3><div id="leaseRows"></div></section><section id="permissionResultsView" class="permission-results" hidden><h3 title="Outcomes of submitted decisions">Results</h3><ol id="permissionResultRows"></ol></section></section><aside class="request-sidebar"><h2>Connection permission</h2><div id="requestDetails"></div></aside></main><footer><span id="footerSummary"></span><button id="resultsAttention" class="link-button results-attention" hidden></button><span id="feedback" role="status" aria-live="polite"></span></footer>`;
   // The GUI's own release identity (verified against its bundle manifest).
   void window.flowgate
     .guiBuild()
@@ -1139,7 +1142,7 @@ function buildTree() {
   $('footerSummary').textContent = $('activitySummary').textContent = a
     ? `${counts.displayed}/${a.rows.length} sockets · ${counts.lifecycle} TIME_WAIT · ${counts.unresolved} unresolved · ${a.complete ? 'Complete' : 'Partial visibility'}`
     : state.observation.message;
-  $('activitySummary').title = $('footerSummary').title = [detailedSummary, 'Counts describe this endpoint’s projected observations and current search/socket filter. The measurement source selects byte columns, not which sockets are listed.', a?.collected, ...(a?.issues || [])]
+  $('activitySummary').title = $('footerSummary').title = [detailedSummary, a?.collected, ...new Set(a?.issues)]
     .filter(Boolean)
     .join(' · ');
 }
@@ -1247,7 +1250,7 @@ function paneControls(self?: 'info' | 'chart', summaryText = '▾') {
   if (self) {
     const x = element('button', '✕', 'pane-close');
     x.title =
-      'Close ' + paneList().find((p) => p.key === self)!.label + ' (reopen from any ▾ window menu)';
+      'Close ' + paneList().find((p) => p.key === self)!.label + '';
     x.setAttribute('aria-label', x.title);
     x.onclick = () => setPane(self, false);
     wrap.append(x);
@@ -1278,7 +1281,7 @@ function updateFirewallStatus() {
     const warning = queueHealthWarning(!!state?.control.connected, state?.control.queueHealth);
     queue.hidden = !warning;
     queue.textContent = warning?.text || '';
-    queue.title = warning ? warning.title.split('\n', 1)[0] + ' Open queue diagnostics for details.' : '';
+    queue.title = warning ? 'Open queue diagnostics' : '';
   }
 
 }
@@ -1319,7 +1322,7 @@ function setupMainMenus(windowMenu: HTMLElement) {
   const controlTitle = control.querySelector('summary')!;
   const sourceLabel = element('label', 'Activity display source', 'menu-control');
   sourceLabel.append($('activitySource'));
-  sourceLabel.title = 'Changes the measurements shown in Activity. Collection keeps its current state.';
+  sourceLabel.title = 'Choose which measurements Activity shows.';
   options.querySelector('.menu-panel')!.prepend(sourceLabel);
   tools.lastElementChild!.append(control, element('hr'), monitoring, element('hr'), options);
   const about = element('button', 'About FlowGate');
@@ -1668,7 +1671,7 @@ function renderTree() {
     if (r.socket) {
       const direction = initiationPresentation(r.socket);
       icon = element('span', direction.glyph, 'connection-direction ' + direction.className);
-      icon.title = direction.title;
+      icon.title = direction.hover;
       icon.setAttribute('role', 'img');
       icon.setAttribute('aria-label', direction.label);
       if (direction.state === 'listening') rowLabel = r.socket.socket.local;
@@ -1806,7 +1809,7 @@ function renderInfo() {
   $('selectedExecutable').title =
     rawPath +
     (rawPath.endsWith(' (deleted)')
-      ? ' · Running replaced/deleted executable; original identity retained.'
+      ? ' · Running the original executable identity.'
       : '');
   $('selectedExecutable').hidden = !pathText;
   const selectedName = $('selectedName');
@@ -2185,7 +2188,7 @@ function currentEvent() {
     ? decidedEvent
     : undefined;
 }
-function actionable(e: ViewEvent | undefined) {
+function actionable(e: ViewEvent | undefined, scope: Scope | 'for-a-while' = chosenScope) {
   return (
     !!e &&
     state.control.connected &&
@@ -2195,7 +2198,7 @@ function actionable(e: ViewEvent | undefined) {
     !e.attempt &&
     !reviewFailureOf(e) &&
     !localSubmitted.has(state.control.generation + ':' + e.id) &&
-    !!e.scope_previews[chosenScope]
+    !!e.scope_previews[scope]
   );
 }
 function selectRequest(id: string) {
@@ -2270,7 +2273,7 @@ function renderRequests() {
         tr.append(element('td', v));
       tr.title =
         g.count > 1
-          ? `${g.count} similar requests. A decision answers the oldest one; Remember also settles the others it covers.`
+          ? `Once answers the oldest request. Remember also settles requests it covers.`
           : '';
       const select = () => {
         // Always the group's current representative; a decision never fans out.
@@ -2303,6 +2306,11 @@ function renderRequests() {
     detailSignature = sig;
     const container = $('requestDetails');
     container.replaceChildren();
+    const popupDuration = $('promptLeaseDuration');
+    if (popupDuration) {
+      popupDuration.replaceChildren();
+      popupDuration.hidden = true;
+    }
     if (!e) {
       container.append(
         element(
@@ -2340,8 +2348,11 @@ function renderRequests() {
     );
     const controls = $('decisionControls'),
       dock = $('decisionDock');
-    for (const action of ['allow', 'block'] as const)
+    for (const action of ['allow', 'block'] as const) {
       $<HTMLButtonElement>(action).onclick = () => void decideFromCard(e.id, action);
+      const temporary = $<HTMLButtonElement>(action + 'ForAWhile');
+      if (temporary) temporary.onclick = () => void decideFromCard(e.id, action, true);
+    }
     const rememberBox = $<HTMLInputElement>('rememberToggle');
     if (rememberBox) {
       rememberBox.checked = rememberOn;
@@ -2354,8 +2365,11 @@ function renderRequests() {
     }
     const leaseDuration = $<HTMLSelectElement>('forAWhileDuration');
     if (leaseDuration) {
-      if (!forAWhileDurations(state.control).includes(forAWhileSeconds))
-        forAWhileSeconds = defaultForAWhile(savedForAWhile, forAWhileDurations(state.control));
+      if (popupDuration) {
+        popupDuration.append($('forAWhileDurationWrap'));
+        popupDuration.hidden = false;
+      }
+      forAWhileSeconds = defaultForAWhile(savedForAWhile, forAWhileDurations(state.control));
       leaseDuration.value = String(forAWhileSeconds);
       leaseDuration.onchange = () => {
         const seconds = Number(leaseDuration.value);
@@ -2374,14 +2388,19 @@ function renderRequests() {
         input.checked = rememberFields[field];
         input.onchange = () => {
           rememberFields = { ...rememberFields, [field]: input.checked };
+          if (promptID) popupRuleEdited = true;
           cardNote = undefined;
           invalidateReview();
         };
       }
       const duration = $<HTMLSelectElement>('rememberDuration');
-      duration.value = String(rememberDuration);
+      duration.value = promptID && !rememberOn ? 'once' : String(rememberDuration);
       duration.onchange = () => {
-        rememberDuration = Number(duration.value);
+        if (promptID) {
+          rememberOn = duration.value !== 'once';
+          popupRuleEdited = true;
+        }
+        if (duration.value !== 'once') rememberDuration = Number(duration.value);
         syncRememberScope();
         invalidateReview(0);
       };
@@ -2493,7 +2512,7 @@ function shortAttempt(a: Attempt, e?: ViewEvent) {
       ? `${verdict} · rule saved.`
       : `${verdict} once.`;
 }
-async function decideFromCard(id: string, action: 'allow' | 'block') {
+async function decideFromCard(id: string, action: 'allow' | 'block', directLease = false) {
   syncRememberScope();
   const e = currentEvent();
   if (!e || e.id !== id || (Boolean(promptID) && (!promptLayoutReady || performance.now() < promptStableAt)))
@@ -2502,9 +2521,9 @@ async function decideFromCard(id: string, action: 'allow' | 'block') {
     generation: state.control.generation,
     zoneRevision: state.control.networkZones?.revision || '',
     capabilities: state.control.capabilities,
-    forAWhile: forAWhileOn,
+    forAWhile: directLease || forAWhileOn,
     forAWhileSeconds,
-    remember: rememberMode() && rememberOn,
+    remember: !directLease && rememberMode() && rememberOn,
     fields: rememberFields,
     duration: rememberDuration,
     pairIds: localPairView(e, state.control.events, state.control.capabilities)?.pairIds,
@@ -2568,16 +2587,17 @@ async function decideFromCard(id: string, action: 'allow' | 'block') {
     }
     return;
   }
-  if (!actionable(e)) return;
+  if (!actionable(e, directLease ? 'for-a-while' : chosenScope)) return;
+  const reviewRequired = !directLease && needsDecisionReview();
   const preview = decisionReviews[action];
   if (
-    needsDecisionReview() &&
+    reviewRequired &&
     (reviewFor !== reviewKey() ||
       !preview ||
       Date.parse(preview.expires_at) <= (state.control.serverNow || Date.now()))
   )
     return;
-  const decision = decisionFor(action, e, needsDecisionReview() ? preview : undefined),
+  const decision = directLease ? plan.decision : decisionFor(action, e, reviewRequired ? preview : undefined),
     key = state.control.generation + ':' + e.id;
   localSubmitted.add(key);
   cardNote = undefined;
@@ -2603,7 +2623,9 @@ async function decideFromCard(id: string, action: 'allow' | 'block') {
       reviewChecking = false;
       reviewMessage = message.slice(REMEMBER_REVIEW_CHANGED.length);
     } else {
-      note(e, shortError(message), message);
+      note(e, directLease && message.startsWith('process_scope_unavailable:')
+        ? 'For a while needs one verified running process.'
+        : shortError(message), message);
     }
   }
   updateDecisions();
@@ -2646,11 +2668,15 @@ function renderLeases(container: HTMLElement | null, leases: ProcessLease[], own
   container.hidden = leases.length === 0;
 }
 function updateDecisions() {
-  syncRememberScope();
   const e = currentEvent(),
     now = state.control.serverNow || Date.now(),
     groups = state.control.connected ? requestGroups(state.control.events) : [],
     group = e ? groups.find((g) => g.key === groupKey(e)) : undefined;
+  // Remember needs a verified application, or an explicitly offered process scope.
+  const runtimeUnverified = e?.attribution.permission_target?.kind === 'runtime-unverified';
+  const processRemember = runtimeUnverified && !endedRequest(e) && !!e?.scope_previews['process-remember'];
+  if (runtimeUnverified && !processRemember) rememberOn = false;
+  syncRememberScope();
   if (promptID && $('dismiss')) {
     const other = groups.filter(
       (g) => !g.representative.attempt && (!e || g.key !== groupKey(e)),
@@ -2661,7 +2687,7 @@ function updateDecisions() {
         ? 'Decide later'
         : 'Close';
     $('dismiss').title =
-      'Dismiss this view without Allow or Deny. Unanswered requests retain their original deadlines; this group does not open again automatically.';
+      'Dismiss without deciding. The deadline stays. This group won’t reopen automatically.';
   }
   if ($('promptPending')) $('promptPending').textContent = `Pending requests (${groups.length})`;
   if (!promptID) {
@@ -2674,7 +2700,7 @@ function updateDecisions() {
     $('similarRequests').textContent =
       group && group.count > 1 ? `+${group.count - 1} similar requests` : 'None';
   if ($('similarRequests'))
-    $('similarRequests').title = group && group.count > 1 ? 'Allow/Deny answers this request; Remember also settles the others it covers.' : '';
+    $('similarRequests').title = group && group.count > 1 ? 'Remember also settles requests the rule covers.' : '';
   if ($('askSource') && e) $('askSource').textContent = askSource(e, state.control.rules);
   const ended = endedRequest(e),
     ruleMode = endedRuleMode(e),
@@ -2728,7 +2754,7 @@ function updateDecisions() {
       b.disabled =
         pacing || !leaseMode || leaseDone || endedLeaseBusy.has(e!.id) || !state.control.connected || !canDecide(state.control);
       b.title = leaseMode
-        ? `${id === 'allow' ? 'Allow' : 'Deny'} new connections of process ${e!.request_rule?.pid ?? ''} for a while; this ended request is not delivered`
+        ? `${id === 'allow' ? 'Allow' : 'Deny'} future connections from PID ${e!.request_rule?.pid ?? ''} for a while.`
         : endedLeaseReason(e, state.control.capabilities);
       continue;
     }
@@ -2740,6 +2766,7 @@ function updateDecisions() {
         !remembering ||
         ruleDone ||
         ruleBusy.has(e!.id) ||
+        endedLeaseBusy.has(e!.id) ||
         !!unverifiable ||
         !state.control.connected ||
         !canManageRules(state.control) ||
@@ -2749,7 +2776,7 @@ function updateDecisions() {
         ? ENDED_NEEDS_REMEMBER
         : unverifiable
           ? IDENTITY_UNVERIFIABLE_TEXT
-          : `${id === 'allow' ? 'Allow' : 'Deny'}: save a rule for future connections; this request stays ended`;
+          : `${id === 'allow' ? 'Allow' : 'Deny'} future connections. This request has ended.`;
       continue;
     }
     b.disabled =
@@ -2761,7 +2788,7 @@ function updateDecisions() {
           !review ||
           Date.parse(review.expires_at) <= now));
     b.title = onceCopy?.[id] ?? (needsDecisionReview()
-      ? rememberBlockReason(e, now) || review?.summary || review?.scope_preview || 'Review required'
+      ? rememberBlockReason(e, now) || splitPreview(review?.scope_preview || '').preview || 'Review required'
       : temporary
         ? liveLeaseUnavailable || FOR_A_WHILE_TOOLTIP
         : rememberMode()
@@ -2781,10 +2808,6 @@ function updateDecisions() {
   const scope = $<HTMLSelectElement>('scope');
   if (scope) scope.disabled = locked;
   const toggle = $<HTMLInputElement>('rememberToggle');
-  // An ended request keeps Remember: it is the way to a rule for future connections.
-  // An Electron runtime whose app is unverified: no application-wide rule (backend refuses too).
-  const runtimeUnverified = e?.attribution.permission_target?.kind === 'runtime-unverified';
-  const processRemember = runtimeUnverified && !ended && !!e?.scope_previews['process-remember'];
   if (processRemember) {
     rememberFields = { ...rememberFields, process: true };
     decisionZone = 'any';
@@ -2795,9 +2818,9 @@ function updateDecisions() {
     toggle.disabled = (runtimeUnverified && !processRemember) || (ruleMode ? ruleDone || rulePinned || pacing : locked);
     toggle.parentElement!.title = runtimeUnverified
       ? e!.attribution.permission_target!.remember
-      : "Create rule and don't ask me again";
+      : "Save a rule for the selected scope";
     toggle.parentElement!.classList.toggle('unavailable', runtimeUnverified && !processRemember);
-    if (runtimeUnverified && !processRemember && rememberOn) setOption('remember', false);
+    toggle.checked = rememberOn;
   }
   const scopeLine = $('permissionScope');
   if (scopeLine)
@@ -2817,25 +2840,39 @@ function updateDecisions() {
       : liveLeaseUnavailable || FOR_A_WHILE_TOOLTIP;
     whileBox.parentElement!.classList.toggle('unavailable', ended ? !leaseMode : !!liveLeaseUnavailable);
   }
-  const showLease = temporary && (!ended || leaseMode) && !leaseDone;
+  const leaseReason = ended ? endedLeaseReason(e, state.control.capabilities) : liveLeaseUnavailable;
+  for (const id of ['allowForAWhile', 'blockForAWhile']) {
+    const button = $<HTMLButtonElement>(id);
+    if (!button) continue;
+    button.disabled = pacing || !!leaseReason || (ended
+      ? leaseDone || endedLeaseBusy.has(e!.id) || ruleBusy.has(e!.id) || !state.control.connected || !canDecide(state.control)
+      : !actionable(e, 'for-a-while'));
+    button.title = leaseReason || (ended
+      ? 'Applies to new connections from the running process only.'
+      : FOR_A_WHILE_TOOLTIP);
+  }
+  const showLease = (promptID ? !!$('allowForAWhile') : temporary) && (!ended || leaseMode) && !leaseDone;
   if ($('forAWhileNote')) {
-    $('forAWhileNote').hidden = !showLease;
+    $('forAWhileNote').hidden = !showLease || Boolean(promptID && leaseReason);
     $('forAWhileNote').textContent = forAWhileNote(forAWhileSeconds);
   }
-  // Duration selector only while For a while is checked; the expiry shown is a
-  // preview, the countdown after the click uses the backend's until.
   if ($('forAWhileDurationWrap')) {
-    $('forAWhileDurationWrap').hidden = !showLease;
-    $<HTMLSelectElement>('forAWhileDuration').disabled = pacing || endedLeaseBusy.has(e?.id ?? '') || (!ended && locked);
-    $('forAWhileExpiry').textContent = showLease ? expiryPreview(forAWhileSeconds, now) : '';
+    $('forAWhileDurationWrap').hidden = !promptID && !showLease;
+    const duration = $<HTMLSelectElement>('forAWhileDuration');
+    duration.disabled = promptID ? $<HTMLButtonElement>('allowForAWhile').disabled
+      : pacing || endedLeaseBusy.has(e?.id ?? '') || (!ended && locked);
+    if (promptID) duration.value = String(forAWhileSeconds);
+    $('forAWhileExpiry').textContent = showLease && (!promptID || !leaseReason) ? expiryPreview(forAWhileSeconds, now) : '';
   }
   const panel = $('rememberPanel');
   if (panel) {
-    panel.hidden = !remembering || (ended && !ruleMode);
+    panel.hidden = (promptID ? runtimeUnverified && !processRemember : !remembering) || (ended && !ruleMode);
+    if (promptID) $('rememberScope').hidden = !remembering;
     for (const input of panel.querySelectorAll<HTMLInputElement>('input[data-field]')) {
+      if (promptID) input.parentElement!.hidden = !remembering;
       if (input.dataset.field === 'application') continue;
       if (!ruleMode) {
-        input.disabled = locked || input.dataset.available !== 'true' || (processRemember && input.dataset.field === 'process');
+        input.disabled = !remembering || locked || input.dataset.available !== 'true' || (processRemember && input.dataset.field === 'process');
         continue;
       }
       const endedProcess = input.dataset.field === 'process' && instanceEnded;
@@ -2844,14 +2881,15 @@ function updateDecisions() {
         ruleDone || rulePinned || input.dataset.available !== 'true' || (endedProcess && !input.checked);
       if (endedProcess)
         input.parentElement!.title =
-          'This process instance has ended, so a process-only rule could never match. Uncheck to save a rule for the application.';
+          'Process ended. Clear Process to use application scope.';
       input.parentElement!.classList.toggle('instance-ended', endedProcess);
     }
     const duration = $<HTMLSelectElement>('rememberDuration');
     duration.disabled = ruleMode ? ruleDone || rulePinned : locked;
     // Backend offers persistent only with rule storage; temporary only as "application".
     for (const option of duration.options)
-      option.disabled = !ruleMode && !e?.scope_previews[rememberScope(Number(option.value))];
+      option.disabled = option.value === 'once' ? ended || !e?.scope_previews.once
+        : !ruleMode && !e?.scope_previews[rememberScope(Number(option.value))];
     const allowReview = ruleMode && e ? endedFlow.reviews.allow : undefined;
     $('rememberSummary').textContent = ruleMode
       ? ruleDone || unverifiable
@@ -2897,7 +2935,7 @@ function updateDecisions() {
     zone.disabled = !!scope?.disabled || !needsDecisionReview() || processRemember;
     zone.title = needsDecisionReview()
       ? 'Scope of the remembered rule'
-      : 'Any network · backend upgrade required for remembered zone rules';
+      : 'Update the daemon to save network scopes.';
     zone.parentElement!.parentElement!.hidden = chosenScope === 'once';
   }
   if ($('decisionReview'))
@@ -2981,7 +3019,7 @@ function updateDecisions() {
     future.textContent = rememberFields.process
       ? 'Switch to application scope for future connections…'
       : 'Create application rule for future connections…';
-    future.title = 'Separate application-wide rule, independently verified from fresh Activity. Does not release this request. No automatic scope switch or save.';
+    future.title = 'Review a separate app rule for future connections.';
   }
   if ($('permissionTarget'))
     $('permissionTarget').textContent = ended && temporary && leaseMode
@@ -3059,7 +3097,7 @@ function consume(next: ClientState) {
     updateFirewallStatus();
     for (const th of document.querySelectorAll<HTMLElement>('.col-rule_status button'))
       th.title = state.control.capabilities?.includes(POLICY_CAPABILITY)
-        ? 'Priority · DL Limit · UL Limit · In Blocker · Out Blocker · In Quota · Out Quota. Upload limits are experimental and separate from firewall Blocker policy.'
+        ? STATUS_SLOTS.map((slot) => slot.label).join(' · ') + '. Shaping and firewall rules are separate.'
         : 'Compatibility inventory (listed rules; no backend summary).';
     $('pendingCount').textContent = String(requestGroups(state.control.events).length);
     const stamp =

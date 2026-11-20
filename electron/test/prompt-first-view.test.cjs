@@ -208,7 +208,7 @@ test('Remember never leaves Allow/Deny disabled without a reason; stale reviews 
     assert.ok(fn.includes(reason), reason);
   // Shown in the Remember panel and on the disabled buttons.
   assert.match(src, /rememberBlockReason\(e, now\) \|\|\n\s*\(reviewFor === reviewKey\(\)/);
-  assert.match(src, /\? rememberBlockReason\(e, now\) \|\| review\?\.summary/);
+  assert.match(src, /\? rememberBlockReason\(e, now\) \|\| splitPreview\(review\?\.scope_preview \|\| ''\)\.preview/);
   // A stale or expired review is renewed automatically (throttled), not left disabled.
   assert.match(src, /if \(!fresh && performance\.now\(\) - autoReviewAt > 2000\)/);
   assert.ok(!src.includes("(reviewMessage ? '' : 'Rule review required.')"), 'no generic "review required" fallback');

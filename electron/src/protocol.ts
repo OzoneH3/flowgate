@@ -348,6 +348,7 @@ export interface Reply {
   runtime_checks?: import('./runtime-checks').RuntimeCheck[];
   build?: import('./build-info').DaemonBuild;
   decision_log?: unknown;
+  decision_timeout?: unknown;
   decision_record?: unknown;
   traffic_monitor?: TrafficMonitor;
   policy_view?: PolicyView;
@@ -544,6 +545,7 @@ export interface Bridge {
   dismissPrompt(): Promise<void>;
   decisionLog(): Promise<DecisionLogState>;
   connectionChecks(options?:unknown):Promise<import('./connection-checks').CheckView>;
+  decisionTimeout(edit?: import('./decision-timeout').DecisionTimeoutEdit): Promise<import('./decision-timeout').DecisionTimeoutView>;
   usageHistory(query: unknown): Promise<import('./usage-history-client').HistoryState>;
   usageHistoryConfigure(options: unknown): Promise<import('./usage-history-client').HistoryState>;
   observedUsage(): Promise<import('./observed-usage-client').UsageState>;
@@ -890,6 +892,7 @@ export function parseReply(raw: unknown): Reply {
     usage_history: r.usage_history,
     history_settings: r.history_settings,
     connection_checks: r.connection_checks,
+    decision_timeout: r.decision_timeout,
     upload_shaping: r.upload_shaping,
     decision_preview: r.decision_preview,
     decision_receipt: r.decision_receipt,

@@ -90,9 +90,6 @@ body.hide-chart #activityView > #trafficGraph {
   border-radius: 7px 7px 0 0;
 }
 
-#activityView > #trafficGraph #trafficCanvas {
-  height: calc(100% - 68px);
-}
 #app > footer {
   height: var(--desktop-footer-height);
   min-height: var(--desktop-footer-height);

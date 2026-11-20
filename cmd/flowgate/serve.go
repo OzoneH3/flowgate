@@ -123,6 +123,11 @@ func serveCommand(args []string) error {
 		return fmt.Errorf("decision-timeout must be 1s–60s")
 	}
 	e := daemon.New(*decisionTimeout)
+	timeoutSeconds, timeoutRevision, err := db.DecisionTimeout()
+	if err != nil {
+		return err
+	}
+	e.InitDecisionTimeout(timeoutSeconds, timeoutRevision, db.SaveDecisionTimeout)
 	disabledChecks, checksRevision, err := db.ConnectionChecks()
 	if err != nil {
 		return err

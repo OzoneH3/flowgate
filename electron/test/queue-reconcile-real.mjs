@@ -147,6 +147,7 @@ try {
   const firstId = new URL(w0.url()).searchParams.get('request');
   const before = await peerLines();
   const clickAt = Date.now();
+  await w0.locator('#rememberDuration').selectOption('once');
   await w0.locator('#allow').click(); // Allow Once
   // Same click must not decide/advance onto the next request immediately.
   const pend1 = await wait(async () => {
@@ -180,17 +181,18 @@ try {
     return e?.attribution?.owners?.some((o) => o.pid === pids.alpha) ? x : undefined;
   }, 15000, 'alpha card').catch(async () => {
     // Beta may be presented first; answer it once with Deny, then the alpha card follows.
-    await prompt()?.locator('#block').click();
+    const beta = prompt();
+    await beta?.locator('#rememberDuration').selectOption('once');
+    await beta?.locator('#block').click();
     await sleep(1200);
     return prompt();
   });
-  await w.locator('#forAWhileToggle').check();
   await w.locator('#forAWhileDuration').waitFor();
   await w.locator('#forAWhileDuration').selectOption('60');
   evidence.expiry_preview = await w.locator('#forAWhileExpiry').innerText();
   assert(/until/i.test(evidence.expiry_preview), 'expiry shown before click');
   const b2 = await peerLines();
-  await w.locator('#allow').click();
+  await w.locator('#allowForAWhile').click();
   await wait(async () => !(await awaiting(pids.alpha)).length, 10000, 'alpha queue settled');
   await wait(async () => (await peerLines()) >= b2 + 2, 8000, 'settled alpha flows delivered');
   const lease = (await list()).leases.find((l) => l.pid === pids.alpha);
@@ -204,15 +206,15 @@ try {
   // 3. Ended request, process alive: For a while Deny (1 min) blocks next TCP+UDP; sibling independent.
   await command({ op: 'outgoing', name: 'other', protocol: 'tcp', host: '10.79.0.3', port: 44000, v6: false, timeout_ms: 30000 });
   await wait(async () => /10\.79\.0\.3:44000/.test(await cardText()), 15000, 'other card');
+  await prompt().locator('#rememberDuration').selectOption('0');
   await command({ op: 'close', name: 'other' });
   await wait(async () => /connection has ended|no longer pending/i.test(await cardText()), 30000, 'ended card');
   w = prompt();
   evidence.ended_card = (await cardText()).slice(0, 500);
   assert(!/original socket is no longer present/.test(evidence.ended_card), 'raw diagnostics hidden from main card');
-  assert(await w.locator('#forAWhileToggle').isEnabled(), 'For a while offered for live process');
-  await w.locator('#forAWhileToggle').check();
+  assert(await w.locator('#blockForAWhile').isEnabled(), 'For a while offered for live process');
   await w.locator('#forAWhileDuration').selectOption('60');
-  await w.locator('#block').click();
+  await w.locator('#blockForAWhile').click();
   const res = await wait(async () => {
     const t = await cardText();
     return /This ended request was not delivered/.test(t) ? t : undefined;

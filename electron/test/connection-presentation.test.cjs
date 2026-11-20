@@ -18,13 +18,13 @@ test('whole-application UDP Once explains Allow and Deny separately using the da
   const incoming = event('incoming', 'Once: incoming udp, local 10.0.0.1:4300, remote 10.0.0.2:4400. Block Once drops queued datagrams. The next datagram can open a new request.');
   assert.deepEqual(compactUDPOnce(outgoing), {
     summary: 'Allow drops waiting datagrams and permits later sends for 30 seconds. Deny drops both.',
-    allow: 'Allow Once permits later datagrams on this UDP tuple for 30 seconds. Already queued datagrams will be discarded. No rule is saved.',
-    block: 'Deny drops waiting datagrams and blocks later sends on this UDP tuple for 30 seconds. No rule is saved.',
+    allow: 'Drops waiting datagrams. Allows later sends on this UDP tuple for 30 s.',
+    block: 'Drops waiting datagrams. Blocks this UDP tuple for 30 s.',
   });
   assert.deepEqual(compactUDPOnce(incoming), {
     summary: 'Allow permits waiting datagrams and later sends for 30 seconds. Deny drops waiting datagrams. The next send can prompt again.',
-    allow: 'Allow permits waiting datagrams and later sends on this UDP tuple for 30 seconds. No rule is saved.',
-    block: 'Deny drops waiting datagrams. The next send can prompt again. No rule is saved.',
+    allow: 'Allows waiting datagrams and later sends on this UDP tuple for 30 s.',
+    block: 'Drops waiting datagrams. The next send can prompt again.',
   });
   assert.equal(compactUDPOnce({ ...outgoing, flow: { ...outgoing.flow, protocol: 'tcp' } }), undefined);
   assert.equal(compactUDPOnce({ ...incoming, ask_rule: undefined }), undefined);

@@ -112,7 +112,7 @@ await build({entryPoints:['src/pane-preload.ts'],bundle:true,platform:'node',for
 await build({entryPoints:['src/pane-renderer.ts'],bundle:true,platform:'browser',format:'iife',outfile:'dist/pane.js'});
 for (const file of [
   'index.html', 'pane.html', 'prompt.html',
-  'style.css', 'desktop-layout.css', 'pane.css', 'permission-popup.css',
+  'style.css', 'tooltip.css', 'desktop-layout.css', 'pane.css', 'permission-popup.css',
 ]) await copyFile(`src/${file}`, `dist/${file}`);
 
 await copyFile('themes/signal-deck.css', 'dist/theme.css');
