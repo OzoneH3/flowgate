@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 import platform
 import runpy
+import stat
+import sys
 import tarfile
 import tempfile
 import types
@@ -25,6 +27,38 @@ class ReleaseChecks(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(dir=ROOT / 'build')
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+
+    def test_runuser_resolves_system_sbin_and_ignores_path(self):
+        sbin = self.root / 'sbin'
+        bin_dir = self.root / 'bin'
+        local = self.root / 'local'
+        for directory in (sbin, bin_dir, local):
+            directory.mkdir()
+        (local / 'runuser').touch(mode=0o755)
+        (bin_dir / 'runuser').symlink_to(local / 'runuser')
+        trust = Mock(return_value=types.SimpleNamespace(st_uid=0, st_mode=stat.S_IFDIR | 0o755))
+        with patch.dict(scope, RUNUSER_DIRS=(sbin, bin_dir), secure_file=Mock()), \
+                patch.dict(os.environ, PATH=str(local)), patch.object(Path, 'lstat', trust):
+            with self.assertRaisesRegex(RuntimeError, 'trusted system directory'):
+                release['system_runuser']()
+            installed = sbin / 'runuser'
+            installed.touch(mode=0o755)
+            self.assertEqual(release['system_runuser'](), str(installed))
+
+    def test_missing_runuser_stops_preflight_and_install_before_lock(self):
+        locked = Mock()
+        privileged_os = Mock(wraps=os)
+        privileged_os.X_OK = os.X_OK
+        privileged_os.geteuid.return_value = 0
+        privileged_os.sys = types.SimpleNamespace(version_info=sys.version_info,
+                                                   flags=types.SimpleNamespace(isolated=1))
+        for operation in ('preflight', 'install'):
+            with self.subTest(operation=operation), \
+                    patch.dict(scope, RUNUSER_DIRS=(), locked=locked, os=privileged_os), \
+                    patch('sys.argv', ['flowgate-release.py', operation, '--bundle', 'unused', '--sha256', '0' * 64]):
+                with self.assertRaisesRegex(RuntimeError, 'requires an executable runuser'):
+                    release['main']()
+                locked.assert_not_called()
 
     def archive(self, extra=None):
         backend = {name: b'backend\n' for name in {*release['FILES'], *release['UNITS'],

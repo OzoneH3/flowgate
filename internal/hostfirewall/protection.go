@@ -91,7 +91,7 @@ func (m *Evaluation) ProtectionStatus() daemon.ProtectionStatus {
 			s.Reason = "Bounded evaluation owns interception; stop it before continuous Start"
 		}
 	}
-	return daemon.ProtectionStatus{ID: s.ID, RequestID: s.RequestID, DesiredMode: m.desiredMode, State: s.State, Profile: s.Profile, Cleanup: s.Cleanup, ReasonCode: s.ReasonCode, Reason: s.Reason, Readiness: s.Readiness, ExistingConnections: "Preserved at activation; rules control new supported admissions. Existing admitted TCP is not terminated by rule edits.", FailurePolicy: "New TCP/UDP fail closed on consumer loss; pre-existing admitted connections may continue. Explicit Stop returns to monitoring.", GUIRequired: false}
+	return daemon.ProtectionStatus{ID: s.ID, RequestID: s.RequestID, DesiredMode: m.desiredMode, State: s.State, Profile: s.Profile, Cleanup: s.Cleanup, ReasonCode: s.ReasonCode, Reason: s.Reason, Readiness: s.Readiness, ExistingConnections: "Existing connections are preserved at activation. During active protection, creating or enabling a newly winning Block can disconnect verified established TCP sockets.", FailurePolicy: "New TCP/UDP fail closed on consumer loss; pre-existing admitted connections may continue. Explicit Stop returns to monitoring.", GUIRequired: false}
 }
 func (m *Evaluation) ProtectionReadiness(profile string) (daemon.ProtectionStatus, error) {
 	if !validProfile(profile) {

@@ -8,6 +8,8 @@ Both the build machine and the installation host need Python 3.9 or newer
 and `/usr/bin/sha256sum` (from coreutils). The host's system Python must
 provide `os.pidfd_open` and `signal.pidfd_send_signal` for safe desktop
 shutdown during upgrades.
+Preflight checks for an executable `runuser` in the system's standard
+binary directories before staging an installation.
 
 The package target installs the pinned Electron runtime when needed, builds the
 desktop and native components, and runs the release checks.

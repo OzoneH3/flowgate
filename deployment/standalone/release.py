@@ -43,6 +43,7 @@ HEX = re.compile(r'[a-f0-9]{64}')
 MONITORING = b'{"schema":1,"mode":"monitoring"}'
 RESCUE_ENTRY = b'#!/bin/sh\nexec /usr/bin/python3 -I /usr/local/libexec/flowgate/rescue-release.py recover "$@"\n'
 SHA256SUM = '/usr/bin/sha256sum'
+RUNUSER_DIRS = tuple(map(Path, ('/usr/sbin', '/usr/bin', '/sbin', '/bin')))
 
 
 def digest(path):
@@ -55,6 +56,26 @@ def secure_file(path):
     if not stat.S_ISREG(mode.st_mode) or mode.st_uid != 0 or mode.st_mode & 0o022:
         raise RuntimeError(f'Unsafe managed file: {path}')
     return path
+
+
+def system_runuser():
+    # Root invokes this helper. Ignore PATH and reject links outside the system
+    # directories, while allowing ordinary merged-/usr aliases.
+    for directory in RUNUSER_DIRS:
+        try:
+            executable = (directory / 'runuser').resolve(strict=True)
+            if executable.parent not in RUNUSER_DIRS:
+                continue
+            secure_file(executable)
+            parents = [parent.lstat() for parent in executable.parents]
+            if os.access(executable, os.X_OK) and all(
+                stat.S_ISDIR(parent.st_mode) and parent.st_uid == 0 and not parent.st_mode & 0o022
+                for parent in parents
+            ):
+                return str(executable)
+        except (OSError, RuntimeError):
+            continue
+    raise RuntimeError('FlowGate requires an executable runuser in a trusted system directory (/usr/sbin, /usr/bin, /sbin, /bin)')
 
 
 def secure_directory(path):
@@ -351,7 +372,7 @@ def preflight(api, backend_dir, backend, desktop_config):
 
 def desktop(user, config, program, action, preferences=None):
     account = pwd.getpwuid(user)
-    command = ['/usr/bin/runuser', '-u', account.pw_name, '--', '/usr/bin/env', '-i',
+    command = [system_runuser(), '-u', account.pw_name, '--', '/usr/bin/env', '-i',
                'HOME=' + account.pw_dir, 'XDG_CONFIG_HOME=' + config, str(program), action]
     if preferences is not None:
         command.extend(['--import-preferences', str(preferences)])
@@ -841,6 +862,8 @@ def main():
         parser.error('System Python must support Linux pidfds to stop the installed desktop safely')
     if os.geteuid() != 0 or not __debug__ or not os.sys.flags.isolated:
         parser.error('Run as root using /usr/bin/python3 -I')
+    if options.operation in ('preflight', 'install'):
+        system_runuser()
     os.umask(0o077)
     os.environ['PATH'] = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
     with locked():
