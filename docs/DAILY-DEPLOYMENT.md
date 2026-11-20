@@ -60,3 +60,26 @@ rollback or reboot test. Live acceptance remains a separate explicit action.
 
 Earlier implementation/incident notes are retained in
 [DAILY-DEPLOYMENT-HISTORY.md](DAILY-DEPLOYMENT-HISTORY.md).
+
+## Passwordless local updates
+
+The checkout updater normally uses sudo. To authorize the current desktop
+account to install local builds without an interactive password prompt, run
+this once from a trusted checkout.
+
+```sh
+sudo /usr/bin/python3 -I scripts/setup-passwordless-update.py
+```
+
+This grants that account the ability to install local code that runs as root.
+The root-owned helper restricts commands to supported updater operations.
+Use trusted local source and builds. Bundle hashes check consistency, and the
+updater verifies the bundle and checks compatibility before stopping protection.
+The standalone `make update` workflow invokes sudo directly.
+
+Remove the authorization and helper to return the checkout updater to ordinary
+sudo.
+
+```sh
+sudo rm /etc/sudoers.d/flowgate-local-update /usr/local/libexec/flowgate-update-helper
+```

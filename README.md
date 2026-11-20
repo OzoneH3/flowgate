@@ -35,6 +35,10 @@ the desktop. The per-app monitoring and control workflow takes inspiration from
   [Limits and priorities](docs/ZONE-SHAPING.txt) ·
   [Download coverage](docs/DOWNLOAD-LIMITER.txt)
 
+![FlowGate Ask prompt for an outgoing TCP connection from a disposable app, with its remote endpoint, Remember options, duration, and Allow and Deny buttons visible](docs/images/flowgate-ask-remember.png)
+
+*An outgoing Ask prompt with Remember expanded and a five-minute duration selected.*
+
 ## Try the desktop
 
 From a source checkout, run this as your desktop user. The launcher builds the
@@ -55,12 +59,17 @@ The standalone release candidate targets **64-bit x86 Linux with systemd**.
 There is currently no installer on [GitHub Releases](https://github.com/OzoneH3/flowgate/releases).
 
 1. Check the [build and system requirements](docs/STANDALONE-RELEASE.md).
-2. Run `make package` from a clean, committed checkout. The archive, offline
-   installer, and SHA-256 receipts go to `.workspace/dist/`.
+2. Run `make package` from a clean, committed checkout. It builds FlowGate,
+   runs the release checks, and writes the archive, offline installer, and
+   SHA-256 receipts to `build/dist/`.
 3. Follow the [standalone installation guide](docs/STANDALONE-RELEASE.md) to
    verify the files, run preflight, and install. The same guide covers rollback
    and uninstall.
 4. Open **FlowGate** from the application menu or run `flowgate-ui`.
+
+To upgrade an existing installation from a clean, committed checkout, run
+`make update` as your desktop user. It builds the package, verifies the archive's
+digest, runs preflight, installs with sudo, and reloads the installed desktop.
 
 A fresh install starts in **Monitoring**. When you're ready to enable
 protection, review essential networking first. Then choose **Incoming only**
@@ -73,8 +82,15 @@ Use **Stop protection** to return to monitoring. [Essential networking](docs/ESS
 - **An app needs verified ownership.** When a socket is shared, its owner has
   exited, or FlowGate can't inspect it, the app's saved permission cannot be
   applied on the strength of a guess. [How ownership is verified](docs/ATTRIBUTION.md)
-- **TCP rules govern new connections.** Setting a rule to Block leaves
-  already-admitted TCP connections open. [Connection and rule semantics](docs/SEMANTICS.md)
+- **A newly created or enabled Block can disconnect open TCP connections.**
+  FlowGate does this during active protection when the Block becomes the winning
+  decision and FlowGate can verify the exact socket, its owner, and the connection
+  direction. Starting protection preserves open connections. A later winning
+  Block can still disconnect them. [Connection and rule semantics](docs/SEMANTICS.md)
+- **Local can include VPN peers.** For example, a remote desktop connection to
+  `192.168.23.155` over `ppp0` is automatically classified as Local. Choose
+  **Local** to scope a rule to that zone. Configured prefixes can override
+  automatic classification. [Automatic zones](docs/AUTOMATIC-ZONES.md)
 - **VPN support depends on the setup.** TUN traffic is subject to ordinary
   application rules. WireGuard and XFRM interfaces currently prevent activation.
   Use the read-only checks to investigate firewall, routing, or VPN conflicts.
@@ -88,8 +104,8 @@ or requesting sudo.
 
 ```sh
 . scripts/go-env.sh
-go build -o .workspace/flowgate ./cmd/flowgate
-.workspace/flowgate doctor
+go build -o build/flowgate ./cmd/flowgate
+build/flowgate doctor
 ```
 
 Use `doctor --json` for structured output. FlowGate also runs live compatibility
@@ -127,36 +143,9 @@ workflow and migration.
 Connect a checkout build to an existing installed daemon with
 `./scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock`. The
 launcher attaches without starting or stopping the daemon. Compare the builds
-shown in the desktop header or run `flowgate version` on a particular binary.
+shown in **Help → About** or run `flowgate version` on a particular binary.
 
-The optional [passwordless local update helper](#passwordless-local-updates)
+The optional [passwordless local update helper](docs/DAILY-DEPLOYMENT.md#passwordless-local-updates)
 applies to checkout-based updates.
-
-</details>
-
-### Passwordless local updates
-
-<details>
-<summary>Setup, permissions, and removal</summary>
-
-The updater normally uses sudo. To authorize the current desktop account to
-install local builds without an interactive password prompt, run this once from
-a trusted checkout.
-
-```sh
-sudo /usr/bin/python3 -I scripts/setup-passwordless-update.py
-```
-
-This grants that account the ability to install local code that runs as root.
-The helper is root-owned and restricts commands to the updater's supported
-operations. Bundle hashes check consistency. Use only trusted local source and
-builds. The updater still verifies the bundle and checks compatibility before
-it stops existing protection.
-
-Remove the authorization and helper to return the updater to ordinary sudo.
-
-```sh
-sudo rm /etc/sudoers.d/flowgate-local-update /usr/local/libexec/flowgate-update-helper
-```
 
 </details>

@@ -1,5 +1,28 @@
 # Established TCP control
 
+## Current behavior (20 November 2026)
+
+Commit `d89a94d8` added automatic disconnect to the rule-save path. During
+active protection, a newly created or enabled Block can abort an established
+socket if the edit changes its effective decision to Block and the rule still
+wins. The daemon checks connection direction, current application and UID,
+Wine prefix where applicable, and exact socket identity before acting. The
+descriptor-transfer race documented below still applies after the last owner
+observation. There is no separate per-socket GUI action.
+
+Commit `c44db978` extended the same checks to eligible sockets preserved across
+a protection restart. Activation itself leaves them open. The private
+receiver verification confirmed all three streams survived startup. A winning
+Local Block then stopped only the target application's LAN stream. The
+same application's non-Local stream and another application's LAN stream
+continued on the original sockets. A losing Block left its stream usable.
+[Current policy semantics](SEMANTICS.md#disconnect-on-a-winning-block)
+
+## Original engineering record (23 October 2026)
+
+The remaining sections describe the prototype and the evidence available at
+that time.
+
 23 October 2026. First implementation gate for F03/B21 in the
 [NetLimiter functionality audit](NETLIMITER-FUNCTIONAL-AUDIT.md).
 

@@ -213,7 +213,7 @@ Filters are separate from actions. A startup rule is:
 
 Highest numerical priority wins; ties use lexicographically smallest unique rule ID. All matching rule IDs are returned in precedence order. Schema 2: `remote_address` is an IP, CIDR, or explicit `*`; omitted/empty means any address. `local_port` and `remote_port` are exact ports; omitted/zero means any port. CLI remembered incoming defaults to observed remote address + local service port, with unrestricted source port. Outgoing defaults to observed remote address + destination port, with unrestricted local port. A CIDR or advanced remote-port restriction can be selected in a startup rule. The `remembered_filter` output previews the scope. Identity/revision/UID/direction/protocol remain mandatory. Legacy schema omitted/0/1 keeps `remote` as an exact IP:port or empty for any endpoint; it cannot use the new fields. Mixing legacy `remote` with new address/remote-port fields is rejected. Unknown schema versions and startup JSON fields are rejected. The API remains v1 with additive output fields. No implicit Allow/Block priority or hidden specificity weights. No matching rule means Ask; unsafe attribution means Block even if a rule would otherwise match. Unknown users have no application permission. API authorization is independent of policy matching.
 
-Rules are bounded to 256. The lab retains memory-only rules; explicit host-control mode commits remembered rules to SQLite before publishing decisions. See HOST-CONTROL.md for durable expiry and Disable/Delete semantics. The bounded saved-rule editor is described in RULES.md. Loading/replacing rules clears userspace decisions. Expired rules are re-evaluated on subsequent queued packets. New application-scope answers invalidate decided userspace events whose effective policy changes, while retaining unaffected decisions and unrelated pending requests. This prevents an unrelated answer from discarding a just-approved one-shot packet before its verdict is sent. Replacing the complete rule set invalidates pending IDs too; their held packets drop. TCP connections already admitted keep their kernel decision until conntrack expires/closes; rule changes do **not** revoke these connections. UDP original-direction datagrams recheck ownership and rule/decision lifetime. New SYNs are always attributed even on marked tuples, and their sequence separates successive attempts using a tuple. This prevents a standing port-wide permission.
+Rules are bounded to 256. The lab retains memory-only rules; explicit host-control mode commits remembered rules to SQLite before publishing decisions. See HOST-CONTROL.md for durable expiry and Disable/Delete semantics. The bounded saved-rule editor is described in RULES.md. Loading/replacing rules clears userspace decisions. Expired rules are re-evaluated on subsequent queued packets. New application-scope answers invalidate decided userspace events whose effective policy changes, while retaining unaffected decisions and unrelated pending requests. This prevents an unrelated answer from discarding a just-approved one-shot packet before its verdict is sent. Replacing the complete rule set invalidates pending IDs too; their held packets drop. Established TCP uses a kernel fast path with a targeted [disconnect on a winning Block](#disconnect-on-a-winning-block). UDP original-direction datagrams recheck ownership and rule/decision lifetime. New SYNs are always attributed even on marked tuples, and their sequence separates successive attempts using a tuple. This prevents a standing port-wide permission.
 
 ## Lifecycle, resources and failure
 
@@ -260,7 +260,7 @@ remain unchanged.
 
 ## Connection-initiation product contract
 
-This milestone authorizes **new TCP connections**. Once approved, a connection
+FlowGate checks policy at TCP admission. Once approved, a connection
 may continue on its kernel fast path, including after an accepted-socket transfer
 to another process. This is intentional initiation control, not continuous
 ownership enforcement. The actual WSADuplicateSocket fixture demonstrates that
@@ -268,10 +268,7 @@ beta can receive on alpha's already-approved connection after alpha closes its
 reference. A new SYN still needs current policy and attribution. Remembered rules
 remain application/revision/user/endpoint filters, never runtime or port grants.
 
-Rule replacement, deletion through replacement, expiry, or a new Block decision
-invalidates relevant userspace decisions as previously documented; none currently
-disconnects an already-admitted TCP connection or clears its conntrack mark.
-There is no separate disconnect operation yet. UDP retains the existing per-flow
+UDP retains the existing per-flow
 lease and fresh ownership/per-datagram rule checks. A frozen UDP batch may share
 one fresh ownership observation as described above. Reuse is limited to a complete,
 directly associated attribution of one exact native executable in its thread-group
@@ -302,6 +299,24 @@ are pinned; replacement or helper/protocol failure requires explicit reattachmen
 A prefix is a runtime-session boundary, not a game-session assertion. IPv6 table
 rows preserve scope IDs; link-local permission remains unsupported without a
 validated interface mapping. See WINE.md for commands and tested family cases.
+
+### Disconnect on a winning Block
+
+Starting or restarting protection preserves established TCP. After activation,
+creating or enabling a Block can abort a connection in a protected direction
+when the edit changes its effective decision from Allow or Ask to Block and
+the new Block still wins at the time of the abort. The prior decision includes
+active **For a while** leases. Eligible connections include those preserved
+across a protection restart.
+
+FlowGate requires a unique direction, the exact live socket, and fresh
+application and UID evidence, including the Wine prefix where applicable.
+Same-host sockets and ambiguous conntrack matches are skipped. FlowGate also
+skips cases where it lacks evidence needed to evaluate a rule, such as the
+packet interface for an interface-scoped rule. Ownership is sampled and can
+change after the final check. A saved Block is not a receipt that an established
+socket was closed. A fresh connection still goes through ordinary admission.
+[Established TCP control](ESTABLISHED-TCP-CONTROL.md)
 
 ## Native desktop client and additive API metadata
 
@@ -474,8 +489,9 @@ not create a prompt or saved application permission. If an explicit target
 might apply, ownership is resolved normally; missing/ambiguous evidence still
 fails closed. A rule for another verified application cannot grant or deny this
 one. Localhost Allow reports `default-localhost-allow`; other firewall chains
-and queue/packet bounds can still prevent delivery. As elsewhere, edits control
-new TCP admissions and future UDP checks, not already admitted TCP payloads.
+and queue/packet bounds can still prevent delivery. Localhost rule edits apply to
+new TCP admissions and future UDP checks. Same-host sockets are excluded from
+the established TCP disconnect path.
 
 ### TCP loopback self-connections
 
