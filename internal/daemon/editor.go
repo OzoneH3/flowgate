@@ -451,7 +451,7 @@ func (e *Engine) publishRulesLocked(next []policy.Rule) error {
 	if err := e.SaveRules(next); err != nil {
 		return mutationError("persistence_failed", fmt.Sprintf("transaction failed; old policy retained: %v", err))
 	}
-	e.rules = next
+	e.publishRuleStateLocked(next)
 	e.pruneHandlesLocked()
 	return nil
 }

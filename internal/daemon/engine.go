@@ -97,6 +97,8 @@ type Engine struct {
 	saveConnectionChecks     func(bool, uint64) error
 	socketAuthorization      *socketAuthorization // guarded by mu
 	zonePublisherInstalled   bool
+	tcpDisconnect            *tcpDisconnect // configured before API startup
+	tcpBlockEdit             *tcpBlockEdit  // guarded by mu, taken by the saving operation
 	QueueHealth              queuehealth.Registry
 	// Profiler is configured before API startup; nil leaves profiling unavailable.
 	Profiler *diagnostics.Recorder
@@ -681,7 +683,7 @@ func (e *Engine) decideLocked(id, action, scope string, uid uint32, admin bool, 
 					return Event{}, mutationError("persistence_failed", "rule persistence failed: "+err.Error())
 				}
 			}
-			e.rules = next
+			e.publishRuleStateLocked(next)
 			remembered = &r
 		}
 		v.State = map[string]string{"allow": "allowed", "block": "blocked"}[action]
@@ -961,7 +963,7 @@ func (e *Engine) ChangeRule(generation, id, action string, expected *uint64, uid
 	if err := e.SaveRules(next); err != nil {
 		return mutationError("persistence_failed", "rule transaction failed; old policy retained: "+err.Error())
 	}
-	e.rules = next
+	e.publishRuleStateLocked(next)
 	e.pruneHandlesLocked()
 	// Cached verdicts are invalidated conservatively; awaiting requests are
 	// re-evaluated against the new policy instead of being dropped.

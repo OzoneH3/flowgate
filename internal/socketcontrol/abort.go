@@ -1,5 +1,4 @@
 // Package socketcontrol provides an exact-socket Linux TCP abort primitive.
-// It is deliberately not connected to a daemon API or policy evaluator.
 //
 // A socket cookie prevents targeting a replacement socket, but does not prove
 // application ownership, exclusive descriptor use, or a winning Deny rule.

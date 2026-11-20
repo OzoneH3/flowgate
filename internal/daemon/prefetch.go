@@ -192,11 +192,15 @@ func (e *Engine) unlockResolved() {
 	e.unlockAndSettle()
 }
 
-// unlockAndSettle releases e.mu, then runs any settle the operation requested.
+// unlockAndSettle releases e.mu, then completes the saved Block and pending
+// request work before the operation returns.
 func (e *Engine) unlockAndSettle() {
 	reason := e.settleReason
 	e.settleReason = ""
+	edit := e.tcpBlockEdit
+	e.tcpBlockEdit = nil
 	e.mu.Unlock()
+	e.disconnectBlockedTCP(edit)
 	if reason != "" {
 		e.settleNow(reason)
 	}
@@ -214,8 +218,11 @@ func (e *Engine) followUpSettleLocked() {
 	}
 	e.settleReason = ""
 	sink := e.settledSink
+	edit := e.tcpBlockEdit
+	e.tcpBlockEdit = nil
 	e.settledSink, e.prefetched = nil, nil
 	e.mu.Unlock()
+	e.disconnectBlockedTCP(edit)
 	e.lockResolved(func() ([]*Event, []identity.Flow) { return e.pendingLocked(), nil })
 	e.settledSink = sink
 	e.settling = true

@@ -69,6 +69,7 @@ type Request struct {
 	Scope               string       `json:"scope,omitempty"`
 }
 type EnforcementStatus struct {
+	Session string    `json:"-"`
 	Profile string    `json:"profile"`
 	State   string    `json:"state"`
 	Detail  string    `json:"detail"`

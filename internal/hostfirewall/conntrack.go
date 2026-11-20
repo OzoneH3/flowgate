@@ -17,7 +17,9 @@ const approved uint32 = 0x10000000
 const preserved uint32 = 0x20000000
 const mask uint32 = approved | preserved
 
-func flows() ([]ct.Flow, error) {
+func flows() ([]ct.Flow, error) { return flowsContext(context.Background()) }
+
+func flowsContext(ctx context.Context) ([]ct.Flow, error) {
 	c, err := ct.Dial(nil)
 	if err != nil {
 		return nil, err
@@ -26,6 +28,8 @@ func flows() ([]ct.Flow, error) {
 	// Bound netlink startup wait; Close interrupts a stalled dump.
 	timer := time.AfterFunc(3*time.Second, func() { c.Close() })
 	defer timer.Stop()
+	stop := context.AfterFunc(ctx, func() { c.Close() })
+	defer stop()
 	fs, err := c.Dump(nil)
 	if err != nil {
 		return nil, err

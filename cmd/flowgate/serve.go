@@ -228,6 +228,7 @@ func serveCommand(args []string) error {
 	} else if len(wineBins) > 0 || len(winePrefixes) > 0 {
 		return fmt.Errorf("Wine runtime/prefix selection requires --wine-helper")
 	}
+	hostfirewall.ConfigureEstablishedTCP(e, socketResolvers.Fresh)
 	// Construct outside Engine.mu: the initial refresh publishes through Engine.
 	zoneManager := identity.NewZoneManagerWithPublisher(zones.Legacy(), e.NetworkZonePublisher())
 	previousRuntimeChecks := e.RuntimeChecks
@@ -279,7 +280,7 @@ func serveCommand(args []string) error {
 	}
 	e.Enforcement = func() daemon.EnforcementStatus {
 		s := evaluation.Status()
-		return daemon.EnforcementStatus{State: s.State, Profile: s.Profile, StopsAt: s.StopsAt, Detail: s.Reason}
+		return daemon.EnforcementStatus{Session: s.ID, State: s.State, Profile: s.Profile, StopsAt: s.StopsAt, Detail: s.Reason}
 	}
 	defer evaluation.Close()
 	e.StopMonitoring = cancel

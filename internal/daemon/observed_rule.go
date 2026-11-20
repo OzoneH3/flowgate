@@ -252,7 +252,7 @@ func (e *Engine) PreviewObservedRule(generation string, target ObservedTarget, d
 	if replaces != nil {
 		sentence = fmt.Sprintf("Updates the existing whole-%s rule %s (version %d). ", processScope(draft), replaces.ID, replaces.Version) + sentence
 	}
-	v := ObservedPreview{Token: randomID(), ExpiresAt: now.Add(30 * time.Second), Rule: candidate, Application: current.Application, ProcessID: p.ID, PID: p.PID, PrincipalUID: p.UID, ScopePreview: sentence + " Stored rule only; matching pending requests are re-evaluated; existing connections unchanged.", Enforcement: c, Replaces: replaces}
+	v := ObservedPreview{Token: randomID(), ExpiresAt: now.Add(30 * time.Second), Rule: candidate, Application: current.Application, ProcessID: p.ID, PID: p.PID, PrincipalUID: p.UID, ScopePreview: sentence + observedRuleEffect(candidate), Enforcement: c, Replaces: replaces}
 	e.creationPreviews[v.Token] = &creationPreview{View: v, Target: target, Process: p, Verified: current, Draft: raw, UID: uid, Admin: admin}
 	return v, nil
 }
@@ -381,7 +381,7 @@ func (e *Engine) SaveObservedRule(generation, token string, draft ObservedDraft,
 	if ref := p.View.Replaces; ref != nil {
 		sentence = fmt.Sprintf("Updates the existing whole-%s rule %s (version %d). ", map[bool]string{true: "process", false: "application"}[!candidate.Filter.Process.IsZero()], ref.ID, ref.Version) + sentence
 	}
-	sentence += " Stored rule only; matching pending requests are re-evaluated; existing connections unchanged."
+	sentence += observedRuleEffect(candidate)
 	if sentence != p.View.ScopePreview {
 		return policy.Rule{}, "", false, mutationError("policy_conflict", "Overlapping policy changed since preview; review again")
 	}
@@ -468,4 +468,11 @@ func containsOwner(owners []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func observedRuleEffect(r policy.Rule) string {
+	if r.Action == "block" && !r.Disabled && policy.ProtocolMatches(r.Filter.Protocol, "tcp") {
+		return " Matching pending requests are re-evaluated. Creating or enabling a winning Block can disconnect verified established TCP connections."
+	}
+	return " Matching pending requests are re-evaluated."
 }

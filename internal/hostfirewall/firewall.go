@@ -318,6 +318,7 @@ func RunProfileAuthorized(ctx context.Context, dir, socket, database string, uid
 	}
 	defer e.CloseProcessTargets()
 	e.Mode = "host-enforcement"
+	ConfigureEstablishedTCP(e, identity.Resolve)
 	decisions, derr := decisionlog.Open(filepath.Join(filepath.Dir(database), "decisions.db"), e.Generation, e.Mode, true)
 	if derr != nil {
 		fmt.Fprintln(os.Stderr, "WARNING: decision log unavailable; enforcement unaffected:", derr)
@@ -360,7 +361,7 @@ func RunProfileAuthorized(ctx context.Context, dir, socket, database string, uid
 				state = "degraded"
 			}
 		}
-		return daemon.EnforcementStatus{Profile: profile, State: state, Detail: "Profile " + profile + ": selected new TCP/UDP connections require policy/decision; startup flows preserved. FlowGate Allow does not guarantee delivery.", StopsAt: r.StopsAt}
+		return daemon.EnforcementStatus{Session: r.Token, Profile: profile, State: state, Detail: "Profile " + profile + ": selected new TCP/UDP connections require policy/decision; startup flows preserved. FlowGate Allow does not guarantee delivery.", StopsAt: r.StopsAt}
 	}
 	api, err := daemon.Serve(socket, e, false)
 	if err != nil {
