@@ -165,8 +165,16 @@ def launch(reload=False):
     ]
     if reload:
         stop_installed()
-        subprocess.Popen(argv, env=env, start_new_session=True, stdin=subprocess.DEVNULL,
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        child = subprocess.Popen(
+            argv, env=env, start_new_session=True, stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        try:
+            status = child.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            return
+        raise RuntimeError(f'FlowGate GUI exited during startup (status {status}). '
+                           'Run flowgate-ui directly to see the error.')
     else:
         os.execve(executable, argv, env)
 

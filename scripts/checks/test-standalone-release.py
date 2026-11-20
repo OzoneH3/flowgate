@@ -7,6 +7,7 @@ from pathlib import Path
 import platform
 import runpy
 import stat
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -225,7 +226,7 @@ class ReleaseChecks(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'Unexpected package member'):
             self.unpack(archive, digest)
 
-    def test_reload_switches_to_current_installed_gui(self):
+    def reload_environment(self):
         base = self.root / 'installed'
         release_dir = base / 'releases' / 'new'
         release_dir.mkdir(parents=True)
@@ -237,15 +238,30 @@ class ReleaseChecks(unittest.TestCase):
             'XDG_CACHE_HOME': str(self.root / 'cache'),
         }
         Path(env['XDG_RUNTIME_DIR']).mkdir()
+        return base, env
+
+    def test_reload_starts_current_installed_gui_when_closed(self):
+        base, env = self.reload_environment()
         scope = ui['launch'].__globals__
         with patch.dict(os.environ, env, clear=True), patch.dict(scope, BASE=base, stop_installed=Mock()), \
                 patch('subprocess.run', return_value=types.SimpleNamespace(returncode=1)), \
                 patch('subprocess.Popen') as start:
-            start.side_effect = lambda *args, **kwargs: scope['stop_installed'].assert_called_once()
+            start.return_value.wait.side_effect = subprocess.TimeoutExpired('electron', 1)
             ui['launch'](reload=True)
+            scope['stop_installed'].assert_called_once()
         args, kwargs = start.call_args
         self.assertEqual(args[0][0], str(base / 'gui/new/runtime/electron'))
         self.assertTrue(kwargs['start_new_session'])
+
+    def test_reload_reports_gui_startup_failure(self):
+        base, env = self.reload_environment()
+        scope = ui['launch'].__globals__
+        with patch.dict(os.environ, env, clear=True), patch.dict(scope, BASE=base, stop_installed=Mock()), \
+                patch('subprocess.run', return_value=types.SimpleNamespace(returncode=1)), \
+                patch('subprocess.Popen') as start:
+            start.return_value.wait.return_value = 1
+            with self.assertRaisesRegex(RuntimeError, r'status 1\).*Run flowgate-ui directly'):
+                ui['launch'](reload=True)
 
     def test_reload_headless_does_not_stop_gui(self):
         with patch.dict(os.environ, {}, clear=True), \
