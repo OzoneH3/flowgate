@@ -10,11 +10,12 @@ INSTALL_FLAGS ?=
 RECOVER_FLAGS ?=
 UNINSTALL_FLAGS ?=
 
-.PHONY: help build check package preflight install desktop recover uninstall clean
+.PHONY: help build check package update preflight install desktop recover uninstall clean
 help:
 	@printf '%s\n' 'make build        Build the daemon, desktop and helpers' \
 	  'make check        Run focused release checks' \
 	  'make package      Create an offline installer bundle and SHA256 receipt' \
+	  'make update       Build, verify, and install the daemon and desktop (VERSION=...)' \
 	  'make preflight    Check a package against the installed state' \
 	  'make install      Install a verified package (BUNDLE=... SHA256=...)' \
 	  'make desktop      Migrate the current user login or import preferences' \
@@ -31,6 +32,15 @@ check:
 
 package: build check
 	python3 -B deployment/standalone/package.py "$(VERSION)" "$(ARTIFACT)"
+
+update: package
+	@set -eu; \
+	  artifact="$(ARTIFACT)"; \
+	  receipt="$$(basename "$$artifact").sha256"; \
+	  (cd "$$(dirname "$$artifact")" && sha256sum -c -- "$$receipt"); \
+	  digest=$$(cut -d ' ' -f 1 "$$artifact.sha256"); \
+	  $(MAKE) preflight BUNDLE="$$artifact" SHA256="$$digest"; \
+	  $(MAKE) install BUNDLE="$$artifact" SHA256="$$digest"
 
 preflight install:
 	@test -n "$(SHA256)" || { printf '%s\n' 'Set SHA256 to the verified package digest'; exit 2; }
