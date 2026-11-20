@@ -214,14 +214,15 @@ func compatibleNFT(b []byte) error {
 							return fmt.Errorf("opaque mark table cannot be exported")
 						}
 					case "conntrack", "addrtype", "MASQUERADE", "DNAT", "SNAT":
-					case "icmp", "icmp6", "hl", "rt", "LOG", "REJECT":
+					case "icmp", "icmp6", "hl", "rt", "multiport", "LOG", "REJECT":
 						// These matches inspect protocol headers. LOG continues
 						// traversal and REJECT denies the packet like native
 						// reject. None uses reserved marks to choose a verdict.
 						ip := r.Family == "ip"
 						ip6 := r.Family == "ip6"
 						match := xt["type"] == "match" && (ip && xt["name"] == "icmp" ||
-							ip6 && (xt["name"] == "icmp6" || xt["name"] == "hl" || xt["name"] == "rt"))
+							ip6 && (xt["name"] == "icmp6" || xt["name"] == "hl" || xt["name"] == "rt") ||
+							(ip || ip6) && xt["name"] == "multiport")
 						target := xt["type"] == "target" && (ip || ip6) &&
 							(xt["name"] == "LOG" || xt["name"] == "REJECT")
 						if len(x) != 1 || len(xt) != 2 || !(match || target) {

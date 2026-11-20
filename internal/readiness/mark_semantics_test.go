@@ -155,6 +155,58 @@ func TestStockUFWICMPCompatibility(t *testing.T) {
 	}
 }
 
+func TestXTMultiportReadiness(t *testing.T) {
+	const multiport = `{"xt":{"type":"match","name":"multiport"}}`
+	const queue = `{"queue":{"num":101}}`
+	for _, tc := range []struct {
+		name, family, expr, refusal string
+	}{
+		{"IPv4 port match", "ip", multiport, ""},
+		{"IPv6 port match", "ip6", multiport, ""},
+		{"wrong type", "ip", strings.Replace(multiport, `"match"`, `"target"`, 1), "unsupported opaque expression"},
+		{"wrong family", "inet", multiport, "unsupported opaque expression"},
+		{"unexpected fields", "ip", `{"xt":{"type":"match","name":"multiport","extra":true}}`, "unsupported opaque expression"},
+		{"queue before match", "ip", queue + "," + multiport, "unproven mark/queue/zone/notrack/offload expression"},
+		{"queue after match", "ip", multiport + "," + queue, "unproven mark/queue/zone/notrack/offload expression"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			nft := fmt.Sprintf(`{"nftables":[{"rule":{"family":%q,"table":"filter","chain":"ufw-user-input","handle":134,"expr":[%s,{"counter":{"packets":0,"bytes":0}},{"accept":null}]}}]}`, tc.family, tc.expr)
+			env := fakeEnv()
+			env.Run = func(_ context.Context, cmd string, args ...string) ([]byte, error) {
+				switch cmd + " " + strings.Join(args, " ") {
+				case "nft -j list ruleset":
+					return []byte(nft), nil
+				case "ip -j -d link show", "ip -j -4 rule show", "ip -j -6 rule show":
+					return []byte("[]"), nil
+				default:
+					return nil, fmt.Errorf("unexpected probe %s %v", cmd, args)
+				}
+			}
+			seen := 0
+			for _, check := range FirewallFor(context.Background(), env, "both", true) {
+				if check.ID != "firewall.mark_compatibility" && check.ID != "firewall.ruleset" {
+					continue
+				}
+				seen++
+				t.Log(check.ID, check.Status, check.Code, check.Detail)
+				if tc.refusal == "" {
+					if check.Status != Ready {
+						t.Errorf("port match was refused: %+v", check)
+					}
+					continue
+				}
+				want := tc.family + "/filter/ufw-user-input rule handle 134: " + tc.refusal
+				if check.Status != Blocked || check.Code != "firewall_conflict" || !strings.HasPrefix(check.Detail, want) {
+					t.Errorf("expected refusal %q, got %+v", want, check)
+				}
+			}
+			if seen != 2 {
+				t.Fatalf("expected both readiness checks, found %d", seen)
+			}
+		})
+	}
+}
+
 func TestMarkAwareFIBReadiness(t *testing.T) {
 	const marked = `{"match":{"op":"==","left":{"fib":{"result":"oif","flags":["saddr","mark","iif"]}},"right":0}}`
 	const markFree = `{"match":{"op":"==","left":{"fib":{"result":"oif","flags":["saddr","iif"]}},"right":0}}`
