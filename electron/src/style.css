@@ -77,10 +77,6 @@ button:active:not(:disabled) {
   color: #11b8ed;
   font-size: 13px;
 }
-.separator {
-  height: 18px;
-  border-left: 1px solid #555;
-}
 #controlStatus {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1277,7 +1273,7 @@ body.hide-chart #activityView #trafficGraph { display: none; }
 .toolbar-units { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-text); }
 .toolbar-units select { height: 24px; min-height: 24px; width: 92px; padding: 0 4px; font-size: 12px; }
 .toolbar-status { font-size: 12px; color: var(--fg-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
-.toolbar .separator { display: none; }
+.toolbar-separator { flex: none; color: var(--fg-muted); }
 .toolbar #search { order: 9; flex: 0 1 320px; width: 320px; min-width: 120px; height: 24px; margin-left: auto; font-size: 12px; }
 .tabs { height: 30px; padding: 2px 0 0; }
 .tabs button { font-size: 12px; padding: 0 8px; height: 22px; min-height: 22px; line-height: 22px; border-radius: 0; }

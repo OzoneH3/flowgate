@@ -1377,7 +1377,9 @@ function setupMainMenus(windowMenu: HTMLElement) {
     };
     windowPanel.append(b);
   }
-  $('toolbarUnits').before(file, tools, windowMenu, help);
+  const unitsSeparator = element('span', '|', 'toolbar-separator');
+  unitsSeparator.setAttribute('aria-hidden', 'true');
+  $('toolbarUnits').before(file, tools, windowMenu, help, unitsSeparator);
   // Preserve an obvious state entry point; text is updated by the existing evaluation state.
   const status = element('button', 'Firewall controls', 'firewall-state');
   status.id = 'firewallMenuStatus';
