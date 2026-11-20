@@ -1371,12 +1371,12 @@ function setupMainMenus(windowMenu: HTMLElement) {
   health.hidden = true;
   health.setAttribute('role', 'status');
   status.after(health);
-  const queue = element('span', '', 'queue-health');
+  const queue = element('span', '', 'runtime-health queue-health');
   queue.id = 'queueHealth';
   queue.hidden = true;
   queue.setAttribute('role', 'status');
   queue.tabIndex = 0;
-  toolbar.after(queue);
+  health.after(queue);
   new MutationObserver(updateFirewallStatus).observe(controlTitle, {
     childList: true,
     characterData: true,
