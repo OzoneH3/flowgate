@@ -154,3 +154,56 @@ func TestStockUFWICMPCompatibility(t *testing.T) {
 		t.Fatalf("wrong-kind LOG did not remain blocked: %v", err)
 	}
 }
+
+func TestMarkAwareFIBReadiness(t *testing.T) {
+	const marked = `{"match":{"op":"==","left":{"fib":{"result":"oif","flags":["saddr","mark","iif"]}},"right":0}}`
+	const markFree = `{"match":{"op":"==","left":{"fib":{"result":"oif","flags":["saddr","iif"]}},"right":0}}`
+	const acceptedXT = `{"xt":{"type":"target","name":"LOG"}}`
+	for _, tc := range []struct {
+		name  string
+		expr  string
+		block bool
+	}{
+		{"mark alone", marked, true},
+		{"mark after xt", acceptedXT + "," + marked, true},
+		{"mark before xt", marked + "," + acceptedXT, true},
+		{"scalar mark flag", strings.Replace(marked, `["saddr","mark","iif"]`, `"mark"`, 1), true},
+		{"mark-free lookup", markFree, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			nft := fmt.Sprintf(`{"nftables":[{"rule":{"family":"ip","table":"filter","chain":"input","handle":42,"expr":[%s,{"drop":null}]}}]}`, tc.expr)
+			env := fakeEnv()
+			env.Run = func(_ context.Context, cmd string, args ...string) ([]byte, error) {
+				switch cmd + " " + strings.Join(args, " ") {
+				case "nft -j list ruleset":
+					return []byte(nft), nil
+				case "ip -j -d link show", "ip -j -4 rule show", "ip -j -6 rule show":
+					return []byte("[]"), nil
+				default:
+					return nil, fmt.Errorf("unexpected probe %s %v", cmd, args)
+				}
+			}
+			seen := 0
+			for _, check := range FirewallFor(context.Background(), env, "both", true) {
+				switch check.ID {
+				case "firewall.mark_compatibility", "firewall.ruleset":
+				default:
+					continue
+				}
+				seen++
+				t.Log(check.ID, check.Status, check.Code, check.Detail)
+				if tc.block {
+					if check.Status != Blocked || check.Code != "firewall_conflict" ||
+						check.Detail != "ip/filter/input rule handle 42: packet-mark FIB lookup is not proven compatible" {
+						t.Errorf("expected a localized FIB refusal, got %+v", check)
+					}
+				} else if check.Status != Ready {
+					t.Errorf("mark-free FIB was refused: %+v", check)
+				}
+			}
+			if seen != 2 {
+				t.Fatalf("expected both readiness checks, found %d", seen)
+			}
+		})
+	}
+}

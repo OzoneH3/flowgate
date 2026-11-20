@@ -156,6 +156,20 @@ func markInput(v any) bool {
 	return false
 }
 
+func fibUsesPacketMark(fib map[string]any) bool {
+	switch flags := fib["flags"].(type) {
+	case string:
+		return flags == "mark"
+	case []any:
+		for _, flag := range flags {
+			if flag == "mark" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func compatibleNFT(b []byte) error {
 	var n struct {
 		Nftables []map[string]json.RawMessage `json:"nftables"`
@@ -183,6 +197,11 @@ func compatibleNFT(b []byte) error {
 		visit = func(v any) error {
 			switch x := v.(type) {
 			case map[string]any:
+				// A marked FIB lookup takes the whole packet mark as an
+				// input. No disjoint mask can be proven from this node.
+				if fib, ok := x["fib"].(map[string]any); ok && fibUsesPacketMark(fib) {
+					return fmt.Errorf("packet-mark FIB lookup is not proven compatible")
+				}
 				if xt, ok := x["xt"].(map[string]any); ok {
 					switch xt["name"] {
 					case "MARK", "CONNMARK", "connmark":
