@@ -15,6 +15,13 @@ await fs.mkdir(client);
 await fs.cp(path.join(electronDir, 'dist'), path.join(client, 'dist'), { recursive: true });
 await fs.copyFile(path.join(electronDir, 'package.json'), path.join(client, 'package.json'));
 const endpoint = path.join(run, 'api');
+const config = path.join(run, 'config');
+await fs.mkdir(path.join(config, 'flowgate'), { recursive: true });
+await fs.writeFile(path.join(config, 'flowgate', 'style.css'), ':root { --fixture-user-style: desktop; }');
+await fs.writeFile(
+  path.join(config, 'flowgate', 'permission-popup.css'),
+  ':root { --fixture-user-style: permission; }',
+);
 const zone = {
   state: 'known',
   zone: 'internet',
@@ -165,10 +172,13 @@ let app;
 try {
   app = await _electron.launch({
     chromiumSandbox: true,
-    args: [client, '--observer', endpoint, '--control', endpoint],
+    args: [
+      ...(process.env.WAYLAND_DISPLAY ? ['--ozone-platform=wayland'] : []),
+      client, '--observer', endpoint, '--control', endpoint,
+    ],
     env: {
       ...process.env,
-      XDG_CONFIG_HOME: path.join(run, 'config'),
+      XDG_CONFIG_HOME: config,
       XDG_CACHE_HOME: path.join(run, 'cache'),
       FLOWGATE_INSTALLED: '0',
     },
@@ -190,8 +200,12 @@ try {
   const sheets = (page) =>
     page.evaluate(() => Array.from(document.styleSheets, (s) => new URL(s.href).pathname));
   const main = app.windows().find((p) => p.url().endsWith('/index.html'));
-  assert.deepEqual(await sheets(main), ['/style.css']);
-  assert.deepEqual(await sheets(prompt), ['/permission-popup.css']);
+  assert.deepEqual(await sheets(main), ['/style.css', '/user-style.css']);
+  assert.deepEqual(await sheets(prompt), ['/permission-popup.css', '/user-permission-popup.css']);
+  const appliedStyle = (page) => page.evaluate(() =>
+    getComputedStyle(document.documentElement).getPropertyValue('--fixture-user-style').trim());
+  assert.equal(await appliedStyle(main), 'desktop');
+  assert.equal(await appliedStyle(prompt), 'permission');
   const shot = async (name) => {
     await prompt.evaluate(() => document.fonts.ready);
     await prompt.screenshot({ path: path.join(run, name + '.png') });
@@ -353,8 +367,15 @@ try {
   await prompt.locator('#rememberDuration').scrollIntoViewIfNeeded();
   assert(await prompt.locator('#promptBody').evaluate((el) => el.scrollWidth <= el.clientWidth));
   assert.equal(decisions.length, 1);
+  const paneOpened = app.waitForEvent('window');
+  await main.evaluate(() => window.flowgate.paneControl('info', 'undock'));
+  const pane = await paneOpened;
+  await pane.waitForURL('flowgate://app/pane.html?pane=info');
+  await pane.waitForLoadState('load');
+  assert.deepEqual(await sheets(pane), ['/style.css', '/user-style.css']);
+  assert.equal(await appliedStyle(pane), 'desktop');
   console.log(
-    'PASS native popup layout, temporary stylesheet, focus, previews, keyboard Allow Once, queue and long labels.',
+    'PASS native user styles in main, pane and popup, popup layout, focus, previews, keyboard Allow Once, queue and long labels.',
     run,
   );
 } finally {

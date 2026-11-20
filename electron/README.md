@@ -44,6 +44,19 @@ main window and bounded native notifications request review. **Open permission w
 and notification activation are explicit user actions. Closing
 that window or choosing **Decide later** sends no verdict.
 
+## Custom CSS
+
+Put either stylesheet in `$XDG_CONFIG_HOME/flowgate/` or, if
+`XDG_CONFIG_HOME` is unset, in `~/.config/flowgate/`.
+
+- `style.css` overrides the main window and detached panes.
+- `permission-popup.css` overrides the connection permission popup.
+
+The files load after the bundled styles. You can put just the rules you want
+to change in them. Restart FlowGate to apply changes to open windows.
+Removing the files restores the bundled appearance. The files must be regular
+files up to 1 MiB each.
+
 ## Boundaries and backend semantics
 
 - `main.ts` owns the Unix sockets indirectly through `backend.ts`. A separate
@@ -52,7 +65,8 @@ that window or choosing **Decide later** sends no verdict.
   webview. `preload.ts` exposes snapshot/subscription, decisions, rule drafts/previews/mutations, bounded preferences, and fixed evaluation/extended-monitoring operations. Sender WebContents, main frame and local origin
   are validated for every invoke; decision payloads have exact allowed keys and
   enum values. No generic filesystem, shell, socket or IPC capability is exposed.
-- Only three local assets are served by the custom `flowgate://app` protocol.
+- The custom `flowgate://app` protocol serves fixed asset paths, the two user
+  stylesheets, and application icons.
   Production CSP blocks connections, frames, objects, inline scripts and remote
   assets. Navigation, new windows and permissions are denied. Diagnostic names,
   paths, addresses and metadata are inserted using text nodes/textContent.

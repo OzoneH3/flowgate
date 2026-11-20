@@ -35,7 +35,7 @@ import {
   type Rect,
 } from './pane-model';
 import { isDisplayUnit } from './display-units';
-import { bundledAsset } from './assets';
+import { bundledAsset, userStylesheet } from './assets';
 import { ApplicationIcons } from './icons';
 import { Background } from './background';
 import { TrafficHistory } from './history';
@@ -88,9 +88,11 @@ if (installed && (!runtime || !path.isAbsolute(runtime)))
 const sessionDirectory = installed
   ? path.join(runtime!, 'flowgate')
   : path.resolve(__dirname, '../../build/desktop-session');
-const config = installed
-  ? path.join(userDirectory('XDG_CONFIG_HOME', path.join(app.getPath('home'), '.config')), 'flowgate')
-  : sessionDirectory;
+const userConfig = path.join(
+  userDirectory('XDG_CONFIG_HOME', path.join(app.getPath('home'), '.config')),
+  'flowgate',
+);
+const config = installed ? userConfig : sessionDirectory;
 for (const dir of new Set([sessionDirectory, config]))
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 const profile = fs.mkdtempSync(path.join(sessionDirectory, 'electron-profile-'));
@@ -607,7 +609,8 @@ app.whenReady().then(async () => {
   protocol.handle('flowgate', (request) => {
     const u = new URL(request.url);
     const name = u.pathname.slice(1);
-    if (u.host === 'app' && /^icons\/[a-f0-9]{64}\.(png|svg)$/.test(name)) {
+    if (u.host !== 'app') return new Response('Not found', { status: 404 });
+    if (/^icons\/[a-f0-9]{64}\.(png|svg)$/.test(name)) {
       const asset = icons.asset(name.slice(6));
       return asset
         ? new Response(new Uint8Array(asset.data), {
@@ -619,13 +622,15 @@ app.whenReady().then(async () => {
           })
         : new Response('Not found', { status: 404 });
     }
-    const mime = bundledAsset(name);
-    if (u.host !== 'app' || !mime) return new Response('Not found', { status: 404 });
-    return new Response(fs.readFileSync(path.join(__dirname, name)), {
+    const userCSS = userStylesheet(name, userConfig);
+    const mime = userCSS === undefined ? bundledAsset(name) : 'text/css; charset=utf-8';
+    if (!mime) return new Response('Not found', { status: 404 });
+    return new Response(userCSS ?? fs.readFileSync(path.join(__dirname, name)), {
       headers: {
         'Content-Type': mime,
         'Content-Security-Policy': csp,
         'X-Content-Type-Options': 'nosniff',
+        ...(userCSS === undefined ? {} : { 'Cache-Control': 'no-store' }),
       },
     });
   });
