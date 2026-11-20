@@ -549,38 +549,37 @@ function windowFor(isPrompt = false, id = '', generation = '', group?: string) {
       setImmediate(automaticDecision);
     }
   });
-  w.once('ready-to-show', () => {
-    if (!isPrompt) {
-      // Start in the tray. Background.checkHost reveals a recovery window
-      // only when no usable tray host is available.
-      return;
-    }
-    const bounds = edgePosition(screen.getPrimaryDisplay().workArea, PROMPT_WIDTH, PROMPT_HEIGHT);
-    w.setBounds(bounds);
-    // Install the native windowAdded hook before mapping. Wayland ignores global
-    // setBounds; showing first causes a visible wrong-monitor flash.
-    const placement = placeKDEPrompt(
-      profile,
-      process.pid,
-      w.id,
-      bounds,
-      () => !w.isDestroyed() && prompt === w,
-      (installed) => {
-        if (w.isDestroyed() || prompt !== w) return;
-        promptKDEReady = installed;
-        if (installed) {
-          w.minimize(); // Initial minimized map prevents KWin automatic activation.
-        } else if (!promptIdle) {
-          w.showInactive();
-        }
-      },
-      id !== '__idle__',
-    ).catch((error) => {
+  if (isPrompt) {
+    // Retargeting can replace the idle document before ready-to-show. Start
+    // compositor preparation independently of the renderer and queue reveals
+    // behind it so startup QML cannot overwrite the request's visibility.
+    const placement = Promise.resolve().then(async () => {
+      if (w.isDestroyed() || prompt !== w) return;
+      const bounds = edgePosition(screen.getPrimaryDisplay().workArea, PROMPT_WIDTH, PROMPT_HEIGHT);
+      w.setBounds(bounds);
+      await placeKDEPrompt(
+        profile,
+        process.pid,
+        w.id,
+        bounds,
+        () => !w.isDestroyed() && prompt === w,
+        (installed) => {
+          if (w.isDestroyed() || prompt !== w) return;
+          promptKDEReady = installed;
+          if (installed) {
+            w.minimize(); // Initial minimized map prevents KWin automatic activation.
+          } else if (!promptIdle) {
+            w.showInactive();
+          }
+        },
+        id !== '__idle__',
+      );
+    }).catch((error) => {
       console.info('FlowGate: prompt placement unavailable', String(error));
-      if (!w.isDestroyed() && !promptIdle) w.showInactive();
+      if (!w.isDestroyed() && prompt === w && !promptIdle) w.showInactive();
     });
     promptPlacement.set(w.webContents.id, placement);
-  });
+  }
   const refresh = () => {
     if (backend && !w.isDestroyed()) {
       w.webContents.send('state', backend.view());

@@ -59,7 +59,7 @@ test('KDE configured priority overrides Electron output order and uses that outp
   assert.deepEqual({ ...w.frameGeometry }, { x: 4600, y: 932, width: 520, height: 460 });
 });
 
-test('startup handshake waits for native configure and reveals without activation', () => {
+test('startup handshake on KWin 6.6 waits for native configure and reveals without activation', () => {
   const { placementQML } = require('../dist/test/prompt-placement.cjs');
   const qml = placementQML(42, 7, { x: 0, y: 0, width: 520, height: 460 }, 'primary');
   const body = qml.slice(
@@ -101,10 +101,9 @@ test('startup handshake waits for native configure and reveals without activatio
     sendClientToScreen(win, o) {
       win.output = o;
     },
-    currentDesktopForScreen() {
-      return 1;
-    },
-    clientArea() {
+    currentDesktop: { id: 'desktop-1' },
+    clientArea(_kind, _output, desktop) {
+      assert.equal(desktop, workspace.currentDesktop);
       return { x: 2000, y: 30, width: 900, height: 570 };
     },
     set activeWindow(v) {
@@ -168,13 +167,17 @@ test('handshake rejects native-window replacement', () => {
 test('fullscreen primary redirects only the permission window to a free secondary output', () => {
   const primary={name:'DP-1'},secondary={name:'DP-2'};
   const desktop={id:1},otherDesktop={id:2};
-  const run=(over={},screens=[primary,secondary],extra=[])=>{
+  const run=(over={},screens=[primary,secondary],extra=[],perOutput=true)=>{
     const permission={pid:42,caption:promptTitle(7)};
     const game={pid:99,caption:'Synthetic fullscreen',fullScreen:true,minimized:false,output:primary,desktops:[desktop],...over};
     let target;
-    const workspace={screens,windowList:()=>[permission,game,...extra],currentDesktopForScreen:()=>desktop,
+    const workspace={screens,windowList:()=>[permission,game,...extra],currentDesktop:desktop,
+      ...(perOutput ? {currentDesktopForScreen:()=>desktop} : {}),
       sendClientToScreen:(w,output)=>{assert.equal(w,permission);target=output;},
-      clientArea:(_kind,output)=>output===primary?{x:0,y:0,width:1920,height:1080}:{x:1920,y:0,width:1600,height:900}};
+      clientArea:(_kind,output,currentDesktop)=>{
+        assert.equal(currentDesktop,desktop);
+        return output===primary?{x:0,y:0,width:1920,height:1080}:{x:1920,y:0,width:1600,height:900};
+      }};
     vm.runInNewContext(placementScript(42,7,{x:1400,y:620,width:520,height:460},'DP-1'),{workspace,KWin:{PlacementArea:0},print:()=>{}});
     assert.equal(game.frameGeometry,undefined,'fullscreen application is never moved');
     assert.equal(workspace.activeWindow,undefined,'placement does not request activation');
@@ -183,6 +186,8 @@ test('fullscreen primary redirects only the permission window to a free secondar
   const redirected=run();
   assert.equal(redirected.target,secondary);
   assert.deepEqual({...redirected.permission.frameGeometry},{x:3000,y:440,width:520,height:460});
+  assert.equal(run({},[primary,secondary],[],false).target,secondary,'KWin 6.6 uses its shared desktop for fullscreen routing');
+  assert.equal(run({desktops:[otherDesktop]},[primary,secondary],[],false).target,primary);
   assert.equal(run({fullScreen:false}).target,primary);
   assert.equal(run({minimized:true}).target,primary);
   assert.equal(run({desktops:[otherDesktop]}).target,primary);

@@ -10,7 +10,8 @@ export function promptTitle(windowID: number) {
   return `${PROMPT_TITLE} · ${windowID}`;
 }
 // Shared by startup QML and one-shot resizes. Fullscreen is compositor evidence,
-// independent of application identity. Ignore minimized/other-desktop windows.
+// independent of application identity. KWin 6.6 has a shared current desktop,
+// while KWin 6.7 can select one independently on each output.
 function outputSelection(pid: number, outputName?: string, retainOutput = false) {
   return `const primary=workspace.screens.find(o=>o.name===${JSON.stringify(outputName || '')}) || workspace.screens[0];
     const candidates=typeof workspace.windowList==='function'?workspace.windowList():workspace.stackingOrder;
@@ -18,7 +19,8 @@ function outputSelection(pid: number, outputName?: string, retainOutput = false)
       const g=c.frameGeometry, a=output.geometry;
       return c.normalWindow && c.noBorder && g && a && ['x','y','width','height'].every(k=>Math.abs(g[k]-a[k])<=1);
     };
-    const fullscreenOn=(output)=>candidates.some(c=>c.pid!==${pid} && (c.fullScreen || coversOutput(c,output)) && !c.minimized && c.output===output && (c.onAllDesktops || !c.desktops || c.desktops.length===0 || c.desktops.indexOf(workspace.currentDesktopForScreen(output))>=0));
+    const desktopFor=(output)=>typeof workspace.currentDesktopForScreen==='function' ? workspace.currentDesktopForScreen(output) : workspace.currentDesktop;
+    const fullscreenOn=(output)=>candidates.some(c=>c.pid!==${pid} && (c.fullScreen || coversOutput(c,output)) && !c.minimized && c.output===output && (c.onAllDesktops || !c.desktops || c.desktops.length===0 || c.desktops.indexOf(desktopFor(output))>=0));
     const current=${retainOutput ? "workspace.screens.includes(w.output) && w.output!==primary ? w.output : null" : "null"};
     const output=current || (primary && fullscreenOn(primary) ? (workspace.screens.find(o=>o!==primary && !fullscreenOn(o)) || primary) : primary);`;
 }
@@ -29,7 +31,7 @@ export function placementScript(pid: number, windowID: number, bounds: Rect, out
     Object.values(bounds).some((v) => !Number.isFinite(v))
   )
     throw Error('Invalid placement');
-  const routed = `${outputSelection(pid, outputName, retainOutput)} if(!output)throw new Error('Configured primary output unavailable'); workspace.sendClientToScreen(w,output); const area=workspace.clientArea(KWin.PlacementArea,output,workspace.currentDesktopForScreen(output)); const width=Math.min(${bounds.width},area.width),height=Math.min(${bounds.height},area.height); w.frameGeometry={x:area.x+area.width-width,y:area.y+area.height-height,width:width,height:height};`;
+  const routed = `${outputSelection(pid, outputName, retainOutput)} if(!output)throw new Error('Configured primary output unavailable'); workspace.sendClientToScreen(w,output); const area=workspace.clientArea(KWin.PlacementArea,output,desktopFor(output)); const width=Math.min(${bounds.width},area.width),height=Math.min(${bounds.height},area.height); w.frameGeometry={x:area.x+area.width-width,y:area.y+area.height-height,width:width,height:height};`;
   const placement = outputName ? routed : `if(workspace.screens && workspace.screens.length) { ${routed} } else { w.frameGeometry = ${JSON.stringify(bounds)}; }`;
   return `for (const w of workspace.windowList()) { if (w.pid === ${pid} && w.caption === ${JSON.stringify(promptTitle(windowID))}) { ${placement} print("FLOWGATE_PROMPT_PLACED_${pid}", ${JSON.stringify(outputName || 'native-primary')}, JSON.stringify(w.frameGeometry)); } }`;
 }
@@ -67,7 +69,7 @@ QtObject {
     if(!s.output || !workspace.screens.includes(s.output)) s.output=selectedOutput;
     const output=s.output;
     if(!output) { clock.stop(); return; }
-    const area=workspace.clientArea(KWin.PlacementArea,output,workspace.currentDesktopForScreen(output));
+    const area=workspace.clientArea(KWin.PlacementArea,output,desktopFor(output));
     const width=Math.min(${bounds.width},area.width), height=Math.min(${bounds.height},area.height);
     const desired={x:area.x+area.width-width,y:area.y+area.height-height,width:width,height:height};
     const g=w.frameGeometry, stamp=JSON.stringify(g);
