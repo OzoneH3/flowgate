@@ -85,15 +85,15 @@ function userDirectory(variable: string, fallback: string) {
 const runtime = process.env.XDG_RUNTIME_DIR;
 if (installed && (!runtime || !path.isAbsolute(runtime)))
   throw Error('FlowGate requires an absolute XDG_RUNTIME_DIR in the desktop session.');
-const workspace = installed
+const sessionDirectory = installed
   ? path.join(runtime!, 'flowgate')
-  : path.resolve(__dirname, '../../.workspace');
+  : path.resolve(__dirname, '../../build/desktop-session');
 const config = installed
   ? path.join(userDirectory('XDG_CONFIG_HOME', path.join(app.getPath('home'), '.config')), 'flowgate')
-  : workspace;
-for (const dir of new Set([workspace, config]))
+  : sessionDirectory;
+for (const dir of new Set([sessionDirectory, config]))
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-const profile = fs.mkdtempSync(path.join(workspace, 'electron-profile-'));
+const profile = fs.mkdtempSync(path.join(sessionDirectory, 'electron-profile-'));
 app.setPath('userData', profile);
 app.setPath('sessionData', profile);
 app.setPath('crashDumps', path.join(profile, 'crashes'));

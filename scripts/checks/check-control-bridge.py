@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2]
 os.umask(0o077)
 assert os.environ['FLOWGATE_PARENT_NETNS']!=os.readlink('/proc/self/ns/net')
-run=Path(tempfile.mkdtemp(prefix='bridge-',dir=ROOT/'.workspace'))
+run=Path(tempfile.mkdtemp(prefix='bridge-',dir=ROOT/'build'))
 bindir=run/'bin';bindir.mkdir()
 # Only this test's PATH selects the shim. It maps fixed production paths into
 # workspace-owned namespace paths and simulates authentication success/failure.

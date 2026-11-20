@@ -117,7 +117,7 @@ const wait = async (fn) => {
   }
   throw Error('timeout ' + fn);
 };
-const prefs = path.join(root, '.workspace/electron-preferences.json'),
+const prefs = path.join(root, 'build/desktop-session/electron-preferences.json'),
   old = fs.existsSync(prefs) ? fs.readFileSync(prefs) : null;
 let app;
 try {

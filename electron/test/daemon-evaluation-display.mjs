@@ -57,7 +57,7 @@ const reply = (ro) => ({
 });
 const servers = [];
 let app;
-const pref = path.join(root, '.workspace/electron-preferences.json'),
+const pref = path.join(root, 'build/desktop-session/electron-preferences.json'),
   saved = fs.existsSync(pref) ? fs.readFileSync(pref) : undefined;
 try {
   for (const ro of [false, true]) {

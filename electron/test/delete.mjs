@@ -70,7 +70,7 @@ const proxy = net.createServer((client) =>
     client.on('close', () => upstream.destroy());
   }),
 );
-const pref = path.join(root, '.workspace/electron-preferences.json'),
+const pref = path.join(root, 'build/desktop-session/electron-preferences.json'),
   old = fs.existsSync(pref) ? fs.readFileSync(pref) : undefined;
 try {
   const harness = fs

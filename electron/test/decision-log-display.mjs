@@ -14,7 +14,7 @@ let missingId = '';
 let outcomeCapability = false;
 let outcomeError = '';
 const outcomeRequests = [];
-const prefPath = path.join(root, '.workspace/electron-preferences.json');
+const prefPath = path.join(root, 'build/desktop-session/electron-preferences.json');
 const preferences = fs.existsSync(prefPath) ? fs.readFileSync(prefPath) : undefined;
 const base = (readonly) => ({
   version: 1,

@@ -8,6 +8,6 @@ p.add_argument('--backend',choices=['flowgate','electron-backend'],default='flow
 a=p.parse_args()
 print('FlowGate extended UDP traffic monitoring (experimental, collection only). No firewall activation.\nStop in Activity or press Ctrl+C here. TCP monitoring is independent.',flush=True)
 # sudo is the system authentication owner; no Qt password handling or shell input.
-args=['sudo',str(root/'.workspace'/a.backend),'udp-start','--uid',str(os.getuid())]
+args=['sudo',str(root/'build'/a.backend),'udp-start','--uid',str(os.getuid())]
 try:sys.exit(subprocess.call(args))
 except KeyboardInterrupt:pass

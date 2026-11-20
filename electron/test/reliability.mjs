@@ -77,7 +77,7 @@ const proxy = net.createServer((s) =>
   }),
 );
 await new Promise((r) => proxy.listen(proxyEndpoint, r));
-const prefs = path.join(root, '.workspace/electron-preferences.json'),
+const prefs = path.join(root, 'build/desktop-session/electron-preferences.json'),
   old = fs.existsSync(prefs) ? fs.readFileSync(prefs) : undefined;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const wait = async (fn) => {

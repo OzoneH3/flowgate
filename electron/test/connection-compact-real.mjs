@@ -46,7 +46,7 @@ async function command(q) {
 const initial = await call({ operation: 'list' });
 assert.equal(initial.generation, ready.generation);
 assert.equal((initial.rules || []).length, 0);
-const prefs = path.join(root, '.workspace/electron-preferences.json'),
+const prefs = path.join(root, 'build/desktop-session/electron-preferences.json'),
   old = fs.existsSync(prefs) ? fs.readFileSync(prefs) : undefined;
 let app;
 const evidence = { run, generation: ready.generation, journeys: [], errors: [] };

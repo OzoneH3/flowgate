@@ -12,7 +12,7 @@ const evidence = path.join(
 );
 fs.mkdirSync(evidence, { recursive: true });
 const run = fs.mkdtempSync(path.join(root, '.workspace/av-'));
-const pref = path.join(root, '.workspace/electron-preferences.json');
+const pref = path.join(root, 'build/desktop-session/electron-preferences.json');
 const old = fs.existsSync(pref) ? fs.readFileSync(pref) : undefined;
 let sequence = 1,
   empty = false,

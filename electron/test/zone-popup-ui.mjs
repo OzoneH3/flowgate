@@ -254,7 +254,7 @@ try {
   assert.equal(storedDefaults.shapingDefaults.uploadBits,32000000);
   assert.equal(storedDefaults.shapingDefaults.downloadBits,16000000);
   assert.equal(storedDefaults.shapingDefaults.priority,'high');
-  assert.deepEqual(JSON.parse(fs.readFileSync(client+'/.workspace/electron-preferences.json','utf8')).ui.shapingDefaults,storedDefaults.shapingDefaults);
+  assert.deepEqual(JSON.parse(fs.readFileSync(client+'/build/desktop-session/electron-preferences.json','utf8')).ui.shapingDefaults,storedDefaults.shapingDefaults);
   assert.equal(await page.evaluate(async()=>{try{await window.flowgate.preferences({shapingDefaults:{priority:'critical'}});return false;}catch{return true;}}),true);
   await page.locator('#optionsMenu summary').click();
   await open('upload');assert.equal(await page.locator('#uploadRate').inputValue(),'32');await close();

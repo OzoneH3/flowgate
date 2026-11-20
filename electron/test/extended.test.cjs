@@ -8,8 +8,8 @@ const { EventEmitter } = require('node:events');
 const { ExtendedMonitoring } = require('../dist/test/extended.cjs');
 test('extended bridge uses fixed operations; Stop acknowledgement and failure remain independent', async () => {
   const root = fs.mkdtempSync(path.resolve(__dirname, '../../.workspace/ext-unit-'));
-  fs.mkdirSync(path.join(root, '.workspace'));
-  fs.writeFileSync(path.join(root, '.workspace/udp-collector'), 'synthetic');
+  fs.mkdirSync(path.join(root, 'build'));
+  fs.writeFileSync(path.join(root, 'build/udp-collector'), 'synthetic');
   const originalSpawn = cp.spawn,
     originalExec = cp.execFile;
   let calls = [];
@@ -42,7 +42,7 @@ test('extended bridge uses fixed operations; Stop acknowledgement and failure re
     ext.view(true);
     await ext.action('stop');
     assert.match(ext.state.message, /acknowledged Stop/);
-    assert.equal(calls[1][0], path.join(root, '.workspace/electron-backend'));
+    assert.equal(calls[1][0], path.join(root, 'build/electron-backend'));
     assert.deepEqual(calls[1][1], ['udp-stop']);
     cp.execFile = (c, a, o, done) => done(Error('lost acknowledgement'), '', 'disconnected');
     await ext.action('stop');

@@ -14,7 +14,7 @@ const ready = JSON.parse(fs.readFileSync(readyPath));
 if (!ready.socket.startsWith(path.dirname(readyPath)))
   throw Error('Fixture socket outside fixture');
 const run = fs.mkdtempSync(path.join(root, '.workspace/rule-status-real-'));
-const prefs = path.join(root, '.workspace/electron-preferences.json'),
+const prefs = path.join(root, 'build/desktop-session/electron-preferences.json'),
   old = fs.existsSync(prefs) ? fs.readFileSync(prefs) : undefined;
 const log = [];
 const step = (s) => {

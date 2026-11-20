@@ -23,7 +23,7 @@ if (
     'Explicit isolated workspace endpoint and active/failed expectation required; host endpoints forbidden',
   );
 const run = fs.mkdtempSync(path.join(root, '.workspace/daemon-udp-ui-'));
-const prefs = path.join(root, '.workspace/electron-preferences.json'),
+const prefs = path.join(root, 'build/desktop-session/electron-preferences.json'),
   old = fs.existsSync(prefs) ? fs.readFileSync(prefs) : null;
 let app;
 const wait = async (fn) => {

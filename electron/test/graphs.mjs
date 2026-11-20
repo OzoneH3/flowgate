@@ -37,7 +37,7 @@ function start(cmd, args = []) {
   p.output = () => output;
   return p;
 }
-const prefs = path.join(root, '.workspace/electron-preferences.json'),
+const prefs = path.join(root, 'build/desktop-session/electron-preferences.json'),
   old = fs.existsSync(prefs) ? fs.readFileSync(prefs) : undefined;
 try {
   const fixturePath = path.join(run, 'tcp-fixture');

@@ -38,7 +38,7 @@ const wait = async (fn) => {
 const baseline = await call({ operation: 'list' });
 assert.equal(baseline.generation, ready.generation);
 if (mutate) assert.equal((baseline.rules || []).length, 0, 'Mutation fixture must start empty');
-const prefs = root + '/.workspace/electron-preferences.json',
+const prefs = root + '/build/desktop-session/electron-preferences.json',
   old = fs.existsSync(prefs) ? fs.readFileSync(prefs) : undefined;
 fs.writeFileSync(prefs, '{}');
 let app;

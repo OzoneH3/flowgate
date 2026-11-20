@@ -63,7 +63,7 @@ export class Evaluation {
       throw Error('A controller is already active or starting');
     if (action === 'start' && !['incoming', 'both'].includes(String(profile)))
       throw Error('Select a profile');
-    const dir = fs.mkdtempSync(path.join(this.root, '.workspace/electron-control-'));
+    const dir = fs.mkdtempSync(path.join(this.root, 'build/electron-control-'));
     fs.chmodSync(dir, 0o700);
     fs.writeFileSync(
       path.join(dir, 'request.json'),

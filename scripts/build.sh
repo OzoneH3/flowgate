@@ -20,7 +20,7 @@ for target in "$@"; do
   cmake --build build/desktop -j2
   ;;
  electron)
-  mkdir -p "$TMPDIR" "$XDG_CACHE_HOME"
+  mkdir -p "$TMPDIR" "$XDG_CACHE_HOME" build/desktop-session
   if [ ! -f electron/node_modules/electron/package.json ]; then
     (cd electron && npm ci)
   fi

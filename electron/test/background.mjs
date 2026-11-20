@@ -70,7 +70,7 @@ function parseBlock(text) {
     }
   }
 }
-const prefFile = path.join(root, '.workspace/electron-preferences.json'),
+const prefFile = path.join(root, 'build/desktop-session/electron-preferences.json'),
   oldPrefs = fs.existsSync(prefFile) ? fs.readFileSync(prefFile) : undefined;
 try {
   const text = fs

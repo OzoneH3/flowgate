@@ -26,16 +26,16 @@ class BackendSelection(unittest.TestCase):
  def test_udp_default_and_electron(self):
   for args,name in [([], 'flowgate'),(['--backend','electron-backend'],'electron-backend')]:
    code,calls=self.invoke('traffic-control.py',args)
-   self.assertEqual(code,0);self.assertEqual(calls,[['sudo',str(ROOT/'.workspace'/name),'udp-start','--uid',str(__import__('os').getuid())]])
+   self.assertEqual(code,0);self.assertEqual(calls,[['sudo',str(ROOT/'build'/name),'udp-start','--uid',str(__import__('os').getuid())]])
  def test_desktop_start_and_fallback(self):
   for args,name in [([], 'flowgate'),(['--backend','electron-backend'],'electron-backend')]:
    for action in ['start','stop']:
-    with tempfile.TemporaryDirectory(dir=ROOT/'.workspace',prefix='bridge-selection-')as job:
+    with tempfile.TemporaryDirectory(dir=ROOT/'build',prefix='bridge-selection-')as job:
      code,calls=self.invoke('desktop-control.py',['--action',action,'--job',job,*args])
-     self.assertEqual(code,0);self.assertEqual(calls[0],['sudo','-v']);self.assertEqual(calls[1][:5],['sudo','-n',str(ROOT/'.workspace'/name),'host-session','--action'])
+     self.assertEqual(code,0);self.assertEqual(calls[0],['sudo','-v']);self.assertEqual(calls[1][:5],['sudo','-n',str(ROOT/'build'/name),'host-session','--action'])
      self.assertEqual(json.loads(Path(job,'result.json').read_text())['phase'],'stopped')
  def test_desktop_prefers_pinned_controller(self):
-  with tempfile.TemporaryDirectory(dir=ROOT/'.workspace',prefix='bridge-selection-')as job:
+  with tempfile.TemporaryDirectory(dir=ROOT/'build',prefix='bridge-selection-')as job:
    code,calls=self.invoke('desktop-control.py',['--action','stop','--job',job,'--backend','electron-backend'],pinned=True)
    self.assertEqual(code,0);self.assertEqual(calls[1][2],'/run/flowgate/controller')
  def test_rejects_arbitrary_executables_before_auth(self):

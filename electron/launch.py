@@ -32,7 +32,7 @@ if os.geteuid() == 0:
 for endpoint in (a.observer, a.control):
     if endpoint and (not os.path.isabs(endpoint) or len(os.fsencode(endpoint)) > 107):
         p.error('Endpoints must be absolute Unix socket paths of at most 107 bytes')
-run = Path(tempfile.mkdtemp(prefix='electron-run-', dir=ROOT/'.workspace'))
+run = Path(tempfile.mkdtemp(prefix='electron-run-', dir=ROOT/'build'))
 children = []
 owned = None
 
@@ -45,7 +45,7 @@ try:
     with (run/'observer.log').open('w') as log:
         if not a.observer:
             owned = run/'observer.sock'
-            observer = subprocess.Popen([str(ROOT/'.workspace/electron-observer'), 'observe', '--socket', str(owned), '--interval', a.interval], stdout=log, stderr=log)
+            observer = subprocess.Popen([str(ROOT/'build/electron-observer'), 'observe', '--socket', str(owned), '--interval', a.interval], stdout=log, stderr=log)
             children.append(observer)
             end = time.monotonic()+10
             while not owned.exists():
@@ -58,7 +58,7 @@ try:
         env = os.environ.copy()
         # Electron's bundled Fontconfig must not share caches with the host's
         # (possibly newer) Fontconfig; keeps fonts/rules, private versioned cache.
-        fontconfig_isolation.apply(env, env.get('XDG_CACHE_HOME') or str(ROOT/'.workspace/cache'),
+        fontconfig_isolation.apply(env, env.get('XDG_CACHE_HOME') or str(ROOT/'build/cache'),
                                    fontconfig_isolation.runtime_version(ROOT/'electron/node_modules/electron/dist'))
         if not env.get('WAYLAND_DISPLAY') and Path('/run/user/'+str(os.getuid())+'/wayland-0').exists():
             env['WAYLAND_DISPLAY'] = 'wayland-0'

@@ -6,7 +6,7 @@ import net from 'node:net';
 import assert from 'node:assert/strict';
 const root = path.resolve(import.meta.dirname, '../..'),
   run = fs.mkdtempSync(path.join(root, '.workspace/panes-synthetic-'));
-const prefs = path.join(root, '.workspace/electron-preferences.json'),
+const prefs = path.join(root, 'build/desktop-session/electron-preferences.json'),
   old = fs.existsSync(prefs) ? fs.readFileSync(prefs) : undefined;
 const application = {
   key: 'synthetic',

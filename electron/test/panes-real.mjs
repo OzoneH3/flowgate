@@ -30,7 +30,7 @@ const call = (body) =>
 const initial = await call({ operation: 'list' });
 assert.equal(initial.generation, ready.generation);
 assert.equal((initial.rules || []).length, 0);
-const prefs = path.join(root, '.workspace/electron-preferences.json'),
+const prefs = path.join(root, 'build/desktop-session/electron-preferences.json'),
   old = fs.existsSync(prefs) ? fs.readFileSync(prefs) : undefined;
 const wait = async (fn) => {
   for (let i = 0; i < 180; i++) {

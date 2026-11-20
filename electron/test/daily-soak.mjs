@@ -51,7 +51,7 @@ const proxy = net.createServer((s) =>
   }),
 );
 await new Promise((r) => proxy.listen(endpoint, r));
-const prefs = root + '/.workspace/electron-preferences.json',
+const prefs = root + '/build/desktop-session/electron-preferences.json',
   old = fs.existsSync(prefs) ? fs.readFileSync(prefs) : undefined;
 const result = {
   run,

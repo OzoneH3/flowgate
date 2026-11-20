@@ -85,7 +85,7 @@ const server = net.createServer((s) =>
   }),
 );
 await new Promise((r) => server.listen(endpoint, r));
-const prefs = path.join(root, '.workspace/electron-preferences.json'),
+const prefs = path.join(root, 'build/desktop-session/electron-preferences.json'),
   old = fs.existsSync(prefs) ? fs.readFileSync(prefs) : undefined;
 let app, page;
 try {

@@ -48,7 +48,7 @@ function start(cmd, args = []) {
   p.output = () => output;
   return p;
 }
-const pref = path.join(root, '.workspace/electron-preferences.json'),
+const pref = path.join(root, 'build/desktop-session/electron-preferences.json'),
   old = fs.existsSync(pref) ? fs.readFileSync(pref) : undefined;
 try {
   fs.writeFileSync(pref, '{}');
