@@ -157,17 +157,19 @@ func TestStockUFWICMPCompatibility(t *testing.T) {
 
 func TestXTMultiportReadiness(t *testing.T) {
 	const multiport = `{"xt":{"type":"match","name":"multiport"}}`
+	const comment = `{"xt":{"type":"match","name":"comment"}}`
 	const queue = `{"queue":{"num":101}}`
 	for _, tc := range []struct {
 		name, family, expr, refusal string
 	}{
-		{"IPv4 port match", "ip", multiport, ""},
-		{"IPv6 port match", "ip6", multiport, ""},
+		{"IPv4 port match", "ip", multiport + "," + comment, ""},
+		{"IPv6 port match", "ip6", multiport + "," + comment, ""},
 		{"wrong type", "ip", strings.Replace(multiport, `"match"`, `"target"`, 1), "unsupported opaque expression"},
 		{"wrong family", "inet", multiport, "unsupported opaque expression"},
 		{"unexpected fields", "ip", `{"xt":{"type":"match","name":"multiport","extra":true}}`, "unsupported opaque expression"},
-		{"queue before match", "ip", queue + "," + multiport, "unproven mark/queue/zone/notrack/offload expression"},
-		{"queue after match", "ip", multiport + "," + queue, "unproven mark/queue/zone/notrack/offload expression"},
+		{"wrong comment type", "ip", multiport + "," + strings.Replace(comment, `"match"`, `"target"`, 1), "unsupported opaque expression comment (target)"},
+		{"queue before match", "ip", queue + "," + multiport + "," + comment, "unproven mark/queue/zone/notrack/offload expression"},
+		{"queue after matches", "ip", multiport + "," + comment + "," + queue, "unproven mark/queue/zone/notrack/offload expression"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			nft := fmt.Sprintf(`{"nftables":[{"rule":{"family":%q,"table":"filter","chain":"ufw-user-input","handle":134,"expr":[%s,{"counter":{"packets":0,"bytes":0}},{"accept":null}]}}]}`, tc.family, tc.expr)
