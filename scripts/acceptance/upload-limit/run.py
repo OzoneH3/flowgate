@@ -12,7 +12,7 @@ import sys
 import time
 
 from receiver import Receiver
-from download_trace import continuous
+from download_trace import REFERENCE_IFB, continuous
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
@@ -151,7 +151,8 @@ def verify_stream(api, probe, stream, wait_for):
     return wait_for(current, 15, f"unverified native TCP stream for probe {hello['probe']}")
 
 
-def exercise(api, probes, receiver, nic, record, report, stack, direction, diagnostics=None):
+def exercise(api, probes, receiver, nic, record, report, stack, direction, diagnostics=None,
+             compare_reference=False):
     from scenarios import Scenario
     from vm import FixtureError, wait_for
 
@@ -209,25 +210,28 @@ def exercise(api, probes, receiver, nic, record, report, stack, direction, diagn
 
     app = f'{a["uid"]}:{a["application"]["key"]}'
 
-    def phase(name, cap=None, extra=0):
+    def phase(name, cap=None, extra=0, reference=False):
         state_before = status()
         row = {"configured_bits_per_second": cap, "status_before": state_before, "receiver": {}}
         phases[name] = row
         for label, probe in probes.items():
-            if name.endswith("removed") and label == "B":
+            if name.endswith("removed") and label == "B" and not compare_reference:
                 continue
             if diagnostics is None:
                 row["receiver"][label] = measure(probe, receiver, label, direction=direction)
             else:
                 endpoints = {key: identities[label]["socket"][key] for key in ("local", "remote")}
                 target = {}
-                if cap and label == "A":
-                    kernel = state_before["kernel"]
-                    target = {"ifb": kernel["download"]["interface"], "minor": kernel["apps"][app]["minor"]}
+                if cap and (label == "A" or compare_reference):
+                    if reference:
+                        target = {"ifb": REFERENCE_IFB, "reference": True}
+                    else:
+                        kernel = state_before["kernel"]
+                        target = {"ifb": kernel["download"]["interface"], "minor": kernel["apps"][app]["minor"]}
                 windows = continuous(probe, receiver, label, diagnostics, endpoints, target,
                                      WARMUP, WINDOW, extra if label == "A" else 0)
                 row["receiver"][label] = windows[0]
-                if target:
+                if target and label == "A":
                     row["windows"] = windows
             row["status_after_" + label] = status()
         record("phase", {"phase": name, **row})
@@ -274,7 +278,11 @@ def exercise(api, probes, receiver, nic, record, report, stack, direction, diagn
             record("a-covered", coverage)
 
         confirm_coverage()
-        limited = phase("a-limited", cap, extra=5 if diagnostics else 0)
+        if compare_reference:
+            ifb = status()["kernel"]["download"]["interface"]
+            report["flowgate_tc"] = diagnostics.call(op="inspect", interface=nic, ifb=ifb)
+            record("flowgate-tc", report["flowgate_tc"])
+        limited = phase("a-limited", cap, extra=5 if diagnostics and not compare_reference else 0)
         if direction == "download":
             if diagnostics:
                 first = limited["windows"][0]
@@ -289,7 +297,10 @@ def exercise(api, probes, receiver, nic, record, report, stack, direction, diagn
         record("limit-removed", configure([]))
         cleanup = False
         recovered = phase("limit-removed")
-        if diagnostics and not in_range(limited["receiver"]["A"]["bits_per_second"], cap, CAP_TOLERANCE):
+        if compare_reference:
+            reference_comparison(diagnostics, nic, cap, baseline, limited, recovered, identities, phase,
+                                 record, report)
+        elif diagnostics and not in_range(limited["receiver"]["A"]["bits_per_second"], cap, CAP_TOLERANCE):
             # Compare the same sockets with receive aggregation disabled on
             # the guest fixture only, after the owned shaping tree is gone.
             offloads = diagnostics.call(op="gro-off", interface=nic)
@@ -319,8 +330,53 @@ def exercise(api, probes, receiver, nic, record, report, stack, direction, diagn
     assert all(verdicts.values()), verdicts
 
 
+def reference_comparison(diagnostics, nic, cap, baseline, limited, recovered, identities, phase, record, report):
+    clean = diagnostics.call(op="inspect", interface=nic)
+    assert recovered["status_before"]["status"] == "Disabled"
+    assert report["flowgate_tc"]["offloads"] == clean["offloads"], "interface offloads changed"
+    assert not clean["ingress"] and not clean["egress"]
+    report["flowgate_removed_tc"] = clean
+    original = limited["windows"][0]["boundary_start"]["guest"]
+    socket = identities["A"]["socket"]
+
+    def rate_ok(row, label, target, tolerance):
+        return in_range(row["receiver"][label]["bits_per_second"], target, tolerance)
+
+    a_in_band = rate_ok(limited, "A", cap, CAP_TOLERANCE)
+    for variant, mirror in (("reference", False), ("reference-matched-egress", True)):
+        actual = diagnostics.call(op="reference-start", interface=nic, local=socket["local"],
+                                  remote=socket["remote"], mtu=clean[nic]["link"]["mtu"],
+                                  htb=original["htb"], leaf=original["leaf"]["options"],
+                                  mirror_egress=mirror)
+        try:
+            assert actual["offloads"] == clean["offloads"], "interface offloads changed"
+            report[variant + "_tc"] = actual
+            record(variant + "-tc", actual)
+            sample = phase(variant + "-limited", cap, reference=True)
+            observed = sample["windows"][0]["boundary_start"]["guest"]
+            keys = ("rate", "ceil", "burst", "cburst", "quantum", "prio", "linklayer")
+            assert all(observed["htb"][key] == original["htb"][key] for key in keys)
+            assert observed["leaf"]["options"] == original["leaf"]["options"]
+        finally:
+            diagnostics.call(op="reference-stop")
+        after = diagnostics.call(op="inspect", interface=nic)
+        assert after["offloads"] == clean["offloads"], "interface offloads changed"
+        assert not after["ingress"] and not after["egress"]
+        assert [q["kind"] for q in after[nic]["qdisc"]] == [q["kind"] for q in clean[nic]["qdisc"]]
+        recovered_ref = phase(variant + "-removed")
+        verdicts = {
+            "a_near_cap": rate_ok(sample, "A", cap, CAP_TOLERANCE),
+            "b_near_baseline": rate_ok(sample, "B", baseline["B"]["bits_per_second"], BASELINE_TOLERANCE),
+            "a_recovered": rate_ok(recovered_ref, "A", baseline["A"]["bits_per_second"], BASELINE_TOLERANCE),
+            "b_recovered": rate_ok(recovered_ref, "B", baseline["B"]["bits_per_second"], BASELINE_TOLERANCE),
+        }
+        report[variant + "_verdicts"] = verdicts
+        if a_in_band or not verdicts["a_near_cap"]:
+            break
+
+
 def run_case(lab, sut, names, release, evidence, unused_host, *, direction, binaries,
-             diagnose_download=False, diagnose_rule_delete=False):
+             diagnose_download=False, compare_reference=False, diagnose_rule_delete=False):
     from lab import FlowGate, activate, configure_sut, recorder, save
 
     name = f"application-{direction}-limit"
@@ -355,7 +411,8 @@ def run_case(lab, sut, names, release, evidence, unused_host, *, direction, bina
                            if diagnose_download else None)
             activate(api, release)
             evidence["phase"] = "scenarios"
-            exercise(api, probes, receiver, nic, record, report, stack, direction, diagnostics)
+            exercise(api, probes, receiver, nic, record, report, stack, direction, diagnostics,
+                     compare_reference)
         report["verdict"] = "pass"
         evidence["scenarios"][name] = "pass"
         print(f"PASS {name}", flush=True)
@@ -400,9 +457,11 @@ def main():
     parser.add_argument("--local-check", action="store_true")
     parser.add_argument("--direction", choices=("upload", "download"), default="upload")
     parser.add_argument("--diagnose-download", action="store_true")
+    parser.add_argument("--compare-reference", action="store_true",
+                        help="compare with a guest-only tc flower/IFB cap on the same TCP sockets")
     args = parser.parse_args()
-    if args.diagnose_download and args.direction != "download":
-        parser.error("--diagnose-download requires --direction download")
+    if (args.diagnose_download or args.compare_reference) and args.direction != "download":
+        parser.error("download diagnostics require --direction download")
     sys.path.insert(0, str(args.lab.resolve()))
     import lab
     import vm
@@ -413,7 +472,8 @@ def main():
     name = f"application-{args.direction}-limit"
     vm.RUNS = ROOT / ".workspace" / name / "runs"
     lab.run_cases = partial(run_case, direction=args.direction, binaries=binaries,
-                            diagnose_download=args.diagnose_download)
+                            diagnose_download=args.diagnose_download or args.compare_reference,
+                            compare_reference=args.compare_reference)
     args.archive = args.dist / ARCHIVE
     args.archive_sha256 = ARCHIVE_SHA256
     args.installer = args.dist / "flowgate-release.py"

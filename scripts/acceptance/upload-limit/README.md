@@ -15,6 +15,20 @@ For download, use the host as sender on the same TCP connections:
 python3 -B scripts/acceptance/upload-limit/run.py --direction download
 ```
 
+Compare the same sockets with a standalone ingress cap:
+
+```sh
+python3 -B scripts/acceptance/upload-limit/run.py --direction download --compare-reference
+```
+
+The comparison keeps the original NIC offloads and uses the same SLIRP route.
+After measuring FlowGate and confirming recovery, it installs a temporary
+flower filter for A's exact IPv4 TCP tuple and redirects to a guest-only IFB
+with the captured HTB class and fq_codel leaf settings. If the reference meets
+the band and FlowGate misses it, a second reference phase adds the matching NIC
+egress queue tree to test that difference. It captures both applications'
+steady-state rates, kernel counters, and recovery after each removal.
+
 Use `--lab`, `--profile`, or `--dist` to override those locations. The tested lab
 runner is `75af5ee`. The runner checks both package digests and the installed
 daemon's source and executable digests. Go builds two distinct static native
