@@ -1,0 +1,26 @@
+/* Layout for the detached Info View and Traffic Chart. */
+.detached-pane #app { height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+.detached-heading { height:30px; min-height:30px; display:flex; align-items:center; background:var(--fg-section); border-bottom:1px solid var(--fg-border); padding:0 5px; }
+.detached-heading h2 { flex:1; margin:0; padding:3px; font-size:12px; font-weight:400; }
+.detached-heading button { border:0; background:transparent; padding:0 8px; min-height:23px; }
+.pane-presentation { display:flex; gap:12px; padding:4px 8px; border-bottom:1px solid var(--fg-border); }
+.pane-presentation select { min-height:22px; height:22px; }
+#paneMessage { margin:0 8px; font-size:11px; color:var(--fg-muted); }
+#paneMessage:empty { display:none; }
+#paneContent { flex:1; min-height:0; overflow:hidden; position:relative; display:flex; flex-direction:column; }
+#paneContent > #selectedName { margin:8px; color:var(--fg-selected); font-size:14px; font-weight:400; }
+#paneContent #selectedName img { vertical-align:middle; margin-right:5px; }
+#paneContent #selectedExecutable { padding:0 8px 8px; overflow-wrap:anywhere; }
+#paneContent .info-scroll { flex:1; overflow:auto; padding:0 8px; }
+#paneContent #info { display:grid; grid-template-columns:minmax(80px,30%) 1fr; padding:8px; border:1px solid var(--fg-border); margin:4px 0 8px; }
+#paneContent #info dt { font-weight:600; }
+#paneContent #info dd { margin:0 0 6px; overflow-wrap:anywhere; white-space:pre-wrap; }
+.pane-action-hint { margin:4px 8px; font-size:11px; color:var(--fg-muted); }
+.detached-pane #trafficCanvas { height:auto; flex:1; min-height:80px; }
+.detached-pane .graph-heading { display:none; }
+.detached-pane .graph-pause { top:30px; }
+.detached-pane .graph-sample { bottom:80px; }
+.detached-pane .graph-live { top:59px; }
+#paneContent .info-scroll > .info-section-title { color:var(--fg-text); }
+#paneContent #info dt { color:var(--fg-text); }
+#paneContent #info > .info-technical { grid-column:1 / -1; margin-top:6px; }

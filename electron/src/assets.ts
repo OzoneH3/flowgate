@@ -7,6 +7,8 @@ const assets: Record<string, string> = {
   'prompt.html': 'text/html',
   'permission-popup.css': 'text/css',
   'style.css': 'text/css',
+  'desktop-layout.css': 'text/css',
+  'pane.css': 'text/css',
   'renderer.js': 'text/javascript',
   'pane.html': 'text/html',
   'pane.js': 'text/javascript',
@@ -22,11 +24,13 @@ export function bundledAsset(name: string): string | undefined {
 
 const userStyles: Record<string, string> = {
   'user-style.css': 'style.css',
+  'user-desktop-layout.css': 'desktop-layout.css',
+  'user-pane.css': 'pane.css',
   'user-permission-popup.css': 'permission-popup.css',
 };
 const maxStyleBytes = 1024 * 1024;
 
-// Only these two routes can read user configuration. Missing or invalid files
+// Only the listed routes can read user configuration. Missing or invalid files
 // serve an empty stylesheet so the bundled theme can still load.
 export function userStylesheet(name: string, directory: string): string | undefined {
   if (!Object.hasOwn(userStyles, name)) return undefined;

@@ -1010,11 +1010,11 @@ async function setupSizing() {
   };
   void refresh();
   setInterval(() => void refresh(), 3000);
+  const applySidebarWidth = (width: number) => {
+    document.documentElement.style.setProperty('--desktop-saved-sidebar-width', width + 'px');
+  };
+  if (prefs.sidebar) applySidebarWidth(prefs.sidebar);
   for (const aside of document.querySelectorAll<HTMLElement>('main aside')) {
-    // Keep the default proportion responsive; only a user resize stores pixels.
-    const sidebarWidth = prefs.sidebar ? prefs.sidebar + 'px' : '45.5vw';
-    aside.style.width = sidebarWidth;
-    document.documentElement.style.setProperty('--info-width', sidebarWidth);
     const grip = node('div', '');
     grip.className = 'sidebar-grip';
     grip.tabIndex = 0;
@@ -1023,9 +1023,7 @@ async function setupSizing() {
     aside.before(grip);
     const resize = (n: number) => {
       prefs.sidebar = Math.round(Math.max(240, Math.min(600, n)));
-      document.documentElement.style.setProperty('--info-width', prefs.sidebar + 'px');
-      for (const a of document.querySelectorAll<HTMLElement>('main aside'))
-        a.style.width = prefs.sidebar + 'px';
+      applySidebarWidth(prefs.sidebar);
     };
     grip.onkeydown = (e) => {
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {

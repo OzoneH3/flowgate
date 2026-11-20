@@ -19,6 +19,14 @@ const config = path.join(run, 'config');
 await fs.mkdir(path.join(config, 'flowgate'), { recursive: true });
 await fs.writeFile(path.join(config, 'flowgate', 'style.css'), ':root { --fixture-user-style: desktop; }');
 await fs.writeFile(
+  path.join(config, 'flowgate', 'desktop-layout.css'),
+  ':root { --fixture-user-style: main; --desktop-toolbar-height: 47px; --desktop-sidebar-width: 300px; }',
+);
+await fs.writeFile(
+  path.join(config, 'flowgate', 'pane.css'),
+  ':root { --fixture-user-style: pane; } .detached-heading { height: 44px; min-height: 44px; }',
+);
+await fs.writeFile(
   path.join(config, 'flowgate', 'permission-popup.css'),
   ':root { --fixture-user-style: permission; }',
 );
@@ -200,12 +208,21 @@ try {
   const sheets = (page) =>
     page.evaluate(() => Array.from(document.styleSheets, (s) => new URL(s.href).pathname));
   const main = app.windows().find((p) => p.url().endsWith('/index.html'));
-  assert.deepEqual(await sheets(main), ['/style.css', '/user-style.css']);
+  assert.deepEqual(await sheets(main), [
+    '/style.css', '/desktop-layout.css', '/user-style.css', '/user-desktop-layout.css',
+  ]);
   assert.deepEqual(await sheets(prompt), ['/permission-popup.css', '/user-permission-popup.css']);
   const appliedStyle = (page) => page.evaluate(() =>
     getComputedStyle(document.documentElement).getPropertyValue('--fixture-user-style').trim());
-  assert.equal(await appliedStyle(main), 'desktop');
+  assert.equal(await appliedStyle(main), 'main');
   assert.equal(await appliedStyle(prompt), 'permission');
+  assert.equal(await main.locator('.toolbar').evaluate((el) => getComputedStyle(el).height), '47px');
+  await main.locator('#activityView > .sidebar-grip').waitFor();
+  const sidebar = main.locator('#activityView > aside');
+  const sidebarWidth = () => sidebar.evaluate((el) => getComputedStyle(el).width);
+  assert.equal(await sidebarWidth(), '300px');
+  await main.locator('#activityView > .sidebar-grip').press('ArrowLeft');
+  assert.equal(await sidebarWidth(), '310px');
   const shot = async (name) => {
     await prompt.evaluate(() => document.fonts.ready);
     await prompt.screenshot({ path: path.join(run, name + '.png') });
@@ -372,8 +389,13 @@ try {
   const pane = await paneOpened;
   await pane.waitForURL('flowgate://app/pane.html?pane=info');
   await pane.waitForLoadState('load');
-  assert.deepEqual(await sheets(pane), ['/style.css', '/user-style.css']);
-  assert.equal(await appliedStyle(pane), 'desktop');
+  assert.deepEqual(await sheets(pane), [
+    '/style.css', '/pane.css', '/user-style.css', '/user-pane.css',
+  ]);
+  assert.equal(await appliedStyle(pane), 'pane');
+  assert.equal(
+    await pane.locator('.detached-heading').evaluate((el) => getComputedStyle(el).height), '44px',
+  );
   console.log(
     'PASS native user styles in main, pane and popup, popup layout, focus, previews, keyboard Allow Once, queue and long labels.',
     run,

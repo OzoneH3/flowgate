@@ -49,13 +49,29 @@ that window or choosing **Decide later** sends no verdict.
 Put either stylesheet in `$XDG_CONFIG_HOME/flowgate/` or, if
 `XDG_CONFIG_HOME` is unset, in `~/.config/flowgate/`.
 
-- `style.css` overrides the main window and detached panes.
+- `style.css` overrides shared styles in the main window and detached panes.
+- `desktop-layout.css` overrides the main window only.
+- `pane.css` overrides detached Info View and Traffic Chart windows only.
 - `permission-popup.css` overrides the connection permission popup.
 
 The files load after the bundled styles. You can put just the rules you want
 to change in them. Restart FlowGate to apply changes to open windows.
 Removing the files restores the bundled appearance. The files must be regular
 files up to 1 MiB each.
+
+For example, put this in `desktop-layout.css` to change the toolbar height and
+the default width of the docked sidebar. An explicitly resized sidebar keeps
+its saved width.
+
+```css
+:root {
+  --desktop-toolbar-height: 46px;
+  --desktop-sidebar-width: 32vw;
+}
+```
+
+The bundled layout files are in `electron/src/`. The window-specific user
+stylesheet loads after the shared user stylesheet.
 
 ## Boundaries and backend semantics
 
@@ -65,7 +81,7 @@ files up to 1 MiB each.
   webview. `preload.ts` exposes snapshot/subscription, decisions, rule drafts/previews/mutations, bounded preferences, and fixed evaluation/extended-monitoring operations. Sender WebContents, main frame and local origin
   are validated for every invoke; decision payloads have exact allowed keys and
   enum values. No generic filesystem, shell, socket or IPC capability is exposed.
-- The custom `flowgate://app` protocol serves fixed asset paths, the two user
+- The custom `flowgate://app` protocol serves fixed asset paths, the allowed user
   stylesheets, and application icons.
   Production CSP blocks connections, frames, objects, inline scripts and remote
   assets. Navigation, new windows and permissions are denied. Diagnostic names,

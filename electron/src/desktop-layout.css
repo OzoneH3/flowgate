@@ -1,0 +1,55 @@
+/* Main window layout. The sidebar value is also used by the tabs and footer. */
+:root {
+  --desktop-toolbar-height: 39px;
+  --desktop-tabs-height: 30px;
+  --desktop-footer-height: 26px;
+  --desktop-sidebar-width: 45.5vw;
+  --desktop-sidebar-max-width: 45vw;
+  --desktop-sidebar-grip-width: 5px;
+  --desktop-traffic-chart-height: 136px;
+  --info-width: var(--desktop-saved-sidebar-width, var(--desktop-sidebar-width));
+}
+
+#app {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.toolbar {
+  height: var(--desktop-toolbar-height);
+  min-height: var(--desktop-toolbar-height);
+}
+.tabs {
+  position: absolute;
+  top: var(--desktop-toolbar-height);
+  left: 4px;
+  width: calc(100% - min(var(--info-width), var(--desktop-sidebar-max-width)) - 16px);
+  height: var(--desktop-tabs-height);
+}
+.activity-main,
+.request-list,
+.rules-main {
+  padding-top: var(--desktop-tabs-height);
+}
+main aside {
+  max-width: min(600px, var(--desktop-sidebar-max-width));
+}
+main .sidebar-grip + aside,
+#decisionLogView > .sidebar-grip + aside {
+  width: var(--info-width);
+}
+.sidebar-grip {
+  width: var(--desktop-sidebar-grip-width);
+}
+#activityView #trafficGraph {
+  flex: 0 0 var(--desktop-traffic-chart-height);
+  height: var(--desktop-traffic-chart-height);
+}
+#app > footer {
+  height: var(--desktop-footer-height);
+  min-height: var(--desktop-footer-height);
+}
+#app:has(#activityView:not([hidden])) > footer {
+  width: calc(100% - min(var(--info-width), var(--desktop-sidebar-max-width)) - 10px);
+}

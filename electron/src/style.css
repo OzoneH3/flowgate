@@ -57,11 +57,6 @@ input {
 button:active:not(:disabled) {
   background: #176780;
 }
-#app {
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
-}
 .toolbar {
   height: 30px;
   display: flex;
@@ -491,11 +486,9 @@ pre {
 }
 main aside {
   min-width: 240px;
-  max-width: min(600px, 45vw);
   flex-shrink: 0;
 }
 .sidebar-grip {
-  width: 5px;
   flex-shrink: 0;
   cursor: col-resize;
   background: #363636;
@@ -647,8 +640,7 @@ dialog::backdrop {
 #graphStatus { max-height: 28px; line-height: 14px; overflow: auto; }
 
 
-:root { --info-width: 38vw; }
-.toolbar { height: 39px; min-height: 39px; gap: 10px; overflow: visible; padding: 4px 8px; }
+.toolbar { gap: 10px; overflow: visible; padding: 4px 8px; }
 .toolbar #search { order: 9; flex: 0 1 240px; width: 240px; min-width: 100px; height: 26px; margin-left: 4px; }
 #activitySource { width: 105px; }
 #activityView .filterbar #expand { margin-left: auto; }
@@ -663,10 +655,9 @@ dialog::backdrop {
 .menu-panel #evaluationStatus { min-width: 100%; max-height: 120px; line-height: 1.5; }
 .menu-panel .backgroundbar { display: flex; }
 .menu-panel .backgroundbar label { white-space: normal; }
-.tabs { position: absolute; z-index: 2; top: 39px; left: 4px; width: calc(100% - min(var(--info-width),45vw) - 16px); height: 30px; padding: 1px 0; border-bottom: 1px solid #444; }
+.tabs { z-index: 2; padding: 1px 0; border-bottom: 1px solid #444; }
 .tabs button { font-size: 12px; padding: 3px 9px; }
 main { gap: 3px; padding: 0 4px 4px; }
-.activity-main,.request-list,.rules-main { padding-top: 30px; }
 .filterbar { min-height: 33px; align-items: center; flex-wrap: nowrap; gap: 5px; padding: 4px 0; }
 #activityView .filterbar { height: 33px; flex: 0 0 33px; padding: 4px 0; }
 #activityView .filterbar input, #activityView .filterbar select, #activityView .filterbar button { height: 25px; min-height: 25px; padding-top: 2px; padding-bottom: 2px; }
@@ -701,7 +692,6 @@ td.up { color: #c7daa8; background: #344b20; }
 #activityView aside { overflow: hidden; }
 #activityView #trafficGraph { position: relative; flex: 0 0 126px; height: 126px; margin-top: 0; }
 #activityView > aside { margin-bottom: -26px; z-index: 3; }
-#app:has(#activityView:not([hidden])) > footer { width: calc(100% - min(var(--info-width),45vw) - 10px); }
 #app:has(#activityView:not([hidden])) > footer > span:first-child { display: none; }
 .graph-heading { display: flex; align-items: center; background: var(--fg-section); border-top: 1px solid var(--fg-border); }
 .graph-heading h2 { flex: 1; border: 0; height: 29px; white-space: nowrap; }
@@ -1205,7 +1195,7 @@ body.hide-chart #activityView #trafficGraph { display: none; }
 .toolbar-status { font-size: 12px; color: var(--fg-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
 .toolbar-separator { flex: none; color: var(--fg-muted); }
 .toolbar #search { order: 9; flex: 0 1 320px; width: 320px; min-width: 120px; height: 24px; margin-left: auto; font-size: 12px; }
-.tabs { height: 30px; padding: 2px 0 0; }
+.tabs { padding: 2px 0 0; }
 .tabs button { font-size: 12px; padding: 0 8px; height: 22px; min-height: 22px; line-height: 22px; border-radius: 0; }
 #activityView .filterbar { height: 33px; gap: 4px; padding: 4px 4px 4px 8px; }
 #activityView .filterbar #rateMode { min-width: 88px; height: 24px; min-height: 24px; padding: 0 10px; font-size: 12px; background: #2b2b2b; border: 1px solid #5a5a5a; }
@@ -1217,11 +1207,10 @@ body.hide-chart #activityView #trafficGraph { display: none; }
 .icon-button:hover:not(:disabled) { background: #3a3a3a; }
 body.preset-status #tree th:nth-child(n+5), body.preset-status #tree td:nth-child(n+5) { display: none; }
 #activityView .summary { display: none; }
-#app > footer { height: 26px; min-height: 26px; padding: 0 10px; align-items: center; background: #2d2d2d; border-top: 1px solid #3a3a3a; font-size: 12px; }
+#app > footer { padding: 0 10px; align-items: center; background: #2d2d2d; border-top: 1px solid #3a3a3a; font-size: 12px; }
 #app:has(#activityView:not([hidden])) > footer > span:first-child { display: inline; color: var(--fg-muted); }
 #app > footer #feedback { margin-left: auto; color: var(--fg-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #activityView > aside { margin-bottom: 0; }
-#activityView #trafficGraph { flex: 0 0 136px; height: 136px; }
 .graph-heading { height: 24px; min-height: 24px; }
 .graph-heading h2 { height: 24px; padding: 3px 7px; }
 .graph-heading .graph-controls { display: none; }
@@ -1306,27 +1295,6 @@ body.hide-sidebar #activityView > aside { display:none; }
 .floating-rule-status { position:fixed; z-index:45; top:110px; right:24px; width:min(450px,calc(100vw - 48px)); max-height:calc(100vh - 140px); overflow:auto; padding:8px; background:var(--fg-content); border:1px solid var(--fg-border); box-shadow:0 4px 16px #0009; }
 .floating-rule-status > header { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
 .floating-rule-status #infoRules { min-height:180px; }
-.detached-pane #app { height:100vh; display:flex; flex-direction:column; overflow:hidden; }
-.detached-heading { height:30px; min-height:30px; display:flex; align-items:center; background:var(--fg-section); border-bottom:1px solid var(--fg-border); padding:0 5px; }
-.detached-heading h2 { flex:1; margin:0; padding:3px; font-size:12px; font-weight:400; }
-.detached-heading button { border:0; background:transparent; padding:0 8px; min-height:23px; }
-.pane-presentation { display:flex; gap:12px; padding:4px 8px; border-bottom:1px solid var(--fg-border); }
-.pane-presentation select { min-height:22px; height:22px; }
-#paneMessage { margin:0 8px; font-size:11px; color:var(--fg-muted); }
-#paneMessage:empty { display:none; }
-#paneContent { flex:1; min-height:0; overflow:hidden; position:relative; display:flex; flex-direction:column; }
-#paneContent > #selectedName { margin:8px; color:var(--fg-selected); font-size:14px; font-weight:400; }
-#paneContent #selectedName img { vertical-align:middle; margin-right:5px; }
-#paneContent #selectedExecutable { padding:0 8px 8px; overflow-wrap:anywhere; }
-#paneContent .info-scroll { flex:1; overflow:auto; padding:0 8px; }
-#paneContent #info { display:grid; grid-template-columns:minmax(80px,30%) 1fr; padding:8px; border:1px solid var(--fg-border); margin:4px 0 8px; }
-#paneContent #info dt { font-weight:600; }
-#paneContent #info dd { margin:0 0 6px; overflow-wrap:anywhere; white-space:pre-wrap; }
-.pane-action-hint { margin:4px 8px; font-size:11px; color:var(--fg-muted); }
-.detached-pane #trafficCanvas { height:auto; flex:1; min-height:80px; }
-.detached-pane .graph-heading { display:none; }
-.detached-pane .graph-pause { top:30px; }
-.detached-pane .graph-sample { bottom:80px; }
 .graph-values button { padding:0; background:transparent; border:0; min-height:14px; font-size:inherit; }
 .graph-values button:hover { text-decoration:underline; background:transparent; }
 .graph-values button.series-hidden { opacity:.45; text-decoration:line-through; }
@@ -1334,10 +1302,7 @@ body.hide-sidebar #activityView > aside { display:none; }
 .graph-live:disabled { opacity:.45; color:#fff; }
 .graph-sample > div { display:flex; gap:4px; margin-top:6px; }
 .graph-sample button { min-height:22px; padding:0 10px; }
-.detached-pane .graph-live { top:59px; }
-#paneContent .info-scroll > .info-section-title { color:var(--fg-text); }
-#paneContent #info dt { color:var(--fg-text); }
-#paneContent #info > .info-technical { grid-column:1 / -1; margin-top:6px; }
+
 
 /* Quick setters are viewport anchored, including detached Info. */
 .quick-popup { position: fixed; z-index: 100; box-sizing: border-box; }
