@@ -11,7 +11,7 @@ cd "$(dirname "$0")/../.."
 run="$PWD/.workspace/tcp-initiation-$(date +%s)-$$"
 mkdir -m 700 -p "$run"
 scripts/build.sh tcp-initiation
-cp .workspace/tcp-initiation-collector "$run/collector"
+cp build/tcp-initiation-collector "$run/collector"
 go build -o "$run/flowgate" ./cmd/flowgate
 go build -o "$run/native" ./fixtures/tcp-initiation
 git rev-parse HEAD > "$run/source.sha"

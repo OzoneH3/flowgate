@@ -21,8 +21,8 @@ ui = runpy.run_path(str(LIFECYCLE / 'flowgate-ui'))
 
 class ReleaseChecks(unittest.TestCase):
     def setUp(self):
-        (ROOT / '.workspace').mkdir(exist_ok=True)
-        self.temp = tempfile.TemporaryDirectory(dir=ROOT / '.workspace')
+        (ROOT / 'build').mkdir(exist_ok=True)
+        self.temp = tempfile.TemporaryDirectory(dir=ROOT / 'build')
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
 
@@ -94,12 +94,8 @@ class ReleaseChecks(unittest.TestCase):
             'XDG_CACHE_HOME': str(self.root / 'cache'),
         }
         Path(env['XDG_RUNTIME_DIR']).mkdir()
-        # Production refuses workspace-backed session paths. The mock keeps
-        # all test directories private while preserving that check separately.
         scope = ui['launch'].__globals__
         with patch.dict(os.environ, env, clear=True), patch.dict(scope, BASE=base, stop_installed=Mock()), \
-                patch.object(Path, 'resolve', autospec=True,
-                             side_effect=lambda path, **_: release_dir if path.name == 'current' else Path('/fixture') / path.name), \
                 patch('subprocess.run', return_value=types.SimpleNamespace(returncode=1)), \
                 patch('subprocess.Popen') as start:
             start.side_effect = lambda *args, **kwargs: scope['stop_installed'].assert_called_once()

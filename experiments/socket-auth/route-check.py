@@ -11,7 +11,7 @@ import tempfile
 import time
 
 ROOT = Path('/home/flowgate-user/Apps/flowgate/.workspace/socket-auth-prototype')
-PROBE = ROOT / '.workspace/socket-auth/route-probe'
+PROBE = ROOT / 'build/socket-auth/route-probe'
 
 if '--inside' in sys.argv:
     for name in ('pid', 'net', 'mnt'):
@@ -33,7 +33,7 @@ if '--inside' in sys.argv:
 
 if os.geteuid() != 0:
     raise SystemExit('Requires sudo for isolated BPF/netfilter loading; no host deployment.')
-out = Path(tempfile.mkdtemp(prefix='route-', dir=ROOT / '.workspace/socket-auth'))
+out = Path(tempfile.mkdtemp(prefix='route-', dir=ROOT / 'build/socket-auth'))
 os.chmod(out, 0o700)
 owner = ROOT.stat()
 fds = []
@@ -56,7 +56,7 @@ rc = 1
 try:
     before = inventory()
     provenance = {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
-                  for p in [PROBE, ROOT / 'internal/socketgrant/route_kernel.c', ROOT / 'internal/socketgrant/route_kernel.h', ROOT / 'internal/socketgrant/bpf/route_gate.bpf.c', ROOT / 'internal/socketgrant/bpf/gate.h', ROOT / '.workspace/socket-route-build/route_gate.skel.h', ROOT / 'internal/socketgrant/owned_rule.c', ROOT / 'internal/socketgrant/owned_rule.h', *sorted((ROOT / 'experiments/socket-auth').glob('*'))] if p.is_file()}
+                  for p in [PROBE, ROOT / 'internal/socketgrant/route_kernel.c', ROOT / 'internal/socketgrant/route_kernel.h', ROOT / 'internal/socketgrant/bpf/route_gate.bpf.c', ROOT / 'internal/socketgrant/bpf/gate.h', ROOT / 'build/socket-route-build/route_gate.skel.h', ROOT / 'internal/socketgrant/owned_rule.c', ROOT / 'internal/socketgrant/owned_rule.h', *sorted((ROOT / 'experiments/socket-auth').glob('*'))] if p.is_file()}
     (out / 'provenance.json').write_text(json.dumps(provenance, indent=2))
     with (out / 'output.log').open('w') as log:
         p = subprocess.Popen(['unshare', '--mount', '--propagation', 'private', '--net', '--pid', '--fork',

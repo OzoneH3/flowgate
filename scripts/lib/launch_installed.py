@@ -16,7 +16,7 @@ def select_bundle(root, status):
     if not isinstance(revision, str) or len(revision) != 40 or any(c not in '0123456789abcdef' for c in revision) or build.get('modified') is not False:
         raise RuntimeError('Installed release identity is unavailable or modified; no GUI started')
     check_release_approval(root, revision)
-    bundle = root / '.workspace/automatic-zone-releases' / revision
+    bundle = root / 'build/automatic-zone-releases' / revision
     try:
         verify_bundle(bundle, 'matched-manifest.json', revision)
     except (KeyError, TypeError, AttributeError) as exc:
@@ -25,14 +25,14 @@ def select_bundle(root, status):
 
 
 def launch(root, host, dry=False):
-    workspace = root / '.workspace'
-    workspace.mkdir(exist_ok=True)
-    with (workspace / 'launch-installed.lock').open('a') as lock:
+    state = root / 'build'
+    state.mkdir(exist_ok=True)
+    with (state / 'launch-installed.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         before = host.status()
         bundle = select_bundle(root, before)
         processes = []
-        releases = (workspace / 'automatic-zone-releases').resolve()
+        releases = (state / 'automatic-zone-releases').resolve()
         for proc in pathlib.Path('/proc').iterdir():
             if not proc.name.isdigit():
                 continue

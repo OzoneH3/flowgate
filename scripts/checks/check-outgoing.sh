@@ -11,4 +11,4 @@ go test -race ./internal/daemon ./internal/policy ./internal/queue ./internal/st
 go vet ./cmd/flowgate ./internal/daemon ./internal/policy ./internal/queue ./internal/store ./internal/hostfirewall
 run="$PWD/.workspace/outgoing-check-$$"
 scripts/lab.sh python3 scripts/acceptance/host-lab.py "$run" --both --outgoing-suite
-QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-offscreen}" .workspace/desktop/outgoing-test
+QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-offscreen}" build/desktop/outgoing-test

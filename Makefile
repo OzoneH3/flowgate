@@ -2,7 +2,7 @@ SHELL := /bin/sh
 .DEFAULT_GOAL := help
 
 VERSION ?= 0.1.0-rc.7
-ARTIFACT := $(CURDIR)/.workspace/dist/flowgate-$(VERSION)-linux-x86_64.tar.gz
+ARTIFACT := $(CURDIR)/build/dist/flowgate-$(VERSION)-linux-x86_64.tar.gz
 BUNDLE ?= $(ARTIFACT)
 SHA256 ?=
 DESKTOP_FLAGS ?= --migrate-autostart
@@ -58,4 +58,4 @@ uninstall:
 	sudo /usr/local/sbin/flowgate-uninstall $(UNINSTALL_FLAGS)
 
 clean:
-	rm -rf -- .workspace/standalone-build .workspace/dist
+	rm -rf -- build/standalone-build build/dist

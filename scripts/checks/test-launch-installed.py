@@ -6,7 +6,7 @@ class LaunchTest(unittest.TestCase):
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.root=pathlib.Path(self.tmp.name);self.rev='a'*40
   (self.root/'deployment').mkdir();(self.root/'deployment/release-policy.json').write_text(json.dumps({'approved':[self.rev],'rejected':[]}))
-  self.bundle=self.root/'.workspace/automatic-zone-releases'/self.rev;self.bundle.mkdir(parents=True);(self.bundle/'launch-ui').write_text('fixture')
+  self.bundle=self.root/'build/automatic-zone-releases'/self.rev;self.bundle.mkdir(parents=True);(self.bundle/'launch-ui').write_text('fixture')
   (self.bundle/'matched-manifest.json').write_text(json.dumps({'source':self.rev,'files':{'launch-ui':hashlib.sha256(b'fixture').hexdigest()}}))
   self.host=Mock();self.host.status.return_value={'generation':'same','build':{'source':self.rev,'modified':False}}
  def run_launch(self,**kw):

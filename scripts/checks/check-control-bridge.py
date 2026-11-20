@@ -60,6 +60,6 @@ try:
     print('PASS terminal bridge: simulated auth cancellation, real namespace root snapshot start/readiness, generation-scoped Stop and confirmed cleanup')
 finally:
     if controller and controller.poll() is None:
-        subprocess.run([str(ROOT/'.workspace/flowgate'),'host-stop','--state',str(run/'state')],check=False)
+        subprocess.run([str(ROOT/'build/flowgate'),'host-stop','--state',str(run/'state')],check=False)
         controller.wait(8)
 print('EVIDENCE',run)

@@ -3,7 +3,7 @@
 // Isolated build only. The lab creates its queue chain BEFORE calling fg_open.
 #include "kernel.h"
 #include "owned_rule.h"
-#include "../../.workspace/socket-auth/gate.skel.h"
+#include "../../build/socket-auth/gate.skel.h"
 #include <bpf/bpf.h>
 #include <errno.h>
 #include <linux/netfilter.h>

@@ -66,8 +66,8 @@ say "Source HEAD: $(git rev-parse HEAD)"
 IFS= read -r rev < deployment/default-release
 case "$rev" in ''|*[!0-9a-f]*) echo "Invalid approved release pin" >&2; exit 1;; esac
 [ "${#rev}" = 40 ] || { echo "Invalid approved release SHA" >&2; exit 1; }
-bundle="$root/.workspace/automatic-zone-releases/$rev"
-backend="$root/.workspace/daily-releases/$rev"
+bundle="$root/build/automatic-zone-releases/$rev"
+backend="$root/build/daily-releases/$rev"
 say "Approved release: $rev (HEAD is not implicitly approved)"
 
 # --- bundle -------------------------------------------------------------------

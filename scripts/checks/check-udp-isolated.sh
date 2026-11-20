@@ -9,5 +9,5 @@ go build -o .workspace/udp-test-driver ./fixtures/udpdriver
 mkdir -p .workspace/udp-fixtures
 cc -Wall -Wextra -O2 fixtures/udp/fixture.c -o .workspace/udp-fixtures/alpha
 cp .workspace/udp-fixtures/alpha .workspace/udp-fixtures/beta
-if [ ! -x .workspace/udp-collector ]; then scripts/build.sh udp; fi
+if [ ! -x build/udp-collector ]; then scripts/build.sh udp; fi
 exec python3 scripts/acceptance/udp-verification.py "$@"

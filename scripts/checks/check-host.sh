@@ -9,4 +9,4 @@ go vet ./internal/daemon ./internal/policy ./internal/queue ./internal/store ./i
 run="$PWD/.workspace/host-check-$$"
 scripts/lab.sh python3 scripts/acceptance/host-lab.py "$run" --suite
 scripts/lab.sh python3 scripts/acceptance/host-lab.py "$run-bootstrap" --bootstrap-only
-.workspace/desktop/host-test
+build/desktop/host-test

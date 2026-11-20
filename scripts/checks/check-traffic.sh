@@ -10,4 +10,4 @@ cp .workspace/traffic-fixtures/a/fixture .workspace/traffic-fixtures/b/fixture
 go test -race ./internal/identity ./internal/monitor ./internal/daemon
 go vet ./...
 python3 scripts/acceptance/traffic-test.py
-QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-offscreen}" .workspace/desktop/traffic-test
+QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-offscreen}" build/desktop/traffic-test

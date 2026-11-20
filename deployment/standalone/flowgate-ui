@@ -14,7 +14,7 @@ BASE = Path('/usr/local/lib/flowgate')
 DESKTOP = Path('/usr/local/share/applications/flowgate.desktop')
 LOGIN_EXEC = b'Exec=/usr/local/bin/flowgate-ui'
 LEGACY_EXEC = re.compile(
-    rb'Exec="/[^"\r\n]+/\.workspace/automatic-zone-releases/[a-f0-9]{40}/launch-ui"'
+    rb'Exec="/[^"\r\n]+/(?:build|\.workspace)/automatic-zone-releases/[a-f0-9]{40}/launch-ui"'
     rb' --observer /run/flowgate-api/daemon.sock.monitor --control /run/flowgate-api/daemon.sock'
 )
 

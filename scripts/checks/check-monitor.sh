@@ -10,6 +10,6 @@ cp .workspace/monitor-fixtures/a/fixture .workspace/monitor-fixtures/b/fixture
 go test -race ./internal/identity ./internal/daemon ./internal/monitor
 go vet ./...
 python3 scripts/acceptance/monitor-test.py
-QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-offscreen}" .workspace/desktop/monitor-test
+QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-offscreen}" build/desktop/monitor-test
 # Small real Allow-to-receiver regression for the shared API/window changes.
-QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-offscreen}" .workspace/desktop/desktop-test allowOnce
+QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-offscreen}" build/desktop/desktop-test allowOnce

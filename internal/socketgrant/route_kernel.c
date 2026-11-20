@@ -6,7 +6,7 @@
 #include "route_kernel.h"
 #include "owned_rule.h"
 #include "bpf/gate.h"
-#include "../../.workspace/socket-route-build/route_gate.skel.h"
+#include "../../build/socket-route-build/route_gate.skel.h"
 #include <bpf/bpf.h>
 #include <linux/netfilter.h>
 #include <linux/netfilter/nf_tables.h>

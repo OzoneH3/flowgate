@@ -14,7 +14,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = ROOT / 'deployment/standalone'
-BUILD = ROOT / '.workspace/standalone-build'
+BUILD = ROOT / 'build/standalone-build'
 
 
 def digest(path):
@@ -45,10 +45,10 @@ def pack(version, output):
         (gui / 'electron').mkdir(parents=True)
         files = {
             'flowgate': BUILD / 'flowgate',
-            'holder-iterator': ROOT / '.workspace/holder-iterator',
-            'tcp-initiation': ROOT / '.workspace/tcp-initiation-collector',
-            'udp-collector': ROOT / '.workspace/udp-collector',
-            'wine-owner-observer.exe': ROOT / '.workspace/windows/table-probe.exe',
+            'holder-iterator': ROOT / 'build/holder-iterator',
+            'tcp-initiation': ROOT / 'build/tcp-initiation-collector',
+            'udp-collector': ROOT / 'build/udp-collector',
+            'wine-owner-observer.exe': ROOT / 'build/windows/table-probe.exe',
             'launch': ROOT / 'deployment/launch',
             'control.py': ROOT / 'deployment/control.py',
             'recover.py': HERE / 'recover',

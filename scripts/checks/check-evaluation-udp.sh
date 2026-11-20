@@ -7,13 +7,13 @@ cd "$(dirname "$0")/../.."
 sudo_n=
 case "${1:-}" in --noninteractive) sudo_n=-n;; '') ;; *) echo 'usage: scripts/checks/check-evaluation-udp.sh [--noninteractive]' >&2; exit 2;; esac
 go build -o .workspace/flowgate-eval-udp ./cmd/flowgate
-for f in .workspace/udp-collector .workspace/udp-fixtures/alpha; do
+for f in build/udp-collector .workspace/udp-fixtures/alpha; do
  [ -x "$f" ] || { echo "Missing $f; build with scripts/build.sh udp or cc -O2 fixtures/udp/fixture.c -o .workspace/udp-fixtures/alpha" >&2; exit 1; }
 done
 run="$PWD/.workspace/evaluation-udp-$(date +%s)-$$"
 mkdir -m 755 "$run"
 git rev-parse HEAD >"$run/source.sha"
-sha256sum .workspace/flowgate-eval-udp .workspace/udp-collector .workspace/udp-fixtures/alpha >"$run/artifacts.sha256"
+sha256sum .workspace/flowgate-eval-udp build/udp-collector .workspace/udp-fixtures/alpha >"$run/artifacts.sha256"
 echo "EVIDENCE $run"
 # Word splitting is intentional for the fixed optional sudo flag only.
 exec sudo $sudo_n unshare --net --pid --mount --fork --mount-proc --propagation private \

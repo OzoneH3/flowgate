@@ -14,8 +14,8 @@ scope = release['install'].__globals__
 
 class StateFreshness(unittest.TestCase):
     def setUp(self):
-        (ROOT / '.workspace').mkdir(exist_ok=True)
-        temp = tempfile.TemporaryDirectory(dir=ROOT / '.workspace')
+        (ROOT / 'build').mkdir(exist_ok=True)
+        temp = tempfile.TemporaryDirectory(dir=ROOT / 'build')
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
         self.payload = self.root / 'payload'

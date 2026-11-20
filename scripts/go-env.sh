@@ -1,3 +1,3 @@
-# Source from repository root. All build/cache files stay in the workspace.
-export GOCACHE="$PWD/.workspace/go-cache" GOPATH="$PWD/.workspace/go" GOTMPDIR="$PWD/.workspace/tmp" TMPDIR="$PWD/.workspace/tmp"
+# Source from repository root. All build/cache files stay under build/.
+export GOCACHE="$PWD/build/go-cache" GOPATH="$PWD/build/go" GOTMPDIR="$PWD/build/tmp" TMPDIR="$PWD/build/tmp"
 mkdir -p "$GOCACHE" "$GOPATH" "$GOTMPDIR"

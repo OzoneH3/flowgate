@@ -22,7 +22,7 @@ def interrupted(*_):
 signal.signal(signal.SIGTERM, interrupted)
 try:
     with (run/'observer.log').open('w') as log:
-        observer = subprocess.Popen([str(ROOT/'.workspace/flowgate'),'observe','--socket',str(run/'control.sock'),'--interval',args.interval],stdout=log,stderr=log)
+        observer = subprocess.Popen([str(ROOT/'build/flowgate'),'observe','--socket',str(run/'control.sock'),'--interval',args.interval],stdout=log,stderr=log)
     end=time.monotonic()+8
     while not (run/'control.sock').exists():
         if observer.poll() is not None: raise RuntimeError((run/'observer.log').read_text())
@@ -34,7 +34,7 @@ try:
     print('FlowGate host monitor — read-only. No firewall rules or synthetic traffic.',flush=True)
     print('Private session:',run,flush=True)
     print('Close the window or press Ctrl+C here to stop this observer. Other instances are independent.',flush=True)
-    gui=subprocess.Popen([str(ROOT/'.workspace/desktop/flowgate-desktop'),'--monitor-socket',str(run/'control.sock'),'--control-socket','/run/flowgate-api/control.sock'],env=env)
+    gui=subprocess.Popen([str(ROOT/'build/desktop/flowgate-desktop'),'--monitor-socket',str(run/'control.sock'),'--control-socket','/run/flowgate-api/control.sock'],env=env)
     gui.wait()
 except KeyboardInterrupt:
     pass

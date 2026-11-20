@@ -8,4 +8,4 @@ go test -race ./internal/daemon ./internal/policy
 go vet ./...
 # Explicitly choose wayland (with WAYLAND_DISPLAY) or offscreen at invocation.
 export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-offscreen}"
-exec .workspace/desktop/desktop-test
+exec build/desktop/desktop-test

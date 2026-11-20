@@ -1,6 +1,6 @@
 # Standalone FlowGate release candidate
 
-The source build uses GNU Make. Installation uses an exact offline archive. The daemon, desktop, helpers, upgrade and rescue tools run without the source checkout or .workspace. The initial release candidate targets Linux x86_64 with systemd. It uses the Electron desktop, including the existing Plasma Wayland integrations. The Qt client and lab tools are outside the package.
+The source build uses GNU Make. Installation uses an exact offline archive. The daemon, desktop, helpers, upgrade and rescue tools run without the source checkout. The initial release candidate targets Linux x86_64 with systemd. It uses the Electron desktop, including the existing Plasma Wayland integrations. The Qt client and lab tools are outside the package.
 
 Build prerequisites are Go and a C toolchain, Clang with BPF support, bpftool, libbpf, libmnl and libnftnl development files, a kernel BTF file, Wine development headers and import libraries, Python 3, Node and the Electron dependencies in the lockfile. The installed host needs systemd, Python 3, iproute2, nftables, runuser, the dynamically linked system libraries and the kernel features checked by FlowGate. BPF, traffic collector and Wine features still depend on their individual runtime checks.
 
@@ -11,7 +11,7 @@ desktop and native components, and runs the release checks.
 make package
 ```
 
-Build from a clean committed revision. The build and package targets write to .workspace. The archive and the offline bootstrap land in .workspace/dist. Copy them to a convenient location. Distribute their SHA256 digests through the trusted release channel. Check the bootstrap itself against the trusted digest before executing it as root. The archive SHA256 is an argument and the bootstrap verifies privately staged bytes before parsing the payload or running any packaged code.
+Build from a clean committed revision. The build and package targets write to build/. The archive and the offline bootstrap land in build/dist. Copy them to a convenient location. Distribute their SHA256 digests through the trusted release channel. Check the bootstrap itself against the trusted digest before executing it as root. The archive SHA256 is an argument and the bootstrap verifies privately staged bytes before parsing the payload or running any packaged code.
 
 To build and upgrade the installed daemon and desktop on this machine in one command:
 
@@ -19,7 +19,7 @@ To build and upgrade the installed daemon and desktop on this machine in one com
 make update
 ```
 
-This builds the current committed checkout in .workspace, verifies the archive against its checksum receipt, then runs preflight and install in order. Run it as the intended desktop user. Preflight and install invoke sudo. From a desktop session, the command then closes the old installed GUI and starts the version matching the new daemon from /usr/local/lib/flowgate.
+This builds the current committed checkout in build/, verifies the archive against its checksum receipt, then runs preflight and install in order. Run it as the intended desktop user. Preflight and install invoke sudo. From a desktop session, the command then closes the old installed GUI and starts the version matching the new daemon from /usr/local/lib/flowgate.
 
 ```sh
 make preflight BUNDLE=/absolute/path/to/flowgate.tar.gz SHA256=<trusted-sha256>

@@ -11,8 +11,8 @@ scripts/build.sh desktop
 printf '%s\n' 'Explicit incoming-first HOST enforcement evaluation, automatic stop after 5 minutes.' \
  'New incoming TCP/UDP may wait or be blocked. Existing tracked connections are preserved; outgoing is allowed.' \
  'The GUI stays unprivileged. In another terminal run:' \
- '.workspace/desktop/flowgate-desktop --socket /run/flowgate-api/control.sock' \
- 'Stop: sudo .workspace/flowgate host-stop --state /run/flowgate' \
- 'Recovery after daemon loss: sudo .workspace/flowgate host-recover --state /run/flowgate'
-exec sudo "$PWD/.workspace/flowgate" host-session --action start \
+ 'build/desktop/flowgate-desktop --socket /run/flowgate-api/control.sock' \
+ 'Stop: sudo build/flowgate host-stop --state /run/flowgate' \
+ 'Recovery after daemon loss: sudo build/flowgate host-recover --state /run/flowgate'
+exec sudo "$PWD/build/flowgate" host-session --action start \
   --uid "$(id -u)" --duration 5m --timeout 30s

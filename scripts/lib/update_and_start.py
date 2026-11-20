@@ -504,7 +504,7 @@ class Host:
         # Only this user's released FlowGate main processes. Snapshot start time
         # and recheck before signalling so a reused PID is never targeted.
         processes = []
-        releases = (root / '.workspace/automatic-zone-releases').resolve()
+        releases = (root / 'build/automatic-zone-releases').resolve()
         for proc in pathlib.Path('/proc').iterdir():
             if not proc.name.isdigit():
                 continue
@@ -554,7 +554,7 @@ class Host:
         environment = {k: v for k, v in os.environ.items() if k not in SESSION_KEYS}
         environment.update(desktop)
         say('Launching GUI on Wayland session ' + desktop['WAYLAND_DISPLAY'])
-        pid = supervise_gui([launch, '--observer', '/run/flowgate-api/daemon.sock.monitor', '--control', '/run/flowgate-api/daemon.sock'], environment, bundle / '.workspace/gui-launch.log')
+        pid = supervise_gui([launch, '--observer', '/run/flowgate-api/daemon.sock.monitor', '--control', '/run/flowgate-api/daemon.sock'], environment, root / 'build' / 'gui-launch.log')
         say('GUI started (PID ' + str(pid) + '); main window reported loaded')
 
 
@@ -658,8 +658,8 @@ def update(host, root, revision, *, dry=False, gui=True, profile="preserve", win
     check_release_approval(root, revision)
     if autostart and not gui:
         raise ValueError("--autostart requires GUI switching")
-    bundle = root / '.workspace/automatic-zone-releases' / revision
-    backend = root / '.workspace/daily-releases' / revision
+    bundle = root / 'build/automatic-zone-releases' / revision
+    backend = root / 'build/daily-releases' / revision
     manifest = None
     if not dry or (bundle / 'matched-manifest.json').exists():
         verify_bundle(bundle, 'matched-manifest.json', revision)

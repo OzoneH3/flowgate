@@ -6,12 +6,12 @@ cd "$(dirname "$0")/.."
 export GOMAXPROCS=2 GOFLAGS=-p=1 PYTHONDONTWRITEBYTECODE=1
 revision=$(git rev-parse HEAD)
 [ -z "$(git status --porcelain)" ] || { echo 'Commit tracked changes first' >&2; exit 1; }
-out="$PWD/.workspace/experimental-upload-bundles/$revision"
+out="$PWD/build/experimental-upload-bundles/$revision"
 [ ! -e "$out" ] || { echo 'Bundle already exists' >&2; exit 1; }
 mkdir -p "$out/backend" "$out/electron"
 scripts/build.sh holder-iterator
-digest=$(sha256sum .workspace/holder-iterator | cut -d " " -f1)
-cp .workspace/holder-iterator "$out/backend/holder-iterator"
+digest=$(sha256sum build/holder-iterator | cut -d " " -f1)
+cp build/holder-iterator "$out/backend/holder-iterator"
 go build -trimpath -ldflags "-X main.sourceRevision=$revision -X main.holderIteratorSHA256=$digest" -o "$out/backend/flowgate" ./cmd/flowgate
 experimental/upload-shaper/build.sh "$out/helpers"
 npm --prefix electron run build
@@ -26,8 +26,7 @@ cat > "$out/launch-ui" <<'EOF'
 set -eu
 : "${FLOWGATE_ELECTRON:?Set absolute path to trusted Electron executable}"
 [ "$#" -eq 2 ] || { echo 'Usage: launch-ui MONITOR_SOCKET CONTROL_SOCKET' >&2; exit 2; }
-mkdir -p "$(dirname "$0")/.workspace/tmp"
-export TMPDIR="$(dirname "$0")/.workspace/tmp"
+
 exec "$FLOWGATE_ELECTRON" --ozone-platform=wayland "$(dirname "$0")/electron" --observer "$1" --control "$2"
 EOF
 chmod +x "$out/launch-ui"

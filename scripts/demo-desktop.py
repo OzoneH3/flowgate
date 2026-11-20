@@ -34,7 +34,7 @@ try:
     if not env.get('WAYLAND_DISPLAY') and not env.get('DISPLAY') and Path('/run/user/'+str(os.getuid())+'/wayland-0').exists():
         env['WAYLAND_DISPLAY']='wayland-0'
         env['QT_QPA_PLATFORM']='wayland'
-    gui = subprocess.Popen([str(ROOT/'.workspace/desktop/flowgate-desktop'),'--socket',str(run/'control.sock')],env=env)
+    gui = subprocess.Popen([str(ROOT/'build/desktop/flowgate-desktop'),'--socket',str(run/'control.sock')],env=env)
     print('\nFlowGate isolated lab:',run,flush=True)
     print('Only workspace native UDP traffic is controlled. Normal host networking is unchanged.')
     print('Each attempt sends ONE datagram. Allow should add RECEIVED to receiver-41001.log.')

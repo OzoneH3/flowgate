@@ -66,8 +66,8 @@ class Preparation(unittest.TestCase):
             path = tools / name; path.write_text(TOOL); path.chmod(0o755)
         self.log = self.root / 'tool-log.jsonl'
         self.env = dict(os.environ, PATH=str(tools) + ':' + os.environ['PATH'], TOOL_LOG=str(self.log), PYTHONDONTWRITEBYTECODE='1')
-        self.backend = self.root / '.workspace/daily-releases' / REVISION
-        self.gui = self.root / '.workspace/automatic-zone-releases' / REVISION
+        self.backend = self.root / 'build/daily-releases' / REVISION
+        self.gui = self.root / 'build/automatic-zone-releases' / REVISION
     def tearDown(self): self.temp.cleanup()
     def prepare(self, *args, **env):
         return subprocess.run(['sh', 'scripts/prepare-release.sh', *args], cwd=self.root, env=dict(self.env, **env), text=True, capture_output=True)
@@ -96,6 +96,7 @@ class Preparation(unittest.TestCase):
                    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div)
                    and isinstance(node.left, ast.Name) and node.left.id == 'here'
                    and isinstance(node.right, ast.Constant) and isinstance(node.right.value, str)}
+        helpers.discard('standalone-release.json')  # Only the standalone archive includes this marker.
         self.assertTrue(helpers <= set(manifest['files']), helpers - set(manifest['files']))
         self.assertIn('wine-owner-observer.exe', helpers)
         self.assertNotIn('install.py', manifest['files'])

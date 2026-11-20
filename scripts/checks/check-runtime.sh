@@ -6,7 +6,7 @@ cd "$(dirname "$0")/../.."
 . ./scripts/go-env.sh
 go test -race ./internal/...
 go vet ./...
-go build -o .workspace/flowgate ./cmd/flowgate
+go build -o build/flowgate ./cmd/flowgate
 scripts/build.sh windows
 scripts/build.sh wine-table
 # Sequential: all three tests use the private run socket; each creates a namespace.

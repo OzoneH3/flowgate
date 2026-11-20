@@ -10,14 +10,14 @@ case "${1:-}" in
  *) echo 'Usage: scripts/prepare-release.sh [--backend-only]' >&2; exit 2 ;;
 esac
 . ./scripts/go-env.sh
-export PYTHONDONTWRITEBYTECODE=1 npm_config_cache="$PWD/.workspace/npm-cache" XDG_CACHE_HOME="$PWD/.workspace/cache"
+export PYTHONDONTWRITEBYTECODE=1 npm_config_cache="$PWD/build/npm-cache" XDG_CACHE_HOME="$PWD/build/cache"
 test "$(git branch --show-current)" = master
 git diff --quiet
 git diff --cached --quiet
 revision=$(git rev-parse HEAD)
-backend="$PWD/.workspace/daily-releases/$revision"
-bundle="$PWD/.workspace/automatic-zone-releases/$revision"
-logs="$PWD/.workspace/build-logs/$revision"
+backend="$PWD/build/daily-releases/$revision"
+bundle="$PWD/build/automatic-zone-releases/$revision"
+logs="$PWD/build/build-logs/$revision"
 steps=10
 [ "$backend_only" -eq 0 ] || steps=8
 build_step() {
@@ -47,18 +47,18 @@ else
  mkdir -p "$backend"
 build_step 1 "Build daemon and holder iterator" "$logs/build-daemon.log" sh -c '
  scripts/build.sh holder-iterator
- python3 scripts/build-matched-daemon.py --revision "$1" --loader .workspace/holder-iterator --output "$2/flowgate"
- cp .workspace/holder-iterator "$2/holder-iterator"
+ python3 scripts/build-matched-daemon.py --revision "$1" --loader build/holder-iterator --output "$2/flowgate"
+ cp build/holder-iterator "$2/holder-iterator"
 ' sh "$revision" "$backend"
 build_step 2 "Build receiver fixtures" "$logs/build-fixtures.log" go build -trimpath -o "$backend/native" ./fixtures/process-rule
 cp "$backend/native" "$backend/native-other"
 build_step 3 "Build Wine observer" "$logs/build-wine.log" scripts/build.sh wine-table
-cp .workspace/windows/table-probe.exe "$backend/wine-owner-observer.exe"
+cp build/windows/table-probe.exe "$backend/wine-owner-observer.exe"
 # Build collectors from this checkout, rather than accepting workspace leftovers.
 build_step 4 "Build TCP collector" "$logs/build-tcp.log" scripts/build.sh tcp-initiation
 build_step 5 "Build UDP collector" "$logs/build-udp.log" scripts/build.sh udp
-cp .workspace/tcp-initiation-collector "$backend/tcp-initiation"
-cp .workspace/udp-collector "$backend/udp-collector"
+cp build/tcp-initiation-collector "$backend/tcp-initiation"
+cp build/udp-collector "$backend/udp-collector"
 # Current source checks. These do not claim live-kernel collector acceptance.
 ordinary_peer_tests='^(TestDecisionLogAPIOnReadOnlyEndpoint|TestObservedCreationAuthorizationAndPersistence|TestTrafficAPIPermissionsAndProjection)$'
 # Kernel fixtures share one lab namespace; serialize packages even if GOFLAGS
@@ -92,8 +92,8 @@ fi
 test ! -e "$bundle" || { echo "Incomplete GUI bundle exists; inspect it before rebuilding: $bundle" >&2; exit 1; }
 build_step 9 "Build Electron UI" "$logs/build-electron.log" npm --prefix electron run build
 printf '[#########-] 10/10 Package matched release — running\n'
-mkdir -p "$bundle/electron" "$bundle/.workspace/cache" "$bundle/docs" "$bundle/evidence"
-cp -a ".workspace/daily-releases/$revision" "$bundle/backend"
+mkdir -p "$bundle/electron" "$bundle/docs" "$bundle/evidence"
+cp -a "build/daily-releases/$revision" "$bundle/backend"
 cp -a electron/dist "$bundle/electron/dist"
 cp electron/package.json "$bundle/electron/package.json"
 cp -a electron/node_modules/electron/dist "$bundle/runtime"
@@ -106,10 +106,11 @@ cat > "$bundle/launch-ui" <<'LAUNCH'
 #!/bin/sh
 set -eu
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-export TMPDIR="$here/.workspace" XDG_CACHE_HOME="$here/.workspace/cache"
+cache="${XDG_CACHE_HOME:-$HOME/.cache}/flowgate"
+mkdir -p "$cache"
 # Private, runtime-versioned Fontconfig cache for Electron's bundled Fontconfig
 # (keeps system fonts/rules; respects a user FONTCONFIG_FILE/FONTCONFIG_PATH).
-fontconfig=$(python3 "$here/fontconfig_isolation.py" "$XDG_CACHE_HOME" "$here/runtime" || true)
+fontconfig=$(python3 "$here/fontconfig_isolation.py" "$cache" "$here/runtime" || true)
 if [ -n "$fontconfig" ]; then export FONTCONFIG_FILE="$fontconfig"; fi
 exec "$here/runtime/electron" --ozone-platform=wayland "$here/electron" "$@"
 LAUNCH

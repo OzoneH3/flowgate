@@ -40,7 +40,7 @@ class BackendSelection(unittest.TestCase):
    self.assertEqual(code,0);self.assertEqual(calls[1][2],'/run/flowgate/controller')
  def test_rejects_arbitrary_executables_before_auth(self):
   for script in ['desktop-control.py','traffic-control.py']:
-   for backend in ['../other','/usr/bin/sh',str(ROOT/'.workspace/electron-backend'),'unknown']:
+   for backend in ['../other','/usr/bin/sh',str(ROOT/'build/electron-backend'),'unknown']:
     code,calls=self.invoke(script,['--backend',backend])
     self.assertEqual(code,2);self.assertEqual(calls,[])
 if __name__=='__main__':unittest.main()

@@ -41,7 +41,7 @@ class SourceStage(unittest.TestCase):
         (self.root / 'deployment').mkdir()
         (self.root / 'deployment/default-release').write_text('f' * 40 + '\n')
         for parent, name in [('automatic-zone-releases', 'matched-manifest.json'), ('daily-releases', 'manifest.json')]:
-            d = self.root / '.workspace' / parent / ('f' * 40)
+            d = self.root / 'build' / parent / ('f' * 40)
             d.mkdir(parents=True)
             (d / name).write_text('{}')
         self.bin = self.root / 'bin'
@@ -120,7 +120,7 @@ esac
         self.assertIn('--revision ' + 'f' * 40, self.calls())
         self.assertNotIn('--revision revision', self.calls())
         self.log.unlink()
-        (self.root / '.workspace/daily-releases' / ('f' * 40) / 'manifest.json').unlink()
+        (self.root / 'build/daily-releases' / ('f' * 40) / 'manifest.json').unlink()
         r = self.run_source('--local')
         self.assertNotEqual(r.returncode, 0)
         self.assertNotIn('PREPARE', self.calls())
@@ -209,7 +209,7 @@ class Update(unittest.TestCase):
         environment.start()
         self.addCleanup(environment.stop)
         for parent, filename in [('automatic-zone-releases', 'matched-manifest.json'), ('daily-releases', 'manifest.json')]:
-            directory = self.root / '.workspace' / parent / 'new'
+            directory = self.root / 'build' / parent / 'new'
             directory.mkdir(parents=True)
             (directory / 'flowgate').write_bytes(b'backend')
             (directory / filename).write_text(json.dumps(dict(source='new', files={'flowgate': hashlib.sha256(b'backend').hexdigest()})))
@@ -252,7 +252,7 @@ class Update(unittest.TestCase):
         h = FakeHost()
         with patch.object(m, 'configure_login_start') as configured:
             self.run_update(h, autostart=True)
-            configured.assert_called_once_with(self.root / '.workspace/automatic-zone-releases/new', enable=True)
+            configured.assert_called_once_with(self.root / 'build/automatic-zone-releases/new', enable=True)
             self.assertEqual(h.calls[-1], 'gui')
         with patch.object(h, 'switch_gui', side_effect=m.GuiNotSwitched('failed')), patch.object(m, 'configure_login_start') as configured:
             with self.assertRaises(m.GuiNotSwitched):
@@ -460,7 +460,7 @@ class Update(unittest.TestCase):
         self.assertEqual(h.calls, ['status'])
     def test_dry_run_missing_manifest_and_null_build(self):
         import shutil
-        shutil.rmtree(self.root / '.workspace')
+        shutil.rmtree(self.root / 'build')
         h = FakeHost(); h.current['build'] = None
         self.run_update(h, dry=True)
         self.assertEqual(h.calls, ['status'])
@@ -471,7 +471,7 @@ class Update(unittest.TestCase):
         self.assertEqual(h.calls, ['status'])
     def test_gui_switch_signals_only_released_host_gui_through_pidfd(self):
         proc = self.root / '12345'; proc.mkdir()
-        gui = self.root / '.workspace/automatic-zone-releases/old'
+        gui = self.root / 'build/automatic-zone-releases/old'
         args = [str(gui / 'runtime/electron'), '--ozone-platform=wayland', str(gui / 'electron'), '--observer', '/run/flowgate-api/daemon.sock.monitor', '--control', '/run/flowgate-api/daemon.sock']
         # Electron's rewritten main-process cmdline: one string, switches first.
         rewritten = [args[0], '--ozone-platform=wayland', '--observer', '--control', str(gui / 'electron'), '/run/flowgate-api/daemon.sock.monitor', '/run/flowgate-api/daemon.sock']
@@ -503,7 +503,7 @@ class Update(unittest.TestCase):
         self.assertEqual((env['WAYLAND_DISPLAY'], env['XDG_RUNTIME_DIR'], env['KEEP']), ('gui-display', '/gui-runtime', '1'))
     def test_recycled_pid_during_evidence_read_is_never_signalled(self):
         proc = self.root / '12345'; proc.mkdir()
-        gui = self.root / '.workspace/automatic-zone-releases/old'
+        gui = self.root / 'build/automatic-zone-releases/old'
         (proc / 'cmdline').write_bytes(('\0'.join([str(gui / 'runtime/electron'), '--ozone-platform=wayland', str(gui / 'electron'), '--observer', '/run/flowgate-api/daemon.sock.monitor', '--control', '/run/flowgate-api/daemon.sock']) + '\0').encode())
         (proc / 'exe').symlink_to(gui / 'runtime/electron')
         original = pathlib.Path.iterdir
@@ -520,7 +520,7 @@ class Update(unittest.TestCase):
         self.assertIn('no GUI started', str(raised.exception))
     def test_unverifiable_desktop_keeps_old_gui_and_launches_nothing(self):
         proc = self.root / '12345'; proc.mkdir()
-        gui = self.root / '.workspace/automatic-zone-releases/old'
+        gui = self.root / 'build/automatic-zone-releases/old'
         args = [str(gui / 'runtime/electron'), '--ozone-platform=wayland', str(gui / 'electron'), '--observer', '/run/flowgate-api/daemon.sock.monitor', '--control', '/run/flowgate-api/daemon.sock']
         (proc / 'cmdline').write_bytes(('\0'.join(args) + '\0').encode())
         (proc / 'exe').symlink_to(gui / 'runtime/electron')
@@ -550,7 +550,7 @@ class Update(unittest.TestCase):
         self.assertIn('Backend update verified; GUI not switched', err.getvalue())
         self.assertNotIn('Update failed', err.getvalue())
     def test_tampered_bundle_fails_before_sudo_or_stop(self):
-        (self.root / '.workspace/daily-releases/new/flowgate').write_bytes(b'tampered')
+        (self.root / 'build/daily-releases/new/flowgate').write_bytes(b'tampered')
         h = FakeHost()
         with self.assertRaises(RuntimeError): self.run_update(h)
         self.assertEqual(h.calls, [])
@@ -575,7 +575,7 @@ class ReleasedGui(unittest.TestCase):
         self.base = pathlib.Path(self.tmp.name)
         self.n = 0
     def proc(self, root, cmdline, exe=None):
-        releases = root / '.workspace/automatic-zone-releases'
+        releases = root / 'build/automatic-zone-releases'
         gui = releases / 'old'
         self.n += 1
         p = self.base / ('proc' + str(self.n)); p.mkdir()

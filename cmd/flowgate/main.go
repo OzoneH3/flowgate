@@ -84,7 +84,7 @@ func main() {
 	case "runtime-discover":
 		fs := flag.NewFlagSet("runtime-discover", flag.ExitOnError)
 		bins := fs.String("runtime-bins", "/usr/bin", "comma-separated explicitly trusted runtime bin directories")
-		helper := fs.String("helper", ".workspace/windows/table-probe.exe", "observer image to detect")
+		helper := fs.String("helper", "build/windows/table-probe.exe", "observer image to detect")
 		fs.Parse(os.Args[2:])
 		sessions, err := identity.DiscoverRuntimes(strings.Split(*bins, ","), *helper)
 		if err != nil {
@@ -197,7 +197,7 @@ func serve() error {
 	scratch := fs.String("observer-scratch", "", "private workspace observer scratch directory")
 	prefixes := fs.String("attach-prefixes", "", "comma-separated already-running workspace prefixes")
 	bins := fs.String("runtime-bins", "/usr/bin", "comma-separated trusted runtime bin directories")
-	helper := fs.String("wine-helper", ".workspace/windows/table-probe.exe", "workspace PE census helper")
+	helper := fs.String("wine-helper", "build/windows/table-probe.exe", "local PE census helper")
 	policyDB := fs.String("policy-store", "", "optional private workspace SQLite rule store for isolated acceptance")
 	rulepath := fs.String("rules", "", "JSON rule array")
 	decisionPath := fs.String("decision-log", "", "optional absolute decision log path in a private 0700 directory")

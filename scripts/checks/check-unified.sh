@@ -8,4 +8,4 @@ scripts/build.sh desktop
 go test -race ./internal/daemon ./internal/hostfirewall ./internal/monitor
 go vet ./cmd/flowgate ./internal/daemon ./internal/hostfirewall ./internal/monitor
 scripts/lab.sh python3 scripts/checks/check-control-bridge.py
-QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-offscreen}" .workspace/desktop/unified-test
+QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-offscreen}" build/desktop/unified-test

@@ -22,11 +22,11 @@ for package in identity daemon hostfirewall; do
 done
 (cd electron && npm run build && npm test)
 scripts/build.sh desktop
-QT_QPA_PLATFORM=offscreen .workspace/desktop/desktop-test
-QT_QPA_PLATFORM=offscreen .workspace/desktop/snapshot-test
+QT_QPA_PLATFORM=offscreen build/desktop/desktop-test
+QT_QPA_PLATFORM=offscreen build/desktop/snapshot-test
 # These require separate namespace/host fixtures; never report them as covered.
 echo 'Additional opt-in coverage: --wine; subordinate-ID user namespace coverage (FLOWGATE_USERNS_SCRATCH) requires a separate UID-mapping fixture.'
-go build -o .workspace/flowgate ./cmd/flowgate
+go build -o build/flowgate ./cmd/flowgate
 go build -o .workspace/native-a ./fixtures/native
 cp .workspace/native-a .workspace/native-b
 scripts/lab.sh python3 scripts/acceptance/protection-refusal.py

@@ -26,12 +26,12 @@ if [ -z "$reuse" ]; then
  cc -Wall -Wextra -O2 fixtures/udp/fixture.c -o .workspace/udp-fixtures/alpha
  cp .workspace/udp-fixtures/alpha .workspace/udp-fixtures/beta
 fi
-for f in .workspace/flowgate-udp-daemon .workspace/udp-collector .workspace/udp-fixtures/alpha; do
+for f in .workspace/flowgate-udp-daemon build/udp-collector .workspace/udp-fixtures/alpha; do
  [ -x "$f" ] || { echo "missing $f; rerun without --reuse-build" >&2; exit 1; }
 done
 run="$PWD/.workspace/daemon-udp-$(date +%s)-$$"
 mkdir -m 755 "$run"
-sha256sum .workspace/flowgate-udp-daemon .workspace/udp-collector .workspace/udp-fixtures/alpha >"$run/artifacts.sha256"
+sha256sum .workspace/flowgate-udp-daemon build/udp-collector .workspace/udp-fixtures/alpha >"$run/artifacts.sha256"
 if [ -n "$kernel" ]; then
  # shellcheck disable=SC2086
  exec sudo $sudo_n unshare --net --pid --mount --fork --mount-proc --propagation private \

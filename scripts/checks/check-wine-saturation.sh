@@ -33,6 +33,6 @@ printf 'Evidence directory: %s\n' "$run"
 exec unshare --user --map-current-user --keep-caps --net --pid --fork --mount-proc \
  sh -c 'set -e; ip link set lo up; exec "$@"' sh \
  python3 scripts/acceptance/wine-saturation.py \
- --binary "$run/flowgate" --helper "$PWD/.workspace/windows/table-probe.exe" --run "$run/evidence" \
+ --binary "$run/flowgate" --helper "$PWD/build/windows/table-probe.exe" --run "$run/evidence" \
  --proton "$run/proton" --data "$run/data" --prefix-source "$prefix" --pe "$run/saturation.exe" --lwp "$lwp" \
  ${FLOWGATE_SATURATION_ARGS:-}
