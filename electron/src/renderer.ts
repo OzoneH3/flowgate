@@ -26,7 +26,7 @@ import {
   type RememberFields,
 } from './decision-remember';
 import { askSource, awaiting, groupKey, requestGroups } from './automatic-prompts';
-import { permissionTarget, scopeZoneText } from './connection-presentation';
+import { compactUDPOnce, permissionTarget, scopeZoneText } from './connection-presentation';
 import {
   IDENTITY_UNVERIFIABLE_TEXT,
   identityUnverifiable,
@@ -2682,6 +2682,13 @@ function updateDecisions() {
     liveLeaseUnavailable = liveLeaseReason(e, state.control.capabilities),
     leaseDone = !!e && endedLeaseDone.has(e.id),
     unverifiable = e ? ruleUnverifiable.get(e.id) : undefined;
+  const onceCopy = promptID && e?.state === 'awaiting-decision' && !ended && !e.attempt &&
+    chosenScope === 'once' && !remembering && !temporary ? compactUDPOnce(e) : undefined;
+  const onceNote = $('udpOnceNote');
+  if (onceNote) {
+    onceNote.textContent = onceCopy?.summary ?? '';
+    onceNote.hidden = !onceCopy;
+  }
   // Live Remember: a review that no longer matches (zones, fields, expiry duration
   // changed) or that expired is renewed automatically, at most every 2 s.
   if (!ended && remembering && actionable(e) && !reviewChecking && !reviewMessage) {
@@ -2747,13 +2754,13 @@ function updateDecisions() {
         (reviewFor !== reviewKey() ||
           !review ||
           Date.parse(review.expires_at) <= now));
-    b.title = needsDecisionReview()
+    b.title = onceCopy?.[id] ?? (needsDecisionReview()
       ? rememberBlockReason(e, now) || review?.summary || review?.scope_preview || 'Review required'
       : temporary
         ? liveLeaseUnavailable || FOR_A_WHILE_TOOLTIP
         : rememberMode()
           ? (e?.scope_previews.once || 'Once: this connection attempt only') + ' · creates no rule'
-          : e?.scope_previews[chosenScope] || '';
+          : e?.scope_previews[chosenScope] || '');
   }
   const locked =
     pacing ||

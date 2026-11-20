@@ -37,6 +37,31 @@ export function connectionPresentation(flow: RequestEvent['flow']) {
           : 'Initiation direction unavailable',
   };
 }
+
+// The daemon emits these Once details only for its verified whole-application
+// UDP Ask paths. Use the preview as evidence instead of evaluating rule scope here.
+const outgoingUDPOnce = 'Allow Once permits later datagrams on this UDP tuple for 30 seconds. Already queued datagrams will be discarded.';
+const incomingUDPOnce = 'Block Once drops queued datagrams. The next datagram can open a new request.';
+
+export function compactUDPOnce(event: Pick<RequestEvent, 'flow' | 'ask_rule' | 'scope_previews'>) {
+  const preview = event.scope_previews.once;
+  if (event.flow.protocol !== 'udp' || !event.ask_rule || !preview) return;
+  if (event.flow.direction === 'outgoing' && preview === outgoingUDPOnce) {
+    return {
+      summary: 'Allow drops waiting datagrams and permits later sends for 30 seconds. Deny drops both.',
+      allow: outgoingUDPOnce + ' No rule is saved.',
+      block: 'Deny drops waiting datagrams and blocks later sends on this UDP tuple for 30 seconds. No rule is saved.',
+    };
+  }
+  if (event.flow.direction === 'incoming' && preview.endsWith(' ' + incomingUDPOnce)) {
+    return {
+      summary: 'Allow permits waiting datagrams and later sends for 30 seconds. Deny drops waiting datagrams. The next send can prompt again.',
+      allow: 'Allow permits waiting datagrams and later sends on this UDP tuple for 30 seconds. No rule is saved.',
+      block: 'Deny drops waiting datagrams. The next send can prompt again. No rule is saved.',
+    };
+  }
+}
+
 export function permissionTarget(
   scope: Scope,
   protocol: string,

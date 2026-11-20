@@ -1,12 +1,37 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  compactUDPOnce,
   connectionPresentation,
   permissionTarget,
   parseConnectionZone,
   scopeZoneText,
 } = require('../dist/test/connection-presentation.cjs');
 const { parseReply } = require('../dist/test/protocol.cjs');
+test('whole-application UDP Once explains Allow and Deny separately using the daemon preview', () => {
+  const event = (direction, once) => ({
+    flow: { direction, protocol: 'udp' },
+    ask_rule: { id: 'ask', version: 1 },
+    scope_previews: { once },
+  });
+  const outgoing = event('outgoing', 'Allow Once permits later datagrams on this UDP tuple for 30 seconds. Already queued datagrams will be discarded.');
+  const incoming = event('incoming', 'Once: incoming udp, local 10.0.0.1:4300, remote 10.0.0.2:4400. Block Once drops queued datagrams. The next datagram can open a new request.');
+  assert.deepEqual(compactUDPOnce(outgoing), {
+    summary: 'Allow drops waiting datagrams and permits later sends for 30 seconds. Deny drops both.',
+    allow: 'Allow Once permits later datagrams on this UDP tuple for 30 seconds. Already queued datagrams will be discarded. No rule is saved.',
+    block: 'Deny drops waiting datagrams and blocks later sends on this UDP tuple for 30 seconds. No rule is saved.',
+  });
+  assert.deepEqual(compactUDPOnce(incoming), {
+    summary: 'Allow permits waiting datagrams and later sends for 30 seconds. Deny drops waiting datagrams. The next send can prompt again.',
+    allow: 'Allow permits waiting datagrams and later sends on this UDP tuple for 30 seconds. No rule is saved.',
+    block: 'Deny drops waiting datagrams. The next send can prompt again. No rule is saved.',
+  });
+  assert.equal(compactUDPOnce({ ...outgoing, flow: { ...outgoing.flow, protocol: 'tcp' } }), undefined);
+  assert.equal(compactUDPOnce({ ...incoming, ask_rule: undefined }), undefined);
+  assert.equal(compactUDPOnce(event('outgoing', 'Once: ordinary scoped UDP request')), undefined);
+  assert.equal(compactUDPOnce({ ...outgoing, flow: { ...outgoing.flow, direction: 'incoming' } }), undefined);
+});
+
 test('direction is evidence, independent of endpoints and byte flow', () => {
   const flow = {
     direction: 'incoming',

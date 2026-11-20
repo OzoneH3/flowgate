@@ -332,6 +332,9 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
     controls.append(wrap);
   }
   dock.append(controls);
+  const onceNote = el('p', '', 'decision-note', 'udpOnceNote');
+  onceNote.hidden = true;
+  dock.append(onceNote);
   if (o.forAWhile) {
     const note = el('p', FOR_A_WHILE_NOTE, 'for-a-while-note', 'forAWhileNote');
     note.hidden = true;
