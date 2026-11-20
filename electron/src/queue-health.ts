@@ -15,6 +15,24 @@ const decimalGauges = new Set([
   'first_proof_admissions', 'first_proof_denied_tails_reclaimed',
   'first_proof_history_evictions', 'first_proof_history_full_observations',
 ]);
+const counterLabels: Record<string, string> = {
+  attribution_capacity_rejections: 'Owner lookup queue full',
+  census_capacity_rejections: 'Ownership census queue full',
+  fairness_displacement_rejections: 'Older work displaced to make room',
+  deadline_rejections: 'Packet decision deadline elapsed',
+  shutdown_rejections: 'Packets rejected during shutdown',
+  retention_capacity_rejections: 'Held-packet queue full',
+  retained_deadline_rejections: 'Held-packet deadline elapsed',
+  retained_shutdown_rejections: 'Held packets rejected during shutdown',
+  parse_rejections: 'Packets that could not be parsed',
+  missing_payload_rejections: 'Queue messages missing packet data',
+  netlink_overflow_notifications: 'Kernel queue overflow notifications',
+  receive_failures: 'Queue receive failures',
+  verdict_failures: 'Failures submitting a packet verdict',
+  self_tracking_failures: 'Local connection tracking failures',
+  verdict_write_retries: 'Retries submitting a packet verdict',
+  verdict_target_gone: 'Packet gone before verdict submission',
+};
 export function parseQueueHealth(raw: unknown): QueueHealth | undefined {
   if (raw === undefined) return undefined;
   if (!object(raw) || typeof raw.state !== 'string' || !['inactive', 'ready', 'pressure', 'unavailable'].includes(raw.state) || !stamp(raw.sampled_at)) return unavailable;
@@ -51,10 +69,22 @@ export function queueHealthWarning(connected: boolean, health?: QueueHealth): { 
   const lines = [health.state === 'pressure' ? 'Recent queue rejections or I/O failures (last 30 seconds).'
     : health.malformed ? 'The GUI could not read the queue diagnostics returned by the daemon.'
     : 'The daemon reports that queue diagnostics are unavailable.', 'Protection state is shown separately. Rejection counters count packet attempts, not confirmed kernel drops. Netlink overflow notifications do not give a lost-packet count. Accounting coverage gaps are separate.'];
+  if (health.sampled_at) lines.push('Sample taken: ' + new Date(health.sampled_at).toLocaleString());
+  if (!health.sessions?.length) lines.push('This response did not include per-queue counters.');
   for (const s of health.sessions || []) {
+    lines.push('');
     lines.push(`Queue ${s.queue} · ${s.direction} · generation ${s.generation} · started ${s.started_at}${s.stopped_at ? ' · stopped ' + s.stopped_at : ''}${s.saturated ? ' · counters saturated' : ''}`);
-    for (const [key, value] of Object.entries(s.counters)) if (value !== '0') lines.push(`${key}: ${value} ${health.counter_units?.[key] || ''}`);
-    lines.push('Current userspace gauges: ' + Object.entries(s.gauges).map(([key,value]) => `${key}=${value}`).join(', '));
+    if (s.last_issue_at) lines.push('Last issue: ' + new Date(s.last_issue_at).toLocaleString());
+    const nonzero = Object.entries(s.counters).filter(([, value]) => value !== '0');
+    if (nonzero.length) {
+      lines.push('Recorded totals since this queue started:');
+      for (const [key, value] of nonzero) {
+        const label = Object.hasOwn(counterLabels, key) ? counterLabels[key] : key.replaceAll('_', ' ');
+        lines.push(`${label}: ${value} ${health.counter_units?.[key] || ''}`);
+      }
+    }
+    if (Object.keys(s.gauges).length)
+      lines.push('Queue measurements: ' + Object.entries(s.gauges).map(([key, value]) => `${key.replaceAll('_', ' ')}: ${value}`).join(' · '));
   }
   return { text: health.state === 'pressure' ? 'Queue pressure / errors' : 'Queue health unavailable', title: lines.join('\n') };
 }

@@ -1275,7 +1275,7 @@ function updateFirewallStatus() {
     const warning = queueHealthWarning(!!state?.control.connected, state?.control.queueHealth);
     queue.hidden = !warning;
     queue.textContent = warning?.text || '';
-    queue.title = warning?.title || '';
+    queue.title = warning ? warning.title.split('\n', 1)[0] + ' Open queue diagnostics for details.' : '';
   }
 
 }
@@ -1398,12 +1398,29 @@ function setupMainMenus(windowMenu: HTMLElement) {
   health.hidden = true;
   health.setAttribute('role', 'status');
   status.after(health);
-  const queue = element('span', '', 'runtime-health queue-health');
+  const queue = element('button', '', 'runtime-health queue-health');
   queue.id = 'queueHealth';
   queue.hidden = true;
-  queue.setAttribute('role', 'status');
-  queue.tabIndex = 0;
-  health.after(queue);
+  queue.type = 'button';
+  queue.setAttribute('aria-haspopup', 'dialog');
+  $('extendedBadge').after(queue);
+  const queueDialog = element('dialog');
+  queueDialog.id = 'queueDiagnostics';
+  const queueTitle = element('h2', 'Queue diagnostics');
+  queueTitle.id = 'queueDiagnosticsTitle';
+  queueDialog.setAttribute('aria-labelledby', queueTitle.id);
+  const queueDetails = element('p', '', 'queue-diagnostics-details');
+  const closeQueue = element('button', 'Close');
+  closeQueue.onclick = () => queueDialog.close();
+  queueDialog.append(queueTitle, queueDetails, closeQueue);
+  document.body.append(queueDialog);
+  queueDialog.onclose = () => (queue.hidden ? $('extendedBadge') : queue).focus();
+  queue.onclick = () => {
+    const warning = queueHealthWarning(!!state?.control.connected, state?.control.queueHealth);
+    if (!warning) return;
+    queueDetails.textContent = warning.title;
+    queueDialog.showModal();
+  };
   updateFirewallStatus();
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;

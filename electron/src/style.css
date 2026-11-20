@@ -1360,6 +1360,8 @@ body.preset-status #tree th.col-filler, body.preset-status #tree td.filler { dis
 .toolbar .firewall-state { white-space: nowrap; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
 .toolbar .runtime-health { flex: 0 1 auto; min-width: 7em; max-width: 320px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 1px 6px; border: 1px solid #c9a227; border-radius: 3px; color: #ffd27a; background: #3a3110; font-size: 11px; }
 .toolbar .runtime-health[hidden] { display: none; }
+#queueDiagnostics { width: min(560px, calc(100vw - 36px)); max-height: calc(100vh - 36px); overflow: auto; }
+.queue-diagnostics-details { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
 .toolbar:has(> .runtime-health:not([hidden])) .firewall-state { flex-shrink: 0; } /* Protection state keeps priority over the advisory. */
 .toolbar:has(> .runtime-health:not([hidden])) #search { min-width: 60px; }
 .toolbar:has(> .runtime-health:not([hidden])) #extendedBadge { flex-shrink: 1; min-width: 4em; overflow: hidden; text-overflow: ellipsis; } /* Other advisories yield room so nothing leaves the window. */

@@ -20,7 +20,15 @@ const server = net.createServer((socket) => socket.once('data', () => {
     },
     read_only: false,
     enforcement: { state: 'active', profile: 'both' },
-    queue_health: { state: queueState, sampled_at: now },
+    queue_health: {
+      state: queueState, sampled_at: now,
+      counter_units: { deadline_rejections: 'packets', netlink_overflow_notifications: 'notifications' },
+      sessions: [{
+        generation: 'a'.repeat(32), queue: 101, direction: 'both', started_at: now,
+        last_issue_at: now, counters: { deadline_rejections: '3', netlink_overflow_notifications: '2' },
+        gauges: { retained_packets: 1 }, saturated: false,
+      }],
+    },
     events: [], rules: [],
   }) + '\n');
 }));
@@ -39,16 +47,30 @@ try {
   );
   await page.setViewportSize({ width: 1280, height: 656 });
   const badge = page.locator('.toolbar > #queueHealth');
+  const udp = page.locator('#extendedBadge');
   await badge.waitFor({ state: 'visible', timeout: 10000 });
   assert.equal(await badge.textContent(), 'Queue pressure / errors');
   assert.match(await badge.getAttribute('title'), /Recent queue rejections/);
+  const udpBounds = await udp.boundingBox();
+  assert.ok((await badge.boundingBox()).x >= udpBounds.x + udpBounds.width);
   const info = page.locator('#activityView > aside > h2');
   const infoTop = (await info.boundingBox()).y;
-  await page.screenshot({ path: path.join(run, 'warning.png') });
+  await badge.click();
+  const diagnostics = page.getByRole('dialog', { name: 'Queue diagnostics' });
+  await diagnostics.waitFor({ state: 'visible' });
+  const text = await diagnostics.textContent();
+  assert.match(text, /Queue 101 · both/);
+  assert.match(text, /Last issue:/);
+  assert.match(text, /Packet decision deadline elapsed: 3 packets/);
+  assert.match(text, /Kernel queue overflow notifications: 2 notifications/);
+  assert.match(text, /Recorded totals since this queue started/);
   queueState = 'ready';
   await badge.waitFor({ state: 'hidden', timeout: 10000 });
+  assert.equal(await diagnostics.textContent(), text, 'the captured warning stays readable after recovery');
+  await diagnostics.getByRole('button', { name: 'Close' }).click();
+  await diagnostics.waitFor({ state: 'hidden' });
   assert.equal((await info.boundingBox()).y, infoTop);
-  console.log('PASS queue warning shown and cleared in place on Wayland', run);
+  console.log('PASS queue diagnostics open after UDP and remain readable after recovery on Wayland', run);
 } finally {
   if (app) await app.evaluate(({ app }) => app.exit()).catch(() => {});
   server.close();
