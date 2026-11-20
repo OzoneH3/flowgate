@@ -267,7 +267,8 @@ func (e *Engine) settleNow(reason string) {
 	e.settling = false
 	e.settledSink = sink
 	// Requests skipped here aged out during resolution; they keep waiting.
-	e.prefetched, e.settleReason = nil, ""
+	// The next pass still owns any reason queued during this pass's census.
+	e.prefetched = nil
 	e.mu.Unlock()
 }
 
@@ -280,17 +281,19 @@ func (e *Engine) settleLaterLocked() {
 	e.settleScheduled = true
 	go func() {
 		e.mu.Lock()
-		e.settleScheduled = false
-		reason := e.settleReason
-		e.settleReason = ""
-		e.mu.Unlock()
-		if reason != "" {
+		for e.settleReason != "" {
+			reason := e.settleReason
+			e.settleReason = ""
+			e.mu.Unlock()
 			e.settleNow(reason)
+			e.mu.Lock()
 		}
+		e.settleScheduled = false
+		e.mu.Unlock()
 	}()
 }
 
-// settleIdle reports whether no deferred settle is queued (tests).
+// settleIdle reports whether no deferred settle is queued or running (tests).
 func (e *Engine) settleIdle() bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()

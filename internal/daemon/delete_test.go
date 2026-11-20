@@ -7,9 +7,12 @@ import (
 	"flowgate/internal/policy"
 	"flowgate/internal/store"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -385,6 +388,75 @@ func TestConditionalDeleteAcknowledgesBeforePendingRecheck(t *testing.T) {
 			t.Fatal("the original request did not settle under the retained Allow")
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func TestOverlappingConditionalDeletesRecheckBothRequests(t *testing.T) {
+	// Give the first worker the next turn when the second save releases it.
+	prev := runtime.GOMAXPROCS(1)
+	defer runtime.GOMAXPROCS(prev)
+	e, f, a, now := fixture()
+	r := policy.Rule{Schema: 2, ID: "fallback", Version: 1, Action: "allow", Created: *now, Filter: policy.Remembered(f, *a)}
+	ask := r
+	ask.ID = "inner"
+	ask.Action = "ask"
+	ask.Priority = 1
+	outer := ask
+	outer.ID = "outer"
+	outer.Priority = 2
+	if err := e.SetRules([]policy.Rule{r, ask, outer}); err != nil {
+		t.Fatal(err)
+	}
+	first := e.ObserveResolved(f, "first", *a)
+	if first.Rule != outer.ID {
+		t.Fatal(first)
+	}
+	started, release := make(chan struct{}), make(chan struct{})
+	var scans atomic.Int32
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	defer unblock()
+	e.Resolve = func(identity.Flow) identity.Attribution {
+		if scans.Add(1) == 1 {
+			close(started)
+			<-release
+		}
+		return *a
+	}
+	writes := 0
+	e.SaveRules = func([]policy.Rule) error {
+		writes++
+		if writes == 2 {
+			unblock()
+			runtime.Gosched()
+		}
+		return nil
+	}
+	del := func(r policy.Rule) {
+		t.Helper()
+		if _, err := e.DeleteRule(e.Generation, r.ID, &r.Version, 0, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	del(outer)
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("first delete did not start a recheck")
+	}
+	other := f
+	other.Remote = netip.AddrPortFrom(f.Remote.Addr(), f.Remote.Port()+1)
+	later := e.ObserveResolved(other, "later", *a)
+	if later.Rule != ask.ID || later.State != "awaiting-decision" {
+		t.Fatal(later)
+	}
+	del(ask)
+	until := time.Now().Add(time.Second)
+	for !e.settleIdle() || stateOf(e, first.ID) != "allowed" || stateOf(e, later.ID) != "allowed" {
+		runtime.Gosched()
+		if time.Now().After(until) {
+			t.Fatalf("both deletes succeeded; first=%s, later=%s, identity scans=%d", stateOf(e, first.ID), stateOf(e, later.ID), scans.Load())
+		}
 	}
 }
 

@@ -169,7 +169,7 @@ type Engine struct {
 	// currently holds mu (see lockResolved); nil otherwise.
 	prefetched      *prefetchSet
 	peerPrefetched  *prefetchSet // packet-local peer evidence; not an interaction settlement
-	settleScheduled bool         // a deferred settlePendingLocked is queued (guarded by mu)
+	settleScheduled bool         // a deferred settlement worker is queued or running (guarded by mu)
 	settleReason    string       // settle requested while mu is held; run after release
 	settling        bool         // settleNow is running
 	// listReads publishes immutable API list projections (list_snapshot.go).
