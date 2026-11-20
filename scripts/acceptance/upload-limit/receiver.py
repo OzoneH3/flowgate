@@ -1,5 +1,6 @@
 """Receive or send payloads over retained, labeled TCP streams on the lab host."""
 import socket
+import struct
 from threading import Event, Lock, Thread
 from time import monotonic_ns
 
@@ -97,6 +98,18 @@ class Receiver:
         worker.join(2)
         if worker.is_alive() or errors:
             raise RuntimeError(f"host sender did not complete cleanly: {errors}")
+
+    def sender_stats(self, label):
+        with self.lock:
+            conn = self.streams[label]
+            row = dict(self.rows[label])
+        info = conn.getsockopt(socket.IPPROTO_TCP, socket.TCP_INFO, 232)
+        # Linux tcp_info has fixed offsets for these existing u32 fields.
+        fields = {"srtt_us": 68, "rttvar_us": 72, "snd_cwnd": 80, "total_retrans": 100,
+                  "notsent_bytes": 144, "min_rtt_us": 148}
+        return {**row, "monotonic_ns": monotonic_ns(),
+                "tcp": {name: struct.unpack_from("=I", info, offset)[0] for name, offset in fields.items()
+                        if len(info) >= offset + 4}}
 
     def sample(self, label):
         with self.lock:

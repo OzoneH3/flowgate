@@ -117,7 +117,9 @@ func probe(source, remote string, download bool) error {
 			case err := <-reading:
 				return nil, fmt.Errorf("download stream closed: %v", err)
 			default:
-				answer["monotonic_ns"] = time.Since(epoch).Nanoseconds()
+				now := time.Now()
+				answer["monotonic_ns"] = now.Sub(epoch).Nanoseconds()
+				answer["wall_ns"] = now.UnixNano()
 				answer["bytes"] = bytesRead.Load()
 			}
 		case "start":
