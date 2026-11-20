@@ -26,6 +26,8 @@
 
 ## Feature deployment
 
+- Keep build outputs, tool caches, and release archives under `build/`. Shipped
+  launchers and helpers must run without access to `.workspace` or the checkout.
 - Deploy verified new features using the guarded release workflow unless the user
   explicitly requests otherwise. Preserve existing firewall permissions, protection
   mode, user preferences and owned shaping state; honor any narrower path or host
