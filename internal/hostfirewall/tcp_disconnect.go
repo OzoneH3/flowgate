@@ -70,24 +70,37 @@ func matchEstablishedTCP(sockets []identity.Socket, fs []ct.Flow) []daemon.Estab
 		}
 		src := endpoint(orig.IP.SourceAddress, orig.Proto.SourcePort)
 		dst := endpoint(orig.IP.DestinationAddress, orig.Proto.DestinationPort)
-		// NAT, scoped addresses and ambiguous original directions require
-		// additional evidence. Never guess using a local or remote port.
-		if src != endpoint(reply.IP.DestinationAddress, reply.Proto.DestinationPort) ||
-			dst != endpoint(reply.IP.SourceAddress, reply.Proto.SourcePort) ||
-			src.Addr().IsLinkLocalUnicast() || dst.Addr().IsLinkLocalUnicast() {
+		replySrc := endpoint(reply.IP.SourceAddress, reply.Proto.SourcePort)
+		replyDst := endpoint(reply.IP.DestinationAddress, reply.Proto.DestinationPort)
+		outgoing, incoming := endpoints{src, dst}, endpoints{dst, src}
+		// NAT cannot prove direction here, but either tuple can be visible to
+		// a socket. Count each tuple once per row so a translated connection
+		// in another zone cannot make an untranslated candidate look unique.
+		if incoming != (endpoints{replySrc, replyDst}) || flow.Status.SrcNAT() || flow.Status.DstNAT() {
+			for ep := range map[endpoints]struct{}{
+				outgoing: {}, incoming: {}, {replySrc, replyDst}: {}, {replyDst, replySrc}: {},
+			} {
+				add(ep, "")
+			}
+			continue
+		}
+		if src.Addr().IsLinkLocalUnicast() || dst.Addr().IsLinkLocalUnicast() {
 			continue
 		}
 		// A preserved connection may have been picked up midstream, so its
 		// original tuple alone is not proof of the TCP initiator. A connection
 		// admitted through the owned TCP SYN policy has that evidence.
-		if flow.Mark&mask != approved || flow.Status.Expected() ||
-			(flow.ProtoInfo.TCP.OriginalFlags|flow.ProtoInfo.TCP.ReplyFlags)&0x80 != 0 { // IP_CT_TCP_SIMULTANEOUS_OPEN
-			add(endpoints{src, dst}, "")
-			add(endpoints{dst, src}, "")
+		// Conntrack decodes nf_ct_tcp_flags as a big-endian uint16. The
+		// flags are the high byte and the low byte is the mask.
+		flags := byte((flow.ProtoInfo.TCP.OriginalFlags | flow.ProtoInfo.TCP.ReplyFlags) >> 8)
+		const simultaneousOpen = 0x80 // IP_CT_TCP_SIMULTANEOUS_OPEN
+		if flow.Mark&mask != approved || flow.Status.Expected() || flags&simultaneousOpen != 0 {
+			add(outgoing, "")
+			add(incoming, "")
 			continue
 		}
-		add(endpoints{src, dst}, "outgoing")
-		add(endpoints{dst, src}, "incoming")
+		add(outgoing, "outgoing")
+		add(incoming, "incoming")
 	}
 	var out []daemon.EstablishedTCP
 	for _, s := range sockets {

@@ -44,6 +44,36 @@ func TestMatchEstablishedTCPRequiresUnambiguousAdmittedDirection(t *testing.T) {
 	nat := flow
 	nat.TupleReply = tuple(b, netip.MustParseAddrPort("10.0.0.3:33220"))
 	check("", nat)
+	t.Run("translated reply competes across conntrack zones", func(t *testing.T) {
+		nat.Zone = 2
+		nat.TupleOrig = tuple(netip.MustParseAddrPort("10.0.0.3:33220"), b)
+		nat.TupleReply = tuple(b, a) // The socket-visible tuple is in the reply.
+		check := func(fs ...ct.Flow) {
+			t.Helper()
+			if got := matchEstablishedTCP([]identity.Socket{s}, fs); len(got) != 0 {
+				t.Fatalf("translated competing row allowed an abort candidate: %+v", got)
+			}
+		}
+		check(flow, nat)
+		check(nat, flow)
+	})
+	for _, flag := range []struct {
+		name            string
+		original, reply uint16
+		want            bool
+	}{
+		{"original simultaneous open", 0x8000, 0x0000, false},
+		{"reply simultaneous open", 0x0000, 0x8000, false},
+		{"mask only", 0x0180, 0x0080, true},
+	} {
+		t.Run(flag.name, func(t *testing.T) {
+			row := flow
+			row.ProtoInfo.TCP = &ct.ProtoInfoTCP{State: 3, OriginalFlags: flag.original, ReplyFlags: flag.reply}
+			if got := matchEstablishedTCP([]identity.Socket{s}, []ct.Flow{row}); (len(got) == 1) != flag.want {
+				t.Fatalf("abort candidates = %v, want eligible = %v", got, flag.want)
+			}
+		})
+	}
 	startup := flow
 	startup.Mark |= preserved
 	check("", startup)

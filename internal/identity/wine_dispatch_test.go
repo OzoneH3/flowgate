@@ -278,3 +278,42 @@ func TestWineDispatchSameCookieCannotTransferApplicationOrPrefix(t *testing.T) {
 		})
 	}
 }
+
+func TestWineFinalTCPHolderRequiresUnchangedVerifiedBrokerPrefix(t *testing.T) {
+	root := t.TempDir()
+	prefixes := []string{filepath.Join(root, "one"), filepath.Join(root, "two")}
+	for i, name := range []string{"alpha.exe", "beta.exe"} {
+		prefix := prefixes[i]
+		drive := filepath.Join(prefix, "dosdevices", "c:")
+		if err := os.MkdirAll(drive, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(drive, name), []byte(name), 0600); err != nil {
+			t.Fatal(err)
+		}
+		f, initial, _ := dispatchFixture()
+		f.Protocol, initial.Sockets[0].Protocol, initial.Sockets[0].Remote = "tcp", "tcp", f.Remote
+		initial.Owners[0].Application.Prefix = prefix
+		row := WindowsOwner{Family: 4, PID: 42, Created: 10, CreationTime: "10", Image: "C:\\" + name,
+			Address: f.Local.Addr().String(), Port: f.Local.Port(),
+			RemoteAddress: f.Remote.Addr().String(), RemotePort: f.Remote.Port(), State: 5}
+		snap := tableSnapshot{Schema: 2, Family: 4, Version: "11.0", Complete: true, Rows: []WindowsOwner{row}}
+		for _, tc := range []struct{ name, final string }{
+			{"matching", prefix}, {"changed", prefixes[1-i]}, {"unverified", ""},
+		} {
+			t.Run(name+"/"+tc.name, func(t *testing.T) {
+				again := copyWineInitial(initial)
+				again.Owners[0].Application.Prefix = tc.final
+				w := WineTable{prefix: prefix}
+				got := w.finishCensus(f, initial, again, &initial.Owners[0], snap, snap, []WindowsOwner{row}, func(*Process, string, string) bool { return true })
+				if tc.final == prefix {
+					if !got.FreshConnectionProof() || got.Application == nil || got.Application.Prefix != prefix || got.Application.Name != name {
+						t.Fatalf("matching prefix lost verified ownership: %+v", got)
+					}
+				} else if got.FreshConnectionProof() || got.Application != nil || got.ReasonCode != ReasonRuntimeOwnershipChanged {
+					t.Fatalf("changed or unverified prefix retained ownership: %+v", got)
+				}
+			})
+		}
+	}
+}

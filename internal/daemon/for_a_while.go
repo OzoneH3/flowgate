@@ -163,7 +163,11 @@ func (e *Engine) pruneLeasesLocked(now time.Time, checkLiveness bool) {
 }
 
 func (e *Engine) leaseForLocked(f identity.Flow, a identity.Attribution, now time.Time) *processLease {
-	for _, l := range e.processLeases {
+	return matchingProcessLease(e.processLeases, f, a, now)
+}
+
+func matchingProcessLease(leases map[string]*processLease, f identity.Flow, a identity.Attribution, now time.Time) *processLease {
+	for _, l := range leases {
 		if l.matches(f, a, now) {
 			return l
 		}
@@ -181,10 +185,14 @@ func (e *Engine) policyLocked(f identity.Flow, a identity.Attribution, now time.
 
 // leaseOverlayLocked applies a matching live lease to an "ask" result only.
 func (e *Engine) leaseOverlayLocked(action, rule string, f identity.Flow, a identity.Attribution, now time.Time) (string, string, *processLease) {
+	return leaseOverlay(e.processLeases, action, rule, f, a, now)
+}
+
+func leaseOverlay(leases map[string]*processLease, action, rule string, f identity.Flow, a identity.Attribution, now time.Time) (string, string, *processLease) {
 	if action != "ask" {
 		return action, rule, nil
 	}
-	if l := e.leaseForLocked(f, a, now); l != nil {
+	if l := matchingProcessLease(leases, f, a, now); l != nil {
 		return l.Action, leaseRulePrefix + l.ID, l
 	}
 	return action, rule, nil

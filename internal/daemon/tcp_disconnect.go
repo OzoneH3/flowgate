@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"log"
+	"maps"
 	"time"
 
 	"flowgate/internal/identity"
@@ -32,6 +33,8 @@ type tcpDisconnect struct {
 type tcpBlockEdit struct {
 	before, after []policy.Rule
 	blocks        map[string]uint64
+	at            time.Time
+	leases        map[string]*processLease
 }
 
 func (e *Engine) publishRuleStateLocked(next []policy.Rule) {
@@ -56,7 +59,9 @@ func (e *Engine) publishRuleStateLocked(next []policy.Rule) {
 		blocks[r.ID] = r.Version
 	}
 	if len(blocks) != 0 {
-		e.tcpBlockEdit = &tcpBlockEdit{before: before, after: next, blocks: blocks}
+		// Leases are immutable after insertion. Capture the set at publication
+		// since another decision can replace a lease during the socket census.
+		e.tcpBlockEdit = &tcpBlockEdit{before: before, after: next, blocks: blocks, at: now, leases: maps.Clone(e.processLeases)}
 	}
 }
 
@@ -142,13 +147,14 @@ func (e *Engine) abortNewlyBlockedTCP(ctx context.Context, edit *tcpBlockEdit, c
 	// Conntrack identifies the direction, but it does not attest the packet's
 	// interface or a local peer's identity. If a rule could depend on either,
 	// evaluating without that evidence could incorrectly select a Block.
-	if requiresTCPPacketEvidence(edit.before, f, now) || requiresTCPPacketEvidence(edit.after, f, now) || requiresTCPPacketEvidence(e.rules, f, now) {
+	if requiresTCPPacketEvidence(edit.before, f, edit.at) || requiresTCPPacketEvidence(edit.after, f, edit.at) || requiresTCPPacketEvidence(e.rules, f, now) {
 		return
 	}
-	if before, _, _ := e.evaluateLocked(edit.before, f, a, now); before == "block" {
+	base, priorRule, _ := e.evaluateLocked(edit.before, f, a, edit.at)
+	if before, _, _ := leaseOverlay(edit.leases, base, priorRule, f, a, edit.at); before == "block" {
 		return
 	}
-	after, winner, _ := e.evaluateLocked(edit.after, f, a, now)
+	after, winner, _ := e.evaluateLocked(edit.after, f, a, edit.at)
 	version, triggered := edit.blocks[winner]
 	if after != "block" || !triggered {
 		return

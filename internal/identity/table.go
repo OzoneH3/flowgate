@@ -719,7 +719,9 @@ func readWineImageMaps(pid int, activity bool) string {
 func sameBrokerGeneration(b Process, owners []Process) bool {
 	for _, p := range owners {
 		if p.PID == b.PID {
-			return p.Start == b.Start && p.ExecutableRevision == b.ExecutableRevision && p.UID == b.UID && p.NetNS == b.NetNS && p.MountNS == b.MountNS
+			return p.Start == b.Start && p.ExecutableRevision == b.ExecutableRevision &&
+				p.UID == b.UID && p.NetNS == b.NetNS && p.MountNS == b.MountNS &&
+				b.Application.Prefix != "" && p.Application.Prefix == b.Application.Prefix
 		}
 	}
 	return false

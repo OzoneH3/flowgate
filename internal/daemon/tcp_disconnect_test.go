@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"testing"
+	"time"
 
 	"flowgate/internal/identity"
 	"flowgate/internal/policy"
@@ -11,12 +12,20 @@ import (
 
 func TestTCPBlockEditDisconnectRequiresNewAndCurrentWinner(t *testing.T) {
 	for _, tc := range []struct {
-		name      string
-		configure func(*policy.Rule, *policy.Rule, *[]policy.Rule)
-		current   func([]policy.Rule) []policy.Rule
-		want      bool
+		name       string
+		configure  func(*policy.Rule, *policy.Rule, *[]policy.Rule)
+		current    func([]policy.Rule) []policy.Rule
+		want       bool
+		priorLease string
+		clearLease bool
 	}{
 		{name: "create", want: true},
+		{name: "Ask without a lease transitions to Block", want: true, configure: func(allow, _ *policy.Rule, _ *[]policy.Rule) {
+			allow.Action = "ask"
+		}},
+		{name: "Ask with Allow lease transitions to Block", want: true, priorLease: "allow"},
+		{name: "Ask with active Block lease is already blocked", priorLease: "block"},
+		{name: "Block lease at edit still counts if removed before abort check", priorLease: "block", clearLease: true},
 		{name: "enable", want: true, configure: func(_, block *policy.Rule, before *[]policy.Rule) {
 			old := *block
 			old.Disabled = true
@@ -65,6 +74,20 @@ func TestTCPBlockEditDisconnectRequiresNewAndCurrentWinner(t *testing.T) {
 			if tc.configure != nil {
 				tc.configure(&before[0], &block, &before)
 			}
+			if tc.priorLease != "" {
+				before[0].Action = "ask"
+				a.VisibilityComplete = true
+				a.Owners[0].PID, a.Owners[0].BootID = 123, "boot"
+				lease, err := e.newLeaseLocked(&Event{Flow: f}, *a, tc.priorLease, *now, 30*time.Second)
+				if err != nil {
+					t.Fatal(err)
+				}
+				e.storeLeaseLocked(lease)
+				base, rule, _ := e.evaluateLocked(before, f, *a, *now)
+				if action, _, _ := e.leaseOverlayLocked(base, rule, f, *a, *now); base != "ask" || action != tc.priorLease {
+					t.Fatalf("bad lease fixture: %s -> %s", base, action)
+				}
+			}
 			e.rules = before
 			status := EnforcementStatus{State: "active", Profile: "both"}
 			e.Enforcement = func() EnforcementStatus { return status }
@@ -76,6 +99,9 @@ func TestTCPBlockEditDisconnectRequiresNewAndCurrentWinner(t *testing.T) {
 				},
 			}
 			e.publishRuleStateLocked([]policy.Rule{before[0], block})
+			if tc.clearLease {
+				clear(e.processLeases)
+			}
 			if tc.current != nil {
 				e.rules = tc.current(append([]policy.Rule(nil), e.rules...))
 			}
