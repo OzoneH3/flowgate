@@ -178,7 +178,7 @@ function pacePrompt() {
 }
 const promptRefs = new Map<number, RequestRef>();
 const promptURL = (ref: RequestRef, remember?: QueuedRememberSelection) =>
-  'flowgate://app/index.html?request=' +
+  'flowgate://app/prompt.html?request=' +
   encodeURIComponent(ref.id) +
   '&generation=' +
   encodeURIComponent(ref.generation) +
@@ -447,10 +447,12 @@ function trusted(e: IpcMainInvokeEvent, allowPane = false) {
   )
     throw Error('Untrusted IPC sender');
   const u = new URL(e.senderFrame.url);
+  const documentPath = promptRefs.has(e.sender.id) ? '/prompt.html'
+    : paneRoles.has(e.sender.id) ? '/pane.html' : '/index.html';
   if (
     u.protocol !== 'flowgate:' ||
     u.host !== 'app' ||
-    u.pathname !== (paneRoles.has(e.sender.id) ? '/pane.html' : '/index.html') ||
+    u.pathname !== documentPath ||
     (!allowPane && paneRoles.has(e.sender.id))
   )
     throw Error('Unexpected IPC origin');

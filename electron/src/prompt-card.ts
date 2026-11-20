@@ -10,14 +10,11 @@ import { gameIconApplication, provenanceDetails, targetLines } from './provenanc
 import { pairDetailRows, type LocalPairView } from './local-pair';
 import { connectionFields, connectionHeader, fromTo, promptSummary, rememberLabel } from './prompt-summary';
 
-// The request card shared by the permission window and the Pending requests
-// tab. First view: application, the actual
-// owner on one quiet line, the destination, one status line, then
-// Allow | Deny | Remember | For a while and a small Details link. Everything
-// technical sits in the separate Details view, as short labelled fields in
-// expandable sections. Only structure here; the renderer wires state.
+// Both surfaces use the same request content and controls. The popup exposes
+// its sections to permission-popup.css. The renderer binds decision state.
 export interface CardOptions {
   name: string;
+  popup?: boolean;
   rememberMode: boolean;
   forAWhile: boolean;
   rememberOptions: RememberOption[];
@@ -71,9 +68,7 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
     summary = promptSummary(e, o.name);
 
   // ---- first view ----------------------------
-  // Green direction/protocol bar, a two-row From/To box (the program on its own
-  // side: From when outgoing, To when incoming), four aligned field rows from
-  // backend values, then one link row (status + Details) and the decision row.
+  // Preserve the From/To roles even when the popup leads with the application.
   const route = el('div', '', 'connection-route nl-card-top', 'requestSummary');
   const bar = el('h3', '', 'connection-banner nl-bar', 'connectionHeader');
   const chevron = el('button', '', 'nl-chevron', 'cardCollapse');
@@ -96,6 +91,11 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
           summary.title,
         );
     heading.id = 'requestApplication';
+    if (o.popup) {
+      heading.setAttribute('role', 'heading');
+      heading.setAttribute('aria-level', '1');
+      heading.querySelector('.application-icon')?.setAttribute('aria-hidden', 'true');
+    }
     addClass(heading, 'nl-program');
     const cell = el('div', '', 'nl-cell');
     cell.append(heading);
@@ -145,8 +145,10 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
     ['To', sides.to],
   ] as const) {
     const r = el('div', '', 'nl-row');
+    if (o.popup) r.id = side.kind === 'program' ? 'requestIdentity' : 'requestPeer';
     r.append(el('span', label, 'nl-label'), side.kind === 'program' ? programCell() : peerCell(side.text));
-    box.append(r);
+    if (o.popup && side.kind === 'program') box.prepend(r);
+    else box.append(r);
   }
   const f = connectionFields(e);
   const fields = el('dl', '', 'nl-fields', 'connectionFields');
@@ -171,7 +173,8 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
       dd.append(group);
     }
   }
-  route.append(bar, box, fields);
+  if (o.popup) route.append(box, bar, fields);
+  else route.append(bar, box, fields);
   const meta = el('div', '', 'request-meta nl-links');
   const status = el('p', '', 'expiry request-status-line', 'requestStatusLine');
   status.setAttribute('role', 'status');
@@ -183,10 +186,11 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
   const card = el('section', '', 'nl-card', 'requestCard');
   const nodes: HTMLElement[] = [card];
   card.append(route, meta);
-  // Collapsing keeps the bar and the decision row.
+  // The popup also keeps the application and peer visible when collapsed.
   chevron.onclick = () => {
-    const collapsed = !box.hidden;
-    box.hidden = fields.hidden = meta.hidden = collapsed;
+    const collapsed = !fields.hidden;
+    fields.hidden = meta.hidden = collapsed;
+    if (!o.popup) box.hidden = collapsed;
     chevron.setAttribute('aria-expanded', String(!collapsed));
     o.onDetails?.(false);
   };
@@ -305,22 +309,23 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
   card.append(details);
 
   // ---- decision row ----------------------------------------------------------
-  // Sticky at the bottom of the scrolling body: the decision row and the
-  // selected option's controls (incl. the expiry duration) stay visible.
   const dock = el('div', '', 'decision-dock', 'decisionDock');
   const controls = el('div', '', 'decision-controls', 'decisionControls');
+  const actions = o.popup ? el('div', '', '', 'decisionActions') : controls;
+  const options = o.popup ? el('div', '', '', 'decisionOptions') : controls;
+  if (o.popup) controls.append(actions, options);
   for (const [id, label] of [
     ['allow', 'Allow'],
     ['block', 'Deny'],
   ] as const) {
     const button = el('button', label, id, id);
     button.type = 'button';
-    controls.append(button);
+    actions.append(button);
   }
   if (o.rememberMode)
-    controls.append(checkbox('rememberToggle', 'Remember', 'remember-toggle', "Create rule and don't ask me again"));
+    options.append(checkbox('rememberToggle', 'Remember', 'remember-toggle', "Create rule and don't ask me again"));
   if (o.forAWhile)
-    controls.append(checkbox('forAWhileToggle', 'For a while', 'option-toggle for-a-while-toggle', FOR_A_WHILE_TOOLTIP));
+    options.append(checkbox('forAWhileToggle', 'For a while', 'option-toggle for-a-while-toggle', FOR_A_WHILE_TOOLTIP));
   if (o.forAWhile && (o.forAWhileDurations?.length ?? 0) > 1) {
     // Shown only while For a while is checked (renderer), beside Allow/Deny.
     const wrap = el('span', '', 'for-a-while-duration', 'forAWhileDurationWrap'),
@@ -329,7 +334,7 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
     for (const d of o.forAWhileDurations!) select.append(new Option(durationLabel(d), String(d)));
     wrap.append(select, el('span', '', 'for-a-while-expiry', 'forAWhileExpiry'));
     wrap.hidden = true;
-    controls.append(wrap);
+    options.append(wrap);
   }
   dock.append(controls);
   const onceNote = el('p', '', 'decision-note', 'udpOnceNote');

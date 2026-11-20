@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>FlowGate</title>
+    <link rel="stylesheet" href="permission-popup.css" />
+    <script src="renderer.js" defer></script>
+  </head>
+  <body>
+    <div id="app">
+      <section class="prompt-shell">
+        <header class="prompt-heading">
+          <strong>FlowGate Blocker</strong>
+          <span id="promptPending">Connection permission</span>
+          <button id="closePrompt" aria-label="Dismiss permission window">×</button>
+        </header>
+        <div id="promptBody"><div id="requestDetails"></div></div>
+        <footer><span id="controlStatus"></span><button id="dismiss">Decide later</button></footer>
+        <div id="feedback" role="status" aria-live="polite"></div>
+      </section>
+    </div>
+  </body>
+</html>

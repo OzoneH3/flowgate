@@ -822,11 +822,13 @@ function measurePrompt() {
     const body = $('promptBody');
     if (!shell || !body) return;
     // Natural rendered content, independent of the constrained scrolling viewport.
+    const padding = getComputedStyle(body);
     const height =
       shell.offsetHeight -
       body.offsetHeight +
       $('requestDetails').getBoundingClientRect().height +
-      16;
+      parseFloat(padding.paddingTop) +
+      parseFloat(padding.paddingBottom);
     const keysDown = [...promptKeysDown].sort();
     const signature = Math.ceil(height) + ':' + pointerDown + ':' + keysDown.join(',') + ':' + rememberOn;
     if (signature === lastPromptLayout) return;
@@ -896,7 +898,6 @@ if (promptID) {
       },
       true,
     );
-  root.innerHTML = `<section class="prompt-shell"><header class="prompt-heading"><strong>FlowGate Blocker</strong><span id="promptPending">Connection permission</span><button id="closePrompt" aria-label="Dismiss permission window">×</button></header><div id="promptBody"><div id="requestDetails"></div></div><footer><span id="controlStatus"></span><button id="dismiss">Decide later</button></footer><div id="feedback" role="status" aria-live="polite"></div></section>`;
   new ResizeObserver(measurePrompt).observe($('requestDetails'));
   new ResizeObserver(measurePrompt).observe($('feedback'));
   document.addEventListener('toggle', measurePrompt, true);
@@ -2363,6 +2364,7 @@ function renderRequests() {
     };
     container.append(
       ...buildRequestCard(e, {
+        popup: Boolean(promptID),
         name: eventName(e),
         rememberMode: rememberMode(),
         forAWhile: forAWhileMode(),
@@ -2444,7 +2446,7 @@ function renderRequests() {
         chosenScope = scopes.value as Scope;
         void prepareDecisions();
       };
-      controls.append(scopes);
+      ($('decisionOptions') || controls).append(scopes);
       const networks = element('div', '', 'decision-network');
       const networkLabel = element('label', 'Remember on ');
       const zone = element('select');

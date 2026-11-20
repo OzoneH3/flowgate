@@ -430,8 +430,8 @@ test('ended request: one visible reason in the countdown slot, most specific fir
   assert.match(slot, /endedStatusLine\(\$\('decisionNote'\)\?\.textContent, \$\('requestResult'\)\?\.textContent\)/);
   assert.match(slot, /expiry\.title = endedLine;/);
   assert.ok(!/disabled|onclick|submit/.test(slot));
-  const css = fs.readFileSync(path.join(__dirname, '../src/style.css'), 'utf8');
-  assert.match(css, /#promptBody \.nl-links \.expiry\.ended \{[^}]*white-space:nowrap; overflow:hidden; text-overflow:ellipsis;/);
+  const css = fs.readFileSync(path.join(__dirname, '../src/permission-popup.css'), 'utf8');
+  assert.match(css, /\.expiry\.ended \{[^}]*white-space: nowrap; overflow: hidden; text-overflow: ellipsis;/);
   // Header build version: no state access before the first publication.
   assert.match(src, /headerVersion\(guiBuild, state\?\.control\.connected \? state\.control\.daemonBuild : undefined\)/);
 });

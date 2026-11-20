@@ -1,6 +1,8 @@
 // This is a fixed asset table, not a filesystem read API. Unknown paths never reach readFile.
 const assets: Record<string, string> = {
   'index.html': 'text/html',
+  'prompt.html': 'text/html',
+  'permission-popup.css': 'text/css',
   'style.css': 'text/css',
   'renderer.js': 'text/javascript',
   'pane.html': 'text/html',

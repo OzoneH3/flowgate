@@ -177,9 +177,11 @@ try {
     evidence['round' + round].view = v;
     await w.screenshot({ path: `${run}/${round}-${r.label}.png` });
     assert(v.header.startsWith(r.dir + ' connection - TCP(6)'), `${r.label}: header "${v.header}"`);
-    assert.deepEqual(v.rows.map((x) => x.label), ['From', 'To']);
-    assert.equal(v.rows[r.dir === 'Outgoing' ? 0 : 1].program, true, `${r.label}: program on the ${r.dir === 'Outgoing' ? 'From' : 'To'} side`);
-    assert.equal(v.rows[r.dir === 'Outgoing' ? 1 : 0].program, false);
+    const from = v.rows.find(row => row.label === 'From');
+    const to = v.rows.find(row => row.label === 'To');
+    assert.equal(v.rows.length, 2);
+    assert.equal(from?.program, r.dir === 'Outgoing', `${r.label}: From side`);
+    assert.equal(to?.program, r.dir === 'Incoming', `${r.label}: To side`);
     assert(v.application && /^Process \d+/.test(v.process), `${r.label}: application/process ${v.application} / ${v.process}`);
     for (const f of [v.local, v.remote]) {
       assert(/Port:\s*\d+$/.test(f), `${r.label}: address/port "${f}"`);
@@ -189,7 +191,7 @@ try {
     assert.deepEqual(v.controls, [true, true, true, true], `${r.label}: Allow|Deny|Remember|For a while visible`);
     assert(v.overflowX <= 0 && v.overflowY <= 0, `${r.label}: no scroll at ${v.width}x${v.height} (${v.overflowX}/${v.overflowY})`);
     assert.equal(Math.round(shown.kwin.w), 745, 'native window width 745');
-    step(`round ${round} ${r.label}: on screen after ${shown.ms} ms (KWin ${Math.round(shown.kwin.w)}x${Math.round(shown.kwin.h)}); "${v.header}" From "${v.rows[0].text}" To "${v.rows[1].text}"; ${v.application} · ${v.process} · local ${v.local} · remote ${v.remote}`);
+    step(`round ${round} ${r.label}: on screen after ${shown.ms} ms (KWin ${Math.round(shown.kwin.w)}x${Math.round(shown.kwin.h)}); "${v.header}" From "${from.text}" To "${to.text}"; ${v.application} · ${v.process} · local ${v.local} · remote ${v.remote}`);
     // Human click: press, hold for a few frames, release.
     const box = await w.locator('#allow').boundingBox();
     await w.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
@@ -211,7 +213,7 @@ try {
   await w4.screenshot({ path: `${run}/4-narrow-incoming-ipv6.png` });
   assert(n.width <= 425 && n.overflowX <= 0, `narrow: no horizontal overflow at ${n.width} (${n.overflowX})`);
   assert.deepEqual(n.controls.slice(0, 2), [true, true], 'narrow: Allow and Deny visible');
-  assert(n.header.startsWith('Incoming connection - TCP(6)') && n.rows[1].program, 'narrow: incoming, program on To');
+  assert(n.header.startsWith('Incoming connection - TCP(6)') && n.rows.find(row => row.label === 'To')?.program, 'narrow: incoming, program on To');
   step(`narrow ${n.width}px: no horizontal overflow; controls visible ${JSON.stringify(n.controls)} (vertical scroll ${n.overflowY > 0 ? 'yes' : 'no'})`);
   const b4 = await w4.locator('#block').boundingBox();
   await w4.mouse.move(b4.x + b4.width / 2, b4.y + b4.height / 2);

@@ -1,0 +1,238 @@
+/* Layout of the independent permission window. The card and its controls keep
+   the same DOM while Details, Remember and For a while change visibility. */
+:root {
+  color-scheme: dark;
+  font: 15px/1.45 system-ui, sans-serif;
+  --surface: #142023;
+  --inset: #101a1c;
+  --line: #34474b;
+  --text: #eff6f3;
+  --muted: #b2c4c4;
+  --accent: #89dfc6;
+  color: var(--text);
+  background: var(--surface);
+}
+
+* { box-sizing: border-box; }
+body, p, h4, dl, dd { margin: 0; }
+[hidden] { display: none !important; }
+button, select, input { font: inherit; }
+button, select {
+  max-width: 100%;
+  padding: 6px 12px;
+  color: inherit;
+  background: #263639;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+button, summary, label:has(input:enabled) { cursor: pointer; }
+button:enabled:hover { filter: brightness(1.2); }
+button:enabled:active { filter: brightness(.92); }
+:disabled { opacity: .55; cursor: default; }
+:focus-visible { outline: 3px solid #ffce80; outline-offset: 2px; }
+input[type=checkbox] { accent-color: var(--accent); width: 17px; height: 17px; flex: none; margin: 0; }
+
+.prompt-shell {
+  display: grid;
+  grid-template: 'header' auto 'body' minmax(0, 1fr) 'footer' auto 'feedback' auto / minmax(0, 1fr);
+  height: 100vh;
+  border: 1px solid var(--line);
+}
+.prompt-heading, footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 24px;
+  background: var(--inset);
+}
+.prompt-heading { grid-area: header; border-bottom: 1px solid var(--line); -webkit-app-region: drag; }
+.prompt-heading strong {
+  padding-left: 30px;
+  background: url('flowgate.png') left center / 22px no-repeat;
+  font-size: 14px;
+}
+#promptPending, #controlStatus, #feedback { font-size: 13px; color: var(--muted); }
+#promptPending { margin-left: auto; }
+#closePrompt {
+  -webkit-app-region: no-drag;
+  border: 0;
+  padding: 0 7px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 22px;
+}
+#promptBody { grid-area: body; overflow: auto; padding: 22px 24px; }
+footer { grid-area: footer; border-top: 1px solid var(--line); }
+#controlStatus { overflow-wrap: anywhere; }
+#dismiss { flex: none; margin-left: auto; font-size: 13px; }
+#feedback { grid-area: feedback; overflow-wrap: anywhere; }
+#feedback:not(:empty) { padding: 6px 24px; }
+
+/* Section placement. State wrappers yield their visible children to this grid.
+   Empty tracks collapse, including those for unsupported permission options. */
+#requestCard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-areas:
+    'identity    identity'
+    'destination direction'
+    'connection  connection'
+    'status      status'
+    'details     details'
+    'decisions   options'
+    'network     network'
+    'onceNote    onceNote'
+    'leaseNote   leaseNote'
+    'remember    remember'
+    'reconcile   future';
+  overflow-wrap: anywhere;
+}
+#requestSummary, #fromToBox, #decisionDock, #decisionControls { display: contents; }
+#requestIdentity { grid-area: identity; }
+#requestPeer { grid-area: destination; }
+#connectionHeader { grid-area: direction; }
+#connectionFields { grid-area: connection; }
+.request-meta { grid-area: status; }
+#requestMore { grid-area: details; }
+#decisionActions { grid-area: decisions; }
+#decisionOptions { grid-area: options; }
+#rememberPanel { grid-area: remember; }
+.decision-network { grid-area: network; }
+#udpOnceNote { grid-area: onceNote; }
+#forAWhileNote { grid-area: leaseNote; }
+#decisionReconcile { grid-area: reconcile; }
+#futureApplicationRule { grid-area: future; }
+
+#requestIdentity { padding: 4px 0 18px; }
+.nl-label, dt, .nl-port-label, .nl-owner { color: var(--muted); }
+.nl-label { font-size: 13px; }
+#requestApplication {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+  font-size: clamp(24px, 4.5vw, 36px);
+  line-height: 1.2;
+}
+.application-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border: 1px solid #41635e;
+  border-radius: 10px;
+  color: var(--accent);
+  background: #203833;
+  font-size: 24px;
+}
+.application-icon img { width: 28px; height: 28px; object-fit: contain; }
+.nl-owner { display: block; margin-top: 4px; font-size: 14px; }
+#requestPeer, #connectionHeader {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  padding: 13px 14px;
+  background: #213532;
+  color: #c3f0e0;
+}
+#requestPeer { border-radius: 8px 0 0 8px; }
+#requestPeer .nl-label { color: inherit; }
+#requestDestination { font-weight: 600; }
+#connectionHeader { margin: 0; font-weight: 400; justify-content: flex-end; border-radius: 0 8px 8px 0; font-size: 14px; }
+#cardCollapse {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  background: transparent;
+  border-color: #53726a;
+}
+#cardCollapse::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border: solid currentColor;
+  border-width: 0 2px 2px 0;
+  transform: translateY(-2px) rotate(45deg);
+}
+#cardCollapse[aria-expanded=false]::before { transform: rotate(-45deg); }
+#connectionFields, .connection-fields {
+  display: grid;
+  grid-template-columns: minmax(90px, 9em) minmax(0, 1fr);
+  gap: 7px 16px;
+}
+#connectionFields { margin-top: 18px; padding: 15px 18px; border: 1px solid var(--line); border-radius: 8px; }
+#connectionFields dd { font-variant-numeric: tabular-nums; }
+.nl-port-group { display: inline-block; margin-left: 1em; }
+.nl-port-label { margin-right: .4em; }
+
+.request-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 12px 0; }
+.link-button { background: transparent; border: 0; padding: 4px 0; color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+.expiry { font-size: 14px; color: var(--muted); }
+.expiry.ended { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ended, .decision-note, .previous-revision, .remember-summary { color: #f4ca85; }
+.details-head { display: flex; align-items: center; gap: 16px; padding-bottom: 8px; }
+.detail-section { border-top: 1px solid var(--line); padding: 8px 1px; }
+.detail-section > summary { font-weight: 600; }
+.detail-section .connection-fields { margin: 10px 0; font-size: 14px; }
+.detail-section dd { white-space: pre-wrap; }
+
+#decisionActions, #decisionOptions, .decision-network {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 12px 0;
+}
+#decisionActions {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  gap: 10px;
+  background: var(--surface);
+}
+#decisionActions button { min-width: 95px; padding: 9px 18px; font-weight: 650; }
+#allow { color: #10231e; background: var(--accent); border-color: var(--accent); }
+#allow::before { content: '✓ '; margin-right: .45em; }
+#block::before { content: '× '; margin-right: .45em; }
+#block { border-color: #687a7b; }
+#decisionOptions { justify-content: flex-end; }
+#decisionOptions label, .remember-field, .for-a-while-duration {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.for-a-while-duration { flex-wrap: wrap; }
+.for-a-while-expiry, .for-a-while-note { color: var(--muted); }
+#rememberPanel {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px 18px;
+  min-width: 0;
+  margin: 8px 0 0;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--inset);
+}
+#rememberPanel legend { padding: 0 6px; font-weight: 600; }
+.remember-scope, .remember-duration, #refreshDecision { grid-column: 1 / -1; }
+.remember-duration select { margin-left: 4px; }
+.unavailable, .instance-ended { color: var(--muted); }
+
+@media (max-width: 560px) {
+  #promptBody { padding: 12px; }
+  .prompt-heading, footer { padding: 6px 12px; gap: 8px; }
+  #requestCard {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: 'identity' 'destination' 'direction' 'connection' 'status'
+      'details' 'options' 'network' 'onceNote' 'leaseNote' 'remember' 'reconcile' 'future' 'decisions';
+  }
+  #requestPeer { border-radius: 8px 8px 0 0; }
+  #connectionHeader { justify-content: flex-start; border-radius: 0 0 8px 8px; padding-top: 0; }
+  #decisionOptions { justify-content: flex-start; }
+  #rememberPanel { grid-template-columns: minmax(0, 1fr); }
+}
