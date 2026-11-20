@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"reflect"
 	"strconv"
 	"strings"
 )
@@ -170,6 +171,37 @@ func fibUsesPacketMark(fib map[string]any) bool {
 	return false
 }
 
+func strictIPv6ReversePathGuard(expr any) bool {
+	// nft JSON represents "fib saddr . mark . iif check missing" as an
+	// oif lookup compared to false. Require the whole IPv6-only drop rule.
+	return reflect.DeepEqual(expr, []any{
+		map[string]any{"match": map[string]any{
+			"op": "==", "left": map[string]any{"meta": map[string]any{"key": "nfproto"}}, "right": "ipv6",
+		}},
+		map[string]any{"match": map[string]any{
+			"op": "==", "left": map[string]any{"fib": map[string]any{
+				"result": "oif", "flags": []any{"saddr", "mark", "iif"},
+			}}, "right": false,
+		}},
+		map[string]any{"drop": nil},
+	})
+}
+
+func hasPreroutingFilterChain(objects []map[string]json.RawMessage, table, name string) bool {
+	for _, object := range objects {
+		raw, ok := object["chain"]
+		if !ok {
+			continue
+		}
+		var chain struct{ Family, Table, Name, Type, Hook string }
+		if json.Unmarshal(raw, &chain) == nil && chain.Family == "inet" &&
+			chain.Table == table && chain.Name == name && chain.Type == "filter" && chain.Hook == "prerouting" {
+			return true
+		}
+	}
+	return false
+}
+
 func compatibleNFT(b []byte) error {
 	var n struct {
 		Nftables []map[string]json.RawMessage `json:"nftables"`
@@ -197,10 +229,15 @@ func compatibleNFT(b []byte) error {
 		visit = func(v any) error {
 			switch x := v.(type) {
 			case map[string]any:
-				// A marked FIB lookup takes the whole packet mark as an
-				// input. No disjoint mask can be proven from this node.
+				// Host protection sets conntrack bits at input/output, not
+				// the packet mark read by this prerouting drop guard. The
+				// rest of nft, xt mark exports and policy routing must
+				// still pass their existing checks.
 				if fib, ok := x["fib"].(map[string]any); ok && fibUsesPacketMark(fib) {
-					return fmt.Errorf("packet-mark FIB lookup is not proven compatible")
+					if r.Family != "inet" || !strictIPv6ReversePathGuard(r.Expr) ||
+						!hasPreroutingFilterChain(n.Nftables, r.Table, r.Chain) {
+						return fmt.Errorf("packet-mark FIB lookup is not proven compatible")
+					}
 				}
 				if xt, ok := x["xt"].(map[string]any); ok {
 					switch xt["name"] {

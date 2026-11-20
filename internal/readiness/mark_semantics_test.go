@@ -261,3 +261,58 @@ func TestMarkAwareFIBReadiness(t *testing.T) {
 		})
 	}
 }
+
+func TestStrictIPv6ReversePathReadiness(t *testing.T) {
+	const guard = `{"match":{"op":"==","left":{"meta":{"key":"nfproto"}},"right":"ipv6"}},{"match":{"op":"==","left":{"fib":{"result":"oif","flags":["saddr","mark","iif"]}},"right":false}},{"drop":null}`
+	const defaults = `[{"priority":0,"src":"all","table":"local"},{"priority":32766,"src":"all","table":"main"}]`
+	const unsafeRPDB = `[{"priority":100,"fwmark":"0x10000000","fwmask":"0x10000000","table":"100"}]`
+	for _, tc := range []struct {
+		name, hook, expr, routes, suffix, refusal string
+	}{
+		{"stock strict IPv6 reverse path", "prerouting", guard, defaults, "", ""},
+		{"wrong hook", "input", guard, defaults, "", "rule handle 141: packet-mark FIB lookup"},
+		{"wrong protocol", "prerouting", strings.Replace(guard, `"ipv6"`, `"ipv4"`, 1), defaults, "", "rule handle 141: packet-mark FIB lookup"},
+		{"wrong lookup", "prerouting", strings.Replace(guard, `"saddr"`, `"daddr"`, 1), defaults, "", "rule handle 141: packet-mark FIB lookup"},
+		{"wrong verdict", "prerouting", strings.Replace(guard, `"drop"`, `"accept"`, 1), defaults, "", "rule handle 141: packet-mark FIB lookup"},
+		{"queue in same rule", "prerouting", `{"queue":{"num":102}},` + guard, defaults, "", "rule handle 141: unproven mark/queue"},
+		{"writer in later rule", "prerouting", guard, defaults, `,{"rule":{"family":"inet","table":"other","chain":"pre","handle":142,"expr":[{"mangle":{"key":{"meta":{"key":"mark"}},"value":{"ct":{"key":"mark"}}}}]}}`, "rule handle 142: native mark/mangle writer"},
+		{"overlapping policy route", "prerouting", guard, unsafeRPDB, "", "routing mark selector overlaps reserved bits"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Use arbitrary names so the proof depends on the hook and
+			// expression, without any reliance on the firewall vendor.
+			nft := fmt.Sprintf(`{"nftables":[{"chain":{"family":"inet","table":"other","name":"pre","type":"filter","hook":%q,"prio":10}},{"rule":{"family":"inet","table":"other","chain":"pre","handle":141,"expr":[%s]}}%s]}`, tc.hook, tc.expr, tc.suffix)
+			env := fakeEnv()
+			env.Run = func(_ context.Context, cmd string, args ...string) ([]byte, error) {
+				switch cmd + " " + strings.Join(args, " ") {
+				case "nft -j list ruleset":
+					return []byte(nft), nil
+				case "ip -j -d link show", "ip -j -4 rule show":
+					return []byte("[]"), nil
+				case "ip -j -6 rule show":
+					return []byte(tc.routes), nil
+				default:
+					return nil, fmt.Errorf("unexpected probe %s %v", cmd, args)
+				}
+			}
+			seen := 0
+			for _, check := range FirewallFor(context.Background(), env, "both", true) {
+				if check.ID != "firewall.mark_compatibility" && check.ID != "firewall.ruleset" {
+					continue
+				}
+				seen++
+				t.Log(check.ID, check.Status, check.Code, check.Detail)
+				if tc.refusal == "" {
+					if check.Status != Ready {
+						t.Errorf("strict IPv6 reverse-path guard refused: %+v", check)
+					}
+				} else if check.Status != Blocked || check.Code != "firewall_conflict" || !strings.Contains(check.Detail, tc.refusal) {
+					t.Errorf("expected refusal %q, got %+v", tc.refusal, check)
+				}
+			}
+			if seen != 2 {
+				t.Fatalf("expected both readiness checks, found %d", seen)
+			}
+		})
+	}
+}
