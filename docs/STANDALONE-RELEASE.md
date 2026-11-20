@@ -11,6 +11,16 @@ shutdown during upgrades.
 Preflight checks for an executable `runuser` in the system's standard
 binary directories before staging an installation.
 
+On hosts with AppArmor's unprivileged user-namespace restriction enabled,
+standalone installation requires the system `apparmor_parser`. It loads and
+persists `/etc/apparmor.d/flowgate-standalone-electron`, which permits user
+namespaces only for Electron in FlowGate's managed versioned desktop tree.
+Chromium sandboxing and the host's AppArmor settings stay enabled. The one
+profile covers upgrades and retained rollback versions. The standalone
+uninstaller unloads and removes the unmodified managed profile. After rolling
+back to a release that predates this support, use the newer offline
+`flowgate-release.py uninstall` to include profile cleanup.
+
 The package target installs the pinned Electron runtime when needed, builds the
 desktop and native components, and runs the release checks.
 

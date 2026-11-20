@@ -44,6 +44,17 @@ MONITORING = b'{"schema":1,"mode":"monitoring"}'
 RESCUE_ENTRY = b'#!/bin/sh\nexec /usr/bin/python3 -I /usr/local/libexec/flowgate/rescue-release.py recover "$@"\n'
 SHA256SUM = '/usr/bin/sha256sum'
 RUNUSER_DIRS = tuple(map(Path, ('/usr/sbin', '/usr/bin', '/sbin', '/bin')))
+APPARMOR_PROFILE = Path('/etc/apparmor.d/flowgate-standalone-electron')
+APPARMOR_USERNS = Path('/proc/sys/kernel/apparmor_restrict_unprivileged_userns')
+APPARMOR_ENABLED = Path('/sys/module/apparmor/parameters/enabled')
+APPARMOR_LOADED = Path('/sys/kernel/security/apparmor/profiles')
+ELECTRON_PROFILE = b'''# Managed by the FlowGate standalone installer.
+abi <abi/4.0>,
+include <tunables/global>
+profile flowgate-standalone-electron /usr/local/lib/flowgate/gui/[0-9]*/runtime/electron flags=(unconfined) {
+  userns,
+}
+'''
 
 
 def digest(path):
@@ -58,12 +69,12 @@ def secure_file(path):
     return path
 
 
-def system_runuser():
+def system_executable(name):
     # Root invokes this helper. Ignore PATH and reject links outside the system
     # directories, while allowing ordinary merged-/usr aliases.
     for directory in RUNUSER_DIRS:
         try:
-            executable = (directory / 'runuser').resolve(strict=True)
+            executable = (directory / name).resolve(strict=True)
             if executable.parent not in RUNUSER_DIRS:
                 continue
             secure_file(executable)
@@ -75,7 +86,54 @@ def system_runuser():
                 return str(executable)
         except (OSError, RuntimeError):
             continue
-    raise RuntimeError('FlowGate requires an executable runuser in a trusted system directory (/usr/sbin, /usr/bin, /sbin, /bin)')
+    raise RuntimeError(f'FlowGate requires an executable {name} in a trusted system directory (/usr/sbin, /usr/bin, /sbin, /bin)')
+
+
+def system_runuser():
+    return system_executable('runuser')
+
+
+def electron_profile_exists():
+    if not existing(APPARMOR_PROFILE):
+        return False
+    if secure_file(APPARMOR_PROFILE).read_bytes() != ELECTRON_PROFILE:
+        raise RuntimeError(f'Edited or unmanaged AppArmor profile preserved: {APPARMOR_PROFILE}')
+    return True
+
+
+def electron_profile_parser():
+    if APPARMOR_USERNS.is_file() and APPARMOR_USERNS.read_text().strip() == '1':
+        return system_executable('apparmor_parser')
+    return None
+
+
+def install_electron_profile(parser):
+    if parser is None:
+        return
+    present = electron_profile_exists()
+    if not present:
+        atomic(APPARMOR_PROFILE, ELECTRON_PROFILE, 0o644)
+    else:
+        secure_directory(APPARMOR_PROFILE.parent)
+    try:
+        subprocess.run([parser, '-r', '-T', str(APPARMOR_PROFILE)], check=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        if not present:
+            APPARMOR_PROFILE.unlink()
+            fsync_dir(APPARMOR_PROFILE.parent)
+        raise
+
+
+def remove_electron_profile():
+    if not electron_profile_exists():
+        return
+    secure_directory(APPARMOR_PROFILE.parent)
+    if APPARMOR_ENABLED.is_file() and APPARMOR_ENABLED.read_text().strip() == 'Y':
+        if any(line.startswith('flowgate-standalone-electron ') for line in APPARMOR_LOADED.read_text().splitlines()):
+            parser = system_executable('apparmor_parser')
+            subprocess.run([parser, '-R', str(APPARMOR_PROFILE)], check=True, timeout=15)
+    APPARMOR_PROFILE.unlink()
+    fsync_dir(APPARMOR_PROFILE.parent)
 
 
 def secure_directory(path):
@@ -413,6 +471,9 @@ def install(options, payload, manifest, backend):
     host, old, before, selected, collector, config, uid, xdg, settings = preflight(
         api, payload / 'backend', backend, options.desktop_config,
     )
+    parser = electron_profile_parser()
+    if parser is not None:
+        electron_profile_exists()
     if options.operation == 'preflight':
         print(f"Preflight passed for {manifest['release']}. Current protection: {selected}.")
         return
@@ -426,6 +487,9 @@ def install(options, payload, manifest, backend):
     gui_payload = BASE / 'gui' / release
     immutable_tree(payload / 'gui', gui_payload, gui_files)
     desktop(uid, xdg, gui_payload / 'flowgate-ui', '--check-autostart', options.import_preferences)
+    # The attachment covers only Electron under the immutable versioned GUI
+    # tree. Keeping it across a release switch also covers a verified rollback.
+    install_electron_profile(parser)
 
     # Pin the rescue executable and lifecycle script independently of current.
     rescue = secure_directory(BASE / 'rescue' / release)
@@ -755,6 +819,7 @@ def recover(options, api, host, record, pending):
 def uninstall(options, api, host, record, pending):
     if pending:
         raise RuntimeError('Resolve the interrupted install before uninstalling')
+    electron_profile_exists()
     files = {Path(dst): record['files'][name] for name, dst in FILES.items()}
     files.update({Path('/etc/systemd/system') / name: record['files'][name] for name in UNITS})
     for path, expected in files.items():
@@ -815,6 +880,7 @@ def uninstall(options, api, host, record, pending):
     if existing(login_helper):
         desktop(record['uid'], record['desktop_config'], login_helper, '--stop-installed')
         desktop(record['uid'], record['desktop_config'], login_helper, '--remove-autostart')
+    remove_electron_profile()
     for name in UNITS:
         (Path('/etc/systemd/system') / name).unlink(missing_ok=True)
     host.run('systemctl', 'daemon-reload')
@@ -875,6 +941,7 @@ def main():
         pending = DATA / 'standalone-pending.json'
         receipt = pending if pending.exists() else DATA / 'standalone.json'
         if not existing(receipt) and options.operation == 'uninstall':
+            remove_electron_profile()
             print('No standalone installation is registered')
             return
         record = read_record(receipt)

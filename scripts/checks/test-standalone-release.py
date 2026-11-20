@@ -60,6 +60,47 @@ class ReleaseChecks(unittest.TestCase):
                     release['main']()
                 locked.assert_not_called()
 
+    def test_electron_profile_lifecycle_preserves_unmanaged_content(self):
+        profile = self.root / 'flowgate-standalone-electron'
+        foreign = self.root / 'foreign-profile'
+        userns = self.root / 'restrict-userns'
+        enabled = self.root / 'enabled'
+        loaded = self.root / 'profiles'
+        userns.write_text('0\n')
+        enabled.write_text('Y\n')
+        loaded.write_text('flowgate-standalone-electron (unconfined)\nforeign-profile (enforce)\n')
+        foreign.write_text('independent policy')
+        parser = '/usr/sbin/apparmor_parser'
+        def write(path, content, mode):
+            path.write_bytes(content)
+            path.chmod(mode)
+        with patch.dict(scope, APPARMOR_PROFILE=profile, APPARMOR_USERNS=userns,
+                        APPARMOR_ENABLED=enabled, APPARMOR_LOADED=loaded, secure_file=lambda p: p,
+                        secure_directory=Mock(), fsync_dir=Mock(), atomic=write,
+                        system_executable=Mock(return_value=parser)), patch('subprocess.run') as run:
+            self.assertIsNone(release['electron_profile_parser']())
+            release['install_electron_profile'](None)
+            self.assertFalse(profile.exists())
+            userns.write_text('1\n')
+            self.assertEqual(release['electron_profile_parser'](), parser)
+            scope['system_executable'].assert_called_once_with('apparmor_parser')
+            release['install_electron_profile'](parser)
+            run.assert_called_once_with([parser, '-r', '-T', str(profile)], check=True, timeout=15)
+            self.assertEqual(profile.read_bytes(), release['ELECTRON_PROFILE'])
+            profile.write_text('edited policy')
+            run.reset_mock()
+            for action in (lambda: release['install_electron_profile'](parser), release['remove_electron_profile']):
+                with self.assertRaisesRegex(RuntimeError, 'Edited or unmanaged AppArmor profile preserved'):
+                    action()
+            run.assert_not_called()
+            self.assertEqual(profile.read_text(), 'edited policy')
+            profile.write_bytes(release['ELECTRON_PROFILE'])
+            release['remove_electron_profile']()
+            run.assert_called_once_with([parser, '-R', str(profile)], check=True, timeout=15)
+        self.assertFalse(profile.exists())
+        self.assertEqual(foreign.read_text(), 'independent policy')
+        self.assertEqual(userns.read_text(), '1\n')
+
     def archive(self, extra=None):
         backend = {name: b'backend\n' for name in {*release['FILES'], *release['UNITS'],
                                                     'launch', 'flowgate', 'standalone-release.json'}}
