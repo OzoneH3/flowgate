@@ -37,7 +37,7 @@ update: package
 	@set -eu; \
 	  artifact="$(ARTIFACT)"; \
 	  receipt="$$(basename "$$artifact").sha256"; \
-	  (cd "$$(dirname "$$artifact")" && sha256sum -c -- "$$receipt"); \
+	  (cd "$$(dirname "$$artifact")" && /usr/bin/sha256sum -c -- "$$receipt"); \
 	  digest=$$(cut -d ' ' -f 1 "$$artifact.sha256"); \
 	  $(MAKE) preflight BUNDLE="$$artifact" SHA256="$$digest"; \
 	  $(MAKE) install BUNDLE="$$artifact" SHA256="$$digest"

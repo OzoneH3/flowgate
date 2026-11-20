@@ -3,7 +3,6 @@
 import argparse
 from contextlib import contextmanager
 import fcntl
-import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -12,6 +11,7 @@ import pwd
 import re
 import runpy
 import shutil
+import signal
 import stat
 import subprocess
 import tarfile
@@ -42,11 +42,12 @@ RELEASE_ID = re.compile(r'[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9]+(?:\.[A-Za-z0-9]
 HEX = re.compile(r'[a-f0-9]{64}')
 MONITORING = b'{"schema":1,"mode":"monitoring"}'
 RESCUE_ENTRY = b'#!/bin/sh\nexec /usr/bin/python3 -I /usr/local/libexec/flowgate/rescue-release.py recover "$@"\n'
+SHA256SUM = '/usr/bin/sha256sum'
 
 
 def digest(path):
     with path.open('rb') as f:
-        return hashlib.file_digest(f, 'sha256').hexdigest()
+        return subprocess.check_output([SHA256SUM], stdin=f).split()[0].decode('ascii')
 
 
 def secure_file(path):
@@ -830,6 +831,14 @@ def main():
     mode.add_argument('--rollback', action='store_true')
     sub.add_parser('uninstall').add_argument('--purge', action='store_true')
     options = parser.parse_args()
+    if os.sys.version_info < (3, 9):
+        parser.error('FlowGate requires Python 3.9 or newer')
+    if not os.access(SHA256SUM, os.X_OK):
+        parser.error(f'FlowGate requires {SHA256SUM}')
+    if options.operation in ('preflight', 'install') and (
+        not hasattr(os, 'pidfd_open') or not hasattr(signal, 'pidfd_send_signal')
+    ):
+        parser.error('System Python must support Linux pidfds to stop the installed desktop safely')
     if os.geteuid() != 0 or not __debug__ or not os.sys.flags.isolated:
         parser.error('Run as root using /usr/bin/python3 -I')
     os.umask(0o077)

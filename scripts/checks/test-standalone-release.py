@@ -63,6 +63,14 @@ class ReleaseChecks(unittest.TestCase):
         self.assertEqual(manifest['release'], backend['release'])
         self.assertEqual((path / 'gui/runtime/electron').read_bytes(), b'Electron')
 
+    def test_release_hashes_use_file_bytes_independent_of_filename(self):
+        payload = self.root / '-archive\\name\nwith spaces'
+        payload.write_bytes(b'\x00flowgate\xff\n')
+        expected = hashlib.sha256(payload.read_bytes()).hexdigest()
+        package = runpy.run_path(str(LIFECYCLE / 'package.py'))
+        self.assertEqual(package['digest'](payload), expected)
+        self.assertEqual(release['digest'](payload), expected)
+
     def test_refuses_wrong_digest_before_extracting(self):
         archive, _ = self.archive()
         with self.assertRaisesRegex(RuntimeError, 'SHA256'):

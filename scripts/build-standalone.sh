@@ -12,6 +12,8 @@ test -z "$(git status --porcelain --untracked-files=no)" || {
   echo 'Commit tracked changes before building a release.' >&2
   exit 1
 }
+python3 -B -c 'import sys; sys.version_info >= (3, 9) or sys.exit("FlowGate requires Python 3.9 or newer.")'
+test -x /usr/bin/sha256sum || { echo 'FlowGate requires /usr/bin/sha256sum.' >&2; exit 1; }
 revision=$(git rev-parse HEAD)
 stage="$PWD/build/standalone-build"
 mkdir -p "$stage/electron" "$TMPDIR" "$XDG_CACHE_HOME"

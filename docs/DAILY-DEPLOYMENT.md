@@ -1,14 +1,18 @@
 # Deployment and release preparation
 
-The supported deployment commands are:
+For a standalone installation from your current checkout, use `make update`.
+See the [standalone release guide](STANDALONE-RELEASE.md) for that workflow.
+The commands below are for the pinned checkout updater.
 
 ```sh
 scripts/prepare-release.sh                 # matched backend and Electron
 scripts/prepare-release.sh --backend-only  # backend only
-scripts/update-and-start.sh                # prepare, install, verify, preserve current mode
+scripts/update-and-start.sh --update --dry-run  # preview the pinned update
+scripts/update-and-start.sh --update           # install prepared pinned bundles
 ```
 
-The default restores the live mode observed during update; fresh installs stay
+Running the script with no arguments opens the installed GUI. For an update,
+the default profile restores the live mode observed during update. Fresh installs stay
 monitoring. Explicit `--profile both --acknowledge-outgoing-blocking` acknowledges
 that DNS/DHCP/VPN may be blocked and continuous protection has no automatic
 countdown. No essential service permission is added by an update. If the GUI/API
@@ -17,7 +21,7 @@ is unavailable, root-local recovery is `sudo /usr/local/sbin/flowgate-recover`.
 To start the desktop user's GUI automatically at login, use:
 
 ```sh
-scripts/update-and-start.sh --local --profile preserve --autostart
+scripts/update-and-start.sh --update --local --profile preserve --autostart
 ```
 
 After the matched GUI reports it loaded, this writes the current user's
@@ -32,14 +36,18 @@ The release directory must remain available at login.
 
 Upstream updates are noninteractive and have a 60-second timeout (with up to five
 seconds for forced cleanup). Failure stops before preparation, authentication or
-protection changes. Use `scripts/update-and-start.sh --local` to deliberately skip
-upstream access and install the current committed local master; it still requires
-a clean master branch. Interrupting the fetch does not stop the installed daemon.
+protection changes. Use `scripts/update-and-start.sh --update --local` to skip
+upstream access. It still requires a clean `master` and the prepared bundles for
+the exact revision in [deployment/default-release](../deployment/default-release).
+The updater installs that pinned revision. Interrupting the fetch leaves the
+installed daemon running.
 
 Preparation requires clean master, builds collectors from current source, and
 records current race/vet evidence. It never installs or activates protection.
-Bundle paths remain `.workspace/daily-releases/<revision>` and
-`.workspace/automatic-zone-releases/<revision>`. Existing bundles are hash-checked
+Preparation builds the checked-out commit. Use the pinned commit when preparing
+bundles for the updater. It expects a backend manifest in
+`build/daily-releases/<revision>/` and a matched manifest in
+`build/automatic-zone-releases/<revision>/`. Existing bundles are hash-checked
 before reuse. The old installer that combined installation with host acceptance
 is retired and no longer shipped.
 

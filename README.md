@@ -56,7 +56,11 @@ rules and protection, connect the desktop to an installed FlowGate daemon.
 ## Install FlowGate
 
 The standalone release candidate targets **64-bit x86 Linux with systemd**.
-There is currently no installer on [GitHub Releases](https://github.com/OzoneH3/flowgate/releases).
+Check [GitHub Releases](https://github.com/OzoneH3/flowgate/releases) for a
+prebuilt candidate. If you download one, follow the installation guide to
+verify the archive and offline installer before running them as root.
+
+To build from source:
 
 1. Check the [build and system requirements](docs/STANDALONE-RELEASE.md).
 2. Run `make package` from a clean, committed checkout. It builds FlowGate,
@@ -127,16 +131,19 @@ checks when you enable protection. [Read the diagnostic and recovery guide](docs
 
 Use [the checkout updater](docs/DAILY-DEPLOYMENT.md) only with matched backend
 and Electron bundles for the exact [pinned revision](deployment/default-release).
-A fresh public clone may not contain that revision. From a clean, committed
-`master` checkout with the prepared bundles in `.workspace/`, preview the
-update and then apply it.
+A fresh public clone may not contain that revision. The updater needs both
+`build/daily-releases/<revision>/` and
+`build/automatic-zone-releases/<revision>/` for that pin. From a clean
+`master` checkout, preview the update and then apply it.
 
 ```sh
-./scripts/update-and-start.sh --local --profile preserve --dry-run
-./scripts/update-and-start.sh --local --profile preserve
+./scripts/update-and-start.sh --update --local --profile preserve --dry-run
+./scripts/update-and-start.sh --update --local --profile preserve
 ```
 
-This workflow preserves the existing protection mode. The
+With no arguments the script opens the installed desktop. The `--local`
+option skips fetching and still requires the prepared bundles for the pinned
+revision. This workflow preserves the existing protection mode. The
 [standalone guide](docs/STANDALONE-RELEASE.md) covers the source package
 workflow and migration.
 

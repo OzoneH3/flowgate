@@ -2,7 +2,12 @@
 
 The source build uses GNU Make. Installation uses an exact offline archive. The daemon, desktop, helpers, upgrade and rescue tools run without the source checkout. The initial release candidate targets Linux x86_64 with systemd. It uses the Electron desktop, including the existing Plasma Wayland integrations. The Qt client and lab tools are outside the package.
 
-Build prerequisites are Go and a C toolchain, Clang with BPF support, bpftool, libbpf, libmnl and libnftnl development files, a kernel BTF file, Wine development headers and import libraries, Python 3, Node and the Electron dependencies in the lockfile. The installed host needs systemd, Python 3, iproute2, nftables, runuser, the dynamically linked system libraries and the kernel features checked by FlowGate. BPF, traffic collector and Wine features still depend on their individual runtime checks.
+Build prerequisites are Go and a C toolchain, Clang with BPF support, bpftool, libbpf, libmnl and libnftnl development files, a kernel BTF file, Wine development headers and import libraries, Node and the Electron dependencies in the lockfile. The installed host needs systemd, iproute2, nftables, runuser, the dynamically linked system libraries and the kernel features checked by FlowGate. BPF, traffic collector and Wine features still depend on their individual runtime checks.
+
+Both the build machine and the installation host need Python 3.9 or newer
+and `/usr/bin/sha256sum` (from coreutils). The host's system Python must
+provide `os.pidfd_open` and `signal.pidfd_send_signal` for safe desktop
+shutdown during upgrades.
 
 The package target installs the pinned Electron runtime when needed, builds the
 desktop and native components, and runs the release checks.

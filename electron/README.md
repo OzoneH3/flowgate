@@ -22,18 +22,19 @@ repository's Go toolchain and existing desktop libraries. No system installation
 is performed. Node 26.11.1/npm 12.2.0/Electron 44.9.0 were used here. Electron's
 sandbox must work; there is no `--no-sandbox` fallback.
 
-Default startup creates a private mode-0700 `.workspace/electron-run-*` directory
+Default startup creates a private mode-0700 `build/electron-run-*` directory
 and starts only its own read-only observer. Its observer stops when Electron quits
 or the launcher receives Ctrl+C. `--observer` reuses an existing observer and leaves
 it running. `--control` attaches to an existing authenticated Go API. Merely launching or closing Electron never starts, stops, or recovers its controller. Evaluation buttons require an explicit user action. Independent controllers/collectors
-survive client exit. Each launcher owns only its own children and socket. Logs and
-Electron profile/cache directories remain under `.workspace` for inspection.
+survive client exit. Each launcher owns only its own children and socket. Look
+for `observer.log`, `electron.log`, and the launch and exit records in the run
+directory printed by the launcher.
 
 For already-built **production** assets without rebuilding:
 
 ```sh
 scripts/build.sh electron
-XDG_CACHE_HOME="$PWD/.workspace/cache" TMPDIR="$PWD/.workspace/tmp" python3 electron/launch.py
+XDG_CACHE_HOME="$PWD/build/cache" TMPDIR="$PWD/build/tmp" python3 electron/launch.py
 ```
 
 `--interval 1s` configures an owned observer; accepted backend range is 500ms–30s.
@@ -1053,7 +1054,7 @@ Activity uses compact rows and source-specific chart indicators.
 
 Activity now starts with an **All applications** overview. Choose TCP rates or UDP rates in Activity; totals and numeric sorting use that measurement source. The graph retains separate source histories over all observed sockets, independent of search. Missing measurements remain unavailable, and the overview cannot be used as a rule target. In/Out cells retain backend policy details; “Not set” means no explicit rule. The sidebar shows executable, properties, a compact Rules matrix and navigation links.
 
-See [Activity presentation and verification](ACTIVITY-COMPOSITION.md) and [ordinary Wayland launch diagnostics](LAUNCH-DIAGNOSTICS.md). The launcher retains GUI output/exit status in its run directory. Electron builds use `.workspace/electron-backend`, preserving the separate approved backend executable.
+See [Activity presentation and verification](ACTIVITY-COMPOSITION.md) and [ordinary Wayland launch diagnostics](LAUNCH-DIAGNOSTICS.md). The launcher retains GUI output and exit status in its run directory. The preview builds its own `build/electron-observer`.
 
 ## Activity-context rule workflow
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Create a curated offline package from make build output."""
 import datetime
-import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -15,11 +15,12 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[2]
 HERE = ROOT / 'deployment/standalone'
 BUILD = ROOT / 'build/standalone-build'
+SHA256SUM = '/usr/bin/sha256sum'
 
 
 def digest(path):
     with path.open('rb') as file:
-        return hashlib.file_digest(file, 'sha256').hexdigest()
+        return subprocess.check_output([SHA256SUM], stdin=file).split()[0].decode('ascii')
 
 
 def write_json(path, value):
@@ -124,4 +125,8 @@ def pack(version, output):
 
 
 if __name__ == '__main__':
+    if sys.version_info < (3, 9):
+        raise SystemExit('FlowGate packaging requires Python 3.9 or newer.')
+    if not os.access(SHA256SUM, os.X_OK):
+        raise SystemExit(f'FlowGate packaging requires {SHA256SUM}.')
     pack(sys.argv[1], Path(sys.argv[2]).resolve())
