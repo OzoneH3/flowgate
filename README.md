@@ -12,9 +12,11 @@ the desktop. The per-app monitoring and control workflow takes inspiration from
 [Try the desktop](#try-the-desktop) · [Install FlowGate](#install-flowgate) ·
 [Documentation](#documentation)
 
-![FlowGate main window showing the Activity list, selected application details, and upload and download charts](docs/images/flowgate-main-window.png)
+![FlowGate Activity view with a full-width traffic chart above the app table and details for the selected demo app](docs/images/flowgate-main-window.png)
 
-*The Activity view with sample traffic.*
+*Activity opens with the traffic chart above the app table. Select a row to
+see its details, or return to the all-applications overview to give the table
+the full width.*
 
 ## What you can do
 

@@ -1,8 +1,8 @@
-/* Main window layout. The sidebar value is also used by the tabs and footer. */
+/* Main window layout. */
 :root {
-  --desktop-toolbar-height: 39px;
-  --desktop-tabs-height: 30px;
-  --desktop-footer-height: 26px;
+  --desktop-toolbar-height: 46px;
+  --desktop-tabs-height: 36px;
+  --desktop-footer-height: 28px;
   --desktop-sidebar-width: 45.5vw;
   --desktop-sidebar-max-width: 45vw;
   --desktop-sidebar-grip-width: 5px;
@@ -27,7 +27,6 @@
   width: calc(100% - min(var(--info-width), var(--desktop-sidebar-max-width)) - 16px);
   height: var(--desktop-tabs-height);
 }
-.activity-main,
 .request-list,
 .rules-main {
   padding-top: var(--desktop-tabs-height);
@@ -42,14 +41,313 @@ main .sidebar-grip + aside,
 .sidebar-grip {
   width: var(--desktop-sidebar-grip-width);
 }
-#activityView #trafficGraph {
-  flex: 0 0 var(--desktop-traffic-chart-height);
+#app:has(#activityView:not([hidden])) > .tabs {
+  width: calc(100% - 8px);
+}
+
+#activityView:not([hidden]) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas:
+    'chart chart chart'
+    'table grip details';
+  gap: 0;
+  padding-top: var(--desktop-tabs-height);
+}
+
+#activityView .activity-main {
+  grid-area: table;
+  min-width: 0;
+}
+
+#activityView > .sidebar-grip {
+  grid-area: grip;
+}
+
+#activityView > aside {
+  grid-area: details;
+}
+
+body.hide-info #activityView > :is(aside, .sidebar-grip),
+#activityView > aside[hidden],
+#activityView > .sidebar-grip:has(+ aside[hidden]),
+body.hide-chart #activityView > #trafficGraph {
+  display: none;
+}
+
+#activityView > #trafficGraph {
+  grid-area: chart;
   height: var(--desktop-traffic-chart-height);
+  min-width: 0;
+  margin: 4px 0;
+  background: var(--fg-content);
+  border: 1px solid var(--fg-border);
+  border-radius: 8px;
+}
+
+#activityView > #trafficGraph .graph-heading {
+  border-radius: 7px 7px 0 0;
+}
+
+#activityView > #trafficGraph #trafficCanvas {
+  height: calc(100% - 68px);
 }
 #app > footer {
   height: var(--desktop-footer-height);
   min-height: var(--desktop-footer-height);
 }
-#app:has(#activityView:not([hidden])) > footer {
-  width: calc(100% - min(var(--info-width), var(--desktop-sidebar-max-width)) - 10px);
+
+/* Main window appearance. User desktop styles load after this file. */
+:root {
+  --desktop-chrome: #111b1d;
+  --desktop-raised: #19292c;
+  --desktop-control: #213538;
+  --desktop-accent: #8de0cb;
+  --fg-content: #142023;
+  --fg-section: #203235;
+  --fg-border: #354b4f;
+  --fg-selected: #285653;
+  --fg-tab: var(--desktop-accent);
+  --fg-text: #edf5f4;
+  --fg-muted: #adc0c2;
+  --fg-row-height: 27px;
+}
+
+#app > .toolbar {
+  background: var(--desktop-chrome);
+  border-color: var(--fg-border);
+  padding-inline: 12px;
+}
+
+.toolbar .brand {
+  color: var(--desktop-accent);
+  font-size: 14px;
+  letter-spacing: .09em;
+}
+
+.toolbar #search {
+  height: 28px;
+  padding-inline: 10px;
+  background: var(--fg-content);
+  border-color: var(--fg-border);
+  border-radius: 6px;
+}
+
+#app .menu-panel {
+  background: var(--desktop-raised);
+  border-color: var(--fg-border);
+  border-radius: 6px;
+}
+
+#app > .tabs {
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  background: var(--fg-content);
+  border-bottom-color: var(--fg-border);
+}
+
+#app > .tabs > button {
+  height: 26px;
+  line-height: 26px;
+  padding-inline: 10px;
+  border-radius: 5px;
+  color: var(--fg-muted);
+}
+
+#app > .tabs > button[aria-selected='true'] {
+  background: var(--desktop-accent);
+  color: var(--desktop-chrome);
+  font-weight: 600;
+}
+
+#app > .tabs > button:hover:not([aria-selected='true']) {
+  background: var(--fg-section);
+  color: var(--fg-text);
+}
+
+#app :is(.toolbar, .filterbar) select,
+#app .filterbar button:not(.icon-button),
+#activityView .filterbar #rateMode {
+  background: var(--desktop-control);
+  border-color: var(--fg-border);
+  border-radius: 5px;
+}
+
+#app .filterbar button:not(.icon-button):hover:not(:disabled),
+#activityView .filterbar #rateMode[aria-pressed='true'] {
+  background: var(--fg-selected);
+}
+
+#app :is(button, select, input, summary, table, tr, .sidebar-grip):focus-visible {
+  outline: 2px solid var(--desktop-accent);
+  outline-offset: -2px;
+}
+
+#app .table-scroll,
+#app main > aside {
+  background: var(--fg-content);
+  border: 1px solid var(--fg-border);
+  border-radius: 8px;
+}
+
+#app .table-scroll th {
+  background: var(--desktop-raised);
+  color: var(--fg-muted);
+  border-color: var(--fg-border);
+  font-weight: 600;
+}
+
+#app .table-scroll th button:hover:not(:disabled) {
+  background: var(--fg-section);
+  color: var(--fg-text);
+}
+
+#app .table-scroll tbody tr:nth-child(even) {
+  background: var(--desktop-raised);
+}
+
+#app .table-scroll tbody tr:hover,
+#app #tree tbody tr:not([aria-selected='true']):hover > td {
+  background: var(--fg-section);
+}
+
+#app .table-scroll tbody tr[aria-selected='true'] {
+  background: var(--fg-selected);
+  color: var(--fg-text);
+}
+
+#tree td.down .rate-value,
+#tree td.up .rate-value {
+  background: var(--desktop-control);
+}
+
+#activityView aside h2,
+#app .request-sidebar > h2 {
+  height: auto;
+  min-height: 32px;
+  padding: 7px 10px;
+  background: var(--desktop-raised);
+  color: var(--fg-muted);
+  font-weight: 600;
+}
+
+#app #selectedName {
+  margin: 10px 10px 4px;
+  color: var(--fg-text);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+#activityView #info,
+#activityView .info-rule-matrix {
+  border-color: var(--fg-border);
+  border-radius: 6px;
+}
+
+#activityView .info-section-title::before {
+  background: var(--desktop-control);
+}
+
+#app .link-button {
+  --fg-selected: var(--desktop-accent);
+}
+
+#app :is(.info-tools button, .info-technical summary, .activity-rule-actions button,
+  .policy-identity, .policy-create button, .info-rule-matrix th.connection-column) {
+  color: var(--desktop-accent);
+}
+
+#app > footer {
+  background: var(--desktop-chrome);
+  border-top-color: var(--fg-border);
+  color: var(--fg-muted);
+}
+
+#app .filterbar button[aria-checked='true'] {
+  background: var(--fg-selected);
+}
+
+#activityView #uploadLimits {
+  white-space: nowrap;
+}
+
+@media (max-width: 950px) {
+  #activityView .filterbar-icons {
+    gap: 2px;
+  }
+
+  #activityView .filterbar-icons .icon-button {
+    width: 22px;
+    min-width: 22px;
+  }
+
+  #activityView .filterbar #rateMode {
+    min-width: 58px;
+  }
+}
+
+#requestsView .request-list > h2 {
+  padding: 6px 9px;
+  background: var(--desktop-raised);
+  border-color: var(--fg-border);
+  border-radius: 5px;
+  font-weight: 600;
+}
+
+#requestsView .connection-banner {
+  background: var(--fg-section);
+  color: #c3f0e0;
+}
+
+#requestsView .nl-direction::before {
+  background: var(--fg-selected);
+}
+
+#requestsView .nl-direction::after {
+  border-left-color: var(--fg-selected);
+}
+
+#requestsView .nl-box {
+  background: var(--desktop-raised);
+  border: 1px solid var(--fg-border);
+  border-radius: 6px;
+}
+
+#requestsView :is(.nl-label, .nl-fields dt, .nl-port-label) {
+  background: transparent;
+  color: var(--fg-muted);
+}
+
+#requestsView .nl-link {
+  color: var(--desktop-accent);
+}
+
+#requestsView .nl-fields {
+  padding: 8px;
+  border: 1px solid var(--fg-border);
+  border-radius: 6px;
+}
+
+#requestDetails .decision-controls button:is(.allow, .block),
+#requestDetails button.open-prompt {
+  background: var(--desktop-control);
+  border: 1px solid var(--fg-border);
+  border-radius: 5px;
+}
+
+#requestDetails .decision-controls button.allow:enabled {
+  background: var(--desktop-accent);
+  border-color: transparent;
+  color: var(--desktop-chrome);
+}
+
+#requestDetails .decision-controls button:is(.allow, .block):enabled:hover {
+  filter: brightness(1.15);
+}
+
+#requestDetails .decision-controls input[type='checkbox']:checked {
+  background: var(--fg-selected);
+  border-color: var(--desktop-accent);
 }

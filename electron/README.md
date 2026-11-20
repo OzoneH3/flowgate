@@ -441,8 +441,8 @@ this README and `scripts/checks/check-electron-delete.sh`.
 
 ## Live traffic graphs
 
-Based on exact integrated checkout `ffa5c45f99c393853e73e28af2b2be7c6e948371`.
-The lower Info View contains a lightweight canvas chart for the selected socket,
+Activity shows the traffic chart above the table. It spans the window even when
+you select a row and open the details pane. The chart follows the selected socket,
 process, application or Unidentified group. Choose **60 s / 5 min** and **TCP
 transport payload / UDP API-reported bytes**. Download is green/solid; upload is
 orange/dashed so equal rates remain distinguishable. Axes show B/s and elapsed

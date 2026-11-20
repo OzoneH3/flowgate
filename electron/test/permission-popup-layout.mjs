@@ -15,6 +15,7 @@ await fs.mkdir(client);
 await fs.cp(path.join(electronDir, 'dist'), path.join(client, 'dist'), { recursive: true });
 await fs.copyFile(path.join(electronDir, 'package.json'), path.join(client, 'package.json'));
 const endpoint = path.join(run, 'api');
+const observer = path.join(run, 'obs');
 const config = path.join(run, 'config');
 await fs.mkdir(path.join(config, 'flowgate'), { recursive: true });
 await fs.writeFile(path.join(config, 'flowgate', 'style.css'), ':root { --fixture-user-style: desktop; }');
@@ -167,14 +168,43 @@ function reply(q) {
     activity: { sequence: 1, collected: now, complete: true, processes: {}, rows: [] },
   };
 }
-const server = net.createServer((socket) => {
-  let input = '';
-  socket.setEncoding('utf8').on('data', (chunk) => {
-    input += chunk;
-    if (input.includes('\n')) socket.end(JSON.stringify(reply(JSON.parse(input))) + '\n');
+async function listen(pathname, respond) {
+  const server = net.createServer((socket) => {
+    let input = '';
+    socket.setEncoding('utf8').on('data', (chunk) => {
+      input += chunk;
+      if (input.includes('\n')) socket.end(JSON.stringify(respond(JSON.parse(input))) + '\n');
+    });
   });
+  await new Promise((resolve, reject) => server.once('error', reject).listen(pathname, resolve));
+  return server;
+}
+const server = await listen(endpoint, reply);
+const observerServer = await listen(observer, () => {
+  const now = new Date().toISOString();
+  const process = { ...first.attribution.owners[0], id: 'atlas-process' };
+  return {
+    version: 1,
+    generation,
+    server_time: now,
+    mode: 'host-monitor',
+    read_only: true,
+    activity: {
+      sequence: 1,
+      collected: now,
+      complete: true,
+      processes: { [process.id]: process },
+      rows: [{
+        id: 'atlas-socket',
+        owners: [process.id],
+        ownership_category: 'visible-holder',
+        state: 'Established',
+        socket: { protocol: 'tcp', local: first.flow.local, remote: first.flow.remote, uid: process.uid, state: 1 },
+        traffic: { available: false, reason: 'Synthetic observation' },
+      }],
+    },
+  };
 });
-await new Promise((resolve, reject) => server.once('error', reject).listen(endpoint, resolve));
 
 let app;
 try {
@@ -182,7 +212,7 @@ try {
     chromiumSandbox: true,
     args: [
       ...(process.env.WAYLAND_DISPLAY ? ['--ozone-platform=wayland'] : []),
-      client, '--observer', endpoint, '--control', endpoint,
+      client, '--observer', observer, '--control', endpoint,
     ],
     env: {
       ...process.env,
@@ -217,12 +247,50 @@ try {
   assert.equal(await appliedStyle(main), 'main');
   assert.equal(await appliedStyle(prompt), 'permission');
   assert.equal(await main.locator('.toolbar').evaluate((el) => getComputedStyle(el).height), '47px');
-  await main.locator('#activityView > .sidebar-grip').waitFor();
-  const sidebar = main.locator('#activityView > aside');
+  const appRow = main.locator('#rows tr[data-id^="app:"]').filter({ hasText: 'Atlas Sync' });
+  const chart = main.locator('#trafficGraph');
+  const table = main.locator('#activityView .table-scroll');
+  const sidebar = main.locator('#activityDetails');
+  const grip = main.locator('#activityView > .sidebar-grip');
+  await appRow.waitFor();
+  await sidebar.waitFor({ state: 'hidden' });
+  await grip.waitFor({ state: 'hidden' });
+  await chart.waitFor();
+  const chartWidth = (await chart.boundingBox()).width;
+  const fullTableWidth = (await table.boundingBox()).width;
+  assert.equal(chartWidth, fullTableWidth);
+  await main.screenshot({ path: path.join(run, 'activity-overview.png') });
+  await appRow.click();
+  await sidebar.waitFor();
+  await grip.waitFor();
+  assert.match(await sidebar.locator('#selectedName').getAttribute('data-label'), /Atlas Sync/i);
   const sidebarWidth = () => sidebar.evaluate((el) => getComputedStyle(el).width);
   assert.equal(await sidebarWidth(), '300px');
-  await main.locator('#activityView > .sidebar-grip').press('ArrowLeft');
+  assert.equal((await chart.boundingBox()).width, chartWidth);
+  assert((await chart.boundingBox()).y < (await table.boundingBox()).y);
+  assert((await table.boundingBox()).width < fullTableWidth);
+  await grip.press('ArrowLeft');
   assert.equal(await sidebarWidth(), '310px');
+  await main.screenshot({ path: path.join(run, 'activity-selected.png') });
+  const viewport = main.viewportSize() || await main.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+  await main.setViewportSize({ width: 800, height: 550 });
+  const narrowChart = await chart.boundingBox();
+  const narrowSidebar = await sidebar.boundingBox();
+  assert(narrowSidebar.x + narrowSidebar.width <= 800);
+  assert(narrowSidebar.y >= narrowChart.y + narrowChart.height);
+  await main.screenshot({ path: path.join(run, 'activity-narrow.png') });
+  await main.setViewportSize(viewport);
+  await chart.locator('.pane-close').click();
+  await chart.waitFor({ state: 'hidden' });
+  await sidebar.waitFor();
+  const windowMenu = main.locator('.toolbar-window-menu');
+  await windowMenu.locator('summary').click();
+  await windowMenu.locator('[data-pane="chart"]').click();
+  await chart.waitFor();
+  await main.locator('#rows tr[data-id="overview"] .name').click();
+  await sidebar.waitFor({ state: 'hidden' });
+  await grip.waitFor({ state: 'hidden' });
+  assert.equal((await table.boundingBox()).width, fullTableWidth);
   const shot = async (name) => {
     await prompt.evaluate(() => document.fonts.ready);
     await prompt.screenshot({ path: path.join(run, name + '.png') });
@@ -397,10 +465,11 @@ try {
     await pane.locator('.detached-heading').evaluate((el) => getComputedStyle(el).height), '44px',
   );
   console.log(
-    'PASS native user styles in main, pane and popup, popup layout, focus, previews, keyboard Allow Once, queue and long labels.',
+    'PASS Activity chart and selection layout, native user styles, popup focus, previews, keyboard Allow Once, queue and long labels.',
     run,
   );
 } finally {
   await app?.close();
+  observerServer.close();
   server.close();
 }

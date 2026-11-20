@@ -1169,10 +1169,7 @@ button.status-slot.policy-fallback .blocker-glyph { opacity: .5; }
 .pane-menu .menu-panel .menu-heading { padding: 3px 12px; color: var(--fg-muted); font-size: 11px; }
 .pane-menu .menu-panel hr { border: 0; border-top: 1px solid #555; margin: 3px 0; }
 .tabs .pane-controls { position: absolute; right: 6px; top: 4px; }
-body.hide-info #activityView > aside { display: none; }
 body.hide-info .tabs { width: calc(100% - 8px); }
-body.hide-info #app:has(#activityView:not([hidden])) > footer { width: 100%; }
-body.hide-chart #activityView #trafficGraph { display: none; }
 .graph-heading .pane-controls { margin-left: 4px; }
 
 .status-slot .slot-icon { border: 0; background: #8a8a8a; color: #222; }
@@ -1286,12 +1283,6 @@ body.preset-status #tree th.col-filler, body.preset-status #tree td.filler { dis
 #trafficCanvas:focus-visible { outline: 1px solid var(--fg-selected); outline-offset: -1px; }
 @media (max-width: 1000px) { .toolbar { gap: 5px; } .toolbar .brand { margin-right: 0; font-size: 13px; } .toolbar-units select { width: 82px; } }
 
-/* Independent Info View and Traffic Chart docking; one sidebar can hold either. */
-body.hide-info:not(.hide-sidebar) #activityView > aside { display:flex; }
-body.hide-info:not(.hide-sidebar) #activityView > aside > :not(#trafficGraph):not(.sidebar-grip) { display:none; }
-body.hide-info:not(.hide-sidebar) #activityView #trafficGraph { display:block; flex:1; height:auto; }
-body.hide-info:not(.hide-sidebar) #trafficCanvas { height:calc(100% - 86px); min-height:64px; }
-body.hide-sidebar #activityView > aside { display:none; }
 .floating-rule-status { position:fixed; z-index:45; top:110px; right:24px; width:min(450px,calc(100vw - 48px)); max-height:calc(100vh - 140px); overflow:auto; padding:8px; background:var(--fg-content); border:1px solid var(--fg-border); box-shadow:0 4px 16px #0009; }
 .floating-rule-status > header { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
 .floating-rule-status #infoRules { min-height:180px; }
