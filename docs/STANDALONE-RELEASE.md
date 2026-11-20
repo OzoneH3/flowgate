@@ -21,6 +21,14 @@ uninstaller unloads and removes the unmodified managed profile. After rolling
 back to a release that predates this support, use the newer offline
 `flowgate-release.py uninstall` to include profile cleanup.
 
+On stock Fedora 45 with SELinux enforcing, the root daemon starts through
+`/usr/bin/env`. The stock policy transitions it to `unconfined_service_t`, which
+permits its subprocess probes and UDP collector. Monitor setup and both
+protection-guard commands run directly in the stock `init_t` context. The
+installer leaves host policy and enforcing mode intact. FlowGate ships no
+dedicated SELinux confinement policy. Preflight reports the command behavior
+on SELinux hosts. Other policies can assign different domains.
+
 The package target installs the pinned Electron runtime when needed, builds the
 desktop and native components, and runs the release checks.
 

@@ -48,6 +48,7 @@ MONITORING = b'{"schema":1,"mode":"monitoring"}'
 RESCUE_ENTRY = b'#!/bin/sh\nexec /usr/bin/python3 -I /usr/local/libexec/flowgate/rescue-release.py recover "$@"\n'
 SHA256SUM = '/usr/bin/sha256sum'
 RUNUSER_DIRS = tuple(map(Path, ('/usr/sbin', '/usr/bin', '/sbin', '/bin')))
+SELINUX_ENFORCE = Path('/sys/fs/selinux/enforce')
 APPARMOR_PROFILE = Path('/etc/apparmor.d/flowgate-standalone-electron')
 APPARMOR_USERNS = Path('/proc/sys/kernel/apparmor_restrict_unprivileged_userns')
 APPARMOR_ENABLED = Path('/sys/module/apparmor/parameters/enabled')
@@ -500,6 +501,10 @@ def install(options, payload, manifest, backend):
     parser = electron_profile_parser()
     if parser is not None:
         electron_profile_exists()
+    if SELINUX_ENFORCE.is_file():
+        print('SELinux: Stock Fedora 45 runs the root daemon in unconfined_service_t via /usr/bin/env. '
+              'Direct monitor setup and both protection-guard invocations use the stock init_t context. '
+              'The installer leaves host SELinux policy and enforcement unchanged.')
     if options.operation == 'preflight':
         print(f"Preflight passed for {manifest['release']}. Current protection: {selected}.")
         return

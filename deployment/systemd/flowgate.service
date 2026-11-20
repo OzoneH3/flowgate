@@ -9,10 +9,9 @@ StartLimitBurst=5
 [Service]
 Type=notify
 NotifyAccess=main
-# Enter through the distro's standard executable label. On Fedora, executing
-# directly from /usr/local/lib would leave these programs in SELinux init_t.
-ExecStartPre=/usr/bin/env /usr/local/lib/flowgate/current/flowgate monitor-setup
-ExecStartPre=/usr/bin/env /usr/local/lib/flowgate/current/flowgate protection-guard --state /run/flowgate-enforcement --desired /var/lib/flowgate/protection.json --bootstrap-database /var/lib/flowgate/rules.db
+ExecStartPre=/usr/local/lib/flowgate/current/flowgate monitor-setup
+ExecStartPre=/usr/local/lib/flowgate/current/flowgate protection-guard --state /run/flowgate-enforcement --desired /var/lib/flowgate/protection.json --bootstrap-database /var/lib/flowgate/rules.db
+# Stock Fedora transitions the root daemon to unconfined_service_t via bin_t.
 ExecStart=/usr/bin/env /usr/local/lib/flowgate/current/launch
 Restart=on-failure
 RestartSec=3s
