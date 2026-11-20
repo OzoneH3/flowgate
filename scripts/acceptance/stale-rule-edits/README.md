@@ -32,3 +32,23 @@ The exit status reports pass or fail. The runner prints an evidence directory
 under `.workspace/stale-rule-edits/runs/`. The scenario JSONL includes both
 requests and errors, generations, saved rules, client results, exact-tuple log
 rows, and receiver counts.
+
+## Monitor socket write authority
+
+Add `--case monitor-socket-rule-edit` to the same command to select this
+case instead of the restart case. The enrolled administrator connects over
+SSH and reads the saved Block through both `/run/flowgate-api/daemon.sock`
+and `/run/flowgate-api/daemon.sock.monitor`. The test checks that both sockets
+report the same non-root administrator UID and daemon generation.
+
+The primary socket previews a valid Block-to-Allow edit. The monitor socket
+must reject its save with `read_only` and `read-only API`. The test compares the
+entire stored Block with the original record, then submits the same save
+request through the primary socket. The primary save must preserve the rule
+ID and filter and advance the version by one.
+
+The host receiver must count zero payloads before and after the refusal,
+then exactly one after the primary save. The Decision Log must identify the
+winning rule ID, version, and action on each probe. The runner removes the
+guest overlay and prints the per-run evidence path under
+`.workspace/monitor-socket-rule-edit/runs/`.
