@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Check the standalone Debian noexec upgrade and rollback with one host receiver."""
+"""Check the standalone Debian noexec upgrade, UDP accounting, and rollback."""
 
 import argparse
 from contextlib import ExitStack
 import json
+import os
 from pathlib import Path
 import re
 import sys
+import udp_echo
 
 ROOT = Path(__file__).resolve().parents[3]
 NAME = "standalone-lifecycle"
@@ -161,6 +163,13 @@ def exercise(lab, sut, receiver, candidate, new_release, old_release, evidence):
             assert collector["state"] == "active" and collector["reason_code"] == "active", collector
             stages["upgrade_block"] = verify_block(case, saved, "upgraded-block")
 
+            phase = "upgrade-udp-accounting"
+            udp_result = stages["upgrade_udp_accounting"] = {}
+            udp_echo.verify(sut, api, record, udp_result, upgraded["generation"], collector["generation"])
+            udp_result["mount"] = stock_run_mount(sut, "/run/flowgate-api")
+            record("upgrade_udp_accounting", udp_result)
+            assert case.rules() == {saved["id"]: saved}, "UDP probe changed the saved rule inventory"
+
             phase = "rollback"
             guest_step("rollback_command", "sudo -n /usr/local/sbin/flowgate-recover --rollback")
             rolled_back = snapshot(api, old_release, ("stopped", "monitoring"))
@@ -191,6 +200,8 @@ def exercise(lab, sut, receiver, candidate, new_release, old_release, evidence):
 def main():
     if not __debug__:
         raise SystemExit("Run with assertions enabled")
+    if os.geteuid() == 0:
+        raise SystemExit("Run as the ordinary host user with qemu:///session")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--lab", type=Path, default=ROOT.parent / "flowgate-lab")
     parser.add_argument("--old-dir", type=Path, default=ROOT / "build/dist/rc8-13e3029a")

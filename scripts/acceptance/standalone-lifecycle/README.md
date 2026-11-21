@@ -1,7 +1,9 @@
-# Standalone upgrade and rollback on stock Debian
+# Standalone upgrade, UDP accounting, and rollback on stock Debian
 
 Run from the FlowGate checkout after coordinating one disposable Debian SUT slot
-with the lab runner. The runner owns the host TCP receiver and guest cleanup.
+with the lab runner. Run as the ordinary host user with `qemu:///session`.
+The runner owns the host TCP receiver and guest cleanup. The lifecycle binds
+its UDP echo receiver to an ephemeral loopback port on the lab host.
 Build the committed candidate with `make package VERSION=0.1.0-rc.8` and a
 separate `ARTIFACT` path under `build/dist/`. Set `CANDIDATE_DIR` to that
 directory, `CANDIDATE_SOURCE` to the full source commit, and the two SHA-256
@@ -28,7 +30,12 @@ against their digests on the host and in the guest.
    Verify the running and on-disk build, a new daemon generation, an active
    collector, automatically restored protection in both directions, the
    unchanged Block, and zero TCP delivery.
-3. Use the installed `flowgate-recover --rollback`. Verify that the predecessor
+3. Exchange 12 labeled IPv4 UDP requests of 1,200 payload bytes and replies of
+   400 payload bytes. Check every sequence at the host and at the guest.
+   Compare Activity deltas against 14,400 uploaded bytes and 4,800 downloaded
+   bytes on the same registered probe socket and collector generation. Remove
+   the scoped UDP Allow and verify that the original Block is unchanged.
+4. Use the installed `flowgate-recover --rollback`. Verify that the predecessor
    runs in monitoring with a fresh generation, retains the rule, and again
    reports the helper-execution failure. Reactivate both directions through
    the API, confirm zero TCP delivery and the same winning rule, then delete
