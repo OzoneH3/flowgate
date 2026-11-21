@@ -571,7 +571,7 @@ function showFloatingRuleStatus() {
     floating = element('section', '', 'floating-rule-status');
     floating.id = 'floatingRuleStatus';
     floating.setAttribute('aria-label', 'Activity rule status');
-    const title = element('header', 'Rule Status · actions reviewed in Activity');
+    const title = element('header', 'Traffic Rules · actions reviewed in Activity');
     const close = element('button', '✕');
     close.setAttribute('aria-label', 'Close floating rule status');
     title.append(close);
@@ -937,7 +937,7 @@ if (promptID) {
     ['name', 'Name'],
     ['download_bps', 'DL Rate'],
     ['upload_bps', 'UL Rate'],
-    ['rule_status', 'Rule Status'],
+    ['rule_status', 'Traffic Rules'],
     ['count', 'Sockets'],
     ['pid', 'PID'],
     ['downloaded', 'Downloaded'],
@@ -1743,6 +1743,8 @@ function renderTree() {
       tr.append(td);
     }
     const filler = element('td', '', 'filler');
+    // The blank area still selects the row, but must not inherit its tooltip.
+    filler.title = '';
     filler.setAttribute('aria-hidden', 'true');
     tr.append(filler);
     // Replace the old keyed node in place before ordering. Leaving it in tbody

@@ -318,6 +318,11 @@ try {
   const sidebar = main.locator('#activityDetails');
   const grip = main.locator('#activityView > .sidebar-grip');
   await appRow.waitFor();
+  assert(await main.getByRole('columnheader', { name: 'Traffic Rules', exact: true }).isVisible());
+  await appRow.locator('.connection-status-slot').hover();
+  await desktopTooltip.waitFor();
+  await appRow.locator('td.filler').hover();
+  await desktopTooltip.waitFor({ state: 'hidden' });
   await sidebar.waitFor({ state: 'hidden' });
   await grip.waitFor({ state: 'hidden' });
   await chart.waitFor();
