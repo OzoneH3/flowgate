@@ -1,4 +1,4 @@
-# Standalone FlowGate release candidate
+# Standalone FlowGate releases
 
 The source build uses GNU Make. Installation uses an exact offline archive. The daemon, desktop, helpers, upgrade and rescue tools run without the source checkout. The initial release candidate targets Linux x86_64 with systemd. It uses the Electron desktop, including the existing Plasma Wayland integrations. The Qt client and lab tools are outside the package.
 
@@ -233,8 +233,8 @@ Uninstall stops the managed daemon and desktop, verifies cleanup, and removes ma
 
 ## Maintainer release handoff
 
-1. Build once from a fresh checkout of the chosen commit with an explicit
-   `VERSION`. Retain all four files. Record `git rev-parse HEAD` and both
+1. Build from the clean checkout of the chosen local release tag using
+   `make package`. Retain all four files. Record `git rev-parse HEAD` and both
    digests. In the asset directory, set `BUNDLE` to the archive basename.
    Check both receipts and use `tar -xOzf "$BUNDLE" release.json`
    to match the manifest's full `source` and `version` to the intended release.
@@ -256,7 +256,8 @@ Uninstall stops the managed daemon and desktop, verifies cleanup, and removes ma
    release tag resolves to the tested commit, attach the **retained four files**
    to a draft and put the source SHA and both digests in the release notes.
    Download and compare the draft assets to the originals before publishing.
-   A rebuild can change the archive digest even at the same commit and version.
+   Recreating a package in a fresh checkout can change the archive digest even
+   at the same commit and version. Use the tested, retained files.
    With `TAG` set to the verified remote tag and `NOTES` to the release notes
    file, run these commands from the retained asset directory:
 
@@ -264,8 +265,9 @@ Uninstall stops the managed daemon and desktop, verifies cleanup, and removes ma
    (
      set -eu
      repo=OzoneH3/flowgate
-     gh release create "$TAG" --repo "$repo" --verify-tag --draft --prerelease \
-       --title "FlowGate $TAG" --notes-file "$NOTES" \
+     case "$TAG" in *-rc.*) set -- --prerelease ;; *) set -- ;; esac
+     gh release create "$TAG" --repo "$repo" --verify-tag --draft "$@" \
+       --title "FlowGate ${TAG#flowgate-v}" --notes-file "$NOTES" \
        "$BUNDLE" "$BUNDLE.sha256" flowgate-release.py flowgate-release.py.sha256
      downloaded=$(mktemp -d ./draft-assets.XXXXXX)
      gh release download "$TAG" --repo "$repo" --dir "$downloaded"
@@ -276,7 +278,7 @@ Uninstall stops the managed daemon and desktop, verifies cleanup, and removes ma
    ```
 
    After all four comparisons succeed, publish the verified draft with
-   `gh release edit "$TAG" --repo OzoneH3/flowgate --draft=false --prerelease`.
+   `gh release edit "$TAG" --repo OzoneH3/flowgate --draft=false`.
 
 ## Verification record
 
