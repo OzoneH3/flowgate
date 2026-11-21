@@ -50,7 +50,12 @@ func (s *session) accountingSnapshot() identity.UDPSnapshot {
 }
 func (s *session) failure() error { s.mu.Lock(); defer s.mu.Unlock(); return s.err }
 func (s *session) close()         { s.cancel(); <-s.done }
-func startSession(parent context.Context, helper string, uid uint32, machine bool) (*session, error) {
+func startPinnedSession(parent context.Context, pinned *os.File, uid uint32, machine bool) (*session, error) {
+	// The first ExtraFiles entry becomes descriptor 3 in the child.
+	return startSession(parent, "/proc/self/fd/3", uid, machine, pinned)
+}
+
+func startSession(parent context.Context, helper string, uid uint32, machine bool, files ...*os.File) (*session, error) {
 	ns, err := os.Stat("/proc/self/ns/net")
 	if err != nil {
 		return nil, err
@@ -61,6 +66,7 @@ func startSession(parent context.Context, helper string, uid uint32, machine boo
 		target = "all"
 	}
 	cmd := exec.CommandContext(ctx, helper, target, strconv.FormatUint(ns.Sys().(*syscall.Stat_t).Ino, 10))
+	cmd.ExtraFiles = files
 	// A crashed daemon closes stdin; the native helper exits/detaches on EOF.
 	cmd.WaitDelay = 200 * time.Millisecond
 	input, err := cmd.StdinPipe()

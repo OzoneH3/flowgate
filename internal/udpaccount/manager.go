@@ -6,11 +6,12 @@ import (
 	"flowgate/internal/identity"
 	"flowgate/internal/readiness"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // Manager belongs to the existing Go daemon. It owns one optional native helper,
@@ -32,18 +33,28 @@ type Status struct {
 type Manager struct {
 	mu       sync.Mutex
 	status   Status
-	pinned   string
+	pinned   *os.File
 	run      *session
 	cancel   context.CancelFunc
 	done     chan struct{}
 	closed   bool
 	attempts []time.Time
-	launch   func(context.Context, string, uint32, bool) (*session, error)
+	launch   func(context.Context, *os.File, uint32, bool) (*session, error)
 }
 
-func NewManager(helper, pinDir string) *Manager {
-	m := &Manager{launch: startSession, status: Status{State: "disabled", NetNS: identity.NetNS(), Scope: "machine", ReasonCode: "disabled", Reason: "Explicit Start required; no collector attached"}}
-	check := readiness.MachineHelper(helper)
+// NewManager pins the reviewed helper in one of the caller's verified directories.
+func NewManager(helper, expectedSHA256 string, pinDirs ...string) *Manager {
+	m := &Manager{launch: startPinnedSession, status: Status{State: "disabled", NetNS: identity.NetNS(), Scope: "machine", ReasonCode: "disabled", Reason: "Explicit Start required; no collector attached"}}
+	fd, err := unix.Open(helper, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NONBLOCK, 0)
+	if err != nil {
+		m.status.ReasonCode = "helper_missing"
+		m.status.Reason = err.Error()
+		return m
+	}
+	source := os.NewFile(uintptr(fd), helper)
+	defer source.Close()
+
+	check := readiness.MachineHelper(descriptorPath(source))
 	if check.Status == readiness.Ready {
 		check = readiness.BTFNames("/sys/kernel/btf/vmlinux")
 	}
@@ -52,43 +63,12 @@ func NewManager(helper, pinDir string) *Manager {
 		m.status.Reason = check.Detail
 		return m
 	}
-	source, err := os.Open(helper)
-	if err != nil {
-		m.status.ReasonCode = "helper_missing"
-		m.status.Reason = err.Error()
-		return m
-	}
-	defer source.Close()
-	pinned, err := os.CreateTemp(pinDir, ".flowgate-udp-")
+	m.pinned, err = pinHelper(source, expectedSHA256, pinDirs)
 	if err != nil {
 		m.status.ReasonCode = "helper_pin_failed"
 		m.status.Reason = err.Error()
 		return m
 	}
-	cleanup := func(err error) {
-		pinned.Close()
-		os.Remove(pinned.Name())
-		m.status.ReasonCode = "helper_pin_failed"
-		m.status.Reason = err.Error()
-	}
-	n, err := io.Copy(pinned, io.LimitReader(source, 32*1024*1024+1))
-	if err != nil || n > 32*1024*1024 {
-		cleanup(fmt.Errorf("helper copy failed/oversized"))
-		return m
-	}
-	if err = pinned.Chmod(0700); err != nil {
-		cleanup(err)
-		return m
-	}
-	if err = pinned.Close(); err != nil {
-		cleanup(err)
-		return m
-	}
-	if check = readiness.MachineHelper(pinned.Name()); check.Status != readiness.Ready {
-		cleanup(fmt.Errorf("pinned helper incompatible: %s", check.Detail))
-		return m
-	}
-	m.pinned = pinned.Name()
 	m.status.Available = true
 	return m
 }
@@ -152,8 +132,9 @@ func (m *Manager) Start(expected ...string) (Status, error) {
 	m.status.ReasonCode = "starting"
 	m.status.Reason = "Awaiting actual BPF load/attach and first sample"
 	m.status.Generation = generation()
+	pinned := m.pinned
 	go func() {
-		run, err := m.launch(ctx, m.pinned, 0, true)
+		run, err := m.launch(ctx, pinned, 0, true)
 		if err == nil {
 			m.mu.Lock()
 			m.run = run
@@ -284,11 +265,12 @@ func (m *Manager) Close() {
 	m.mu.Lock()
 	done := m.done
 	pinned := m.pinned
+	m.pinned = nil
 	m.mu.Unlock()
 	if done != nil {
 		<-done
 	}
-	if pinned != "" {
-		os.Remove(pinned)
+	if pinned != nil {
+		pinned.Close()
 	}
 }

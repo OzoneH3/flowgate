@@ -41,6 +41,14 @@ class Matched(unittest.TestCase):
         with patch.object(m.subprocess,'run',side_effect=mutate):
             with self.assertRaises(RuntimeError):m.build(self.out,self.loader,'a'*40)
         self.assertFalse(self.out.exists())
+    def test_packaged_udp_helper_checksum_is_pinned(self):
+        udp = self.loader.with_name('udp-collector')
+        udp.write_bytes(b'reviewed UDP helper')
+        with patch.object(m.subprocess, 'run') as run:
+            m.build(self.out, self.loader, 'a'*40, udp_helper=udp)
+        args = run.call_args.args[0]
+        digest = hashlib.sha256(udp.read_bytes()).hexdigest()
+        self.assertIn('main.udpCollectorSHA256='+digest, args[args.index('-ldflags')+1])
     def test_bad_revision_or_tags_refuse(self):
         for revision,tags in [('short',''),('a'*40,'unexpected')]:
             with patch.object(m.subprocess,'run') as run:

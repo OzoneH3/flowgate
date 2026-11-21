@@ -33,7 +33,7 @@ scripts/build-socket-authorization.sh
 scripts/build.sh holder-iterator tcp-initiation udp wine-table
 experimental/upload-shaper/build.sh "$stage/shaping"
 python3 -B scripts/build-matched-daemon.py --revision "$revision" --version "$version" \
-  --loader build/holder-iterator --tags socketprototype --output "$stage/flowgate"
+  --loader build/holder-iterator --udp-helper build/udp-collector --tags socketprototype --output "$stage/flowgate"
 test "$identity" = "$(python3 -B deployment/standalone/identity.py --require-clean)" || {
   echo 'Source or tag changed during build. Run make build again.' >&2
   exit 1

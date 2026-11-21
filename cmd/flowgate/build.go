@@ -16,9 +16,10 @@ var releaseVersion string
 // Set by the matched build after compiling the optional iterator loader.
 // Empty disables loading even if a helper path is supplied.
 var holderIteratorSHA256 string
+var udpCollectorSHA256 string
 
 func buildIdentity() daemon.BuildIdentity {
-	b := daemon.BuildIdentity{Source: sourceRevision, Version: releaseVersion, MaxRuleSchema: policy.NetworkEndpointSchema, HolderIteratorSHA256: holderIteratorSHA256}
+	b := daemon.BuildIdentity{Source: sourceRevision, Version: releaseVersion, MaxRuleSchema: policy.NetworkEndpointSchema, HolderIteratorSHA256: holderIteratorSHA256, UDPCollectorSHA256: udpCollectorSHA256}
 	if v, ok := debug.ReadBuildInfo(); ok {
 		for _, s := range v.Settings {
 			switch s.Key {

@@ -2,12 +2,17 @@ package udpaccount
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"flowgate/internal/identity"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -34,7 +39,7 @@ func TestManagerSerializedLifecycleAndFailure(t *testing.T) {
 	var live *session
 	var liveMu sync.Mutex
 	m := &Manager{status: Status{State: "disabled", Available: true, Scope: "machine", NetNS: "test"}}
-	m.launch = func(ctx context.Context, _ string, _ uint32, machine bool) (*session, error) {
+	m.launch = func(ctx context.Context, _ *os.File, _ uint32, machine bool) (*session, error) {
 		starts.Add(1)
 		entered <- struct{}{}
 		select {
@@ -109,7 +114,7 @@ func TestManagerSerializedLifecycleAndFailure(t *testing.T) {
 	}
 }
 func TestManagerMissingAndRetryBound(t *testing.T) {
-	m := NewManager("/nonexistent-optional-helper", t.TempDir())
+	m := NewManager("/nonexistent-optional-helper", "", t.TempDir())
 	defer m.Close()
 	if m.Status().Available || m.Status().State != "disabled" {
 		t.Fatal(m.Status())
@@ -118,7 +123,7 @@ func TestManagerMissingAndRetryBound(t *testing.T) {
 		t.Fatal("missing helper started")
 	}
 	m.status.Available = true
-	m.launch = func(context.Context, string, uint32, bool) (*session, error) {
+	m.launch = func(context.Context, *os.File, uint32, bool) (*session, error) {
 		return nil, errors.New("fixture load denied")
 	}
 	for i := 0; i < 3; i++ {
@@ -150,7 +155,7 @@ func TestSessionProtocolFailureAndCancellation(t *testing.T) {
 }
 
 func TestManagerPinsOnlyReviewedHelperCopy(t *testing.T) {
-	helper := "../../.workspace/udp-collector"
+	helper := "../../build/udp-collector"
 	original, err := os.ReadFile(helper)
 	if err != nil {
 		t.Skip("optional native helper not built")
@@ -160,24 +165,67 @@ func TestManagerPinsOnlyReviewedHelperCopy(t *testing.T) {
 	if err = os.WriteFile(source, original, 0700); err != nil {
 		t.Fatal(err)
 	}
-	m := NewManager(source, dir)
+	trusted := fmt.Sprintf("%x", sha256.Sum256(original))
+	m := NewManager(source, trusted, dir)
 	if !m.Status().Available {
 		m.Close()
 		t.Skip("optional helper/BTF prerequisites absent: " + m.Status().Reason)
 	}
 	pinned := m.pinned
+	info, err := pinned.Stat()
+	if err != nil || info.Mode().Perm() != 0700 || info.Sys().(*syscall.Stat_t).Nlink != 0 {
+		t.Fatal("pin must be an anonymous owner-only executable", info, err)
+	}
 	if err = os.WriteFile(source, []byte("changed after root configuration"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	copy, err := os.ReadFile(pinned)
+	copy, err := io.ReadAll(pinned)
 	if err != nil || string(copy) != string(original) {
 		t.Fatal("reviewed helper not pinned", err)
 	}
 	m.Close()
-	if _, err = os.Stat(pinned); !os.IsNotExist(err) {
+	if _, err = pinned.Stat(); !errors.Is(err, os.ErrClosed) {
 		t.Fatal("owned helper copy retained")
 	}
 	if b, _ := os.ReadFile(source); string(b) != "changed after root configuration" {
 		t.Fatal("cleanup modified source")
+	}
+}
+
+func TestPackagedPinRejectsChangedBytesAndWritableSource(t *testing.T) {
+	original, err := os.ReadFile("../../build/udp-collector")
+	if err != nil {
+		t.Skip("optional native helper not built")
+	}
+	directory := t.TempDir()
+	name := filepath.Join(directory, "udp-collector")
+	expected := fmt.Sprintf("%x", sha256.Sum256(original))
+	for _, test := range []struct {
+		data []byte
+		mode os.FileMode
+		want string
+	}{
+		{append(append([]byte(nil), original...), 0), 0700, "SHA-256"},
+		{original, 0720, "non-writable"},
+	} {
+		if err := os.WriteFile(name, test.data, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(name, test.mode); err != nil {
+			t.Fatal(err)
+		}
+		source, err := os.Open(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pin, err := pinHelper(source, expected, []string{directory})
+		source.Close()
+		if pin != nil || err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Fatalf("wanted %q refusal, got %v", test.want, err)
+		}
+	}
+	files, err := os.ReadDir(directory)
+	if err != nil || len(files) != 1 || files[0].Name() != "udp-collector" {
+		t.Fatal("refusal left an unexpected file", files, err)
 	}
 }

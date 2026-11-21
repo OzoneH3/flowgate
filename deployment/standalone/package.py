@@ -92,7 +92,8 @@ def pack(identity, output):
         # manifest records its own test scope separately.
         build = json.loads(subprocess.check_output([str(backend / 'flowgate'), 'version']))
         if (any(build.get(key) != identity[key] for key in ('version', 'source')) or
-            build.get('holder_iterator_sha256') != digest(backend / 'holder-iterator')):
+            build.get('holder_iterator_sha256') != digest(backend / 'holder-iterator') or
+            build.get('udp_collector_sha256') != digest(backend / 'udp-collector')):
             raise RuntimeError('Daemon or collector build does not match the payload')
         write_json(backend / 'manifest.json', {
             **identity, 'max_rule_schema': build['max_rule_schema'],

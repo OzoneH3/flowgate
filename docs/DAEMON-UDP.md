@@ -29,10 +29,13 @@ checked monitor Stop, retained executable/configuration and exclusive database
 handoff from INTEGRATION.md. No host rollout/attachment is performed in this task.
 Missing optional helper/BTF does not prevent daemon startup. The helper defaults
 to `udp-collector` beside the executable; an explicit override must be absolute.
-A matching ELF/protocol helper is pinned at startup into the already-validated
-root API directory (0700 owned copy, bounded32MiB). Start executes only that copy,
-never a request-supplied path. Rebuild/install fixes require a deliberate daemon
-restart to pin the newly reviewed helper. Shutdown removes only its own copy.
+A matching ELF/protocol helper is pinned at startup as an anonymous, owner-only
+executable file (0700, bounded to 32 MiB). The daemon tries its verified API
+directory first, then its verified database directory, and honors the mount flags
+on both. A standalone package checks the helper's owner and SHA-256 against the
+daemon build. Start executes the pinned descriptor. Rebuilds and upgrades require
+a daemon restart to pin the replacement. The kernel releases the pin after its
+last descriptor or execution reference closes, including after a forced exit.
 
 Permissions are independent, additive fields:
 
@@ -106,8 +109,8 @@ Helper startup is bounded5seconds; each registration/reply exchange has a3second
 watchdog including pipe writes. Diagnostics retain at most4096 stderr bytes.
 Failure does not stop the Go daemon/TCP/rules. It exposes failed/unavailable, never
 measured zero. GUI exit/client disconnect does not stop the owned helper. Unexpected daemon
-death closes helper stdin, causing native exit and owned link/map cleanup; SIGKILL
-can leave the inert pinned executable file, never a persistent BPF pin.
+death closes helper stdin, causing native exit and owned link/map cleanup. An
+anonymous executable pin leaves no filesystem entry after SIGKILL.
 
 After lost ACK, fetch authoritative `list`/`traffic-status`. Do not automatically
 replay Start or Stop, launch the legacy prototype, or infer success from an open

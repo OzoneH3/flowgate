@@ -176,9 +176,9 @@ func serveCommand(args []string) error {
 		}
 		*helper = filepath.Join(filepath.Dir(exe), "udp-collector")
 	}
-	// Pin the executable in the verified database directory. The API socket
-	// directory is normally under /run, which may be mounted noexec.
-	traffic := udpaccount.NewManager(*helper, filepath.Dir(*database))
+	// Both directories were verified above. The collector chooses an
+	// executable mount without changing either mount's policy.
+	traffic := udpaccount.NewManager(*helper, udpCollectorSHA256, filepath.Dir(*socket), filepath.Dir(*database))
 	defer traffic.Close()
 	e.Traffic = traffic
 	if *allowTraffic {
