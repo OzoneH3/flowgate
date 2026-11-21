@@ -159,3 +159,47 @@ test('read-only Windows images need no Unix execute bit; missing files retry',as
  for(const a of apps)assert.ok((await icons.metadata([iconKey(a)]))[iconKey(a)].icon);
  assert.equal((await icons.request(['not-allowed']))['not-allowed'],null);
 });
+
+test('paletted ICO frames decode packed pixels, row padding and AND transparency', () => {
+  const { inflateSync } = require('node:zlib');
+  for (const bits of [1, 4, 8]) {
+    const paletteSize = 2;
+    const ico = Buffer.alloc(22 + 40 + paletteSize * 4 + 16);
+    ico.writeUInt16LE(1, 2);
+    ico.writeUInt16LE(1, 4);
+    ico[6] = 3;
+    ico[7] = 2;
+    ico.writeUInt32LE(ico.length - 22, 14);
+    ico.writeUInt32LE(22, 18);
+    const dib = ico.subarray(22);
+    dib.writeUInt32LE(40, 0);
+    dib.writeInt32LE(3, 4);
+    dib.writeInt32LE(4, 8);
+    dib.writeUInt16LE(1, 12);
+    dib.writeUInt16LE(bits, 14);
+    // A zero colors-used field selects the format's full palette.
+    if (bits !== 1) dib.writeUInt32LE(paletteSize, 32);
+    dib[40] = 255;
+    dib[46] = 255;
+    const setRow = (offset, indices) => indices.forEach((index, x) => {
+      dib[offset + ((x * bits) >> 3)] |= index << (8 - bits - ((x * bits) & 7));
+    });
+    setRow(48, [0, 1, 0]);
+    setRow(52, [1, 0, 1]);
+    dib[60] = 0x40;
+    const png = icoToPng(ico);
+    assert.ok(png, `${bits}-bit icon`);
+    const length = png.readUInt32BE(33);
+    assert.equal(png.toString('ascii', 37, 41), 'IDAT');
+    const pixels = inflateSync(png.subarray(41, 41 + length));
+    assert.deepEqual([...pixels], [
+      0, 255, 0, 0, 255, 0, 0, 255, 0, 255, 0, 0, 255,
+      0, 0, 0, 255, 255, 255, 0, 0, 255, 0, 0, 255, 255,
+    ]);
+    assert.equal(icoToPng(ico.subarray(0, -1)), undefined);
+    if (bits !== 1) {
+      dib[48] = 2 << (8 - bits);
+      assert.equal(icoToPng(ico), undefined);
+    }
+  }
+});

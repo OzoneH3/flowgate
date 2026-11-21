@@ -1,6 +1,5 @@
 import { deflateSync } from 'node:zlib';
-// Local Windows shortcut artwork only. Decode bounded 24/32-bit, uncompressed ICO
-// frames (or embedded PNG); never load executable resources or external data.
+// Decode bounded uncompressed ICO frames and embedded PNG artwork.
 const MAX_BYTES = 1024 * 1024;
 function chunk(name: string, data: Buffer) {
   const body = Buffer.concat([Buffer.from(name), data]);
@@ -47,33 +46,49 @@ export function icoToPng(data: Buffer): Buffer | undefined {
       bytes.readInt32LE(4) !== width ||
       bytes.readInt32LE(8) !== height * 2 ||
       bytes.readUInt16LE(12) !== 1 ||
-      ![24, 32].includes(bytes.readUInt16LE(14)) ||
+      ![1, 4, 8, 24, 32].includes(bytes.readUInt16LE(14)) ||
       bytes.readUInt32LE(16) !== 0
     )
       continue;
-    const bits = bytes.readUInt16LE(14), pixelBytes = bits / 8,
-      rowStride = Math.ceil(width * bits / 32) * 4,
+    const bits = bytes.readUInt16LE(14);
+    const indexed = bits <= 8;
+    const paletteSize = indexed ? bytes.readUInt32LE(32) || (1 << bits) : 0;
+    if (indexed && paletteSize > (1 << bits)) continue;
+    const pixelsStart = 40 + paletteSize * 4;
+    const rowStride = Math.ceil(width * bits / 32) * 4,
       maskStride = Math.ceil(width / 32) * 4,
-      pixelsEnd = 40 + rowStride * height;
+      pixelsEnd = pixelsStart + rowStride * height;
     if (pixelsEnd + maskStride * height > bytes.length) continue;
     let hasAlpha = false;
-    for (let at = 43; bits === 32 && at < pixelsEnd; at += 4)
+    for (let at = pixelsStart + 3; bits === 32 && at < pixelsEnd; at += 4)
       if (bytes[at]) {
         hasAlpha = true;
         break;
       }
     const scan = Buffer.alloc((width * 4 + 1) * height);
-    for (let y = 0; y < height; y++)
+    let valid = true;
+    for (let y = 0; y < height && valid; y++)
       for (let x = 0; x < width; x++) {
-        const row = height - 1 - y,
-          src = 40 + row * rowStride + x * pixelBytes,
-          dst = y * (width * 4 + 1) + 1 + x * 4;
+        const row = height - 1 - y;
+        let src = pixelsStart + row * rowStride + ((x * bits) >> 3);
+        if (indexed) {
+          // Packed palette indices come most-significant first in each byte.
+          const shift = 8 - bits - ((x * bits) & 7);
+          const index = (bytes[src] >> shift) & ((1 << bits) - 1);
+          if (index >= paletteSize) {
+            valid = false;
+            break;
+          }
+          src = 40 + index * 4;
+        }
+        const dst = y * (width * 4 + 1) + 1 + x * 4;
         scan[dst] = bytes[src + 2];
         scan[dst + 1] = bytes[src + 1];
         scan[dst + 2] = bytes[src];
         const transparent = bytes[pixelsEnd + row * maskStride + (x >> 3)] & (0x80 >> (x & 7));
         scan[dst + 3] = transparent ? 0 : hasAlpha ? bytes[src + 3] : 255;
       }
+    if (!valid) continue;
     const header = Buffer.alloc(13);
     header.writeUInt32BE(width);
     header.writeUInt32BE(height, 4);
