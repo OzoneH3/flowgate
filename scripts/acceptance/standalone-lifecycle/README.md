@@ -1,40 +1,43 @@
-# Standalone upgrade and rollback on Debian
+# Standalone upgrade and rollback on stock Debian
 
-Run from the FlowGate checkout. The existing flowgate-lab runner starts one
-disposable Debian guest, runs the enrolled user's probe over SSH, and owns the
-host TCP receiver and guest cleanup.
+Run from the FlowGate checkout after coordinating one disposable Debian SUT slot
+with the lab runner. The runner owns the host TCP receiver and guest cleanup.
+Build the committed candidate with `make package VERSION=0.1.0-rc.8` and a
+separate `ARTIFACT` path under `build/dist/`. Set `CANDIDATE_DIR` to that
+directory, `CANDIDATE_SOURCE` to the full source commit, and the two SHA-256
+variables to the trusted receipt digests.
 
 ```sh
-python3 -B scripts/acceptance/standalone-lifecycle/run.py --lab ../flowgate-lab
+python3 -B scripts/acceptance/standalone-lifecycle/run.py --lab ../flowgate-lab \
+  --new-dir "$CANDIDATE_DIR" --new-source "$CANDIDATE_SOURCE" \
+  --new-archive-sha256 "$CANDIDATE_ARCHIVE_SHA256" \
+  --new-installer-sha256 "$CANDIDATE_INSTALLER_SHA256"
 ```
 
-The test pins the previously verified RC8 predecessor `13e3029a` and the
-public-audit RC8 candidate `7511ac17`. The defaults point to the predecessor
-in `build/dist/rc8-13e3029a/` and the audited candidate in
-`.workspace/public-audit-01a1ff88/source/build/dist/rc8/`. Use `--old-dir`
-and `--new-dir` if those same files are stored elsewhere. Each directory needs
-the archive and `flowgate-release.py`. The fixture checks their pinned digests
-on the host and in the guest.
+The test pins the published bytes of RC8 predecessor `13e3029a`. By default
+it reads the archive and its installer from `build/dist/rc8-13e3029a/`.
+Use `--old-dir` to locate those same files elsewhere. Both pairs are checked
+against their digests on the host and in the guest.
 
-If the guest mounts `/run` with `noexec`, the predecessor's UDP collector
-cannot execute its pinned helper and the installer refuses the upgrade. To
-test the rest of the lifecycle on that guest, append `--guest-api-exec-mount`.
-This puts a root-owned executable tmpfs at `/run/flowgate-api` only in the
-disposable guest. The installer still checks the collector and protection state.
+1. Install the unmodified predecessor in monitoring. Activate both directions,
+   save an outgoing application Block using the preview/save API, and verify
+   zero TCP delivery with that rule's ID and version winning the decision.
+   Record the collector's helper-execution failure and verify that
+   `/run/flowgate-api` is on the stock `/run` mount with `noexec`.
+2. Use the candidate's documented offline `preflight` and `install`.
+   Verify the running and on-disk build, a new daemon generation, an active
+   collector, automatically restored protection in both directions, the
+   unchanged Block, and zero TCP delivery.
+3. Use the installed `flowgate-recover --rollback`. Verify that the predecessor
+   runs in monitoring with a fresh generation, retains the rule, and again
+   reports the helper-execution failure. Reactivate both directions through
+   the API, confirm zero TCP delivery and the same winning rule, then delete
+   the disposable rule.
 
-1. Install the predecessor in monitoring. Activate incoming and outgoing
-   protection, save an outbound application Block with the ordinary
-   preview/save API, then confirm its rule ID and version win a fresh TCP
-   attempt. The probe must finish denied and the receiver must count zero.
-2. Upgrade using the documented offline path, `preflight` and `install`
-   through the verified candidate installer. Verify the running and on-disk
-   build, new daemon generation, restored protection mode, complete saved rule,
-   and a fresh blocked attempt.
-3. Run `sudo /usr/local/sbin/flowgate-recover --rollback` in the guest. Verify
-   the predecessor, a new generation, and the documented monitoring state.
-   Reactivate protection through the normal API and test the same rule against
-   a third labeled attempt. Remove the disposable rule.
+Run `6a50c67f791d` at fixture commit `db778b70` is the historical comparison.
+It passed after creating an executable API submount in the disposable guest.
+The stock regression uses no submount and checks the mount at each stage.
 
 Each run writes `standalone-lifecycle.json` and matching JSONL evidence under
-`.workspace/standalone-lifecycle/runs/<run-id>/`. The runner returns nonzero
-if any stage, receiver assertion, or guest cleanup fails.
+`.workspace/standalone-lifecycle/runs/<run-id>/`. The runner returns nonzero if
+a stage, receiver assertion, or guest cleanup fails.

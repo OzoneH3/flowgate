@@ -1,24 +1,21 @@
 #!/usr/bin/env python3
-"""Check the pinned standalone Debian upgrade and rollback with one host receiver."""
+"""Check the standalone Debian noexec upgrade and rollback with one host receiver."""
 
 import argparse
 from contextlib import ExitStack
 import json
 from pathlib import Path
+import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[3]
 NAME = "standalone-lifecycle"
 ARCHIVE = "flowgate-0.1.0-rc.8-linux-x86_64.tar.gz"
 INSTALLER = "flowgate-release.py"
-INSTALLER_DIGEST = "94a2956bf3477875aa63eafc3f2abd555160837d220f8449b3dfe3cbc349124c"
 PREDECESSOR = (
     "13e3029ac2e4d2695b851cfb09710d9ab4bb8bf7",
     "f49a4c48b62f63d59b643829a8a52af5b9e4b140af74cb8715a6936cc041aa46",
-)
-CANDIDATE = (
-    "7511ac1764c8a922c1ad259747338973adf197f2",
-    "112995add59425a674ce7f25e9af220f5e96188e39d08f64aa7044cfcd33041d",
+    "94a2956bf3477875aa63eafc3f2abd555160837d220f8449b3dfe3cbc349124c",
 )
 CURRENT = "/usr/local/lib/flowgate/current"
 API = "python3 fg-lab/guest_tools.py flowgate /run/flowgate-api/daemon.sock"
@@ -26,18 +23,30 @@ PROBE = "fg-lab/fg-lab-probe fg-lab/guest_tools.py probe 10.80.0.1"
 
 
 def verified_package(lab, directory, pinned):
-    source, digest = pinned
+    source, digest, installer_digest = pinned
     package = argparse.Namespace(
         archive=directory / ARCHIVE,
         installer=directory / INSTALLER,
         archive_sha256=digest,
-        installer_sha256=INSTALLER_DIGEST,
+        installer_sha256=installer_digest,
     )
     lab.check_digest(package.archive, package.archive_sha256)
     lab.check_digest(package.installer, package.installer_sha256)
     manifest = lab.manifest(package.archive)
     assert manifest["source"] == source, manifest["source"]
     return package, manifest
+
+
+def stock_run_mount(sut, path):
+    target, options = sut.run(f"findmnt -n -T {path} -o TARGET,OPTIONS").stdout.split()
+    assert target == "/run" and "noexec" in options.split(","), (path, target, options)
+    return {"target": target, "options": options}
+
+
+def assert_legacy_failure(collector):
+    assert collector["state"] == "failed" and collector["reason_code"] == "permission_required", collector
+    assert re.fullmatch(r"fork/exec /run/flowgate-api/\.flowgate-udp-[0-9]+: permission denied",
+                        collector["reason"]), collector
 
 
 def exercise(lab, sut, receiver, candidate, new_release, old_release, evidence):
@@ -66,8 +75,22 @@ def exercise(lab, sut, receiver, candidate, new_release, old_release, evidence):
         assert Path(release_path).name == release["release"], release_path
         protection = state["protection"]
         assert (protection["state"], protection["desired_mode"]) == expected, protection
+        enforcement = state["enforcement"]
+        assert enforcement["state"] == expected[0], enforcement
+        if expected[1] == "both":
+            assert protection["profile"] == enforcement["profile"] == "both", state
         return {"source": binary["source"], "generation": state["generation"],
-                "release_path": release_path, "protection": protection}
+                "executable_sha256": binary["executable_sha256"], "release_path": release_path,
+                "protection": protection, "enforcement": enforcement}
+
+    def collector_at(api, name):
+        collector = api("traffic-status")["traffic_monitor"]
+        stages[name] = collector
+        record(name, collector)
+        mount = stock_run_mount(sut, "/run/flowgate-api")
+        stages[name + "_mount"] = mount
+        record(name + "_mount", mount)
+        return collector
 
     def verify_block(case, saved, name):
         assert case.rules().get(saved["id"]) == saved, "saved Block changed"
@@ -94,6 +117,7 @@ def exercise(lab, sut, receiver, candidate, new_release, old_release, evidence):
         }
         assert evidence["installed_sha"] == old_release["source"] == PREDECESSOR[0]
         report["debian_version"] = sut.run("cat /etc/debian_version").stdout.strip()
+        report["boot_run_mount"] = evidence["boot_run_mount"]
         sut.upload(candidate.archive, "candidate.tar.gz")
         sut.upload(candidate.installer, "candidate.py")
         lab.configure_sut(sut)
@@ -119,28 +143,22 @@ def exercise(lab, sut, receiver, candidate, new_release, old_release, evidence):
             stages["predecessor_block"] = {**before, **verify_block(case, saved, "predecessor-block")}
 
             phase = "upgrade"
-            collector = api("traffic-status")["traffic_monitor"]
-            stages["predecessor_collector"] = collector
-            if collector["state"] == "failed":
-                diagnostic = sut.run(
-                    "sudo -n journalctl -b -u flowgate.service "
-                    "-u flowgate-monitor-setup.service --no-pager -n 100",
-                    check=False, timeout=12,
-                )
-                stages["predecessor_collector_journal"] = diagnostic.stdout
+            assert_legacy_failure(collector_at(api, "predecessor_collector"))
             guest_step(
                 "candidate_digests",
                 "cd fg-lab && /usr/bin/sha256sum -c <<'SHA256'\n"
                 f"{candidate.archive_sha256}  candidate.tar.gz\n"
                 f"{candidate.installer_sha256}  candidate.py\nSHA256",
             )
-            installer = "cd fg-lab && sudo -n /usr/bin/python3 -I ./candidate.py"
+            installer = "cd fg-lab && sudo -n /usr/bin/python3 -I -B ./candidate.py"
             options = f"--bundle ./candidate.tar.gz --sha256 {candidate.archive_sha256}"
             guest_step("upgrade_preflight", f"{installer} preflight {options}")
             guest_step("upgrade_install", f"{installer} install {options}")
             upgraded = snapshot(api, new_release, ("active", "both"))
             stages["upgrade_running"] = upgraded
             assert upgraded["generation"] != before["generation"], upgraded
+            collector = collector_at(api, "upgrade_collector")
+            assert collector["state"] == "active" and collector["reason_code"] == "active", collector
             stages["upgrade_block"] = verify_block(case, saved, "upgraded-block")
 
             phase = "rollback"
@@ -148,12 +166,14 @@ def exercise(lab, sut, receiver, candidate, new_release, old_release, evidence):
             rolled_back = snapshot(api, old_release, ("stopped", "monitoring"))
             stages["rollback_running"] = rolled_back
             assert rolled_back["generation"] not in {upgraded["generation"], before["generation"]}
+            assert_legacy_failure(collector_at(api, "rollback_collector"))
             assert case.rules().get(saved["id"]) == saved, "rollback changed saved Block"
             lab.activate(api, old_release)
             stages["rollback_block"] = {
                 **snapshot(api, old_release, ("active", "both")),
                 **verify_block(case, saved, "rollback-block"),
             }
+            assert_legacy_failure(collector_at(api, "rollback_reactivated_collector"))
             phase = "rule-cleanup"
             case.cleanup()
             assert saved["id"] not in case.rules(), "disposable Block survived cleanup"
@@ -173,11 +193,11 @@ def main():
         raise SystemExit("Run with assertions enabled")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--lab", type=Path, default=ROOT.parent / "flowgate-lab")
-    parser.add_argument("--guest-api-exec-mount", action="store_true",
-                        help="on a noexec /run, mount a private executable tmpfs for the guest API")
     parser.add_argument("--old-dir", type=Path, default=ROOT / "build/dist/rc8-13e3029a")
-    parser.add_argument("--new-dir", type=Path, default=(
-        ROOT / ".workspace/public-audit-01a1ff88/source/build/dist/rc8"))
+    parser.add_argument("--new-dir", type=Path, required=True)
+    parser.add_argument("--new-source", required=True)
+    parser.add_argument("--new-archive-sha256", required=True)
+    parser.add_argument("--new-installer-sha256", required=True)
     paths = parser.parse_args()
 
     sys.dont_write_bytecode = True
@@ -187,22 +207,16 @@ def main():
 
     vm.RUNS = ROOT / ".workspace/standalone-lifecycle/runs"
     old, old_release = verified_package(lab, paths.old_dir, PREDECESSOR)
-    new, new_release = verified_package(lab, paths.new_dir, CANDIDATE)
+    new, new_release = verified_package(lab, paths.new_dir, (
+        paths.new_source, paths.new_archive_sha256, paths.new_installer_sha256,
+    ))
     old.profile = paths.lab / "profiles/debian-13.json"
     old.scenario = [NAME]
     old.keep_failed = False
     install_predecessor = lab.install
 
     def install_with_mount_evidence(sut, args, release, evidence):
-        options = sut.run("findmnt -n -T /run -o OPTIONS").stdout.strip()
-        evidence["guest_run_mount_options"] = options
-        if paths.guest_api_exec_mount and "noexec" in options.split(","):
-            sut.run("sudo -n install -d -m 0711 -o root -g root /run/flowgate-api && "
-                    "sudo -n mount -t tmpfs -o mode=0711,uid=0,gid=0,nosuid,nodev,exec "
-                    "flowgate-lifecycle /run/flowgate-api")
-            api_options = sut.run("findmnt -n -T /run/flowgate-api -o OPTIONS").stdout.strip()
-            assert "noexec" not in api_options.split(","), api_options
-            evidence["guest_api_mount_options"] = api_options
+        evidence["boot_run_mount"] = stock_run_mount(sut, "/run")
         install_predecessor(sut, args, release, evidence)
 
     lab.install = install_with_mount_evidence

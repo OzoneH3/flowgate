@@ -130,6 +130,22 @@ before parsing its manifest or executing packaged code.
 
 Fresh installation starts monitoring. Upgrades authenticate and verify the candidate, check existing policy schema, preserve configuration, snapshot the stopped writer's state, and verify monitoring before restoring the previously active mode. A retained shaping journal or configured shaping requires a verified transition before upgrade. Installation preserves the disabled host-trial interface of a legacy installation when one is reported and verified.
 
+### Debian upgrade with `/run` mounted `noexec`
+
+The managed RC8 predecessor `13e3029a` can report `permission_required`
+when starting its UDP collector from `/run/flowgate-api`. Run the verified
+replacement's offline `preflight` and `install` commands above with the
+existing service running and `/run` mounted as usual. Preflight verifies the
+known predecessor, the failed helper's checksum, and the mount's `noexec`
+flag. The replacement requires an active collector before restoring the
+previous protection mode.
+
+If you run `flowgate-recover --rollback` back to that predecessor, the
+installation returns to monitoring with the latest saved rules and settings.
+The predecessor's UDP collector fails again on the stock mount, and recovery
+reports that limitation. Use the usual protection controls to reactivate
+interception if needed.
+
 ### Fedora 45 recovery from the RC8 collector failure
 
 On Fedora 45, build `7b3e8e51` can report a failed UDP collector and refuse an

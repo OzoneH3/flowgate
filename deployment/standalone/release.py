@@ -24,6 +24,7 @@ DATA = Path('/var/lib/flowgate')
 ETC = Path('/etc/flowgate')
 TOOLS = Path('/usr/local/libexec/flowgate')
 STATE = Path('/run/flowgate-enforcement')
+API_DIR = Path('/run/flowgate-api')
 UNITS = ('flowgate.service', 'flowgate-guard.service')
 SHAPING = ETC / 'shaping.json'
 LEGACY = Path('/usr/local/libexec/flowgate-update-helper')
@@ -44,6 +45,7 @@ FILES = {
 }
 RELEASE_ID = re.compile(r'[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9]+(?:\.[A-Za-z0-9]+)*)?-[a-f0-9]{12}')
 HEX = re.compile(r'[a-f0-9]{64}')
+LEGACY_UDP_SOURCES = frozenset({'13e3029ac2e4d2695b851cfb09710d9ab4bb8bf7'})
 MONITORING = b'{"schema":1,"mode":"monitoring"}'
 RESCUE_ENTRY = b'#!/bin/sh\nexec /usr/bin/python3 -I /usr/local/libexec/flowgate/rescue-release.py recover "$@"\n'
 SHA256SUM = '/usr/bin/sha256sum'
@@ -423,9 +425,7 @@ def preflight(api, backend_dir, backend, desktop_config):
             if not existing(SHAPING):
                 extra_config[SHAPING] = json.dumps({'interface': interface}).encode()
         settings = saved_settings(host, response, shape=shape)
-        collector = (response.get('traffic_monitor') or {}).get('state')
-        if collector not in (None, 'unavailable', 'active', 'stopped'):
-            raise RuntimeError('Current collector is not settled')
+        collector = collector_target(response, old[1])
         if selected != 'monitoring':
             checks = json.loads(host.run(str(daemon), 'doctor', '--json', '--upgrade-preflight',
                                          '--state', str(STATE), '--profile', selected))
@@ -507,6 +507,8 @@ def install(options, payload, manifest, backend):
               'The installer leaves host SELinux policy and enforcement unchanged.')
     if options.operation == 'preflight':
         print(f"Preflight passed for {manifest['release']}. Current protection: {selected}.")
+        if ((before or {}).get('traffic_monitor') or {}).get('state') == 'failed':
+            print('Verified legacy UDP helper on a noexec mount. Install requires active UDP collection before restoring protection.')
         return
     if old is not None and old[0].name == manifest['release']:
         raise RuntimeError('This exact release is already installed')
@@ -562,7 +564,7 @@ def install(options, payload, manifest, backend):
             raise RuntimeError('Shaping journal appeared during install')
 
     try:
-        before_quiesce = prepare_switch(api, host, before, settings, selected)
+        before_quiesce = prepare_switch(api, host, before, settings, selected, old[1] if old else None)
         api['install_locked'](host, payload / 'backend', stamp, extra_config=config,
                               verify_extra=verify_extra, before_quiesce=before_quiesce, standalone=True)
     except PreflightChanged:
@@ -624,6 +626,38 @@ def verify_saved_settings(host, expected, response):
             raise RuntimeError(f'Saved {name} differs after switching the executable')
 
 
+def legacy_udp_noexec(manifest, observed):
+    if (manifest.get('source') not in LEGACY_UDP_SOURCES or
+        observed.get('state') != 'failed' or observed.get('reason_code') != 'permission_required' or
+        observed.get('available') is not True or not observed.get('generation')):
+        return False
+    match = re.fullmatch(r'fork/exec (.+): permission denied', observed.get('reason', ''))
+    if not match:
+        return False
+    pinned = Path(match[1])
+    if pinned.parent != API_DIR or not re.fullmatch(r'\.flowgate-udp-[0-9]+', pinned.name):
+        return False
+    try:
+        check_directory(API_DIR, API_DIR.lstat())
+        return (bool(os.statvfs(secure_file(pinned)).f_flag & os.ST_NOEXEC)
+                and pinned.lstat().st_mode & 0o7777 == 0o700
+                and digest(pinned) == manifest['files']['udp-collector'])
+    except (OSError, RuntimeError, KeyError):
+        return False
+
+
+def collector_target(response, manifest):
+    observed = response.get('traffic_monitor') or {}
+    state = observed.get('state')
+    if state in (None, 'unavailable', 'active', 'stopped'):
+        return state
+    if legacy_udp_noexec(manifest, observed):
+        # This predecessor attempted startup automatically. Require the
+        # replacement to complete that startup and receive an actual sample.
+        return 'active'
+    raise RuntimeError('Current collector is not settled')
+
+
 def restore_collector(host, expected, response):
     if expected not in ('active', 'stopped'):
         return
@@ -639,7 +673,7 @@ class PreflightChanged(RuntimeError):
     """The verified transition has not reached service shutdown."""
 
 
-def verify_before_switch(api, host, before, settings, protection):
+def verify_before_switch(api, host, before, settings, protection, manifest):
     try:
         _, fresh = host.api()
         if fresh['generation'] != before['generation'] or fresh['protection'] != protection:
@@ -650,6 +684,10 @@ def verify_before_switch(api, host, before, settings, protection):
         new_collector = fresh.get('traffic_monitor') or {}
         if any(old_collector.get(key) != new_collector.get(key) for key in ('state', 'generation')):
             raise RuntimeError('collector changed')
+        if old_collector.get('state') == 'failed':
+            if (old_collector.get('reason') != new_collector.get('reason') or
+                not legacy_udp_noexec(manifest, new_collector)):
+                raise RuntimeError('legacy collector evidence changed')
         current = saved_settings(host, fresh)
         for name, value in settings.items():
             if current[name] != value:
@@ -660,18 +698,18 @@ def verify_before_switch(api, host, before, settings, protection):
         raise PreflightChanged(f'State changed after preflight: {exc}. Retry from a fresh preflight.') from exc
 
 
-def prepare_switch(api, host, before, settings, selected):
+def prepare_switch(api, host, before, settings, selected, manifest):
     if before is None:
         return None
     expected = before['protection']
-    verify_before_switch(api, host, before, settings, expected)
+    verify_before_switch(api, host, before, settings, expected, manifest)
     if selected != 'monitoring':
         host.api('protection-stop', generation=before['generation'], protection_id=expected['id'])
         stopped = wait_for(host, before['generation'], lambda state: check_mode(api, host, state, 'monitoring'))
         expected = stopped['protection']
 
     def before_quiesce():
-        verify_before_switch(api, host, before, settings, expected)
+        verify_before_switch(api, host, before, settings, expected, manifest)
 
     return before_quiesce
 
@@ -712,11 +750,13 @@ def rollback_build(api, host, record):
     immutable_tree(gui, gui, prior['gui'])
 
     # This includes the stored-rule ceiling and shaping checks before Stop.
-    host, _, before, selected, collector, config, uid, xdg, settings = preflight(
+    host, predecessor, before, selected, collector, config, uid, xdg, settings = preflight(
         api, old, candidate, record['desktop_config'],
     )
     if config:
         raise RuntimeError('Rollback would require unexpected changes to shaping configuration')
+    legacy_rollback = (collector == 'active' and candidate.get('source') in LEGACY_UDP_SOURCES
+                       and bool(os.statvfs(API_DIR).f_flag & os.ST_NOEXEC))
     stamp = time.strftime('%Y%m%dT%H%M%S') + '-' + uuid.uuid4().hex[:8]
     pending = DATA / 'standalone-pending.json'
     attempt = dict(
@@ -733,10 +773,14 @@ def rollback_build(api, host, record):
         if api['rule_documents'](DATA / 'rules.db') != newest:
             raise RuntimeError('The previous executable did not retain the newest rule documents')
         verify_saved_settings(host, settings, response)
-        restore_collector(host, collector, response)
+        if legacy_rollback:
+            wait_for(host, response['generation'],
+                     lambda value: legacy_udp_noexec(candidate, value.get('traffic_monitor') or {}))
+        else:
+            restore_collector(host, collector, response)
 
     try:
-        before_quiesce = prepare_switch(api, host, before, settings, selected)
+        before_quiesce = prepare_switch(api, host, before, settings, selected, predecessor[1])
         api['install_locked'](host, old, stamp, verify_extra=verify_latest,
                               before_quiesce=before_quiesce, standalone=True)
     except PreflightChanged:
@@ -755,6 +799,8 @@ def rollback_build(api, host, record):
     pending.unlink()
     fsync_dir(DATA)
     print(f'Selected {previous} in monitoring with the latest saved rules and settings.')
+    if legacy_rollback:
+        print('UDP collector failed as expected: the previous release executes its helper from a noexec mount.')
 
 
 def cleanup(api, host, record):

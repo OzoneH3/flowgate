@@ -121,6 +121,38 @@ class ReleaseChecks(unittest.TestCase):
                     release['main']()
                 locked.assert_not_called()
 
+    def test_legacy_collector_requires_exact_failure_and_verified_noexec_pin(self):
+        pinned = self.root / '.flowgate-udp-123'
+        pinned.write_bytes(b'packaged helper')
+        pinned.chmod(0o700)
+        manifest = {'source': '13e3029ac2e4d2695b851cfb09710d9ab4bb8bf7',
+                    'files': {'udp-collector': hashlib.sha256(pinned.read_bytes()).hexdigest()}}
+        status = {'state': 'failed', 'available': True, 'reason_code': 'permission_required',
+                  'generation': 'legacy-collector', 'reason': f'fork/exec {pinned}: permission denied'}
+        target = release['collector_target']
+        with patch.dict(scope, API_DIR=self.root, secure_file=lambda path: path,
+                        check_directory=Mock()), patch('os.statvfs') as mount:
+            mount.return_value.f_flag = os.ST_NOEXEC
+            self.assertEqual(target({'traffic_monitor': status}, manifest), 'active')
+            for changed_status, changed_manifest in (
+                (dict(status, state='disabled'), manifest),
+                (dict(status, state='starting'), manifest),
+                (dict(status, generation=''), manifest),
+                (dict(status, reason='BPF attach: permission denied'), manifest),
+                (dict(status, reason=f'fork/exec {pinned}.elsewhere: permission denied'), manifest),
+                (status, dict(manifest, source='different-build')),
+            ):
+                with self.subTest(status=changed_status, source=changed_manifest['source']):
+                    with self.assertRaisesRegex(RuntimeError, 'Current collector is not settled'):
+                        target({'traffic_monitor': changed_status}, changed_manifest)
+            mount.return_value.f_flag = 0
+            with self.assertRaisesRegex(RuntimeError, 'Current collector is not settled'):
+                target({'traffic_monitor': status}, manifest)
+            mount.return_value.f_flag = os.ST_NOEXEC
+            pinned.write_bytes(b'different helper')
+            with self.assertRaisesRegex(RuntimeError, 'Current collector is not settled'):
+                target({'traffic_monitor': status}, manifest)
+
     def test_electron_profile_lifecycle_preserves_unmanaged_content(self):
         profile = self.root / 'flowgate-standalone-electron'
         foreign = self.root / 'foreign-profile'
