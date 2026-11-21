@@ -327,9 +327,3 @@ body.hide-chart #activityView > #trafficGraph {
   border: 1px solid var(--fg-border);
   border-radius: 6px;
 }
-
-#requestDetails button.open-prompt {
-  background: var(--desktop-control);
-  border: 1px solid var(--fg-border);
-  border-radius: 5px;
-}

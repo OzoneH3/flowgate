@@ -61,6 +61,7 @@ export function setupDecisionLog(
   view.hidden = true;
   const option = (v: string, t: string) => `<option value="${v}">${t}</option>`;
   view.innerHTML = `<section class="rules-main log-main"><div class="filterbar">
+<span id="logOutcomeAction"></span>
 <select id="logRange" aria-label="Time range">${RANGES.map(([v, t]) => option(v, t)).join('')}</select>
 <select id="logDirection" aria-label="Direction">${option('', 'Any direction')}${option('incoming', 'Incoming')}${option('outgoing', 'Outgoing')}</select>
 <select id="logAction" aria-label="Outcome">${option('', 'Any outcome')}${option('allow', 'Allowed')}${option('block', 'Blocked')}${option('pending', 'Pending records')}</select>
@@ -162,6 +163,7 @@ async function applyFilter() {
   detailVersion++;
   shownDetail = undefined;
   newAbove = 0;
+  $('logOutcomeAction').replaceChildren();
   $('logDetails').replaceChildren(el('p', 'Select a record.', 'hint'));
   current = await window.flowgate.decisionLogFilter(filter());
   render();
@@ -390,6 +392,8 @@ async function showDetail(id: string, outcome = false) {
   const version = ++detailVersion;
   shownDetail = undefined;
   const box = $('logDetails');
+  const action = $('logOutcomeAction');
+  action.replaceChildren();
   box.replaceChildren(el('p', outcome ? 'Looking up recorded outcome…' : 'Loading record…', 'hint'));
   const { record, note } = outcome
     ? await window.flowgate.decisionLogOutcome(id)
@@ -397,7 +401,7 @@ async function showDetail(id: string, outcome = false) {
   if (version !== detailVersion) return;
   if (!record) {
     box.replaceChildren(el('p', note || 'Record unavailable.', 'hint'));
-    if (outcome) box.append(backToPending(id));
+    if (outcome) action.append(backToPending(id));
     return;
   }
   const outcomeOf = outcome ? id : undefined;
@@ -413,8 +417,10 @@ function backToPending(id: string) {
 
 function renderDetail(r: LogRecord, note: string, outcomeOf?: string) {
   const box = $('logDetails');
+  const action = $('logOutcomeAction');
+  action.replaceChildren();
   const parts: HTMLElement[] = [el('h3', `${outcomeLabel(r)} · ${time(r.time)}`)];
-  if (outcomeOf) parts.push(backToPending(outcomeOf));
+  if (outcomeOf) action.append(backToPending(outcomeOf));
   if (note) parts.push(el('p', note, 'hint'));
   const section = (title: string) => {
     parts.push(el('h4', title));
@@ -455,7 +461,7 @@ function renderDetail(r: LogRecord, note: string, outcomeOf?: string) {
       } else if (current?.outcomeLookup) {
         const link = el('button', 'Open recorded outcome');
         link.onclick = () => void showDetail(r.id, true);
-        parts.push(link);
+        action.append(link);
       } else {
         parts.push(el('p', 'Outcome lookup unavailable.', 'hint'));
       }

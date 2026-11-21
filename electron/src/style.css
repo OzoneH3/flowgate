@@ -403,9 +403,6 @@ footer {
   content: '● ';
   color: #e15d56;
 }
-.open-prompt {
-  margin: 9px 0;
-}
 .request-result {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -464,7 +461,7 @@ footer {
   min-width: 0;
 }
 #rulesTable {
-  min-width: 900px;
+  min-width: 820px;
 }
 #rulesTable th {
   padding: 5px;
@@ -476,7 +473,7 @@ footer {
   width: 210px;
 }
 #rulesTable th:nth-child(6) {
-  width: 165px;
+  width: 125px;
 }
 pre {
   font: inherit;
@@ -1001,6 +998,7 @@ td.up { color: #c7daa8; background: #344b20; }
 #logScroll { overflow-anchor: none; }
 #logApplication { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #decisionLogView .filterbar > button { flex-shrink: 0; }
+#logOutcomeAction:empty { display: none; }
 #decisionLogView > aside { width: 32%; max-width: 380px; }
 #decisionLogView .filterbar { flex-wrap: wrap; }
 .log-details dl { align-items: baseline; }
