@@ -43,39 +43,39 @@ buttons use the one-minute duration below Next request.*
 
 ## Try the desktop
 
-From a source checkout, run this as your desktop user. The launcher builds the
-Electron app and starts a local read-only observer for live Activity. See the
-[desktop prerequisites](electron/README.md) for Go, Node, npm, Python and
-Electron runtime requirements.
+As your desktop user, clone the repository and run the preview. The first run
+downloads the locked Electron dependencies and Go modules, builds the app, and
+opens live Activity with a private read-only observer. Press Ctrl+C in the
+launch terminal to stop the preview. [Desktop prerequisites](electron/README.md)
 
 ```sh
+git clone https://github.com/OzoneH3/flowgate.git
+cd flowgate
 ./scripts/run-electron.sh
 ```
 
-This preview requires no service installation or firewall activation. To use
-rules and protection, connect the desktop to an installed FlowGate daemon.
-
 ## Install FlowGate
 
-The standalone release candidate targets **64-bit x86 Linux with systemd**.
-Check [GitHub Releases](https://github.com/OzoneH3/flowgate/releases) for a
-prebuilt candidate. If you download one, follow the installation guide to
-verify the archive and offline installer before running them as root.
+The standalone candidate targets **64-bit x86 Linux with systemd**. From a
+clean checkout of the revision you want to install, run the following as the
+intended desktop administrator. First check the
+[build and host requirements](docs/STANDALONE-RELEASE.md#requirements).
 
-To build from source:
+```sh
+make update
+```
 
-1. Check the [build and system requirements](docs/STANDALONE-RELEASE.md).
-2. Run `make package` from a clean, committed checkout. It builds FlowGate,
-   runs the release checks, and writes the archive, offline installer, and
-   SHA-256 receipts to `build/dist/`.
-3. Follow the [standalone installation guide](docs/STANDALONE-RELEASE.md) to
-   verify the files, run preflight, and install. The same guide covers rollback
-   and uninstall.
-4. Open **FlowGate** from the application menu or run `flowgate-ui`.
+This command builds the checked-out commit, verifies the archive, runs preflight
+and installs with sudo. In a graphical session it opens the matching installed
+desktop. To upgrade from public `master` later, run `git pull --ff-only`,
+review the new revision, then run `make update` again. To open the installed app at any time, use
+the application menu or run `flowgate-ui`.
 
-To upgrade an existing installation from a clean, committed checkout, run
-`make update` as your desktop user. It builds the package, verifies the archive's
-digest, runs preflight, installs with sudo, and reloads the installed desktop.
+Run `make help` for individual build, package, install and recovery commands.
+The [standalone guide](docs/STANDALONE-RELEASE.md) covers staged installation,
+checksum verification for a candidate downloaded from [GitHub Releases](https://github.com/OzoneH3/flowgate/releases),
+and rollback. The [verification record](docs/STANDALONE-RELEASE.md#verification-record)
+identifies the audited builds and the guest checks still pending.
 
 A fresh install starts in **Monitoring**. When you're ready to enable
 protection, review essential networking first. Then choose **Incoming only**
@@ -104,9 +104,9 @@ Use **Stop protection** to return to monitoring. [Essential networking](docs/ESS
 
 ## Diagnose before explicit activation
 
-Run `flowgate doctor` if FlowGate is installed, or build the command from your
-checkout. Doctor reports what it could check without changing firewall settings
-or requesting sudo.
+On a standalone installation, run `/usr/local/lib/flowgate/current/flowgate doctor`.
+From a source checkout, use the commands below. Doctor reports what it could
+check without changing firewall settings or requesting sudo.
 
 ```sh
 . scripts/go-env.sh
@@ -124,37 +124,7 @@ checks when you enable protection. [Read the diagnostic and recovery guide](docs
 | Use Activity, prompts, the tray, and saved rules | [Electron desktop guide](electron/README.md) |
 | Know who can see traffic or edit rules | [Authorization](docs/AUTHORIZATION.md) |
 | Check supported Wine/Proton versions and attribution | [Wine and Proton guide](docs/WINE.md) |
-| Prepare a developer release or recover an installation | [Deployment and rollback](docs/DAILY-DEPLOYMENT.md) · [Script reference](scripts/README.md) |
+| Package a standalone release, recover or uninstall | [Standalone release guide](docs/STANDALONE-RELEASE.md) |
+| Maintain a pinned checkout deployment or attach a development desktop | [Developer deployment guide](docs/DAILY-DEPLOYMENT.md) · [Script reference](scripts/README.md) |
 | Work on the Unix API, Qt client, or core | [API](docs/API.md) · [Qt client](desktop/README.md) · [Integration map](docs/INTEGRATION.md) |
 | Review project status and test evidence | [Status](docs/STATUS.md) · [Historical records](docs/HANDOFF.md) |
-
-<details>
-<summary>Checkout-based updates and developer tools</summary>
-
-Use [the checkout updater](docs/DAILY-DEPLOYMENT.md) only with matched backend
-and Electron bundles for the exact [pinned revision](deployment/default-release).
-A fresh public clone may not contain that revision. The updater needs both
-`build/daily-releases/<revision>/` and
-`build/automatic-zone-releases/<revision>/` for that pin. From a clean
-`master` checkout, preview the update and then apply it.
-
-```sh
-./scripts/update-and-start.sh --update --local --profile preserve --dry-run
-./scripts/update-and-start.sh --update --local --profile preserve
-```
-
-With no arguments the script opens the installed desktop. The `--local`
-option skips fetching and still requires the prepared bundles for the pinned
-revision. This workflow preserves the existing protection mode. The
-[standalone guide](docs/STANDALONE-RELEASE.md) covers the source package
-workflow and migration.
-
-Connect a checkout build to an existing installed daemon with
-`./scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock`. The
-launcher attaches without starting or stopping the daemon. Compare the builds
-shown in **Help → About** or run `flowgate version` on a particular binary.
-
-The optional [passwordless local update helper](docs/DAILY-DEPLOYMENT.md#passwordless-local-updates)
-applies to checkout-based updates.
-
-</details>

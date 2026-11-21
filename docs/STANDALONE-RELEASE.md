@@ -2,7 +2,20 @@
 
 The source build uses GNU Make. Installation uses an exact offline archive. The daemon, desktop, helpers, upgrade and rescue tools run without the source checkout. The initial release candidate targets Linux x86_64 with systemd. It uses the Electron desktop, including the existing Plasma Wayland integrations. The Qt client and lab tools are outside the package.
 
-Build prerequisites are Go and a C toolchain, Clang with BPF support, bpftool, libbpf, libmnl and libnftnl development files, a kernel BTF file, Wine development headers and import libraries, Node and the Electron dependencies in the lockfile. The installed host needs systemd, iproute2, nftables, runuser, the dynamically linked system libraries and the kernel features checked by FlowGate. BPF, traffic collector and Wine features still depend on their individual runtime checks.
+## Requirements
+
+Build from a clean Git checkout with GNU Make, Go 1.24 or newer, a C toolchain,
+Clang with BPF support, LLD, pkg-config, bpftool and readable kernel BTF at
+`/sys/kernel/btf/vmlinux`. Install the libbpf, libmnl and libnftnl development
+files. The Windows observer build expects Wine headers under `/usr/include/wine`
+and import libraries under `/usr/lib/wine/x86_64-windows`. The first build needs
+Node ≥22.12, npm and network access for the locked dependencies, Electron runtime
+and Go modules.
+
+The installation host needs systemd, sudo, iproute2, nftables, runuser and the
+dynamically linked daemon and desktop libraries. The graphical session must
+support Electron's sandbox. FlowGate checks kernel and runtime capabilities
+for BPF, traffic collection and Wine individually.
 
 Both the build machine and the installation host need Python 3.9 or newer
 and `/usr/bin/sha256sum` (from coreutils). The host's system Python must
@@ -29,36 +42,93 @@ installer leaves host policy and enforcing mode intact. FlowGate ships no
 dedicated SELinux confinement policy. Preflight reports the command behavior
 on SELinux hosts. Other policies can assign different domains.
 
-The package target installs the pinned Electron runtime when needed, builds the
-desktop and native components, and runs the release checks.
+## Install or update from source
 
-```sh
-make package
-```
-
-Build from a clean committed revision. The build and package targets write to build/. The archive and the offline bootstrap land in build/dist. Copy them to a convenient location. Distribute their SHA256 digests through the trusted release channel. Check the bootstrap itself against the trusted digest before executing it as root. The archive SHA256 is an argument and the bootstrap verifies privately staged bytes before parsing the payload or running any packaged code.
-
-To build and upgrade the installed daemon and desktop on this machine in one command:
+As the intended desktop administrator, run this command from a clean checkout of the desired revision.
 
 ```sh
 make update
 ```
 
-This builds the current committed checkout in build/, verifies the archive against its checksum receipt, then runs preflight and install in order. Run it as the intended desktop user. Preflight and install invoke sudo. From a desktop terminal, the command closes any running installed GUI and opens the version matching the new daemon, including when the GUI was already closed. A shell without a display completes the installation and leaves desktop launch for your next graphical session.
+Make builds the current checkout, checks the archive against its local receipt,
+then runs preflight and install with sudo. In a graphical session it reloads
+the installed desktop, starting it even if it was closed. From a headless shell,
+launch `flowgate-ui` at the next graphical login. For an upgrade, obtain the
+desired source revision before invoking Make. Install refuses a release ID
+already installed (same version and source revision).
 
-```sh
-make preflight BUNDLE=/absolute/path/to/flowgate.tar.gz SHA256=<trusted-sha256>
-make install BUNDLE=/absolute/path/to/flowgate.tar.gz SHA256=<trusted-sha256>
+## Build and inspect a package
+
+From the checkout root, `make package` builds Electron, the daemon and its native
+helpers and runs the standalone release and freshness checks. The default version
+is **0.1.0-rc.7**. A successful build prints the archive path and writes four files.
+
+```text
+build/dist/flowgate-0.1.0-rc.7-linux-x86_64.tar.gz
+build/dist/flowgate-0.1.0-rc.7-linux-x86_64.tar.gz.sha256
+build/dist/flowgate-release.py
+build/dist/flowgate-release.py.sha256
 ```
 
-Use actual digest text in place of the placeholder. On a computer without a checkout, use the verified bootstrap from the archive's output directory in the same way.
+Build and verify the default package from the checkout root.
 
 ```sh
-sudo /usr/bin/python3 -I ./flowgate-release.py preflight --bundle ./flowgate.tar.gz --sha256 <trusted-sha256>
-sudo /usr/bin/python3 -I ./flowgate-release.py install --bundle ./flowgate.tar.gz --sha256 <trusted-sha256>
+make package &&
+(cd build/dist && /usr/bin/sha256sum -c flowgate-0.1.0-rc.7-linux-x86_64.tar.gz.sha256 flowgate-release.py.sha256)
 ```
 
-Invoke fresh installation with sudo from the intended desktop administrator's account. Fresh installation starts monitoring. Upgrades authenticate and verify the candidate, check existing policy schema, preserve configuration, snapshot the stopped writer's state, and verify monitoring before restoring the previously active mode. A retained shaping journal or configured shaping requires a verified transition before upgrade. Installation preserves the disabled host-trial interface of a legacy installation when one is reported and verified.
+Each check prints the filename followed by `OK`. Use the following commands to install
+that package in separate steps from the same trusted checkout.
+
+```sh
+(
+  set -eu
+  bundle="$PWD/build/dist/flowgate-0.1.0-rc.7-linux-x86_64.tar.gz"
+  digest=$(cut -d ' ' -f 1 "$bundle.sha256")
+  make preflight BUNDLE="$bundle" SHA256="$digest"
+  make install BUNDLE="$bundle" SHA256="$digest"
+)
+```
+
+Both targets use the checkout's `deployment/standalone/release.py`. Preflight
+takes an install lock, verifies the privately staged archive and examines host
+state. After installation, open `flowgate-ui` as the desktop user.
+
+The RC8 lab examples use an explicit version. Give the candidate its own
+directory so its installer and receipts stay together.
+
+```sh
+make package VERSION=0.1.0-rc.8 \
+  ARTIFACT="$PWD/build/dist/rc8/flowgate-0.1.0-rc.8-linux-x86_64.tar.gz"
+```
+
+## Install a downloaded package offline
+
+Copy all four assets into one directory. Obtain the archive filename and the
+**archive and installer SHA-256 values** from the trusted release record.
+In that directory, set `BUNDLE` to the published archive basename,
+`ARCHIVE_SHA256` and `INSTALLER_SHA256` to the corresponding hex digests.
+Run the block as the intended desktop administrator. It verifies both files
+before invoking the downloaded installer as root.
+
+```sh
+(
+  set -eu
+  : "${BUNDLE:?Set the release archive filename}"
+  : "${ARCHIVE_SHA256:?Set the trusted archive digest}"
+  : "${INSTALLER_SHA256:?Set the trusted installer digest}"
+  /usr/bin/sha256sum -c "$BUNDLE.sha256" flowgate-release.py.sha256
+  printf '%s  %s\n' "$ARCHIVE_SHA256" "$BUNDLE" "$INSTALLER_SHA256" flowgate-release.py | /usr/bin/sha256sum -c -
+  sudo /usr/bin/python3 -I -B ./flowgate-release.py preflight --bundle "./$BUNDLE" --sha256 "$ARCHIVE_SHA256"
+  sudo /usr/bin/python3 -I -B ./flowgate-release.py install --bundle "./$BUNDLE" --sha256 "$ARCHIVE_SHA256"
+)
+```
+
+The receipts check each file against its accompanying checksum. The trusted digests
+identify the approved bytes. The installer checks a private copy of the archive
+before parsing its manifest or executing packaged code.
+
+Fresh installation starts monitoring. Upgrades authenticate and verify the candidate, check existing policy schema, preserve configuration, snapshot the stopped writer's state, and verify monitoring before restoring the previously active mode. A retained shaping journal or configured shaping requires a verified transition before upgrade. Installation preserves the disabled host-trial interface of a legacy installation when one is reported and verified.
 
 ### Fedora 45 recovery from the RC8 collector failure
 
@@ -72,12 +142,15 @@ install the verified replacement. This preserves the saved rules database at
 `/var/lib/flowgate/rules.db`. Use the enrolled desktop administrator's account.
 Obtain the archive, offline installer, and receipts for the replacement, and
 check the SHA-256 values against the trusted release channel before removing
-the old installation.
+the old installation. The following command uses the replacement digests from
+the [Fedora upgrade regression](../scripts/acceptance/fedora-collector-upgrade/run.py).
 
 ```sh
 bundle=flowgate-0.1.0-rc.8-linux-x86_64.tar.gz
+digest=55f522e7f12f87f91bbcc5ab7c170c846abeed3f26ee8975b9b579b5b0fb01af
+installer_digest=94a2956bf3477875aa63eafc3f2abd555160837d220f8449b3dfe3cbc349124c
 /usr/bin/sha256sum -c "$bundle.sha256" flowgate-release.py.sha256 &&
-digest=$(cut -d ' ' -f 1 "$bundle.sha256") &&
+printf '%s  %s\n' "$digest" "$bundle" "$installer_digest" flowgate-release.py | /usr/bin/sha256sum -c - &&
 sudo /usr/local/sbin/flowgate-uninstall &&
 sudo test -s /var/lib/flowgate/rules.db &&
 sudo /usr/bin/python3 -I -B ./flowgate-release.py preflight --bundle "$bundle" --sha256 "$digest" &&
@@ -92,25 +165,92 @@ automatic desktop launch preference. This path
 removes the registered predecessor, so the new installation has no
 `flowgate-recover --rollback` target.
 
-Launch the new UI from the application menu or with flowgate-ui. Close any older desktop session copy before launching it. The installed GUI stores preferences in XDG_CONFIG_HOME/flowgate and transient state in XDG_RUNTIME_DIR/flowgate. The installer updates the enrolled user's managed login entry while preserving its opt-out flags. It saves the original entry for migration rollback. It does not enable an absent login entry. For a non-default config root pass --desktop-config during install. For a legacy preference import, compare the saved files from the old GUI releases and pass --import-preferences with the selected absolute path using INSTALL_FLAGS. The import refuses to overwrite different installed preferences.
+## Desktop preferences
+
+Launch the new UI from the application menu or with `flowgate-ui`. Close any older desktop session copy before launching it. The installed GUI stores preferences in XDG_CONFIG_HOME/flowgate and transient state in XDG_RUNTIME_DIR/flowgate. The installer updates the enrolled user's managed login entry while preserving its opt-out flags. It saves the original entry for migration rollback. It does not enable an absent login entry. For a non-default config root pass --desktop-config during install. For a legacy preference import, compare the saved files from the old GUI releases and pass --import-preferences with the selected absolute path using INSTALL_FLAGS. The import refuses to overwrite different installed preferences.
 
 ```sh
 make desktop DESKTOP_FLAGS='--enable-autostart'
 make desktop DESKTOP_FLAGS='--import-preferences /absolute/path/to/electron-preferences.json'
 ```
 
+## Recovery and removal
+
 If installation fails after cutover, it tries to restore the verified previous build and its database in monitoring. The independently installed rescue entry point can remove owned interception even when the API, desktop or selected release pointer is broken. Consult the local report when it refuses an ownership mismatch.
 
-```sh
-make recover
-make recover RECOVER_FLAGS=--stop-only
-make recover RECOVER_FLAGS=--rollback
-make uninstall
-make uninstall UNINSTALL_FLAGS=--purge
-```
+| Desired outcome | Command |
+| --- | --- |
+| Restore monitoring | `make recover` |
+| Stop FlowGate and clear owned interception | `make recover RECOVER_FLAGS=--stop-only` |
+| Return to a compatible predecessor | `make recover RECOVER_FLAGS=--rollback` |
+| Remove the installation and retain data | `make uninstall` |
+| Also purge system configuration and state, keeping per-user preferences | `make uninstall UNINSTALL_FLAGS=--purge` |
 
 Without Make, run sudo /usr/local/sbin/flowgate-recover or sudo /usr/local/sbin/flowgate-uninstall with the same options. If the normal recovery wrapper is missing during a partial install, use sudo /usr/local/libexec/flowgate/rescue. Recovery persists monitoring and verifies interception cleanup. Explicit rollback switches to the previous compatible executable using the latest rules and settings. It checks the state contract and rule schema before stopping protection. If a predecessor is incompatible or has no compatibility declaration, rollback refuses. An interrupted installation uses its own transaction snapshot. An older archive is a separate recovery decision because restoring it can discard later edits. If the current executable is damaged, use local rescue to remove interception. Inspect the kept backup and reinstall a verified compatible package before selecting a different build.
 
 Uninstall stops the managed daemon and desktop, verifies cleanup, and removes managed units and the registered login and application entries. The normal operation preserves policy, preferences and recovery data. The purge option removes the system configuration and machine state after verified cleanup. It leaves per-user preferences with the user. Legacy development releases and the optional old passwordless update configuration require separate ownership review. Keep their copies until a standalone migration has been verified.
 
-Review the host with preflight before scheduling a migration. Validate the exact archive and complete lifecycle in a guest before release approval.
+## Maintainer release handoff
+
+1. Build once from a fresh checkout of the chosen commit with an explicit
+   `VERSION`. Retain all four files. Record `git rev-parse HEAD` and both
+   digests. In the asset directory, set `BUNDLE` to the archive basename.
+   Check both receipts and use `tar -xOzf "$BUNDLE" release.json`
+   to match the manifest's full `source` and `version` to the intended release.
+2. Supply that archive, installer and both recorded digests to the external
+   `flowgate-lab/lab.py run` command using `--profile`, `--archive`,
+   `--archive-sha256`, `--installer` and `--installer-sha256`. Match the
+   passing guest result's installed source and executable digest to the
+   manifest and both artifact digests to the build record. Record fresh install,
+   upgrade and rollback results on disposable guests before approving those
+   lifecycle paths. With `LAB` set to the runner checkout and the recorded
+   digests in `ARCHIVE_SHA256` and `INSTALLER_SHA256`, a Debian run is:
+
+   ```sh
+   python3 -B "$LAB/lab.py" run --profile "$LAB/profiles/debian-13.json" \
+     --archive "$PWD/$BUNDLE" --archive-sha256 "$ARCHIVE_SHA256" \
+     --installer "$PWD/flowgate-release.py" --installer-sha256 "$INSTALLER_SHA256"
+   ```
+3. Publication to GitHub Releases is manual. After guest approval, verify the
+   release tag resolves to the tested commit, attach the **retained four files**
+   to a draft and put the source SHA and both digests in the release notes.
+   Download and compare the draft assets to the originals before publishing.
+   A rebuild can change the archive digest even at the same commit and version.
+   With `TAG` set to the verified remote tag and `NOTES` to the release notes
+   file, run these commands from the retained asset directory:
+
+   ```sh
+   (
+     set -eu
+     repo=OzoneH3/flowgate
+     gh release create "$TAG" --repo "$repo" --verify-tag --draft --prerelease \
+       --title "FlowGate $TAG" --notes-file "$NOTES" \
+       "$BUNDLE" "$BUNDLE.sha256" flowgate-release.py flowgate-release.py.sha256
+     downloaded=$(mktemp -d ./draft-assets.XXXXXX)
+     gh release download "$TAG" --repo "$repo" --dir "$downloaded"
+     for asset in "$BUNDLE" "$BUNDLE.sha256" flowgate-release.py flowgate-release.py.sha256; do
+       cmp "$asset" "$downloaded/$asset"
+     done
+   )
+   ```
+
+   After all four comparisons succeed, publish the verified draft with
+   `gh release edit "$TAG" --repo OzoneH3/flowgate --draft=false --prerelease`.
+
+## Verification record
+
+The public-clone audit at `7511ac1764c8a922c1ad259747338973adf197f2` ran
+the read-only preview, built RC7 and RC8, passed the 24 standalone checks for
+each, and verified both receipts, the archive contents and packaged daemon
+identity. Fresh installation, upgrade and rollback **still require guest
+verification for these exact artifacts**.
+
+| Version | Audited archive SHA-256 |
+| --- | --- |
+| 0.1.0-rc.7 (default) | `0358a862f84aa60db55cbf5803a24984e9d736eda81979a37228c24bef37b9ae` |
+| 0.1.0-rc.8 (explicit) | `112995add59425a674ce7f25e9af220f5e96188e39d08f64aa7044cfcd33041d` |
+
+Both builds produced installer SHA-256
+`94a2956bf3477875aa63eafc3f2abd555160837d220f8449b3dfe3cbc349124c`.
+The public repository advertised no tags or published releases at the time of
+the audit. Earlier RC8 guest results refer to their own source and digests.

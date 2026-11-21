@@ -1,7 +1,7 @@
 # Scripts
 
-Run commands from the repository root. Build output, caches and disposable
-fixtures belong in `.workspace/`.
+Run commands from the repository root. Builds, tool caches and release artifacts
+go under `build/`. Development fixtures also use `.workspace/` for scratch data.
 
 | Location | Purpose |
 | --- | --- |
@@ -14,7 +14,7 @@ fixtures belong in `.workspace/`.
 | `install-prepared.py`, `update-and-start.sh` | Explicit installation/update operations. |
 | `*-essentials.py`, `*-system-networking.py` | Essential-networking review and diagnostics. |
 | `update-address-registry.py` | Refresh the versioned address registry. |
-| `lab.sh`, `go-env.sh` | Private namespace launcher and workspace cache setup. |
+| `lab.sh`, `go-env.sh` | Private namespace launcher and checkout-local Go cache setup. |
 
 Examples:
 
@@ -51,34 +51,37 @@ scripts/build.sh desktop
 scripts/build.sh electron
 scripts/build.sh windows wine-table
 scripts/build.sh tcp-initiation udp
-scripts/prepare-release.sh                 # matched backend and Electron bundle
-scripts/prepare-release.sh --backend-only  # backend bundle only
 ```
 
 The build command accepts one or more explicit targets. Collectors and Wine
-helpers are built only when requested. `--help` lists the targets. Preparation
-requires clean master, checks an existing bundle before reusing it, and never
-installs or activates protection. Backend and GUI bundles retain their existing
-`.workspace/daily-releases/` and `.workspace/automatic-zone-releases/` locations.
+helpers are built only when requested. `--help` lists the targets. For standalone
+packages use the [standalone release guide](../docs/STANDALONE-RELEASE.md).
+For `scripts/prepare-release.sh`, follow the [matched-pair preparation
+steps](../docs/DAILY-DEPLOYMENT.md#prepare-a-matched-pair) from clean master.
+Its outputs are `build/daily-releases/<revision>/` and
+`build/automatic-zone-releases/<revision>/`. Existing bundles are verified
+before reuse.
 
 The old separate build/release scripts have been replaced by these two entry
 points. The superseded installer that mixed installation and live acceptance,
 and its tests, have been removed. The current monitoring installer, rollback
 tests, and separate acceptance scenarios remain.
 
-## One-command update and start
+## Launch or update a pinned checkout deployment
 
 ```sh
 scripts/update-and-start.sh
 ```
 
-The normal command fast-forwards master when upstream is configured, then selects
-the exact SHA in `deployment/default-release`, not HEAD. It requires already
-prepared matched artifacts and verifies them. `deployment/release-policy.json`
-rejects experiments and refuses every unapproved SHA before contacting the host,
-including direct calls to the Python coordinator. Approval is an explicit exact-SHA
-review; preparing a bundle does not approve installation. The current pin remains
-`25dbb1a90e81f6fc2a150231cae699db87e430f3`; rejected `66313d5` is blocked.
+With no arguments the script reuses or opens the matched checkout GUI for the
+installed approved daemon. Use `scripts/update-and-start.sh --update` to update.
+With an upstream configured, update fast-forwards master before selecting the
+exact SHA in [deployment/default-release](../deployment/default-release).
+`--local` skips the upstream check. The updater requires both prepared bundles
+for the pin. It verifies the manifests and checks the revision against
+[release-policy.json](../deployment/release-policy.json).
+Preparation and approval are separate steps.
+
 The coordinator authenticates sudo before interrupting
 protection, stops protection if a daemon update is needed, installs, verifies
 the running build, restores the previous protection mode, then closes the old released GUI
@@ -119,8 +122,8 @@ reproduced and receiver controls passed; it does not mean the failure is fixed.
 ## Installer trust and recovery
 
 Use `python3 scripts/install-prepared.py --bundle PATH` for a monitoring-only
-installation, or `update-and-start.sh` for the complete update workflow. The
-coordinator snapshots and verifies the selected bundle before authentication.
+installation, or `scripts/update-and-start.sh --update` for the complete pinned
+update workflow. The coordinator snapshots and verifies the selected bundle before authentication.
 Root receives those bytes on stdin, stages them in a private root-owned directory,
 and uses `/usr/bin/python3 -I`. It does not import modules or execute the installer
 from the writable build folder. This trusts the selected local checkout; the

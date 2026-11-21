@@ -2,17 +2,44 @@
 
 For a standalone installation from your current checkout, use `make update`.
 See the [standalone release guide](STANDALONE-RELEASE.md) for that workflow.
-The commands below are for the pinned checkout updater.
+The older checkout updater consumes two prepared directories for an approved
+revision. It has a separate preparation step.
+
+## Prepare a matched pair
+
+Run these commands on a clean `master` at the revision to package. On a fresh
+clone, keep Go modules in a dot-prefixed directory under `build/` so the
+`./...` race and vet patterns skip the dependency cache. Install the locked
+Electron dependencies and runtime before preparing the GUI.
 
 ```sh
-scripts/prepare-release.sh                 # matched backend and Electron
-scripts/prepare-release.sh --backend-only  # backend only
-scripts/update-and-start.sh --update --dry-run  # preview the pinned update
-scripts/update-and-start.sh --update           # install prepared pinned bundles
+export GOMODCACHE="$PWD/build/.gomodcache"
+. ./scripts/go-env.sh
+export npm_config_cache="$PWD/build/npm-cache" electron_config_cache="$PWD/build/electron-cache" XDG_CACHE_HOME="$PWD/build/cache"
+ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm --prefix electron ci &&
+node electron/node_modules/electron/install.js &&
+scripts/prepare-release.sh
 ```
 
-Running the script with no arguments opens the installed GUI. For an update,
-the default profile restores the live mode observed during update. Fresh installs stay
+For a backend-only bundle, set the Go cache as above and run
+`scripts/prepare-release.sh --backend-only`.
+
+## Apply a prepared pinned update
+
+From a clean `master`, the following two commands preview and then apply an
+update using local artifacts. Both require the backend and GUI manifests for
+the exact [release pin](../deployment/default-release). The public checkout
+at `7511ac1764c8` lacked the pinned commit and its artifacts. Preparing that
+checkout builds a pair for its own HEAD and the pinned updater still refuses.
+
+```sh
+scripts/update-and-start.sh --update --local --profile preserve --dry-run
+scripts/update-and-start.sh --update --local --profile preserve
+```
+
+Running the script with no arguments reuses or opens the checkout GUI for the
+installed approved daemon. The default update profile restores the previously
+observed live mode. Fresh installs stay
 monitoring. Explicit `--profile both --acknowledge-outgoing-blocking` acknowledges
 that DNS/DHCP/VPN may be blocked and continuous protection has no automatic
 countdown. No essential service permission is added by an update. If the GUI/API
@@ -68,6 +95,12 @@ rollback or reboot test. Live acceptance remains a separate explicit action.
 
 Earlier implementation/incident notes are retained in
 [DAILY-DEPLOYMENT-HISTORY.md](DAILY-DEPLOYMENT-HISTORY.md).
+
+## Attach a development desktop
+
+Run `./scripts/run-electron.sh --daemon /run/flowgate-api/daemon.sock` to attach
+the checkout desktop to the installed daemon. The daemon keeps running when the
+GUI closes. Compare the builds in **Help → About**.
 
 ## Passwordless local updates
 
