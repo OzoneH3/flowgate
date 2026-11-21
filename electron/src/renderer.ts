@@ -173,12 +173,13 @@ const queuedAddress = queuedDuration !== undefined && (queuedField === 'address'
 const queuedPort = queuedDuration !== undefined && (queuedField === 'port' || queuedField === 'endpoint');
 // Only an intentional rule edit keeps an ended request open for rule review.
 let popupRuleEdited = queuedAddress || queuedPort;
-let rememberOn = queuedAddress || queuedPort,
+let rememberOn = Boolean(promptID),
   rememberFields: RememberFields = { ...DEFAULT_REMEMBER, address: queuedAddress, port: queuedPort },
-  rememberDuration = rememberOn ? queuedDuration ?? 0 : 0,
+  rememberDuration = 0,
   reviewTimer: ReturnType<typeof setTimeout> | undefined;
 // The Pending requests sidebar still uses mutually exclusive checkboxes.
 let forAWhileOn = false;
+let popupTemporaryOnce = true;
 // decision-for-a-while-durations-v1 (FlowGate extension): the selected lease
 // duration; defaults to the user's last choice when the backend allows it.
 let forAWhileSeconds = DEFAULT_FOR_A_WHILE_SECONDS,
@@ -288,7 +289,7 @@ async function prepareRequestRule() {
   }
 }
 function resetRemember() {
-  rememberOn = false;
+  rememberOn = Boolean(promptID);
   forAWhileOn = false;
   forAWhileSeconds = defaultForAWhile(savedForAWhile, state ? forAWhileDurations(state.control) : [15]);
   rememberFields = { ...DEFAULT_REMEMBER };
@@ -378,7 +379,7 @@ function rememberBlockReason(e: ViewEvent | undefined, now: number): string {
   if (e.attempt || localSubmitted.has(state.control.generation + ':' + e.id)) return 'Already submitted.';
   if (!e.scope_previews[chosenScope])
     return chosenScope === 'persistent'
-      ? 'A permanent rule is not offered for this request; choose an expiry duration.'
+      ? promptID ? 'A permanent rule is not available for this request.' : 'A permanent rule is not offered for this request; choose an expiry duration.'
       : 'This expiry duration is not offered for this request.';
   if (reviewMessage) return 'Rule not available: ' + shortError(reviewMessage);
   if (reviewChecking || reviewFor !== reviewKey() || !decisionReviews.allow) return 'Checking rule…';
@@ -2387,8 +2388,16 @@ function renderRequests() {
         popupDuration.hidden = false;
       }
       forAWhileSeconds = defaultForAWhile(savedForAWhile, forAWhileDurations(state.control));
-      leaseDuration.value = String(forAWhileSeconds);
+      leaseDuration.value = promptID && popupTemporaryOnce ? 'once' : String(forAWhileSeconds);
       leaseDuration.onchange = () => {
+        if (promptID) {
+          popupTemporaryOnce = leaseDuration.value === 'once';
+          if (popupTemporaryOnce) {
+            cardNote = undefined;
+            updateDecisions();
+            return;
+          }
+        }
         const seconds = Number(leaseDuration.value);
         if (!forAWhileDurations(state.control).includes(seconds)) return;
         forAWhileSeconds = savedForAWhile = seconds;
@@ -2411,20 +2420,18 @@ function renderRequests() {
         };
       }
       const duration = $<HTMLSelectElement>('rememberDuration');
-      duration.value = promptID && !rememberOn ? 'once' : String(rememberDuration);
-      duration.onchange = () => {
-        if (promptID) {
-          rememberOn = duration.value !== 'once';
-          popupRuleEdited = true;
-        }
-        if (duration.value !== 'once') rememberDuration = Number(duration.value);
-        syncRememberScope();
-        invalidateReview(0);
-      };
+      if (duration) {
+        duration.value = String(rememberDuration);
+        duration.onchange = () => {
+          rememberDuration = Number(duration.value);
+          syncRememberScope();
+          invalidateReview(0);
+        };
+      }
       $('refreshDecision').onclick = () =>
         void (endedRuleMode(currentEvent()) ? prepareRequestRule() : prepareDecisions());
     }
-    if (!rememberMode()) {
+    if (!rememberMode() && !promptID) {
       // Legacy backend (no Remember fields): scope list and reviewed network scope.
       const scopes = element('select');
       scopes.id = 'scope';
@@ -2529,18 +2536,22 @@ function shortAttempt(a: Attempt, e?: ViewEvent) {
       ? `${verdict} · rule saved.`
       : `${verdict} once.`;
 }
-async function decideFromCard(id: string, action: 'allow' | 'block', directLease = false) {
+async function decideFromCard(id: string, action: 'allow' | 'block', temporaryAction = false) {
   syncRememberScope();
   const e = currentEvent();
   if (!e || e.id !== id || (Boolean(promptID) && (!promptLayoutReady || performance.now() < promptStableAt)))
     return;
+  if (promptID && !temporaryAction && (!rememberMode() || !rememberOn)) return;
+  const directLease = temporaryAction && !popupTemporaryOnce;
+  const scope = temporaryAction ? (directLease ? 'for-a-while' : 'once') : chosenScope;
+  if (temporaryAction && scope === 'once' && !actionable(e, scope)) return;
   const plan = promptPlan(e, action, {
     generation: state.control.generation,
     zoneRevision: state.control.networkZones?.revision || '',
     capabilities: state.control.capabilities,
     forAWhile: directLease || forAWhileOn,
     forAWhileSeconds,
-    remember: !directLease && rememberMode() && rememberOn,
+    remember: !temporaryAction && rememberMode() && rememberOn,
     fields: rememberFields,
     duration: rememberDuration,
     pairIds: localPairView(e, state.control.events, state.control.capabilities)?.pairIds,
@@ -2604,8 +2615,8 @@ async function decideFromCard(id: string, action: 'allow' | 'block', directLease
     }
     return;
   }
-  if (!actionable(e, directLease ? 'for-a-while' : chosenScope)) return;
-  const reviewRequired = !directLease && needsDecisionReview();
+  if (!actionable(e, scope)) return;
+  const reviewRequired = !temporaryAction && needsDecisionReview();
   const preview = decisionReviews[action];
   if (
     reviewRequired &&
@@ -2614,7 +2625,7 @@ async function decideFromCard(id: string, action: 'allow' | 'block', directLease
       Date.parse(preview.expires_at) <= (state.control.serverNow || Date.now()))
   )
     return;
-  const decision = directLease ? plan.decision : decisionFor(action, e, reviewRequired ? preview : undefined),
+  const decision = temporaryAction ? plan.decision : decisionFor(action, e, reviewRequired ? preview : undefined),
     key = state.control.generation + ':' + e.id;
   localSubmitted.add(key);
   cardNote = undefined;
@@ -2732,15 +2743,15 @@ function updateDecisions() {
     liveLeaseUnavailable = liveLeaseReason(e, state.control.capabilities),
     leaseDone = !!e && endedLeaseDone.has(e.id),
     unverifiable = e ? ruleUnverifiable.get(e.id) : undefined;
-  const futureRuleHint = 'Choose Rule duration to save a rule for future connections.';
+  const futureRuleHint = 'Use Allow always or Deny always to save a rule for future connections.';
   const leaseAvailable = leaseMode && !leaseDone && state.control.connected && canDecide(state.control);
   const futureRuleAvailable = ruleMode && !ruleDone && !rulePinned && !unverifiable &&
     state.control.connected && canManageRules(state.control);
   const unverifiableHint = promptID
-    ? IDENTITY_UNVERIFIABLE_TEXT.replace('Choose Remember', 'Choose Rule duration')
+    ? IDENTITY_UNVERIFIABLE_TEXT.replace('Choose Remember', 'Use Allow always or Deny always')
     : IDENTITY_UNVERIFIABLE_TEXT;
   const onceCopy = promptID && e?.state === 'awaiting-decision' && !ended && !e.attempt &&
-    chosenScope === 'once' && !remembering && !temporary ? compactUDPOnce(e) : undefined;
+    popupTemporaryOnce ? compactUDPOnce(e) : undefined;
   const onceNote = $('udpOnceNote');
   if (onceNote) {
     onceNote.textContent = onceCopy?.summary ?? '';
@@ -2773,12 +2784,10 @@ function updateDecisions() {
   for (const id of ['allow', 'block'] as const) {
     const b = $<HTMLButtonElement>(id);
     if (!b) continue;
-    const action = id === 'allow' ? 'Allow' : 'Deny';
-    if (promptID) {
-      const duration = rememberMode() ? rememberDuration : chosenScope === 'persistent' ? 0 : 3600;
-      b.textContent = chosenScope === 'once'
-        ? action + ' once'
-        : action + (duration ? ' · save ' + durationLabel(duration) : ' · save (no expiry)');
+    if (promptID && !remembering) {
+      b.disabled = true;
+      b.title = 'A permanent rule is not available for this request.';
+      continue;
     }
     const review = decisionReviews[id];
     if (ended && temporary) {
@@ -2819,13 +2828,13 @@ function updateDecisions() {
         (reviewFor !== reviewKey() ||
           !review ||
           Date.parse(review.expires_at) <= now));
-    b.title = onceCopy?.[id] ?? (needsDecisionReview()
+    b.title = needsDecisionReview()
       ? rememberBlockReason(e, now) || splitPreview(review?.scope_preview || '').preview || 'Review required'
       : temporary
         ? liveLeaseUnavailable || FOR_A_WHILE_TOOLTIP
         : rememberMode()
           ? (e?.scope_previews.once || 'Once: this connection attempt only') + ' · creates no rule'
-          : e?.scope_previews[chosenScope] || '');
+          : e?.scope_previews[chosenScope] || '';
   }
   const locked =
     pacing ||
@@ -2876,7 +2885,15 @@ function updateDecisions() {
   for (const id of ['allowForAWhile', 'blockForAWhile']) {
     const button = $<HTMLButtonElement>(id);
     if (!button) continue;
-    button.textContent = (id === 'allowForAWhile' ? 'Allow' : 'Deny') + ' process · ' + durationLabel(forAWhileSeconds);
+    const action = id === 'allowForAWhile' ? 'Allow' : 'Deny';
+    if (popupTemporaryOnce) {
+      button.textContent = action + ' once';
+      button.disabled = pacing || !actionable(e, 'once');
+      button.title = ended ? 'This request has ended.' :
+        onceCopy?.[id === 'allowForAWhile' ? 'allow' : 'block'] || (e?.scope_previews.once || 'Only this connection') + ' · creates no rule';
+      continue;
+    }
+    button.textContent = action + ' process · ' + durationLabel(forAWhileSeconds);
     button.disabled = pacing || !!leaseReason || (ended
       ? leaseDone || endedLeaseBusy.has(e!.id) || ruleBusy.has(e!.id) || !state.control.connected || !canDecide(state.control)
       : !actionable(e, 'for-a-while'));
@@ -2884,7 +2901,7 @@ function updateDecisions() {
       ? 'Applies to new connections from the running process only.'
       : FOR_A_WHILE_TOOLTIP);
   }
-  const showLease = (promptID ? !!$('allowForAWhile') : temporary) && (!ended || leaseMode) && !leaseDone;
+  const showLease = (promptID ? !popupTemporaryOnce : temporary) && (!ended || leaseMode) && !leaseDone;
   if ($('forAWhileNote')) {
     $('forAWhileNote').hidden = !showLease || Boolean(promptID && leaseReason);
     $('forAWhileNote').textContent = forAWhileNote(forAWhileSeconds);
@@ -2892,9 +2909,12 @@ function updateDecisions() {
   if ($('forAWhileDurationWrap')) {
     $('forAWhileDurationWrap').hidden = !promptID && !showLease;
     const duration = $<HTMLSelectElement>('forAWhileDuration');
-    duration.disabled = promptID ? $<HTMLButtonElement>('allowForAWhile').disabled
-      : pacing || endedLeaseBusy.has(e?.id ?? '') || (!ended && locked);
-    if (promptID) duration.value = String(forAWhileSeconds);
+    if (promptID) {
+      duration.disabled = pacing || (ended ? !leaseAvailable : locked);
+      duration.value = popupTemporaryOnce ? 'once' : String(forAWhileSeconds);
+      for (const option of duration.options)
+        option.disabled = option.value === 'once' ? ended || !e?.scope_previews.once : !!leaseReason;
+    } else duration.disabled = pacing || endedLeaseBusy.has(e?.id ?? '') || (!ended && locked);
     $('forAWhileExpiry').textContent = showLease && (!promptID || !leaseReason) ? expiryPreview(forAWhileSeconds, now) : '';
   }
   const panel = $('rememberPanel');
@@ -2918,11 +2938,11 @@ function updateDecisions() {
       input.parentElement!.classList.toggle('instance-ended', endedProcess);
     }
     const duration = $<HTMLSelectElement>('rememberDuration');
-    duration.disabled = ruleMode ? ruleDone || rulePinned : locked;
-    // Backend offers persistent only with rule storage; temporary only as "application".
-    for (const option of duration.options)
-      option.disabled = option.value === 'once' ? ended || !e?.scope_previews.once
-        : !ruleMode && !e?.scope_previews[rememberScope(Number(option.value))];
+    if (duration) {
+      duration.disabled = ruleMode ? ruleDone || rulePinned : locked;
+      for (const option of duration.options)
+        option.disabled = !ruleMode && !e?.scope_previews[rememberScope(Number(option.value))];
+    }
     const allowReview = ruleMode && e ? endedFlow.reviews.allow : undefined;
     $('rememberSummary').textContent = ruleMode
       ? ruleDone || unverifiable
@@ -3058,14 +3078,16 @@ function updateDecisions() {
     $('permissionTarget').textContent = ended && temporary && leaseMode
       ? `Ended request: For a while covers new ${e!.flow.direction} connections of process ${e!.request_rule?.pid ?? ''} only; this request is not delivered.`
       : ruleMode
-      ? 'Ended request: Allow/Deny with Remember saves a rule for future connections only.'
+      ? promptID ? 'Ended request: saved rules apply to future connections only.'
+        : 'Ended request: Allow/Deny with Remember saves a rule for future connections only.'
       : failure
         ? 'No rule saved · the original connection was not allowed.'
         : temporary
           ? liveLeaseUnavailable || `For a while: this connection and new connections. ${forAWhileNote(forAWhileSeconds)}`
           : rememberMode()
             ? remembering
-              ? 'Remember: create a rule for the checked properties'
+              ? promptID ? 'Always: save a rule for the checked properties with no expiry'
+                : 'Remember: create a rule for the checked properties'
               : 'Once: this connection attempt only · no rule'
             : needsDecisionReview() && reviewFor === reviewKey() && decisionReviews.allow
               ? `Application + peer/service · ${decisionZone === 'any' ? 'Any network' : zoneLabel(decisionZone)} · ${decisionReviews.allow.rule.expires.startsWith('0001-') ? 'persistent' : 'until ' + new Date(decisionReviews.allow.rule.expires).toLocaleTimeString()}`

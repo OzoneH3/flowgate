@@ -103,12 +103,12 @@ footer {
     'connection  connection'
     'status      status'
     'details     details'
-    'decisions   options'
     'network     network'
+    'remember    remember'
     'onceNote    onceNote'
     'leaseNote   leaseNote'
-    'remember    remember'
-    'reconcile   future';
+    'reconcile   future'
+    'decisions   options';
   overflow-wrap: anywhere;
 }
 #requestSummary, #fromToBox, #decisionDock, #decisionControls { display: contents; }
@@ -252,7 +252,8 @@ footer {
   background: var(--inset);
 }
 #rememberPanel legend { padding: 0 6px; font-weight: 600; }
-.remember-scope, .remember-duration, #refreshDecision { grid-column: 1 / -1; }
+.remember-scope, .remember-summary, .remember-duration, #refreshDecision { grid-column: 1 / -1; }
+.remember-summary:empty { display: none; }
 .remember-duration select { margin-left: 4px; }
 .unavailable, .instance-ended { color: var(--muted); }
 

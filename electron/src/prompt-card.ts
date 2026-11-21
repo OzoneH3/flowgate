@@ -328,16 +328,16 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
     ['allow', 'Allow'],
     ['block', 'Deny'],
   ] as const) {
-    const button = el('button', label, id, id);
+    const button = el('button', o.popup ? label + ' always' : label, id, id);
     button.type = 'button';
     actions.append(button);
   }
   if (!o.popup && o.rememberMode)
     options.append(checkbox('rememberToggle', 'Remember', 'remember-toggle', "Create rule and don't ask me again"));
-  if (o.popup && o.forAWhile) {
+  if (o.popup) {
     for (const [id, label, style] of [
-      ['allowForAWhile', 'Allow for a while', 'allow'],
-      ['blockForAWhile', 'Deny for a while', 'block'],
+      ['allowForAWhile', 'Allow once', 'allow'],
+      ['blockForAWhile', 'Deny once', 'block'],
     ] as const) {
       const button = el('button', label, style + ' while-action', id);
       button.type = 'button';
@@ -347,11 +347,13 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
   }
   if (!o.popup && o.forAWhile)
     options.append(checkbox('forAWhileToggle', 'For a while', 'option-toggle for-a-while-toggle', FOR_A_WHILE_TOOLTIP));
-  if (o.forAWhile && (o.popup || (o.forAWhileDurations?.length ?? 0) > 1)) {
+  if (o.popup || (o.forAWhile && (o.forAWhileDurations?.length ?? 0) > 1)) {
     const wrap = el('span', '', 'for-a-while-duration', 'forAWhileDurationWrap'),
       select = el('select', '', '', 'forAWhileDuration');
-    select.setAttribute('aria-label', 'For a while duration');
-    for (const d of o.forAWhileDurations!) select.append(new Option(durationLabel(d), String(d)));
+    select.setAttribute('aria-label', o.popup ? 'Temporary duration' : 'For a while duration');
+    if (o.popup) select.append(new Option('This connection only', 'once'));
+    if (o.forAWhile)
+      for (const d of o.forAWhileDurations!) select.append(new Option(durationLabel(d), String(d)));
     wrap.append(select, el('span', '', 'for-a-while-expiry', 'forAWhileExpiry'));
     wrap.hidden = true;
     options.append(wrap);
@@ -367,7 +369,7 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
   }
   if (o.rememberMode) {
     const panel = el('fieldset', '', 'remember-panel', 'rememberPanel');
-    panel.hidden = true;
+    panel.hidden = !o.popup;
     const legend = el('legend');
     if (o.popup) legend.textContent = 'Rule scope';
     else legend.textContent = 'Create rule for:';
@@ -393,20 +395,27 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
       } else label.append(input, ' ' + option.label);
       panel.append(label);
     }
-    const durationLabel = el('label', o.popup ? 'Rule duration: ' : 'Rule expires after: ', 'remember-duration'),
-      duration = el('select', '', '', 'rememberDuration');
-    if (o.popup) duration.append(new Option('This connection only', 'once'));
-    for (const d of REMEMBER_DURATIONS) duration.append(new Option(d.label, String(d.seconds)));
-    duration.title = 'The saved rule stops matching at expiry.';
-    durationLabel.append(duration);
+    if (!o.popup) {
+      const label = el('label', 'Rule expires after: ', 'remember-duration'),
+        duration = el('select', '', '', 'rememberDuration');
+      for (const d of REMEMBER_DURATIONS) duration.append(new Option(d.label, String(d.seconds)));
+      duration.title = 'The saved rule stops matching at expiry.';
+      label.append(duration);
+      panel.append(label);
+    }
     const summary = el('p', '', 'remember-summary', 'rememberSummary');
     summary.setAttribute('role', 'status');
     const refresh = el('button', 'Refresh review', 'link-button', 'refreshDecision');
     refresh.type = 'button';
     refresh.hidden = true;
-    panel.append(durationLabel, refresh);
-    statusSection.box.append(summary);
-    dock.append(panel);
+    panel.append(refresh);
+    if (o.popup) {
+      panel.append(summary);
+      dock.prepend(panel);
+    } else {
+      statusSection.box.append(summary);
+      dock.append(panel);
+    }
   }
   const note = el('p', '', 'decision-note', 'decisionNote'),
     review = el('p', '', 'decision-review', 'decisionReview'),

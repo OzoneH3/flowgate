@@ -158,10 +158,10 @@ function reply(q) {
             : '0001-01-01T00:00:00Z',
           filter: {
             ...e.remembered_filter,
-            protocol: '*',
-            remote_address: '*',
-            remote_port: 0,
-            local_port: 0,
+            protocol: q.remember?.protocol ? e.flow.protocol : '*',
+            remote_address: q.remember?.address ? e.remembered_filter.remote_address : '*',
+            remote_port: q.remember?.port && e.flow.direction === 'outgoing' ? e.remembered_filter.remote_port : 0,
+            local_port: q.remember?.port && e.flow.direction === 'incoming' ? 50123 : 0,
           },
         },
       },
@@ -442,8 +442,8 @@ try {
     }
   }
   const allow = prompt.locator('#allow');
-  const ruleDuration = prompt.locator('#rememberDuration');
-  const leaseDuration = prompt.getByRole('combobox', { name: 'For a while duration' });
+  const ruleField = prompt.locator('#rememberPanel input[data-field=address]');
+  const leaseDuration = prompt.getByRole('combobox', { name: 'Temporary duration' });
   const allowTemporary = prompt.locator('#allowForAWhile');
   const denyTemporary = prompt.locator('#blockForAWhile');
   const native = await app.browserWindow(prompt);
@@ -454,18 +454,18 @@ try {
   });
   assert(await heading.isVisible());
   assert(await allow.isEnabled());
-  assert(await prompt.getByRole('button', { name: /Deny once/ }).isEnabled());
-  assert.equal(await allow.innerText(), 'Allow once');
+  assert(await prompt.getByRole('button', { name: /Deny always/ }).isEnabled());
+  assert.equal(await allow.innerText(), 'Allow always');
   assert.equal(await prompt.locator('#promptPending').innerText(), 'Pending requests (2)');
-  assert.match(await allow.getAttribute('title'), /Only this held connection/i);
-  await allow.hover();
+  assert.match(await allowTemporary.getAttribute('title'), /Only this held connection/i);
+  await allowTemporary.hover();
   const permissionTooltip = prompt.getByRole('tooltip');
   await permissionTooltip.waitFor();
   assert.match(await permissionTooltip.innerText(), /Only this held connection/i);
   await prompt.mouse.move(3, 3);
   await permissionTooltip.waitFor({ state: 'hidden' });
   assert.equal(await prompt.locator('#rememberToggle, #forAWhileToggle').count(), 0);
-  assert.equal(await ruleDuration.inputValue(), 'once');
+  assert.equal(await leaseDuration.inputValue(), 'once');
   assert(await prompt.locator('#rememberPanel').isVisible());
   assert((await bounds('#allowForAWhile')).y >= (await bounds('#allow')).y + (await bounds('#allow')).height);
   assert((await bounds('#blockForAWhile')).y >= (await bounds('#block')).y + (await bounds('#block')).height);
@@ -518,11 +518,11 @@ try {
   await prompt.keyboard.press('Enter');
   assert.equal(await active(), 'detailsBack');
   assert(await prompt.getByRole('region', { name: 'Request details' }).isVisible());
-  assert.equal(await prompt.locator('#scopePreview').textContent(), once);
+  assert.match(await prompt.locator('#scopePreview').textContent(), /This application/);
   await prompt.keyboard.press('Enter');
   assert.equal(await active(), 'detailsToggle');
 
-  await ruleDuration.selectOption('0');
+  await ruleField.check();
   await prompt.waitForFunction(() => document.querySelector('#allow')?.disabled === false);
   await prompt.waitForFunction(() => innerHeight > 590);
   assert.match(await prompt.locator('#scopePreview').textContent(), /This application/);
@@ -565,15 +565,15 @@ try {
     assert(status.y < (await bounds('#connectionFields')).y);
     assert((await bounds('#requestPeer')).y < (await bounds('#requestIdentity')).y);
     assert(await originalAllow.evaluate((node) => node === document.querySelector('#allow')));
-    assert.equal(await ruleDuration.inputValue(), '0');
+    assert(await ruleField.isChecked());
     await shot('alternate');
   } finally {
     await native.evaluate((w, key) => w.webContents.removeInsertedCSS(key), key);
     await fs.unlink(alternate);
   }
-  await ruleDuration.selectOption('once');
+  await leaseDuration.selectOption('once');
   await prompt.waitForFunction(() => !document.querySelector('#allow').disabled);
-  await tabTo('allow');
+  await tabTo('allowForAWhile');
   assert.equal(decisions.length, 0);
   await prompt.keyboard.press('Enter');
   assert.equal(await requestWindow(second.id), prompt);
@@ -583,14 +583,14 @@ try {
     [{ action: 'allow', scope: 'once', id: first.id }],
   );
   assert.equal(await prompt.locator('#promptPending').innerText(), 'Pending requests (1)');
-  assert.equal(await ruleDuration.inputValue(), 'once');
+  assert.equal(await leaseDuration.inputValue(), 'once');
   assert.match(await prompt.locator('#connectionHeader').innerText(), /Incoming/);
   assert.equal(await prompt.locator('#requestPeer .nl-label').textContent(), 'From');
   const name = second.attribution.application.name;
   assert(await prompt.getByRole('heading', { level: 1, name, exact: true }).isVisible());
 
   // Chromium viewport emulation keeps the desktop work area unchanged.
-  await ruleDuration.selectOption('once');
+  await leaseDuration.selectOption('once');
   await prompt.setViewportSize({ width: 360, height: 400 });
   await prompt.waitForFunction(() => innerWidth === 360 && innerHeight === 400);
   assert(
@@ -605,9 +605,9 @@ try {
   assert(await prompt.locator('#promptBody').evaluate((el) => el.scrollWidth <= el.clientWidth));
   await visibleActions();
   await shot('long-compact');
-  await ruleDuration.selectOption('0');
+  await ruleField.check();
   await prompt.waitForFunction(() => !document.querySelector('#allow').disabled);
-  await prompt.locator('#rememberDuration').scrollIntoViewIfNeeded();
+  await ruleField.scrollIntoViewIfNeeded();
   assert(await prompt.locator('#promptBody').evaluate((el) => el.scrollWidth <= el.clientWidth));
   assert.equal(decisions.length, 1);
   const third = request('third-client', 'Another queued application', 'outgoing', timeoutSeconds);
@@ -628,7 +628,8 @@ try {
   assert(nextCountdown > 0 && nextCountdown <= 45);
   await denyTemporary.waitFor();
   await prompt.waitForFunction(() => !document.querySelector('#blockForAWhile').disabled);
-  assert.equal(await leaseDuration.inputValue(), '60');
+  assert.equal(await leaseDuration.inputValue(), 'once');
+  await leaseDuration.selectOption('60');
   await denyTemporary.click();
   for (let i = 0; i < 40 && decisions.length < 3; i++)
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -727,23 +728,23 @@ async function verifyPolish(app, requestWindow) {
     assert.equal(dims.scale, 1.5);
     assert.deepEqual(dims.screen, [800, 600]);
   } else assert.equal(dims.scale, 1);
-  const duration = prompt.locator('#rememberDuration');
+  const duration = prompt.getByLabel('Temporary duration');
   assert.equal(await duration.inputValue(), 'once');
   const label = (id) => prompt.locator('#' + id).innerText();
-  assert.equal(await label('allow'), 'Allow once');
-  assert.equal(await label('block'), 'Deny once');
-  await duration.selectOption('0');
-  assert.equal(await label('allow'), 'Allow · save (no expiry)');
+  assert.equal(await label('allow'), 'Allow always');
+  assert.equal(await label('block'), 'Deny always');
+  assert.equal(await label('allowForAWhile'), 'Allow once');
+  assert.equal(await label('blockForAWhile'), 'Deny once');
 
   async function verifyDurations(peer) {
-    await duration.selectOption('300');
-    await prompt.locator('#forAWhileDuration').selectOption('60');
+    await prompt.locator('#rememberPanel input[data-field=address]').check();
+    await duration.selectOption('60');
     await prompt.waitForFunction(() => document.querySelector('#allow')?.disabled === false);
     await prompt.locator('#promptBody').evaluate((body) => { body.scrollTop = 0; });
     assert.equal(await prompt.locator('#promptPeerAddress').innerText(), peer);
     assert.match(await label('requestStatusLine'), /^Respond in \d+ s/);
     for (const [id, text] of [
-      ['allow', 'Allow · save 5 min'], ['block', 'Deny · save 5 min'],
+      ['allow', 'Allow always'], ['block', 'Deny always'],
       ['allowForAWhile', 'Allow process · 1 min'], ['blockForAWhile', 'Deny process · 1 min'],
     ]) assert.equal(await label(id), text);
     const visible = await prompt.evaluate(() => Object.fromEntries([
@@ -801,13 +802,13 @@ async function verifyPolish(app, requestWindow) {
   second.revalidation = { code: 'connection_ended', reason: 'Original connection ended', checked_at: new Date().toISOString() };
   const status = prompt.locator('#requestStatusLine');
   await prompt.waitForFunction(() => document.querySelector('#requestStatusLine')?.textContent.includes('running process'));
-  assert.match(await status.innerText(), /ended.*Rule duration.*future connections/);
+  assert.match(await status.innerText(), /ended.*Allow always.*future connections/);
   assert.doesNotMatch(await status.innerText(), /Remember/);
   await captureCard('expired-running.png');
   second.request_rule.process_state = 'ended';
   second.request_rule.process_lease_available = false;
   await prompt.waitForFunction(() => document.getElementById('allowForAWhile')?.disabled);
-  assert.match(await status.innerText(), /ended.*Rule duration.*future connections/);
+  assert.match(await status.innerText(), /ended.*Allow always.*future connections/);
   assert.doesNotMatch(await status.innerText(), /running process|Remember/);
   await captureCard('expired-process-ended.png');
   assert.match(await main.locator('#decisionNote').innerText(), /Check Remember to save a rule/);
