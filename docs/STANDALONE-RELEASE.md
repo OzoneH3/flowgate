@@ -258,8 +258,11 @@ Uninstall stops the managed daemon and desktop, verifies cleanup, and removes ma
 The public-clone audit at `7511ac1764c8a922c1ad259747338973adf197f2` ran
 the read-only preview, built RC7 and RC8, passed the 24 standalone checks for
 each, and verified both receipts, the archive contents and packaged daemon
-identity. Fresh installation, upgrade and rollback **still require guest
-verification for these exact artifacts**.
+identity. The exact RC8 archive was subsequently installed for the headless
+and desktop scenarios in the [compatibility record](COMPATIBILITY.md#rc8-and-subsequent-checks).
+The documented Debian upgrade and rollback used a separate build. Guest
+lifecycle coverage for the exact audited RC7 and RC8 archives is still
+incomplete.
 
 | Version | Audited archive SHA-256 |
 | --- | --- |

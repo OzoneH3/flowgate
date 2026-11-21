@@ -7,8 +7,8 @@
 FlowGate is a Linux application firewall and network monitor inspired by
 [NetLimiter](https://netlimiter.com/).
 
-[Try the desktop](#try-the-desktop) · [Install FlowGate](#install-flowgate) ·
-[Documentation](#documentation)
+[Features](#features) · [Tested systems](#supported-systems-and-limitations) ·
+[Try the desktop](#try-the-desktop) · [Build, install or update](#install-flowgate)
 
 ## Features
 
@@ -20,41 +20,49 @@ FlowGate is a Linux application firewall and network monitor inspired by
 
 ## Supported systems and limitations
 
-**Standalone target: x86-64 Linux with systemd.** A popup pass means the receiver got the held TCP payload after **Allow Once**.
+The standalone package targets **x86-64 Linux with systemd**. These are
+scenario results from specific builds. A desktop **Allow once** pass means
+the receiver got exactly one held TCP payload after the popup click.
 
 | Tested system | Recorded result |
 | --- | --- |
-| Debian 13.7 (headless) | Firewall rules and UDP checks passed. |
-| Ubuntu 26.04.1 GNOME (Wayland) | Headless rules passed. Popup passed. |
-| Fedora 45 GNOME (Wayland) | Rules passed. Popup passed. Stock firewalld blocked readiness on a later build. |
-| Kubuntu 26.04.1 Plasma (Wayland) | Earlier VM popup passed. |
-| CachyOS KDE Plasma (Wayland VM) | The maintainer reports a working installation. An earlier VM verified popup delivery with stock UFW. The new RC8 package awaits verification. |
-| Mint 22.3 Cinnamon and Xubuntu 26.04.1 Xfce (X11) | Popup passed on both. |
-| Pop!_OS 24.04 COSMIC (Wayland) | Popup passed once. Repeats inconclusive. |
-| CachyOS Hyprland (Wayland) | Popup passed with UFW off. Approval unverified with stock UFW. |
-| openSUSE Tumbleweed Plasma (Wayland) | Stock firewalld readiness passed. Popup delivery unverified. |
+| Debian 13.7 (headless) | RC8 passed 12 firewall rule cases and the separate UDP fast-path check. A later build passed upgrade and rollback with stock `/run` mounted `noexec`. |
+| Linux Mint 22.3 Cinnamon (X11) | RC8 **Allow once** and **Deny once** passed. |
+| Kubuntu 26.04.1 KDE Plasma (Wayland) | RC8 **Allow once** passed. |
+| CachyOS KDE Plasma (Wayland) | RC8 **Allow once** and **Deny once** passed with stock UFW. |
+| Xubuntu 26.04.1 Xfce (X11) | RC8 **Allow once** passed. |
+| openSUSE Tumbleweed KDE Plasma (Wayland) | RC8 **Allow once** passed on retry with stock firewalld. |
+| Pop!_OS 24.04 COSMIC (Wayland) | **Allow once** passed on the placement-fix build `a96ab84d` at stock resolution and scaling. |
+| Ubuntu 26.04.1 GNOME (Wayland) | Earlier headless rules and UDP checks passed. The RC8 desktop retry stopped before GNOME Shell was available. |
+| Fedora 45 GNOME (Wayland) | Earlier builds passed headless rules, UDP, and desktop delivery. The RC8 desktop retry stopped before a Wayland socket was available. A separate run hit a stock firewalld readiness blocker. |
+| CachyOS Hyprland (Wayland) | An earlier desktop delivery check passed with UFW disabled. The stock RC8 check stopped during popup navigation. |
 
-A later sweep launched all nine desktops without verifying delivery. [Full compatibility matrix and tested builds](docs/COMPATIBILITY.md)
+[Tested builds, run IDs and earlier results](docs/COMPATIBILITY.md)
 
-App rules require [verified socket ownership](docs/ATTRIBUTION.md). VPN compatibility depends on the setup. WireGuard and XFRM interfaces [block activation](docs/SEMANTICS.md).
-Download limiting covers [eligible established TCP connections](docs/DOWNLOAD-LIMITER.txt).
+App rules require [verified socket ownership](docs/ATTRIBUTION.md).
+Protection readiness depends on the host firewall and VPN setup. WireGuard
+and XFRM interfaces are [unsupported for protection](docs/SEMANTICS.md).
+Download limiting is experimental and covers
+[eligible established TCP connections](docs/DOWNLOAD-LIMITER.txt).
 
 ![FlowGate Activity view with download and upload totals in the traffic chart header, the app table below, and the selected app’s Overview at right](docs/images/flowgate-main-window.png)
 
 *The Activity view shows simulated traffic. On wide windows,
 the inspector sits beside the traffic chart and app table.*
 
-![FlowGate Ask prompt for an outgoing TCP connection from Atlas Sync, with endpoint details, rule scope, and a row of For a while buttons beneath Allow and Deny](docs/images/flowgate-ask-remember.png)
+![FlowGate Ask prompt for an outgoing TCP connection from the test executable native, showing endpoints, Rule scope, and the four Always and Once buttons](docs/images/flowgate-ask-popup.png)
 
-*An outgoing Ask prompt with a five-minute rule duration. The For a while
-buttons use the one-minute duration below Next request.*
+*An outgoing TCP request captured on a default-scale desktop. **Allow always**
+and **Deny always** save a rule using the visible scope. With **This connection
+only** selected, **Allow once** and **Deny once** answer the current request.*
 
 ## Try the desktop
 
-As your desktop user, clone the repository and run the preview. The first run
-downloads the locked Electron dependencies and Go modules, builds the app, and
-opens live Activity with a private read-only observer. Press Ctrl+C in the
-launch terminal to stop the preview. [Desktop prerequisites](electron/README.md)
+As your desktop user, clone the repository and run the read-only preview. The
+first run downloads the locked Electron dependencies and Go modules, builds
+the app, and opens live Activity with a private observer. The preview leaves
+system installation and protection settings alone. Press Ctrl+C in the launch
+terminal to stop it. [Desktop prerequisites](electron/README.md)
 
 ```sh
 git clone https://github.com/OzoneH3/flowgate.git
@@ -64,25 +72,27 @@ cd flowgate
 
 ## Install FlowGate
 
-From a clean checkout of the revision you want to install, run the following as the
-intended desktop administrator. First check the
-[build and host requirements](docs/STANDALONE-RELEASE.md#requirements).
+Use a clean checkout of the desired revision and run Make as the intended
+desktop administrator. Check the [build and host requirements](docs/STANDALONE-RELEASE.md#requirements),
+including Electron sandbox support.
 
-```sh
-make update
-```
+| Command | What it does |
+| --- | --- |
+| `make build` | Builds the standalone daemon, Electron desktop and native helpers under `build/`. |
+| `make check` | Runs the standalone release and update-freshness checks. |
+| `make package` | Builds and checks the release, then writes the archive, offline installer and two SHA-256 receipts under `build/dist/`. The default version is `0.1.0-rc.7`. |
+| `make preflight BUNDLE="$bundle" SHA256="$digest"` | Stages and verifies the archive with sudo and checks host readiness for installation. |
+| `make install BUNDLE="$bundle" SHA256="$digest"` | Verifies and installs the specified archive with sudo. |
+| `make update` | Builds, packages and verifies this checkout, runs preflight and install with sudo, then reloads the installed desktop in a graphical session. |
 
-This command builds the checked-out commit, verifies the archive, runs preflight
-and installs with sudo. In a graphical session it opens the matching installed
-desktop. To upgrade from public `master` later, run `git pull --ff-only`,
-review the new revision, then run `make update` again. To open the installed app at any time, use
-the application menu or run `flowgate-ui`.
+For a source install or upgrade, use `make update`. To upgrade from public
+`master`, run `git pull --ff-only`, review the revision, then run
+`make update`. Open the installed app from the application menu or with
+`flowgate-ui`.
 
-Run `make help` for individual build, package, install and recovery commands.
-The [standalone guide](docs/STANDALONE-RELEASE.md) covers staged installation,
-checksum verification for a candidate downloaded from [GitHub Releases](https://github.com/OzoneH3/flowgate/releases),
-and rollback. The [verification record](docs/STANDALONE-RELEASE.md#verification-record)
-identifies the audited builds and the guest checks still pending.
+The [standalone release guide](docs/STANDALONE-RELEASE.md) shows how to set
+`bundle` and `digest` for a staged install, verify a downloaded release,
+and roll back or uninstall.
 
 A fresh install starts in **Monitoring**. When you're ready to enable
 protection, review essential networking first. Then choose **Incoming only**

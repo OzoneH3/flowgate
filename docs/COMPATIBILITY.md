@@ -2,11 +2,42 @@
 
 The standalone package targets x86-64 Linux with systemd. The tables cover the
 ten distribution and desktop profiles exercised by the local FlowGate VM lab
-on 20–21 November 2026. Each result applies to the installed build and guest
-setup shown. Fresh installation, upgrade and rollback still need guest checks
-for the exact artifacts from the public-clone audit. [Standalone verification record](STANDALONE-RELEASE.md#verification-record)
+on 20–21 November 2026. Each result applies to the installed build, guest
+setup and scenario shown. [Standalone verification record](STANDALONE-RELEASE.md#verification-record)
 
-## Headless firewall checks
+## RC8 and subsequent checks
+
+The audited RC8 package contains FlowGate
+`7511ac1764c8a922c1ad259747338973adf197f2`. The desktop **Allow once** checks
+required one click on the original live request, exactly one receiver delivery,
+a linked user decision, unchanged saved rules and a competing request still
+pending at zero deliveries. The **Deny once** checks required the linked
+denial and zero deliveries for the live request.
+
+| Guest | Scenario and result | Run |
+| --- | --- | --- |
+| Debian 13.7, headless | Twelve rule cases passed, plus a separate UDP fast-path pass. | `c16cf263da6d`, `2b04e50d2c34` |
+| Linux Mint 22.3 Cinnamon, X11 | Allow once and Deny once passed. | `e745ae884af4`, `169aff123f0c` |
+| Kubuntu 26.04.1 KDE Plasma, Wayland | Allow once passed. | `de060586f8e3` |
+| CachyOS KDE Plasma, Wayland | Allow once and Deny once passed with stock UFW. | `0f10f2b56394`, `73c8718f07dd` |
+| Xubuntu 26.04.1 Xfce, X11 | Allow once passed. | `554eabd8f2e8` |
+| openSUSE Tumbleweed KDE Plasma, Wayland | Allow once passed with stock firewalld after a verifier retry. | `a5b3c637bd04` |
+| Ubuntu 26.04.1 GNOME, Wayland | Stopped at desktop launch while waiting for GNOME Shell. | `db0932188a72` |
+| Fedora 45 GNOME, Wayland | Stopped at desktop launch without a Wayland socket. | `1dc527678a53` |
+| CachyOS Hyprland, Wayland | Launched, then stopped at popup navigation during first-login setup. | `4903f27a2302` |
+| Pop!_OS 24.04 COSMIC, Wayland | The dock covered the popup footer at stock 1280×800 and default scaling. | `6751c9237ac6` |
+
+Pop!_OS run `282332ea3741` passed **Allow once** at the same display settings
+on placement-fix build `a96ab84d54b31eb43ef03604c2de62770cc863f1`. The
+runner advanced past the resolver card using **Next request**.
+
+Debian 13.7 run `c268f1c6c733` passed the guarded upgrade from
+`13e3029ac2e4d2695b851cfb09710d9ab4bb8bf7` to
+`1b336f7a9664fb5dcaaa11994f6eaf4fa6ea72f2` on stock `/run` mounted
+`noexec`. It also verified rollback to monitoring with the saved rule
+preserved and the predecessor's UDP collector limitation reported.
+
+## Earlier headless firewall checks
 
 The same runner (`75af5ee36a464b60a80669c9f15598f3b52eb02d`) tested FlowGate
 `13e3029ac2e4d2695b851cfb09710d9ab4bb8bf7` on three guests. Each passed the
@@ -26,7 +57,7 @@ An earlier Ubuntu 26.04.1 **cloud** image had a different package set. On
 `/usr/bin/runuser` (`801393f41af0`). Four headless cases passed after adding
 desktop libraries and a guest-only symlink (`a94031a05254`).
 
-## Desktop decisions by guest
+## Earlier desktop decisions by guest
 
 A **delivery** here means the receiving endpoint counted zero labelled TCP
 payloads while the request was held, then one after a desktop Allow Once.
@@ -44,9 +75,9 @@ shows how far a subsequent build got on every desktop.
 | Xubuntu 26.04.1 | Xfce, X11 | `24f9b61b006801f15ae089c9bad8b6e6bdb74e84` | `196644b9317c` verified popup delivery. The competitor stayed pending at zero. |
 | Pop!_OS 24.04 LTS | COSMIC, Wayland | `24f9b61b006801f15ae089c9bad8b6e6bdb74e84` | `39aa2bd631ab` verified popup delivery with the competitor pending at zero. Repeats `fe2cc1982341` and `319e8087c6b9` stopped before approval while selecting the request. |
 | CachyOS | Hyprland 0.57.2, Wayland | `13e3029ac2e4d2695b851cfb09710d9ab4bb8bf7` | `85f1c8665c43` launched the UI but stock UFW blocked readiness. With UFW disabled in the guest, `01289275e189` verified delivery after navigating to the prompt and using the keyboard. The competitor stayed pending at zero. |
-| openSUSE Tumbleweed | KDE Plasma, Wayland | `e7a4c3325dbd53c2ee0921321fdceb7c95301ea5` | `a08c13a2255b` activated both directions with stock firewalld. The selected prompt was visible and the receiver stayed at zero. Duplicate OCR matches stopped the runner before the click. Delivery remains unverified. |
+| openSUSE Tumbleweed | KDE Plasma, Wayland | `e7a4c3325dbd53c2ee0921321fdceb7c95301ea5` | `a08c13a2255b` activated both directions with stock firewalld. The selected prompt was visible and the receiver stayed at zero. Duplicate OCR matches stopped the runner before the click. |
 
-## CachyOS KDE and the new RC8 matrix
+## Earlier CachyOS KDE result and RC8 verifier audit
 
 The maintainer reports using FlowGate successfully on CachyOS with KDE Plasma.
 The stock-UFW Wayland VM run `25821f6e7065` independently recorded one
@@ -55,12 +86,12 @@ saved rules. Its original request `f673b45c865f886ba9cc40bd38cbc905` had a
 linked user/once/allow decision. The original competitor stayed pending at
 zero. That run used FlowGate `51cf10f14988478392645c10f7c321077f479b64`
 and lab `1bfca9c1120d5a9e395658dc5b6df014c5b59d44`. Its trace lacks an
-immediate pre-click socket-status sample. The **new RC8 Plasma result is
-open** pending a receiver-confirmed run of that package.
+immediate pre-click socket-status sample. The later RC8 Plasma runs are
+listed above.
 
 ### What counts as a desktop pass
 
-The stock matrix pins FlowGate `7511ac1764c8a922c1ad259747338973adf197f2`
+The initial stock-matrix audit used FlowGate `7511ac1764c8a922c1ad259747338973adf197f2`
 and lab verifier `35563f215ecf4097c5590c7ebcb8ef057e1b2b19`.
 Both artifact receipts and the archive's embedded source matched the matrix
 handoff. [RC8 archive and installer digests](STANDALONE-RELEASE.md#verification-record)
