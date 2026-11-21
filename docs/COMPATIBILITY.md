@@ -46,6 +46,52 @@ shows how far a subsequent build got on every desktop.
 | CachyOS | Hyprland 0.57.2, Wayland | `13e3029ac2e4d2695b851cfb09710d9ab4bb8bf7` | `85f1c8665c43` launched the UI but stock UFW blocked readiness. With UFW disabled in the guest, `01289275e189` verified delivery after navigating to the prompt and using the keyboard. The competitor stayed pending at zero. |
 | openSUSE Tumbleweed | KDE Plasma, Wayland | `e7a4c3325dbd53c2ee0921321fdceb7c95301ea5` | `a08c13a2255b` activated both directions with stock firewalld. The selected prompt was visible and the receiver stayed at zero. Duplicate OCR matches stopped the runner before the click. Delivery remains unverified. |
 
+## CachyOS KDE and the new RC8 matrix
+
+The maintainer reports using FlowGate successfully on CachyOS with KDE Plasma.
+The stock-UFW Wayland VM run `25821f6e7065` independently recorded one
+Allow Once click, receiver counts of zero before and one after, and unchanged
+saved rules. Its original request `f673b45c865f886ba9cc40bd38cbc905` had a
+linked user/once/allow decision. The original competitor stayed pending at
+zero. That run used FlowGate `51cf10f14988478392645c10f7c321077f479b64`
+and lab `1bfca9c1120d5a9e395658dc5b6df014c5b59d44`. Its trace lacks an
+immediate pre-click socket-status sample. The **new RC8 Plasma result is
+open** pending a receiver-confirmed run of that package.
+
+### What counts as a desktop pass
+
+The stock matrix pins FlowGate `7511ac1764c8a922c1ad259747338973adf197f2`
+and lab verifier `35563f215ecf4097c5590c7ebcb8ef057e1b2b19`.
+Both artifact receipts and the archive's embedded source matched the matrix
+handoff. [RC8 archive and installer digests](STANDALONE-RELEASE.md#verification-record)
+
+1. Match the displayed application, PID, outbound TCP direction and both socket endpoints to the target request. Identify one enabled **Allow once** on that card. **Allow always** saves a rule. Selecting a duration changes the lower button from **Allow once** to a timed process allowance.
+2. Immediately before the decision click, require both original request IDs pending, the original dial in flight with its original inode and endpoints, and zero labelled target payloads at the receiver.
+3. After one decision click, require exactly one labelled target payload and a final **user / once / allow** decision linked through the original pending record. Require identical saved rules and the same competitor still pending with zero deliveries.
+
+An offline replay exercised the committed selector and its decision-click
+path on saved frames with input intercepted. The replay used native fixture frames and explicitly modified controls, with
+simulated pending requests. Guest results require the installed package and
+an independent receiver.
+
+| Replay | Observed decision input |
+| --- | --- |
+| Fresh card with **Allow always** and **Allow once**, including a composite with a third, timed Allow | Selected the lower **Allow once**. The genuine timed-preset frame produced no decision click. |
+| Wrong application, PID, remote address or port | No decision click. |
+| Two visible **Allow once** controls in a modified frame | No decision click. |
+| Same application, PID and peer, different original dial | **Wrong-card click.** The expected local port was 50202. The saved card showed 50218. The selector accepts the app name anywhere in the card and checks only the remote endpoint. The original request and receiver checks still guard the final result. Match the displayed local endpoint before clicking. |
+| Alternate capture of the visible Once control | **Missed control.** The runner could not locate the card boundary. Separately, changing only the OCR token from `once` to `once.` on a passing frame also suppressed the click. |
+
+A separate offline replay used the prior Plasma trace and varied individual
+observations. The verifier rejected a dead original dial, an early delivery,
+zero or two deliveries at its checked sample, a wrong decision link, source
+or scope, changed rules, a replaced competitor, and competitor delivery.
+**One false pass was reproduced:** after validating a count of one, the
+runner reads the receiver again for `count_after` without checking that
+value. With a duplicate arriving between reads, it returned success and
+recorded two. Require the last receiver observation to satisfy the count
+before accepting a matrix result.
+
 ## Nine-desktop check on one build
 
 All nine guests launched the installed desktop on FlowGate

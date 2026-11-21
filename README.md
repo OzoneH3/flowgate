@@ -27,7 +27,8 @@ FlowGate is a Linux application firewall and network monitor inspired by
 | Debian 13.7 (headless) | Firewall rules and UDP checks passed. |
 | Ubuntu 26.04.1 GNOME (Wayland) | Headless rules passed. Popup passed. |
 | Fedora 45 GNOME (Wayland) | Rules passed. Popup passed. Stock firewalld blocked readiness on a later build. |
-| Kubuntu 26.04.1 and CachyOS, both Plasma (Wayland) | Popup passed on both. |
+| Kubuntu 26.04.1 Plasma (Wayland) | Earlier VM popup passed. |
+| CachyOS KDE Plasma (Wayland VM) | The maintainer reports a working installation. An earlier VM verified popup delivery with stock UFW. The new RC8 package awaits verification. |
 | Mint 22.3 Cinnamon and Xubuntu 26.04.1 Xfce (X11) | Popup passed on both. |
 | Pop!_OS 24.04 COSMIC (Wayland) | Popup passed once. Repeats inconclusive. |
 | CachyOS Hyprland (Wayland) | Popup passed with UFW off. Approval unverified with stock UFW. |
