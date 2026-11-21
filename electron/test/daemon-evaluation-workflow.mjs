@@ -132,7 +132,7 @@ try {
     () =>
       page
         .locator('#controlMenu > summary')
-        .evaluate((e) => /Firewall · [0-5]:/.test(e.textContent)),
+        .evaluate((e) => /FW: [0-5]:/.test(e.textContent)),
     'visible active countdown',
   );
   await page.screenshot({ path: path.join(run, 'active-normal.png') });

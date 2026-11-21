@@ -78,9 +78,9 @@ test('badge is display-only and sits beside, not inside, the protection entry', 
   const src = fs.readFileSync(path.join(__dirname, '../src/renderer.ts'), 'utf8');
   const block = src.slice(src.indexOf("const health = document.getElementById('runtimeHealth');"), src.indexOf('function setupMainMenus'));
   assert.ok(block.length > 0 && !/disabled|onclick|protectionStart|canStart/.test(block));
-  assert.match(src, /status\.after\(health\);/);
+  assert.match(src, /monitoring\.after\(health\);/);
   const css = fs.readFileSync(path.join(__dirname, '../src/style.css'), 'utf8');
-  // Keeps its "Degraded" prefix readable; the protection entry never shrinks for it, other items yield.
-  assert.match(css, /\.toolbar \.runtime-health \{ flex: 0 1 auto; min-width: 7em;/);
-  assert.match(css, /\.toolbar:has\(> \.runtime-health:not\(\[hidden\]\)\) \.firewall-state \{ flex-shrink: 0; \}/);
+  // Advisories yield space to the top-level status menus when the toolbar narrows.
+  assert.match(css, /\.toolbar \.runtime-health \{ flex: 0 1 auto; min-width: 0;/);
+  assert.match(css, /\.desktop-menu \{ position: relative; flex-shrink: 0; \}/);
 });

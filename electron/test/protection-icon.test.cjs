@@ -25,7 +25,7 @@ test('firewall badge uses current enforcement and explains missing status', () =
     enforcement: { state: 'active', profile: 'both' },
     evaluation: { state: 'stopped' },
   };
-  assert.equal(firewallPresentation(control).menu, 'Firewall · Both');
+  assert.equal(firewallPresentation(control).status, 'Both');
   assert.equal(firewallPresentation({ ...control, connected: false }).status, 'Offline');
   assert.match(firewallPresentation({ connected: true }).detail, /no enforcement status was reported/);
 });

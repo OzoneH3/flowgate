@@ -24,6 +24,7 @@ fs.writeFileSync(path.join(run, 'matched-manifest.json'), JSON.stringify({
 }));
 
 let udp = 'disabled';
+let partial = false;
 let activityAvailable = true;
 const operations = [];
 const serve = (readonly) => net.createServer((socket) => socket.once('data', (data) => {
@@ -31,6 +32,7 @@ const serve = (readonly) => net.createServer((socket) => socket.once('data', (da
   if (!readonly && ['traffic-start', 'traffic-stop'].includes(operation)) {
     operations.push(operation);
     udp = operation === 'traffic-start' ? 'active' : 'disabled';
+    partial = false;
   }
   const now = new Date().toISOString();
   socket.end(JSON.stringify({
@@ -53,7 +55,7 @@ const serve = (readonly) => net.createServer((socket) => socket.once('data', (da
     },
     build: { source: revision, modified: false },
     traffic_monitor: {
-      state: udp, available: true, partial: false, scope: 'machine',
+      state: udp, available: true, partial, scope: 'machine',
       generation: 'collector', reason_code: udp, reason: 'Test collector.',
     },
     ...(readonly && activityAvailable
@@ -74,10 +76,12 @@ try {
     env: { ...process.env, XDG_CACHE_HOME: path.join(run, 'cache') },
   });
   const page = await app.firstWindow();
+  page.setDefaultTimeout(10000);
   await app.evaluate(({ BrowserWindow }) =>
     BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'FlowGate')?.show(),
   );
-  await page.getByRole('button', { name: 'Firewall: Both' }).waitFor();
+  const firewallBadge = page.locator('#firewallMenuStatus[aria-label="Firewall: Both"]');
+  await firewallBadge.waitFor();
   assert.equal(await page.locator('.toolbar').getByText(revision.slice(0, 7)).count(), 0);
   assert.equal(await page.locator('.toolbar').getByText('Activity · machine', { exact: false }).count(), 0);
   await page.locator('#footerSummary').getByText('Partial visibility', { exact: false }).waitFor();
@@ -99,14 +103,9 @@ try {
   assert.equal(await helpOpen(), false, 'pressing another heading closes the previous menu');
   assert.equal(await page.locator('#toolsMenu').evaluate((node) => node.open), true);
   await page.mouse.up();
-  for (const id of ['controlMenu', 'monitoringMenu', 'optionsMenu']) {
-    const section = page.locator('#' + id);
-    await section.locator('summary').first().hover();
-    await page.mouse.down();
-    assert.equal(await section.evaluate((node) => node.open), true, id + ' opens on press');
-    await page.mouse.up();
-    assert.equal(await section.evaluate((node) => node.open), true, id + ' stays open on release');
-  }
+  assert.equal(await page.locator('#toolsMenu :is(#controlMenu, #monitoringMenu)').count(), 0);
+  await page.locator('#optionsMenu > summary').click();
+  assert.equal(await page.locator('#optionsMenu').evaluate((node) => node.open), true);
   await help.click();
   const iconsRow = await page.getByRole('button', { name: 'Icons and symbols' }).boundingBox();
   const aboutRow = await page.getByRole('button', { name: 'About FlowGate' }).boundingBox();
@@ -137,12 +136,22 @@ try {
   await guide.waitFor({ state: 'hidden' });
   await page.waitForFunction(() => document.activeElement === document.querySelector('#helpMenu > summary'));
 
-  await page.getByRole('button', { name: 'Firewall: Both' }).hover();
+  await firewallBadge.hover();
   await page.mouse.down();
   assert.equal(await page.locator('#controlMenu').evaluate((node) => node.open), true);
   await page.mouse.up();
-  assert.equal(await page.locator('#controlMenu > summary').textContent(), 'Firewall · Both');
+  assert.equal(await page.locator('#controlMenu > summary').textContent(), 'FW: Both');
+  const open = (id) => page.locator('.toolbar > #' + id).evaluate((node) => node.open);
+  const udpMenu = page.locator('#extendedBadge');
+  await udpMenu.press('Enter');
+  assert.equal(await open('monitoringMenu'), true, 'keyboard opens the UDP menu');
+  assert.equal(await open('controlMenu'), false, 'keyboard closes the previous menu');
+  await page.keyboard.press('Escape');
+  assert.equal(await open('monitoringMenu'), false, 'Escape closes the UDP menu');
+  assert.equal(await udpMenu.evaluate((node) => document.activeElement === node), true);
   await page.locator('#extendedBadge').click();
+  assert.equal(await open('controlMenu'), false);
+  assert.equal(await open('toolsMenu'), false);
   await page.locator('#extendedEnable').click();
   await page.locator('#confirmation').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#confirmTitle').textContent(), 'Start UDP monitoring');
@@ -150,16 +159,24 @@ try {
   assert.deepEqual(operations, []);
   await page.locator('#confirmYes').click();
 
-  const udpBadge = page.getByRole('button', { name: 'UDP monitoring: On' });
+  const udpBadge = page.locator('#extendedBadge[aria-label="UDP monitoring: On"]');
   await udpBadge.waitFor();
-  const firewallBadge = page.getByRole('button', { name: 'Firewall: Both' });
   const background = (button) => button.evaluate((node) => getComputedStyle(node).backgroundColor);
   await firewallBadge.hover();
   const hoverColor = await background(firewallBadge);
   assert.notEqual(await background(udpBadge), hoverColor);
   await udpBadge.hover();
   assert.equal(await background(udpBadge), hoverColor);
-  await udpBadge.click();
+  partial = true;
+  await page.locator('#extendedBadge[aria-label="UDP monitoring: On, partial coverage"]').waitFor();
+  assert.equal(await udpMenu.textContent(), 'UDP: On (partial)');
+  await page.setViewportSize({ width: 800, height: 550 });
+  await page.locator('#firewallMenuStatus').click();
+  const firewallPanel = await page.locator('#controlMenu > .menu-panel').boundingBox();
+  assert.ok(firewallPanel.x >= 0 && firewallPanel.x + firewallPanel.width <= 800);
+  await udpMenu.click();
+  const udpPanel = await page.locator('#monitoringMenu > .menu-panel').boundingBox();
+  assert.ok(udpPanel.x >= 0 && udpPanel.x + udpPanel.width <= 800);
   const udpDetails = page.locator('#extendedStatus');
   assert.ok(await udpDetails.evaluate((node) => parseFloat(getComputedStyle(node).fontSize) >= 14));
   assert.ok(await udpDetails.evaluate((node) => node.scrollHeight <= node.clientHeight));
@@ -172,9 +189,9 @@ try {
   await page.locator('#extendedBadge').click();
   await page.locator('#extendedStop').click();
   await page.locator('#confirmYes').click();
-  await page.getByRole('button', { name: 'UDP monitoring: Off' }).waitFor();
+  await page.locator('#extendedBadge[aria-label="UDP monitoring: Off"]').waitFor();
   assert.deepEqual(operations, ['traffic-start', 'traffic-stop']);
-  assert.equal(await page.locator('#controlMenu > summary').textContent(), 'Firewall · Both');
+  assert.equal(await page.locator('#controlMenu > summary').textContent(), 'FW: Both');
   activityAvailable = false;
   await page.locator('#footerSummary').getByText('Activity unavailable', { exact: false }).waitFor();
   assert.match(await page.locator('#info').textContent(), /Activity unavailable/);

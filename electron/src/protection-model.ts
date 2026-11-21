@@ -161,7 +161,7 @@ export function firewallPresentation(control?: ClientState['control']) {
     status = 'Offline';
     detail = 'The firewall controller is disconnected. Current enforcement could not be confirmed.';
   }
-  return { status, detail, menu: 'Firewall · ' + (countdown || status) };
+  return { status, detail, countdown };
 }
 
 /**

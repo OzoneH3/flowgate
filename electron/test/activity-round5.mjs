@@ -153,7 +153,6 @@ try {
   await p.screenshot({ path: out + '/after-chart-details.png' });
   await p.keyboard.press('Escape');
   await p.screenshot({ path: out + '/after-process-fallback.png' });
-  await p.click('#toolsMenu > summary');
   await p.locator('#controlMenu > summary').click();
   await p.screenshot({ path: out + '/after-tools.png' });
   await p.keyboard.press('Escape');

@@ -50,11 +50,11 @@ try {
   const udp = page.locator('#extendedBadge');
   await badge.waitFor({ state: 'visible', timeout: 10000 });
   assert.equal(await badge.textContent(), 'Queue pressure / errors');
-  assert.match(await badge.getAttribute('title'), /Recent queue rejections/);
+  assert.equal(await badge.getAttribute('title'), 'Open queue diagnostics');
   const udpBounds = await udp.boundingBox();
   assert.ok((await badge.boundingBox()).x >= udpBounds.x + udpBounds.width);
-  const info = page.locator('#activityView > aside > h2');
-  const infoTop = (await info.boundingBox()).y;
+  const tabs = page.locator('.tabs');
+  const tabsTop = (await tabs.boundingBox()).y;
   await badge.click();
   const diagnostics = page.getByRole('dialog', { name: 'Queue diagnostics' });
   await diagnostics.waitFor({ state: 'visible' });
@@ -69,7 +69,7 @@ try {
   assert.equal(await diagnostics.textContent(), text, 'the captured warning stays readable after recovery');
   await diagnostics.getByRole('button', { name: 'Close' }).click();
   await diagnostics.waitFor({ state: 'hidden' });
-  assert.equal((await info.boundingBox()).y, infoTop);
+  assert.equal((await tabs.boundingBox()).y, tabsTop);
   console.log('PASS queue diagnostics open after UDP and remain readable after recovery on Wayland', run);
 } finally {
   if (app) await app.evaluate(({ app }) => app.exit()).catch(() => {});

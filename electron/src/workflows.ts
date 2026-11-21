@@ -521,7 +521,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
   endpointUI = setupEndpointPermissions();
   for (const [id, label] of [
     ['optionsMenu', 'Desktop preferences'],
-    ['monitoringMenu', 'Traffic monitoring'],
+    ['monitoringMenu', 'UDP: …'],
     ['controlMenu', 'Firewall'],
   ]) {
     const menu = node('details', '');
@@ -531,9 +531,13 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
     menu.lastElementChild!.className = 'menu-panel';
     document.querySelector('.brand')!.after(menu);
   }
-  document.addEventListener('pointerdown', (event) => {
+  const closeOutsideMenus = (event: Event) => {
     for (const menu of document.querySelectorAll<HTMLDetailsElement>('.desktop-menu[open]'))
       if (!menu.contains(event.target as Node)) menu.open = false;
+  };
+  document.addEventListener('pointerdown', closeOutsideMenus, { capture: true });
+  document.addEventListener('click', (event) => {
+    if (event.detail === 0) closeOutsideMenus(event);
   }, { capture: true });
   setupDecisionTimeout($<HTMLDetailsElement>('optionsMenu'));
   const evaluation = node('section', '');
@@ -652,16 +656,15 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
     }
   };
   let extendedError = '';
-  const badge = node('button', 'UDP: …') as HTMLButtonElement;
+  const badge = document.querySelector<HTMLElement>('#monitoringMenu > summary')!;
   badge.id = 'extendedBadge';
-  badge.title = 'Open UDP monitoring controls';
-  $('search').before(badge);
+  badge.setAttribute('aria-label', 'UDP monitoring');
   const review = async (action: 'enable' | 'stop') => {
     try {
       const e = await window.flowgate.extendedState();
       const starting = action === 'enable';
       if (!(starting ? e.canEnable : e.canStop))
-        throw Error('UDP monitoring status changed. Review the current state in Tools.');
+        throw Error('UDP monitoring status changed. Review the current state in the UDP menu.');
       const label = starting ? 'Start UDP monitoring' : 'Stop UDP monitoring';
       const text = starting
         ? 'FlowGate will measure UDP socket bytes across all peers. UDP measurements are separate from TCP measurements. Collection keeps running when you close the GUI. ' +
@@ -683,12 +686,13 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
       const e = await window.flowgate.extendedState(),
         u = state?.observation.activity?.udp;
       const label = e.mode === 'daemon' ? e.state : u?.state || 'disabled';
-      const short = label === 'active' ? 'On' : label === 'disabled' ? 'Off'
+      const partial = label === 'partial' || e.partial;
+      const short = label === 'active' || label === 'partial' ? 'On' : label === 'disabled' ? 'Off'
         : label === 'unknown' ? 'Offline' : label === 'unsupported' ? 'Unavailable'
         : label.charAt(0).toUpperCase() + label.slice(1);
-      badge.textContent = `UDP: ${short}${e.partial ? '*' : ''}`;
-      badge.title = `UDP monitoring: ${label}${e.partial ? ' · partial coverage' : ''}`;
-      badge.setAttribute('aria-label', `UDP monitoring: ${short}${e.partial ? ', partial coverage' : ''}`);
+      badge.textContent = `UDP: ${short}${partial ? ' (partial)' : ''}`;
+      badge.title = `UDP monitoring: ${short}${partial ? ' · partial coverage' : ''}`;
+      badge.setAttribute('aria-label', `UDP monitoring: ${short}${partial ? ', partial coverage' : ''}`);
       $('extendedStatus').textContent =
         e.mode === 'daemon'
           ? `${e.state}${e.partial ? ' · partial coverage' : ''} · Measurements: ${e.canView ? 'permitted' : 'not authorized'} · Collector control: ${e.canControl ? 'permitted' : 'read-only'}. ${e.message} ${extendedError}`

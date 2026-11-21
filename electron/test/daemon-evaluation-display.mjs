@@ -185,7 +185,7 @@ try {
     () =>
       p
         .locator('#controlMenu > summary')
-        .evaluate((e) => /Firewall · 4:|Firewall · 5:/.test(e.textContent)),
+        .evaluate((e) => /FW: [45]:/.test(e.textContent)),
     'active',
   );
   const deadline = e.stops_at;

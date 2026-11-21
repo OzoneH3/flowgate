@@ -1290,14 +1290,9 @@ function updateFirewallStatus() {
   const status = document.getElementById('firewallMenuStatus');
   if (!status) return;
   const firewall = firewallPresentation(state?.control);
-  status.textContent = 'FW: ' + firewall.status;
+  status.textContent = 'FW: ' + (firewall.countdown || firewall.status);
   status.title = firewall.detail;
-  status.setAttribute('aria-label', 'Firewall: ' + firewall.status);
-  const summary = document.querySelector<HTMLElement>('#controlMenu > summary');
-  if (summary) {
-    summary.textContent = firewall.menu;
-    summary.title = firewall.detail;
-  }
+  status.setAttribute('aria-label', 'Firewall: ' + (firewall.countdown || firewall.status));
   const health = document.getElementById('runtimeHealth');
   if (health) {
     const badge = runtimeBadge(!!state?.control.connected, state?.control.runtimeChecks);
@@ -1323,9 +1318,8 @@ function onToolbarMenuPress(trigger: HTMLElement, open: () => void) {
   });
   trigger.addEventListener('click', (event) => {
     // The mouse press already acted. Keep the native summary click for
-    // keyboard and touch, and give the shortcut buttons the same support.
+    // keyboard and touch.
     if (event.pointerType === 'mouse' && event.button === 0) event.preventDefault();
-    else if (trigger instanceof HTMLButtonElement) open();
   });
 }
 function setupMainMenus(windowMenu: HTMLElement, units: HTMLSelectElement) {
@@ -1349,13 +1343,14 @@ function setupMainMenus(windowMenu: HTMLElement, units: HTMLSelectElement) {
     monitoring = $<HTMLDetailsElement>('monitoringMenu'),
     options = $<HTMLDetailsElement>('optionsMenu');
   const controlTitle = control.querySelector('summary')!;
+  controlTitle.id = 'firewallMenuStatus';
   const sourceLabel = element('label', 'Activity display source', 'menu-control');
   sourceLabel.append($('activitySource'));
   sourceLabel.title = 'Choose which measurements Activity shows.';
   const unitsLabel = element('label', 'Units', 'menu-control');
   unitsLabel.append(units);
   options.querySelector('.menu-panel')!.prepend(sourceLabel, unitsLabel);
-  tools.lastElementChild!.append(control, element('hr'), monitoring, element('hr'), options);
+  tools.lastElementChild!.append(options);
   const about = element('button', 'About FlowGate');
   const dialog = element('dialog');
   dialog.id = 'aboutFlowGate';
@@ -1414,33 +1409,22 @@ function setupMainMenus(windowMenu: HTMLElement, units: HTMLSelectElement) {
     };
     windowPanel.append(b);
   }
-  $('controlStatus').before(file, tools, windowMenu, help);
-  // Preserve an obvious state entry point; text is updated by the existing evaluation state.
-  const status = element('button', 'Firewall controls', 'firewall-state');
-  status.id = 'firewallMenuStatus';
-  const openTool = (section: HTMLDetailsElement, target: HTMLElement) => {
-    for (const item of [control, monitoring, options]) item.open = item === section;
-    tools.open = true;
-    target.focus();
-  };
-  onToolbarMenuPress(status, () => openTool(control, controlTitle));
-  onToolbarMenuPress($('extendedBadge'), () => openTool(monitoring, monitoring.querySelector('summary')!));
-  $('controlStatus').before(status);
+  $('controlStatus').before(file, tools, windowMenu, help, control, monitoring);
   for (const menu of [file, tools, windowMenu.querySelector('details')!, help, control, monitoring, options]) {
     onToolbarMenuPress(menu.querySelector('summary')!, () => { menu.open = !menu.open; });
   }
-  // Advisory runtime health beside, not inside, the protection entry (its text is ellipsized).
+  // Keep the two status menus adjacent and let advisories yield space.
   const health = element('span', '', 'runtime-health');
   health.id = 'runtimeHealth';
   health.hidden = true;
   health.setAttribute('role', 'status');
-  status.after(health);
+  monitoring.after(health);
   const queue = element('button', '', 'runtime-health queue-health');
   queue.id = 'queueHealth';
   queue.hidden = true;
   queue.type = 'button';
   queue.setAttribute('aria-haspopup', 'dialog');
-  $('extendedBadge').after(queue);
+  health.after(queue);
   const queueDialog = element('dialog');
   queueDialog.id = 'queueDiagnostics';
   const queueTitle = element('h2', 'Queue diagnostics');
