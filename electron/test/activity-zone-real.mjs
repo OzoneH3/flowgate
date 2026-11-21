@@ -83,7 +83,12 @@ try {
       .click();
     await page.locator('.quick-popup').waitFor();
     const shell = Date.now() - started;
-    if (zone) await page.locator(`#qs-zone input[value=${zone}]`).check();
+    if (zone) {
+      const scope = page.locator(`#qs-zone input[value=${zone}]`);
+      await scope.check();
+      assert(await scope.isChecked());
+      assert.doesNotMatch(await page.locator('.quick-popup').innerText(), /Automatic peer classification|Legacy configured prefixes|Network revision:/);
+    }
     await page.locator('[data-focus="qs:new:' + action + '"]').click();
     await wait(async () => (await page.locator('.quick-popup').count()) === 0);
     result.timings ??= [];
@@ -109,6 +114,8 @@ try {
   info.on('pageerror', (e) => result.errors.push(String(e)));
   await info.locator('[data-focus="cell:process:incoming"]').click();
   await info.locator('#qs-zone input[value=internet]').check();
+  assert(await info.locator('#qs-zone input[value=internet]').isChecked());
+  assert.doesNotMatch(await info.locator('.quick-popup').innerText(), /Automatic peer classification|Legacy configured prefixes|Network revision:/);
   await info.locator('[data-focus="qs:new:block"]').click();
   await wait(async () => (await info.locator('.quick-popup').count()) === 0);
   rules = (await call({ operation: 'list' })).rules;

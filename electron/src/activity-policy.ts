@@ -5,7 +5,7 @@ import { matchesApplicationZone } from './application-zones';
 import { acceptsPublication } from './publication';
 import { applicationHeading } from './application-heading';
 import { openZoneMigration } from './zone-migration-view';
-import { ZONE_MIGRATION_CAPABILITY, zoneDefinitionDetails, ZONE_CAPABILITY, zoneLabel, type NetworkZone } from './network-zones';
+import { ZONE_MIGRATION_CAPABILITY, ZONE_CAPABILITY, zoneLabel, type NetworkZone } from './network-zones';
 import { popupPosition } from './popup-position';
 import { networkScopeChoices } from './network-scope-choices';
 import type { PolicyEntry } from './pane-model';
@@ -1068,7 +1068,6 @@ export class ActivityPolicy {
       frag.append(
         el('p', 'No Internet prefixes configured; no peers currently match.', 'rule-note'),
       );
-    if (pop.networkZone) frag.append(el('small', zoneDefinitionDetails(c.networkZones), 'rule-note'));
     return frag;
   }
   // NetLimiter quick setter: [Enabled] Ask | Allow | Deny, Advanced, Delete — one click sets the
