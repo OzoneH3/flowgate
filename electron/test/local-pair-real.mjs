@@ -1,8 +1,8 @@
 // Real local-pair popup journey: beta connects to alpha's own listener (10.79.0.1) inside a held disposable
 // fixture (scripts/acceptance/process-rules-isolated.py --hold --continuous --zones --other; both directions intercepted).
 // Simplified permission popup: the first view shows application / owner / destination / status line and
-// Allow | Deny | Remember | For a while; there is no pair panel. A plain Allow/Deny on a backend-verified
-// local pair sends decide-pair (Once) for exactly that connection, the permission window hides at once and
+// Rule scope, Always and Once actions, and Temporary duration are visible on open.
+// Allow once or Deny once on a backend-verified local pair sends decide-pair for exactly that connection, the permission window hides at once and
 // the outcome is listed in the main window (Pending requests › Results). Never the host daemon.
 //
 // Hide latency: on KDE the main process hides the prompt through a KWin script (opacity 0 + minimized;
@@ -199,14 +199,15 @@ async function firstView(w) {
     return {
       application: text('requestApplication'),
       owner: text('requestOwner'),
-      destination: text('requestDestination'),
+      destination: text('promptPeerAddress'),
       status: text('requestStatusLine'),
       body: document.body.innerText,
       oldPairPanel: ['localPair', 'localPairTitle', 'pairAllow', 'pairBlock', 'pairResult'].filter((id) => document.getElementById(id)),
       buttonsText: [...document.querySelectorAll('button')].filter(shown).map((b) => b.textContent.trim()),
       detailsHidden: document.getElementById('requestMore')?.hidden,
       pairSection: !!document.querySelector('details[data-section="local-pair"]'),
-      controls: ['allow', 'block', 'rememberToggle', 'forAWhileToggle'].map((id) => ({ id, present: !!document.getElementById(id), shown: shown(document.getElementById(id)) })),
+      controls: ['allow', 'block', 'allowForAWhile', 'blockForAWhile', 'forAWhileDuration'].map((id) => ({ id, present: !!document.getElementById(id), shown: shown(document.getElementById(id)) })),
+      ruleScope: shown(document.getElementById('rememberPanel')),
       durationWrapHidden: document.getElementById('forAWhileDurationWrap')?.hidden ?? null,
     };
   });
@@ -219,7 +220,10 @@ function assertFirstView(v, port, label) {
   assert.equal(v.detailsHidden, true, label + ': Details view hidden in the first view');
   assert(v.application, label + ': #requestApplication');
   assert(v.status !== null, label + ': #requestStatusLine');
-  assert(new RegExp(`^To Local service \\(.+\\) · 10\\.79\\.0\\.1:${port} · TCP$`).test(v.destination), label + ': destination "' + v.destination + '"');
+  assert.equal(v.destination, `10.79.0.1:${port}`, label + ': request peer');
+  assert(v.ruleScope, label + ': rule scope visible on open');
+  for (const caption of ['Allow always', 'Deny always', 'Allow once', 'Deny once'])
+    assert(v.buttonsText.includes(caption), label + ': ' + caption + ' visible');
   for (const c of v.controls) assert(c.present && c.shown, `${label}: #${c.id} visible`);
 }
 const resultRows = () =>
@@ -241,10 +245,10 @@ async function pairCard(port, seen) {
       if (!x || seen.includes(requestOf(x))) return undefined;
       const n = await promptNative();
       if (!n?.visible || n.opacity === 0) return undefined;
-      const dest = await x.locator('#requestDestination').innerText().catch(() => '');
+      const dest = await x.locator('#promptPeerAddress').innerText().catch(() => '');
       if (!dest.includes(`10.79.0.1:${port}`)) return undefined;
       if (!(await x.locator('details[data-section="local-pair"]').count())) return undefined;
-      return (await x.locator('#allow').isEnabled()) ? x : undefined;
+      return (await x.locator('#allowForAWhile').isEnabled()) ? x : undefined;
     },
     20000,
     'pair card',
@@ -297,9 +301,9 @@ try {
   await shot(w, '01-first-view');
   step(
     `first view: application "${v1.application}", owner "${v1.owner ?? '(none)'}", destination "${v1.destination}", ` +
-      `status "${v1.status}"; no pair panel, no "Allow both"/"Deny both", no PID/cookie; Allow|Deny|Remember|For a while visible`,
+      `status "${v1.status}"; no pair panel, no "Allow both"/"Deny both", no PID/cookie; Always and Once actions visible`,
   );
-  const allowHide = await clickAndMeasureHide(w, '#allow', 'allow');
+  const allowHide = await clickAndMeasureHide(w, '#allowForAWhile', 'allow');
   evidence.allow_hide = allowHide;
   assert(allowHide.hide_ms < 1000, `prompt hidden after ${allowHide.hide_ms} ms (must be well under 1 s)`);
   step(
@@ -338,7 +342,7 @@ try {
   assert(await w2.locator('#requestApplication').isHidden(), 'first view hidden while Details is open');
   await shot(w2, '03-details-view');
   await w2.locator('#detailsBack').click();
-  await w2.locator('#requestDestination').waitFor();
+  await w2.locator('#promptPeerAddress').waitFor();
   // Narrow: shrink the native prompt window to 360 px wide.
   const normal = await promptNative();
   await app.evaluate(({ BrowserWindow }, h) => {
@@ -365,7 +369,7 @@ try {
       body: body && { scrollWidth: body.scrollWidth, clientWidth: body.clientWidth },
       row: row && { scrollWidth: row.scrollWidth, clientWidth: row.clientWidth },
       doc: { scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth },
-      controls: Object.fromEntries(['allow', 'block', 'rememberToggle', 'forAWhileToggle'].map((id) => [id, rect(id)])),
+      controls: Object.fromEntries(['allow', 'block', 'allowForAWhile', 'blockForAWhile', 'forAWhileDuration'].map((id) => [id, rect(id)])),
     };
   });
   evidence.narrow = { method: narrowMethod, native: await promptNative(), ...narrow };
@@ -375,7 +379,7 @@ try {
   assert(narrow.row.scrollWidth <= narrow.row.clientWidth, `#decisionControls overflows ${JSON.stringify(narrow.row)}`);
   for (const [id, r] of Object.entries(narrow.controls))
     assert(r && r.width > 0 && r.height > 0 && r.left >= 0 && r.right <= narrow.innerWidth && r.top >= 0 && r.bottom <= narrow.innerHeight, `#${id} visible at narrow width ${JSON.stringify(r)}`);
-  step(`narrow ${narrow.innerWidth}px (${narrowMethod}): #promptBody ${narrow.body.scrollWidth}/${narrow.body.clientWidth}, #decisionControls ${narrow.row.scrollWidth}/${narrow.row.clientWidth}; 4 controls inside the viewport`);
+  step(`narrow ${narrow.innerWidth}px (${narrowMethod}): #promptBody ${narrow.body.scrollWidth}/${narrow.body.clientWidth}, #decisionControls ${narrow.row.scrollWidth}/${narrow.row.clientWidth}; decision controls inside the viewport`);
   if (narrowMethod.startsWith('page')) await w2.setViewportSize({ width: normal.content.width, height: normal.content.height });
   else
     await app.evaluate(({ BrowserWindow }, b) => {
@@ -383,7 +387,7 @@ try {
       x.setSize(b.width, b.height);
     }, normal.bounds);
   await sleep(200);
-  const blockHide = await clickAndMeasureHide(w2, '#block', 'block');
+  const blockHide = await clickAndMeasureHide(w2, '#blockForAWhile', 'block');
   evidence.block_hide = blockHide;
   await sleep(2500);
   assert.equal(await alphaCount(), before, 'denied connection delivered');

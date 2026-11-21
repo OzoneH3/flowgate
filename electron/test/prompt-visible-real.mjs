@@ -1,6 +1,6 @@
 // Real KDE Wayland check that an automatic permission window is actually ON SCREEN (KWin opacity and
 // minimized state), not just rendered: content checks and page screenshots pass for a minimized,
-// transparent window. Three sequential requests, each answered with Allow. Disposable fixture only.
+// transparent window. Three sequential requests, each answered with Allow once. Disposable fixture only.
 import { _electron } from 'playwright-core';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -137,7 +137,10 @@ try {
         header: t('connectionHeader'), rows,
         application: t('fieldApplication'), process: t('fieldProcess'), local: t('fieldLocal'), remote: t('fieldRemote'),
         detailsHidden: document.getElementById('requestMore')?.hidden,
-        controls: ['allow', 'block', 'rememberToggle', 'forAWhileToggle'].map((id) => shown(id)),
+        controls: ['allow', 'block', 'allowForAWhile', 'blockForAWhile', 'forAWhileDuration'].map(shown),
+        labels: ['allow', 'block', 'allowForAWhile', 'blockForAWhile'].map(t),
+        ruleScope: shown('rememberPanel'),
+        temporaryDuration: document.getElementById('forAWhileDuration')?.selectedOptions[0]?.textContent,
         overflowX: body.scrollWidth - body.clientWidth, overflowY: body.scrollHeight - body.clientHeight,
         width: innerWidth, height: innerHeight,
       };
@@ -172,7 +175,7 @@ try {
     evidence['round' + round] = { label: r.label, shown: shown ?? null, timeline: timeline.slice(-5) };
     if (!shown) throw Error(`round ${round} (${r.label}): permission window never on screen (KWin) within 10 s; last ${JSON.stringify(timeline.at(-1))}`);
     seen.push(shown.id);
-    const w = await wait(async () => { const x = prompt(); return x && (await x.locator('#allow').isEnabled()) ? x : undefined; }, 10000, 'allow enabled');
+    const w = await wait(async () => { const x = prompt(); return x && (await x.locator('#allowForAWhile').isEnabled()) ? x : undefined; }, 10000, 'allow enabled');
     const v = await view(w);
     evidence['round' + round].view = v;
     await w.screenshot({ path: `${run}/${round}-${r.label}.png` });
@@ -188,12 +191,15 @@ try {
       assert(r.v6 ? /:/.test(f.replace(/Port:.*/, '')) && !/\[|\]/.test(f) : /^\d+\.\d+\.\d+\.\d+/.test(f), `${r.label}: address format "${f}"`);
     }
     assert.equal(v.detailsHidden, true);
-    assert.deepEqual(v.controls, [true, true, true, true], `${r.label}: Allow|Deny|Remember|For a while visible`);
+    assert.deepEqual(v.controls, [true, true, true, true, true], `${r.label}: all decision controls visible`);
+    assert.deepEqual(v.labels, ['Allow always', 'Deny always', 'Allow once', 'Deny once']);
+    assert.equal(v.temporaryDuration, 'This connection only');
+    assert(v.ruleScope, `${r.label}: rule scope visible on open`);
     assert(v.overflowX <= 0 && v.overflowY <= 0, `${r.label}: no scroll at ${v.width}x${v.height} (${v.overflowX}/${v.overflowY})`);
     assert.equal(Math.round(shown.kwin.w), 745, 'native window width 745');
     step(`round ${round} ${r.label}: on screen after ${shown.ms} ms (KWin ${Math.round(shown.kwin.w)}x${Math.round(shown.kwin.h)}); "${v.header}" From "${from.text}" To "${to.text}"; ${v.application} · ${v.process} · local ${v.local} · remote ${v.remote}`);
     // Human click: press, hold for a few frames, release.
-    const box = await w.locator('#allow').boundingBox();
+    const box = await w.locator('#allowForAWhile').boundingBox();
     await w.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await w.mouse.down();
     await sleep(120);
@@ -205,7 +211,7 @@ try {
   // Narrow window: a fourth request (incoming IPv6) at 420 px wide, answered with Deny.
   void issue({ op: 'incoming', name: 'alpha', protocol: 'tcp', v6: true });
   await wait(async () => { const x = prompt(); const id = x && new URL(x.url()).searchParams.get('request'); return id && !seen.includes(id) && onScreen(kwinProbe(pid)) ? x : undefined; }, 10000, 'fourth card');
-  const w4 = await wait(async () => { const x = prompt(); return x && (await x.locator('#allow').isEnabled()) ? x : undefined; }, 10000, 'allow enabled 4');
+  const w4 = await wait(async () => { const x = prompt(); return x && (await x.locator('#allowForAWhile').isEnabled()) ? x : undefined; }, 10000, 'allow enabled 4');
   await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows().find((x) => /[?&]request=/.test(x.webContents.getURL())); w.setSize(420, w.getSize()[1]); });
   await sleep(700);
   const n = await view(w4);
@@ -215,7 +221,7 @@ try {
   assert.deepEqual(n.controls.slice(0, 2), [true, true], 'narrow: Allow and Deny visible');
   assert(n.header.startsWith('Incoming connection - TCP(6)') && n.rows.find(row => row.label === 'To')?.program, 'narrow: incoming, program on To');
   step(`narrow ${n.width}px: no horizontal overflow; controls visible ${JSON.stringify(n.controls)} (vertical scroll ${n.overflowY > 0 ? 'yes' : 'no'})`);
-  const b4 = await w4.locator('#block').boundingBox();
+  const b4 = await w4.locator('#blockForAWhile').boundingBox();
   await w4.mouse.move(b4.x + b4.width / 2, b4.y + b4.height / 2);
   await w4.mouse.down();
   await sleep(120);

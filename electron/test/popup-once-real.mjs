@@ -95,6 +95,8 @@ try {
     popup.setDefaultTimeout(5000);
     const duration = popup.getByLabel('Temporary duration');
     await duration.waitFor();
+    const native = await app.browserWindow(popup);
+    await wait('native popup visible', () => native.evaluate((w) => w.isVisible() && !w.isMinimized()));
     assert.equal(await popup.locator('#requestApplication strong').innerText(), request.attribution.application.name);
     assert.match(await popup.locator('#fieldProcess').innerText(), new RegExp('\\b' + ready.alpha.pid + '\\b'));
     assert.match(await popup.locator('#connectionHeader').innerText(), /Outgoing.*TCP/);
@@ -126,6 +128,15 @@ try {
     assert(await scope.isVisible());
     if (save) {
       await wait('default rule review', () => popup.locator('#allow').isEnabled());
+      assert.equal(await duration.locator('option:checked').innerText(), 'This connection only');
+      for (const label of ['Allow always', 'Deny always', 'Allow once', 'Deny once'])
+        assert(await popup.getByRole('button', { name: new RegExp(label + '$') }).isVisible());
+      const fields = scope.locator('input[data-field]');
+      assert.deepEqual(await fields.evaluateAll((inputs) => inputs.map((input) =>
+        [input.dataset.field, input.checked, input.disabled])), [
+        ['application', true, true], ['protocol', false, false], ['process', false, false],
+        ['address', false, false], ['port', false, false],
+      ]);
       assert(await scope.evaluate((panel) => {
         const rect = panel.getBoundingClientRect(), body = document.getElementById('promptBody').getBoundingClientRect();
         return rect.top >= body.top && rect.bottom <= body.bottom;
@@ -218,6 +229,23 @@ try {
   assert.equal((await list()).events?.filter((event) => event.state === 'awaiting-decision').length ?? 0, 0);
   assert.equal(await count(), before + 1);
   evidence.steps.push({ name: 'matching-rule-wins', request: final.request_id, final: final.decision, delivered: 1 });
+
+  const scopedCount = await count();
+  await connect(alternate);
+  const outside = await pending(alternate);
+  const outsideCard = await card(outside);
+  assert.equal(await outsideCard.popup.locator('#promptPeerAddress').innerText(), alternate + ':' + port);
+  assert.equal(await outsideCard.duration.inputValue(), 'once');
+  assert.equal(await count(), scopedCount, 'out-of-scope connection must still be held by the original Ask');
+  const outsideScreenshot = await capture(outsideCard.popup, 'out-of-scope-prompt.png');
+  await outsideCard.popup.getByRole('button', { name: /Deny once$/ }).click();
+  const denied = await finalDecision(outside.id, 'block');
+  assert.equal(denied.decision.scope, 'once');
+  assert.equal((await command('settle', { name: 'alpha' })).last_send?.status, 'dial-failed');
+  assert.equal(await count(), scopedCount);
+  assert.deepEqual((await list()).rules, chosen.rules);
+  evidence.steps.push({ name: 'out-of-scope-still-asks', request: outside.id, peer: outside.flow.remote,
+    askRule: outside.ask_rule.id, heldPayloads: 0, delivered: 0, final: denied.decision, screenshot: outsideScreenshot });
   evidence.passed = true;
 } finally {
   await fs.writeFile(path.join(run, 'result.json'), JSON.stringify(evidence, null, 2));
