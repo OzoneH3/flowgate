@@ -262,21 +262,27 @@ func TestMarkAwareFIBReadiness(t *testing.T) {
 	}
 }
 
-func TestStrictIPv6ReversePathReadiness(t *testing.T) {
+func TestIPv6ReversePathReadiness(t *testing.T) {
 	const guard = `{"match":{"op":"==","left":{"meta":{"key":"nfproto"}},"right":"ipv6"}},{"match":{"op":"==","left":{"fib":{"result":"oif","flags":["saddr","mark","iif"]}},"right":false}},{"drop":null}`
 	const defaults = `[{"priority":0,"src":"all","table":"local"},{"priority":32766,"src":"all","table":"main"}]`
 	const unsafeRPDB = `[{"priority":100,"fwmark":"0x10000000","fwmask":"0x10000000","table":"100"}]`
+	const unsafeTransfer = `,{"rule":{"family":"inet","table":"other","chain":"pre","handle":142,"expr":[{"mangle":{"key":{"meta":{"key":"mark"}},"value":{"ct":{"key":"mark"}}}}]}}`
+	// Fedora capture 1fb42e464484, inet/firewalld/filter_PREROUTING handle 141.
+	loose := strings.Replace(guard, `,"iif"`, "", 1)
 	for _, tc := range []struct {
 		name, hook, expr, routes, suffix, refusal string
 	}{
 		{"stock strict IPv6 reverse path", "prerouting", guard, defaults, "", ""},
+		{"stock loose IPv6 reverse path", "prerouting", loose, defaults, "", ""},
 		{"wrong hook", "input", guard, defaults, "", "rule handle 141: packet-mark FIB lookup"},
 		{"wrong protocol", "prerouting", strings.Replace(guard, `"ipv6"`, `"ipv4"`, 1), defaults, "", "rule handle 141: packet-mark FIB lookup"},
 		{"wrong lookup", "prerouting", strings.Replace(guard, `"saddr"`, `"daddr"`, 1), defaults, "", "rule handle 141: packet-mark FIB lookup"},
 		{"wrong verdict", "prerouting", strings.Replace(guard, `"drop"`, `"accept"`, 1), defaults, "", "rule handle 141: packet-mark FIB lookup"},
 		{"queue in same rule", "prerouting", `{"queue":{"num":102}},` + guard, defaults, "", "rule handle 141: unproven mark/queue"},
-		{"writer in later rule", "prerouting", guard, defaults, `,{"rule":{"family":"inet","table":"other","chain":"pre","handle":142,"expr":[{"mangle":{"key":{"meta":{"key":"mark"}},"value":{"ct":{"key":"mark"}}}}]}}`, "rule handle 142: native mark/mangle writer"},
+		{"writer after strict guard", "prerouting", guard, defaults, unsafeTransfer, "rule handle 142: native mark/mangle writer"},
+		{"writer after loose guard", "prerouting", loose, defaults, unsafeTransfer, "rule handle 142: native mark/mangle writer"},
 		{"overlapping policy route", "prerouting", guard, unsafeRPDB, "", "routing mark selector overlaps reserved bits"},
+		{"overlapping policy route with loose guard", "prerouting", loose, unsafeRPDB, "", "routing mark selector overlaps reserved bits"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			// Use arbitrary names so the proof depends on the hook and
@@ -304,7 +310,7 @@ func TestStrictIPv6ReversePathReadiness(t *testing.T) {
 				t.Log(check.ID, check.Status, check.Code, check.Detail)
 				if tc.refusal == "" {
 					if check.Status != Ready {
-						t.Errorf("strict IPv6 reverse-path guard refused: %+v", check)
+						t.Errorf("IPv6 reverse-path guard refused: %+v", check)
 					}
 				} else if check.Status != Blocked || check.Code != "firewall_conflict" || !strings.Contains(check.Detail, tc.refusal) {
 					t.Errorf("expected refusal %q, got %+v", tc.refusal, check)

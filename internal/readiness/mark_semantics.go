@@ -171,20 +171,25 @@ func fibUsesPacketMark(fib map[string]any) bool {
 	return false
 }
 
-func strictIPv6ReversePathGuard(expr any) bool {
-	// nft JSON represents "fib saddr . mark . iif check missing" as an
-	// oif lookup compared to false. Require the whole IPv6-only drop rule.
-	return reflect.DeepEqual(expr, []any{
-		map[string]any{"match": map[string]any{
-			"op": "==", "left": map[string]any{"meta": map[string]any{"key": "nfproto"}}, "right": "ipv6",
-		}},
-		map[string]any{"match": map[string]any{
-			"op": "==", "left": map[string]any{"fib": map[string]any{
-				"result": "oif", "flags": []any{"saddr", "mark", "iif"},
-			}}, "right": false,
-		}},
-		map[string]any{"drop": nil},
-	})
+func ipv6ReversePathGuard(expr any) bool {
+	// "check missing" is an oif lookup compared to false. Loose checks for
+	// a reverse route, strict also requires the incoming interface.
+	for _, flags := range [][]any{{"saddr", "mark"}, {"saddr", "mark", "iif"}} {
+		if reflect.DeepEqual(expr, []any{
+			map[string]any{"match": map[string]any{
+				"op": "==", "left": map[string]any{"meta": map[string]any{"key": "nfproto"}}, "right": "ipv6",
+			}},
+			map[string]any{"match": map[string]any{
+				"op": "==", "left": map[string]any{"fib": map[string]any{
+					"result": "oif", "flags": flags,
+				}}, "right": false,
+			}},
+			map[string]any{"drop": nil},
+		}) {
+			return true
+		}
+	}
+	return false
 }
 
 func hasPreroutingFilterChain(objects []map[string]json.RawMessage, table, name string) bool {
@@ -234,7 +239,7 @@ func compatibleNFT(b []byte) error {
 				// rest of nft, xt mark exports and policy routing must
 				// still pass their existing checks.
 				if fib, ok := x["fib"].(map[string]any); ok && fibUsesPacketMark(fib) {
-					if r.Family != "inet" || !strictIPv6ReversePathGuard(r.Expr) ||
+					if r.Family != "inet" || !ipv6ReversePathGuard(r.Expr) ||
 						!hasPreroutingFilterChain(n.Nftables, r.Table, r.Chain) {
 						return fmt.Errorf("packet-mark FIB lookup is not proven compatible")
 					}
