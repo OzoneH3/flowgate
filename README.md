@@ -4,37 +4,44 @@
 
 **See which apps are online and decide what they can connect to.**
 
-FlowGate is a Linux application firewall and network monitor. See live traffic
-by app, allow or block connections, and look up past firewall decisions from
-the desktop. The per-app monitoring and control workflow takes inspiration from
+FlowGate is a Linux application firewall and network monitor inspired by
 [NetLimiter](https://netlimiter.com/).
 
 [Try the desktop](#try-the-desktop) · [Install FlowGate](#install-flowgate) ·
 [Documentation](#documentation)
 
+## Features
+
+- See live traffic per app and opt in to 1, 7 or 30 days of [usage history](docs/USAGE-HISTORY.md).
+- **Allow, Block or Ask** for inbound and outbound TCP/UDP. Answer once or [save a rule](docs/SEMANTICS.md).
+- Review decisions and their reasons in the [Decision Log](docs/DECISION-LOG.md).
+- Set per-executable rules within each prefix on [supported Wine/Proton setups](docs/PROTON-LAUNCHER-REGRESSION.md).
+- **Experimental** [bandwidth limits and traffic priorities](docs/ZONE-SHAPING.txt) for eligible native apps.
+
+## Supported systems and limitations
+
+**Standalone target: x86-64 Linux with systemd.** A popup pass means the receiver got the held TCP payload after **Allow Once**.
+
+| Tested system | Recorded result |
+| --- | --- |
+| Debian 13.7 (headless) | Firewall rules and UDP checks passed. |
+| Ubuntu 26.04.1 GNOME (Wayland) | Headless rules passed. Popup passed. |
+| Fedora 45 GNOME (Wayland) | Rules passed. Popup passed. Stock firewalld blocked readiness on a later build. |
+| Kubuntu 26.04.1 and CachyOS, both Plasma (Wayland) | Popup passed on both. |
+| Mint 22.3 Cinnamon and Xubuntu 26.04.1 Xfce (X11) | Popup passed on both. |
+| Pop!_OS 24.04 COSMIC (Wayland) | Popup passed once. Repeats inconclusive. |
+| CachyOS Hyprland (Wayland) | Popup passed with UFW off. Approval unverified with stock UFW. |
+| openSUSE Tumbleweed Plasma (Wayland) | Stock firewalld readiness passed. Popup delivery unverified. |
+
+A later sweep launched all nine desktops without verifying delivery. [Full compatibility matrix and tested builds](docs/COMPATIBILITY.md)
+
+App rules require [verified socket ownership](docs/ATTRIBUTION.md). VPN compatibility depends on the setup. WireGuard and XFRM interfaces [block activation](docs/SEMANTICS.md).
+Download limiting covers [eligible established TCP connections](docs/DOWNLOAD-LIMITER.txt).
+
 ![FlowGate Activity view with download and upload totals in the traffic chart header, the app table below, and the selected app’s Overview at right](docs/images/flowgate-main-window.png)
 
 *The Activity view shows simulated traffic. On wide windows,
 the inspector sits beside the traffic chart and app table.*
-
-## What you can do
-
-- **See network activity.** Browse active sockets by app and process, watch
-  live upload and download charts, and opt in to keeping 1, 7, or 30 days of
-  data. [Usage history](docs/USAGE-HISTORY.md)
-- **Decide what gets through.** Allow or block supported TCP and UDP traffic by
-  verified application, user, and direction. Make a temporary choice at a prompt or
-  save a rule for future connections. [How rules work](docs/SEMANTICS.md)
-- **Find out what the firewall decided.** Look up recorded firewall decisions
-  and their reasons. Usage and decision records reflect what FlowGate observed.
-  Both can have gaps. [Decision Log](docs/DECISION-LOG.md)
-- **Set separate rules for Windows apps.** With supported Wine and Proton
-  runtimes, FlowGate distinguishes Windows executables and Wine prefixes.
-  [Tested runtimes and scope](docs/PROTON-LAUNCHER-REGRESSION.md)
-- **Limit bandwidth (experimental).** Apply limits and priorities to eligible
-  native app traffic. Download limits cover established TCP on supported routes.
-  [Limits and priorities](docs/ZONE-SHAPING.txt) ·
-  [Download coverage](docs/DOWNLOAD-LIMITER.txt)
 
 ![FlowGate Ask prompt for an outgoing TCP connection from Atlas Sync, with endpoint details, rule scope, and a row of For a while buttons beneath Allow and Deny](docs/images/flowgate-ask-remember.png)
 
@@ -56,8 +63,7 @@ cd flowgate
 
 ## Install FlowGate
 
-The standalone candidate targets **64-bit x86 Linux with systemd**. From a
-clean checkout of the revision you want to install, run the following as the
+From a clean checkout of the revision you want to install, run the following as the
 intended desktop administrator. First check the
 [build and host requirements](docs/STANDALONE-RELEASE.md#requirements).
 
@@ -83,24 +89,12 @@ or **Incoming + outgoing**, select **Check readiness**, and use **Start protecti
 The system service runs as root and continues running when the desktop closes.
 Use **Stop protection** to return to monitoring. [Essential networking](docs/ESSENTIAL-NETWORKING.md)
 
-## Good to know
+During active protection, a new or re-enabled Block can disconnect an open TCP
+connection if it wins and FlowGate verifies the socket, owner and direction.
+Starting protection preserves open connections. [Established TCP control](docs/ESTABLISHED-TCP-CONTROL.md)
 
-- **An app needs verified ownership.** When a socket is shared, its owner has
-  exited, or FlowGate can't inspect it, the app's saved permission cannot be
-  applied on the strength of a guess. [How ownership is verified](docs/ATTRIBUTION.md)
-- **A newly created or enabled Block can disconnect open TCP connections.**
-  FlowGate does this during active protection when the Block becomes the winning
-  decision and FlowGate can verify the exact socket, its owner, and the connection
-  direction. Starting protection preserves open connections. A later winning
-  Block can still disconnect them. [Connection and rule semantics](docs/SEMANTICS.md)
-- **Local can include VPN peers.** For example, a remote desktop connection to
-  `192.168.23.155` over `ppp0` is automatically classified as Local. Choose
-  **Local** to scope a rule to that zone. Configured prefixes can override
-  automatic classification. [Automatic zones](docs/AUTOMATIC-ZONES.md)
-- **VPN support depends on the setup.** TUN traffic is subject to ordinary
-  application rules. WireGuard and XFRM interfaces currently prevent activation.
-  Use the read-only checks to investigate firewall, routing, or VPN conflicts.
-  [Network compatibility](docs/COEXISTENCE.md) · [Diagnostics](docs/DIAGNOSTICS.md)
+VPN peers can fall in the **Local** zone. Configured prefixes can override the
+automatic classification. [Automatic zones](docs/AUTOMATIC-ZONES.md)
 
 ## Diagnose before explicit activation
 
