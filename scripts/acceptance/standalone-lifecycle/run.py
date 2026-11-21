@@ -77,25 +77,18 @@ def exercise(lab, sut, receiver, candidate, new_release, old_release, evidence):
         lab.verify_build(state["build"], release)
         assert Path(release_path).name == release["release"], release_path
         gui = Path(CURRENT).parent / "gui" / Path(release_path).name
-        # Exercise the packaged About reader and formatter on the installed
-        # payload, with the actual connected daemon's API identity.
-        script = """
-const [gui, build] = process.argv.slice(1);
-const {readGuiBuild} = require(gui + '/electron/dist/test/gui-build.cjs');
-const {headerVersion, parseDaemonBuild} = require(gui + '/electron/dist/test/build-info.cjs');
-const desktop = readGuiBuild(gui + '/electron');
-const daemon = parseDaemonBuild(JSON.parse(build));
-console.log(JSON.stringify({desktop, daemon, about: headerVersion(desktop, daemon)}));
-"""
-        about = json.loads(sut.run("ELECTRON_RUN_AS_NODE=1 " + shlex.join([
-            str(gui / "runtime/electron"), "-e", script, str(gui), json.dumps(state["build"]),
-        ])).stdout)
-        assert (about["desktop"]["state"], about["desktop"]["source"], about["desktop"]["version"]) == (
-            "verified", release["source"], release["version"],
-        ), about
-        assert not about["about"]["mismatch"], about
+        # This SUT is headless. Verify the selected GUI files, including the
+        # matched manifest that the packaged About reader uses at launch.
+        gui_files = ("matched-manifest.json", "electron/package.json",
+                     "electron/dist/main.cjs", "electron/dist/renderer.js")
+        checks = [f"{release['files']['gui/' + name]['sha256']}  {name}" for name in gui_files]
+        sut.run(f"cd {shlex.quote(str(gui))} && /usr/bin/sha256sum -c <<'SHA256'\n"
+                + "\n".join(checks) + "\nSHA256")
+        desktop = json.loads(sut.run(f"cat {shlex.quote(str(gui / 'matched-manifest.json'))}").stdout)
+        assert (desktop["source"], desktop["version"]) == (release["source"], release["version"]), desktop
         if release["schema"] == 2:
-            assert binary["version"] == about["daemon"]["version"] == release["version"], (binary, about)
+            assert desktop["release"] == release["release"], desktop
+            assert binary["version"] == state["build"]["version"] == release["version"], (binary, state["build"])
         protection = state["protection"]
         assert (protection["state"], protection["desired_mode"]) == expected, protection
         enforcement = state["enforcement"]
@@ -103,7 +96,8 @@ console.log(JSON.stringify({desktop, daemon, about: headerVersion(desktop, daemo
         if expected[1] == "both":
             assert protection["profile"] == enforcement["profile"] == "both", state
         return {"source": binary["source"], "generation": state["generation"],
-                "cli_version": binary.get("version"), "about": about,
+                "cli_version": binary.get("version"), "daemon_version": state["build"].get("version"),
+                "about_version": desktop["version"], "gui_release_path": str(gui),
                 "executable_sha256": binary["executable_sha256"], "release_path": release_path,
                 "protection": protection, "enforcement": enforcement}
 
