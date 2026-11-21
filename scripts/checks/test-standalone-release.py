@@ -240,10 +240,30 @@ class ReleaseChecks(unittest.TestCase):
         Path(env['XDG_RUNTIME_DIR']).mkdir()
         return base, env
 
+    def resolve_reload_directories(self, env, *, leave_real=None):
+        # Model installed paths separately from the physical test checkout.
+        # Keep the real release pointer and any directory under negative test.
+        paths = {
+            Path(env[key]): Path('/run/flowgate-test') / name
+            for key, name in (
+                ('XDG_RUNTIME_DIR', 'session'),
+                ('XDG_CONFIG_HOME', 'config'),
+                ('XDG_CACHE_HOME', 'cache'),
+            )
+            if key != leave_real
+        }
+        resolve = Path.resolve
+
+        def installed_path(path, *args, **kwargs):
+            return paths[path] if path in paths else resolve(path, *args, **kwargs)
+
+        return patch.object(Path, 'resolve', installed_path)
+
     def test_reload_starts_current_installed_gui_when_closed(self):
         base, env = self.reload_environment()
         scope = ui['launch'].__globals__
-        with patch.dict(os.environ, env, clear=True), patch.dict(scope, BASE=base, stop_installed=Mock()), \
+        with patch.dict(os.environ, env, clear=True), self.resolve_reload_directories(env), \
+                patch.dict(scope, BASE=base, stop_installed=Mock()), \
                 patch('subprocess.run', return_value=types.SimpleNamespace(returncode=1)), \
                 patch('subprocess.Popen') as start:
             start.return_value.wait.side_effect = subprocess.TimeoutExpired('electron', 1)
@@ -256,12 +276,33 @@ class ReleaseChecks(unittest.TestCase):
     def test_reload_reports_gui_startup_failure(self):
         base, env = self.reload_environment()
         scope = ui['launch'].__globals__
-        with patch.dict(os.environ, env, clear=True), patch.dict(scope, BASE=base, stop_installed=Mock()), \
+        with patch.dict(os.environ, env, clear=True), self.resolve_reload_directories(env), \
+                patch.dict(scope, BASE=base, stop_installed=Mock()), \
                 patch('subprocess.run', return_value=types.SimpleNamespace(returncode=1)), \
                 patch('subprocess.Popen') as start:
             start.return_value.wait.return_value = 1
             with self.assertRaisesRegex(RuntimeError, r'status 1\).*Run flowgate-ui directly'):
                 ui['launch'](reload=True)
+
+    def test_reload_rejects_directories_resolving_under_workspace(self):
+        base, env = self.reload_environment()
+        scope = ui['launch'].__globals__
+        inside = self.root / '.workspace/session'
+        inside.mkdir(parents=True)
+        alias = self.root / 'desktop-alias'
+        alias.symlink_to(inside, target_is_directory=True)
+        for key in ('XDG_RUNTIME_DIR', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME'):
+            with self.subTest(directory=key):
+                invalid = dict(env, **{key: str(alias)})
+                stop = Mock()
+                with patch.dict(os.environ, invalid, clear=True), \
+                        self.resolve_reload_directories(invalid, leave_real=key), \
+                        patch.dict(scope, BASE=base, stop_installed=stop), \
+                        patch('subprocess.Popen') as start:
+                    with self.assertRaisesRegex(RuntimeError, 'must be outside \\.workspace'):
+                        ui['launch'](reload=True)
+                    stop.assert_not_called()
+                    start.assert_not_called()
 
     def test_reload_headless_does_not_stop_gui(self):
         with patch.dict(os.environ, {}, clear=True), \
