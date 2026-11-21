@@ -69,7 +69,8 @@ app.commandLine.appendSwitch('disable-domain-reliability');
 // is unsupported by Chromium's Wayland surface factory in this Electron release.
 // WebGPU's Vulkan/GL interop otherwise initializes Vulkan independently of the
 // compositor flag. Select its GLES adapter too; do not disable GPU acceleration.
-if (app.commandLine.getSwitchValue('ozone-platform') === 'wayland') {
+const nativeWayland = app.commandLine.getSwitchValue('ozone-platform') === 'wayland';
+if (nativeWayland) {
   const disabled = new Set(
     app.commandLine.getSwitchValue('disable-features').split(',').filter(Boolean),
   );
@@ -1245,7 +1246,10 @@ app.whenReady().then(async () => {
       promptLayouts.get(e.sender.id) || promptPlacement.get(e.sender.id) || Promise.resolve();
     const resize = prior.then(async () => {
       if (w.isDestroyed() || w !== prompt || promptRefs.get(e.sender.id) !== ref) return;
-      if (!promptIdle && contentChanged) {
+      // Without compositor placement, Wayland can grow the window in place
+      // while ignoring the requested move. Keep the opening size and let the
+      // body scroll so the fixed footer stays inside the original frame.
+      if (!promptIdle && contentChanged && (!nativeWayland || promptKDEReady)) {
         if (w.getBounds().height !== bounds.height || w.getBounds().width !== bounds.width)
           w.setBounds(bounds);
         await resizeKDEPrompt(profile, process.pid, w.id, bounds);
