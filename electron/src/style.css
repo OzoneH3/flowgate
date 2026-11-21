@@ -1264,10 +1264,7 @@ body.hide-info .tabs { width: calc(100% - 8px); }
 .toolbar .desktop-menu > summary { font-size: 13px; padding: 2px 4px; background: transparent; border: 0; color: var(--fg-text); }
 .toolbar .desktop-menu > summary:hover { background: #3a3a3a; }
 .toolbar-window-menu .menu-panel { left: 0; right: auto; }
-.toolbar-units { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-text); }
-.toolbar-units select { height: 24px; min-height: 24px; width: 92px; padding: 0 4px; font-size: 12px; }
 .toolbar-status { font-size: 12px; color: var(--fg-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
-.toolbar-separator { flex: none; color: var(--fg-muted); }
 .toolbar #search { order: 9; flex: 0 1 320px; width: 320px; min-width: 120px; height: 24px; margin-left: auto; font-size: 12px; }
 .tabs { padding: 2px 0 0; }
 .tabs button { font-size: 12px; padding: 0 8px; height: 22px; min-height: 22px; line-height: 22px; border-radius: 0; }
@@ -1353,7 +1350,7 @@ body.preset-status #tree th.col-filler, body.preset-status #tree td.filler { dis
 .graph-sample:not(.pinned) { pointer-events: none; }
 .graph-sample:not(.pinned) > div { display: none; }
 #trafficCanvas:focus-visible { outline: 1px solid var(--fg-selected); outline-offset: -1px; }
-@media (max-width: 1000px) { .toolbar { gap: 5px; } .toolbar .brand { margin-right: 0; font-size: 13px; } .toolbar-units select { width: 82px; } }
+@media (max-width: 1000px) { .toolbar { gap: 5px; } .toolbar .brand { margin-right: 0; font-size: 13px; } }
 
 .floating-rule-status { position:fixed; z-index:45; top:110px; right:24px; width:min(450px,calc(100vw - 48px)); max-height:calc(100vh - 140px); overflow:auto; padding:8px; background:var(--fg-content); border:1px solid var(--fg-border); box-shadow:0 4px 16px #0009; }
 .floating-rule-status > header { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }

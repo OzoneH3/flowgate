@@ -144,7 +144,10 @@ try {
         .locator('#rows tr[data-id^="process:"] .name')
         .nth((step / 4) % 2)
         .click();
+      await main.locator('#toolsMenu > summary').click();
+      await main.locator('#optionsMenu > summary').click();
       await main.selectOption('#displayUnits', step % 8 ? 'autoBit' : 'autoByte');
+      await main.locator('#toolsMenu > summary').click();
       await info.locator('[data-focus="cell:process:incoming"]').first().click();
       await info.locator('.quick-popup').waitFor();
       await info.keyboard.press('Enter');

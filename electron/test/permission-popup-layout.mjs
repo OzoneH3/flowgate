@@ -282,8 +282,15 @@ try {
   assert.equal(await appliedStyle(main), 'main');
   assert.equal(await appliedStyle(prompt), 'permission');
   assert.equal(await main.locator('.toolbar').evaluate((el) => getComputedStyle(el).height), '47px');
+  const units = main.getByRole('combobox', { name: 'Display units' });
+  assert(await units.isHidden());
   await main.locator('#toolsMenu > summary').click();
   await main.locator('#optionsMenu > summary').click();
+  assert(await main.locator('#optionsMenu').getByRole('combobox', { name: 'Display units' }).isVisible());
+  await units.selectOption('Mbit');
+  await main.waitForFunction(() => window.flowgate.preferences().then((p) => p.displayUnit === 'Mbit'));
+  await units.selectOption('autoByte');
+  await main.waitForFunction(() => window.flowgate.preferences().then((p) => p.displayUnit === 'autoByte'));
   const timeout = main.getByRole('spinbutton', { name: 'Decision timeout (seconds)' });
   const saveTimeout = main.locator('#decisionTimeoutSave');
   await main.waitForFunction(() => document.querySelector('#decisionTimeoutSeconds')?.value === '30');

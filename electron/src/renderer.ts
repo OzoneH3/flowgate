@@ -923,7 +923,7 @@ if (promptID) {
     }
   });
 } else {
-  root.innerHTML = `<header class="toolbar"><strong class="brand">FLOWGATE</strong><span id="toolbarUnits" class="toolbar-units"><label for="displayUnits">Units</label><select id="displayUnits" aria-label="Display units" title="Display bytes or bits using decimal units."></select></span><span id="controlStatus" class="toolbar-status"></span><input id="search" type="search" aria-label="Search Activity" placeholder="Search"></header><nav class="tabs" aria-label="Views"><button id="activityTab" aria-selected="true">Activity</button><button id="requestsTab" aria-selected="false">Pending requests <span id="pendingCount">0</span></button><span id="tabsPaneControls" class="pane-controls"></span></nav><main id="activityView"><section id="trafficGraph"></section><section class="activity-main"><div class="filterbar"><select id="activitySource" aria-label="Activity measurement source"><option value="tcp">TCP</option><option value="udp">UDP</option></select><button id="uploadLimits">Upload limits</button><button id="rateMode" aria-pressed="false" title="Switch between rate and total traffic">Rate</button><select id="columnPreset" aria-label="Column preset"><option value="status">Status</option><option value="details">Details</option></select><select id="filter" aria-label="Socket filter"><option value="all">All sockets</option><option value="active">Active TCP / connected UDP</option><option value="listening">Listening TCP / bound UDP</option></select><span class="filterbar-icons"><button id="expand" class="icon-button" title="Expand all" aria-label="Expand all">⊞</button><button id="collapse" class="icon-button" title="Collapse all" aria-label="Collapse all">⊟</button><button id="refreshNow" class="icon-button" title="Refresh now" aria-label="Refresh now">↻</button></span></div><div class="table-scroll"><table id="tree" role="treegrid" tabindex="0" aria-label="Application process socket activity"><thead><tr id="headers"></tr></thead><tbody id="rows"></tbody></table></div><div id="activitySummary" class="summary"></div></section><aside id="activityDetails" hidden><h2>App details<span id="infoPaneControls" class="pane-controls"></span></h2><h3 id="selectedName">FlowGate Activity</h3><div id="selectedExecutable"></div><div class="info-scroll"><h3 id="infoProperties" class="info-section-title">Overview</h3><dl id="info"></dl><section id="infoRules"></section><section class="info-tools"><h3 class="info-section-title">Tools</h3><button id="infoOpenRules">Rule list</button><button id="infoOpenLog">Decision log</button><button id="infoOpenPending">Pending requests</button></section></div></aside></main><main id="requestsView" hidden><section class="request-list"><h2>Pending requests</h2><p class="hint">One row per group of identical requests; a decision answers its oldest request. Dismissal grants nothing. Closing FlowGate leaves an independent controller running.</p><div class="table-scroll"><table id="requests"><thead><tr><th>Application</th><th>Direction</th><th>Protocol</th><th>Remote endpoint</th><th>Requests</th><th>State</th></tr></thead><tbody id="requestRows"></tbody></table></div><section id="temporaryDecisions" class="temporary-decisions" hidden><h3 title="Temporary decisions are kept in memory">Temporary decisions</h3><div id="leaseRows"></div></section><section id="permissionResultsView" class="permission-results" hidden><h3 title="Outcomes of submitted decisions">Results</h3><ol id="permissionResultRows"></ol></section></section><aside class="request-sidebar"><h2>Connection permission</h2><div id="requestDetails"></div></aside></main><footer><span id="footerSummary"></span><button id="resultsAttention" class="link-button results-attention" hidden></button><span id="feedback" role="status" aria-live="polite"></span></footer>`;
+  root.innerHTML = `<header class="toolbar"><strong class="brand">FLOWGATE</strong><span id="controlStatus" class="toolbar-status"></span><input id="search" type="search" aria-label="Search Activity" placeholder="Search"></header><nav class="tabs" aria-label="Views"><button id="activityTab" aria-selected="true">Activity</button><button id="requestsTab" aria-selected="false">Pending requests <span id="pendingCount">0</span></button><span id="tabsPaneControls" class="pane-controls"></span></nav><main id="activityView"><section id="trafficGraph"></section><section class="activity-main"><div class="filterbar"><select id="activitySource" aria-label="Activity measurement source"><option value="tcp">TCP</option><option value="udp">UDP</option></select><button id="uploadLimits">Upload limits</button><button id="rateMode" aria-pressed="false" title="Switch between rate and total traffic">Rate</button><select id="columnPreset" aria-label="Column preset"><option value="status">Status</option><option value="details">Details</option></select><select id="filter" aria-label="Socket filter"><option value="all">All sockets</option><option value="active">Active TCP / connected UDP</option><option value="listening">Listening TCP / bound UDP</option></select><span class="filterbar-icons"><button id="expand" class="icon-button" title="Expand all" aria-label="Expand all">⊞</button><button id="collapse" class="icon-button" title="Collapse all" aria-label="Collapse all">⊟</button><button id="refreshNow" class="icon-button" title="Refresh now" aria-label="Refresh now">↻</button></span></div><div class="table-scroll"><table id="tree" role="treegrid" tabindex="0" aria-label="Application process socket activity"><thead><tr id="headers"></tr></thead><tbody id="rows"></tbody></table></div><div id="activitySummary" class="summary"></div></section><aside id="activityDetails" hidden><h2>App details<span id="infoPaneControls" class="pane-controls"></span></h2><h3 id="selectedName">FlowGate Activity</h3><div id="selectedExecutable"></div><div class="info-scroll"><h3 id="infoProperties" class="info-section-title">Overview</h3><dl id="info"></dl><section id="infoRules"></section><section class="info-tools"><h3 class="info-section-title">Tools</h3><button id="infoOpenRules">Rule list</button><button id="infoOpenLog">Decision log</button><button id="infoOpenPending">Pending requests</button></section></div></aside></main><main id="requestsView" hidden><section class="request-list"><h2>Pending requests</h2><p class="hint">One row per group of identical requests; a decision answers its oldest request. Dismissal grants nothing. Closing FlowGate leaves an independent controller running.</p><div class="table-scroll"><table id="requests"><thead><tr><th>Application</th><th>Direction</th><th>Protocol</th><th>Remote endpoint</th><th>Requests</th><th>State</th></tr></thead><tbody id="requestRows"></tbody></table></div><section id="temporaryDecisions" class="temporary-decisions" hidden><h3 title="Temporary decisions are kept in memory">Temporary decisions</h3><div id="leaseRows"></div></section><section id="permissionResultsView" class="permission-results" hidden><h3 title="Outcomes of submitted decisions">Results</h3><ol id="permissionResultRows"></ol></section></section><aside class="request-sidebar"><h2>Connection permission</h2><div id="requestDetails"></div></aside></main><footer><span id="footerSummary"></span><button id="resultsAttention" class="link-button results-attention" hidden></button><span id="feedback" role="status" aria-live="polite"></span></footer>`;
   // The GUI's own release identity (verified against its bundle manifest).
   void window.flowgate
     .guiBuild()
@@ -1305,7 +1305,7 @@ function onToolbarMenuPress(trigger: HTMLElement, open: () => void) {
     else if (trigger instanceof HTMLButtonElement) open();
   });
 }
-function setupMainMenus(windowMenu: HTMLElement) {
+function setupMainMenus(windowMenu: HTMLElement, units: HTMLSelectElement) {
   const toolbar = document.querySelector('.toolbar')!;
   const make = (id: string, title: string) => {
     const menu = element('details', '', 'desktop-menu');
@@ -1329,7 +1329,9 @@ function setupMainMenus(windowMenu: HTMLElement) {
   const sourceLabel = element('label', 'Activity display source', 'menu-control');
   sourceLabel.append($('activitySource'));
   sourceLabel.title = 'Choose which measurements Activity shows.';
-  options.querySelector('.menu-panel')!.prepend(sourceLabel);
+  const unitsLabel = element('label', 'Units', 'menu-control');
+  unitsLabel.append(units);
+  options.querySelector('.menu-panel')!.prepend(sourceLabel, unitsLabel);
   tools.lastElementChild!.append(control, element('hr'), monitoring, element('hr'), options);
   const about = element('button', 'About FlowGate');
   const dialog = element('dialog');
@@ -1389,9 +1391,7 @@ function setupMainMenus(windowMenu: HTMLElement) {
     };
     windowPanel.append(b);
   }
-  const unitsSeparator = element('span', '|', 'toolbar-separator');
-  unitsSeparator.setAttribute('aria-hidden', 'true');
-  $('toolbarUnits').before(file, tools, windowMenu, help, unitsSeparator);
+  $('controlStatus').before(file, tools, windowMenu, help);
   // Preserve an obvious state entry point; text is updated by the existing evaluation state.
   const status = element('button', 'Firewall controls', 'firewall-state');
   status.id = 'firewallMenuStatus';
@@ -1402,7 +1402,7 @@ function setupMainMenus(windowMenu: HTMLElement) {
   };
   onToolbarMenuPress(status, () => openTool(control, controlTitle));
   onToolbarMenuPress($('extendedBadge'), () => openTool(monitoring, monitoring.querySelector('summary')!));
-  $('toolbarUnits').after(status);
+  $('controlStatus').before(status);
   for (const menu of [file, tools, windowMenu.querySelector('details')!, help, control, monitoring, options]) {
     onToolbarMenuPress(menu.querySelector('summary')!, () => { menu.open = !menu.open; });
   }
@@ -1465,7 +1465,10 @@ function setupPaneControls() {
   windowMenu.classList.add('toolbar-window-menu');
   (document.getElementById('controlMenu') || document.querySelector('.brand'))!.after(windowMenu);
   // Display units never change the chosen accounting source or numeric sorting.
-  const units = $<HTMLSelectElement>('displayUnits');
+  const units = element('select');
+  units.id = 'displayUnits';
+  units.setAttribute('aria-label', 'Display units');
+  units.title = 'Display bytes or bits using decimal units.';
   for (const value of DISPLAY_UNITS) units.add(new Option(value, value));
   const applyUnit = (value: DisplayUnit) => {
     displayUnit = value;
@@ -1482,7 +1485,7 @@ function setupPaneControls() {
   void window.flowgate
     .preferences()
     .then((p) => applyUnit(isDisplayUnit(p.displayUnit) ? p.displayUnit : 'autoByte'));
-  setupMainMenus(windowMenu);
+  setupMainMenus(windowMenu, units);
   $<HTMLSelectElement>('layoutPreset').onchange = () => {
     const v = $<HTMLSelectElement>('layoutPreset').value;
     void window.flowgate.paneControl('info', v === 'activity' ? 'close' : 'dock');
