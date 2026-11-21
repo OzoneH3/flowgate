@@ -12,7 +12,7 @@ the desktop. The per-app monitoring and control workflow takes inspiration from
 [Try the desktop](#try-the-desktop) · [Install FlowGate](#install-flowgate) ·
 [Documentation](#documentation)
 
-![FlowGate Activity view with the traffic chart above the app table and the selected app’s Overview at right](docs/images/flowgate-main-window.png)
+![FlowGate Activity view with download and upload totals in the traffic chart header, the app table below, and the selected app’s Overview at right](docs/images/flowgate-main-window.png)
 
 *The Activity view shows simulated traffic. On wide windows,
 the inspector sits beside the traffic chart and app table.*
@@ -36,9 +36,10 @@ the inspector sits beside the traffic chart and app table.*
   [Limits and priorities](docs/ZONE-SHAPING.txt) ·
   [Download coverage](docs/DOWNLOAD-LIMITER.txt)
 
-![FlowGate Ask prompt for an outgoing TCP connection from a demo app, with its remote endpoint, Remember options, duration, and Allow and Deny buttons visible](docs/images/flowgate-ask-remember.png)
+![FlowGate Ask prompt for an outgoing TCP connection from Atlas Sync, with endpoint details, rule scope, and a row of For a while buttons beneath Allow and Deny](docs/images/flowgate-ask-remember.png)
 
-*An outgoing Ask prompt with Remember expanded and a five-minute duration selected.*
+*An outgoing Ask prompt with a five-minute rule duration. The For a while
+buttons use the one-minute duration below Next request.*
 
 ## Try the desktop
 
