@@ -3167,7 +3167,7 @@ function renderAboutBuild() {
   if (!el) return;
   // guiBuild() may resolve before the first state publication.
   const v = headerVersion(guiBuild, state?.control.connected ? state.control.daemonBuild : undefined);
-  el.textContent = v.title + (v.mismatch ? '\nThe GUI and daemon are running different revisions.' : '');
+  el.textContent = v.title + (v.mismatch ? '\nThe GUI and daemon are running different builds.' : '');
 }
 function consume(next: ClientState) {
   if (!acceptsPublication(state, next)) return;

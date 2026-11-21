@@ -170,7 +170,10 @@ def main():
     lab.system = fedora
     lab.run_udp_case = exercise
     args.profile = args.lab / "profiles/fedora-45.json"
-    args.archive = args.artifact_dir / "flowgate-0.1.0-rc.8-linux-x86_64.tar.gz"
+    archives = list(args.artifact_dir.glob("flowgate-*-linux-x86_64.tar.gz"))
+    if len(archives) != 1:
+        parser.error("--artifact-dir must contain exactly one FlowGate archive and its offline installer")
+    args.archive = archives[0]
     args.installer = args.artifact_dir / "flowgate-release.py"
     args.archive_sha256 = digest(args.archive)
     args.installer_sha256 = digest(args.installer)

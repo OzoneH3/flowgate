@@ -59,48 +59,73 @@ already installed (same version and source revision).
 
 ## Build and inspect a package
 
-From the checkout root, `make package` builds Electron, the daemon and its native
-helpers and runs the standalone release and freshness checks. The default version
-is **0.1.0-rc.7**. A successful build prints the archive path and writes four files.
-
-```text
-build/dist/flowgate-0.1.0-rc.7-linux-x86_64.tar.gz
-build/dist/flowgate-0.1.0-rc.7-linux-x86_64.tar.gz.sha256
-build/dist/flowgate-release.py
-build/dist/flowgate-release.py.sha256
-```
-
-Build and verify the default package from the checkout root.
+Run these commands in a clean Git checkout with the FlowGate tags available.
 
 ```sh
-make package &&
-(cd build/dist && /usr/bin/sha256sum -c flowgate-0.1.0-rc.7-linux-x86_64.tar.gz.sha256 flowgate-release.py.sha256)
+make package
+bundle="$(make -s archive-path)"
+(cd "$(dirname "$bundle")" && /usr/bin/sha256sum -c "$(basename "$bundle").sha256" flowgate-release.py.sha256)
+make identity
 ```
 
-Each check prints the filename followed by `OK`. Use the following commands to install
-that package in separate steps from the same trusted checkout.
+An exact `flowgate-vX.Y.Z-rc.N` or `flowgate-vX.Y.Z` tag supplies the displayed
+version. An untagged commit uses the most recent FlowGate tag on its
+first-parent history, or the Electron package's numeric baseline before the
+first release tag. It has a development version such as
+`0.1.0-rc.8.dev-0123456789ab` or `0.1.0-dev-0123456789ab`. Ordinary commits
+derive a fresh identity from their Git SHA. A source tarball without Git
+metadata is refused. Clone the repository, fetch its tags and check out the
+intended commit, or install the verified binary package.
+
+The archive is `build/dist/<release-id>/flowgate-<release-id>-linux-x86_64.tar.gz`.
+A tagged release ID appends the first 12 characters of the source SHA to the
+version. A development version already contains those characters and doubles
+as its release ID. The manifest records the complete source SHA. Each output
+directory contains its own installer and both byte-for-byte SHA-256 receipts.
+Rebuilding an identity verifies and reuses its existing package. Existing
+packages stored elsewhere keep their original names and receipts.
+
+### Prepare an RC or stable release
+
+Choose a clean, reviewed commit, then prepare the next candidate locally.
+
+```sh
+git tag -a flowgate-v0.1.0-rc.9 -m 'FlowGate 0.1.0-rc.9'
+make package
+```
+
+For the stable release, check out its reviewed commit and run:
+
+```sh
+git tag -a flowgate-v0.1.0 -m 'FlowGate 0.1.0'
+make package
+```
+
+Use a single FlowGate release tag per commit. When promoting an already tagged
+candidate, make a separate stable release commit before tagging. These commands
+create local tags and local packages. `VERSION` and `ARTIFACT` overrides are
+replaced by the tag or commit and `make -s archive-path`.
+
+### Inspect or install the selected build
 
 ```sh
 (
   set -eu
-  bundle="$PWD/build/dist/flowgate-0.1.0-rc.7-linux-x86_64.tar.gz"
+  bundle="$(make -s archive-path)"
   digest=$(cut -d ' ' -f 1 "$bundle.sha256")
   make preflight BUNDLE="$bundle" SHA256="$digest"
   make install BUNDLE="$bundle" SHA256="$digest"
 )
+/usr/local/lib/flowgate/current/flowgate version
+readlink -f /usr/local/lib/flowgate/current
 ```
 
-Both targets use the checkout's `deployment/standalone/release.py`. Preflight
-takes an install lock, verifies the privately staged archive and examines host
-state. After installation, open `flowgate-ui` as the desktop user.
-
-The RC8 lab examples use an explicit version. Give the candidate its own
-directory so its installer and receipts stay together.
-
-```sh
-make package VERSION=0.1.0-rc.8 \
-  ARTIFACT="$PWD/build/dist/rc8/flowgate-0.1.0-rc.8-linux-x86_64.tar.gz"
-```
+The installer uses the privately verified archive and the release ID becomes
+the directory under `/usr/local/lib/flowgate/releases/`. Help → About shows
+the verified desktop manifest's version and source. It also shows the linked
+daemon's version and source when supplied by that daemon. Older binaries that
+predate the version field still report their source SHA. The installer and
+rollback output identify the selected package, including legacy RC8 releases.
 
 ## Install a downloaded package offline
 
@@ -266,8 +291,8 @@ incomplete.
 
 | Version | Audited archive SHA-256 |
 | --- | --- |
-| 0.1.0-rc.7 (default) | `0358a862f84aa60db55cbf5803a24984e9d736eda81979a37228c24bef37b9ae` |
-| 0.1.0-rc.8 (explicit) | `112995add59425a674ce7f25e9af220f5e96188e39d08f64aa7044cfcd33041d` |
+| 0.1.0-rc.7 (historical) | `0358a862f84aa60db55cbf5803a24984e9d736eda81979a37228c24bef37b9ae` |
+| 0.1.0-rc.8 (historical) | `112995add59425a674ce7f25e9af220f5e96188e39d08f64aa7044cfcd33041d` |
 
 Both builds produced installer SHA-256
 `94a2956bf3477875aa63eafc3f2abd555160837d220f8449b3dfe3cbc349124c`.

@@ -4,7 +4,6 @@ import datetime
 import json
 import os
 from pathlib import Path
-import re
 import shutil
 import stat
 import subprocess
@@ -27,22 +26,37 @@ def write_json(path, value):
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + '\n')
 
 
-def pack(version, output):
-    if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9]+(?:\.[a-zA-Z0-9]+)*)?', version):
-        raise ValueError('Invalid release version')
-    source = (BUILD / 'source').read_text().strip()
-    revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    if source != revision or subprocess.check_output(
-        ['git', 'status', '--porcelain', '--untracked-files=no'], cwd=ROOT, text=True,
-    ):
-        raise RuntimeError('Build and clean source commit must match')
-    release = f'{version}-{revision[:12]}'
-    output.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=output.parent) as folder:
-        staging = Path(folder)
+def receipt(path):
+    return f'{digest(path)}  {path.name}\n'
+
+
+def verify_retained(output, identity):
+    bootstrap = output.with_name('flowgate-release.py')
+    for path in (output, bootstrap):
+        if path.with_suffix(path.suffix + '.sha256').read_text() != receipt(path):
+            raise RuntimeError(f'Retained receipt does not match {path}')
+    with tarfile.open(output, 'r:gz') as stream:
+        manifest = json.load(stream.extractfile('release.json'))
+    if manifest['schema'] != 2 or any(manifest[key] != value for key, value in identity.items()):
+        raise RuntimeError(f'Retained archive has a different build identity: {output}')
+    if bootstrap.read_bytes() != (HERE / 'release.py').read_bytes():
+        raise RuntimeError(f'Retained installer differs from this source: {bootstrap}')
+
+
+def pack(identity, output):
+    if json.loads((BUILD / 'identity.json').read_text()) != identity:
+        raise RuntimeError('Build and clean source identity must match. Run make build again.')
+    if output.parent.exists() or output.parent.is_symlink():
+        verify_retained(output, identity)
+        return
+    output.parent.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=output.parent.parent) as folder:
+        staging = Path(folder) / 'payload'
+        artifacts = Path(folder) / 'artifacts'
+        artifacts.mkdir()
         backend = staging / 'backend'
         gui = staging / 'gui'
-        backend.mkdir()
+        backend.mkdir(parents=True)
         (gui / 'electron').mkdir(parents=True)
         files = {
             'flowgate': BUILD / 'flowgate',
@@ -73,26 +87,29 @@ def pack(version, output):
         ]
         for name in executables:
             (backend / name).chmod(0o755)
-        write_json(backend / 'standalone-release.json', {'version': version, 'source': source})
+        write_json(backend / 'standalone-release.json', identity)
         # The legacy field gates reuse of the monitoring installer. The standalone
         # manifest records its own test scope separately.
         build = json.loads(subprocess.check_output([str(backend / 'flowgate'), 'version']))
-        if build.get('source') != source or build.get('holder_iterator_sha256') != digest(backend / 'holder-iterator'):
+        if (any(build.get(key) != identity[key] for key in ('version', 'source')) or
+            build.get('holder_iterator_sha256') != digest(backend / 'holder-iterator')):
             raise RuntimeError('Daemon or collector build does not match the payload')
         write_json(backend / 'manifest.json', {
-            'release': release, 'source': source, 'max_rule_schema': build['max_rule_schema'],
+            **identity, 'max_rule_schema': build['max_rule_schema'],
             'isolated_passed': False, 'executables': executables,
             'state_compatibility': 'flowgate-rules-and-settings-v1',
             'files': {p.name: digest(p) for p in sorted(backend.iterdir())},
         })
         electron = BUILD / 'electron'
         shutil.copytree(electron / 'dist', gui / 'electron/dist')
-        shutil.copyfile(electron / 'package.json', gui / 'electron/package.json')
+        app = json.loads((electron / 'package.json').read_text())
+        app['version'] = identity['version']
+        write_json(gui / 'electron/package.json', app)
         shutil.copytree(electron / 'node_modules/electron/dist', gui / 'runtime')
         shutil.copyfile(ROOT / 'electron/fontconfig_isolation.py', gui / 'fontconfig_isolation.py')
         shutil.copy2(HERE / 'flowgate-ui', gui / 'flowgate-ui')
         write_json(gui / 'matched-manifest.json', {
-            'source': source, 'version': version,
+            **identity,
             'built_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
             'files': {str(p.relative_to(gui)): digest(p) for p in (gui / 'electron').rglob('*') if p.is_file()},
         })
@@ -102,8 +119,7 @@ def pack(version, output):
             if path.is_file():
                 path.chmod(0o755 if path.stat().st_mode & 0o111 else 0o644)
         manifest = {
-            'schema': 1, 'platform': 'linux-x86_64', 'release': release,
-            'version': version, 'source': source,
+            **identity, 'schema': 2, 'platform': 'linux-x86_64',
             'files': {
                 str(p.relative_to(staging)): {'sha256': digest(p), 'mode': stat.S_IMODE(p.stat().st_mode)}
                 for p in sorted(staging.rglob('*')) if p.is_file()
@@ -112,16 +128,22 @@ def pack(version, output):
         write_json(staging / 'release.json', manifest)
         # Standalone installation uses the exact externally pinned archive.
         # The separate bootstrap is for the first install on machines without the tool.
-        archive = staging / 'package.tar.gz'
+        archive = artifacts / output.name
         with tarfile.open(archive, 'w:gz', compresslevel=3) as stream:
             for path in ('release.json', 'backend', 'gui'):
                 stream.add(staging / path, arcname=path)
-        archive.replace(output)
-    bootstrap = output.parent / 'flowgate-release.py'
-    shutil.copyfile(HERE / 'release.py', bootstrap)
-    output.with_suffix(output.suffix + '.sha256').write_text(f'{digest(output)}  {output.name}\n')
-    (output.parent / 'flowgate-release.py.sha256').write_text(f'{digest(bootstrap)}  {bootstrap.name}\n')
-    print(output)
+        bootstrap = artifacts / 'flowgate-release.py'
+        shutil.copyfile(HERE / 'release.py', bootstrap)
+        for path in (archive, bootstrap):
+            path.with_suffix(path.suffix + '.sha256').write_text(receipt(path))
+        # Publish the archive, installer and receipts together. If a concurrent
+        # build wins, retain and check its already published files.
+        try:
+            artifacts.rename(output.parent)
+        except OSError:
+            if not output.parent.is_dir():
+                raise
+            verify_retained(output, identity)
 
 
 if __name__ == '__main__':
@@ -129,4 +151,14 @@ if __name__ == '__main__':
         raise SystemExit('FlowGate packaging requires Python 3.9 or newer.')
     if not os.access(SHA256SUM, os.X_OK):
         raise SystemExit(f'FlowGate packaging requires {SHA256SUM}.')
-    pack(sys.argv[1], Path(sys.argv[2]).resolve())
+    from identity import archive_path, source_identity
+
+    if len(sys.argv) != 1:
+        raise SystemExit('Use make package from the chosen commit or release tag; the archive name is derived from its identity.')
+    try:
+        identity = source_identity(require_clean=True)
+        output = archive_path(identity)
+        pack(identity, output)
+        print(output)
+    except (OSError, RuntimeError, ValueError, subprocess.CalledProcessError) as error:
+        raise SystemExit(f'FlowGate: {error}') from None

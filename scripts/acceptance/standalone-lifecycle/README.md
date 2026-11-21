@@ -4,8 +4,8 @@ Run from the FlowGate checkout after coordinating one disposable Debian SUT slot
 with the lab runner. Run as the ordinary host user with `qemu:///session`.
 The runner owns the host TCP receiver and guest cleanup. The lifecycle binds
 its UDP echo receiver to an ephemeral loopback port on the lab host.
-Build the committed candidate with `make package VERSION=0.1.0-rc.8` and a
-separate `ARTIFACT` path under `build/dist/`. Set `CANDIDATE_DIR` to that
+Build the committed candidate with `make package`. Set `CANDIDATE_DIR` to
+`$(dirname "$(make -s archive-path)")`, or to a retained candidate's
 directory, `CANDIDATE_SOURCE` to the full source commit, and the two SHA-256
 variables to the trusted receipt digests.
 
@@ -27,7 +27,8 @@ against their digests on the host and in the guest.
    Record the collector's helper-execution failure and verify that
    `/run/flowgate-api` is on the stock `/run` mount with `noexec`.
 2. Use the candidate's documented offline `preflight` and `install`.
-   Verify the running and on-disk build, a new daemon generation, an active
+   Verify the running and on-disk build and the installed About identity.
+   Check for a new daemon generation, an active
    collector, automatically restored protection in both directions, the
    unchanged Block, and zero TCP delivery.
 3. Exchange 12 labeled IPv4 UDP requests of 1,200 payload bytes and replies of

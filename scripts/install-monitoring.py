@@ -187,6 +187,7 @@ def verify_monitoring(r,manifest,before_rules):
  problems=[]
  b=r.get('build')or{}
  if b.get('source')!=manifest['source']or b.get('executable_sha256')!=manifest['files']['flowgate']:problems.append(('build',b))
+ if 'version'in manifest and b.get('version')!=manifest['version']:problems.append(('build version',b.get('version')))
  p=r.get('protection')or{}
  if p.get('state')!='stopped'or p.get('desired_mode')!='monitoring':problems.append(('protection',p))
  if (r.get('enforcement')or{}).get('state')!='stopped':problems.append(('enforcement',r.get('enforcement')))

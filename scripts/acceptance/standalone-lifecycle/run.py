@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import sys
 import udp_echo
 
@@ -24,10 +25,10 @@ API = "python3 fg-lab/guest_tools.py flowgate /run/flowgate-api/daemon.sock"
 PROBE = "fg-lab/fg-lab-probe fg-lab/guest_tools.py probe 10.80.0.1"
 
 
-def verified_package(lab, directory, pinned):
+def verified_package(lab, directory, pinned, archive_name=ARCHIVE):
     source, digest, installer_digest = pinned
     package = argparse.Namespace(
-        archive=directory / ARCHIVE,
+        archive=directory / archive_name,
         installer=directory / INSTALLER,
         archive_sha256=digest,
         installer_sha256=installer_digest,
@@ -75,6 +76,26 @@ def exercise(lab, sut, receiver, candidate, new_release, old_release, evidence):
         lab.verify_build(binary, release)
         lab.verify_build(state["build"], release)
         assert Path(release_path).name == release["release"], release_path
+        gui = Path(CURRENT).parent / "gui" / Path(release_path).name
+        # Exercise the packaged About reader and formatter on the installed
+        # payload, with the actual connected daemon's API identity.
+        script = """
+const [gui, build] = process.argv.slice(1);
+const {readGuiBuild} = require(gui + '/electron/dist/test/gui-build.cjs');
+const {headerVersion, parseDaemonBuild} = require(gui + '/electron/dist/test/build-info.cjs');
+const desktop = readGuiBuild(gui + '/electron');
+const daemon = parseDaemonBuild(JSON.parse(build));
+console.log(JSON.stringify({desktop, daemon, about: headerVersion(desktop, daemon)}));
+"""
+        about = json.loads(sut.run("ELECTRON_RUN_AS_NODE=1 " + shlex.join([
+            str(gui / "runtime/electron"), "-e", script, str(gui), json.dumps(state["build"]),
+        ])).stdout)
+        assert (about["desktop"]["state"], about["desktop"]["source"], about["desktop"]["version"]) == (
+            "verified", release["source"], release["version"],
+        ), about
+        assert not about["about"]["mismatch"], about
+        if release["schema"] == 2:
+            assert binary["version"] == about["daemon"]["version"] == release["version"], (binary, about)
         protection = state["protection"]
         assert (protection["state"], protection["desired_mode"]) == expected, protection
         enforcement = state["enforcement"]
@@ -82,6 +103,7 @@ def exercise(lab, sut, receiver, candidate, new_release, old_release, evidence):
         if expected[1] == "both":
             assert protection["profile"] == enforcement["profile"] == "both", state
         return {"source": binary["source"], "generation": state["generation"],
+                "cli_version": binary.get("version"), "about": about,
                 "executable_sha256": binary["executable_sha256"], "release_path": release_path,
                 "protection": protection, "enforcement": enforcement}
 
@@ -218,9 +240,12 @@ def main():
 
     vm.RUNS = ROOT / ".workspace/standalone-lifecycle/runs"
     old, old_release = verified_package(lab, paths.old_dir, PREDECESSOR)
+    archives = list(paths.new_dir.glob("flowgate-*-linux-x86_64.tar.gz"))
+    if len(archives) != 1:
+        parser.error("--new-dir must contain exactly one FlowGate archive and its offline installer")
     new, new_release = verified_package(lab, paths.new_dir, (
         paths.new_source, paths.new_archive_sha256, paths.new_installer_sha256,
-    ))
+    ), archives[0].name)
     old.profile = paths.lab / "profiles/debian-13.json"
     old.scenario = [NAME]
     old.keep_failed = False

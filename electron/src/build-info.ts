@@ -12,16 +12,23 @@ export interface GuiBuild {
 export interface DaemonBuild {
   source: string;
   modified: boolean;
+  version?: string;
 }
 
 export const HEX40 = /^[0-9a-f]{40}$/;
+
+export function parseBuildVersion(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length <= 64 &&
+    /^\d+\.\d+\.\d+(?:-[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*)?$/.test(value) ? value : undefined;
+}
 
 /** Fail-soft: the daemon reports `source` (some builds `revision`). */
 export function parseDaemonBuild(raw: unknown): DaemonBuild | undefined {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
   const b = raw as Record<string, unknown>;
   const source = [b.source, b.revision].find((v): v is string => typeof v === 'string' && HEX40.test(v));
-  return source ? { source, modified: b.modified === true } : undefined;
+  const version = parseBuildVersion(b.version);
+  return source ? { source, modified: b.modified === true, ...(version ? { version } : {}) } : undefined;
 }
 
 export function formatBuildTime(iso: string, timeZone?: string, locale?: string) {
@@ -49,8 +56,10 @@ export function headerVersion(gui: GuiBuild | undefined, daemon: DaemonBuild | u
     lines.push('GUI build: ' + gui.reason);
   }
   if (daemon) {
+    if (daemon.version) lines.push('Daemon version: ' + daemon.version);
     lines.push('Daemon build: ' + daemon.source + (daemon.modified ? ' (modified)' : ''));
-    if (gui?.state === 'verified' && daemon.source !== gui.source) {
+    if (gui?.state === 'verified' && (daemon.source !== gui.source ||
+        (daemon.version && gui.version && daemon.version !== gui.version))) {
       mismatch = true;
       text += ' · daemon ' + daemon.source.slice(0, 7);
     }

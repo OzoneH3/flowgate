@@ -80,7 +80,7 @@ including Electron sandbox support.
 | --- | --- |
 | `make build` | Builds the standalone daemon, Electron desktop and native helpers under `build/`. |
 | `make check` | Runs the standalone release and update-freshness checks. |
-| `make package` | Builds and checks the release, then writes the archive, offline installer and two SHA-256 receipts under `build/dist/`. The default version is `0.1.0-rc.7`. |
+| `make package` | Builds and checks the package, then writes its archive, offline installer and two SHA-256 receipts under `build/dist/<release-id>/`. An exact FlowGate tag supplies the release version. Untagged commits use a development version with their short Git SHA. |
 | `make preflight BUNDLE="$bundle" SHA256="$digest"` | Stages and verifies the archive with sudo and checks host readiness for installation. |
 | `make install BUNDLE="$bundle" SHA256="$digest"` | Verifies and installs the specified archive with sudo. |
 | `make update` | Builds, packages and verifies this checkout, runs preflight and install with sudo, then reloads the installed desktop in a graphical session. |

@@ -1,14 +1,13 @@
 # Fedora 45 protected boot and daemon restart
 
 Run from the FlowGate checkout with the prepared Fedora 45 base and SSH key
-from the adjacent `flowgate-lab` checkout. Build an RC8 package with the
+from the adjacent `flowgate-lab` checkout. Build a package with the
 normal standalone workflow. Use the generated archive, offline installer,
 and their SHA-256 receipts.
 
 ```sh
-make package VERSION=0.1.0-rc.8 \
-  ARTIFACT="$PWD/build/dist/fg-lab-fedora-guard/flowgate-0.1.0-rc.8-linux-x86_64.tar.gz"
-python3 -B scripts/acceptance/fedora-guard/run.py
+make package
+python3 -B scripts/acceptance/fedora-guard/run.py --artifact-dir "$(dirname "$(make -s archive-path)")"
 ```
 
 Use `--artifact-dir` or `--lab` for other locations. The lab runner verifies

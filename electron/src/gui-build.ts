@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { HEX40, type GuiBuild } from './build-info';
+import { HEX40, parseBuildVersion, type GuiBuild } from './build-info';
 
 // Main process only: compares the running GUI's files with its release manifest
 // (<bundle>/matched-manifest.json next to <bundle>/electron). Matching listed
@@ -68,9 +68,6 @@ export function readGuiBuild(appPath: string): GuiBuild {
     typeof manifest.built_at === 'string' && ISO.test(manifest.built_at) && Number.isFinite(Date.parse(manifest.built_at))
       ? manifest.built_at
       : undefined;
-  const version = typeof manifest.version === 'string' &&
-    manifest.version.length <= 64 &&
-    /^\d+\.\d+\.\d+(?:-[a-zA-Z0-9]+(?:\.[a-zA-Z0-9]+)*)?$/.test(manifest.version)
-    ? manifest.version : undefined;
+  const version = parseBuildVersion(manifest.version);
   return { state: 'verified', source, builtAt, ...(version ? { version } : {}), reason: 'GUI files match the release manifest.' };
 }

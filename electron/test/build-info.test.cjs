@@ -90,3 +90,15 @@ test('unverified or unavailable GUI identity never shows a version or the packag
     assert.doesNotMatch(v.text, /0\.1\.0|bbbbbbb/);
   }
 });
+test('About shows both package versions, including a development build of the same source', (t) => {
+  const app = bundle(t), manifest = path.join(path.dirname(app), 'matched-manifest.json');
+  const version = '0.1.0-rc.8.dev-' + A.slice(0, 12);
+  fs.writeFileSync(manifest, JSON.stringify({ ...JSON.parse(fs.readFileSync(manifest)), version }));
+  const gui = readGuiBuild(app);
+  assert.equal(gui.version, version);
+  const daemon = parseDaemonBuild({ source: A, modified: false, version: '0.1.0-rc.8' });
+  assert.equal(headerVersion(gui, daemon).mismatch, true);
+  assert.ok(headerVersion(gui, daemon).title.includes('Version: ' + version));
+  assert.match(headerVersion(gui, daemon).title, /Daemon version: 0\.1\.0-rc\.8\n/);
+  assert.equal(headerVersion(gui, { ...daemon, version }).mismatch, false);
+});

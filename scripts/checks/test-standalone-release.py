@@ -194,21 +194,28 @@ class ReleaseChecks(unittest.TestCase):
         self.assertEqual(foreign.read_text(), 'independent policy')
         self.assertEqual(userns.read_text(), '1\n')
 
-    def archive(self, extra=None):
+    def archive(self, extra=None, *, schema=1, desktop_version=None):
         backend = {name: b'backend\n' for name in {*release['FILES'], *release['UNITS'],
                                                     'launch', 'flowgate', 'standalone-release.json'}}
         source = 'a' * 40
-        name = '0.1.0-rc.1-aaaaaaaaaaaa'
+        version = '0.1.0-rc.1' if schema == 1 else '0.1.0-rc.1.dev-aaaaaaaaaaaa'
+        name = release['release_id'](version, source)
+        identity = {'release': name, 'source': source, 'version': version}
+        if schema == 2:
+            backend['standalone-release.json'] = json.dumps(identity).encode()
         sha = lambda data: hashlib.sha256(data).hexdigest()
         payload = {f'backend/{key}': value for key, value in backend.items()}
         payload['backend/manifest.json'] = json.dumps({
             'release': name, 'source': source,
+            **({'version': version} if schema == 2 else {}),
             'files': {key: sha(value) for key, value in backend.items()},
         }).encode()
         payload['gui/runtime/electron'] = b'Electron'
+        if schema == 2:
+            payload['gui/matched-manifest.json'] = json.dumps(identity).encode()
+            payload['gui/electron/package.json'] = json.dumps({'version': desktop_version or version}).encode()
         manifest = {
-            'schema': 1, 'platform': 'linux-' + platform.machine(), 'version': '0.1.0-rc.1',
-            'release': name, 'source': source,
+            **identity, 'schema': schema, 'platform': 'linux-' + platform.machine(),
             'files': {name: {'mode': 0o755, 'sha256': sha(data)} for name, data in payload.items()},
         }
         archive = self.root / 'bundle.tar.gz'
@@ -230,6 +237,17 @@ class ReleaseChecks(unittest.TestCase):
         path, manifest, backend = self.unpack(archive, digest)
         self.assertEqual(manifest['release'], backend['release'])
         self.assertEqual((path / 'gui/runtime/electron').read_bytes(), b'Electron')
+
+    def test_versioned_archive_requires_a_single_identity(self):
+        archive, digest = self.archive(schema=2)
+        _, manifest, backend = self.unpack(archive, digest)
+        self.assertEqual(manifest['version'], manifest['release'])
+        self.assertEqual(manifest['version'], backend['version'])
+
+    def test_versioned_archive_refuses_a_conflicting_desktop_version(self):
+        archive, digest = self.archive(schema=2, desktop_version='0.1.0-rc.7')
+        with self.assertRaisesRegex(RuntimeError, 'Electron package version differs'):
+            self.unpack(archive, digest)
 
     def test_release_hashes_use_file_bytes_independent_of_filename(self):
         payload = self.root / '-archive\\name\nwith spaces'

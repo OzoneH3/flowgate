@@ -44,6 +44,8 @@ FILES = {
     'flowgate.png': '/usr/local/share/icons/hicolor/256x256/apps/flowgate.png',
 }
 RELEASE_ID = re.compile(r'[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9]+(?:\.[A-Za-z0-9]+)*)?-[a-f0-9]{12}')
+VERSION = re.compile(r'[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9]+(?:\.[A-Za-z0-9]+)*)?')
+DEVELOPMENT_VERSION = re.compile(r'[0-9]+\.[0-9]+\.[0-9]+(?:-rc\.[0-9]+\.dev|-dev)-[a-f0-9]{12}')
 HEX = re.compile(r'[a-f0-9]{64}')
 LEGACY_UDP_SOURCES = frozenset({'13e3029ac2e4d2695b851cfb09710d9ab4bb8bf7'})
 MONITORING = b'{"schema":1,"mode":"monitoring"}'
@@ -67,6 +69,23 @@ profile flowgate-standalone-electron /usr/local/lib/flowgate/gui/[0-9]*/runtime/
 def digest(path):
     with path.open('rb') as f:
         return subprocess.check_output([SHA256SUM], stdin=f).split()[0].decode('ascii')
+
+
+def release_id(version, source):
+    if not isinstance(source, str) or not re.fullmatch(r'[a-f0-9]{40}', source):
+        raise ValueError('Invalid full source revision')
+    if not isinstance(version, str) or len(version) > 64:
+        raise ValueError('Invalid release version')
+    short = source[:12]
+    if DEVELOPMENT_VERSION.fullmatch(version) and version.endswith('-' + short):
+        return version
+    if VERSION.fullmatch(version):
+        return f'{version}-{short}'
+    raise ValueError('Invalid release version or development revision')
+
+
+def release_label(version, release):
+    return f'{version} ({release})' if version != release else release
 
 
 def secure_file(path):
@@ -256,12 +275,12 @@ def unpack(bundle, expected, staging):
         if header is None or header.name != 'release.json' or not header.isfile() or header.size > 1024 * 1024:
             raise RuntimeError('Missing or invalid release manifest')
         manifest = json.load(stream.extractfile(header))
-        if manifest['schema'] != 1 or manifest['platform'] != 'linux-' + platform.machine():
+        if manifest['schema'] not in (1, 2) or manifest['platform'] != 'linux-' + platform.machine():
             raise RuntimeError('Unsupported package platform or schema')
         release = manifest['release']
         if not RELEASE_ID.fullmatch(release) or not re.fullmatch(r'[a-f0-9]{40}', manifest['source']):
             raise RuntimeError('Invalid release ID or source')
-        if release != f"{manifest['version']}-{manifest['source'][:12]}":
+        if release != release_id(manifest['version'], manifest['source']):
             raise RuntimeError('Release name does not match version and source')
         wanted = manifest['files']
         seen = set()
@@ -301,6 +320,14 @@ def unpack(bundle, expected, staging):
     required = {*FILES, *UNITS, 'flowgate', 'launch', 'standalone-release.json'}
     if not required <= set(actual) or 'gui/runtime/electron' not in seen:
         raise RuntimeError('Package is missing a required entry point')
+    if manifest['schema'] == 2:
+        fields = ('version', 'source', 'release')
+        for metadata in (backend, read_record(payload / 'backend/standalone-release.json'),
+                         read_record(payload / 'gui/matched-manifest.json')):
+            if any(metadata.get(key) != manifest[key] for key in fields):
+                raise RuntimeError('Backend, desktop and archive build identities disagree')
+        if read_record(payload / 'gui/electron/package.json').get('version') != manifest['version']:
+            raise RuntimeError('Electron package version differs from archive version')
     return payload, manifest, backend
 
 
@@ -400,6 +427,8 @@ def preflight(api, backend_dir, backend, desktop_config):
     build = json.loads(host.run(str(daemon), 'version'))
     if build.get('source') != backend['source'] or build.get('max_rule_schema') != backend['max_rule_schema']:
         raise RuntimeError('Candidate executable has an incompatible build declaration')
+    if 'version' in backend and build.get('version') != backend['version']:
+        raise RuntimeError('Candidate executable version differs from the release manifest')
     response = None
     selected = 'monitoring'
     extra_config = {}
@@ -413,6 +442,8 @@ def preflight(api, backend_dir, backend, desktop_config):
         live = response['build']
         if live.get('source') != old[1]['source'] or live.get('executable_sha256') != old[1]['files']['flowgate'] or live.get('modified') is not False:
             raise RuntimeError('Running backend does not match the current release')
+        if 'version' in old[1] and live.get('version') != old[1]['version']:
+            raise RuntimeError('Running backend version differs from the current release manifest')
         shape = shaping_status(host, response['generation'])
         if (shape.get('status') not in ('Disabled', 'Unsupported', None) or
             shape.get('enabled') or shape.get('configured_caps') or
@@ -506,7 +537,7 @@ def install(options, payload, manifest, backend):
               'Direct monitor setup and both protection-guard invocations use the stock init_t context. '
               'The installer leaves host SELinux policy and enforcement unchanged.')
     if options.operation == 'preflight':
-        print(f"Preflight passed for {manifest['release']}. Current protection: {selected}.")
+        print(f"Preflight passed for {release_label(manifest['version'], manifest['release'])}. Current protection: {selected}.")
         if ((before or {}).get('traffic_monitor') or {}).get('state') == 'failed':
             print('Verified legacy UDP helper on a noexec mount. Install requires active UDP collection before restoring protection.')
         return
@@ -592,7 +623,7 @@ def install(options, payload, manifest, backend):
                     raise RuntimeError(f'Installed in monitoring; restoring {selected} was refused: {exc}') from None
                 raise RuntimeError(f'Restoring {selected} could not be verified; use local recovery') from exc
     desktop(uid, xdg, Path(FILES['flowgate-ui']), '--migrate-autostart', options.import_preferences)
-    print(f"Installed {release}; protection mode {selected}. Launch with flowgate-ui.")
+    print(f"Installed {release_label(manifest.get('version', release), release)}; protection mode {selected}. Launch with flowgate-ui.")
 
 
 SHAPE_SETTINGS = (
@@ -744,6 +775,13 @@ def rollback_build(api, host, record):
             'database. No changes made. Select a compatible package or review the older '
             'backup separately without replacing current data.'
         )
+    version = candidate.get('version', previous)
+    if version == previous and 'standalone-release.json' in candidate['files']:
+        # Older standalone releases ship a verified marker, but their daemon
+        # and backend manifest predate the version field.
+        version = read_record(old / 'standalone-release.json')['version']
+    if version != previous and release_id(version, candidate['source']) != previous:
+        raise RuntimeError('Previous version and release directory disagree')
     gui = BASE / 'gui' / previous
     if not gui.is_dir():
         raise RuntimeError('Matching previous desktop payload is unavailable')
@@ -798,7 +836,7 @@ def rollback_build(api, host, record):
     write_record(DATA / 'standalone.json', attempt)
     pending.unlink()
     fsync_dir(DATA)
-    print(f'Selected {previous} in monitoring with the latest saved rules and settings.')
+    print(f'Selected {release_label(version, previous)} in monitoring with the latest saved rules and settings.')
     if legacy_rollback:
         print('UDP collector failed as expected: the previous release executes its helper from a noexec mount.')
 
