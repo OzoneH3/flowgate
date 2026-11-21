@@ -180,8 +180,10 @@ def main():
     old.profile = paths.lab / "profiles/debian-13.json"
     old.scenario = [NAME]
     old.keep_failed = False
-    lab.run_cases = lambda _guest, sut, _names, release, evidence, host: exercise(
-        lab, sut, host, new, new_release, release, evidence)
+    def run_lifecycle(_guest, sut, _names, release, evidence, host, *, diagnose_rule_delete=False):
+        exercise(lab, sut, host, new, new_release, release, evidence)
+
+    lab.run_cases = run_lifecycle
     assert old_release["release"] != new_release["release"]
     return lab.run(old)
 
