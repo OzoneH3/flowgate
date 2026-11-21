@@ -1256,6 +1256,8 @@ body.hide-info .tabs { width: calc(100% - 8px); }
 .rule-cell .cell-qualifier { margin-left: 0; }
 .pane-menu .menu-panel { left: auto; right: 0; width: max-content; min-width: 150px; }
 .tabs .pane-menu .menu-panel { right: 0; }
+.tabs:has(.pane-menu[open]),
+#activityView #trafficGraph:has(.pane-menu[open]) { z-index: 10; }
 
 .toolbar { gap: 14px; padding: 4px 8px 4px 10px; }
 .toolbar .brand { font-size: 15px; font-weight: 700; color: var(--fg-selected); letter-spacing: .2px; margin-right: 4px; }
@@ -1347,7 +1349,7 @@ body.preset-status #tree th.col-filler, body.preset-status #tree td.filler { dis
 .toolbar:has(> .runtime-health:not([hidden])) #search { min-width: 60px; }
 .toolbar:has(> .runtime-health:not([hidden])) #extendedBadge { flex-shrink: 1; min-width: 4em; overflow: hidden; text-overflow: ellipsis; } /* Other advisories yield room so nothing leaves the window. */
 .toolbar #controlStatus { display: none; } /* Same state remains in the firewall entry and Tools review. */
-.graph-sample { position: absolute; z-index: 7; right: 8px; bottom: 16px; max-width: min(350px, calc(100% - 16px)); }
+.graph-sample { position: absolute; z-index: 7; left: 8px; bottom: 16px; max-width: min(350px, calc(100% - 16px)); }
 .graph-sample:not(.pinned) { pointer-events: none; }
 .graph-sample:not(.pinned) > div { display: none; }
 #trafficCanvas:focus-visible { outline: 1px solid var(--fg-selected); outline-offset: -1px; }

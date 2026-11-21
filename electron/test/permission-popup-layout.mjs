@@ -352,6 +352,7 @@ try {
   assert.equal(await download.getAttribute('title'), downloadHelp);
   await sample.waitFor();
   assert((await sample.boundingBox()).width <= 350);
+  assert(Math.abs((await sample.boundingBox()).x - (await chart.boundingBox()).x - 8) <= 1);
   assert(await sample.getByRole('button', { name: 'Close' }).isHidden());
   await chart.screenshot({ path: path.join(run, 'chart-sample.png') });
   await chart.locator('#trafficCanvas').click();
@@ -388,6 +389,19 @@ try {
   assert.equal((await chart.boundingBox()).width, chartWidth);
   assert((await chart.boundingBox()).y < (await table.boundingBox()).y);
   assert((await table.boundingBox()).width < fullTableWidth);
+  const panesMenu = main.locator('#tabsPaneControls');
+  await panesMenu.locator('summary').click();
+  await panesMenu.getByRole('menuitemcheckbox', { name: 'Info View' }).click();
+  await sidebar.waitFor({ state: 'hidden' });
+  await appRow.click();
+  await sidebar.waitFor();
+  await sidebar.locator('.pane-close').click();
+  await sidebar.waitFor({ state: 'hidden' });
+  await appRow.click();
+  await sidebar.waitFor();
+  assert.match(await sidebar.locator('#selectedName').innerText(), /Atlas Sync/);
+  for (const key of ['download_bps', 'upload_bps'])
+    assert.doesNotMatch(await main.locator('.col-' + key + ' button').innerText(), /autoByte|\(def\)/);
   await grip.press('ArrowLeft');
   assert.equal(await sidebarWidth(), '310px');
   await main.screenshot({ path: path.join(run, 'activity-selected.png') });
@@ -402,6 +416,19 @@ try {
   await main.setViewportSize(viewport);
   await chart.locator('.pane-close').click();
   await chart.waitFor({ state: 'hidden' });
+  await sidebar.waitFor();
+  await panesMenu.locator('summary').click();
+  const infoMenuItem = panesMenu.getByRole('menuitemcheckbox', { name: 'Info View' });
+  assert(await infoMenuItem.evaluate((item) => {
+    const box = item.getBoundingClientRect();
+    const info = document.getElementById('activityDetails').getBoundingClientRect();
+    const x = box.x + box.width / 2, y = box.y + box.height / 2;
+    return x > info.left && x < info.right && y > info.top && y < info.bottom
+      && item.contains(document.elementFromPoint(x, y));
+  }), 'the Panes menu receives clicks where it overlaps Info');
+  await infoMenuItem.click();
+  await sidebar.waitFor({ state: 'hidden' });
+  await appRow.click();
   await sidebar.waitFor();
   const windowMenu = main.locator('.toolbar-window-menu');
   await windowMenu.locator('summary').click();

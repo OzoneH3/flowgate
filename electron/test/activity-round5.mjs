@@ -98,7 +98,8 @@ try {
   await p.screenshot({ path: out + '/after-normal.png' });
   await p.selectOption('#displayUnits', 'Mbit');
   await p.waitForTimeout(300);
-  assert.equal(await p.locator('.col-download_bps small').innerText(), 'Mbit (def)');
+  assert.doesNotMatch(await p.locator('.col-download_bps button').innerText(), /Mbit|\(def\)/);
+  assert.doesNotMatch(await p.locator('.col-upload_bps button').innerText(), /Mbit|\(def\)/);
   assert.equal((await p.evaluate(() => window.flowgate.preferences())).displayUnit, 'Mbit');
   results.sourceBefore = await p.locator('#activitySource').inputValue();
   assert.equal(results.sourceBefore, 'tcp');

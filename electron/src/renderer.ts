@@ -957,10 +957,6 @@ if (promptID) {
       continue;
     }
     const b = element('button', title);
-    if (key === 'download_bps' || key === 'upload_bps') {
-      b.classList.add('rate-header');
-      b.append(element('small', 'autoByte (def)'));
-    }
     b.disabled = key === 'rule_status';
     b.onclick = () => {
       const actual =
@@ -1105,9 +1101,11 @@ if (promptID) {
     } else return;
     e.preventDefault();
     if (index >= 0) {
-      selected = visible[index].row.id;
+      const next = visible[index].row;
+      selected = next.id;
       renderTree();
       renderInfo();
+      reopenInfo(next);
       document
         .querySelector('tr[aria-selected="true"]')
         ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
@@ -1212,6 +1210,9 @@ function applyPanes() {
 }
 function setPane(key: 'info' | 'chart', open: boolean) {
   void window.flowgate.paneControl(key, open ? 'dock' : 'close').catch(message);
+}
+function reopenInfo(row: Row) {
+  if (row.kind !== 'overview' && !paneState().info) setPane('info', true);
 }
 function paneControls(self?: 'info' | 'chart', summaryText = '▾') {
   const wrap = element('span', '', 'pane-controls-inner');
@@ -1469,8 +1470,6 @@ function setupPaneControls() {
   const applyUnit = (value: DisplayUnit) => {
     displayUnit = value;
     units.value = value;
-    for (const small of document.querySelectorAll('.rate-header small'))
-      small.textContent = value + ' (def)';
     graph?.setUnit(value);
     if (state) updateObservedUsage(state, value);
     if (state) renderTree();
@@ -1621,6 +1620,7 @@ function renderTree() {
       for (const row of document.querySelectorAll<HTMLElement>('#rows tr'))
         row.setAttribute('aria-selected', String(row.dataset.id === selected));
       renderInfo();
+      reopenInfo(r);
       $('tree').focus();
     };
     tr.ondblclick = (event) => {
@@ -3262,8 +3262,6 @@ function consumePresentation(frame: PaneFrame) {
   displayUnit = p.unit;
   $<HTMLSelectElement>('displayUnits').value = p.unit;
   $<HTMLSelectElement>('activitySource').value = p.source;
-  for (const small of document.querySelectorAll('.rate-header small'))
-    small.textContent = p.unit + ' (def)';
   graph?.setSource(p.source);
   graph?.setUnit(p.unit);
   graph?.setPresentation(p.chart);
