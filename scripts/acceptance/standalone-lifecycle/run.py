@@ -173,6 +173,8 @@ def main():
         raise SystemExit("Run with assertions enabled")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--lab", type=Path, default=ROOT.parent / "flowgate-lab")
+    parser.add_argument("--guest-api-exec-mount", action="store_true",
+                        help="on a noexec /run, mount a private executable tmpfs for the guest API")
     parser.add_argument("--old-dir", type=Path, default=ROOT / "build/dist/rc8-13e3029a")
     parser.add_argument("--new-dir", type=Path, default=(
         ROOT / ".workspace/public-audit-01a1ff88/source/build/dist/rc8"))
@@ -189,6 +191,22 @@ def main():
     old.profile = paths.lab / "profiles/debian-13.json"
     old.scenario = [NAME]
     old.keep_failed = False
+    install_predecessor = lab.install
+
+    def install_with_mount_evidence(sut, args, release, evidence):
+        options = sut.run("findmnt -n -T /run -o OPTIONS").stdout.strip()
+        evidence["guest_run_mount_options"] = options
+        if paths.guest_api_exec_mount and "noexec" in options.split(","):
+            sut.run("sudo -n install -d -m 0711 -o root -g root /run/flowgate-api && "
+                    "sudo -n mount -t tmpfs -o mode=0711,uid=0,gid=0,nosuid,nodev,exec "
+                    "flowgate-lifecycle /run/flowgate-api")
+            api_options = sut.run("findmnt -n -T /run/flowgate-api -o OPTIONS").stdout.strip()
+            assert "noexec" not in api_options.split(","), api_options
+            evidence["guest_api_mount_options"] = api_options
+        install_predecessor(sut, args, release, evidence)
+
+    lab.install = install_with_mount_evidence
+
     def run_lifecycle(_guest, sut, _names, release, evidence, host, *, diagnose_rule_delete=False):
         exercise(lab, sut, host, new, new_release, release, evidence)
 

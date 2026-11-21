@@ -16,6 +16,12 @@ and `--new-dir` if those same files are stored elsewhere. Each directory needs
 the archive and `flowgate-release.py`. The fixture checks their pinned digests
 on the host and in the guest.
 
+If the guest mounts `/run` with `noexec`, the predecessor's UDP collector
+cannot execute its pinned helper and the installer refuses the upgrade. To
+test the rest of the lifecycle on that guest, append `--guest-api-exec-mount`.
+This puts a root-owned executable tmpfs at `/run/flowgate-api` only in the
+disposable guest. The installer still checks the collector and protection state.
+
 1. Install the predecessor in monitoring. Activate incoming and outgoing
    protection, save an outbound application Block with the ordinary
    preview/save API, then confirm its rule ID and version win a fresh TCP
