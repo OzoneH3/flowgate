@@ -80,7 +80,6 @@ async function quit() {
 try {
   await launch();
   await main.evaluate(() => {
-    document.getElementById('toolsMenu').open = true;
     document.getElementById('controlMenu').open = true;
   });
   await main.selectOption('#protectionProfile', 'both');
@@ -129,7 +128,6 @@ try {
   );
   result.steps.push('expired attempt during GUI absence is never reopened as actionable');
   await main.evaluate(() => {
-    document.getElementById('toolsMenu').open = true;
     document.getElementById('controlMenu').open = true;
   });
   await main.click('#protectionStop');

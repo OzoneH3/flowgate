@@ -228,7 +228,6 @@ try {
   await main.locator('#rows tr[data-id^="app:"]').first().waitFor();
   const menus = (open) =>
     main.evaluate((open) => {
-      document.getElementById('toolsMenu').open = open;
       document.getElementById('controlMenu').open = open;
     }, open);
   evidence.alpha_start = await command({ op: 'launch', name: 'alpha' }); // fresh requester instance

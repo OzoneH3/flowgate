@@ -102,7 +102,6 @@ try {
   assert.equal((initial.rules||[]).length, 0);
   await launch();
   await main.evaluate(() => {
-    document.getElementById('toolsMenu').open = true;
     document.getElementById('controlMenu').open = true;
   });
   assert.match((await state()).label, /Monitoring only/);
@@ -116,7 +115,6 @@ try {
   evidence.steps.push('continuous both active from authoritative status');
   await main.screenshot({ path: run + '/continuous-active.png' });
   await main.evaluate(() => {
-    document.getElementById('toolsMenu').open = false;
     document.getElementById('controlMenu').open = false;
   });
   await main.click('#expand');
@@ -246,7 +244,6 @@ try {
     'GUI exit leaves protection active; reopen recovers state without Start replay',
   );
   await main.evaluate(() => {
-    document.getElementById('toolsMenu').open = true;
     document.getElementById('controlMenu').open = true;
   });
   await main.locator('#protectionStop').click();

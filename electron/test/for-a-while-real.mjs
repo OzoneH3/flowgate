@@ -124,7 +124,6 @@ try {
   await main.locator('#rows tr').first().waitFor();
   const menus = (open) =>
     main.evaluate((open) => {
-      document.getElementById('toolsMenu').open = open;
       document.getElementById('controlMenu').open = open;
     }, open);
   const prior = (await list()).protection;

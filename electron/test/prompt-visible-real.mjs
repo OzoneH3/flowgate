@@ -104,7 +104,7 @@ try {
   main.on('pageerror', (e) => evidence.errors.push(String(e)));
   await main.locator('#rows tr').first().waitFor();
   const pid = await app.evaluate(() => process.pid);
-  const menus = (o) => main.evaluate((o) => { document.getElementById('toolsMenu').open = o; document.getElementById('controlMenu').open = o; }, o);
+  const menus = (o) => main.evaluate((o) => { document.getElementById('controlMenu').open = o; }, o);
   if (l0.protection?.state === 'active') await call({ operation: 'protection-stop', generation: ready.generation, protection_id: l0.protection.id });
   await menus(true);
   await main.selectOption('#protectionProfile', 'both');

@@ -1331,7 +1331,6 @@ function setupMainMenus(windowMenu: HTMLElement, units: HTMLSelectElement) {
     return menu;
   };
   const file = make('fileMenu', 'File'),
-    tools = make('toolsMenu', 'Tools'),
     help = make('helpMenu', 'Help');
   const quit = element('button', 'Quit FlowGate UI');
   const quitNote = element('p', 'Daemon protection keeps running if active.', 'menu-note');
@@ -1341,7 +1340,7 @@ function setupMainMenus(windowMenu: HTMLElement, units: HTMLSelectElement) {
   file.lastElementChild!.append(quit, quitNote);
   const control = $<HTMLDetailsElement>('controlMenu'),
     monitoring = $<HTMLDetailsElement>('monitoringMenu'),
-    options = $<HTMLDetailsElement>('optionsMenu');
+    settings = $<HTMLDetailsElement>('settingsMenu');
   const controlTitle = control.querySelector('summary')!;
   controlTitle.id = 'firewallMenuStatus';
   const sourceLabel = element('label', 'Activity display source', 'menu-control');
@@ -1349,8 +1348,7 @@ function setupMainMenus(windowMenu: HTMLElement, units: HTMLSelectElement) {
   sourceLabel.title = 'Choose which measurements Activity shows.';
   const unitsLabel = element('label', 'Units', 'menu-control');
   unitsLabel.append(units);
-  options.querySelector('.menu-panel')!.prepend(sourceLabel, unitsLabel);
-  tools.lastElementChild!.append(options);
+  settings.querySelector('.menu-panel')!.prepend(sourceLabel, unitsLabel);
   const about = element('button', 'About FlowGate');
   const dialog = element('dialog');
   dialog.id = 'aboutFlowGate';
@@ -1409,8 +1407,8 @@ function setupMainMenus(windowMenu: HTMLElement, units: HTMLSelectElement) {
     };
     windowPanel.append(b);
   }
-  $('controlStatus').before(file, tools, windowMenu, help, control, monitoring);
-  for (const menu of [file, tools, windowMenu.querySelector('details')!, help, control, monitoring, options]) {
+  $('controlStatus').before(file, settings, windowMenu, help, control, monitoring);
+  for (const menu of [file, settings, windowMenu.querySelector('details')!, help, control, monitoring]) {
     onToolbarMenuPress(menu.querySelector('summary')!, () => { menu.open = !menu.open; });
   }
   // Keep the two status menus adjacent and let advisories yield space.

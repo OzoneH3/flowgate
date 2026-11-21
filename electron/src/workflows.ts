@@ -520,7 +520,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
   $('requestsView').after(view);
   endpointUI = setupEndpointPermissions();
   for (const [id, label] of [
-    ['optionsMenu', 'Desktop preferences'],
+    ['settingsMenu', 'Settings'],
     ['monitoringMenu', 'UDP: …'],
     ['controlMenu', 'Firewall'],
   ]) {
@@ -539,7 +539,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
   document.addEventListener('click', (event) => {
     if (event.detail === 0) closeOutsideMenus(event);
   }, { capture: true });
-  setupDecisionTimeout($<HTMLDetailsElement>('optionsMenu'));
+  setupDecisionTimeout($<HTMLDetailsElement>('settingsMenu'));
   const evaluation = node('section', '');
   evaluation.className = 'evaluationbar';
   evaluation.innerHTML = `<select id="evalProfile" aria-label="Evaluation profile"><option value="incoming">Incoming only</option><option value="both" disabled>Both directions · support not advertised</option></select><button id="evalStart">Start 5-minute evaluation…</button><button id="evalStop">Stop evaluation</button><button id="evalCancel" hidden>Cancel authentication</button><button id="evalStatus">Status</button><button id="evalRecover">Recovery…</button><span id="evaluationStatus" role="status"></span>`;
@@ -1040,7 +1040,8 @@ function selectRule() {
 }
 async function setupSizing() {
   let prefs: Preferences = await window.flowgate.preferences();
-  setupShapingDefaults(document.querySelector('#optionsMenu .menu-panel')!, prefs);
+  const settingsPanel = document.querySelector('#settingsMenu .menu-panel')!;
+  setupShapingDefaults(settingsPanel, prefs);
   const save = () =>
     void window.flowgate.preferences({
       sidebar: prefs.sidebar,
@@ -1050,7 +1051,7 @@ async function setupSizing() {
   const controls = node('section', '');
   controls.className = 'backgroundbar';
   controls.innerHTML = `<label><input type="checkbox" id="keepInTray"> Keep running in the tray when the window closes</label><span>When enabled, closing hides this window; requests stay monitored. Use File to quit the UI.</span><span id="backgroundStatus" role="status"></span>`;
-  document.querySelector('#optionsMenu .menu-panel')!.append(controls);
+  settingsPanel.append(controls);
   $<HTMLInputElement>('keepInTray').checked = prefs.keepInTray === true;
   $('keepInTray').onchange = () => {
     prefs.keepInTray = $<HTMLInputElement>('keepInTray').checked;

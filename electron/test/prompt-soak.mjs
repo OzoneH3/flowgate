@@ -99,7 +99,6 @@ try {
   assert.equal(((await call({ operation: 'list' })).rules || []).length, 0);
   await launch();
   await main.evaluate(() => {
-    document.getElementById('toolsMenu').open = true;
     document.getElementById('controlMenu').open = true;
   });
   if ((await call({ operation: 'list' })).protection.state !== 'active') {
@@ -112,7 +111,6 @@ try {
     result.reusedActiveFixture = true;
   }
   await main.evaluate(() => {
-    document.getElementById('toolsMenu').open = false;
     document.getElementById('controlMenu').open = false;
   });
   const start = Date.now();
@@ -250,7 +248,6 @@ try {
     await sleep(Math.max(0, 60000 - (Date.now() - at)));
   }
   await main.evaluate(() => {
-    document.getElementById('toolsMenu').open = true;
     document.getElementById('controlMenu').open = true;
   });
   await main.click('#protectionStop');

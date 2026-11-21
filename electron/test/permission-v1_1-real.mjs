@@ -114,7 +114,6 @@ try {
 
   // Protection on the FIXTURE daemon only (continuous profile both).
   await main.evaluate(() => {
-    document.getElementById('toolsMenu').open = true;
     document.getElementById('controlMenu').open = true;
   });
   await main.selectOption('#protectionProfile', 'both');
@@ -128,7 +127,6 @@ try {
   );
   await main.evaluate(() => {
     document.getElementById('controlMenu').open = false;
-    document.getElementById('toolsMenu').open = false;
   });
   step('fixture protection started from the UI (profile both); host untouched');
 
@@ -452,7 +450,6 @@ try {
   }));
   // Stop fixture protection again.
   await main.evaluate(() => {
-    document.getElementById('toolsMenu').open = true;
     document.getElementById('controlMenu').open = true;
   });
   await main.locator('#protectionStop').click();

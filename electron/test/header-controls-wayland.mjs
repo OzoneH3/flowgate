@@ -98,14 +98,17 @@ try {
   await page.mouse.up();
   await help.press('Enter');
   assert.equal(await helpOpen(), true, 'keyboard activation still opens Help');
-  await page.locator('#toolsMenu > summary').hover();
+  const settings = page.locator('.toolbar > #settingsMenu');
+  const settingsLabel = settings.locator(':scope > summary');
+  assert.equal(await settingsLabel.textContent(), 'Settings');
+  await settingsLabel.hover();
   await page.mouse.down();
   assert.equal(await helpOpen(), false, 'pressing another heading closes the previous menu');
-  assert.equal(await page.locator('#toolsMenu').evaluate((node) => node.open), true);
+  assert.equal(await settings.evaluate((node) => node.open), true);
   await page.mouse.up();
-  assert.equal(await page.locator('#toolsMenu :is(#controlMenu, #monitoringMenu)').count(), 0);
-  await page.locator('#optionsMenu > summary').click();
-  assert.equal(await page.locator('#optionsMenu').evaluate((node) => node.open), true);
+  assert.equal(await settings.locator('.desktop-menu').count(), 0);
+  for (const id of ['activitySource', 'displayUnits', 'decisionTimeoutSeconds', 'defaultPriority', 'keepInTray'])
+    await settings.locator('#' + id).waitFor({ state: 'visible' });
   await help.click();
   const iconsRow = await page.getByRole('button', { name: 'Icons and symbols' }).boundingBox();
   const aboutRow = await page.getByRole('button', { name: 'About FlowGate' }).boundingBox();
@@ -151,7 +154,7 @@ try {
   assert.equal(await udpMenu.evaluate((node) => document.activeElement === node), true);
   await page.locator('#extendedBadge').click();
   assert.equal(await open('controlMenu'), false);
-  assert.equal(await open('toolsMenu'), false);
+  assert.equal(await open('settingsMenu'), false);
   await page.locator('#extendedEnable').click();
   await page.locator('#confirmation').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#confirmTitle').textContent(), 'Start UDP monitoring');

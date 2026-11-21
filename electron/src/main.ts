@@ -864,7 +864,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('connection-checks',(e,v:unknown)=>{trusted(e);return connectionChecks.request(v);});
   ipcMain.handle('decision-timeout', (e, edit: unknown) => {
     trusted(e);
-    if (e.sender !== main.webContents) throw Error('Open Desktop preferences to change the permission popup timeout.');
+    if (e.sender !== main.webContents) throw Error('Open Settings to change the permission popup timeout.');
     return decisionTimeout(backend, edit);
   });
   ipcMain.handle('history:read', (e, q: unknown) => {

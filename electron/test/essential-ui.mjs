@@ -236,7 +236,6 @@ try {
   const page = await app.firstWindow();
   await page.locator('#essentialOpen').waitFor({ state: 'attached' });
   await page.evaluate(() => {
-    document.getElementById('toolsMenu').open = true;
     document.getElementById('controlMenu').open = true;
   });
   await page.click('#essentialOpen');

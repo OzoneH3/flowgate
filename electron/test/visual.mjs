@@ -163,7 +163,7 @@ try {
   metrics.dpr = await page.evaluate(() => devicePixelRatio);
   fs.writeFileSync(path.join(evidence, 'metrics.json'), JSON.stringify(metrics, null, 2));
   if (stage !== 'before') {
-    for (const id of ['controlMenu', 'optionsMenu']) {
+    for (const id of ['controlMenu', 'settingsMenu']) {
       await page.click('#' + id + ' > summary');
       assert(await page.locator('#' + id + ' .menu-panel').isVisible());
       await page.keyboard.press('Escape');

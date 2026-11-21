@@ -271,8 +271,7 @@ try {
     await popup.waitFor({state:'detached'});
   }
   // Persist defaults through the actual main-process preference IPC, never the backend.
-  await page.locator('#toolsMenu > summary').click();
-  await page.locator('#optionsMenu summary').click();
+  await page.locator('#settingsMenu > summary').click();
   await page.locator('#defaultPriority').selectOption('high');
   await page.locator('#defaultUploadLimit').fill('32');
   await page.locator('#defaultDownloadLimit').fill('16');
@@ -285,7 +284,7 @@ try {
   assert.equal(storedDefaults.shapingDefaults.priority,'high');
   assert.deepEqual(JSON.parse(fs.readFileSync(client+'/build/desktop-session/electron-preferences.json','utf8')).ui.shapingDefaults,storedDefaults.shapingDefaults);
   assert.equal(await page.evaluate(async()=>{try{await window.flowgate.preferences({shapingDefaults:{priority:'critical'}});return false;}catch{return true;}}),true);
-  await page.locator('#optionsMenu summary').click();
+  await page.locator('#settingsMenu summary').click();
   await open('upload');assert.equal(await page.locator('#uploadRate').inputValue(),'32');await close();
   await open('download');assert.equal(await page.locator('#uploadRate').inputValue(),'16');await close();
   await open('priority');assert.equal(await page.locator('#priorityLevel input:checked').inputValue(),'high');

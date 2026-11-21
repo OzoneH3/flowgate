@@ -96,10 +96,9 @@ try {
     created.push((await p.evaluate(() => window.flowgate.snapshot())).control.rules[0]);
   }
   await p.screenshot({ path: out + '/after-normal.png' });
-  await p.locator('#toolsMenu > summary').click();
-  await p.locator('#optionsMenu > summary').click();
+  await p.locator('#settingsMenu > summary').click();
   await p.selectOption('#displayUnits', 'Mbit');
-  await p.locator('#toolsMenu > summary').click();
+  await p.locator('#settingsMenu > summary').click();
   await p.waitForTimeout(300);
   assert.doesNotMatch(await p.locator('.col-download_bps button').innerText(), /Mbit|\(def\)/);
   assert.doesNotMatch(await p.locator('.col-upload_bps button').innerText(), /Mbit|\(def\)/);
@@ -113,10 +112,9 @@ try {
   await p.click('#rateMode');
   assert.match(await p.locator('.col-download_bps button').innerText(), /Total/);
   await p.click('#rateMode');
-  await p.locator('#toolsMenu > summary').click();
-  await p.locator('#optionsMenu > summary').click();
+  await p.locator('#settingsMenu > summary').click();
   await p.selectOption('#displayUnits', 'autoByte');
-  await p.locator('#toolsMenu > summary').click();
+  await p.locator('#settingsMenu > summary').click();
   await p.locator('#trafficGraph .pane-menu summary').click();
   await p.locator('#trafficGraph .pane-menu button', { hasText: '10 min' }).click();
   assert.equal(await p.locator('#graphWindow').inputValue(), '600');

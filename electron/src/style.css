@@ -1317,10 +1317,7 @@ body.preset-status #tree th.col-filler, body.preset-status #tree td.filler { dis
 /* Round 5: compact menus and independent display/accounting controls. */
 .toolbar { gap: 8px; }
 .toolbar .desktop-menu[open] > summary { background: var(--fg-section); outline: 1px solid var(--fg-border); }
-.toolbar #toolsMenu .desktop-menu { display: block; }
-.toolbar #toolsMenu .desktop-menu > summary { padding: 5px 8px; }
-.toolbar #toolsMenu .desktop-menu > .menu-panel { position: static; width: 100%; border: 0; box-shadow: none; }
-.toolbar :is(#toolsMenu, #controlMenu, #monitoringMenu) > .menu-panel {
+.toolbar :is(#settingsMenu, #controlMenu, #monitoringMenu) > .menu-panel {
   top: 100%;
   max-height: calc(100vh - 46px);
   overflow: auto;

@@ -95,7 +95,6 @@ try {
   await page.locator('#essentialOpen').waitFor({ state: 'attached' });
   await wait(async () => (await page.evaluate(() => window.flowgate.essentialState())).permitted);
   await page.evaluate(() => {
-    document.getElementById('toolsMenu').open = true;
     document.getElementById('controlMenu').open = true;
   });
   await page.click('#essentialOpen');
@@ -145,7 +144,6 @@ try {
     await wait(async () => page.locator('#editRule').isDisabled());
     assert.match(await page.locator('#ruleInfo').innerText(), /essential-system-networking/);
     await page.evaluate(() => {
-      document.getElementById('toolsMenu').open = true;
       document.getElementById('controlMenu').open = true;
     });
     await page.click('#essentialOpen');

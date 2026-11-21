@@ -284,9 +284,8 @@ try {
   assert.equal(await main.locator('.toolbar').evaluate((el) => getComputedStyle(el).height), '47px');
   const units = main.getByRole('combobox', { name: 'Display units' });
   assert(await units.isHidden());
-  await main.locator('#toolsMenu > summary').click();
-  await main.locator('#optionsMenu > summary').click();
-  assert(await main.locator('#optionsMenu').getByRole('combobox', { name: 'Display units' }).isVisible());
+  await main.locator('#settingsMenu > summary').click();
+  assert(await main.locator('#settingsMenu').getByRole('combobox', { name: 'Display units' }).isVisible());
   await units.selectOption('Mbit');
   await main.waitForFunction(() => window.flowgate.preferences().then((p) => p.displayUnit === 'Mbit'));
   await units.selectOption('autoByte');
@@ -309,8 +308,7 @@ try {
   const deadline = await prompt.locator('.expiry').textContent();
   assert(Number(deadline.match(/^Respond in (\d+) s/)?.[1]) > 60, 'an active request retains its own deadline');
   await main.screenshot({ path: path.join(run, 'permission-timeout.png') });
-  await main.locator('#optionsMenu > summary').click();
-  await main.locator('#toolsMenu > summary').click();
+  await main.locator('#settingsMenu > summary').click();
   const rateMode = main.locator('#rateMode');
   await rateMode.hover();
   const desktopTooltip = main.getByRole('tooltip');

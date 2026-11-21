@@ -184,10 +184,9 @@ try {
       .locator('#rows tr[data-id^="process:"] .name')
       .nth(i % 2)
       .click();
-    await main.locator('#toolsMenu > summary').click();
-    await main.locator('#optionsMenu > summary').click();
+    await main.locator('#settingsMenu > summary').click();
     await main.selectOption('#displayUnits', i % 2 ? 'autoBit' : 'autoByte');
-    await main.locator('#toolsMenu > summary').click();
+    await main.locator('#settingsMenu > summary').click();
     await main
       .locator('.table-scroll')
       .first()
