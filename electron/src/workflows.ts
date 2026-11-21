@@ -62,8 +62,10 @@ let state: ClientState,
   saving = false,
   unresolved = false;
 const status = (s: string) => {
-  $('ruleFeedback').textContent = s;
-  if ($('feedback')) $('feedback').textContent = s;
+  for (const id of ['ruleFeedback', 'feedback', 'paneMessage']) {
+    const output = $(id);
+    if (output) output.textContent = s;
+  }
 };
 function editorMessage(s: string) {
   $('editorFeedback').textContent = s;
@@ -119,10 +121,22 @@ function invalidate() {
   $('scopeSummary').textContent = 'Choose scope, then review the backend preview.';
   $<HTMLButtonElement>('saveRule').disabled = true;
 }
+function showRuleEditor() {
+  const panel = $<HTMLDialogElement>('ruleEditor');
+  panel.hidden = false;
+  if (!panel.open) panel.showModal();
+  $('resumeEditor').hidden = true;
+}
+function hideRuleEditor() {
+  const panel = $<HTMLDialogElement>('ruleEditor');
+  panel.close();
+  panel.hidden = true;
+}
 export async function openRule(source: RuleSource, options: EditorOptions = {}) {
   if (draft) {
-    $('ruleEditor').hidden = false;
-    status('An unfinished editor is already open. Save or close it first.');
+    showRuleEditor();
+    editorMessage('An unfinished editor is already open. Save or close it first.');
+    $('editAction').focus();
     return;
   }
   try {
@@ -219,7 +233,7 @@ export async function openRule(source: RuleSource, options: EditorOptions = {}) 
       for (const id of ['anyAddress', 'anyLocal', 'anyRemote'])
         $<HTMLInputElement>(id).checked = true;
     }
-    $('ruleEditor').hidden = false;
+    showRuleEditor();
     invalidate();
     if (options.quick && draft.observed)
       $('absoluteExpiry').textContent =
@@ -251,60 +265,21 @@ export async function openRule(source: RuleSource, options: EditorOptions = {}) 
 }
 export function resumeRuleEditor() {
   if (!draft) return false;
-  const editor = $('ruleEditor');
-  editor.hidden = false;
-  editor.querySelector<HTMLElement>('input,button')?.focus();
+  showRuleEditor();
+  $('editAction').focus();
   return true;
 }
-export function setupWorkflows(chooseTab: (s: string) => void) {
-  showTab = chooseTab;
-  $('requestsTab').after(node('button', 'Rules'));
-  const ruleTab = $('requestsTab').nextElementSibling as HTMLButtonElement;
-  ruleTab.id = 'rulesTab';
-  ruleTab.onclick = () => chooseTab('rules');
-  const view = node('main', '');
-  view.id = 'rulesView';
-  view.hidden = true;
-  view.innerHTML = `<section class="rules-main"><div class="filterbar"><button id="editRule">Edit selected</button><button id="toggleRule">Enable / Disable…</button><button id="deleteRule">Delete…</button></div><div class="table-scroll"><table id="rulesTable" tabindex="0" aria-label="Saved rules"><thead><tr><th>Application</th><th>Action</th><th>Direction</th><th>Protocol</th><th>Endpoint scope</th><th>Expiry</th><th>State</th></tr></thead><tbody id="ruleRows"></tbody></table></div><p class="hint">Rules are evaluated by Go. Changing rules does not necessarily disconnect already-approved TCP sessions.</p><p id="deleteCompatibility" class="hint"></p><p id="ruleFeedback" role="status"></p></section><aside><h2>Rule information</h2><dl id="ruleInfo">Select a saved rule.</dl></aside>`;
-  $('requestsView').after(view);
-  endpointUI = setupEndpointPermissions();
-  for (const [id, label] of [
-    ['optionsMenu', 'Desktop preferences'],
-    ['monitoringMenu', 'Traffic monitoring'],
-    ['controlMenu', 'Firewall'],
-  ]) {
-    const menu = node('details', '');
-    menu.id = id;
-    menu.className = 'desktop-menu';
-    menu.append(node('summary', label), node('div', ''));
-    menu.lastElementChild!.className = 'menu-panel';
-    document.querySelector('.brand')!.after(menu);
-  }
-  document.addEventListener('pointerdown', (event) => {
-    for (const menu of document.querySelectorAll<HTMLDetailsElement>('.desktop-menu[open]'))
-      if (!menu.contains(event.target as Node)) menu.open = false;
-  }, { capture: true });
-  setupDecisionTimeout($<HTMLDetailsElement>('optionsMenu'));
-  const evaluation = node('section', '');
-  evaluation.className = 'evaluationbar';
-  evaluation.innerHTML = `<select id="evalProfile" aria-label="Evaluation profile"><option value="incoming">Incoming only</option><option value="both" disabled>Both directions · support not advertised</option></select><button id="evalStart">Start 5-minute evaluation…</button><button id="evalStop">Stop evaluation</button><button id="evalCancel" hidden>Cancel authentication</button><button id="evalStatus">Status</button><button id="evalRecover">Recovery…</button><span id="evaluationStatus" role="status"></span>`;
-  document.querySelector('#controlMenu .menu-panel')!.append(evaluation);
-  setupProtectionControls();
-  setupConnectionChecks($('controlMenu').querySelector<HTMLElement>('.menu-panel')!);
-  migrationUI = setupZoneMigration();
+export function setupRuleEditor(resumeAfter: Element) {
   const confirmation = node('dialog', '');
   confirmation.id = 'confirmation';
   confirmation.innerHTML = `<h2 id="confirmTitle"></h2><p id="confirmText"></p><div class="editor-actions"><button id="confirmNo">Cancel</button><button id="confirmYes">Continue</button></div>`;
   document.body.append(confirmation);
-  const panel = node('section', '');
+  const panel = document.createElement('dialog');
   panel.id = 'ruleEditor';
   panel.hidden = true;
-  panel.setAttribute('role', 'dialog');
-  panel.setAttribute('aria-label', 'Rule editor');
-  panel.innerHTML = `<header><strong>FlowGate — Rule editor</strong><span><button id="editorMode">Compact editor</button> <button id="minimizeEditor">Minimize</button> <button id="closeEditor">Close</button></span></header><div class="editor-body"><div class="editor-tab">Rule</div><h2>For</h2><details class="editor-identity"><summary id="editorApplication">Application identity</summary><pre id="editorIdentity"></pre></details><h2>Rule and scope</h2><div id="creationScopeFields" hidden><label for="createScope">Scope</label> <select id="createScope"><option value="">Choose scope…</option><option value="custom">Specified address / ports</option><option value="application">All addresses / ports for this protocol</option></select></div><div class="editor-fields"><label for="editAction">Action</label><select id="editAction"><option value="allow">Allow</option><option value="block">Block</option><option value="ask">Ask</option></select><label for="editProtocol">Protocol</label><select id="editProtocol"><option value="tcp">TCP</option><option value="udp">UDP</option><option value="*">Any</option></select><label for="editZone">Network</label><select id="editZone" aria-label="Network zone"><option value="">Any network</option><option value="local">Local Network</option><option value="internet">Internet</option></select><label for="editAddress">Remote address</label><div class="scope-input"><label><input id="anyAddress" type="checkbox">Any address</label><input id="editAddress" maxlength="256" placeholder="IP address or CIDR"></div><label for="editLocal">Local port</label><div class="scope-input"><label><input id="anyLocal" type="checkbox">Any port</label><input id="editLocal" type="number" min="1" max="65535" aria-label="Specific local port"></div><label for="editRemote">Remote port</label><div class="scope-input"><label><input id="anyRemote" type="checkbox">Any port</label><input id="editRemote" type="number" min="1" max="65535" aria-label="Specific remote port"></div><label for="editPriority">Priority</label><input id="editPriority" type="number" min="-1000" max="1000"><label for="editExpiry">Expiry</label><select id="editExpiry"><option value="preserve">Preserve absolute expiry</option><option value="hour">For 1 hour from preview</option><option value="permanent">Persistent (no expiry)</option></select><label for="editShareRoot">Also apply when run as root</label><div><input id="editShareRoot" type="checkbox"><small>Exact executable and rule scope. For interpreters, this covers all scripts they run. Requires administrator access.</small></div><label for="editEnabled">Enabled</label><input id="editEnabled" type="checkbox"></div><p id="absoluteExpiry"></p><h2>Review scope</h2><p id="scopeSummary"></p><details id="backendScope"><summary>Full backend preview</summary><p id="rulePreview" class="scope-preview"></p></details><p id="editorFeedback" role="status"></p></div><footer><button id="reloadRule">Reload version, keep fields</button><button id="previewRule">Preview</button><button id="saveRule" disabled>Save</button><span id="previewValidity" role="timer"></span><button id="reconcileRule" hidden>Check save result</button></footer>`;
-  panel.querySelector('header')!.prepend(panel.querySelector('.editor-tab')!);
+  panel.setAttribute('aria-labelledby', 'ruleEditorTitle');
+  panel.innerHTML = `<header><h2 id="ruleEditorTitle">Rule editor</h2><span><button id="editorMode">Compact editor</button> <button id="minimizeEditor">Minimize</button> <button id="closeEditor">Close</button></span></header><div class="editor-body"><h3>Application</h3><details class="editor-identity"><summary id="editorApplication">Application identity</summary><pre id="editorIdentity"></pre></details><h3>Rule and scope</h3><div id="creationScopeFields" hidden><label for="createScope">Scope</label> <select id="createScope"><option value="">Choose scope…</option><option value="custom">Specified address / ports</option><option value="application">All addresses / ports for this protocol</option></select></div><div class="editor-fields"><label for="editAction">Action</label><select id="editAction"><option value="allow">Allow</option><option value="block">Block</option><option value="ask">Ask</option></select><label for="editProtocol">Protocol</label><select id="editProtocol"><option value="tcp">TCP</option><option value="udp">UDP</option><option value="*">Any</option></select><label for="editZone">Network</label><select id="editZone" aria-label="Network zone"><option value="">Any network</option><option value="local">Local Network</option><option value="internet">Internet</option></select><label for="editAddress">Remote address</label><div class="scope-input"><label><input id="anyAddress" type="checkbox">Any address</label><input id="editAddress" maxlength="256" placeholder="IP address or CIDR"></div><label for="editLocal">Local port</label><div class="scope-input"><label><input id="anyLocal" type="checkbox">Any port</label><input id="editLocal" type="number" min="1" max="65535" aria-label="Specific local port"></div><label for="editRemote">Remote port</label><div class="scope-input"><label><input id="anyRemote" type="checkbox">Any port</label><input id="editRemote" type="number" min="1" max="65535" aria-label="Specific remote port"></div><label for="editPriority">Priority</label><input id="editPriority" type="number" min="-1000" max="1000"><label for="editExpiry">Expiry</label><select id="editExpiry"><option value="preserve">Preserve absolute expiry</option><option value="hour">For 1 hour from preview</option><option value="permanent">Persistent (no expiry)</option></select><label for="editShareRoot">Also apply when run as root</label><div><input id="editShareRoot" type="checkbox"><small>Exact executable and rule scope. For interpreters, this covers all scripts they run. Requires administrator access.</small></div><label for="editEnabled">Enabled</label><input id="editEnabled" type="checkbox"></div><p id="absoluteExpiry"></p><h3>Review scope</h3><p id="scopeSummary"></p><details id="backendScope"><summary>Full backend preview</summary><p id="rulePreview" class="scope-preview"></p></details><p id="editorFeedback" role="status"></p></div><footer><button id="reloadRule">Reload version, keep fields</button><button id="previewRule">Preview</button><button id="saveRule" disabled>Save</button><span id="previewValidity" role="timer"></span><button id="reconcileRule" hidden>Check save result</button></footer>`;
   const editorFooter = panel.querySelector('footer')!;
-  editorFooter.prepend(panel.querySelector('#saveRule')!);
   editorFooter.append(panel.querySelector('#closeEditor')!);
   document.body.append(panel);
   $('editorMode').onclick = () => {
@@ -318,28 +293,28 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
     panel.querySelector(`label[for="${id}"]`)?.classList.add('advanced-rule-field');
   }
   document.addEventListener('keydown', (e) => {
-    if (e.ctrlKey && e.key.toLowerCase() === 'e') {
+    if ($('rulesTab') && e.ctrlKey && e.key.toLowerCase() === 'e') {
       e.preventDefault();
       const id = selected || state?.control.rules?.[0]?.id;
       if (id) void openRule({ id });
-    }
-    if (e.key === 'Escape' && draft && !saving) {
-      panel.hidden = true;
-      $('resumeEditor').hidden = false;
     }
   });
   const resume = node('button', 'Resume editor') as HTMLButtonElement;
   resume.id = 'resumeEditor';
   resume.hidden = true;
-  ruleTab.after(resume);
-  resume.onclick = () => {
-    panel.hidden = false;
-    resume.hidden = true;
-  };
-  $('minimizeEditor').onclick = () => {
-    panel.hidden = true;
+  resumeAfter.after(resume);
+  resume.onclick = () => resumeRuleEditor();
+  const minimize = () => {
+    if (saving) return;
+    hideRuleEditor();
     resume.hidden = false;
+    resume.focus();
   };
+  panel.addEventListener('cancel', (event) => {
+    event.preventDefault();
+    minimize();
+  });
+  $('minimizeEditor').onclick = minimize;
   panel.addEventListener('input', () => {
     if (!unresolved) {
       invalidate();
@@ -359,7 +334,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
   $('closeEditor').onclick = () => {
     if (saving) return;
     const close = async () => {
-      panel.hidden = true;
+      hideRuleEditor();
       draft = undefined;
       resume.hidden = true;
       receipt = '';
@@ -453,9 +428,9 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
             window.dispatchEvent(
               new CustomEvent('activity-rule-saved', { detail: result.rule.id }),
             );
-          selectRule();
+          if ($('ruleInfo')) selectRule();
         }
-        panel.hidden = true;
+        hideRuleEditor();
         $('resumeEditor').hidden = true;
         draft = undefined;
         status(resultMessage(result));
@@ -483,12 +458,12 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
         draft = undefined;
         unresolved = false;
         reconcileReceipt = '';
-        panel.hidden = true;
+        hideRuleEditor();
         $('resumeEditor').hidden = true;
         if (!stayInActivity) showTab('rules');
         else
           window.dispatchEvent(new CustomEvent('activity-rule-saved', { detail: result.rule.id }));
-        selectRule();
+        if ($('ruleInfo')) selectRule();
         status(resultMessage(result));
       }
     } catch (e) {
@@ -498,6 +473,44 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
       updateButtons();
     }
   };
+}
+export function setupWorkflows(chooseTab: (s: string) => void) {
+  showTab = chooseTab;
+  $('requestsTab').after(node('button', 'Rules'));
+  const ruleTab = $('requestsTab').nextElementSibling as HTMLButtonElement;
+  ruleTab.id = 'rulesTab';
+  ruleTab.onclick = () => chooseTab('rules');
+  const view = node('main', '');
+  view.id = 'rulesView';
+  view.hidden = true;
+  view.innerHTML = `<section class="rules-main"><div class="filterbar"><button id="editRule">Edit selected</button><button id="toggleRule">Enable / Disable…</button><button id="deleteRule">Delete…</button></div><div class="table-scroll"><table id="rulesTable" tabindex="0" aria-label="Saved rules"><thead><tr><th>Application</th><th>Action</th><th>Direction</th><th>Protocol</th><th>Endpoint scope</th><th>Expiry</th><th>State</th></tr></thead><tbody id="ruleRows"></tbody></table></div><p class="hint">Rules are evaluated by Go. Changing rules does not necessarily disconnect already-approved TCP sessions.</p><p id="deleteCompatibility" class="hint"></p><p id="ruleFeedback" role="status"></p></section><aside><h2>Rule information</h2><dl id="ruleInfo">Select a saved rule.</dl></aside>`;
+  $('requestsView').after(view);
+  endpointUI = setupEndpointPermissions();
+  for (const [id, label] of [
+    ['optionsMenu', 'Desktop preferences'],
+    ['monitoringMenu', 'Traffic monitoring'],
+    ['controlMenu', 'Firewall'],
+  ]) {
+    const menu = node('details', '');
+    menu.id = id;
+    menu.className = 'desktop-menu';
+    menu.append(node('summary', label), node('div', ''));
+    menu.lastElementChild!.className = 'menu-panel';
+    document.querySelector('.brand')!.after(menu);
+  }
+  document.addEventListener('pointerdown', (event) => {
+    for (const menu of document.querySelectorAll<HTMLDetailsElement>('.desktop-menu[open]'))
+      if (!menu.contains(event.target as Node)) menu.open = false;
+  }, { capture: true });
+  setupDecisionTimeout($<HTMLDetailsElement>('optionsMenu'));
+  const evaluation = node('section', '');
+  evaluation.className = 'evaluationbar';
+  evaluation.innerHTML = `<select id="evalProfile" aria-label="Evaluation profile"><option value="incoming">Incoming only</option><option value="both" disabled>Both directions · support not advertised</option></select><button id="evalStart">Start 5-minute evaluation…</button><button id="evalStop">Stop evaluation</button><button id="evalCancel" hidden>Cancel authentication</button><button id="evalStatus">Status</button><button id="evalRecover">Recovery…</button><span id="evaluationStatus" role="status"></span>`;
+  document.querySelector('#controlMenu .menu-panel')!.append(evaluation);
+  setupProtectionControls();
+  setupConnectionChecks($('controlMenu').querySelector<HTMLElement>('.menu-panel')!);
+  migrationUI = setupZoneMigration();
+  setupRuleEditor(ruleTab);
   $('editRule').onclick = () => void openRule({ id: selected });
   $('toggleRule').onclick = async () => {
     if (!$('ruleEditor').hidden) {
@@ -791,11 +804,14 @@ function updateButtons() {
   $<HTMLButtonElement>('reconcileRule').disabled = saving || !state?.control.connected;
   $<HTMLButtonElement>('closeEditor').disabled = saving;
 }
-export function updateWorkflows(next: ClientState) {
+export function updateRuleEditor(next: ClientState) {
   state = next;
+  updateButtons();
+}
+export function updateWorkflows(next: ClientState) {
+  updateRuleEditor(next);
   endpointUI?.update(next);
   migrationUI?.update(next, selected);
-  updateButtons();
   const rules = state.control.rules || [],
     sig = JSON.stringify([rules, state.control.rule_states, rules.map((r) => savedRuleState(r, next.control))]);
   if (sig !== signature) {

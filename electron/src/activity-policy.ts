@@ -591,10 +591,6 @@ export class ActivityPolicy {
       !c.capabilities?.includes('observed-rule-create-v1') ||
       (tier === 'process' && inv.processPolicy?.state !== 'active');
     add.onclick = () => {
-      if (this.delegate) {
-        this.delegate({ kind: 'new' });
-        return;
-      }
       const source = this.newSource('incoming', tier, inv);
       if (source) void openRule(source, { activity: true, networkZone: this.row?.applicationZone?.zone });
     };
@@ -718,9 +714,7 @@ export class ActivityPolicy {
       const advanced = button('Advanced…', `list:${ref.id}:advanced`);
       advanced.disabled = blocked || inactiveTarget;
       advanced.onclick = () =>
-        this.delegate
-          ? this.delegate({ kind: 'edit', id: ref.id })
-          : void openRule({ id: ref.id }, { activity: true });
+        void openRule({ id: ref.id }, { activity: true });
       const remove = button('Delete…', `list:${ref.id}:delete`);
       remove.disabled = blocked || !c.capabilities?.includes('conditional-rule-delete-v1');
       const generation = c.generation;
@@ -919,9 +913,7 @@ export class ActivityPolicy {
         const advanced = button('Advanced', 'qs-advanced', 'link-button');
         advanced.disabled = !!reason || busy || only.target_state === 'inactive';
         advanced.onclick = () =>
-          this.delegate
-            ? this.delegate({ kind: 'edit', id: only.id })
-            : void openRule({ id: only.id }, { activity: true });
+          void openRule({ id: only.id }, { activity: true });
         // Delete stays available for an inactive (exited) target; only edits are blocked.
         const remove = button('Delete', 'qs-delete', 'link-button');
         remove.disabled =
@@ -1000,8 +992,7 @@ export class ActivityPolicy {
       advanced.title = 'Set address, port, and expiry.';
       advanced.onclick = () => {
         const source = this.newSource(direction, tier, inv);
-        if (source && this.delegate) this.delegate({ kind: 'new' });
-        else if (source)
+        if (source)
           void openRule(source, {
             activity: true,
             protocol: pop.protocol === '*' ? undefined : pop.protocol,
@@ -1124,12 +1115,9 @@ export class ActivityPolicy {
       : 'Set address, port, and expiry.';
     advanced.onclick = () => {
       if (own)
-        return this.delegate
-          ? this.delegate({ kind: 'edit', id: own.id })
-          : void openRule({ id: own.id }, { activity: true });
+        return void openRule({ id: own.id }, { activity: true });
       const source = this.newSource(pop.direction, pop.tier, inv);
-      if (source && this.delegate) this.delegate({ kind: 'new' });
-      else if (source) void openRule(source, { activity: true });
+      if (source) void openRule(source, { activity: true });
     };
     // Delete acts on the own rule only (also for an ended process target).
     const rule = own && this.editable(own);
@@ -1184,9 +1172,7 @@ export class ActivityPolicy {
       const advanced = button('Advanced', `qs-scoped:${ref.id}:advanced`, 'link-button');
       advanced.disabled = !canManageRules(c) || busy || !rule || ref.target_state === 'inactive';
       advanced.onclick = () =>
-        this.delegate
-          ? this.delegate({ kind: 'edit', id: ref.id })
-          : void openRule({ id: ref.id }, { activity: true });
+        void openRule({ id: ref.id }, { activity: true });
       const remove = button('Delete', `qs-scoped:${ref.id}:delete`, 'link-button');
       remove.disabled =
         !canManageRules(c) ||
@@ -1314,9 +1300,7 @@ export class ActivityPolicy {
       const advanced = button('Advanced', `${key}:advanced`, 'link-button');
       advanced.disabled = blocked || inactiveTarget;
       advanced.onclick = () =>
-        this.delegate
-          ? this.delegate({ kind: 'edit', id: ref.id })
-          : void openRule({ id: ref.id }, { activity: true });
+        void openRule({ id: ref.id }, { activity: true });
       const remove = button('Delete', `${key}:delete`, 'link-button');
       remove.disabled =
         !canManageRules(c) || !rule || !c.capabilities?.includes('conditional-rule-delete-v1');

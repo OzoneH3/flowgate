@@ -507,40 +507,75 @@ main aside {
   touch-action: none;
 }
 #ruleEditor {
-  position: fixed;
-  right: 12px;
-  top: 110px;
-  width: min(610px, calc(100vw - 24px));
-  height: min(640px, calc(100vh - 122px));
-  z-index: 5;
-  background: #252525;
-  border: 1px solid #777;
-  box-shadow: 0 6px 25px #111;
-  display: flex;
-  flex-direction: column;
+  box-sizing: border-box;
+  width: min(640px, calc(100vw - 24px));
+  max-width: none;
+  max-height: calc(100dvh - 24px);
+  margin: auto;
+  padding: 0;
+  border: 1px solid var(--fg-border);
+  border-top: 2px solid var(--fg-tab);
+  border-radius: 10px;
+  background: var(--fg-content);
+  color: var(--fg-text);
+  box-shadow: 0 10px 32px #000a;
+  font-size: 14px;
+  line-height: 1.4;
 }
-#ruleEditor[hidden] {
-  display: none;
-}
-#ruleEditor header {
+#ruleEditor[open] { display: flex; flex-direction: column; }
+#ruleEditor header,
+#ruleEditor footer {
+  flex: none;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 6px 10px;
-  background: #333;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  padding: 10px 14px;
+  background: var(--fg-section);
 }
+#ruleEditor header { justify-content: space-between; border-bottom: 1px solid var(--fg-border); }
+#ruleEditor footer { border-top: 1px solid var(--fg-border); }
+#ruleEditorTitle { margin: 0; padding: 0; border: 0; background: none; font-size: 17px; font-weight: 700; }
+#ruleEditor :is(button, select, input:not([type='checkbox'])) {
+  min-height: 28px;
+  padding-inline: 7px;
+  border: 1px solid var(--fg-border);
+  border-radius: 6px;
+  background: var(--desktop-control, var(--fg-section));
+  color: inherit;
+}
+#ruleEditor :is(button, input, select, summary):focus-visible { outline: 2px solid var(--fg-tab); }
+#ruleEditor button:hover:enabled { border-color: var(--fg-tab); }
+#ruleEditor #saveRule:enabled { background: var(--fg-tab); color: var(--desktop-chrome, #171717); }
+#ruleEditor input[type='checkbox'] { accent-color: var(--fg-tab); }
 .editor-body {
   overflow: auto;
-  flex: 1;
   min-height: 0;
-  padding: 8px 12px;
+  padding: 10px 14px;
+}
+#ruleEditor .editor-body h3 {
+  margin: 10px 0 4px;
+  color: var(--fg-text);
+  font-size: 13px;
+  font-weight: 700;
+}
+.editor-identity summary {
+  padding: 6px 8px;
+  border: 1px solid var(--fg-border);
+  border-radius: 6px;
+  background: var(--fg-section);
+  cursor: pointer;
+  overflow-wrap: anywhere;
 }
 .editor-fields {
   display: grid;
-  grid-template-columns: 155px minmax(0, 1fr);
+  grid-template-columns: minmax(100px, 1fr) minmax(0, 2.4fr);
   align-items: center;
-  gap: 9px 14px;
-  padding: 14px 12px;
+  gap: 6px 10px;
+}
+@media (max-width: 430px) {
+  #ruleEditor header, #ruleEditor footer, .editor-body { padding-inline: 9px; }
+  #ruleEditor .scope-input { flex-wrap: wrap; }
 }
 .editor-fields input[type='checkbox'] {
   min-width: 0;
@@ -557,9 +592,6 @@ main aside {
   padding: 0 8px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-#ruleEditor footer {
-  justify-content: flex-end;
 }
 #rulePreview {
   max-height: 170px;
@@ -817,21 +849,8 @@ td.up { color: #c7daa8; background: #344b20; }
 #requestDetails:focus { outline:0; }
 .quick-popup .compact-application { margin:0 0 4px; gap:5px; }
 .quick-popup .compact-application strong { font-size:12px; }
-#ruleEditor { width: min(640px,calc(100vw - 24px)); height: min(582px,calc(100vh - 74px)); top: 62px; right: 12px; font-size: 14px; background: #222; }
-#ruleEditor header { height: 34px; padding: 4px 9px; }
-#ruleEditor header strong { font-weight: 400; }
-#ruleEditor header button { min-height: 24px; font-size: 11px; }
-.editor-body { padding: 6px 12px; }
-.editor-tab { display: inline-block; background: #04a9e4; color: white; padding: 5px 9px; margin: 0 0 4px; }
-#ruleEditor h2 { background: transparent; padding: 4px 0; border-bottom: 1px solid #484848; font-size: 16px; margin: 0 0 6px; }
-.editor-identity { padding: 0 0 10px; }
-.editor-identity summary { background: #292929; border: 1px solid #4a4a4a; padding: 5px 7px; cursor: pointer; overflow-wrap: anywhere; font-size: 12px; }
-.editor-fields { grid-template-columns: 155px minmax(0,1fr); gap: 5px 12px; padding: 3px 0; }
-.editor-fields input,.editor-fields select { min-height: 25px; height: 25px; font-size: 13px; }
-#absoluteExpiry,#editorFeedback { font-size: 11px; margin: 5px 0; padding: 0; }
+#absoluteExpiry,#editorFeedback { font-size: 12px; margin: 5px 0; padding: 0; }
 #rulePreview { font-size: 12px; line-height: 1.35; max-height: 80px; margin: 4px 0; padding: 5px; }
-#ruleEditor footer { min-height: 42px; justify-content: flex-start; background: #373737; padding: 6px 12px; }
-#ruleEditor footer button { min-height: 28px; }
 @media(max-width:950px) {
  .toolbar { gap: 4px; }.brand { font-size: 12px; }.desktop-menu > summary { padding: 4px; }
  #controlStatus { max-width: 29%; }
@@ -851,11 +870,6 @@ td.up { color: #c7daa8; background: #344b20; }
 
 .allow:before,.block:before { display: inline-block; width: 15px; height: 15px; line-height: 15px; border-radius: 50%; color: #eee; text-align: center; font-size: 12px; margin-right: 5px; }
 .allow:before { content: '✓'; background: #679f38; }.block:before { content: '×'; background: #d4524b; }
-#ruleEditor header { height: 38px; background: #222; gap: 8px; }
-#ruleEditor header strong { flex: 1; font-size: 12px; color: #aaa; }
-#ruleEditor header .editor-tab { margin: 0; }
-#ruleEditor footer #reloadRule { margin-left: auto; font-size: 11px; }
-#ruleEditor footer #saveRule { min-width: 80px; }
 
 .identity-route dd:first-of-type { font-size: 15px; font-weight: 400; }
 .identity-route dd.route-application { font-size: 17px; font-weight: 600; }
@@ -963,17 +977,6 @@ td.up { color: #c7daa8; background: #344b20; }
 #backendScope { font-size: 11px; }
 #backendScope .scope-preview { max-height: 150px; }
 #previewValidity { font-size: 11px; color: var(--fg-text); margin-left: auto; }
-#ruleEditor footer { flex-wrap: wrap; gap: 6px; }
-#ruleEditor footer #reloadRule { margin-left: 0; }
-#ruleEditor footer #previewValidity { order: 9; }
-#ruleEditor h2 { font-size: 15px; }
-@media(max-width:950px) { #ruleEditor { width: min(620px,calc(100vw - 24px)); } }
-/* Keep the reviewed scope above the footer at ordinary 600px window height. */
-#ruleEditor .editor-body { padding-top: 3px; }
-#ruleEditor h2 { padding: 2px 0; margin-bottom: 4px; }
-#ruleEditor .editor-identity { padding-bottom: 4px; }
-#ruleEditor .editor-fields { gap: 4px 8px; }
-#ruleEditor .editor-fields input,#ruleEditor .editor-fields select { height: 24px; min-height: 24px; }
 #ruleEditor .scope-input input[type='checkbox'] { height: 13px; min-height: 13px; }
 #creationScopeFields { padding-bottom: 4px; }
 #ruleEditor #scopeSummary { font-size: 12px; line-height: 1.35; }
@@ -1060,9 +1063,7 @@ td.up { color: #c7daa8; background: #344b20; }
 .activity-quick input[type=checkbox] { min-width:0; }
 .activity-quick-actions button { min-height:24px; padding:2px 8px; }
 .quick-allow { color:var(--fg-allow); }.quick-block { color:var(--fg-block); }
-#ruleEditor.quick-editor { width:min(560px,calc(100vw - 24px)); height:auto; max-height:calc(100vh - 100px); top:90px; font-size:12px; }
-#ruleEditor.quick-editor .editor-body { flex:0 1 auto; }
-#ruleEditor.quick-editor h2 { font-size:13px; }
+#ruleEditor.quick-editor { width: min(540px, calc(100vw - 24px)); }
 .quick-editor .advanced-rule-field,.quick-editor #creationScopeFields { display:none !important; }
 .quick-editor .editor-fields { grid-template-columns:110px minmax(0,1fr); }
 .connection-direction { display:inline-flex; width:16px; height:16px; border:2px solid currentColor; border-radius:50%; align-items:center; justify-content:center; margin-right:4px; vertical-align:middle; font-size:12px; line-height:12px; font-weight:600; }

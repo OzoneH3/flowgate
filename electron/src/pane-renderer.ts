@@ -12,6 +12,7 @@ import type { PaneFrame, PolicyEntry } from './pane-model';
 import { scopeZoneText } from './connection-presentation';
 import { initiationPresentation } from './initiation';
 import { trafficDetails, sum } from './model';
+import { setupRuleEditor, updateRuleEditor } from './workflows';
 const kind = new URL(location.href).searchParams.get('pane') === 'info' ? 'info' : 'chart';
 const root = document.getElementById('app')!;
 setupTooltips();
@@ -65,7 +66,8 @@ if (kind === 'chart') {
   );
 } else {
   content.innerHTML =
-    '<h3 id="selectedName"></h3><div id="selectedExecutable"></div><div class="info-scroll"><h3 class="info-section-title">Properties</h3><dl id="info"></dl><section id="infoRules"></section></div><p class="pane-action-hint">Advanced rule editing opens in Activity.</p>';
+    '<h3 id="selectedName"></h3><div id="selectedExecutable"></div><div class="info-scroll"><h3 class="info-section-title">Properties</h3><dl id="info"></dl><section id="infoRules"></section></div>';
+  setupRuleEditor(document.getElementById('dockPane')!);
   updateInspector = setupInspectorTabs(document.getElementById('info')!);
   const delegate = (action: PolicyEntry) => {
     if (!frame) return;
@@ -89,7 +91,10 @@ function consume(next: PaneFrame) {
   )
     return;
   frame = next;
-  if(kind === "info") refreshUpload(next.state);
+  if (kind === 'info') {
+    refreshUpload(next.state);
+    updateRuleEditor(next.state);
+  }
   const p = next.presentation,
     s = next.state,
     r = p.row;

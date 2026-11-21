@@ -85,7 +85,8 @@ try {
   await main.locator('#trafficGraph .pane-menu summary').click();
   await main.locator('[data-undock=chart]').click();
   const chart = await pane('chart');
-  assert.equal(app.windows().length, 3);
+  const detached = () => app.windows().filter((p) => p.url().includes('/pane.html'));
+  assert.equal(detached().length, 2);
   await info.selectOption('#paneUnits', 'Mbit');
   await wait(async () => (await main.locator('#displayUnits').inputValue()) === 'Mbit');
   await chart.selectOption('#paneSource', 'udp');
@@ -106,6 +107,23 @@ try {
   await wait(async () =>
     /Allow/.test(await info.locator('[data-focus="cell:process:incoming"]').innerText()),
   );
+  await info.locator('[data-focus="cell:process:incoming"]').click();
+  await info.getByRole('button', { name: 'Advanced', exact: true }).click();
+  const editor = info.getByRole('dialog', { name: 'Rule editor' });
+  await editor.waitFor();
+  assert(await editor.evaluate((element) => element.matches(':modal')));
+  assert.equal(await editor.locator('#editAction').inputValue(), 'allow');
+  assert(await main.locator('#ruleEditor').isHidden());
+  await editor.getByRole('button', { name: 'Preview', exact: true }).click();
+  await wait(() => editor.getByRole('button', { name: 'Save', exact: true }).isEnabled());
+  await info.screenshot({ path: run + '/advanced-rule-in-info.png' });
+  await editor.getByRole('button', { name: 'Minimize' }).click();
+  await editor.waitFor({ state: 'hidden' });
+  await info.getByRole('button', { name: 'Resume editor' }).click();
+  await editor.waitFor();
+  assert.equal(await editor.locator('#editAction').inputValue(), 'allow');
+  await editor.getByRole('button', { name: 'Close', exact: true }).click();
+  assert.equal((await call({ operation: 'list' })).rules[0].id, created.id);
   await info.screenshot({ path: run + '/02-info-real-process-rule.png' });
   await chart.screenshot({ path: run + '/03-chart-real.png' });
   await main.screenshot({ path: run + '/04-main-one-rule-owner.png' });
@@ -135,7 +153,7 @@ try {
   await chart.keyboard.press('ArrowLeft');
   await chart.locator('#graphPrevious').click();
   await chart.locator('[data-series=upload]').click();
-  assert.equal(await chart.locator('[data-series=upload]').getAttribute('aria-pressed'), 'false');
+  await wait(async () => (await chart.locator('[data-series=upload]').getAttribute('aria-pressed')) === 'false');
   await chart.screenshot({ path: run + '/05-chart-navigation.png' });
   await chart.locator('#graphLive').click();
   await wait(
@@ -151,21 +169,21 @@ try {
   await wait(
     async () =>
       await app.evaluate(({ BrowserWindow }) =>
-        BrowserWindow.getAllWindows().every((w) => !w.isVisible()),
+        BrowserWindow.getAllWindows().filter((w) => !w.webContents.getURL().includes('prompt.html')).every((w) => !w.isVisible()),
       ),
   );
   await app.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id).show(), mainID);
   await wait(
     async () =>
       await app.evaluate(({ BrowserWindow }) =>
-        BrowserWindow.getAllWindows().every((w) => w.isVisible()),
+        BrowserWindow.getAllWindows().filter((w) => !w.webContents.getURL().includes('prompt.html')).every((w) => w.isVisible()),
       ),
   );
   await info.locator('#dockPane').click();
-  await wait(async () => app.windows().length === 2);
+  await wait(async () => detached().length === 1);
   assert(await main.locator('#infoRules').isVisible());
   await chart.locator('#closePane').click();
-  await wait(async () => app.windows().length === 1);
+  await wait(async () => detached().length === 0);
   await main.locator('.toolbar-window-menu summary').click();
   await main.locator('.toolbar-window-menu [data-pane=chart]').click();
   await wait(async () => await main.locator('#trafficGraph').isVisible());
