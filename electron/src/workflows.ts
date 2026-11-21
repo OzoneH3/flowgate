@@ -34,8 +34,12 @@ let editRevision = 0;
 let accessState = '';
 let editorSource: RuleSource = {};
 let stayInActivity = false;
+let editorChanged = false;
+let requireNetwork = false;
 export interface EditorOptions {
   networkZone?: 'local' | 'internet';
+  newNetworkSource?: RuleSource;
+  requireNetwork?: boolean;
   activity?: boolean;
   quick?: boolean;
   action?: 'allow' | 'block' | 'ask';
@@ -132,6 +136,14 @@ function hideRuleEditor() {
   panel.close();
   panel.hidden = true;
 }
+function showRuleExpiry(rule: Rule, process: boolean) {
+  const expires = rule.expires.startsWith('0001-') ? '' : new Date(rule.expires).toLocaleString();
+  $('absoluteExpiry').textContent = expires ? 'Expires: ' + expires
+    : process ? 'This daemon session · ends on process exit.' : 'Persistent: no expiry.';
+  $('editExpiry').querySelector('option[value=preserve]')!.textContent = expires
+    ? 'Keep expiry · ' + expires
+    : process ? 'Keep this daemon session lifetime' : 'Keep persistent';
+}
 export async function openRule(source: RuleSource, options: EditorOptions = {}) {
   if (draft) {
     showRuleEditor();
@@ -141,9 +153,11 @@ export async function openRule(source: RuleSource, options: EditorOptions = {}) 
   }
   try {
     draft = await window.flowgate.ruleDraft(source);
+    editorChanged = false;
     futureOnlyDraft = !!options.futureOnly;
     editorSource = source;
     stayInActivity = !!options.activity;
+    requireNetwork = !!options.requireNetwork;
     $('ruleEditor').classList.toggle('quick-editor', !!options.quick);
     $('editorMode').textContent = options.quick ? 'Advanced editor' : 'Compact editor';
     unresolved = false;
@@ -164,14 +178,30 @@ export async function openRule(source: RuleSource, options: EditorOptions = {}) 
     $('editAction').title = askWritable ? 'Ask: prompt for each new connection' : '';
     $<HTMLSelectElement>('editAction').value = r.action;
     $<HTMLSelectElement>('editProtocol').value = r.filter.protocol;
-    $<HTMLSelectElement>('editZone').value = options.networkZone || r.filter.network_zone || '';
-    $<HTMLSelectElement>('editZone').disabled =
+    const zone = $<HTMLSelectElement>('editZone');
+    zone.options[0].textContent = requireNetwork ? 'Choose Local or Internet…' : 'Any network';
+    zone.value = options.networkZone || r.filter.network_zone || '';
+    zone.disabled =
       !!source.id || !!source.zone || !state?.control.capabilities?.includes(ZONE_CAPABILITY);
     $('editZone').title = source.id
       ? 'Create a new rule to change the network scope.'
       : state?.control.capabilities?.includes(ZONE_CAPABILITY)
         ? 'Choose the network scope.'
         : 'Backend update required';
+    const newNetwork = $<HTMLButtonElement>('newNetworkRule');
+    newNetwork.hidden = !options.newNetworkSource || !!r.filter.network_zone;
+    newNetwork.onclick = () => {
+      if (!options.newNetworkSource || saving || unresolved) return;
+      const create = async () => {
+        hideRuleEditor();
+        draft = undefined;
+        const action = r.action === 'allow' || r.action === 'block' || r.action === 'ask' ? r.action : undefined;
+        await openRule(options.newNetworkSource!, { activity: options.activity, action, requireNetwork: true });
+      };
+      if (editorChanged)
+        confirmAction('Discard editor changes?', 'Start a separate rule with its own network scope. Changes in this draft will be discarded.', create, 'Start new rule');
+      else void create();
+    };
     if (r.filter.all_programs)
       $('editorApplication').textContent =
         `All programs · ${r.filter.all_uids ? 'all users' : 'current user'} · ${zoneLabel(r.filter.network_zone)} · ${r.filter.direction}`;
@@ -191,18 +221,7 @@ export async function openRule(source: RuleSource, options: EditorOptions = {}) 
     $<HTMLInputElement>('editShareRoot').disabled = !state?.control.capabilities?.includes('explicit-root-sharing-v1') || state.control.permissions?.role !== 'administrator' || !!r.filter.process || !!r.filter.all_programs || !!r.preset || !!source.zone;
 
     $<HTMLSelectElement>('editExpiry').value = 'preserve';
-    $('absoluteExpiry').textContent = r.expires.startsWith('0001-')
-      ? r.filter.process || draft.targetScope === 'process'
-        ? 'This daemon session · ends on process exit.'
-        : 'Persistent: no expiry.'
-      : 'Expires: ' + new Date(r.expires).toLocaleString();
-    $('editExpiry').querySelector('option[value=preserve]')!.textContent = r.expires.startsWith(
-      '0001-',
-    )
-      ? r.filter.process || draft.targetScope === 'process'
-        ? 'Keep this daemon session lifetime'
-        : 'Keep persistent'
-      : 'Keep this expiry';
+    showRuleExpiry(r, !!r.filter.process || draft.targetScope === 'process');
     $('creationScopeFields').hidden = !draft.observed;
     $<HTMLSelectElement>('createScope').value = '';
     for (const e of document.querySelectorAll<HTMLElement>('#editPriority,label[for=editPriority]'))
@@ -278,7 +297,7 @@ export function setupRuleEditor(resumeAfter: Element) {
   panel.id = 'ruleEditor';
   panel.hidden = true;
   panel.setAttribute('aria-labelledby', 'ruleEditorTitle');
-  panel.innerHTML = `<header><h2 id="ruleEditorTitle">Rule editor</h2><span><button id="editorMode">Compact editor</button> <button id="minimizeEditor">Minimize</button> <button id="closeEditor">Close</button></span></header><div class="editor-body"><h3>Application</h3><details class="editor-identity"><summary id="editorApplication">Application identity</summary><pre id="editorIdentity"></pre></details><h3>Rule and scope</h3><div id="creationScopeFields" hidden><label for="createScope">Scope</label> <select id="createScope"><option value="">Choose scope…</option><option value="custom">Specified address / ports</option><option value="application">All addresses / ports for this protocol</option></select></div><div class="editor-fields"><label for="editAction">Action</label><select id="editAction"><option value="allow">Allow</option><option value="block">Block</option><option value="ask">Ask</option></select><label for="editProtocol">Protocol</label><select id="editProtocol"><option value="tcp">TCP</option><option value="udp">UDP</option><option value="*">Any</option></select><label for="editZone">Network</label><select id="editZone" aria-label="Network zone"><option value="">Any network</option><option value="local">Local Network</option><option value="internet">Internet</option></select><label for="editAddress">Remote address</label><div class="scope-input"><label><input id="anyAddress" type="checkbox">Any address</label><input id="editAddress" maxlength="256" placeholder="IP address or CIDR"></div><label for="editLocal">Local port</label><div class="scope-input"><label><input id="anyLocal" type="checkbox">Any port</label><input id="editLocal" type="number" min="1" max="65535" aria-label="Specific local port"></div><label for="editRemote">Remote port</label><div class="scope-input"><label><input id="anyRemote" type="checkbox">Any port</label><input id="editRemote" type="number" min="1" max="65535" aria-label="Specific remote port"></div><label for="editPriority">Priority</label><input id="editPriority" type="number" min="-1000" max="1000"><label for="editExpiry">Expiry</label><select id="editExpiry"><option value="preserve">Preserve absolute expiry</option><option value="hour">For 1 hour from preview</option><option value="permanent">Persistent (no expiry)</option></select><label for="editShareRoot">Also apply when run as root</label><div><input id="editShareRoot" type="checkbox"><small>Exact executable and rule scope. For interpreters, this covers all scripts they run. Requires administrator access.</small></div><label for="editEnabled">Enabled</label><input id="editEnabled" type="checkbox"></div><p id="absoluteExpiry"></p><h3>Review scope</h3><p id="scopeSummary"></p><details id="backendScope"><summary>Full backend preview</summary><p id="rulePreview" class="scope-preview"></p></details><p id="editorFeedback" role="status"></p></div><footer><button id="reloadRule">Reload version, keep fields</button><button id="previewRule">Preview</button><button id="saveRule" disabled>Save</button><span id="previewValidity" role="timer"></span><button id="reconcileRule" hidden>Check save result</button></footer>`;
+  panel.innerHTML = `<header><h2 id="ruleEditorTitle">Rule editor</h2><span><button id="editorMode">Compact editor</button> <button id="minimizeEditor">Minimize</button> <button id="closeEditor">Close</button></span></header><div class="editor-body"><h3>Application</h3><details class="editor-identity"><summary id="editorApplication">Application identity</summary><pre id="editorIdentity"></pre></details><h3>Rule and scope</h3><div id="creationScopeFields" hidden><label for="createScope">Scope</label> <select id="createScope"><option value="">Choose scope…</option><option value="custom">Specified address / ports</option><option value="application">All addresses / ports for this protocol</option></select></div><div class="editor-fields"><label for="editAction">Action</label><select id="editAction"><option value="allow">Allow</option><option value="block">Block</option><option value="ask">Ask</option></select><label for="editProtocol">Protocol</label><select id="editProtocol"><option value="tcp">TCP</option><option value="udp">UDP</option><option value="*">Any</option></select><label for="editZone">Network</label><div class="editor-network"><select id="editZone" aria-label="Network zone"><option value="">Any network</option><option value="local">Local Network</option><option value="internet">Internet</option></select><button id="newNetworkRule" type="button" hidden>New rule for another network…</button></div><label for="editAddress">Remote address</label><div class="scope-input"><label><input id="anyAddress" type="checkbox">Any address</label><input id="editAddress" maxlength="256" placeholder="IP address or CIDR"></div><label for="editLocal">Local port</label><div class="scope-input"><label><input id="anyLocal" type="checkbox">Any port</label><input id="editLocal" type="number" min="1" max="65535" aria-label="Specific local port"></div><label for="editRemote">Remote port</label><div class="scope-input"><label><input id="anyRemote" type="checkbox">Any port</label><input id="editRemote" type="number" min="1" max="65535" aria-label="Specific remote port"></div><label for="editPriority">Priority</label><input id="editPriority" type="number" min="-1000" max="1000"><label for="editExpiry">Expiry</label><select id="editExpiry"><option value="preserve">Keep current expiry</option><option value="hour">For 1 hour from preview</option><option value="permanent">Persistent (no expiry)</option></select><label for="editShareRoot">Also apply when run as root</label><div><input id="editShareRoot" type="checkbox"><small>Exact executable and rule scope. For interpreters, this covers all scripts they run. Requires administrator access.</small></div><label for="editEnabled">Enabled</label><input id="editEnabled" type="checkbox"></div><p id="absoluteExpiry"></p><h3>Review scope</h3><p id="scopeSummary"></p><details id="backendScope"><summary>Full backend preview</summary><p id="rulePreview" class="scope-preview"></p></details><p id="editorFeedback" role="status"></p></div><footer><button id="reloadRule">Reload version, keep fields</button><button id="previewRule">Preview</button><button id="saveRule" disabled>Save</button><span id="previewValidity" role="timer"></span><button id="reconcileRule" hidden>Check save result</button></footer>`;
   const editorFooter = panel.querySelector('footer')!;
   editorFooter.append(panel.querySelector('#closeEditor')!);
   document.body.append(panel);
@@ -317,6 +336,7 @@ export function setupRuleEditor(resumeAfter: Element) {
   $('minimizeEditor').onclick = minimize;
   panel.addEventListener('input', () => {
     if (!unresolved) {
+      editorChanged = true;
       invalidate();
       updateButtons();
     }
@@ -360,7 +380,7 @@ export function setupRuleEditor(resumeAfter: Element) {
     try {
       const old = draft;
       draft = await window.flowgate.ruleDraft(editorSource);
-      $('absoluteExpiry').textContent = 'Absolute expiry: ' + draft.rule.expires;
+      showRuleExpiry(draft.rule, !!draft.rule.filter.process || draft.targetScope === 'process');
       invalidate();
       editorMessage(
         'Current version loaded; entered fields retained. Review expiry and preview again.',
@@ -760,11 +780,13 @@ function updateButtons() {
   $<HTMLButtonElement>('reloadRule').hidden = !!draft?.observed;
   $<HTMLButtonElement>('previewRule').disabled ||=
     (!!draft?.observed && !$<HTMLSelectElement>('createScope').value) ||
+    (requireNetwork && !$<HTMLSelectElement>('editZone').value) ||
     (draft?.rule.action === 'ask' && !state?.control.capabilities?.includes(STORED_ASK_CAPABILITY));
   $<HTMLSelectElement>('editZone').disabled ||=
     !!editorSource.id ||
     !!editorSource.zone ||
     !state?.control.capabilities?.includes(ZONE_CAPABILITY);
+  $<HTMLButtonElement>('newNetworkRule').disabled = saving || unresolved || !writable();
   if ($<HTMLSelectElement>('editZone').value && receipt &&
       state?.control.networkZones?.revision !== previewNetworkRevision) {
     receipt = ''; previewNeedsRefresh = true;

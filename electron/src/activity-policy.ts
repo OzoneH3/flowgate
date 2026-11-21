@@ -913,7 +913,7 @@ export class ActivityPolicy {
         const advanced = button('Advanced', 'qs-advanced', 'link-button');
         advanced.disabled = !!reason || busy || only.target_state === 'inactive';
         advanced.onclick = () =>
-          void openRule({ id: only.id }, { activity: true });
+          this.openBlockerEditor(inv, only.id, pop.protocol === '*' ? undefined : pop.protocol);
         // Delete stays available for an inactive (exited) target; only edits are blocked.
         const remove = button('Delete', 'qs-delete', 'link-button');
         remove.disabled =
@@ -991,13 +991,7 @@ export class ActivityPolicy {
       advanced.disabled = !!blocked || busy;
       advanced.title = 'Set address, port, and expiry.';
       advanced.onclick = () => {
-        const source = this.newSource(direction, tier, inv);
-        if (source)
-          void openRule(source, {
-            activity: true,
-            protocol: pop.protocol === '*' ? undefined : pop.protocol,
-            networkZone: this.row?.applicationZone?.zone,
-          });
+        this.openBlockerEditor(inv, undefined, pop.protocol === '*' ? undefined : pop.protocol);
       };
       links.append(advanced);
       const noDelete = button('Delete', 'qs-delete-none', 'link-button');
@@ -1070,6 +1064,18 @@ export class ActivityPolicy {
       );
     return frag;
   }
+  private openBlockerEditor(inv: Inventory, id?: string, protocol?: string) {
+    const { direction, tier, networkZone } = this.popup!;
+    const source = this.newSource(direction, tier, inv);
+    if (id) {
+      const caps = this.state!.control.capabilities;
+      const newNetworkSource = !this.row?.applicationZone && source?.observed &&
+        caps?.includes(ZONE_CAPABILITY) && caps.includes('observed-rule-create-v1') ? source : undefined;
+      void openRule({ id }, { activity: true, newNetworkSource });
+    } else if (source) {
+      void openRule(source, { activity: true, protocol, networkZone: networkZone || undefined });
+    }
+  }
   // NetLimiter quick setter: [Enabled] Ask | Allow | Deny, Advanced, Delete — one click sets the
   // node's own canonical rule (backend creates it or updates it in place); no review step.
   private policySetter(
@@ -1112,12 +1118,7 @@ export class ActivityPolicy {
     advanced.title = own
       ? 'Open the rule editor.'
       : 'Set address, port, and expiry.';
-    advanced.onclick = () => {
-      if (own)
-        return void openRule({ id: own.id }, { activity: true });
-      const source = this.newSource(pop.direction, pop.tier, inv);
-      if (source) void openRule(source, { activity: true });
-    };
+    advanced.onclick = () => this.openBlockerEditor(inv, own?.id);
     // Delete acts on the own rule only (also for an ended process target).
     const rule = own && this.editable(own);
     const remove = button('Delete', own ? 'qs-delete' : 'qs-delete-none', 'link-button');

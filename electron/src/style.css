@@ -548,6 +548,8 @@ main aside {
 #ruleEditor button:hover:enabled { border-color: var(--fg-tab); }
 #ruleEditor #saveRule:enabled { background: var(--fg-tab); color: var(--desktop-chrome, #171717); }
 #ruleEditor input[type='checkbox'] { accent-color: var(--fg-tab); }
+.editor-network { display: flex; flex-wrap: wrap; gap: 6px; }
+.editor-network select { flex: 1; }
 .editor-body {
   overflow: auto;
   min-height: 0;

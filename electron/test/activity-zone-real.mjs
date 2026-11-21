@@ -137,6 +137,7 @@ try {
   await info.locator('.rule-details summary').click();
   await info.screenshot({ path: run + '/02-process-zone-and-fallbacks.png' });
   await info.locator('[data-focus="cell:process:incoming"]').click();
+  await info.locator('#qs-zone input[value=internet]').check();
   await info.screenshot({ path: run + '/03-popup-compact.png' });
   await info.locator('.qs-row input[type=checkbox]').click();
   await wait(async () =>
@@ -153,10 +154,46 @@ try {
   );
   await main.locator('[data-focus="cell:application:incoming"]').click();
   await main.locator('[data-focus="qs-advanced"]').click();
+  await main.getByRole('dialog', { name: 'Rule editor' }).waitFor();
   assert.equal(await main.locator('#editZone').inputValue(), 'local');
   assert.equal(await main.locator('#editZone').isDisabled(), true);
   await main.screenshot({ path: run + '/04-zone-advanced-editor.png' });
   await main.locator('#closeEditor').click();
+
+  await main.locator('#rows tr[data-id^="app:"] .name').first().click();
+  await create(main, 'outgoing', 'block');
+  const broad = (await call({ operation: 'list' })).rules.find((r) =>
+    !r.filter.all_programs && !r.filter.process && r.filter.direction === 'outgoing' && !r.filter.network_zone);
+  assert(broad, 'Any-network application rule exists');
+  await main.locator('[data-focus="cell:application:outgoing"]').click();
+  await main.locator('[data-focus="qs-advanced"]').click();
+  const network = main.getByRole('combobox', { name: 'Network zone' });
+  await network.waitFor();
+  assert(await network.isDisabled());
+  await main.getByRole('button', { name: 'New rule for another network…' }).click();
+  await main.locator('#createScope').selectOption('application');
+  assert(await main.locator('#previewRule').isDisabled());
+  await network.selectOption('internet');
+  await main.locator('#editExpiry').selectOption('hour');
+  await main.locator('#previewRule').click();
+  await main.locator('#saveRule').click();
+  await wait(async () => (await call({ operation: 'list' })).rules.some((r) =>
+    r.filter.application === broad.filter.application && r.filter.direction === 'outgoing' && r.filter.network_zone === 'internet'));
+  const after = (await call({ operation: 'list' })).rules;
+  assert.deepEqual(after.find((r) => r.id === broad.id), broad);
+  const scoped = after.find((r) => r.filter.application === broad.filter.application &&
+    r.filter.direction === 'outgoing' && r.filter.network_zone === 'internet');
+  assert.equal(scoped.action, broad.action);
+  assert(Date.parse(scoped.expires) > Date.now());
+  await main.locator('#rulesTab').click();
+  await main.locator(`#ruleRows tr[data-id=${JSON.stringify(scoped.id)}]`).click();
+  await main.locator('#editRule').click();
+  const expiry = main.locator('#editExpiry option[value=preserve]');
+  await main.getByRole('dialog', { name: 'Rule editor' }).waitFor();
+  const formatted = await main.evaluate((value) => new Date(value).toLocaleString(), scoped.expires);
+  assert.equal(await expiry.textContent(), 'Keep expiry · ' + formatted);
+  await main.locator('#closeEditor').click();
+
   await main.setViewportSize({ width: 860, height: 600 });
   await main.screenshot({ path: run + '/05-narrow.png' });
   assert.deepEqual(result.errors, []);
