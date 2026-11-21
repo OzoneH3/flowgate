@@ -119,6 +119,15 @@ def exercise(lab, sut, receiver, candidate, new_release, old_release, evidence):
             stages["predecessor_block"] = {**before, **verify_block(case, saved, "predecessor-block")}
 
             phase = "upgrade"
+            collector = api("traffic-status")["traffic_monitor"]
+            stages["predecessor_collector"] = collector
+            if collector["state"] == "failed":
+                diagnostic = sut.run(
+                    "sudo -n journalctl -b -u flowgate.service "
+                    "-u flowgate-monitor-setup.service --no-pager -n 100",
+                    check=False, timeout=12,
+                )
+                stages["predecessor_collector_journal"] = diagnostic.stdout
             guest_step(
                 "candidate_digests",
                 "cd fg-lab && /usr/bin/sha256sum -c <<'SHA256'\n"
