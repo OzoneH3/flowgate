@@ -502,6 +502,11 @@ export function setupRuleEditor(resumeAfter: Element) {
     }
   };
 }
+export function setRuleListReturn(action?: () => void) {
+  const button = $<HTMLButtonElement>('ruleListReturn');
+  button.hidden = !action;
+  button.onclick = action ?? null;
+}
 export function setupWorkflows(chooseTab: (s: string) => void) {
   showTab = chooseTab;
   $('requestsTab').after(node('button', 'Rules'));
@@ -511,7 +516,7 @@ export function setupWorkflows(chooseTab: (s: string) => void) {
   const view = node('main', '');
   view.id = 'rulesView';
   view.hidden = true;
-  view.innerHTML = `<section class="rules-main"><div class="filterbar"><button id="editRule">Edit selected</button><button id="toggleRule">Enable / Disable…</button><button id="deleteRule">Delete…</button></div><div class="table-scroll"><table id="rulesTable" tabindex="0" aria-label="Saved rules"><thead><tr><th>Application</th><th>Action</th><th>Direction</th><th>Protocol</th><th>Endpoint scope</th><th>Expiry</th><th>State</th></tr></thead><tbody id="ruleRows"></tbody></table></div><p class="hint">Rules are evaluated by Go. Changing rules does not necessarily disconnect already-approved TCP sessions.</p><p id="deleteCompatibility" class="hint"></p><p id="ruleFeedback" role="status"></p></section><aside><h2>Rule information</h2><dl id="ruleInfo">Select a saved rule.</dl></aside>`;
+  view.innerHTML = `<section class="rules-main"><div class="filterbar"><button id="editRule">Edit selected</button><button id="toggleRule">Enable / Disable…</button><button id="deleteRule">Delete…</button></div><div class="table-scroll"><div id="ruleListEmpty" class="hint" hidden><p>No saved rules yet.</p><button id="ruleListReturn" type="button" hidden>Back to app rules</button></div><table id="rulesTable" tabindex="0" aria-label="Saved rules"><thead><tr><th>Application</th><th>Action</th><th>Direction</th><th>Protocol</th><th>Endpoint scope</th><th>Expiry</th><th>State</th></tr></thead><tbody id="ruleRows"></tbody></table></div><p class="hint">Rules are evaluated by Go. Changing rules does not necessarily disconnect already-approved TCP sessions.</p><p id="deleteCompatibility" class="hint"></p><p id="ruleFeedback" role="status"></p></section><aside><h2>Rule information</h2><dl id="ruleInfo"></dl></aside>`;
   $('requestsView').after(view);
   endpointUI = setupEndpointPermissions();
   for (const [id, label] of [
@@ -846,6 +851,10 @@ export function updateWorkflows(next: ClientState) {
     sig = JSON.stringify([rules, state.control.rule_states, rules.map((r) => savedRuleState(r, next.control))]);
   if (sig !== signature) {
     signature = sig;
+    const empty = rules.length === 0;
+    $('ruleListEmpty').hidden = !empty;
+    $('rulesTable').hidden = empty;
+    $('ruleInfo').closest('aside')!.hidden = empty;
     const body = $('ruleRows');
     body.replaceChildren();
     for (const r of rules) {
@@ -900,7 +909,7 @@ export function updateWorkflows(next: ClientState) {
   }
   const compatible = state.control.capabilities?.includes('conditional-rule-delete-v1');
   $<HTMLButtonElement>('deleteRule').disabled ||= !compatible;
-  $('deleteCompatibility').textContent = compatible
+  $('deleteCompatibility').textContent = compatible || !rules.length
     ? ''
     : 'Safe Delete unavailable: backend must advertise conditional-rule-delete-v1. No unconditional fallback.';
   const access = state.control.connected ? (!writable() ? 'readonly' : 'write') : 'offline';
@@ -912,7 +921,7 @@ export function updateWorkflows(next: ClientState) {
         : access === 'readonly'
           ? 'Read-only controller; mutations disabled.'
           : state.control.enforcement?.state === 'stopped'
-            ? 'Stored rules editable · select an In / Out cell to review policy.'
+            ? 'Stored rules editable · protection stopped.'
             : 'Connected. Rule changes require a backend preview.',
     );
   }
@@ -1017,11 +1026,11 @@ function selectRule() {
         ['Edit version', String(r.version)],
       ]
     : [];
-  const signature = JSON.stringify(fields);
+  const signature = JSON.stringify([!!state.control.rules?.length, fields]);
   if (info.dataset.signature !== signature) {
     info.dataset.signature = signature;
     info.replaceChildren();
-    if (!r) info.textContent = 'Select a saved rule.';
+    if (!r && state.control.rules?.length) info.textContent = 'Select a saved rule.';
     for (const [label, value] of fields) info.append(node('dt', label), node('dd', value));
   }
 }

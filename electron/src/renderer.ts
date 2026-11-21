@@ -92,7 +92,7 @@ import type { Application } from './protocol';
 import { verifiedLaunch } from './provenance';
 import { openInactiveRules } from './inactive-rules';
 import { TrafficGraph } from './graph';
-import { setupWorkflows, updateWorkflows, openRule, resumeRuleEditor } from './workflows';
+import { setupWorkflows, updateWorkflows, openRule, resumeRuleEditor, setRuleListReturn } from './workflows';
 import { setupDecisionLog, showDecisionLog, updateDecisionLog } from './decision-log-view';
 import { runtimeBadge, runtimeDegradation } from './runtime-checks';
 import { queueHealthWarning } from './queue-health';
@@ -971,6 +971,27 @@ if (promptID) {
     $('headers').append(th);
   }
   const chooseTab = (next: string) => {
+    if (next === 'rules' && tab !== 'rules') {
+      const app = tab === 'activity' && allRows(roots).find((row) => row.id === selected && row.kind === 'application');
+      setRuleListReturn(app ? () => {
+        chooseTab('activity');
+        if (!allRows(roots).some((row) => row.id === app.id)) {
+          $('activityTab').focus();
+          return;
+        }
+        if (selected !== app.id) {
+          selected = app.id;
+          buildTree();
+        }
+        const controls = document.querySelector<HTMLElement>(
+          `#rows tr[data-id="${CSS.escape(app.id)}"] .status-strip`,
+        );
+        if (controls) {
+          controls.tabIndex = -1;
+          (controls.querySelector<HTMLElement>('button.policy-cell:enabled') || controls).focus();
+        } else $('tree').focus();
+      } : undefined);
+    }
     tab = next;
     showObservedUsage(next === 'usage');
     if ($('rulesView')) {

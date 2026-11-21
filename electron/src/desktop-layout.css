@@ -31,6 +31,14 @@
 .rules-main {
   padding-top: var(--desktop-tabs-height);
 }
+#rulesView > aside[hidden],
+#rulesView > .sidebar-grip:has(+ aside[hidden]),
+#rulesView:has(#ruleListEmpty:not([hidden])) :is(#editRule, #toggleRule, #deleteRule) {
+  display: none;
+}
+#ruleListEmpty { padding: 8px 16px 16px; }
+#ruleListEmpty p { color: var(--fg-text); font-size: 14px; font-weight: 600; }
+#ruleListReturn { color: var(--fg-text); }
 main aside {
   max-width: min(600px, var(--desktop-sidebar-max-width));
 }
@@ -41,7 +49,7 @@ main .sidebar-grip + aside,
 .sidebar-grip {
   width: var(--desktop-sidebar-grip-width);
 }
-#app:has(#activityView:not([hidden])) > .tabs {
+#app:has(#activityView:not([hidden]), #rulesView:not([hidden]) > aside[hidden]) > .tabs {
   width: calc(100% - 8px);
 }
 

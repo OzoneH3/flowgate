@@ -275,6 +275,8 @@ function row(r: LogRecord) {
 }
 
 function emptyText(s: DecisionLogState) {
+  if (s.activityPreview)
+    return 'Connect to an installed FlowGate daemon to view recorded decisions.';
   if (!s.connected) return 'Disconnected from the daemon. No records can be retrieved.';
   if (!s.supported)
     return 'This daemon does not provide a decision log (decision-log-v1 not advertised).';

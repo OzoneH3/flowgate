@@ -390,6 +390,13 @@ try {
   assert.equal(await appRow.locator('.status-strip > .status-slot').count(), 5);
   assert.match(await sidebar.locator('#selectedName').getAttribute('data-label'), /Atlas Sync/i);
   assert.match(await sidebar.locator('#selectedName').innerText(), /Atlas Sync/i);
+  await sidebar.getByRole('button', { name: 'Rule list' }).click();
+  assert.equal(await main.locator('#ruleListEmpty p').innerText(), 'No saved rules yet.');
+  assert(await main.locator('#rulesTable').isHidden());
+  assert.doesNotMatch(await main.locator('#rulesView').innerText(), /Select a saved rule|select an In \/ Out cell/);
+  await main.getByRole('button', { name: 'Back to app rules' }).click();
+  await sidebar.waitFor();
+  assert(await appRow.locator('.status-strip').evaluate((group) => group.contains(document.activeElement)));
   const overviewTab = sidebar.getByRole('tab', { name: 'Overview', exact: true });
   const diagnosticsTab = sidebar.getByRole('tab', { name: 'Diagnostics' });
   assert.equal(await overviewTab.getAttribute('aria-selected'), 'true');

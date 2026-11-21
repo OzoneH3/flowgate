@@ -17,6 +17,7 @@ export interface DecisionLogState extends LogView {
   supported: boolean;
   outcomeLookup: boolean;
   connected: boolean;
+  activityPreview: boolean;
   endpointKind: 'controller' | 'companion' | '';
   generation: string;
   enforcement: string;
@@ -60,6 +61,7 @@ export class DecisionLogClient {
       supported: !!t,
       outcomeLookup: !!t?.outcomeLookup,
       connected: c.connected || o.connected,
+      activityPreview: o.connected && !this.backend.controller && !o.protection && !t,
       endpointKind: t?.kind || '',
       generation: (t?.kind === 'controller' ? c.generation : o.generation) || '',
       enforcement: c.connected ? c.enforcement?.state || c.mode || '' : '',
