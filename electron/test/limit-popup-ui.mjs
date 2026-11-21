@@ -263,7 +263,7 @@ try {
   }
   await open('upload');
   await geometry('upload initial');
-  assert.equal(await page.locator('#uploadDetails').textContent(), 'Advanced');
+  assert.equal(await page.locator('#uploadDetails').textContent(), 'Details');
   assert.deepEqual(await page.locator('#uploadUnits option').allTextContents(), [
     'B/s',
     'KB/s',
@@ -437,10 +437,16 @@ try {
   await geometry('download 800');
   await page.screenshot({ path: dir + '/download-800.png' });
   await page.locator('#uploadDetails').click();
+  assert(await page.locator('#uploadDetailsBody summary').isVisible());
+  assert.equal(await page.locator('#uploadDetailsBody details').getAttribute('open'), null);
+  assert.doesNotMatch(await page.locator('#uploadDetailsBody').innerText(), /0 confirmed \/ 0 requested|UDP GSO/);
   assert.match(
-    await page.locator('#uploadDetailsBody').textContent(),
-    /Established TCP only|established TCP only/,
+    await page.locator('#uploadDetailsBody').innerText(),
+    /Established TCP only/,
   );
+  await page.locator('#uploadDetailsBody summary').click();
+  assert.match(await page.locator('#uploadDetailsBody').innerText(), /UDP GSO/);
+  await page.locator('#uploadDetailsBody summary').click();
   await page.setViewportSize({ width: 360, height: 240 });
   await sleep(200);
   const bounds = await popup.boundingBox();

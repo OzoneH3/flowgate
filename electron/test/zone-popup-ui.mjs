@@ -289,6 +289,9 @@ try {
   await open('upload');assert.equal(await page.locator('#uploadRate').inputValue(),'32');await close();
   await open('download');assert.equal(await page.locator('#uploadRate').inputValue(),'16');await close();
   await open('priority');assert.equal(await page.locator('#priorityLevel').inputValue(),'high');
+  await popup.getByRole('button', { name: 'Details', exact: true }).click();
+  assert.match(await popup.locator('#uploadDetailsBody').innerText(), /Budgets.*Best effort/s);
+  assert.doesNotMatch(await popup.locator('#uploadDetailsBody').innerText(), /Eligible connected UDP/);
   await popup.screenshot({path:dir+'/priority-editor.png'});await close();
   assert.equal(writes().length,0);
   evidence.steps.push({label:'Options persists independent defaults; new popup values; invalid IPC refused; no shaping writes',defaults:storedDefaults.shapingDefaults});

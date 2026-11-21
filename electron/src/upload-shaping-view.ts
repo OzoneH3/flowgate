@@ -27,18 +27,25 @@ function paintAvailability(b:HTMLButtonElement) {
 }
 
 const text=<K extends keyof HTMLElementTagNameMap>(tag:K,value:string)=>{const e=document.createElement(tag);e.textContent=value;return e;};
-function coverage(t:UploadTarget, direction:LimitDirection='upload') {
-  const c=limitCoverage(view.snapshot,t,direction,coverageExpired());
-  const reason=view.snapshot?.status==='Applying'?'Configuration pending.':coverageExpired()?'Coverage observation expired; awaiting fresh verification.':c.confirmed<c.requested||!c.requested?'Pending socket discovery, fresh ownership proof and class binding; configuration acknowledgement does not confirm coverage.':'Only these observed sockets are confirmed.';
-  return `${c.confirmed} confirmed / ${c.requested} requested socket bindings. ${reason} Coverage is partial; not an application-wide guarantee.${direction==='download'?' Established TCP only; UDP, listeners, fragments and IPv6 extension headers are uncovered.':''}`;
-}
 function budgetText() {
-  const s=view.snapshot, f=(n?:number)=>n?`${n/1000000} Mbit/s`:'none (priority inactive)';
-  return `All-traffic budgets: upload ${f(s?.upload_budget_bits_per_second)}, download ${f(s?.download_budget_bits_per_second)}.`;
+  const s = view.snapshot, rate = (n?:number) => n ? `${n/1000000} Mbit/s` : 'off';
+  return `Budgets · Upload ${rate(s?.upload_budget_bits_per_second)} · Download ${rate(s?.download_budget_bits_per_second)}`;
 }
-function priorityCoverageText(t:UploadTarget) {
-  const c=priorityCoverage(view.snapshot,t,coverageExpired());
-  return `${c.confirmed} confirmed / ${c.requested} requested socket bindings in budgeted directions. Coverage is partial; not an application-wide guarantee.`;
+function coverageStatus(t: UploadTarget, kind: LimitKind) {
+  const snapshot = view.snapshot;
+  const priority = kind === 'priority';
+  const status = priority ? prioritySummary(view, t) : uploadSummary(view, t, kind);
+  if (status === 'Pending') return 'Applying configuration…';
+  if (status === 'Unsupported' || status === 'Off') return status;
+  const expired = coverageExpired();
+  const counts = priority ? priorityCoverage(snapshot, t, expired) : limitCoverage(snapshot, t, kind, expired);
+  const configured = snapshot?.configured_caps.find((cap) => sameTarget(cap, t));
+  if (priority && (!configured?.traffic_priority ||
+      !(snapshot?.upload_budget_bits_per_second || snapshot?.download_budget_bits_per_second))) return status;
+  const detail = expired ? 'Waiting for fresh coverage'
+    : counts.requested ? `${counts.confirmed} of ${counts.requested} observed sockets confirmed`
+    : 'Waiting for eligible sockets';
+  return `${status.replace(/ · Partial$/, '')} · ${detail}`;
 }
 function paintButton(b:HTMLButtonElement,t:UploadTarget) {
   if(b.dataset.limitDirection==='priority'){
@@ -56,7 +63,14 @@ function paintButton(b:HTMLButtonElement,t:UploadTarget) {
 function paint() {
   updateActions?.();
   const live=document.getElementById('uploadCoverageLive');
-  if(live && dialogTarget) live.textContent=dialogDirection==='priority'?`${prioritySummary(view,dialogTarget)} · ${budgetText()} ${priorityCoverageText(dialogTarget)} ${view.message} ${view.snapshot?.last_error||''}`:`${uploadSummary(view,dialogTarget,dialogDirection)} · ${coverage(dialogTarget,dialogDirection)} ${view.message} ${view.snapshot?.last_error||''}`;
+  if (live && dialogTarget) {
+    live.textContent = coverageStatus(dialogTarget, dialogDirection);
+    const meta = document.getElementById('uploadCoverageContext')!;
+    const device = view.snapshot?.interface ? 'Interface ' + view.snapshot.interface : '';
+    meta.textContent = [device, dialogDirection === 'priority' ? budgetText() : ''].filter(Boolean).join(' · ');
+    document.getElementById('uploadControllerError')!.textContent =
+      view.snapshot?.last_error || (!view.writable ? view.message : '');
+  }
   for(const b of document.querySelectorAll<HTMLButtonElement>('[data-upload-limit]')) {
     const t=targets.get(b); if(t)paintButton(b,t);paintAvailability(b);
   }
@@ -168,17 +182,32 @@ async function open(t:UploadTarget, anchor?:HTMLElement, direction:LimitKind='up
   });
   const zoneHint=text('span','');zoneHint.id='uploadZoneHint';zoneHint.className='hint';
   const zoneRow=text('div','');zoneRow.className='upload-zone-row';zoneRow.append(zone,zoneHint);
-  const detailsButton=text('button','Advanced');detailsButton.id='uploadDetails';detailsButton.setAttribute('aria-expanded','false');detailsButton.setAttribute('aria-controls','uploadDetailsBody');detailsButton.title='Advanced limit status, coverage and refresh';
+  const detailsButton=text('button','Details');detailsButton.id='uploadDetails';detailsButton.setAttribute('aria-expanded','false');detailsButton.setAttribute('aria-controls','uploadDetailsBody');
   const remove=text('button','Delete');remove.id='uploadRemove';actions.append(detailsButton,remove,save);
   const details=text('div','');details.id='uploadDetailsBody';details.hidden=true;
   const summary=text('p','Reading current configuration…');summary.id='uploadCoverage';summary.setAttribute('role','status');
   const live=text('p','');live.id='uploadCoverageLive';
-  const detail=text('p',isPriority?'Experimental traffic priority for this application in both directions: under a saturated local budget, higher priority is favored. This is best effort: Low traffic may be very slow or stall, with no minimum delivery rate or bounded progress. Only connected host-local sockets of verified native applications on the selected interface; unbudgeted directions are inactive. Per-app download priority covers established TCP only; eligible connected UDP uses the shared default class. Shaping only; firewall Allow/Deny and rule priority are separate. No latency guarantee. Ends at daemon restart.':(direction==='download'?'Download: established TCP only; UDP, listeners, fragments and IPv6 extension headers are uncovered. Limits schedule local delivery, not upstream link capacity. ':'')+'Experimental: verified native sockets on the selected interface only; first traffic and unsupported sockets may escape. UDP GSO unsupported; TCP caps receiver-tested. Firewall Allow/Deny is separate. Socket assignment survives exec/transfer until close or fresh rebinding. Limits end at daemon restart. Byte prefixes use 1024; bit prefixes use 1000.');detail.className='hint';
-  const refresh=text('button','Refresh / review');refresh.id='uploadRefresh';
-  details.append(live,summary,detail,text('p','Zone limits also respect the combined All networks cap. Explicit zone priorities override All networks; Delete restores inheritance. The All networks priority determines the application’s parent allocation; zone priority controls leaf borrowing, including competition with other applications for shared-budget capacity, without strict global ordering. Shared directional budgets cover all traffic. Unknown classifications use All networks only. The unknown queue retains its scheduler allocation while idle; active queues may borrow unused capacity up to their ceilings. Zone settings never grant firewall permission.'),refresh);
+  const contextNote=text('p','');contextNote.id='uploadCoverageContext';contextNote.className='shaping-detail-note';
+  const controllerError=text('p','');controllerError.id='uploadControllerError';
+  const detail=text('p',isPriority
+    ? 'Best effort on busy, budgeted directions. Low priority can stall.'
+    : direction==='download'
+      ? 'Established TCP only. Limits apply to local delivery.'
+      : 'Limits apply only to verified sockets on this interface.');
+  detail.className='shaping-detail-note';
+  const technical=text('details','');technical.append(
+    text('summary','Technical notes'),
+    text('p',isPriority
+      ? 'Priority can favor verified native sockets under contention. Per-app download priority covers established TCP. Eligible connected UDP uses the shared class. Delete a zone override to restore inheritance.'
+      : 'Initial traffic and unsupported sockets can escape shaping. UDP GSO is unsupported. Socket assignments last until close or fresh rebinding. Zone limits also respect the All networks cap. Bytes use binary prefixes and bits use decimal prefixes.'),
+    text('p','Coverage is partial. Unknown classifications use All networks. Settings end at daemon restart. Firewall permissions are separate.'),
+  );
+  const refresh=text('button','Reload configuration');refresh.id='uploadRefresh';
+  details.append(live,contextNote,summary,controllerError,detail,technical,refresh);
   d.append(header,zoneRow,row,actions,details);document.body.append(d);anchor?.setAttribute('aria-expanded','true');
   const bounds=anchor?.getBoundingClientRect() || {left:8,top:8,bottom:8};
   const place=()=>{const current=anchor?.isConnected?anchor.getBoundingClientRect():bounds;const pos=popupPosition(current,d.offsetWidth,d.offsetHeight,{width:innerWidth,height:innerHeight});d.style.left=pos.left+'px';d.style.top=pos.top+'px';};
+  technical.ontoggle = place;
   const reveal=()=>{details.hidden=false;detailsButton.setAttribute('aria-expanded','true');place();};
   const dismiss=()=>{d.remove();anchor?.setAttribute('aria-expanded','false');document.removeEventListener('pointerdown',outside,true);document.removeEventListener('keydown',escape,true);window.removeEventListener('resize',place);if(dismissPopup===dismiss)dismissPopup=undefined;if(anchor?.isConnected)anchor.focus({preventScroll:true});};
   const outside=(e:PointerEvent)=>{if(!d.contains(e.target as Node)&&!anchor?.contains(e.target as Node))dismiss();};
@@ -208,7 +237,7 @@ async function open(t:UploadTarget, anchor?:HTMLElement, direction:LimitKind='up
     zone.title=view.zoneSupported?'Unknown networks use All networks.':'This daemon supports All networks only.';
     buttons();
   };
-  const read=async()=>{blocked=true;buttons();try{const sent=performance.now(),start=context;const [v,prefs]=await Promise.all([window.flowgate.uploadStatus(),window.flowgate.preferences().catch(()=>undefined)]);defaults={...(prefs?.shapingDefaults || DEFAULT_SHAPING)};if(start!==context)throw Error('Connection changed; refresh again');adopt(v,sent);paint();if(!d.isConnected)return;draft=view;if(!edited)loadZone();summary.textContent=`${view.snapshot?.interface?'Interface '+view.snapshot.interface+'. ':''}${view.message} ${view.snapshot?.last_error||''}`;blocked=false;paint();if(!view.writable||view.snapshot?.last_error)reveal();}catch(e){summary.textContent=String(e);reveal();}buttons();};
+  const read=async()=>{blocked=true;buttons();try{const sent=performance.now(),start=context;const [v,prefs]=await Promise.all([window.flowgate.uploadStatus(),window.flowgate.preferences().catch(()=>undefined)]);defaults={...(prefs?.shapingDefaults || DEFAULT_SHAPING)};if(start!==context)throw Error('Connection changed; refresh again');adopt(v,sent);paint();if(!d.isConnected)return;draft=view;if(!edited)loadZone();summary.textContent='';blocked=false;paint();if(!view.writable||view.snapshot?.last_error)reveal();}catch(e){summary.textContent=String(e);reveal();}buttons();};
   const apply=async(rate:number|null,prio?:TrafficPriority|null)=>{if(!draft?.generation||!draft.snapshot)return;blocked=true;buttons();try{const sent=performance.now(),start=context;const result=await window.flowgate.uploadConfigure(isPriority?{generation:draft.generation,expected_version:draft.snapshot.version,target:t,bits_per_second:null,priority:prio===undefined?null:prio}:{generation:draft.generation,expected_version:draft.snapshot.version,target:t,direction:direction as LimitDirection,bits_per_second:rate});if(start!==context)throw Error('Connection changed; refresh again');adopt(result,sent);paint();if(d.isConnected)dismiss();}catch(e){if(!d.isConnected)return;summary.textContent=String(e);reveal();}};
   save.onclick=()=>{try{if(isPriority&&scopeOf(t)!=='all'&&!hasCap()&&!edited){dismiss();return;}if(isPriority){if(level.value==='inherit'){if(hasCap())void apply(null,null);else dismiss();}else void apply(null,level.value as TrafficPriority);return;}void apply(enabled.checked?uploadRateBits(input.value,unit):null);}catch(e){summary.textContent=String(e instanceof Error?e.message:e);reveal();}};
   input.onkeydown=e=>{if(e.key==='Enter'&&!e.isComposing){e.preventDefault();if(!save.disabled)save.click();}};

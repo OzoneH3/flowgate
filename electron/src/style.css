@@ -1939,3 +1939,6 @@ button.connection-status-slot:hover:not(:disabled),button.connection-status-slot
   font-size: 12px;
 }
 .quick-editor #uploadDetailsBody p { margin: 0 0 8px; }
+.quick-editor #uploadDetailsBody p:empty { display: none; }
+.quick-editor #uploadDetailsBody details { margin-bottom: 8px; }
+.shaping-detail-note { color: var(--fg-muted); }
