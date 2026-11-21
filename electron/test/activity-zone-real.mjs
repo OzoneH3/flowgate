@@ -174,7 +174,8 @@ try {
   await main.locator('#createScope').selectOption('application');
   assert(await main.locator('#previewRule').isDisabled());
   await network.selectOption('internet');
-  await main.locator('#editExpiry').selectOption('hour');
+  assert(await main.locator('#editExpiry option[value=preserve]').isDisabled());
+  assert.equal(await main.locator('#editExpiry').inputValue(), 'hour');
   await main.locator('#previewRule').click();
   await main.locator('#saveRule').click();
   await wait(async () => (await call({ operation: 'list' })).rules.some((r) =>
@@ -191,7 +192,8 @@ try {
   const expiry = main.locator('#editExpiry option[value=preserve]');
   await main.getByRole('dialog', { name: 'Rule editor' }).waitFor();
   const formatted = await main.evaluate((value) => new Date(value).toLocaleString(), scoped.expires);
-  assert.equal(await expiry.textContent(), 'Keep expiry · ' + formatted);
+  assert.equal(await expiry.textContent(), 'Keep original deadline · ' + formatted);
+  assert.equal(await main.locator('#editExpiry option[value=hour]').textContent(), 'New deadline · 1 hour from preview');
   await main.locator('#closeEditor').click();
 
   await main.setViewportSize({ width: 860, height: 600 });

@@ -138,11 +138,19 @@ function hideRuleEditor() {
 }
 function showRuleExpiry(rule: Rule, process: boolean) {
   const expires = rule.expires.startsWith('0001-') ? '' : new Date(rule.expires).toLocaleString();
+  const expiry = $<HTMLSelectElement>('editExpiry');
+  const preserve = expiry.options[0];
+  preserve.hidden = preserve.disabled = !rule.id;
+  preserve.textContent = expires
+    ? 'Keep original deadline · ' + expires
+    : process ? 'Keep this daemon session lifetime' : 'Keep persistent';
+  if (!rule.id) {
+    expiry.value = expires ? 'hour' : 'permanent';
+    $('absoluteExpiry').textContent = '';
+    return;
+  }
   $('absoluteExpiry').textContent = expires ? 'Expires: ' + expires
     : process ? 'This daemon session · ends on process exit.' : 'Persistent: no expiry.';
-  $('editExpiry').querySelector('option[value=preserve]')!.textContent = expires
-    ? 'Keep expiry · ' + expires
-    : process ? 'Keep this daemon session lifetime' : 'Keep persistent';
 }
 export async function openRule(source: RuleSource, options: EditorOptions = {}) {
   if (draft) {
@@ -239,8 +247,8 @@ export async function openRule(source: RuleSource, options: EditorOptions = {}) 
         : 'Persistent (no expiry)';
     $('editExpiry').querySelector('option[value=hour]')!.textContent =
       r.filter.process || draft.targetScope === 'process'
-        ? 'Up to 1 hour (ends on exit/session)'
-        : 'For 1 hour from preview';
+        ? 'New deadline · up to 1 hour from preview'
+        : 'New deadline · 1 hour from preview';
     if (options.action) $<HTMLSelectElement>('editAction').value = options.action;
     if (options.disabled !== undefined)
       $<HTMLInputElement>('editEnabled').checked = !options.disabled;
