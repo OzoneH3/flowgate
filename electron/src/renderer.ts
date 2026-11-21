@@ -118,6 +118,7 @@ import {
   inactiveRuleMatches,
   type Row,
   type Metric,
+  holderLabel,
 } from './model';
 const root = document.querySelector<HTMLDivElement>('#app')!;
 setupTooltips();
@@ -2167,7 +2168,9 @@ function renderInfo() {
         info,
         'Visible holder',
         p
-          ? `${p.thread_group_pid ? `Worker TID ${p.pid} · thread-group PID ${p.thread_group_pid}` : p.pid} · ${p.executable}`
+          ? [holderLabel(p), p.thread_group_pid && `thread-group PID ${p.thread_group_pid}`,
+              p.executable, p.application.executable !== p.executable && p.application.executable,
+              p.application.prefix && p.application.prefix !== '.' && `Wine prefix ${p.application.prefix}`].filter(Boolean).join(' · ')
           : id,
       );
     }

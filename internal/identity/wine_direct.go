@@ -31,11 +31,15 @@ func wineClientPeer(client, broker Process) bool {
 	if client.UID != broker.UID || client.NetNS != broker.NetNS || client.MountNS != broker.MountNS || client.Application.Prefix != broker.Application.Prefix {
 		return false
 	}
-	cf, e := socketFDs(client.PID)
+	return wineSocketPeer(client.PID, broker.PID)
+}
+
+func wineSocketPeer(clientPID, brokerPID int) bool {
+	cf, e := socketFDs(clientPID)
 	if e != nil {
 		return false
 	}
-	bf, e := socketFDs(broker.PID)
+	bf, e := socketFDs(brokerPID)
 	if e != nil {
 		return false
 	}

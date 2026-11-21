@@ -155,6 +155,12 @@ export function metricLabel(s: Sum, rate = false) {
     ? 'Mixed sources'
     : amount(s.value, rate) + (s.value !== undefined && s.partial ? ' *' : '');
 }
+export function holderLabel(p: Process): string {
+  const name = (p.application.kind === 'wine' && p.application.name)
+    || p.process_name || p.executable.split('/').pop();
+  return name ? `${name} (PID ${p.pid})` : `PID ${p.pid}`;
+}
+
 export function hierarchy(activity: Activity, query = '', filter = 'all'): Row[] {
   const roots: Row[] = [];
   const apps = new Map<string, Row>(),
@@ -174,6 +180,8 @@ export function hierarchy(activity: Activity, query = '', filter = 'all'): Row[]
       s.display_application?.executable || '',
       ...owners.flatMap((p) => [
         p.executable,
+        p.process_name || '',
+        p.application.executable,
         p.application.name,
         String(p.pid),
         String(p.thread_group_pid || ''),
@@ -320,6 +328,9 @@ export function hierarchy(activity: Activity, query = '', filter = 'all'): Row[]
     parent.children.push({
       id: s.id,
       parent: parent.id,
+      identityNote: parent === unknown && owners.length
+        ? 'Visible holders: ' + owners.map(holderLabel).join(', ')
+        : undefined,
       kind: 'socket',
       label: (s.display_application && s.owners.length > 1 ? 'Shared · ' : '') + s.socket.remote,
       children: [],

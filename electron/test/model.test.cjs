@@ -10,6 +10,22 @@ function row(id, owners = [], traffic = {}) {
     traffic: { available: true, definition: 'tcp', uploaded: 10, upload_bps: 2, ...traffic },
   };
 }
+test('a shared unresolved socket shows searchable holder names without selecting an application', () => {
+  const processes = Object.fromEntries(['alpha.exe', 'beta.exe'].map((name, index) => [name, {
+    id: name, pid: 41 + index, uid: 1000, process_name: name, executable: '/runtime/loader',
+    application: { kind: 'wine-unresolved', name: 'Unresolved Wine process', executable: '', key: '', revision: '' },
+  }]));
+  const activity = { rows: [row('shared', Object.keys(processes))], processes };
+  const [group] = hierarchy(activity, 'beta.exe');
+  assert.equal(group.id, 'unidentified');
+  const [socket] = group.children;
+  assert.equal(socket.identityNote, 'Visible holders: alpha.exe (PID 41), beta.exe (PID 42)');
+  assert.equal(socket.process, undefined);
+  assert.equal(socket.runtimeApplication, undefined);
+  assert.equal(socket.pid, undefined);
+  assert.equal(sum(group.rows, 'uploaded').value, 10);
+});
+
 test('shared/unknown counted once and incompatible sources never summed', () => {
   const a = {
     rows: [row('one', ['a', 'b']), row('one', ['a', 'b']), row('two', [], { definition: 'udp' })],

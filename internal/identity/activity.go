@@ -9,9 +9,11 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
 )
 
 type ActivityProcess struct {
+	ProcessName string      `json:"process_name,omitempty"`
 	BootID      string      `json:"boot_id,omitempty"`
 	NetNS       string      `json:"netns,omitempty"`
 	MountNS     string      `json:"mountns,omitempty"`
@@ -119,6 +121,7 @@ func (c *ActivityCollector) inspect(pid int, now time.Time) (Process, error) {
 	if ok && sameUID && old.process.NetNS == link(base+"/ns/net") && old.process.MountNS == link(base+"/ns/mnt") && old.process.Start == start && old.process.Executable == link(base+"/exe") && old.process.ExecutableRevision == stamp(base+"/exe") && now.Sub(old.checked) < 5*time.Second {
 		return old.process, nil
 	}
+	name := strings.TrimSpace(string(readBound(base+"/comm", 64)))
 	p, err := Inspect(pid)
 	if err == nil {
 		// Detach retained values from bounded but potentially large proc buffers.
@@ -132,6 +135,15 @@ func (c *ActivityCollector) inspect(pid int, now time.Time) (Process, error) {
 		}
 	}
 	if err == nil {
+		// comm can be set by the process; expose it only as a display hint.
+		if p.Start == start {
+			p.activityName = strings.Map(func(r rune) rune {
+				if !unicode.IsPrint(r) {
+					return -1
+				}
+				return r
+			}, name)
+		}
 		p.Provenance = CaptureProvenance(p)
 		c.cache[pid] = cachedActivityProcess{p, now}
 	} else {
@@ -222,7 +234,7 @@ func (c *ActivityCollector) Collect() ActivitySnapshot {
 				if p.ThreadGroup != p.PID {
 					group = p.ThreadGroup
 				}
-				out.Processes[id] = ActivityProcess{BootID: p.BootID, NetNS: p.NetNS, MountNS: p.MountNS, PIDNS: p.PIDNS, ID: id, PID: p.PID, Start: p.Start, UID: p.UID, Executable: p.Executable, Application: p.Application, ThreadGroup: group, Provenance: p.Provenance, ExecutableRevision: p.ExecutableRevision}
+				out.Processes[id] = ActivityProcess{ProcessName: p.activityName, BootID: p.BootID, NetNS: p.NetNS, MountNS: p.MountNS, PIDNS: p.PIDNS, ID: id, PID: p.PID, Start: p.Start, UID: p.UID, Executable: p.Executable, Application: p.Application, ThreadGroup: group, Provenance: p.Provenance, ExecutableRevision: p.ExecutableRevision}
 				for _, index := range wanted[socket] {
 					row := &out.Rows[index]
 					if len(row.Owners) >= 32 {

@@ -41,6 +41,7 @@ type Application struct {
 	Hosted *Hosted `json:"hosted,omitempty"`
 }
 type Process struct {
+	activityName string // Proc comm, for Activity presentation only.
 	// HolderWitness pins a newly supported worker/private-table owner set.
 	// It is snapshot evidence, never an application or process permission key.
 	HolderWitness      string      `json:"holder_witness,omitempty"`
@@ -129,7 +130,13 @@ func Inspect(pid int) (Process, error) {
 		a.Executable = ""
 		a.Revision = ""
 		a.Name = "Unresolved Wine process"
-		prefix, steamAppID := wineEnvironmentIdentity(string(readBound(base+"/environ", 1<<20)))
+		raw := string(readBound(base+"/environ", 1<<20))
+		prefix, steamAppID := wineEnvironmentIdentity(raw)
+		prefixEvidence := "explicit prefix"
+		if prefix == "" && len(raw) < 1<<20 && wineRuntimeHint(p.Executable, "") {
+			prefix = verifiedDefaultWinePrefix(p, raw)
+			prefixEvidence = "default prefix corroborated by the live Wine server"
+		}
 		a.SteamAppID = steamAppID
 		a.Prefix = prefix
 		// Only argv[0], corroborated by an executable mapping, identifies the image. Arguments may name another program.
@@ -166,7 +173,7 @@ func Inspect(pid int) (Process, error) {
 					a.Executable = resolved
 					a.Revision = stamp(base + "/root" + resolved)
 					a.Name = filepath.Base(resolved)
-					a.Evidence = []string{"Wine runtime mapping", "argv[0] corroborated by mapped Windows image", "explicit prefix"}
+					a.Evidence = []string{"Wine runtime mapping", "argv[0] corroborated by mapped Windows image", prefixEvidence}
 				}
 			}
 			if a.Kind == "wine-unresolved" && prefix != "" && wineMemfdImage(base, arg, maps, start) {
@@ -174,7 +181,7 @@ func Inspect(pid int) (Process, error) {
 				a.Executable = arg
 				a.Revision = stamp(base + "/root" + arg)
 				a.Name = filepath.Base(arg)
-				a.Evidence = []string{"Wine anonymous PE image: mapped executable memfd and complete PE headers match argv[0] file", "source inode/revision unchanged since before process creation", "explicit prefix; ordinary non-adversarial snapshot model"}
+				a.Evidence = []string{"Wine anonymous PE image: mapped executable memfd and complete PE headers match argv[0] file", "source inode/revision unchanged since before process creation", prefixEvidence, "ordinary non-adversarial snapshot model"}
 			}
 
 		}

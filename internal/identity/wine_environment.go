@@ -27,6 +27,9 @@ func wineEnvironmentRaw(raw string) (prefix, steamAppID string) {
 
 func wineEnvironmentIdentity(raw string) (prefix, steamAppID string) {
 	prefix, steamAppID = wineEnvironmentRaw(raw)
+	if !filepath.IsAbs(prefix) {
+		return "", steamAppID
+	}
 	if canonical, err := filepath.EvalSymlinks(prefix); err == nil {
 		prefix = canonical
 	}
@@ -49,15 +52,15 @@ func mayShareWinePrefix(pid int, prefix string) bool {
 	return winePrefixCandidate(pid, prefix, processStat, link, readWineEnvironment)
 }
 
-// Only absent prefix variables can be excluded before the UID/namespace filter.
-// This check performs no filesystem canonicalization of process-supplied paths.
+// Before checking UID and namespaces, keep explicit prefix candidates and
+// Wine loaders that could be using the default. Do not resolve their paths here.
 func mayHaveWinePrefix(pid int, prefix string) bool {
 	if prefix == "" || prefix == "." {
 		return true
 	}
 	return wineEnvironmentCandidate(pid, func(raw string) bool {
 		p, _ := wineEnvironmentRaw(raw)
-		return p != ""
+		return p != "" || (defaultWinePath(raw) != "" && wineRuntimeHint(link(fmt.Sprintf("/proc/%d/exe", pid)), ""))
 	}, processStat, link, readWineEnvironment)
 }
 
@@ -67,6 +70,11 @@ func winePrefixCandidate(pid int, prefix string, stat func(string) (string, int,
 	}
 	return wineEnvironmentCandidate(pid, func(raw string) bool {
 		observed, _ := wineEnvironmentIdentity(raw)
+		if observed == "" {
+			if candidate := defaultWinePath(raw); candidate != "" {
+				observed, _ = filepath.EvalSymlinks(candidate)
+			}
+		}
 		return observed == prefix
 	}, stat, readLink, read)
 }

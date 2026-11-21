@@ -28,7 +28,7 @@ func TestWineEnvironmentSharedDerivation(t *testing.T) {
 		{"empty last prefix", "WINEPREFIX=/first\x00WINEPREFIX=\x00STEAM_COMPAT_DATA_PATH=/data\x00", "/data/pfx"},
 		{"symlink", "WINEPREFIX=" + alias + "\x00", real},
 		{"broken symlink", "WINEPREFIX=" + broken + "\x00", broken},
-		{"missing", "OTHER=value\x00", "."},
+		{"missing", "OTHER=value\x00", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, id := wineEnvironmentIdentity(tc.raw + "SteamAppId=1\x00SteamAppId=2\x00")
@@ -108,5 +108,21 @@ func TestWineAbsentPrefixFilterDoesNotResolvePaths(t *testing.T) {
 	}
 	if wineEnvironmentCandidate(1, func(raw string) bool { p, _ := wineEnvironmentRaw(raw); return p != "" }, func(string) (string, int, error) { return "1", 0, nil }, func(string) string { return "exe" }, func(string) ([]byte, error) { return []byte("OTHER=value\x00"), nil }) {
 		t.Fatal("stable absent prefix not excluded")
+	}
+}
+
+func TestDefaultWinePrefixDiscoveryInputs(t *testing.T) {
+	for _, tc := range []struct{ raw, want string }{
+		{"HOME=/home/user\x00", "/home/user/.wine"},
+		{"HOME=/first\x00HOME=/second\x00", "/second/.wine"},
+		{"HOME=relative\x00", ""}, {"", ""},
+		{"HOME=/home/user\x00WINEPREFIX=\x00", ""},
+		{"HOME=/home/user\x00WINEPREFIX=relative\x00", ""},
+		{"HOME=/home/user\x00WINEPREFIX=/other\x00", ""},
+		{"HOME=/home/user\x00STEAM_COMPAT_DATA_PATH=/steam\x00", ""},
+	} {
+		if got := defaultWinePath(tc.raw); got != tc.want {
+			t.Errorf("defaultWinePath(%q) = %q; want %q", tc.raw, got, tc.want)
+		}
 	}
 }

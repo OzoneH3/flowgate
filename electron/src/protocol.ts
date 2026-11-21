@@ -29,6 +29,7 @@ import type { LogFilter, LogRecord } from './decision-log';
 import { parsePolicyView, type PolicyView } from './policy';
 // Additive v1 API projection. Backend values are data, never renderer markup.
 export interface Application {
+  prefix?: string;
   key: string;
   revision: string;
   name: string;
@@ -130,6 +131,7 @@ export interface PermissionTarget {
   prefix?: string;
 }
 export interface Process {
+  process_name?: string;
   thread_group_pid?: number;
   id: string;
   pid: number;
@@ -585,6 +587,7 @@ function application(v: unknown): Application {
     revision: string(a.revision),
     name: string(a.name),
     executable: string(a.executable),
+    ...(string(a.prefix) && { prefix: string(a.prefix).slice(0, 4096) }),
     display_name: string(a.display_name) || undefined,
     display_executable: string(a.display_executable) || undefined,
     executable_status: ['linked', 'deleted', 'unavailable'].includes(string(a.executable_status))
@@ -616,6 +619,7 @@ function process(v: unknown): Process {
   const p = object(v);
   return {
     id: string(p.id),
+    ...(string(p.process_name) && { process_name: string(p.process_name).slice(0, 64) }),
     pid: number(p.pid),
     thread_group_pid: number(p.thread_group_pid) > 0 ? number(p.thread_group_pid) : undefined,
     start_ticks: string(p.start_ticks),
