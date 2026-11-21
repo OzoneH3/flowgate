@@ -1911,6 +1911,8 @@ button.connection-status-slot:hover:not(:disabled),button.connection-status-slot
 }
 .upload-setter-row .quick-editor-enabled { grid-column: 1 / -1; }
 .upload-setter-row.priority-setter-row { grid-template-columns: minmax(0, 1fr); }
+#priorityLevel label:has(input[value='inherit']) { grid-column: 1 / -1; }
+#priorityLevel label[hidden] { display: none; }
 @supports (appearance: base-select) {
   .upload-setter-row select,
   .upload-setter-row select::picker(select) { appearance: base-select; }

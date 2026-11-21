@@ -24,17 +24,17 @@ try{
  const button=async n=>{const a=ready.apps[n];await p.locator('#search').fill(a.name);const b=p.getByRole('button',{name:'Traffic priority for '+(a.display_name||a.name),exact:true});await wait(async()=>{await p.locator('#expand').click();return await b.count()>=1});return b.first();};
  const setPriority=async(n,level,{escapeFirst=false,del=false}={})=>{
   const b=await button(n);
-  if(escapeFirst){const v=(await status()).version;await b.click();await p.locator('#priorityLevel').waitFor({state:'visible'});assert.equal(await p.locator('#uploadSave').isDisabled(),true,'OK disabled for unchanged Normal');await p.locator('#priorityLevel').selectOption(level);await p.keyboard.press('Escape');assert.equal(await p.locator('#uploadLimitDialog').count(),0);assert.equal((await status()).version,v,'dismiss must not write');}
+  if(escapeFirst){const v=(await status()).version;await b.click();await p.locator('#priorityLevel').waitFor({state:'visible'});assert.equal(await p.locator('#uploadSave').isDisabled(),true,'OK disabled for unchanged Normal');await p.locator(`#priorityLevel input[value=${level}]`).check();await p.keyboard.press('Escape');assert.equal(await p.locator('#uploadLimitDialog').count(),0);assert.equal((await status()).version,v,'dismiss must not write');}
   await b.click();await p.locator('#priorityLevel').waitFor({state:'visible'});
   assert.match(await p.locator('#uploadLimitTitle').textContent(),/^Traffic priority · /);
   // OK stays disabled until the draft differs from the stored value (Normal with no priority).
   if(del)await wait(()=>p.locator('#uploadRemove').isEnabled());
   else{await wait(async()=>!(await p.locator('#uploadCoverage').textContent()).startsWith('Reading'));
-   assert.equal(await p.locator('#uploadSave').isEnabled(),(await p.locator('#priorityLevel').inputValue())!=='normal'||await p.locator('#uploadRemove').isEnabled());
-   await p.locator('#priorityLevel').selectOption(level);await wait(()=>p.locator('#uploadSave').isEnabled());
+   assert.equal(await p.locator('#uploadSave').isEnabled(),(await p.locator('#priorityLevel input:checked').inputValue())!=='normal'||await p.locator('#uploadRemove').isEnabled());
+   await p.locator(`#priorityLevel input[value=${level}]`).check();await wait(()=>p.locator('#uploadSave').isEnabled());
    // A delivered status refresh must keep the draft selection.
    await p.evaluate(()=>{window.pubs=[];window.flowgate.subscribe(s=>window.pubs.push(s.publication))});
-   await wait(async()=>new Set(await p.evaluate(()=>window.pubs)).size>=2);assert.equal(await p.locator('#priorityLevel').inputValue(),level);
+   await wait(async()=>new Set(await p.evaluate(()=>window.pubs)).size>=2);assert.equal(await p.locator('#priorityLevel input:checked').inputValue(),level);
    await p.screenshot({path:captures+`/popup-${n}-${level}.png`});await p.locator('#uploadSave').click();}
   if(del)await p.locator('#uploadRemove').click();
   await p.locator('#uploadLimitDialog').waitFor({state:'detached'});

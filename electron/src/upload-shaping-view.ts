@@ -1,7 +1,7 @@
 import { showAccountIn } from './accounts';
 import { popupPosition } from './popup-position';
-import { networkScopeChoices } from './network-scope-choices';
-import {DEFAULT_SHAPING, shapingUnavailableReason, ZONE_CAPABILITY, scopeOf, scopeLabel, sameTarget, type LimitScope, uploadTarget, uploadSummary, limitCoverage, capRate, capPriority, prioritySummary, priorityCoverage, validateBudget, DOWNLOAD_CAPABILITY, PRIORITY_CAPABILITY, TRAFFIC_PRIORITIES, type TrafficPriority, type LimitDirection, UPLOAD_CAPABILITY, UPLOAD_RATE_UNITS, uploadRateBits, uploadRateValue, type UploadRateUnit, type UploadView, type UploadTarget} from './upload-shaping';
+import { editorChoices, networkScopeChoices } from './network-scope-choices';
+import {DEFAULT_SHAPING, shapingUnavailableReason, ZONE_CAPABILITY, scopeOf, scopeLabel, sameTarget, type LimitScope, uploadTarget, uploadSummary, limitCoverage, capRate, capPriority, prioritySummary, priorityCoverage, validateBudget, DOWNLOAD_CAPABILITY, PRIORITY_CAPABILITY, type TrafficPriority, type LimitDirection, UPLOAD_CAPABILITY, UPLOAD_RATE_UNITS, uploadRateBits, uploadRateValue, type UploadRateUnit, type UploadView, type UploadTarget} from './upload-shaping';
 import type {Row} from './model';
 import type {ClientState} from './protocol';
 let view:UploadView={supported:false,writable:false,message:'Unsupported: experimental upload controller is not enabled.'};
@@ -9,6 +9,7 @@ let flight=false, last=0, context='', leaseDeadline=0;
 // The shared limiter popup edits one kind: an upload/download rate or the
 // application's single traffic priority (both directions).
 type LimitKind = LimitDirection | 'priority';
+type PriorityChoice = TrafficPriority | 'inherit';
 let dialogDirection:LimitKind='upload';
 let dialogTarget:UploadTarget|undefined, latestState:ClientState|undefined;
 let updateActions:(()=>void)|undefined;
@@ -172,12 +173,24 @@ async function open(t:UploadTarget, anchor?:HTMLElement, direction:LimitKind='up
   for(const unit of UPLOAD_RATE_UNITS)units.add(new Option(unit,unit));units.value='Mbit/s';
   let unit:UploadRateUnit='Mbit/s';
   const save=text('button','OK');save.id='uploadSave';
-  const level=document.createElement('select');level.id='priorityLevel';level.setAttribute('aria-label','Traffic priority');
-  for(const p of TRAFFIC_PRIORITIES)level.add(new Option(p[0].toUpperCase()+p.slice(1),p));level.value='normal';
-  if(isPriority){row.classList.add('priority-setter-row');row.append(level);}else row.append(enabledLabel,input,units);
+  let priority: PriorityChoice = 'normal';
+  const priorityChoices = editorChoices<PriorityChoice>('priorityLevel', 'Priority', [
+    ['high', 'High'], ['normal', 'Normal'], ['low', 'Low'], ['inherit', 'Inherited'],
+  ], priority, (choice) => {
+    priority = choice;
+    edited = true;
+    buttons();
+  });
+  const inheritedChoice = priorityChoices.querySelector<HTMLInputElement>('input[value="inherit"]')!;
+  const inheritedLabel = inheritedChoice.closest('label')!;
+  inheritedLabel.hidden = true;
+  if (isPriority) {
+    row.classList.add('priority-setter-row');
+    row.append(priorityChoices);
+  } else row.append(enabledLabel, input, units);
   const actions=text('div','');actions.className='upload-setter-actions';
   const zone=networkScopeChoices('uploadZone',scopeOf(t),(scope)=>{
-    drafts.set(scopeOf(t),{value:input.value,unit,enabled:enabled.checked,level:level.value,edited});
+    drafts.set(scopeOf(t),{value:input.value,unit,enabled:enabled.checked,priority,edited});
     t.scope=scope;loadZone();paint();place();
   });
   const zoneHint=text('span','');zoneHint.id='uploadZoneHint';zoneHint.className='hint';
@@ -211,25 +224,28 @@ async function open(t:UploadTarget, anchor?:HTMLElement, direction:LimitKind='up
   const reveal=()=>{details.hidden=false;detailsButton.setAttribute('aria-expanded','true');place();};
   const dismiss=()=>{d.remove();anchor?.setAttribute('aria-expanded','false');document.removeEventListener('pointerdown',outside,true);document.removeEventListener('keydown',escape,true);window.removeEventListener('resize',place);if(dismissPopup===dismiss)dismissPopup=undefined;if(anchor?.isConnected)anchor.focus({preventScroll:true});};
   const outside=(e:PointerEvent)=>{if(!d.contains(e.target as Node)&&!anchor?.contains(e.target as Node))dismiss();};
-  const escape=(e:KeyboardEvent)=>{if(e.key==='Escape'){if([units,level].some(s=>s.matches(':open')))return;e.preventDefault();e.stopPropagation();dismiss();}};
+  const escape=(e:KeyboardEvent)=>{if(e.key==='Escape'){if(units.matches(':open'))return;e.preventDefault();e.stopPropagation();dismiss();}};
   dismissPopup=dismiss;document.addEventListener('pointerdown',outside,true);document.addEventListener('keydown',escape,true);window.addEventListener('resize',place);close.onclick=dismiss;
   detailsButton.onclick=()=>{details.hidden=!details.hidden;detailsButton.setAttribute('aria-expanded',String(!details.hidden));place();};
   let defaults={...DEFAULT_SHAPING};
   let draft:UploadView|undefined, blocked=true, edited=false;
   const hasCap=()=>draft?.snapshot?.configured_caps.some(c=>sameTarget(c,t) && (direction==='priority'?c.traffic_priority!==undefined:capRate(c,direction)>0));
-  const buttons=()=>{zone.disabled=blocked||!view.zoneSupported;const stale=!view.writable||(scopeOf(t)!=='all'&&!view.zoneSupported)||(direction==='download'&&!view.downloadSupported)||(isPriority&&!view.prioritySupported)||view.generation!==draft?.generation||view.snapshot?.version!==draft?.snapshot?.version;save.disabled=blocked||stale||!draft?.writable||(isPriority?((level.value!=='normal'||scopeOf(t)!=='all')&&!t.revision)||(level.value==='normal'&&scopeOf(t)==='all'&&!hasCap()):(enabled.checked&&!t.revision)||(!enabled.checked&&!hasCap()));remove.disabled=blocked||stale||!draft?.writable||!hasCap();};
+  const buttons=()=>{zone.disabled=blocked||!view.zoneSupported;const stale=!view.writable||(scopeOf(t)!=='all'&&!view.zoneSupported)||(direction==='download'&&!view.downloadSupported)||(isPriority&&!view.prioritySupported)||view.generation!==draft?.generation||view.snapshot?.version!==draft?.snapshot?.version;save.disabled=blocked||stale||!draft?.writable||(isPriority?((priority!=='normal'||scopeOf(t)!=='all')&&!t.revision)||(priority==='normal'&&scopeOf(t)==='all'&&!hasCap()):(enabled.checked&&!t.revision)||(!enabled.checked&&!hasCap()));remove.disabled=blocked||stale||!draft?.writable||!hasCap();};
   updateActions=()=>{if(d.isConnected)buttons();};buttons();place();d.focus({preventScroll:true});
-  input.oninput=()=>{edited=true;};enabled.onchange=()=>{edited=true;buttons();};level.onchange=()=>{edited=true;buttons();};
+  input.oninput=()=>{edited=true;};enabled.onchange=()=>{edited=true;buttons();};
   units.onchange=()=>{if(!input.value.trim()){unit=units.value as UploadRateUnit;edited=true;return;}try{const bits=uploadRateBits(input.value,unit);unit=units.value as UploadRateUnit;input.value=uploadRateValue(bits,unit);edited=true;}catch(e){units.value=unit;summary.textContent=String(e instanceof Error?e.message:e);reveal();}};
-  const drafts=new Map<LimitScope,{value:string;unit:UploadRateUnit;enabled:boolean;level:string;edited:boolean}>();
+  const drafts=new Map<LimitScope,{value:string;unit:UploadRateUnit;enabled:boolean;priority:PriorityChoice;edited:boolean}>();
   const loadZone=()=>{
     const c=draft?.snapshot?.configured_caps.find(c=>sameTarget(c,t));
     const inheritedPriority=draft?.snapshot?.configured_caps.find(x=>sameTarget(x,{...t,scope:'all'}))?.traffic_priority ?? 'normal';
-    level.querySelector('option[value=inherit]')?.remove();
-    if(isPriority&&scopeOf(t)!=='all')level.add(new Option(`Inherited (${inheritedPriority[0].toUpperCase()+inheritedPriority.slice(1)})`,'inherit'),0);
     const saved=drafts.get(scopeOf(t));
-    if(saved){input.value=saved.value;unit=saved.unit;units.value=unit;enabled.checked=saved.enabled;level.value=saved.level;edited=saved.edited;}
-    else {edited=false;level.value=c?.traffic_priority ?? (scopeOf(t)!=='all'?'inherit':defaults.priority);enabled.checked=true;unit=direction==='download'?defaults.downloadUnit:defaults.uploadUnit;units.value=unit;input.value=uploadRateValue(capRate(c,direction==='priority'?'upload':direction)||(direction==='download'?defaults.downloadBits:defaults.uploadBits),unit);}
+    if(saved){input.value=saved.value;unit=saved.unit;units.value=unit;enabled.checked=saved.enabled;priority=saved.priority;edited=saved.edited;}
+    else {edited=false;priority=c?.traffic_priority ?? (scopeOf(t)!=='all'?'inherit':defaults.priority);enabled.checked=true;unit=direction==='download'?defaults.downloadUnit:defaults.uploadUnit;units.value=unit;input.value=uploadRateValue(capRate(c,direction==='priority'?'upload':direction)||(direction==='download'?defaults.downloadBits:defaults.uploadBits),unit);}
+    if (isPriority) {
+      inheritedLabel.hidden = inheritedChoice.disabled = scopeOf(t) === 'all';
+      inheritedLabel.querySelector('span')!.textContent = `Inherited (${inheritedPriority[0].toUpperCase()+inheritedPriority.slice(1)})`;
+      for (const input of priorityChoices.querySelectorAll('input')) input.checked = input.value === priority;
+    }
     const all=draft?.snapshot?.configured_caps.find(c=>sameTarget(c,{...t,scope:'all'}));
     const inherited=scopeOf(t)!=='all' && (isPriority?!!all?.traffic_priority:!!capRate(all,direction as LimitDirection));
     zoneHint.textContent=isPriority&&scopeOf(t)!=='all'?(c?.traffic_priority!==undefined?`Override: ${c.traffic_priority[0].toUpperCase()+c.traffic_priority.slice(1)}`:`Inherited: ${inheritedPriority[0].toUpperCase()+inheritedPriority.slice(1)} (All networks)`):(inherited?'All applies':'');
@@ -239,9 +255,9 @@ async function open(t:UploadTarget, anchor?:HTMLElement, direction:LimitKind='up
   };
   const read=async()=>{blocked=true;buttons();try{const sent=performance.now(),start=context;const [v,prefs]=await Promise.all([window.flowgate.uploadStatus(),window.flowgate.preferences().catch(()=>undefined)]);defaults={...(prefs?.shapingDefaults || DEFAULT_SHAPING)};if(start!==context)throw Error('Connection changed; refresh again');adopt(v,sent);paint();if(!d.isConnected)return;draft=view;if(!edited)loadZone();summary.textContent='';blocked=false;paint();if(!view.writable||view.snapshot?.last_error)reveal();}catch(e){summary.textContent=String(e);reveal();}buttons();};
   const apply=async(rate:number|null,prio?:TrafficPriority|null)=>{if(!draft?.generation||!draft.snapshot)return;blocked=true;buttons();try{const sent=performance.now(),start=context;const result=await window.flowgate.uploadConfigure(isPriority?{generation:draft.generation,expected_version:draft.snapshot.version,target:t,bits_per_second:null,priority:prio===undefined?null:prio}:{generation:draft.generation,expected_version:draft.snapshot.version,target:t,direction:direction as LimitDirection,bits_per_second:rate});if(start!==context)throw Error('Connection changed; refresh again');adopt(result,sent);paint();if(d.isConnected)dismiss();}catch(e){if(!d.isConnected)return;summary.textContent=String(e);reveal();}};
-  save.onclick=()=>{try{if(isPriority&&scopeOf(t)!=='all'&&!hasCap()&&!edited){dismiss();return;}if(isPriority){if(level.value==='inherit'){if(hasCap())void apply(null,null);else dismiss();}else void apply(null,level.value as TrafficPriority);return;}void apply(enabled.checked?uploadRateBits(input.value,unit):null);}catch(e){summary.textContent=String(e instanceof Error?e.message:e);reveal();}};
+  save.onclick=()=>{try{if(isPriority&&scopeOf(t)!=='all'&&!hasCap()&&!edited){dismiss();return;}if(isPriority){if(priority==='inherit'){if(hasCap())void apply(null,null);else dismiss();}else void apply(null,priority);return;}void apply(enabled.checked?uploadRateBits(input.value,unit):null);}catch(e){summary.textContent=String(e instanceof Error?e.message:e);reveal();}};
   input.onkeydown=e=>{if(e.key==='Enter'&&!e.isComposing){e.preventDefault();if(!save.disabled)save.click();}};
   remove.onclick=()=>void apply(null,null);refresh.onclick=()=>{drafts.clear();edited=false;void read();};await read();
   // A slow status reply must not steal focus or select a draft the user already edited.
-  if(d.isConnected && !blocked && !edited && document.activeElement===d){if(isPriority)level.focus({preventScroll:true});else if(!save.disabled){input.focus({preventScroll:true});input.select();}}
+  if(d.isConnected && !blocked && !edited && document.activeElement===d){if(isPriority)priorityChoices.querySelector<HTMLInputElement>('input:checked')?.focus({preventScroll:true});else if(!save.disabled){input.focus({preventScroll:true});input.select();}}
 }

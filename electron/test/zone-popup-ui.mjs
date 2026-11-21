@@ -288,7 +288,12 @@ try {
   await page.locator('#optionsMenu summary').click();
   await open('upload');assert.equal(await page.locator('#uploadRate').inputValue(),'32');await close();
   await open('download');assert.equal(await page.locator('#uploadRate').inputValue(),'16');await close();
-  await open('priority');assert.equal(await page.locator('#priorityLevel').inputValue(),'high');
+  await open('priority');assert.equal(await page.locator('#priorityLevel input:checked').inputValue(),'high');
+  const priorityOptions = popup.locator('#priorityLevel');
+  assert.deepEqual(await priorityOptions.locator('label:visible').allTextContents(), ['High', 'Normal', 'Low']);
+  await priorityOptions.getByRole('radio', { name: 'High' }).press('ArrowRight');
+  assert(await priorityOptions.getByRole('radio', { name: 'Normal' }).isChecked());
+  await priorityOptions.getByRole('radio', { name: 'High' }).check();
   await popup.getByRole('button', { name: 'Details', exact: true }).click();
   assert.match(await popup.locator('#uploadDetailsBody').innerText(), /Budgets.*Best effort/s);
   assert.doesNotMatch(await popup.locator('#uploadDetailsBody').innerText(), /Eligible connected UDP/);
@@ -326,10 +331,12 @@ try {
   await popup.screenshot({path:dir+'/internet-upload-popup.png'});await page.screenshot({path:dir+'/internet-upload-native.png'});
   await page.locator('#uploadRate').fill('5');await page.locator('#uploadRate').press('Enter');await popup.waitFor({state:'detached'});
   await open('download');await zone('local');await popup.screenshot({path:dir+'/local-download-popup.png'});await close();
-  await open('priority');await page.locator('#priorityLevel').selectOption('high');await page.locator('#uploadSave').click();await popup.waitFor({state:'detached'});
-  await open('priority');await zone('internet');await page.locator('#priorityLevel').selectOption('normal');await page.locator('#uploadSave').click();await popup.waitFor({state:'detached'});
+  await open('priority');await page.locator('#priorityLevel input[value=high]').check();await page.locator('#uploadSave').click();await popup.waitFor({state:'detached'});
+  await open('priority');await zone('internet');await page.locator('#priorityLevel input[value=normal]').check();await page.locator('#uploadSave').click();await popup.waitFor({state:'detached'});
   assert.equal(own('internet').traffic_priority,'normal');assert.equal(own('all').traffic_priority,'high');
-  await open('priority');await zone('internet');await popup.screenshot({path:dir+'/internet-priority-popup.png'});
+  await open('priority');await zone('internet');
+  assert(await priorityOptions.getByRole('radio', { name: 'Inherited (High)' }).isVisible());
+  await popup.screenshot({path:dir+'/internet-priority-popup.png'});
   await page.locator('#uploadRemove').click();await popup.waitFor({state:'detached'});
   assert.equal(own('internet').traffic_priority,undefined);assert.equal(own('all').traffic_priority,'high');
   await open('upload');await zone('internet');await page.locator('#uploadRemove').click();await popup.waitFor({state:'detached'});
@@ -362,7 +369,7 @@ try {
   await openZone('upload','local');await zone('internet');await close();
   await openZone('upload','local');assert.equal(await page.locator('#uploadRate').inputValue(),'7');await page.screenshot({path:dir+'/zone-row-local-native.png'});await close();
   await open('upload');assert.equal(await page.locator('#uploadZone input:checked').inputValue(),'all');await close();
-  await openZone('priority','local');await page.locator('#priorityLevel').selectOption('low');await page.locator('#uploadSave').click();await popup.waitFor({state:'detached'});
+  await openZone('priority','local');await page.locator('#priorityLevel input[value=low]').check();await page.locator('#uploadSave').click();await popup.waitFor({state:'detached'});
   assert.equal(own('local').traffic_priority,'low');assert.equal(own('all').traffic_priority,'high');
   await openZone('priority','internet');await close();assert.equal(await zoneSlot('priority','internet').evaluate(b=>b.classList.contains('upload-configured')),false);
   await openZone('download','internet');assert.equal(await page.locator('#uploadRate').inputValue(),'6');await close();
