@@ -306,14 +306,7 @@ body.hide-chart #activityView > #trafficGraph {
   border-left-color: var(--fg-selected);
 }
 
-#requestsView .nl-box {
-  background: var(--desktop-raised);
-  border: 1px solid var(--fg-border);
-  border-radius: 6px;
-}
-
-#requestsView :is(.nl-label, .nl-fields dt, .nl-port-label) {
-  background: transparent;
+#requestsView :is(.nl-fields dt, .nl-port-label) {
   color: var(--fg-muted);
 }
 
@@ -327,24 +320,8 @@ body.hide-chart #activityView > #trafficGraph {
   border-radius: 6px;
 }
 
-#requestDetails .decision-controls button:is(.allow, .block),
 #requestDetails button.open-prompt {
   background: var(--desktop-control);
   border: 1px solid var(--fg-border);
   border-radius: 5px;
-}
-
-#requestDetails .decision-controls button.allow:enabled {
-  background: var(--desktop-accent);
-  border-color: transparent;
-  color: var(--desktop-chrome);
-}
-
-#requestDetails .decision-controls button:is(.allow, .block):enabled:hover {
-  filter: brightness(1.15);
-}
-
-#requestDetails .decision-controls input[type='checkbox']:checked {
-  background: var(--fg-selected);
-  border-color: var(--desktop-accent);
 }
