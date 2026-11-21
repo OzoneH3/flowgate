@@ -442,15 +442,15 @@ try {
   assert(await allow.isEnabled());
   assert(await prompt.getByRole('button', { name: '× Deny', exact: true }).isEnabled());
   assert.equal(await prompt.locator('#promptPending').innerText(), 'Pending requests (2)');
-  assert.match(await allow.getAttribute('title'), /this application/i);
+  assert.match(await allow.getAttribute('title'), /Only this held connection/i);
   await allow.hover();
   const permissionTooltip = prompt.getByRole('tooltip');
   await permissionTooltip.waitFor();
-  assert.match(await permissionTooltip.innerText(), /this application/i);
+  assert.match(await permissionTooltip.innerText(), /Only this held connection/i);
   await prompt.mouse.move(3, 3);
   await permissionTooltip.waitFor({ state: 'hidden' });
   assert.equal(await prompt.locator('#rememberToggle, #forAWhileToggle').count(), 0);
-  assert.equal(await ruleDuration.inputValue(), '0');
+  assert.equal(await ruleDuration.inputValue(), 'once');
   assert(await prompt.locator('#rememberPanel').isVisible());
   assert((await bounds('#allowForAWhile')).y >= (await bounds('#allow')).y + (await bounds('#allow')).height);
   assert((await bounds('#blockForAWhile')).y >= (await bounds('#block')).y + (await bounds('#block')).height);
@@ -491,7 +491,6 @@ try {
     await reloadTheme('base');
   }
   const originalAllow = await allow.elementHandle();
-  await ruleDuration.selectOption('once');
   await shot('compact');
 
   await tabTo('cardCollapse');
@@ -569,7 +568,7 @@ try {
     [{ action: 'allow', scope: 'once', id: first.id }],
   );
   assert.equal(await prompt.locator('#promptPending').innerText(), 'Pending requests (1)');
-  assert.equal(await ruleDuration.inputValue(), '0');
+  assert.equal(await ruleDuration.inputValue(), 'once');
   assert.match(await prompt.locator('#connectionHeader').innerText(), /Incoming/);
   assert.equal(await prompt.locator('#requestPeer .nl-label').textContent(), 'From');
   const name = second.attribution.application.name;

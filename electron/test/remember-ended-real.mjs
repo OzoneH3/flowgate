@@ -29,14 +29,14 @@ try{
  await command({op:'outgoing',name:'alpha',protocol:'tcp',timeout_ms:2500});
  const original=await wait(pending,'original pending');
  const prompt=await wait(async()=>app.windows().find(w=>new URL(w.url()).searchParams.get('request')===original.id),'automatic prompt');
- await prompt.locator('#rememberToggle').waitFor();
+ await prompt.locator('#rememberDuration').waitFor();
  await wait(async()=>!(await prompt.locator('#allow').isDisabled()),'card ready');
  // Joining the native connect job proves closure; no guessed Activity absence.
+ await prompt.locator('#rememberDuration').selectOption('0');
  await command({op:'settle',name:'alpha'});
- await prompt.locator('#rememberToggle').check();
  await wait(async()=>/connection has ended/i.test(await prompt.locator('#requestResult').textContent()),'ended reason');
  assert(await prompt.locator('#allow').isDisabled());assert(await prompt.locator('#block').isDisabled());assert(await prompt.locator('#refreshDecision').isHidden());
- assert(await prompt.locator('#rememberToggle').isChecked());
+ assert.equal(await prompt.locator('#rememberDuration').inputValue(), '0');
  assert.match(await prompt.locator('.expiry').textContent(),/ended/i);
  assert.match(await prompt.locator('#requestDetails').textContent(),new RegExp(original.flow.remote.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')));
  await prompt.screenshot({path:run+'/ended-prompt.png'});

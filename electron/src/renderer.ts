@@ -171,7 +171,7 @@ const queuedAddress = queuedDuration !== undefined && (queuedField === 'address'
 const queuedPort = queuedDuration !== undefined && (queuedField === 'port' || queuedField === 'endpoint');
 // Only an intentional rule edit keeps an ended request open for rule review.
 let popupRuleEdited = queuedAddress || queuedPort;
-let rememberOn = Boolean(promptID),
+let rememberOn = queuedAddress || queuedPort,
   rememberFields: RememberFields = { ...DEFAULT_REMEMBER, address: queuedAddress, port: queuedPort },
   rememberDuration = rememberOn ? queuedDuration ?? 0 : 0,
   reviewTimer: ReturnType<typeof setTimeout> | undefined;

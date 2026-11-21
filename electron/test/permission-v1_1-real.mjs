@@ -170,7 +170,7 @@ try {
     await first.locator('#requestDetails').textContent(),
     /No matching rule \(default Ask\)/,
   );
-  await first.locator('#rememberToggle').check();
+  await first.locator('#rememberDuration').selectOption('0');
   const fieldsShown = await first
     .locator('#rememberPanel input[data-field]')
     .evaluateAll((xs) => xs.map((x) => [x.dataset.field, x.checked, x.disabled]));
@@ -419,8 +419,8 @@ try {
     'new attempt not covered by Once',
   );
   const again = await wait(async () => promptWindow());
-  await again.locator('#rememberToggle').waitFor();
-  await again.locator('#rememberToggle').check();
+  await again.locator('#rememberDuration').waitFor();
+  await again.locator('#rememberDuration').selectOption('0');
   await wait(
     async () => /replaces Ask rule/i.test(await again.locator('#rememberSummary').innerText()),
     15000,

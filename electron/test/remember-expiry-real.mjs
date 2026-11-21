@@ -211,7 +211,7 @@ try {
       assert.equal(await count(), received);
       const freshWindow = await prompt(fresh.id);
       assert((await freshWindow.locator('#askSource').textContent()).includes(ask.id));
-      assert.equal(await freshWindow.locator('#rememberToggle').isChecked(), false);
+      assert.equal(await freshWindow.locator('#rememberDuration').inputValue(), 'once');
       await freshWindow.locator('#allow').click();
       await wait('restored Ask delivered after Allow Once', async () => await count() === received + 1);
       await held(0);
@@ -234,7 +234,6 @@ try {
       const b = (await held(2)).find((request) => request.id !== a.id);
       assert.equal(b.flow.remote, peerB.host + ':' + peerB.port);
       assert.equal(b.rule, ask.id);
-      await aWindow.locator('#rememberToggle').check();
       await aWindow.locator('#rememberDuration').selectOption(queueDuration);
       for (const field of scopeFields) await aWindow.locator(`input[data-field="${field}"]`).check();
       await wait('review scoped to A', async () => {
@@ -248,7 +247,6 @@ try {
       });
       assert.equal((await held(1))[0].id, b.id);
       assert.equal(await count(), before);
-      assert(await bWindow.locator('#rememberToggle').isChecked());
       assert.equal(await bWindow.locator('#rememberDuration').inputValue(), queueDuration);
       for (const field of ['protocol', 'address', 'port', 'process']) {
         const input = bWindow.locator(`input[data-field="${field}"]`);
@@ -281,7 +279,7 @@ try {
         await wait('review names replacement rule', async () =>
           (await bWindow.locator('#rememberSummary').innerText()).includes(competingRule.id));
       }
-      if (clearRemember) await bWindow.locator('#rememberToggle').uncheck();
+      if (clearRemember) await bWindow.locator('#rememberDuration').selectOption('once');
       if (queueSeconds && scenario === 'keep') await new Promise((resolve) => setTimeout(resolve, 12000));
       const clickedBAt = Date.now();
       await bWindow.locator('#allow').click();
@@ -370,7 +368,6 @@ try {
   await command({ op: 'batch', items: [outgoing, outgoing] });
   const [request] = await held(2);
   const window = await prompt(request.id);
-  await window.locator('#rememberToggle').check();
   await window.locator('#rememberDuration').selectOption('60');
   const summary = await wait('60-second reviewed scope', async () => {
     const value = await window.locator('#rememberSummary').innerText();
@@ -459,7 +456,6 @@ try {
     const [permanentRequest] = await held(1);
     assert.equal(permanentRequest.rule, ask.id);
     const permanentWindow = await prompt(permanentRequest.id);
-    await permanentWindow.locator('#rememberToggle').check();
     await permanentWindow.locator('#rememberDuration').selectOption('0');
     await wait('permanent Ask retention preview', async () => {
       const summary = await permanentWindow.locator('#rememberSummary').innerText();

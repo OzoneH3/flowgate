@@ -270,7 +270,7 @@ try {
   });
   const first = await wait(async () => promptWindow(), 20000, 'prompt');
   const requestId = requestOf(first);
-  await first.locator('#rememberToggle').waitFor();
+  await first.locator('#rememberDuration').waitFor();
   await sleep(600);
   const compact = await promptFacts();
   evidence.compact_bounds = compact.bounds;
@@ -280,7 +280,7 @@ try {
   await shot(first, '01-prompt-compact');
 
   // Remember expansion + Process selection while the requester is alive.
-  await first.locator('#rememberToggle').check();
+  await first.locator('#rememberDuration').selectOption('0');
   await first.locator('#rememberPanel').waitFor();
   await sleep(800);
   const expanded = await promptFacts();
@@ -344,7 +344,7 @@ try {
       'ended request locks optional Remember fields: ' +
         lockedOptional.map((f) => f.field).join(', '),
     );
-  assert(await first.locator('#rememberToggle').isChecked(), 'Remember survives');
+  assert.equal(await first.locator('#rememberDuration').inputValue(), '0', 'selected rule duration survives');
   assert(await processBox.isChecked(), 'Process selection survives');
   await shot(first, '03-ended-process-still-checked');
   step(
@@ -384,18 +384,13 @@ try {
   for (const f of ['protocol', 'address', 'port'])
     if (await first.locator(`#rememberPanel input[data-field="${f}"]`).isChecked())
       await first.locator(`#rememberPanel input[data-field="${f}"]`).uncheck();
-  // A one-time Allow is never converted into a rule: without Remember it is unavailable.
-  await first.locator('#rememberToggle').uncheck();
-  await sleep(300);
-  evidence.plain_allow_enabled = await first.locator('#allow').isEnabled();
-  evidence.plain_note = await first.locator('#decisionNote').innerText().catch(() => '');
-  if (evidence.plain_allow_enabled) finding('plain Allow enabled on an ended request');
-  assert(/check Remember to save a rule/i.test(evidence.plain_note), 'ended card explains Remember');
-  if (await first.locator('#forAWhileToggle').count())
-    evidence.for_a_while_disabled = await first.locator('#forAWhileToggle').isDisabled();
+  // An ended request can save a reviewed future rule, but cannot be decided once.
+  assert(await first.locator('#rememberDuration option[value="once"]').isDisabled());
+  if (await first.locator('#allowForAWhile').count())
+    evidence.for_a_while_disabled = await first.locator('#allowForAWhile').isDisabled();
   if (evidence.for_a_while_disabled === false) finding('For a while enabled on an ended request');
   assert.equal((await list()).rules.length, 0, 'no rule from a plain click');
-  await first.locator('#rememberToggle').check();
+  await first.locator('#rememberDuration').selectOption('0');
   assert(!(await processBox.isChecked()), 'Process stays unchecked after re-checking Remember');
   await wait(() => first.locator('#allow').isEnabled(), 15000, 'Remember + Allow enabled');
   evidence.rule_summary = await first.locator('#rememberSummary').innerText();
@@ -500,10 +495,8 @@ try {
   await sleep(800);
   const nextFacts = await promptFacts();
   evidence.next_bounds = nextFacts.bounds;
-  evidence.next_remember_checked = await next
-    .locator('#rememberToggle')
-    .isChecked()
-    .catch(() => null);
+  evidence.next_rule_duration = await next.locator('#rememberDuration').inputValue();
+  assert.equal(evidence.next_rule_duration, 'once');
   if (
     nextFacts.bounds.height !== compact.bounds.height ||
     nextFacts.bounds.width !== compact.bounds.width
@@ -512,8 +505,7 @@ try {
       `next request not reset to compact size: ${JSON.stringify(nextFacts.bounds)} vs ${JSON.stringify(compact.bounds)}`,
     );
   else step('next request reset to compact size');
-  if (evidence.next_remember_checked) finding('next request kept Remember expanded/checked');
-  else step('next request starts with Remember collapsed');
+  step('next request starts with This connection only');
   await shot(next, '06-next-request-compact');
   await next.click('#block');
 

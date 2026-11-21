@@ -139,10 +139,10 @@ try {
   await menus(false);
   step('fixture protection active (UI Start); host untouched');
 
-  // 1. Compact first view, no focus theft, always on top, NetLimiter order, mutual exclusion.
+  // 1. Compact first view, no focus theft, always on top, separate temporary actions.
   let before = await send('alpha', 'tcp', '10.79.0.2', 43000);
   let w = await card(/10\.79\.0\.2:43000/);
-  await w.locator('#forAWhileToggle').waitFor();
+  await w.locator('#allowForAWhile').waitFor();
   await sleep(900);
   const compact = await facts();
   evidence.compact = compact;
@@ -150,17 +150,15 @@ try {
   assert.equal(compact.bounds.height, 590);
   assert(!compact.focused, 'prompt took focus');
   assert(compact.top, 'prompt not always on top');
-  const order = await w.locator('#allow, #block, #rememberToggle, #forAWhileToggle').evaluateAll((xs) => xs.map((x) => x.id));
-  assert.deepEqual(order, ['allow', 'block', 'rememberToggle', 'forAWhileToggle'], 'NetLimiter order');
+  const order = await w.locator('#allow, #block, #allowForAWhile, #blockForAWhile').evaluateAll((xs) => xs.map((x) => x.id));
+  assert.deepEqual(order, ['allow', 'block', 'allowForAWhile', 'blockForAWhile'], 'decision button order');
   assert(!(await w.locator('#requestMore').evaluate((d) => d.open)), 'Details collapsed');
   evidence.compact_text = (await w.locator('body').innerText()).slice(0, 800);
   await shot(w, '01-compact');
-  await w.locator('#rememberToggle').check();
-  await w.locator('#forAWhileToggle').check();
-  assert(!(await w.locator('#rememberToggle').isChecked()), 'For a while unchecks Remember');
-  await w.locator('#rememberToggle').check();
-  assert(!(await w.locator('#forAWhileToggle').isChecked()), 'Remember unchecks For a while');
-  step(`compact 745x590, unfocused, always-on-top; order Allow|Deny|Remember|For a while; mutually exclusive both ways`);
+  assert.equal(await w.locator('#rememberDuration').inputValue(), 'once');
+  await w.locator('#rememberDuration').selectOption('0');
+  assert(await w.locator('#allowForAWhile').isEnabled());
+  step('compact 745x590, unfocused, always-on-top; separate temporary controls');
 
   // 800x550: buttons and duration select stay visible.
   await app.evaluate(({ BrowserWindow }) =>
@@ -180,8 +178,8 @@ try {
   step('at 800x550 Allow, Deny and the expiry-duration select are visible');
 
   // 2. For a while + Allow: current delivered, lease line counts down, same process new TCP/UDP no prompt.
-  await w.locator('#forAWhileToggle').check();
-  await w.locator('#allow').click();
+  await w.locator('#forAWhileDuration').selectOption('15');
+  await w.locator('#allowForAWhile').click();
   assert(await delivered(before), 'current request delivered');
   const lease = await wait(async () => (await list()).leases[0], 8000, 'lease listed');
   evidence.lease = lease;
@@ -221,8 +219,8 @@ try {
   step('lease expired and vanished; same process prompted again');
 
   // 5. For a while + Deny: current and a later connection blocked, no prompt.
-  await w.locator('#forAWhileToggle').check();
-  await w.locator('#block').click();
+  await w.locator('#forAWhileDuration').selectOption('15');
+  await w.locator('#blockForAWhile').click();
   await wait(async () => (await list()).leases.some((l) => l.action === 'block'), 8000);
   assert(!(await delivered(before, 1500)), 'denied current');
   before = await send('alpha', 'udp', '10.79.0.3', 44001);
@@ -235,13 +233,13 @@ try {
   // 6. Ended request: Remember -> Deny, relaunch blocked; repeat click creates no duplicate.
   before = await send('other', 'tcp', '10.79.0.3', 44000);
   w = await card(/10\.79\.0\.3:44000/);
+  await w.locator('#rememberDuration').selectOption('0');
   await command({ op: 'exit', name: 'other' });
   await wait(async () => /has ended|no longer pending/i.test(await prompt().locator("body").innerText()), 40000, 'ended card');
   w = prompt();
-  assert(await w.locator('#forAWhileToggle').isDisabled(), 'For a while unavailable when ended');
+  assert(await w.locator('#allowForAWhile').isDisabled(), 'For a while unavailable when ended');
   assert(await w.locator('#allow').isVisible(), 'Allow stays visible');
-  if (await w.locator('#forAWhileToggle').isChecked()) throw Error('For a while left checked');
-  if (!(await w.locator('#rememberToggle').isChecked())) await w.locator('#rememberToggle').check();
+  assert.equal(await w.locator('#rememberDuration').inputValue(), '0');
   assert(!(await w.locator('#rememberPanel input[data-field="process"]').isChecked()), 'process not preselected');
   await wait(() => w.locator('#block').isEnabled(), 15000, 'deny enabled');
   await w.locator('#block').click();

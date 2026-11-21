@@ -37,6 +37,12 @@ func main() {
 	}
 	var mu sync.Mutex
 	var jobs sync.WaitGroup
+	type sendResult struct {
+		Remote string `json:"remote"`
+		Status string `json:"status"`
+		Error  string `json:"error,omitempty"`
+	}
+	var lastSend *sendResult
 	// Open outgoing sends; "close" cancels/closes them while the process stays alive.
 	open := map[int]context.CancelFunc{}
 	nextOpen := 0
@@ -209,9 +215,12 @@ func main() {
 			go func() {
 				defer jobs.Done()
 				defer func() { mu.Lock(); delete(open, id); mu.Unlock(); cancel() }()
+				result := sendResult{Remote: net.JoinHostPort(host, strconv.Itoa(port)), Status: "cancelled"}
+				defer func() { mu.Lock(); lastSend = &result; mu.Unlock() }()
 				var d net.Dialer
-				c, e := d.DialContext(ctx, key, net.JoinHostPort(host, strconv.Itoa(port)))
+				c, e := d.DialContext(ctx, key, result.Remote)
 				if e != nil {
+					result.Status, result.Error = "dial-failed", e.Error()
 					return
 				}
 				defer c.Close()
@@ -227,10 +236,15 @@ func main() {
 						}
 					}
 					if _, e := c.Write([]byte("process-fixture")); e != nil {
+						result.Status, result.Error = "write-failed", e.Error()
 						return
 					}
 				}
-				c.Read(make([]byte, 128))
+				if n, err := c.Read(make([]byte, 128)); n > 0 {
+					result.Status = "received"
+				} else if err != nil {
+					result.Status, result.Error = "read-failed", err.Error()
+				}
 			}()
 		}
 		mu.Lock()
@@ -238,8 +252,12 @@ func main() {
 		for k, v := range counts {
 			copy[k] = v
 		}
+		reply := map[string]any{"counts": copy}
+		if q.Op == "settle" && lastSend != nil {
+			reply["last_send"] = *lastSend
+		}
 		mu.Unlock()
-		if e := enc.Encode(map[string]any{"counts": copy}); e != nil {
+		if e := enc.Encode(reply); e != nil {
 			fmt.Fprintln(os.Stderr, e)
 			return
 		}
