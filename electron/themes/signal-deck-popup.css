@@ -141,15 +141,15 @@ input[type=checkbox] { accent-color: var(--cyan); }
    positioning keeps them above feedback when the controller adds a message. */
 .prompt-shell footer {
   display: grid;
+  grid-template-areas: 'status status' 'context context' 'queue actions';
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.8fr);
   align-items: stretch;
   gap: 0 12px;
   padding: 10px var(--gutter);
   background: var(--inset);
 }
-#controlStatus { grid-column: 1 / -1; }
 #controlStatus:not(:empty) { margin-bottom: 6px; }
-#promptQueueControls { grid-column: 1; margin-left: 0; }
+#promptQueueControls { margin-left: 0; }
 #dismiss {
   grid-column: 1;
   justify-self: stretch;
@@ -174,7 +174,7 @@ input[type=checkbox] { accent-color: var(--cyan); }
 @supports (position-anchor: --popup-actions) {
   .prompt-shell footer::after {
     content: '';
-    grid-column: 2;
+    grid-area: actions;
     anchor-name: --popup-actions;
     min-height: var(--control-height);
   }

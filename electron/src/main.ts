@@ -168,6 +168,7 @@ const pressedPromptKeys = new Set<string>();
 const rendererPromptKeys = new Set<string>();
 let promptPointerDown = false;
 let promptDismissed = false;
+let promptKeyboardNext = false;
 let promptIdle = false;
 let promptKDEReady = false;
 const promptReadyAt = new Map<number, number>();
@@ -180,15 +181,16 @@ function pacePrompt() {
   transitionTimer = setTimeout(automaticDecision, TRANSITION_MS + 10);
 }
 const promptRefs = new Map<number, RequestRef>();
-const promptURL = (ref: RequestRef, remember?: QueuedRememberSelection) =>
+const promptURL = (ref: RequestRef, remember?: QueuedRememberSelection, focusHeading = false) =>
   'flowgate://app/prompt.html?request=' +
   encodeURIComponent(ref.id) +
   '&generation=' +
   encodeURIComponent(ref.generation) +
-  (remember ? '&rememberField=' + remember.field + '&rememberDuration=' + remember.duration : '');
+  (remember ? '&rememberField=' + remember.field + '&rememberDuration=' + remember.duration : '') +
+  (focusHeading ? '&focus=heading' : '');
 // The one permission window shows one request card. Switching card reuses the
 // window: rebinding promptRefs first makes decisions from the old card fail closed.
-function retarget(ref: RequestRef, reload = false, remember?: QueuedRememberSelection) {
+function retarget(ref: RequestRef, reload = false, remember?: QueuedRememberSelection, focusHeading = false) {
   const w = prompt!,
     current = promptRefs.get(w.webContents.id);
   if (!reload && current?.id === ref.id && current.generation === ref.generation) {
@@ -219,7 +221,7 @@ function retarget(ref: RequestRef, reload = false, remember?: QueuedRememberSele
     else w.showInactive();
   });
   promptLayouts.set(w.webContents.id, reset);
-  void w.loadURL(promptURL(ref, remember));
+  void w.loadURL(promptURL(ref, remember, focusHeading));
 }
 // Temporary Allow/Deny hides at once; remembered saves hide after acknowledgement.
 // The submission outcome, including refusals
@@ -298,6 +300,17 @@ function automaticDecision() {
     if (!transitionUntil) pacePrompt();
     if (!promptInputSettled()) return;
     transitionUntil = 0;
+    if (promptDismissed && promptKeyboardNext) {
+      promptKeyboardNext = false;
+      const following = automaticPrompts.next(view, false);
+      if (following && prompt.isFocused() &&
+        view.control.events.some((e) => e.id === following.id && e.remainingMs > 1000)) {
+        // Keep the foreground window mapped for an intentional keyboard advance.
+        promptDismissed = false;
+        retarget(following, false, undefined, true);
+        return;
+      }
+    }
     if (promptDismissed || !next) {
       promptIdle = true;
       if (promptKDEReady)
@@ -1241,11 +1254,12 @@ app.whenReady().then(async () => {
     promptLayouts.set(e.sender.id, resize);
     await resize;
   });
-  ipcMain.handle('prompt:dismiss', (e) => {
+  ipcMain.handle('prompt:dismiss', (e, keyboardNext?: unknown) => {
     trusted(e);
     if (prompt && !prompt.isDestroyed() && prompt.webContents === e.sender) {
       const ref = promptRefs.get(e.sender.id);
       if (ref) automaticPrompts.dismiss(ref);
+      promptKeyboardNext = keyboardNext === true && prompt.isFocused() && !promptIdle && !promptDismissed;
       promptDismissed = true;
       pacePrompt();
     }

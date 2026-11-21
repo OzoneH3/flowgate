@@ -100,6 +100,8 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
     if (o.popup) {
       heading.setAttribute('role', 'heading');
       heading.setAttribute('aria-level', '1');
+      heading.setAttribute('aria-describedby', 'promptEndpoint');
+      heading.tabIndex = -1;
       heading.querySelector('.application-icon')?.setAttribute('aria-hidden', 'true');
     }
     addClass(heading, 'nl-program');

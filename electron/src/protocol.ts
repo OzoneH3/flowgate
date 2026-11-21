@@ -542,7 +542,7 @@ export interface Bridge {
   openFutureApplicationRule(value: { generation: string; id: string }): Promise<void>;
   onFutureApplicationRule(fn: (source: ObservedSource) => void): () => void;
   promptLayout(value: { height: number; pointerDown: boolean; keysDown: string[]; remember: boolean }): Promise<void>;
-  dismissPrompt(): Promise<void>;
+  dismissPrompt(keyboardNext?: boolean): Promise<void>;
   decisionLog(): Promise<DecisionLogState>;
   connectionChecks(options?:unknown):Promise<import('./connection-checks').CheckView>;
   decisionTimeout(edit?: import('./decision-timeout').DecisionTimeoutEdit): Promise<import('./decision-timeout').DecisionTimeoutView>;

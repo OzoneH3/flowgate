@@ -109,5 +109,6 @@ test('sandbox identity_unverifiable is one permanent concise error (request-sand
   assert.match(src, /refresh\.hidden = rememberMode\(\)\n\s+\? .*\|\| !!unverifiable/);
   assert.match(src, /!ruleChecking && !unverifiable &&/);
   assert.match(src, /ruleUnverifiable\.has\(e\.id\)\) return;/);
-  assert.match(src, /ruleMode && unverifiable\n\s+\? IDENTITY_UNVERIFIABLE_TEXT/);
+  assert.match(src, /ruleMode && unverifiable\n\s+\? unverifiableHint/);
+  assert.match(src, /unverifiableHint = promptID\s+\? IDENTITY_UNVERIFIABLE_TEXT\.replace\('Choose Remember', 'Choose Rule duration'\)\s+: IDENTITY_UNVERIFIABLE_TEXT/);
 });

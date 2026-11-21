@@ -51,6 +51,7 @@ import {
   expiryPreview,
   forAWhileDurations,
   forAWhileNote,
+  durationLabel,
   type ProcessLease,
 } from './process-lease';
 import {
@@ -123,6 +124,7 @@ setupTooltips();
 const promptParams = new URL(location.href).searchParams;
 const promptGeneration = promptParams.get('generation');
 const promptID = promptParams.get('request');
+let focusNextHeading = promptParams.get('focus') === 'heading';
 const applicationCallers = new ApplicationCallers();
 let state: ClientState;
 let selected = 'overview';
@@ -909,7 +911,9 @@ if (promptID) {
   setTimeout(() => {
     if (state) updateDecisions();
   }, 670);
-  $('dismiss').onclick = () => void window.flowgate.dismissPrompt();
+  $('dismiss').onclick = (event) => void window.flowgate.dismissPrompt(
+    event.detail === 0 && $('dismiss').dataset.nextRequest === 'true',
+  );
   $('closePrompt').onclick = () => void window.flowgate.dismissPrompt();
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
@@ -2307,6 +2311,11 @@ function renderRequests() {
     const container = $('requestDetails');
     container.replaceChildren();
     const popupDuration = $('promptLeaseDuration');
+    const popupContext = $('promptContext');
+    if (popupContext) {
+      $('promptResponse').replaceChildren();
+      popupContext.hidden = !e;
+    }
     if (popupDuration) {
       popupDuration.replaceChildren();
       popupDuration.hidden = true;
@@ -2346,6 +2355,14 @@ function renderRequests() {
         },
       }),
     );
+    if (popupContext) {
+      $('promptPeerAddress').textContent = e.flow.remote || 'Unavailable';
+      $('promptResponse').append($('requestStatusLine'));
+      if (focusNextHeading) {
+        focusNextHeading = false;
+        $('requestApplication').focus();
+      }
+    }
     const controls = $('decisionControls'),
       dock = $('decisionDock');
     for (const action of ['allow', 'block'] as const) {
@@ -2681,6 +2698,7 @@ function updateDecisions() {
     const other = groups.filter(
       (g) => !g.representative.attempt && (!e || g.key !== groupKey(e)),
     ).length;
+    $('dismiss').dataset.nextRequest = String(other > 0);
     $('dismiss').textContent = other
       ? `Next request (${other})`
       : !reviewFailureOf(e) && e?.state === 'awaiting-decision' && e.remainingMs > 0
@@ -2714,6 +2732,13 @@ function updateDecisions() {
     liveLeaseUnavailable = liveLeaseReason(e, state.control.capabilities),
     leaseDone = !!e && endedLeaseDone.has(e.id),
     unverifiable = e ? ruleUnverifiable.get(e.id) : undefined;
+  const futureRuleHint = 'Choose Rule duration to save a rule for future connections.';
+  const leaseAvailable = leaseMode && !leaseDone && state.control.connected && canDecide(state.control);
+  const futureRuleAvailable = ruleMode && !ruleDone && !rulePinned && !unverifiable &&
+    state.control.connected && canManageRules(state.control);
+  const unverifiableHint = promptID
+    ? IDENTITY_UNVERIFIABLE_TEXT.replace('Choose Remember', 'Choose Rule duration')
+    : IDENTITY_UNVERIFIABLE_TEXT;
   const onceCopy = promptID && e?.state === 'awaiting-decision' && !ended && !e.attempt &&
     chosenScope === 'once' && !remembering && !temporary ? compactUDPOnce(e) : undefined;
   const onceNote = $('udpOnceNote');
@@ -2748,6 +2773,13 @@ function updateDecisions() {
   for (const id of ['allow', 'block'] as const) {
     const b = $<HTMLButtonElement>(id);
     if (!b) continue;
+    const action = id === 'allow' ? 'Allow' : 'Deny';
+    if (promptID) {
+      const duration = rememberMode() ? rememberDuration : chosenScope === 'persistent' ? 0 : 3600;
+      b.textContent = chosenScope === 'once'
+        ? action + ' once'
+        : action + (duration ? ' · save ' + durationLabel(duration) : ' · save (no expiry)');
+    }
     const review = decisionReviews[id];
     if (ended && temporary) {
       // For a while on an ended request: creates the process lease only.
@@ -2773,9 +2805,9 @@ function updateDecisions() {
         (rememberFields.process && instanceEnded) ||
         (pinned ? pinned.action !== id : !endedFlow.fresh(ruleChoice(e!, id), now));
       b.title = !remembering
-        ? ENDED_NEEDS_REMEMBER
+        ? promptID ? (futureRuleAvailable ? futureRuleHint : 'Request ended.') : ENDED_NEEDS_REMEMBER
         : unverifiable
-          ? IDENTITY_UNVERIFIABLE_TEXT
+          ? unverifiableHint
           : `${id === 'allow' ? 'Allow' : 'Deny'} future connections. This request has ended.`;
       continue;
     }
@@ -2844,6 +2876,7 @@ function updateDecisions() {
   for (const id of ['allowForAWhile', 'blockForAWhile']) {
     const button = $<HTMLButtonElement>(id);
     if (!button) continue;
+    button.textContent = (id === 'allowForAWhile' ? 'Allow' : 'Deny') + ' process · ' + durationLabel(forAWhileSeconds);
     button.disabled = pacing || !!leaseReason || (ended
       ? leaseDone || endedLeaseBusy.has(e!.id) || ruleBusy.has(e!.id) || !state.control.connected || !canDecide(state.control)
       : !actionable(e, 'for-a-while'));
@@ -2987,11 +3020,11 @@ function updateDecisions() {
           : ended && temporary && !leaseMode
           ? endedLeaseReason(e, state.control.capabilities)
           : ended && ruleMode && !remembering && !temporary
-          ? leaseMode ? ENDED_NEEDS_CHOICE : ENDED_NEEDS_REMEMBER
+          ? promptID ? '' : leaseMode ? ENDED_NEEDS_CHOICE : ENDED_NEEDS_REMEMBER
           : ended && ruleMode && rememberFields.process && instanceEnded
             ? ENDED_PROCESS
             : ruleMode && unverifiable
-              ? IDENTITY_UNVERIFIABLE_TEXT
+              ? unverifiableHint
             : ruleMode && ruleMessage
               ? shortError(ruleMessage) + ' · Selections kept.'
               : ''); // live Remember: the reason is the panel's summary line
@@ -3043,7 +3076,12 @@ function updateDecisions() {
   const expiry = document.querySelector<HTMLElement>('.expiry');
   if (expiry) {
     const limited = !!e && (!e.attribution.visibility_complete || e.attribution.status !== 'directly-associated');
-    const endedLine = ended ? endedStatusLine($('decisionNote')?.textContent, $('requestResult')?.textContent) : '';
+    let endedLine = ended ? endedStatusLine($('decisionNote')?.textContent, $('requestResult')?.textContent) : '';
+    if (promptID && ended) {
+      if (!/has ended|request ended/i.test(endedLine)) endedLine = 'Request ended. ' + endedLine;
+      if (futureRuleAvailable) endedLine += ' ' + futureRuleHint;
+      if (leaseAvailable) endedLine += ' Use a process action for the running process.';
+    }
     expiry.classList.toggle('ended', !!endedLine);
     expiry.title = endedLine;
     expiry.textContent = !e
@@ -3051,10 +3089,12 @@ function updateDecisions() {
       : ended
         ? endedLine
         : e.remainingMs > 0 && e.state === 'awaiting-decision'
-          ? `${Math.ceil(e.remainingMs / 1000)} s left` +
+          ? (promptID ? `Respond in ${Math.ceil(e.remainingMs / 1000)} s` : `${Math.ceil(e.remainingMs / 1000)} s left`) +
             (group && group.count > 1 ? ` · +${group.count - 1} similar` : '') +
             (limited ? ' · limited attribution' : '')
-          : `Request ${e.state === 'awaiting-decision' ? 'expired' : e.state}`;
+          : promptID && (e.state === 'awaiting-decision' || e.state === 'expired')
+            ? 'Request ended.'
+            : `Request ${e.state === 'awaiting-decision' ? 'expired' : e.state}`;
   }
   measurePrompt();
 }

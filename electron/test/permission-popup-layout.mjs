@@ -1,6 +1,7 @@
 // After npm run build, run node test/permission-popup-layout.mjs on a display
 // with at least 800 × 900 available. All requests use a private fixture socket.
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
@@ -17,10 +18,12 @@ await fs.copyFile(path.join(electronDir, 'package.json'), path.join(client, 'pac
 const endpoint = path.join(run, 'api');
 const observer = path.join(run, 'obs');
 const config = path.join(run, 'config');
+const polish = process.env.FLOWGATE_TEST_POPUP_POLISH;
 await fs.mkdir(path.join(config, 'flowgate'), { recursive: true });
 // Exercise the original base layout with window-specific user overrides.
-for (const slot of ['theme.css', 'popup-theme.css'])
-  await fs.writeFile(path.join(config, 'flowgate', slot), '');
+if (!polish)
+  for (const slot of ['theme.css', 'popup-theme.css'])
+    await fs.writeFile(path.join(config, 'flowgate', slot), '');
 await fs.writeFile(path.join(config, 'flowgate', 'style.css'), ':root { --fixture-user-style: desktop; }');
 await fs.writeFile(
   path.join(config, 'flowgate', 'desktop-layout.css'),
@@ -105,7 +108,12 @@ function request(id, name, direction, seconds = 180) {
 }
 const first = request('atlas-sync', 'Atlas Sync', 'outgoing');
 const second = request('long-client', 'Archive' + 'Synchronization'.repeat(10), 'incoming');
-let events = [first, second];
+let events = polish ? [] : [first, second];
+if (polish) {
+  second.flow.remote = '[2001:db8:31ab:42cd:53ef:6400:7511:8622]:65432';
+  second.remembered_filter.remote_address = '2001:db8:31ab:42cd:53ef:6400:7511:8622';
+  second.remembered_filter.remote_port = 65432;
+}
 let timeoutSeconds = 30;
 let timeoutRevision = 1;
 const timeoutEdits = [];
@@ -165,6 +173,8 @@ function reply(q) {
       'decision-remember-fields-v1',
       'decision-for-a-while-v1',
       'decision-for-a-while-durations-v1',
+      'request-application-rule-v1',
+      'request-for-a-while-v1',
       'network-zone-policy-v1',
       'decision-timeout-settings-v1',
     ],
@@ -253,6 +263,9 @@ try {
     }
     throw Error('No permission window for ' + id + ': ' + app.windows().map((p) => p.url()));
   }
+  if (polish) {
+    await verifyPolish(app, requestWindow);
+  } else {
   const prompt = await requestWindow(first.id);
   prompt.setDefaultTimeout(8000);
   await prompt.waitForFunction(() => document.querySelector('#allow')?.disabled === false);
@@ -286,7 +299,8 @@ try {
   await main.locator('#decisionTimeoutRefresh').click();
   await main.waitForFunction(() => !document.querySelector('#decisionTimeoutSeconds')?.disabled);
   assert.equal(await timeout.inputValue(), '45');
-  assert(parseInt(await prompt.locator('.expiry').textContent(), 10) > 60, 'an active request retains its own deadline');
+  const deadline = await prompt.locator('.expiry').textContent();
+  assert(Number(deadline.match(/^Respond in (\d+) s/)?.[1]) > 60, 'an active request retains its own deadline');
   await main.screenshot({ path: path.join(run, 'permission-timeout.png') });
   await main.locator('#optionsMenu > summary').click();
   await main.locator('#toolsMenu > summary').click();
@@ -427,7 +441,7 @@ try {
       );
     }
   }
-  const allow = prompt.getByRole('button', { name: '✓ Allow', exact: true });
+  const allow = prompt.locator('#allow');
   const ruleDuration = prompt.locator('#rememberDuration');
   const leaseDuration = prompt.getByRole('combobox', { name: 'For a while duration' });
   const allowTemporary = prompt.locator('#allowForAWhile');
@@ -440,7 +454,8 @@ try {
   });
   assert(await heading.isVisible());
   assert(await allow.isEnabled());
-  assert(await prompt.getByRole('button', { name: '× Deny', exact: true }).isEnabled());
+  assert(await prompt.getByRole('button', { name: /Deny once/ }).isEnabled());
+  assert.equal(await allow.innerText(), 'Allow once');
   assert.equal(await prompt.locator('#promptPending').innerText(), 'Pending requests (2)');
   assert.match(await allow.getAttribute('title'), /Only this held connection/i);
   await allow.hover();
@@ -609,7 +624,7 @@ try {
   assert.equal(decisions[1].duration_seconds, 60);
   assert.equal(await requestWindow(third.id), prompt);
   await prompt.getByRole('heading', { level: 1, name: third.attribution.application.name }).waitFor();
-  const nextCountdown = parseInt(await prompt.locator('.expiry').textContent(), 10);
+  const nextCountdown = Number((await prompt.locator('.expiry').textContent()).match(/^Respond in (\d+) s/)?.[1]);
   assert(nextCountdown > 0 && nextCountdown <= 45);
   await denyTemporary.waitFor();
   await prompt.waitForFunction(() => !document.querySelector('#blockForAWhile').disabled);
@@ -653,8 +668,149 @@ try {
     'PASS Activity chart and selection layout, native user styles, popup focus, previews, keyboard Allow Once, queue and long labels.',
     run,
   );
+  }
 } finally {
   await app?.close();
   observerServer.close();
   server.close();
+}
+
+async function verifyPolish(app, requestWindow) {
+  const main = await app.firstWindow();
+  await main.waitForURL('flowgate://app/index.html');
+  await main.locator('#requestsTab').waitFor();
+  const mainNative = await app.browserWindow(main);
+  async function activate(native) {
+    const caption = await native.evaluate((w) => w.getTitle());
+    const script = path.join(run, 'activate.js');
+    const name = 'flowgate-fixture-focus-' + Date.now();
+    await fs.writeFile(script, `for (const w of workspace.windowList()) {
+      if (w.pid === ${app.process().pid} && w.caption === ${JSON.stringify(caption)}) workspace.activeWindow = w;
+    }`);
+    const kwin = (...args) => execFileSync('qdbus6', ['org.kde.KWin', ...args], { encoding: 'utf8' }).trim();
+    const id = kwin('/Scripting', 'org.kde.kwin.Scripting.loadScript', script, name);
+    try {
+      kwin('/Scripting/Script' + id, 'org.kde.kwin.Script.run');
+      for (let i = 0; i < 20; i++) {
+        if (await native.evaluate((w) => w.isFocused())) return;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      assert.fail('KWin did not focus ' + caption);
+    } finally {
+      kwin('/Scripting', 'org.kde.kwin.Scripting.unloadScript', name);
+    }
+  }
+  await activate(mainNative);
+  events = [first];
+  const prompt = await requestWindow(first.id);
+  prompt.setDefaultTimeout(8000);
+  await prompt.waitForFunction(() => document.querySelector('#allow')?.disabled === false);
+  assert(await mainNative.evaluate((w) => w.isFocused()), 'automatic popup must leave focus on the previous window');
+  const native = await app.browserWindow(prompt);
+  async function scaleCard() {
+    if (polish !== 'scaled') return;
+    // Scale Electron content while retaining the virtual output's native work area.
+    await native.evaluate((w) => w.webContents.setZoomFactor(1.5));
+    await prompt.waitForFunction(() => devicePixelRatio === 1.5);
+  }
+  async function captureCard(file) {
+    const image = Buffer.from(await native.evaluate(async (w) =>
+      (await w.webContents.capturePage()).toPNG().toString('base64')), 'base64');
+    await fs.writeFile(path.join(run, file), image);
+    return image;
+  }
+  await scaleCard();
+  const dims = await prompt.evaluate(() => ({
+    scale: devicePixelRatio, screen: [screen.width, screen.height], viewport: [innerWidth, innerHeight],
+  }));
+  if (polish === 'scaled') {
+    assert.equal(dims.scale, 1.5);
+    assert.deepEqual(dims.screen, [800, 600]);
+  } else assert.equal(dims.scale, 1);
+  const duration = prompt.locator('#rememberDuration');
+  assert.equal(await duration.inputValue(), 'once');
+  const label = (id) => prompt.locator('#' + id).innerText();
+  assert.equal(await label('allow'), 'Allow once');
+  assert.equal(await label('block'), 'Deny once');
+  await duration.selectOption('0');
+  assert.equal(await label('allow'), 'Allow · save (no expiry)');
+
+  async function verifyDurations(peer) {
+    await duration.selectOption('300');
+    await prompt.locator('#forAWhileDuration').selectOption('60');
+    await prompt.waitForFunction(() => document.querySelector('#allow')?.disabled === false);
+    await prompt.locator('#promptBody').evaluate((body) => { body.scrollTop = 0; });
+    assert.equal(await prompt.locator('#promptPeerAddress').innerText(), peer);
+    assert.match(await label('requestStatusLine'), /^Respond in \d+ s/);
+    for (const [id, text] of [
+      ['allow', 'Allow · save 5 min'], ['block', 'Deny · save 5 min'],
+      ['allowForAWhile', 'Allow process · 1 min'], ['blockForAWhile', 'Deny process · 1 min'],
+    ]) assert.equal(await label(id), text);
+    const visible = await prompt.evaluate(() => Object.fromEntries([
+      'promptPeerAddress', 'requestStatusLine', 'allow', 'block', 'allowForAWhile', 'blockForAWhile',
+    ].map((id) => {
+      const el = document.getElementById(id);
+      const lines = Array.from(el.getClientRects());
+      return [id, lines.length > 0 && lines.every((rect) => rect.width > 0 && rect.height > 0
+        && rect.top >= 0 && rect.bottom <= innerHeight
+        && rect.left >= 0 && rect.right <= innerWidth
+        && el.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)))];
+    })));
+    assert(Object.values(visible).every(Boolean), JSON.stringify({ dims, visible }));
+  }
+  await verifyDurations(first.flow.remote);
+  await captureCard('action-durations.png');
+
+  events.push(second);
+  const next = prompt.getByRole('button', { name: 'Next request (1)' });
+  await next.waitFor();
+  await activate(native);
+  await next.focus();
+  await prompt.keyboard.down('Enter');
+  await new Promise((resolve) => setTimeout(resolve, 750));
+  assert.equal(new URL(prompt.url()).searchParams.get('request'), first.id);
+  await prompt.keyboard.up('Enter');
+  assert.equal(await requestWindow(second.id), prompt);
+  await scaleCard();
+  const name = second.attribution.application.name;
+  const heading = prompt.getByRole('heading', { name, level: 1 });
+  await heading.waitFor();
+  await prompt.waitForFunction(() => document.activeElement?.id === 'requestApplication' && document.hasFocus());
+  assert.equal(await heading.getAttribute('aria-describedby'), 'promptEndpoint');
+  assert.equal(await prompt.locator('#promptPeerAddress').innerText(), second.flow.remote);
+  assert.equal(await duration.inputValue(), 'once');
+  assert.equal(decisions.length, 0);
+  assert(events.some((event) => event.id === second.id && event.state === 'awaiting-decision'));
+  await captureCard('keyboard-next.png');
+  await verifyDurations(second.flow.remote);
+  const capture = await captureCard('long-ipv6-durations.png');
+  if (polish === 'scaled') {
+    assert(capture.readUInt32BE(16) <= dims.screen[0] && capture.readUInt32BE(20) <= dims.screen[1],
+      'the settled card must fit the scaled output');
+  }
+
+  await main.locator('#requestsTab').click();
+  await main.locator(`#requestRows tr[data-id="${second.id}"]`).click();
+  assert(await main.getByRole('checkbox', { name: 'Remember', exact: true }).isVisible());
+  second.state = 'expired';
+  second.deadline = new Date(Date.now() - 1000).toISOString();
+  second.request_rule = {
+    available: true, process_state: 'running', until: new Date(Date.now() + 20000).toISOString(),
+    process_lease_available: true, pid: 4281,
+  };
+  second.revalidation = { code: 'connection_ended', reason: 'Original connection ended', checked_at: new Date().toISOString() };
+  const status = prompt.locator('#requestStatusLine');
+  await prompt.waitForFunction(() => document.querySelector('#requestStatusLine')?.textContent.includes('running process'));
+  assert.match(await status.innerText(), /ended.*Rule duration.*future connections/);
+  assert.doesNotMatch(await status.innerText(), /Remember/);
+  await captureCard('expired-running.png');
+  second.request_rule.process_state = 'ended';
+  second.request_rule.process_lease_available = false;
+  await prompt.waitForFunction(() => document.getElementById('allowForAWhile')?.disabled);
+  assert.match(await status.innerText(), /ended.*Rule duration.*future connections/);
+  assert.doesNotMatch(await status.innerText(), /running process|Remember/);
+  await captureCard('expired-process-ended.png');
+  assert.match(await main.locator('#decisionNote').innerText(), /Check Remember to save a rule/);
+  assert.equal(decisions.length, 0);
+  console.log('PASS permission popup polish', polish, JSON.stringify(dims), run);
 }
