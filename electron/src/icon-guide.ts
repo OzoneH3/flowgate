@@ -1,13 +1,14 @@
 import { blockerGlyph, STATUS_SLOTS } from './activity-policy';
 import { statusIconMarkup } from './fast-path';
 import type { Row } from './model';
+import type { NetworkZone } from './network-zones';
 import type { ChipTone } from './rule-chip';
 import { limitGlyph } from './upload-shaping-view';
 
 type Icon = Node | string;
 
 export function createIconGuide(
-  rowIcon: (kind: Row['kind'] | 'service' | 'terminal') => SVGElement,
+  rowIcon: (kind: Row['kind'] | NetworkZone | 'service' | 'terminal') => SVGElement,
   statusFamilyGlyph: (key: string) => HTMLElement,
 ) {
   const dialog = document.createElement('dialog');
@@ -60,7 +61,8 @@ export function createIconGuide(
 
   section('Activity rows', [
     [rowIcon('overview'), 'Computer', 'Overview of the sockets visible to FlowGate.'],
-    [rowIcon('network'), 'Network filter', 'Internet, Local Network, or an application filtered to one of those zones.'],
+    [rowIcon('internet'), 'Internet', 'Internet traffic, either across applications or for the app shown.'],
+    [rowIcon('local'), 'Local Network', 'Local network traffic, either across applications or for the app shown.'],
     [rowIcon('application'), 'Application', 'An application or group. FlowGate uses the application’s own icon when available.'],
     [rowIcon('process'), 'Process', 'An individual running instance, identified by its process ID.'],
     [rowIcon('service'), 'Service fallback', 'A generic icon for a service or background program.'],

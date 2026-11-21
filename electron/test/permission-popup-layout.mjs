@@ -420,6 +420,13 @@ try {
   assert.equal(await sidebarWidth(), '310px');
   await main.screenshot({ path: path.join(run, 'activity-selected.png') });
   await main.getByRole('button', { name: 'Expand all', exact: true }).click();
+  for (const zone of ['internet', 'local']) {
+    const overview = main.locator(`tr[data-id="network:${zone}"] .network-icon-${zone}`);
+    const grouped = main.locator(`tr[data-id^="app:"][data-id$=":${zone}"] .network-icon-${zone}`);
+    assert(await overview.isVisible());
+    assert(await grouped.first().isVisible());
+    assert.equal(await overview.locator('path').getAttribute('d'), await grouped.first().locator('path').getAttribute('d'));
+  }
   const socket = main.locator('#rows tr[data-id="atlas-socket"]');
   const elbow = socket.locator('.tree-elbow');
   await elbow.waitFor();

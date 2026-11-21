@@ -1582,13 +1582,6 @@ body.preset-status #tree th.col-filler, body.preset-status #tree td.filler { dis
 .inactive-rules-status { margin:6px 0 0; color:#ddc38d; font-size:11px; }
 .inactive-rules-empty { color:#aaa; margin:2px 0; }
 
-/* App + network-zone filter rows (display scopes; not new program identities). */
-.application-zone-icon { width:16px; height:16px; display:inline-flex; flex:0 0 16px; color:#c5d947; }
-.application-zone-icon svg { width:16px; height:16px; fill:currentColor; }
-
-
-
-.row-icon.network-filter-icon { fill:#c4dd32; stroke:#a7c52b; stroke-width:.6; }
 .inactive-rule-add { display:flex; align-items:center; gap:6px; flex-wrap:wrap; border-top:1px solid #ffffff2a; margin-top:6px; padding-top:6px; }
 .inactive-rule-add .qs-action { height:22px; min-height:22px; padding:0 7px; display:inline-flex; align-items:center; gap:4px; }
 .inactive-rule-add-label { color:#bbb; }

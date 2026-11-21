@@ -73,7 +73,7 @@ import {
 import { buildRequestCard } from './prompt-card';
 import { localPairView, pairSignature } from './local-pair';
 import { splitPreview } from './prompt-summary';
-import { ZONE_CAPABILITY, zoneLabel } from './network-zones';
+import { ZONE_CAPABILITY, zoneLabel, type NetworkZone } from './network-zones';
 import type { Presentation, PaneFrame } from './pane-model';
 import { DISPLAY_UNITS, displayAmount, isDisplayUnit, type DisplayUnit } from './display-units';
 import { initiationPresentation } from './initiation';
@@ -440,7 +440,7 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, text = '', class
   e.className = className;
   return e;
 }
-function rowIcon(kind: Row['kind'] | 'service' | 'terminal') {
+function rowIcon(kind: Row['kind'] | NetworkZone | 'service' | 'terminal') {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', '0 0 16 16');
   svg.setAttribute('class', 'row-icon');
@@ -448,8 +448,10 @@ function rowIcon(kind: Row['kind'] | 'service' | 'terminal') {
   const path = document.createElementNS(svg.namespaceURI, 'path');
   path.setAttribute(
     'd',
-    kind === 'network'
-      ? 'M1 2h14L10 8v6l-4-2V8z'
+    kind === 'internet'
+      ? 'M14.5 8a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0ZM1.5 8h13M8 1.5c4 3.5 4 9.5 0 13-4-3.5-4-9.5 0-13Z'
+      : kind === 'local'
+        ? 'M5.5 1.5h5v4h-5zM1 10.5h5v4H1zM10 10.5h5v4h-5zM8 5.5V8M3.5 10.5V8h9v2.5'
       : kind === 'service'
         ? 'M6.5 1h3l.5 2 1.5 1 2-.5 1.5 2.5-1.5 1v2l1.5 1-1.5 2.5-2-.5-1.5 1-.5 2h-3l-.5-2-1.5-1-2 .5L.5 10l1.5-1V7L.5 6 2 3.5l2 .5 1.5-1z M10.5 8a2.5 2.5 0 1 0-5 0 2.5 2.5 0 1 0 5 0'
         : kind === 'terminal'
@@ -466,7 +468,7 @@ function rowIcon(kind: Row['kind'] | 'service' | 'terminal') {
           ? 'M2 5h4v6H2zM10 5h4v6h-4zM6 8h4'
           : 'M3 3h10v10H3zM6 6a2 2 0 1 1 3 2l-1 1M8 11v1',
   );
-  if (kind === 'network') svg.classList.add('network-filter-icon');
+  if (kind === 'internet' || kind === 'local') svg.classList.add('network-icon-' + kind);
   svg.append(path);
   return svg;
 }
@@ -1678,15 +1680,16 @@ function renderTree() {
       displayApp && JSON.stringify([displayApp.key, displayApp.revision, displayApp.executable]);
     let rowLabel =
       r.presentationLabel ? r.presentationLabel : r.applicationZone ? r.label : r.kind === 'application' && displayKey ? appNames.get(displayKey) || r.label : r.label;
-    let icon: HTMLElement = installedIcon(
+    const zone = r.applicationZone?.zone ??
+      (r.kind === 'network' ? r.id === 'network:local' ? 'local' : 'internet' : undefined);
+    let icon: HTMLElement = zone ? element('span', '', 'application-icon') : installedIcon(
       r.kind === 'application' || r.kind === 'process' ? r.displayApplication || inactiveApp || rowApplication(r)
         : r.kind === 'program' ? r.children.map(c => c.process?.application || c.displayApplication || (c.inactive && {key:c.inactive.key, revision:c.inactive.revision, executable:c.inactive.executable, name:c.label})).find(Boolean) || undefined : undefined,
       r.kind,
     );
-    if(r.applicationZone){
-      icon=element('span','', 'application-zone-icon');
-      icon.innerHTML='<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 2h14L10 8v6l-4-2V8z"/></svg>';
-      icon.title='Application + '+zoneLabel(r.applicationZone.zone)+' filter';
+    if (zone) {
+      icon.append(rowIcon(zone));
+      if (r.applicationZone) icon.title = 'Application + ' + zoneLabel(zone) + ' filter';
     }
     if (r.socket) {
       const direction = initiationPresentation(r.socket);
