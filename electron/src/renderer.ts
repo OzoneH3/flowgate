@@ -426,7 +426,7 @@ let sequence = '';
 let eventSignature = '';
 let detailSignature = '';
 let roots: Row[] = [];
-let visible: { row: Row; depth: number }[] = [];
+let visible: ReturnType<typeof flatten> = [];
 let sort = 'name',
   descending = false;
 const expanded = new Set<string>(['overview']);
@@ -1560,9 +1560,9 @@ function renderTree() {
   const body = $('rows');
   const ordered: HTMLTableRowElement[] = [];
   const liveIds = new Set<string>();
-  for (const { row: r, depth } of visible) {
+  for (const { row: r, depth, branches } of visible) {
     liveIds.add(r.id);
-    const rowSignature = rowStructure(r, depth, selected === r.id, expanded.has(r.id));
+    const rowSignature = rowStructure(r, depth, selected === r.id, expanded.has(r.id), branches);
     const rateValues = rateKeys().map((key) => sum(r.rows, key, measurementSource));
     const totalValues = (['downloaded', 'uploaded'] as Metric[]).map((key) =>
       sum(r.rows, key, measurementSource),
@@ -1637,6 +1637,18 @@ function renderTree() {
     };
     const name = element('td');
     name.className = `name depth-${depth}`;
+    if (branches.length) {
+      const guides = element('span', '', 'tree-guides');
+      guides.setAttribute('aria-hidden', 'true');
+      branches.forEach((continues, level) => {
+        const guide = element('span');
+        guide.className = level === branches.length - 1
+          ? (continues ? 'tree-junction' : 'tree-elbow')
+          : (continues ? 'tree-trunk' : '');
+        guides.append(guide);
+      });
+      name.append(guides);
+    }
     const toggle = element(
       'button',
       r.children.length ? (expanded.has(r.id) ? '◢' : '▷') : '',

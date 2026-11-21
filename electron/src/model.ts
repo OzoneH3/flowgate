@@ -396,8 +396,8 @@ export function flatten(
   key: string,
   descending: boolean,
   source?: MeasurementSource,
-): { row: Row; depth: number }[] {
-  const result: { row: Row; depth: number }[] = [];
+): { row: Row; depth: number; branches: boolean[] }[] {
+  const result: { row: Row; depth: number; branches: boolean[] }[] = [];
   const value = (r: Row): number | string =>
     key === 'name'
       ? r.label
@@ -414,8 +414,8 @@ export function flatten(
                 : key === 'state'
                   ? (r.socket?.state ?? '')
                   : (sum(r.rows, key as Metric, source).value ?? -1);
-  const walk = (rows: Row[], depth: number) => {
-    for (const row of [...rows].sort((a, b) => {
+  const walk = (rows: Row[], depth: number, ancestors: boolean[]) => {
+    const sorted = [...rows].sort((a, b) => {
       const categoryOrder = (r: Row) => r.kind === 'overview' ? 0 : r.kind === 'unidentified' ? 1 : r.kind === 'kernel-lifecycle' ? 2 : r.kind === 'inactive-group' ? 3 : undefined;
       const ac = categoryOrder(a), bc = categoryOrder(b);
       if (ac !== undefined && bc !== undefined && ac !== bc) return ac - bc;
@@ -439,12 +439,15 @@ export function flatten(
           : String(av).localeCompare(String(bv))) * (descending ? -1 : 1) ||
         a.id.localeCompare(b.id)
       );
-    })) {
-      result.push({ row, depth });
-      if (expanded.has(row.id)) walk(row.children, depth + 1);
+    });
+    for (const [index, row] of sorted.entries()) {
+      // Each level records whether its branch continues to another sibling.
+      const branches = depth ? [...ancestors, index < sorted.length - 1] : ancestors;
+      result.push({ row, depth, branches });
+      if (expanded.has(row.id)) walk(row.children, depth + 1, branches);
     }
   };
-  walk(roots, 0);
+  walk(roots, 0, []);
   return result;
 }
 export function allRows(roots: Row[]): Row[] {

@@ -39,6 +39,23 @@ test('numeric sort, partial and unavailable counters', () => {
   );
   assert.equal(sum(roots[0].rows, 'uploaded').partial, true);
 });
+test('tree branches end at the last visible sibling in the current sort order', () => {
+  const node = (id, children = []) => ({ id, label: id, children, rows: [] });
+  const roots = [node('host', [node('app', [node('process', [node('socket')])]), node('other')])];
+  const expanded = new Set(['host', 'app', 'process']);
+  const guides = (descending) => flatten(roots, expanded, 'name', descending)
+    .map(({ row: r, branches }) => [r.id, branches]);
+  assert.deepEqual(guides(false), [
+    ['host', []], ['app', [true]], ['process', [true, false]],
+    ['socket', [true, false, false]], ['other', [false]],
+  ]);
+  assert.deepEqual(guides(true), [
+    ['host', []], ['other', [true]], ['app', [false]], ['process', [false, false]],
+    ['socket', [false, false, false]],
+  ]);
+  expanded.delete('app');
+  assert.deepEqual(guides(false), [['host', []], ['app', [true]], ['other', [false]]]);
+});
 test('reassociation preserves backend socket ID; groups use executable identity', () => {
   const r = row('stable', []);
   const a = {

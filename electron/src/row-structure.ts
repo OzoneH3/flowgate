@@ -10,7 +10,7 @@ const structure = (r: SocketRow) => {
   const { display_source: _source, display_verified_at: _verified, ...identity } = runtime;
   return { ...rest, runtime_application: identity };
 };
-export function rowStructure(r: Row, depth: number, selected: boolean, expanded: boolean) {
+export function rowStructure(r: Row, depth: number, selected: boolean, expanded: boolean, branches?: boolean[]) {
   return JSON.stringify([
     r.kind,
     r.program,
@@ -29,5 +29,6 @@ export function rowStructure(r: Row, depth: number, selected: boolean, expanded:
     depth,
     selected,
     expanded,
+    branches,
   ]);
 }

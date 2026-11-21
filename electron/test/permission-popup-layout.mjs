@@ -319,7 +319,9 @@ try {
   await main.screenshot({ path: path.join(run, 'app-tooltip.png') });
   await main.keyboard.press('Escape');
   await desktopTooltip.waitFor({ state: 'hidden' });
-  const appRow = main.locator('#rows tr[data-id^="app:"]').filter({ hasText: 'Atlas Sync' });
+  const appRow = main.locator('#rows tr[data-id^="app:"]').filter({
+    has: main.locator('.row-name-text', { hasText: /^Atlas Sync$/ }),
+  });
   const chart = main.locator('#trafficGraph');
   const table = main.locator('#activityView .table-scroll');
   const sidebar = main.locator('#activityDetails');
@@ -417,6 +419,13 @@ try {
   await grip.press('ArrowLeft');
   assert.equal(await sidebarWidth(), '310px');
   await main.screenshot({ path: path.join(run, 'activity-selected.png') });
+  await main.getByRole('button', { name: 'Expand all', exact: true }).click();
+  const socket = main.locator('#rows tr[data-id="atlas-socket"]');
+  const elbow = socket.locator('.tree-elbow');
+  await elbow.waitFor();
+  assert.equal(await elbow.evaluate((el) => getComputedStyle(el, '::after').borderTopWidth), '1px');
+  assert.equal(await elbow.evaluate((el) => el.parentElement.getAttribute('aria-hidden')), 'true');
+  await main.screenshot({ path: path.join(run, 'activity-tree-guides.png') });
   const viewport = main.viewportSize() || await main.evaluate(() => ({ width: innerWidth, height: innerHeight }));
   await main.setViewportSize({ width: 800, height: 550 });
   const narrowChart = await chart.boundingBox();

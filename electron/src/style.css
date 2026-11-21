@@ -1535,6 +1535,30 @@ body.preset-status #tree th.col-filler, body.preset-status #tree td.filler { dis
 /* Applications launched by a verified application nest one level deeper (Heroic › nile › process › socket). */
 #tree .name.depth-4 { padding-left: 78px; }
 #tree .name.depth-5 { padding-left: 94px; }
+#tree td.name { position: relative; }
+.tree-guides {
+  position: absolute;
+  inset-block: 0 -1px;
+  inset-inline-start: 42px;
+  display: flex;
+  color: color-mix(in srgb, var(--fg-border), var(--fg-text) 25%);
+  pointer-events: none;
+}
+.tree-guides > span { position: relative; width: 16px; }
+.tree-guides > :is(.tree-trunk, .tree-junction, .tree-elbow)::before {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  border-inline-start: 1px solid currentColor;
+}
+.tree-guides > .tree-elbow::before { inset-block-end: 50%; }
+.tree-guides > :is(.tree-junction, .tree-elbow)::after {
+  content: '';
+  position: absolute;
+  inset-block-start: 50%;
+  width: 7px;
+  border-top: 1px solid currentColor;
+}
 /* Not-running applications with stored rules: listed after running ones, dimmed. */
 #tree tr.inactive-app td { color:#8a8a8a; }
 #tree tr.inactive-app .application-icon { opacity:.55; }
