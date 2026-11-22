@@ -125,7 +125,8 @@ func analysisHolders(s identity.ActivitySnapshot, row identity.ActivityRow, samp
 			holder := AnalysisHolder{PID: p.PID, ThreadGroup: p.ThreadGroup, Start: p.Start,
 				UID: p.UID, Executable: boundedAnalysisPath(p.Executable)}
 			if sample != nil {
-				holder.WindowsImage, holder.WindowsImageReason = analysisWindowsImage(p, sample.VerifiedWineHolders[id])
+				reason, checked := sample.WineHolderChecks[id]
+				holder.WindowsImage, holder.WindowsImageReason = analysisWindowsImage(p, reason, checked)
 			}
 			holders = append(holders, holder)
 		}
@@ -133,7 +134,7 @@ func analysisHolders(s identity.ActivitySnapshot, row identity.ActivityRow, samp
 	return holders, len(row.Owners) > analysisHolderLimit || row.OwnershipCategory == "holders-truncated"
 }
 
-func analysisWindowsImage(p identity.ActivityProcess, live bool) (*AnalysisWindowsImage, string) {
+func analysisWindowsImage(p identity.ActivityProcess, reason string, checked bool) (*AnalysisWindowsImage, string) {
 	a := p.Application
 	if a.Kind != "wine" && a.Kind != "wine-unresolved" {
 		return nil, ""
@@ -145,8 +146,11 @@ func analysisWindowsImage(p identity.ActivityProcess, live bool) (*AnalysisWindo
 		a.Revision == "" || a.Key != identity.ApplicationKey(p.UID, a) {
 		return nil, "No mapped Windows executable was corroborated for this Wine holder"
 	}
-	if !live {
-		return nil, "The holder exited, changed, or was no longer inspectable before collection finished"
+	if !checked {
+		return nil, "The Windows image and Wine prefix were not rechecked before collection finished"
+	}
+	if reason != "" {
+		return nil, reason
 	}
 	image := &AnalysisWindowsImage{Name: boundedAnalysisPath(a.Name), Executable: boundedAnalysisPath(a.Executable),
 		Prefix: boundedAnalysisPath(a.Prefix)}

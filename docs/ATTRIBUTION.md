@@ -201,6 +201,8 @@ A fresh observation can include a `windows_image` on an individual Wine or
 Proton holder. The image name, executable path and prefix come from the existing
 process resolver. The holder keeps its native executable and PID. If the image
 cannot be corroborated, `windows_image_reason` records the missing evidence.
+The analyzer rechecks the image and prefix before reporting the label. If either
+changes during collection, a later sample can report the newly verified identity.
 Each image describes one verified process. Multiple programs can hold the same
 socket, and their images grant no socket-wide application identity.
 

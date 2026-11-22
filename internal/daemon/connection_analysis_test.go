@@ -170,7 +170,9 @@ func TestConnectionAnalysisWineHolderImagesRemainPerProcess(t *testing.T) {
 	}
 	s := identity.ActivitySnapshot{Processes: servers}
 	sample := identity.ConnectionSample{
-		VerifiedWineHolders: map[string]bool{"alpha-a": true, "alpha-b": true, "beta-b": true},
+		WineHolderChecks: map[string]string{
+			"alpha-a": "", "alpha-b": "", "beta-b": "", "beta-a": "The holder exited during collection",
+		},
 	}
 	first := identity.ActivityRow{OwnershipCategory: "shared", Owners: []string{"alpha-a", "beta-a", "server"}}
 	second := identity.ActivityRow{OwnershipCategory: "shared", Owners: []string{"alpha-b", "beta-b"}}
