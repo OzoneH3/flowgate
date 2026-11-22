@@ -1,3 +1,4 @@
+import { CONNECTION_ANALYSIS_CAPABILITY, parseConnectionAnalysis } from './connection-analysis';
 import { accountName } from './account-lookup';
 import { DEFAULT_SHAPING, validateShapingDefaults } from './upload-shaping';
 import { UploadShapingClient } from "./upload-shaping-client";
@@ -50,7 +51,7 @@ import { DecisionLogClient } from './decision-log-client';
 import { ObservedUsageClient } from './observed-usage-client';
 import { Evaluation } from './evaluation';
 import type { Preferences } from './protocol';
-import { Backend } from './backend';
+import { Backend, call } from './backend';
 import { validateDecision } from './protocol';
 import { validateRequestRule } from './request-rule';
 import { endedLeaseResult, validateEndedLease } from './prompt-decision';
@@ -868,6 +869,36 @@ app.whenReady().then(async () => {
   const upload = new UploadShapingClient(backend);
   ipcMain.handle("upload:status", (e) => { presentationSender(e); return upload.read(); });
   ipcMain.handle("upload:configure", (e, v) => { presentationSender(e); return upload.configure(v); });
+  ipcMain.handle('activity:analyze-connections', async (e, mode: unknown) => {
+    trusted(e);
+    if (e.sender !== main.webContents || (mode !== 'recheck' && mode !== 'watch'))
+      throw Error('Invalid Activity analysis request.');
+    const observation = backend.state.observation;
+    if (!observation.connected || !observation.capabilities?.includes(CONNECTION_ANALYSIS_CAPABILITY))
+      throw Error('Connection analysis is unavailable from the Activity daemon.');
+
+    // Allow the ten-second sampling window and the daemon's twelve-second collection grace.
+    const watchMs = mode === 'watch' ? 10000 : 0;
+    const reply = await call(
+      backend.observer,
+      { operation: 'connection-analyze', connection_analysis: { watch_ms: watchMs } },
+      watchMs + 14000,
+    );
+    const current = backend.state.observation;
+    const scope = observation.permissions?.observation_scope;
+    if (
+      !current.connected ||
+      current.generation !== observation.generation ||
+      current.permissions?.observation_scope !== scope ||
+      reply.generation !== observation.generation
+    )
+      throw Error('The Activity connection changed. Run the analysis again.');
+    if (reply.error || reply.error_code) throw Error(reply.error || reply.error_code);
+    const result = parseConnectionAnalysis(reply.connection_analysis);
+    if (scope && result.scope !== scope)
+      throw Error('The Activity observation scope changed. Run the analysis again.');
+    return result;
+  });
   const decisionLog = new DecisionLogClient(backend);
   const observedUsage = new ObservedUsageClient(backend);
   const usageHistory = new UsageHistoryClient(backend);

@@ -84,6 +84,7 @@ const api: Bridge = {
   dismissPrompt: (keyboardNext) => ipcRenderer.invoke('prompt:dismiss', keyboardNext),
   decisionLog: () => ipcRenderer.invoke('log:state'),
   observedUsage: () => ipcRenderer.invoke('usage:read'),
+  analyzeConnections: (mode) => ipcRenderer.invoke('activity:analyze-connections', mode),
   connectionChecks: (v) => ipcRenderer.invoke('connection-checks',v),
   decisionTimeout: (edit) => ipcRenderer.invoke('decision-timeout', edit),
   usageHistory: (q) => ipcRenderer.invoke('history:read', q),

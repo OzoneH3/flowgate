@@ -438,6 +438,9 @@ test('snapshot revisions retain full uint64 precision and reject malformed metad
   assert.throws(() => parseReply({ ...base, snapshot_revision: '1', snapshot_at: 'bad' }), /snapshot metadata/);
   assert.equal(parseReply(base).snapshot_revision, undefined, 'legacy server remains supported');
   assert.throws(() => parseReply({ ...base, capabilities: ['request-list-snapshot-v1'] }), /snapshot metadata/);
+  const analysis = { ...base, capabilities: ['request-list-snapshot-v1', 'activity-connection-analysis-v1'] };
+  assert.equal(parseReply(analysis, 'connection-analyze').snapshot_revision, undefined);
+  assert.throws(() => parseReply({ ...analysis, snapshot_revision: '0' }, 'connection-analyze'), /snapshot metadata/);
 });
 
 test('snapshot revision fences survive polling after an acknowledgement and reset on generation change', async (t) => {

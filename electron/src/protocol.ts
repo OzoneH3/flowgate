@@ -351,6 +351,7 @@ export interface Reply {
   build?: import('./build-info').DaemonBuild;
   decision_log?: unknown;
   decision_timeout?: unknown;
+  connection_analysis?: unknown;
   decision_record?: unknown;
   traffic_monitor?: TrafficMonitor;
   policy_view?: PolicyView;
@@ -464,6 +465,7 @@ export interface Decision {
   duration_seconds?: number;
 }
 export interface Bridge {
+  analyzeConnections(mode: import('./connection-analysis').ConnectionAnalysisMode): Promise<import('./connection-analysis').ConnectionAnalysis>;
   accountName(uid: number): Promise<string | null>;
   uploadStatus(): Promise<import("./upload-shaping").UploadView>;
   uploadConfigure(value: import("./upload-shaping").UploadEdit | import("./upload-shaping").UploadCleanup | import("./upload-shaping").BudgetEdit): Promise<import("./upload-shaping").UploadView>;
@@ -825,7 +827,7 @@ function askRule(v: unknown): RequestEvent['ask_rule'] {
     ? { id: string(r.id), version: Number(r.version) }
     : undefined;
 }
-export function parseReply(raw: unknown): Reply {
+export function parseReply(raw: unknown, operation?: string): Reply {
   const r = object(raw);
   if (
     r.version !== 1 ||
@@ -835,7 +837,12 @@ export function parseReply(raw: unknown): Reply {
   )
     throw Error('Invalid v1 backend response');
   let snapshotRevision: string | undefined;
-  if (array(r.capabilities, 64).includes('request-list-snapshot-v1') && r.snapshot_revision === undefined)
+  // Connection analysis reads independent Activity samples without publishing a request-list revision.
+  if (
+    operation !== 'connection-analyze' &&
+    array(r.capabilities, 64).includes('request-list-snapshot-v1') &&
+    r.snapshot_revision === undefined
+  )
     throw Error('Invalid request snapshot metadata');
   if (r.snapshot_revision !== undefined) {
     if (typeof r.snapshot_revision !== 'string' || !/^[1-9][0-9]{0,19}$/.test(r.snapshot_revision) || BigInt(r.snapshot_revision) > 18446744073709551615n || !Number.isFinite(Date.parse(string(r.snapshot_at))))
@@ -897,6 +904,7 @@ export function parseReply(raw: unknown): Reply {
     history_settings: r.history_settings,
     connection_checks: r.connection_checks,
     decision_timeout: r.decision_timeout,
+    connection_analysis: r.connection_analysis,
     upload_shaping: r.upload_shaping,
     decision_preview: r.decision_preview,
     decision_receipt: r.decision_receipt,

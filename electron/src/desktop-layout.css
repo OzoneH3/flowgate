@@ -327,3 +327,71 @@ body.hide-chart #activityView > #trafficGraph {
   border: 1px solid var(--fg-border);
   border-radius: 6px;
 }
+
+#openConnectionAnalysis {
+  flex: none;
+  white-space: nowrap;
+}
+
+#connectionAnalysis:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  max-height: 65%;
+  min-height: 0;
+  margin: 0 4px 4px 8px;
+  padding: 7px 9px;
+  gap: 6px;
+  border: 1px solid var(--fg-border);
+  border-radius: 6px;
+  background: var(--fg-section);
+  font-size: 12px;
+}
+
+#connectionAnalysis .analysis-header,
+#connectionAnalysis .analysis-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+#connectionAnalysis .analysis-header h3 {
+  flex: 1;
+  margin: 0;
+  font-size: 13px;
+}
+
+#connectionAnalysis p,
+#connectionAnalysis h4 {
+  margin: 0;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+#connectionAnalysisResults {
+  overflow: auto;
+  min-height: 0;
+}
+
+#connectionAnalysisResults article {
+  border-top: 1px solid var(--fg-border);
+  padding: 6px 0;
+}
+
+#connectionAnalysisResults ul {
+  margin: 0;
+  padding-left: 18px;
+  overflow-wrap: anywhere;
+}
+
+#connectionAnalysisResults summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+#connectionAnalysisResults .analysis-history-entry {
+  border-left: 2px solid var(--fg-border);
+  padding-left: 8px;
+  margin: 4px 0;
+}

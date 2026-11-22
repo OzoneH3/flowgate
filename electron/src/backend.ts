@@ -42,8 +42,12 @@ import { LOCAL_PAIR_CAPABILITY, pairResultText, validatePairChoice, type PairCho
 export class BackendCallError extends Error {
  constructor(error:Error,readonly requestMayHaveBeenSent:boolean){super(error.message,{cause:error});this.name="BackendCallError";if("code" in error)Object.assign(this,{code:error.code});}
 }
-export function call(path: string, request: object, timeoutMs = 3500): Promise<Reply> {
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 20000)
+export function call(
+  path: string,
+  request: { operation: string; [key: string]: unknown },
+  timeoutMs = 3500,
+): Promise<Reply> {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 24000)
     throw Error('Invalid backend timeout');
   return new Promise((resolve, reject) => {
     const socket = net.createConnection({ path });
@@ -77,7 +81,10 @@ export function call(path: string, request: object, timeoutMs = 3500): Promise<R
           const data = Buffer.concat(chunks);
           done(
             undefined,
-            parseReply(JSON.parse(data.subarray(0, data.indexOf(10)).toString('utf8'))),
+            parseReply(
+              JSON.parse(data.subarray(0, data.indexOf(10)).toString('utf8')),
+              request.operation,
+            ),
           );
         } catch (e) {
           done(e as Error);
