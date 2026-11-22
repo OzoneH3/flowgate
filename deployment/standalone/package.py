@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Create a curated offline package from make build output."""
 import datetime
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -12,7 +13,6 @@ import tarfile
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
-HERE = ROOT / 'deployment/standalone'
 BUILD = ROOT / 'build/standalone-build'
 SHA256SUM = '/usr/bin/sha256sum'
 
@@ -30,6 +30,10 @@ def receipt(path):
     return f'{digest(path)}  {path.name}\n'
 
 
+def source_bytes(identity, path):
+    return subprocess.check_output(['git', 'show', f"{identity['source']}:{path}"], cwd=ROOT)
+
+
 def verify_retained(output, identity):
     bootstrap = output.with_name('flowgate-release.py')
     for path in (output, bootstrap):
@@ -39,7 +43,7 @@ def verify_retained(output, identity):
         manifest = json.load(stream.extractfile('release.json'))
     if manifest['schema'] != 2 or any(manifest[key] != value for key, value in identity.items()):
         raise RuntimeError(f'Retained archive has a different build identity: {output}')
-    if bootstrap.read_bytes() != (HERE / 'release.py').read_bytes():
+    if bootstrap.read_bytes() != source_bytes(identity, 'deployment/standalone/release.py'):
         raise RuntimeError(f'Retained installer differs from this source: {bootstrap}')
 
 
@@ -60,26 +64,29 @@ def pack(identity, output):
         (gui / 'electron').mkdir(parents=True)
         files = {
             'flowgate': BUILD / 'flowgate',
-            'holder-iterator': ROOT / 'build/holder-iterator',
-            'tcp-initiation': ROOT / 'build/tcp-initiation-collector',
-            'udp-collector': ROOT / 'build/udp-collector',
-            'wine-owner-observer.exe': ROOT / 'build/windows/table-probe.exe',
-            'launch': ROOT / 'deployment/launch',
-            'control.py': ROOT / 'deployment/control.py',
-            'recover.py': HERE / 'recover',
-            'uninstall.py': HERE / 'uninstall',
-            'release.py': HERE / 'release.py',
-            'flowgate-ui': HERE / 'flowgate-ui',
-            'flowgate.desktop': HERE / 'flowgate.desktop',
+            'holder-iterator': BUILD / 'holder-iterator',
+            'tcp-initiation': BUILD / 'tcp-initiation-collector',
+            'udp-collector': BUILD / 'udp-collector',
+            'wine-owner-observer.exe': BUILD / 'table-probe.exe',
             'flowgate.png': BUILD / 'electron/dist/flowgate.png',
-            'install-monitoring.py': ROOT / 'scripts/install-monitoring.py',
         }
         for name in ('kernel', 'probe', 'controller.py', 'classify.bpf.o'):
             files[name] = BUILD / 'shaping' / name
-        for name in ('flowgate.service', 'flowgate-guard.service', '50-flowgate-guard.conf'):
-            files[name] = ROOT / 'deployment/systemd' / name
         for name, path in files.items():
             shutil.copyfile(path, backend / name)
+        sources = {
+            'launch': 'deployment/launch',
+            'control.py': 'deployment/control.py',
+            'install-monitoring.py': 'scripts/install-monitoring.py',
+            'recover.py': 'deployment/standalone/recover',
+            'uninstall.py': 'deployment/standalone/uninstall',
+        }
+        for name in ('release.py', 'flowgate-ui', 'flowgate.desktop'):
+            sources[name] = f'deployment/standalone/{name}'
+        for name in ('flowgate.service', 'flowgate-guard.service', '50-flowgate-guard.conf'):
+            sources[name] = f'deployment/systemd/{name}'
+        for name, path in sources.items():
+            (backend / name).write_bytes(source_bytes(identity, path))
         executables = [
             'flowgate', 'launch', 'holder-iterator', 'tcp-initiation', 'udp-collector',
             'control.py', 'recover.py', 'uninstall.py', 'release.py', 'flowgate-ui',
@@ -110,8 +117,8 @@ def pack(identity, output):
         app['version'] = identity['version']
         write_json(gui / 'electron/package.json', app)
         shutil.copytree(runtime, gui / 'runtime')
-        shutil.copyfile(ROOT / 'electron/fontconfig_isolation.py', gui / 'fontconfig_isolation.py')
-        shutil.copy2(HERE / 'flowgate-ui', gui / 'flowgate-ui')
+        (gui / 'fontconfig_isolation.py').write_bytes(source_bytes(identity, 'electron/fontconfig_isolation.py'))
+        shutil.copy2(backend / 'flowgate-ui', gui / 'flowgate-ui')
         write_json(gui / 'matched-manifest.json', {
             **identity,
             'built_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -137,7 +144,7 @@ def pack(identity, output):
             for path in ('release.json', 'backend', 'gui'):
                 stream.add(staging / path, arcname=path)
         bootstrap = artifacts / 'flowgate-release.py'
-        shutil.copyfile(HERE / 'release.py', bootstrap)
+        shutil.copyfile(backend / 'release.py', bootstrap)
         for path in (archive, bootstrap):
             path.with_suffix(path.suffix + '.sha256').write_text(receipt(path))
         # Publish the archive, installer and receipts together. If a concurrent
@@ -162,7 +169,9 @@ if __name__ == '__main__':
     try:
         identity = source_identity(require_clean=True)
         output = archive_path(identity)
-        pack(identity, output)
+        with (BUILD.parent / '.standalone.lock').open('a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_SH)
+            pack(identity, output)
         print(output)
     except (OSError, RuntimeError, ValueError, subprocess.CalledProcessError) as error:
         raise SystemExit(f'FlowGate: {error}') from None

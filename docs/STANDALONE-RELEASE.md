@@ -4,7 +4,8 @@ The source build uses GNU Make. Installation uses an exact offline archive. The 
 
 ## Requirements
 
-Build from a clean Git checkout with GNU Make, Go 1.24 or newer, a C toolchain,
+Build from a clean Git checkout with GNU Make, Go 1.24 or newer, `flock` from
+util-linux, a C toolchain,
 Clang with BPF support, LLD, pkg-config, bpftool and readable kernel BTF at
 `/sys/kernel/btf/vmlinux`. Install the libbpf, libmnl and libnftnl development
 files. The Windows observer build expects Wine headers under `/usr/include/wine`
@@ -60,6 +61,9 @@ already installed (same version and source revision).
 ## Build and inspect a package
 
 Run these commands in a clean Git checkout with the FlowGate tags available.
+Packaging uses a fresh export of the selected commit for project sources.
+Local untracked files stay in the checkout, and dependency caches are reused
+under `build/`.
 
 ```sh
 make package
