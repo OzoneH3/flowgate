@@ -6,13 +6,13 @@ import (
 	"encoding/hex"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
 const Capability = "queue-health-v1"
 const RecentWindow = 30 * time.Second
 const MaxSessions = 8
+const recentBuckets = int(RecentWindow/time.Second) + 1
 
 type Cause uint8
 
@@ -56,15 +56,17 @@ type Gauges struct {
 	RetainedBytes              int    `json:"retained_bytes"`
 }
 type View struct {
-	Generation  string            `json:"generation"`
-	Queue       uint16            `json:"queue"`
-	Direction   string            `json:"direction"`
-	StartedAt   time.Time         `json:"started_at"`
-	StoppedAt   *time.Time        `json:"stopped_at,omitempty"`
-	LastIssueAt *time.Time        `json:"last_issue_at,omitempty"`
-	Counters    map[string]string `json:"counters"`
-	Saturated   bool              `json:"saturated"`
-	Gauges      Gauges            `json:"gauges"`
+	Generation        string            `json:"generation"`
+	Queue             uint16            `json:"queue"`
+	Direction         string            `json:"direction"`
+	StartedAt         time.Time         `json:"started_at"`
+	StoppedAt         *time.Time        `json:"stopped_at,omitempty"`
+	LastIssueAt       *time.Time        `json:"last_issue_at,omitempty"`
+	Counters          map[string]string `json:"counters"`
+	RecentCounters    map[string]string `json:"recent_counters"`
+	LastAdmissionMask *int              `json:"last_admission_mask,omitempty"`
+	Saturated         bool              `json:"saturated"`
+	Gauges            Gauges            `json:"gauges"`
 }
 type Snapshot struct {
 	CounterUnits map[string]string `json:"counter_units,omitempty"`
@@ -72,17 +74,24 @@ type Snapshot struct {
 	SampledAt    time.Time         `json:"sampled_at"`
 	Sessions     []View            `json:"sessions,omitempty"` // machine detail: administrator only
 }
+type recentBucket struct {
+	second int64
+	counts [causeCount]uint64
+}
+
 type Session struct {
-	generation string
-	queue      uint16
-	direction  string
-	started    time.Time
-	counters   [causeCount]atomic.Uint64
-	saturated  atomic.Bool
-	last       atomic.Int64
-	mu         sync.Mutex
-	stopped    *time.Time
-	gauges     func() Gauges
+	generation        string
+	queue             uint16
+	direction         string
+	started           time.Time
+	mu                sync.Mutex
+	counters          [causeCount]uint64
+	recent            [recentBuckets]recentBucket
+	saturated         bool
+	last              time.Time
+	lastAdmissionMask int
+	stopped           *time.Time
+	gauges            func() Gauges
 }
 type Registry struct {
 	mu          sync.Mutex
@@ -118,7 +127,7 @@ func (r *Registry) Start(queue uint16, direction string) *Session {
 		r.unavailable = true
 		return nil
 	}
-	s := &Session{generation: hex.EncodeToString(id[:]), queue: queue, direction: direction, started: time.Now().UTC()}
+	s := &Session{generation: hex.EncodeToString(id[:]), queue: queue, direction: direction, started: time.Now()}
 	r.sessions = append(r.sessions, s)
 	return s
 }
@@ -146,56 +155,93 @@ func (s *Session) End() {
 // Add counts one observed operation/notification or rejected packet attempt.
 // Rejections are not proof that a kernel verdict was successfully delivered.
 func (s *Session) Add(c Cause) {
+	s.add(c, -1, time.Time{})
+}
+
+// RejectAdmission records the limits observed by the scheduler on the last
+// failed admission attempt. Several limit bits may be set for one rejection.
+func (s *Session) RejectAdmission(mask uint8) {
+	s.add(AttributionCapacity, int(mask), time.Time{})
+}
+
+func (s *Session) add(c Cause, mask int, now time.Time) {
 	if s == nil || c >= causeCount {
 		return
 	}
-	a := &s.counters[c]
-	for {
-		v := a.Load()
-		if v == ^uint64(0) {
-			s.saturated.Store(true)
-			break
-		}
-		if a.CompareAndSwap(v, v+1) {
-			if v+1 == ^uint64(0) {
-				s.saturated.Store(true)
-			}
-			break
-		}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.counters[c] != ^uint64(0) {
+		s.counters[c]++
 	}
-	if c != Shutdown && c != RetainedShutdown {
-		s.last.Store(time.Now().UnixNano())
+	s.saturated = s.saturated || s.counters[c] == ^uint64(0)
+	if c == Shutdown || c == RetainedShutdown {
+		return
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	s.last = now
+	sec := int64(now.Sub(s.started) / time.Second)
+	b := &s.recent[sec%int64(recentBuckets)]
+	if b.second != sec {
+		*b = recentBucket{second: sec}
+	}
+	if b.counts[c] != ^uint64(0) {
+		b.counts[c]++
+	}
+	if c == AttributionCapacity {
+		s.lastAdmissionMask = mask
 	}
 }
-func (r *Registry) Snapshot(admin bool) Snapshot { return r.snapshot(time.Now().UTC(), admin) }
+func (r *Registry) Snapshot(admin bool) Snapshot { return r.snapshot(time.Now(), admin) }
 func (r *Registry) snapshot(now time.Time, admin bool) Snapshot {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	out := Snapshot{State: "inactive", SampledAt: now}
+	out := Snapshot{State: "inactive", SampledAt: now.UTC()}
 	for _, s := range r.sessions {
 		s.mu.Lock()
 		stopped := s.stopped
 		gauge := s.gauges
-		s.mu.Unlock()
-		last := s.last.Load()
+		last := s.last
 		if stopped == nil {
 			if out.State == "inactive" {
 				out.State = "ready"
 			}
-			if last != 0 && now.Sub(time.Unix(0, last)) <= RecentWindow {
+			if !last.IsZero() && now.Sub(last) <= RecentWindow {
 				out.State = "pressure"
 			}
 		}
 		if !admin {
+			s.mu.Unlock()
 			continue
 		}
-		v := View{Generation: s.generation, Queue: s.queue, Direction: s.direction, StartedAt: s.started, StoppedAt: stopped, Counters: make(map[string]string), Saturated: s.saturated.Load()}
-		if last != 0 {
-			t := time.Unix(0, last).UTC()
+		counters := s.counters
+		var recent [causeCount]uint64
+		sec := int64(now.Sub(s.started) / time.Second)
+		for _, b := range s.recent {
+			if b.second > sec || sec-b.second >= int64(recentBuckets) {
+				continue
+			}
+			for c, n := range b.counts {
+				recent[c] += min(n, ^uint64(0)-recent[c])
+			}
+		}
+		saturated, mask := s.saturated, s.lastAdmissionMask
+		s.mu.Unlock()
+		v := View{Generation: s.generation, Queue: s.queue, Direction: s.direction, StartedAt: s.started.UTC(), StoppedAt: stopped,
+			Counters: make(map[string]string), RecentCounters: make(map[string]string), Saturated: saturated}
+		if !last.IsZero() {
+			t := last.UTC()
 			v.LastIssueAt = &t
 		}
 		for c := Cause(0); c < causeCount; c++ {
-			v.Counters[names[c]] = strconv.FormatUint(s.counters[c].Load(), 10)
+			v.Counters[names[c]] = strconv.FormatUint(counters[c], 10)
+			if recent[c] != 0 {
+				v.RecentCounters[names[c]] = strconv.FormatUint(recent[c], 10)
+			}
+		}
+		if recent[AttributionCapacity] != 0 && mask >= 0 {
+			v.LastAdmissionMask = &mask
 		}
 		if gauge != nil {
 			v.Gauges = gauge()

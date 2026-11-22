@@ -10,8 +10,8 @@ A healthy diagnostic snapshot is not a delivery guarantee.
 Every queue run has a separate random generation and start/stop times, including
 reactivations within one daemon generation. Up to eight recent queue sessions are
 retained. Counters are cumulative unsigned decimal strings, saturating at
-18446744073709551615 with an explicit saturation flag. Counters are sampled
-individually; concurrent operations may advance them while the snapshot is read.
+18446744073709551615 with an explicit saturation flag. The session counters
+share a snapshot, and the live gauges are sampled separately.
 
 The counters distinguish attribution capacity, census capacity, fairness
  displacement, attribution deadlines, shutdown, retention capacity, retained
@@ -26,6 +26,11 @@ count. They are never converted into estimated packet loss.
 
 Administrator API peers can read machine-wide per-session counters, units,
 timestamps and current userspace attribution/census/active-worker/retained gauges.
+The dialog keeps the snapshot that opened it and shows live recovery separately.
+Recent counts use one-second buckets over an approximately 30-second window.
+The latest owner-lookup rejection may include the scheduler's last observed
+limits. Several limits can apply to one attempt. Those limits describe capacity
+at the time of rejection.
 Ordinary peers receive only the general advisory state and sampling time, including
 on read-only endpoints. No packet payloads, addresses or inferred owners are
 included. Userspace gauges do not measure kernel queue depth. Stopped sessions

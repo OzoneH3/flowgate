@@ -52,9 +52,9 @@ func TestHealthReasonsPrivacyAndRecovery(t *testing.T) {
 func TestHealthSaturatesConcurrentAndBounded(t *testing.T) {
 	var r Registry
 	s := r.Start(1, "incoming")
-	s.counters[Deadline].Store(^uint64(0) - 1)
+	s.counters[Deadline] = ^uint64(0) - 1
 	s.Add(Deadline)
-	if !s.saturated.Load() {
+	if !s.saturated {
 		t.Fatal("exact maximum must be marked saturated")
 	}
 	var wg sync.WaitGroup
@@ -85,6 +85,29 @@ func TestHealthSaturatesConcurrentAndBounded(t *testing.T) {
 	}
 	if full.Start(2, "both") != nil || full.Snapshot(false).State != "unavailable" {
 		t.Fatal("untracked active queue claimed healthy")
+	}
+}
+
+func TestRecentCausesExpireWithoutChangingSessionTotals(t *testing.T) {
+	var r Registry
+	s := r.Start(101, "both")
+	s.add(AttributionCapacity, -1, s.started.Add(time.Second))
+	mask := 3
+	s.add(AttributionCapacity, mask, s.started.Add(3*time.Second))
+	s.add(RetentionCapacity, -1, s.started.Add(33*time.Second))
+	s.add(Shutdown, -1, s.started.Add(33*time.Second))
+	sample := r.snapshot(s.started.Add(33*time.Second), true).Sessions[0]
+	if sample.RecentCounters[names[AttributionCapacity]] != "1" ||
+		sample.RecentCounters[names[RetentionCapacity]] != "1" ||
+		sample.RecentCounters[names[Shutdown]] != "" ||
+		sample.Counters[names[AttributionCapacity]] != "2" ||
+		sample.LastAdmissionMask == nil || *sample.LastAdmissionMask != mask {
+		t.Fatal(sample)
+	}
+	sample = r.snapshot(s.started.Add(34*time.Second), true).Sessions[0]
+	if sample.RecentCounters[names[AttributionCapacity]] != "" || sample.LastAdmissionMask != nil ||
+		sample.Counters[names[AttributionCapacity]] != "2" {
+		t.Fatal(sample)
 	}
 }
 func TestShutdownDoesNotClaimPressure(t *testing.T) {

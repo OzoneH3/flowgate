@@ -1,5 +1,5 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
-const {parseQueueHealth,queueHealthWarning}=require('../dist/test/queue-health.cjs');
+const {parseQueueHealth,queueHealthNow,queueHealthWarning}=require('../dist/test/queue-health.cjs');
 const now=new Date().toISOString();
 const admin={state:'pressure',sampled_at:now,counter_units:{deadline_rejections:'packets',netlink_overflow_notifications:'notifications'},sessions:[{generation:'a'.repeat(32),queue:101,direction:'both',started_at:now,counters:{deadline_rejections:'18446744073709551615',netlink_overflow_notifications:'2'},saturated:true,gauges:{active_workers:2,retained_packets:1}}]};
 test('queue warning is connected-only and clears independently of cumulative totals',()=>{
@@ -9,6 +9,24 @@ test('queue warning is connected-only and clears independently of cumulative tot
 });
 test('ordinary queue health has no invented machine detail',()=>{
  const h=parseQueueHealth({state:'pressure',sampled_at:now});assert.equal(h.sessions,undefined);assert.match(queueHealthWarning(true,h).text,/Queue pressure/);
+});
+test('queue diagnostics distinguish recent causes, session totals and live recovery', () => {
+ const key = 'attribution_capacity_rejections';
+ const raw = {...admin, counter_units: {...admin.counter_units, [key]: 'packets'}, sessions: [{
+   ...admin.sessions[0], counters: {[key]: '2332'}, recent_counters: {[key]: '4'}, last_admission_mask: 1,
+   gauges: {attribution_packets: 0, retained_packets: 0, active_workers: 0},
+ }]};
+ const snapshot = parseQueueHealth(raw);
+ const warning = queueHealthWarning(true, snapshot);
+ assert.match(warning.title, /At sample: No packets in owner lookup or held for a decision/);
+ assert.match(warning.title, /About the last 30 seconds\nOwner lookup capacity reached before a rule decision: 4 packets\nLatest owner lookup rejection: per-endpoint limit/);
+ assert.match(warning.title, /Recorded totals since this queue started/);
+ assert.match(warning.title, new RegExp(BigInt(2332).toLocaleString()));
+ assert.match(queueHealthNow(true, {...snapshot, state: 'ready'}), /No queue rejections or I\/O issues in the last 30 seconds/);
+ assert.match(queueHealthNow(false, snapshot), /disconnected/);
+ assert.match(queueHealthWarning(true, parseQueueHealth(admin)).title, /recent count by cause is unavailable/);
+ raw.sessions[0].recent_counters[key] = '2333';
+ assert.equal(parseQueueHealth(raw).state, 'unavailable');
 });
 test('daemon first-proof totals coexist with numeric queue gauges', () => {
  const raw = {...admin, state: 'ready', sessions: [{...admin.sessions[0], gauges: {

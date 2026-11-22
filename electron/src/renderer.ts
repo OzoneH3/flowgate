@@ -96,7 +96,7 @@ import { TrafficGraph } from './graph';
 import { setupWorkflows, updateWorkflows, openRule, resumeRuleEditor, setRuleListReturn } from './workflows';
 import { setupDecisionLog, showDecisionLog, updateDecisionLog } from './decision-log-view';
 import { runtimeBadge, runtimeDegradation } from './runtime-checks';
-import { queueHealthWarning } from './queue-health';
+import { queueHealthNow, queueHealthWarning } from './queue-health';
 import { headerVersion, type GuiBuild } from './build-info';
 import type { Attempt, ClientState, ViewEvent, Scope } from './protocol';
 import { recordDecisionResult, showsLocalResult, type CardResult } from './card-result';
@@ -1310,6 +1310,11 @@ function updateFirewallStatus() {
     queue.textContent = warning?.text || '';
     queue.title = warning ? 'Open queue diagnostics' : '';
   }
+  const queueLive = document.getElementById('queueDiagnosticsLive');
+  if (queueLive) {
+    const summary = queueHealthNow(!!state?.control.connected, state?.control.queueHealth);
+    if (queueLive.textContent !== summary) queueLive.textContent = summary;
+  }
 
 }
 function onToolbarMenuPress(trigger: HTMLElement, open: () => void) {
@@ -1432,9 +1437,12 @@ function setupMainMenus(windowMenu: HTMLElement, units: HTMLSelectElement) {
   queueTitle.id = 'queueDiagnosticsTitle';
   queueDialog.setAttribute('aria-labelledby', queueTitle.id);
   const queueDetails = element('p', '', 'queue-diagnostics-details');
+  const queueLive = element('p');
+  queueLive.id = 'queueDiagnosticsLive';
+  queueLive.setAttribute('role', 'status');
   const closeQueue = element('button', 'Close');
   closeQueue.onclick = () => queueDialog.close();
-  queueDialog.append(queueTitle, queueDetails, closeQueue);
+  queueDialog.append(queueTitle, queueLive, queueDetails, closeQueue);
   document.body.append(queueDialog);
   queueDialog.onclose = () => (queue.hidden ? $('extendedBadge') : queue).focus();
   queue.onclick = () => {

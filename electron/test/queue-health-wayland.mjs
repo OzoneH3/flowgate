@@ -26,7 +26,8 @@ const server = net.createServer((socket) => socket.once('data', () => {
       sessions: [{
         generation: 'a'.repeat(32), queue: 101, direction: 'both', started_at: now,
         last_issue_at: now, counters: { deadline_rejections: '3', netlink_overflow_notifications: '2' },
-        gauges: { retained_packets: 1 }, saturated: false,
+        recent_counters: queueState === 'pressure' ? { deadline_rejections: '1' } : {},
+        gauges: { attribution_packets: 0, retained_packets: queueState === 'pressure' ? 1 : 0 }, saturated: false,
       }],
     },
     events: [], rules: [],
@@ -61,12 +62,16 @@ try {
   const text = await diagnostics.textContent();
   assert.match(text, /Queue 101 · both/);
   assert.match(text, /Last issue:/);
+  assert.match(text, /About the last 30 seconds\s*Packet decision deadline elapsed: 1 packet/);
   assert.match(text, /Packet decision deadline elapsed: 3 packets/);
   assert.match(text, /Kernel queue overflow notifications: 2 notifications/);
   assert.match(text, /Recorded totals since this queue started/);
+  const captured = diagnostics.locator('.queue-diagnostics-details');
+  const snapshot = await captured.textContent();
   queueState = 'ready';
   await badge.waitFor({ state: 'hidden', timeout: 10000 });
-  assert.equal(await diagnostics.textContent(), text, 'the captured warning stays readable after recovery');
+  await diagnostics.getByRole('status').getByText('No queue rejections or I/O issues', { exact: false }).waitFor();
+  assert.equal(await captured.textContent(), snapshot, 'the captured warning stays readable after recovery');
   await diagnostics.getByRole('button', { name: 'Close' }).click();
   await diagnostics.waitFor({ state: 'hidden' });
   assert.equal((await tabs.boundingBox()).y, tabsTop);

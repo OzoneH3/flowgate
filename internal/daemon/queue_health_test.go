@@ -12,6 +12,7 @@ func TestQueueHealthAPIProjection(t *testing.T) {
 	e := New(time.Second)
 	s := e.QueueHealth.Start(101, "both")
 	s.Add(queuehealth.NetlinkOverflow)
+	s.RejectAdmission(1)
 	dir := t.TempDir()
 	if err := os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
@@ -27,8 +28,14 @@ func TestQueueHealthAPIProjection(t *testing.T) {
 		t.Fatal(r, err)
 	}
 	if e.administrator(uint32(os.Getuid())) {
-		if len(r.QueueHealth.Sessions) != 1 || r.QueueHealth.Sessions[0].Counters["netlink_overflow_notifications"] != "1" {
+		if len(r.QueueHealth.Sessions) != 1 {
 			t.Fatal(r.QueueHealth)
+		}
+		session := r.QueueHealth.Sessions[0]
+		if session.Counters["netlink_overflow_notifications"] != "1" ||
+			session.RecentCounters["attribution_capacity_rejections"] != "1" ||
+			session.LastAdmissionMask == nil || *session.LastAdmissionMask != 1 {
+			t.Fatal(session)
 		}
 	} else if len(r.QueueHealth.Sessions) != 0 || r.QueueHealth.CounterUnits != nil {
 		t.Fatal("machine queue telemetry leaked", r.QueueHealth)

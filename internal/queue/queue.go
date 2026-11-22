@@ -183,7 +183,12 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 	})
 	workers.enableFirstProofHolding(e.QueuePolicyEpoch)
 	processor.decisionObserved = workers.noteInitialDecision
-	workers.admissionRejected = func(mask uint8) { admissionLimits[mask&31].Add(1) }
+	// Only the single receive callback calls submitWait and reads this mask.
+	var lastAdmissionMask uint8
+	workers.admissionRejected = func(mask uint8) {
+		lastAdmissionMask = mask & 31
+		admissionLimits[lastAdmissionMask].Add(1)
+	}
 	health.GaugeSource(func() queuehealth.Gauges {
 		g := workers.healthGauges()
 		g.RetainedPackets, g.RetainedBytes = retained.gauges()
@@ -301,7 +306,7 @@ func RunConfigured(ctx context.Context, e *daemon.Engine, direction string, numb
 				if ctx.Err() != nil {
 					health.Add(queuehealth.Shutdown)
 				} else {
-					health.Add(queuehealth.AttributionCapacity)
+					health.RejectAdmission(lastAdmissionMask)
 				}
 			} else {
 				health.Add(queuehealth.ParseRejected)
