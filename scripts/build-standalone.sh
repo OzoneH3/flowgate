@@ -5,6 +5,9 @@ root="$PWD"
 identity=$(python3 -B deployment/standalone/identity.py --require-clean)
 revision=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["source"])' "$identity")
 version=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["version"])' "$identity")
+# Clang/LLD use the commit time for the Windows observer's PE timestamps.
+SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$revision")
+export SOURCE_DATE_EPOCH
 umask 022
 
 # Export once into a fresh tree so no working-tree source or old generated

@@ -64,6 +64,9 @@ Run these commands in a clean Git checkout with the FlowGate tags available.
 Packaging uses a fresh export of the selected commit for project sources.
 Local untracked files stay in the checkout, and dependency caches are reused
 under `build/`.
+The archive uses the selected commit's timestamp for the GUI manifest and
+archive headers. To compare builds, use the same toolchains, kernel BTF,
+system libraries and locked dependencies.
 
 ```sh
 make package

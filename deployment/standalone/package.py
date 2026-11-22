@@ -2,6 +2,7 @@
 """Create a curated offline package from make build output."""
 import datetime
 import fcntl
+import gzip
 import json
 import os
 from pathlib import Path
@@ -34,6 +35,23 @@ def source_bytes(identity, path):
     return subprocess.check_output(['git', 'show', f"{identity['source']}:{path}"], cwd=ROOT)
 
 
+def write_archive(archive, staging, epoch):
+    def normalize(member):
+        member.uid = member.gid = 0
+        member.uname = member.gname = ''
+        member.mtime = epoch
+        if member.isdir():
+            member.mode = 0o755
+        return member
+
+    # An explicit empty gzip filename keeps the staging name out of the header.
+    with archive.open('wb') as file:
+        with gzip.GzipFile(filename='', fileobj=file, mode='wb', compresslevel=3, mtime=epoch) as compressed:
+            with tarfile.open(fileobj=compressed, mode='w', format=tarfile.PAX_FORMAT) as stream:
+                for path in ('release.json', 'backend', 'gui'):
+                    stream.add(staging / path, arcname=path, filter=normalize)
+
+
 def verify_retained(output, identity):
     bootstrap = output.with_name('flowgate-release.py')
     for path in (output, bootstrap):
@@ -53,6 +71,7 @@ def pack(identity, output):
     if output.parent.exists() or output.parent.is_symlink():
         verify_retained(output, identity)
         return
+    epoch = int(subprocess.check_output(['git', 'show', '-s', '--format=%ct', identity['source']], cwd=ROOT))
     output.parent.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=output.parent.parent) as folder:
         staging = Path(folder) / 'payload'
@@ -121,7 +140,7 @@ def pack(identity, output):
         shutil.copy2(backend / 'flowgate-ui', gui / 'flowgate-ui')
         write_json(gui / 'matched-manifest.json', {
             **identity,
-            'built_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            'built_at': datetime.datetime.fromtimestamp(epoch, datetime.timezone.utc).isoformat(),
             'files': {str(p.relative_to(gui)): digest(p) for p in (gui / 'electron').rglob('*') if p.is_file()},
         })
         for path in staging.rglob('*'):
@@ -140,9 +159,7 @@ def pack(identity, output):
         # Standalone installation uses the exact externally pinned archive.
         # The separate bootstrap is for the first install on machines without the tool.
         archive = artifacts / output.name
-        with tarfile.open(archive, 'w:gz', compresslevel=3) as stream:
-            for path in ('release.json', 'backend', 'gui'):
-                stream.add(staging / path, arcname=path)
+        write_archive(archive, staging, epoch)
         bootstrap = artifacts / 'flowgate-release.py'
         shutil.copyfile(backend / 'release.py', bootstrap)
         for path in (archive, bootstrap):

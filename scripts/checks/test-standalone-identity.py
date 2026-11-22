@@ -1,14 +1,17 @@
 """Exercise Git-derived standalone identities without building or installing."""
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'deployment/standalone'))
 from identity import archive_path, source_identity
+from package import write_archive
 from release import release_id
 
 
@@ -73,6 +76,37 @@ class IdentityChecks(unittest.TestCase):
         self.assertEqual(release_id('0.1.0-rc.8', 'a' * 40), '0.1.0-rc.8-aaaaaaaaaaaa')
         with self.assertRaisesRegex(ValueError, 'development revision'):
             release_id('0.1.0-rc.8.dev-bbbbbbbbbbbb', 'a' * 40)
+
+    def test_archive_headers_use_source_epoch_and_stable_metadata(self):
+        epoch = 1_700_000_000
+        archives = []
+        for n in (1, 2):
+            staging = self.root / f'staging-{n}'
+            staging.mkdir()
+            for path in ('backend', 'gui'):
+                (staging / path).mkdir(mode=0o700 if n == 1 else 0o755)
+            (staging / 'release.json').write_text('{}')
+            helper = staging / 'backend/helper'
+            helper.write_text('fixture')
+            helper.chmod(0o755)
+            for path in staging.rglob('*'):
+                os.utime(path, (epoch + n, epoch + n + 0.5))
+            archive = self.root / f'archive-{n}.tar.gz'
+            write_archive(archive, staging, epoch)
+            archives.append(archive)
+
+        first, second = (archive.read_bytes() for archive in archives)
+        self.assertEqual(first, second)
+        self.assertFalse(first[3] & 0x08)  # gzip filename flag
+        self.assertEqual(int.from_bytes(first[4:8], 'little'), epoch)
+        with tarfile.open(archives[0]) as stream:
+            self.assertEqual([m.name for m in stream], ['release.json', 'backend', 'backend/helper', 'gui'])
+            for member in stream.getmembers():
+                self.assertEqual((member.uid, member.gid, member.uname, member.gname), (0, 0, '', ''))
+                self.assertEqual(member.mtime, epoch)
+                self.assertNotIn('mtime', member.pax_headers)
+            self.assertEqual(stream.getmember('backend').mode, 0o755)
+            self.assertEqual(stream.getmember('backend/helper').mode, 0o755)
 
 
 if __name__ == '__main__':
