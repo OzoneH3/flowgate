@@ -3,6 +3,7 @@ package daemon
 import (
 	"flowgate/internal/identity"
 	"os"
+	"slices"
 )
 
 // AdministratorUID is configured by a privileged daemon before serving, never
@@ -57,6 +58,15 @@ func (e *Engine) activityAuthorized(uid uint32) bool {
 func (e *Engine) activityForPeer(s identity.ActivitySnapshot, uid uint32, admin bool) identity.ActivitySnapshot {
 	if e.APIUID != nil {
 		return activityFor(s, uid, admin)
+	}
+	if !admin {
+		// Keep the private observer's existing socket visibility. Its process
+		// ancestry still has to respect the caller's account boundary.
+		processes := make(map[string]identity.ActivityProcess, len(s.Processes))
+		for id, p := range s.Processes {
+			processes[id] = activityProcessFor(p, uid)
+		}
+		s.Processes = processes
 	}
 	return s
 }
@@ -115,7 +125,7 @@ func activityFor(s identity.ActivitySnapshot, uid uint32, admin bool) identity.A
 		out.Rows = append(out.Rows, r)
 		out.OwnershipCounts[r.OwnershipCategory]++
 		for _, id := range r.Owners {
-			out.Processes[id] = s.Processes[id]
+			out.Processes[id] = activityProcessFor(s.Processes[id], uid)
 		}
 	}
 	if s.UDP != nil {
@@ -134,4 +144,94 @@ func activityFor(s identity.ActivitySnapshot, uid uint32, admin bool) identity.A
 	out.Issues = append([]string{}, s.Issues...)
 	out.Issues = append(out.Issues, "User-scoped projection; foreign and mixed-user ownership rows withheld; not machine-wide visibility")
 	return out
+}
+
+// A launch is derived from the whole available ancestry, not just from the
+// observed process. Keep the same-account part of the chain and its immediate
+// parent while withholding grouping, paths, prefixes and explanatory text that
+// could have been derived from an ancestor beyond the visibility boundary.
+func provenanceFor(p *identity.Provenance, uid uint32, pid int, start string) *identity.Provenance {
+	if p == nil {
+		return nil
+	}
+	visible := p.Ancestry
+	for i, ancestor := range visible {
+		if ancestor.UID != uid {
+			visible = visible[:i]
+			break
+		}
+	}
+	ownAncestor := func(pid int, start string) bool {
+		return pid > 0 && start != "" && slices.ContainsFunc(visible, func(p identity.ProvenanceAncestor) bool {
+			return p.PID == pid && p.Start == start
+		})
+	}
+	cut := len(visible) != len(p.Ancestry)
+	hiddenLauncher := p.Launch != nil &&
+		!(pid > 0 && start != "" && p.Launch.LauncherPID == pid && p.Launch.LauncherStart == start) &&
+		!ownAncestor(p.Launch.LauncherPID, p.Launch.LauncherStart)
+	hideParent := p.Parent != nil && !ownAncestor(p.Parent.PID, p.Parent.Start)
+	if !cut && !hiddenLauncher && !hideParent {
+		return p
+	}
+	projected := *p
+	if cut || hiddenLauncher {
+		projected.Ancestry = append([]identity.ProvenanceAncestor{}, visible...)
+		projected.Launch, projected.Group, projected.Role = nil, "", ""
+		projected.Evidence = "unavailable"
+		projected.Stop = "visibility"
+		projected.Reason = "Launch ancestry is limited to the caller's account"
+	}
+	if hideParent {
+		projected.Parent = nil
+	}
+	return &projected
+}
+
+func activityProcessFor(p identity.ActivityProcess, uid uint32) identity.ActivityProcess {
+	if p.UID != uid {
+		p.Provenance = nil
+	} else {
+		p.Provenance = provenanceFor(p.Provenance, uid, p.PID, p.Start)
+	}
+	return p
+}
+
+func localPeerOwnerFor(owner *identity.LocalPeerOwner, uid uint32) *identity.LocalPeerOwner {
+	if owner == nil || owner.UID != uid {
+		return nil
+	}
+	projected := *owner
+	projected.Provenance = provenanceFor(owner.Provenance, uid, owner.PID, owner.Start)
+	return &projected
+}
+
+func eventFor(event Event, uid uint32, admin bool) Event {
+	if admin {
+		return event
+	}
+	if peer := event.LocalPeer; peer != nil {
+		if (peer.Owner != nil && peer.Owner.UID != uid) ||
+			(peer.Owner == nil && peer.Socket != nil && peer.Socket.UID != uid) {
+			event.LocalPeer = nil
+		} else {
+			projected := *peer
+			projected.Owner = localPeerOwnerFor(peer.Owner, uid)
+			event.LocalPeer = &projected
+		}
+	}
+	event.Attribution.Owners = slices.Clone(event.Attribution.Owners)
+	for i := range event.Attribution.Owners {
+		p := &event.Attribution.Owners[i]
+		if p.UID == uid {
+			p.Provenance = provenanceFor(p.Provenance, uid, p.PID, p.Start)
+		} else {
+			p.Provenance = nil
+		}
+		if p.Parent != 0 && (p.Provenance == nil || len(p.Provenance.Ancestry) == 0 ||
+			p.Provenance.Ancestry[0].PID != p.Parent) {
+			p.Parent = 0
+		}
+	}
+	return event
 }

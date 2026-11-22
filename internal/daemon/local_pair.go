@@ -313,7 +313,7 @@ func (e *Engine) DecidePair(generation string, ids []string, action, scope strin
 			return PairDecision{}, nil, mutationError("not_a_pair", "the local server changed since this request was observed; review again")
 		}
 		if !admin && p.UID != uid {
-			return PairDecision{}, nil, mutationError("forbidden", fmt.Sprintf("the server side (%s, UID %d) belongs to another principal; decide the outgoing request alone", sa.Application.Name, p.UID))
+			return PairDecision{}, nil, mutationError("forbidden", "the server side belongs to another principal; decide the outgoing request alone")
 		}
 		if len(out.Attribution.Sockets) != 1 {
 			return PairDecision{}, nil, mutationError("not_a_pair", "the client socket is not unique")

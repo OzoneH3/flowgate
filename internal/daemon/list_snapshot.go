@@ -138,7 +138,7 @@ func (s *listReadState) read(uid uint32, admin bool, now time.Time) (ListSnapsho
 		if event.RequestRule != nil && !now.Before(event.RequestRule.Until) {
 			event.RequestRule = nil
 		}
-		events = append(events, event)
+		events = append(events, eventFor(event, uid, admin))
 	}
 	view.Events = events
 	rules := view.Rules[:0]

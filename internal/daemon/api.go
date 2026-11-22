@@ -988,6 +988,14 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 										r.ErrorCode = typed.Code
 									}
 								} else {
+									if !admin {
+										for i, event := range v.Events {
+											v.Events[i] = eventFor(event, cred.Uid, false)
+										}
+										if v.IncomingAdmission != nil {
+											v.IncomingAdmission.Server = localPeerOwnerFor(v.IncomingAdmission.Server, cred.Uid)
+										}
+									}
 									r.Pair, r.Settled, r.ScopePreview = &v, settled, v.Sentence
 								}
 							}
@@ -1023,7 +1031,8 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 										r.ErrorCode = typed.Code
 									}
 								} else {
-									r.Decision = &v
+									projected := eventFor(v, cred.Uid, admin)
+									r.Decision = &projected
 								}
 							}
 						default:
