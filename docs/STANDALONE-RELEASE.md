@@ -50,7 +50,7 @@ As the intended desktop administrator, run this command from a clean checkout of
 make update
 ```
 
-Make builds the current checkout, checks the archive against its local receipt,
+Make builds the current checkout, checks the archive and installer receipts,
 then runs preflight and install with sudo. In a graphical session it reloads
 the installed desktop, starting it even if it was closed. From a headless shell,
 launch `flowgate-ui` at the next graphical login. For an upgrade, obtain the
@@ -233,11 +233,24 @@ Uninstall stops the managed daemon and desktop, verifies cleanup, and removes ma
 
 ## Maintainer release handoff
 
-1. Build from the clean checkout of the chosen local release tag using
-   `make package`. Retain all four files. Record `git rev-parse HEAD` and both
-   digests. In the asset directory, set `BUNDLE` to the archive basename.
-   Check both receipts and use `tar -xOzf "$BUNDLE" release.json`
-   to match the manifest's full `source` and `version` to the intended release.
+To publish an approved development build, retain its original version and four
+files. Use a distribution tag such as `build-0.1.0-dev-8338adf27d8d` on the
+approved source commit and mark the GitHub release as a prerelease. The draft
+upload attaches those files directly. This tag is outside the `flowgate-v`
+namespace used to derive package versions.
+
+To publish a versioned RC or stable build, build from the chosen
+`flowgate-v` tag. Adding an RC tag and rebuilding changes the version in the
+manifest, daemon and desktop, along with the archive name and install path.
+Record the new archive SHA-256 and verify the installer receipt separately.
+At the same source commit, the installer is copied from the same file and can
+retain its SHA-256. Match the new payload and executable hashes to the package
+and refresh any release checks that rely on the previous bytes.
+
+1. In the retained asset directory, set `BUNDLE` to the archive basename.
+   Check both receipts with `sha256sum -c -- "$BUNDLE.sha256" flowgate-release.py.sha256`.
+   Use `tar -xOzf "$BUNDLE" release.json` to record the full source SHA and
+   package version alongside the archive and installer digests.
 2. Supply that archive, installer and both recorded digests to the external
    `flowgate-lab/lab.py run` command using `--profile`, `--archive`,
    `--archive-sha256`, `--installer` and `--installer-sha256`. Match the
@@ -265,9 +278,14 @@ Uninstall stops the managed daemon and desktop, verifies cleanup, and removes ma
    (
      set -eu
      repo=OzoneH3/flowgate
-     case "$TAG" in *-rc.*) set -- --prerelease ;; *) set -- ;; esac
+     case "$TAG" in
+       build-*) title=${TAG#build-}; set -- --prerelease ;;
+       flowgate-v*-rc.*) title=${TAG#flowgate-v}; set -- --prerelease ;;
+       flowgate-v*) title=${TAG#flowgate-v}; set -- ;;
+       *) exit 2 ;;
+     esac
      gh release create "$TAG" --repo "$repo" --verify-tag --draft "$@" \
-       --title "FlowGate ${TAG#flowgate-v}" --notes-file "$NOTES" \
+       --title "FlowGate $title" --notes-file "$NOTES" \
        "$BUNDLE" "$BUNDLE.sha256" flowgate-release.py flowgate-release.py.sha256
      downloaded=$(mktemp -d ./draft-assets.XXXXXX)
      gh release download "$TAG" --repo "$repo" --dir "$downloaded"

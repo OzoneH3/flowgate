@@ -72,27 +72,31 @@ cd flowgate
 
 ## Install FlowGate
 
-Use a clean checkout of the desired revision and run Make as the intended
-desktop administrator. Check the [build and host requirements](docs/STANDALONE-RELEASE.md#requirements),
-including Electron sandbox support.
+From a clean Git clone of the desired revision, run `make check` for the
+standalone installer, upgrade-state and version checks. Check the
+[build and host requirements](docs/STANDALONE-RELEASE.md#requirements).
 
-| Command | What it does |
-| --- | --- |
-| `make build` | Builds the standalone daemon, Electron desktop and native helpers under `build/`. |
-| `make check` | Runs the standalone release and update-freshness checks. |
-| `make package` | Builds and checks the package, then writes its archive, offline installer and two SHA-256 receipts under `build/dist/<release-id>/`. An exact FlowGate tag supplies the release version. Untagged commits use a development version with their short Git SHA. |
-| `make preflight BUNDLE="$bundle" SHA256="$digest"` | Stages and verifies the archive with sudo and checks host readiness for installation. |
-| `make install BUNDLE="$bundle" SHA256="$digest"` | Verifies and installs the specified archive with sudo. |
-| `make update` | Builds, packages and verifies this checkout, runs preflight and install with sudo, then reloads the installed desktop in a graphical session. |
+Build and verify a package without installing it.
 
-For a source install or upgrade, use `make update`. To upgrade from public
-`master`, run `git pull --ff-only`, review the revision, then run
-`make update`. Open the installed app from the application menu or with
-`flowgate-ui`.
+```sh
+(
+  set -eu
+  make package
+  bundle="$(make -s archive-path)"
+  cd "$(dirname "$bundle")"
+  sha256sum -c -- "$(basename "$bundle").sha256" flowgate-release.py.sha256
+)
+```
 
-The [standalone release guide](docs/STANDALONE-RELEASE.md) shows how to set
-`bundle` and `digest` for a staged install, verify a downloaded release,
-and roll back or uninstall.
+`make package` also runs `make check`. It puts the archive,
+`flowgate-release.py`, and both `.sha256` receipts in
+`build/dist/<release-id>/`. Untagged commits get a development version with
+their short Git SHA.
+
+To install or update from the current checkout, run `make update` as the
+intended desktop administrator. It checks both receipts, runs preflight and
+install with sudo, then reloads FlowGate in a graphical session. For retained or
+downloaded files, use the [offline install procedure](docs/STANDALONE-RELEASE.md#install-a-downloaded-package-offline).
 
 A fresh install starts in **Monitoring**. When you're ready to enable
 protection, review essential networking first. Then choose **Incoming only**
