@@ -258,6 +258,32 @@ class StateFreshness(unittest.TestCase):
         self.assertEqual(self.operations.count('protection-stop'), 3)
         self.assertEqual(self.state['protection']['desired_mode'], 'monitoring')
 
+    def test_unacknowledged_stop_cannot_authorize_restoration(self):
+        def request(operation='list', **fields):
+            result = self.request(operation, **fields)
+            if operation == 'protection-stop':
+                raise OSError('lost Stop response')
+            return result
+
+        self.host.api.side_effect = request
+        with self.assertRaisesRegex(RuntimeError, 'Installer Stop was not acknowledged'):
+            self.install()
+        self.assertNotIn('protection-start', self.operations)
+        self.assertTrue(self.pending.exists())
+        self.host.api.side_effect = self.request
+        self.assert_recovery_repeatable('leave-running')
+
+    def test_shutdown_refusal_restores_protection_if_predecessor_remains_running(self):
+        def refused(host, path, stamp, *, before_quiesce, **kwargs):
+            before_quiesce()
+            raise RuntimeError('service stop refused')
+
+        self.host_installer.side_effect = refused
+        self.assert_refused('service stop refused', protection_stopped=True)
+        self.assertTrue(self.running)
+        self.assertIn('protection-start', self.operations)
+        self.assertEqual(self.state['protection']['desired_mode'], 'both')
+
     def test_pending_is_kept_if_protection_restoration_cannot_be_verified(self):
         self.change_before_quiesce = self.stopped_collector
 

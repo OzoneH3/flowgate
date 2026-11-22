@@ -816,6 +816,7 @@ def switch_release(api, host, before, settings, selected, manifest, bundle, reco
     with (IntentWrites() if selected != 'monitoring' else nullcontext()) as intent:
         expected = (before or {}).get('protection')
         stop_attempted = False
+        stop_acknowledged = False
 
         def before_quiesce():
             if before is not None:
@@ -839,6 +840,7 @@ def switch_release(api, host, before, settings, selected, manifest, bundle, reco
                 _, stopped = host.api('protection-stop', generation=before['generation'],
                                       protection_id=expected['id'])
                 expected = stopped['protection']
+                stop_acknowledged = True
                 state = wait_for(host, before['generation'], lambda value: check_mode(api, host, value, 'monitoring'))
                 if state['protection']['id'] != expected['id']:
                     raise PreflightChanged('Protection changed during Stop. Retry from a fresh preflight.')
@@ -847,8 +849,13 @@ def switch_release(api, host, before, settings, selected, manifest, bundle, reco
                                   verify_extra=verify_extra, before_quiesce=before_quiesce,
                                   snapshot_ready=snapshot_ready, standalone=True)
         except (Exception, SystemExit) as exc:
-            if record['phase'] == 'preparing':
+            if isinstance(exc, api['RollbackComplete']):
+                raise
+            phase = record['phase']
+            if phase == 'preparing' or (phase == 'snapshotting' and stop_acknowledged and host.daemon_pids()):
                 if stop_attempted:
+                    if not stop_acknowledged:
+                        raise RuntimeError(f'{exc} Installer Stop was not acknowledged; use local recovery') from exc
                     try:
                         mode = restore_on_refusal(api, host, before, expected, selected, intent)
                     except (OSError, RuntimeError, ValueError) as error:
