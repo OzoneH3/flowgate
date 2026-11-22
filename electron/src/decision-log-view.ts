@@ -25,6 +25,7 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, text = '', cls = '') 
   return n;
 };
 let current: DecisionLogState | undefined;
+let accessRevision = 0;
 let client: ClientState | undefined;
 let selected = '';
 let visible = false;
@@ -89,14 +90,13 @@ export function setupDecisionLog(
     change();
   };
   $('logLive').onclick = async () => {
-    current = await window.flowgate.decisionLogLive(!current?.live);
-    render();
+    acceptState(await window.flowgate.decisionLogLive(!current?.live));
   };
   const latest = async () => {
     if (!current) return;
     // Explicit user navigation: reuse the same server filter and newest-page operation.
     // Preserve Live/Paused rather than silently resuming follow.
-    current = await window.flowgate.decisionLogFilter(current.filter);
+    if (!acceptState(await window.flowgate.decisionLogFilter(current.filter))) return;
     newAbove = 0;
     render();
     $('logScroll').scrollTop = 0;
@@ -105,8 +105,7 @@ export function setupDecisionLog(
   $('logLatest').onclick = () => void latest();
   $('logNew').onclick = () => void latest();
   $('logOlder').onclick = async () => {
-    current = await window.flowgate.decisionLogOlder();
-    render();
+    acceptState(await window.flowgate.decisionLogOlder());
   };
   $('logScroll').onscroll = () => {
     if ($('logScroll').scrollTop === 0 && newAbove) {
@@ -142,6 +141,10 @@ export function setupDecisionLog(
       .querySelector(`#logRows tr[data-id="${CSS.escape(next.id)}"]`)
       ?.scrollIntoView({ block: 'nearest' });
   };
+  window.flowgate.onDecisionLogAccessReset((revision) => {
+    clearAccess(revision);
+    void poll();
+  });
   setInterval(() => void poll(), 1000);
 }
 
@@ -158,16 +161,49 @@ function filter(): LogFilter {
   if (application) f.application = application;
   return f;
 }
-async function applyFilter() {
+function clearSelection() {
   selected = '';
   detailVersion++;
   shownDetail = undefined;
-  newAbove = 0;
+  $('logTable').removeAttribute('aria-activedescendant');
   $('logOutcomeAction').replaceChildren();
   $('logDetails').replaceChildren(el('p', 'Select a record.', 'hint'));
-  current = await window.flowgate.decisionLogFilter(filter());
-  render();
+  for (const row of $('logRows').children) row.setAttribute('aria-selected', 'false');
+}
+function clearAccess(revision: number) {
+  if (revision <= accessRevision) return;
+  accessRevision = revision;
+  current = undefined;
+  application = undefined;
+  signature = '';
+  newAbove = 0;
+  clearSelection();
+  $('logRows').replaceChildren();
   $('logScroll').scrollTop = 0;
+  for (const id of ['logOlder', 'logNew', 'logApplication', 'logClear', 'logEmpty'])
+    $(id).hidden = true;
+  $('logApplication').textContent = $('logApplication').title = '';
+  $('logStatus').textContent = $('logStatus').title = '';
+  for (const id of ['logDirection', 'logAction', 'logSource'])
+    $<HTMLSelectElement>(id).value = '';
+  $<HTMLSelectElement>('logRange').value = 'any';
+}
+function acceptState(next: DecisionLogState) {
+  if (next.accessRevision < accessRevision || (current && next.session < current.session)) return false;
+  clearAccess(next.accessRevision);
+  if (current && next.session !== current.session) {
+    clearSelection();
+    newAbove = 0;
+  }
+  current = next;
+  render();
+  return true;
+}
+async function applyFilter() {
+  clearSelection();
+  newAbove = 0;
+  if (acceptState(await window.flowgate.decisionLogFilter(filter())))
+    $('logScroll').scrollTop = 0;
 }
 if (typeof window !== 'undefined') {
   window.addEventListener('flowgate-account-name', () => {
@@ -191,10 +227,10 @@ async function poll() {
   polling = true;
   try {
     const previous = current;
-    current = await window.flowgate.decisionLog();
-    render();
+    const next = await window.flowgate.decisionLog();
+    if (!acceptState(next)) return;
     if (shownDetail?.record.kind === 'pending' &&
-        (previous?.supported !== current.supported || previous?.outcomeLookup !== current.outcomeLookup)) {
+        (previous?.supported !== next.supported || previous?.outcomeLookup !== next.outcomeLookup)) {
       renderDetail(shownDetail.record, shownDetail.note);
     }
   } finally {

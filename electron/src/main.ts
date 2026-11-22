@@ -689,6 +689,7 @@ app.whenReady().then(async () => {
       return;
     }
     history.observe(state.observation);
+    decisionLog.observe(state);
     paneModel.observe(state);
     publishPanes();
     icons.observe(state);
@@ -899,7 +900,9 @@ app.whenReady().then(async () => {
       throw Error('The Activity observation scope changed. Run the analysis again.');
     return result;
   });
-  const decisionLog = new DecisionLogClient(backend);
+  const decisionLog = new DecisionLogClient(backend, (revision) => {
+    if (main && !main.isDestroyed()) main.webContents.send('log:access-reset', revision);
+  });
   const observedUsage = new ObservedUsageClient(backend);
   const usageHistory = new UsageHistoryClient(backend);
   const connectionChecks = new ConnectionChecksClient(backend);
@@ -929,7 +932,7 @@ app.whenReady().then(async () => {
     'log:live': (v: unknown) => decisionLog.setLive(v),
     'log:detail': (v: unknown) => decisionLog.detail(v),
     'log:outcome': (v: unknown) => decisionLog.outcome(v),
-    'log:copy': async (v: unknown) => clipboard.writeText(await decisionLog.copyText(v)),
+    'log:copy': (v: unknown) => decisionLog.copy(v, (text) => clipboard.writeText(text)),
   }))
     ipcMain.handle(channel, (e, v) => {
       trusted(e);

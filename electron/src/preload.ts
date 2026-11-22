@@ -83,6 +83,7 @@ const api: Bridge = {
   promptLayout: (value) => ipcRenderer.invoke('prompt:layout', value),
   dismissPrompt: (keyboardNext) => ipcRenderer.invoke('prompt:dismiss', keyboardNext),
   decisionLog: () => ipcRenderer.invoke('log:state'),
+  onDecisionLogAccessReset: (fn) => ipcRenderer.on('log:access-reset', (_event, revision: number) => fn(revision)),
   observedUsage: () => ipcRenderer.invoke('usage:read'),
   analyzeConnections: (mode) => ipcRenderer.invoke('activity:analyze-connections', mode),
   connectionChecks: (v) => ipcRenderer.invoke('connection-checks',v),

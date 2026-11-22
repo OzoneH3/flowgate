@@ -229,3 +229,63 @@ test('copy bridge permits only a loaded record id and a specific endpoint select
   ])
     assert.throws(() => L.logCopyRequest(value));
 });
+
+test('scope change on the same log drops a delayed recovery page and clears cursors', async () => {
+  const foreign = record(101, { principal_uid: 1001 });
+  const own = record(13);
+  const requests = [];
+  const pending = [];
+  const store = new L.DecisionLogStore((query) => {
+    requests.push(query);
+    return new Promise((resolve) => pending.push(resolve));
+  }, 1000, 100, 1);
+  const page = (scope, records, extra = {}) => L.parsePage({
+    scope, records, log_id: 'same-log', ...extra,
+  });
+
+  const initial = store.tick();
+  pending.shift()(page('machine', [foreign], { next_before: '101' }));
+  await initial;
+  assert.equal(store.view().hasOlder, true);
+  const oldRun = store.tick();
+  pending.shift()(page('machine', [record(102, { principal_uid: 1001 })], { has_more: true }));
+  await new Promise((resolve) => setImmediate(resolve));
+  const oldReply = pending.shift();
+
+  store.resetAccess();
+  assert.deepEqual(store.view().records, []);
+  assert.equal(store.get(foreign.id), undefined);
+  assert.equal(store.view().hasOlder, false);
+  const fresh = store.tick();
+  assert.deepEqual(requests.at(-1), { limit: 100 });
+  pending.shift()(page('self', [own]));
+  await fresh;
+  oldReply(page('machine', [foreign], { next_before: '101' }));
+  await oldRun;
+  assert.equal(store.view().scope, 'self');
+  assert.deepEqual(ids(store.view()), [own.sequence]);
+  assert.equal(store.get(foreign.id), undefined);
+  assert.equal(store.view().hasOlder, false);
+});
+
+test('a page can narrow visibility before the connection poll reports the change', async () => {
+  let scope = 'machine';
+  const requests = [];
+  const store = new L.DecisionLogStore(async (query) => {
+    requests.push(query);
+    return L.parsePage({
+      scope, log_id: 'same-log',
+      records: scope === 'machine' ? [record(101, { principal_uid: 1001 })] : [record(13)],
+      next_before: scope === 'machine' ? '101' : '',
+    });
+  });
+  await store.tick();
+  scope = 'self';
+  await store.tick();
+  assert.equal(requests.at(-1).after, '101');
+  assert.equal(store.view().accessRevision, 1);
+  assert.deepEqual(store.view().records, []);
+  await store.tick();
+  assert.deepEqual(requests.at(-1), { limit: 100 });
+  assert.deepEqual(ids(store.view()), ['13']);
+});

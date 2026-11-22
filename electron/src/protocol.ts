@@ -548,6 +548,7 @@ export interface Bridge {
   promptLayout(value: { height: number; pointerDown: boolean; keysDown: string[]; remember: boolean }): Promise<void>;
   dismissPrompt(keyboardNext?: boolean): Promise<void>;
   decisionLog(): Promise<DecisionLogState>;
+  onDecisionLogAccessReset(fn: (revision: number) => void): void;
   connectionChecks(options?:unknown):Promise<import('./connection-checks').CheckView>;
   decisionTimeout(edit?: import('./decision-timeout').DecisionTimeoutEdit): Promise<import('./decision-timeout').DecisionTimeoutView>;
   usageHistory(query: unknown): Promise<import('./usage-history-client').HistoryState>;

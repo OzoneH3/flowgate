@@ -215,13 +215,14 @@ export function parseHealth(raw: unknown): LogHealth | undefined {
 export function parsePage(raw: unknown): LogPage {
   const p = obj(raw);
   if (!Array.isArray(p.records) || p.records.length > 100) throw Error('Invalid decision-log page');
+  if (p.scope !== 'machine' && p.scope !== 'self') throw Error('Invalid decision-log scope');
   return {
     records: p.records.map(parseRecord),
     next_before: cursor(p.next_before),
     newest: cursor(p.newest),
     has_more: typeof p.has_more === 'boolean' ? p.has_more : undefined,
     log_id: str(p.log_id ?? obj(p.health).log_id, 128),
-    scope: str(p.scope, 16),
+    scope: p.scope,
     health: parseHealth(p.health),
     limitations: (Array.isArray(p.limitations) ? p.limitations : [])
       .slice(0, 16)
@@ -303,6 +304,7 @@ export class LogError extends Error {
 }
 export interface LogView {
   session: number;
+  accessRevision: number;
   status: 'idle' | 'loading' | 'ready' | 'disconnected' | 'error';
   error?: { code: string; message: string };
   records: LogRecord[];
@@ -323,6 +325,7 @@ export interface LogView {
 // Rows are deduplicated by stable ID, ordered by backend sequence and bounded.
 export class DecisionLogStore {
   private session = 0;
+  private accessRevision = 0;
   private records = new Map<string, LogRecord>();
   private order: LogRecord[] = [];
   private nextBefore = '';
@@ -345,10 +348,12 @@ export class DecisionLogStore {
     private maxRows = 1000,
     private pageSize = 100,
     private catchUpPages = 5,
+    private accessReset?: (revision: number) => void,
   ) {}
   view(): LogView {
     return {
       session: this.session,
+      accessRevision: this.accessRevision,
       ...this.state,
       records: this.order,
       live: this.live,
@@ -363,6 +368,15 @@ export class DecisionLogStore {
   }
   get(id: string) {
     return this.records.get(id);
+  }
+  resetAccess(scope = '') {
+    this.logId = '';
+    this.reset({});
+    this.state = { status: 'loading', scope, limitations: [] };
+    this.inFlight = false;
+    this.runToken++;
+    this.accessRevision++;
+    this.accessReset?.(this.accessRevision);
   }
   private reset(filter: LogFilter, notice = '') {
     this.session++;
@@ -409,6 +423,11 @@ export class DecisionLogStore {
     return added;
   }
   private apply(page: LogPage) {
+    if (this.state.scope && page.scope !== this.state.scope) {
+      // The page may use a cursor from a different visibility scope.
+      this.resetAccess(page.scope);
+      return false;
+    }
     if (page.log_id && this.logId && page.log_id !== this.logId) {
       // A different/recreated log: cursors are meaningless; restart without mixing sequences.
       this.logId = page.log_id;
@@ -499,8 +518,9 @@ export class DecisionLogStore {
       this.filter,
       'Many new records arrived; showing the newest. Older ones remain available below.',
     );
+    const restartedSession = this.session;
     const page = await this.query({});
-    if (!this.apply(page)) return;
+    if (restartedSession !== this.session || !this.apply(page)) return;
     this.merge(page.records);
     this.nextBefore = page.next_before;
   }
