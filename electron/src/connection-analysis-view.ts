@@ -108,7 +108,6 @@ function renderResults(target: HTMLElement, result: ConnectionAnalysis): void {
   for (const connection of result.connections) {
     const latest = connection.observations.at(-1)!;
     const previous = connection.observations.slice(0, -1).reverse();
-    const earlierVerified = previous.find((entry) => entry.application);
     const row = document.createElement('article');
     const endpoints = `${latest.local || connection.local} → ${latest.remote || connection.remote}`;
     row.append(
@@ -119,13 +118,6 @@ function renderResults(target: HTMLElement, result: ConnectionAnalysis): void {
       ),
       observationDetails(latest),
     );
-    if (!latest.application && earlierVerified?.application)
-      row.append(
-        node(
-          'p',
-          `Previously verified · ${applicationLabel(earlierVerified.application)} · observed ${time(earlierVerified.at)}`,
-        ),
-      );
     if (previous.length) {
       const history = document.createElement('details');
       history.append(node('summary', 'Earlier observations'));
