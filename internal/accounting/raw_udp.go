@@ -5,15 +5,89 @@ import (
 	"time"
 )
 
+const (
+	rawUDPMaxSampleGap = int64(60 * time.Second)
+	rawUDPAbsentLimit  = int64(4 * time.Second)
+)
+
+// Build the same ownership bookends for capacity planning and counter updates.
+func rawUDPOwners(s identity.ActivitySnapshot, ownersValid bool) map[string]baseline {
+	u := s.UDP
+	owners := map[string]baseline{}
+	if ownersValid && rawUDPCountsFit(u) {
+		for _, r := range s.Rows {
+			if r.Socket.Protocol != "udp" || r.Socket.NetNS != u.NetNS {
+				continue
+			}
+			e, o := owner(s, r)
+			if !u.Machine && e.UID != u.UID {
+				o = ""
+				e = Entry{}
+			}
+			if _, duplicate := owners[r.Socket.Cookie]; duplicate {
+				owners[r.Socket.Cookie] = baseline{}
+				continue
+			}
+			owners[r.Socket.Cookie] = baseline{owner: o, entry: e}
+		}
+	}
+	return owners
+}
+
+// planRawUDP counts the prospective live cursors and newly credited identities
+// without moving the collector watermark or applying live and retired deltas.
+func (l *Ledger) planRawUDP(u *identity.UDPSnapshot, owners map[string]baseline, additions map[string]bool) bool {
+	if !rawUDPCountsFit(u) ||
+		l.udpRawGeneration != u.Generation || l.udpRawNamespace != u.NetNS || u.SampleNS <= l.udpRawSample {
+		// An oversized or repeated sample cannot credit new identities. A new
+		// generation has no earlier ownership and its incoming cursors fit.
+		return true
+	}
+	count := len(l.udpRawPrevious)
+	for cookie, old := range l.udpRawPrevious {
+		_, live := u.AccountingRows[cookie]
+		_, retired := u.Retired[cookie]
+		if !live && (retired || u.SampleNS-old.sampleNS > rawUDPAbsentLimit) {
+			count--
+		}
+	}
+	for cookie, c := range u.AccountingRows {
+		if !validRawUDP(cookie, c) {
+			continue
+		}
+		old, exists := l.udpRawPrevious[cookie]
+		if !exists {
+			count++
+			continue
+		}
+		b := owners[cookie]
+		if u.SampleNS-l.udpRawSample <= rawUDPMaxSampleGap && rawUDPCounterContinues(c, old) &&
+			b.owner != "" && b.owner == old.owner && (c.Uploaded != old.up || c.Downloaded != old.down) &&
+			l.entries[b.entry.ID] == nil {
+			additions[b.entry.ID] = true
+		}
+	}
+	return count <= MaxBaselines
+}
+
+func rawUDPCountsFit(u *identity.UDPSnapshot) bool {
+	return len(u.AccountingRows) <= MaxBaselines && len(u.Retired) <= MaxBaselines
+}
+
+func validRawUDP(cookie string, c identity.UDPCount) bool {
+	return cookie != "" && cookie != "ffffffffffffffff" && !c.Since.IsZero()
+}
+
+func rawUDPCounterContinues(c identity.UDPCount, old baseline) bool {
+	return c.Since.Equal(old.since) && c.Uploaded >= old.up && c.Downloaded >= old.down
+}
+
 // observeRawUDP conserves registered API payload counters independently of the
 // FD census. Identity only chooses an application bucket versus unattributed;
 // it never changes the collector's counter cursor or grants a permission.
-func (l *Ledger) observeRawUDP(s identity.ActivitySnapshot, ownersValid bool) {
+func (l *Ledger) observeRawUDP(s identity.ActivitySnapshot, owners map[string]baseline) {
 	u := s.UDP
-	if l.frozen || u == nil || l.sources[1].State != "active" || u.AccountingRows == nil {
-		return
-	}
-	if len(u.AccountingRows) > MaxBaselines || len(u.Retired) > MaxBaselines {
+	if !rawUDPCountsFit(u) {
 		l.gap()
 		return
 	}
@@ -50,24 +124,6 @@ func (l *Ledger) observeRawUDP(s identity.ActivitySnapshot, ownersValid bool) {
 		l.gap()
 		l.udpRawSkippedKnown = false
 	}
-	owners := map[string]baseline{}
-	if ownersValid {
-		for _, r := range s.Rows {
-			if r.Socket.Protocol != "udp" || r.Socket.NetNS != u.NetNS {
-				continue
-			}
-			e, o := owner(s, r)
-			if !u.Machine && e.UID != u.UID {
-				o = ""
-				e = Entry{}
-			}
-			if _, duplicate := owners[r.Socket.Cookie]; duplicate {
-				owners[r.Socket.Cookie] = baseline{}
-				continue
-			}
-			owners[r.Socket.Cookie] = baseline{owner: o, entry: e}
-		}
-	}
 	if u.SampleNS <= l.udpRawSample {
 		if u.SampleNS < l.udpRawSample {
 			l.gap()
@@ -82,7 +138,7 @@ func (l *Ledger) observeRawUDP(s identity.ActivitySnapshot, ownersValid bool) {
 		}
 		return
 	}
-	if l.udpRawSample != 0 && u.SampleNS-l.udpRawSample > int64(60*time.Second) {
+	if l.udpRawSample != 0 && u.SampleNS-l.udpRawSample > rawUDPMaxSampleGap {
 		l.gap()
 		for k, b := range l.udpRawPrevious {
 			b.owner = ""
@@ -107,13 +163,13 @@ func (l *Ledger) observeRawUDP(s identity.ActivitySnapshot, ownersValid bool) {
 	// A legacy helper may omit a final snapshot. Wait a bounded interval, report
 	// a gap and release its baseline; never fabricate a final zero counter.
 	for k, b := range l.udpRawPrevious {
-		if _, live := u.AccountingRows[k]; !live && u.SampleNS-b.sampleNS > int64(4*time.Second) {
+		if _, live := u.AccountingRows[k]; !live && u.SampleNS-b.sampleNS > rawUDPAbsentLimit {
 			delete(l.udpRawPrevious, k)
 			l.gap()
 		}
 	}
 	for cookie, c := range u.AccountingRows {
-		if cookie == "" || cookie == "ffffffffffffffff" || c.Since.IsZero() {
+		if !validRawUDP(cookie, c) {
 			l.gap()
 			continue
 		}
@@ -128,14 +184,9 @@ func (l *Ledger) rawUDPDelta(cookie string, c identity.UDPCount, b baseline, at 
 		l.gap()
 		return
 	} // no cursor: never replay a lifetime total
-	if !exists && len(l.udpRawPrevious) >= MaxBaselines {
-		l.frozen = true
-		l.gap()
-		return
-	}
 	current := b
 	up, down := c.Uploaded, c.Downloaded
-	continuous := exists && c.Since.Equal(old.since) && up >= old.up && down >= old.down
+	continuous := exists && rawUDPCounterContinues(c, old)
 	if continuous {
 		up -= old.up
 		down -= old.down
@@ -160,11 +211,6 @@ func (l *Ledger) rawUDPDelta(cookie string, c identity.UDPCount, b baseline, at 
 		} else {
 			row := l.entries[b.entry.ID]
 			if row == nil {
-				if len(l.entries) >= MaxEntries {
-					l.frozen = true
-					l.gap()
-					return
-				}
 				b.entry.FirstObservedAt = old.at
 				row = &retained{entry: b.entry}
 				l.entries[b.entry.ID] = row
@@ -174,10 +220,6 @@ func (l *Ledger) rawUDPDelta(cookie string, c identity.UDPCount, b baseline, at 
 		}
 	}
 	if retired {
-		return
-	}
-	if !exists && len(l.udpRawPrevious) >= MaxBaselines {
-		l.gap()
 		return
 	}
 	// Preserve current ownership only for the next observation's bookend.

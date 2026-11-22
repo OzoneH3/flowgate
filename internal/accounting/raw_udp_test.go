@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"flowgate/internal/identity"
 	"fmt"
+	"maps"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -237,6 +239,159 @@ func TestRawUDPWineRequiresFreshMatchingOwner(t *testing.T) {
 				if len(entries) != 1 || entries[0].Application.Name != "alpha.exe" || entries[0].Source != UDP {
 					t.Fatalf("stable bytes credited to the wrong application: %+v", entries)
 				}
+			}
+		})
+	}
+}
+
+func TestRawUDPCapacityFreezesBeforeAnyTotalsOrCursorsMove(t *testing.T) {
+	sample := func(seq uint64, order []string, mixed bool) identity.ActivitySnapshot {
+		s := rawUDP(seq, 0)
+		base := s.Rows[0]
+		baseProcess := s.Processes[base.Owners[0]]
+		s.Rows = nil
+		clear(s.Processes)
+		clear(s.UDP.AccountingRows)
+		for _, name := range order {
+			process := baseProcess
+			process.ID = name
+			process.Application.Key = name
+			s.Processes[name] = process
+			row := base
+			row.Socket.Cookie = name
+			row.Owners = []string{name}
+			uploaded := map[string]uint64{"a": 100, "b": 200}[name] * (seq - 1)
+			if mixed && name == "b" {
+				row.Socket.Protocol = "tcp"
+				row.Traffic.Definition = TCP
+				row.Traffic.Uploaded = uploaded
+			} else {
+				s.UDP.AccountingRows[name] = identity.UDPCount{Uploaded: uploaded, Since: fixtureStart}
+			}
+			s.Rows = append(s.Rows, row)
+		}
+		return s
+	}
+
+	type state struct {
+		Entries         int
+		Attributed      uint64
+		Unattributed    string
+		TCPUnattributed string
+		Sequence        uint64
+		RawSample       int64
+		RawCursors      map[string]uint64
+		RowCursors      int
+		Frozen          bool
+		Gaps            uint64
+	}
+	read := func(l *Ledger) state {
+		cursors := make(map[string]uint64)
+		for cookie, cursor := range l.udpRawPrevious {
+			cursors[cookie] = cursor.up
+		}
+		return state{
+			Entries: len(l.entries), Attributed: sum(l, 1000), Unattributed: unassigned(l, UDP),
+			TCPUnattributed: unassigned(l, TCP), Sequence: l.sequence, RawSample: l.udpRawSample,
+			RawCursors: cursors, RowCursors: len(l.previous), Frozen: l.frozen, Gaps: l.gaps,
+		}
+	}
+
+	for _, tc := range []struct {
+		name  string
+		order []string
+		free  int
+		mixed bool
+	}{
+		{name: "one_slot_a_then_b", order: []string{"a", "b"}, free: 1},
+		{name: "one_slot_b_then_a", order: []string{"b", "a"}, free: 1},
+		{name: "both_fit", order: []string{"a", "b"}, free: 2},
+		{name: "shared_limit_udp_and_tcp", order: []string{"a", "b"}, free: 1, mixed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			l := New()
+			for i := 0; i < MaxEntries-tc.free; i++ {
+				l.entries[fmt.Sprint(i)] = &retained{counts: counts{up: 7}}
+			}
+			l.Observe(sample(1, tc.order, tc.mixed))
+			before := read(l)
+			rawBefore, rowBefore := maps.Clone(l.udpRawPrevious), maps.Clone(l.previous)
+			next := sample(2, tc.order, tc.mixed)
+			if tc.mixed {
+				// Neither an unattributed lifetime count nor a TCP delta may
+				// commit before the combined identity capacity is decided.
+				next.UDP.AccountingRows["first"] = identity.UDPCount{Uploaded: 17, Since: fixtureStart}
+			}
+			l.Observe(next)
+			after := read(l)
+			rawAfter, rowAfter := maps.Clone(l.udpRawPrevious), maps.Clone(l.previous)
+			l.Observe(next)
+			replay := read(l)
+			if !reflect.DeepEqual(rawAfter, l.udpRawPrevious) || !reflect.DeepEqual(rowAfter, l.previous) {
+				t.Fatal("replay moved a counter cursor")
+			}
+			if tc.free == 1 && (!reflect.DeepEqual(rawBefore, rawAfter) || !reflect.DeepEqual(rowBefore, rowAfter)) {
+				t.Error("capacity freeze did not preserve the accepted counter cursors")
+			}
+			t.Logf("before=%+v after=%+v replay=%+v", before, after, replay)
+			want := before
+			if tc.free == 1 {
+				want.Frozen = true
+				want.Gaps++
+			} else {
+				want.Entries = MaxEntries
+				want.Attributed = 300
+				want.Sequence = next.Sequence
+				want.RawSample = next.UDP.SampleNS
+				want.RawCursors = map[string]uint64{"a": 100, "b": 200}
+				for _, entry := range l.Snapshot(1000, false).Entries {
+					if decimal(want.RawCursors[entry.Application.Key]) != entry.Uploaded {
+						t.Errorf("wrong credit for %s: %s", entry.Application.Key, entry.Uploaded)
+					}
+				}
+			}
+			if !reflect.DeepEqual(after, want) || !reflect.DeepEqual(replay, want) {
+				t.Fatalf("capacity changed part of a sample or replay: want %+v", want)
+			}
+			if l.entries["0"].counts.up != 7 {
+				t.Fatal("retained credits changed")
+			}
+		})
+	}
+}
+
+func TestRawUDPCursorCapacityFreezesWholeSample(t *testing.T) {
+	for _, retire := range []bool{false, true} {
+		t.Run(fmt.Sprintf("retirement_%t", retire), func(t *testing.T) {
+			l := New()
+			open := rawUDP(1, 0)
+			open.Rows = nil
+			open.UDP.AccountingRows = make(map[string]identity.UDPCount)
+			for i := 0; i < MaxBaselines; i++ {
+				open.UDP.AccountingRows[fmt.Sprint(i)] = identity.UDPCount{Since: fixtureStart}
+			}
+			l.Observe(open)
+			next := rawUDP(2, 0)
+			next.Rows = nil
+			next.UDP.AccountingRows = map[string]identity.UDPCount{"new": {Since: fixtureStart, Uploaded: 7}}
+			if retire {
+				next.UDP.Retired = map[string]identity.UDPCount{"0": {Since: fixtureStart, Uploaded: 11}}
+			}
+			before := maps.Clone(l.udpRawPrevious)
+			l.Observe(next)
+			t.Logf("cursor count %d, watermark %d -> %d, frozen=%t, unattributed=%s B",
+				len(l.udpRawPrevious), open.UDP.SampleNS, l.udpRawSample, l.frozen, unassigned(l, UDP))
+			if len(l.udpRawPrevious) != MaxBaselines {
+				t.Fatal("cursor table out of bounds")
+			}
+			if retire {
+				if l.frozen || l.udpRawSample != next.UDP.SampleNS || l.udpRawPrevious["new"].up != 7 ||
+					!l.udpRawPrevious["0"].since.IsZero() || unassigned(l, UDP) != "18" {
+					t.Fatal("retirement did not free space before applying the new cursor")
+				}
+			} else if !l.frozen || l.udpRawSample != open.UDP.SampleNS ||
+				!reflect.DeepEqual(l.udpRawPrevious, before) || unassigned(l, UDP) != "0" {
+				t.Fatal("cursor capacity committed part of the rejected sample")
 			}
 		})
 	}

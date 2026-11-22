@@ -220,62 +220,7 @@ func owner(s identity.ActivitySnapshot, r identity.ActivityRow) (Entry, string) 
 	e.ID = hash([]any{uid, a.Key, a.Revision, a.Kind, a.Runtime, a.Prefix, e.Source})
 	return e, hash([]any{e.ID, holders, runtime})
 }
-func (l *Ledger) Observe(s identity.ActivitySnapshot) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if s.Sequence == 0 || s.Sequence <= l.sequence {
-		return
-	}
-	discontinuity := l.sequence != 0 && (s.Sequence != l.sequence+1 || !s.Collected.After(l.sampled) || s.Collected.Sub(l.sampled) > 60*time.Second)
-	l.sequence = s.Sequence
-	invalidTime := s.Collected.IsZero() || (!l.sampled.IsZero() && !s.Collected.After(l.sampled))
-	if !invalidTime {
-		l.sampled = s.Collected
-	}
-	l.sources = []Source{{TCP, "unavailable", "Collection incomplete; counters rebaseline"}, {UDP, "unavailable", "UDP collector unavailable"}}
-	if s.Complete && s.Error == "" {
-		l.sources[0] = Source{TCP, "active", "Sampled TCP payload; includes upload retransmissions, not delivery"}
-	}
-	if s.UDP != nil && s.UDP.State == "active" && s.UDP.Generation != "" && len(s.UDP.Generation) <= 256 && s.UDP.SampleNS > 0 && !s.UDP.Collected.IsZero() && s.Collected.Sub(s.UDP.Collected) >= 0 && s.Collected.Sub(s.UDP.Collected) < 4*time.Second {
-		l.sources[1] = Source{UDP, "active", "Successful UDP API return bytes; not wire bytes or delivery"}
-	}
-	rawUDP := s.UDP != nil && s.UDP.AccountingRows != nil
-	rawActive := rawUDP && l.sources[1].State == "active"
-	if rawUDP {
-		l.observeRawUDP(s, s.Complete && s.Error == "" && !discontinuity && !invalidTime)
-	}
-	if discontinuity || !s.Complete || s.Error != "" || invalidTime {
-		l.gap()
-		clear(l.previous)
-		if !s.Complete || s.Error != "" || invalidTime {
-			for i := range l.sources {
-				if i == 1 && rawActive {
-					l.sources[i].Reason = "Registered UDP payload conserved; incomplete ownership goes to unattributed"
-					continue
-				}
-				l.sources[i].State = "unavailable"
-				l.sources[i].Reason = "Collection incomplete or timestamp invalid; counters rebaseline"
-			}
-			return
-		}
-	}
-	if l.frozen {
-		return
-	}
-	if len(s.Rows) > MaxBaselines {
-		clear(l.previous)
-		l.gap()
-		return
-	}
-	if s.UDP != nil && !rawUDP {
-		if l.udpGeneration == s.UDP.Generation && l.udpMissed != s.UDP.Missed {
-			l.gap()
-			// Misses concern unregistered cookies, not counters of already
-			// registered cookies. Preserve their monotonic, generation-scoped
-			// baselines; each still needs matching ownership bookends below.
-		}
-		l.udpGeneration, l.udpMissed = s.UDP.Generation, s.UDP.Missed
-	}
+func activityBaselines(s identity.ActivitySnapshot, rawUDP, udpActive bool) map[string]baseline {
 	next := make(map[string]baseline, len(s.Rows))
 	for _, r := range s.Rows {
 		t := r.Traffic
@@ -292,7 +237,7 @@ func (l *Ledger) Observe(s identity.ActivitySnapshot) {
 			if rawUDP {
 				continue
 			} // source counters already reduced independently
-			if r.Socket.Protocol != "udp" || l.sources[1].State != "active" || s.UDP.NetNS != r.Socket.NetNS {
+			if r.Socket.Protocol != "udp" || !udpActive || s.UDP.NetNS != r.Socket.NetNS {
 				continue
 			}
 			generation = s.UDP.Generation
@@ -301,11 +246,9 @@ func (l *Ledger) Observe(s identity.ActivitySnapshot) {
 		}
 		key := hash([]any{r.Socket.NetNS, r.Socket.Cookie, r.Socket.Inode, r.Socket.Family, r.Socket.Protocol})
 		// Duplicate socket records cannot donate the same bytes twice or choose an
-		// arbitrary owner. Reject the entire observation before applying any delta.
+		// arbitrary owner. Reject these Activity rows before applying their deltas.
 		if _, exists := next[key]; exists {
-			l.gap()
-			clear(l.previous)
-			return
+			return nil
 		}
 		e, o := owner(s, r)
 		if t.Definition == UDP && !s.UDP.Machine && e.UID != s.UDP.UID {
@@ -317,22 +260,104 @@ func (l *Ledger) Observe(s identity.ActivitySnapshot) {
 		}
 		next[key] = b
 	}
-	// Sort processing for deterministic allocation. Preflight all new rows before
-	// applying any delta, so capacity exhaustion freezes at an observation boundary.
-	keys := make([]string, 0, len(next))
+	return next
+}
+
+func (l *Ledger) Observe(s identity.ActivitySnapshot) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.frozen || s.Sequence == 0 || s.Sequence <= l.sequence {
+		return
+	}
+	discontinuity := l.sequence != 0 && (s.Sequence != l.sequence+1 || !s.Collected.After(l.sampled) || s.Collected.Sub(l.sampled) > 60*time.Second)
+	invalidTime := s.Collected.IsZero() || (!l.sampled.IsZero() && !s.Collected.After(l.sampled))
+	complete := s.Complete && s.Error == "" && !invalidTime
+	sources := []Source{{TCP, "unavailable", "Collection incomplete; counters rebaseline"}, {UDP, "unavailable", "UDP collector unavailable"}}
+	if s.Complete && s.Error == "" {
+		sources[0] = Source{TCP, "active", "Sampled TCP payload; includes upload retransmissions, not delivery"}
+	}
+	if s.UDP != nil && s.UDP.State == "active" && s.UDP.Generation != "" && len(s.UDP.Generation) <= 256 && s.UDP.SampleNS > 0 && !s.UDP.Collected.IsZero() && s.Collected.Sub(s.UDP.Collected) >= 0 && s.Collected.Sub(s.UDP.Collected) < 4*time.Second {
+		sources[1] = Source{UDP, "active", "Successful UDP API return bytes; not wire bytes or delivery"}
+	}
+	rawUDP := s.UDP != nil && s.UDP.AccountingRows != nil
+	udpActive := sources[1].State == "active"
+	rawActive := rawUDP && udpActive
+
+	// Both reducers share one identity limit. Reject the entire observation
+	// before advancing any cursor, even if only the second source would overflow.
 	additions := map[string]bool{}
-	for key, b := range next {
-		keys = append(keys, key)
-		old, ok := l.previous[key]
-		if ok && b.owner != "" && b.owner == old.owner && b.since.Equal(old.since) && b.generation == old.generation && b.up >= old.up && b.down >= old.down && (b.source != UDP || (b.sampleNS > old.sampleNS && b.sampleNS-old.sampleNS <= int64(60*time.Second))) && (b.up != old.up || b.down != old.down) && l.entries[b.entry.ID] == nil {
-			additions[b.entry.ID] = true
+	var rawOwners map[string]baseline
+	if rawActive {
+		rawOwners = rawUDPOwners(s, complete && !discontinuity)
+		if !l.planRawUDP(s.UDP, rawOwners, additions) {
+			l.frozen = true
+			l.gap()
+			return
+		}
+	}
+	var next map[string]baseline
+	if complete && len(s.Rows) <= MaxBaselines {
+		next = activityBaselines(s, rawUDP, udpActive)
+	}
+	if !discontinuity {
+		for key, b := range next {
+			old, ok := l.previous[key]
+			if ok && b.owner != "" && b.owner == old.owner && b.since.Equal(old.since) && b.generation == old.generation && b.up >= old.up && b.down >= old.down && (b.source != UDP || (b.sampleNS > old.sampleNS && b.sampleNS-old.sampleNS <= int64(60*time.Second))) && (b.up != old.up || b.down != old.down) && l.entries[b.entry.ID] == nil {
+				additions[b.entry.ID] = true
+			}
 		}
 	}
 	if len(l.entries)+len(additions) > MaxEntries {
 		l.frozen = true
 		l.gap()
+		return
+	}
+
+	l.sequence = s.Sequence
+	if !invalidTime {
+		l.sampled = s.Collected
+	}
+	l.sources = sources
+	if rawActive {
+		l.observeRawUDP(s, rawOwners)
+	}
+	if discontinuity || !complete {
+		l.gap()
+		clear(l.previous)
+		if !complete {
+			for i := range l.sources {
+				if i == 1 && rawActive {
+					l.sources[i].Reason = "Registered UDP payload conserved; incomplete ownership goes to unattributed"
+					continue
+				}
+				l.sources[i].State = "unavailable"
+				l.sources[i].Reason = "Collection incomplete or timestamp invalid; counters rebaseline"
+			}
+			return
+		}
+	}
+	if len(s.Rows) > MaxBaselines {
+		clear(l.previous)
+		l.gap()
+		return
+	}
+	if s.UDP != nil && !rawUDP {
+		if l.udpGeneration == s.UDP.Generation && l.udpMissed != s.UDP.Missed {
+			l.gap()
+			// Misses concern unregistered cookies, not counters of already
+			// registered cookies. Preserve their monotonic, generation-scoped
+			// baselines; each still needs matching ownership bookends below.
+		}
+		l.udpGeneration, l.udpMissed = s.UDP.Generation, s.UDP.Missed
+	}
+	if next == nil {
+		l.gap()
 		clear(l.previous)
 		return
+	}
+	keys := make([]string, 0, len(next))
+	for key := range next {
+		keys = append(keys, key)
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
@@ -372,12 +397,6 @@ func (l *Ledger) Observe(s identity.ActivitySnapshot) {
 		}
 		row := l.entries[b.entry.ID]
 		if row == nil {
-			if len(l.entries) >= MaxEntries {
-				l.frozen = true
-				l.gap()
-				clear(l.previous)
-				return
-			}
 			b.entry.FirstObservedAt = old.at
 			row = &retained{entry: b.entry}
 			l.entries[b.entry.ID] = row
