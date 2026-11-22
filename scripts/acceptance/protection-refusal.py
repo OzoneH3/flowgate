@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Real activation refusal: keep the guarded control API alive until explicit Stop."""
 import socket,subprocess,pathlib,time,json,os,tempfile
+from lablib import start_receiver_daemon
 if not os.environ.get('FLOWGATE_PARENT_NETNS') or os.readlink('/proc/self/ns/net') == os.environ['FLOWGATE_PARENT_NETNS']:
  raise SystemExit('requires scripts/lab.sh private namespace')
 r=pathlib.Path(tempfile.mkdtemp(prefix='protection-refusal-',dir=pathlib.Path('.workspace').resolve()));api=r/'api'/'daemon.sock'
@@ -10,7 +11,7 @@ print('EVIDENCE',r,flush=True)
 listener=socket.socket();listener.bind(('127.0.0.1',0));listener.listen()
 client=socket.create_connection(listener.getsockname());server,_=listener.accept()
 log=(r/'daemon.log').open('w')
-p=subprocess.Popen([str(r.parent/'flowgate'),'serve','--socket',str(api),'--database',str(r/'rules.db'),'--uid','0','--administrator','--allow-protection','--evaluation-state',str(r/'api'/'enforcement'),'--protection-state',str(r/'desired.json')],stdout=log,stderr=log)
+p=start_receiver_daemon('protection-refusal','serve','--socket',str(api),'--database',str(r/'rules.db'),'--uid','0','--administrator','--allow-protection','--evaluation-state',str(r/'api'/'enforcement'),'--protection-state',str(r/'desired.json'),stdout=log,stderr=log)
 def request(operation='list',**kw):
  with socket.socket(socket.AF_UNIX) as s:
   s.settimeout(5);s.connect(str(api));s.sendall((json.dumps(dict(version=1,operation=operation,**kw))+'\n').encode());return json.loads(s.makefile('rb').readline())

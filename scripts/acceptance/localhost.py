@@ -18,8 +18,8 @@ try:
                 if os.path.exists(p):os.unlink(p)
             logpath=RUN/f'localhost-{direction}-{action}.log'
             with logpath.open('w') as log:
-                d=subprocess.Popen([BIN,'serve-lab','--parent-netns',os.environ['FLOWGATE_PARENT_NETNS'],
-                    '--socket',SOCK,'--direction',direction,'--rules',str(rp), '--zone-local','192.0.2.10/32','--zone-local','2001:db8::10/128'],stdout=log,stderr=log)
+                d=start_receiver_daemon('localhost','serve-lab','--parent-netns',os.environ['FLOWGATE_PARENT_NETNS'],
+                    '--socket',SOCK,'--direction',direction,'--rules',str(rp), '--zone-local','192.0.2.10/32','--zone-local','2001:db8::10/128',stdout=log,stderr=log)
             children.append(d)
             wait(lambda:logpath.exists() and 'READY' in logpath.read_text())
             for j,(udp,v6,address) in enumerate(( (u,v,a) for a,v in [('127.0.0.1',False),('::1',True),('192.0.2.10',False),('2001:db8::10',True)] for u in (False,True))):

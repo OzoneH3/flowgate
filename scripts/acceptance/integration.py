@@ -3,7 +3,7 @@ from lablib import *
 for p in (SOCK,SOCK+'.monitor'):
     if os.path.exists(p):os.unlink(p)
 log=(RUN/'daemon.log').open('w')
-d=subprocess.Popen([BIN,'serve-lab','--parent-netns',os.environ['FLOWGATE_PARENT_NETNS'],'--socket',SOCK,'--rules',localhost_ask_rules('incoming'),'--timeout','2s'],stdout=log,stderr=log);children.append(d)
+d=start_receiver_daemon('integration','serve-lab','--parent-netns',os.environ['FLOWGATE_PARENT_NETNS'],'--socket',SOCK,'--rules',localhost_ask_rules('incoming'),'--timeout','2s',stdout=log,stderr=log);children.append(d)
 try:
     wait(lambda:os.path.exists(SOCK) and 'READY' in (RUN/'daemon.log').read_text())
     for port,udp,v6 in [(24101,False,False),(24102,True,False),(24103,False,True),(24104,True,True)]:

@@ -1,8 +1,30 @@
 #!/usr/bin/env python3
 """Receiver-observed tests; must run via lab.sh in an isolated network/PID namespace."""
-import json, os, socket, subprocess, sys, time, pathlib, signal
-ROOT=pathlib.Path.cwd(); BIN=str(ROOT/'.workspace/flowgate'); RUN=ROOT/'.workspace/run'
+import hashlib, json, os, socket, subprocess, sys, time, pathlib, signal
+ROOT=pathlib.Path.cwd(); RUN=ROOT/'.workspace/run'
+SELECTED_BINARY = os.environ.get('FLOWGATE_TEST_BINARY')
+BIN = str(pathlib.Path(SELECTED_BINARY).resolve()) if SELECTED_BINARY else str(ROOT/'.workspace/flowgate')
 SOCK=str(RUN/'control.sock')
+def start_receiver_daemon(fixture, *args, **kwargs):
+    """Launch the explicitly selected daemon and attest the running image."""
+    if not SELECTED_BINARY:
+        raise RuntimeError('Set FLOWGATE_TEST_BINARY or use scripts/check.sh --receivers')
+    process = subprocess.Popen([BIN, *args], **kwargs)
+    try:
+        executable = pathlib.Path(f'/proc/{process.pid}/exe')
+        if executable.resolve(strict=True) != pathlib.Path(BIN):
+            raise RuntimeError(f'{fixture} started a different executable: {executable.readlink()}')
+        with executable.open('rb') as image:
+            digest = hashlib.file_digest(image, 'sha256').hexdigest()
+        result = dict(fixture=fixture, binary=dict(path=BIN, sha256=digest))
+        (RUN / f'{fixture}-binary.json').write_text(json.dumps(result, indent=2) + '\n')
+        print('DAEMON', json.dumps(result), flush=True)
+    except BaseException:
+        process.kill()
+        process.wait()
+        raise
+    return process
+
 def cli(*args):
     p=subprocess.run([BIN,*args],capture_output=True,text=True)
     if p.returncode: raise RuntimeError(p.stderr+p.stdout)

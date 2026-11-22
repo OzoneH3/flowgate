@@ -1,8 +1,74 @@
 #!/bin/sh
 set -eu
+invocation_directory=$PWD
 cd "$(dirname "$0")/.."
 . ./scripts/go-env.sh
 export PYTHONDONTWRITEBYTECODE=1
+
+receiver_checks() {
+ case "$#" in
+  0)
+   go build -o build/flowgate ./cmd/flowgate
+   daemon="$PWD/build/flowgate"
+   ;;
+  2)
+   case "$2" in
+    /*) input=$2 ;;
+    *) input="$invocation_directory/$2" ;;
+   esac
+   case "$1" in
+    --binary) daemon=$input ;;
+    --archive)
+     daemon="$PWD/$(mktemp -d build/receiver-release.XXXXXX)/flowgate"
+     python3 - "$input" "$daemon" <<'PYTHON'
+import hashlib
+import json
+from pathlib import Path
+import shutil
+import sys
+import tarfile
+
+archive, daemon = sys.argv[1], Path(sys.argv[2])
+with tarfile.open(archive, "r:*") as bundle:
+    manifest = json.load(bundle.extractfile("release.json"))
+    member = bundle.getmember("backend/flowgate")
+    if not member.isfile():
+        raise SystemExit("Release backend/flowgate must be a regular file")
+    with bundle.extractfile(member) as source, daemon.open("wb") as output:
+        shutil.copyfileobj(source, output)
+with daemon.open("rb") as source:
+    if hashlib.file_digest(source, "sha256").hexdigest() != manifest["files"][member.name]["sha256"]:
+        raise SystemExit("Release backend/flowgate SHA-256 does not match release.json")
+daemon.chmod(0o755)
+PYTHON
+     ;;
+    *) echo 'Usage: scripts/check.sh --receivers [--binary PATH | --archive PATH]' >&2; return 2 ;;
+   esac
+   ;;
+  *) echo 'Usage: scripts/check.sh --receivers [--binary PATH | --archive PATH]' >&2; return 2 ;;
+ esac
+ FLOWGATE_TEST_BINARY=$(realpath -e -- "$daemon")
+ export FLOWGATE_TEST_BINARY
+ if [ ! -f "$FLOWGATE_TEST_BINARY" ] || [ ! -x "$FLOWGATE_TEST_BINARY" ]; then
+  echo "Daemon must be an executable file: $FLOWGATE_TEST_BINARY" >&2
+  return 2
+ fi
+ mkdir -p .workspace
+ go build -o .workspace/native-a ./fixtures/native
+ cp .workspace/native-a .workspace/native-b
+ for fixture in protection-refusal localhost integration outgoing; do
+  rm -f ".workspace/run/$fixture-binary.json"
+  scripts/lab.sh python3 "scripts/acceptance/$fixture.py"
+  test -s ".workspace/run/$fixture-binary.json"
+ done
+}
+
+if [ "${1:-}" = "--receivers" ]; then
+ shift
+ receiver_checks "$@"
+ exit
+fi
+
 go vet ./...
 # Real socket fixtures must not be blocked by the host's active application policy.
 ordinary_peer_tests='^(TestDecisionLogAPIOnReadOnlyEndpoint|TestObservedCreationAuthorizationAndPersistence|TestTrafficAPIPermissionsAndProjection)$'
@@ -26,13 +92,7 @@ QT_QPA_PLATFORM=offscreen build/desktop/desktop-test
 QT_QPA_PLATFORM=offscreen build/desktop/snapshot-test
 # These require separate namespace/host fixtures; never report them as covered.
 echo 'Additional opt-in coverage: --wine; subordinate-ID user namespace coverage (FLOWGATE_USERNS_SCRATCH) requires a separate UID-mapping fixture.'
-go build -o build/flowgate ./cmd/flowgate
-go build -o .workspace/native-a ./fixtures/native
-cp .workspace/native-a .workspace/native-b
-scripts/lab.sh python3 scripts/acceptance/protection-refusal.py
-scripts/lab.sh python3 scripts/acceptance/localhost.py
-scripts/lab.sh python3 scripts/acceptance/integration.py
-scripts/lab.sh python3 scripts/acceptance/outgoing.py
+receiver_checks
 if [ "${1:-}" = "--wine" ]; then
  scripts/build.sh windows
  scripts/lab.sh python3 scripts/acceptance/wine-integration.py
