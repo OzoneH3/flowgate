@@ -76,9 +76,14 @@ function observationDetails(observation: ConnectionObservation, expandable = tru
       node('summary', `Shared socket · ${count} ${count === 1 ? 'process' : 'processes'}${suffix}`),
     );
   }
-  if (observation.application)
+  if (observation.application) {
     body.append(node('p', `Verified · ${applicationLabel(observation.application)}`));
-  if (!observation.application) {
+  } else if (observation.bestEffortApplication) {
+    const app = observation.bestEffortApplication;
+    const label = app.name || applicationLabel(app);
+    body.append(node('p', `Best-effort Electron package match · ${label}`));
+    if (app.name && app.executable) body.append(node('p', app.executable));
+  } else {
     const reason =
       observation.reason ||
       observation.category.replaceAll('-', ' ') ||

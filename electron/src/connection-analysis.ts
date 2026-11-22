@@ -17,6 +17,7 @@ export interface ConnectionObservation {
   holders: Holder[];
   holdersTruncated: boolean;
   application?: { name: string; executable: string; pid?: number };
+  bestEffortApplication?: { name: string; executable: string };
 }
 
 interface AnalyzedConnection {
@@ -91,18 +92,26 @@ function parseObservation(value: unknown): ConnectionObservation {
   });
   const holdersTruncated = flag(state.holders_truncated ?? false);
   let application: ConnectionObservation['application'];
+  let bestEffortApplication: ConnectionObservation['bestEffortApplication'];
   if (state.verified_application !== undefined) {
     const app = object(state.verified_application);
     if (!string(app.key) || !string(app.revision)) throw invalid();
+    const details = { name: optionalString(app.name), executable: optionalString(app.executable) };
     // A Wine broker's holder PID identifies a Linux process, not the Windows executable.
     const pid =
       app.source === 'descriptor-holder-census' && !holdersTruncated && holders.length === 1
         ? holders[0].pid
         : undefined;
-    application = {
+    // Older daemons mislabeled best-effort Electron matches on this wire field.
+    if (app.kind === 'electron') bestEffortApplication = details;
+    else application = { ...details, pid };
+  }
+  if (state.best_effort_application !== undefined) {
+    const app = object(state.best_effort_application);
+    if (!string(app.key) || !string(app.revision)) throw invalid();
+    bestEffortApplication = {
       name: optionalString(app.name),
       executable: optionalString(app.executable),
-      pid,
     };
   }
   return {
@@ -114,6 +123,7 @@ function parseObservation(value: unknown): ConnectionObservation {
     holders,
     holdersTruncated,
     application,
+    bestEffortApplication,
   };
 }
 

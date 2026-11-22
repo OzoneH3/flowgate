@@ -74,6 +74,7 @@ type ConnectionObservation struct {
 	Holders          []AnalysisHolder     `json:"holders"`
 	HoldersTruncated bool                 `json:"holders_truncated,omitempty"`
 	Application      *AnalysisApplication `json:"verified_application,omitempty"`
+	BestEffort       *AnalysisApplication `json:"best_effort_application,omitempty"`
 }
 
 type AnalysisHolder struct {
@@ -167,28 +168,33 @@ func boundedAnalysisPath(path string) string {
 	return path
 }
 
-func analysisApplication(s identity.ActivitySnapshot, row identity.ActivityRow) *AnalysisApplication {
+func analysisApplications(s identity.ActivitySnapshot, row identity.ActivityRow) (verified, bestEffort *AnalysisApplication) {
 	var app identity.Application
 	var source string
 	switch {
 	case row.RuntimeApplication != nil:
 		p, ok := runtimeActivityOwner(s, row)
 		if !ok || row.RuntimeApplication.DisplaySource != "" || p.Application.Prefix == "" {
-			return nil
+			return nil, nil
 		}
 		app, source = p.Application, "wine-runtime-census"
 	case row.OwnershipCategory == "visible-holder" && len(row.Owners) == 1:
 		p, ok := s.Processes[row.Owners[0]]
 		if !ok || !identity.LiveRuleable(p.Application) {
-			return nil
+			return nil, nil
 		}
 		app, source = p.Application, "descriptor-holder-census"
 	default:
-		return nil
+		return nil, nil
 	}
-	return &AnalysisApplication{Name: boundedAnalysisPath(app.Name), Key: app.Key,
+	result := &AnalysisApplication{Name: boundedAnalysisPath(app.Name), Key: app.Key,
 		Revision: boundedAnalysisPath(app.Revision), Executable: boundedAnalysisPath(app.Executable),
 		Kind: app.Kind, Prefix: boundedAnalysisPath(app.Prefix), Source: source}
+	if identity.BestEffortElectron(app) {
+		result.Source = "electron-package-match"
+		return nil, result
+	}
+	return result, nil
 }
 
 func (r *AnalyzedConnection) record(at time.Time, observation ConnectionObservation) {
@@ -303,9 +309,10 @@ func (e *Engine) analyzeConnections(query *ConnectionAnalysisQuery, uid uint32, 
 				Reason: "Socket generation was not confirmed after holder inspection", Holders: []AnalysisHolder{}}
 			if sample.Confirmed[key] {
 				holders, truncated := analysisHolders(s, row, &sample)
+				verified, bestEffort := analysisApplications(s, row)
 				observation = ConnectionObservation{Category: row.OwnershipCategory, Reason: row.Evidence,
 					Local: row.Socket.Local.String(), Remote: row.Socket.Remote.String(),
-					Holders: holders, HoldersTruncated: truncated, Application: analysisApplication(s, row)}
+					Holders: holders, HoldersTruncated: truncated, Application: verified, BestEffort: bestEffort}
 			}
 			record.record(s.Collected, observation)
 		}

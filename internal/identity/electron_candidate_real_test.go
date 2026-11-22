@@ -190,6 +190,31 @@ func TestBestEffortElectronRealRuntime(t *testing.T) {
 	attr := func(p identity.Process) identity.Attribution {
 		return identity.Attribution{Application: &p.Application, Owners: []identity.Process{p}, VisibilityComplete: true}
 	}
+	t.Run("analysis-confidence", func(t *testing.T) {
+		native, err := identity.Inspect(os.Getpid())
+		if err != nil {
+			t.Fatal(err)
+		}
+		nativeRule := saved
+		nativeRule.Action = "block"
+		nativeRule.Executable = native.Application.Executable
+		nativeRule.Filter.Application = native.Application.Key
+		nativeRule.Filter.Revision = native.Application.Revision
+		nativeRule.Filter.UID = native.UID
+		for _, tc := range []struct {
+			name, field, action string
+			process             identity.Process
+			rule                policy.Rule
+			verified            int
+		}{
+			{"best-effort", "best_effort_application", "allow", p, saved, 0},
+			{"verified", "verified_application", "block", native, nativeRule, 1},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				checkConnectionAnalysisConfidence(t, f, tc.process, tc.rule, tc.field, tc.verified, tc.action)
+			})
+		}
+	})
 	if got, _, _ := policy.Evaluate([]policy.Rule{saved}, f, attr(q), time.Now()); got == "allow" {
 		t.Fatal("beta inherited alpha rule")
 	}
@@ -287,4 +312,94 @@ func TestBestEffortElectronRealRuntime(t *testing.T) {
 		t.Fatalf("receiver requests: %d", received.Load())
 	}
 	t.Logf("three real receiver requests; distinct ASAR/script applications; persistent serialized rule matches only alpha after relaunch")
+}
+
+// Supply a controlled socket census with a live resolver-issued identity.
+// Read directly from the authenticated API so the test covers wire field names.
+func checkConnectionAnalysisConfidence(t *testing.T, f identity.Flow, p identity.Process, rule policy.Rule, field string, verified int, action string) {
+	t.Helper()
+	now := time.Now()
+	attr := identity.Attribution{Application: &p.Application, Owners: []identity.Process{p}, VisibilityComplete: true}
+	before, _, _ := policy.Evaluate([]policy.Rule{rule}, f, attr, now)
+	row := identity.ActivityRow{OwnershipCategory: "unknown", Evidence: "No visible descriptor",
+		Socket: identity.Socket{Protocol: "tcp", Family: 2, NetNS: "net:[22]", Inode: 40, UID: p.UID,
+			Cookie: "8e23000000000000", Local: f.Local, Remote: f.Remote}}
+	visible := row
+	visible.OwnershipCategory = "visible-holder"
+	visible.Evidence = "Visible descriptor holder"
+	visible.Owners = []string{"holder"}
+	e := daemon.New(time.Minute)
+	e.Mode = "host-monitor"
+	e.Activity = func() identity.ActivitySnapshot {
+		return identity.ActivitySnapshot{Collected: now, Rows: []identity.ActivityRow{row}}
+	}
+	e.ConnectionSample = func(uint16) identity.ConnectionSample {
+		return identity.ConnectionSample{
+			Activity: identity.ActivitySnapshot{Collected: now.Add(time.Second), Rows: []identity.ActivityRow{visible},
+				Processes: map[string]identity.ActivityProcess{
+					"holder": {PID: p.PID, Start: p.Start, UID: p.UID, Executable: p.Executable, Application: p.Application},
+				}},
+			Confirmed: map[string]bool{identity.ConnectionKey(visible.Socket): true},
+		}
+	}
+	dir, err := os.MkdirTemp("", "fga-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	socket := filepath.Join(dir, "api")
+	listener, err := daemon.Serve(socket, e, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	conn, err := net.Dial("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	fmt.Fprintln(conn, `{"version":1,"operation":"connection-analyze"}`)
+	var reply struct {
+		Analysis json.RawMessage `json:"connection_analysis"`
+	}
+	if err := json.NewDecoder(conn).Decode(&reply); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("API %s", reply.Analysis)
+	after, _, _ := policy.Evaluate([]policy.Rule{rule}, f, attr, now)
+	t.Logf("Policy before=%s after=%s", before, after)
+	if before != action || after != action {
+		t.Errorf("policy before=%s after=%s, want %s", before, after, action)
+	}
+	var result struct {
+		Baseline  int `json:"baseline_unidentified"`
+		Recovered int `json:"recovered"`
+		Latest    int `json:"latest_verified"`
+		Rows      []struct {
+			Observations []map[string]json.RawMessage `json:"observations"`
+		} `json:"connections"`
+	}
+	if err := json.Unmarshal(reply.Analysis, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Baseline != 1 || result.Recovered != verified || result.Latest != verified {
+		t.Errorf("counts baseline=%d recovered=%d latest=%d, want 1/%d/%d", result.Baseline, result.Recovered, result.Latest, verified, verified)
+	}
+	if len(result.Rows) != 1 || len(result.Rows[0].Observations) != 2 {
+		t.Fatal("expected a baseline and recheck observation")
+	}
+	observation := result.Rows[0].Observations[1]
+	if (observation["verified_application"] != nil) != (verified == 1) ||
+		(observation["best_effort_application"] != nil) != (verified == 0) {
+		t.Errorf("expected only %s in the observation", field)
+	}
+	var app daemon.AnalysisApplication
+	if raw := observation[field]; raw != nil {
+		if err := json.Unmarshal(raw, &app); err != nil {
+			t.Fatal(err)
+		}
+		if app.Name != p.Application.Name || app.Kind != p.Application.Kind || app.Key != p.Application.Key {
+			t.Errorf("unexpected application %+v", app)
+		}
+	}
 }

@@ -187,11 +187,13 @@ Omit the query for a one-shot recheck across all ports. Servers advertise
 `activity-connection-analysis-v1`. One analysis per daemon can run at a time.
 
 The `connection_analysis` response includes the original Activity reason and
-timestamp, dated changes in observed holders or verified application, the last
+timestamp, dated changes in observed holders or application evidence, the last
 sample time, and measured collection durations. `recovered` counts baseline
 Unidentified sockets with a fresh verified application at least once.
-`latest_verified` counts sockets with a verified application in their latest
-observation. Collection is capped at 64 sockets and eight recorded changes per
+`latest_verified` counts sockets with a `verified_application` in their latest
+observation. An Electron package match is reported as `best_effort_application`
+with source `electron-package-match`. It contributes to neither verified count.
+Collection is capped at 64 sockets and eight recorded changes per
 socket, with truncation reported. Shared sockets with different observed applications
 stay ambiguous. A socket absent from a sample could have closed or lost
 visibility. Only matching cookies, namespaces and socket inodes can join

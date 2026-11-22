@@ -131,16 +131,16 @@ func TestConnectionAnalysisAcceptsOnlyFreshMatchingRuntimeEvidence(t *testing.T)
 					Evidence: identity.TableEvidence{SocketCookie: example.cookie, BrokerPID: 48, BrokerStart: "21", UID: 1000}},
 			}
 			s := identity.ActivitySnapshot{Processes: map[string]identity.ActivityProcess{"broker": {PID: 48, Start: "21", UID: 1000}}}
-			if app := analysisApplication(s, row); app == nil || app.Key != application.Key || app.Prefix != example.prefix {
+			if app, hint := analysisApplications(s, row); hint != nil || app == nil || app.Key != application.Key || app.Prefix != example.prefix {
 				t.Fatalf("missing fresh runtime result %+v", app)
 			}
 			row.RuntimeApplication.DisplaySource = "last-verified-snapshot"
-			if app := analysisApplication(s, row); app != nil {
+			if app, hint := analysisApplications(s, row); app != nil || hint != nil {
 				t.Fatalf("cached label presented as fresh: %+v", app)
 			}
 			row.RuntimeApplication.DisplaySource = ""
 			row.Socket.Cookie = "cc00000000000000"
-			if app := analysisApplication(s, row); app != nil {
+			if app, hint := analysisApplications(s, row); app != nil || hint != nil {
 				t.Fatalf("runtime label transferred to a different socket: %+v", app)
 			}
 		})
@@ -193,8 +193,10 @@ func TestConnectionAnalysisWineHolderImagesRemainPerProcess(t *testing.T) {
 			t.Fatalf("another holder supplied the image or prefix: %+v", other)
 		}
 	}
-	if analysisApplication(s, first) != nil || analysisApplication(s, second) != nil {
-		t.Fatal("holder images supplied a socket-wide application")
+	for _, row := range []identity.ActivityRow{first, second} {
+		if app, hint := analysisApplications(s, row); app != nil || hint != nil {
+			t.Fatal("holder images supplied a socket-wide application")
+		}
 	}
 	original, _ := analysisHolders(s, first, nil)
 	if original[0].WindowsImage != nil {
