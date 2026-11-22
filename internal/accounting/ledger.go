@@ -159,8 +159,17 @@ func owner(s identity.ActivitySnapshot, r identity.ActivityRow) (Entry, string) 
 	var uid uint32
 	var runtime any
 	if v := r.RuntimeApplication; v != nil {
+		// Activity can retain a previous Wine label after the fresh runtime
+		// census fails. It still looks like an association on the wire.
+		// Keep the counters and withhold this endpoint's ownership evidence.
+		if v.DisplaySource != "" || v.DisplayVerifiedAt != "" {
+			return Entry{}, ""
+		}
 		ev := v.Evidence
 		if v.Application.Kind != "wine" || v.Application.Prefix == "" || ev.Prefix != v.Application.Prefix || ev.UID != v.UID || ev.Generation == "" || ev.BrokerPID <= 0 || ev.BrokerStart == "" || ev.SocketCookie != r.Socket.Cookie || len(ev.Owners) != 1 || ev.Owners[0].PID == 0 || ev.Owners[0].Created == 0 {
+			return Entry{}, ""
+		}
+		if exe := v.Application.Executable; exe == "" || len(exe) > 4096 || !utf8.ValidString(exe) {
 			return Entry{}, ""
 		}
 		if r.OwnershipCategory != "visible-holder" && r.OwnershipCategory != "shared" {
@@ -169,7 +178,7 @@ func owner(s identity.ActivitySnapshot, r identity.ActivityRow) (Entry, string) 
 		a, uid = v.Application, v.UID
 		// Only holder incarnation fields: mutable socket state is not identity.
 		w := ev.Owners[0]
-		runtime = []any{ev.Generation, ev.Runtime, ev.Prefix, ev.BrokerPID, ev.BrokerStart, ev.DirectPID, ev.DirectStart, w.PID, w.Created, w.CreationTime, w.UnixPID, w.Image}
+		runtime = []any{v.Application.Executable, ev.Generation, ev.Runtime, ev.Prefix, ev.BrokerPID, ev.BrokerStart, ev.DirectPID, ev.DirectStart, w.PID, w.Created, w.CreationTime, w.UnixPID, w.Image}
 	} else {
 		if r.OwnershipCategory != "visible-holder" || len(r.Owners) != 1 {
 			return Entry{}, ""

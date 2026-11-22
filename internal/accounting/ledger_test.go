@@ -249,7 +249,7 @@ func TestWinePrefixesAndHelperGenerationDoNotTransfer(t *testing.T) {
 		p := s.Processes["10:100"]
 		p.Application.Kind = "wine-unresolved"
 		s.Processes[p.ID] = p
-		a := identity.Application{Key: "same-synthetic-key", Revision: "pe-revision", Kind: "wine", Name: "Synthetic", Prefix: prefix}
+		a := identity.Application{Key: "same-synthetic-key", Revision: "pe-revision", Kind: "wine", Name: "Synthetic", Executable: "/fixture/alpha.exe", Prefix: prefix}
 		s.Rows[0].RuntimeApplication = &identity.RuntimeApplication{Application: a, UID: 1000, Evidence: identity.TableEvidence{Prefix: prefix, Generation: generation, UID: 1000, BrokerPID: 10, BrokerStart: "100", SocketCookie: "cookie", Owners: []identity.WindowsOwner{{PID: 5, Created: 123, Image: "synthetic"}}}}
 		return s
 	}
@@ -325,7 +325,7 @@ func TestRuntimeForeignCoholderIsUnattributed(t *testing.T) {
 		s.Processes[foreign.ID] = foreign
 		s.Rows[0].Owners = append(s.Rows[0].Owners, foreign.ID)
 		s.Rows[0].OwnershipCategory = "shared"
-		s.Rows[0].RuntimeApplication = &identity.RuntimeApplication{UID: 1000, Application: identity.Application{Kind: "wine", Key: "windows", Revision: "pe", Prefix: "prefix"}, Evidence: identity.TableEvidence{UID: 1000, Prefix: "prefix", Generation: "helper", BrokerPID: 10, BrokerStart: "100", SocketCookie: "cookie", Owners: []identity.WindowsOwner{{PID: 1, Created: 1}}}}
+		s.Rows[0].RuntimeApplication = &identity.RuntimeApplication{UID: 1000, Application: identity.Application{Kind: "wine", Key: "windows", Revision: "pe", Executable: "/fixture/alpha.exe", Prefix: "prefix"}, Evidence: identity.TableEvidence{UID: 1000, Prefix: "prefix", Generation: "helper", BrokerPID: 10, BrokerStart: "100", SocketCookie: "cookie", Owners: []identity.WindowsOwner{{PID: 1, Created: 1}}}}
 		l.Observe(s)
 	}
 	if len(l.entries) != 0 || unassigned(l, TCP) != "10" {
@@ -445,7 +445,7 @@ func TestSimultaneousWineApplicationsAndPrefixes(t *testing.T) {
 		for i := 0; i < 2; i++ {
 			label := fmt.Sprint(i)
 			prefix := "prefix-" + label
-			app := identity.Application{Key: "windows-" + label, Revision: "pe-" + label, Kind: "wine", Name: "Synthetic " + label, Prefix: prefix}
+			app := identity.Application{Key: "windows-" + label, Revision: "pe-" + label, Kind: "wine", Name: "Synthetic " + label, Executable: "/fixture/windows-" + label + ".exe", Prefix: prefix}
 			broker := identity.ActivityProcess{ID: "broker-" + label, PID: 100 + i, Start: "broker-start", BootID: "boot", NetNS: "net", UID: 1000, ExecutableRevision: "broker", Application: identity.Application{Kind: "wine-unresolved", Prefix: prefix}}
 			co := broker
 			co.ID = "app-" + label

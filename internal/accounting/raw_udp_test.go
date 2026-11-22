@@ -120,7 +120,7 @@ func TestRawUDPWineTwoApplicationsTwoPrefixesNoCrossCredit(t *testing.T) {
 		for i := 0; i < 4; i++ {
 			label := fmt.Sprint(i)
 			prefix := []string{"prefix-a", "prefix-b"}[i/2]
-			app := identity.Application{Kind: "wine", Key: "app-" + label, Revision: "revision", Prefix: prefix}
+			app := identity.Application{Kind: "wine", Key: "app-" + label, Revision: "revision", Executable: "/fixture/app-" + label + ".exe", Prefix: prefix}
 			broker := identity.ActivityProcess{ID: "broker-" + label, PID: 100 + i, Start: "broker-start", BootID: "boot", NetNS: s.UDP.NetNS, UID: 1000, ExecutableRevision: "broker", Application: identity.Application{Kind: "wine-unresolved", Prefix: prefix}}
 			co := broker
 			co.ID = "app-" + label
@@ -175,5 +175,69 @@ func TestTracingSkipsReportGapWithoutEstimatingBytes(t *testing.T) {
 	again := l.Snapshot(0, true)
 	if again.Gaps != got.Gaps || again.Entries[0].Uploaded != "2400" {
 		t.Fatal(again)
+	}
+}
+
+func TestRawUDPWineRequiresFreshMatchingOwner(t *testing.T) {
+	wine := func(seq, up uint64) identity.ActivitySnapshot {
+		s := rawUDP(seq, up)
+		row := &s.Rows[0]
+		broker := s.Processes[row.Owners[0]]
+		broker.Application = identity.Application{Kind: "wine-unresolved", Prefix: "/fixture/pfx"}
+		s.Processes[broker.ID] = broker
+		app := identity.Application{Kind: "wine", Key: "alpha", Name: "alpha.exe",
+			Executable: "/fixture/alpha.exe", Revision: "stamp", Prefix: "/fixture/pfx"}
+		row.RuntimeApplication = &identity.RuntimeApplication{
+			Application: app, UID: broker.UID,
+			Evidence: identity.TableEvidence{UID: broker.UID, Prefix: app.Prefix, Generation: "helper",
+				BrokerPID: broker.PID, BrokerStart: broker.Start, SocketCookie: row.Socket.Cookie,
+				Owners: []identity.WindowsOwner{{PID: 6, Created: 1, Image: app.Executable}}},
+		}
+		return s
+	}
+	retainLabel := func(app *identity.RuntimeApplication) {
+		app.DisplaySource = "last-verified-snapshot"
+		app.DisplayVerifiedAt = fixtureStart.Format(time.RFC3339Nano)
+	}
+	for _, tc := range []struct {
+		name string
+		edit func(before, after *identity.RuntimeApplication)
+		want uint64
+	}{
+		{name: "fresh stable owner", want: 100},
+		{name: "cached ending label", edit: func(_, after *identity.RuntimeApplication) { retainLabel(after) }},
+		{name: "cached starting label", edit: func(before, _ *identity.RuntimeApplication) { retainLabel(before) }},
+		{name: "different executable same prefix", edit: func(_, after *identity.RuntimeApplication) {
+			after.Application.Executable = "/fixture/beta.exe"
+			after.Application.Name = "beta.exe"
+			// Keep the runtime's image label identical. The mapped executable
+			// path itself must match even when the runtime name does.
+		}},
+		{name: "same executable different prefix", edit: func(_, after *identity.RuntimeApplication) {
+			after.Application.Prefix = "/fixture/other-pfx"
+			after.Evidence.Prefix = after.Application.Prefix
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before, after := wine(1, 0), wine(2, 100)
+			if tc.edit != nil {
+				tc.edit(before.Rows[0].RuntimeApplication, after.Rows[0].RuntimeApplication)
+			}
+			l := New()
+			l.Observe(before)
+			l.Observe(after)
+			l.Observe(after) // The same counter sample cannot credit the interval again.
+			credited, unattributed := sum(l, 1000), unassigned(l, UDP)
+			t.Logf("Windows application=%d B, unattributed=%s B, registered delta=100 B", credited, unattributed)
+			if credited != tc.want || unattributed != decimal(100-tc.want) {
+				t.Fatalf("wrong bucket or lost bytes: %+v", l.Snapshot(0, true))
+			}
+			if tc.want > 0 {
+				entries := l.Snapshot(1000, false).Entries
+				if len(entries) != 1 || entries[0].Application.Name != "alpha.exe" || entries[0].Source != UDP {
+					t.Fatalf("stable bytes credited to the wrong application: %+v", entries)
+				}
+			}
+		})
 	}
 }
