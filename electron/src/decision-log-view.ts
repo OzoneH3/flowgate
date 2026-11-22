@@ -266,9 +266,10 @@ function row(r: LogRecord) {
   t.title = r.time;
   if (r.kind === 'gap') {
     tr.className = 'log-gap';
+    const dropped = r.gap?.dropped;
     const cell = el(
       'td',
-      `Records lost${r.gap?.dropped ? ': ' + r.gap.dropped : ''} — ${r.gap?.reason || 'not recorded'}. History in this interval is incomplete.`,
+      `Records lost · ${dropped === undefined ? 'Count withheld' : `${dropped} dropped`} — ${r.gap?.reason || 'not recorded'}. History in this interval is incomplete.`,
     );
     cell.colSpan = 7;
     tr.append(t, cell);
@@ -466,7 +467,7 @@ function renderDetail(r: LogRecord, note: string, outcomeOf?: string) {
   };
   if (r.kind === 'gap') {
     const g = section('Lost records');
-    field(g, 'Dropped', r.gap?.dropped);
+    field(g, 'Dropped', r.gap?.dropped ?? 'Count withheld');
     field(g, 'Reason', r.gap?.reason);
     parts.push(
       el('p', 'Decisions in this interval were not stored; history is incomplete.', 'hint'),
@@ -568,10 +569,18 @@ function renderDetail(r: LogRecord, note: string, outcomeOf?: string) {
       field(m, 'IDs', r.decision.matching_rules.join(', '));
     }
   }
+  if (r.aggregation) {
+    const a = section('Aggregated observations');
+    field(a, 'Observations', r.aggregation.observations);
+    field(a, 'Window', `${r.aggregation.window_ms} ms`);
+    field(a, 'First seen', time(r.aggregation.first_seen));
+    field(a, 'Last seen', time(r.aggregation.last_seen));
+  }
   const meta = section('Record');
   field(meta, 'Sequence', r.sequence);
   field(meta, 'Record ID', r.id);
   field(meta, 'Request ID', r.request_id);
+  field(meta, 'Related request ID', r.related_request_id);
   field(meta, 'Daemon generation', r.generation);
   field(meta, 'Mode', r.mode);
   const actions = el('div', '', 'log-actions');

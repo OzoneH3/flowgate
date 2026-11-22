@@ -289,3 +289,72 @@ test('a page can narrow visibility before the connection poll reports the change
   assert.deepEqual(requests.at(-1), { limit: 100 });
   assert.deepEqual(ids(store.view()), ['13']);
 });
+
+test('a delayed catch-up restart cannot insert incoming rows into a populated outgoing filter', async () => {
+  const requests = [];
+  const store = new L.DecisionLogStore((query) => new Promise((resolve) => {
+    requests.push({ query, resolve });
+  }), 1000, 100, 1);
+  const page = (records, extra = {}) => L.parsePage({
+    records, log_id: 'same-log', scope: 'machine', ...extra,
+  });
+
+  const initial = store.tick();
+  requests.shift().resolve(page([record(1)]));
+  await initial;
+  const catchUp = store.tick();
+  requests.shift().resolve(page([record(3)], { has_more: true }));
+  await new Promise((resolve) => setImmediate(resolve));
+  const old = requests.shift();
+  assert.deepEqual(old.query, { limit: 100 });
+
+  const switched = store.setFilter({ direction: 'outgoing' });
+  const fresh = requests.shift();
+  assert.deepEqual(fresh.query, { limit: 100, direction: 'outgoing' });
+  const outgoing = record(2);
+  fresh.resolve(page([outgoing]));
+  await switched;
+  assert.deepEqual(ids(store.view()), ['2']);
+
+  old.resolve(page([record(5)], { next_before: '5' }));
+  await catchUp;
+  assert.deepEqual(ids(store.view()), ['2']);
+  assert.equal(store.view().filter.direction, 'outgoing');
+  assert.equal(store.view().hasOlder, false);
+});
+
+test('a failed catch-up restart reports its error when the filter has not changed', async () => {
+  let calls = 0;
+  const store = new L.DecisionLogStore(async () => {
+    if (++calls === 3) throw new L.LogError('History unavailable', 'unavailable');
+    return L.parsePage({
+      records: [record(calls)], log_id: 'same-log', scope: 'machine', has_more: true,
+    });
+  }, 1000, 100, 1);
+  await store.tick();
+  await store.tick();
+  assert.equal(store.view().status, 'error');
+  assert.equal(store.view().error.code, 'unavailable');
+});
+
+test('copied evidence preserves a revalidation link, aggregation and withheld versus zero counts', () => {
+  const parsedCopy = (input) => JSON.parse(JSON.stringify(L.parseRecord(input)));
+  const block = parsedCopy({
+    ...record(7), request_id: undefined, related_request_id: 'earlier-request',
+    decision: { action: 'block', source: 'identity_changed' },
+  });
+  assert.equal(block.request_id, '');
+  assert.equal(block.related_request_id, 'earlier-request');
+
+  const aggregation = {
+    observations: 15, first_seen: '2026-11-22T18:03:12.012Z',
+    last_seen: '2026-11-22T18:03:14.123Z', window_ms: 5000,
+  };
+  assert.deepEqual(parsedCopy({ ...record(8), aggregation }).aggregation, aggregation);
+
+  const gap = { id: 'gap', sequence: '9', kind: 'gap' };
+  const withheld = parsedCopy({ ...gap, gap: { reason: 'History incomplete' } });
+  const zero = parsedCopy({ ...gap, gap: { dropped: 0, reason: 'History incomplete' } });
+  assert.equal(Object.hasOwn(withheld.gap, 'dropped'), false);
+  assert.equal(zero.gap.dropped, 0);
+});

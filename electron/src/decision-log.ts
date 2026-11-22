@@ -30,6 +30,13 @@ export interface LogRecord {
   mode: string;
   kind: 'pending' | 'final' | 'gap';
   request_id: string;
+  related_request_id?: string;
+  aggregation?: {
+    observations: number;
+    first_seen: string;
+    last_seen: string;
+    window_ms: number;
+  };
   flow?: {
     direction: string;
     protocol: string;
@@ -52,7 +59,7 @@ export interface LogRecord {
   };
   verdict?: { state: string; detail: string };
   delivery: string;
-  gap?: { dropped: number; reason: string };
+  gap?: { dropped?: number; reason: string };
 }
 export interface LogHealth {
   state: string;
@@ -90,6 +97,8 @@ const obj = (v: unknown): Record<string, unknown> =>
   v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 const str = (v: unknown, max = 4096) => (typeof v === 'string' ? v.slice(0, max) : '');
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+const count = (v: unknown) =>
+  typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? v : undefined;
 const uid = (v: unknown) => (typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null);
 const cursor = (v: unknown) => {
   const s = str(v, 32);
@@ -123,9 +132,19 @@ export function parseRecord(raw: unknown): LogRecord {
   };
   if (kind === 'gap') {
     const g = obj(r.gap);
-    record.gap = { dropped: num(g.dropped), reason: str(g.reason) };
+    const dropped = count(g.dropped);
+    record.gap = { reason: str(g.reason), ...(dropped === undefined ? {} : { dropped }) };
     return record;
   }
+  const related = str(r.related_request_id, 256);
+  if (related) record.related_request_id = related;
+  const aggregation = obj(r.aggregation);
+  const observations = count(aggregation.observations);
+  const window = count(aggregation.window_ms);
+  const first = str(aggregation.first_seen, 64);
+  const last = str(aggregation.last_seen, 64);
+  if (observations !== undefined && window !== undefined && first && last)
+    record.aggregation = { observations, first_seen: first, last_seen: last, window_ms: window };
   const f = obj(r.flow);
   record.flow = {
     direction: str(f.direction, 32),
@@ -452,7 +471,9 @@ export class DecisionLogStore {
     try {
       await fn(session);
     } catch (e) {
-      if (session !== this.session) return;
+      // A catch-up restart can change the session within the same run.
+      // A filter or access change invalidates the run itself.
+      if (token !== this.runToken) return;
       const code = e instanceof LogError ? e.code : 'disconnected';
       if (code === 'invalid_cursor') {
         this.reset(this.filter, 'Saved position is no longer valid; the view restarted.');

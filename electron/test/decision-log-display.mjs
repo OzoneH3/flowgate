@@ -14,6 +14,10 @@ let missingId = '';
 let outcomeCapability = false;
 let outcomeError = '';
 const outcomeRequests = [];
+let evidence = [];
+let heldRecovery;
+let catchUpPages = 0;
+let raceArmed = false;
 const prefPath = path.join(root, 'build/desktop-session/electron-preferences.json');
 const preferences = fs.existsSync(prefPath) ? fs.readFileSync(prefPath) : undefined;
 const base = (readonly) => ({
@@ -29,9 +33,9 @@ const base = (readonly) => ({
     ...(outcomeCapability ? ['decision-log-outcome-v1'] : []),
   ],
   permissions: {
-    role: 'administrator',
-    policy_scope: 'machine',
-    observation_scope: 'machine',
+    role: variant === 'evidence-self' ? 'user' : 'administrator',
+    policy_scope: variant === 'evidence-self' ? 'self' : 'machine',
+    observation_scope: variant === 'evidence-self' ? 'self' : 'machine',
     can_manage_rules: !readonly,
     can_decide: false,
   },
@@ -155,6 +159,27 @@ const page = () => ({
 });
 // Explicitly synthetic server-side filters and cursor pages for navigation checks.
 function fixturePage(q = {}) {
+  if (variant === 'evidence' || variant === 'evidence-self') {
+    const self = variant === 'evidence-self';
+    return {
+      ...page(),
+      scope: self ? 'self' : 'machine',
+      records: q.after ? [] : evidence.map((r) =>
+        self && r.kind === 'gap' ? { ...r, gap: { reason: r.gap.reason } } : r),
+      health: { state: 'ok', recording: true, counts_withheld: self },
+    };
+  }
+  if (variant === 'filter-race') {
+    const incoming = (sequence) => {
+      const r = record(sequence, 'allow', 'user');
+      return { ...r, flow: { ...r.flow, direction: 'incoming' } };
+    };
+    if (q.direction === 'outgoing')
+      return { ...page(), records: q.after ? [] : [record(4001, 'allow', 'user')] };
+    if (!q.after) return { ...page(), records: [incoming(4000)] };
+    const has_more = raceArmed && ++catchUpPages <= 5;
+    return { ...page(), records: has_more ? [incoming(4010 + catchUpPages)] : [], has_more };
+  }
   if (variant !== 'navigation') return page();
   let rows = navigation.filter(
     (r) =>
@@ -192,6 +217,11 @@ try {
       s.once('data', (b) => {
         const q = JSON.parse(b);
         let r = base(readonly);
+        if (q.operation === 'decision-log' && variant === 'filter-race' && catchUpPages === 5 &&
+            !q.decision_query.after && !q.decision_query.direction && !heldRecovery) {
+          heldRecovery = s;
+          return;
+        }
         if (q.operation === 'decision-log')
           r =
             variant === 'forbidden'
@@ -203,7 +233,7 @@ try {
               ? { ...r, error_code: 'not_found', error: 'Unavailable' }
               : {
                   ...r,
-                  decision_record: (variant === 'navigation' ? navigation : page().records).find(
+                  decision_record: (variant === 'navigation' ? navigation : fixturePage().records).find(
                     (x) => x.id === q.decision_id,
                   ),
                 };
@@ -223,6 +253,7 @@ try {
     servers.push(server);
   }
   app = await _electron.launch({
+    executablePath: process.env.FLOWGATE_TEST_ELECTRON,
     chromiumSandbox: true,
     args: [
       '--ozone-platform=wayland',
@@ -272,7 +303,7 @@ try {
   variant = 'degraded';
   await p.selectOption('#logDirection', 'outgoing');
   await until(async () => (await p.locator('#logRows tr').count()) === 6, 'records');
-  assert.match(await p.locator('#logRows tr.log-gap').innerText(), /Records lost: 4/);
+  assert.match(await p.locator('#logRows tr.log-gap').innerText(), /Records lost · 4 dropped/);
   assert.match(await p.locator('#logStatus').innerText(), /Logging degraded · 4 records dropped/);
   await p.click('#logRows tr[data-id="syn-12"]');
   await until(
@@ -558,6 +589,71 @@ try {
     'PASS SYNTHETIC decision-log states (unsupported, forbidden, empty, filtered, degraded+gap, rule edited/deleted since decision) ' +
       dir,
   );
+  await p.setViewportSize({ width: 1280, height: 760 });
+  const display = await app.evaluate(({ screen }) => screen.getPrimaryDisplay());
+  console.log(`Desktop ${display.size.width}x${display.size.height} at ${display.scaleFactor * 100}%`);
+  const laterBlock = {
+    ...record(3002, 'block', 'identity_changed'), request_id: undefined,
+    related_request_id: 'earlier-request',
+  };
+  const aggregation = {
+    observations: 15, first_seen: '2026-11-22T18:03:12.012Z',
+    last_seen: '2026-11-22T18:03:14.123Z', window_ms: 5000,
+  };
+  const gap = {
+    id: 'evidence-gap', sequence: '3000', kind: 'gap',
+    gap: { dropped: 0, reason: 'Fixture gap' },
+  };
+  evidence = [laterBlock, { ...record(3001, 'block', 'capacity'), aggregation }, gap];
+  variant = 'evidence';
+  await p.click('#logClear');
+  await p.click('#logRows tr[data-id="syn-3002"]');
+  await shown('syn-3002');
+  assert.match(await detail(), /Related request ID\s+earlier-request/);
+  assert.equal(await openOutcome().count(), 0);
+  await checkCopy('Copy record', (r) => {
+    assert.equal(r.related_request_id, 'earlier-request');
+    assert.equal(r.request_id, '');
+  });
+  await p.screenshot({ path: path.join(dir, 'evidence-related-request.png') });
+  await p.click('#logRows tr[data-id="syn-3001"]');
+  await shown('syn-3001');
+  assert.match(await detail(), /Aggregated observations\s+Observations\s+15\s+Window\s+5000 ms\s+First seen/i);
+  await checkCopy('Copy record', (r) => assert.deepEqual(r.aggregation, aggregation));
+  await p.screenshot({ path: path.join(dir, 'evidence-aggregation.png') });
+  await p.click('#logRows tr[data-id="evidence-gap"]');
+  await shown('evidence-gap');
+  assert.match(await detail(), /Dropped\s+0/);
+  assert.match(await p.locator('#logRows .log-gap').innerText(), /0 dropped/);
+  await checkCopy('Copy record', (r) => assert.equal(r.gap.dropped, 0));
+
+  variant = 'evidence-self';
+  await until(async () => /Your decisions only/.test(await p.locator('#logStatus').innerText()), 'self evidence');
+  await p.click('#logRows tr[data-id="evidence-gap"]');
+  await shown('evidence-gap');
+  assert.match(await detail(), /Dropped\s+Count withheld/);
+  assert.match(await p.locator('#logRows .log-gap').innerText(), /Count withheld/);
+  await checkCopy('Copy record', (r) => assert.equal(Object.hasOwn(r.gap, 'dropped'), false));
+  await p.screenshot({ path: path.join(dir, 'evidence-withheld-count.png') });
+
+  variant = 'filter-race';
+  await until(async () => (await rows()).includes('syn-4000'), 'race seed');
+  if ((await p.locator('#logLive').getAttribute('aria-pressed')) === 'false') await p.click('#logLive');
+  raceArmed = true;
+  await until(() => heldRecovery, 'unfiltered recovery request held');
+  await p.selectOption('#logDirection', 'outgoing');
+  await until(async () => (await rows()).join() === 'syn-4001', 'outgoing-only page');
+  assert.equal(heldRecovery.destroyed, false, 'obsolete reply must still be in flight');
+  const obsolete = { ...record(5000, 'allow', 'user') };
+  obsolete.flow.direction = 'incoming';
+  heldRecovery.end(JSON.stringify({
+    ...base(false), decision_log: { ...page(), records: [obsolete], next_before: '5000' },
+  }) + '\n');
+  await p.waitForTimeout(1200); // Renderer polling interval is one second.
+  assert.deepEqual(await rows(), ['syn-4001']);
+  assert.equal(await p.locator('#logOlder').isVisible(), false);
+  await p.screenshot({ path: path.join(dir, 'outgoing-after-delayed-page.png') });
+  console.log('PASS evidence detail and clipboard JSON; outgoing-only filter ignored a delayed incoming recovery page');
 } finally {
   if (app) {
     await app.evaluate(({ app }) => app.exit()).catch(() => {});
