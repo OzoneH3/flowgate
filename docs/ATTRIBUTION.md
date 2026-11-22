@@ -197,6 +197,13 @@ stay ambiguous. A socket absent from a sample could have closed or lost
 visibility. Only matching cookies, namespaces and socket inodes can join
 observations, even when endpoints are reused.
 
+A fresh observation can include a `windows_image` on an individual Wine or
+Proton holder. The image name, executable path and prefix come from the existing
+process resolver. The holder keeps its native executable and PID. If the image
+cannot be corroborated, `windows_image_reason` records the missing evidence.
+Each image describes one verified process. Multiple programs can hold the same
+socket, and their images grant no socket-wide application identity.
+
 A watch waits 350 ms between samples. A connection that opens and closes in the
 gap can go unobserved. Covering a short connected UDP socket requires recording
 the successful connect event while the socket is live, with its socket cookie,

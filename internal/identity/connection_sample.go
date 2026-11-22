@@ -16,8 +16,9 @@ func ConnectionKey(s Socket) string {
 }
 
 type ConnectionSample struct {
-	Activity  ActivitySnapshot
-	Confirmed map[string]bool
+	Activity            ActivitySnapshot
+	Confirmed           map[string]bool
+	VerifiedWineHolders map[string]bool // keyed by Activity process ID; never used for a rule
 }
 
 // CollectConnectionSample bookends the Activity holder census with socket
@@ -41,7 +42,24 @@ func CollectConnectionSample(localPort uint16, annotate func(*ActivitySnapshot))
 			snapshot.Issues = append(snapshot.Issues, "Socket identity confirmation incomplete")
 		}
 	}
+	wineHolders := make(map[string]bool)
+	for id, p := range snapshot.Processes {
+		if p.Application.Kind == "wine" && liveConnectionWineHolder(p) {
+			wineHolders[id] = true
+		}
+	}
 	snapshot.Collected = time.Now()
 	snapshot.DurationMS = snapshot.Collected.Sub(snapshot.Started).Milliseconds()
-	return ConnectionSample{Activity: snapshot, Confirmed: confirmed}
+	return ConnectionSample{Activity: snapshot, Confirmed: confirmed, VerifiedWineHolders: wineHolders}
+}
+
+// The holder census already inspects the live runtime image and bookends the
+// descriptor, process generation and native executable. Check that the same
+// process and executable are still visible after the socket confirmation and
+// any runtime annotation. A zombie cannot supply a live executable.
+func liveConnectionWineHolder(p ActivityProcess) bool {
+	facts, err := readHolderFacts(Holder{TGID: p.PID}, HolderMember{TID: p.PID, Start: p.Start})
+	return err == nil && facts.UID == p.UID && facts.Exe == p.Executable &&
+		facts.Revision == p.ExecutableRevision && facts.NetNS == p.NetNS &&
+		facts.MountNS == p.MountNS && facts.PIDNS == p.PIDNS
 }

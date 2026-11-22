@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"flowgate/internal/identity"
 	"reflect"
 	"time"
@@ -12,6 +13,7 @@ const (
 	analysisInterval             = 350 * time.Millisecond
 	analysisGrace                = 12 * time.Second
 	analysisRowLimit             = 64
+	analysisConnectionBytes      = 3 * 1024 * 1024 // Leave room for API metadata under the desktop's 4 MiB limit.
 	analysisHistoryLimit         = 8
 	analysisHolderLimit          = 8
 )
@@ -75,11 +77,21 @@ type ConnectionObservation struct {
 }
 
 type AnalysisHolder struct {
-	PID         int    `json:"pid"`
-	ThreadGroup int    `json:"thread_group_pid,omitempty"`
-	Start       string `json:"start_ticks"`
-	UID         uint32 `json:"uid"`
-	Executable  string `json:"executable,omitempty"`
+	PID                int                   `json:"pid"`
+	ThreadGroup        int                   `json:"thread_group_pid,omitempty"`
+	Start              string                `json:"start_ticks"`
+	UID                uint32                `json:"uid"`
+	Executable         string                `json:"executable,omitempty"`
+	WindowsImage       *AnalysisWindowsImage `json:"windows_image,omitempty"`
+	WindowsImageReason string                `json:"windows_image_reason,omitempty"`
+}
+
+// AnalysisWindowsImage describes a process, not an owner of the socket as a
+// whole. It intentionally has no application key or policy target.
+type AnalysisWindowsImage struct {
+	Name       string `json:"name"`
+	Executable string `json:"executable,omitempty"`
+	Prefix     string `json:"prefix,omitempty"`
 }
 
 type AnalysisApplication struct {
@@ -106,15 +118,42 @@ func analysisLifecycle(row identity.ActivityRow) bool {
 		row.RuntimeApplication == nil && row.DisplayApplication == nil
 }
 
-func analysisHolders(s identity.ActivitySnapshot, row identity.ActivityRow) ([]AnalysisHolder, bool) {
+func analysisHolders(s identity.ActivitySnapshot, row identity.ActivityRow, sample *identity.ConnectionSample) ([]AnalysisHolder, bool) {
 	holders := make([]AnalysisHolder, 0, min(len(row.Owners), analysisHolderLimit))
 	for _, id := range row.Owners[:min(len(row.Owners), analysisHolderLimit)] {
 		if p, ok := s.Processes[id]; ok {
-			holders = append(holders, AnalysisHolder{PID: p.PID, ThreadGroup: p.ThreadGroup, Start: p.Start,
-				UID: p.UID, Executable: boundedAnalysisPath(p.Executable)})
+			holder := AnalysisHolder{PID: p.PID, ThreadGroup: p.ThreadGroup, Start: p.Start,
+				UID: p.UID, Executable: boundedAnalysisPath(p.Executable)}
+			if sample != nil {
+				holder.WindowsImage, holder.WindowsImageReason = analysisWindowsImage(p, sample.VerifiedWineHolders[id])
+			}
+			holders = append(holders, holder)
 		}
 	}
 	return holders, len(row.Owners) > analysisHolderLimit || row.OwnershipCategory == "holders-truncated"
+}
+
+func analysisWindowsImage(p identity.ActivityProcess, live bool) (*AnalysisWindowsImage, string) {
+	a := p.Application
+	if a.Kind != "wine" && a.Kind != "wine-unresolved" {
+		return nil, ""
+	}
+	if a.Prefix == "" {
+		return nil, "A Wine prefix could not be verified for this process"
+	}
+	if a.Kind != "wine" || a.Runtime != p.Executable || a.Name == "" || a.Executable == "" ||
+		a.Revision == "" || a.Key != identity.ApplicationKey(p.UID, a) {
+		return nil, "No mapped Windows executable was corroborated for this Wine holder"
+	}
+	if !live {
+		return nil, "The holder exited, changed, or was no longer inspectable before collection finished"
+	}
+	image := &AnalysisWindowsImage{Name: boundedAnalysisPath(a.Name), Executable: boundedAnalysisPath(a.Executable),
+		Prefix: boundedAnalysisPath(a.Prefix)}
+	if image.Name == "" {
+		return nil, "The verified Windows executable name exceeds the report limit"
+	}
+	return image, ""
 }
 
 func boundedAnalysisPath(path string) string {
@@ -216,7 +255,7 @@ func (e *Engine) analyzeConnections(query *ConnectionAnalysisQuery, uid uint32, 
 			continue
 		}
 		record := analysisConnection(row, baseline.Collected, true)
-		holders, truncated := analysisHolders(baseline, row)
+		holders, truncated := analysisHolders(baseline, row, nil)
 		record.record(baseline.Collected, ConnectionObservation{Category: row.OwnershipCategory,
 			Reason: row.Evidence, Local: row.Socket.Local.String(), Remote: row.Socket.Remote.String(),
 			Holders: holders, HoldersTruncated: truncated})
@@ -259,7 +298,7 @@ func (e *Engine) analyzeConnections(query *ConnectionAnalysisQuery, uid uint32, 
 			observation := ConnectionObservation{Category: "unconfirmed-socket",
 				Reason: "Socket generation was not confirmed after holder inspection", Holders: []AnalysisHolder{}}
 			if sample.Confirmed[key] {
-				holders, truncated := analysisHolders(s, row)
+				holders, truncated := analysisHolders(s, row, &sample)
 				observation = ConnectionObservation{Category: row.OwnershipCategory, Reason: row.Evidence,
 					Local: row.Socket.Local.String(), Remote: row.Socket.Remote.String(),
 					Holders: holders, HoldersTruncated: truncated, Application: analysisApplication(s, row)}
@@ -278,7 +317,15 @@ func (e *Engine) analyzeConnections(query *ConnectionAnalysisQuery, uid uint32, 
 		time.Sleep(analysisInterval)
 	}
 
-	for _, record := range result.Connections {
+	budget := analysisConnectionBytes
+	for i, record := range result.Connections {
+		encoded, err := json.Marshal(record)
+		if err != nil || len(encoded)+1 > budget {
+			result.Connections = result.Connections[:i]
+			result.Truncated = true
+			break
+		}
+		budget -= len(encoded) + 1
 		if record.recovered {
 			result.Recovered++
 		}
