@@ -12,9 +12,13 @@ import (
 // Real loopback sockets of this test process; the descriptor scan is limited
 // to this process (an unprivileged test cannot read other processes' fds).
 func ownProcessOnly(t *testing.T) {
-	old := localPairPIDs
-	localPairPIDs = func() []int { return []int{os.Getpid()} }
-	t.Cleanup(func() { localPairPIDs = old })
+	old := holderSource
+	holderSource = func() holderProc {
+		p := procHolders()
+		p.groups = func() ([]int, error) { return []int{os.Getpid()}, nil }
+		return p
+	}
+	t.Cleanup(func() { holderSource = old })
 }
 
 func ap(t *testing.T, a net.Addr) netip.AddrPort {

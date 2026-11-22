@@ -13,8 +13,6 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
-	"os"
-	"strconv"
 	"strings"
 )
 
@@ -87,19 +85,6 @@ var localAddresses = func() ([]netip.Addr, error) {
 // loopbackInterface reports whether an interface index is a loopback device
 // (tests replace it). Same-host packets traverse lo, never a physical device.
 var loopbackInterface = linkIsLoopback
-
-// localPairPIDs lists the processes whose descriptors are scanned (tests limit
-// it to the test process; production scans every visible /proc entry).
-var localPairPIDs = func() []int {
-	entries, _ := os.ReadDir("/proc")
-	out := make([]int, 0, len(entries))
-	for _, e := range entries {
-		if pid, err := strconv.Atoi(e.Name()); err == nil {
-			out = append(out, pid)
-		}
-	}
-	return out
-}
 
 // IsLocalFlow: the remote address is an address of this same network namespace
 // (loopback or an assigned local address) and the packet used a loopback
@@ -218,12 +203,14 @@ func identifyLocalPeer(f Flow, p *LocalPeer, sockets []Socket, again func() ([]S
 		}
 	}
 	p.Socket = &LocalPeerSocket{Kind: kind, Protocol: s.Protocol, Local: s.Local, Remote: s.Remote, State: SocketState(s), Cookie: s.Cookie, Inode: s.Inode, UID: s.UID, NetNS: s.NetNS}
-	owners, incomplete := socketHolders(s.Inode)
+	socket := fmt.Sprintf("socket:[%d]", s.Inode)
+	_, holders := resolveHolderIdentities(map[string]bool{socket: true}, inspectWithProvenance, nil)
+	owners := holders.Owners[socket]
 	// The socket must still be the same generation after the descriptor scan.
 	if now, err := again(); err == nil {
 		still := false
 		for _, x := range now {
-			if x.Inode == s.Inode && x.Cookie == s.Cookie && pick(x) {
+			if x.Inode == s.Inode && x.Cookie == s.Cookie && x.NetNS == s.NetNS && pick(x) {
 				still = true
 			}
 		}
@@ -246,17 +233,17 @@ func identifyLocalPeer(f Flow, p *LocalPeer, sockets []Socket, again func() ([]S
 		_, owner = brokerAssociation(owners)
 	}
 	switch {
+	case len(owners) > 1 && owner == nil:
+		p.Reason = fmt.Sprintf("Local %s unknown: %d processes share the socket; no single owner", p.Role, len(owners))
+		return p
+	case !holders.Complete:
+		p.Reason = fmt.Sprintf("Local %s unknown: process visibility incomplete; another holder cannot be excluded", p.Role)
+		return p
 	case len(owners) == 0:
 		p.Reason = localClientNoOwner
 		if p.Role == "server" {
 			p.Reason = "Local server unknown: no visible process holds the receiving socket"
 		}
-		return p
-	case owner == nil:
-		p.Reason = fmt.Sprintf("Local %s unknown: %d processes share the socket; no single owner", p.Role, len(owners))
-		return p
-	case incomplete:
-		p.Reason = fmt.Sprintf("Local %s unknown: process visibility incomplete; another holder cannot be excluded", p.Role)
 		return p
 	}
 	p.State = "verified"
@@ -269,35 +256,4 @@ func identifyLocalPeer(f Flow, p *LocalPeer, sockets []Socket, again func() ([]S
 		p.Evidence = fmt.Sprintf("%s %s socket %s (%s), cookie %s, inode %d; one descriptor holder PID %d (start %s)", strings.ToUpper(s.Protocol), kind, s.Local, SocketState(s), s.Cookie, s.Inode, owner.PID, owner.Start)
 	}
 	return p
-}
-
-// socketHolders scans visible processes for descriptors of one socket inode.
-func socketHolders(inode uint32) ([]Process, bool) {
-	want := fmt.Sprintf("socket:[%d]", inode)
-	var owners []Process
-	incomplete := false
-	for _, pid := range localPairPIDs() {
-		base := "/proc/" + strconv.Itoa(pid)
-		fds, err := os.ReadDir(base + "/fd")
-		if err != nil {
-			if _, e := os.Stat(base); e == nil && !strings.Contains(string(readBound(base+"/status", 4096)), "State:\tZ") {
-				incomplete = true
-			}
-			continue
-		}
-		for _, fd := range fds {
-			if link(base+"/fd/"+fd.Name()) != want {
-				continue
-			}
-			p, err := Inspect(pid)
-			if err != nil {
-				incomplete = true
-			} else {
-				p.Provenance = CaptureProvenance(p)
-				owners = append(owners, p)
-			}
-			break
-		}
-	}
-	return owners, incomplete
 }
