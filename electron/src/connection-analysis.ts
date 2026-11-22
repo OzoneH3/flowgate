@@ -4,6 +4,8 @@ export type ConnectionAnalysisMode = 'recheck' | 'watch';
 interface Holder {
   pid: number;
   executable: string;
+  windowsImage?: { name: string; executable: string; prefix: string };
+  windowsImageReason: string;
 }
 
 export interface ConnectionObservation {
@@ -75,7 +77,17 @@ function parseObservation(value: unknown): ConnectionObservation {
   const state = object(value);
   const holders = list(state.holders, 8, (value) => {
     const holder = object(value);
-    return { pid: count(holder.pid, 1), executable: optionalString(holder.executable) };
+    const image = holder.windows_image === undefined ? undefined : object(holder.windows_image);
+    return {
+      pid: count(holder.pid, 1),
+      executable: optionalString(holder.executable),
+      windowsImage: image && {
+        name: string(image.name),
+        executable: optionalString(image.executable),
+        prefix: optionalString(image.prefix),
+      },
+      windowsImageReason: optionalString(holder.windows_image_reason),
+    };
   });
   const holdersTruncated = flag(state.holders_truncated ?? false);
   let application: ConnectionObservation['application'];

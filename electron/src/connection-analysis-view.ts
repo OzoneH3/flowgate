@@ -45,8 +45,37 @@ function applicationLabel(app: NonNullable<ConnectionObservation['application']>
   return app.pid === undefined ? executable : `${executable} · PID ${app.pid}`;
 }
 
-function observationDetails(observation: ConnectionObservation): HTMLElement {
-  const body = document.createElement('div');
+function holderDetails(holder: ConnectionObservation['holders'][number]): HTMLElement {
+  const row = document.createElement('li');
+  const image = holder.windowsImage;
+  const name = image?.name || holder.executable.split('/').at(-1);
+  row.append(node('strong', name ? `${name} · PID ${holder.pid}` : `PID ${holder.pid}`));
+
+  const details = document.createElement('dl');
+  if (image)
+    details.append(
+      node('dt', 'Windows executable'),
+      node('dd', image.executable || 'Unavailable'),
+      node('dt', 'Wine prefix'),
+      node('dd', image.prefix || 'Unavailable'),
+    );
+  details.append(node('dt', 'Native executable'), node('dd', holder.executable || 'Unavailable'));
+  row.append(details);
+  if (holder.windowsImageReason) row.append(node('p', holder.windowsImageReason));
+  return row;
+}
+
+function observationDetails(observation: ConnectionObservation, expandable = true): HTMLElement {
+  const shared = observation.category === 'shared' || observation.holders.length > 1;
+  const body = document.createElement(shared && expandable ? 'details' : 'div');
+  if (shared && expandable) {
+    body.className = 'analysis-shared';
+    const count = observation.holders.length;
+    const suffix = observation.holdersTruncated ? ' reported' : '';
+    body.append(
+      node('summary', `Shared socket · ${count} ${count === 1 ? 'process' : 'processes'}${suffix}`),
+    );
+  }
   if (observation.application)
     body.append(node('p', `Verified · ${applicationLabel(observation.application)}`));
   if (!observation.application) {
@@ -56,13 +85,16 @@ function observationDetails(observation: ConnectionObservation): HTMLElement {
       'No ownership evidence reported';
     body.append(node('p', `Unresolved · ${reason}`));
   }
-  if (observation.holders.length && observation.application?.pid === undefined) {
+  if (
+    observation.holders.length &&
+    (shared ||
+      observation.application?.pid === undefined ||
+      observation.holders.some((holder) => holder.windowsImage || holder.windowsImageReason))
+  ) {
     const holders = document.createElement('ul');
-    for (const holder of observation.holders)
-      holders.append(
-        node('li', `PID ${holder.pid} · ${holder.executable || 'Executable unavailable'}`),
-      );
-    body.append(node('p', 'Observed socket holders'), holders);
+    holders.className = 'analysis-holders';
+    for (const holder of observation.holders) holders.append(holderDetails(holder));
+    body.append(holders);
   }
   if (observation.holdersTruncated) body.append(node('p', 'Only some holders could be reported.'));
   return body;
@@ -100,7 +132,7 @@ function renderResults(target: HTMLElement, result: ConnectionAnalysis): void {
       for (const entry of previous) {
         const observation = document.createElement('div');
         observation.className = 'analysis-history-entry';
-        observation.append(node('p', time(entry.at)), observationDetails(entry));
+        observation.append(node('p', time(entry.at)), observationDetails(entry, false));
         history.append(observation);
       }
       row.append(history);

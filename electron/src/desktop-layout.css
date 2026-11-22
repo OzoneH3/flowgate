@@ -348,6 +348,10 @@ body.hide-chart #activityView > #trafficGraph {
   font-size: 12px;
 }
 
+#connectionAnalysis:has(.analysis-shared[open]) {
+  max-height: 78%;
+}
+
 #connectionAnalysis .analysis-header,
 #connectionAnalysis .analysis-actions {
   display: flex;
@@ -388,6 +392,45 @@ body.hide-chart #activityView > #trafficGraph {
 #connectionAnalysisResults summary {
   width: fit-content;
   cursor: pointer;
+}
+
+#connectionAnalysisResults .analysis-shared > summary {
+  padding: 3px 0;
+  font-weight: 600;
+}
+
+#connectionAnalysisResults .analysis-holders {
+  list-style: none;
+  padding-left: 12px;
+}
+
+#connectionAnalysisResults .analysis-holders li {
+  display: grid;
+  grid-template-columns: minmax(0, 13em) minmax(0, 1fr);
+  column-gap: 8px;
+  border-left: 2px solid var(--fg-border);
+  padding-left: 8px;
+  margin-top: 4px;
+}
+
+#connectionAnalysisResults .analysis-holders li > p {
+  grid-column: 2;
+}
+
+#connectionAnalysisResults .analysis-holders dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 8px;
+  margin: 0;
+}
+
+#connectionAnalysisResults .analysis-holders :is(dt, p) {
+  color: var(--fg-muted);
+}
+
+#connectionAnalysisResults .analysis-holders :is(dt, dd) {
+  margin: 0;
+  line-height: 1.35;
 }
 
 #connectionAnalysisResults .analysis-history-entry {
