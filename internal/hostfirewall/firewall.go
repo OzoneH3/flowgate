@@ -105,21 +105,36 @@ func lock(dir string) (*os.File, error) {
 	return f, nil
 }
 func save(dir string, r Record) error {
-	b, _ := json.MarshalIndent(r, "", "  ")
-	p := filepath.Join(dir, "instance.json")
-	f, e := os.OpenFile(p+".new", os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-	if e != nil {
-		return e
+	b, err := json.MarshalIndent(r, "", "  ")
+	if err != nil {
+		return err
 	}
-	defer os.Remove(p + ".new")
-	if _, e = f.Write(b); e == nil {
-		e = f.Sync()
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
 	}
-	f.Close()
-	if e != nil {
-		return e
+	defer d.Close()
+	// A write interrupted before rename must leave the last record readable
+	// and must not reserve the staging path for future writers.
+	f, err := os.CreateTemp(dir, ".instance-*")
+	if err != nil {
+		return err
 	}
-	return os.Rename(p+".new", p)
+	defer os.Remove(f.Name())
+	if _, err = f.Write(b); err == nil {
+		err = f.Sync()
+	}
+	closeErr := f.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if err = os.Rename(f.Name(), filepath.Join(dir, "instance.json")); err != nil {
+		return err
+	}
+	return d.Sync()
 }
 func Read(dir string) (Record, error) {
 	if err := daemon.SecureDirectory(dir); err != nil {
