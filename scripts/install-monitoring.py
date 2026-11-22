@@ -373,7 +373,7 @@ def install(h, bundle, stamp):
 
 
 def install_locked(h,bundle,stamp, *, extra_config=None, verify_extra=None,
-                   before_quiesce=None, standalone=False):
+                   before_quiesce=None, snapshot_ready=None, standalone=False):
  manifest=json.loads((bundle/'manifest.json').read_text())
  if not standalone and manifest['isolated_passed'] is not True:
   raise RuntimeError('Prepared bundle did not pass legacy qualification')
@@ -477,6 +477,12 @@ def install_locked(h,bundle,stamp, *, extra_config=None, verify_extra=None,
    atomic(h,backup/filename,contents,0o600)
    snapshot[destination]={'file':filename,'sha256':sha(contents),'mode':stat.S_IMODE(path.stat().st_mode)}
   atomic(h,backup/'rollback-files.json',json.dumps(snapshot,indent=2).encode(),0o600)
+  if snapshot_ready is not None:
+   for directory in (backup, backup.parent):
+    fd=os.open(directory,os.O_RDONLY|os.O_DIRECTORY)
+    try:os.fsync(fd)
+    finally:os.close(fd)
+   snapshot_ready()
  except Exception as preparation_error:
   if quiesced and previous:
    try:

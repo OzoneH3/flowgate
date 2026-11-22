@@ -101,6 +101,36 @@ class MonitoringInstall(unittest.TestCase):
   h=self.host()
   with self.assertRaises(SystemExit):self.run_install(h)
   self.assertEqual(h.calls,[]);self.assertEqual(json.loads((self.base/'var/lib/flowgate/protection.json').read_text())['mode'],'monitoring')
+ def test_snapshot_callback_runs_between_shutdown_and_configuration(self):
+  old=self.base/'usr/local/lib/flowgate/releases/OLD'
+  for unit in m.UNITS:
+   (old/unit).write_bytes(b'old unit')
+   (self.base/'etc/systemd/system'/unit).write_bytes(b'old unit')
+  host=self.host(running=True)
+  data=self.base/'var/lib/flowgate'
+  backup=data/'backups/SRC-monitoring-T'
+  original=m.atomic
+  events=[]
+  def atomic(h,path,contents,mode=0o644):
+   if path==backup/'rollback-files.json':
+    self.assertFalse(h.daemon_pids())
+    self.assertFalse(path.exists())
+    events.append('before-snapshot')
+   return original(h,path,contents,mode)
+  def snapshot_ready():
+   self.assertTrue((backup/'rollback-files.json').is_file())
+   self.assertTrue((backup/'install-record.json').is_file())
+   self.assertEqual((self.base/'usr/local/lib/flowgate/current').resolve(),old)
+   self.assertFalse((self.base/'etc/flowgate/administrator.json').exists())
+   self.assertFalse(host.daemon_pids())
+   events.append('snapshot-ready')
+   raise KeyboardInterrupt
+  with patch.object(m,'atomic',side_effect=atomic):
+   with self.assertRaises(KeyboardInterrupt):
+    m.install_locked(host,self.bundle,'T',snapshot_ready=snapshot_ready)
+  self.assertEqual(events,['before-snapshot','snapshot-ready'])
+  self.assertNotIn(('systemctl','start','flowgate.service'),host.calls)
+
  def test_active_protection_is_never_interrupted(self):
   h=self.host(running=True,protection='active')
   with self.assertRaises(SystemExit):self.run_install(h)

@@ -1,7 +1,8 @@
 #!/usr/bin/python3
 """Install, recover or remove a verified standalone FlowGate release."""
 import argparse
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
+import ctypes
 import fcntl
 import json
 import os
@@ -13,6 +14,7 @@ import runpy
 import shutil
 import signal
 import stat
+import struct
 import subprocess
 import tarfile
 import tempfile
@@ -571,7 +573,7 @@ def install(options, payload, manifest, backend):
         'release': release, 'previous': old[0].name if old else None, 'stamp': stamp,
         'rescue': {name: digest(rescue / name) for name in ('flowgate', 'release.py', 'install-monitoring.py')},
         'files': backend['files'], 'gui': gui_files, 'uid': uid, 'desktop_config': xdg,
-        'previous_mode': selected,
+        'previous_mode': selected, 'phase': 'preparing',
         'previous_unit_hashes': {name: old[1]['files'][name] for name in UNITS} if old else {},
     }
     if DATA.is_symlink():
@@ -595,20 +597,11 @@ def install(options, payload, manifest, backend):
             raise RuntimeError('Shaping journal appeared during install')
 
     try:
-        before_quiesce = prepare_switch(api, host, before, settings, selected, old[1] if old else None)
-        api['install_locked'](host, payload / 'backend', stamp, extra_config=config,
-                              verify_extra=verify_extra, before_quiesce=before_quiesce, standalone=True)
-    except PreflightChanged:
-        pending.unlink()
-        fsync_dir(DATA)
-        raise
+        switch_release(api, host, before, settings, selected, old[1] if old else None,
+                       payload / 'backend', record, pending, config, verify_extra)
     except api['RollbackComplete']:
-        pending.unlink()
-        fsync_dir(DATA)
+        clear_pending(pending)
         raise RuntimeError('Previous release and database restored in monitoring') from None
-    write_record(DATA / 'standalone.json', record)
-    pending.unlink()
-    fsync_dir(DATA)
 
     if selected != 'monitoring':
         _, after = host.api()
@@ -618,10 +611,14 @@ def install(options, payload, manifest, backend):
             wait_for(host, after['generation'], lambda v: check_mode(api, host, v, selected))
         except Exception as exc:
             _, status = host.api()
+            if status.get('generation') != after['generation']:
+                raise RuntimeError('Installed daemon changed during protection restoration; use local recovery') from exc
             if not check_mode(api, host, status, selected):
                 if check_mode(api, host, status, 'monitoring'):
+                    finish_install(record, pending)
                     raise RuntimeError(f'Installed in monitoring; restoring {selected} was refused: {exc}') from None
                 raise RuntimeError(f'Restoring {selected} could not be verified; use local recovery') from exc
+    finish_install(record, pending)
     desktop(uid, xdg, Path(FILES['flowgate-ui']), '--migrate-autostart', options.import_preferences)
     print(f"Installed {release_label(manifest.get('version', release), release)}; protection mode {selected}. Launch with flowgate-ui.")
 
@@ -729,20 +726,136 @@ def verify_before_switch(api, host, before, settings, protection, manifest):
         raise PreflightChanged(f'State changed after preflight: {exc}. Retry from a fresh preflight.') from exc
 
 
-def prepare_switch(api, host, before, settings, selected, manifest):
-    if before is None:
-        return None
-    expected = before['protection']
-    verify_before_switch(api, host, before, settings, expected, manifest)
-    if selected != 'monitoring':
-        host.api('protection-stop', generation=before['generation'], protection_id=expected['id'])
-        stopped = wait_for(host, before['generation'], lambda state: check_mode(api, host, state, 'monitoring'))
-        expected = stopped['protection']
+class IntentWrites:
+    """Count persisted mode changes, including identical Stops on older daemons."""
 
-    def before_quiesce():
-        verify_before_switch(api, host, before, settings, expected, manifest)
+    def __init__(self):
+        self.count = 0
 
-    return before_quiesce
+    def __enter__(self):
+        libc = ctypes.CDLL(None, use_errno=True)
+        self.fd = libc.inotify_init1(os.O_NONBLOCK | os.O_CLOEXEC)
+        if self.fd < 0:
+            raise OSError(ctypes.get_errno(), 'Cannot watch protection intent')
+        # The daemon atomically renames the new intent over protection.json.
+        mask = 0x80 | 0x08 | 0x200  # IN_MOVED_TO, IN_CLOSE_WRITE, IN_DELETE
+        if libc.inotify_add_watch(self.fd, os.fsencode(DATA), mask) < 0:
+            error = ctypes.get_errno()
+            os.close(self.fd)
+            raise OSError(error, 'Cannot watch protection intent')
+        return self
+
+    def __exit__(self, *_):
+        os.close(self.fd)
+
+    def writes(self):
+        while True:
+            try:
+                data = os.read(self.fd, 65536)
+            except BlockingIOError:
+                return self.count
+            offset = 0
+            while offset < len(data):
+                _, mask, _, length = struct.unpack_from('iIII', data, offset)
+                offset += 16
+                if mask & (0x4000 | 0x8000):  # IN_Q_OVERFLOW or IN_IGNORED
+                    raise RuntimeError('Protection intent changes could not be verified')
+                if data[offset:offset + length].rstrip(b'\0') == b'protection.json':
+                    self.count += 1
+                offset += length
+
+
+def clear_pending(pending):
+    pending.unlink()
+    fsync_dir(DATA)
+
+
+def finish_install(record, pending):
+    record['phase'] = 'complete'
+    write_record(pending, record)
+    write_record(DATA / 'standalone.json', record)
+    clear_pending(pending)
+
+
+def restore_on_refusal(api, host, before, stopped, selected, intent):
+    generation = before['generation']
+
+    def settled(response):
+        mode = response['protection']['desired_mode']
+        return mode in ('monitoring', 'incoming', 'both') and check_mode(api, host, response, mode)
+
+    status = wait_for(host, generation, settled)
+    if (intent.writes() != 1 or status['protection']['desired_mode'] != 'monitoring'
+            or status['protection']['id'] != stopped['id']):
+        return status['protection']['desired_mode']
+
+    request = uuid.uuid4().hex
+    try:
+        host.api('protection-start', generation=generation, protection_id=stopped['id'],
+                 request_id=request, profile=selected)
+    except (OSError, RuntimeError, ValueError):
+        status = wait_for(host, generation, settled)
+        if intent.writes() > 1 and status['protection'].get('request_id') != request:
+            return status['protection']['desired_mode']
+        raise
+    status = wait_for(host, generation, settled)
+    # Older daemons accept another Stop against the same protection ID. If it
+    # raced the Start request, undo only our own Start, never a user's Start.
+    if (intent.writes() != 2 and status['protection']['desired_mode'] == selected
+            and status['protection'].get('request_id') == request):
+        host.api('protection-stop', generation=generation, protection_id=status['protection']['id'])
+        status = wait_for(host, generation, settled)
+    mode = status['protection']['desired_mode']
+    if mode != selected and intent.writes() == 2:
+        raise RuntimeError(f'Restoring {selected} did not settle in the requested mode')
+    return mode
+
+
+def switch_release(api, host, before, settings, selected, manifest, bundle, record, pending,
+                   config, verify_extra):
+    with (IntentWrites() if selected != 'monitoring' else nullcontext()) as intent:
+        expected = (before or {}).get('protection')
+        stop_attempted = False
+
+        def before_quiesce():
+            if before is not None:
+                verify_before_switch(api, host, before, settings, expected, manifest)
+            if intent is not None and intent.writes() != 1:
+                raise PreflightChanged('Protection intent changed after preflight. Retry from a fresh preflight.')
+            record['phase'] = 'snapshotting'
+            write_record(pending, record)
+
+        def snapshot_ready():
+            if intent is not None and intent.writes() != 1:
+                raise PreflightChanged('Protection intent changed before shutdown completed.')
+            record['phase'] = 'snapshot-ready'
+            write_record(pending, record)
+
+        try:
+            if before is not None:
+                verify_before_switch(api, host, before, settings, expected, manifest)
+            if intent is not None:
+                stop_attempted = True
+                _, stopped = host.api('protection-stop', generation=before['generation'],
+                                      protection_id=expected['id'])
+                expected = stopped['protection']
+                state = wait_for(host, before['generation'], lambda value: check_mode(api, host, value, 'monitoring'))
+                if state['protection']['id'] != expected['id']:
+                    raise PreflightChanged('Protection changed during Stop. Retry from a fresh preflight.')
+                expected = state['protection']
+            api['install_locked'](host, bundle, record['stamp'], extra_config=config,
+                                  verify_extra=verify_extra, before_quiesce=before_quiesce,
+                                  snapshot_ready=snapshot_ready, standalone=True)
+        except (Exception, SystemExit) as exc:
+            if record['phase'] == 'preparing':
+                if stop_attempted:
+                    try:
+                        mode = restore_on_refusal(api, host, before, expected, selected, intent)
+                    except (OSError, RuntimeError, ValueError) as error:
+                        raise RuntimeError(f'{exc} Protection outcome could not be verified; use local recovery: {error}') from error
+                    print(f'Upgrade refused; predecessor protection verified in {mode}.')
+                clear_pending(pending)
+            raise
 
 
 def rollback_build(api, host, record):
@@ -798,7 +911,7 @@ def rollback_build(api, host, record):
     stamp = time.strftime('%Y%m%dT%H%M%S') + '-' + uuid.uuid4().hex[:8]
     pending = DATA / 'standalone-pending.json'
     attempt = dict(
-        prior, previous=current.name, stamp=stamp, previous_mode=selected,
+        prior, previous=current.name, stamp=stamp, previous_mode=selected, phase='preparing',
         previous_unit_hashes={name: installed['files'][name] for name in UNITS},
         uid=uid, desktop_config=xdg,
     )
@@ -818,24 +931,16 @@ def rollback_build(api, host, record):
             restore_collector(host, collector, response)
 
     try:
-        before_quiesce = prepare_switch(api, host, before, settings, selected, predecessor[1])
-        api['install_locked'](host, old, stamp, verify_extra=verify_latest,
-                              before_quiesce=before_quiesce, standalone=True)
-    except PreflightChanged:
-        pending.unlink()
-        fsync_dir(DATA)
-        raise
+        switch_release(api, host, before, settings, selected, predecessor[1],
+                       old, attempt, pending, config, verify_latest)
     except api['RollbackComplete']:
-        pending.unlink()
-        fsync_dir(DATA)
+        clear_pending(pending)
         raise RuntimeError(
             'Downgrade failed verification. The newer executable and latest state were '
             'restored in monitoring. No older database was activated.'
         ) from None
     write_record(receipt, attempt)
-    write_record(DATA / 'standalone.json', attempt)
-    pending.unlink()
-    fsync_dir(DATA)
+    finish_install(attempt, pending)
     print(f'Selected {release_label(version, previous)} in monitoring with the latest saved rules and settings.')
     if legacy_rollback:
         print('UDP collector failed as expected: the previous release executes its helper from a noexec mount.')
@@ -864,25 +969,92 @@ def cleanup(api, host, record):
         raise RuntimeError('Interception remains; install and startup tools retained')
 
 
-def restore_previous(api, host, record):
-    if not record.get('previous'):
-        raise RuntimeError('No verified previous release is recorded')
-    old = BASE / 'releases' / record['previous']
+def recovery_backup(record):
+    release, stamp = record['release'], record['stamp']
+    if not RELEASE_ID.fullmatch(release) or not re.fullmatch(r'[0-9]{8}T[0-9]{6}-[a-f0-9]{8}', stamp):
+        raise RuntimeError('Invalid pending release or rollback stamp')
+    return DATA / 'backups' / (release + '-monitoring-' + stamp)
+
+
+def verified_predecessor(api, host, record):
+    previous = record['previous']
+    if not RELEASE_ID.fullmatch(previous):
+        raise RuntimeError('Invalid recorded predecessor')
+    old = BASE / 'releases' / previous
     manifest = api['previous_release_for_path'](host, BASE, old)
-    backup = DATA / 'backups' / (record['release'] + '-monitoring-' + record['stamp'])
+    if {name: manifest['files'].get(name) for name in UNITS} != record['previous_unit_hashes']:
+        raise RuntimeError('Previous units differ from the pending transaction')
+    return old, manifest
+
+
+def verified_rollback_snapshot(api, host, record, backup, previous):
+    # Validate the complete inventory before cleanup can stop a healthy daemon.
+    if not backup.is_dir():
+        raise RuntimeError('Rollback snapshot directory is missing')
+    secure_directory(backup)
     snapshot = read_record(backup / 'rollback-files.json')
     install_record = read_record(backup / 'install-record.json')
-    allowed = {DATA / name for name in ('rules.db', 'decisions.db')}
-    allowed.update({ETC / 'zones.json', ETC / 'administrator.json', SHAPING, Path(api['DROPIN'])})
-    allowed.update(Path(path) for path in api['TOOLS'].values())
-    allowed.update(Path('/etc/systemd/system') / name for name in UNITS)
+    old, manifest = previous
+    target = install_record.get('previous_current')
+    if (install_record.get('release') != record['release'] or install_record.get('stamp') != record['stamp']
+            or not target or (BASE / target).resolve() != old):
+        raise RuntimeError('Rollback snapshot does not match the pending transaction')
+    enabled = install_record.get('unit_enabled') or {}
+    if set(enabled) != set(UNITS) or any(type(value) is not bool for value in enabled.values()):
+        raise RuntimeError('Invalid rollback service settings')
+    units = {str(Path('/etc/systemd/system') / name): manifest['files'][name] for name in UNITS}
+    required = {DATA / name for name in ('rules.db', 'decisions.db')}
+    required.update({ETC / 'zones.json', ETC / 'administrator.json', Path(api['DROPIN'])})
+    required.update(Path(path) for path in api['TOOLS'].values())
+    required = {str(path) for path in required} | units.keys()
+    if not isinstance(snapshot, dict) or not required <= snapshot.keys() <= required | {str(SHAPING)}:
+        raise RuntimeError('Unsafe or incomplete rollback inventory')
+    files = set()
     for name, item in snapshot.items():
-        if Path(name) not in allowed or item is not None and not re.fullmatch(r'rollback-[0-9]+', item['file']):
+        if name in units and (not isinstance(item, dict) or item.get('sha256') != units[name]):
+            raise RuntimeError(f'Rollback unit does not match predecessor: {name}')
+        if item is None:
+            continue
+        if (not isinstance(item, dict) or not re.fullmatch(r'rollback-[0-9]+', item.get('file', ''))
+                or not HEX.fullmatch(item.get('sha256', '')) or type(item.get('mode')) is not int
+                or not 0 <= item['mode'] <= 0o777 or item['mode'] & 0o022 or item['file'] in files):
             raise RuntimeError('Unsafe rollback inventory')
-        if item is not None:
-            secure_file(backup / item['file'])
-    api['rollback'](host, backup, DATA, BASE, (old, manifest), snapshot, install_record['unit_enabled'])
-    print(f'Restored {old.name} and its saved database in monitoring.')
+        files.add(item['file'])
+        if digest(secure_file(backup / item['file'])) != item['sha256']:
+            raise RuntimeError(f'Rollback backup integrity check failed: {name}')
+    rules = snapshot[str(DATA / 'rules.db')]
+    if rules is not None:
+        if digest(secure_file(backup / 'rules.db')) != rules['sha256']:
+            raise RuntimeError('Rollback rules backup integrity check failed')
+        api['rule_inventory'](backup / 'rules.db')
+    elif existing(backup / 'rules.db'):
+        raise RuntimeError('Unexpected rules database in rollback backup')
+    return snapshot, enabled
+
+
+def recover_unchanged(api, host, previous):
+    old, manifest = previous
+    if current_release() != old:
+        raise RuntimeError('Current changed before the rollback snapshot was ready')
+    if owned_journal():
+        raise RuntimeError('Retained shaping ownership journal; verified reconciliation required')
+    for name in UNITS:
+        unit = Path('/etc/systemd/system') / name
+        if digest(secure_file(unit)) != manifest['files'][name]:
+            raise RuntimeError(f'Edited unit preserved: {unit}')
+    if host.daemon_pids():
+        pid, response = api['wait_api'](host)
+        build = response['build']
+        if (host.daemon_pids() != [pid] or build.get('source') != manifest['source']
+                or build.get('executable_sha256') != manifest['files']['flowgate']
+                or build.get('modified') is not False
+                or ('version' in manifest and build.get('version') != manifest['version'])):
+            raise RuntimeError('Running predecessor could not be verified')
+        response = wait_for(host, response['generation'],
+                            lambda value: check_mode(api, host, value, value['protection']['desired_mode']))
+    else:
+        response = api['restart_unchanged'](host, BASE, DATA, previous)
+    print(f"Recovered unchanged {old.name}; protection mode {response['protection']['desired_mode']}.")
 
 
 def recover(options, api, host, record, pending):
@@ -890,21 +1062,27 @@ def recover(options, api, host, record, pending):
         if pending:
             raise RuntimeError('An installation is incomplete. Run recover without --rollback for failed-install recovery.')
         return rollback_build(api, host, record)
-    cleanup(api, host, record)
     if options.stop_only:
+        cleanup(api, host, record)
         print('FlowGate stopped; monitoring intent saved and no managed interception remains.')
         return
-    if pending and record.get('previous'):
-        # Preserve the previous desktop login when reverting the first migration.
-        # A standalone predecessor still uses the same stable launcher.
-        launcher = Path(FILES['flowgate-ui'])
-        if existing(launcher) and record.get('previous') and not (
-            BASE / 'gui' / record['previous']
-        ).is_dir():
-            desktop(record['uid'], record['desktop_config'], launcher, '--restore-autostart')
-        restore_previous(api, host, record)
-        pending.unlink()
-        fsync_dir(DATA)
+    if pending and record.get('previous') and record.get('phase') != 'complete':
+        previous = verified_predecessor(api, host, record)
+        backup = recovery_backup(record)
+        phase = record.get('phase')
+        if phase in ('preparing', 'snapshotting'):
+            recover_unchanged(api, host, previous)
+        else:
+            if not existing(backup / 'rollback-files.json'):
+                raise RuntimeError('Required rollback snapshot is missing; predecessor left running if available')
+            snapshot, enabled = verified_rollback_snapshot(api, host, record, backup, previous)
+            cleanup(api, host, record)
+            launcher = Path(FILES['flowgate-ui'])
+            if existing(launcher) and not (BASE / 'gui' / record['previous']).is_dir():
+                desktop(record['uid'], record['desktop_config'], launcher, '--restore-autostart')
+            api['rollback'](host, backup, DATA, BASE, previous, snapshot, enabled)
+            print(f'Restored {previous[0].name} and its saved database in monitoring.')
+        clear_pending(pending)
         return
     selected = BASE / 'releases' / record['release']
     manifest = api['previous_release_for_path'](host, BASE, selected)
@@ -914,6 +1092,7 @@ def recover(options, api, host, record, pending):
         active = None
     if active not in (selected, None):
         raise RuntimeError('Current points at a different release; use explicit rollback')
+    cleanup(api, host, record)
     if active is None:
         with tempfile.TemporaryDirectory(dir=BASE) as folder:
             link = Path(folder) / 'current'
@@ -925,9 +1104,7 @@ def recover(options, api, host, record, pending):
     api['wait_monitoring'](host, manifest, api['rule_inventory'](DATA / 'rules.db'))
     if pending:
         write_record(DATA / 'release-receipts' / (record['release'] + '.json'), record)
-        write_record(DATA / 'standalone.json', record)
-        pending.unlink()
-        fsync_dir(DATA)
+        finish_install(record, pending)
     print('Monitoring recovered. Protection remains off.')
 
 
