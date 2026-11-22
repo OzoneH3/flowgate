@@ -5,6 +5,7 @@ package identity
 import (
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"syscall"
@@ -152,6 +153,11 @@ func (c *ActivityCollector) inspect(pid int, now time.Time) (Process, error) {
 	return p, err
 }
 func (c *ActivityCollector) Collect() ActivitySnapshot {
+	return c.collect(0)
+}
+
+// collect can limit process inspection to rows at a selected local port.
+func (c *ActivityCollector) collect(localPort uint16) ActivitySnapshot {
 	c.sequence++
 	out := ActivitySnapshot{Sequence: c.sequence, Started: time.Now(), Complete: true, Rows: []ActivityRow{}, Processes: map[string]ActivityProcess{}}
 	finish := func() ActivitySnapshot {
@@ -194,6 +200,9 @@ func (c *ActivityCollector) Collect() ActivitySnapshot {
 	sort.Slice(sockets, func(i, j int) bool { return sockets[i].Cookie < sockets[j].Cookie })
 	wanted := map[string][]int{}
 	for _, s := range sockets {
+		if localPort != 0 && s.Local.Port() != localPort {
+			continue
+		}
 		id := activitySocketID(s)
 		out.Rows = append(out.Rows, ActivityRow{ID: id, Socket: s, Owners: []string{}, State: SocketState(s), Direction: "Unknown", Ownership: "Unknown owner", Evidence: "Unknown owner: no descriptor holder found in this snapshot"})
 		if s.Inode != 0 {
@@ -225,7 +234,12 @@ func (c *ActivityCollector) Collect() ActivitySnapshot {
 			for _, p := range owners {
 				if len(out.Processes) >= 2048 && !seen[p.PID] {
 					out.Complete = false
-					out.Issues = append(out.Issues, "Process row limit reached")
+					if !slices.Contains(out.Issues, "Process row limit reached") {
+						out.Issues = append(out.Issues, "Process row limit reached")
+					}
+					for _, index := range wanted[socket] {
+						out.Rows[index].Evidence = "Process row limit reached; owner list truncated"
+					}
 					continue
 				}
 				seen[p.PID] = true

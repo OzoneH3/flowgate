@@ -157,6 +157,8 @@ type Engine struct {
 	AdministratorUID   *uint32
 	APIUID             *uint32
 	Activity           func() identity.ActivitySnapshot
+	ConnectionSample   func(uint16) identity.ConnectionSample
+	connectionAnalysis sync.Mutex
 	UploadShaping      *uploadshape.Manager
 	UsageHistory       *accounting.History
 	ObservedUsage      *accounting.Ledger

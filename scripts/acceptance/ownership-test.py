@@ -31,7 +31,7 @@ try:
  same,si=fixture('.workspace/ownership-fixtures/a/shared')
  cross,ci=fixture('.workspace/ownership-fixtures/a/shared',ROOT/'.workspace/ownership-fixtures/b/shared')
  hidden,hi=fixture('.workspace/traffic-fixtures/b/fixture','hidden')
- obs=spawn([ROOT/'.workspace/flowgate','observe','--socket',run/'api.sock','--interval','500ms','--udp-socket',''])
+ obs=spawn([ROOT/'build/flowgate','observe','--socket',run/'api.sock','--interval','500ms','--udp-socket',''])
  def leader_ok():
   s=snapshot(); rr=[r for p in li['ports'] for r in rows(s,p)]
   if len(rr)!=4 or any(len(r['owners'])!=1 for r in rr):return None
@@ -46,7 +46,7 @@ try:
  r=one(si['port']);assert r['ownership_category']=='shared' and r['display_application']['key'];assert len(rows(snapshot(),si['port']))==1
  print('PASS same-application shared socket: both holders retained, one row and display-only common identity',flush=True)
  # Even a display-associated shared native socket cannot become a policy identity.
- decision=json.loads(subprocess.check_output([str(ROOT/'.workspace/flowgate'),'attribute','--protocol','udp','--direction','incoming','--local',f"127.0.0.1:{si['port']}",'--remote','127.0.0.1:45678'],text=True))
+ decision=json.loads(subprocess.check_output([str(ROOT/'build/flowgate'),'attribute','--protocol','udp','--direction','incoming','--local',f"127.0.0.1:{si['port']}",'--remote','127.0.0.1:45678'],text=True))
  assert not decision.get('application') and decision['status']!='directly-associated',decision
  print('PASS enforcement Resolve withholds application permission for display-groupable shared socket',flush=True)
  def cross_ok():

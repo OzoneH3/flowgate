@@ -25,11 +25,17 @@ func activityTable(s Socket) activityTableKey {
 // spending the refresh budget on the same first eight sockets. No association
 // is used as permission evidence. Admission still uses its independent census.
 func (m *WineObservers) AnnotateActivity(s *ActivitySnapshot) {
-	m.annotateActivityFresh(s)
+	m.annotateActivityFresh(s, true)
 	m.retainWineActivityAnnotations(s, time.Now())
 }
 
-func (m *WineObservers) annotateActivityFresh(s *ActivitySnapshot) {
+// AnnotateConnectionAnalysis uses fresh runtime evidence without reading or
+// updating the ordinary Activity display cache.
+func (m *WineObservers) AnnotateConnectionAnalysis(s *ActivitySnapshot) {
+	m.annotateActivityFresh(s, false)
+}
+
+func (m *WineObservers) annotateActivityFresh(s *ActivitySnapshot, useDispatch bool) {
 	if !s.Complete || m.admissionDemand.Load() != 0 {
 		return
 	}
@@ -69,7 +75,14 @@ func (m *WineObservers) annotateActivityFresh(s *ActivitySnapshot) {
 		if record == nil {
 			// Discovery/setup remains subject to the normal pinned-broker validation.
 			row := s.Rows[indices[0]]
-			m.TryResolve(Flow{NetNS: row.Socket.NetNS, Protocol: row.Socket.Protocol, Direction: "outgoing", Local: row.Socket.Local, Remote: row.Socket.Remote})
+			flow := Flow{NetNS: row.Socket.NetNS, Protocol: row.Socket.Protocol, Direction: "outgoing", Local: row.Socket.Local, Remote: row.Socket.Remote}
+			if useDispatch {
+				m.TryResolve(flow)
+			} else {
+				// Setup may validate a new runtime session. The analyzer does
+				// not consult or populate the admission dispatch hints.
+				m.resolveAttribution(flow, Resolve(flow), false)
+			}
 		}
 		if !m.tryActivityCensus() {
 			continue

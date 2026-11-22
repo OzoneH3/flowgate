@@ -31,6 +31,7 @@ const DaemonProfileCapability = "daemon-profile-v1"
 var apiProfileContext = pprof.WithLabels(context.Background(), pprof.Labels("flowgate_work", "api"))
 
 type Request struct {
+	ConnectionAnalysis  *ConnectionAnalysisQuery   `json:"connection_analysis,omitempty"`
 	DecisionTimeout     *DecisionTimeoutOptions    `json:"decision_timeout,omitempty"`
 	ConnectionChecks    *ConnectionCheckOptions    `json:"connection_checks,omitempty"`
 	ProfileArtifact     string                     `json:"profile_artifact,omitempty"`
@@ -110,6 +111,7 @@ type Response struct {
 	RequestRule      *RequestRulePreview         `json:"request_rule_preview,omitempty"`
 	Replayed         bool                        `json:"replayed,omitempty"`
 
+	ConnectionAnalysis  *ConnectionAnalysis               `json:"connection_analysis,omitempty"`
 	PolicyView          *PolicyView                       `json:"policy_view,omitempty"`
 	PolicyExplanations  *PolicyExplanations               `json:"policy_explanations,omitempty"`
 	BackendMode         string                            `json:"backend_mode,omitempty"`
@@ -268,6 +270,9 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 					if e.Activity != nil {
 						r.Capabilities = append(r.Capabilities, "activity-initiation-v1", "application-display-metadata-v1", "activity-initiation-events-v1")
 					}
+					if e.Activity != nil && e.ConnectionSample != nil {
+						r.Capabilities = append(r.Capabilities, ConnectionAnalysisCapability)
+					}
 					stopAfterResponse := false
 					if e.APIUID != nil && cred.Uid != *e.APIUID && cred.Uid != 0 {
 						continueResponse(c, r)
@@ -351,6 +356,13 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 							r.Capabilities = append(r.Capabilities, DecisionTimeoutCapability)
 						}
 						switch q.Operation {
+						case "connection-analyze":
+							if !e.activityAuthorized(cred.Uid) {
+								continueResponse(c, r)
+								return
+							}
+							c.SetWriteDeadline(time.Now().Add(q.ConnectionAnalysis.timeout()))
+							r.ConnectionAnalysis, r.ErrorCode, r.Error = e.analyzeConnections(q.ConnectionAnalysis, cred.Uid, admin, permissions.ObservationScope)
 						case "decision-timeout-status", "decision-timeout-configure":
 							var v DecisionTimeoutSettings
 							var er error
@@ -793,23 +805,21 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						case "observed-usage":
 							if e.ObservedUsage == nil {
 								r.ErrorCode, r.Error = "unavailable", "Observed usage is unavailable"
-							} else if e.Mode == "host-monitor" && e.APIUID == nil && cred.Uid != uint32(os.Geteuid()) {
+							} else if !e.activityAuthorized(cred.Uid) {
 								r.ErrorCode, r.Error = "forbidden", "not authorized"
 							} else {
 								snapshot := e.ObservedUsage.Snapshot(cred.Uid, admin)
 								r.ObservedUsage = &snapshot
 							}
 						case "list":
-							if e.Mode == "host-monitor" && e.APIUID == nil && cred.Uid != uint32(os.Geteuid()) {
+							if !e.activityAuthorized(cred.Uid) {
 								r.Error = "not authorized"
 								r.ErrorCode = "forbidden"
 							} else {
 								if e.Activity != nil {
 									snapshot := ClassifyActivity(e.Activity(), *r.NetworkZones)
-									if e.APIUID != nil {
-										snapshot = activityFor(snapshot, cred.Uid, admin)
-									}
-									r.Activity = &snapshot
+									projected := e.activityForPeer(snapshot, cred.Uid, admin)
+									r.Activity = &projected
 								}
 								if e.Mode != "host-monitor" {
 									r.Events = cachedList.Events
@@ -1020,7 +1030,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 							r.Error = "unknown operation"
 						}
 					}
-					if q.Version == 1 && q.Operation != "list" {
+					if q.Version == 1 && q.Operation != "list" && q.Operation != "connection-analyze" {
 						if publishErr := e.listReads.publishAfter(e, q.Operation); publishErr != nil {
 							r.ErrorCode = "snapshot_unavailable"
 							r.Error = "Operation completed; list publication failed. Refresh before any retry: " + publishErr.Error()
@@ -1057,7 +1067,11 @@ func Call(path string, q Request) (Response, error) {
 		return Response{}, e
 	}
 	defer c.Close()
-	c.SetDeadline(time.Now().Add(5 * time.Second))
+	timeout := 5 * time.Second
+	if q.Operation == "connection-analyze" {
+		timeout = q.ConnectionAnalysis.timeout()
+	}
+	c.SetDeadline(time.Now().Add(timeout))
 	if e = json.NewEncoder(c).Encode(q); e != nil {
 		return Response{}, e
 	}

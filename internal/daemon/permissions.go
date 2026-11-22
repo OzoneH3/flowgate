@@ -1,6 +1,9 @@
 package daemon
 
-import "flowgate/internal/identity"
+import (
+	"flowgate/internal/identity"
+	"os"
+)
 
 // AdministratorUID is configured by a privileged daemon before serving, never
 // supplied in a request. Each endpoint still authenticates SO_PEERCRED and 0600.
@@ -45,6 +48,17 @@ func (e *Engine) permissions(uid uint32, readonly bool) Permissions {
 	}
 	p.CanManageMachineRules = p.CanManageRules && e.administrator(uid)
 	return p
+}
+
+func (e *Engine) activityAuthorized(uid uint32) bool {
+	return e.Mode != "host-monitor" || e.APIUID != nil || uid == uint32(os.Geteuid())
+}
+
+func (e *Engine) activityForPeer(s identity.ActivitySnapshot, uid uint32, admin bool) identity.ActivitySnapshot {
+	if e.APIUID != nil {
+		return activityFor(s, uid, admin)
+	}
+	return s
 }
 
 // A root census must not disclose another user's process metadata on an ordinary

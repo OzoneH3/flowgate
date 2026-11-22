@@ -41,7 +41,7 @@ func main() {
 	identity.WineBrokerExecutable = os.Getenv("FLOWGATE_WINE_BROKER")
 
 	if len(os.Args) < 2 {
-		fmt.Printf("%s: doctor | profile | runtime-discover | sockets | process PID | attribute | pending | decide | rule-delete | monitor-setup | monitor-backup | monitor-stop | serve | observe | serve-lab | host-start | host-status | host-stop | host-recover\n", productName)
+		fmt.Printf("%s: doctor | connection-analyze | profile | runtime-discover | sockets | process PID | attribute | pending | decide | rule-delete | monitor-setup | monitor-backup | monitor-stop | serve | observe | serve-lab | host-start | host-status | host-stop | host-recover\n", productName)
 		return
 	}
 	switch os.Args[1] {
@@ -63,6 +63,10 @@ func main() {
 			Issues     []string           `json:"issues"`
 			ReviewOnly bool               `json:"review_only"`
 		}{s, rules, issues, true})
+	case "connection-analyze":
+		if err := connectionAnalysisCommand(os.Args[2:], os.Stdout); err != nil {
+			fatal(err)
+		}
 	case "version":
 		output(buildIdentity())
 	case "profile":
@@ -274,6 +278,7 @@ func serve() error {
 	activityCtx, activityCancel := context.WithCancel(context.Background())
 	defer activityCancel()
 	e.Activity = observer.Snapshot
+	e.ConnectionSample = observer.ConnectionSample
 	e.ObservedUsage = accounting.New()
 	observer.Observed = e.ObservedUsage.Observe
 	if *decisionPath != "" {
@@ -320,6 +325,7 @@ func serve() error {
 		resolver.Try = observers.TryResolve
 		e.Resolve, e.TryResolve = resolver.Resolve, resolver.TryResolve
 		observer.Annotate = observers.AnnotateActivity
+		observer.AnalyzeRuntime = observers.AnnotateConnectionAnalysis
 	} else if *prefixes != "" {
 		if os.Getenv("FLOWGATE_WINE_TABLE_RUNNER") != "" {
 			return fmt.Errorf("choose explicit attachment or legacy environment, not both")
@@ -469,6 +475,7 @@ func observe() error {
 	observer.ZoneSource = zoneManager.Snapshot
 	go zoneManager.Run(ctx)
 	e.Activity = observer.Snapshot
+	e.ConnectionSample = observer.ConnectionSample
 	e.ObservedUsage = accounting.New()
 	observer.Observed = e.ObservedUsage.Observe
 	listener, err := daemon.Serve(path, e, true)

@@ -15,6 +15,7 @@ type Observer struct {
 	// It is configured before Run and is never invoked by API polling.
 	Observed         func(identity.ActivitySnapshot)
 	Annotate         func(*identity.ActivitySnapshot)
+	AnalyzeRuntime   func(*identity.ActivitySnapshot)
 	InitiationEvents func([]identity.Socket) identity.InitiationEvents
 	Zones            identity.NetworkZones
 	ZoneSource       func() identity.NetworkZones
@@ -56,6 +57,11 @@ func (o *Observer) Snapshot() identity.ActivitySnapshot {
 		snapshot.Error = "Collection overdue; old activity withheld"
 	}
 	return snapshot
+}
+
+// ConnectionSample is independent of publishing, byte accounting and policy.
+func (o *Observer) ConnectionSample(localPort uint16) identity.ConnectionSample {
+	return identity.CollectConnectionSample(localPort, o.AnalyzeRuntime)
 }
 
 func (o *Observer) publish(snapshot identity.ActivitySnapshot) {

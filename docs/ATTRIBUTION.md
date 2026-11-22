@@ -162,6 +162,47 @@ No enforcement attribution changed, so the settled firewall/UDP/Wayland suites
 were reused rather than repeated. No live host collection privilege or enforcement
 was activated, and no host network/security/service settings changed.
 
+## Analyze Unidentified connections over SSH
+
+Run the CLI on the machine running FlowGate. It uses the existing authenticated
+Activity socket and reports the same observation scope as that socket.
+
+```sh
+flowgate connection-analyze
+flowgate connection-analyze --watch 5s
+flowgate connection-analyze --socket /path/to/api.sock --watch 5s --local-port 443
+```
+
+The first command rechecks the Unidentified rows in the current Activity
+snapshot. Start a watch in one terminal before launching the application in
+another. A watch also includes new sockets first seen during its run. It returns
+JSON when it finishes and can run for up to ten seconds. The default socket is
+the installed read-only Activity endpoint at
+`/run/flowgate-api/daemon.sock.monitor`. Pass `--socket` to target a private
+`flowgate observe` instance.
+
+Unix API clients can send
+`{"version":1,"operation":"connection-analyze","connection_analysis":{"watch_ms":5000,"local_port":443}}`.
+Omit the query for a one-shot recheck across all ports. Servers advertise
+`activity-connection-analysis-v1`. One analysis per daemon can run at a time.
+
+The `connection_analysis` response includes the original Activity reason and
+timestamp, dated changes in observed holders or verified application, the last
+sample time, and measured collection durations. `recovered` counts baseline
+Unidentified sockets with a fresh verified application at least once.
+`latest_verified` counts sockets with a verified application in their latest
+observation. Collection is capped at 64 sockets and eight recorded changes per
+socket, with truncation reported. Shared sockets with different observed applications
+stay ambiguous. A socket absent from a sample could have closed or lost
+visibility. Only matching cookies, namespaces and socket inodes can join
+observations, even when endpoints are reused.
+
+A watch waits 350 ms between samples. A connection that opens and closes in the
+gap can go unobserved. Covering a short connected UDP socket requires recording
+the successful connect event while the socket is live, with its socket cookie,
+network namespace and verified process generation and executable. The analyzer
+does not use the results to make firewall decisions.
+
 ## Observation-only TCP initiation evidence
 
 `activity-initiation-v1` adds bounded handshake evidence to Activity without

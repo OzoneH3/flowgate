@@ -197,6 +197,7 @@ func serveCommand(args []string) error {
 	observer.Zones = zones
 	observer.UDP = traffic.AccountingSnapshot
 	e.Activity = observer.Snapshot
+	e.ConnectionSample = observer.ConnectionSample
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 	socketResolvers := daemon.SocketSessionResolvers{
@@ -232,6 +233,7 @@ func serveCommand(args []string) error {
 		resolver.Try = wines.TryResolve
 		e.Resolve, e.TryResolve = resolver.Resolve, resolver.TryResolve
 		observer.Annotate = wines.AnnotateActivity
+		observer.AnalyzeRuntime = wines.AnnotateConnectionAnalysis
 	} else if len(wineBins) > 0 || len(winePrefixes) > 0 {
 		return fmt.Errorf("Wine runtime/prefix selection requires --wine-helper")
 	}
