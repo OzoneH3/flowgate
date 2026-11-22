@@ -238,17 +238,20 @@ async function poll() {
   }
 }
 
-const time = (iso: string) => {
+const time = (iso: string, showFraction = false) => {
   const d = new Date(iso);
   if (!Number.isFinite(d.getTime())) return iso || '—';
   const today = new Date().toDateString() === d.toDateString();
-  return d.toLocaleString('en-GB', {
+  const local = d.toLocaleString('en-GB', {
     ...(today ? {} : { day: '2-digit', month: 'short' }),
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
     hour12: false,
   });
+  // Keep source precision even when it exceeds Date's millisecond precision.
+  const fraction = showFraction && iso.match(/(\.\d+)(?:Z|[+-]\d{2}:\d{2})$/)?.[1];
+  return local + (fraction || '');
 };
 const protocolLabel = (r: LogRecord) =>
   r.flow
@@ -573,8 +576,8 @@ function renderDetail(r: LogRecord, note: string, outcomeOf?: string) {
     const a = section('Aggregated observations');
     field(a, 'Observations', r.aggregation.observations);
     field(a, 'Window', `${r.aggregation.window_ms} ms`);
-    field(a, 'First seen', time(r.aggregation.first_seen));
-    field(a, 'Last seen', time(r.aggregation.last_seen));
+    field(a, 'First seen', time(r.aggregation.first_seen, true), r.aggregation.first_seen);
+    field(a, 'Last seen', time(r.aggregation.last_seen, true), r.aggregation.last_seen);
   }
   const meta = section('Record');
   field(meta, 'Sequence', r.sequence);

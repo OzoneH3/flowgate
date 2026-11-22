@@ -598,7 +598,7 @@ try {
   };
   const aggregation = {
     observations: 15, first_seen: '2026-11-22T18:03:12.012Z',
-    last_seen: '2026-11-22T18:03:14.123Z', window_ms: 5000,
+    last_seen: '2026-11-22T18:03:12.123Z', window_ms: 5000,
   };
   const gap = {
     id: 'evidence-gap', sequence: '3000', kind: 'gap',
@@ -618,7 +618,14 @@ try {
   await p.screenshot({ path: path.join(dir, 'evidence-related-request.png') });
   await p.click('#logRows tr[data-id="syn-3001"]');
   await shown('syn-3001');
-  assert.match(await detail(), /Aggregated observations\s+Observations\s+15\s+Window\s+5000 ms\s+First seen/i);
+  assert.match(await detail(), /Aggregated observations\s+Observations\s+15\s+Window\s+5000 ms/i);
+  const timestamp = (label) => p.locator(`#logDetails dt:text-is("${label}") + dd`);
+  const firstSeen = timestamp('First seen');
+  const lastSeen = timestamp('Last seen');
+  assert.match(await firstSeen.innerText(), /:\d{2}:12\.012$/);
+  assert.match(await lastSeen.innerText(), /:\d{2}:12\.123$/);
+  assert.equal(await firstSeen.getAttribute('title'), aggregation.first_seen);
+  assert.equal(await lastSeen.getAttribute('title'), aggregation.last_seen);
   await checkCopy('Copy record', (r) => assert.deepEqual(r.aggregation, aggregation));
   await p.screenshot({ path: path.join(dir, 'evidence-aggregation.png') });
   await p.click('#logRows tr[data-id="evidence-gap"]');
