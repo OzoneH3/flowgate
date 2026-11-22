@@ -5,6 +5,7 @@ const path = require('node:path');
 const { test } = require('node:test');
 const vm = require('node:vm');
 const { transformSync } = require('esbuild');
+const { compactPromptBounds, PROMPT_MIN_HEIGHT } = require('../dist/test/automatic-prompts.cjs');
 
 test('an early request waits for native startup cleanup without ready-to-show', async () => {
   // Run the actual main-process creation and retarget functions while holding
@@ -31,7 +32,7 @@ test('an early request waits for native startup cleanup without ready-to-show', 
     });
     setTitle() {}
     setMenu() {}
-    setBounds() {}
+    setBounds() { calls.push(['electron-set-bounds']); }
     getBounds() {
       return bounds;
     }
@@ -56,8 +57,9 @@ test('an early request waits for native startup cleanup without ready-to-show', 
     process: { pid: 42 },
     PROMPT_TITLE: 'Permission',
     APP_ICON: '',
-    PROMPT_WIDTH: 745,
-    PROMPT_HEIGHT: 590,
+    PROMPT_MIN_HEIGHT,
+    compactPromptBounds,
+    nativeWayland: true,
     prompt: undefined,
     promptIdle: true,
     promptKDEReady: false,
@@ -78,7 +80,6 @@ test('an early request waits for native startup cleanup without ready-to-show', 
       getPrimaryDisplay: () => ({ workArea: bounds }),
       getDisplayMatching: () => ({ workArea: bounds }),
     },
-    edgePosition: () => bounds,
     backend: {
       view: () => ({
         control: {

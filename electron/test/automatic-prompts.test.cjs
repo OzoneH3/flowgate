@@ -3,11 +3,20 @@ const assert = require('node:assert/strict');
 const {
   AutomaticPrompts,
   edgePosition,
+  compactPromptBounds,
   boundDecision,
   requestGroups,
   askSource,
   queuedRemember,
 } = require('../dist/test/automatic-prompts.cjs');
+
+test('short unanchored Wayland outputs leave room for desktop chrome', () => {
+  const short = { x: 0, y: 0, width: 848, height: 480 };
+  assert.equal(compactPromptBounds(short, true).height, 416);
+  assert.equal(compactPromptBounds(short, false).height, 480);
+  const normal = { x: 0, y: 32, width: 1280, height: 736 };
+  assert.deepEqual(compactPromptBounds(normal, true), compactPromptBounds(normal, false));
+});
 const { REMEMBER_DURATIONS } = require('../dist/test/decision-remember.cjs');
 const state = (ids, generation = 'g') => ({
   control: {

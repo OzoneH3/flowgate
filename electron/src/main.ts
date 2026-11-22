@@ -12,7 +12,7 @@ import { matchesApplicationZone } from './application-zones';
 import { Essential } from './essential';
 import { Protection } from './protection';
 import { placeKDEPrompt, resizeKDEPrompt, PROMPT_TITLE, promptTitle } from './prompt-placement';
-import { AutomaticPrompts, PROMPT_HEIGHT, PROMPT_WIDTH, edgePosition, boundDecision, groupOf, inputSettled, queuedRemember, queuedRememberSelection, type QueuedRememberSelection } from './automatic-prompts';
+import { AutomaticPrompts, PROMPT_HEIGHT, PROMPT_MIN_HEIGHT, compactPromptBounds, edgePosition, boundDecision, groupOf, inputSettled, queuedRemember, queuedRememberSelection, type QueuedRememberSelection } from './automatic-prompts';
 import { leaseHolds } from './process-lease';
 import {
   app,
@@ -202,8 +202,6 @@ function retarget(ref: RequestRef, reload = false, remember?: QueuedRememberSele
   promptRefs.set(w.webContents.id, ref);
   promptContentHeights.delete(w.webContents.id);
   promptReadyAt.set(w.webContents.id, Date.now() + TRANSITION_MS);
-  const compact = edgePosition(screen.getDisplayMatching(w.getBounds()).workArea, PROMPT_WIDTH, PROMPT_HEIGHT);
-  w.setBounds(compact);
   const reset = (
     promptLayouts.get(w.webContents.id) ||
     promptPlacement.get(w.webContents.id) ||
@@ -218,8 +216,20 @@ function retarget(ref: RequestRef, reload = false, remember?: QueuedRememberSele
       )
     )
       return;
-    if (promptKDEReady) await resizeKDEPrompt(profile, process.pid, w.id, compact);
-    else w.showInactive();
+    const currentBounds = w.getBounds();
+    const compact = compactPromptBounds(
+      screen.getDisplayMatching(currentBounds).workArea,
+      nativeWayland && !promptKDEReady,
+    );
+    if (promptKDEReady) {
+      await resizeKDEPrompt(profile, process.pid, w.id, compact);
+    } else {
+      // Leave a compositor-constrained frame alone between cards. A redundant
+      // grow can shift the footer while the user is aiming at it.
+      if (!nativeWayland || currentBounds.width > compact.width || currentBounds.height > compact.height)
+        w.setBounds(compact);
+      if (!w.isVisible()) w.showInactive();
+    }
   });
   promptLayouts.set(w.webContents.id, reset);
   void w.loadURL(promptURL(ref, remember, focusHeading));
@@ -480,15 +490,17 @@ function presentationSender(e: IpcMainInvokeEvent) {
     throw Error('Presentation operation is unavailable from a prompt');
 }
 function windowFor(isPrompt = false, id = '', generation = '', group?: string) {
+  const initialBounds = isPrompt
+    ? compactPromptBounds(screen.getPrimaryDisplay().workArea, nativeWayland)
+    : { width, height };
   const w = new BrowserWindow({
     title: isPrompt ? PROMPT_TITLE : 'FlowGate',
     icon: APP_ICON,
     frame: !isPrompt,
     alwaysOnTop: isPrompt,
-    width: isPrompt ? PROMPT_WIDTH : width,
-    height: isPrompt ? PROMPT_HEIGHT : height,
+    ...initialBounds,
     minWidth: isPrompt ? 320 : 800,
-    minHeight: isPrompt ? 240 : 550,
+    minHeight: isPrompt ? Math.min(PROMPT_MIN_HEIGHT, initialBounds.height) : 550,
     backgroundColor: '#222222',
     autoHideMenuBar: true,
     show: false,
@@ -570,8 +582,7 @@ function windowFor(isPrompt = false, id = '', generation = '', group?: string) {
     // behind it so startup QML cannot overwrite the request's visibility.
     const placement = Promise.resolve().then(async () => {
       if (w.isDestroyed() || prompt !== w) return;
-      const bounds = edgePosition(screen.getPrimaryDisplay().workArea, PROMPT_WIDTH, PROMPT_HEIGHT);
-      w.setBounds(bounds);
+      const bounds = compactPromptBounds(screen.getPrimaryDisplay().workArea, false);
       await placeKDEPrompt(
         profile,
         process.pid,
@@ -1250,7 +1261,9 @@ app.whenReady().then(async () => {
       // while ignoring the requested move. Keep the opening size and let the
       // body scroll so the fixed footer stays inside the original frame.
       if (!promptIdle && contentChanged && (!nativeWayland || promptKDEReady)) {
-        if (w.getBounds().height !== bounds.height || w.getBounds().width !== bounds.width)
+        // KWin owns the combined move and resize. An Electron resize first
+        // would grow the popup at its old origin, temporarily below the edge.
+        if (!promptKDEReady && (w.getBounds().height !== bounds.height || w.getBounds().width !== bounds.width))
           w.setBounds(bounds);
         await resizeKDEPrompt(profile, process.pid, w.id, bounds);
       }
