@@ -136,4 +136,4 @@ checks when you enable protection. [Read the diagnostic and recovery guide](docs
 | Package a standalone release, recover or uninstall | [Standalone release guide](docs/STANDALONE-RELEASE.md) |
 | Maintain a pinned checkout deployment or attach a development desktop | [Developer deployment guide](docs/DAILY-DEPLOYMENT.md) · [Script reference](scripts/README.md) |
 | Work on the Unix API, Qt client, or core | [API](docs/API.md) · [Qt client](desktop/README.md) · [Integration map](docs/INTEGRATION.md) |
-| Review project status and test evidence | [Status](docs/STATUS.md) · [Historical records](docs/HANDOFF.md) |
+| Review priorities, project status, and test evidence | [Audit and roadmap](docs/ROADMAP.md) · [Status](docs/STATUS.md) · [Historical records](docs/HANDOFF.md) |
