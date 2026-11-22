@@ -104,9 +104,12 @@ def pack(identity, output):
         electron = BUILD / 'electron'
         shutil.copytree(electron / 'dist', gui / 'electron/dist')
         app = json.loads((electron / 'package.json').read_text())
+        runtime = electron / 'node_modules/electron/dist'
+        if (runtime / 'version').read_text().strip() != app['devDependencies']['electron']:
+            raise RuntimeError('Packaged Electron runtime does not match the desktop pin')
         app['version'] = identity['version']
         write_json(gui / 'electron/package.json', app)
-        shutil.copytree(electron / 'node_modules/electron/dist', gui / 'runtime')
+        shutil.copytree(runtime, gui / 'runtime')
         shutil.copyfile(ROOT / 'electron/fontconfig_isolation.py', gui / 'fontconfig_isolation.py')
         shutil.copy2(HERE / 'flowgate-ui', gui / 'flowgate-ui')
         write_json(gui / 'matched-manifest.json', {

@@ -20,14 +20,7 @@ rm -f "$stage/identity.json"
 # Copy the committed Electron source to an isolated build directory.
 git archive "$revision" electron | tar -x -C "$stage"
 rm -rf "$stage/electron/dist"
-if [ ! -d "$stage/electron/node_modules" ]; then
-  ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm --prefix "$stage/electron" ci
-fi
-node "$stage/electron/node_modules/electron/install.js"
-if [ ! -x "$stage/electron/node_modules/electron/dist/electron" ]; then
-  echo 'The Electron runtime installer did not produce a runnable Linux binary.' >&2
-  exit 1
-fi
+scripts/ensure-electron.sh "$stage/electron"
 npm --prefix "$stage/electron" run build
 scripts/build-socket-authorization.sh
 scripts/build.sh holder-iterator tcp-initiation udp wine-table

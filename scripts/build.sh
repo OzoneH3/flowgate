@@ -21,10 +21,7 @@ for target in "$@"; do
   ;;
  electron)
   mkdir -p "$TMPDIR" "$XDG_CACHE_HOME" build/desktop-session
-  if [ ! -f electron/node_modules/electron/package.json ]; then
-    (cd electron && npm ci)
-  fi
-  node electron/node_modules/electron/install.js
+  scripts/ensure-electron.sh electron
   (cd electron && npm run build)
   go build -o build/electron-observer ./cmd/flowgate
   cp build/electron-observer build/electron-backend
