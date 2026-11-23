@@ -333,6 +333,50 @@ def unpack(bundle, expected, staging):
     return payload, manifest, backend
 
 
+PF_FORKNOEXEC = 0x00000040  # Linux /proc/PID/stat flags: child has not executed its own image.
+
+def has_serve_argv(process):
+    argv = (process / 'cmdline').read_bytes().split(b'\0')
+    return len(argv) > 1 and argv[1] == b'serve' and argv[0].endswith(b'/flowgate')
+
+
+def daemon_pids(proc):
+    matches = []
+    for process in proc.iterdir():
+        if not process.name.isdecimal():
+            continue
+        try:
+            if process.stat().st_uid != 0 or not has_serve_argv(process):
+                continue
+        except OSError:
+            continue
+        try:
+            # A subprocess may briefly expose its parent's argv before exec.
+            # Strip comm as one field, even when it contains spaces or ')'.
+            fields = (process / 'stat').read_bytes().rsplit(b')', 1)[-1].split()
+            if len(fields) >= 20 and int(fields[6]) & PF_FORKNOEXEC:
+                continue
+            # The first argv read may predate an exec that cleared the flag.
+            if not has_serve_argv(process):
+                continue
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+        except (OSError, ValueError):
+            # If we already saw a matching command but can't read its flags
+            # or recheck argv, preserve the conservative match.
+            pass
+        matches.append(int(process.name))
+    return sorted(matches)
+
+
+def standalone_host(api):
+    host = api['Host']()
+    # Retained releases keep their verified monitoring scripts byte-for-byte.
+    # Use the wrapper's current process census for both installation and rescue.
+    host.daemon_pids = lambda: daemon_pids(host.path('/proc'))
+    return host
+
+
 def module(path):
     secure_file(path)
     api = runpy.run_path(str(path))
@@ -400,7 +444,7 @@ def shaping_status(host, generation):
 
 
 def preflight(api, backend_dir, backend, desktop_config):
-    host = api['Host']()
+    host = standalone_host(api)
     former = current_release()
     old = None
     if former is not None:
@@ -1248,7 +1292,7 @@ def main():
         if digest(secure_file(rescue)) != record['rescue']['install-monitoring.py']:
             raise RuntimeError('Rescue installer failed verification')
         api = module(rescue)
-        host = api['Host']()
+        host = standalone_host(api)
         action = recover if options.operation == 'recover' else uninstall
         action(options, api, host, record, pending if receipt == pending else None)
 

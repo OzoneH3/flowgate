@@ -13,13 +13,38 @@ import tarfile
 import tempfile
 import types
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 ROOT = Path(__file__).resolve().parents[2]
 LIFECYCLE = ROOT / 'deployment/standalone'
 release = runpy.run_path(str(LIFECYCLE / 'release.py'))
 scope = release['unpack'].__globals__
 ui = runpy.run_path(str(LIFECYCLE / 'flowgate-ui'))
+
+
+class DaemonCensus(unittest.TestCase):
+    def process(self, pid, flags, *, execs_helper=False):
+        path = MagicMock()
+        path.name = str(pid)
+        path.stat.return_value.st_uid = 0
+        argv = b'/usr/local/lib/flowgate/current/flowgate\0serve\0'
+        cmdline = MagicMock()
+        cmdline.read_bytes.side_effect = [argv, b'resolvectl\0status\0' if execs_helper else argv]
+        stat = MagicMock()
+        stat.read_bytes.return_value = f'{pid} (flowgate (test)) S 1 0 0 0 0 {flags} '.encode() + b'0 ' * 13
+        path.__truediv__.side_effect = {'cmdline': cmdline, 'stat': stat}.__getitem__
+        return path
+
+    def test_distinguishes_forked_and_execed_processes(self):
+        old = runpy.run_path(str(ROOT / 'scripts/install-monitoring.py'))
+        host = release['standalone_host'](old)
+        managed = self.process(3078, 0)
+        before_exec = self.process(3266, release['PF_FORKNOEXEC'])
+        during_exec = self.process(3270, 0, execs_helper=True)
+        independent_daemon = self.process(4010, 0)
+        with patch.object(host, 'path') as proc:
+            proc.return_value.iterdir.return_value = [independent_daemon, before_exec, during_exec, managed]
+            self.assertEqual(host.daemon_pids(), [3078, 4010])
 
 
 class ReleaseChecks(unittest.TestCase):

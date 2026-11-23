@@ -518,13 +518,13 @@ def install_locked(h,bundle,stamp, *, extra_config=None, verify_extra=None,
   h.run('systemctl','disable','flowgate-guard.service')  # pulled in by flowgate.service only; never WantedBy network-pre
   h.run('systemctl','enable','flowgate.service')
   h.run('systemctl','start','flowgate.service')
-  _,r=wait_api(h)
+  pid,r=wait_api(h)
   expected_rules=verified_rule_transition(backup/'rules.db',data/'rules.db',admin_uid)
   problems=verify_monitoring(r,manifest,expected_rules)
   tables=flowgate_tables(h)
   if tables:problems.append(('owned interception tables present',tables))
   pids=h.daemon_pids()
-  if len(pids)!=1:problems.append(('daemon processes',pids))
+  if pids!=[pid]:problems.append(('daemon processes',pids))
   if problems:raise RuntimeError('Monitoring verification failed: '+json.dumps(problems,default=str))
   if verify_extra is not None:verify_extra(r)
   final={'generation':r['generation'],'build':r['build'],'protection':r['protection'],'enforcement':r['enforcement'],'traffic_monitor':r.get('traffic_monitor'),'rules':api_inventory(r),'capabilities':r['capabilities'],'permissions':r.get('permissions'),'owned_tables':tables,'daemon_pids':pids,'nm_dropin_installed':h.path(DROPIN).exists()}
