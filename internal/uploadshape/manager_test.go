@@ -3,9 +3,13 @@ package uploadshape
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"flowgate/internal/identity"
 )
 
 type model struct {
@@ -34,6 +38,83 @@ func until(t *testing.T, f func() bool) {
 			t.Fatal("timeout")
 		}
 		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestSavedOnlySettingsStayOutOfKernelPolicy(t *testing.T) {
+	m := newManager(Options{})
+	defer m.Close()
+	m.start = func() (transport, error) {
+		t.Error("saved-only settings started the controller")
+		return nil, fmt.Errorf("unexpected controller start")
+	}
+	edit := &Cap{Application: "app", UID: 1000, BitsPerSecond: 8_000_000, DownloadBitsPerSecond: 16_000_000, TrafficPriority: "high"}
+	for i := 0; i < MaxCaps+1; i++ {
+		copy := *edit
+		copy.UID += uint32(i)
+		if _, err := m.Configure(uint64(i+1), Config{Schema: 4, StoredEdit: &copy}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := m.Snapshot()
+	if s.Enabled || s.Status != "Disabled" || len(s.Caps) != MaxCaps+1 || !s.Caps[0].StoredOnly {
+		t.Fatalf("unexpected stored settings: %+v", s)
+	}
+	cfg, _, _ := m.current()
+	if len(cfg.Caps) != 0 {
+		t.Fatalf("saved-only settings reached the controller: %+v", cfg)
+	}
+	if _, err := m.Configure(s.Version, Config{Schema: 3}); err == nil {
+		t.Fatal("legacy configuration overwrote saved settings")
+	}
+	removed, err := m.Configure(s.Version, Config{Schema: 4, StoredEdit: &Cap{Application: "app", UID: 1000}})
+	if err != nil || len(removed.Caps) != MaxCaps || removed.Caps[0].UID != 1001 {
+		t.Fatalf("removal crossed application accounts: %+v, %v", removed, err)
+	}
+}
+
+func TestSavedNativeSettingBindsWhenItsSocketAppears(t *testing.T) {
+	m := newManager(Options{})
+	f := &model{}
+	m.start = func() (transport, error) { return f, nil }
+	var started atomic.Bool
+	sock := censusRows(1)[0]
+	sock.UID = 1000
+	m.sockets = func() ([]identity.Socket, error) {
+		if !started.Load() {
+			return nil, nil
+		}
+		return []identity.Socket{sock}, nil
+	}
+	m.resolveBatch = func(flows []identity.Flow) []identity.Attribution {
+		app := identity.Application{Kind: "native", Key: "native"}
+		return []identity.Attribution{{VisibilityComplete: true, Status: "directly-associated", Application: &app,
+			Owners: []identity.Process{{PID: 7, ThreadGroup: 7, UID: 1000, Application: app}}, Sockets: []identity.Socket{sock}}}
+	}
+	defer m.Close()
+	cap := Cap{UID: 1000, Application: "native", BitsPerSecond: 8_000_000}
+	cfg := Config{Schema: 4, Enabled: true, Caps: []Cap{cap}}
+	s, err := m.Configure(1, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	until(t, func() bool { return m.Snapshot().AppliedVersion == s.Version })
+	cfg.StoredEdit = &Cap{UID: 1000, Application: "runtime", BitsPerSecond: 16_000_000}
+	updated, err := m.Configure(s.Version, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	until(t, func() bool { return m.Snapshot().AppliedVersion == updated.Version })
+	started.Store(true)
+	until(t, func() bool {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		return slices.Contains(f.calls, "bind_many")
+	})
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(slices.DeleteFunc(slices.Clone(f.calls), func(op string) bool { return op != "policy" })) != 1 {
+		t.Fatalf("saved-only edit reapplied the native kernel policy: %v", f.calls)
 	}
 }
 func TestDisabledAndCAS(t *testing.T) {

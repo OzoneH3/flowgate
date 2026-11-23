@@ -38,6 +38,8 @@ function budgetText() {
   return `Budgets · Upload ${rate(s?.upload_budget_bits_per_second)} · Download ${rate(s?.download_budget_bits_per_second)}`;
 }
 function coverageStatus(t: UploadTarget, kind: LimitKind) {
+  if (t.stored_only || view.snapshot?.configured_caps.some(c => c.stored_only && sameTarget(c,t)))
+    return 'Saved only · the limiter cannot bind sockets for this identity.';
   const snapshot = view.snapshot;
   const priority = kind === 'priority';
   const status = priority ? prioritySummary(view, t) : uploadSummary(view, t, kind);
@@ -128,6 +130,14 @@ function shapingButton(row:Row,state:ClientState,kind:LimitKind) {
 function emptySlot() {
   const slot=document.createElement('span');slot.className='status-slot';slot.setAttribute('aria-hidden','true');return slot;
 }
+function configuredTarget(cap: UploadTarget): UploadTarget {
+  const state = latestState;
+  if (!state) return cap;
+  const live = state.observation.connected && Object.values(state.observation.activity?.processes || {})
+    .find(p => p.uid === cap.uid && p.application.key === cap.application && p.application.kind === 'native');
+  const rule = state.control.rules?.find(r => r.filter.uid === cap.uid && r.filter.application === cap.application);
+  return { ...cap, revision: live ? live.application.revision : rule?.filter.revision };
+}
 export async function openUploadLimits() {
   const sent=performance.now(), start=context; const v=await window.flowgate.uploadStatus(); if(start!==context) throw Error("Connection changed; reopen limits"); adopt(v,sent);
   const d=document.createElement("dialog");d.id="uploadLimitList";d.className="upload-limit-dialog";
@@ -135,11 +145,11 @@ export async function openUploadLimits() {
   for(const c of view.snapshot?.configured_caps||[])for(const direction of ['upload','download'] as const){
     if(!capRate(c,direction))continue;
     const b=text('button','');showAccountIn(b,c.uid,user=>`${c.application} · ${user} · ${scopeLabel(scopeOf(c))} · ${direction} ${capRate(c,direction)/1000000} Mbit/s`);
-    b.onclick=()=>{d.remove();const p=latestState?.observation.connected?Object.values(latestState.observation.activity?.processes||{}).find(p=>p.uid===c.uid&&p.application.key===c.application&&p.application.kind==='native'):undefined;void open({...c,revision:p?.application.revision},document.getElementById('uploadLimits')||undefined,direction);};d.append(b);
+    b.onclick=()=>{d.remove();void open(configuredTarget(c),document.getElementById('uploadLimits')||undefined,direction);};d.append(b);
   }
   for(const c of view.snapshot?.configured_caps||[])if(c.traffic_priority){
     const b=text('button','');showAccountIn(b,c.uid,user=>`${c.application} · ${user} · ${scopeLabel(scopeOf(c))} · traffic priority ${c.traffic_priority}`);
-    b.onclick=()=>{d.remove();const p=latestState?.observation.connected?Object.values(latestState.observation.activity?.processes||{}).find(p=>p.uid===c.uid&&p.application.key===c.application&&p.application.kind==='native'):undefined;void open({...c,revision:p?.application.revision},document.getElementById('uploadLimits')||undefined,'priority');};d.append(b);
+    b.onclick=()=>{d.remove();void open(configuredTarget(c),document.getElementById('uploadLimits')||undefined,'priority');};d.append(b);
   }
   if(view.prioritySupported && view.snapshot){
     // Manual per-direction budgets (interface-wide, host-local connected sockets
@@ -153,7 +163,7 @@ export async function openUploadLimits() {
     const saved=view;saveBudgets.onclick=async()=>{saveBudgets.disabled=true;try{const budgets={upload:bits(ub.value),download:bits(db.value)};const sent=performance.now(),start=context;const result=await window.flowgate.uploadConfigure({generation:saved.generation!,expected_version:saved.snapshot!.version,budgets});if(start!==context)throw Error('Connection changed; refresh again');adopt(result,sent);paint();d.remove();}catch(e){msg.textContent=String(e instanceof Error?e.message:e);saveBudgets.disabled=false;}};
     box.append(saveBudgets,msg,text('p','Priority is best effort. Scheduler allocations do not guarantee delivery, progress or latency. Low traffic may be very slow or stall under contention. Priority acts only while the local budget is the busy shaping point; it cannot reclaim upstream bandwidth.'));d.append(box);
   }
-  if(!view.snapshot?.configured_caps.length)d.append(text("p","No configured limits. Select a verified native application’s ↑ UL Limit or ↓ DL Limit slot in Activity to add one."));
+  if(!view.snapshot?.configured_caps.length)d.append(text("p","No configured limits. Select an application’s ↑ UL Limit or ↓ DL Limit slot in Activity to add one."));
   if(view.writable && view.generation && view.snapshot && !view.snapshot.enabled && !view.snapshot.configured_caps.length && view.snapshot.status==='Unsupported') {
     const saved=view, retry=text('button','Retry owned cleanup'); retry.id='uploadCleanup';
     retry.onclick=async()=>{retry.disabled=true;try{const result=await window.flowgate.uploadConfigure({generation:saved.generation!,expected_version:saved.snapshot!.version,cleanup_only:true});d.append(text('p',result.message+' Close and refresh to verify cleanup.'));}catch(e){d.append(text('p',String(e)));}};d.append(retry);
@@ -226,7 +236,13 @@ async function open(t:UploadTarget, anchor?:HTMLElement, direction:LimitKind='up
   );
   const refresh=text('button','Reload configuration');refresh.id='uploadRefresh';
   details.append(live,contextNote,summary,controllerError,detail,technical,refresh);
-  d.append(header,zoneRow,row,actions,details);document.body.append(d);anchor?.setAttribute('aria-expanded','true');
+  d.append(header,zoneRow,row);
+  if (t.stored_only) {
+    const note=text('p','Saved only. This build cannot apply shaping to this identity.');
+    note.className='shaping-detail-note';
+    d.append(note);
+  }
+  d.append(actions,details);document.body.append(d);anchor?.setAttribute('aria-expanded','true');
   const bounds=anchor?.getBoundingClientRect() || {left:8,top:8,bottom:8};
   const place=()=>{const current=anchor?.isConnected?anchor.getBoundingClientRect():bounds;const pos=popupPosition(current,d.offsetWidth,d.offsetHeight,{width:innerWidth,height:innerHeight});d.style.left=pos.left+'px';d.style.top=pos.top+'px';};
   technical.ontoggle = place;

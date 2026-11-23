@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/pprof"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,8 +20,10 @@ import (
 
 // MaxCaps is the shared class-node capacity: one legacy or four zoned nodes.
 const MaxCaps = 16
+const MaxStoredCaps = 1024
 
 type Cap struct {
+	StoredOnly            bool   `json:"stored_only,omitempty"`
 	Scope                 string `json:"scope,omitempty"`
 	UID                   uint32 `json:"uid"`
 	Application           string `json:"application"`
@@ -37,6 +40,9 @@ func (c Cap) key() string { return strconv.FormatUint(uint64(c.UID), 10) + ":" +
 type Config struct {
 	Enabled bool  `json:"enabled"`
 	Caps    []Cap `json:"caps"`
+	// Schema 4 preserves saved-only entries and optionally edits one exact key
+	// and scope. A zero-rate entry with no priority deletes that saved setting.
+	StoredEdit *Cap `json:"stored_edit,omitempty"`
 	// Schema >=2 protects priority/budgets; schema 3 protects zone scopes in
 	// either requested or stored state from older full-replacement clients.
 	Schema         int    `json:"schema,omitempty"`
@@ -368,8 +374,8 @@ func verificationView(k *KernelStatus, sampleStart, now time.Time) (*int64, stri
 }
 
 func validateConfig(c Config) error {
-	if len(c.Caps) > MaxCaps*3 || (!c.Enabled && (len(c.Caps) != 0 || c.UploadBudget != 0 || c.DownloadBudget != 0)) {
-		return fmt.Errorf("at most 48 scoped entries; disabled configuration must have no caps or budgets")
+	if len(c.Caps) > MaxStoredCaps+MaxCaps*3 {
+		return fmt.Errorf("too many saved shaping entries")
 	}
 	for _, b := range []uint64{c.UploadBudget, c.DownloadBudget} {
 		if b != 0 && (b < MinBudget || b > MaxBudget) {
@@ -386,13 +392,40 @@ func validateConfig(c Config) error {
 		}
 		seen[v.key()+"\x00"+v.Scope] = true
 	}
-	if err := validateZones(c); err != nil {
+	active := kernelConfig(c)
+	if len(c.Caps)-len(active.Caps) > MaxStoredCaps || len(active.Caps) > MaxCaps*3 {
+		return fmt.Errorf("too many shaping entries")
+	}
+	if !c.Enabled && (len(active.Caps) != 0 || c.UploadBudget != 0 || c.DownloadBudget != 0) {
+		return fmt.Errorf("disabled configuration must have no enforceable caps or budgets")
+	}
+	if err := validateZones(active); err != nil {
 		return err
 	}
-	if !allocationAdmitted(c.UploadBudget, aggregateCaps(c.Caps, c.UploadBudget, false), false) || !allocationAdmitted(c.DownloadBudget, aggregateCaps(c.Caps, c.DownloadBudget, true), true) {
+	if !allocationAdmitted(c.UploadBudget, aggregateCaps(active.Caps, c.UploadBudget, false), false) || !allocationAdmitted(c.DownloadBudget, aggregateCaps(active.Caps, c.DownloadBudget, true), true) {
 		return fmt.Errorf("allocation_below_minimum")
 	}
 	return nil
+}
+
+func kernelConfig(c Config) Config {
+	all := c.Caps
+	c.Caps = nil
+	for _, cap := range all {
+		if !cap.StoredOnly {
+			c.Caps = append(c.Caps, cap)
+		}
+	}
+	return c
+}
+
+func hasStoredOnly(caps []Cap) bool {
+	for _, cap := range caps {
+		if cap.StoredOnly {
+			return true
+		}
+	}
+	return false
 }
 
 // Configure accepts desired state, not a claim that kernel changes completed.
@@ -410,8 +443,15 @@ func (m *Manager) Configure(expected uint64, c Config) (Snapshot, error) {
 	if err := validateConfig(c); err != nil {
 		return Snapshot{}, err
 	}
+	if hasStoredOnly(c.Caps) || (c.StoredEdit != nil && c.Schema != 4) {
+		return Snapshot{}, fmt.Errorf("schema_upgrade_required")
+	}
+	active := kernelConfig(c)
+	active.StoredEdit = nil
 	m.mu.Lock()
-	if ((zoned(c) || zoned(m.cfg)) && c.Schema != 3) || ((advanced(c) || advanced(m.cfg)) && c.Schema != 2 && c.Schema != 3) {
+	if (hasStoredOnly(m.snap.Caps) && c.Schema != 4) ||
+		((zoned(c) || zoned(m.cfg)) && c.Schema != 3 && c.Schema != 4) ||
+		((advanced(c) || advanced(m.cfg)) && c.Schema != 2 && c.Schema != 3 && c.Schema != 4) {
 		m.mu.Unlock()
 		return Snapshot{}, fmt.Errorf("schema_upgrade_required")
 	}
@@ -423,14 +463,36 @@ func (m *Manager) Configure(expected uint64, c Config) (Snapshot, error) {
 		m.mu.Unlock()
 		return Snapshot{}, fmt.Errorf("stale_version")
 	}
+	if c.Schema == 4 {
+		edit := c.StoredEdit
+		if edit != nil {
+			copy := *edit
+			if copy.Scope == "all" {
+				copy.Scope = ""
+			}
+			copy.StoredOnly = true
+			edit = &copy
+		}
+		for _, cap := range m.snap.Caps {
+			if cap.StoredOnly && (edit == nil || cap.key() != edit.key() || cap.Scope != edit.Scope) {
+				c.Caps = append(c.Caps, cap)
+			}
+		}
+		if edit != nil && (edit.BitsPerSecond != 0 || edit.DownloadBitsPerSecond != 0 || edit.TrafficPriority != "") {
+			c.Caps = append(c.Caps, *edit)
+		}
+		if err := validateConfig(c); err != nil {
+			m.mu.Unlock()
+			return Snapshot{}, err
+		}
+	}
 	// Leave a full policy generation of headroom for in-flight discovery. The
 	// worker rotates its owned generation before consuming the reserved tail.
-	if len(c.Caps) > 0 && m.snap.Kernel != nil && m.snap.Kernel.NextMinor > 0xffef-2*MaxCaps {
+	if !sameKernelPolicy(active, m.cfg) && len(active.Caps) > 0 && m.snap.Kernel != nil && m.snap.Kernel.NextMinor > 0xffef-2*MaxCaps {
 		m.mu.Unlock()
 		return Snapshot{}, fmt.Errorf("class_generation_exhausted: wait for owned generation rotation")
 	}
-	c.Caps = append([]Cap(nil), c.Caps...)
-	m.cfg = c
+	m.cfg = active
 	m.snap.Version++
 	m.snap.Enabled = c.Enabled
 	m.snap.Caps = append([]Cap{}, c.Caps...)
@@ -454,6 +516,11 @@ func (m *Manager) Configure(expected uint64, c Config) (Snapshot, error) {
 	accepted := m.snapshotLocked()
 	m.mu.Unlock()
 	return accepted, nil
+}
+
+func sameKernelPolicy(a, b Config) bool {
+	return a.Enabled == b.Enabled && a.UploadBudget == b.UploadBudget &&
+		a.DownloadBudget == b.DownloadBudget && slices.Equal(a.Caps, b.Caps)
 }
 func (m *Manager) Close() {
 	m.mu.Lock()
@@ -585,6 +652,7 @@ func (m *Manager) run() {
 	var discovery discoverySnapshot
 	var priority priorityQueue
 	previousCaps := map[string]Cap{}
+	var previousConfig Config
 	discovery.reset()
 	defer func() {
 		if t != nil {
@@ -650,7 +718,7 @@ func (m *Manager) run() {
 			}
 			m.gap("first_packet_binding_race")
 		}
-		if applied != version {
+		if applied != version && (applied == 0 || !sameKernelPolicy(cfg, previousConfig)) {
 			// One full desired policy: configured population, budgets and
 			// priorities. The controller removes instantiated applications that
 			// are no longer configured and applies an ordered class batch.
@@ -675,9 +743,12 @@ func (m *Manager) run() {
 			}
 			priority.hints.view.Version = version
 			m.publishPriority(&priority)
-			applied = version
+			previousConfig = cfg
 			discovery.clearRetry() // cap edits may request a fresh attempt, never reset progress
 			bound = map[string]bool{}
+		}
+		if applied != version {
+			applied = version
 			m.mu.Lock()
 			m.snap.AppliedVersion = version
 			m.mu.Unlock()

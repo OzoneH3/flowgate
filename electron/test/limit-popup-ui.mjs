@@ -61,9 +61,9 @@ function status() {
   return {
     version,
     applied_version: version,
-    enabled: caps.length > 0,
+    enabled: caps.some(c => !c.stored_only),
     interface: 'synthetic0',
-    status: caps.length ? 'Partial' : 'Disabled',
+    status: caps.some(c => !c.stored_only) ? 'Partial' : 'Disabled',
     configured_caps: caps,
     coverage_valid_for_ms: 10000,
     kernel: {
@@ -90,6 +90,7 @@ function reply(q, monitor) {
         'experimental-native-upload-v1',
         'experimental-native-download-v1',
         'experimental-traffic-priority-v1',
+        'saved-shaping-settings-v1',
       ],
       permissions: {
         role: 'administrator',
@@ -138,7 +139,12 @@ function reply(q, monitor) {
       return { ...r, error_code: 'synthetic_refusal', error: 'Synthetic configuration refusal' };
     if (q.generation !== generation || q.expected_version !== version)
       return { ...r, error_code: 'version_conflict', error: 'Configuration changed' };
-    caps = structuredClone(q.upload_config.caps);
+    const edit = q.upload_config.stored_edit;
+    const stored = caps.filter(c => c.stored_only && (!edit || c.uid !== edit.uid ||
+      c.application !== edit.application || (c.scope || 'all') !== (edit.scope || 'all')));
+    if (edit && (edit.bits_per_second || edit.download_bits_per_second || edit.traffic_priority))
+      stored.push({ ...edit, stored_only:true });
+    caps = [...structuredClone(q.upload_config.caps), ...stored];
     version++;
     return drop ? null : { ...r, upload_shaping: status() };
   }
@@ -241,25 +247,31 @@ try {
   await page.locator('#expand').click();
   const unverified = page.locator('#rows tr[data-id^="app:runtime-hover"]');
   await unverified.waitFor();
-  for (const [direction, label] of [
-    ['priority', 'Traffic priority'],
-    ['upload', 'Upload limit'],
-    ['download', 'Download limit'],
-  ]) {
-    const button = unverified.locator(`[data-limit-direction="${direction}"]`);
-    await wait(async () => {
-      await button.hover();
-      if (!(await tooltip.count())) return false;
-      const message = await tooltip.textContent();
-      return message.startsWith(label + ' unavailable') && message.includes('outside its socket coverage');
-    }, label + ' for a saved identity without native proof');
-    assert.equal(await button.getAttribute('aria-disabled'), 'true');
-    assert(await button.evaluate((element) => element.matches(':hover') && !element.disabled));
-    await button.click({ force: true });
-    await button.press('Enter');
-    assert.equal(await popup.count(), 0);
+  const draftTarget = (direction) => unverified.locator(`[data-limit-direction="${direction}"]`);
+  for (const direction of ['priority', 'upload', 'download']) {
+    await draftTarget(direction).hover();
+    await wait(async () => (await tooltip.count()) && (await tooltip.textContent()).includes('Saved only'), 'runtime tooltip');
+    await draftTarget(direction).click();
+    await popup.waitFor();
+    assert.match(await popup.innerText(), /Saved only. This build cannot apply shaping/);
+    if (direction === 'priority') await page.locator('#priorityLevel input[value=high]').check();
+    await wait(() => page.locator('#uploadSave').isEnabled(), 'runtime save');
+    await page.locator('#uploadSave').click();
+    await popup.waitFor({ state: 'detached' });
   }
-  assert.equal(writes().length, 0);
+  assert(caps[0].stored_only && caps[0].traffic_priority === 'high' &&
+    caps[0].bits_per_second && caps[0].download_bits_per_second);
+  assert(writes().every(({q}) => !q.upload_config.enabled && !q.upload_config.caps.length));
+  for (const direction of ['priority', 'upload', 'download']) {
+    await draftTarget(direction).click();
+    await popup.waitFor();
+    await page.locator('#uploadDetails').click();
+    await page.locator('#uploadRemove').click();
+    await popup.waitFor({ state: 'detached' });
+  }
+  assert.deepEqual(caps, []);
+  priorWrites = writes().length;
+  evidence.steps.push({ label: 'Three settings saved and removed using only the saved runtime identity; no kernel configuration sent' });
   const appImage = page.locator('#rows tr[data-id^="app:appimage-hover"]');
   await appImage.locator('[data-limit-direction="download"]').click();
   await popup.waitFor();
@@ -293,8 +305,8 @@ try {
   }
   assert.deepEqual(caps, []);
   assert.equal(writes().length, 6);
-  priorWrites = writes().length;
-  evidence.steps.push({ label: 'AppImage editor opened and all three settings saved from a native process-rule row with no sockets; unsupported runtime stayed unavailable' });
+  priorWrites += writes().length;
+  evidence.steps.push({ label: 'AppImage editor opened and all three settings saved from a native process-rule row with no sockets' });
   async function open(direction) {
     await slot(direction).click();
     await popup.waitFor();

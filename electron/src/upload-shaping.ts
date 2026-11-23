@@ -1,5 +1,7 @@
 import type { Row } from './model';
 import type { ClientState } from './protocol';
+export const SAVED_SHAPING_CAPABILITY = 'saved-shaping-settings-v1';
+export const MAX_STORED_CAPS = 1024;
 export const ZONE_CAPABILITY = 'experimental-zone-shaping-v1';
 export type LimitScope = 'all' | 'internet' | 'local';
 export const scopeOf = (t: {scope?: string}): LimitScope => (t.scope || 'all') as LimitScope;
@@ -14,7 +16,7 @@ export const PRIORITY_CAPABILITY = 'experimental-traffic-priority-v1';
 export type TrafficPriority = 'low' | 'normal' | 'high';
 export const TRAFFIC_PRIORITIES: readonly TrafficPriority[] = ['low','normal','high'];
 export const MIN_BUDGET = 16000000, MAX_BUDGET = 10000000000;
-export interface UploadTarget { scope?: '' | LimitScope; uid: number; application: string; label?: string; revision?: string }
+export interface UploadTarget { scope?: '' | LimitScope; uid: number; application: string; label?: string; revision?: string; stored_only?: boolean }
 export interface UploadCap extends UploadTarget { bits_per_second: number; download_bits_per_second?: number; traffic_priority?: TrafficPriority }
 export interface UploadSnapshot {
   version: number; applied_version: number; enabled: boolean; interface: string; status: string;
@@ -25,44 +27,57 @@ export interface UploadView { supported: boolean; downloadSupported?: boolean; p
 export interface UploadCleanup { generation: string; expected_version: number; cleanup_only: true }
 export interface UploadEdit { generation: string; expected_version: number; target: UploadTarget; direction?: LimitDirection; bits_per_second: number | null; priority?: TrafficPriority | null }
 export interface BudgetEdit { generation: string; expected_version: number; budgets: { upload: number; download: number } }
-export function hasSavedUploadIdentity(state: ClientState, target: UploadTarget): boolean {
-  return !!(state.control?.connected && target.application && target.revision &&
-    state.control.rules?.some(rule => rule.native_shaping_identity === true &&
-      rule.filter.application === target.application && rule.filter.revision === target.revision &&
-      rule.filter.uid === target.uid));
+export function savedUploadTarget(state: ClientState, target: UploadTarget): UploadTarget | undefined {
+  if (!state.control?.connected || !target.application || !target.revision) return;
+  const rules = state.control.rules?.filter(rule =>
+    !rule.preset && !rule.network_endpoint && !rule.filter.all_programs && !rule.filter.all_uids &&
+    rule.filter.application === target.application && rule.filter.revision === target.revision &&
+    rule.filter.uid === target.uid);
+  if (rules?.some(rule => rule.native_shaping_identity === true)) return target;
+  if (rules?.length && state.control.capabilities?.includes(SAVED_SHAPING_CAPABILITY))
+    return { ...target, stored_only: true };
 }
 export function uploadTarget(row: Row, state: ClientState): UploadTarget | undefined {
-  if (row.displayApplication || row.runtimeApplication || !['application','process'].includes(row.kind)) return;
+  if (row.displayApplication || !['application','process'].includes(row.kind)) return;
   const zone=row.applicationZone;
   if(zone && (!state.control?.capabilities?.includes(ZONE_CAPABILITY) || !state.control.networkZones || zone.model!==state.control.networkZones.model)) return;
   if (row.inactive) {
     const {key, revision, uid} = row.inactive;
     const saved = {uid, application:key, revision, label:row.label, ...(zone ? {scope:zone.zone} : {})};
-    return hasSavedUploadIdentity(state,saved) ? saved : undefined;
+    return savedUploadTarget(state,saved);
   }
   if (!state.observation?.connected) return;
+  if (row.runtimeApplication) {
+    const {uid, application} = row.runtimeApplication;
+    if (!application?.key || !application.revision) return;
+    return savedUploadTarget(state,{uid, application:application.key, revision:application.revision, label:row.label,
+      ...(zone ? {scope:zone.zone} : {})});
+  }
   const p = row.process;
-  if (!p || p.application.kind !== 'native' || p.application.hosted || !p.application.key || !p.application.revision) return;
-  return {uid:p.uid, application:p.application.key, revision:p.application.revision, label:row.label, ...(zone?{scope:zone.zone}:{})};
+  if (!p || !p.application.key || !p.application.revision) return;
+  const target = {uid:p.uid, application:p.application.key, revision:p.application.revision, label:row.label,
+    ...(zone?{scope:zone.zone}:{})};
+  return p.application.kind === 'native' && !p.application.hosted ? target : savedUploadTarget(state,target);
 }
 // Presentation only. Socket binding is verified independently by the controller.
 export function shapingUnavailableReason(row: Row, state: ClientState, view: UploadView, kind: LimitDirection|'priority'): string | undefined {
   const reasons:string[]=[];
-  if (row.inactive && !uploadTarget(row,state)) reasons.push('No saved identity supported by the current limiter. Wine/Proton applications and hosted Electron bundles are outside its socket coverage.');
+  const target = uploadTarget(row,state);
+  if (row.inactive && !target) reasons.push('No matching saved application identity is available for shaping.');
   else if (!row.inactive && !state.observation?.connected) reasons.push('Current socket observation is disconnected.');
-  else if (row.runtimeApplication || row.displayApplication || row.process?.application.kind==='wine') reasons.push('Wine/runtime or shared-owner application shaping is not supported; only verified native application sockets are eligible.');
-  else if (!uploadTarget(row,state)) reasons.push('No current eligible native application target is available for this row.');
+  else if (!target && (row.runtimeApplication || row.displayApplication || row.process?.application.kind==='wine')) reasons.push('Wine/runtime or shared-owner application shaping is not supported; only verified native application sockets are eligible.');
+  else if (!target) reasons.push('No current eligible native application target is available for this row.');
   if (!state.control?.connected) reasons.push('The control connection is disconnected.');
   else if (!state.control.capabilities?.includes(UPLOAD_CAPABILITY) || (kind==='download'&&!state.control.capabilities?.includes(DOWNLOAD_CAPABILITY)) || (kind==='priority'&&!state.control.capabilities?.includes(PRIORITY_CAPABILITY))) reasons.push('This backend does not provide the requested shaping capability.');
   else if (state.control.permissions?.role!=='administrator' || state.control.readOnly) reasons.push('Shaping changes require an administrator with write access.');
-  if (!view.supported || view.snapshot?.status==='Unsupported') reasons.push('Host shaping unavailable: '+(view.snapshot?.last_error||view.message||'Status unavailable.'));
+  if (!view.supported || (!target?.stored_only && view.snapshot?.status==='Unsupported')) reasons.push('Host shaping unavailable: '+(view.snapshot?.last_error||view.message||'Status unavailable.'));
   else if (!view.writable) reasons.push(view.message||'Host shaping is read-only.');
   return reasons.length ? reasons.join(' ') : undefined;
 }
 export function parseUpload(raw: unknown): UploadSnapshot {
   const r = raw as UploadSnapshot;
   if (r && r.configured_caps === null) r.configured_caps = [];
-  if (!r || !Number.isSafeInteger(r.version) || r.version < 1 || !Number.isSafeInteger(r.applied_version) || typeof r.enabled !== 'boolean' || !Array.isArray(r.configured_caps) || r.configured_caps.length > 48 || !['Disabled','Applying','Active','Partial','Unsupported'].includes(r.status)) throw Error('Invalid upload-limit status');
+  if (!r || !Number.isSafeInteger(r.version) || r.version < 1 || !Number.isSafeInteger(r.applied_version) || typeof r.enabled !== 'boolean' || !Array.isArray(r.configured_caps) || r.configured_caps.length > 48 + MAX_STORED_CAPS || !['Disabled','Applying','Active','Partial','Unsupported'].includes(r.status)) throw Error('Invalid upload-limit status');
   for (const c of r.configured_caps) validateCap(c);
   return r;
 }
@@ -77,9 +92,11 @@ export function validateCap(c: UploadCap) {
   if (!c || !Number.isSafeInteger(c.uid) || c.uid < 0 || typeof c.application !== 'string' || !c.application || c.application.length > 4096 || !validRate(c.bits_per_second) || !validRate(c.download_bits_per_second ?? 0) || !(c.bits_per_second || c.download_bits_per_second || prio)) throw Error('Use a native application and a rate from 1 to 1000 Mbit/s');
 }
 export function validateCapacity(caps: UploadCap[]) {
+  const active = caps.filter(c => !c.stored_only);
+  if (caps.length - active.length > MAX_STORED_CAPS) throw Error('Saved shaping settings capacity exceeded.');
   const apps=new Map<string,boolean>();
-  for(const c of caps){const key=`${c.uid}:${c.application}`;apps.set(key,!!apps.get(key)||scopeOf(c)!=='all');}
-  if(caps.length>48 || [...apps.values()].reduce((n,zoned)=>n+(zoned?4:1),0)>16)throw Error('Shaping capacity exceeded: 16 class slots; each zoned application uses four.');
+  for(const c of active){const key=`${c.uid}:${c.application}`;apps.set(key,!!apps.get(key)||scopeOf(c)!=='all');}
+  if(active.length>48 || [...apps.values()].reduce((n,zoned)=>n+(zoned?4:1),0)>16)throw Error('Shaping capacity exceeded: 16 class slots; each zoned application uses four.');
 }
 export function replaceCap(s: UploadSnapshot, edit: UploadEdit): UploadCap[] {
   if (edit?.priority !== undefined) return replacePriority(s, edit);
@@ -87,7 +104,7 @@ export function replaceCap(s: UploadSnapshot, edit: UploadEdit): UploadCap[] {
   if (s.version !== edit.expected_version) throw Error('Configuration changed. Refresh and review the draft before saving.');
   validateCap({...edit.target,bits_per_second:1000000});
   const old=s.configured_caps.find(c=>sameTarget(c,edit.target));
-  const cap:UploadCap={...(scopeOf(edit.target)!=='all'?{scope:scopeOf(edit.target)}:{}),uid:edit.target.uid,application:edit.target.application,bits_per_second:old?.bits_per_second || 0};
+  const cap:UploadCap={...(scopeOf(edit.target)!=='all'?{scope:scopeOf(edit.target)}:{}),uid:edit.target.uid,application:edit.target.application,bits_per_second:old?.bits_per_second || 0, ...(edit.target.stored_only || old?.stored_only ? { stored_only:true } : {})};
   if(old?.download_bits_per_second)cap.download_bits_per_second=old.download_bits_per_second;
   if(old?.traffic_priority)cap.traffic_priority=old.traffic_priority; // a rate edit keeps the priority
   if(edit.direction==='download') {if(edit.bits_per_second===null)delete cap.download_bits_per_second;else cap.download_bits_per_second=edit.bits_per_second;}
@@ -104,7 +121,7 @@ export function replacePriority(s: UploadSnapshot, edit: UploadEdit): UploadCap[
   if (s.version !== edit.expected_version) throw Error('Configuration changed. Refresh and review the draft before saving.');
   validateCap({...edit.target,bits_per_second:1000000});
   const old=s.configured_caps.find(c=>sameTarget(c,edit.target));
-  const cap:UploadCap={...(scopeOf(edit.target)!=='all'?{scope:scopeOf(edit.target)}:{}),uid:edit.target.uid,application:edit.target.application,bits_per_second:old?.bits_per_second || 0};
+  const cap:UploadCap={...(scopeOf(edit.target)!=='all'?{scope:scopeOf(edit.target)}:{}),uid:edit.target.uid,application:edit.target.application,bits_per_second:old?.bits_per_second || 0, ...(edit.target.stored_only || old?.stored_only ? { stored_only:true } : {})};
   if(old?.download_bits_per_second)cap.download_bits_per_second=old.download_bits_per_second;
   if(edit.priority!==null && (edit.priority!=='normal' || scopeOf(edit.target)!=='all'))cap.traffic_priority=edit.priority as TrafficPriority;
   const caps=s.configured_caps.filter(c=>!sameTarget(c,cap));
@@ -120,6 +137,7 @@ export function capPriority(c: UploadCap | undefined): TrafficPriority { return 
 export function prioritySummary(v: UploadView, t?: UploadTarget): string {
   if (!v.supported || !v.snapshot || !v.prioritySupported) return 'Unsupported';
   const s=v.snapshot, c=t && s.configured_caps.find(c=>sameTarget(c,t));
+  if (t?.stored_only || c?.stored_only) return c?.traffic_priority ? `${capPriority(c)} · Saved only` : 'Normal · Saved only';
   if (s.status==='Unsupported') return 'Unsupported';
   if (s.status==='Applying' || s.applied_version!==s.version) return 'Pending';
   const prio=capPriority(c), name=prio[0].toUpperCase()+prio.slice(1);
@@ -144,6 +162,7 @@ export function limitCoverage(s:UploadSnapshot | undefined, t:UploadTarget, dire
 export function uploadSummary(v: UploadView, t?: UploadTarget, direction: LimitDirection = 'upload'): string {
   if (!v.supported || !v.snapshot || (direction==='download' && !v.downloadSupported)) return 'Unsupported';
   const s=v.snapshot, c=t && s.configured_caps.find(c=>sameTarget(c,t));
+  if (t?.stored_only || c?.stored_only) return capRate(c,direction) ? `${capRate(c,direction)/1000000} Mbit/s · Saved only` : 'Off · Saved only';
   if (s.status==='Unsupported') return 'Unsupported';
   if (s.status==='Applying' || s.applied_version!==s.version) return 'Pending';
   if (!capRate(c,direction)) return 'Off';
