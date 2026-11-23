@@ -720,25 +720,33 @@ def legacy_udp_noexec(manifest, observed):
 
 def collector_target(response, manifest):
     observed = response.get('traffic_monitor') or {}
-    state = observed.get('state')
+    state = collector_state(response)
     if state in (None, 'unavailable', 'active', 'stopped'):
         return state
     if legacy_udp_noexec(manifest, observed):
         # This predecessor attempted startup automatically. Require the
         # replacement to complete that startup and receive an actual sample.
         return 'active'
-    raise RuntimeError('Current collector is not settled')
+    reason = observed.get('reason') or state
+    raise RuntimeError(f'Current collector is not settled: {reason}')
+
+
+def collector_state(response):
+    observed = response.get('traffic_monitor') or {}
+    state = observed.get('state')
+    if state == 'disabled' and observed.get('available') is True and observed.get('reason_code') == 'disabled':
+        return 'stopped'
+    return state
 
 
 def restore_collector(host, expected, response):
     if expected not in ('active', 'stopped'):
         return
     observed = response.get('traffic_monitor') or {}
-    if observed.get('state') != expected:
+    if collector_state(response) != expected:
         host.api('traffic-start' if expected == 'active' else 'traffic-stop',
                  generation=response['generation'], collector_generation=observed.get('generation', ''))
-        wait_for(host, response['generation'],
-                 lambda value: (value.get('traffic_monitor') or {}).get('state') == expected)
+        wait_for(host, response['generation'], lambda value: collector_state(value) == expected)
 
 
 class PreflightChanged(RuntimeError):

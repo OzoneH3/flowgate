@@ -178,6 +178,28 @@ class ReleaseChecks(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'Current collector is not settled'):
                 target({'traffic_monitor': status}, manifest)
 
+    def test_collector_stop_restores_disabled_state_and_failed_census_is_reported(self):
+        disabled = {'generation': 'collector', 'state': 'disabled', 'reason_code': 'disabled',
+                    'available': True}
+        active = {'generation': 'replacement-collector', 'state': 'active', 'available': True}
+        target = release['collector_target']
+        self.assertEqual(target({'traffic_monitor': disabled}, {}), 'stopped')
+        restore = release['restore_collector']
+        host = Mock()
+        before = {'generation': 'replacement', 'traffic_monitor': active}
+        with patch.dict(scope, wait_for=Mock()) as context:
+            restore(host, 'stopped', before)
+            host.api.assert_called_once_with('traffic-stop', generation='replacement',
+                                             collector_generation='replacement-collector')
+            settled = context['wait_for'].call_args.args[2]
+            self.assertFalse(settled(before))
+            self.assertFalse(settled({'traffic_monitor': dict(disabled, available=False)}))
+            self.assertTrue(settled({'traffic_monitor': disabled}))
+        failed = dict(disabled, state='failed', reason_code='bpf_load_failed',
+                      reason='socket diagnostic capacity exceeded; helper: ')
+        with self.assertRaisesRegex(RuntimeError, 'Current collector is not settled: socket diagnostic capacity exceeded'):
+            target({'traffic_monitor': failed}, {})
+
     def test_electron_profile_lifecycle_preserves_unmanaged_content(self):
         profile = self.root / 'flowgate-standalone-electron'
         foreign = self.root / 'foreign-profile'

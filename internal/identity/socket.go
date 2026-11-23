@@ -78,7 +78,12 @@ func NetNS() string              { return link("/proc/self/ns/net") }
 func Sockets() ([]Socket, error) { return SocketsLimited(0) }
 
 // UDPSockets is the complete UDP census of both families, without TCP rows.
-func UDPSockets() ([]Socket, error) { return socketsFor([]byte{unix.IPPROTO_UDP}, 0) }
+func UDPSockets() ([]Socket, error) { return UDPSocketsLimited(0) }
+
+// UDPSocketsLimited bounds the UDP census across both families.
+func UDPSocketsLimited(limit int) ([]Socket, error) {
+	return socketsFor([]byte{unix.IPPROTO_UDP}, limit)
+}
 
 // SocketsLimited bounds retained rows; zero preserves the enforcement census.
 func SocketsLimited(limit int) ([]Socket, error) {

@@ -156,7 +156,7 @@ func (s *session) sample(input io.Writer, output io.Reader, ready chan<- error) 
 	since := map[string]time.Time{}
 	start := time.Now()
 	for s.ctx.Err() == nil {
-		sockets, err := identity.SocketsLimited(2048)
+		sockets, err := identity.UDPSocketsLimited(2048)
 		if err != nil {
 			return err
 		}

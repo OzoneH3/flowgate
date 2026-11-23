@@ -3,6 +3,7 @@ package identity
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"golang.org/x/sys/unix"
 	"net"
@@ -11,6 +12,43 @@ import (
 	"syscall"
 	"testing"
 )
+
+func TestBoundedUDPCensusIgnoresTCPAndRetainsBothFamilies(t *testing.T) {
+	tcp, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tcp.Close()
+
+	want := make(map[string]bool)
+	for network, address := range map[string]string{"udp4": "127.0.0.1:0", "udp6": "[::1]:0"} {
+		conn, err := net.ListenPacket(network, address)
+		if err != nil {
+			if network == "udp6" && (errors.Is(err, unix.EAFNOSUPPORT) || errors.Is(err, unix.EADDRNOTAVAIL)) {
+				t.Skipf("IPv6 unavailable: %v", err)
+			}
+			t.Fatal(err)
+		}
+		defer conn.Close()
+		want[conn.LocalAddr().String()] = true
+	}
+	rows, err := UDPSocketsLimited(4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		if row.Protocol != "udp" {
+			t.Fatalf("unexpected %s socket in UDP census", row.Protocol)
+		}
+		delete(want, row.Local.String())
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing UDP sockets: %v", want)
+	}
+	if rows, err := UDPSocketsLimited(1); len(rows) != 1 || !errors.Is(err, ErrSocketCensusCapacity) {
+		t.Fatalf("overflow returned %d rows and %v", len(rows), err)
+	}
+}
 
 func TestUDPPortDiagRequestPreservesCompleteCandidateScope(t *testing.T) {
 	for _, family := range []byte{unix.AF_INET, unix.AF_INET6} {
