@@ -12,7 +12,9 @@ import re
 import secrets
 import selectors
 import signal
+import socket
 import stat
+import struct
 import subprocess
 import sys
 import time
@@ -179,6 +181,136 @@ def decode_tc_batch(text, count):
     if len(rows) != count:
         raise IncompleteTCBatch('incomplete traffic-control batch output')
     return rows
+
+
+# NETLINK_ROUTE UAPI: nlmsghdr, nlattr, tcmsg, and tc_htb_opt. Keep the
+# kernel's exact options in the ownership record, including 64-bit rates,
+# ratespec fields and buffer ticks. No conversion through tc's text printer.
+NL_HEADER = struct.Struct('=IHHII')
+NL_ATTR = struct.Struct('=HH')
+TC_MESSAGE = struct.Struct('=B3xiIII')
+HTB_PARAMETERS = struct.Struct('=BBHhHIBBHhHIIIIII')
+
+
+def aligned_records(data, header):
+    while data:
+        if len(data) < header.size:
+            raise RuntimeError('truncated traffic-control netlink header')
+        fields = header.unpack_from(data)
+        length = fields[0]
+        stride = (length + 3) & ~3
+        if not header.size <= length <= stride <= len(data):
+            raise RuntimeError('invalid traffic-control netlink length')
+        yield fields, data[header.size:length]
+        data = data[stride:]
+
+
+def tc_attributes(data, pad=None):
+    attrs = {}
+    for (_, kind), value in aligned_records(data, NL_ATTR):
+        if kind == pad and not value:
+            continue
+        # Kernels may mark nested attributes, but these scalar values are
+        # never in network byte order.
+        kind &= ~0x8000
+        if kind in attrs or kind & 0x4000:
+            raise RuntimeError('ambiguous traffic-control netlink attributes')
+        attrs[kind] = value
+    return attrs
+
+
+def tc_handle(value):
+    return f'{value >> 16:x}:' + (f'{value & 0xffff:x}' if value & 0xffff else '')
+
+
+def decode_tc_class(data, ifindex, stats=False):
+    if len(data) < TC_MESSAGE.size:
+        raise RuntimeError('truncated traffic-control class identity')
+    family, device, handle, parent, info = TC_MESSAGE.unpack_from(data)
+    if family != socket.AF_UNSPEC or device != ifindex or not handle:
+        raise RuntimeError('unexpected traffic-control class identity')
+    attrs = tc_attributes(data[TC_MESSAGE.size:], pad=9)  # TCA_PAD
+    kind = attrs.get(1, b'')  # TCA_KIND
+    if not re.fullmatch(rb'[A-Za-z0-9_]+\0', kind):
+        raise RuntimeError('missing or invalid traffic-control class kind')
+    row = {'class': kind[:-1].decode('ascii'), 'handle': tc_handle(handle)}
+    if parent == 0xffffffff:  # TC_H_ROOT
+        row['root'] = True
+    else:
+        row['parent'] = tc_handle(parent)
+    if info:
+        row['leaf'] = hex(info >> 16)
+    if row['class'] != 'htb':
+        # Any foreign class still reaches topology verification. fq_codel flow
+        # buckets continue to be ignored by the same caller as with tc JSON.
+        return row
+    if set(attrs) - {1, 2, 3, 4, 5, 6, 7}:
+        raise RuntimeError('unsupported HTB class attributes')
+    options = tc_attributes(attrs.get(2, b''), pad=8)  # TCA_OPTIONS, TCA_HTB_PAD
+    if set(options) - {1, 6, 7} or len(options.get(1, b'')) != HTB_PARAMETERS.size:
+        raise RuntimeError('missing or unsupported HTB class options')
+    parms = HTB_PARAMETERS.unpack(options[1])
+    def rate(option, narrow):
+        if option not in options:
+            return narrow
+        if len(options[option]) != 8:
+            raise RuntimeError('invalid 64-bit HTB class rate')
+        return struct.unpack('=Q', options[option])[0]
+    actual_rate, actual_ceil = rate(6, parms[5]), rate(7, parms[11])
+    if not 0 < actual_rate <= actual_ceil:
+        raise RuntimeError('invalid HTB class rates')
+    row.update(rate=actual_rate, ceil=actual_ceil, rate_spec=list(parms[:6]), ceil_spec=list(parms[6:12]),
+               buffer_ticks=parms[12], cbuffer_ticks=parms[13], quantum=parms[14], level=parms[15])
+    if not parms[15]:
+        row['prio'] = parms[16]
+    if stats:
+        counters = tc_attributes(attrs[7], pad=6)  # TCA_STATS2, TCA_STATS_PAD
+        byte_count, packet_count = struct.unpack_from('=QI', counters[1])  # TCA_STATS_BASIC
+        if 8 in counters:  # TCA_STATS_PKT64
+            packet_count, = struct.unpack('=Q', counters[8])
+        qlen, backlog, drops, requeues, overlimits = struct.unpack('=IIIII', counters[3])
+        row['stats'] = dict(bytes=byte_count, packets=packet_count, qlen=qlen,
+                            backlog=backlog, drops=drops, requeues=requeues, overlimits=overlimits)
+    return row
+
+
+def rtnetlink_classes(dev, stats=False):
+    """Fresh, bounded RTM_GETTCLASS dump. Any incomplete dump is unusable."""
+    deadline = time.monotonic() + 3
+    index = socket.if_nametoindex(dev)
+    rows = {}
+    total = 0
+    with socket.socket(socket.AF_NETLINK, socket.SOCK_RAW, socket.NETLINK_ROUTE) as conn:
+        conn.bind((0, 0))
+        port, _ = conn.getsockname()
+        payload = TC_MESSAGE.pack(socket.AF_UNSPEC, index, 0, 0, 0)
+        conn.sendto(NL_HEADER.pack(NL_HEADER.size + len(payload), 42, 0x301, 1, port) + payload, (0, 0))
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError('traffic-control class dump deadline exceeded')
+            conn.settimeout(remaining)
+            data, _, flags, sender = conn.recvmsg(65536)
+            total += len(data)
+            if sender != (0, 0) or flags & socket.MSG_TRUNC or not data or total > 2 * 1024 * 1024:
+                raise RuntimeError('invalid or oversized traffic-control class dump')
+            done = False
+            for (_, kind, flags, seq, pid), body in aligned_records(data, NL_HEADER):
+                if done or seq != 1 or pid != port or flags & 0x10:  # NLM_F_DUMP_INTR
+                    raise RuntimeError('interrupted or unrelated traffic-control class dump')
+                if kind == 3 and len(body) == 4 and struct.unpack('=i', body)[0] == 0:  # NLMSG_DONE
+                    done = True
+                    continue
+                if kind != 40 or not flags & 2:  # RTM_NEWTCLASS, NLM_F_MULTI
+                    raise RuntimeError('unsuccessful traffic-control class dump')
+                row = decode_tc_class(body, index, stats)
+                if row['handle'] in rows:
+                    raise RuntimeError('duplicate traffic-control class handle')
+                rows[row['handle']] = row
+            if done:
+                if socket.if_nametoindex(dev) != index:
+                    raise RuntimeError('interface changed during traffic-control class dump')
+                return list(rows.values())
 
 
 class KernelWorker:
@@ -400,6 +532,7 @@ class Controller:
         self.compatibility = self.preflight(before)
         validate_activation_topology(self.compatibility, getattr(args, 'host_trial', False))
         self.original = before
+        self.class_source = getattr(self, 'class_source', 'tc')
         self.token = secrets.token_hex(16)
         self.major = 0x100 + secrets.randbelow(0xfe00)
         # Download adapter: one owned IFB per generation with its own HTB major.
@@ -486,31 +619,36 @@ class Controller:
             raise RuntimeError('invalid exact socket response')
         return result
 
-    def query_tc(self, commands, detailed=False):
-        # Fresh read-only dumps, identical to the former individual processes.
-        # No -force: any failed command invalidates the entire observation.
-        # This is not an atomic kernel snapshot and does not cache authority.
+    def tc_batch(self, commands, detailed):
         tc = ['tc', *(['-d'] if detailed else []), '-j']
         p = subprocess.run([*tc, '-batch', '-'],
                            input=''.join(' '.join(c) + '\n' for c in commands),
                            capture_output=True, text=True, timeout=3)
         if p.returncode or len(p.stdout) > 2 * 1024 * 1024:
             raise RuntimeError('traffic-control query batch failed: ' + p.stderr[:1024])
-        try:
-            return decode_tc_batch(p.stdout, len(commands))
-        except IncompleteTCBatch:
-            # Older tc prints classes as text and emits nothing for an empty
-            # device. Confirm the missing class output separately. Accepting
-            # it as an empty array would pass preflight and fail after mutation.
-            for command in commands:
-                if len(command) == 4 and command[:3] == ('class', 'show', 'dev'):
-                    probe = subprocess.run([*tc, *command], capture_output=True, text=True, timeout=3)
-                    if probe.returncode == 0 and not probe.stderr and not probe.stdout.strip():
-                        raise RuntimeError(
-                            'tc -j class show returned no JSON; install iproute2 with JSON '
-                            'class dumps (upstream 6.2 or newer) before enabling traffic shaping'
-                        ) from None
-            raise
+        return decode_tc_batch(p.stdout, len(commands))
+
+    def query_tc(self, commands, detailed=False):
+        # Each result must be associated with a specific read-only query. Never
+        # infer the position of an empty class response in a mixed tc batch.
+        is_class = lambda c: len(c) == 4 and c[:3] == ('class', 'show', 'dev')
+        if getattr(self, 'class_source', None) != 'rtnetlink':
+            try:
+                return self.tc_batch(commands, detailed)
+            except (IncompleteTCBatch, json.JSONDecodeError):
+                if getattr(self, 'class_source', None) == 'tc':
+                    raise  # An existing tc-format journal can't change representations.
+                candidates = [c for c in commands if is_class(c)]
+                if len(candidates) != 1:
+                    raise
+                probe = subprocess.run(['tc', '-j', *candidates[0]], capture_output=True, text=True, timeout=3)
+                if (probe.returncode or probe.stderr or not
+                        (not probe.stdout or re.fullmatch(r'(?:class [^\n]+\n)+', probe.stdout))):
+                    raise
+                self.class_source = 'rtnetlink'
+        other = [c for c in commands if not is_class(c)]
+        results = iter(self.tc_batch(other, detailed) if other else [])
+        return [rtnetlink_classes(c[3]) if is_class(c) else next(results) for c in commands]
 
     def topology(self, expected=None):
         fields = ('qdiscs', 'classes', 'egress', 'ingress', 'root_filters')
@@ -643,6 +781,7 @@ class Controller:
                 'setup_tc_intent': getattr(self, 'setup_tc_intent', None),
                 'ifb_detail_expected': getattr(self, 'ifb_detail_expected', None),
                 'ul_detail_expected': getattr(self, 'ul_detail_expected', None),
+                'class_source': getattr(self, 'class_source', 'tc'),
                 'link_identity': {k: self.link.get(k) for k in ('ifindex','address','parentbus','parentdev','link_type')}}
         p = self.state / 'owner.new'
         fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
@@ -848,6 +987,9 @@ class Controller:
         if not stat.S_ISREG(st.st_mode) or st.st_uid != 0 or st.st_mode & 0o077 or st.st_size > 65536:
             raise ValueError('invalid owner journal')
         d = json.loads(self.manifest.read_text())
+        self.class_source = d.get('class_source', 'tc')
+        if self.class_source not in ('tc', 'rtnetlink'):
+            raise ValueError('invalid traffic-control class journal format')
         boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
         valid_pin = (isinstance(d.get('token'), str) and re.fullmatch('[0-9a-f]{32}', d['token'])
                      and d.get('pin') == '/sys/fs/bpf/fg-m1-' + d['token'])

@@ -40,7 +40,7 @@ class ModelTests(unittest.TestCase):
         with patch.object(m1.subprocess,'run',return_value=types.SimpleNamespace(returncode=1,stdout='[]',stderr='failure')):
             with self.assertRaises(RuntimeError):c.query_tc([('qdisc','show')])
 
-    def test_tc_query_diagnoses_mint_empty_class_dump_without_accepting_it(self):
+    def test_tc_query_repeats_other_queries_when_stock_class_is_blank_or_text(self):
         from subprocess import CompletedProcess
         from unittest.mock import patch
 
@@ -57,11 +57,22 @@ class ModelTests(unittest.TestCase):
         def result(stdout='', code=0, stderr=''):
             return CompletedProcess([], code, stdout, stderr)
 
-        with patch.object(m1.subprocess, 'run', side_effect=[result(batch), result()]) as run:
-            with self.assertRaisesRegex(RuntimeError, 'install iproute2 with JSON class dumps'):
-                self.fake().query_tc(commands, detailed=True)
-        self.assertEqual([call.args[0] for call in run.call_args_list],
-                         [['tc', '-d', '-j', '-batch', '-'], ['tc', '-d', '-j', *commands[1]]])
+        foreign_filter = '[{"kind":"matchall","pref":101}]\n'
+        independent = qdisc + foreign_filter + '[]\n[]\n'
+        for raw, class_output in ((batch, ''), (qdisc + 'class htb 10:1 root\n' + foreign_filter + '[]\n[]\n',
+                                               'class htb 10:1 root\n')):
+            with self.subTest(class_output=class_output):
+                c = self.fake()
+                with patch.object(m1, 'rtnetlink_classes', return_value=[{'class':'htb','handle':'10:1'}]) as kernel:
+                    with patch.object(m1.subprocess, 'run', side_effect=[
+                            result(raw), result(class_output), result(independent)]) as run:
+                        rows = c.query_tc(commands, detailed=True)
+                    self.assertEqual(run.call_args_list[-1].kwargs['input'],
+                                     ''.join(' '.join(command) + '\n' for command in commands if command != commands[1]))
+                    kernel.assert_called_once_with('enp0s18')
+                self.assertEqual(rows[1:5], [[{'class':'htb','handle':'10:1'}],
+                                             [{'kind':'matchall','pref':101}], [], []])
+                self.assertEqual(c.class_source, 'rtnetlink')
         for class_result in (result('[]'), result(code=1), result(stderr='Dump terminated')):
             with self.subTest(class_result=class_result):
                 with patch.object(m1.subprocess, 'run',
@@ -71,6 +82,82 @@ class ModelTests(unittest.TestCase):
         with patch.object(m1.subprocess, 'run', return_value=result(qdisc + '[]\n' * 4)) as run:
             self.assertEqual(self.fake().query_tc(commands), [m1.decode_tc_batch(qdisc, 1)[0], [], [], [], []])
             run.assert_called_once()
+        c = self.fake()
+        c.class_source = 'tc'
+        with patch.object(m1.subprocess, 'run', return_value=result(batch)) as run:
+            with self.assertRaises(m1.IncompleteTCBatch):
+                c.query_tc(commands)
+            run.assert_called_once()
+
+    def test_rtnetlink_class_dump_requires_complete_unique_kernel_evidence(self):
+        from unittest.mock import patch
+        def attr(kind, payload):
+            size = m1.NL_ATTR.size + len(payload)
+            return m1.NL_ATTR.pack(size, kind) + payload + b'\0' * (-size % 4)
+
+        spec = [0, 1, 0, 0, 0, 2500000]
+        parms = m1.HTB_PARAMETERS.pack(*spec, *spec, 409600, 409600, 1500, 0, 1)
+        opts = attr(1, parms) + attr(6, m1.struct.pack('=Q', 12500000000)) + attr(7, m1.struct.pack('=Q', 12500000000))
+        body = m1.TC_MESSAGE.pack(0, 42, 0x100001, 0xffffffff, 0x20000)
+        htb = body + attr(1, b'htb\0') + attr(2, opts)
+        foreign = m1.TC_MESSAGE.pack(0, 42, 0x200001, 0xffffffff, 0) + attr(1, b'hfsc\0')
+        def message(kind, data, flags=2):
+            return m1.NL_HEADER.pack(m1.NL_HEADER.size + len(data), kind, flags, 1, 99) + data
+
+        done = message(3, bytes(4))
+        owned = message(40, htb)
+        def dump(*packets):
+            with patch.object(m1.socket, 'if_nametoindex', return_value=42):
+                with patch.object(m1.socket, 'socket') as factory:
+                    conn = factory.return_value.__enter__.return_value
+                    conn.getsockname.return_value = (99, 0)
+                    conn.recvmsg.side_effect = [(p, [], 0, (0,0)) for p in packets]
+                    return m1.rtnetlink_classes('test0')
+
+        self.assertEqual(dump(done), [])
+        (row,) = dump(owned, done)
+        self.assertEqual((row['handle'], row['root'], row['leaf'], row['rate'], row['ceil'],
+                          row['buffer_ticks'], row['quantum'], row['prio']),
+                         ('10:1', True, '0x2', 12500000000, 12500000000, 409600, 1500, 1))
+        self.assertEqual(dump(message(40, foreign), done),
+                         [{'class':'hfsc','handle':'20:1','root':True}])
+        for data in (owned + owned + done, message(40, htb, flags=0x12) + done,
+                     message(40, body + attr(1, b'htb\0') + attr(2, opts + attr(1, parms))) + done,
+                     message(40, htb[:-4]) + done, owned + message(3, m1.struct.pack('=i', -4))):
+            with self.subTest(data=data), self.assertRaises(RuntimeError):
+                dump(data)
+
+    def test_class_mismatch_or_ambiguous_dump_stops_mutation_and_cleanup(self):
+        from unittest.mock import MagicMock, Mock, patch
+        owned = {'class':'htb','handle':'10:1','root':True,'rate':2500000,'ceil':2500000}
+        for fault in ([dict(owned, rate=1250000)], [owned, {'class':'hfsc','handle':'20:1'}],
+                      RuntimeError('duplicate traffic-control class handle')):
+            with self.subTest(fault=fault):
+                c = self.fake()
+                c.verify = lambda: m1.Controller.verify(c)
+                c.ns = 'net:[1]'
+                c.get_link = lambda: {'ifindex': 1}
+                c.link = c.get_link()
+                c.expected = {'qdiscs': [], 'classes': [owned]}
+                c.ids = None
+                c.state = MagicMock()
+                c.call = Mock()
+                c.k = Mock()
+                c.save = Mock()
+                c.pin = Mock()
+                c.manifest = Mock()
+                c.class_source = 'rtnetlink'
+                c.tc_batch = lambda *a: []
+                c.topology = lambda *a: {'qdiscs': [], 'classes': c.query_tc([('class','show','dev',c.dev)])[0]}
+                with patch.object(m1.os, 'readlink', return_value=c.ns):
+                    with patch.object(m1, 'rtnetlink_classes',
+                                      side_effect=fault if isinstance(fault, Exception) else None, return_value=fault):
+                        with self.assertRaises(RuntimeError):
+                            c.mutate('class', 'change')
+                        with self.assertRaises(RuntimeError):
+                            c.cleanup_objects()
+                for operation in (c.call, c.k, c.save, c.pin.rmdir, c.manifest.unlink):
+                    operation.assert_not_called()
 
     def test_topology_batches_all_parents_and_preserves_foreign_filters(self):
         c=self.fake();c.link={};calls=[]
