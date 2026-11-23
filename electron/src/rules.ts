@@ -65,6 +65,7 @@ export class Rules {
           'Preset-owned rule: manage through the administrative Essential API; this editor cannot preserve its scope.',
         );
       rule = structuredClone(r);
+      delete rule.native_shaping_identity;
     } else {
       const e = c.events.find((e) => e.id === s.event);
       if (!e?.remembered_filter || e.state !== 'awaiting-decision' || e.remainingMs <= 0)

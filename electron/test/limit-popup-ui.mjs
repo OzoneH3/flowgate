@@ -32,9 +32,11 @@ const process = {
 const savedRule = {
   id: 'saved-hover-rule', version: 1, schema: 2, action: 'allow', priority: 100,
   disabled: false, created: new Date().toISOString(), expires: '0001-01-01T00:00:00Z',
-  executable: '/synthetic/stopped-hover',
+  native_shaping_identity: true, executable: '/synthetic/stopped-hover',
   filter: { application: 'stopped-hover', revision: 'saved', uid: 1000, direction: 'outgoing', protocol: '*' },
 };
+const unverifiedRule = { ...savedRule, id: 'runtime-hover-rule', native_shaping_identity: undefined,
+  executable: '/synthetic/runtime-hover.exe', filter: { ...savedRule.filter, application: 'runtime-hover' } };
 const requests = [],
   sockets = new Set(),
   servers = [];
@@ -57,7 +59,7 @@ function status() {
     configured_caps: caps,
     coverage_valid_for_ms: 10000,
     kernel: {
-      bindings: caps.map((c) => ({
+      bindings: caps.filter(c => c.application === appIdentity.key).map((c) => ({
         app: c.uid + ':' + c.application,
         covered: true,
         download: !!c.download_bits_per_second,
@@ -74,11 +76,12 @@ function reply(q, monitor) {
       ...r,
       mode: monitor ? 'host-monitor' : 'daemon-monitor',
       events: [],
-      rules: [savedRule],
+      rules: [savedRule, unverifiedRule],
       capabilities: [
         'explicit-administrator-v1',
         'experimental-native-upload-v1',
         'experimental-native-download-v1',
+        'experimental-traffic-priority-v1',
       ],
       permissions: {
         role: 'administrator',
@@ -167,7 +170,8 @@ const wait = async (fn, label = 'condition') => {
   }
   throw Error('Timeout: ' + label);
 };
-const writes = () => requests.filter((r) => r.q.operation === 'upload-configure');
+let priorWrites = 0;
+const writes = () => requests.filter((r) => r.q.operation === 'upload-configure').slice(priorWrites);
 const evidence = {
   scope: 'Native sandboxed Electron, synthetic API only. No shaping/enforcement/receiver proof.',
   run: dir,
@@ -227,17 +231,20 @@ try {
   const popup = page.locator('#uploadLimitDialog');
   const tooltip = page.locator('#flowgateTooltip:popover-open');
   await page.locator('#expand').click();
-  const stopped = page.locator('#rows tr[data-id^="app:stopped-hover"]');
-  await stopped.waitFor();
+  const unverified = page.locator('#rows tr[data-id^="app:runtime-hover"]');
+  await unverified.waitFor();
   for (const [direction, label] of [
     ['priority', 'Traffic priority'],
     ['upload', 'Upload limit'],
     ['download', 'Download limit'],
   ]) {
-    const button = stopped.locator(`[data-limit-direction="${direction}"]`);
-    await button.hover();
-    assert((await tooltip.textContent()).startsWith(label + ' unavailable'));
-    assert.match(await tooltip.textContent(), /application is not currently observed/);
+    const button = unverified.locator(`[data-limit-direction="${direction}"]`);
+    await wait(async () => {
+      await button.hover();
+      if (!(await tooltip.count())) return false;
+      const message = await tooltip.textContent();
+      return message.startsWith(label + ' unavailable') && message.includes('No saved native application identity');
+    }, label + ' for a saved identity without native proof');
     assert.equal(await button.getAttribute('aria-disabled'), 'true');
     assert(await button.evaluate((element) => element.matches(':hover') && !element.disabled));
     await button.click({ force: true });
@@ -245,7 +252,35 @@ try {
     assert.equal(await popup.count(), 0);
   }
   assert.equal(writes().length, 0);
-  evidence.steps.push({ label: 'Stopped app tooltips and activation guards for all three controls' });
+  const stopped = page.locator('#rows tr[data-id^="app:stopped-hover"]');
+  for (const direction of ['priority', 'upload', 'download']) {
+    await stopped.locator(`[data-limit-direction="${direction}"]`).click();
+    await popup.waitFor();
+    if (direction === 'priority') {
+      await page.locator('#priorityLevel input[value=high]').check();
+    }
+    await wait(() => page.locator('#uploadSave').isEnabled(), 'saved app editor');
+    if (direction !== 'priority') await page.locator('#uploadRate').fill(direction === 'upload' ? '8' : '16');
+    await page.locator('#uploadSave').click();
+    await popup.waitFor({ state: 'detached' });
+  }
+  assert.equal(writes().length, 3);
+  assert.deepEqual(caps, [{
+    uid: 1000, application: 'stopped-hover', bits_per_second: 8000000,
+    download_bits_per_second: 16000000, traffic_priority: 'high',
+  }]);
+  assert.deepEqual(status().kernel.bindings, []);
+  for (const direction of ['priority', 'upload', 'download']) {
+    await stopped.locator(`[data-limit-direction="${direction}"]`).click();
+    await popup.waitFor();
+    await page.locator('#uploadDetails').click();
+    await page.locator('#uploadRemove').click();
+    await popup.waitFor({ state: 'detached' });
+  }
+  assert.deepEqual(caps, []);
+  assert.equal(writes().length, 6);
+  priorWrites = writes().length;
+  evidence.steps.push({ label: 'Saved all three settings with no sockets; unverified target stayed unavailable' });
   async function open(direction) {
     await slot(direction).click();
     await popup.waitFor();

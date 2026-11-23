@@ -58,3 +58,46 @@ func TestRuntimeUpdateProjectionIsIndependentOfActivity(t *testing.T) {
 		}
 	}
 }
+
+func TestSavedNativeShapingIdentityProjection(t *testing.T) {
+	const executable = "/games/alpha.exe"
+	const uid = 1000
+	native := identity.Application{Kind: "native", Executable: executable}
+	stored := policy.Rule{Executable: executable, Filter: policy.Filter{
+		Application: identity.ApplicationKey(uid, native), Revision: "saved", UID: uid,
+	}}
+	for _, tc := range []struct {
+		name string
+		edit func(*policy.Rule)
+		want bool
+	}{
+		{"native", func(*policy.Rule) {}, true},
+		{"another account", func(r *policy.Rule) { r.Filter.UID++ }, false},
+		{"different path", func(r *policy.Rule) { r.Executable = "/games/beta.exe" }, false},
+		{"wine alpha", func(r *policy.Rule) {
+			r.Filter.Application = identity.ApplicationKey(uid, identity.Application{Kind: "wine", Executable: executable, Prefix: "/prefix-a"})
+		}, false},
+		{"wine beta", func(r *policy.Rule) {
+			r.Executable = "/games/beta.exe"
+			r.Filter.Application = identity.ApplicationKey(uid, identity.Application{Kind: "wine", Executable: r.Executable, Prefix: "/prefix-b"})
+		}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := stored
+			tc.edit(&r)
+			raw, err := json.Marshal(Response{Rules: []policy.Rule{r}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var response struct {
+				Rules []projectedRule
+			}
+			if err := json.Unmarshal(raw, &response); err != nil {
+				t.Fatal(err)
+			}
+			if len(response.Rules) != 1 || response.Rules[0].NativeShapingIdentity != tc.want {
+				t.Fatalf("expected native shaping identity %t: %s", tc.want, raw)
+			}
+		})
+	}
+}

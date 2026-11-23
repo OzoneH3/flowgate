@@ -66,6 +66,27 @@ test('new caps require connected observation of the reviewed native revision',as
  assert.equal(h.calls.filter(c=>c.operation==='upload-configure').length,0);
 });
 
+test('a saved native app can be configured with no process, but identities stay exact',async t=>{
+ const h=await harness(t);
+ h.state.observation={connected:false};
+ const saved={kind:'application',label:'Saved alpha',inactive:{uid:1000,key:'native-alpha',revision:'r1'}};
+ const rule={filter:{uid:1000,application:'native-alpha',revision:'r1'},native_shaping_identity:true};
+ h.state.control.rules=[rule];
+ const target=uploadTarget(saved,h.state);
+ assert.deepEqual(target,{uid:1000,application:'native-alpha',revision:'r1',label:'Saved alpha'});
+ const edit={generation:'g1',expected_version:1,target,bits_per_second:32000000};
+ for(const changed of [{uid:1001},{revision:'r2'},{application:'other'}])
+  await assert.rejects(h.client.configure({...edit,target:{...target,...changed}}),/no saved native/);
+ h.state.control.rules=[{...rule,native_shaping_identity:false}];
+ assert.equal(uploadTarget(saved,h.state),undefined);
+ await assert.rejects(h.client.configure(edit),/no saved native/);
+ assert.equal(h.calls.filter(c=>c.operation==='upload-configure').length,0);
+ h.state.control.rules=[rule];
+ const result=await h.client.configure(edit);
+ assert.equal(result.snapshot.configured_caps[0].bits_per_second,32000000);
+ assert.equal(h.calls.filter(c=>c.operation==='upload-configure').length,1);
+});
+
 test('upload rate units preserve exact integer bit rates through decimal byte/bit views',()=>{
  for(const bits of [1000000,1000001,1600000,8000000,32000000,1000000000])
    for(const unit of UPLOAD_RATE_UNITS) assert.equal(uploadRateBits(uploadRateValue(bits,unit),unit),bits,`${bits} ${unit}`);

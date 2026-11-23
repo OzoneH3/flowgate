@@ -25,20 +25,31 @@ export interface UploadView { supported: boolean; downloadSupported?: boolean; p
 export interface UploadCleanup { generation: string; expected_version: number; cleanup_only: true }
 export interface UploadEdit { generation: string; expected_version: number; target: UploadTarget; direction?: LimitDirection; bits_per_second: number | null; priority?: TrafficPriority | null }
 export interface BudgetEdit { generation: string; expected_version: number; budgets: { upload: number; download: number } }
+export function hasSavedUploadIdentity(state: ClientState, target: UploadTarget): boolean {
+  return !!(state.control?.connected && target.application && target.revision &&
+    state.control.rules?.some(rule => rule.native_shaping_identity === true &&
+      rule.filter.application === target.application && rule.filter.revision === target.revision &&
+      rule.filter.uid === target.uid));
+}
 export function uploadTarget(row: Row, state: ClientState): UploadTarget | undefined {
-  if (!state.observation?.connected) return;
-  if (row.displayApplication || row.runtimeApplication || row.inactive || !['application','process'].includes(row.kind)) return;
-  const p = row.process;
-  if (!p || p.application.kind !== 'native' || p.application.hosted || !p.application.key || !p.application.revision) return;
+  if (row.displayApplication || row.runtimeApplication || !['application','process'].includes(row.kind)) return;
   const zone=row.applicationZone;
   if(zone && (!state.control?.capabilities?.includes(ZONE_CAPABILITY) || !state.control.networkZones || zone.model!==state.control.networkZones.model)) return;
+  if (row.inactive) {
+    const {key, revision, uid} = row.inactive;
+    const saved = {uid, application:key, revision, label:row.label, ...(zone ? {scope:zone.zone} : {})};
+    return hasSavedUploadIdentity(state,saved) ? saved : undefined;
+  }
+  if (!state.observation?.connected) return;
+  const p = row.process;
+  if (!p || p.application.kind !== 'native' || p.application.hosted || !p.application.key || !p.application.revision) return;
   return {uid:p.uid, application:p.application.key, revision:p.application.revision, label:row.label, ...(zone?{scope:zone.zone}:{})};
 }
-// Presentation only. Keep the existing target authority and eligibility unchanged.
+// Presentation only. Socket binding is verified independently by the controller.
 export function shapingUnavailableReason(row: Row, state: ClientState, view: UploadView, kind: LimitDirection|'priority'): string | undefined {
   const reasons:string[]=[];
-  if (!state.observation?.connected) reasons.push('Current socket observation is disconnected.');
-  else if (row.inactive) reasons.push('This application is not currently observed. Shaping requires a verified running native application.');
+  if (row.inactive && !uploadTarget(row,state)) reasons.push('No saved native application identity is available for this row.');
+  else if (!row.inactive && !state.observation?.connected) reasons.push('Current socket observation is disconnected.');
   else if (row.runtimeApplication || row.displayApplication || row.process?.application.kind==='wine') reasons.push('Wine/runtime or shared-owner application shaping is not supported; only verified native application sockets are eligible.');
   else if (!uploadTarget(row,state)) reasons.push('No current eligible native application target is available for this row.');
   if (!state.control?.connected) reasons.push('The control connection is disconnected.');

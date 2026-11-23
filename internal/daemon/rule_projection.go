@@ -2,6 +2,9 @@ package daemon
 
 import (
 	"encoding/json"
+	"path/filepath"
+
+	"flowgate/internal/identity"
 	"flowgate/internal/policy"
 )
 
@@ -9,12 +12,24 @@ import (
 // with a rule and a client-supplied value cannot change matching authority.
 type projectedRule struct {
 	policy.Rule
-	FollowsUpdates bool `json:"follows_updates"`
+	FollowsUpdates        bool `json:"follows_updates"`
+	NativeShapingIdentity bool `json:"native_shaping_identity,omitempty"`
+}
+
+// Match the saved key against the ordinary native identity. The path alone
+// cannot distinguish a native executable from a hosted or Wine application.
+func nativeShapingIdentity(rule policy.Rule) bool {
+	f, path := rule.Filter, rule.Executable
+	return rule.Preset == nil && !rule.NetworkEndpoint && !f.AllPrograms && !f.AllUIDs &&
+		f.Process.IsZero() && f.Revision != "" && filepath.IsAbs(path) && filepath.Clean(path) == path &&
+		f.Application == identity.ApplicationKey(f.UID, identity.Application{Kind: "native", Executable: path})
 }
 
 func (r Response) MarshalJSON() ([]byte, error) {
 	type plain Response
-	project := func(rule policy.Rule) projectedRule { return projectedRule{rule, rule.FollowsUpdates()} }
+	project := func(rule policy.Rule) projectedRule {
+		return projectedRule{rule, rule.FollowsUpdates(), nativeShapingIdentity(rule)}
+	}
 	var rules []projectedRule
 	for _, rule := range r.Rules {
 		rules = append(rules, project(rule))
