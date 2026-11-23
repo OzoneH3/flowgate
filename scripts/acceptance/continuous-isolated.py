@@ -173,7 +173,8 @@ try:
  checks=json.loads(cmd(BIN,'doctor','--json','--upgrade-preflight','--state',str(STATE),'--profile','both'))['checks']
  assert any(c['status']=='blocked' for c in checks),checks
  wait(lambda:state()['state']=='degraded',seconds=20)
- assert 'flowgate_guard' in cmd('nft','list','tables')
+ # The API reports the audit failure before the separate guard installation.
+ wait(lambda:'flowgate_guard' in cmd('nft','list','tables'),seconds=25)
  stop();cmd('nft','delete','table','inet','overlap_fixture')
  passed('Overlapping runtime writer detected; fail-closed guard retained; explicit Stop cleans owned interception')
  protect();stop();backend.terminate();assert backend.wait(8)==0

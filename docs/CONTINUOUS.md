@@ -34,7 +34,11 @@ the guard, reclaims only its exact recorded token/namespace, and starts normally
 Actual owned table structure is audited every second. Foreign interface, routing,
 queue, mark and Tailscale client compatibility is rechecked every ten seconds
 (bounded inspection up to fifteen seconds). Unsupported changes degrade and retain
-a guard; this is bounded detection, not instantaneous protection against another
+a guard. The runtime audit can report `degraded` with `cleanup: unconfirmed`
+before the separate `flowgate_guard` table is installed. The daemon keeps any
+intact owned queue rules during that handoff. Those rules have no bypass on
+consumer loss.
+This is bounded detection, not instantaneous protection against another
 privileged actor rewriting firewall/routing. Forwarded containers, other network
 namespaces, non-TCP/UDP, unsupported IPv6 extension/fragment initiation and initramfs
 traffic are not covered. Loopback traverses both hooks and can require both sides.
