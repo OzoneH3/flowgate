@@ -104,7 +104,7 @@ class Reference:
         self.interface = None
 
 
-def guest_sample(local, remote, ifb=None, minor=None, reference=False):
+def guest_sample(local, remote, ifb=None, minor=None, reference=False, interface=None):
     out = {}
     if ifb is not None:
         if reference:
@@ -126,6 +126,9 @@ def guest_sample(local, remote, ifb=None, minor=None, reference=False):
         )
         if not reference:
             out["redirected"] = json.loads(run("sudo", "-n", RELEASE + "/kernel", "stats", journal["pin"]))[5]
+    if interface:
+        out["nic_qdisc"] = json.loads(tc("-s", "-j", "qdisc", "show", "dev", interface))
+        out["nic_classes"] = json.loads(tc("-s", "-j", "class", "show", "dev", interface))
     out["tcp"] = run("ss", "-tinme", f"src {local} and dst {remote}")
     return out
 

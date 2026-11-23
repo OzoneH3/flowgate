@@ -215,24 +215,27 @@ def exercise(api, probes, receiver, nic, record, report, stack, direction, diagn
         row = {"configured_bits_per_second": cap, "status_before": state_before, "receiver": {}}
         phases[name] = row
         for label, probe in probes.items():
-            if name.endswith("removed") and label == "B" and not compare_reference:
+            if name.endswith("removed") and label == "B" and direction == "upload":
                 continue
             if diagnostics is None:
                 row["receiver"][label] = measure(probe, receiver, label, direction=direction)
             else:
                 endpoints = {key: identities[label]["socket"][key] for key in ("local", "remote")}
                 target = {}
-                if cap and (label == "A" or compare_reference):
+                if cap:
                     if reference:
-                        target = {"ifb": REFERENCE_IFB, "reference": True}
+                        target = {"ifb": REFERENCE_IFB, "reference": True, "interface": nic}
                     else:
                         kernel = state_before["kernel"]
-                        target = {"ifb": kernel["download"]["interface"], "minor": kernel["apps"][app]["minor"]}
+                        target = {"ifb": kernel["download"]["interface"], "minor": kernel["apps"][app]["minor"],
+                                  "interface": nic}
                 windows = continuous(probe, receiver, label, diagnostics, endpoints, target,
                                      WARMUP, WINDOW, extra if label == "A" else 0)
                 row["receiver"][label] = windows[0]
                 if target and label == "A":
                     row["windows"] = windows
+                elif target:
+                    row["b_windows"] = windows
             row["status_after_" + label] = status()
         record("phase", {"phase": name, **row})
         return row
@@ -327,6 +330,8 @@ def exercise(api, probes, receiver, nic, record, report, stack, direction, diagn
     report["verdicts"] = verdicts
     if direction == "download":
         verdicts["download_counters_advanced"] = all(val > 0 for val in delta.values())
+        verdicts["b_recovered"] = in_range(recovered["receiver"]["B"]["bits_per_second"],
+                                            baseline["B"]["bits_per_second"], BASELINE_TOLERANCE)
     assert all(verdicts.values()), verdicts
 
 
@@ -343,6 +348,7 @@ def reference_comparison(diagnostics, nic, cap, baseline, limited, recovered, id
         return in_range(row["receiver"][label]["bits_per_second"], target, tolerance)
 
     a_in_band = rate_ok(limited, "A", cap, CAP_TOLERANCE)
+    b_in_band = rate_ok(limited, "B", baseline["B"]["bits_per_second"], BASELINE_TOLERANCE)
     for variant, mirror in (("reference", False), ("reference-matched-egress", True)):
         actual = diagnostics.call(op="reference-start", interface=nic, local=socket["local"],
                                   remote=socket["remote"], mtu=clean[nic]["link"]["mtu"],
@@ -371,7 +377,9 @@ def reference_comparison(diagnostics, nic, cap, baseline, limited, recovered, id
             "b_recovered": rate_ok(recovered_ref, "B", baseline["B"]["bits_per_second"], BASELINE_TOLERANCE),
         }
         report[variant + "_verdicts"] = verdicts
-        if a_in_band or not verdicts["a_near_cap"]:
+        # A's result alone cannot rule out an effect from replacing the NIC's
+        # egress root on B, which must never enter A's IFB class.
+        if b_in_band and (a_in_band or not verdicts["a_near_cap"]):
             break
 
 

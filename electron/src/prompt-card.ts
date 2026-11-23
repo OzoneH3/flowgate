@@ -395,13 +395,14 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
       } else label.append(input, ' ' + option.label);
       panel.append(label);
     }
-    const expiryLabel = el('label', 'Rule expires after: ', 'remember-duration'),
-      duration = el('select', '', '', 'rememberDuration');
-    for (const d of REMEMBER_DURATIONS) duration.append(new Option(d.label, String(d.seconds)));
-    duration.title = 'The saved rule stops matching at expiry.';
-    expiryLabel.hidden = !!o.popup;
-    expiryLabel.append(duration);
-    panel.append(expiryLabel);
+    if (!o.popup) {
+      const label = el('label', 'Rule expires after: ', 'remember-duration'),
+        duration = el('select', '', '', 'rememberDuration');
+      for (const d of REMEMBER_DURATIONS) duration.append(new Option(d.label, String(d.seconds)));
+      duration.title = 'The saved rule stops matching at expiry.';
+      label.append(duration);
+      panel.append(label);
+    }
     const summary = el('p', '', 'remember-summary', 'rememberSummary');
     summary.setAttribute('role', 'status');
     const refresh = el('button', 'Refresh review', 'link-button', 'refreshDecision');
@@ -426,7 +427,8 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
   reconcile.type = future.type = 'button';
   reconcile.hidden = future.hidden = true;
   statusSection.box.append(note, review, result);
-  dock.append(reconcile, future);
+  dock.append(reconcile);
+  (o.popup ? statusSection.box : dock).append(future);
   card.append(dock);
 
   // Details is a separate view: the first view hides while it is open.
