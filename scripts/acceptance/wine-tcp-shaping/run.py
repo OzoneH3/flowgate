@@ -117,7 +117,8 @@ def run_case(guest, sut, names, release, evidence, _, *, relay, receiver, probe,
         log = f"wine-{attempt}-{label}.log"
         command = (f'cd fg-lab && exec env WINEPREFIX="$PWD/{prefix}" WINEDEBUG=-all '
                    f'FG_TEST_HOST={HOST} FG_TEST_PORT={host_receiver.port} FG_TEST_LABEL={label} '
-                   f'FG_TEST_MODE={direction} wine-runtime/bin/wine "$PWD/{image}" > {log}')
+                   f'FG_TEST_MODE={direction} FG_TEST_GATE=wine-go-{attempt} '
+                   f'wine-runtime/bin/wine "$PWD/{image}" > {log}')
         # Shell PID becomes the launcher. Stop the entire isolated Wine prefix
         # after the phase and wait before reusing its receiver label.
         sut.run(f"setsid sh -c {shlex.quote(command)} </dev/null >/dev/null 2>&1 &")
@@ -143,7 +144,8 @@ def run_case(guest, sut, names, release, evidence, _, *, relay, receiver, probe,
         report["phases"][name] = output = {}
         with relay.listener(guest) as sender, ExitStack() as stack:
             receiver.make_listener = sender.dup
-            peer = stack.enter_context(receiver.Receiver(LABELS, download=direction == "download"))
+            peer = stack.enter_context(receiver.Receiver(
+                LABELS, download=direction == "download", send_rate=80_000_000))
             samples = {label: stack.enter_context(stream(direction, label, peer, name)) for label in LABELS}
             identities = {label: wait_for(lambda: read_connection(peer, label, identify),
                                           f"missing socket identity for {label}") for label in LABELS}
@@ -169,6 +171,8 @@ def run_case(guest, sut, names, release, evidence, _, *, relay, receiver, probe,
                 for label in LABELS:
                     peer.start(label)
                     stack.callback(peer.stop, label)
+            else:
+                sut.run(f"touch fg-lab/wine-go-{name}")
             time.sleep(3)
             start = {label: sample() for label, sample in samples.items()}
             time.sleep(7)

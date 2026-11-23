@@ -23,7 +23,7 @@ static void sample(ULONGLONG bytes, ULONGLONG time) {
 }
 
 void mainCRTStartup(void) {
-    char host[32], port[8], label[8], mode[8];
+    char host[32], port[8], label[8], mode[8], gate[128];
     if (!GetEnvironmentVariableA("FG_TEST_HOST", host, sizeof(host)) ||
         !GetEnvironmentVariableA("FG_TEST_PORT", port, sizeof(port)) ||
         !GetEnvironmentVariableA("FG_TEST_LABEL", label, sizeof(label)) ||
@@ -48,12 +48,24 @@ void mainCRTStartup(void) {
         ExitProcess(4);
     ULONGLONG bytes = 0, last = GetTickCount64();
     sample(bytes, last);
+    if (mode[0] == 'u' && GetEnvironmentVariableA("FG_TEST_GATE", gate, sizeof(gate))) {
+        while (GetFileAttributesA(gate) == INVALID_FILE_ATTRIBUTES)
+            Sleep(30);
+    }
+    ULONGLONG started = GetTickCount64();
     for (;;) {
         int n = mode[0] == 'u' ? send(s, buffer, sizeof(buffer), 0) : recv(s, buffer, sizeof(buffer), 0);
         if (n <= 0)
             ExitProcess(5);
         bytes += (unsigned)n;
         ULONGLONG now = GetTickCount64();
+        if (mode[0] == 'u') {
+            // Offer 80 Mbit/s per stream. It exceeds the test limiter budget
+            // without flooding the emulated link during management reads.
+            ULONGLONG due = started + bytes / 10000;
+            if (due > now)
+                Sleep((DWORD)(due - now));
+        }
         if (now - last >= 200) {
             sample(bytes, now);
             last = now;

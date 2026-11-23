@@ -6,10 +6,11 @@ from time import monotonic_ns
 
 
 class Receiver:
-    def __init__(self, labels, download=False):
+    def __init__(self, labels, download=False, send_rate=None):
         self.rows = {label: {"connections": 0, "bytes": 0} for label in labels}
         self.lock = Lock()
         self.download = download
+        self.send_rate = send_rate
         self.streams = {}
         self.sending = {}
         self.listener = socket.socket()
@@ -84,6 +85,8 @@ class Receiver:
 
         def send():
             data = bytes(128 << 10)
+            sent_total = 0
+            started = monotonic_ns()
             try:
                 while not stop.is_set():
                     try:
@@ -94,6 +97,10 @@ class Receiver:
                         raise RuntimeError("host sender lost its TCP stream")
                     with self.lock:
                         self.rows[label]["bytes"] += sent
+                    if self.send_rate:
+                        sent_total += sent
+                        deadline = started + sent_total * 8_000_000_000 // self.send_rate
+                        stop.wait(max(0, (deadline - monotonic_ns()) / 1_000_000_000))
             except (OSError, RuntimeError) as exc:
                 errors.append(exc)
 
