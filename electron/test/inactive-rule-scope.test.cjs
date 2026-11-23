@@ -7,7 +7,18 @@ const net = require('node:net');
 const path = require('node:path');
 const { Rules } = require('../dist/test/rules.cjs');
 const workspace = path.resolve(__dirname, '../../.workspace');
-const { changeStoredRule } = require('../dist/test/inactive-rules.cjs');
+const { matchesStoredRuleEdit, storedRuleEdit } = require('../dist/test/stored-rule-edit.cjs');
+
+async function changeStoredRule(rule, action, disabled) {
+  const { ruleDraft, rulePreview, ruleSave } = global.window.flowgate;
+  const { token, rule: draft } = await ruleDraft({ id: rule.id });
+  if (draft.id !== rule.id || draft.version !== rule.version)
+    throw Error('This rule changed since it was listed; nothing was saved.');
+  const { receipt, verifiedRule } = await rulePreview(storedRuleEdit(token, draft, action, disabled));
+  if (!verifiedRule || !matchesStoredRuleEdit(verifiedRule, draft, action, disabled))
+    throw Error('The backend reviewed a different change than requested.');
+  await ruleSave(receipt);
+}
 
 const stored = (filter, extra = {}) => ({
   id: 'user:a', version: 1, schema: filter.remote ? 1 : 2, created: '2026-01-01T00:00:00Z', expires: '0001-01-01T00:00:00Z',

@@ -63,6 +63,15 @@ const appRule = rule('application-rule', undefined, 'allow'),
   processRule = rule('process-rule', target(101), 'block');
 const scopedRule = rule('scoped-rule', target(101), 'allow');
 scopedRule.filter.remote_address = '203.0.113.7';
+const stoppedRules = [
+  ['stopped-in-a', 'incoming', 'allow', 443],
+  ['stopped-in-b', 'incoming', 'block', 8443],
+  ['stopped-out', 'outgoing', 'allow', 53],
+].map(([id, direction, action, remote_port]) => ({
+  ...rule(id, undefined, action),
+  executable: '/synthetic/stopped-fixture',
+  filter: { ...appRule.filter, application: 'saved-fixture', direction, remote_port },
+}));
 let disconnected = false;
 let observationSequence = 0;
 let exited = false,
@@ -252,6 +261,7 @@ const handler = (monitor) => (s) =>
           'process-instance-rules-v1',
           'observed-rule-create-v1',
           'conditional-rule-delete-v1',
+          'rule-from-basis-v1',
         ],
         permissions: {
           role: 'administrator',
@@ -261,7 +271,7 @@ const handler = (monitor) => (s) =>
           can_decide: false,
         },
         events: [],
-        rules: [appRule, processRule, scopedRule],
+        rules: [appRule, processRule, scopedRule, ...stoppedRules],
         rule_states: {
           'application-rule': {
             target_scope: 'application',
@@ -314,13 +324,30 @@ try {
       TMPDIR: path.join(root, '.workspace/tmp'),
     },
   });
-  const page = await app.firstWindow(),
-    errors = [];
+  await wait(() => app.windows().some(w => w.url() === 'flowgate://app/index.html'));
+  const page = app.windows().find(w => w.url() === 'flowgate://app/index.html');
+  const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
   const shot = (name, p = page) => p.screenshot({ path: path.join(run, name + '.png') });
   await page.setViewportSize({ width: 1280, height: 656 });
   await wait(async () => (await page.locator('#rows tr[data-id^="app:"]').count()) > 0);
   await page.click('#expand');
+  const stopped = page.locator('#rows tr[data-id^="app:saved-fixture"]');
+  const popup = page.locator('.quick-rule-editor');
+  const incoming = stopped.locator('[data-direction=incoming]');
+  assert.equal(await incoming.locator('.scoped-hint').textContent(), '+2');
+  await incoming.click();
+  await popup.waitFor();
+  assert.match(await popup.innerText(), /Incoming rules/);
+  for (const action of ['qs:stopped-in-a:block', 'qs:stopped-in-b:allow'])
+    await wait(() => popup.locator(`[data-focus="${action}"]`).isEnabled());
+  assert.equal(await popup.locator('[data-rule-id="stopped-out"]').count(), 0);
+  await page.keyboard.press('Escape');
+  await stopped.locator('[data-direction=outgoing]').click();
+  assert.match(await popup.innerText(), /Outgoing rules/);
+  await wait(() => popup.locator('[data-focus="qs:stopped-out:block"]').isEnabled());
+  assert.equal(await popup.locator('[data-rule-id="stopped-in-a"]').count(), 0);
+  await page.keyboard.press('Escape');
   await page.locator('#rows tr[data-id^="process:"] .name').last().click();
   const original = page.locator('#rows tr[data-id^="process:"]').first();
   await original.locator('[data-direction=incoming]').click();
@@ -385,6 +412,19 @@ try {
   };
   const info = await pane('info');
   info.on('pageerror', (e) => errors.push(String(e)));
+  await stopped.locator('.name').click();
+  await wait(async () => /stopped-fixture/.test(await info.locator('#selectedName').innerText()));
+  const detachedDrafts = await info.evaluate(async () => {
+    const selected = await window.flowgate.ruleDraft({ id: 'stopped-in-a' });
+    const basis = await window.flowgate.ruleDraft({ basis: { rule: 'stopped-out', direction: 'incoming' } });
+    const foreign = await window.flowgate.ruleDraft({ id: 'application-rule' }).catch(error => String(error));
+    return { id: selected.rule.id, filter: basis.rule.filter, foreign };
+  });
+  assert.equal(detachedDrafts.id, 'stopped-in-a');
+  assert.equal(detachedDrafts.filter.application, 'saved-fixture');
+  assert.equal(detachedDrafts.filter.direction, 'incoming');
+  assert.match(detachedDrafts.foreign, /Saved rule does not belong to selected target/);
+  await page.locator('#rows tr[data-id^="process:"] .name').first().click();
   await page.locator('#trafficGraph .pane-menu summary').click();
   await page.locator('[data-undock=chart]').click();
   const chart = await pane('chart');

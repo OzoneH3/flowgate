@@ -30,7 +30,8 @@ import {
   type PolicyRuleRef,
   type DirectionPolicy,
 } from './policy';
-import { ruleStatus, ruleState, isRuleMasked, ownConfigured, zoneConfigured } from './rule-status';
+import { ruleStatus, runningRuleInventory, ruleState, isRuleMasked, ownConfigured, zoneConfigured } from './rule-status';
+import { matchesStoredRuleEdit, storedRuleEdit } from './stored-rule-edit';
 import {
   ownRuleChip,
   ownShape,
@@ -72,14 +73,26 @@ export function scopeLabel(ref: PolicyRuleRef) {
   const protocol = f.protocol === '*' ? 'TCP + UDP' : f.protocol.toUpperCase();
   return `${protocol} · remote ${f.remote_address && f.remote_address !== '*' ? f.remote_address : f.remote || 'any address'} · local port ${f.local_port || 'any'} · remote port ${f.remote_port || 'any'}`;
 }
+function savedApplicationBasis(status: ReturnType<typeof ruleStatus>) {
+  return [...status.incoming, ...status.outgoing].find((r) =>
+    !r.preset && !r.network_endpoint && r.schema !== 5 &&
+    !r.filter.process && !r.filter.all_programs && !r.filter.all_uids &&
+    !!r.filter.application && !!r.filter.revision,
+  );
+}
 export function selectionInventory(row: Row, state: ClientState) {
-  const authoritative = !!state.control.capabilities?.includes(POLICY_CAPABILITY);
   const result = authoritativePolicy(row, state),
-    app = result.application;
+    app = row.inactive ? undefined : result.application;
   const processPolicy = state.control.capabilities?.includes(PROCESS_CAPABILITY)
     ? authoritativeProcessPolicy(row, state)
     : undefined;
-  const fallback = ruleStatus(row, state);
+  const runningInventory = runningRuleInventory(row, state, !!app || !!processPolicy);
+  const savedOnly = !!row.inactive || !!runningInventory;
+  const authoritative = !savedOnly && !!state.control.capabilities?.includes(POLICY_CAPABILITY);
+  const fallback = runningInventory || ruleStatus(row, state);
+  const basis = savedOnly && fallback.available && state.control.capabilities?.includes('rule-from-basis-v1')
+    ? savedApplicationBasis(row.applicationZone ? ruleStatus({ ...row, applicationZone: undefined }, state) : fallback)
+    : undefined;
   const zone = authoritativeZonePolicy(row, state);
   const stored = directions.flatMap((d) => fallback[d]).map((r) => {
     const stateLabel = ruleState(r, fallback.now);
@@ -98,6 +111,7 @@ export function selectionInventory(row: Row, state: ClientState) {
     };
   });
   const maskedRules = stored.filter((r) => r.masked && !r.disabled && !r.expired);
+  const visibleStored = stored.filter((r) => !maskedRules.includes(r));
   const zoneIDs = new Set(
     processPolicy?.zone_fallback_rule_ids || app?.zone_fallback_rule_ids || [],
   );
@@ -114,7 +128,7 @@ export function selectionInventory(row: Row, state: ClientState) {
                 .rules
             : app?.[d].rules || []),
         ])
-      : stored;
+      : visibleStored;
   const rules = row.applicationZone ? unfilteredRules.filter(r=>matchesApplicationZone(r.scope,row.applicationZone!)) : unfilteredRules;
   const candidates =
     (app || processPolicy) &&
@@ -128,6 +142,8 @@ export function selectionInventory(row: Row, state: ClientState) {
     );
   return {
     authoritative,
+    savedOnly,
+    basis,
     app,
     processPolicy,
     zone,
@@ -138,7 +154,7 @@ export function selectionInventory(row: Row, state: ClientState) {
     complete: authoritative && !!state.control.policy?.complete,
     reason: authoritative
       ? result.reason
-      : 'Compatibility inventory: listed exact-identity rules; no backend summary.',
+      : fallback.reason,
     candidate: candidates ? candidates[0] : undefined,
     processCandidate: candidates ? candidates.find(s => !s.holder_witness) : undefined,
     fallback,
@@ -261,10 +277,20 @@ export class ActivityPolicy {
       ? 'process'
       : 'application';
   }
-  private anyProtocol() {
-    return !!this.state?.control.capabilities?.some((c) =>
+  private anyProtocol(inv: Inventory) {
+    return !!inv.basis || !!this.state?.control.capabilities?.some((c) =>
       [ANY_PROTOCOL_CAPABILITY, ZONE_CAPABILITY].includes(c),
     );
+  }
+  activateForRow(row: Row, state: ClientState, direction: Direction, anchor: HTMLElement) {
+    // A quick editor refresh can be newer than the Activity table. Keep that
+    // publication, but use the row explicitly selected by the click.
+    if (!acceptsPublication(this.state, state)) {
+      if (state.control.generation !== this.state!.control.generation) return;
+      state = this.state!;
+    }
+    this.update(row, state);
+    this.activate(direction, undefined, anchor);
   }
   activate(direction: Direction, tier = this.defaultTier(), anchor?: HTMLElement) {
     if (!this.row || !this.state) return;
@@ -281,7 +307,8 @@ export class ActivityPolicy {
     const targetId = this.row.id;
     const generation = this.state.control.generation;
     const row = this.row;
-    const protocol: Protocol = this.anyProtocol()
+    const inv = selectionInventory(row, this.state);
+    const protocol: Protocol = this.anyProtocol(inv)
       ? '*'
       : (row.kind === 'socket' ? row.socket?.socket.protocol : undefined) === 'udp'
         ? 'udp'
@@ -299,7 +326,7 @@ export class ActivityPolicy {
     };
     this.signature = '';
     this.host.querySelector('.quick-popup')?.remove();
-    this.host.append(this.popupBox(selectionInventory(row, this.state)));
+    this.host.append(this.popupBox(inv));
     this.place();
     // Focus the popup itself, never an action: the key that opened it must not also trigger it.
     this.host.querySelector<HTMLElement>('.quick-popup')?.focus({ preventScroll: true });
@@ -388,7 +415,7 @@ export class ActivityPolicy {
     )
       this.popup = undefined;
     if (Number.isFinite(state.control.serverNow)) this.skew = state.control.serverNow! - Date.now();
-    this.host.hidden = !row || row.kind === 'overview' || row.kind === 'program' || row.kind === 'launch';
+    this.host.hidden = !row || row.kind === 'overview' || row.kind === 'program' || row.kind === 'launch' || row.kind === 'inactive-group';
     if (this.host.hidden || !row) return;
     const inv = selectionInventory(row, state),
       c = state.control;
@@ -397,6 +424,7 @@ export class ActivityPolicy {
       row.process?.id,
       row.socket?.initiation,
       inv.rules,
+      inv.basis,
       inv.maskedRules,
       inv.available,
       inv.complete,
@@ -587,11 +615,10 @@ export class ActivityPolicy {
     add.disabled =
       !canManageRules(c) ||
       !!(row.applicationZone && row.applicationZone.model!==c.networkZones?.model) ||
-      (!inv.candidate && !inv.zone) ||
-      !c.capabilities?.includes('observed-rule-create-v1') ||
+      (!inv.basis && ((!inv.candidate && !inv.zone) || !c.capabilities?.includes('observed-rule-create-v1'))) ||
       (tier === 'process' && inv.processPolicy?.state !== 'active');
     add.onclick = () => {
-      const source = this.newSource('incoming', tier, inv);
+      const source = this.newSource('incoming', tier, inv, row.applicationZone?.zone);
       if (source) void openRule(source, { activity: true, networkZone: this.row?.applicationZone?.zone });
     };
     links.append(add);
@@ -807,10 +834,12 @@ export class ActivityPolicy {
       );
     return '';
   }
-  private newSource(direction: Direction, tier: Tier, inv: Inventory): RuleSource | undefined {
+  private newSource(direction: Direction, tier: Tier, inv: Inventory, networkZone?: NetworkZone): RuleSource | undefined {
     const c = this.state!.control,
       candidate = tier === 'process' ? inv.processCandidate : inv.candidate;
     if(this.row?.applicationZone && this.row.applicationZone.model!==c.networkZones?.model)return;
+    if (tier === 'application' && inv.basis)
+      return { basis: { rule: inv.basis.id, direction, ...(networkZone ? { networkZone } : {}) } };
     if (inv.zone && c.networkZones)
       return {
         zone: {
@@ -940,13 +969,13 @@ export class ActivityPolicy {
       links.append(addNew);
       box.append(links);
     } else {
-      const supported = !!c.capabilities?.includes('observed-rule-create-v1');
+      const supported = !!inv.basis || !!c.capabilities?.includes('observed-rule-create-v1');
       const blocked =
         reason ||
         (!supported ? 'Backend update required to create rules from Activity.' : '') ||
         (this.row?.applicationZone && this.row.applicationZone.model!==c.networkZones?.model ? 'Legacy classifier: edit an existing rule or review explicit migration before creating an automatic-zone rule.' : '') ||
-        (!inv.candidate && !inv.zone
-          ? 'No live, uniquely owned native socket to verify this target.'
+        (!inv.basis && !inv.candidate && !inv.zone
+          ? inv.savedOnly ? 'No saved rule can supply the application identity for a new rule.' : 'No live, uniquely owned native socket to verify this target.'
           : '');
       const lifetime =
         tier === 'process'
@@ -998,7 +1027,7 @@ export class ActivityPolicy {
       noDelete.disabled = true;
       noDelete.title = 'No rule to delete here yet.';
       links.append(noDelete);
-      if (!this.anyProtocol()) {
+      if (!this.anyProtocol(inv)) {
         const seg = el('span', '', 'segmented small');
         seg.setAttribute('role', 'radiogroup');
         seg.setAttribute('aria-label', 'Protocol for the new rule');
@@ -1036,12 +1065,11 @@ export class ActivityPolicy {
       if (blocked) box.append(el('p', blocked, 'rule-note'));
     }
     if (wholeApplication.length)
-      box.append(this.ruleList(wholeApplication, busy, 'Additional whole-application rules'));
-    if (scoped.length) box.append(this.ruleList(scoped, busy, pop.networkZone ? 'Other rules' : 'Scoped rules'));
-    for (const ref of inv.maskedRules) {
-      if (ref.scope.direction === direction && tier === 'application' &&
-          (ref.scope.network_zone || '') === (pop.networkZone || '')) box.append(this.maskedLine(ref));
-    }
+      box.append(this.ruleList(wholeApplication, inv, busy, 'Additional whole-application rules'));
+    if (scoped.length) box.append(this.ruleList(scoped, inv, busy, pop.networkZone ? 'Other rules' : 'Scoped rules'));
+    const masked = inv.maskedRules.filter(ref => ref.scope.direction === direction && tier === 'application' &&
+      !all.some(r => r.id === ref.id) && (!inv.authoritative || (ref.scope.network_zone || '') === (pop.networkZone || '')));
+    if (masked.length) box.append(this.ruleList(masked, inv, busy, 'Masked rules'));
     if (this.pending && this.pending.rowId === this.row?.id) box.append(this.reviewBox());
     return box;
   }
@@ -1066,7 +1094,7 @@ export class ActivityPolicy {
   }
   private openBlockerEditor(inv: Inventory, id?: string, protocol?: string) {
     const { direction, tier, networkZone } = this.popup!;
-    const source = this.newSource(direction, tier, inv);
+    const source = this.newSource(direction, tier, inv, networkZone || undefined);
     if (id) {
       const caps = this.state!.control.capabilities;
       const newNetworkSource = !this.row?.applicationZone && source?.observed &&
@@ -1151,42 +1179,20 @@ export class ActivityPolicy {
     return line;
   }
   // Additional rules are separate from the canonical setter target.
-  private ruleList(refs: PolicyRuleRef[], busy: boolean, heading: string) {
-    const c = this.state!.control;
+  private ruleList(refs: (PolicyRuleRef & { masked?: boolean })[], inv: Inventory, busy: boolean, heading: string) {
     const wrap = el('div', '', 'qs-scoped');
     wrap.append(el('h4', `${heading} (${refs.length})`));
     for (const ref of refs) {
-      const line = el('div', '', 'qs-scoped-rule');
+      const line = el('section', '', 'qs-scoped-rule');
       line.dataset.ruleId = ref.id;
-      line.append(
-        el(
-          'span',
-          `${actionGlyph(ref.action)} ${actionWord(ref.action)}`,
-          `rule-action-${ref.action}`,
-        ),
-        el('span', shortScope(ref), 'activity-rule-scope'),
-        el('span', refState(ref), 'rule-enabled-state state-' + refState(ref).toLowerCase()),
-      );
+      const scope = shortScope(ref);
+      line.setAttribute('aria-label', scope);
       line.title = `${scopeLabel(ref)}\n${ref.id} · version ${ref.version}`;
-      const rule = this.editable(ref);
-      const advanced = button('Advanced', `qs-scoped:${ref.id}:advanced`, 'link-button');
-      advanced.disabled = !canManageRules(c) || busy || !rule || ref.target_state === 'inactive';
-      advanced.onclick = () =>
-        void openRule({ id: ref.id }, { activity: true });
-      const remove = button('Delete', `qs-scoped:${ref.id}:delete`, 'link-button');
-      remove.disabled =
-        !canManageRules(c) ||
-        busy ||
-        !rule ||
-        !c.capabilities?.includes('conditional-rule-delete-v1');
-      const generation = c.generation;
-      remove.onclick = () => {
-        if (rule)
-          this.delegate
-            ? this.delegate({ kind: 'delete', id: rule.id })
-            : confirmRuleDelete(rule, generation);
-      };
-      line.append(advanced, remove);
+      line.append(
+        el('span', scope, 'activity-rule-scope'),
+        el('span', ref.masked ? 'Masked by newer rule' : refState(ref), 'rule-enabled-state'),
+        this.actionRow(ref, inv, busy || !canManageRules(this.state!.control), undefined, true),
+      );
       wrap.append(line);
     }
     return wrap;
@@ -1200,13 +1206,15 @@ export class ActivityPolicy {
     inv: Inventory,
     blocked: boolean,
     policy?: string,
+    showRuleLinks = false,
   ) {
     const c = this.state!.control;
     const isPolicy = policy !== undefined;
     const row = el('div', '', 'qs-row');
     const inactiveTarget =
       !!ref && (ref.target_state === 'inactive' || c.rule_states?.[ref.id]?.state === 'inactive');
-    const editable = !ref || !!this.editable(ref);
+    const rule = ref && this.editable(ref);
+    const editable = !ref || (!!rule && !rule.preset);
     // An action this daemon cannot write (unknown, or Ask without stored-ask-v1) is shown read-only:
     // never flipped, enabled or re-saved as Allow/Deny here.
     const foreign =
@@ -1239,7 +1247,7 @@ export class ActivityPolicy {
     const enabledLabel = el('label', '', 'quick-editor-enabled');
     enabledLabel.append(enabled, el('span', 'Enabled'));
     row.append(enabledLabel);
-    if (ref?.stored_only) {
+    if (ref?.stored_only && !showRuleLinks) {
       const label = foreign ? actionWord(ref.action) + ' · ' + refState(ref) : refState(ref);
       row.append(el('span', label, 'rule-enabled-state'));
     }
@@ -1285,7 +1293,7 @@ export class ActivityPolicy {
     }
     if (ref && !isPolicy) {
       const several =
-        this.applicable(
+        !showRuleLinks && this.applicable(
           inv,
           ref.scope.direction as Direction,
           ref.scope.process ? 'process' : 'application',
@@ -1294,16 +1302,15 @@ export class ActivityPolicy {
       scope.hidden = !several;
       scope.title = scopeLabel(ref);
       row.append(scope);
-      const rule = this.editable(ref);
       const links = el('span', '', 'qs-row-links');
-      links.hidden = !several;
+      links.hidden = !several && !showRuleLinks;
       const advanced = button('Advanced', `${key}:advanced`, 'link-button');
-      advanced.disabled = blocked || inactiveTarget;
+      advanced.disabled = blocked || inactiveTarget || !rule;
       advanced.onclick = () =>
         void openRule({ id: ref.id }, { activity: true });
       const remove = button('Delete', `${key}:delete`, 'link-button');
       remove.disabled =
-        !canManageRules(c) || !rule || !c.capabilities?.includes('conditional-rule-delete-v1');
+        blocked || !canManageRules(c) || !rule || !c.capabilities?.includes('conditional-rule-delete-v1');
       const generation = c.generation;
       remove.onclick = () => {
         if (rule)
@@ -1369,8 +1376,9 @@ export class ActivityPolicy {
   private review_new(inv: Inventory, action: RuleAction) {
     const pop = this.popup!;
     const { direction, tier, protocol, lifetime, enabled, networkZone } = pop;
-    const source = this.newSource(direction, tier, inv);
+    const source = this.newSource(direction, tier, inv, networkZone || undefined);
     if (!source) return;
+    const basis = source.basis ? inv.basis : undefined;
     const expiry: 'hour' | 'permanent' =
       tier === 'process' ? 'permanent' : lifetime === 'hour' ? 'hour' : 'permanent';
     const run = async () => {
@@ -1388,7 +1396,7 @@ export class ActivityPolicy {
             remote_address: '*',
             local_port: 0,
             remote_port: 0,
-            priority: 100,
+            priority: basis?.priority ?? 100,
             disabled: !enabled,
             expiry,
             creation_scope: 'application',
@@ -1402,11 +1410,16 @@ export class ActivityPolicy {
             !rule.filter.local_port &&
             !rule.filter.remote_port &&
             rule.disabled === !enabled &&
+            (!basis || (rule.filter.application === basis.filter.application &&
+              rule.filter.revision === basis.filter.revision && rule.filter.uid === basis.filter.uid &&
+              !rule.filter.all_programs && !rule.filter.all_uids && rule.priority === basis.priority &&
+              (rule.filter.zone_model || '') === (draft.rule.filter.zone_model || ''))) &&
             (rule.filter.network_zone || '') === networkZone &&
             !!rule.filter.process === (tier === 'process') &&
             (expiry === 'permanent'
               ? rule.expires.startsWith('0001-')
               : Math.abs(Date.parse(rule.expires) - (Date.now() + this.skew + 3600000)) < 120000),
+          !!basis,
         );
       } catch (e) {
         this.fail(p, e);
@@ -1419,7 +1432,7 @@ export class ActivityPolicy {
   // creates it or updates it in place (preview.replaces) and never selects a scoped rule.
   private review_policy(inv: Inventory, action: RuleAction) {
     const { direction, tier, networkZone } = this.popup!;
-    const source = this.newSource(direction, tier, inv);
+    const source = this.newSource(direction, tier, inv, networkZone || undefined);
     if (!source?.observed) return;
     const run = async () => {
       const p = this.begin(
@@ -1474,23 +1487,9 @@ export class ActivityPolicy {
           throw Error('This rule changed since it was listed; review the current version.');
         await this.preview(
           p,
-          {
-            token: draft.token,
-            action: o.action,
-            protocol: r.filter.protocol,
-            remote_address: r.filter.remote_address || '*',
-            local_port: r.filter.local_port || 0,
-            remote_port: r.filter.remote_port || 0,
-            priority: r.priority,
-            disabled: o.disabled,
-            expiry: 'preserve',
-          },
-          (rule) =>
-            rule.id === ref.id &&
-            rule.action === o.action &&
-            rule.disabled === o.disabled &&
-            rule.expires === r.expires &&
-            JSON.stringify(rule.filter) === JSON.stringify(r.filter),
+          storedRuleEdit(draft.token, r, o.action, o.disabled),
+          (rule) => matchesStoredRuleEdit(rule, r, o.action, o.disabled),
+          true,
         );
       } catch (e) {
         this.fail(p, e);
@@ -1499,14 +1498,16 @@ export class ActivityPolicy {
     };
     void run();
   }
-  private async preview(p: Pending, edit: RuleEdit, matches: (rule: Rule) => boolean) {
+  private async preview(p: Pending, edit: RuleEdit, matches: (rule: Rule) => boolean, exactScope = false) {
     const r = await window.flowgate.rulePreview(edit);
     if (!this.current(p)) return;
     const rule = r.verifiedRule;
+    const exact = !!rule && matches(rule);
+    if (exactScope && !exact) throw Error('The backend reviewed a different change than requested.');
     p.receipt = r.receipt;
     p.scope = rule ? reviewedScope(rule) : r.preview;
     p.expiresAt = r.expiresAt ? Date.parse(r.expiresAt) : undefined;
-    if (rule && matches(rule) && (!p.expiresAt || p.expiresAt > Date.now() + this.skew + 2000)) {
+    if (exact && (!p.expiresAt || p.expiresAt > Date.now() + this.skew + 2000)) {
       await this.save(p);
       return;
     }

@@ -10,6 +10,7 @@ import { EndpointRules } from './endpoint-rules';
 import { ruleCoversRevision, runtimeWitness } from './protocol';
 import { readGuiBuild } from './gui-build';
 import { matchesApplicationZone } from './application-zones';
+import { ruleStatus } from './rule-status';
 import { Essential } from './essential';
 import { Protection } from './protection';
 import { placeKDEPrompt, resizeKDEPrompt, PROMPT_TITLE, promptTitle } from './prompt-placement';
@@ -818,6 +819,16 @@ app.whenReady().then(async () => {
           )
         )
           throw Error('Observed target is not the selected identity');
+      } else if (value.basis || row.inactive) {
+        const basis = value.basis;
+        if (basis && (row.kind !== 'application' || (row.applicationZone &&
+          (basis.networkZone !== row.applicationZone.zone ||
+            row.applicationZone.model !== state.control.networkZones?.model))))
+          throw Error('Saved rule creation scope differs from selection');
+        const target = basis ? { ...row, applicationZone: undefined } : row;
+        const inventory = ruleStatus(target, state);
+        if (![...inventory.incoming, ...inventory.outgoing].some((r) => r.id === (basis ? basis.rule : value.id)))
+          throw Error('Saved rule does not belong to selected target');
       } else {
         const rule = state.control.rules?.find((r) => r.id === value.id);
         const app = row.runtimeApplication?.application || row.process?.application;
@@ -843,7 +854,7 @@ app.whenReady().then(async () => {
       const draft = await rules.draft(value);
       if (paneDrafts.size >= 32) paneDrafts.delete(paneDrafts.keys().next().value!);
       paneDrafts.set(draft.token, binding);
-      if(value.observed && row.applicationZone){
+      if((value.observed || value.basis) && row.applicationZone){
         if(paneZoneDrafts.size>=32)paneZoneDrafts.delete(paneZoneDrafts.keys().next().value!);
         paneZoneDrafts.set(draft.token,row.applicationZone.zone);
       }

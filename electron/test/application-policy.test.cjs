@@ -136,7 +136,8 @@ global.window = {
     ruleContext: async () => state,
     ruleDraft: async (source) => {
       calls.push(['draft', source]);
-      return { token: 'draft-' + calls.length, generation: 'g', source: 'test', rule: {} };
+      const rule = state.control.rules.find(r => r.id === (source.id || source.basis?.rule));
+      return { token: 'draft-' + calls.length, generation: 'g', source: 'test', rule: rule || {} };
     },
     rulePreview: async (edit) => {
       calls.push(['preview', edit]);
@@ -175,6 +176,16 @@ const filter = (o = {}) => ({
   ...o,
 });
 function saved(edit) {
+  const source = calls.findLast((c) => c[0] === 'draft')?.[1];
+  const existing = state.control.rules.find(r => r.id === (source?.id || source?.basis?.rule));
+  if (existing)
+    return {
+      ...existing, id: source.id || 'new', version: 2, priority: edit.priority,
+      action: edit.action, disabled: edit.disabled,
+      filter: { ...existing.filter, direction: source.basis?.direction || existing.filter.direction,
+        protocol: edit.protocol, remote_address: edit.remote_address,
+        remote_port: edit.remote_port, local_port: edit.local_port },
+    };
   return {
     id: 'own',
     version: 2,
@@ -230,7 +241,7 @@ const direction = (d, rules, own) => ({
     : { application_rule: own, scoped_rules: rules.filter((r) => r !== own).length }),
 });
 // rules: outgoing refs; own: the application_rule ref (null = none, undefined = old daemon).
-function setup(rules, own, capabilities = ['application-policy-v1']) {
+function setup(rules, own, capabilities = ['application-policy-v1'], inactive = false) {
   calls.length = 0;
   feedback.textContent = '';
   const now = new Date().toISOString();
@@ -274,12 +285,14 @@ function setup(rules, own, capabilities = ['application-policy-v1']) {
       activity: { sequence: 1, collected: now, processes: { [process.id]: process }, rows: [] },
     },
   };
+  if (inactive) state.observation.activity.processes = {};
   const row = {
     id: 'application:app',
     kind: 'application',
     label: 'app',
-    process,
-    rows: [{ id: 'socket-1', owners: [process.id], ownership_category: 'visible-holder' }],
+    ...(inactive
+      ? { inactive: { key: 'app', revision: 'rev', uid: 1000 }, rows: [] }
+      : { process, rows: [{ id: 'socket-1', owners: [process.id], ownership_category: 'visible-holder' }] }),
   };
   const host = new El('section');
   document.body.replaceChildren(host);
@@ -290,7 +303,7 @@ function setup(rules, own, capabilities = ['application-policy-v1']) {
     policy.activate('outgoing', 'application', cell);
     await settle(); // popup refreshes the bounded policy batch before enabling actions
   };
-  return { host, policy, cell, open };
+  return { host, policy, cell, row, open };
 }
 const find = (host, focus) => host.querySelector(`[data-focus="${focus}"]`);
 const settle = async () => {
@@ -305,7 +318,7 @@ test('narrow remembered rule + application Allow: one-click canonical applicatio
   await f.open();
   const popup = f.host.querySelector('.quick-popup');
   assert.match(popup.textContent, /Scoped rules \(1\)/);
-  assert.equal(find(f.host, 'qs:narrow:allow'), null, 'scoped rule has no Allow/Deny setter');
+  assert.equal(find(f.host, 'qs:narrow:allow').disabled, false);
   const allow = find(f.host, 'qs:new:allow');
   assert.equal(allow.disabled, false);
   allow.onclick();
@@ -363,7 +376,7 @@ test('existing own rule: Deny sets it through application_policy; enabled and De
   await f.open();
   assert.equal(find(f.host, 'qs:own:allow').disabled, true, 'current active action');
   assert.equal(find(f.host, 'qs-delete').disabled, false);
-  assert.equal(find(f.host, 'qs:narrow:allow'), null);
+  assert.equal(find(f.host, 'qs:narrow:block').disabled, false);
   find(f.host, 'qs:own:block').onclick();
   await settle();
   assert.equal(calls[0][1].observed.direction, 'outgoing');
@@ -383,7 +396,7 @@ test('without application-policy-v1 an app Allow creates a new app-wide rule, ne
   assert.match(f.cell.textContent, /Not set/);
   assert(!f.cell.classList.contains('tone-block'));
   await f.open();
-  assert.equal(find(f.host, 'qs:narrow:allow'), null);
+  assert.equal(find(f.host, 'qs:narrow:allow').disabled, false);
   find(f.host, 'qs:new:allow').onclick();
   await settle();
   assert(calls[0][1].observed);
@@ -414,4 +427,61 @@ test('without stored-ask-v1 an Ask rule is read-only and Ask is never offered', 
   assert.equal(find(f.host, 'qs:own:allow').disabled, true);
   assert.equal(find(f.host, 'qs:own:block').disabled, true);
   assert.equal(find(f.host, 'qs:own:enabled').disabled, true);
+});
+
+for (const inactive of [false, true]) {
+  test(`shared Blocker popup edits each scoped rule by ID (${inactive ? 'not running' : 'running'})`, async () => {
+    const first = ref('first', 'block', 'scoped');
+    const second = ref('second', 'allow', 'scoped', {
+      scope: filter({ protocol: 'udp', remote_port: 53 }),
+    });
+    const f = setup([first, second], null, ['application-policy-v1', 'rule-from-basis-v1'], inactive);
+    await f.open();
+    const popup = f.host.querySelector('.quick-popup');
+    assert.match(popup.textContent, /Outgoing rules/);
+    assert.match(popup.textContent, /Scoped rules \(2\)/);
+    assert.equal(find(popup, 'qs:second:block').disabled, false);
+    assert.equal(find(popup, 'qs:first:block').disabled, true);
+    find(popup, 'qs:first:allow').onclick();
+    await settle();
+    assert.deepEqual(calls.map(([op]) => op), ['draft', 'preview', 'save']);
+    assert.deepEqual(calls[0], ['draft', { id: 'first' }]);
+    assert.deepEqual(
+      [calls[1][1].action, calls[1][1].protocol, calls[1][1].remote_address, calls[1][1].expiry],
+      ['allow', 'tcp', '1.1.1.1', 'preserve'],
+    );
+    await f.open();
+    find(f.host, 'qs:second:block').onclick();
+    await settle();
+    assert.deepEqual(calls[3], ['draft', { id: 'second' }]);
+    assert.deepEqual([calls[4][1].action, calls[4][1].protocol, calls[4][1].remote_port], ['block', 'udp', 53]);
+  });
+}
+
+test('a stopped app can add an incoming rule from its saved outgoing identity', async () => {
+  const f = setup([ref('basis', 'block', 'scoped')], null, ['rule-from-basis-v1'], true);
+  f.policy.activate('incoming', 'application', find(f.host, 'cell:application:incoming'));
+  await settle();
+  const popup = f.host.querySelector('.quick-popup');
+  assert.match(popup.textContent, /Incoming rules/);
+  const allow = find(popup, 'qs:new:allow');
+  assert.equal(allow.disabled, false);
+  allow.onclick();
+  await settle();
+  assert.deepEqual(calls.map(([op]) => op), ['draft', 'preview', 'save']);
+  assert.deepEqual(calls[0], ['draft', { basis: { rule: 'basis', direction: 'incoming' } }]);
+});
+
+test('clicking a different row after a policy refresh uses the clicked identity', async () => {
+  const f = setup([ref('first', 'block', 'scoped')], null, ['application-policy-v1'], true);
+  const previous = { ...state, publication: 5 };
+  state = { ...state, publication: 6 };
+  f.policy.update(f.row, state);
+  await f.open();
+  const other = { ...f.row, id: 'other', label: 'Other stopped app',
+    inactive: { ...f.row.inactive, key: 'different' } };
+  f.policy.activateForRow(other, previous, 'outgoing', f.cell);
+  await settle();
+  assert.match(f.host.querySelector('.quick-popup').textContent, /Other stopped app/);
+  assert.equal(find(f.host, 'qs:first:allow'), null);
 });

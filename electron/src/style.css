@@ -1580,24 +1580,6 @@ body.preset-status #tree th.col-filler, body.preset-status #tree td.filler { dis
 /* Inherited from the application's rule (process row without its own rule): muted, not interactive. */
 #tree .policy-cell.policy-inherited { opacity:1; cursor:default; pointer-events:none; }
 #tree .policy-cell.policy-inherited .status-glyph, #tree .policy-cell.policy-inherited svg, #tree .policy-cell.policy-inherited span { filter:grayscale(1) brightness(.75); opacity:.7; }
-/* Rules of a not-running application (Activity cell popup). */
-.quick-popup.inactive-rules { position:fixed; z-index:60; min-width:300px; max-width:min(520px,calc(100vw - 8px)); padding:8px 10px; }
-.inactive-rules.busy { opacity:.7; pointer-events:none; }
-.inactive-rules-title { color:#ddd; font-weight:600; margin:0 0 6px; }
-.inactive-rule-wrap + .inactive-rule-wrap { border-top:1px solid #ffffff1a; margin-top:4px; padding-top:4px; }
-.inactive-rule { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
-.inactive-rule .qs-action { height:22px; min-height:22px; padding:0 7px; display:inline-flex; align-items:center; gap:4px; }
-.inactive-rule .qs-action.current { outline:1px solid #cddc39; }
-.inactive-rule .qs-row-links { margin-left:auto; display:inline-flex; gap:8px; }
-.inactive-rule-scope { color:#9a9a9a; font-size:11px; margin:2px 0 0 22px; }
-.inactive-rules-status:empty, .inactive-rules-empty:empty { display:none; }
-.inactive-rules-status { margin:6px 0 0; color:#ddc38d; font-size:11px; }
-.inactive-rules-empty { color:#aaa; margin:2px 0; }
-
-.inactive-rule-add { display:flex; align-items:center; gap:6px; flex-wrap:wrap; border-top:1px solid #ffffff2a; margin-top:6px; padding-top:6px; }
-.inactive-rule-add .qs-action { height:22px; min-height:22px; padding:0 7px; display:inline-flex; align-items:center; gap:4px; }
-.inactive-rule-add-label { color:#bbb; }
-.inactive-rule-add .qs-row-links { margin-left:auto; }
 /* Release identity beside the title: GUI release + build date/time; daemon only on mismatch. */
 #aboutFlowGate { width: min(480px, calc(100vw - 36px)); }
 #aboutFlowGate .about-build { white-space: pre-line; overflow-wrap: anywhere; line-height: 1.6; }
@@ -1891,7 +1873,9 @@ button.connection-status-slot:hover:not(:disabled),button.connection-status-slot
   background: var(--fg-section);
 }
 .quick-editor .qs-rule-scope { margin-left: 0; overflow-wrap: anywhere; }
-.quick-editor .qs-scoped-rule { flex-wrap: wrap; }
+.quick-editor .qs-scoped-rule { flex-wrap: wrap; padding-block: 8px; }
+.quick-editor .qs-scoped-rule + .qs-scoped-rule { border-top: 1px solid var(--fg-border); }
+.quick-editor .qs-scoped-rule .qs-row { flex: 1 0 100%; flex-wrap: wrap; }
 .quick-editor :is(.qs-links, .upload-setter-actions) {
   display: flex;
   flex-wrap: wrap;

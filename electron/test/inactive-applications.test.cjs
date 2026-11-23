@@ -61,8 +61,6 @@ test('process rows show an inherited application rule muted and not interactive'
   assert.match(src, /if \(inherited\) \{\n\s*button\.classList\.add\('policy-inherited'\);\n\s*button\.disabled = true;/);
   assert.match(src, /button\.title = inherited\n\s*\? ''/, 'no tooltip on inherited cells');
   assert.match(src, /event\.stopPropagation\(\);\n\s*if \(inherited\) return;/, 'no click on inherited cells');
-  // Not running: stored identity popup, without a live observed target.
-  assert.match(src, /if \(r\.inactive\) \{\n\s*showInactiveRules\(button, r, direction\);\n\s*return;\n\s*\}/);
   const css = fs.readFileSync(path.join(__dirname, '../src/style.css'), 'utf8');
   assert.match(css, /\.policy-cell\.policy-inherited \{[^}]*pointer-events:none/);
 });
@@ -84,23 +82,6 @@ test('same name, different programs show where they live; older revisions are ma
   assert.deepEqual(hy.map((x) => [x.inactive.revision, x.inactive.earlierVersion]).sort(), [['new', false], ['old', true]]);
   assert.equal(shortLocation('/home/u/.codex/packages/standalone/releases/0.160.0-x86_64-unknown-linux-musl/bin/codex'), '~/…/0.160.0-x86_64-unknown-linux-musl/bin');
 });
-
-test('not-running rules popup: reviewed in-place edits only, delete via the confirmed path', () => {
-  const fs = require('node:fs'), path = require('node:path');
-  const src = fs.readFileSync(path.join(__dirname, '../src/inactive-rules.ts'), 'utf8');
-  // Edits are pinned to the listed version and saved only when the backend reviewed exactly that change.
-  assert.match(src, /draft\.rule\.version !== rule\.version/);
-  // The edit is built from the normalized draft and the reviewed scope must equal it (no widening).
-  assert.match(src, /const d = draft\.rule;/);
-  assert.match(src, /v\.action !== action \|\| v\.disabled !== disabled \|\| v\.schema !== editedSchema\(d\) \|\| scopeKey\(v\) !== scopeKey\(d\)/);
-  assert.match(src, /expiry: 'preserve'/);
-  // Uncertain saves are never reported as success.
-  assert.match(src, /result\.phase === 'unknown'\) return 'Save result unknown/);
-  assert.match(src, /confirmRuleDelete\(rule, o\.generation\)/);
-  // No creation path: no ruleDraft for a new source, only by id.
-  assert.ok(!/ruleDraft\(\{ ?(kind|observed|process)/.test(src));
-});
-
 
 test('script context survives inactive listing without changing interpreter identity', () => {
   const r = rule('script','python-key','rev','/usr/bin/python3');
@@ -264,8 +245,4 @@ test('adding a rule for a not-running program: same identity only; new-rule save
   assert.equal(sameNewRule({ ...reviewed, action: 'allow' }, reviewed), false);
   assert.equal(sameNewRule({ ...reviewed, filter: { ...reviewed.filter, revision: 'r2' } }, reviewed), false);
   assert.equal(sameNewRule({ ...reviewed, filter: { ...reviewed.filter, uid: 0 } }, reviewed), false);
-  const fs = require('node:fs'), path = require('node:path');
-  const src = fs.readFileSync(path.join(__dirname, '../src/inactive-rules.ts'), 'utf8');
-  assert.match(src, /ruleDraft\(\{ basis: \{ rule: basisId, direction,/);
-  assert.match(src, /v\.filter\.application !== f\.application \|\| v\.filter\.revision !== f\.revision \|\| v\.filter\.uid !== f\.uid/);
 });

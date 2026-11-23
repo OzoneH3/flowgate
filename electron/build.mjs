@@ -94,7 +94,7 @@ await build({
     'src/card-result.ts',
     'src/build-info.ts',
     'src/gui-build.ts',
-    'src/inactive-rules.ts',
+    'src/stored-rule-edit.ts',
     'src/observed-usage.ts',
     'src/usage-history.ts',
     'src/usage-history-client.ts',

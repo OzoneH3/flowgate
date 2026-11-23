@@ -91,7 +91,6 @@ import { ruleStatus, ruleState, ruleDescription, ownConfigured, zoneConfigured, 
 import { canDecide, canManageRules } from './protocol';
 import type { Application } from './protocol';
 import { verifiedLaunch } from './provenance';
-import { openInactiveRules } from './inactive-rules';
 import { TrafficGraph } from './graph';
 import { setupWorkflows, updateWorkflows, openRule, resumeRuleEditor, setRuleListReturn } from './workflows';
 import { setupDecisionLog, showDecisionLog, updateDecisionLog } from './decision-log-view';
@@ -769,45 +768,13 @@ function statusStrip(r: Row) {
       for (const tr of document.querySelectorAll<HTMLElement>('#rows tr'))
         tr.setAttribute('aria-selected', String(tr.dataset.id === selected));
       renderInfo();
-      if (r.inactive) {
-        showInactiveRules(button, r, direction);
-        return;
-      }
-      if (runningInventory) {
-        showInactiveRules(button, r, direction);
-        return;
-      }
       if (presentation?.panes.info !== 'docked') showFloatingRuleStatus();
-      activityPolicy?.activate(direction, undefined, button);
+      activityPolicy?.activateForRow(r, state, direction, button);
     };
     strip.append(button);
   }
   cell.append(strip);
   return cell;
-}
-function showInactiveRules(anchor: HTMLElement, r: Row, direction: 'incoming' | 'outgoing') {
-  if ((!r.inactive && !(r.kind==='application'&&r.process)) || !state) return;
-  const status = ruleStatus(r, state);
-  const allStatus = ruleStatus({...r, applicationZone: undefined}, state);
-  openInactiveRules(anchor, {
-    label: r.applicationZone ? r.label : r.presentationLabel || (r.inactive?appNames.get(JSON.stringify([r.inactive.key,r.inactive.revision,r.inactive.executable])):undefined) || r.label,
-    presenceLabel: r.inactive?undefined:'running process observed',
-    direction,
-    rules: status.available ? status[direction] : [],
-    generation: state.control.generation,
-    now: status.now,
-    canManage: state.control.connected && canManageRules(state.control),
-    canDelete: !!state.control.capabilities?.includes('conditional-rule-delete-v1'),
-    askWritable: !!state.control.capabilities?.includes('stored-ask-v1'),
-    message,
-    // New rules reuse the identity of one of this program's own stored rules.
-    networkZone: r.applicationZone?.zone,
-    basisRuleId: (!r.applicationZone || r.applicationZone.model === state.control.networkZones?.model) && state.control.capabilities?.includes('rule-from-basis-v1')
-      ? [...(allStatus.available ? [...allStatus.incoming, ...allStatus.outgoing] : [])].find(
-          (x) => !x.preset && !x.filter.process && !x.filter.all_programs && !x.filter.all_uids,
-        )?.id
-      : undefined,
-  });
 }
 function field(container: HTMLElement, label: string, value: string) {
   container.append(element('dt', label), element('dd', value || 'Unknown'));
@@ -1829,8 +1796,7 @@ function renderInfo() {
   const retained = !liveRow && retainedSelection?.row;
   const r = liveRow || (retained ? { ...retained, rows: [], children: [] } : undefined);
   $('activityDetails').hidden = !r || r.kind === 'overview';
-  // Not running: no live policy summary; its rules are listed in Info View and edited from its In/Out cells.
-  activityPolicy?.update(r?.inactive ? undefined : r, state);
+  activityPolicy?.update(r, state);
   $('infoProperties').textContent =
     r?.kind === 'socket'
       ? 'Connection properties'
@@ -2079,14 +2045,6 @@ function renderInfo() {
     const rules = (state.control.rules || []).filter((x) => inactiveRuleMatches(r.inactive!, x) && (!r.applicationZone || matchesApplicationZone(x.filter, r.applicationZone)));
     field(info, 'Rules', rules.map((x) => ruleDescription(x, now)).join('\n') || 'None');
     field(info, 'Edit', 'Add or edit saved rules without starting the program. Select its Local Network or Internet row for network-specific permissions.');
-    const controls = element('dd');
-    for (const direction of ['incoming', 'outgoing'] as const) {
-      const edit = element('button', direction === 'incoming' ? 'Incoming rules…' : 'Outgoing rules…');
-      edit.type = 'button';
-      edit.onclick = () => showInactiveRules(edit, r, direction);
-      controls.append(edit);
-    }
-    info.append(element('dt', 'Manage rules'), controls);
   }
   if (r.revisions && r.revisions.length > 1)
     field(info, 'Running revisions', r.revisions.join('\n') + '\nSame verified program and user; each process keeps its own exact identity.');
