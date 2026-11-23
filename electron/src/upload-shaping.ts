@@ -48,7 +48,7 @@ export function uploadTarget(row: Row, state: ClientState): UploadTarget | undef
 // Presentation only. Socket binding is verified independently by the controller.
 export function shapingUnavailableReason(row: Row, state: ClientState, view: UploadView, kind: LimitDirection|'priority'): string | undefined {
   const reasons:string[]=[];
-  if (row.inactive && !uploadTarget(row,state)) reasons.push('No saved native application identity is available for this row.');
+  if (row.inactive && !uploadTarget(row,state)) reasons.push('No saved identity supported by the current limiter. Wine/Proton applications and hosted Electron bundles are outside its socket coverage.');
   else if (!row.inactive && !state.observation?.connected) reasons.push('Current socket observation is disconnected.');
   else if (row.runtimeApplication || row.displayApplication || row.process?.application.kind==='wine') reasons.push('Wine/runtime or shared-owner application shaping is not supported; only verified native application sockets are eligible.');
   else if (!uploadTarget(row,state)) reasons.push('No current eligible native application target is available for this row.');

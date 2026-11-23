@@ -49,6 +49,12 @@ func TestAppImageIdentityRemountSeparationAndNoJSONAuthority(t *testing.T) {
 	if key != ApplicationKey(1000, b) {
 		t.Fatal("remount changes key")
 	}
+	if !MatchesSavedNativeKey(1000, key, a.KeyPath()) ||
+		MatchesSavedNativeKey(1001, key, a.KeyPath()) ||
+		MatchesSavedNativeKey(1000, key, mk("/mount-one", "/apps/one", "bin/helper").KeyPath()) ||
+		MatchesSavedNativeKey(1000, key, mk("/mount-one", "/apps/two", "bin/app").KeyPath()) {
+		t.Fatal("saved AppImage key must match the account, archive and inner executable")
+	}
 	for _, q := range []Application{mk("/mount-two", "/apps/two", "bin/app"), mk("/mount-two", "/apps/one", "bin/helper"), {Kind: "native", Executable: a.KeyPath(), Revision: "stamp"}} {
 		if ApplicationKey(1000, q) == key {
 			t.Fatal("cross executable/archive transfer")

@@ -2,8 +2,6 @@ package daemon
 
 import (
 	"encoding/json"
-	"path/filepath"
-
 	"flowgate/internal/identity"
 	"flowgate/internal/policy"
 )
@@ -16,13 +14,12 @@ type projectedRule struct {
 	NativeShapingIdentity bool `json:"native_shaping_identity,omitempty"`
 }
 
-// Match the saved key against the ordinary native identity. The path alone
-// cannot distinguish a native executable from a hosted or Wine application.
+// A process rule can identify the application for shaping configuration. Its
+// firewall permission stays bound to the original process.
 func nativeShapingIdentity(rule policy.Rule) bool {
-	f, path := rule.Filter, rule.Executable
+	f := rule.Filter
 	return rule.Preset == nil && !rule.NetworkEndpoint && !f.AllPrograms && !f.AllUIDs &&
-		f.Process.IsZero() && f.Revision != "" && filepath.IsAbs(path) && filepath.Clean(path) == path &&
-		f.Application == identity.ApplicationKey(f.UID, identity.Application{Kind: "native", Executable: path})
+		f.Revision != "" && identity.MatchesSavedNativeKey(f.UID, f.Application, rule.Executable)
 }
 
 func (r Response) MarshalJSON() ([]byte, error) {

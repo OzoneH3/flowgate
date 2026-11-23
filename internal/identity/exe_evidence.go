@@ -557,9 +557,7 @@ func (a Application) KeyPath() string {
 // ApplicationKey derives the application key (user, kind, prefix, key path).
 func ApplicationKey(uid uint32, a Application) string {
 	if verifiedAppImage(a) {
-		// Length-delimited fields cannot collide with ordinary native paths.
-		b, _ := json.Marshal([]any{uid, "appimage-v1", a.AppImage.Container, a.AppImage.RelativeExecutable})
-		return digest(string(b))
+		return appImageApplicationKey(uid, a.AppImage.Container, a.AppImage.RelativeExecutable)
 	}
 	if a.Kind == "electron" && a.Hosted != nil && a.Hosted.State == "best-effort" {
 		if a.Hosted.Scope == "node-utilities" {
@@ -568,6 +566,39 @@ func ApplicationKey(uid uint32, a Application) string {
 		return digest(fmt.Sprintf("%d|electron-best-effort-v1|%s|%s", uid, a.Runtime, a.KeyPath()))
 	}
 	return digest(fmt.Sprintf("%d|%s|%s|%s", uid, a.Kind, a.Prefix, a.KeyPath()))
+}
+
+func appImageApplicationKey(uid uint32, container, relative string) string {
+	// Length-delimited fields cannot collide with ordinary native paths.
+	b, _ := json.Marshal([]any{uid, "appimage-v1", container, relative})
+	return digest(string(b))
+}
+
+// MatchesSavedNativeKey identifies a saved native application or AppImage
+// configuration target. It provides no evidence about any live process or socket.
+func MatchesSavedNativeKey(uid uint32, key, keyPath string) bool {
+	if !path.IsAbs(keyPath) || path.Clean(keyPath) != keyPath {
+		return false
+	}
+	if key == ApplicationKey(uid, Application{Kind: "native", Executable: keyPath}) {
+		return true
+	}
+	// The saved display path joins the container and its inner executable
+	// with "!/". The hash disambiguates paths that themselves contain "!/".
+	for offset := 0; offset < len(keyPath); {
+		i := strings.Index(keyPath[offset:], "!/")
+		if i < 0 {
+			break
+		}
+		i += offset
+		relative := keyPath[i+2:]
+		if relative != "" && !path.IsAbs(relative) &&
+			key == appImageApplicationKey(uid, keyPath[:i], relative) {
+			return true
+		}
+		offset = i + 2
+	}
+	return false
 }
 
 // --- verification after exit ----------------------------------------------

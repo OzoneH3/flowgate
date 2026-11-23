@@ -30,13 +30,21 @@ const process = {
   executable: appIdentity.executable,
 };
 const savedRule = {
-  id: 'saved-hover-rule', version: 1, schema: 2, action: 'allow', priority: 100,
+  id: 'saved-hover-rule', version: 1, schema: 3, action: 'allow', priority: 100,
   disabled: false, created: new Date().toISOString(), expires: '0001-01-01T00:00:00Z',
   native_shaping_identity: true, executable: '/synthetic/stopped-hover',
-  filter: { application: 'stopped-hover', revision: 'saved', uid: 1000, direction: 'outgoing', protocol: '*' },
+  filter: { application: 'stopped-hover', revision: 'saved', uid: 1000, direction: 'outgoing', protocol: '*',
+    process: { instance_id: 'a'.repeat(32), session: 'synthetic-gen', boot_id: 'fixture',
+      pid: 63, start_ticks: '100', uid: 1000, netns: 'net:[1]', mountns: 'mnt:[1]', pidns: 'pid:[1]',
+      executable: '/synthetic/stopped-hover', revision: 'saved' },
+  },
 };
-const unverifiedRule = { ...savedRule, id: 'runtime-hover-rule', native_shaping_identity: undefined,
-  executable: '/synthetic/runtime-hover.exe', filter: { ...savedRule.filter, application: 'runtime-hover' } };
+const appImageRule = { ...savedRule, id: 'appimage-hover-rule', schema: 2,
+  executable: '/synthetic/tool.AppImage!/bin/tool',
+  filter: { ...savedRule.filter, application: 'appimage-hover', process: undefined } };
+const unverifiedRule = { ...savedRule, id: 'runtime-hover-rule', schema: 2, native_shaping_identity: undefined,
+  executable: '/synthetic/runtime-hover.exe',
+  filter: { ...savedRule.filter, application: 'runtime-hover', process: undefined } };
 const requests = [],
   sockets = new Set(),
   servers = [];
@@ -76,7 +84,7 @@ function reply(q, monitor) {
       ...r,
       mode: monitor ? 'host-monitor' : 'daemon-monitor',
       events: [],
-      rules: [savedRule, unverifiedRule],
+      rules: [savedRule, appImageRule, unverifiedRule],
       capabilities: [
         'explicit-administrator-v1',
         'experimental-native-upload-v1',
@@ -243,7 +251,7 @@ try {
       await button.hover();
       if (!(await tooltip.count())) return false;
       const message = await tooltip.textContent();
-      return message.startsWith(label + ' unavailable') && message.includes('No saved native application identity');
+      return message.startsWith(label + ' unavailable') && message.includes('outside its socket coverage');
     }, label + ' for a saved identity without native proof');
     assert.equal(await button.getAttribute('aria-disabled'), 'true');
     assert(await button.evaluate((element) => element.matches(':hover') && !element.disabled));
@@ -252,6 +260,12 @@ try {
     assert.equal(await popup.count(), 0);
   }
   assert.equal(writes().length, 0);
+  const appImage = page.locator('#rows tr[data-id^="app:appimage-hover"]');
+  await appImage.locator('[data-limit-direction="download"]').click();
+  await popup.waitFor();
+  await wait(() => page.locator('#uploadSave').isEnabled(), 'saved AppImage editor');
+  await page.keyboard.press('Escape');
+  await popup.waitFor({ state: 'detached' });
   const stopped = page.locator('#rows tr[data-id^="app:stopped-hover"]');
   for (const direction of ['priority', 'upload', 'download']) {
     await stopped.locator(`[data-limit-direction="${direction}"]`).click();
@@ -280,7 +294,7 @@ try {
   assert.deepEqual(caps, []);
   assert.equal(writes().length, 6);
   priorWrites = writes().length;
-  evidence.steps.push({ label: 'Saved all three settings with no sockets; unverified target stayed unavailable' });
+  evidence.steps.push({ label: 'AppImage editor opened and all three settings saved from a native process-rule row with no sockets; unsupported runtime stayed unavailable' });
   async function open(direction) {
     await slot(direction).click();
     await popup.waitFor();

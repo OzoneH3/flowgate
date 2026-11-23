@@ -1271,7 +1271,7 @@ export interface Rule {
   // Daemon-derived, read-only (never persisted or sent back): this saved
   // application rule also covers updated revisions of the same verified program.
   follows_updates?: boolean;
-  // Daemon-derived. This saved key names an ordinary native application.
+  // Daemon-derived. This saved key names a native application or AppImage.
   native_shaping_identity?: boolean;
   root_application?: string;
   invocation?: Invocation;
@@ -1519,7 +1519,7 @@ export function parseRule(v: unknown): Rule {
     root_application: string(r.root_application) || undefined,
     ...(r.share_with_root === true ? { share_with_root: true } : {}),
     ...(r.follows_updates === true && !preset && !filter.process ? { follows_updates: true } : {}),
-    ...(r.native_shaping_identity === true && !preset && !filter.process && !filter.all_programs &&
+    ...(r.native_shaping_identity === true && !preset && !filter.all_programs &&
       !filter.all_uids && !r.network_endpoint ? { native_shaping_identity: true } : {}),
     created: string(r.created),
     disabled: r.disabled === true,

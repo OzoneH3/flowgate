@@ -72,6 +72,9 @@ func TestSavedNativeShapingIdentityProjection(t *testing.T) {
 		want bool
 	}{
 		{"native", func(*policy.Rule) {}, true},
+		{"native process rule", func(r *policy.Rule) {
+			r.Filter.Process = identity.Instance{UID: uid, PID: 42, Executable: executable, Revision: "saved"}
+		}, true},
 		{"another account", func(r *policy.Rule) { r.Filter.UID++ }, false},
 		{"different path", func(r *policy.Rule) { r.Executable = "/games/beta.exe" }, false},
 		{"wine alpha", func(r *policy.Rule) {
