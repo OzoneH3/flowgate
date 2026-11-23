@@ -22,9 +22,14 @@ function paintAvailability(b:HTMLButtonElement) {
   const item=buttonRows.get(b);if(!item)return;
   const reason=shapingUnavailableReason(item.row,latestState||item.state,view,item.kind);
   const label=item.kind==='priority'?'Traffic priority':item.kind==='download'?'Download limit':'Upload limit';
-  b.disabled=!!reason;
+  // Keep unavailable controls hoverable and focusable so their explanations are reachable.
+  b.setAttribute('aria-disabled',String(!!reason));
+  b.classList.toggle('unavailable',!!reason);
   b.setAttribute('aria-label',`${label} for ${item.row.label}`);
-  if(reason){b.title=reason;b.setAttribute('aria-label',`${label} unavailable for ${item.row.label}: ${reason}`);}
+  if(reason){
+    b.title=`${label} unavailable · ${reason}`;
+    b.setAttribute('aria-label',`${label} unavailable for ${item.row.label}: ${reason}`);
+  }
 }
 
 const text=<K extends keyof HTMLElementTagNameMap>(tag:K,value:string)=>{const e=document.createElement(tag);e.textContent=value;return e;};
@@ -96,24 +101,28 @@ export function refreshUpload(state:ClientState) {
   void window.flowgate.uploadStatus().then(v=>{if(start===context){adopt(v,sent);paint();}}).catch(()=>{if(start===context){view={supported:true,writable:false,message:"Upload status unavailable"};paint();}}).finally(()=>{flight=false;});
 }
 export function uploadButton(row:Row,state:ClientState,direction:LimitDirection='upload') {
-  const t=uploadTarget(row,state);
-  if(!['application','process'].includes(row.kind)) return emptySlot();
-  const b=document.createElement('button');
-  b.className='status-slot upload-limit'; b.dataset.uploadLimit='';b.dataset.limitDirection=direction;
-  const label=direction==='download'?'Download':'Upload';
-  b.setAttribute('aria-label',`${label} limit for ${row.label}`);b.setAttribute('aria-haspopup','dialog');b.setAttribute('aria-expanded','false');
-  const dot=text('span','·');dot.className='slot-dot';b.append(dot,limitGlyph(direction));
-  buttonRows.set(b,{row,state,kind:direction});if(t){targets.set(b,t);paintButton(b,t);b.onclick=e=>{e.stopPropagation();void open(t,b,direction);};}paintAvailability(b);
-  return b;
+  return shapingButton(row,state,direction);
 }
 export function priorityButton(row:Row,state:ClientState) {
-  const t=uploadTarget(row,state);
+  return shapingButton(row,state,'priority');
+}
+function shapingButton(row:Row,state:ClientState,kind:LimitKind) {
   if(!['application','process'].includes(row.kind)) return emptySlot();
   const b=document.createElement('button');
-  b.className='status-slot upload-limit priority-control'; b.dataset.uploadLimit='';b.dataset.limitDirection='priority';
-  b.setAttribute('aria-label',`Traffic priority for ${row.label}`);b.setAttribute('aria-haspopup','dialog');b.setAttribute('aria-expanded','false');
-  const dot=text('span','·');dot.className='slot-dot';b.append(dot,limitGlyph('priority'));
-  buttonRows.set(b,{row,state,kind:'priority'});if(t){targets.set(b,t);paintButton(b,t);b.onclick=e=>{e.stopPropagation();void open(t,b,'priority');};}paintAvailability(b);
+  b.type='button';
+  b.className='status-slot upload-limit';b.classList.toggle('priority-control',kind==='priority');
+  b.dataset.uploadLimit='';b.dataset.limitDirection=kind;
+  b.setAttribute('aria-haspopup','dialog');b.setAttribute('aria-expanded','false');
+  const dot=text('span','·');dot.className='slot-dot';b.append(dot,limitGlyph(kind));
+  buttonRows.set(b,{row,state,kind});
+  const target=uploadTarget(row,state);
+  if(target){targets.set(b,target);paintButton(b,target);}
+  paintAvailability(b);
+  b.onclick=(event)=>{
+    event.stopPropagation();
+    if(target && !shapingUnavailableReason(row,latestState||state,view,kind))
+      void open(target,b,kind);
+  };
   return b;
 }
 function emptySlot() {

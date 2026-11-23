@@ -29,6 +29,12 @@ const process = {
   application: appIdentity,
   executable: appIdentity.executable,
 };
+const savedRule = {
+  id: 'saved-hover-rule', version: 1, schema: 2, action: 'allow', priority: 100,
+  disabled: false, created: new Date().toISOString(), expires: '0001-01-01T00:00:00Z',
+  executable: '/synthetic/stopped-hover',
+  filter: { application: 'stopped-hover', revision: 'saved', uid: 1000, direction: 'outgoing', protocol: '*' },
+};
 const requests = [],
   sockets = new Set(),
   servers = [];
@@ -68,7 +74,7 @@ function reply(q, monitor) {
       ...r,
       mode: monitor ? 'host-monitor' : 'daemon-monitor',
       events: [],
-      rules: [],
+      rules: [savedRule],
       capabilities: [
         'explicit-administrator-v1',
         'experimental-native-upload-v1',
@@ -219,6 +225,27 @@ try {
     return false;
   }, 'native candidate');
   const popup = page.locator('#uploadLimitDialog');
+  const tooltip = page.locator('#flowgateTooltip:popover-open');
+  await page.locator('#expand').click();
+  const stopped = page.locator('#rows tr[data-id^="app:stopped-hover"]');
+  await stopped.waitFor();
+  for (const [direction, label] of [
+    ['priority', 'Traffic priority'],
+    ['upload', 'Upload limit'],
+    ['download', 'Download limit'],
+  ]) {
+    const button = stopped.locator(`[data-limit-direction="${direction}"]`);
+    await button.hover();
+    assert((await tooltip.textContent()).startsWith(label + ' unavailable'));
+    assert.match(await tooltip.textContent(), /application is not currently observed/);
+    assert.equal(await button.getAttribute('aria-disabled'), 'true');
+    assert(await button.evaluate((element) => element.matches(':hover') && !element.disabled));
+    await button.click({ force: true });
+    await button.press('Enter');
+    assert.equal(await popup.count(), 0);
+  }
+  assert.equal(writes().length, 0);
+  evidence.steps.push({ label: 'Stopped app tooltips and activation guards for all three controls' });
   async function open(direction) {
     await slot(direction).click();
     await popup.waitFor();

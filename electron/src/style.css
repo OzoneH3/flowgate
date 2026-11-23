@@ -1637,18 +1637,17 @@ body.preset-status #tree th.col-filler, body.preset-status #tree td.filler { dis
 .status-slot.upload-limit:focus-visible .slot-icon,
 .status-slot.upload-limit:hover .slot-icon,
 .status-slot.upload-limit.upload-configured .slot-icon,
-.status-slot.upload-limit.unavailable .slot-icon,
 #infoRules .status-slot.upload-limit .slot-icon { display: inline-flex; }
 .status-slot.upload-limit:focus-visible .slot-dot,
 .status-slot.upload-limit:hover .slot-dot,
 .status-slot.upload-limit.upload-configured .slot-dot,
-.status-slot.upload-limit.unavailable .slot-dot,
 #infoRules .status-slot.upload-limit .slot-dot { display: none; }
 .status-slot.upload-limit.upload-configured .slot-icon.family-priority,
 #tree tbody tr[aria-selected='true'] .status-slot.upload-limit.upload-configured .slot-icon.family-priority,
 .status-slot.upload-limit.upload-configured .slot-icon.family-ul-limit,
 #tree tbody tr[aria-selected='true'] .status-slot.upload-limit.upload-configured .slot-icon.family-ul-limit { background: #409cdb; color: #17232c; }
 .status-slot.upload-limit.unavailable .slot-icon { opacity: .55; }
+.status-slot.upload-limit.unavailable:hover { background: transparent; }
 .status-slot.upload-limit.upload-configured .slot-icon.family-dl-limit,
 #tree tbody tr[aria-selected='true'] .status-slot.upload-limit.upload-configured .slot-icon.family-dl-limit { background: #409cdb; color: #17232c; }
 

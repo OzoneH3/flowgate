@@ -38,6 +38,7 @@ export function uploadTarget(row: Row, state: ClientState): UploadTarget | undef
 export function shapingUnavailableReason(row: Row, state: ClientState, view: UploadView, kind: LimitDirection|'priority'): string | undefined {
   const reasons:string[]=[];
   if (!state.observation?.connected) reasons.push('Current socket observation is disconnected.');
+  else if (row.inactive) reasons.push('This application is not currently observed. Shaping requires a verified running native application.');
   else if (row.runtimeApplication || row.displayApplication || row.process?.application.kind==='wine') reasons.push('Wine/runtime or shared-owner application shaping is not supported; only verified native application sockets are eligible.');
   else if (!uploadTarget(row,state)) reasons.push('No current eligible native application target is available for this row.');
   if (!state.control?.connected) reasons.push('The control connection is disconnected.');
