@@ -213,10 +213,16 @@ def run_case(guest, sut, names, release, evidence, _, *, relay, receiver, probe,
                 for label in "BC":
                     assert rates[label]["bits_per_second"] >= .70 * baseline["receiver"][label]["bits_per_second"], rates
             configure()
-            configure([dict(cap, bits_per_second=0, download_bits_per_second=0, traffic_priority="high")],
-                      budget=40_000_000)
-            priority = phase(direction + "-priority", direction, wanted)["receiver"]
-            assert priority["A"]["bits_per_second"] > max(priority[c]["bits_per_second"] for c in "BC"), priority
+            shares = {}
+            for priority in ("low", "high"):
+                configure([dict(cap, bits_per_second=0, download_bits_per_second=0, traffic_priority=priority)],
+                          budget=40_000_000)
+                measured = phase(f"{direction}-priority-{priority}", direction, wanted)["receiver"]
+                total = sum(row["bits_per_second"] for row in measured.values())
+                assert 30_000_000 <= total <= 48_000_000, measured
+                shares[priority] = measured["A"]["bits_per_second"] / total
+            report[f"{direction}_priority_shares"] = shares
+            assert shares["high"] >= 1.2 * shares["low"], shares
             configure()
         evidence["scenarios"][NAME] = "pass"
         report["verdict"] = "pass"
