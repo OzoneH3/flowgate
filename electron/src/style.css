@@ -506,12 +506,17 @@ main aside {
   touch-action: none;
 }
 #ruleEditor {
+  --editor-top-inset: 12px;
+  --editor-bottom-inset: 88px;
   box-sizing: border-box;
   width: min(640px, calc(100vw - 24px));
   max-width: none;
-  max-height: calc(100dvh - 24px);
+  /* Wayland can expose the full output as the viewport behind desktop chrome. */
+  inset-block: var(--editor-top-inset) var(--editor-bottom-inset);
+  max-height: calc(100dvh - var(--editor-top-inset) - var(--editor-bottom-inset));
   margin: auto;
   padding: 0;
+  overflow: hidden;
   border: 1px solid var(--fg-border);
   border-top: 2px solid var(--fg-tab);
   border-radius: 10px;
