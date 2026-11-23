@@ -545,7 +545,7 @@ export interface Bridge {
   requestForAWhile(value: import('./prompt-decision').EndedLeaseChoice): Promise<{ message: string; lease: import('./process-lease').ProcessLease }>;
   openFutureApplicationRule(value: { generation: string; id: string }): Promise<void>;
   onFutureApplicationRule(fn: (source: ObservedSource) => void): () => void;
-  promptLayout(value: { height: number; pointerDown: boolean; keysDown: string[]; remember: boolean }): Promise<void>;
+  promptLayout(value: { height: number | null; pointerDown: boolean; keysDown: string[]; remember: boolean }): Promise<void>;
   dismissPrompt(keyboardNext?: boolean): Promise<void>;
   decisionLog(): Promise<DecisionLogState>;
   onDecisionLogAccessReset(fn: (revision: number) => void): void;

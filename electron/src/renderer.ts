@@ -835,19 +835,20 @@ function measurePrompt() {
     if (!shell || !body) return;
     // Natural rendered content, independent of the constrained scrolling viewport.
     const padding = getComputedStyle(body);
-    const height =
-      shell.offsetHeight -
-      body.offsetHeight +
-      $('requestDetails').getBoundingClientRect().height +
-      parseFloat(padding.paddingTop) +
-      parseFloat(padding.paddingBottom);
+    // Keep reporting input releases during handoff, but a placeholder with
+    // no request has no useful geometry for the native window.
+    const height = currentEvent()
+      ? Math.ceil(shell.offsetHeight - body.offsetHeight +
+          $('requestDetails').getBoundingClientRect().height +
+          parseFloat(padding.paddingTop) + parseFloat(padding.paddingBottom))
+      : null;
     const keysDown = [...promptKeysDown].sort();
     const reviewingRule = rememberOn && popupRuleEdited;
-    const signature = Math.ceil(height) + ':' + pointerDown + ':' + keysDown.join(',') + ':' + reviewingRule;
+    const signature = height + ':' + pointerDown + ':' + keysDown.join(',') + ':' + reviewingRule;
     if (signature === lastPromptLayout) return;
     lastPromptLayout = signature;
     void window.flowgate.promptLayout({ height, pointerDown, keysDown, remember: reviewingRule }).then(() => {
-      if (!promptLayoutReady) {
+      if (height !== null && !promptLayoutReady) {
         promptLayoutReady = true;
         promptStableAt = performance.now() + 650;
         setTimeout(() => {
@@ -2793,7 +2794,7 @@ function updateDecisions() {
     liveLeaseUnavailable = liveLeaseReason(e, state.control.capabilities),
     leaseDone = !!e && endedLeaseDone.has(e.id),
     unverifiable = e ? ruleUnverifiable.get(e.id) : undefined;
-  const futureRuleHint = 'Use Allow always or Deny always to save a rule for future connections.';
+  const futureRuleHint = 'Use Allow future connections to cover matching retries from this app.';
   const leaseAvailable = leaseMode && !leaseDone && state.control.connected && canDecide(state.control);
   const futureRuleAvailable = ruleMode && !ruleDone && !rulePinned && !unverifiable &&
     state.control.connected && canManageRules(state.control);
@@ -2834,6 +2835,10 @@ function updateDecisions() {
   for (const id of ['allow', 'block'] as const) {
     const b = $<HTMLButtonElement>(id);
     if (!b) continue;
+    if (promptID) {
+      const action = id === 'allow' ? 'Allow' : 'Deny';
+      b.textContent = ruleMode ? action + ' future connections' : action + ' always';
+    }
     if (promptID && !remembering) {
       b.disabled = true;
       b.title = 'A permanent rule is not available for this request.';
@@ -2989,6 +2994,7 @@ function updateDecisions() {
     }
     const duration = $<HTMLSelectElement>('rememberDuration');
     if (duration) {
+      if (promptID) duration.parentElement!.hidden = !ruleMode;
       duration.disabled = ruleMode ? ruleDone || rulePinned : locked;
       for (const option of duration.options)
         option.disabled = !ruleMode && !e?.scope_previews[rememberScope(Number(option.value))];

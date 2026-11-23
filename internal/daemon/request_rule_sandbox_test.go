@@ -294,12 +294,79 @@ func TestWineTableRetainsPEFileWithoutBrokerProcessPermission(t *testing.T) {
 			}
 			*s.now = s.now.Add(2 * time.Minute)
 			s.List(1000, false)
-			rule, err := s.save(t, v.ID, "allow")
+			retryFlow, _ := identity.ParseFlow("udp", "incoming", "127.0.0.1:80", "127.0.0.1:9001")
+			otherPrefixFlow, _ := identity.ParseFlow("udp", "incoming", "127.0.0.1:80", "127.0.0.1:9002")
+			otherAppFlow, _ := identity.ParseFlow("udp", "incoming", "127.0.0.1:80", "127.0.0.1:9003")
+			otherPrefix := filepath.Join(dir, "other-prefix")
+			if err := os.Mkdir(otherPrefix, 0700); err != nil {
+				t.Fatal(err)
+			}
+			beta := filepath.Join(otherPrefix, "beta.exe")
+			if err := os.WriteFile(beta, []byte("other verified PE"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			otherAttribution := func(other identity.Application, fp string) identity.Attribution {
+				other.Prefix = otherPrefix
+				other.Key = identity.ApplicationKey(1000, other)
+				result := a
+				result.Application, result.Fingerprint = &other, fp
+				table := *a.Table
+				table.Prefix = other.Prefix
+				result.Table = &table
+				return result
+			}
+			betaApp := sandboxApp(t, beta, beta, 1000)
+			betaApp.Kind = "wine"
+			otherApp := otherAttribution(betaApp, "other-image")
+			other := otherAttribution(app, "other-prefix")
+			s.Resolve = func(f identity.Flow) identity.Attribution {
+				switch f.Remote.Port() {
+				case 9002:
+					return other
+				case 9003:
+					return otherApp
+				default:
+					return a
+				}
+			}
+			retry := s.Observe(retryFlow, "retry")
+			unrelated := s.Observe(otherPrefixFlow, "same-image-other-prefix")
+			betaRequest := s.Observe(otherAppFlow, "other-image")
+			for _, event := range []Event{retry, unrelated, betaRequest} {
+				if event.State != "awaiting-decision" {
+					t.Fatal(event)
+				}
+			}
+			options := appOnly()
+			options.DurationSeconds = 60
+			preview, err := s.PreviewRequestRule(s.Generation, v.ID, "allow", "application", "any",
+				s.Zones.Revision, 1000, false, options)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if rule.Filter.Application != app.Key || !rule.Filter.Process.IsZero() {
+			rule, _, _, settled, err := s.SaveRequestRuleSettled(s.Generation, preview.Token, v.ID, "allow",
+				"application", "any", s.Zones.Revision, 1000, false, options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rule.Filter.Application != app.Key || !rule.Filter.Process.IsZero() ||
+				!rule.Expires.Equal(s.now.Add(time.Minute)) {
 				t.Fatal(rule)
+			}
+			if len(settled) != 1 || settled[0].ID != retry.ID || settled[0].Rule != rule.ID || settled[0].State != "allowed" {
+				t.Fatalf("expected only the matching retry to settle: %+v", settled)
+			}
+			if s.RetainedState(v.ID, v.Attribution.Fingerprint) != "drop" {
+				t.Fatal("ended request was released")
+			}
+			for _, event := range []Event{unrelated, betaRequest} {
+				if s.RetainedState(event.ID, event.Attribution.Fingerprint) != "pending" {
+					t.Fatalf("unrelated Wine request changed: %+v", event)
+				}
+			}
+			future, _ := identity.ParseFlow("udp", "incoming", "127.0.0.1:80", "127.0.0.1:9004")
+			if event := s.Observe(future, "later"); event.State != "allowed" || event.Rule != rule.ID {
+				t.Fatalf("later matching connection prompted again: %+v", event)
 			}
 		})
 	}

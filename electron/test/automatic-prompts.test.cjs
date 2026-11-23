@@ -290,6 +290,47 @@ test('explicit Remember review keeps its ended request, without retaining unsoli
   assert.equal(auto.follow({...s,control:{...s.control,generation:'new'}},ref,true),undefined);
 });
 
+test('a visible prompt advances through a burst of distinct eligible requests in place', () => {
+  const q = new AutomaticPrompts(), s = state(['old', 'short', 'dismissed', 'next']);
+  const ref = q.next(s, false);
+  Object.assign(s.control.events[0], { state: 'expired', remainingMs: 0 });
+  s.control.events[1].remainingMs = 900;
+  s.control.events[2].remainingMs = s.control.events[3].remainingMs = 30_000;
+  q.dismiss({ generation: 'g', id: 'dismissed', group: 'e:dismissed' });
+  assert.equal(q.follow(s, ref), undefined, 'an explicit review stays on its own group');
+  const next = q.continueVisible(s, ref, false, 1000);
+  assert.deepEqual(next, { generation: 'g', id: 'next', group: 'e:next' });
+  assert.throws(() => boundDecision({ generation: 'g', id: 'old', action: 'allow', scope: 'once' }, next),
+                /does not belong/);
+  s.control.reconciling = true;
+  assert.deepEqual(q.continueVisible(s, ref, false, 1000), ref, 'hold the old card during reconciliation');
+  s.control.reconciling = false;
+  s.control.generation = 'new';
+  assert.equal(q.continueVisible(s, ref, false, 1000), undefined);
+});
+
+test('an open card keeps its verified app rule action after the connection expires', () => {
+  const q = new AutomaticPrompts(), s = state(['old', 'retry']);
+  const ref = q.next(s, false);
+  const [old, retry] = s.control.events;
+  retry.remainingMs = 30_000;
+  s.control.capabilities = ['request-application-rule-v1'];
+  old.request_rule = { available: true };
+  old.remainingMs = 0;
+  assert.deepEqual(q.continueVisible(s, ref, false, 1000), ref, 'wait for the authoritative expiration');
+  Object.assign(old, { state: 'expired', reviewFailure: { code: 'stale_decision', terminal: true } });
+  assert.deepEqual(q.continueVisible(s, ref, false, 1000), ref, 'keep the app-rule target available');
+  assert.equal(q.next(s, false, 1000).id, 'retry', 'never auto-open an expired card');
+  s.control.permissions.can_manage_rules = false;
+  assert.equal(q.continueVisible(s, ref, false, 1000).id, 'retry');
+  s.control.permissions.can_manage_rules = true;
+  old.request_rule.available = false;
+  assert.equal(q.continueVisible(s, ref, false, 1000).id, 'retry', 'no verified target to retain');
+  retry.state = 'allowed';
+  s.control.events = [retry];
+  assert.equal(q.next(s, false, 1000), undefined, 'an acknowledged matching rule settles the retry');
+});
+
 test('allowed request is held while its outcome is unknown, released once its receipt is acknowledged', () => {
   const q = new AutomaticPrompts(),
     s = state(['a']),

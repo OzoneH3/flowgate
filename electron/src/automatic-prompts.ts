@@ -1,5 +1,6 @@
 import {
   canDecide,
+  canManageRules,
   validateDecision,
   type ClientState,
   type Decision,
@@ -7,7 +8,7 @@ import {
   type Rule,
   type ViewEvent,
 } from './protocol';
-import { requestRuleAvailable } from './request-rule';
+import { REQUEST_RULE_CAPABILITY, requestRuleAvailable } from './request-rule';
 import { REMEMBER_DURATIONS, reviewFailureOf } from './decision-remember';
 import type { RequestRef } from './notifications';
 export interface RequestGroup {
@@ -144,15 +145,36 @@ export class AutomaticPrompts {
     this.dismissed.set(key, true);
     while (this.dismissed.size > 512) this.dismissed.delete(this.dismissed.keys().next().value!);
   }
-  next(state: ClientState, occupied: boolean): RequestRef | undefined {
+  next(state: ClientState, occupied: boolean, minimumRemainingMs = 0): RequestRef | undefined {
     // After an unknown/rejected outcome nothing new is presented until an
     // authoritative list issued after it was read (queue reconciliation).
     if (occupied || !canDecide(state.control) || state.control.reconciling || state.control.events.some(e=>e.attempt?.phase==='submitting')) return;
     const g = requestGroups(state.control.events).find(
       (g) =>
-        !g.representative.attempt && !this.dismissed.has(this.key(state.control.generation, g.key)),
+        !g.representative.attempt && g.representative.remainingMs > minimumRemainingMs &&
+        !this.dismissed.has(this.key(state.control.generation, g.key)),
     );
     return g && { generation: state.control.generation, id: g.representative.id, group: g.key };
+  }
+  // While the window is already open, use the next actionable card directly
+  // if the old one settled. A replaced daemon still gets a separate reveal.
+  continueVisible(state: ClientState, ref: RequestRef, reviewingRemember: boolean, minimumRemainingMs: number) {
+    const c = state.control;
+    if (c.generation !== ref.generation) return;
+    const current = c.events.find((e) => e.id === ref.id);
+    // Keep an already presented card through expiry when it still has an
+    // application-rule target. The clock can reach zero before the next
+    // daemon list publishes the terminal state and enables the reviewed action.
+    if (canManageRules(c) && current && (current.state === 'awaiting-decision' || current.state === 'expired') &&
+        (requestRuleAvailable(current, c.capabilities) ||
+          (current.state === 'awaiting-decision' && current.remainingMs <= 0 &&
+            current.request_rule?.available && c.capabilities?.includes(REQUEST_RULE_CAPABILITY))))
+      return ref;
+    const next = this.follow(state, ref, reviewingRemember);
+    if (next?.id === ref.id) return next;
+    if (next && state.control.events.some((e) => e.id === next.id && e.remainingMs > minimumRemainingMs))
+      return next;
+    return this.next(state, false, minimumRemainingMs);
   }
   // The open card after a state update: the same ref while its request still
   // awaits; else the group's next representative (advance); else undefined (close).

@@ -164,6 +164,7 @@ let nextRemember: ReturnType<typeof queuedRemember>;
 const automaticPrompts = new AutomaticPrompts();
 // Keep the old native window until release: its input stream must not reach a new card.
 const TRANSITION_MS = 650;
+const MIN_PROMPT_TIME_MS = 1000;
 let transitionUntil = 0;
 let transitionTimer: ReturnType<typeof setTimeout> | undefined;
 const pressedPromptKeys = new Set<string>();
@@ -203,6 +204,12 @@ function retarget(ref: RequestRef, reload = false, remember?: QueuedRememberSele
   promptRefs.set(w.webContents.id, ref);
   promptContentHeights.delete(w.webContents.id);
   promptReadyAt.set(w.webContents.id, Date.now() + TRANSITION_MS);
+  // Keep the mapped window at its current size until the new document
+  // reports its real layout. A compact resize between cards visibly jumps.
+  if (!reload) {
+    void w.loadURL(promptURL(ref, remember, focusHeading));
+    return;
+  }
   const reset = (
     promptLayouts.get(w.webContents.id) ||
     promptPlacement.get(w.webContents.id) ||
@@ -294,11 +301,11 @@ function automaticDecision() {
   const view = backend.view();
   if (prompt && !prompt.isDestroyed() && !promptIdle) {
     const ref = promptRefs.get(prompt.webContents.id);
-    let next = ref && automaticPrompts.follow(view, ref, promptRemember);
+    let next = ref && automaticPrompts.continueVisible(view, ref, promptRemember, MIN_PROMPT_TIME_MS);
     // A request just decided "For a while" keeps its card while its lease is
     // active, so the lease stays inspectable; any other waiting request wins.
     if (!promptDismissed && !next && ref && leaseHolds(view.control, ref.id))
-      next = automaticPrompts.next(view, false) ?? ref;
+      next = automaticPrompts.next(view, false, MIN_PROMPT_TIME_MS) ?? ref;
     if (!promptDismissed && next?.id === ref?.id) {
       // The same card stays (for example a request that just ended and is now
       // retained): cancel a transition paced while it was briefly unfollowed,
@@ -314,9 +321,8 @@ function automaticDecision() {
     transitionUntil = 0;
     if (promptDismissed && promptKeyboardNext) {
       promptKeyboardNext = false;
-      const following = automaticPrompts.next(view, false);
-      if (following && prompt.isFocused() &&
-        view.control.events.some((e) => e.id === following.id && e.remainingMs > 1000)) {
+      const following = automaticPrompts.next(view, false, MIN_PROMPT_TIME_MS);
+      if (following && prompt.isFocused()) {
         // Keep the foreground window mapped for an intentional keyboard advance.
         promptDismissed = false;
         retarget(following, false, undefined, true);
@@ -329,14 +335,15 @@ function automaticDecision() {
         void resizeKDEPrompt(profile, process.pid, prompt.id, prompt.getBounds(), false);
       else prompt.hide();
       pacePrompt();
-    } else if (view.control.events.some((e) => e.id === next.id && e.remainingMs > 1000))
+    } else {
       retarget(next);
+    }
     return;
   }
-  const next = automaticPrompts.next(view, false);
+  const next = automaticPrompts.next(view, false, MIN_PROMPT_TIME_MS);
   if (!promptInputSettled()) return;
   transitionUntil = 0;
-  const event = next && view.control.events.find((e) => e.id === next.id && e.remainingMs > 1000);
+  const event = next && view.control.events.find((e) => e.id === next.id);
   if (next && event) openDecision(next, nextRemember?.(next.generation, event));
 }
 const windows = new Set<BrowserWindow>();
@@ -1244,9 +1251,8 @@ app.whenReady().then(async () => {
     if (!w || w !== prompt || !promptRefs.has(e.sender.id)) throw Error('Not a permission window');
     if (
       !value ||
-      !Number.isFinite(value.height) ||
-      value.height < 0 ||
-      value.height > 100000 ||
+      (value.height !== null &&
+        (!Number.isFinite(value.height) || value.height < 0 || value.height > 100000)) ||
       typeof value.pointerDown !== 'boolean' ||
       typeof value.remember !== 'boolean' ||
       !Array.isArray(value.keysDown) ||
@@ -1270,8 +1276,6 @@ app.whenReady().then(async () => {
     )
       return;
     promptRemember = value.remember;
-    const contentChanged = promptContentHeights.get(e.sender.id) !== Math.ceil(value.height);
-    promptContentHeights.set(e.sender.id, Math.ceil(value.height));
     const released =
       (promptPointerDown && !value.pointerDown) ||
       (rendererPromptKeys.size > 0 && value.keysDown.length === 0);
@@ -1279,10 +1283,14 @@ app.whenReady().then(async () => {
     for (const key of value.keysDown) rendererPromptKeys.add(key);
     promptPointerDown = value.pointerDown;
     if (released && transitionUntil) pacePrompt();
+    if (value.height === null) return;
+    const height = Math.ceil(value.height);
+    const contentChanged = promptContentHeights.get(e.sender.id) !== height;
+    promptContentHeights.set(e.sender.id, height);
     const bounds = edgePosition(
       screen.getDisplayMatching(w.getBounds()).workArea,
       w.getBounds().width,
-      Math.max(PROMPT_HEIGHT, Math.ceil(value.height)),
+      Math.max(PROMPT_HEIGHT, height),
     );
     // Serialize native resizes after the startup handshake; no stale configure
     // may restore compact geometry over a just-expanded Remember panel.
