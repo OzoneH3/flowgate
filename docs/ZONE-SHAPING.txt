@@ -52,7 +52,8 @@ Schema 3 and capability experimental-zone-shaping-v1. Schema 1/2 legacy all-netw
 settings retain their behavior. A request or stored configuration containing a zone
 requires schema 3: older full-replacement clients cannot erase it, including through
 Disable/Delete. Generation/version CAS and read-after-lost-ack reconciliation remain;
-no automatic write retry. Configuration remains session-scoped, not restart-persistent.
+no automatic write retry. The daemon saves configuration and checks socket ownership
+again after restart.
 
 Each zoned app reserves four nodes: application aggregate + unknown/local/internet
 children. Scope-specific hierarchy is materialized only in affected directions; an

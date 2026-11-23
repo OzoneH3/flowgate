@@ -2,6 +2,7 @@ package uploadshape
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"sync"
@@ -74,7 +75,21 @@ func TestSavedOnlySettingsStayOutOfKernelPolicy(t *testing.T) {
 }
 
 func TestSavedNativeSettingBindsWhenItsSocketAppears(t *testing.T) {
+	cap := Cap{UID: 1000, Application: "native", BitsPerSecond: 8_000_000}
+	previous := newManager(Options{})
+	previous.start = func() (transport, error) { return &model{}, nil }
+	var saved Preferences
+	previous.savePreferences = func(p Preferences) error { saved = p; return nil }
+	if _, err := previous.Configure(1, Config{Schema: 4, Enabled: true, Caps: []Cap{cap}}); err != nil {
+		previous.Close()
+		t.Fatal(err)
+	}
+	previous.Close()
+
 	m := newManager(Options{})
+	if err := m.restorePreferences(saved); err != nil {
+		t.Fatal(err)
+	}
 	f := &model{}
 	m.start = func() (transport, error) { return f, nil }
 	var started atomic.Bool
@@ -92,13 +107,19 @@ func TestSavedNativeSettingBindsWhenItsSocketAppears(t *testing.T) {
 			Owners: []identity.Process{{PID: 7, ThreadGroup: 7, UID: 1000, Application: app}}, Sockets: []identity.Socket{sock}}}
 	}
 	defer m.Close()
-	cap := Cap{UID: 1000, Application: "native", BitsPerSecond: 8_000_000}
 	cfg := Config{Schema: 4, Enabled: true, Caps: []Cap{cap}}
-	s, err := m.Configure(1, cfg)
-	if err != nil {
-		t.Fatal(err)
+	s := m.Snapshot()
+	if !s.Enabled || len(s.Caps) != 1 || s.Caps[0] != cap || s.Kernel != nil || len(m.pending) != 0 {
+		t.Fatalf("restored settings contained missing preferences or stale binding state: %+v", s)
 	}
+	m.Resume()
 	until(t, func() bool { return m.Snapshot().AppliedVersion == s.Version })
+	f.mu.Lock()
+	hadBind := slices.Contains(f.calls, "bind_many") || slices.Contains(f.calls, "bind")
+	f.mu.Unlock()
+	if hadBind {
+		t.Fatal("restored control must not bind without a new observation")
+	}
 	cfg.StoredEdit = &Cap{UID: 1000, Application: "runtime", BitsPerSecond: 16_000_000}
 	updated, err := m.Configure(s.Version, cfg)
 	if err != nil {
@@ -115,6 +136,20 @@ func TestSavedNativeSettingBindsWhenItsSocketAppears(t *testing.T) {
 	defer f.mu.Unlock()
 	if len(slices.DeleteFunc(slices.Clone(f.calls), func(op string) bool { return op != "policy" })) != 1 {
 		t.Fatalf("saved-only edit reapplied the native kernel policy: %v", f.calls)
+	}
+}
+
+func TestFailedPreferenceSaveLeavesVersionAndSettingsUnchanged(t *testing.T) {
+	m := newManager(Options{})
+	defer m.Close()
+	m.savePreferences = func(Preferences) error { return fmt.Errorf("disk failure") }
+	if _, err := m.Configure(1, Config{Schema: 4, StoredEdit: &Cap{
+		UID: 1000, Application: "fixture", BitsPerSecond: 8_000_000,
+	}}); !errors.Is(err, ErrSavePreferences) {
+		t.Fatalf("got %v", err)
+	}
+	if s := m.Snapshot(); s.Version != 1 || len(s.Caps) != 0 || s.Kernel != nil {
+		t.Fatalf("failed write changed active state: %+v", s)
 	}
 }
 func TestDisabledAndCAS(t *testing.T) {

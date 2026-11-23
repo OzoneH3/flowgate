@@ -1,6 +1,10 @@
 package daemon
 
-import "flowgate/internal/uploadshape"
+import (
+	"errors"
+
+	"flowgate/internal/uploadshape"
+)
 
 // Authenticated machine administrator only. Companion status is allowed but
 // never mutation. No request can select helper paths or expand interface scope.
@@ -23,7 +27,9 @@ func (e *Engine) uploadRequest(q Request, admin, readonly bool) (uploadshape.Sna
 	s, err := e.UploadShaping.Configure(*q.ExpectedVersion, *q.UploadConfig)
 	if err != nil {
 		code := "invalid_request"
-		if err.Error() == "stale_version" || err.Error() == "schema_upgrade_required" || err.Error() == "allocation_below_minimum" {
+		if errors.Is(err, uploadshape.ErrSavePreferences) {
+			code = "persistence_failed"
+		} else if err.Error() == "stale_version" || err.Error() == "schema_upgrade_required" || err.Error() == "allocation_below_minimum" {
 			code = err.Error()
 		}
 		return s, mutationError(code, err.Error())

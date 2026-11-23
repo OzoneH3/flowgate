@@ -5,6 +5,7 @@ package uploadshape
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -49,6 +50,17 @@ type Config struct {
 	UploadBudget   uint64 `json:"upload_budget_bits_per_second,omitempty"`
 	DownloadBudget uint64 `json:"download_budget_bits_per_second,omitempty"`
 }
+
+// Preferences is the durable desired policy. It carries neither API revisions
+// nor controller state, and an application key is not evidence of socket ownership.
+type Preferences struct {
+	Enabled        bool   `json:"enabled"`
+	Caps           []Cap  `json:"caps"`
+	UploadBudget   uint64 `json:"upload_budget_bits_per_second,omitempty"`
+	DownloadBudget uint64 `json:"download_budget_bits_per_second,omitempty"`
+}
+
+var ErrSavePreferences = errors.New("could not save shaping preferences")
 
 // Provisional traffic-priority constants, mirrored from the controller's
 // allocate(); validated in the isolated guest only (not NetLimiter behaviour).
@@ -248,13 +260,15 @@ type Manager struct {
 	resolve         func(identity.Flow) identity.Attribution
 	resolveBatch    func([]identity.Flow) []identity.Attribution
 	priorityHints   func([]Cap) priorityHints
+	savePreferences func(Preferences) error
 }
 
-func New(o Options) (*Manager, error) {
+func New(o Options, preferences Preferences, save func(Preferences) error) (*Manager, error) {
 	if err := validateOptions(o); err != nil {
 		return nil, err
 	}
 	m := newManager(o)
+	m.savePreferences = save
 	m.start = func() (transport, error) { return startProcess(o) }
 	m.cleanup = func() error { return cleanupProcess(o) }
 	if _, err := os.Lstat(filepath.Join(o.State, "owner.json")); err == nil {
@@ -262,7 +276,38 @@ func New(o Options) (*Manager, error) {
 		m.snap.Status = "Unsupported"
 		m.snap.LastError = "Owned journal remains; explicit configuration required for verified reconciliation"
 	}
+	if err := m.restorePreferences(preferences); err != nil {
+		return nil, fmt.Errorf("stored shaping preferences: %w", err)
+	}
 	return m, nil
+}
+
+func (m *Manager) restorePreferences(p Preferences) error {
+	c := Config{Enabled: p.Enabled, Caps: p.Caps, UploadBudget: p.UploadBudget, DownloadBudget: p.DownloadBudget}
+	if err := validateConfig(c); err != nil {
+		return err
+	}
+	m.cfg = kernelConfig(c)
+	m.snap.Enabled = c.Enabled
+	m.snap.Caps = append([]Cap{}, c.Caps...)
+	m.snap.UploadBudget, m.snap.DownloadBudget = c.UploadBudget, c.DownloadBudget
+	if c.Enabled {
+		m.snap.Status = "Applying"
+		m.snap.LastError = ""
+	} else if !m.dirty {
+		m.snap.AppliedVersion = m.snap.Version
+	}
+	return nil
+}
+
+// Resume starts normal discovery after the daemon has initialized its other
+// services. An old controller journal is reconciled before new bindings.
+func (m *Manager) Resume() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.cfg.Enabled && !m.running && !m.closed {
+		m.startWorkerLocked()
+	}
 }
 func newManager(o Options) *Manager {
 	m := &Manager{opts: o, wake: make(chan struct{}, 1), hints: make(chan hint, 128), pending: map[string]bool{}, sockets: func() ([]identity.Socket, error) { return identity.SocketsLimited(DiscoveryCapacity) }, resolve: identity.Resolve, resolveBatch: identity.ResolveBatch, priorityHints: nativePriorityHints}
@@ -492,6 +537,13 @@ func (m *Manager) Configure(expected uint64, c Config) (Snapshot, error) {
 		m.mu.Unlock()
 		return Snapshot{}, fmt.Errorf("class_generation_exhausted: wait for owned generation rotation")
 	}
+	if m.savePreferences != nil {
+		p := Preferences{Enabled: c.Enabled, Caps: c.Caps, UploadBudget: c.UploadBudget, DownloadBudget: c.DownloadBudget}
+		if err := m.savePreferences(p); err != nil {
+			m.mu.Unlock()
+			return Snapshot{}, fmt.Errorf("%w: %v", ErrSavePreferences, err)
+		}
+	}
 	m.cfg = active
 	m.snap.Version++
 	m.snap.Enabled = c.Enabled
@@ -501,9 +553,7 @@ func (m *Manager) Configure(expected uint64, c Config) (Snapshot, error) {
 	m.snap.LastError = ""
 	m.snap.Updated = time.Now()
 	if !m.running && (c.Enabled || m.dirty) {
-		m.running = true
-		m.done = make(chan struct{})
-		go m.run()
+		m.startWorkerLocked()
 	}
 	if !m.running {
 		m.snap.Status = "Disabled"
@@ -516,6 +566,12 @@ func (m *Manager) Configure(expected uint64, c Config) (Snapshot, error) {
 	accepted := m.snapshotLocked()
 	m.mu.Unlock()
 	return accepted, nil
+}
+
+func (m *Manager) startWorkerLocked() {
+	m.running = true
+	m.done = make(chan struct{})
+	go m.run()
 }
 
 func sameKernelPolicy(a, b Config) bool {
@@ -638,9 +694,7 @@ func (m *Manager) run() {
 		m.running = false
 		close(m.done)
 		if (restartOnEnable || m.snap.Version != attemptedVersion) && (m.cfg.Enabled || m.dirty) && !m.closed {
-			m.running = true
-			m.done = make(chan struct{})
-			go m.run()
+			m.startWorkerLocked()
 		}
 		m.mu.Unlock()
 	}()

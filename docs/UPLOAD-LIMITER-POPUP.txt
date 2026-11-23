@@ -26,7 +26,8 @@ not an inert Advanced rules editor. Unchecking and pressing OK removes the cap;
 the backend has no stored disabled-cap state. This is stated in its tooltip.
 Unsupported identities remain disabled. Configured is not proof of complete
 coverage; TCP-bound sockets only have the previously demonstrated support,
-UDP GSO remains unsupported. Caps end at daemon restart.
+UDP GSO remains unsupported. Caps survive daemon restart, and socket bindings
+require fresh ownership proof.
 
 Verification: focused upload-shaping unit tests and the private guest GUI
 journey in electron/test/upload-limit-real.mjs. FlowGate captures and receiver evidence are retained in .workspace/limiter-popup and

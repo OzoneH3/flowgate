@@ -141,7 +141,7 @@ function configuredTarget(cap: UploadTarget): UploadTarget {
 export async function openUploadLimits() {
   const sent=performance.now(), start=context; const v=await window.flowgate.uploadStatus(); if(start!==context) throw Error("Connection changed; reopen limits"); adopt(v,sent);
   const d=document.createElement("dialog");d.id="uploadLimitList";d.className="upload-limit-dialog";
-  d.append(text("h3","Experimental bandwidth limits"),text("p",view.message||"Configured limits survive closing the GUI, but not a daemon restart. Coverage remains partial."));
+  d.append(text("h3","Experimental bandwidth limits"),text("p",view.message||"The daemon saves these settings. After restart it checks socket ownership again. Coverage remains partial."));
   for(const c of view.snapshot?.configured_caps||[])for(const direction of ['upload','download'] as const){
     if(!capRate(c,direction))continue;
     const b=text('button','');showAccountIn(b,c.uid,user=>`${c.application} · ${user} · ${scopeLabel(scopeOf(c))} · ${direction} ${capRate(c,direction)/1000000} Mbit/s`);
@@ -232,7 +232,7 @@ async function open(t:UploadTarget, anchor?:HTMLElement, direction:LimitKind='up
     text('p',isPriority
       ? 'Priority can favor verified native sockets under contention. Per-app download priority covers established TCP. Eligible connected UDP uses the shared class. Delete a zone override to restore inheritance.'
       : 'Initial traffic and unsupported sockets can escape shaping. UDP GSO is unsupported. Socket assignments last until close or fresh rebinding. Zone limits also respect the All networks cap. Bytes use binary prefixes and bits use decimal prefixes.'),
-    text('p','Coverage is partial. Unknown classifications use All networks. Settings end at daemon restart. Firewall permissions are separate.'),
+    text('p','Coverage is partial. Unknown classifications use All networks. After restart, saved settings require fresh socket ownership. Firewall permissions are separate.'),
   );
   const refresh=text('button','Reload configuration');refresh.id='uploadRefresh';
   details.append(live,contextNote,summary,controllerError,detail,technical,refresh);

@@ -142,18 +142,23 @@ func serveCommand(args []string) error {
 	if *administrator {
 		e.AdministratorUID = &peer
 	}
+	if *shapeInterface != "" && !*administrator {
+		return fmt.Errorf("experimental upload requires explicit administrator")
+	}
+	if *shapeInterface == "" && (*shapeHelpers != "" || *shapeState != "" || *shapeParent != "" || *shapeHost) {
+		return fmt.Errorf("experimental upload options require an explicit interface")
+	}
 	if *shapeInterface != "" {
-		if !*administrator {
-			return fmt.Errorf("experimental upload requires explicit administrator")
+		preferences, er := db.ShapingPreferences()
+		if er != nil {
+			return fmt.Errorf("load shaping preferences: %w", er)
 		}
-		manager, er := uploadshape.New(uploadshape.Options{Zones: e.CurrentZones, Interface: *shapeInterface, Helpers: *shapeHelpers, State: *shapeState, ParentNetNS: *shapeParent, HostTrial: *shapeHost})
+		manager, er := uploadshape.New(uploadshape.Options{Zones: e.CurrentZones, Interface: *shapeInterface, Helpers: *shapeHelpers, State: *shapeState, ParentNetNS: *shapeParent, HostTrial: *shapeHost}, preferences, db.SaveShapingPreferences)
 		if er != nil {
 			return er
 		}
 		e.UploadShaping = manager
 		defer manager.Close()
-	} else if *shapeHelpers != "" || *shapeState != "" || *shapeParent != "" || *shapeHost {
-		return fmt.Errorf("experimental upload options require an explicit interface")
 	}
 	e.Mode = "daemon-monitor"
 	e.SaveRules = db.Replace
@@ -303,6 +308,9 @@ func serveCommand(args []string) error {
 		if err = evaluation.Restore(); err != nil {
 			return err
 		}
+	}
+	if e.UploadShaping != nil {
+		e.UploadShaping.Resume()
 	}
 	// Bounded, explicit administrator captures are available without an opt-in
 	// environment file or restart. Idle construction does not start profiling.

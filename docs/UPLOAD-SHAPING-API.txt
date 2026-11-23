@@ -50,11 +50,15 @@ caps but leaves the opted-in controller; disabling requires caps:[]:
  {"version":1,"operation":"upload-configure","generation":"CURRENT",
   "expected_version":2,"upload_config":{"enabled":false,"caps":[]}}
 
-Configuration is session-scoped, deliberately not persisted. Daemon restart
-requires a new reviewed configuration, never a replay of old socket bindings.
+The daemon commits accepted settings to its private rule database. On restart
+with shaping configured, it restores the desired settings and requires fresh
+ownership proof for every binding. Saved-only settings stay outside the
+controller. API revisions, PIDs, socket cookies and bindings are not restored.
+An old controller journal is used only for verified cleanup.
 Generation mismatch => stale_generation; missing conditional fields/invalid
 rates => invalid_request; old version => stale_version; unauthorized/companion
-write => forbidden; absent startup capability => unavailable.
+write => forbidden; absent startup capability => unavailable. A failed database
+write returns persistence_failed and leaves the previous settings and version.
 
 Acknowledgement means desired version accepted, normally Applying, NOT that
 traffic is capped. Follow upload-status until applied_version matches and inspect
