@@ -40,6 +40,38 @@ class ModelTests(unittest.TestCase):
         with patch.object(m1.subprocess,'run',return_value=types.SimpleNamespace(returncode=1,stdout='[]',stderr='failure')):
             with self.assertRaises(RuntimeError):c.query_tc([('qdisc','show')])
 
+    def test_tc_query_diagnoses_mint_empty_class_dump_without_accepting_it(self):
+        from subprocess import CompletedProcess
+        from unittest.mock import patch
+
+        commands = [('qdisc', 'show', 'dev', 'enp0s18'), ('class', 'show', 'dev', 'enp0s18'),
+                    *(('filter', 'show', 'dev', 'enp0s18', hook)
+                      for hook in ('egress', 'ingress', 'root'))]
+        qdisc = ('[{"kind":"fq_codel","handle":"0:","root":true,"refcnt":2,"options":'
+                 '{"limit":10240,"flows":1024,"quantum":1514,"target":4999,"interval":99999,'
+                 '"memory_limit":33554432,"ecn":true,"drop_batch":64}}]\n')
+        batch = qdisc + '[]\n[]\n[]\n'
+        with self.assertRaisesRegex(m1.IncompleteTCBatch, 'incomplete'):
+            m1.decode_tc_batch(batch, len(commands))
+
+        def result(stdout='', code=0, stderr=''):
+            return CompletedProcess([], code, stdout, stderr)
+
+        with patch.object(m1.subprocess, 'run', side_effect=[result(batch), result()]) as run:
+            with self.assertRaisesRegex(RuntimeError, 'install iproute2 with JSON class dumps'):
+                self.fake().query_tc(commands, detailed=True)
+        self.assertEqual([call.args[0] for call in run.call_args_list],
+                         [['tc', '-d', '-j', '-batch', '-'], ['tc', '-d', '-j', *commands[1]]])
+        for class_result in (result('[]'), result(code=1), result(stderr='Dump terminated')):
+            with self.subTest(class_result=class_result):
+                with patch.object(m1.subprocess, 'run',
+                                  side_effect=[result(batch), class_result]):
+                    with self.assertRaises(m1.IncompleteTCBatch):
+                        self.fake().query_tc(commands)
+        with patch.object(m1.subprocess, 'run', return_value=result(qdisc + '[]\n' * 4)) as run:
+            self.assertEqual(self.fake().query_tc(commands), [m1.decode_tc_batch(qdisc, 1)[0], [], [], [], []])
+            run.assert_called_once()
+
     def test_topology_batches_all_parents_and_preserves_foreign_filters(self):
         c=self.fake();c.link={};calls=[]
         def query(commands):

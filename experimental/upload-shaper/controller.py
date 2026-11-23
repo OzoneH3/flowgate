@@ -159,6 +159,10 @@ def structural(value):
     return value
 
 
+class IncompleteTCBatch(RuntimeError):
+    pass
+
+
 def decode_tc_batch(text, count):
     """tc emits one JSON array per show command, not a single outer array."""
     decoder = json.JSONDecoder()
@@ -173,7 +177,7 @@ def decode_tc_batch(text, count):
             raise RuntimeError('extra traffic-control batch output')
         rest = rest[end:].lstrip()
     if len(rows) != count:
-        raise RuntimeError('incomplete traffic-control batch output')
+        raise IncompleteTCBatch('incomplete traffic-control batch output')
     return rows
 
 
@@ -486,12 +490,27 @@ class Controller:
         # Fresh read-only dumps, identical to the former individual processes.
         # No -force: any failed command invalidates the entire observation.
         # This is not an atomic kernel snapshot and does not cache authority.
-        p = subprocess.run(['tc', *(['-d'] if detailed else []), '-j', '-batch', '-'],
+        tc = ['tc', *(['-d'] if detailed else []), '-j']
+        p = subprocess.run([*tc, '-batch', '-'],
                            input=''.join(' '.join(c) + '\n' for c in commands),
                            capture_output=True, text=True, timeout=3)
         if p.returncode or len(p.stdout) > 2 * 1024 * 1024:
             raise RuntimeError('traffic-control query batch failed: ' + p.stderr[:1024])
-        return decode_tc_batch(p.stdout, len(commands))
+        try:
+            return decode_tc_batch(p.stdout, len(commands))
+        except IncompleteTCBatch:
+            # Older tc prints classes as text and emits nothing for an empty
+            # device. Confirm the missing class output separately. Accepting
+            # it as an empty array would pass preflight and fail after mutation.
+            for command in commands:
+                if len(command) == 4 and command[:3] == ('class', 'show', 'dev'):
+                    probe = subprocess.run([*tc, *command], capture_output=True, text=True, timeout=3)
+                    if probe.returncode == 0 and not probe.stderr and not probe.stdout.strip():
+                        raise RuntimeError(
+                            'tc -j class show returned no JSON; install iproute2 with JSON '
+                            'class dumps (upstream 6.2 or newer) before enabling traffic shaping'
+                        ) from None
+            raise
 
     def topology(self, expected=None):
         fields = ('qdiscs', 'classes', 'egress', 'ingress', 'root_filters')
