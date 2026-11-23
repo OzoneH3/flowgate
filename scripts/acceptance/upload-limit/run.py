@@ -152,7 +152,7 @@ def verify_stream(api, probe, stream, wait_for):
 
 
 def exercise(api, probes, receiver, nic, record, report, stack, direction, diagnostics=None,
-             compare_reference=False):
+             compare_reference=False, relaunch=None, exited=None):
     from scenarios import Scenario
     from vm import FixtureError, wait_for
 
@@ -246,8 +246,30 @@ def exercise(api, probes, receiver, nic, record, report, stack, direction, diagn
         raise Inconclusive("the route has less than 5× headroom for the original 20 Mbit/s case")
     rate_field = "download_bits_per_second" if direction == "download" else "bits_per_second"
     caps = [{"uid": a["uid"], "application": a["application"]["key"], rate_field: cap}]
+
+    def retire_a():
+        old = identities["A"]
+        probes["A"].close()
+        wait_for(lambda: exited(old["process"]["pid"]), 15, "old A process did not exit")
+        receiver.reset("A")
+        return old
+
+    def launch_a(old, reason):
+        probe = probes["A"] = relaunch()
+        stream = probe.call(op="open", label="A")
+        wait_for(lambda: receiver.sample("A")["connections"] == 1, 5, "new A stream not received")
+        current = verify_stream(api, probe, stream, wait_for)
+        owner = current["process"]
+        assert (owner["uid"], owner["application"]["key"]) == (a["uid"], a["application"]["key"]), current
+        assert (owner["pid"], owner["start_ticks"]) != (old["process"]["pid"], old["process"]["start_ticks"])
+        assert current["socket"]["cookie"] != old["socket"]["cookie"], current
+        identities["A"] = current
+        record(reason, {"before": old, "after": current})
+
     cleanup = True
     try:
+        if relaunch:
+            closed = retire_a()
         applied = configure(caps)
         assert len(applied["configured_caps"]) == 1
         configured = applied["configured_caps"][0]
@@ -255,6 +277,9 @@ def exercise(api, probes, receiver, nic, record, report, stack, direction, diagn
         if direction == "download":
             assert configured.get("bits_per_second", 0) == 0, configured
         record("limit-applied", applied)
+        if relaunch:
+            report["saved_before_launch_version"] = applied["version"]
+            launch_a(closed, "launch-after-save")
 
         def a_covered():
             current = status()
@@ -297,6 +322,17 @@ def exercise(api, probes, receiver, nic, record, report, stack, direction, diagn
             delta = {key: after[key] - before[key] for key in ("bytes", "packets")}
             report["download_redirected_delta"] = delta
             record("download-redirected-delta", delta)
+        if relaunch:
+            launch_a(retire_a(), "relaunch-without-saving")
+            confirm_coverage()
+            restarted = phase("a-relaunched", cap)
+            assert restarted["status_before"]["version"] == report["saved_before_launch_version"], restarted
+            report["relaunch_verdicts"] = {
+                "a_near_cap": in_range(restarted["receiver"]["A"]["bits_per_second"], cap, CAP_TOLERANCE),
+                "b_near_baseline": in_range(restarted["receiver"]["B"]["bits_per_second"],
+                                             baseline["B"]["bits_per_second"], BASELINE_TOLERANCE),
+            }
+            assert all(report["relaunch_verdicts"].values()), report["relaunch_verdicts"]
         record("limit-removed", configure([]))
         cleanup = False
         recovered = phase("limit-removed")
@@ -411,16 +447,20 @@ def run_case(lab, sut, names, release, evidence, unused_host, *, direction, bina
                 stack.callback(ch.close)
                 return ch
 
-            probes = {label: channel(f"fg-lab/{direction}-{label} {SOURCE} "
-                                     f"{DESTINATION}:{receiver.port} {direction}",
-                                     f"{direction}-{label}") for label in "AB"}
+            def probe(label, attempt):
+                return channel(f"fg-lab/{direction}-{label} {SOURCE} {DESTINATION}:{receiver.port} {direction}",
+                               f"{direction}-{label}-{attempt}")
+
+            probes = {label: probe(label, 0) for label in "AB"}
+            a_attempt = iter((1, 2))
             api = FlowGate(channel(f"python3 fg-lab/guest_tools.py flowgate {API}", "api"), record)
             diagnostics = (channel("python3 -B fg-lab/download_trace.py", "download-trace")
                            if diagnose_download else None)
             activate(api, release)
             evidence["phase"] = "scenarios"
             exercise(api, probes, receiver, nic, record, report, stack, direction, diagnostics,
-                     compare_reference)
+                     compare_reference, relaunch=lambda: probe("A", next(a_attempt)),
+                     exited=lambda pid: sut.run(f"test ! -e /proc/{int(pid)}", check=False).returncode == 0)
         report["verdict"] = "pass"
         evidence["scenarios"][name] = "pass"
         print(f"PASS {name}", flush=True)

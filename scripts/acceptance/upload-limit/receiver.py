@@ -67,6 +67,15 @@ class Receiver:
             if not retained:
                 conn.close()
 
+    def reset(self, label):
+        """Retire the previous stream after its probe exits."""
+        assert label not in self.sending
+        with self.lock:
+            conn = self.streams.pop(label, None)
+            self.rows[label] = {"connections": 0, "bytes": 0}
+        if conn is not None:
+            conn.close()
+
     def start(self, label):
         stop = Event()
         errors = []
