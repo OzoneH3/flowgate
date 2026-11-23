@@ -129,6 +129,7 @@ func allocationAdmitted(budget uint64, caps []Cap, download bool) bool {
 }
 
 type Binding struct {
+	Wine       bool   `json:"wine,omitempty"`
 	Zone       string `json:"zone"`
 	Descriptor struct {
 		Local     string `json:"local"`
@@ -232,6 +233,7 @@ type Options struct {
 	Interface, Helpers, State, ParentNetNS string
 	Zones                                  func() identity.NetworkZones
 	HostTrial                              bool
+	WineResolve                            func(identity.Flow) identity.Attribution
 }
 type transport interface {
 	Call(map[string]any) (json.RawMessage, error)
@@ -240,6 +242,7 @@ type transport interface {
 type hint struct {
 	flow        identity.Flow
 	app, cookie string
+	wine        *wineProof
 }
 type Manager struct {
 	mu              sync.Mutex
@@ -323,6 +326,8 @@ func (m *Manager) Snapshot() Snapshot {
 	defer m.mu.Unlock()
 	return m.snapshotLocked()
 }
+
+func (m *Manager) HasWineResolver() bool { return m.opts.WineResolve != nil }
 func (m *Manager) snapshotLocked() Snapshot {
 	now := time.Now()
 	// Deep copy keeps API serialization independent from worker publication.
@@ -618,7 +623,7 @@ func eligible(a identity.Attribution) (string, string) {
 		return "", ""
 	}
 	p := a.Owners[0]
-	if p.PID != p.ThreadGroup || p.HolderWitness != "" || p.Application.Kind != "native" || identity.RuntimeRuleBlocked(&p.Application) != "" {
+	if p.PID != p.ThreadGroup || p.HolderWitness != "" || p.Application.Kind != "native" || p.Application.Hosted != nil || identity.RuntimeRuleBlocked(&p.Application) != "" {
 		return "", ""
 	}
 	return strconv.FormatUint(uint64(p.UID), 10) + ":" + p.Application.Key, a.Sockets[0].Cookie
@@ -658,7 +663,7 @@ func (m *Manager) Offer(f identity.Flow, a identity.Attribution) {
 		}
 	}
 	select {
-	case m.hints <- hint{f, app, cookie}:
+	case m.hints <- hint{flow: f, app: app, cookie: cookie}:
 		m.pending[cookie] = true
 	default:
 		m.snap.Gaps["hint_capacity"]++
@@ -890,6 +895,10 @@ func (m *Manager) run() {
 				m.bind(t, h, version)
 			}
 		case <-tick.C:
+			if err := m.renewWine(t, ks.Bindings, version); err != nil {
+				m.fail(err)
+				return
+			}
 			if len(cfg.Caps) == 0 {
 				discovery.reset()
 				m.publishDiscovery(&discovery)
@@ -997,8 +1006,18 @@ func (m *Manager) run() {
 				continue
 			}
 			var batch []hint
+			wineAttempts := 0
 			for i, s := range candidates {
 				app, cookie := eligible(attributions[i])
+				var proof *wineProof
+				if app == "" && flows[i].Protocol == "tcp" && m.opts.WineResolve != nil &&
+					wineAttempts < 4 && maybeWine(attributions[i]) {
+					wineAttempts++
+					app, proof = m.proveWine(flows[i])
+					if proof != nil {
+						cookie = proof.Socket.Cookie
+					}
+				}
 				if app == "" {
 					m.gap("unsupported_or_shared_discovery")
 					continue
@@ -1008,7 +1027,7 @@ func (m *Manager) run() {
 					continue
 				}
 				stats.EligibleCandidates++
-				batch = append(batch, hint{flows[i], app, cookie})
+				batch = append(batch, hint{flow: flows[i], app: app, cookie: cookie, wine: proof})
 			}
 			stats.BindRequests += uint64(m.bindMany(t, batch, version))
 			m.discovered(stats)
@@ -1048,7 +1067,14 @@ func (m *Manager) bindingRequest(h hint, version uint64) map[string]any {
 	if m.opts.Zones != nil {
 		zone = knownZone(m.opts.Zones().ClassifyFlow(h.flow))
 	}
-	return map[string]any{"zone": zone, "op": "bind", "protocol": h.flow.Protocol, "local": h.flow.Local.String(), "remote": h.flow.Remote.String(), "rate": rate, "download_rate": downloadRate, "priority": prio, "expected_app": h.app, "expected_cookie": h.cookie}
+	req := map[string]any{"zone": zone, "op": "bind", "protocol": h.flow.Protocol, "local": h.flow.Local.String(), "remote": h.flow.Remote.String(), "rate": rate, "download_rate": downloadRate, "priority": prio, "expected_app": h.app, "expected_cookie": h.cookie}
+	if h.wine != nil {
+		if h.wine.Until <= monotonicNS() {
+			return nil
+		}
+		req["wine_proof"] = h.wine
+	}
+	return req
 }
 func (m *Manager) bindingError(err error) {
 	if err == nil {

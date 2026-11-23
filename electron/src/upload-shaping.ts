@@ -1,6 +1,7 @@
 import type { Row } from './model';
 import type { ClientState } from './protocol';
 export const SAVED_SHAPING_CAPABILITY = 'saved-shaping-settings-v1';
+export const WINE_SHAPING_CAPABILITY = 'experimental-wine-tcp-shaping-v1';
 export const MAX_STORED_CAPS = 1024;
 export const ZONE_CAPABILITY = 'experimental-zone-shaping-v1';
 export type LimitScope = 'all' | 'internet' | 'local';
@@ -34,6 +35,9 @@ export function savedUploadTarget(state: ClientState, target: UploadTarget): Upl
     rule.filter.application === target.application && rule.filter.revision === target.revision &&
     rule.filter.uid === target.uid);
   if (rules?.some(rule => rule.native_shaping_identity === true)) return target;
+  if (state.control.capabilities?.includes(WINE_SHAPING_CAPABILITY) &&
+      rules?.some(rule => rule.wine_shaping_candidate === true))
+    return { ...target, stored_only: false };
   if (rules?.length && state.control.capabilities?.includes(SAVED_SHAPING_CAPABILITY))
     return { ...target, stored_only: true };
 }
@@ -104,7 +108,7 @@ export function replaceCap(s: UploadSnapshot, edit: UploadEdit): UploadCap[] {
   if (s.version !== edit.expected_version) throw Error('Configuration changed. Refresh and review the draft before saving.');
   validateCap({...edit.target,bits_per_second:1000000});
   const old=s.configured_caps.find(c=>sameTarget(c,edit.target));
-  const cap:UploadCap={...(scopeOf(edit.target)!=='all'?{scope:scopeOf(edit.target)}:{}),uid:edit.target.uid,application:edit.target.application,bits_per_second:old?.bits_per_second || 0, ...(edit.target.stored_only || old?.stored_only ? { stored_only:true } : {})};
+  const cap:UploadCap={...(scopeOf(edit.target)!=='all'?{scope:scopeOf(edit.target)}:{}),uid:edit.target.uid,application:edit.target.application,bits_per_second:old?.bits_per_second || 0, ...((edit.target.stored_only ?? old?.stored_only) ? { stored_only:true } : {})};
   if(old?.download_bits_per_second)cap.download_bits_per_second=old.download_bits_per_second;
   if(old?.traffic_priority)cap.traffic_priority=old.traffic_priority; // a rate edit keeps the priority
   if(edit.direction==='download') {if(edit.bits_per_second===null)delete cap.download_bits_per_second;else cap.download_bits_per_second=edit.bits_per_second;}
@@ -121,7 +125,7 @@ export function replacePriority(s: UploadSnapshot, edit: UploadEdit): UploadCap[
   if (s.version !== edit.expected_version) throw Error('Configuration changed. Refresh and review the draft before saving.');
   validateCap({...edit.target,bits_per_second:1000000});
   const old=s.configured_caps.find(c=>sameTarget(c,edit.target));
-  const cap:UploadCap={...(scopeOf(edit.target)!=='all'?{scope:scopeOf(edit.target)}:{}),uid:edit.target.uid,application:edit.target.application,bits_per_second:old?.bits_per_second || 0, ...(edit.target.stored_only || old?.stored_only ? { stored_only:true } : {})};
+  const cap:UploadCap={...(scopeOf(edit.target)!=='all'?{scope:scopeOf(edit.target)}:{}),uid:edit.target.uid,application:edit.target.application,bits_per_second:old?.bits_per_second || 0, ...((edit.target.stored_only ?? old?.stored_only) ? { stored_only:true } : {})};
   if(old?.download_bits_per_second)cap.download_bits_per_second=old.download_bits_per_second;
   if(edit.priority!==null && (edit.priority!=='normal' || scopeOf(edit.target)!=='all'))cap.traffic_priority=edit.priority as TrafficPriority;
   const caps=s.configured_caps.filter(c=>!sameTarget(c,cap));

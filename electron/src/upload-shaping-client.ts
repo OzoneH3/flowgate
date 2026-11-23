@@ -52,8 +52,8 @@ export class UploadShapingClient {
       const active = caps.filter(cap => !cap.stored_only);
       const changed = target && caps.find(cap => sameTarget(cap, target));
       const old = target && current.snapshot.configured_caps.find(cap => sameTarget(cap, target));
-      const storedEdit = target && (changed?.stored_only || old?.stored_only)
-        ? changed || { uid:target.uid, application:target.application, scope:scopeOf(target), bits_per_second:0 }
+      const storedEdit = changed?.stored_only ? changed : target && old?.stored_only
+        ? { uid:target.uid, application:target.application, scope:scopeOf(target), bits_per_second:0 }
         : undefined;
       // Schema 2 fields are sent only to a daemon advertising traffic priority, so
       // an older daemon never silently drops them; omission never clears them.

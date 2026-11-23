@@ -10,9 +10,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 func processStartUnix(start string) int64 {
@@ -75,6 +78,30 @@ func peHeaders(f *os.File) ([]byte, int64) {
 		return nil, 0
 	}
 	return out, image
+}
+
+// IsPEExecutable is a configuration hint for a saved rule. It conveys no
+// evidence about any live process, Wine prefix, or socket.
+func IsPEExecutable(path string) bool {
+	if !filepath.IsAbs(path) {
+		return false
+	}
+	fd, err := unix.Open(path, unix.O_PATH|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return false
+	}
+	defer unix.Close(fd)
+	var st unix.Stat_t
+	if unix.Fstat(fd, &st) != nil || st.Mode&unix.S_IFMT != unix.S_IFREG {
+		return false
+	}
+	f, err := os.Open(fmt.Sprintf("/proc/self/fd/%d", fd))
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	headers, _ := peHeaders(f)
+	return headers != nil
 }
 
 func wineMemfdImage(base, path, maps, start string) bool {

@@ -224,10 +224,21 @@ static int dispatch(int argc, char **argv) {
   if (!strcmp(op, "del")) {
     if (bpf_map_delete_elem(fd, &key) && errno != ENOENT)
       die("delete");
-  } else if (!strcmp(op, "bind")) {
-    if (argc != 6)
+  } else if (!strcmp(op, "bind") || !strcmp(op, "bind-until")) {
+    bool bounded = !strcmp(op, "bind-until");
+    if (argc != (bounded ? 7 : 6))
       return 2;
-    struct value v = {.until = now() + 5000000000ULL,
+    uint64_t limit = now() + 5000000000ULL;
+    uint64_t until = limit;
+    if (bounded) {
+      char *end = NULL;
+      until = strtoull(argv[6], &end, 10);
+      if (!until || until > limit || *end)
+        return 2;
+    }
+    // An already expired absolute deadline is safe to publish: it can
+    // never regain coverage and the controller removes it on maintenance.
+    struct value v = {.until = until,
                       .id = strtoul(argv[4], NULL, 10),
                       .download = strtoul(argv[5], NULL, 10)};
     // Both ids may be 0: a priority-only application without any budgeted
@@ -263,8 +274,9 @@ int main(int argc, char **argv) {
     if (count < 3) return 2;
     const char *op = args[1];
     if (strcmp(op,"ids") && strcmp(op,"beat") && strcmp(op,"health") &&
-        strcmp(op,"stats") && strcmp(op,"bind") && strcmp(op,"del")) return 2;
-    if (count != (!strcmp(op,"bind") ? 6 : !strcmp(op,"del") ? 4 : 3))
+        strcmp(op,"stats") && strcmp(op,"bind") && strcmp(op,"bind-until") &&
+        strcmp(op,"del")) return 2;
+    if (count != (!strcmp(op,"bind-until") ? 7 : !strcmp(op,"bind") ? 6 : !strcmp(op,"del") ? 4 : 3))
       return 2;
     if (dispatch(count,args)) return 2;
     if (fputs("\036OK\n",stdout) == EOF || fflush(stdout)) return 1;

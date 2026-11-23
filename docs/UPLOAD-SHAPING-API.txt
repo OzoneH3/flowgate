@@ -78,8 +78,15 @@ bound, until close/removal or explicit fresh revalidation/rebinding. Exec, fork
 and descriptor transfer AFTER binding do not automatically change its class.
 The API does not currently offer an explicit rebind operation; removing the cap
 and reconfiguring causes fresh discovery. Unknown or ambiguous initial ownership
-never inherits another application's class. Runtime/Wine/shared sockets that
-cannot satisfy the native M1 proof remain uncovered.
+never inherits another application's class. A daemon with a configured Wine
+observer advertises experimental-wine-tcp-shaping-v1. A saved PE candidate can
+request shaping before launch. An established TCP socket can bind only with
+fresh kernel and supported Wine runtime evidence for a single Windows handle
+owner, application, prefix and UID. The controller checks the exact socket
+descriptor again before publication. Wine leases last at most five seconds
+from the start of the most recent matching proof. Missing or changed evidence
+withdraws the binding, and kernel expiry applies even if the daemon stalls.
+Shared Windows ownership, Wine UDP and hosted Electron stay uncovered.
 
 Configured caps, kernel app classes, requested bindings and covered_bindings
 are distinct. Kernel status/limitations describe only its requested subset.

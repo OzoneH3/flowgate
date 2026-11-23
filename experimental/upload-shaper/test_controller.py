@@ -182,6 +182,46 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(calls,[('del','cookie'),('beat',)])
         # A malformed worker reply is covered separately below.
 
+    def test_wine_lease_requires_matching_fresh_proof(self):
+        c = self.fake()
+        c.dev, c.ns = 'owned0', 'net:[1]'
+        c.compatibility = {'topology': 'veth-noqueue'}
+        c.bindings, calls = {}, []
+        c.call = lambda *args: '[{"dev":"owned0"}]' if args[0] == 'ip' else self.fail('used native probe')
+        c.exists = lambda d: True
+        c.k = lambda *args: calls.append(args)
+        c.class_ids = lambda app, zone: ('16', '17')
+        app, cookie = '1000:alpha-prefix-a', '0000000000000001'
+        c.policy_apps = {app: {'rate': 20000000, 'download_rate': 20000000, 'priority': 'high'}}
+        c.apps = {app: dict(c.policy_apps[app])}
+        sock = dict(protocol='tcp', local='10.0.0.1:41991', remote='10.0.0.2:40000',
+                    family=2, inode=19, cookie=cookie, netns=c.ns, uid=1000)
+        owner = dict(app=app, socket=sock, fingerprint='a'*64, until_ns=time.monotonic_ns()+2_000_000_000)
+        bind = dict(protocol='tcp', local=sock['local'], remote=sock['remote'], expected_app=app,
+                    expected_cookie=cookie, wine_proof=owner, **c.policy_apps[app])
+        c.bind(bind)
+        self.assertEqual(calls.pop(), ('bind-until', cookie, '16', '17', str(owner['until_ns'])))
+        c.tick()
+        self.assertEqual(calls, [('beat',)])
+        calls.clear()
+        c.rezone({'bindings': {cookie: 'local'}})
+        self.assertEqual(calls[-1], ('bind-until', cookie, '16', '17', str(owner['until_ns'])))
+        renewed = dict(owner, until_ns=owner['until_ns'] + 1_000_000_000)
+        self.assertTrue(c.renew_wine({'cookie': cookie, 'proof': renewed})['renewed'])
+        self.assertEqual(calls[-1], ('bind-until', cookie, '16', '17', str(renewed['until_ns'])))
+        for mismatch in (None, dict(renewed, fingerprint='b'*64),
+                         dict(renewed, app='1000:alpha-prefix-b'),
+                         dict(renewed, socket=dict(sock, inode=20))):
+            c.bind(bind)
+            self.assertFalse(c.renew_wine({'cookie': cookie, 'proof': mismatch})['renewed'])
+            self.assertEqual(calls[-1], ('del', cookie))
+            self.assertNotIn(cookie, c.bindings)
+        c.bind(bind)
+        c.bindings[cookie]['wine_until_ns'] = 1
+        c.tick()
+        self.assertEqual(calls[-2:], [('del', cookie), ('beat',)])
+        self.assertNotIn(cookie, c.bindings)
+
     def test_socket_worker_fresh_requests_and_close_on_cleanup_refusal(self):
         c=self.fake();calls=[]
         class Worker:

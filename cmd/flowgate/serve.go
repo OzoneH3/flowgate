@@ -148,18 +148,6 @@ func serveCommand(args []string) error {
 	if *shapeInterface == "" && (*shapeHelpers != "" || *shapeState != "" || *shapeParent != "" || *shapeHost) {
 		return fmt.Errorf("experimental upload options require an explicit interface")
 	}
-	if *shapeInterface != "" {
-		preferences, er := db.ShapingPreferences()
-		if er != nil {
-			return fmt.Errorf("load shaping preferences: %w", er)
-		}
-		manager, er := uploadshape.New(uploadshape.Options{Zones: e.CurrentZones, Interface: *shapeInterface, Helpers: *shapeHelpers, State: *shapeState, ParentNetNS: *shapeParent, HostTrial: *shapeHost}, preferences, db.SaveShapingPreferences)
-		if er != nil {
-			return er
-		}
-		e.UploadShaping = manager
-		defer manager.Close()
-	}
 	e.Mode = "daemon-monitor"
 	e.SaveRules = db.Replace
 	e.Enforcement = func() daemon.EnforcementStatus {
@@ -212,6 +200,7 @@ func serveCommand(args []string) error {
 			return identity.Resolve(f), start
 		},
 	}
+	var wineResolve func(identity.Flow) identity.Attribution
 	if *wineHelper != "" {
 		health := readiness.NewRuntimeMonitor()
 		e.RuntimeChecks = health.Snapshot
@@ -233,6 +222,7 @@ func serveCommand(args []string) error {
 			return er
 		}
 		defer wines.Close()
+		wineResolve = wines.ResolveFresh
 		socketResolvers = daemon.SocketSessionResolvers{Fresh: wines.ResolveFresh, Observed: wines.ResolveObserved, Group: wines.ResolveFrozenRuntime, Diagnostics: wines.RenewalStatus}
 		resolver := identity.NewUDPAttributionReuse(wines.Resolve)
 		resolver.Try = wines.TryResolve
@@ -241,6 +231,20 @@ func serveCommand(args []string) error {
 		observer.AnalyzeRuntime = wines.AnnotateConnectionAnalysis
 	} else if len(wineBins) > 0 || len(winePrefixes) > 0 {
 		return fmt.Errorf("Wine runtime/prefix selection requires --wine-helper")
+	}
+	if *shapeInterface != "" {
+		preferences, er := db.ShapingPreferences()
+		if er != nil {
+			return fmt.Errorf("load shaping preferences: %w", er)
+		}
+		manager, er := uploadshape.New(uploadshape.Options{Zones: e.CurrentZones, Interface: *shapeInterface,
+			Helpers: *shapeHelpers, State: *shapeState, ParentNetNS: *shapeParent, HostTrial: *shapeHost,
+			WineResolve: wineResolve}, preferences, db.SaveShapingPreferences)
+		if er != nil {
+			return er
+		}
+		e.UploadShaping = manager
+		defer manager.Close()
 	}
 	hostfirewall.ConfigureEstablishedTCP(e, socketResolvers.Fresh)
 	// Construct outside Engine.mu: the initial refresh publishes through Engine.

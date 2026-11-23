@@ -600,7 +600,7 @@ class Controller:
         return p.stdout
 
     def k(self, op, *args):
-        if op not in ('ids', 'beat', 'health', 'stats', 'bind', 'del'):
+        if op not in ('ids', 'beat', 'health', 'stats', 'bind', 'bind-until', 'del'):
             return self.call(self.base / 'kernel', op, self.pin, *args)
         if getattr(self, 'kernel_worker', None) is None:
             self.kernel_worker = KernelWorker([str(self.base / 'kernel'), 'serve'])
@@ -1326,7 +1326,7 @@ class Controller:
                     if b['app'] != app: continue
                     ids = list(self.class_ids(app, b.get('zone', '')))
                     ids[0 if d == 'ul' else 1] = '0'
-                    self.k('bind', cookie, *ids)
+                    self.publish_binding(cookie, b, ids)
                 dev, root = self.direction_device(d)
                 state = self.class_state[d]
                 if d in previous:
@@ -1365,7 +1365,7 @@ class Controller:
                 self.refresh_during_apply()
                 if c not in self.bindings:
                     continue
-                self.k('bind', c, *self.class_ids(bnd['app'], bnd.get('zone', '')))
+                self.publish_binding(c, bnd, self.class_ids(bnd['app'], bnd.get('zone', '')))
         finally:
             self.applying = False
 
@@ -1450,6 +1450,56 @@ class Controller:
             return str(minor if minor in self.class_state[d] else 0)
         return selected('ul'), selected('dl')
 
+    def publish_binding(self, cookie, binding, ids):
+        if binding.get('wine'):
+            self.k('bind-until', cookie, *ids, str(binding['wine_until_ns']))
+        else:
+            self.k('bind', cookie, *ids)
+
+    @staticmethod
+    def descriptor(s):
+        result = {key: s[key] for key in ('family', 'protocol', 'local', 'remote', 'inode', 'cookie', 'uid', 'netns')}
+        result['interface_index'] = s.get('interface_index', 0)
+        return result
+
+    @staticmethod
+    def wine_proof(proof):
+        # Supplied only over the privileged daemon/controller pipe. The deadline
+        # is anchored before the daemon's fresh ownership census.
+        if not isinstance(proof, dict):
+            return False
+        until = proof.get('until_ns')
+        fingerprint = proof.get('fingerprint')
+        now = time.monotonic_ns()
+        return (type(until) is int and now < until <= now + 5_000_000_000 and
+                isinstance(fingerprint, str) and re.fullmatch('[0-9a-f]{64}', fingerprint) and
+                isinstance(proof.get('socket'), dict))
+
+    def renew_wine(self, req):
+        cookie = req['cookie']
+        binding = self.bindings.get(cookie)
+        if binding is None or not binding.get('wine'):
+            return {'renewed': False}
+        proof = req.get('proof')
+        now = time.monotonic_ns()
+        if (now >= binding['wine_until_ns'] or not self.wine_proof(proof)
+                or proof['app'] != binding['app']
+                or proof['fingerprint'] != binding['wine_fingerprint']
+                or self.descriptor(proof['socket']) != binding['descriptor']
+                or not self.exists(binding['descriptor'])):
+            self.k('del', cookie)
+            del self.bindings[cookie]
+            return {'renewed': False}
+        self.verify()
+        # A slow topology read cannot resurrect a binding past its old deadline.
+        if time.monotonic_ns() >= binding['wine_until_ns']:
+            self.k('del', cookie)
+            del self.bindings[cookie]
+            return {'renewed': False}
+        binding['wine_until_ns'] = proof['until_ns']
+        self.publish_binding(cookie, binding, self.class_ids(binding['app'], binding.get('zone', '')))
+        return {'renewed': True}
+
     def rezone(self, req):
         self.applying = True
         try: return self.rezone_bindings(req)
@@ -1468,7 +1518,7 @@ class Controller:
             self.refresh_during_apply()
             if not self.exists(b['descriptor']): continue
             b['zone'] = zone
-            self.k('bind', cookie, *self.class_ids(b['app'], zone))
+            self.publish_binding(cookie, b, self.class_ids(b['app'], zone))
             self.bindings[cookie] = b
         return {'reclassified': True}
 
@@ -1489,34 +1539,50 @@ class Controller:
         routes = json.loads(self.call('ip', '-j', 'route', 'get', remote_ip, 'from', local_ip))
         if len(routes) != 1 or routes[0].get('dev') != self.dev:
             raise ValueError('Unsupported: flow does not use selected interface')
-        try:
-            a = json.loads(self.call(self.base / 'probe', 'bind', proto, local, remote))
-        except RuntimeError as e:
-            raise ValueError('binding refused: ' + str(e)) from e
-        s = a['sockets'][0]; cookie = s['cookie']
+        wine = req.get('wine_proof')
+        if wine is not None:
+            if (proto != 'tcp' or not entry or not self.wine_proof(wine) or wine['app'] != req['expected_app'] or
+                    (wine['socket']['protocol'], wine['socket']['local'], wine['socket']['remote']) != (proto, local, remote)):
+                raise ValueError('fresh Wine TCP proof required')
+            s, app = wine['socket'], req['expected_app']
+            if not app.startswith(str(s['uid']) + ':'):
+                raise ValueError('Wine socket user differs from configured application')
+        else:
+            try:
+                attribution = json.loads(self.call(self.base / 'probe', 'bind', proto, local, remote))
+            except RuntimeError as e:
+                raise ValueError('binding refused: ' + str(e)) from e
+            s = attribution['sockets'][0]
+            app = str(attribution['owners'][0]['uid']) + ':' + attribution['application']['key']
+        cookie = s['cookie']
         if not re.fullmatch('[0-9a-f]{16}', cookie) or cookie in ('0000000000000000', 'ffffffffffffffff') or s['netns'] != self.ns:
             raise ValueError('missing socket generation')
-        app = str(a['owners'][0]['uid']) + ':' + a['application']['key']
         if req.get('expected_app', app) != app:
             raise ValueError('fresh application differs from configured cap')
         if req.get('expected_cookie', cookie) != cookie:
             raise ValueError('socket generation changed before binding')
         if cookie not in self.bindings and len(self.bindings) >= MAX_BINDINGS:
             raise ValueError('binding capacity reached')
-        descriptor = {key: s[key] for key in ('family', 'protocol', 'local', 'remote', 'inode', 'cookie', 'uid', 'netns')}
-        descriptor['interface_index'] = s.get('interface_index', 0)
+        descriptor = self.descriptor(s)
         if not self.exists(descriptor):
             raise ValueError('socket generation absent before binding')
         # Explicit rebind only; background lease maintenance never changes owner.
         if cookie in self.bindings and not req.get('rebind', False):
-            if self.bindings[cookie]['app'] != app:
+            if self.bindings[cookie]['app'] != app or bool(self.bindings[cookie].get('wine')) != bool(wine):
                 raise ValueError('existing binding ownership differs; explicit rebind required')
+        if wine and cookie not in self.bindings and sum(bool(b.get('wine')) for b in self.bindings.values()) >= 8:
+            raise ValueError('Wine binding capacity reached')
         a = self.apps.get(app)
         if a is None or (a.get('rate'), a.get('download_rate', 0), a.get('priority', 'normal')) != (bits, download_bits, prio):
             self.set_cap(app, bits, download_bits, prio)
-        self.k('bind', cookie, *self.class_ids(app, zone))
-        self.bindings[cookie] = {'app': app, 'zone': zone, 'inode': s['inode'], 'protocol': s['protocol'],
-                                 'cookie': cookie, 'netns': s['netns'], 'bound_at': time.time(), 'descriptor': descriptor}
+        binding = {'app': app, 'zone': zone, 'inode': s['inode'], 'protocol': s['protocol'],
+                   'cookie': cookie, 'netns': s['netns'], 'bound_at': time.time(), 'descriptor': descriptor}
+        if wine:
+            if not self.wine_proof(wine):
+                raise ValueError('Wine ownership expired before publication')
+            binding.update(wine=True, wine_until_ns=wine['until_ns'], wine_fingerprint=wine['fingerprint'])
+        self.publish_binding(cookie, binding, self.class_ids(app, zone))
+        self.bindings[cookie] = binding
         self.apps[app]['idle_since'] = time.monotonic()
         return {'app': app, 'cookie': cookie, 'scope': 'socket-binding', 'status': 'Active'}
 
@@ -1598,7 +1664,7 @@ class Controller:
         for c, b in list(self.bindings.items()):
             if time.monotonic() - start > 2:
                 raise RuntimeError('socket existence pass time budget exceeded')
-            live[c] = self.exists(b['descriptor'])
+            live[c] = (not b.get('wine') or time.monotonic_ns() < b['wine_until_ns']) and self.exists(b['descriptor'])
         self.existence_pass_ms = int((time.monotonic() - start) * 1000)
         self.existence_queries = len(live)
         renewal_start = time.monotonic()
@@ -1606,7 +1672,8 @@ class Controller:
             if not live[c]:
                 self.k('del', c); del self.bindings[c]
             else:
-                self.k('bind', c, *self.class_ids(b['app'], b.get('zone', '')))
+                if not b.get('wine'):
+                    self.publish_binding(c, b, self.class_ids(b['app'], b.get('zone', '')))
                 self.apps[b['app']]['idle_since'] = time.monotonic()
         if retire_idle:
             for app, a in list(self.apps.items()):
@@ -1681,7 +1748,8 @@ class Controller:
                                  'per_app_leaf_memory_limit': {a: v.get('leaf_memory_limit') for a, v in self.apps.items()}},
                 # Per-binding coverage is an observation from the SAME health read,
                 # never an authority token or an application-wide guarantee.
-                'bindings': [dict(b, covered=bool(covered and c in covered_cookies),
+                'bindings': [dict({k: v for k, v in b.items() if k not in ('wine_fingerprint', 'wine_until_ns')},
+                                  covered=bool(covered and c in covered_cookies),
                                   download=bool(b.get('protocol') == 'tcp' and int(self.class_ids(b['app'], b.get('zone', ''))[1])),
                                   upload_class=self.apps[b['app']]['minor'] in self.class_state['ul'],
                                   download_class=bool(b.get('protocol') == 'tcp' and self.apps[b['app']]['minor'] in self.class_state['dl']))
@@ -1796,6 +1864,8 @@ def main():
                             result = c.bind(req)
                         elif op == 'bind_many':
                             result = c.bind_many(req)
+                        elif op == 'renew_wine':
+                            result = c.renew_wine(req)
                         elif op == 'rezone':
                             result = c.rezone(req)
                         elif op == 'cap':

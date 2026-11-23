@@ -226,6 +226,9 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 					r.SocketAuthorization = e.PublishedSocketAuthorizationStatus()
 					if e.UploadShaping != nil {
 						r.Capabilities = append(r.Capabilities, "experimental-native-upload-v1", "experimental-native-download-v1", "experimental-traffic-priority-v1", "experimental-zone-shaping-v1", "saved-shaping-settings-v1")
+						if e.UploadShaping.HasWineResolver() {
+							r.Capabilities = append(r.Capabilities, "experimental-wine-tcp-shaping-v1")
+						}
 					}
 					if e.RuntimeChecks != nil {
 						r.RuntimeChecks = e.RuntimeChecks()

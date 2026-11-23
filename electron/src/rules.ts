@@ -66,6 +66,7 @@ export class Rules {
         );
       rule = structuredClone(r);
       delete rule.native_shaping_identity;
+      delete rule.wine_shaping_candidate;
     } else {
       const e = c.events.find((e) => e.id === s.event);
       if (!e?.remembered_filter || e.state !== 'awaiting-decision' || e.remainingMs <= 0)

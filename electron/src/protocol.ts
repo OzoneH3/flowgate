@@ -1273,6 +1273,7 @@ export interface Rule {
   follows_updates?: boolean;
   // Daemon-derived. This saved key names a native application or AppImage.
   native_shaping_identity?: boolean;
+  wine_shaping_candidate?: boolean;
   root_application?: string;
   invocation?: Invocation;
   preset?: {
@@ -1521,6 +1522,8 @@ export function parseRule(v: unknown): Rule {
     ...(r.follows_updates === true && !preset && !filter.process ? { follows_updates: true } : {}),
     ...(r.native_shaping_identity === true && !preset && !filter.all_programs &&
       !filter.all_uids && !r.network_endpoint ? { native_shaping_identity: true } : {}),
+    ...(r.wine_shaping_candidate === true && !preset && !filter.all_programs &&
+      !filter.all_uids && !r.network_endpoint ? { wine_shaping_candidate: true } : {}),
     created: string(r.created),
     disabled: r.disabled === true,
     schema: number(r.schema),
