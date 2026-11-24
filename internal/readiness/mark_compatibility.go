@@ -22,18 +22,12 @@ func compatibleFirewallRules(ctx context.Context, env Environment, nft []byte) C
 	}
 	exported := map[string]int{}
 	if len(kernel) > 0 {
-		backend, err := env.Run(ctx, "iptables", "--version")
-		if err != nil {
-			return ProbeFailure(c.ID, err)
-		}
-		if !strings.Contains(string(backend), "nf_tables") {
-			return fail(fmt.Errorf("Opaque mark inspection requires iptables-nft export"))
-		}
 		for _, family := range []string{"ip", "ip6"} {
-			tool := "iptables-save"
+			frontend := "iptables"
 			if family == "ip6" {
-				tool = "ip6tables-save"
+				frontend = "ip6tables"
 			}
+			tool := ""
 			for _, table := range []string{"filter", "mangle", "nat", "raw", "security"} {
 				needed := false
 				for key := range kernel {
@@ -43,6 +37,12 @@ func compatibleFirewallRules(ctx context.Context, env Environment, nft []byte) C
 				}
 				if !needed {
 					continue
+				}
+				if tool == "" {
+					tool, err = nftExportTool(ctx, env, frontend)
+					if err != nil {
+						return fail(err)
+					}
 				}
 				b, err := env.Run(ctx, tool, "-t", table)
 				if err != nil {
@@ -108,6 +108,25 @@ func compatibleFirewallRules(ctx context.Context, env Environment, nft []byte) C
 	c.Next = ""
 	c.Detail = "Packet/conntrack mark masks and routing selectors are disjoint from reserved bits. Tunnel and transport traffic remain subject to ordinary application permissions."
 	return c
+}
+
+// The distribution default may still select legacy even when the kernel
+// rules to inspect are nft-backed. Never change the default or use a legacy
+// export as evidence for an nft mark expression.
+func nftExportTool(ctx context.Context, env Environment, frontend string) (string, error) {
+	version, err := env.Run(ctx, frontend, "--version")
+	if err == nil && strings.Contains(string(version), "(nf_tables)") {
+		return frontend + "-save", nil
+	}
+	nft := frontend + "-nft"
+	version, err = env.Run(ctx, nft, "--version")
+	if err != nil {
+		return "", fmt.Errorf("Opaque mark inspection requires %s export: %w", nft, err)
+	}
+	if !strings.Contains(string(version), "(nf_tables)") {
+		return "", fmt.Errorf("Opaque mark inspection requires %s export; %s did not report the nft backend", nft, nft)
+	}
+	return nft + "-save", nil
 }
 
 func opaqueMarkCounts(b []byte) (map[string]int, error) {

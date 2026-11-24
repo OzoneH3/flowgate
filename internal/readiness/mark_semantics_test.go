@@ -100,6 +100,60 @@ func TestGenericCompatibilityProofAndSnapshotMismatch(t *testing.T) {
 	}
 }
 
+func TestNFTMarkExportsWithLegacyDefaults(t *testing.T) {
+	ip4 := string(genericMarkFixture("fixture"))
+	ip6Rule := strings.Replace(strings.TrimSuffix(strings.TrimPrefix(ip4, `{"nftables":[`), `]}`),
+		`"family":"ip"`, `"family":"ip6"`, 1)
+	rules := []byte(strings.TrimSuffix(ip4, `]}`) + "," + ip6Rule + "]}")
+	for _, legacyFamily := range []string{"", "ip", "ip6"} {
+		t.Run("legacy="+legacyFamily, func(t *testing.T) {
+			env := fakeEnv()
+			env.Read = func(path string) ([]byte, error) {
+				if (legacyFamily == "ip" && path == "/proc/net/ip_tables_names") ||
+					(legacyFamily == "ip6" && path == "/proc/net/ip6_tables_names") {
+					return []byte("filter\n"), nil
+				}
+				return nil, nil
+			}
+			exports := map[string]int{}
+			env.Run = func(_ context.Context, name string, args ...string) ([]byte, error) {
+				switch name {
+				case "ip":
+					return []byte("[]"), nil
+				case "nft":
+					return rules, nil
+				case "iptables", "ip6tables":
+					return []byte(name + " (legacy)"), nil
+				case "iptables-nft", "ip6tables-nft":
+					return []byte(name + " (nf_tables)"), nil
+				case "iptables-nft-save", "ip6tables-nft-save":
+					if strings.Join(args, " ") != "-t filter" {
+						t.Fatalf("unexpected export %s %v", name, args)
+					}
+					exports[name]++
+					return []byte("-A fixture -j MARK --set-xmark 0/0xff00\n"), nil
+				default:
+					t.Fatalf("unexpected probe %s %v", name, args)
+					return nil, nil
+				}
+			}
+			blocked := 0
+			for _, c := range Firewall(context.Background(), env) {
+				if c.Status == Blocked {
+					blocked++
+					if !strings.HasPrefix(c.ID, "firewall.legacy.") || c.Code != "firewall_conflict" {
+						t.Fatal(c)
+					}
+				}
+			}
+			if (blocked != 0) != (legacyFamily != "") ||
+				exports["iptables-nft-save"] != 2 || exports["ip6tables-nft-save"] != 2 {
+				t.Fatalf("blocked=%d exports=%v", blocked, exports)
+			}
+		})
+	}
+}
+
 func TestNativeMarkReadsAreBounded(t *testing.T) {
 	safe := `{"nftables":[{"rule":{"family":"inet","table":"foreign","chain":"arbitrary","expr":[{"match":{"op":"==","left":{"&":[{"meta":{"key":"mark"}},65280]},"right":1024}}]}}]}`
 	if err := compatibleNFT([]byte(safe)); err != nil {
