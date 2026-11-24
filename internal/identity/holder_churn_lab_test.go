@@ -224,6 +224,12 @@ func TestHolderChurnRealTopologies(t *testing.T) {
 					t.Fatalf("left %d, joined %d", left, joined)
 				}
 				expectOwner(t, out, f, alpha, 1)
+				// Check the acknowledgement only after preserving the first
+				// resolver result. Reading /proc before it could hide the race.
+				task := fmt.Sprintf("/proc/%d/task/%d", f.tgid, left)
+				if _, err := os.Stat(task); !os.IsNotExist(err) {
+					t.Fatalf("LEFT did not retire task %s: %v", task, err)
+				}
 				if tids := censusMembers(t, f.socket, f.tgid); len(tids) != 2 || contains(tids, left) {
 					t.Fatalf("settled members %v", tids)
 				}

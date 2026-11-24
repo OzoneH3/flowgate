@@ -231,6 +231,53 @@ func TestHolderChurnLeaveSameTableReconciles(t *testing.T) {
 	}
 }
 
+func TestHolderDepartureWhileTaskStillListed(t *testing.T) {
+	m := newChurnModel()
+	const leaving = 13
+	addThread(m, 10, leaving, "1003", 1)
+	p := m.f.proc()
+	sameFiles := p.sameFiles
+	rechecking := false
+	p.sameFiles = func(a, b int) (bool, error) {
+		same, err := sameFiles(a, b)
+		if rechecking && b == leaving {
+			// The first KCMP_FILES sees the dropped files reference. By
+			// the time the group is rescanned the TID has disappeared.
+			delete(m.f.groups[10], leaving)
+		}
+		return same, err
+	}
+	census := func() HolderCensus {
+		lim := defaultHolderLimits
+		return p.censusBudget(churnWanted, lim, &holderBudget{deadline: p.now().Add(lim.Time)})
+	}
+	descriptor := func(path, socket string) bool {
+		target, err := p.readlink(path)
+		return err == nil && target == socket
+	}
+	initial := census()
+	first := inspectHolderIdentitiesWith(initial, m.inspect, m.facts, descriptor, func() HolderRecheck {
+		m.f.groups[10][leaving].table = 0
+		rechecking = true
+		return initial.RecheckDetail()
+	})
+	if first.Complete || !first.retryTopology || !slices.Contains(first.Issues, "table_changed") ||
+		first.SocketIssues[churnS1] != "holder_appeared" || len(first.Owners[churnS1]) != 0 {
+		t.Fatalf("overlapping departure must leave ownership uncertain: %+v", first)
+	}
+
+	fresh := census()
+	followup := inspectHolderIdentitiesWith(fresh, m.inspect, m.facts, descriptor, fresh.RecheckDetail)
+	if !fresh.Complete || !followup.Complete || !slices.Equal(churnOwnerPIDs(followup, churnS1), []int{10}) {
+		t.Fatalf("stable surviving group lost its owner: %+v", followup)
+	}
+	for _, h := range fresh.Holders {
+		if h.Socket == churnS1 && !slices.Equal(h.Members, []HolderMember{{10, "1000"}, {11, "1001"}}) {
+			t.Fatalf("unexpected surviving members: %+v", h.Members)
+		}
+	}
+}
+
 func TestHolderChurnWorkerClassWitnessFollowsMembers(t *testing.T) {
 	base := newChurnModel()
 	_, before := base.run(nil, defaultHolderLimits)

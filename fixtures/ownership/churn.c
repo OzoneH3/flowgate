@@ -14,7 +14,8 @@
 //                                     "READY 0 tgid tid"
 // commands (one per line, each acknowledged on stdout):
 //   join        a new thread joins the shared table            -> "JOINED tid"
-//   leave       the most recently joined thread exits           -> "LEFT tid"
+//   leave       the most recently joined thread leaves Linux's  -> "LEFT tid"
+//               task list; surviving threads keep the socket
 //   unshare     a new thread unshares CLONE_FILES; its private   -> "UNSHARED tid"
 //               copy of the table still holds the socket
 //   send PATH   pass the socket via SCM_RIGHTS to the receiver  -> "SENT"
@@ -33,6 +34,7 @@
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/un.h>
+#include <time.h>
 #include <unistd.h>
 
 static int family, type, fd = -1, listener = -1;
@@ -134,6 +136,28 @@ static struct rec *spawn(int unshared, int recv) {
   pthread_barrier_destroy(&started);
   return r;
 }
+static void wait_task_gone(long tid) {
+  char task[96];
+  snprintf(task, sizeof(task), "/proc/self/task/%ld", tid);
+  struct timespec start, now;
+  if (clock_gettime(CLOCK_MONOTONIC, &start))
+    die("departure clock");
+  for (;;) {
+    if (access(task, F_OK)) {
+      if (errno == ENOENT)
+        return;
+      die("departure task lookup");
+    }
+    if (clock_gettime(CLOCK_MONOTONIC, &now))
+      die("departure clock");
+    if (now.tv_sec - start.tv_sec > 2 ||
+        (now.tv_sec - start.tv_sec == 2 && now.tv_nsec >= start.tv_nsec)) {
+      errno = ETIMEDOUT;
+      die("wait for departing task");
+    }
+    nanosleep(&(struct timespec){.tv_nsec = 1000000}, NULL);
+  }
+}
 static void leave(void) {
   if (nrecs == 0)
     die("nothing to leave");
@@ -142,7 +166,14 @@ static void leave(void) {
   r->stop = 1;
   pthread_cond_broadcast(&cv);
   pthread_mutex_unlock(&mu);
-  pthread_join(r->t, NULL);
+  int err = pthread_join(r->t, NULL);
+  if (err) {
+    errno = err;
+    die("pthread_join");
+  }
+  // Linux can clear the join futex before dropping the exiting task's file
+  // table reference and removing the TID. LEFT is the census boundary.
+  wait_task_gone(r->tid);
   nrecs--;
   printf("LEFT %ld\n", r->tid);
 }
