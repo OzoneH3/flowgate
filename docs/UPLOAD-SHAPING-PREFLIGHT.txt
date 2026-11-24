@@ -58,6 +58,17 @@ exact handle0/default-options structure is the recorded evidence instead.
 Post-deletion comparison is authoritative in both cases. A privileged concurrent
 change cannot be made atomic with these netlink calls; this is not ownership CAS.
 
+The installed controller also accepts the stock pfifo_fast root on the same
+single-queue Ethernet topology. It requires handle 0, the exact three bands and
+kernel priority map, a readable default_qdisc of pfifo_fast, a positive transmit
+queue length, and no foreign TC objects. Linux allocates each band using the
+link's txqueuelen. The journal records that length and rechecks it, the default,
+and link readiness before TC changes and cleanup, including after daemon
+restart or interrupted setup. Changed or missing inputs prevent cleanup
+mutations. After deleting the owned root, compare the restored topology and
+queue length before discarding the journal. The controller never sets the
+sysctl or queue length to force restoration.
+
 Interrupted setup
 Write the pending fixed setup operation before its TC command. Recovery can
 recognize the operation's newly created root/class/leaf/clsact/BPF objects only

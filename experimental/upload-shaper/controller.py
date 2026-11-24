@@ -370,6 +370,12 @@ class KernelWorker:
             raise
 
 
+NIC_TOPOLOGIES = ('single-queue-default-fq_codel', 'single-queue-default-pfifo_fast')
+PFIFO_FAST_ROOT = {'kind': 'pfifo_fast', 'handle': '0:', 'root': True, 'options': {
+    'bands': 3, 'priomap': [1, 2, 2, 2, 1, 2, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1], 'multiqueue': False}}
+DEFAULT_QDISC = Path('/proc/sys/net/core/default_qdisc')
+
+
 def compatibility(link, topology, features=None, default_qdisc=None):
     """Pure, conservative preflight. A positive result is not activation consent."""
     reasons = []
@@ -408,8 +414,10 @@ def compatibility(link, topology, features=None, default_qdisc=None):
                 'target': 4999, 'interval': 99999, 'memory_limit': 33554432,
                 'ecn': True, 'drop_batch': 64}
     default = default and options == expected
-    if not ((veth and root.get('kind') == 'noqueue') or (nic and default)):
-        reasons.append('requires unmodified kernel default fq_codel handle 0 (veth: noqueue)')
+    pfifo = (root == PFIFO_FAST_ROOT and default_qdisc == 'pfifo_fast'
+             and type(link.get('txqlen')) is int and link['txqlen'] > 0)
+    if not ((veth and root.get('kind') == 'noqueue') or (nic and (default or pfifo))):
+        reasons.append('requires a restorable kernel default fq_codel or pfifo_fast handle 0 (veth: noqueue)')
     segmentation = None
     if nic:
         if features is None:
@@ -431,7 +439,9 @@ def compatibility(link, topology, features=None, default_qdisc=None):
                             'recommended_min_rate_bps': gso * 8 * 10,
                             'leaf_memory_ceiling_bytes': max(262144, 16 * gso),
                             'udp_segment': 'per-segment accounting: UDP packets queued to userspace for attribution are segmented before the egress hook'}
-    return {'supported': not reasons, 'topology': 'veth-noqueue' if veth else 'single-queue-default-fq_codel',
+    layout = 'veth-noqueue' if veth else (
+        'single-queue-default-pfifo_fast' if root.get('kind') == 'pfifo_fast' else 'single-queue-default-fq_codel')
+    return {'supported': not reasons, 'topology': layout,
             'reasons': reasons, 'offloads': features, 'segmentation': segmentation,
             'default_qdisc_observed': default_qdisc, 'host_activation': False,
             'coverage': 'Partial: verified bound sockets only; first packets may escape'}
@@ -475,8 +485,8 @@ def validate_deployment_mode(parent, host_trial, current, uid):
 def validate_activation_topology(result, host_trial):
     if not result['supported']:
         raise ValueError('Unsupported: ' + '; '.join(result['reasons']))
-    if host_trial and result['topology'] != 'single-queue-default-fq_codel':
-        raise ValueError('Unsupported: host trial requires direct single-queue default-fq_codel NIC')
+    if host_trial and result['topology'] not in NIC_TOPOLOGIES:
+        raise ValueError('Unsupported: host trial requires a direct single-queue NIC with a restorable default root')
 
 class Controller:
     def __init__(self, args):
@@ -532,6 +542,7 @@ class Controller:
         self.compatibility = self.preflight(before)
         validate_activation_topology(self.compatibility, getattr(args, 'host_trial', False))
         self.original = before
+        self.restore_txqlen = self.link['txqlen'] if self.compatibility['topology'] == 'single-queue-default-pfifo_fast' else None
         self.class_source = getattr(self, 'class_source', 'tc')
         self.token = secrets.token_hex(16)
         self.major = 0x100 + secrets.randbelow(0xfe00)
@@ -680,6 +691,11 @@ class Controller:
         queries = [('filter', 'show', 'dev', self.dev, 'parent', p) for p in parents]
         rows = self.query_tc(commands + queries)
         out = dict(zip(fields, rows[:5]))
+        # tc hides qdisc size tables unless details are requested. A size
+        # table on the original or on our replacement is foreign state.
+        if any(q.get('kind') == 'pfifo_fast' for q in
+               out['qdiscs'] + getattr(self, 'original', {}).get('qdiscs', [])):
+            out['qdiscs'] = self.query_tc(commands[:1], detailed=True)[0]
         out['classes'] = [x for x in out['classes'] if x.get('class') != 'fq_codel']
         if combined and out['classes'] != expected['classes']:
             raise RuntimeError('Unsupported: traffic-control classes changed; refusing observation')
@@ -713,7 +729,7 @@ class Controller:
         if link.get('linkinfo', {}).get('info_kind') != 'veth':
             try:
                 features = parse_features(self.call('ethtool', '-k', self.dev))
-                default = Path('/proc/sys/net/core/default_qdisc').read_text().strip()
+                default = DEFAULT_QDISC.read_text().strip()
             except (OSError, RuntimeError):
                 pass
         return compatibility(link, self.topology() if topology is None else topology, features, default)
@@ -781,6 +797,7 @@ class Controller:
                 'setup_tc_intent': getattr(self, 'setup_tc_intent', None),
                 'ifb_detail_expected': getattr(self, 'ifb_detail_expected', None),
                 'ul_detail_expected': getattr(self, 'ul_detail_expected', None),
+                'restore_txqlen': getattr(self, 'restore_txqlen', None),
                 'class_source': getattr(self, 'class_source', 'tc'),
                 'link_identity': {k: self.link.get(k) for k in ('ifindex','address','parentbus','parentdev','link_type')}}
         p = self.state / 'owner.new'
@@ -801,9 +818,16 @@ class Controller:
             identity_fields = tuple(k for k in identity_fields if k not in ('mtu', 'gso_max_size', 'gso_ipv4_max_size', 'tso_max_size'))
         if os.readlink('/proc/self/ns/net') != self.ns or any(link.get(k) != self.link.get(k) for k in identity_fields):
             raise RuntimeError('interface/namespace generation changed')
-        if not getattr(self, 'cleaning', False) and getattr(self, 'original', {}).get('qdiscs', [{}])[0].get('kind') == 'fq_codel':
-            setting = Path('/proc/sys/net/core/default_qdisc')
-            if setting.exists() and setting.read_text().strip() != 'fq_codel':
+        root, *_ = getattr(self, 'original', {}).get('qdiscs') or [{}]
+        if root.get('kind') == 'pfifo_fast':
+            txqlen = getattr(self, 'restore_txqlen', None)
+            if (root != PFIFO_FAST_ROOT or type(txqlen) is not int or txqlen <= 0
+                    or link.get('txqlen') != txqlen or link.get('num_tx_queues') != 1
+                    or not {'UP', 'LOWER_UP'}.issubset(link.get('flags', []))
+                    or DEFAULT_QDISC.read_text().strip() != 'pfifo_fast'):
+                raise RuntimeError('Unsupported: pfifo_fast restoration inputs changed or unavailable; refusing mutation')
+        elif root.get('kind') == 'fq_codel' and not getattr(self, 'cleaning', False):
+            if DEFAULT_QDISC.exists() and DEFAULT_QDISC.read_text().strip() != 'fq_codel':
                 raise RuntimeError('Unsupported: default qdisc changed; restoration requires review')
         actual = self.topology(self.expected)
         if actual != self.expected:
@@ -1020,6 +1044,7 @@ class Controller:
             raise ValueError('Unsupported: journal names a foreign IFB')
         self.expected, self.ids = d['expected'], d['ids']
         self.original = d.get('original', {'qdiscs': [{'kind': 'noqueue', 'handle': '0:', 'root': True}], 'classes': [], 'egress': [], 'ingress': [], 'root_filters': []})
+        self.restore_txqlen = d.get('restore_txqlen')
         if d.get('link_identity') and d['link_identity'] != {k: self.link.get(k) for k in ('ifindex','address','parentbus','parentdev','link_type')}:
             raise ValueError('Unsupported: interface identity changed')
         self.ul_detail_expected = d.get('ul_detail_expected')
@@ -1166,6 +1191,10 @@ class Controller:
         if any(x['kind'] == 'htb' and x['handle'] == self.handle() for x in q):
             self.mutate('qdisc', 'del', 'dev', self.dev, 'root', 'handle', self.handle())
         restoration_changed = self.topology() != self.original
+        if (self.original['qdiscs'] == [PFIFO_FAST_ROOT]
+                and (restoration_changed or self.get_link().get('txqlen') != self.restore_txqlen
+                     or DEFAULT_QDISC.read_text().strip() != 'pfifo_fast')):
+            raise RuntimeError('Unsupported: pfifo_fast baseline was not restored; keeping the recovery journal')
         if self.pin.exists():
             for name in ['program', 'ingress', 'bindings', 'config', 'counters', 'download']:
                 (self.pin / name).unlink(missing_ok=True)
@@ -1825,9 +1854,9 @@ def main():
         result = c.preflight()
         result['deployment_mode'] = 'host-trial' if args.host_trial else 'structural-preflight-only'
         result['activation_authorized'] = False
-        if args.host_trial and (args.lab_parent_netns or result['topology'] != 'single-queue-default-fq_codel'):
+        if args.host_trial and (args.lab_parent_netns or result['topology'] not in NIC_TOPOLOGIES):
             result['supported'] = False
-            result['reasons'].append('host trial requires no lab parent flag and direct single-queue default-fq_codel NIC')
+            result['reasons'].append('host trial requires no lab parent flag and a direct single-queue NIC with a restorable default root')
         print(json.dumps(result), flush=True)
         return
     c = None

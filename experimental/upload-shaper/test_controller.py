@@ -735,6 +735,87 @@ class CompatibilityTests(unittest.TestCase):
             {'limit':10240,'flows':1024,'quantum':1514,'target':4999,'interval':99999,
              'memory_limit':33554432,'ecn':True,'drop_batch':64}}],
             'classes':[], 'egress':[], 'ingress':[], 'root_filters':[]}
+
+    def pfifo_baseline(self):
+        topology = dict(self.topology(), qdiscs=m1.decode_tc_batch(
+            '[{"kind":"pfifo_fast","handle":"0:","root":true,"refcnt":2,'
+            '"options":{"bands":3,"priomap":[1,2,2,2,1,2,0,0,1,1,1,1,1,1,1,1],"multiqueue":false}}]', 1)[0])
+        link = dict(mtu=1500, link_type='ether', parentbus='virtio', num_tx_queues=1,
+                    flags=['UP', 'LOWER_UP'], gso_max_size=65536, txqlen=1000)
+        return link, topology
+
+    def test_pfifo_fast_requires_reproducible_kernel_default(self):
+        link, topology = self.pfifo_baseline()
+        features = {'hw-tc-offload': 'off'}
+        result = m1.compatibility(link, topology, features, 'pfifo_fast')
+        m1.validate_activation_topology(result, host_trial=True)
+        self.assertEqual(result['topology'], 'single-queue-default-pfifo_fast')
+        for default in (None, 'fq_codel'):
+            self.assertFalse(m1.compatibility(link, topology, features, default)['supported'])
+        for change in ({'txqlen': 0}, {'txqlen': None}, {'num_tx_queues': 2}):
+            self.assertFalse(m1.compatibility(dict(link, **change), topology, features, 'pfifo_fast')['supported'])
+        for key, value in (('handle', '8000:'), ('stab', {'overhead': 24}), ('kind', 'prio'),
+                           ('options', {'bands': 3, 'priomap': [0] * 16, 'multiqueue': False})):
+            modified = dict(topology, qdiscs=[dict(topology['qdiscs'][0], **{key: value})])
+            self.assertFalse(m1.compatibility(link, modified, features, 'pfifo_fast')['supported'])
+        for key in ('classes', 'root_filters', 'egress', 'ingress', 'class_filters'):
+            self.assertFalse(m1.compatibility(link, dict(topology, **{key: [{}]}), features, 'pfifo_fast')['supported'])
+
+    def test_pfifo_topology_observes_detailed_size_table(self):
+        link, topology = self.pfifo_baseline()
+        c = object.__new__(m1.Controller)
+        c.dev, c.link = 'test0', link
+        q = topology['qdiscs'][0]
+        c.query_tc = lambda commands, detailed=False: (
+            [[dict(q, stab={'overhead': 24})]] if detailed else [[q], [], [], [], []])
+        actual = c.topology()
+        self.assertEqual(actual['qdiscs'][0]['stab'], {'overhead': 24})
+        self.assertFalse(m1.compatibility(link, actual, {'hw-tc-offload': 'off'}, 'pfifo_fast')['supported'])
+
+    def test_pfifo_cleanup_checks_inputs_and_compares_restored_root(self):
+        import os
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+
+        for change in ('none', 'sysctl', 'txqlen', 'foreign-root', 'wrong-restoration'):
+            with self.subTest(change=change), TemporaryDirectory() as tmp:
+                c = object.__new__(m1.Controller)
+                c.link, c.original = self.pfifo_baseline()
+                c.dev = 'test0'
+                c.ns = os.readlink('/proc/self/ns/net')
+                c.restore_txqlen = c.link['txqlen']
+                c.major = 0x123
+                c.ids = None
+                c.state = Path(tmp)
+                c.manifest = c.state / 'owner.json'
+                c.manifest.touch()
+                c.pin = c.state / 'no-pin'
+                setting = c.state / 'default_qdisc'
+                setting.write_text('fq_codel' if change == 'sysctl' else 'pfifo_fast')
+                c.get_link = lambda: dict(c.link, txqlen=128) if change == 'txqlen' else c.link
+                c.expected = dict(c.original, qdiscs=[{'kind': 'htb', 'handle': c.handle(), 'root': True}])
+                actual = dict(c.original) if change == 'foreign-root' else c.expected
+                c.topology = lambda *_: actual
+                mutations = []
+
+                def mutate(*args):
+                    nonlocal actual
+                    mutations.append(args)
+                    actual = self.topology() if change == 'wrong-restoration' else c.original
+
+                c.mutate = mutate
+                with patch.object(m1, 'DEFAULT_QDISC', setting):
+                    if change == 'none':
+                        c.cleanup_objects()
+                        self.assertEqual(actual, c.original)
+                        self.assertFalse(c.manifest.exists())
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, 'changed|not restored'):
+                            c.cleanup_objects()
+                        self.assertTrue(c.manifest.exists())
+                self.assertEqual(mutations, [('qdisc', 'del', 'dev', 'test0', 'root', 'handle', '123:')]
+                                 if change in ('none', 'wrong-restoration') else [])
+
     def test_narrow_nic_and_refusals(self):
         import copy
         link={'mtu':1500,'link_type':'ether','parentbus':'virtio','num_tx_queues':1,'flags':['UP','LOWER_UP'],'gso_max_size':65536,'gso_max_segs':65535}
