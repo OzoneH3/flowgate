@@ -138,6 +138,41 @@ Host deployment and a real user's game retry are separate from this isolated
 acceptance. Preparing the release does not activate host protection or alter
 stored host rules.
 
+### Wine 11.20 Local Peer at the first TCP SYN
+
+The numbered RC11 Local Peer TCP run `312649857e0a` started the daemon via
+bare `serve`, without `--wine-helper`. Its configured broker check required
+the Windows client to hold the same kernel socket as wineserver. The first
+SYN's FD census saw only wineserver and the request was blocked as
+`runtime_identity_unverified`. The connected-UDP control `e397113abc11` saw
+both holders and a reciprocal Unix peer link. Paired Allow delivered one
+additional datagram.
+
+A private-loopback replay used the same Wine 11.20 runtime and two different
+synthetic Windows clients. Both mapped their own images in the same prefix and
+used the same wineserver before either was released to connect to a shared
+listener. Bare `serve` reproduced both TCP Blocks. With the shipped Wine owner
+observer enabled for that prefix and runtime, RC11 identified both clients
+while their SYNs were held. The two Windows owner snapshots matched each exact
+source and destination, creation time and image. Both Linux observations
+retained that connection's cookie and the same sole wineserver holder. The
+resolver also corroborated each mapped image revision and its reciprocal Unix
+peer link to that broker. Both runtime rows were visible during the second
+connection, so the local endpoint was essential to distinguish them.
+
+In the observer-enabled run each outgoing TCP request reached the stored Ask
+with its own Windows identity. Explicit Block kept the TCP receiver count at
+zero. The connected-UDP paired Allow raised its count from zero to one. An
+unmodified RC11 daemon and the observer extracted from the numbered archive
+reproduced those results with equivalent explicit configuration in the same
+isolated fixture. With an explicit paired Allow for alpha and Block for beta,
+the receiver got one TCP payload from alpha and zero from beta. The shipped
+launcher already enables the observer. Tests
+invoking `serve` directly need to pass `--wine-helper` to exercise this path.
+When the resolver has only the broker FD and no verified owner row, the Block
+remains required. A mapped image or Unix peer link alone cannot select which
+sibling owns that TCP socket.
+
 The burst check also exercises ordinary Allow (`scope=once`) before saving the
 application rule: exactly one of three payloads arrives and two requests in the
 same backend group remain awaiting a decision. The application decision then

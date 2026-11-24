@@ -3,9 +3,60 @@ package identity
 import (
 	"errors"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestWineFirstSYNDoesNotBorrowSiblingOwner(t *testing.T) {
+	prefix := t.TempDir()
+	drive := filepath.Join(prefix, "dosdevices", "c:")
+	if err := os.MkdirAll(drive, 0700); err != nil {
+		t.Fatal(err)
+	}
+	broker := Process{PID: 10, Start: "one", UID: 1000, ExecutableRevision: "broker", Application: Application{Prefix: prefix}}
+	first := tableSnapshot{Schema: 2, Family: 4, Version: "11.20", Complete: true, Rows: []WindowsOwner{
+		{Family: 4, PID: 42, Created: 10, CreationTime: "10", Image: `C:\alpha.exe`, Address: "127.0.0.1", Port: 47101, RemoteAddress: "127.0.0.1", RemotePort: 46000, State: 3},
+		{Family: 4, PID: 43, Created: 11, CreationTime: "11", Image: `C:\beta.exe`, Address: "127.0.0.1", Port: 47102, RemoteAddress: "127.0.0.1", RemotePort: 46000, State: 3},
+	}}
+	for _, name := range []string{"alpha.exe", "beta.exe"} {
+		if err := os.WriteFile(filepath.Join(drive, name), []byte(name), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, row := range first.Rows {
+		name := []string{"alpha.exe", "beta.exe"}[i]
+		t.Run(name, func(t *testing.T) {
+			f := Flow{Protocol: "tcp", Direction: "outgoing", NetNS: "net",
+				Local: netip.AddrPortFrom(netip.MustParseAddr(row.Address), row.Port), Remote: netip.MustParseAddrPort("127.0.0.1:46000")}
+			sock := Socket{Protocol: "tcp", Family: 2, Local: f.Local, Remote: f.Remote,
+				State: 2, Inode: uint32(i + 1), Cookie: []string{"0100000000000000", "0200000000000000"}[i], NetNS: f.NetNS}
+			a := Attribution{VisibilityComplete: true, Owners: []Process{broker}, Sockets: []Socket{sock}}
+			rows, err := selectTableRows(first, f)
+			if err != nil || len(rows) != 1 || rows[0].PID != row.PID {
+				t.Fatalf("selected sibling or lost the exact SYN row: %v %v", rows, err)
+			}
+			w := WineTable{prefix: prefix}
+			path := filepath.Join(drive, name)
+			imageVisible := func(_ *Process, image, revision string) bool {
+				return image == path && revision == stamp(path)
+			}
+			got := w.finishCensus(f, a, a, &broker, first, first, rows, imageVisible)
+			if got.Application == nil || got.Application.Executable != path || got.Application.Prefix != prefix ||
+				got.Table == nil || got.Table.SocketCookie != sock.Cookie || got.ReasonCode != ReasonRuntimeOwnerObserved {
+				t.Fatalf("exact SYN lost its owner: %+v", got)
+			}
+			sibling := first.Rows[1-i]
+			siblingOnly := first
+			siblingOnly.Rows = []WindowsOwner{sibling}
+			got = w.finishCensus(f, a, a, &broker, first, siblingOnly, rows, imageVisible)
+			if got.Application != nil || got.ReasonCode != ReasonRuntimeOwnershipChanged {
+				t.Fatalf("sibling row survived loss of the exact SYN row: %+v", got)
+			}
+		})
+	}
+}
 
 func TestHelperPeerPrefilterPreservesFullCandidateCount(t *testing.T) {
 	bf := map[uint32]bool{10: true, 20: true, 30: true}
