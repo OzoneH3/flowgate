@@ -546,21 +546,10 @@ func (m *Evaluation) run(ctx context.Context, id string, fromMonitoring bool) {
 					case <-runctx.Done():
 						return
 					case <-ticker.C:
-						present, er := owns(record)
-						if er == nil && !present {
-							er = fmt.Errorf("owned interception table disappeared")
-						}
-						if er == nil {
-							var d string
-							d, er = tableDigestForFormat(Table, record.DigestFormat)
-							if er == nil && d != expectedDigest && record.DigestFormat == numericDigestFormat {
-								// Re-read a name-resolved snapshot once before treating a
-								// possible concurrent interface-name swap as rule mutation.
-								d, er = tableDigestForFormat(Table, record.DigestFormat)
-							}
-							if er == nil && d != expectedDigest {
-								er = fmt.Errorf("owned interception table changed")
-							}
+						cleaned, er := auditInterception(m.dir, record, expectedDigest)
+						if cleaned {
+							cancelRun()
+							return
 						}
 						if errors.Is(er, errAuditInconclusive) {
 							inconclusiveAudits++
@@ -731,13 +720,57 @@ func (m *Evaluation) run(ctx context.Context, id string, fromMonitoring bool) {
 		finish(cleanupErr, false)
 		return
 	}
-	if ctx.Err() != nil {
+	// A bounded audit that found a real failure while active remains a
+	// failure even if its deadline arrived during the confirmed cleanup.
+	if ctx.Err() != nil && (!auditFailed || continuous) {
 		err = nil
 	}
 	finish(err, true)
 }
 
-// Separate cleanup lock serializes activation and the independent watchdog.
+func auditInterception(dir string, record Record, expectedDigest string) (bool, error) {
+	verify := func() error {
+		present, err := owns(record)
+		if err != nil {
+			return err
+		}
+		if !present {
+			return fmt.Errorf("owned interception table disappeared")
+		}
+		digest, err := tableDigestForFormat(Table, record.DigestFormat)
+		if err == nil && digest != expectedDigest && record.DigestFormat == numericDigestFormat {
+			// Re-read once before treating a concurrent interface-name swap as mutation.
+			digest, err = tableDigestForFormat(Table, record.DigestFormat)
+		}
+		if err == nil && digest != expectedDigest {
+			return fmt.Errorf("owned interception table changed")
+		}
+		return err
+	}
+	if record.Continuous {
+		return false, verify()
+	}
+	// Keep the token/state read and table inspection in the watchdog's cleanup
+	// transaction order. A missing table by itself never proves cleanup.
+	cleaned := false
+	err := evaluationLock(dir, func() error {
+		current, err := Read(dir)
+		if err != nil {
+			return err
+		}
+		if !current.Embedded || current.Continuous || current.Token != record.Token {
+			return fmt.Errorf("evaluation changed during ownership audit")
+		}
+		if current.State == "stopped" {
+			cleaned = true
+			return nil
+		}
+		return verify()
+	})
+	return cleaned, err
+}
+
+// Separate cleanup lock serializes activation, bounded audits and the watchdog.
 func evaluationLock(dir string, fn func() error) error {
 	fd, err := unix.Open(filepath.Join(dir, "cleanup.lock"), unix.O_CREAT|unix.O_RDWR|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0600)
 	if err != nil {

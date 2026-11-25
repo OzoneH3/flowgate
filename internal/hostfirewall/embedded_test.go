@@ -192,6 +192,53 @@ func TestEmbeddedKernelPartialActivationAndOwnedMutation(t *testing.T) {
 		t.Fatal(s)
 	}
 
+	// A table that vanishes before its deadline remains a real integrity failure.
+	m.duration = 30 * time.Second
+	if _, err = m.Start(s.ID, strings.Repeat("d", 32)); err != nil {
+		t.Fatal(err)
+	}
+	waitEvaluation(t, m, "active")
+	if _, err = nft("delete", "table", "inet", Table); err != nil {
+		t.Fatal(err)
+	}
+	s = waitEvaluation(t, m, "failed")
+	if s.Cleanup != "confirmed" || s.ReasonCode != "activation_failed" || s.Reason != "owned interception table disappeared" {
+		t.Fatal(s)
+	}
+
+	// Run the same activation and watchdog with an independently controlled
+	// context to force watchdog cleanup before the daemon deadline is delivered.
+	id := strings.Repeat("e", 32)
+	ctx, cancel := context.WithCancel(m.ctx)
+	done := make(chan struct{})
+	m.mu.Lock()
+	m.status.ID = id
+	m.status.RequestID = id
+	m.status.State = "starting"
+	m.status.Cleanup = "pending"
+	m.status.StopsAt = time.Now().Add(3 * time.Second)
+	m.cancel, m.done = cancel, done
+	m.mu.Unlock()
+	go m.run(ctx, id, false)
+	waitEvaluation(t, m, "active")
+	select {
+	case <-done:
+	case <-time.After(9 * time.Second):
+		t.Fatal("daemon did not settle after watchdog cleanup", m.Status())
+	}
+	s = m.Status()
+	if s.State != "stopped" || s.Cleanup != "confirmed" || s.ReasonCode != "expired" {
+		t.Fatal(s)
+	}
+	record, err := Read(state)
+	if err != nil || record.Token != id || record.State != "stopped" {
+		t.Fatal(record, err)
+	}
+	tables, err = nft("list", "tables")
+	if err != nil || strings.Contains(string(tables), Table) || !strings.Contains(string(tables), "unrelated_fixture") {
+		t.Fatal(string(tables), err)
+	}
+
 	if e.Traffic.Status().Generation != "independent-collector" {
 		t.Fatal("evaluation replaced collector")
 	}
