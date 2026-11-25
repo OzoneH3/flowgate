@@ -86,6 +86,7 @@ const records = [
 
 const recipes = {
   empty: {},
+  logPages: { populated: true, logPages: true },
   populated: { populated: true },
   readonly: { populated: true, readOnly: true },
   requests: { populated: true, requests: 'both' },
@@ -102,7 +103,7 @@ const recipes = {
 };
 export const recipeNames = Object.keys(recipes);
 
-function inventory(recipe) {
+function inventory(recipe, packageBuild) {
   const started = Date.now();
   const now = () => new Date().toISOString();
   const later = seconds => new Date(started + seconds * 1000).toISOString();
@@ -111,6 +112,14 @@ function inventory(recipe) {
   let stage = recipe.requests;
   const answered = new Set();
   let revision = 0;
+  let timeout = { seconds: 30, revision: '1' };
+  let migratedPreview;
+  let evaluation = { id: '', request_id: '', state: 'stopped', profile: 'incoming', duration_seconds: 300,
+    cleanup: 'not_needed', review: 'Review the isolated incoming evaluation fixture.',
+    reason_code: 'stopped', reason: 'Fixture evaluation stopped',
+    readiness: { state: 'ready', checked_at: fixed, checks: [] } };
+  const olderRecord = record('inventory-log-older', 'pending', 'inventory-request-older', firstFlow, atlas, '19');
+  const newerRecord = record('inventory-log-new', 'pending', 'inventory-request-new', secondFlow, beacon, '25');
   const pendingEvents = () => {
     const primary = event(id.request, atlas, firstOwner,
       recipe.requests === 'udp' ? { ...firstFlow, protocol: 'udp' } : firstFlow, later(recipe.short ? 10 : 900), later(-2));
@@ -150,6 +159,7 @@ function inventory(recipe) {
       version: 1, generation, read_only: observer || !!recipe.readOnly,
       mode: observer ? 'host-monitor' : 'isolated-lab', backend_mode: 'host-enforcement',
       server_time: now(), snapshot_at: now(), snapshot_revision: String(++revision),
+      ...(packageBuild ? { build: { source: packageBuild.source, version: packageBuild.version, modified: false } } : {}),
       capabilities, for_a_while_durations: [15, 60, 3600],
       permissions: { role: 'administrator', policy_scope: 'machine', observation_scope: 'machine',
         can_manage_rules: !observer && !recipe.readOnly, can_manage_machine_rules: !observer && !recipe.readOnly,
@@ -161,10 +171,7 @@ function inventory(recipe) {
       protection: { id: '', request_id: '', state: 'stopped', desired_mode: 'monitoring', profile: 'both',
         cleanup: 'not_needed', reason_code: 'monitoring', reason: 'Fixture protection stopped',
         gui_required: false, readiness: { state: 'ready', checked_at: fixed, checks: [] } },
-      evaluation: { id: '', request_id: '', state: 'stopped', profile: 'incoming', duration_seconds: 300,
-        cleanup: 'not_needed', review: 'Review the isolated incoming evaluation fixture.',
-        reason_code: 'stopped', reason: 'Fixture evaluation stopped',
-        readiness: { state: 'ready', checked_at: fixed, checks: [] } },
+      evaluation,
       process_leases: recipe.activeLease ? [{ id: 'inventory-process-lease', action: 'allow', direction: 'outgoing',
         application_name: atlas.name, executable: atlas.executable, uid: fixtureUid, pid: firstOwner.pid,
         start: firstOwner.start_ticks, until: later(900), seconds: 900, event_id: id.request }] : [],
@@ -212,7 +219,21 @@ function inventory(recipe) {
             { source: 'udp-api-reported', state: 'unavailable', reason: 'Collector inactive' }],
         } };
       case 'decision-timeout-status':
-        return { ...common, decision_timeout: { seconds: 30, revision: '1' } };
+        return { ...common, decision_timeout: timeout };
+      case 'decision-timeout-configure':
+        if (q.decision_timeout?.expected_revision !== timeout.revision) return failure('Timeout revision changed');
+        timeout = { seconds: q.decision_timeout.seconds, revision: String(Number(timeout.revision) + 1) };
+        return { ...common, decision_timeout: timeout };
+      case 'evaluation-start':
+        evaluation = { ...evaluation, id: 'inventory-evaluation', request_id: q.request_id,
+          state: 'starting', cleanup: 'pending', reason_code: 'starting', reason: 'Fixture evaluation starting',
+          started_at: now(), stops_at: later(300) };
+        return { ...common, evaluation };
+      case 'evaluation-stop':
+        if (q.evaluation_id !== evaluation.id) return failure('Evaluation identity changed');
+        evaluation = { ...evaluation, state: 'stopped', cleanup: 'confirmed', reason_code: 'stopped',
+          reason: 'Fixture evaluation stopped' };
+        return { ...common, evaluation };
       case 'request-rule-preview':
       case 'decision-preview': {
         if (recipe.rejectPreview || !found) return failure('Fixture review unavailable', 'review_unavailable');
@@ -248,7 +269,7 @@ function inventory(recipe) {
       }
       case 'zone-migration-preview':
         if (!storedRule || storedRule.schema !== 4) return failure('Expected legacy rule');
-        return { ...common, zone_migration: { token: 'zone-migration-preview',
+        migratedPreview = { token: 'zone-migration-preview',
           rule_id: storedRule.id, old_version: storedRule.version, zone_revision: zone.revision,
           old_model: 'configured-prefix-v1', new_model: 'automatic-peer-v1',
           expires_at: new Date(Date.now() + 29000).toISOString(),
@@ -257,7 +278,13 @@ function inventory(recipe) {
           scope_preview: 'Automatic network scope reviewed.',
           rule: { ...storedRule, schema: 6, version: storedRule.version + 1,
             filter: { ...storedRule.filter, zone_model: 'automatic-peer-v1' } },
-        } };
+        };
+        return { ...common, zone_migration: migratedPreview };
+      case 'zone-migration-save':
+        if (q.preview_token !== migratedPreview?.token || q.id !== migratedPreview.rule_id)
+          return failure('Migration review changed');
+        stored.splice(stored.findIndex(r => r.id === q.id), 1, migratedPreview.rule);
+        return null; // Accepted write, lost acknowledgement. Reconcile with list.
       case 'endpoint-rule-preview': {
         const draft = q.endpoint_draft;
         return { ...common, endpoint_preview: {
@@ -268,10 +295,7 @@ function inventory(recipe) {
               direction: 'outgoing', protocol: 'tcp', remote_address: draft.remote_address,
               remote_port: draft.remote_port } },
           scope_preview: 'All matching users and programs · exact outgoing TCP endpoint.',
-          evaluation: { id: '', request_id: '', state: 'stopped', profile: 'incoming', duration_seconds: 300,
-        cleanup: 'not_needed', review: 'Review the isolated incoming evaluation fixture.',
-        reason_code: 'stopped', reason: 'Fixture evaluation stopped',
-        readiness: { state: 'ready', checked_at: fixed, checks: [] } },
+          evaluation,
       process_leases: recipe.activeLease ? [{ id: 'inventory-process-lease', action: 'allow', direction: 'outgoing',
         application_name: atlas.name, executable: atlas.executable, uid: fixtureUid, pid: firstOwner.pid,
         start: firstOwner.start_ticks, until: later(900), seconds: 900, event_id: id.request }] : [],
@@ -280,6 +304,15 @@ function inventory(recipe) {
       }
       case 'decision-log': {
         const f = q.decision_query || {};
+        if (recipe.logPages) {
+          const newest = stage === 'log-new' ? [newerRecord, ...records] : records;
+          const selected = f.before ? [olderRecord] : f.after
+            ? newest.filter(r => Number(r.sequence) > Number(f.after)) : newest.slice(0, f.limit || 100);
+          return { ...common, decision_log: { records: selected, log_id: 'inventory-log-pages', scope: 'machine',
+            order: 'newest_first', has_more: !f.before && !f.after && f.limit !== 1,
+            next_before: !f.before && !f.after && f.limit !== 1 ? '20' : '', next_after: selected[0]?.sequence || '',
+            health: { state: 'recording', retention_days: 30, retention_records: 20000 }, limitations: [] } };
+        }
         const selected = !recipe.populated || f.after ? []
           : records.filter(row => !f.direction || row.flow?.direction === f.direction)
             .filter(row => !f.action || (f.action === 'pending' ? row.kind === 'pending' : row.decision?.action === f.action));
@@ -328,10 +361,10 @@ function inventory(recipe) {
   return { listen, calls, setStage: value => { stage = value; } };
 }
 
-export async function startSeed(name, control, observer) {
+export async function startSeed(name, control, observer, packageBuild) {
   const recipe = recipes[name];
   if (!recipe) throw Error('Unknown seed recipe ' + name);
-  const fixture = inventory(recipe);
+  const fixture = inventory(recipe, packageBuild);
   const servers = [];
   try {
     servers.push(await fixture.listen(control, false), await fixture.listen(observer, true));

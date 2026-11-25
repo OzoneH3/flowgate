@@ -37,7 +37,9 @@ const out = path.resolve(opts['--out']);
 const work = path.resolve(opts['--work']);
 const journeys = opts['--only'] ? plan.journeys.filter(j => j.id === opts['--only']) : plan.journeys;
 if (!journeys.length) throw Error('Unknown journey ' + opts['--only']);
-await access(path.join(pkg, 'matched-manifest.json'));
+const packageBuild = JSON.parse(await readFile(path.join(pkg, 'matched-manifest.json'), 'utf8'));
+if (!/^[a-f0-9]{40}$/.test(packageBuild.source) || !packageBuild.version)
+  throw Error('Packaged GUI build identity missing');
 const executable = path.join(pkg, 'runtime', 'electron');
 const client = path.join(pkg, 'electron');
 await access(executable, constants.X_OK);
@@ -51,6 +53,15 @@ const actualWayland = wayland && (path.isAbsolute(wayland) ? wayland : runtime &
 if (!actualWayland && !process.env.DISPLAY) throw Error('Run in a logged-in Linux desktop session');
 
 let failures = 0;
+let verification = [];
+const expectedText = {
+  guiRevision: 'GUI revision: ' + packageBuild.source,
+  guiVersion: 'Version: ' + packageBuild.version,
+  daemonRevision: 'Daemon build: ' + packageBuild.source,
+  daemonVersion: 'Daemon version: ' + packageBuild.version,
+};
+const assertionFor = ({ includesBuild, ...assertion }) =>
+  includesBuild ? { ...assertion, contains: expectedText[includesBuild] } : assertion;
 async function publish(state, surface, status, controls, issues) {
   if (status !== 'captured') failures++;
   const record = { schemaVersion: 1, windowId: state.window, stateId: state.id, surface,
@@ -126,6 +137,11 @@ async function perform(page, steps = []) {
       await until(() => page.verify(step.wait), 'State not reached ' + JSON.stringify(step.wait), step.timeout);
       continue;
     }
+    if (step.tabTo) {
+      const target = locate(step.tabTo);
+      const route = await page.tabTo(target);
+      verification.push({ kind: 'tab-focus', target, route });
+    }
     if (step.focus) await page.focus(locate(step.focus));
     if (step.type !== undefined) {
       await page.key('a', 2);
@@ -154,8 +170,28 @@ async function performDesktop(steps = [], pid) {
 }
 const windowOf = (entry, state) => ({ ...entry, query: state.query ?? entry.query });
 
+async function nativeShowing(page, window, pid) {
+  const locator = { roles: ['frame', 'window'], pid, names: ['FlowGate'] };
+  if (window.document === 'prompt.html') locator.names = ['FlowGate — connection permission · [0-9]+'];
+  if (window.document === 'pane.html') {
+    locator.heading = window.query.pane === 'info' ? 'Info View' : 'Traffic chart';
+    locator.names = ['FlowGate pane', 'FlowGate — ' + locator.heading];
+  }
+  let lastError;
+  const shown = await until(async () => {
+    if (!await page.run(() => document.visibilityState === 'visible')) return null;
+    try { return await desktop({ op: 'showing', locator }); }
+    catch (error) { lastError = error; return null; }
+  }, 'Renderer document is not visible', 3800).catch(error => {
+    throw Error('Native showing check failed: ' + (lastError ?? error).message);
+  });
+  await page.assertIdentity();
+  verification.push({ kind: 'native-showing', ...shown });
+}
+
 async function captureState(endpoint, pid, state) {
   const window = plan.windows[state.window];
+  const verifyStart = verification.length;
   const surface = window.document ? 'electron' : 'desktop-accessibility';
   if (state.reason) {
     await publish(state, surface, 'blocked', [], [{ kind: 'blocked', id: state.window, message: state.reason }]);
@@ -177,9 +213,10 @@ async function captureState(endpoint, pid, state) {
       }
       await perform(page, state.steps);
       if (state.ready) await until(() => page.verify(state.ready), 'Expected surface not displayed ' + JSON.stringify(state.ready), state.timeout);
+      await nativeShowing(page, window, pid);
       const controls = await page.capture(state.root ?? window.root);
       const issues = [];
-      for (const assertion of state.expect ?? []) {
+      for (const assertion of (state.expect ?? []).map(assertionFor)) {
         if (!await page.verify(assertion)) issues.push({
           kind: 'missing', id: assertion.selector, message: 'Expected rendered control/state: ' + JSON.stringify(assertion),
         });
@@ -189,7 +226,10 @@ async function captureState(endpoint, pid, state) {
     } catch (error) {
       const controls = await page?.capture(state.root ?? window.root).catch(() => []) ?? [];
       await publish(state, 'electron', 'blocked', controls, [{ kind: 'blocked', id: state.window, message: error.message }]);
-    } finally { page?.close(); }
+    } finally {
+      for (const entry of verification.slice(verifyStart)) entry.state = state.id;
+      page?.close();
+    }
     return;
   }
   let lastError;
@@ -220,14 +260,16 @@ for (const journey of journeys) {
   for (const name of childPaths) await mkdir(path.join(directory, name), { mode: 0o700 });
   const control = path.join(directory, 'c'), observer = path.join(directory, 'o');
   let fixture, app, endpoint;
+  verification = [];
   try {
     if (Buffer.byteLength(control) > 107) throw Error('--work must give the fixture a shorter Unix socket path');
-    fixture = await startSeed(journey.seed, control, observer);
+    fixture = await startSeed(journey.seed, control, observer, packageBuild);
     app = startApplication(directory, control, observer);
     endpoint = await app.endpoint();
     const main = await renderer(endpoint, plan.windows.main);
     try {
-      const geometry = await main.run(() => [screen.width, screen.height, devicePixelRatio]);
+      const [language, ...geometry] = await main.run(() => [navigator.language, screen.width, screen.height, devicePixelRatio]);
+      if (language !== 'en-US') throw Error('Expected the renderer UI language to be en-US, got ' + language);
       if (geometry.toString() !== '1920,1080,1') throw Error('Set the desktop to 1920×1080 at 100% scaling before capture');
       await until(() => main.verify({ selector: '#activityTab' }), 'Main toolbar missing');
     } finally { main.close(); }
@@ -249,6 +291,7 @@ for (const journey of journeys) {
     await fixture.close();
     await writeFile(path.join(directory, 'electron.log'), app.log());
     await writeFile(path.join(directory, 'fixture-operations.json'), JSON.stringify(fixture.calls, null, 2));
+    await writeFile(path.join(directory, 'verification.json'), JSON.stringify({ journey: journey.id, language: 'en-US', states: verification }, null, 2));
   }
 }
 const written = await readdir(out);

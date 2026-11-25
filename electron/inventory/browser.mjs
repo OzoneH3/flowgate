@@ -149,6 +149,25 @@ class Page {
       await this.cdp.send('Runtime.releaseObject', { objectId });
     }
   }
+  async tabTo(locator) {
+    await this.assertIdentity();
+    await this.cdp.send('Page.bringToFront');
+    const route = [];
+    for (let i = 0; i <= 80; i++) {
+      const focus = await this.run(({ selector, text }) => {
+        const e = document.activeElement;
+        if (!e) return {};
+        const inside = e.matches(selector) && (text === undefined ||
+          (e.innerText ?? '').trim().replace(/\s+/g, ' ') === text);
+        return { matched: document.hasFocus() && inside && !e.matches(':disabled') &&
+          e.getAttribute('aria-disabled') !== 'true', id: e.id || e.dataset.id || e.localName };
+      }, [locator]);
+      route.push(focus.id);
+      if (focus.matched) return route;
+      if (i < 80) await this.key('Tab');
+    }
+    throw Error('Keyboard Tab route did not focus ' + JSON.stringify(locator) + ' via ' + route.join(', '));
+  }
   async verify(assertion) {
     return this.run(({ selector, text, contains, attr, value, enabled, count = 1 }) => {
       const matches = [...document.querySelectorAll(selector)].filter(e => {

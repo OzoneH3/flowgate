@@ -36,6 +36,8 @@ def locate(locator):
     under = locator.get("under")
     pid = locator.get("pid")
     children = set(locator.get("childNames", []))
+    heading = locator.get("heading")
+    descendants = set(locator.get("descendantNames", []))
     candidates = []
     for node, ancestors in walk(Atspi.get_desktop(0)):
         if not visible(node) or (roles and role(node) not in roles):
@@ -51,9 +53,17 @@ def locate(locator):
                            if (child := node.get_child_at_index(i))}
             if not children <= names_found:
                 continue
+        if heading and not any(role(child) == "heading" and child.get_name() == heading and visible(child)
+                               for child, _parents in walk(node)):
+            continue
+        if descendants:
+            found = {child.get_name() for child, _parents in walk(node) if visible(child)}
+            if not descendants <= found:
+                continue
         candidates.append(node)
     if len(candidates) != 1:
-        raise RuntimeError(f"Expected one accessible target for {locator}, found {len(candidates)}")
+        reported = {key: value for key, value in locator.items() if key != "pid"}
+        raise RuntimeError(f"Expected one accessible target for {reported}, found {len(candidates)}")
     return candidates[0]
 
 
@@ -128,6 +138,8 @@ def main():
         keyboard(request["keys"])
         return {"ok": True}
     node = locate(request["locator"])
+    if op == "showing":
+        return {"name": node.get_name(), "role": role(node), "showing": True}
     if op == "focus":
         component = node.get_component_iface()
         if not component or not component.grab_focus():

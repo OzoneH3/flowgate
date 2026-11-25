@@ -25,10 +25,10 @@ test('renderer selection requires the exact semantic window and request generati
   assert(!matchesWindow(url.replace('prompt.html', 'index.html'), expected));
 });
 
-test('seed preserves the unrelated pending request and linked historical identity', async t => {
+async function fixture(t, recipe, packageBuild) {
   const dir = await mkdtemp(path.resolve(import.meta.dirname, '../../.workspace/gui-test-'));
   const control = path.join(dir, 'c'), observer = path.join(dir, 'o');
-  const seed = await startSeed('requests', control, observer);
+  const seed = await startSeed(recipe, control, observer, packageBuild);
   t.after(async () => { await seed.close(); await rm(dir, { recursive: true, force: true }); });
   function request(fields) {
     return new Promise((resolve, reject) => {
@@ -42,6 +42,11 @@ test('seed preserves the unrelated pending request and linked historical identit
       });
     });
   }
+  return { request, seed };
+}
+
+test('seed preserves the unrelated pending request and linked historical identity', async t => {
+  const { request } = await fixture(t, 'requests');
   const before = await request({ operation: 'list' });
   assert.deepEqual(before.events.map(e => e.id), [identities.request, identities.incoming]);
   assert.equal((await request({ operation: 'decide', id: identities.request, scope: 'once', action: 'allow' })).decision.state, 'allowed');
@@ -52,4 +57,18 @@ test('seed preserves the unrelated pending request and linked historical identit
   assert.equal(outcome.decision_record.id, identities.logFinal);
   assert.equal(pending.decision_record.request_id, outcome.decision_record.request_id);
   assert.equal(pending.decision_record.flow.local, outcome.decision_record.flow.local);
+});
+
+test('seed exposes exact build identity, an older page and a separately arriving new record', async t => {
+  const build = { source: 'a'.repeat(40), version: '1.2.3' };
+  const { request, seed } = await fixture(t, 'logPages', build);
+  assert.deepEqual((await request({ operation: 'list' })).build, { ...build, modified: false });
+  const page = async query => (await request({ operation: 'decision-log', decision_query: query })).decision_log;
+  const first = await page({});
+  assert(first.next_before);
+  assert(!first.records.some(record => record.id === 'inventory-log-older'));
+  assert.deepEqual((await page({ before: first.next_before })).records.map(record => record.id), ['inventory-log-older']);
+  assert.notEqual((await page({ limit: 1 })).records[0].id, 'inventory-log-new');
+  seed.setStage('log-new');
+  assert.equal((await page({ limit: 1 })).records[0].id, 'inventory-log-new');
 });

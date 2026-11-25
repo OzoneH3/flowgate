@@ -42,15 +42,8 @@
     },
     "quit-confirmation": {
       "locator": {
-        "names": [
-          "Quit FlowGate UI"
-        ],
-        "roles": [
-          "alert",
-          "dialog",
-          "frame"
-        ],
-        "ownProcess": true
+        "roles": ["alert", "alert-dialog", "dialog"],
+        "descendantNames": ["Keep running", "Quit FlowGate UI"]
       }
     },
     "authentication-terminal": {
@@ -121,12 +114,15 @@
     {"id": "menus", "seed": "empty", "states": [
       {"window": "main", "id": "file-menu", "steps": [{"press": "#fileMenu > summary"}], "ready": {"selector": "#fileMenu[open]"}, "expect": [{"selector": "#quitUiNote"}]},
       {"window": "main", "id": "settings-menu", "steps": [{"keys": ["Escape"]}, {"press": "#settingsMenu > summary"}], "ready": {"selector": "#settingsMenu[open]"}, "expect": [{"selector": "#displayUnits"}, {"selector": "#activitySource"}]},
+      {"window": "main", "id": "decision-timeout-clean", "ready": {"selector": "#decisionTimeoutSeconds", "value": "30", "enabled": true}, "expect": [{"selector": "#decisionTimeoutSave", "enabled": false}]},
+      {"window": "main", "id": "decision-timeout-valid-edit", "steps": [{"tabTo": "#decisionTimeoutSeconds"}, {"keys": ["ArrowUp"]}, {"tabTo": "#decisionTimeoutSave"}], "ready": {"selector": "#decisionTimeoutSave", "enabled": true}, "expect": [{"selector": "#decisionTimeoutSeconds", "value": "31"}]},
+      {"window": "main", "id": "decision-timeout-saved", "steps": [{"keys": ["Enter"]}], "ready": {"selector": "#decisionTimeoutStatus", "text": "Saved for new requests."}, "expect": [{"selector": "#decisionTimeoutSeconds", "value": "31"}, {"selector": "#decisionTimeoutSave", "enabled": false}]},
       {"window": "main", "id": "firewall-menu", "steps": [{"keys": ["Escape"]}, {"press": "#controlMenu > summary"}], "ready": {"selector": "#controlMenu[open]"}, "expect": [{"selector": "#protectionStart"}, {"selector": "#protectionStop"}, {"selector": "#evalProfile"}, {"selector": "#evalStatus"}]},
       {"window": "main", "id": "firewall-details", "steps": [{"press": {"selector": "#controlMenu details > summary", "text": "Protection details"}}], "ready": {"selector": "#protectionDesired"}, "expect": [{"selector": "#protectionChecks"}]},
       {"window": "main", "id": "udp-menu", "steps": [{"keys": ["Escape"]}, {"press": "#monitoringMenu > summary"}], "ready": {"selector": "#monitoringMenu[open]"}, "expect": [{"selector": "#extendedStatus"}, {"selector": "#extendedEnable"}, {"selector": "#extendedStop"}]},
       {"window": "main", "id": "window-menu", "steps": [{"keys": ["Escape"]}, {"press": ".toolbar-window-menu details > summary"}], "ready": {"selector": ".toolbar-window-menu details[open]"}},
-      {"window": "main", "id": "help-menu", "steps": [{"keys": ["Escape"]}, {"press": "#helpMenu > summary"}], "ready": {"selector": "#helpMenu[open]"}},
-      {"window": "about", "id": "package-and-daemon", "steps": [{"press": {"selector": "#helpMenu button", "text": "About FlowGate"}}], "ready": {"selector": "#aboutFlowGate[open]"}, "expect": [{"selector": "#aboutBuild"}, {"selector": "#aboutTitle"}]},
+      {"window": "main", "id": "help-menu", "steps": [{"keys": ["Escape"]}, {"tabTo": "#helpMenu > summary"}, {"keys": ["Enter"]}], "ready": {"selector": "#helpMenu[open]"}},
+      {"window": "about", "id": "package-and-daemon", "steps": [{"tabTo": {"selector": "#helpMenu button", "text": "About FlowGate"}}, {"keys": ["Enter"]}], "ready": {"selector": "#aboutFlowGate[open]"}, "expect": [{"selector": "#aboutBuild", "includesBuild": "guiVersion"}, {"selector": "#aboutBuild", "includesBuild": "guiRevision"}, {"selector": "#aboutBuild", "includesBuild": "daemonVersion"}, {"selector": "#aboutBuild", "includesBuild": "daemonRevision"}, {"selector": "#aboutTitle"}]},
       {"window": "icon-guide", "id": "legend", "steps": [{"press": {"selector": "#aboutFlowGate button", "text": "Close"}}, {"press": "#helpMenu > summary"}, {"press": {"selector": "#helpMenu button", "text": "Icons and symbols"}}], "ready": {"selector": "#iconGuide[open]"}, "expect": [{"selector": "#iconGuideTitle"}]}
     ]},
     {"id": "rules-edit", "seed": "populated", "states": [
@@ -147,7 +143,9 @@
       {"window": "endpoint-editor", "id": "endpoint-input-validation", "steps": [{"press": "#endpointPreview"}], "ready": {"selector": "#endpointEditor[open]"}, "expect": [{"selector": "#endpointSave", "enabled": false}, {"selector": "#endpointFeedback"}]},
       {"window": "endpoint-editor", "id": "endpoint-reviewed", "steps": [{"focus": "#endpointAction", "keys": ["Home", "ArrowDown"]}, {"focus": "#endpointAddress", "type": "198.51.100.2"}, {"focus": "#endpointPort", "type": "443"}, {"focus": "#endpointExpiry", "keys": ["End"]}, {"press": "#endpointPreview"}, {"wait": {"selector": "#endpointPreviewText", "contains": "All matching"}}, {"press": "#endpointAcknowledge", "key": " "}], "ready": {"selector": "#endpointSave", "enabled": true}, "expect": [{"selector": "#endpointPreviewText"}, {"selector": "#endpointPreviewUntil"}]},
       {"window": "zone-migration", "id": "legacy-zone-review", "steps": [{"press": "#endpointClose"}, {"press": "#ruleRows tr[data-id=\"inventory-rule-legacy\"]", "key": " "}, {"press": "#migrateZone"}], "ready": {"selector": "#zoneMigrationDialog[open]"}, "expect": [{"selector": "#zoneMigrationIdentity"}, {"selector": "#zoneMigrationAccept"}]},
-      {"window": "zone-migration", "id": "legacy-zone-preview", "ready": {"selector": "#zoneMigrationAccept", "enabled": true}, "expect": [{"selector": "#zoneMigrationDefinition"}, {"selector": "#zoneMigrationCoverage"}]}
+      {"window": "zone-migration", "id": "legacy-zone-preview", "ready": {"selector": "#zoneMigrationAccept", "enabled": true}, "expect": [{"selector": "#zoneMigrationDefinition"}, {"selector": "#zoneMigrationCoverage"}]},
+      {"window": "zone-migration", "id": "legacy-zone-result-unknown", "steps": [{"tabTo": "#zoneMigrationAccept"}, {"keys": [" "]}, {"tabTo": "#zoneMigrationConfirm"}, {"keys": ["Enter"]}], "ready": {"selector": "#zoneMigrationReconcile", "enabled": true}, "expect": [{"selector": "#zoneMigrationMessage", "contains": "Migration outcome unknown"}, {"selector": "#zoneMigrationConfirm", "enabled": false}]},
+      {"window": "zone-migration", "id": "legacy-zone-result-reconciled", "steps": [{"tabTo": "#zoneMigrationReconcile"}, {"keys": ["Enter"]}], "ready": {"selector": "#zoneMigrationMessage", "contains": "Exact migrated rule confirmed"}, "expect": [{"selector": "#zoneMigrationReconcile", "count": 0}]}
     ]},
     {"id": "rule-lost-reply", "seed": "populated", "states": [
       {"window": "rule-editor", "id": "rule-save-unresolved", "steps": [{"press": "#rulesTab"}, {"press": "#ruleRows tr[data-id=\"inventory-rule-enabled\"]"}, {"press": "#editEnabled", "key": " "}, {"wait": {"selector": "#saveRule", "enabled": true}}, {"press": "#saveRule"}], "ready": {"selector": "#editorFeedback", "contains": "Save outcome unresolved"}, "expect": [{"selector": "#saveRule", "enabled": false}], "seedStage": "lose-save"}
@@ -159,7 +157,14 @@
     {"id": "offline", "seed": "offline", "states": [
       {"window": "main", "id": "activity-disconnected", "ready": {"selector": "#activityTab[aria-selected=\"true\"]"}, "expect": [{"selector": "#footerSummary"}]},
       {"window": "main", "id": "decision-log-disconnected", "steps": [{"press": "#decisionLogTab"}], "ready": {"selector": "#logEmpty"}, "expect": [{"selector": "#logEmpty", "contains": "Disconnected"}]},
-      {"window": "about", "id": "about-daemon-unavailable", "steps": [{"press": "#helpMenu > summary"}, {"press": {"selector": "#helpMenu button", "text": "About FlowGate"}}], "ready": {"selector": "#aboutFlowGate[open]"}, "expect": [{"selector": "#aboutBuild"}]}
+      {"window": "about", "id": "about-daemon-unavailable", "steps": [{"press": "#helpMenu > summary"}, {"press": {"selector": "#helpMenu button", "text": "About FlowGate"}}], "ready": {"selector": "#aboutFlowGate[open]"}, "expect": [{"selector": "#aboutBuild", "includesBuild": "guiVersion"}, {"selector": "#aboutBuild", "includesBuild": "guiRevision"}, {"selector": "#aboutBuild", "contains": "Daemon build: unavailable"}]}
+    ]},
+    {"id": "decision-log-pages", "seed": "logPages", "states": [
+      {"window": "main", "id": "decision-log-older-available", "steps": [{"tabTo": "#decisionLogTab"}, {"keys": ["Enter"]}], "ready": {"selector": "#logOlder", "enabled": true}, "expect": [{"selector": "#logRows tr[data-id=\"inventory-log-older\"]", "count": 0}]},
+      {"window": "main", "id": "decision-log-older-loaded", "steps": [{"tabTo": "#logOlder"}, {"keys": ["Enter"]}], "ready": {"selector": "#logRows tr[data-id=\"inventory-log-older\"]"}, "expect": [{"selector": "#logRows tr[data-id=\"inventory-log-pending\"]"}, {"selector": "#logOlder", "count": 0}]},
+      {"window": "main", "id": "decision-log-waiting-for-new", "steps": [{"tabTo": "#logLive"}, {"keys": ["Enter"]}], "ready": {"selector": "#logLive", "contains": "Paused"}, "expect": [{"selector": "#logNew", "count": 0}]},
+      {"window": "main", "id": "decision-log-new-available", "seedStage": "log-new", "ready": {"selector": "#logNew", "text": "New records — latest", "enabled": true}, "expect": [{"selector": "#logRows tr[data-id=\"inventory-log-new\"]", "count": 0}]},
+      {"window": "main", "id": "decision-log-new-loaded", "steps": [{"tabTo": "#logNew"}, {"keys": ["Enter"]}], "ready": {"selector": "#logRows tr[data-id=\"inventory-log-new\"]"}, "expect": [{"selector": "#logNew", "count": 0}, {"selector": "#logLive", "contains": "Paused"}]}
     ]},
     {"id": "decision-log", "seed": "populated", "states": [
       {"window": "main", "id": "decision-log-populated", "steps": [{"press": "#decisionLogTab"}], "ready": {"selector": "#logRows tr[data-id=\"inventory-log-pending\"]"}, "expect": [{"selector": "#logRows tr[data-id=\"inventory-log-final\"]"}, {"selector": "#logDetails"}]},
@@ -222,14 +227,20 @@
       {"window": "main", "id": "udp-active-menu", "steps": [{"press": "#monitoringMenu > summary"}], "ready": {"selector": "#extendedStop", "enabled": true}, "expect": [{"selector": "#extendedStatus"}, {"selector": "#extendedEnable"}]},
       {"window": "confirmation", "id": "udp-stop-review", "steps": [{"press": "#extendedStop"}], "ready": {"selector": "#confirmation[open]"}, "expect": [{"selector": "#confirmTitle", "contains": "Stop UDP"}]}
     ]},
+    {"id": "evaluation-startup", "seed": "populated", "states": [
+      {"window": "main", "id": "daemon-evaluation-starting", "steps": [{"tabTo": "#controlMenu > summary"}, {"keys": ["Enter"]}, {"wait": {"selector": "#evalStart", "enabled": true}}, {"tabTo": "#evalStart"}, {"keys": ["Enter"]}, {"tabTo": "#confirmYes"}, {"keys": ["Enter"]}, {"wait": {"selector": "#evalStop", "enabled": true}}, {"tabTo": "#evalStop"}], "ready": {"selector": "#evaluationStatus", "contains": "Firewall · starting"}, "expect": [{"selector": "#evalStop", "text": "Stop firewall evaluation", "enabled": true}, {"selector": "#evalCancel", "count": 0}, {"selector": "#evalStart", "enabled": false}]},
+      {"window": "main", "id": "daemon-evaluation-startup-stopped", "steps": [{"keys": ["Enter"]}], "ready": {"selector": "#evaluationStatus", "contains": "firewall stopped"}, "expect": [{"selector": "#evalStop", "enabled": false}]},
+      {"window": "main", "id": "daemon-evaluation-readiness-details", "steps": [{"tabTo": "#evaluationChecks > summary"}, {"keys": ["Enter"]}], "ready": {"selector": "#evaluationCheckText", "contains": "Cleanup: confirmed"}, "expect": [{"selector": "#evaluationChecks[open]"}]},
+      {"window": "main", "id": "legacy-evaluation-startup-cancel", "reason": "Cancel authentication during startup only exists in checkout mode. The packaged application unconditionally routes evaluation through the daemon and hides this legacy button."}
+    ]},
     {"id": "requests", "seed": "requests", "states": [
       {"window": "main", "id": "pending-populated", "steps": [{"press": "#requestsTab"}], "ready": {"selector": "#requestRows tr[data-id=\"inventory-request-atlas\"]"}, "expect": [{"selector": "#requestRows tr[data-id=\"inventory-request-beacon\"]"}, {"selector": "#requestDetails"}]},
       {"window": "main", "id": "pending-selected", "steps": [{"press": "#requestRows tr[data-id=\"inventory-request-atlas\"]"}], "ready": {"selector": "#requestRows tr[data-id=\"inventory-request-atlas\"][aria-selected=\"true\"]"}, "expect": [{"selector": "#openSelectedPrompt"}, {"selector": "#requestDetails"}]},
       {"window": "main", "id": "pending-details-expanded", "steps": [{"press": "#detailsToggle"}], "ready": {"selector": "#requestMore"}, "expect": [{"selector": "#requestDetails"}]},
-      {"window": "permission", "id": "outgoing-tcp", "ready": {"selector": "#requestDetails[data-event-id=\"inventory-request-atlas\"]"}, "expect": [{"selector": "#rememberPanel"}, {"selector": "#allow"}, {"selector": "#block"}, {"selector": "#allowForAWhile"}, {"selector": "#blockForAWhile"}, {"selector": "#dismiss"}], "setup": {"window": "main", "steps": [{"press": "#openSelectedPrompt"}]}},
+      {"window": "permission", "id": "outgoing-tcp", "ready": {"selector": "#requestDetails[data-event-id=\"inventory-request-atlas\"]"}, "expect": [{"selector": "#rememberPanel"}, {"selector": "#allow"}, {"selector": "#block"}, {"selector": "#dismiss"}, {"selector": "#allowForAWhile", "enabled": true}, {"selector": "#blockForAWhile", "enabled": true}], "setup": {"window": "main", "steps": [{"press": "#openSelectedPrompt"}]}, "steps": [{"wait": {"selector": "#allowForAWhile", "enabled": true}}, {"tabTo": "#allowForAWhile"}]},
       {"window": "permission", "id": "outgoing-rule-protocol-checked", "steps": [{"wait": {"selector": "#rememberPanel input[data-field=\"protocol\"]", "enabled": true}}, {"press": "#rememberPanel input[data-field=\"protocol\"]", "key": " "}], "ready": {"selector": "#rememberPanel input[data-field=\"protocol\"]:checked"}, "expect": [{"selector": "#rememberPanel"}]},
       {"window": "permission", "id": "outgoing-request-details", "steps": [{"wait": {"selector": "#allowForAWhile", "enabled": true}}, {"press": "#detailsToggle"}], "ready": {"selector": "#requestMore"}, "expect": [{"selector": "#detailsBack"}]},
-      {"window": "permission", "id": "incoming-tcp", "ready": {"selector": "#requestDetails[data-event-id=\"inventory-request-beacon\"]"}, "expect": [{"selector": "#rememberPanel"}, {"selector": "#allowForAWhile"}, {"selector": "#blockForAWhile"}], "query": {"request": "inventory-request-beacon", "generation": "inventory-generation"}, "setup": {"window": "main", "steps": [{"press": "#requestRows tr[data-id=\"inventory-request-beacon\"]"}, {"press": "#openSelectedPrompt"}]}},
+      {"window": "permission", "id": "incoming-tcp", "ready": {"selector": "#requestDetails[data-event-id=\"inventory-request-beacon\"]"}, "expect": [{"selector": "#rememberPanel"}, {"selector": "#allowForAWhile", "enabled": true}, {"selector": "#blockForAWhile", "enabled": true}], "query": {"request": "inventory-request-beacon", "generation": "inventory-generation"}, "setup": {"window": "main", "steps": [{"press": "#requestRows tr[data-id=\"inventory-request-beacon\"]"}, {"press": "#openSelectedPrompt"}]}, "steps": [{"wait": {"selector": "#allowForAWhile", "enabled": true}}, {"tabTo": "#allowForAWhile"}]},
       {"window": "permission", "id": "incoming-temporary-duration", "steps": [{"wait": {"selector": "#forAWhileDuration", "enabled": true}}, {"focus": "#forAWhileDuration", "keys": ["End"]}], "ready": {"selector": "#forAWhileDuration", "value": "3600"}, "expect": [{"selector": "#allowForAWhile"}, {"selector": "#blockForAWhile"}], "query": {"request": "inventory-request-beacon", "generation": "inventory-generation"}},
       {"window": "main", "id": "pending-results", "ready": {"selector": "#permissionResultsView"}, "expect": [{"selector": "#permissionResultRows"}], "setup": {"window": "permission", "query": {"request": "inventory-request-beacon", "generation": "inventory-generation"}, "steps": [{"press": "#allowForAWhile"}]}}
     ]},
@@ -240,11 +251,11 @@
       {"window": "main", "id": "uncertain-decision-result", "steps": [{"press": "#requestsTab"}, {"wait": {"selector": "#requestRows tr[data-id=\"inventory-request-atlas\"]"}}, {"press": "#requestRows tr[data-id=\"inventory-request-atlas\"]"}, {"wait": {"selector": "#allow", "enabled": true}}, {"press": "#allow"}], "ready": {"selector": "#permissionResultRows", "contains": "Result unknown"}, "expect": [{"selector": "#permissionResultsView"}]}
     ]},
     {"id": "request-pair", "seed": "requestPair", "states": [
-      {"window": "permission", "id": "paired-local-request", "ready": {"selector": "#requestApplication"}, "expect": [{"selector": "#rememberPanel"}]},
+      {"window": "permission", "id": "paired-local-request", "ready": {"selector": "#requestApplication"}, "expect": [{"selector": "#rememberPanel"}, {"selector": "#allowForAWhile", "enabled": true}, {"selector": "#blockForAWhile", "enabled": true}], "steps": [{"wait": {"selector": "#allowForAWhile", "enabled": true}}, {"tabTo": "#allowForAWhile"}]},
       {"window": "permission", "id": "paired-local-request-details", "steps": [{"wait": {"selector": "#allowForAWhile", "enabled": true}}, {"press": "#detailsToggle"}], "ready": {"selector": "#requestMore", "contains": "Local connection"}}
     ]},
     {"id": "request-udp", "seed": "requestUdp", "states": [
-      {"window": "permission", "id": "outgoing-udp", "ready": {"selector": "#requestApplication"}, "expect": [{"selector": "#allowForAWhile"}, {"selector": "#blockForAWhile"}, {"selector": "#rememberPanel"}]}
+      {"window": "permission", "id": "outgoing-udp", "ready": {"selector": "#requestApplication"}, "expect": [{"selector": "#rememberPanel"}, {"selector": "#allowForAWhile", "enabled": true}, {"selector": "#blockForAWhile", "enabled": true}], "steps": [{"wait": {"selector": "#allowForAWhile", "enabled": true}}, {"tabTo": "#allowForAWhile"}]}
     ]},
     {"id": "request-expiry", "seed": "requestShort", "states": [
       {"window": "permission", "id": "expired-request", "steps": [{"wait": {"selector": "#allowForAWhile", "enabled": true}}], "ready": {"selector": "#allowForAWhile", "enabled": false}, "expect": [{"selector": "#blockForAWhile", "enabled": false}], "timeout": 14000},
@@ -262,8 +273,8 @@
       {"window": "quit-confirmation", "id": "tray-quit-review", "steps": [{"focus": {"names": ["FlowGate · [0-9]+ pending · .*"], "roles": ["button", "push-button", "menu-item", "toggle-button", "icon", "panel"]}, "keys": ["Menu"]}, {"focus": {"names": ["Quit FlowGate UI"], "roles": ["menu-item"]}, "keys": ["Return"]}], "expectText": ["Keep running", "Quit FlowGate UI"]}
     ]},
     {"id": "native-quit", "seed": "requests", "states": [
-      {"window": "quit-confirmation", "id": "pending-quit-review", "setup": {"window": "main", "steps": [{"wait": {"selector": "#pendingCount", "text": "2"}}, {"press": "#fileMenu > summary"}, {"press": {"selector": "#fileMenu button", "text": "Quit FlowGate UI"}}]}, "expectText": ["Keep running", "Quit FlowGate UI"]},
-      {"window": "authentication-terminal", "id": "legacy-authentication", "reason": "A system-owned legacy authorization terminal requires an external policy/authorization fixture."}
+      {"window": "quit-confirmation", "id": "pending-quit-review", "setup": {"window": "main", "steps": [{"wait": {"selector": "#pendingCount", "text": "2"}}, {"tabTo": "#fileMenu > summary"}, {"keys": ["Enter"]}, {"tabTo": {"selector": "#fileMenu button", "text": "Quit FlowGate UI"}}, {"keys": ["Enter"]}]}, "expectText": ["Keep running", "Quit FlowGate UI"]},
+      {"window": "authentication-terminal", "id": "legacy-authentication", "reason": "External sudo authorization is a checkout-mode evaluation path. Installed FlowGate routes evaluation through the daemon and does not launch this terminal."}
     ]}
   ]
 }
