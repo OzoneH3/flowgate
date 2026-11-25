@@ -327,6 +327,7 @@ try {
   await wait(() => page.locator('#ruleEditor').isVisible());
   assert.match(await page.locator('#editorApplication').innerText(), /This process/);
   await page.selectOption('#createScope', 'custom');
+  await page.uncheck('#anyAddress');
   await page.fill('#editAddress', '2001:db8::123');
   await page.locator('#editAddress').evaluate((e) => e.setSelectionRange(2, 6));
   await page.waitForTimeout(1700);

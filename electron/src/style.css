@@ -550,7 +550,8 @@ main aside {
 }
 #ruleEditor :is(button, input, select, summary):focus-visible { outline: 2px solid var(--fg-tab); }
 #ruleEditor button:hover:enabled { border-color: var(--fg-tab); }
-#ruleEditor #saveRule:enabled { background: var(--fg-tab); color: var(--desktop-chrome, #171717); }
+#ruleEditor #saveRule:enabled { background: var(--fg-tab); color: var(--desktop-chrome, #171717); border-color: var(--fg-allow); }
+#ruleEditor #saveRule:disabled { border-color: var(--fg-block); }
 #ruleEditor input[type='checkbox'] { accent-color: var(--fg-tab); }
 .editor-network { display: flex; flex-wrap: wrap; gap: 6px; }
 .editor-network select { flex: 1; }

@@ -50,6 +50,17 @@ export interface EditorOptions {
   futureOnly?: boolean;
 }
 let previewNeedsRefresh = false;
+let previewTimer: ReturnType<typeof setTimeout> | undefined;
+let previewing = false;
+let previewQueued = false;
+function queuePreview() {
+  clearTimeout(previewTimer);
+  previewQueued = false;
+  previewTimer = setTimeout(() => {
+    previewTimer = undefined;
+    void previewRule();
+  }, 250);
+}
 let futureOnlyDraft = false;
 const resultMessage = (result: { phase: string; message: string }) => result.phase === 'acknowledged' && futureOnlyDraft
   ? result.message + ' Rule saved for future matching connections. The original connection was not allowed.'
@@ -122,7 +133,9 @@ function invalidate() {
   receipt = '';
   previewExpires = 0;
   $('rulePreview').textContent = 'Preview required before saving.';
-  $('scopeSummary').textContent = 'Choose scope, then review the backend preview.';
+  $('scopeSummary').textContent = draft?.observed && !$<HTMLSelectElement>('createScope').value
+    ? 'Choose a scope to preview it.'
+    : 'Preview pending.';
   $<HTMLButtonElement>('saveRule').disabled = true;
 }
 function showRuleEditor() {
@@ -135,6 +148,9 @@ function hideRuleEditor() {
   const panel = $<HTMLDialogElement>('ruleEditor');
   panel.close();
   panel.hidden = true;
+  clearTimeout(previewTimer);
+  previewTimer = undefined;
+  previewQueued = false;
 }
 function showRuleExpiry(rule: Rule, process: boolean) {
   const expires = rule.expires.startsWith('0001-') ? '' : new Date(rule.expires).toLocaleString();
@@ -226,7 +242,6 @@ export async function openRule(source: RuleSource, options: EditorOptions = {}) 
     $<HTMLInputElement>('editPriority').value = String(r.priority);
     $<HTMLInputElement>('editEnabled').checked = !r.disabled;
     $<HTMLInputElement>('editShareRoot').checked = r.share_with_root === true;
-    $<HTMLInputElement>('editShareRoot').disabled = !state?.control.capabilities?.includes('explicit-root-sharing-v1') || state.control.permissions?.role !== 'administrator' || !!r.filter.process || !!r.filter.all_programs || !!r.preset || !!source.zone;
 
     $<HTMLSelectElement>('editExpiry').value = 'preserve';
     showRuleExpiry(r, !!r.filter.process || draft.targetScope === 'process');
@@ -277,14 +292,16 @@ export async function openRule(source: RuleSource, options: EditorOptions = {}) 
       !askWritable && r.action === 'ask'
         ? 'Ask rule is read-only: backend update required (stored-ask-v1). It is never re-saved as Allow/Block.'
         : draft.observed
-          ? 'Observed identity; Preview must verify the live process. Choose explicit scope before reviewing.'
+          ? 'The preview verifies the live process.'
           : 'Fields are validated by Go. Existing identity and absolute expiry are preserved.',
     );
     if (options.futureOnly) {
       $('editorMode').textContent = 'Future application rule';
       $('scopeSummary').textContent = 'Application · all instances · future matching connections only. The ended connection is not approved. Preview independently verifies the current application identity.';
-      editorMessage('Separate stored-rule workflow. No decision is sent for the original connection. Review the explicit scope and lifetime, then preview/save.');
+      editorMessage('The original connection is unaffected. Review the scope and lifetime before saving.');
     }
+    updateButtons();
+    queuePreview();
     $('editAction').focus();
   } catch (e) {
     status(String(e));
@@ -293,6 +310,7 @@ export async function openRule(source: RuleSource, options: EditorOptions = {}) 
 export function resumeRuleEditor() {
   if (!draft) return false;
   showRuleEditor();
+  if (!receipt && !previewNeedsRefresh) queuePreview();
   $('editAction').focus();
   return true;
 }
@@ -342,23 +360,17 @@ export function setupRuleEditor(resumeAfter: Element) {
     minimize();
   });
   $('minimizeEditor').onclick = minimize;
-  panel.addEventListener('input', () => {
-    if (!unresolved) {
-      editorChanged = true;
-      invalidate();
-      updateButtons();
-    }
-  });
-  $('createScope').onchange = () => {
-    if ($<HTMLSelectElement>('createScope').value === 'application') {
+  panel.addEventListener('input', (event) => {
+    if (!draft || unresolved || saving) return;
+    if (event.target === $('createScope') && $<HTMLSelectElement>('createScope').value === 'application') {
       for (const id of ['anyAddress', 'anyLocal', 'anyRemote'])
         $<HTMLInputElement>(id).checked = true;
     }
-    if ($<HTMLSelectElement>('createScope').value === 'custom')
-      $<HTMLInputElement>('anyAddress').checked = false;
+    editorChanged = true;
     invalidate();
     updateButtons();
-  };
+    queuePreview();
+  });
   $('closeEditor').onclick = () => {
     if (saving) return;
     const close = async () => {
@@ -391,54 +403,14 @@ export function setupRuleEditor(resumeAfter: Element) {
       showRuleExpiry(draft.rule, !!draft.rule.filter.process || draft.targetScope === 'process');
       invalidate();
       editorMessage(
-        'Current version loaded; entered fields retained. Review expiry and preview again.',
+        'Current version loaded; entered fields retained. Review the updated preview.',
       );
+      queuePreview();
     } catch (e) {
       editorMessage(String(e));
     }
   };
-  $('previewRule').onclick = async () => {
-    if (!draft || saving || unresolved) return;
-    invalidate();
-    try {
-      const revision = editRevision;
-      const r = await window.flowgate.rulePreview(editValue());
-      if (revision !== editRevision || !draft || $('ruleEditor').hidden) return;
-      receipt = r.receipt;
-      previewNetworkRevision = state?.control.networkZones?.revision || '';
-      previewNeedsRefresh = false;
-      $('scopeSummary').textContent = r.verifiedRule
-        ? reviewedScope(r.verifiedRule)
-        : 'Backend preview ready. Review full scope below.';
-      if (!r.verifiedRule) $<HTMLDetailsElement>('backendScope').open = true;
-      $('rulePreview').textContent = r.preview;
-      previewExpires = r.expiresAt ? Date.parse(r.expiresAt) : 0;
-      if (r.verifiedRule) {
-        const rule = r.verifiedRule;
-        $('editorApplication').textContent =
-          `Verified · ${rule.filter.all_programs ? 'All programs · ' + (rule.filter.all_uids ? 'all users' : accountLabel(rule.filter.uid)) : targetLabel(rule.filter.process) + ' · ' + rule.executable} · ${zoneLabel(rule.filter.network_zone)} · ${rule.filter.direction}`;
-        $('editorIdentity').textContent =
-          `${rule.executable}\n${rule.filter.application} · ${revisionScope(state?.control.rules?.find((x) => x.id === rule.id) || rule)}\n${rule.filter.direction} · ${accountLabel(rule.filter.uid)}${r.processID ? ' · observed process ' + r.processID : ''}`;
-        $('absoluteExpiry').textContent = rule.expires.startsWith('0001-')
-          ? rule.filter.process
-            ? 'This daemon session · ends on process exit.'
-            : 'Persistent: no expiry.'
-          : 'Expires: ' + new Date(rule.expires).toLocaleString();
-      }
-      $<HTMLButtonElement>('saveRule').disabled = !writable();
-      editorMessage('Review this scope before Save. Saving does not start enforcement.');
-      updateButtons();
-    } catch (e) {
-      editorMessage(
-        /stale_target|unsupported_target|unsupported_process|target_inactive|immutable_target/.test(
-          String(e),
-        )
-          ? String(e) +
-              ' Close this editor and select a live supported application again; your draft has not been rebound.'
-          : String(e),
-      );
-    }
-  };
+  $('previewRule').onclick = () => void previewRule();
   $('saveRule').onclick = async () => {
     if (!receipt || saving || unresolved) return;
     const r = receipt;
@@ -502,6 +474,73 @@ export function setupRuleEditor(resumeAfter: Element) {
     }
   };
 }
+async function previewRule() {
+  if (!draft || $('ruleEditor').hidden || $<HTMLButtonElement>('previewRule').disabled) return;
+  clearTimeout(previewTimer);
+  previewTimer = undefined;
+  if (previewing) {
+    previewQueued = true;
+    return;
+  }
+  invalidate();
+  const revision = editRevision;
+  const currentDraft = draft;
+  const networkRevision = state?.control.networkZones?.revision || '';
+  const current = () => revision === editRevision && draft === currentDraft && !$('ruleEditor').hidden;
+  previewing = true;
+  try {
+    const value = editValue();
+    editorMessage('Checking scope…');
+    const r = await window.flowgate.rulePreview(value);
+    if (!current()) return;
+    if (value.network_zone && networkRevision !== (state?.control.networkZones?.revision || ''))
+      throw Error('Network classification changed. Refresh the preview.');
+    receipt = r.receipt;
+    previewNetworkRevision = networkRevision;
+    previewNeedsRefresh = false;
+    const summary = r.verifiedRule
+      ? reviewedScope(r.verifiedRule)
+      : 'Backend preview ready. Review full scope below.';
+    $('scopeSummary').textContent = futureOnlyDraft
+      ? 'The ended connection is not approved. ' + summary
+      : summary;
+    if (!r.verifiedRule) $<HTMLDetailsElement>('backendScope').open = true;
+    $('rulePreview').textContent = r.preview;
+    previewExpires = r.expiresAt ? Date.parse(r.expiresAt) : 0;
+    if (r.verifiedRule) {
+      const rule = r.verifiedRule;
+      $('editorApplication').textContent =
+        `Verified · ${rule.filter.all_programs ? 'All programs · ' + (rule.filter.all_uids ? 'all users' : accountLabel(rule.filter.uid)) : targetLabel(rule.filter.process) + ' · ' + rule.executable} · ${zoneLabel(rule.filter.network_zone)} · ${rule.filter.direction}`;
+      $('editorIdentity').textContent =
+        `${rule.executable}\n${rule.filter.application} · ${revisionScope(state?.control.rules?.find((x) => x.id === rule.id) || rule)}\n${rule.filter.direction} · ${accountLabel(rule.filter.uid)}${r.processID ? ' · observed process ' + r.processID : ''}`;
+      $('absoluteExpiry').textContent = rule.expires.startsWith('0001-')
+        ? rule.filter.process
+          ? 'This daemon session · ends on process exit.'
+          : 'Persistent: no expiry.'
+        : 'Expires: ' + new Date(rule.expires).toLocaleString();
+    }
+    $<HTMLButtonElement>('saveRule').disabled = !writable();
+    editorMessage('Review this scope before Save. Saving does not start enforcement.');
+    updateButtons();
+  } catch (e) {
+    if (!current()) return;
+    editorMessage(
+      /stale_target|unsupported_target|unsupported_process|target_inactive|immutable_target/.test(
+        String(e),
+      )
+        ? String(e) +
+            ' Close this editor and select a live supported application again; your draft has not been rebound.'
+        : String(e),
+    );
+  } finally {
+    previewing = false;
+    if (previewQueued) {
+      previewQueued = false;
+      void previewRule();
+    }
+  }
+}
+
 export function setRuleListReturn(action?: () => void) {
   const button = $<HTMLButtonElement>('ruleListReturn');
   button.hidden = !action;
@@ -767,6 +806,12 @@ function updateButtons() {
     '#ruleEditor input,#ruleEditor select',
   ))
     input.disabled = saving || unresolved;
+  const rule = draft?.rule;
+  $<HTMLInputElement>('editShareRoot').disabled ||= !rule ||
+    !state?.control.capabilities?.includes('explicit-root-sharing-v1') ||
+    state.control.permissions?.role !== 'administrator' ||
+    !!rule.filter.process || draft?.targetScope === 'process' ||
+    !!rule.filter.all_programs || !!rule.preset || !!editorSource.zone;
   for (const [toggle, field] of [
     ['anyAddress', 'editAddress'],
     ['anyLocal', 'editLocal'],

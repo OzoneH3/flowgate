@@ -33,6 +33,8 @@ const prefs = path.join(root, 'build/desktop-session/electron-preferences.json')
 let app,
   proxy,
   drop = false,
+  holdPreview = false,
+  releasePreview,
   saves = 0;
 async function launch(readOnly = false) {
   return _electron.launch({
@@ -66,6 +68,8 @@ try {
         isSave = req.operation === 'observed-rule-save';
       if (isSave) saves++;
       const shouldDrop = drop && isSave;
+      const shouldHold = holdPreview && req.operation === 'observed-rule-preview';
+      if (shouldHold) holdPreview = false;
       const upstream = net.createConnection(path.join(run, 'api/s'));
       upstream.on('connect', () => upstream.write(q));
       let reply = '';
@@ -75,6 +79,8 @@ try {
           if (shouldDrop) {
             drop = false;
             client.destroy();
+          } else if (shouldHold) {
+            releasePreview = () => client.end(reply);
           } else client.end(reply);
           upstream.destroy();
         }
@@ -108,7 +114,6 @@ try {
     await p.selectOption('#createScope', 'application');
   }
   async function preview() {
-    await p.click('#previewRule');
     await wait(() => p.locator('#saveRule').isEnabled());
     assert.match(await p.locator('#editorApplication').innerText(), /Verified/);
   }
@@ -123,10 +128,16 @@ try {
   assert(await p.locator('#editAddress').isDisabled());
   assert(await p.locator('#anyAddress').isChecked());
   await p.screenshot({ path: path.join(run, 'first-rule-preview.png') });
+  holdPreview = true;
   await p.selectOption('#editAction', 'block');
+  await wait(() => releasePreview);
   assert(await p.locator('#saveRule').isDisabled());
   await p.selectOption('#editAction', 'allow');
+  assert(await p.locator('#saveRule').isDisabled());
+  releasePreview();
   await preview();
+  assert.match(await p.locator('#scopeSummary').innerText(), /Allow incoming TCP connections/);
+  assert.equal(saves, 0, 'automatic preview never submits a save');
   await p.locator('#editAction').focus();
   await p.waitForTimeout(1600);
   assert.equal(await p.evaluate(() => document.activeElement.id), 'editAction');
@@ -141,6 +152,7 @@ try {
   assert.equal(await p.locator('#createScope').inputValue(), 'application');
   assert.equal(await p.locator('#previewRule').innerText(), 'Refresh preview');
   assert.match(await p.locator('#previewValidity').innerText(), /draft kept/);
+  await p.click('#previewRule');
   await preview();
   await p.click('#saveRule');
   await wait(async () => (await snapshot()).control.rules.length === 1);
@@ -163,7 +175,6 @@ try {
   await p.click('#editRule');
   await wait(() => p.locator('#ruleEditor').isVisible());
   await p.selectOption('#editAction', 'block');
-  await p.click('#previewRule');
   await wait(() => p.locator('#saveRule').isEnabled());
   await p.click('#saveRule');
   await wait(
@@ -175,6 +186,7 @@ try {
   assert(edited.version > incoming.version);
   await open('outgoing');
   await p.selectOption('#createScope', 'custom');
+  await p.uncheck('#anyAddress');
   await p.fill('#editAddress', '127.0.0.1');
   await p.uncheck('#anyRemote');
   await p.fill('#editRemote', '443');
@@ -204,6 +216,29 @@ try {
   assert.equal(saves, count + 1);
   assert.equal((await snapshot()).control.rules.length, 2);
   await p.screenshot({ path: path.join(run, 'created-rules.png') });
+  await p.locator('#rows tr[data-id^="app:"]').first().locator('.name').click();
+  await p.locator('[data-focus="add-rule"]').click();
+  await p.locator('#ruleEditor').waitFor();
+  await p.selectOption('#createScope', 'custom');
+  assert(await p.locator('#anyAddress').isChecked(), 'custom scope preserves Any address for port-only rules');
+  await wait(async () => /Specify an address or port/.test(await p.locator('#editorFeedback').innerText()));
+  assert(await p.locator('#saveRule').isDisabled(), 'custom scope still needs an endpoint constraint');
+  const saveBorder = () => p.locator('#saveRule').evaluate((button) => {
+    const [red, green] = getComputedStyle(button).borderTopColor.match(/\d+/g).map(Number);
+    return green > red ? 'green' : 'red';
+  });
+  assert.equal(await saveBorder(), 'red');
+  await p.uncheck('#anyLocal');
+  await p.fill('#editLocal', '5');
+  await preview();
+  assert.equal(await saveBorder(), 'green');
+  assert.match(await p.locator('#scopeSummary').innerText(), /any remote address.*local port 5/);
+  await p.click('#saveRule');
+  await wait(() => p.locator('#ruleEditor').isHidden());
+  const portOnly = (await snapshot()).control.rules.find((r) => r.filter.local_port === 5);
+  assert.equal(portOnly?.filter.direction, 'incoming');
+  assert.equal(portOnly.filter.remote_address, '*');
+  assert.equal(portOnly.filter.remote_port || 0, 0);
   await app.evaluate(({ app }) => app.exit());
   await app.close();
   app = await launch(true);
