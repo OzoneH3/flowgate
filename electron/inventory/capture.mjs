@@ -142,8 +142,20 @@ function startApplication(directory, control, observer) {
 function locate(step) {
   return typeof step === 'string' ? { selector: step } : step;
 }
+async function waitForChart(page) {
+  await until(() => page.run(() => {
+    const chart = document.querySelector('#trafficGraph');
+    if (!chart?.checkVisibility({ checkVisibilityCSS: true })) return false;
+    return ['download', 'upload'].every(series =>
+      chart.querySelector('#graphValues button[data-series="' + series + '"]')
+        ?.checkVisibility({ checkVisibilityCSS: true })) &&
+      Boolean(chart.querySelector('.graph-selection')?.textContent.trim());
+  }), 'Activity chart has not painted its series and selection label', 8500);
+}
+
 async function perform(page, steps = []) {
   for (const step of steps) {
+    if (step.chartReady) await waitForChart(page);
     if (step.wait) {
       await until(() => page.verify(step.wait), 'State not reached ' + JSON.stringify(step.wait), step.timeout);
       continue;
@@ -236,6 +248,7 @@ async function captureState(endpoint, pid, state) {
           }
         }
       }
+      if (state.chartReady) await waitForChart(page);
       const root = state.root ?? window.root;
       if (window.document === 'index.html' && root === 'body' &&
           await page.verify({ selector: '#rows tr[data-id="overview"]' })) {

@@ -185,35 +185,52 @@ class Page {
   async capture(root) {
     await this.assertIdentity();
     if (!await this.verify({ selector: root })) throw Error('Capture root is not displayed: ' + root);
-    await this.cdp.send('DOM.enable');
-    const { root: document } = await this.cdp.send('DOM.getDocument', { depth: 0 });
-    const { nodeIds } = await this.cdp.send('DOM.querySelectorAll', { nodeId: document.nodeId, selector: root });
-    if (nodeIds.length !== 1) throw Error('Capture root must identify one surface: ' + root);
-    const projections = await this.run(projectDOM, [root]);
-    const { nodes } = await this.cdp.send('Accessibility.getFullAXTree');
-    const names = new Map(nodes.filter(node => !node.ignored && node.backendDOMNodeId)
-      .map(node => [node.backendDOMNodeId, { name: node.name?.value, role: node.role?.value }]));
-    const { nodes: elements } = await this.cdp.send('DOM.describeNode', { nodeId: nodeIds[0], depth: -1, pierce: false })
-      .then(({ node }) => ({ nodes: flattened(node) }));
-    const controls = projections.map(({ ordinal, ...control }) => {
-      const ax = names.get(elements[ordinal]?.backendNodeId);
-      if (ax?.name && ax.name !== control.text) control.accessibleName = ax.name;
-      if (ax?.role && !['generic', 'none', 'presentation'].includes(ax.role)) control.role = ax.role;
-      return control;
-    });
-    return controls;
+    return readProjectedControls(this.cdp, root);
   }
   close() { this.cdp.close(); }
 }
 
-function flattened(node) {
-  const result = [];
-  function visit(n) {
-    if (n.nodeType === 1) result.push(n);
-    for (const child of n.children ?? []) visit(child);
+export async function readProjectedControls(cdp, selector) {
+  // Capture the elements and their displayed state in one renderer evaluation.
+  // An ordinal in a separately read DOM tree can point to a different element
+  // when a sibling is inserted or removed between protocol calls.
+  const objectGroup = 'flowgate-control-capture';
+  const { result, exceptionDetails } = await cdp.send('Runtime.evaluate', {
+    expression: '(' + projectDOM.toString() + ')(' + JSON.stringify(selector) + ')',
+    objectGroup,
+  });
+  try {
+    if (exceptionDetails || !result.objectId) throw Error('Could not project ' + selector);
+    const { result: properties } = await cdp.send('Runtime.getProperties', {
+      objectId: result.objectId, ownProperties: true,
+    });
+    const property = name => properties.find(entry => entry.name === name)?.value?.objectId;
+    const { result: projected } = await cdp.send('Runtime.callFunctionOn', {
+      objectId: property('controls'), functionDeclaration: 'function () { return this; }', returnByValue: true,
+    });
+    const { result: references } = await cdp.send('Runtime.getProperties', {
+      objectId: property('elements'), ownProperties: true,
+    });
+    const handles = new Map(references.map(ref => [ref.name, ref.value?.objectId]));
+    const controls = projected.value;
+    const backendIds = await Promise.all(controls.map(async (_, index) => {
+      const objectId = handles.get(String(index));
+      if (!objectId) throw Error('Projected DOM control has no element reference');
+      const { node } = await cdp.send('DOM.describeNode', { objectId });
+      return node.backendNodeId;
+    }));
+    const { nodes } = await cdp.send('Accessibility.getFullAXTree');
+    const names = new Map(nodes.filter(node => !node.ignored && node.backendDOMNodeId)
+      .map(node => [node.backendDOMNodeId, { name: node.name?.value, role: node.role?.value }]));
+    return controls.map((control, index) => {
+      const ax = names.get(backendIds[index]);
+      if (ax?.name && ax.name !== control.text) control.accessibleName = ax.name;
+      if (ax?.role && !['generic', 'none', 'presentation'].includes(ax.role)) control.role = ax.role;
+      return control;
+    });
+  } finally {
+    await cdp.send('Runtime.releaseObjectGroup', { objectGroup });
   }
-  visit(node);
-  return result;
 }
 
 function projectDOM(selector) {
@@ -236,7 +253,7 @@ function projectDOM(selector) {
   const ids = new Set();
   const mapped = new Map();
   const counters = new Map();
-  const controls = [];
+  const controls = [], elements = [];
   const visible = e => {
     if (e.closest('[hidden],script,style,template,option,svg')) return false;
     for (let p = e; p; p = p.parentElement) {
@@ -249,7 +266,7 @@ function projectDOM(selector) {
     }
     return true;
   };
-  for (const [ordinal, e] of all.entries()) {
+  for (const e of all) {
     if (!visible(e)) continue;
     const tag = e.localName;
     const native = supported.has(tag);
@@ -261,7 +278,7 @@ function projectDOM(selector) {
     let parent = e.parentElement;
     while (parent && !mapped.has(parent)) parent = parent.parentElement;
     const parentId = mapped.get(parent) ?? null;
-    const stable = e.id || e.dataset.id || e.dataset.field || e.dataset.pane || e.dataset.undock || e.dataset.configuredLimit || e.dataset.focus || e.dataset.direction || e.dataset.limitDirection;
+    const stable = e.id || e.dataset.id || e.dataset.field || e.dataset.pane || e.dataset.undock || e.dataset.configuredLimit || e.dataset.focus || e.dataset.direction || e.dataset.limitDirection || e.dataset.series;
     const slot = parentId ? parentId + '/' : '';
     const role = explicit || roleFor[tag] || (/^h[1-6]$/.test(tag) ? 'heading' : native ? tag : direct ? 'text' : 'group');
     const basis = e.id || (stable ? slot + tag + ':' + encodeURIComponent(stable) : slot + role);
@@ -277,7 +294,7 @@ function projectDOM(selector) {
           : panel ? direct
             : [...e.children].some(child => child.matches('button,input,select,a,summary')) ? direct
               : clean(e.innerText ?? direct);
-    const control = { ordinal, id, parentId, role, text };
+    const control = { id, parentId, role, text };
     if (['select', 'input', 'textarea', 'output', 'meter', 'progress'].includes(tag) &&
         !['checkbox', 'radio'].includes(e.type)) control.value = e.type === 'password' ? null : e.value;
     if (e.type === 'password') control.text = '';
@@ -291,8 +308,9 @@ function projectDOM(selector) {
     if (tag === 'details') control.expanded = e.open;
     if (tag === 'summary' && e.parentElement.localName === 'details') control.expanded = e.parentElement.open;
     controls.push(control);
+    elements.push(e);
   }
-  return controls;
+  return { controls, elements };
 }
 
 const desktopAccountFields = new Map([

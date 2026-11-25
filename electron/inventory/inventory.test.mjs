@@ -3,7 +3,7 @@ import { readFile, mkdtemp, rm } from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
 import test from 'node:test';
-import { bindDesktopAccount, matchesWindow } from './browser.mjs';
+import { bindDesktopAccount, matchesWindow, readProjectedControls } from './browser.mjs';
 import { identities, recipeNames, startSeed } from './seeds.mjs';
 
 const expected = JSON.parse(await readFile(new URL('./expected.json', import.meta.url), 'utf8'));
@@ -101,4 +101,40 @@ test('binds all seven overview fields to the measured account only', () => {
   const wrongControl = controls(guest);
   wrongControl[0].id = 'other';
   assert.throws(() => bindDesktopAccount(wrongControl, guest, true), /all seven/);
+});
+
+test('a changed DOM order cannot assign another element’s accessible name or role', async () => {
+  const calls = [];
+  const ref = (name, objectId) => ({ name, value: { objectId } });
+  const send = async (method, params) => {
+    calls.push(method);
+    switch (method) {
+      case 'Runtime.evaluate': return { result: { objectId: 'snapshot' } };
+      case 'Runtime.getProperties':
+        return { result: params.objectId === 'snapshot'
+          ? [ref('controls', 'controls'), ref('elements', 'elements')]
+          : [ref('1', 'searchNode'), ref('0', 'pendingNode'), ref('2', 'expiredNode')] };
+      case 'Runtime.callFunctionOn': return { result: { value: [
+        { id: 'requestsTab', role: 'button', text: 'Pending requests 0', enabled: true },
+        { id: 'search', role: 'textbox', text: '' },
+        { id: 'allow', role: 'button', text: 'Allow always', enabled: false },
+      ] } };
+      case 'DOM.describeNode': return { node: {
+        backendNodeId: { pendingNode: 32, searchNode: 14, expiredNode: 10 }[params.objectId],
+      } };
+      case 'Accessibility.getFullAXTree': return { nodes: [
+        { backendDOMNodeId: 14, role: { value: 'searchbox' }, name: { value: 'Search Activity' } },
+        { backendDOMNodeId: 400, role: { value: 'checkbox' }, name: { value: 'Other control' } },
+        { backendDOMNodeId: 32, role: { value: 'button' }, name: { value: 'Pending requests 0' } },
+      ] };
+      case 'Runtime.releaseObjectGroup': return {};
+      default: throw Error('Unexpected protocol call ' + method);
+    }
+  };
+  assert.deepEqual(await readProjectedControls({ send }, 'body'), [
+    { id: 'requestsTab', role: 'button', text: 'Pending requests 0', enabled: true },
+    { id: 'search', role: 'searchbox', text: '', accessibleName: 'Search Activity' },
+    { id: 'allow', role: 'button', text: 'Allow always', enabled: false },
+  ]);
+  assert.equal(calls.at(-1), 'Runtime.releaseObjectGroup');
 });
