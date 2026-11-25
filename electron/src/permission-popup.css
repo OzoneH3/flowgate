@@ -80,6 +80,7 @@ footer {
 }
 #promptEndpoint { min-width: 0; overflow-wrap: anywhere; color: var(--muted); }
 #promptPeerAddress { font: 600 13px ui-monospace, monospace; color: var(--text); }
+#promptCountdown { color: var(--muted); }
 #dismiss { flex: none; margin-left: auto; font-size: 13px; }
 #promptQueueControls { grid-area: queue; display: grid; align-content: start; gap: 6px; margin-left: auto; min-width: 0; }
 #promptQueueControls #dismiss { margin: 0; }

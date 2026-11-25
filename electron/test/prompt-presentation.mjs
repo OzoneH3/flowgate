@@ -316,9 +316,10 @@ try {
       await prompt.selectOption('#rememberDuration', value);
     await sleep(700);
     assert.match(
-      await prompt.locator('#rememberSummary').innerText(),
+      await prompt.locator('#requestMore #rememberSummary').textContent(),
       /SYNTHETIC validation error/,
     );
+    assert(await prompt.locator('#rememberSummary').isHidden());
     await prompt.locator('#rememberDuration').focus();
     queuedExpiry = new Date(Date.now() + 700).toISOString();
     ids.push(...Array.from({ length: 20 }, (_, i) => 'repeat' + i), 'expires', 'second');

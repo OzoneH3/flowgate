@@ -418,7 +418,7 @@ test('no Save application rule UI remains in the renderer or style', () => {
   assert.ok(!/\.request-rule\b/.test(css));
 });
 
-test('permission card keeps countdown and ended status in popup Details', () => {
+test('permission card keeps ended status in Details and the timer in the footer', () => {
   const pd = require('../dist/test/prompt-decision.cjs');
   assert.equal(pd.endedStatusLine(pd.ENDED_PROCESS, 'x'), pd.ENDED_PROCESS);
   assert.equal(pd.endedStatusLine('', pd.ENDED_RULE_RESULT), pd.ENDED_RULE_RESULT);

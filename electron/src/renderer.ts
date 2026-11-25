@@ -2295,6 +2295,10 @@ function renderRequests() {
     }
   }
   const e = currentEvent();
+  // Native dismissal may finish after the backend publishes a settled list.
+  // Keep the presented card intact until it is hidden or retargeted.
+  if (promptID && $('requestDetails').dataset.eventId === promptID &&
+      (!e || e.state === 'allowed' || e.state === 'blocked')) return;
   if (keepPromptPresentation(e) && $('requestDetails').dataset.eventId === e?.id) {
     updateDecisions();
     return;
@@ -2759,7 +2763,7 @@ function updateDecisions() {
   const unverifiableHint = promptID
     ? IDENTITY_UNVERIFIABLE_TEXT.replace('Choose Remember', 'Use Allow always or Deny always')
     : IDENTITY_UNVERIFIABLE_TEXT;
-  const onceCopy = promptID && e?.state === 'awaiting-decision' && !ended && !e.attempt &&
+  const onceCopy = promptID && e?.state === 'awaiting-decision' && !ended &&
     popupTemporaryOnce ? compactUDPOnce(e) : undefined;
   const onceNote = $('udpOnceNote');
   if (onceNote && !keepPresentation) {
@@ -2793,9 +2797,10 @@ function updateDecisions() {
   for (const id of ['allow', 'block'] as const) {
     const b = $<HTMLButtonElement>(id);
     if (!b) continue;
+    const ruleHint = id === 'allow' ? 'Save an Allow rule for this scope.' : 'Save a Deny rule for this scope.';
     if (promptID && !remembering) {
       b.disabled = true;
-      b.title = 'A permanent rule is not available for this request.';
+      b.title = '';
       continue;
     }
     const review = decisionReviews[id];
@@ -2822,7 +2827,8 @@ function updateDecisions() {
         !canManageRules(state.control) ||
         (rememberFields.process && instanceEnded) ||
         (pinned ? pinned.action !== id : !endedFlow.fresh(ruleChoice(e!, id), now));
-      if (!keepPresentation)
+      if (promptID) b.title = ruleHint;
+      else if (!keepPresentation)
         b.title = !remembering ? ENDED_NEEDS_REMEMBER : unverifiable ? unverifiableHint
           : `${id === 'allow' ? 'Allow' : 'Deny'} future connections. This request has ended.`;
       continue;
@@ -2835,7 +2841,7 @@ function updateDecisions() {
         (reviewFor !== reviewKey() ||
           !review ||
           Date.parse(review.expires_at) <= now));
-    b.title = needsDecisionReview()
+    b.title = promptID ? ruleHint : needsDecisionReview()
       ? rememberBlockReason(e, now) || splitPreview(review?.scope_preview || '').preview || 'Review required'
       : temporary
         ? liveLeaseUnavailable || FOR_A_WHILE_TOOLTIP
@@ -2897,8 +2903,7 @@ function updateDecisions() {
       button.textContent = action + ' once';
       button.disabled = pacing || !actionable(e, 'once');
       if (!keepPresentation)
-        button.title = onceCopy?.[id === 'allowForAWhile' ? 'allow' : 'block'] ||
-          (e?.scope_previews.once || 'Only this connection') + ' · creates no rule';
+        button.title = `${action} this ${onceCopy ? 'flow' : 'connection'} only.`;
       continue;
     }
     button.textContent = action + ' process · ' + durationLabel(forAWhileSeconds);
@@ -2906,9 +2911,7 @@ function updateDecisions() {
       ? leaseDone || endedLeaseBusy.has(e!.id) || ruleBusy.has(e!.id) || !state.control.connected || !canDecide(state.control)
       : !actionable(e, 'for-a-while'));
     if (!keepPresentation)
-      button.title = leaseReason || (ended
-        ? 'Applies to new connections from the running process only.'
-        : FOR_A_WHILE_TOOLTIP);
+      button.title = leaseReason ? '' : `${action} connections from this process for ${durationLabel(forAWhileSeconds)}.`;
   }
   const showLease = (promptID ? !popupTemporaryOnce : temporary) && (!ended || leaseMode) && !leaseDone;
   if (!keepPresentation && $('forAWhileNote')) {
@@ -2955,7 +2958,7 @@ function updateDecisions() {
         option.disabled = !ruleMode && !e?.scope_previews[rememberScope(Number(option.value))];
     }
     const allowReview = ruleMode && e ? endedFlow.reviews.allow : undefined;
-    if (!keepPresentation) $('rememberSummary').textContent = ruleMode
+    $('rememberSummary').textContent = ruleMode
       ? ruleDone || unverifiable
         ? ''
         : rememberFields.process && instanceEnded
@@ -3105,6 +3108,11 @@ function updateDecisions() {
               : permissionTarget(chosenScope, e?.flow.protocol || '', needsDecisionReview() ? decisionZone : 'any');
   // An expired popup keeps its last presentation. Outcome and review status
   // still update in Details, and all actions use the current backend state.
+  const countdown = $('promptCountdown');
+  if (countdown && e && !ended && e.state === 'awaiting-decision' && e.remainingMs > 0) {
+    countdown.textContent = `Respond in ${Math.ceil(e.remainingMs / 1000)} s`;
+    countdown.hidden = false;
+  }
   const expiry = document.querySelector<HTMLElement>('.expiry');
   if (expiry && (!keepPresentation || promptID)) {
     const limited = !!e && (!e.attribution.visibility_complete || e.attribution.status !== 'directly-associated');
@@ -3115,12 +3123,12 @@ function updateDecisions() {
       ? ''
       : ended
         ? endedLine
-        : e.remainingMs > 0 && e.state === 'awaiting-decision'
-          ? (promptID ? `Respond in ${Math.ceil(e.remainingMs / 1000)} s` : `${Math.ceil(e.remainingMs / 1000)} s left`) +
-            (group && group.count > 1 ? ` · +${group.count - 1} similar` : '') +
-            (limited ? ' · limited attribution' : '')
-          : promptID && (e.state === 'awaiting-decision' || e.state === 'expired')
-            ? 'Request ended.'
+        : promptID
+          ? ''
+          : e.remainingMs > 0 && e.state === 'awaiting-decision'
+            ? `${Math.ceil(e.remainingMs / 1000)} s left` +
+              (group && group.count > 1 ? ` · +${group.count - 1} similar` : '') +
+              (limited ? ' · limited attribution' : '')
             : `Request ${e.state === 'awaiting-decision' ? 'expired' : e.state}`;
   }
   measurePrompt();

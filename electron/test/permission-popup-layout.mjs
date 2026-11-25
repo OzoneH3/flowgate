@@ -206,12 +206,17 @@ function reply(q) {
     activity: { sequence: 1, collected: now, complete: true, processes: {}, rows: [] },
   };
 }
+let finishLastDecision;
 async function listen(pathname, respond) {
   const server = net.createServer((socket) => {
     let input = '';
     socket.setEncoding('utf8').on('data', (chunk) => {
       input += chunk;
-      if (input.includes('\n')) socket.end(JSON.stringify(respond(JSON.parse(input))) + '\n');
+      if (!input.includes('\n')) return;
+      const query = JSON.parse(input);
+      const finish = () => socket.end(JSON.stringify(respond(query)) + '\n');
+      if (query.operation === 'decide' && query.id === 'last-client') finishLastDecision = finish;
+      else finish();
     });
   });
   await new Promise((resolve, reject) => server.once('error', reject).listen(pathname, resolve));
@@ -312,7 +317,7 @@ try {
   await main.locator('#decisionTimeoutRefresh').click();
   await main.waitForFunction(() => !document.querySelector('#decisionTimeoutSeconds')?.disabled);
   assert.equal(await timeout.inputValue(), '45');
-  const deadline = await prompt.locator('.expiry').textContent();
+  const deadline = await prompt.locator('footer #promptCountdown').innerText();
   assert(Number(deadline.match(/^Respond in (\d+) s/)?.[1]) > 60, 'an active request retains its own deadline');
   assert(await prompt.locator('#requestMore #requestStatusLine').isHidden());
   assert.equal(await prompt.locator('footer #requestStatusLine, #controlStatus, #feedback').count(), 0);
@@ -526,11 +531,11 @@ try {
   assert(await prompt.getByRole('button', { name: /Deny always/ }).isEnabled());
   assert.equal(await allow.innerText(), 'Allow always');
   assert.equal(await prompt.locator('#promptPending').innerText(), 'Pending requests (2)');
-  assert.match(await allowTemporary.getAttribute('title'), /Only this held connection/i);
+  assert.equal(await allowTemporary.getAttribute('title'), 'Allow this connection only.');
   await allowTemporary.hover();
   const permissionTooltip = prompt.getByRole('tooltip');
   await permissionTooltip.waitFor();
-  assert.match(await permissionTooltip.innerText(), /Only this held connection/i);
+  assert.equal(await permissionTooltip.innerText(), 'Allow this connection only.');
   await prompt.mouse.move(3, 3);
   await permissionTooltip.waitFor({ state: 'hidden' });
   assert.equal(await prompt.locator('#rememberToggle, #forAWhileToggle').count(), 0);
@@ -693,7 +698,7 @@ try {
   assert.equal(decisions[1].duration_seconds, 60);
   assert.equal(await requestWindow(third.id), prompt);
   await prompt.getByRole('heading', { level: 1, name: third.attribution.application.name }).waitFor();
-  const nextCountdown = Number((await prompt.locator('.expiry').textContent()).match(/^Respond in (\d+) s/)?.[1]);
+  const nextCountdown = Number((await prompt.locator('footer #promptCountdown').innerText()).match(/^Respond in (\d+) s/)?.[1]);
   assert(nextCountdown > 0 && nextCountdown <= 45);
   await denyTemporary.waitFor();
   await prompt.waitForFunction(() => !document.querySelector('#blockForAWhile').disabled);
@@ -719,10 +724,21 @@ try {
   events.push(last);
   assert.equal(await requestWindow(last.id), prompt);
   await prompt.waitForFunction(() => !document.querySelector('#allow')?.disabled);
+  assert.equal(await prompt.locator('#allow').getAttribute('title'), 'Save an Allow rule for this scope.');
+  assert.equal(await prompt.locator('#blockForAWhile').getAttribute('title'), 'Deny this connection only.');
+  assert(await prompt.locator('#requestMore #rememberSummary').isHidden());
   await prompt.locator('#allow').click();
-  await verifyDismissed();
+  await prompt.waitForFunction(() => document.querySelector('#allow')?.disabled);
+  assert(await prompt.locator('#requestMore #rememberSummary').isHidden());
+  assert(await prompt.locator('#requestMore #decisionReconcile').isHidden());
+  assert.match(await prompt.locator('footer #promptCountdown').innerText(), /^Respond in \d+ s$/);
+  for (let i = 0; i < 40 && !finishLastDecision; i++)
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  assert(finishLastDecision, 'the popup must submit the last decision');
+  finishLastDecision();
   assert.deepEqual(decisions.slice(3).map(({ id, action, scope }) => [id, action, scope]),
     [[last.id, 'allow', 'persistent']]);
+  await verifyDismissed();
   const chartOpened = app.waitForEvent('window');
   await main.evaluate(() => window.flowgate.paneControl('chart', 'undock'));
   const detachedChart = await chartOpened;
@@ -827,14 +843,14 @@ async function verifyPolish(app, requestWindow) {
     await prompt.waitForFunction(() => document.querySelector('#allow')?.disabled === false);
     await prompt.locator('#promptBody').evaluate((body) => { body.scrollTop = 0; });
     assert.equal(await prompt.locator('#promptPeerAddress').innerText(), peer);
-    assert.match(await prompt.locator('#requestMore #requestStatusLine').textContent(), /^Respond in \d+ s/);
+    assert.match(await prompt.locator('footer #promptCountdown').innerText(), /^Respond in \d+ s$/);
     assert(await prompt.locator('#requestStatusLine').isHidden());
     for (const [id, text] of [
       ['allow', 'Allow always'], ['block', 'Deny always'],
       ['allowForAWhile', 'Allow process · 1 min'], ['blockForAWhile', 'Deny process · 1 min'],
     ]) assert.equal(await label(id), text);
     const visible = await prompt.evaluate(() => Object.fromEntries([
-      'promptPeerAddress', 'allow', 'block', 'allowForAWhile', 'blockForAWhile',
+      'promptPeerAddress', 'promptCountdown', 'allow', 'block', 'allowForAWhile', 'blockForAWhile',
     ].map((id) => {
       const el = document.getElementById(id);
       const lines = Array.from(el.getClientRects());
