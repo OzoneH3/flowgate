@@ -94,7 +94,6 @@ const recipes = {
   requestUnknown: { populated: true, requests: 'both', loseDecision: true },
   processLease: { populated: true, activeLease: true },
   requestPair: { populated: true, requests: 'pair' },
-  requestExpired: { populated: true, requests: 'expired' },
   requestFault: { populated: true, requests: 'both', rejectPreview: true },
   unhealthy: { populated: true, unhealthy: true },
   offline: { offline: true },
@@ -127,7 +126,11 @@ function inventory(recipe) {
       });
       return [pair(outgoing, reverse, secondOwner, 'server'), pair(reverse, outgoing, firstOwner, 'client')];
     }
-    if (stage === 'expired') return [{ ...primary, state: 'expired', deadline: later(-1) }];
+    if (recipe.short && Date.parse(primary.deadline) <= Date.now()) return [{
+      ...primary, state: 'expired',
+      revalidation: { code: 'connection_ended', reason: 'Original connection ended', checked_at: now() },
+      request_rule: { ...primary.request_rule, process_state: 'ended', until: later(900) },
+    }];
     if (stage === 'both') return [primary, incoming].filter(e => !answered.has(e.id));
     if (stage === 'udp') return [primary].filter(e => !answered.has(e.id));
     return [];
@@ -210,6 +213,7 @@ function inventory(recipe) {
         } };
       case 'decision-timeout-status':
         return { ...common, decision_timeout: { seconds: 30, revision: '1' } };
+      case 'request-rule-preview':
       case 'decision-preview': {
         if (recipe.rejectPreview || !found) return failure('Fixture review unavailable', 'review_unavailable');
         const remembered = q.remember || {};
@@ -219,6 +223,11 @@ function inventory(recipe) {
             remote_address: remembered.address ? found.remembered_filter.remote_address : '*',
             remote_port: remembered.port && found.flow.direction === 'outgoing' ? 443 : 0,
             local_port: remembered.port && found.flow.direction === 'incoming' ? 50124 : 0 } };
+        if (q.operation === 'request-rule-preview') return { ...common, request_rule_preview: {
+          event_id: q.id, action: q.action, token: 'future-rule-' + q.id + '-' + q.action,
+          expires_at: later(900), scope_preview: 'Future connections from this application only.',
+          summary: 'Review a rule for future connections.', rule: preview, replaces: null,
+        } };
         return { ...common, decision_preview: { ...q, event_id: q.id, token: 'decision-preview-' + q.id + '-' + q.action,
           expires_at: later(900), connection_network: zone, scope_preview: found.scope_previews[q.scope],
           summary: q.action + ' this application.', rule: preview } };

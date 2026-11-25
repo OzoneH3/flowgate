@@ -141,9 +141,14 @@ async function perform(page, steps = []) {
 async function performDesktop(steps = [], pid) {
   for (const step of steps) {
     const target = step.focus && { ...step.focus, ...(step.focus.ownProcess ? { pid } : {}) };
-    if (target) await until(async () => {
-      try { return await desktop({ op: 'focus', locator: target }); } catch { return null; }
-    }, 'Desktop keyboard focus missing ' + JSON.stringify(target), 3000);
+    if (target) {
+      let lastError;
+      await until(async () => {
+        try { return await desktop({ op: 'focus', locator: target }); }
+        catch (error) { lastError = error; return null; }
+      }, 'Desktop keyboard focus missing ' + JSON.stringify(target), 3000)
+        .catch(error => { throw lastError ?? error; });
+    }
     if (step.keys) await desktop({ op: 'key', keys: step.keys });
   }
 }

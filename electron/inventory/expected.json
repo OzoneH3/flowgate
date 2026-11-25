@@ -205,7 +205,7 @@
     ]},
     {"id": "traffic", "seed": "populated", "states": [
       {"window": "traffic-settings", "id": "traffic-limits-list", "steps": [{"press": "#activityTab"}, {"press": "#uploadLimits"}], "ready": {"selector": "#uploadLimitList[open]"}, "expect": [{"selector": "#priorityBudgets"}, {"selector": "#budgetSave"}]},
-      {"window": "traffic-editor", "id": "upload-limit-details", "steps": [{"press": "#uploadLimitList button[data-configured-limit=upload]"}, {"press": "#uploadDetails"}], "ready": {"selector": "#uploadDetailsBody"}, "expect": [{"selector": "#uploadEnabled"}, {"selector": "#uploadRate"}, {"selector": "#uploadSave"}, {"selector": "#uploadCoverage"}]},
+      {"window": "traffic-editor", "id": "upload-limit-details", "steps": [{"press": "#uploadLimitList button[data-configured-limit=upload]"}, {"press": "#uploadDetails"}], "ready": {"selector": "#uploadDetailsBody"}, "expect": [{"selector": "#uploadEnabled"}, {"selector": "#uploadRate"}, {"selector": "#uploadSave"}, {"selector": "#uploadCoverageLive"}, {"selector": "#uploadCoverageContext"}]},
       {"window": "traffic-editor", "id": "download-limit-details", "steps": [{"press": "#uploadClose"}, {"press": "#uploadLimits"}, {"press": "#uploadLimitList button[data-configured-limit=download]"}], "ready": {"selector": "#uploadLimitDialog[data-direction=download]"}, "expect": [{"selector": "#uploadEnabled"}, {"selector": "#uploadRate"}, {"selector": "#uploadSave"}]},
       {"window": "traffic-editor", "id": "traffic-priority-details", "steps": [{"press": "#uploadClose"}, {"press": "#uploadLimits"}, {"press": "#uploadLimitList button[data-configured-limit=priority]"}], "ready": {"selector": "#uploadLimitDialog[data-direction=priority]"}, "expect": [{"selector": "#uploadSave"}]}
     ]},
@@ -237,7 +237,7 @@
       {"window": "main", "id": "temporary-process-leases", "steps": [{"press": "#requestsTab"}], "ready": {"selector": "#temporaryDecisions"}, "expect": [{"selector": "#leaseRows"}]}
     ]},
     {"id": "request-unknown", "seed": "requestUnknown", "states": [
-      {"window": "main", "id": "uncertain-decision-result", "steps": [{"press": "#requestsTab"}, {"wait": {"selector": "#requestRows tr[data-id=\"inventory-request-atlas\"]"}}, {"press": "#requestRows tr[data-id=\"inventory-request-atlas\"]"}, {"wait": {"selector": "#allow", "enabled": true}}, {"press": "#allow"}], "ready": {"selector": "#permissionResultRows", "contains": "outcome unknown"}, "expect": [{"selector": "#permissionResultsView"}]}
+      {"window": "main", "id": "uncertain-decision-result", "steps": [{"press": "#requestsTab"}, {"wait": {"selector": "#requestRows tr[data-id=\"inventory-request-atlas\"]"}}, {"press": "#requestRows tr[data-id=\"inventory-request-atlas\"]"}, {"wait": {"selector": "#allow", "enabled": true}}, {"press": "#allow"}], "ready": {"selector": "#permissionResultRows", "contains": "Result unknown"}, "expect": [{"selector": "#permissionResultsView"}]}
     ]},
     {"id": "request-pair", "seed": "requestPair", "states": [
       {"window": "permission", "id": "paired-local-request", "ready": {"selector": "#requestApplication"}, "expect": [{"selector": "#rememberPanel"}]},
@@ -247,19 +247,22 @@
       {"window": "permission", "id": "outgoing-udp", "ready": {"selector": "#requestApplication"}, "expect": [{"selector": "#allowForAWhile"}, {"selector": "#blockForAWhile"}, {"selector": "#rememberPanel"}]}
     ]},
     {"id": "request-expiry", "seed": "requestShort", "states": [
-      {"window": "permission", "id": "expired-request", "ready": {"selector": "body", "contains": "ended"}, "expect": [{"selector": "#allowForAWhile", "enabled": false}, {"selector": "#blockForAWhile", "enabled": false}], "timeout": 14000}
+      {"window": "permission", "id": "expired-request", "steps": [{"wait": {"selector": "#allowForAWhile", "enabled": true}}], "ready": {"selector": "#allowForAWhile", "enabled": false}, "expect": [{"selector": "#blockForAWhile", "enabled": false}], "timeout": 14000},
+      {"window": "permission", "id": "expired-request-details", "steps": [{"press": "#detailsToggle"}, {"press": "#requestMore details[data-section=status] > summary"}], "ready": {"selector": "#requestStatusLine", "contains": "ended"}, "expect": [{"selector": "#detailsBack"}]}
     ]},
     {"id": "request-fault", "seed": "requestFault", "states": [
       {"window": "permission", "id": "review-unavailable", "ready": {"selector": "#refreshDecision"}, "expect": [{"selector": "#allow", "enabled": false}, {"selector": "#block", "enabled": false}]}
     ]},
     {"id": "native-tray", "seed": "requests", "states": [
-      {"window": "tray-menu", "id": "tray-menu", "steps": [{"focus": {"names": ["FlowGate", "FlowGate · .*"], "roles": ["push-button", "menu-item", "toggle-button", "icon", "panel"]}, "keys": ["Menu"]}], "expectText": ["Open FlowGate", "Quit FlowGate UI"]},
+      {"window": "tray-menu", "id": "tray-menu", "steps": [{"focus": {"names": ["FlowGate · [0-9]+ pending · .*"], "roles": ["button", "push-button", "menu-item", "toggle-button", "icon", "panel"]}, "keys": ["Menu"]}], "expectText": ["Open FlowGate", "Quit FlowGate UI"]},
       {"window": "main", "id": "tray-open-flowgate", "ready": {"selector": "#activityTab"}, "desktopSteps": [{"focus": {"names": ["Open FlowGate"], "roles": ["menu-item"]}, "keys": ["Return"]}]},
-      {"window": "main", "id": "tray-pending-requests", "ready": {"selector": "#requestsTab[aria-selected=\"true\"]"}, "desktopSteps": [{"focus": {"names": ["FlowGate", "FlowGate · .*"], "roles": ["push-button", "menu-item", "toggle-button", "icon", "panel"]}, "keys": ["Menu"]}, {"focus": {"names": ["Pending requests [(][0-9]+[)]"], "roles": ["menu-item"]}, "keys": ["Return"]}]}
+      {"window": "main", "id": "tray-pending-requests", "ready": {"selector": "#requestsTab[aria-selected=\"true\"]"}, "desktopSteps": [{"focus": {"names": ["FlowGate · [0-9]+ pending · .*"], "roles": ["button", "push-button", "menu-item", "toggle-button", "icon", "panel"]}, "keys": ["Menu"]}, {"focus": {"names": ["Pending requests [(][0-9]+[)]"], "roles": ["menu-item"]}, "keys": ["Return"]}]}
+    ]},
+    {"id": "native-tray-quit", "seed": "requests", "states": [
+      {"window": "quit-confirmation", "id": "tray-quit-review", "steps": [{"focus": {"names": ["FlowGate · [0-9]+ pending · .*"], "roles": ["button", "push-button", "menu-item", "toggle-button", "icon", "panel"]}, "keys": ["Menu"]}, {"focus": {"names": ["Quit FlowGate UI"], "roles": ["menu-item"]}, "keys": ["Return"]}], "expectText": ["Keep running", "Quit FlowGate UI"]}
     ]},
     {"id": "native-quit", "seed": "requests", "states": [
-      {"window": "quit-confirmation", "id": "pending-quit-review", "setup": {"window": "main", "steps": [{"press": "#fileMenu > summary"}, {"press": {"selector": "#fileMenu button", "text": "Quit FlowGate UI"}}]}, "expectText": ["Keep running", "Quit FlowGate UI"]},
-      {"window": "quit-confirmation", "id": "tray-quit-review", "reason": "Requires a focusable accessible desktop tray action."},
+      {"window": "quit-confirmation", "id": "pending-quit-review", "setup": {"window": "main", "steps": [{"wait": {"selector": "#pendingCount", "text": "2"}}, {"press": "#fileMenu > summary"}, {"press": {"selector": "#fileMenu button", "text": "Quit FlowGate UI"}}]}, "expectText": ["Keep running", "Quit FlowGate UI"]},
       {"window": "authentication-terminal", "id": "legacy-authentication", "reason": "A system-owned legacy authorization terminal requires an external policy/authorization fixture."}
     ]}
   ]
