@@ -129,6 +129,7 @@ type Engine struct {
 	TrafficControlUID    *uint32 // explicit root configuration, independent of rules/decisions
 
 	creationMu       sync.Mutex // serializes bounded preview/replay lifecycle, never packet processing
+	mutationReceipts mutationReceipts
 	creationPreviews map[string]*creationPreview
 	verifyObserved   func(string, identity.ActivityProcess) (identity.Process, error) // tests only; production uses identity verifier
 
@@ -904,6 +905,11 @@ func (e *Engine) Rules(uid uint32, admin bool) []policy.Rule {
 	return out
 }
 func (e *Engine) ChangeRule(generation, id, action string, expected *uint64, uid uint32, admin bool) error {
+	_, err := e.changeRule(generation, id, action, expected, uid, admin)
+	return err
+}
+
+func (e *Engine) changeRule(generation, id, action string, expected *uint64, uid uint32, admin bool) (policy.Rule, error) {
 	active := false
 	if e.Enforcement != nil {
 		active = e.Enforcement().State != "stopped"
@@ -911,35 +917,34 @@ func (e *Engine) ChangeRule(generation, id, action string, expected *uint64, uid
 	e.mu.Lock()
 	defer e.unlockAndSettle()
 	if generation == "" || generation != e.Generation {
-		return mutationError("generation_conflict", "backend generation changed or missing; reload")
+		return policy.Rule{}, mutationError("generation_conflict", "backend generation changed or missing; reload")
 	}
 	if id == "" || expected == nil {
-		return mutationError("invalid_request", "rule ID and expected_version required")
+		return policy.Rule{}, mutationError("invalid_request", "rule ID and expected_version required")
 	}
 	if e.SaveRules == nil {
-		return mutationError("unavailable", "durable rules unavailable")
+		return policy.Rule{}, mutationError("unavailable", "durable rules unavailable")
 	}
 	next := append([]policy.Rule{}, e.rules...)
-	found := false
+	var changed policy.Rule
 	for i, r := range next {
 		if r.ID != id {
 			continue
 		}
 		if !admin && (r.Filter.AllUIDs || r.Filter.UID != uid) {
-			return mutationError("forbidden", "not authorized")
+			return policy.Rule{}, mutationError("forbidden", "not authorized")
 		}
 		if r.Version != *expected {
-			return mutationError("version_conflict", "stale rule version; reload before changing")
+			return policy.Rule{}, mutationError("version_conflict", "stale rule version; reload before changing")
 		}
 		if r.NetworkEndpoint {
-			return mutationError("immutable_target", "Endpoint rules require exact conditional Delete; recreate through endpoint review to change")
+			return policy.Rule{}, mutationError("immutable_target", "Endpoint rules require exact conditional Delete; recreate through endpoint review to change")
 		}
 		if r.Preset != nil && active {
-			return mutationError("protection_active", "Stop protection before changing preset permissions")
+			return policy.Rule{}, mutationError("protection_active", "Stop protection before changing preset permissions")
 		}
-		found = true
 		if action != "delete" && r.Version == ^uint64(0) {
-			return fmt.Errorf("rule version exhausted; delete and create a new rule")
+			return policy.Rule{}, fmt.Errorf("rule version exhausted; delete and create a new rule")
 		}
 		if action != "delete" {
 			next[i].Version++
@@ -947,7 +952,7 @@ func (e *Engine) ChangeRule(generation, id, action string, expected *uint64, uid
 		switch action {
 		case "enable":
 			if e.targetStateLocked(r).State != "active" {
-				return mutationError("target_inactive", "Process target is inactive; create a fresh preview for a live instance")
+				return policy.Rule{}, mutationError("target_inactive", "Process target is inactive; create a fresh preview for a live instance")
 			}
 			next[i].Disabled = false
 		case "disable":
@@ -955,25 +960,29 @@ func (e *Engine) ChangeRule(generation, id, action string, expected *uint64, uid
 		case "delete":
 			next = append(next[:i], next[i+1:]...)
 		default:
-			return fmt.Errorf("action must be enable, disable or delete")
+			return policy.Rule{}, fmt.Errorf("action must be enable, disable or delete")
+		}
+		changed = r
+		if action != "delete" {
+			changed = next[i]
 		}
 		break
 	}
-	if !found {
-		return mutationError("not_found", "rule no longer exists; reload authoritative state")
+	if changed.ID == "" {
+		return policy.Rule{}, mutationError("not_found", "rule no longer exists; reload authoritative state")
 	}
 	if err := e.reconcileSocketPolicyLocked(next); err != nil {
-		return err
+		return policy.Rule{}, err
 	}
 	if err := e.SaveRules(next); err != nil {
-		return mutationError("persistence_failed", "rule transaction failed; old policy retained: "+err.Error())
+		return policy.Rule{}, mutationError("persistence_failed", "rule transaction failed; old policy retained: "+err.Error())
 	}
 	e.publishRuleStateLocked(next)
 	e.pruneHandlesLocked()
 	// Cached verdicts are invalidated conservatively; awaiting requests are
 	// re-evaluated against the new policy instead of being dropped.
 	e.resetCachedLocked("rule " + action)
-	return nil
+	return changed, nil
 }
 
 // ProfileSnapshot reads already-published observation state. It neither scans

@@ -31,6 +31,9 @@ const DaemonProfileCapability = "daemon-profile-v1"
 var apiProfileContext = pprof.WithLabels(context.Background(), pprof.Labels("flowgate_work", "api"))
 
 type Request struct {
+	MutationID            string                 `json:"mutation_id,omitempty"`
+	ApplicationRuleDelete *ApplicationRuleDelete `json:"application_rule_delete,omitempty"`
+
 	ConnectionAnalysis  *ConnectionAnalysisQuery   `json:"connection_analysis,omitempty"`
 	DecisionTimeout     *DecisionTimeoutOptions    `json:"decision_timeout,omitempty"`
 	ConnectionChecks    *ConnectionCheckOptions    `json:"connection_checks,omitempty"`
@@ -78,6 +81,8 @@ type EnforcementStatus struct {
 	StopsAt time.Time `json:"stops_at"`
 }
 type Response struct {
+	MutationReceipt  *MutationReceipt            `json:"mutation_receipt,omitempty"`
+	DeletedRules     []DeletedRule               `json:"deleted_rules,omitempty"`
 	DecisionTimeout  *DecisionTimeoutSettings    `json:"decision_timeout,omitempty"`
 	ConnectionChecks *ConnectionCheckSettings    `json:"connection_checks,omitempty"`
 	Profile          *diagnostics.Status         `json:"profile,omitempty"`
@@ -262,7 +267,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						r.Capabilities = append(r.Capabilities, "daemon-udp-monitor-v1")
 					}
 					if e.Decisions != nil {
-						r.Capabilities = append(r.Capabilities, DecisionLogCapability, DecisionLogOutcomeCapability)
+						r.Capabilities = append(r.Capabilities, DecisionLogCapability, DecisionLogOutcomeCapability, DecisionLogConnectionFilterCapability)
 					}
 					if e.UsageHistory != nil {
 						r.Capabilities = append(r.Capabilities, accounting.HistoryCapability)
@@ -314,6 +319,9 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						permissions.CanDecide = !readonly && (r.Evaluation.State == "active" || (r.Protection != nil && r.Protection.State == "active"))
 					}
 					r.Permissions = &permissions
+					if !r.ReadOnly {
+						r.Capabilities = append(r.Capabilities, MutationReceiptCapability, ApplicationRuleDeleteCapability)
+					}
 					if e.Traffic != nil {
 						s := trafficStatusFor(e.Traffic.Status(), admin)
 						r.TrafficMonitor = &s
@@ -328,6 +336,11 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						r.Error = "invalid v1 request"
 						r.ErrorCode = "invalid_request"
 					} else {
+						handled, reservation := e.beginMutation(q, &r, admin)
+						if handled {
+							json.NewEncoder(c).Encode(r)
+							return
+						}
 						var zones identity.NetworkZones
 						var cachedList ListSnapshot
 						if q.Operation == "list" {
@@ -915,14 +928,28 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 									r.DeletedRule = &deleted
 								}
 							}
+						case "application-rule-delete":
+							if !permissions.CanManageRules {
+								r.ErrorCode, r.Error = "read_only", "Rule management unavailable"
+							} else if q.ApplicationRuleDelete == nil {
+								r.ErrorCode, r.Error = "invalid_request", "Explicit application rule selection required"
+							} else {
+								var err error
+								r.DeletedRules, err = e.DeleteApplicationRules(q.Generation, *q.ApplicationRuleDelete, cred.Uid, admin)
+								ruleMutationError(&r, err)
+							}
 						case "rule":
 							if r.ReadOnly {
-								r.Error = "read-only API"
-							} else if err := e.ChangeRule(q.Generation, q.ID, q.Action, q.ExpectedVersion, cred.Uid, admin); err != nil {
-								r.ErrorCode, r.Error = "invalid_request", err.Error()
-								var typed *RuleMutationError
-								if errors.As(err, &typed) {
-									r.ErrorCode = typed.Code
+								r.ErrorCode, r.Error = "read_only", "read-only API"
+							} else {
+								changed, err := e.changeRule(q.Generation, q.ID, q.Action, q.ExpectedVersion, cred.Uid, admin)
+								ruleMutationError(&r, err)
+								if err == nil {
+									if q.Action == "delete" {
+										r.DeletedRule = &DeletedRule{changed.ID, changed.Version}
+									} else {
+										r.SavedRule = &changed
+									}
 								}
 							}
 						case "decision-preview", "decision-status":
@@ -1041,6 +1068,7 @@ func Serve(path string, e *Engine, readonly bool) (net.Listener, error) {
 						default:
 							r.Error = "unknown operation"
 						}
+						e.completeMutation(reservation, &r)
 					}
 					if q.Version == 1 && q.Operation != "list" && q.Operation != "connection-analyze" {
 						if publishErr := e.listReads.publishAfter(e, q.Operation); publishErr != nil {
@@ -1105,6 +1133,15 @@ func decisionError(r *Response, err error) {
 		r.ErrorCode = typed.Code
 	}
 }
+
+func ruleMutationError(r *Response, err error) {
+	decisionError(r, err)
+	var typed *RuleMutationError
+	if errors.As(err, &typed) {
+		r.ErrorCode = typed.Code
+	}
+}
+
 func continueResponse(c net.Conn, r Response) {
 	r.Error = "not authorized"
 	r.ErrorCode = "forbidden"

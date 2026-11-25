@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/netip"
 	"regexp"
 	"strconv"
 	"strings"
@@ -15,6 +16,13 @@ import (
 // Query is decoded strictly; all filters are applied server-side to both
 // paging directions. Cursors are decimal sequence strings from this log_id.
 type Query struct {
+	Protocol    string     `json:"protocol"`
+	Local       string     `json:"local"`
+	Remote      string     `json:"remote"`
+	RequestID   string     `json:"request_id"`
+	RuleID      string     `json:"rule_id"`
+	RuleVersion string     `json:"rule_version"`
+	Generation  string     `json:"generation"`
 	Limit       *int       `json:"limit"`
 	Before      string     `json:"before"`
 	After       string     `json:"after"`
@@ -95,6 +103,28 @@ func DecodeQuery(raw json.RawMessage) (Query, error) {
 	if q.Direction != "" && q.Direction != "incoming" && q.Direction != "outgoing" {
 		return q, qerr("invalid_request", "direction must be incoming or outgoing")
 	}
+	if q.Protocol != "" && q.Protocol != "tcp" && q.Protocol != "udp" {
+		return q, qerr("invalid_request", "protocol must be tcp or udp")
+	}
+	for _, endpoint := range []*string{&q.Local, &q.Remote} {
+		if *endpoint == "" {
+			continue
+		}
+		ap, err := netip.ParseAddrPort(*endpoint)
+		if err != nil {
+			return q, qerr("invalid_request", "local and remote must be literal IP:port endpoints")
+		}
+		*endpoint = ap.String()
+	}
+	if len(q.RequestID) > 64 || len(q.Generation) > 64 || len(q.RuleID) > 256 {
+		return q, qerr("invalid_request", "invalid request, generation or rule identifier")
+	}
+	if q.RuleVersion != "" {
+		v, err := strconv.ParseUint(q.RuleVersion, 10, 64)
+		if q.RuleID == "" || err != nil || strconv.FormatUint(v, 10) != q.RuleVersion {
+			return q, qerr("invalid_request", "rule_version requires rule_id and an exact decimal uint64")
+		}
+	}
 	if q.Action != "" && q.Action != "allow" && q.Action != "block" && q.Action != "pending" {
 		return q, qerr("invalid_request", "action must be allow, block or pending")
 	}
@@ -160,6 +190,15 @@ func (l *Log) Query(q Query, uid uint32, admin bool) (Page, error) {
 	for col, v := range map[string]string{"direction": q.Direction, "action": q.Action, "source": q.Source, "application": q.Application} {
 		if v != "" {
 			where, args = append(where, col+" = ?"), append(args, v)
+		}
+	}
+	for path, value := range map[string]string{
+		"$.flow.protocol": q.Protocol, "$.flow.local": q.Local, "$.flow.remote": q.Remote,
+		"$.request_id": q.RequestID, "$.generation": q.Generation,
+		"$.decision.rule.id": q.RuleID, "$.decision.rule.version": q.RuleVersion,
+	} {
+		if value != "" {
+			where, args = append(where, "json_extract(document, ?) = ?"), append(args, path, value)
 		}
 	}
 	if limit == 0 {

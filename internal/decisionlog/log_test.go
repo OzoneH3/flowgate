@@ -418,3 +418,32 @@ func TestSlowFailingWriterNeverWaitsInRecord(t *testing.T) {
 		t.Fatal("only gap plus queued records should survive", h.Newest)
 	}
 }
+
+func TestQueryCorrelatesExactConnectionAndRuleVersion(t *testing.T) {
+	l := open(t, filepath.Join(t.TempDir(), "decisions.db"))
+	defer l.Close()
+	now := time.Now()
+	build := func(uid uint32, request, remote string) Record {
+		r := rec(u(uid), now, "allow")
+		r.Flow.Local, r.Flow.Remote = "[::1]:8000", remote
+		r.RequestID = request
+		r.Decision.Rule = &RuleSnapshot{ID: "app-rule", Version: "18446744073709551615"}
+		return r
+	}
+	target := build(1000, "attempt-1", "[::1]:9000")
+	writeNow(t, l, target, build(2000, "attempt-1", "[::1]:9000"),
+		build(1000, "attempt-2", "[::1]:9000"), build(1000, "attempt-1", "[::1]:9001"))
+	raw := `{"protocol":"tcp","local":"[0:0:0:0:0:0:0:1]:8000","remote":"[::1]:9000","request_id":"attempt-1","generation":"gen","rule_id":"app-rule","rule_version":"18446744073709551615"}`
+	result := query(t, l, raw, 1000, false)
+	if len(result.Records) != 1 || result.Records[0].ID != target.ID {
+		t.Fatal(result.Records)
+	}
+	if result := query(t, l, raw, 0, true); len(result.Records) != 2 {
+		t.Fatal(result.Records)
+	}
+	for _, invalid := range []string{`{"remote":"localhost:80"}`, `{"rule_version":"1"}`, `{"protocol":"icmp"}`} {
+		if _, err := DecodeQuery(json.RawMessage(invalid)); err == nil {
+			t.Fatal("accepted", invalid)
+		}
+	}
+}

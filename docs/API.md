@@ -1,5 +1,8 @@
 # Local API additions: conditional rule deletion
 
+For headless scenario workflows, application bulk deletion, and same-generation
+mutation receipts, see the [replacement lab API map](LAB-API.md).
+
 ## Explicit TCP+UDP observed rules
 
 Primary capability `observed-rule-any-protocol-v1` permits explicit
