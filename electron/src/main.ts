@@ -216,6 +216,8 @@ function retarget(ref: RequestRef, reload = false, remember?: QueuedRememberSele
     Promise.resolve()
   ).then(async () => {
     if (w.isDestroyed() || promptIdle || promptRefs.get(w.webContents.id)?.id !== ref.id) return;
+    // On KDE the measured layout reveals the warm window at the verified size.
+    if (promptKDEReady) return;
     const current = backend.view().control;
     if (
       current.generation !== ref.generation ||
@@ -227,17 +229,13 @@ function retarget(ref: RequestRef, reload = false, remember?: QueuedRememberSele
     const currentBounds = w.getBounds();
     const compact = compactPromptBounds(
       screen.getDisplayMatching(currentBounds).workArea,
-      nativeWayland && !promptKDEReady,
+      nativeWayland,
     );
-    if (promptKDEReady) {
-      await resizeKDEPrompt(profile, process.pid, w.id, compact);
-    } else {
-      // Leave a compositor-constrained frame alone between cards. A redundant
-      // grow can shift the footer while the user is aiming at it.
-      if (!nativeWayland || currentBounds.width > compact.width || currentBounds.height > compact.height)
-        w.setBounds(compact);
-      if (!w.isVisible()) w.showInactive();
-    }
+    // Leave a compositor-constrained frame alone between cards. A redundant
+    // grow can shift the footer while the user is aiming at it.
+    if (!nativeWayland || currentBounds.width > compact.width || currentBounds.height > compact.height)
+      w.setBounds(compact);
+    if (!w.isVisible()) w.showInactive();
   });
   promptLayouts.set(w.webContents.id, reset);
   void w.loadURL(promptURL(ref, remember, focusHeading));
@@ -1330,9 +1328,10 @@ app.whenReady().then(async () => {
       if (!promptIdle && contentChanged && (!nativeWayland || promptKDEReady)) {
         // KWin owns the combined move and resize. An Electron resize first
         // would grow the popup at its old origin, temporarily below the edge.
-        if (!promptKDEReady && (w.getBounds().height !== bounds.height || w.getBounds().width !== bounds.width))
+        if (promptKDEReady)
+          await resizeKDEPrompt(profile, process.pid, w.id, bounds);
+        else if (w.getBounds().height !== bounds.height || w.getBounds().width !== bounds.width)
           w.setBounds(bounds);
-        await resizeKDEPrompt(profile, process.pid, w.id, bounds);
       }
     });
     promptLayouts.set(e.sender.id, resize);

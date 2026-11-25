@@ -434,16 +434,15 @@ try {
   const deleteAll = sidebar.getByRole('button', { name: 'Delete all app rules…' });
   await deleteAll.waitFor();
   await sidebar.locator('[data-focus="cell:application:outgoing"]').click();
-  const quick = sidebar.locator('.quick-rule-editor');
   for (const name of ['Advanced', 'Delete']) {
-    const actions = quick.getByRole('button', { name, exact: true });
-    await actions.first().waitFor();
-    const styles = await actions.evaluateAll((buttons) => buttons.map((el) => [
-      el.dataset.focus,
-      getComputedStyle(el).borderTopWidth,
-    ]));
-    assert(styles.length && styles.every(([, width]) => parseFloat(width) > 0),
-      JSON.stringify(styles));
+    // Policy refresh replaces the popup's controls. Inspect the current nodes
+    // in one evaluation so a detached node cannot report an empty border.
+    await main.waitForFunction((name) => {
+      const actions = [...document.querySelectorAll('#activityDetails .quick-rule-editor button')]
+        .filter((el) => el.textContent === name && el.getClientRects().length);
+      return actions.length > 0 &&
+        actions.every((el) => parseFloat(getComputedStyle(el).borderTopWidth) > 0);
+    }, name);
   }
   await main.keyboard.press('Escape');
   await deleteAll.click();

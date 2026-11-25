@@ -260,3 +260,51 @@ test('reused popup stays on secondary after alt-tab, but recovers when output di
   resize();
   assert.equal(permission.output,primary,'disconnected output falls back to available primary');
 });
+
+test('warm KDE resize fits both frames before Wayland commits the new size', () => {
+  const { placementQML } = require('../dist/test/prompt-placement.cjs');
+  const area = { x: 0, y: 24, width: 1280, height: 976 };
+  const output = { name: 'DP-1' };
+  // KWin can apply position immediately and deliver the size asynchronously.
+  for (const [from, to, late] of [[637, 590, false], [590, 637, false], [590, 637, true]]) {
+    const qml = placementQML(42, 7, { x: 0, y: 0, width: 745, height: to }, 'DP-1', true, true);
+    const body = qml.slice(qml.indexOf('  function tick() {') + '  function tick() {'.length, qml.lastIndexOf('\n  }'));
+    let frame = { x: 535, y: 1000 - from, width: 745, height: from };
+    let pending;
+    let stopped = false;
+    const w = {
+      pid: 42, caption: promptTitle(7), internalId: 'warm', output, opacity: 0, minimized: true,
+      get frameGeometry() { return frame; },
+      set frameGeometry(request) {
+        pending = request;
+        frame = { ...frame, x: request.x, y: request.y };
+      },
+    };
+    const workspace = {
+      screens: [output], stackingOrder: [w], clientArea: () => area,
+      set activeWindow(_value) { assert.fail('resize must not activate the prompt'); },
+    };
+    const tick = () => vm.runInContext(`(function(){${body}})()`, context);
+    const context = vm.createContext({
+      state: { ticks: 0, nativeID: null, applied: 0, output: null },
+      workspace, KWin: { PlacementArea: 0 }, console: { log() {} },
+      clock: { stop() { stopped = true; } },
+    });
+    tick();
+    assert.equal(pending.height, to);
+    assert(frame.y + frame.height <= 1000, 'old frame fits the new origin');
+    tick();
+    assert.equal(w.opacity, 0, 'a warm hidden prompt waits for the size');
+    if (late) {
+      for (let i = 0; i < 6; i++) tick();
+      assert.equal(w.opacity, 1, 'the existing frame can be revealed with clearance for a late grow');
+    }
+    frame.height = pending.height;
+    assert(frame.y + frame.height <= 1000, 'the new size fits before final anchoring');
+    for (let i = 0; i < 3 && !stopped; i++) tick();
+    assert.equal(frame.y + frame.height, 1000);
+    assert.equal(w.opacity, 1);
+    assert.equal(w.minimized, false);
+    assert(stopped);
+  }
+});

@@ -44,6 +44,7 @@ export function placementQML(
   bounds: Rect,
   outputName?: string,
   reveal = true,
+  warm = false,
 ) {
   placementScript(pid, windowID, bounds, outputName); // validate fixed numeric input
   return `import QtQuick
@@ -53,19 +54,19 @@ QtObject {
   property var workspace: Workspace
   property var target: null
   function added(w) { if(w.pid===${pid} && w.caption===${JSON.stringify(promptTitle(windowID))}) { target=w; w.keepAbove=true; w.opacity=0; console.log("FLOWGATE_PROMPT_HELD",${pid},${windowID},w.output.name,w.opacity); } }
-  Component.onCompleted: { workspace.windowAdded.connect(root.added); for(const w of workspace.stackingOrder) added(w); }
-  Component.onDestruction: { workspace.windowAdded.disconnect(root.added); if(target) target.opacity=${reveal ? 1 : 0}; }
+  ${warm ? '' : `Component.onCompleted: { workspace.windowAdded.connect(root.added); for(const w of workspace.stackingOrder) added(w); }
+  Component.onDestruction: { workspace.windowAdded.disconnect(root.added); if(target) target.opacity=${reveal ? 1 : 0}; }`}
   property var state: ({ticks:0, nativeID:null, previous:"", stable:0, applied:0, waited:0, confirmed:0, output:null})
   property Timer clock: Timer { interval:50; repeat:true; running:true; onTriggered:root.tick() }
   function tick() {
     const s=state;
-    if (++s.ticks>40) { console.log("FLOWGATE_PROMPT_UNCONFIRMED",${pid},${windowID}); if(target) target.opacity=${reveal ? 1 : 0}; clock.stop(); return; }
+    if (++s.ticks>${warm ? 10 : 40}) { ${warm ? '' : `console.log("FLOWGATE_PROMPT_UNCONFIRMED",${pid},${windowID}); if(target) target.opacity=${reveal ? 1 : 0};`} clock.stop(); return; }
     const matches=workspace.stackingOrder.filter(w=>w.pid===${pid} && w.caption===${JSON.stringify(promptTitle(windowID))});
     if(matches.length!==1) return;
     const w=matches[0], nativeID=String(w.internalId);
     if(s.nativeID!==null && s.nativeID!==nativeID) { clock.stop(); return; }
     s.nativeID=nativeID;
-    ${outputSelection(pid, outputName).replace("const output=", "const selectedOutput=")}
+    ${outputSelection(pid, outputName, warm).replace("const output=", "const selectedOutput=")}
     if(!s.output || !workspace.screens.includes(s.output)) s.output=selectedOutput;
     const output=s.output;
     if(!output) { clock.stop(); return; }
@@ -73,6 +74,28 @@ QtObject {
     const width=Math.min(${bounds.width},area.width), height=Math.min(${bounds.height},area.height);
     const desired={x:area.x+area.width-width,y:area.y+area.height-height,width:width,height:height};
     const g=w.frameGeometry, stamp=JSON.stringify(g);
+    ${warm ? `
+    // KWin can apply a new position before the Wayland client commits the new size.
+    // Anchor the resize to a point that fits both the current and requested frame.
+    if(w.output!==output) { workspace.sendClientToScreen(w,output); return; }
+    const x=Math.max(area.x,area.x+area.width-Math.max(width,g.width));
+    const y=Math.max(area.y,area.y+area.height-Math.max(height,g.height));
+    if(!s.applied) {
+      w.frameGeometry={x:x,y:y,width:width,height:height};
+      s.applied=1;
+      return;
+    }
+    const sized=Math.abs(g.width-width)<=1 && Math.abs(g.height-height)<=1;
+    if(!sized && s.ticks<8) return;
+    // After a timeout, keep clearance for a configure that could still arrive.
+    if(Math.abs(g.x-x)>1 || Math.abs(g.y-y)>1) {
+      w.frameGeometry={x:x,y:y,width:g.width,height:g.height};
+      return;
+    }
+    w.opacity=1; w.minimized=false; w.skipTaskbar=false; w.skipSwitcher=false;
+    console.log("FLOWGATE_PROMPT_RESIZED",JSON.stringify({pid:${pid},windowID:${windowID},area:area,geometry:g}));
+    clock.stop();
+    ` : `
     if(!s.applied) {
       if(w.output!==output) { workspace.sendClientToScreen(w,output); s.stable=0; return; }
       s.stable=stamp===s.previous?s.stable+1:0; s.previous=stamp;
@@ -89,6 +112,7 @@ QtObject {
     }
     // One bounded correction for a late initial restore/configure, never a poll loop.
     if(!correct && ++s.waited===8 && s.applied===1) { w.frameGeometry=desired; s.applied=2; }
+    `}
   }
 }`;
 }
@@ -207,18 +231,23 @@ export async function resizeKDEPrompt(
   const name = `flowgate-resize-${pid}-${path.basename(dir)}`;
   let id: string | undefined;
   try {
-    const file = path.join(dir, 'resize.js');
+    const file = path.join(dir, visible ? 'resize.qml' : 'hide.js');
     await fs.writeFile(
       file,
-      placementScript(pid, windowID, bounds, await configuredPrimaryOutput(), true).replace(
-        ' print(',
-        ` w.opacity=${visible ? 1 : 0}; w.minimized=${!visible}; w.skipTaskbar=${!visible}; w.skipSwitcher=${!visible}; print(`,
-      ),
+      visible
+        ? placementQML(pid, windowID, bounds, await configuredPrimaryOutput(), true, true)
+        : `for(const w of workspace.windowList()) {
+             if(w.pid===${pid} && w.caption===${JSON.stringify(promptTitle(windowID))}) {
+               w.opacity=0; w.minimized=true; w.skipTaskbar=true; w.skipSwitcher=true;
+             }
+           }`,
       { mode: 0o600 },
     );
-    id = await dbus(['/Scripting', 'org.kde.kwin.Scripting.loadScript', file, name]);
+    const load = visible ? 'loadDeclarativeScript' : 'loadScript';
+    id = await dbus(['/Scripting', 'org.kde.kwin.Scripting.' + load, file, name]);
     if (!/^\d+$/.test(id)) throw Error('Invalid resize script');
     await dbus([`/Scripting/Script${id}`, 'org.kde.kwin.Script.run']);
+    if (visible) await new Promise((resolve) => setTimeout(resolve, 575));
   } catch (error) {
     console.info('FlowGate: compositor resize unavailable:', String(error));
   } finally {

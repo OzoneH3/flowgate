@@ -5,7 +5,7 @@ const path = require('node:path');
 const { test } = require('node:test');
 const vm = require('node:vm');
 const { transformSync } = require('esbuild');
-const { compactPromptBounds, PROMPT_MIN_HEIGHT } = require('../dist/test/automatic-prompts.cjs');
+const { compactPromptBounds, edgePosition, PROMPT_HEIGHT, PROMPT_MIN_HEIGHT } = require('../dist/test/automatic-prompts.cjs');
 
 test('an early request waits for native startup cleanup without ready-to-show', async () => {
   // Run the actual main-process creation and retarget functions while holding
@@ -14,6 +14,7 @@ test('an early request waits for native startup cleanup without ready-to-show', 
   const functions = [
     source.slice(source.indexOf('function retarget('), source.indexOf('// Temporary Allow/Deny')),
     source.slice(source.indexOf('function windowFor('), source.indexOf('app.whenReady()')),
+    source.slice(source.indexOf("ipcMain.handle('prompt:layout'"), source.indexOf("ipcMain.handle('prompt:dismiss'")),
   ].join('\n');
   const { code } = transformSync(functions, { loader: 'ts' });
   const calls = [];
@@ -24,6 +25,7 @@ test('an early request waits for native startup cleanup without ready-to-show', 
     finishStartup = resolve;
   });
   class Window extends EventEmitter {
+    static fromWebContents(sender) { return context.prompt.webContents === sender && context.prompt; }
     id = 2;
     webContents = Object.assign(new EventEmitter(), {
       id: 7,
@@ -51,6 +53,9 @@ test('an early request waits for native startup cleanup without ready-to-show', 
   }
   const context = vm.createContext({
     BrowserWindow: Window,
+    ipcMain: { handle: (_name, handler) => { context.layout = handler; } },
+    trusted() {},
+    URL,
     console,
     path,
     __dirname,
@@ -58,13 +63,18 @@ test('an early request waits for native startup cleanup without ready-to-show', 
     PROMPT_TITLE: 'Permission',
     APP_ICON: '',
     PROMPT_MIN_HEIGHT,
+    PROMPT_HEIGHT,
     compactPromptBounds,
+    edgePosition,
     nativeWayland: true,
     prompt: undefined,
     promptIdle: true,
     promptKDEReady: false,
     promptDismissed: false,
     promptRemember: false,
+    promptPointerDown: false,
+    rendererPromptKeys: new Set(),
+    transitionUntil: 0,
     TRANSITION_MS: 650,
     profile: 'fixture-profile',
     windows: new Set(),
@@ -78,7 +88,7 @@ test('an early request waits for native startup cleanup without ready-to-show', 
       `flowgate://app/prompt.html?request=${id}&generation=${generation}`,
     screen: {
       getPrimaryDisplay: () => ({ workArea: bounds }),
-      getDisplayMatching: () => ({ workArea: bounds }),
+      getDisplayMatching: () => ({ workArea: { ...bounds, height: 1000 } }),
     },
     backend: {
       view: () => ({
@@ -98,8 +108,8 @@ test('an early request waits for native startup cleanup without ready-to-show', 
       await startup;
       calls.push(['cleanup']);
     },
-    resizeKDEPrompt: async (_profile, pid, id) => {
-      calls.push(['reveal', pid, id]);
+    resizeKDEPrompt: async (_profile, pid, id, requested) => {
+      calls.push(['reveal', pid, id, requested.height]);
     },
     ref,
   });
@@ -119,8 +129,12 @@ test('an early request waits for native startup cleanup without ready-to-show', 
     ['prepare'],
     ['map-minimized'],
   ]);
+  const layout = context.layout({
+    sender: context.prompt.webContents,
+    senderFrame: { url: 'flowgate://app/prompt.html?request=early&generation=session' },
+  }, { height: 730, pointerDown: false, keysDown: [], remember: false });
   finishStartup();
-  await context.promptLayouts.get(context.prompt.webContents.id);
-  assert.deepEqual(calls.slice(-2), [['cleanup'], ['reveal', 42, 2]]);
+  await layout;
+  assert.deepEqual(calls.slice(-2), [['cleanup'], ['reveal', 42, 2, 730]]);
   assert.equal(context.promptRefs.get(7), ref);
 });
