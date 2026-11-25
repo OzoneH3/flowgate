@@ -1149,3 +1149,32 @@ export function confirmRuleDelete(r: Rule, generation: string) {
     },
   );
 }
+
+export function confirmAppRuleDelete(label: string, rules: Rule[], generation: string) {
+  if (!writable() || state.control.generation !== generation ||
+      !state.control.capabilities?.includes('conditional-rule-delete-v1') || !rules.length) return;
+  const snapshots = rules.map(({ id, version }) => ({ id, version, generation }));
+  const count = snapshots.length;
+  confirmAction(
+    'Delete all app rules',
+    `Delete ${count} saved application ${count === 1 ? 'rule' : 'rules'} for ${label}? This covers incoming and outgoing rules for this app and account. Process rules and traffic limits stay in place. Existing approved TCP sessions may continue.`,
+    async () => {
+      let deleted = 0;
+      for (const snapshot of snapshots) {
+        try {
+          const outcome = await window.flowgate.ruleDelete(snapshot);
+          if (outcome.phase !== 'acknowledged') {
+            status(`Deleted ${deleted} of ${count} rules. ${outcome.message}`);
+            return;
+          }
+          deleted++;
+        } catch (e) {
+          status(`Deleted ${deleted} of ${count} rules. ${String(e)}`);
+          return;
+        }
+      }
+      status(`Deleted ${deleted} saved application ${deleted === 1 ? 'rule' : 'rules'}.`);
+    },
+    'Delete all',
+  );
+}

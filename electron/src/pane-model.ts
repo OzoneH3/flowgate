@@ -41,6 +41,7 @@ export interface PresentationPatch {
 export type PolicyEntry =
   | { kind: 'quick'; direction: 'incoming' | 'outgoing'; tier: 'process' | 'application' }
   | { kind: 'new' }
+  | { kind: 'delete-app-rules' }
   | { kind: 'edit' | 'delete'; id: string };
 export type PaneRuleAction = { selection: string; generation: string } & PolicyEntry;
 export function paneKind(v: unknown): PaneKind {
@@ -95,7 +96,7 @@ export function ruleAction(raw: unknown): PaneRuleAction {
     )
       throw Error('Invalid rule reference');
   } else if (
-    v.kind !== 'new' ||
+    !['new', 'delete-app-rules'].includes(String(v.kind)) ||
     v.id !== undefined ||
     v.tier !== undefined ||
     v.direction !== undefined

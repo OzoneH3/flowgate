@@ -20,7 +20,7 @@ import type {
   RuleSource,
 } from './protocol';
 import { canManageRules, STORED_ASK_CAPABILITY } from './protocol';
-import type { Row } from './model';
+import { inactiveRuleMatches, type Row } from './model';
 import {
   POLICY_CAPABILITY,
   APPLICATION_POLICY_CAPABILITY,
@@ -46,7 +46,7 @@ import {
 } from './rule-chip';
 import { reviewedScope, previewSeconds } from './editor-presentation';
 import { initiationPresentation } from './initiation';
-import { openRule, confirmRuleDelete } from './workflows';
+import { openRule, confirmRuleDelete, confirmAppRuleDelete } from './workflows';
 // Backend capability letting one observed rule cover TCP and UDP (NetLimiter's Blocker cell is
 // protocol-agnostic). Older daemons keep the explicit TCP | UDP choice.
 export { ANY_PROTOCOL_CAPABILITY };
@@ -608,7 +608,7 @@ export class ActivityPolicy {
     const c = this.state!.control;
     const wrap = el('div', '', 'under-matrix');
     const links = el('div', '', 'rule-links');
-    const add = button('Add rule', 'add-rule', 'link-button');
+    const add = button('Add rule', 'add-rule');
     add.title =
       'Set protocol, endpoint, and expiry.';
     const tier = this.defaultTier();
@@ -697,6 +697,24 @@ export class ActivityPolicy {
         ),
       );
       wrap.append(details);
+    }
+    const inactive = row.inactive;
+    const rules = row.kind === 'application' && !row.applicationZone && inv.fallback.available
+      ? [...inv.fallback.incoming, ...inv.fallback.outgoing].filter((rule) =>
+          !rule.preset && !rule.network_endpoint && !rule.root_application &&
+          !rule.filter.all_programs && !rule.filter.all_uids &&
+          (!inactive || inactiveRuleMatches(inactive, rule)),
+        )
+      : [];
+    if (rules.length && canManageRules(c) && c.capabilities?.includes('conditional-rule-delete-v1')) {
+      const footer = el('div', '', 'app-rule-footer');
+      const remove = button('Delete all app rules…', 'delete-app-rules');
+      remove.disabled = this.hasOutstandingAction();
+      remove.onclick = () => this.delegate
+        ? this.delegate({ kind: 'delete-app-rules' })
+        : confirmAppRuleDelete(row.label, rules, c.generation);
+      footer.append(remove);
+      wrap.append(footer);
     }
     return wrap;
   }
@@ -939,12 +957,12 @@ export class ActivityPolicy {
       if (rules.length === 1) {
         const only = rules[0],
           rule = this.editable(only);
-        const advanced = button('Advanced', 'qs-advanced', 'link-button');
+        const advanced = button('Advanced', 'qs-advanced');
         advanced.disabled = !!reason || busy || only.target_state === 'inactive';
         advanced.onclick = () =>
           this.openBlockerEditor(inv, only.id, pop.protocol === '*' ? undefined : pop.protocol);
         // Delete stays available for an inactive (exited) target; only edits are blocked.
-        const remove = button('Delete', 'qs-delete', 'link-button');
+        const remove = button('Delete', 'qs-delete');
         remove.disabled =
           !canManageRules(c) ||
           busy ||
@@ -959,7 +977,7 @@ export class ActivityPolicy {
         };
         links.append(advanced, remove);
       }
-      const addNew = button('New rule…', 'qs-new', 'link-button');
+      const addNew = button('New rule…', 'qs-new');
       addNew.disabled = !!reason || busy || !!(this.row?.applicationZone && this.row.applicationZone.model!==c.networkZones?.model);
       addNew.onclick = () => {
         pop.mode = 'new';
@@ -1016,14 +1034,14 @@ export class ActivityPolicy {
       box.append(anyEndpoint);
       box.append(this.actionRow(undefined, inv, !!blocked || busy));
       const links = el('div', '', 'qs-links');
-      const advanced = button('Advanced', 'qs-advanced', 'link-button');
+      const advanced = button('Advanced', 'qs-advanced');
       advanced.disabled = !!blocked || busy;
       advanced.title = 'Set address, port, and expiry.';
       advanced.onclick = () => {
         this.openBlockerEditor(inv, undefined, pop.protocol === '*' ? undefined : pop.protocol);
       };
       links.append(advanced);
-      const noDelete = button('Delete', 'qs-delete-none', 'link-button');
+      const noDelete = button('Delete', 'qs-delete-none');
       noDelete.disabled = true;
       noDelete.title = 'No rule to delete here yet.';
       links.append(noDelete);
@@ -1050,7 +1068,6 @@ export class ActivityPolicy {
         const life = button(
           pop.lifetime === 'hour' ? '1 hour' : 'Persistent',
           'qs-lifetime',
-          'link-button',
         );
         life.title = 'Switch between No expiry and 1 hour.';
         life.disabled = busy;
@@ -1141,7 +1158,7 @@ export class ActivityPolicy {
       box.append(meta);
     }
     const links = el('div', '', 'qs-links');
-    const advanced = button('Advanced', 'qs-advanced', 'link-button');
+    const advanced = button('Advanced', 'qs-advanced');
     advanced.disabled = !!reason || busy || own?.target_state === 'inactive';
     advanced.title = own
       ? 'Open the rule editor.'
@@ -1149,7 +1166,7 @@ export class ActivityPolicy {
     advanced.onclick = () => this.openBlockerEditor(inv, own?.id);
     // Delete acts on the own rule only (also for an ended process target).
     const rule = own && this.editable(own);
-    const remove = button('Delete', own ? 'qs-delete' : 'qs-delete-none', 'link-button');
+    const remove = button('Delete', own ? 'qs-delete' : 'qs-delete-none');
     remove.disabled =
       !canManageRules(c) ||
       busy ||
@@ -1304,11 +1321,11 @@ export class ActivityPolicy {
       row.append(scope);
       const links = el('span', '', 'qs-row-links');
       links.hidden = !several && !showRuleLinks;
-      const advanced = button('Advanced', `${key}:advanced`, 'link-button');
+      const advanced = button('Advanced', `${key}:advanced`);
       advanced.disabled = blocked || inactiveTarget || !rule;
       advanced.onclick = () =>
         void openRule({ id: ref.id }, { activity: true });
-      const remove = button('Delete', `${key}:delete`, 'link-button');
+      const remove = button('Delete', `${key}:delete`);
       remove.disabled =
         blocked || !canManageRules(c) || !rule || !c.capabilities?.includes('conditional-rule-delete-v1');
       const generation = c.generation;

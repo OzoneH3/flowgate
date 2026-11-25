@@ -259,7 +259,7 @@ body.hide-chart #activityView > #trafficGraph {
   --fg-selected: var(--desktop-accent);
 }
 
-#app :is(.info-tools button, .info-technical summary, .activity-rule-actions button,
+#app :is(.info-technical summary,
   .policy-identity, .policy-create button, .info-rule-matrix th.connection-column) {
   color: var(--desktop-accent);
 }

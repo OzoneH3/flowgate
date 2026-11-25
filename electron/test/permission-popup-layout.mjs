@@ -48,7 +48,9 @@ const generation = 'fixture';
 const start = Date.now();
 const once = 'Only this held connection.';
 const decisions = [];
+const deletions = [];
 const reviewedRules = new Map();
+let savedRules = [];
 function request(id, name, direction, seconds = 180) {
   const application = {
     name,
@@ -121,6 +123,14 @@ const timeoutEdits = [];
 function reply(q) {
   const now = new Date().toISOString();
   const r = { version: 1, generation, server_time: now, mode: 'isolated-lab', read_only: false };
+  if (q.operation === 'rule-delete') {
+    assert.equal(q.generation, generation);
+    const rule = savedRules.find((rule) => rule.id === q.id);
+    assert.equal(q.expected_version, rule?.version);
+    deletions.push(q.id);
+    savedRules = savedRules.filter((rule) => rule.id !== q.id);
+    return { ...r, deleted_rule: { id: q.id, version: q.expected_version } };
+  }
   if (q.operation === 'decision-timeout-status' || q.operation === 'decision-timeout-configure') {
     if (q.operation === 'decision-timeout-configure') {
       assert.equal(q.generation, generation);
@@ -184,6 +194,7 @@ function reply(q) {
       'request-for-a-while-v1',
       'network-zone-policy-v1',
       'decision-timeout-settings-v1',
+      'conditional-rule-delete-v1',
     ],
     for_a_while_durations: [15, 60, 3600],
     network_zones: {
@@ -202,7 +213,7 @@ function reply(q) {
       can_decide: true,
     },
     events,
-    rules: [],
+    rules: savedRules,
     activity: { sequence: 1, collected: now, complete: true, processes: {}, rows: [] },
   };
 }
@@ -409,6 +420,43 @@ try {
   await main.getByRole('button', { name: 'Back to app rules' }).click();
   await sidebar.waitFor();
   assert(await appRow.locator('.status-strip').evaluate((group) => group.contains(document.activeElement)));
+  const savedRule = (id, filter) => ({
+    id, version: 2, action: 'allow', priority: 0, schema: 2,
+    created: new Date(start).toISOString(), expires: '0001-01-01T00:00:00Z',
+    executable: '/fixture/' + filter.application, filter,
+  });
+  savedRules = [
+    savedRule('atlas-in', { ...first.remembered_filter, direction: 'incoming' }),
+    { ...savedRule('atlas-out', first.remembered_filter), disabled: true },
+    savedRule('atlas-other-account', { ...first.remembered_filter, uid: 1001 }),
+    savedRule('other-app', second.remembered_filter),
+  ];
+  const deleteAll = sidebar.getByRole('button', { name: 'Delete all app rules…' });
+  await deleteAll.waitFor();
+  await sidebar.locator('[data-focus="cell:application:outgoing"]').click();
+  const quick = sidebar.locator('.quick-rule-editor');
+  for (const name of ['Advanced', 'Delete']) {
+    const actions = quick.getByRole('button', { name, exact: true });
+    await actions.first().waitFor();
+    const styles = await actions.evaluateAll((buttons) => buttons.map((el) => [
+      el.dataset.focus,
+      getComputedStyle(el).borderTopWidth,
+    ]));
+    assert(styles.length && styles.every(([, width]) => parseFloat(width) > 0),
+      JSON.stringify(styles));
+  }
+  await main.keyboard.press('Escape');
+  await deleteAll.click();
+  const confirmation = main.locator('#confirmation');
+  assert.match(await confirmation.innerText(), /Delete 2 saved application rules for Atlas Sync/);
+  await confirmation.locator('#confirmNo').click();
+  assert.deepEqual(deletions, []);
+  await deleteAll.click();
+  await confirmation.getByRole('button', { name: 'Delete all', exact: true }).click();
+  await deleteAll.waitFor({ state: 'hidden' });
+  assert.deepEqual(deletions, ['atlas-in', 'atlas-out']);
+  assert.deepEqual(savedRules.map(({ id }) => id), ['atlas-other-account', 'other-app']);
+  savedRules = [];
   const overviewTab = sidebar.getByRole('tab', { name: 'Overview', exact: true });
   const diagnosticsTab = sidebar.getByRole('tab', { name: 'Diagnostics' });
   assert.equal(await overviewTab.getAttribute('aria-selected'), 'true');

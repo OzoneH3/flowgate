@@ -3322,7 +3322,9 @@ if (!promptID) {
         ? `cell:${action.tier}:${action.direction}`
         : action.kind === 'new'
           ? 'add-rule'
-          : `list:${action.id}:${action.kind === 'edit' ? 'advanced' : 'delete'}`;
+          : action.kind === 'delete-app-rules'
+            ? 'delete-app-rules'
+            : `list:${action.id}:${action.kind === 'edit' ? 'advanced' : 'delete'}`;
     const button = document.querySelector<HTMLButtonElement>(
       `#infoRules [data-focus="${CSS.escape(focus)}"]`,
     );

@@ -830,7 +830,6 @@ td.up { color: #c7daa8; background: #344b20; }
 .info-rule-matrix td:first-child { font-weight: 600; width: 65px; }
 .info-rule-matrix tr:last-child { outline: 1px solid var(--fg-border); }
 .info-rule-matrix .sidebar-policy { padding: 2px 6px; background: var(--fg-section); min-width: 75px; }
-.info-tools button { border: 0; background: transparent; color: var(--fg-selected); padding: 4px 5px 4px 0; min-height: 22px; font-size: 12px; }
 #activityView aside { overflow: hidden; }
 #activityView #trafficGraph { position: relative; flex: 0 0 126px; height: 126px; margin-top: 0; }
 #activityView > aside { margin-bottom: -26px; z-index: 3; }
@@ -1056,8 +1055,6 @@ td.up { color: #c7daa8; background: #344b20; }
 .activity-rule-scope,.activity-rule-expiry { margin: 3px 0; font-size: 11px; line-height: 15px; overflow-wrap: anywhere; user-select: text; }
 .activity-rule-expiry { color: var(--fg-muted); }
 .activity-rule-actions,.activity-quick-actions { display:flex; gap:6px; flex-wrap:wrap; }
-.activity-rule-actions button { color:var(--fg-selected); font-size:11px; padding:1px 0; min-height:20px; background:transparent; border:0; }
-.activity-rule-actions button:disabled { color:#777; }
 .activity-rule.recently-saved { border-left:2px solid var(--fg-selected); padding-left:6px; }
 .activity-policy-details { font-size:11px; color:var(--fg-muted); margin:8px 0; }
 .activity-policy-details p { user-select:text; }
@@ -1090,7 +1087,6 @@ td.up { color: #c7daa8; background: #344b20; }
 .rules-host { position: relative; }
 .info-tools { display: flex; flex-wrap: wrap; gap: 0 10px; }
 .info-tools .info-section-title { flex: 0 0 100%; }
-.info-tools button { padding: 0; min-height: 20px; }
 .info-rule-matrix { width: auto; border-collapse: separate; border-spacing: 0; table-layout: fixed; margin-left: 4px; }
 .info-rule-matrix th { position: static; height: 20px; padding: 0 0 0 4px; background: transparent; color: var(--fg-muted); border: 0; text-align: left; font-weight: 400; font-size: 12px; }
 .info-rule-matrix th[scope=row] { color: var(--fg-text); font-weight: 600; width: 60px; white-space: nowrap; padding-right: 6px; }
@@ -1142,9 +1138,9 @@ button.status-slot { position: relative; }
 .rule-action-allow { color: #7cc47f; } .rule-action-block { color: #ef6b66; }
 .activity-rule.rule-off strong { opacity: .55; }
 .activity-rule-expiry { margin: 1px 0 2px 28px; font-size: 11px; color: var(--fg-muted); user-select: text; }
-.activity-rule-actions { display: flex; gap: 10px; margin-left: 28px; }
-.activity-rule-actions button { color: var(--fg-selected); font-size: 11px; padding: 0; min-height: 18px; background: transparent; border: 0; }
-.activity-rule-actions button:disabled { color: #777; }
+.activity-rule-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-left: 28px; }
+.app-rule-footer { margin: 10px 0 4px; }
+.app-rule-footer button { color: var(--fg-block, #ff9b9b); }
 .activity-rule.recently-saved { border-left: 2px solid var(--fg-selected); padding-left: 6px; }
 
 .quick-popup { position: absolute; z-index: 20; min-width: 226px; max-width: calc(100% - 8px); padding: 7px 8px 6px; border: 1px solid var(--fg-border); border-top: 2px solid var(--fg-tab); border-radius: 8px; background: var(--fg-content); box-shadow: 0 4px 14px rgba(0,0,0,.55); font-size: 12px; }
@@ -1161,7 +1157,6 @@ button.status-slot { position: relative; }
 .qs-rule-scope { flex: 1 1 100%; font-size: 11px; color: var(--fg-muted); margin-left: 24px; }
 .qs-row-links,.qs-links { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .qs-row-links { margin-left: auto; }
-.qs-links .link-button,.qs-row-links .link-button { font-size: 12px; }
 .segmented { display: inline-flex; border: 1px solid var(--fg-border); border-radius: 2px; overflow: hidden; }
 .segmented button { min-height: 20px; height: 20px; padding: 0 7px; border: 0; border-radius: 0; background: transparent; font-size: 11px; line-height: 18px; }
 .segmented button[aria-checked=true] { background: var(--fg-selected); color: #fff; }
@@ -1884,7 +1879,7 @@ button.connection-status-slot:hover:not(:disabled),button.connection-status-slot
   border-top: 1px solid var(--fg-border);
 }
 .quick-editor :is(.qs-links, .upload-setter-actions) button { font-size: 13px; text-decoration: none; }
-.quick-editor :is(#uploadRemove, .qs-links [data-focus^="qs-delete"]) { color: var(--fg-block, #ff9b9b); }
+.quick-editor :is(#uploadRemove, .qs-links [data-focus^="qs-delete"], .qs-row-links [data-focus$=":delete"]) { color: var(--fg-block, #ff9b9b); }
 .upload-setter-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(88px, auto);
