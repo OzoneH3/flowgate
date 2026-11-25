@@ -1,0 +1,266 @@
+{
+  "version": 1,
+  "source": "electron/src",
+  "windows": {
+    "main": {
+      "document": "index.html",
+      "root": "body"
+    },
+    "permission": {
+      "document": "prompt.html",
+      "root": "body",
+      "query": {
+        "request": "inventory-request-atlas",
+        "generation": "inventory-generation"
+      }
+    },
+    "activity-info": {
+      "document": "pane.html",
+      "root": "body",
+      "query": {
+        "pane": "info"
+      }
+    },
+    "traffic-chart": {
+      "document": "pane.html",
+      "root": "body",
+      "query": {
+        "pane": "chart"
+      }
+    },
+    "tray-menu": {
+      "locator": {
+        "roles": [
+          "menu",
+          "popup-menu"
+        ],
+        "childNames": [
+          "Open FlowGate",
+          "Quit FlowGate UI"
+        ]
+      }
+    },
+    "quit-confirmation": {
+      "locator": {
+        "names": [
+          "Quit FlowGate UI"
+        ],
+        "roles": [
+          "alert",
+          "dialog",
+          "frame"
+        ],
+        "ownProcess": true
+      }
+    },
+    "authentication-terminal": {
+      "locator": {
+        "names": [
+          ".*FlowGate.*"
+        ],
+        "roles": [
+          "frame",
+          "dialog"
+        ]
+      }
+    },
+    "rule-editor": {
+      "document": "index.html",
+      "root": "#ruleEditor"
+    },
+    "confirmation": {
+      "document": "index.html",
+      "root": "#confirmation"
+    },
+    "about": {
+      "document": "index.html",
+      "root": "#aboutFlowGate"
+    },
+    "icon-guide": {
+      "document": "index.html",
+      "root": "#iconGuide"
+    },
+    "queue-diagnostics": {
+      "document": "index.html",
+      "root": "#queueDiagnostics"
+    },
+    "endpoint-editor": {
+      "document": "index.html",
+      "root": "#endpointEditor"
+    },
+    "zone-migration": {
+      "document": "index.html",
+      "root": "#zoneMigrationDialog"
+    },
+    "traffic-settings": {
+      "document": "index.html",
+      "root": "#uploadLimitList"
+    },
+    "traffic-editor": {
+      "document": "index.html",
+      "root": "#uploadLimitDialog"
+    },
+    "floating-rule-status": {
+      "document": "index.html",
+      "root": "#floatingRuleStatus"
+    },
+    "quick-rule-setter": {
+      "document": "index.html",
+      "root": ".quick-rule-editor"
+    }
+  },
+  "journeys": [
+    {"id": "empty", "seed": "empty", "states": [
+      {"window": "main", "id": "activity-empty", "ready": {"selector": "#activityTab[aria-selected=\"true\"]"}, "expect": [{"selector": "#footerSummary"}, {"selector": "#tree"}, {"selector": "#trafficGraph"}]},
+      {"window": "main", "id": "pending-empty", "steps": [{"press": "#requestsTab"}], "ready": {"selector": "#requestsTab[aria-selected=\"true\"]"}, "expect": [{"selector": "#requestRows tr", "count": 0}, {"selector": "#requestDetails"}]},
+      {"window": "main", "id": "rules-empty", "steps": [{"press": "#rulesTab"}], "ready": {"selector": "#rulesTab[aria-selected=\"true\"]"}, "expect": [{"selector": "#ruleListEmpty"}, {"selector": "#editRule", "count": 0}, {"selector": "#deleteRule", "count": 0}]},
+      {"window": "main", "id": "decision-log-empty", "steps": [{"press": "#decisionLogTab"}], "ready": {"selector": "#logEmpty", "contains": "No firewall decisions"}, "expect": [{"selector": "#logRange"}, {"selector": "#logAction"}, {"selector": "#logLive"}]},
+      {"window": "main", "id": "observed-usage-empty", "steps": [{"press": "#observedUsageTab"}], "ready": {"selector": "#observedUsageTab[aria-selected=\"true\"]"}, "expect": [{"selector": "#usageMode"}, {"selector": "#usageStatus"}]},
+      {"window": "main", "id": "history-settings", "steps": [{"focus": "#usageMode", "keys": ["End"]}, {"press": "#historySettings > summary"}], "ready": {"selector": "#historySettings[open]"}, "expect": [{"selector": "#historyEnabled"}, {"selector": "#historyConsent"}, {"selector": "#historySave"}]}
+    ]},
+    {"id": "menus", "seed": "empty", "states": [
+      {"window": "main", "id": "file-menu", "steps": [{"press": "#fileMenu > summary"}], "ready": {"selector": "#fileMenu[open]"}, "expect": [{"selector": "#quitUiNote"}]},
+      {"window": "main", "id": "settings-menu", "steps": [{"keys": ["Escape"]}, {"press": "#settingsMenu > summary"}], "ready": {"selector": "#settingsMenu[open]"}, "expect": [{"selector": "#displayUnits"}, {"selector": "#activitySource"}]},
+      {"window": "main", "id": "firewall-menu", "steps": [{"keys": ["Escape"]}, {"press": "#controlMenu > summary"}], "ready": {"selector": "#controlMenu[open]"}, "expect": [{"selector": "#protectionStart"}, {"selector": "#protectionStop"}, {"selector": "#evalProfile"}, {"selector": "#evalStatus"}]},
+      {"window": "main", "id": "firewall-details", "steps": [{"press": {"selector": "#controlMenu details > summary", "text": "Protection details"}}], "ready": {"selector": "#protectionDesired"}, "expect": [{"selector": "#protectionChecks"}]},
+      {"window": "main", "id": "udp-menu", "steps": [{"keys": ["Escape"]}, {"press": "#monitoringMenu > summary"}], "ready": {"selector": "#monitoringMenu[open]"}, "expect": [{"selector": "#extendedStatus"}, {"selector": "#extendedEnable"}, {"selector": "#extendedStop"}]},
+      {"window": "main", "id": "window-menu", "steps": [{"keys": ["Escape"]}, {"press": ".toolbar-window-menu details > summary"}], "ready": {"selector": ".toolbar-window-menu details[open]"}},
+      {"window": "main", "id": "help-menu", "steps": [{"keys": ["Escape"]}, {"press": "#helpMenu > summary"}], "ready": {"selector": "#helpMenu[open]"}},
+      {"window": "about", "id": "package-and-daemon", "steps": [{"press": {"selector": "#helpMenu button", "text": "About FlowGate"}}], "ready": {"selector": "#aboutFlowGate[open]"}, "expect": [{"selector": "#aboutBuild"}, {"selector": "#aboutTitle"}]},
+      {"window": "icon-guide", "id": "legend", "steps": [{"press": {"selector": "#aboutFlowGate button", "text": "Close"}}, {"press": "#helpMenu > summary"}, {"press": {"selector": "#helpMenu button", "text": "Icons and symbols"}}], "ready": {"selector": "#iconGuide[open]"}, "expect": [{"selector": "#iconGuideTitle"}]}
+    ]},
+    {"id": "rules-edit", "seed": "populated", "states": [
+      {"window": "main", "id": "rules-unselected", "steps": [{"press": "#rulesTab"}], "ready": {"selector": "#ruleRows tr[data-id=\"inventory-rule-enabled\"]"}, "expect": [{"selector": "#editRule", "enabled": false}, {"selector": "#ruleInfo"}]},
+      {"window": "main", "id": "rules-enabled-selected", "steps": [{"press": "#ruleRows tr[data-id=\"inventory-rule-enabled\"]", "key": " "}], "ready": {"selector": "#ruleRows tr[data-id=\"inventory-rule-enabled\"][aria-selected=\"true\"]"}, "expect": [{"selector": "#editRule", "enabled": true}, {"selector": "#ruleInfo", "contains": "Enabled"}]},
+      {"window": "main", "id": "rules-disabled-selected", "steps": [{"press": "#ruleRows tr[data-id=\"inventory-rule-disabled\"]", "key": " "}], "ready": {"selector": "#ruleRows tr[data-id=\"inventory-rule-disabled\"][aria-selected=\"true\"]"}, "expect": [{"selector": "#ruleInfo", "contains": "Disabled"}]},
+      {"window": "rule-editor", "id": "edit-disabled-full", "steps": [{"press": "#editRule"}], "ready": {"selector": "#ruleEditor[open]:not(.quick-editor)"}, "expect": [{"selector": "#editEnabled:not(:checked)"}, {"selector": "#editProtocol"}, {"selector": "#scopeSummary"}]},
+      {"window": "rule-editor", "id": "edit-identity", "steps": [{"press": "#editorApplication"}], "ready": {"selector": "#editorIdentity"}},
+      {"window": "rule-editor", "id": "edit-preview", "steps": [{"press": "#previewRule"}, {"wait": {"selector": "#saveRule", "enabled": true}}, {"press": "#backendScope > summary"}], "ready": {"selector": "#backendScope[open]"}, "expect": [{"selector": "#rulePreview"}, {"selector": "#saveRule", "enabled": true}]},
+      {"window": "rule-editor", "id": "edit-disabled-compact", "steps": [{"press": "#editorMode"}], "ready": {"selector": "#ruleEditor.quick-editor[open]"}, "expect": [{"selector": "#editAction"}, {"selector": "#editEnabled"}, {"selector": "#saveRule"}]},
+      {"window": "rule-editor", "id": "editor-compact-preview", "steps": [{"press": "#previewRule"}], "ready": {"selector": "#saveRule", "enabled": true}, "expect": [{"selector": "#scopeSummary"}, {"selector": "#previewRule"}]},
+      {"window": "main", "id": "editor-minimized", "steps": [{"press": "#minimizeEditor"}], "ready": {"selector": "#resumeEditor"}, "expect": [{"selector": "#ruleEditor[open]", "count": 0}]},
+      {"window": "rule-editor", "id": "editor-resumed-compact", "steps": [{"press": "#resumeEditor"}], "ready": {"selector": "#ruleEditor.quick-editor[open]"}},
+      {"window": "rule-editor", "id": "enable-disabled-draft", "steps": [{"press": "#closeEditor"}, {"press": "#toggleRule"}], "ready": {"selector": "#editEnabled:checked"}},
+      {"window": "confirmation", "id": "delete-verified-rule", "steps": [{"press": "#closeEditor"}, {"press": "#deleteRule"}], "ready": {"selector": "#confirmation[open]"}, "expect": [{"selector": "#confirmTitle", "contains": "Delete"}, {"selector": "#confirmText"}, {"selector": "#confirmNo"}, {"selector": "#confirmYes"}]},
+      {"window": "main", "id": "delete-cancelled", "steps": [{"press": "#confirmNo"}], "ready": {"selector": "#ruleRows tr[data-id=\"inventory-rule-disabled\"][aria-selected=\"true\"]"}, "expect": [{"selector": "#confirmation[open]", "count": 0}]},
+      {"window": "endpoint-editor", "id": "endpoint-unreviewed", "steps": [{"press": "#newEndpointRule"}], "ready": {"selector": "#endpointEditor[open]"}, "expect": [{"selector": "#endpointSave", "enabled": false}, {"selector": "#endpointPreview"}, {"selector": "#endpointAction"}, {"selector": "#endpointAcknowledge"}]},
+      {"window": "endpoint-editor", "id": "endpoint-input-validation", "steps": [{"press": "#endpointPreview"}], "ready": {"selector": "#endpointEditor[open]"}, "expect": [{"selector": "#endpointSave", "enabled": false}, {"selector": "#endpointFeedback"}]},
+      {"window": "endpoint-editor", "id": "endpoint-reviewed", "steps": [{"focus": "#endpointAction", "keys": ["Home", "ArrowDown"]}, {"focus": "#endpointAddress", "type": "198.51.100.2"}, {"focus": "#endpointPort", "type": "443"}, {"focus": "#endpointExpiry", "keys": ["End"]}, {"press": "#endpointPreview"}, {"wait": {"selector": "#endpointPreviewText", "contains": "All matching"}}, {"press": "#endpointAcknowledge", "key": " "}], "ready": {"selector": "#endpointSave", "enabled": true}, "expect": [{"selector": "#endpointPreviewText"}, {"selector": "#endpointPreviewUntil"}]},
+      {"window": "zone-migration", "id": "legacy-zone-review", "steps": [{"press": "#endpointClose"}, {"press": "#ruleRows tr[data-id=\"inventory-rule-legacy\"]", "key": " "}, {"press": "#migrateZone"}], "ready": {"selector": "#zoneMigrationDialog[open]"}, "expect": [{"selector": "#zoneMigrationIdentity"}, {"selector": "#zoneMigrationAccept"}]},
+      {"window": "zone-migration", "id": "legacy-zone-preview", "ready": {"selector": "#zoneMigrationAccept", "enabled": true}, "expect": [{"selector": "#zoneMigrationDefinition"}, {"selector": "#zoneMigrationCoverage"}]}
+    ]},
+    {"id": "rule-lost-reply", "seed": "populated", "states": [
+      {"window": "rule-editor", "id": "rule-save-unresolved", "steps": [{"press": "#rulesTab"}, {"press": "#ruleRows tr[data-id=\"inventory-rule-enabled\"]"}, {"press": "#editEnabled", "key": " "}, {"wait": {"selector": "#saveRule", "enabled": true}}, {"press": "#saveRule"}], "ready": {"selector": "#editorFeedback", "contains": "Save outcome unresolved"}, "expect": [{"selector": "#saveRule", "enabled": false}], "seedStage": "lose-save"}
+    ]},
+    {"id": "readonly", "seed": "readonly", "states": [
+      {"window": "main", "id": "rules-readonly-selected", "steps": [{"press": "#rulesTab"}, {"press": "#ruleRows tr[data-id=\"inventory-rule-enabled\"]", "key": " "}], "ready": {"selector": "#ruleRows tr[data-id=\"inventory-rule-enabled\"][aria-selected=\"true\"]"}, "expect": [{"selector": "#editRule", "enabled": false}, {"selector": "#deleteRule", "enabled": false}]},
+      {"window": "main", "id": "read-only-firewall", "steps": [{"press": "#controlMenu > summary"}], "ready": {"selector": "#controlMenu[open]"}, "expect": [{"selector": "#protectionStart", "enabled": false}]}
+    ]},
+    {"id": "offline", "seed": "offline", "states": [
+      {"window": "main", "id": "activity-disconnected", "ready": {"selector": "#activityTab[aria-selected=\"true\"]"}, "expect": [{"selector": "#footerSummary"}]},
+      {"window": "main", "id": "decision-log-disconnected", "steps": [{"press": "#decisionLogTab"}], "ready": {"selector": "#logEmpty"}, "expect": [{"selector": "#logEmpty", "contains": "Disconnected"}]},
+      {"window": "about", "id": "about-daemon-unavailable", "steps": [{"press": "#helpMenu > summary"}, {"press": {"selector": "#helpMenu button", "text": "About FlowGate"}}], "ready": {"selector": "#aboutFlowGate[open]"}, "expect": [{"selector": "#aboutBuild"}]}
+    ]},
+    {"id": "decision-log", "seed": "populated", "states": [
+      {"window": "main", "id": "decision-log-populated", "steps": [{"press": "#decisionLogTab"}], "ready": {"selector": "#logRows tr[data-id=\"inventory-log-pending\"]"}, "expect": [{"selector": "#logRows tr[data-id=\"inventory-log-final\"]"}, {"selector": "#logDetails"}]},
+      {"window": "main", "id": "decision-log-pending-selected", "steps": [{"press": "#logRows tr[data-id=\"inventory-log-pending\"]"}], "ready": {"selector": "#logDetails", "contains": "Historical pending request"}, "expect": [{"selector": "#logRows tr[data-id=\"inventory-log-pending\"][aria-selected=\"true\"]"}, {"selector": "#logOutcomeAction button", "text": "Open recorded outcome"}]},
+      {"window": "main", "id": "decision-log-linked-final", "steps": [{"press": {"selector": "#logOutcomeAction button", "text": "Open recorded outcome"}}], "ready": {"selector": "#logDetails", "contains": "inventory-log-final"}, "expect": [{"selector": "#logDetails", "contains": "Final disposition"}, {"selector": "#logDetails", "contains": "inventory-request-atlas"}]},
+      {"window": "main", "id": "decision-log-aggregation-selected", "steps": [{"press": "#logRows tr[data-id=\"inventory-log-aggregate\"]"}], "ready": {"selector": "#logDetails", "contains": "First seen"}, "expect": [{"selector": "#logDetails", "contains": "Last seen"}]},
+      {"window": "main", "id": "decision-log-gap-selected", "steps": [{"press": "#logRows tr[data-id=\"inventory-log-gap\"]"}], "ready": {"selector": "#logDetails", "contains": "Count withheld"}},
+      {"window": "main", "id": "decision-log-paused", "steps": [{"press": "#logLive"}], "ready": {"selector": "#logLive", "contains": "Paused"}},
+      {"window": "main", "id": "decision-log-outgoing-filter", "steps": [{"focus": "#logDirection", "keys": ["End"]}], "ready": {"selector": "#logDirection", "value": "outgoing"}, "expect": [{"selector": "#logRows tr[data-id=\"inventory-log-other\"]", "count": 0}]}
+    ]},
+    {"id": "activity", "seed": "populated", "states": [
+      {"window": "main", "id": "activity-populated", "ready": {"selector": "#rows tr[data-id=\"overview\"]"}, "expect": [{"selector": "#tree"}, {"selector": "#footerSummary"}]},
+      {"window": "main", "id": "activity-expanded", "steps": [{"press": "#expand"}], "ready": {"selector": "#rows tr[data-id=\"overview\"][aria-expanded=\"true\"]"}, "expect": [{"selector": "#tree"}]},
+      {"window": "main", "id": "activity-application-selected", "steps": [{"press": "#rows tr[data-id=\"app:inventory-atlas|rev-1|uid:424242\"]", "key": " "}], "ready": {"selector": "#activityDetails"}, "expect": [{"selector": "#selectedName"}, {"selector": "#infoOpenRules"}, {"selector": "#infoOpenLog"}]},
+      {"window": "main", "id": "activity-details-selected-process", "steps": [{"press": "#rows tr[data-id=\"process:inventory-atlas|rev-1|uid:424242:4281:101\"]", "key": " "}], "ready": {"selector": "#rows tr[data-id=\"process:inventory-atlas|rev-1|uid:424242:4281:101\"][aria-selected=\"true\"]"}, "expect": [{"selector": "#activityDetails"}, {"selector": "#infoProperties"}]},
+      {"window": "main", "id": "activity-details-selected-socket", "steps": [{"press": "#rows tr[data-id=\"inventory-socket-atlas\"]", "key": " "}], "ready": {"selector": "#rows tr[data-id=\"inventory-socket-atlas\"][aria-selected=\"true\"]"}, "expect": [{"selector": "#activityDetails"}, {"selector": "#infoProperties"}]},
+      {"window": "main", "id": "activity-network-zone-selected", "steps": [{"press": "#rows tr[data-id=\"network:local\"]", "key": " "}], "ready": {"selector": "#rows tr[data-id=\"network:local\"][aria-selected=\"true\"]"}, "expect": [{"selector": "#activityDetails"}, {"selector": "#infoProperties"}]},
+      {"window": "main", "id": "activity-info-pane-menu", "steps": [{"press": "#infoPaneControls details > summary"}], "ready": {"selector": "#infoPaneControls details[open]"}},
+      {"window": "activity-info", "id": "detached-application-details", "ready": {"selector": "#dockPane"}, "expect": [{"selector": "#paneContent"}, {"selector": "#paneUnits"}, {"selector": "#closePane"}], "setup": {"window": "main", "steps": [{"press": "#infoPaneControls [data-undock=\"info\"]"}]}},
+      {"window": "main", "id": "activity-info-redocked", "ready": {"selector": "#activityDetails"}, "expect": [{"selector": "#infoPaneControls"}], "setup": {"window": "activity-info", "steps": [{"press": "#dockPane", "closesWindow": true}]}},
+      {"window": "quick-rule-setter", "id": "activity-rule-setter", "steps": [{"press": "#rows tr[data-id=\"app:inventory-atlas|rev-1|uid:424242\"] button.policy-cell[data-direction=outgoing]"}], "ready": {"selector": ".quick-rule-editor"}},
+      {"window": "confirmation", "id": "activity-delete-app-rules-review", "steps": [{"press": ".quick-rule-editor button[data-focus=qs-close]"}, {"press": {"selector": "#infoRules button", "text": "Delete all app rules…"}}], "ready": {"selector": "#confirmation[open]"}, "expect": [{"selector": "#confirmTitle", "contains": "Delete all app rules"}]},
+      {"window": "main", "id": "activity-return-from-delete-review", "steps": [{"press": "#confirmNo"}], "ready": {"selector": "#infoRules"}},
+      {"window": "main", "id": "activity-unidentified-selected", "steps": [{"press": "#rows tr[data-id=\"unidentified\"]", "key": " "}], "ready": {"selector": "#rows tr[data-id=\"unidentified\"][aria-selected=\"true\"]"}, "expect": [{"selector": "#activityDetails"}]},
+      {"window": "floating-rule-status", "id": "activity-rule-status-floated", "steps": [{"press": "#activityDetails button[aria-label=\"Close Info View\"]"}, {"wait": {"selector": "#activityDetails", "count": 0}}, {"press": "#rows tr[data-id=\"app:inventory-atlas|rev-1|uid:424242\"] button.policy-cell[data-direction=outgoing]"}], "ready": {"selector": "#floatingRuleStatus"}, "expect": [{"selector": "#infoRules"}]}
+    ]},
+    {"id": "usage", "seed": "populated", "states": [
+      {"window": "main", "id": "observed-usage-populated", "steps": [{"press": "#observedUsageTab"}], "ready": {"selector": "#usageRows tr"}, "expect": [{"selector": "#usageCoverage"}, {"selector": "#usageStatus"}]}
+    ]},
+    {"id": "charts", "seed": "populated", "states": [
+      {"window": "main", "id": "chart-measurement-details", "steps": [{"press": ".graph-explanation > summary"}], "ready": {"selector": ".graph-explanation[open]"}, "expect": [{"selector": "#graphContext"}, {"selector": "#graphStatus"}]},
+      {"window": "main", "id": "chart-paused", "steps": [{"press": "#graphPause"}], "ready": {"selector": "#graphPause[aria-pressed=\"true\"]"}, "expect": [{"selector": "#graphLive", "enabled": true}]},
+      {"window": "main", "id": "chart-live", "steps": [{"press": "#graphLive"}], "ready": {"selector": "#graphPause[aria-pressed=\"false\"]"}, "expect": [{"selector": "#graphLive", "enabled": false}]},
+      {"window": "main", "id": "chart-sample", "steps": [{"focus": "#trafficCanvas", "keys": ["ArrowLeft"]}], "ready": {"selector": "#graphSample"}, "expect": [{"selector": "#graphPrevious"}, {"selector": "#graphNext"}]},
+      {"window": "traffic-chart", "id": "detached-chart", "ready": {"selector": "#dockPane"}, "expect": [{"selector": "#trafficCanvas"}, {"selector": "#paneSource"}], "setup": {"window": "main", "steps": [{"press": "summary[aria-label=\"Traffic chart window menu\"]"}, {"press": "[data-undock=\"chart\"]"}]}}
+    ]},
+    {"id": "analysis", "seed": "populated", "states": [
+      {"window": "main", "id": "analyzer-open", "steps": [{"press": "#openConnectionAnalysis"}], "ready": {"selector": "#connectionAnalysis"}, "expect": [{"selector": "#recheckConnections"}, {"selector": "#watchConnections"}]},
+      {"window": "main", "id": "analyzer-recheck", "steps": [{"press": "#recheckConnections"}], "ready": {"selector": "#connectionAnalysisResults"}, "expect": [{"selector": "#connectionAnalysisStatus"}]},
+      {"window": "main", "id": "analyzer-watch", "steps": [{"press": "#watchConnections"}], "ready": {"selector": "#watchConnections", "enabled": false}, "expect": [{"selector": "#connectionAnalysisStatus"}]},
+      {"window": "main", "id": "analyzer-watch-complete", "ready": {"selector": "#watchConnections", "enabled": true}, "expect": [{"selector": "#connectionAnalysisResults"}]},
+      {"window": "main", "id": "analyzer-holders-expanded", "steps": [{"press": ".analysis-shared > summary"}], "ready": {"selector": ".analysis-shared[open]"}, "expect": [{"selector": "#connectionAnalysisResults"}]}
+    ]},
+    {"id": "traffic", "seed": "populated", "states": [
+      {"window": "traffic-settings", "id": "traffic-limits-list", "steps": [{"press": "#activityTab"}, {"press": "#uploadLimits"}], "ready": {"selector": "#uploadLimitList[open]"}, "expect": [{"selector": "#priorityBudgets"}, {"selector": "#budgetSave"}]},
+      {"window": "traffic-editor", "id": "upload-limit-details", "steps": [{"press": "#uploadLimitList button[data-configured-limit=upload]"}, {"press": "#uploadDetails"}], "ready": {"selector": "#uploadDetailsBody"}, "expect": [{"selector": "#uploadEnabled"}, {"selector": "#uploadRate"}, {"selector": "#uploadSave"}, {"selector": "#uploadCoverage"}]},
+      {"window": "traffic-editor", "id": "download-limit-details", "steps": [{"press": "#uploadClose"}, {"press": "#uploadLimits"}, {"press": "#uploadLimitList button[data-configured-limit=download]"}], "ready": {"selector": "#uploadLimitDialog[data-direction=download]"}, "expect": [{"selector": "#uploadEnabled"}, {"selector": "#uploadRate"}, {"selector": "#uploadSave"}]},
+      {"window": "traffic-editor", "id": "traffic-priority-details", "steps": [{"press": "#uploadClose"}, {"press": "#uploadLimits"}, {"press": "#uploadLimitList button[data-configured-limit=priority]"}], "ready": {"selector": "#uploadLimitDialog[data-direction=priority]"}, "expect": [{"selector": "#uploadSave"}]}
+    ]},
+    {"id": "traffic-cleanup", "seed": "trafficCleanup", "states": [
+      {"window": "traffic-settings", "id": "traffic-limits-cleanup", "steps": [{"press": "#uploadLimits"}], "ready": {"selector": "#uploadLimitList[open]"}, "expect": [{"selector": "#uploadCleanup"}]}
+    ]},
+    {"id": "warnings", "seed": "unhealthy", "states": [
+      {"window": "queue-diagnostics", "id": "queue-diagnostics", "steps": [{"press": "#queueHealth"}], "ready": {"selector": "#queueDiagnostics[open]"}, "expect": [{"selector": "#queueDiagnosticsLive"}]},
+      {"window": "confirmation", "id": "firewall-recovery-review", "steps": [{"press": {"selector": "#queueDiagnostics button", "text": "Close"}}, {"press": "#controlMenu > summary"}, {"press": "#evalRecover"}], "ready": {"selector": "#confirmation[open]"}, "expect": [{"selector": "#confirmText"}]},
+      {"window": "confirmation", "id": "firewall-evaluation-start-review", "steps": [{"press": "#confirmNo"}, {"press": "#controlMenu > summary"}, {"wait": {"selector": "#evalStart", "enabled": true}}, {"press": "#evalStart"}], "ready": {"selector": "#confirmation[open]"}, "expect": [{"selector": "#confirmTitle", "contains": "evaluation"}]},
+      {"window": "confirmation", "id": "udp-start-review", "steps": [{"press": "#confirmNo"}, {"keys": ["Escape"]}, {"press": "#monitoringMenu > summary"}, {"wait": {"selector": "#extendedEnable", "enabled": true}}, {"press": "#extendedEnable"}], "ready": {"selector": "#confirmation[open]"}, "expect": [{"selector": "#confirmTitle", "contains": "Start UDP"}]}
+    ]},
+    {"id": "udp-active", "seed": "trafficActive", "states": [
+      {"window": "main", "id": "udp-active-menu", "steps": [{"press": "#monitoringMenu > summary"}], "ready": {"selector": "#extendedStop", "enabled": true}, "expect": [{"selector": "#extendedStatus"}, {"selector": "#extendedEnable"}]},
+      {"window": "confirmation", "id": "udp-stop-review", "steps": [{"press": "#extendedStop"}], "ready": {"selector": "#confirmation[open]"}, "expect": [{"selector": "#confirmTitle", "contains": "Stop UDP"}]}
+    ]},
+    {"id": "requests", "seed": "requests", "states": [
+      {"window": "main", "id": "pending-populated", "steps": [{"press": "#requestsTab"}], "ready": {"selector": "#requestRows tr[data-id=\"inventory-request-atlas\"]"}, "expect": [{"selector": "#requestRows tr[data-id=\"inventory-request-beacon\"]"}, {"selector": "#requestDetails"}]},
+      {"window": "main", "id": "pending-selected", "steps": [{"press": "#requestRows tr[data-id=\"inventory-request-atlas\"]"}], "ready": {"selector": "#requestRows tr[data-id=\"inventory-request-atlas\"][aria-selected=\"true\"]"}, "expect": [{"selector": "#openSelectedPrompt"}, {"selector": "#requestDetails"}]},
+      {"window": "main", "id": "pending-details-expanded", "steps": [{"press": "#detailsToggle"}], "ready": {"selector": "#requestMore"}, "expect": [{"selector": "#requestDetails"}]},
+      {"window": "permission", "id": "outgoing-tcp", "ready": {"selector": "#requestDetails[data-event-id=\"inventory-request-atlas\"]"}, "expect": [{"selector": "#rememberPanel"}, {"selector": "#allow"}, {"selector": "#block"}, {"selector": "#allowForAWhile"}, {"selector": "#blockForAWhile"}, {"selector": "#dismiss"}], "setup": {"window": "main", "steps": [{"press": "#openSelectedPrompt"}]}},
+      {"window": "permission", "id": "outgoing-rule-protocol-checked", "steps": [{"wait": {"selector": "#rememberPanel input[data-field=\"protocol\"]", "enabled": true}}, {"press": "#rememberPanel input[data-field=\"protocol\"]", "key": " "}], "ready": {"selector": "#rememberPanel input[data-field=\"protocol\"]:checked"}, "expect": [{"selector": "#rememberPanel"}]},
+      {"window": "permission", "id": "outgoing-request-details", "steps": [{"wait": {"selector": "#allowForAWhile", "enabled": true}}, {"press": "#detailsToggle"}], "ready": {"selector": "#requestMore"}, "expect": [{"selector": "#detailsBack"}]},
+      {"window": "permission", "id": "incoming-tcp", "ready": {"selector": "#requestDetails[data-event-id=\"inventory-request-beacon\"]"}, "expect": [{"selector": "#rememberPanel"}, {"selector": "#allowForAWhile"}, {"selector": "#blockForAWhile"}], "query": {"request": "inventory-request-beacon", "generation": "inventory-generation"}, "setup": {"window": "main", "steps": [{"press": "#requestRows tr[data-id=\"inventory-request-beacon\"]"}, {"press": "#openSelectedPrompt"}]}},
+      {"window": "permission", "id": "incoming-temporary-duration", "steps": [{"wait": {"selector": "#forAWhileDuration", "enabled": true}}, {"focus": "#forAWhileDuration", "keys": ["End"]}], "ready": {"selector": "#forAWhileDuration", "value": "3600"}, "expect": [{"selector": "#allowForAWhile"}, {"selector": "#blockForAWhile"}], "query": {"request": "inventory-request-beacon", "generation": "inventory-generation"}},
+      {"window": "main", "id": "pending-results", "ready": {"selector": "#permissionResultsView"}, "expect": [{"selector": "#permissionResultRows"}], "setup": {"window": "permission", "query": {"request": "inventory-request-beacon", "generation": "inventory-generation"}, "steps": [{"press": "#allowForAWhile"}]}}
+    ]},
+    {"id": "process-lease", "seed": "processLease", "states": [
+      {"window": "main", "id": "temporary-process-leases", "steps": [{"press": "#requestsTab"}], "ready": {"selector": "#temporaryDecisions"}, "expect": [{"selector": "#leaseRows"}]}
+    ]},
+    {"id": "request-unknown", "seed": "requestUnknown", "states": [
+      {"window": "main", "id": "uncertain-decision-result", "steps": [{"press": "#requestsTab"}, {"wait": {"selector": "#requestRows tr[data-id=\"inventory-request-atlas\"]"}}, {"press": "#requestRows tr[data-id=\"inventory-request-atlas\"]"}, {"wait": {"selector": "#allow", "enabled": true}}, {"press": "#allow"}], "ready": {"selector": "#permissionResultRows", "contains": "outcome unknown"}, "expect": [{"selector": "#permissionResultsView"}]}
+    ]},
+    {"id": "request-pair", "seed": "requestPair", "states": [
+      {"window": "permission", "id": "paired-local-request", "ready": {"selector": "#requestApplication"}, "expect": [{"selector": "#rememberPanel"}]},
+      {"window": "permission", "id": "paired-local-request-details", "steps": [{"wait": {"selector": "#allowForAWhile", "enabled": true}}, {"press": "#detailsToggle"}], "ready": {"selector": "#requestMore", "contains": "Local connection"}}
+    ]},
+    {"id": "request-udp", "seed": "requestUdp", "states": [
+      {"window": "permission", "id": "outgoing-udp", "ready": {"selector": "#requestApplication"}, "expect": [{"selector": "#allowForAWhile"}, {"selector": "#blockForAWhile"}, {"selector": "#rememberPanel"}]}
+    ]},
+    {"id": "request-expiry", "seed": "requestShort", "states": [
+      {"window": "permission", "id": "expired-request", "ready": {"selector": "body", "contains": "ended"}, "expect": [{"selector": "#allowForAWhile", "enabled": false}, {"selector": "#blockForAWhile", "enabled": false}], "timeout": 14000}
+    ]},
+    {"id": "request-fault", "seed": "requestFault", "states": [
+      {"window": "permission", "id": "review-unavailable", "ready": {"selector": "#refreshDecision"}, "expect": [{"selector": "#allow", "enabled": false}, {"selector": "#block", "enabled": false}]}
+    ]},
+    {"id": "native-tray", "seed": "requests", "states": [
+      {"window": "tray-menu", "id": "tray-menu", "steps": [{"focus": {"names": ["FlowGate", "FlowGate · .*"], "roles": ["push-button", "menu-item", "toggle-button", "icon", "panel"]}, "keys": ["Menu"]}], "expectText": ["Open FlowGate", "Quit FlowGate UI"]},
+      {"window": "main", "id": "tray-open-flowgate", "ready": {"selector": "#activityTab"}, "desktopSteps": [{"focus": {"names": ["Open FlowGate"], "roles": ["menu-item"]}, "keys": ["Return"]}]},
+      {"window": "main", "id": "tray-pending-requests", "ready": {"selector": "#requestsTab[aria-selected=\"true\"]"}, "desktopSteps": [{"focus": {"names": ["FlowGate", "FlowGate · .*"], "roles": ["push-button", "menu-item", "toggle-button", "icon", "panel"]}, "keys": ["Menu"]}, {"focus": {"names": ["Pending requests [(][0-9]+[)]"], "roles": ["menu-item"]}, "keys": ["Return"]}]}
+    ]},
+    {"id": "native-quit", "seed": "requests", "states": [
+      {"window": "quit-confirmation", "id": "pending-quit-review", "setup": {"window": "main", "steps": [{"press": "#fileMenu > summary"}, {"press": {"selector": "#fileMenu button", "text": "Quit FlowGate UI"}}]}, "expectText": ["Keep running", "Quit FlowGate UI"]},
+      {"window": "quit-confirmation", "id": "tray-quit-review", "reason": "Requires a focusable accessible desktop tray action."},
+      {"window": "authentication-terminal", "id": "legacy-authentication", "reason": "A system-owned legacy authorization terminal requires an external policy/authorization fixture."}
+    ]}
+  ]
+}

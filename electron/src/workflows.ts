@@ -895,7 +895,6 @@ export function updateRuleEditor(next: ClientState) {
 export function updateWorkflows(next: ClientState) {
   updateRuleEditor(next);
   endpointUI?.update(next);
-  migrationUI?.update(next, selected);
   const rules = state.control.rules || [],
     sig = JSON.stringify([rules, state.control.rule_states, rules.map((r) => savedRuleState(r, next.control))]);
   if (sig !== signature) {
@@ -934,33 +933,17 @@ export function updateWorkflows(next: ClientState) {
         selectRule();
       };
       tr.onkeydown = (e) => {
-        if (e.key === 'Enter') {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
           selected = r.id;
           selectRule();
-          if (!r.network_endpoint) void openRule({ id: r.id });
+          if (e.key === 'Enter' && !r.network_endpoint) void openRule({ id: r.id });
         }
       };
       body.append(tr);
     }
-    selectRule();
   }
-  for (const id of ['editRule', 'toggleRule', 'deleteRule'])
-    $<HTMLButtonElement>(id).disabled = !writable() || !rules.some((r) => r.id === selected);
-  const chosen = rules.find((r) => r.id === selected);
-  const endpointSelected = !!chosen?.network_endpoint;
-  const presetSelected = chosen?.schema === 5;
-  if (endpointSelected && !canManageEndpoints(state.control)) $<HTMLButtonElement>('deleteRule').disabled = true;
-  for (const id of ['editRule', 'toggleRule']) {
-    $<HTMLButtonElement>(id).disabled ||= presetSelected || endpointSelected;
-    $<HTMLButtonElement>(id).title = endpointSelected ? 'Recreate through Endpoint permission to change scope.' : presetSelected
-      ? 'Manage this legacy preset through the Essential API.'
-      : '';
-  }
-  const compatible = state.control.capabilities?.includes('conditional-rule-delete-v1');
-  $<HTMLButtonElement>('deleteRule').disabled ||= !compatible;
-  $('deleteCompatibility').textContent = compatible || !rules.length
-    ? ''
-    : 'Safe Delete unavailable: backend must advertise conditional-rule-delete-v1. No unconditional fallback.';
+  selectRule();
   const access = state.control.connected ? (!writable() ? 'readonly' : 'write') : 'offline';
   if (access !== accessState) {
     accessState = access;
@@ -1002,7 +985,24 @@ function selectRule() {
   if (state) migrationUI?.update(state, selected);
   for (const tr of document.querySelectorAll<HTMLTableRowElement>('#ruleRows tr'))
     tr.setAttribute('aria-selected', String(tr.dataset.id === selected));
-  const r = state.control.rules?.find((r) => r.id === selected);
+  const rules = state.control.rules || [];
+  const r = rules.find((r) => r.id === selected);
+  for (const id of ['editRule', 'toggleRule', 'deleteRule'])
+    $<HTMLButtonElement>(id).disabled = !writable() || !r;
+  const endpointSelected = !!r?.network_endpoint;
+  const presetSelected = r?.schema === 5;
+  if (endpointSelected && !canManageEndpoints(state.control)) $<HTMLButtonElement>('deleteRule').disabled = true;
+  for (const id of ['editRule', 'toggleRule']) {
+    $<HTMLButtonElement>(id).disabled ||= presetSelected || endpointSelected;
+    $<HTMLButtonElement>(id).title = endpointSelected ? 'Recreate through Endpoint permission to change scope.' : presetSelected
+      ? 'Manage this legacy preset through the Essential API.'
+      : '';
+  }
+  const compatible = state.control.capabilities?.includes('conditional-rule-delete-v1');
+  $<HTMLButtonElement>('deleteRule').disabled ||= !compatible;
+  $('deleteCompatibility').textContent = compatible || !rules.length
+    ? ''
+    : 'Safe Delete unavailable: backend must advertise conditional-rule-delete-v1. No unconditional fallback.';
   const info = $('ruleInfo');
   const fields = r
     ? [

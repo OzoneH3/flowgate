@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "windowId": "main",
+  "stateId": "decision-log-empty",
+  "surface": "electron",
+  "status": "captured",
+  "controls": [
+    { "id": "decisionLogTab", "parentId": "views", "role": "button", "text": "Decision log", "enabled": true, "selected": true },
+    { "id": "decisionLogView", "parentId": null, "role": "main", "text": "" },
+    { "id": "logEmpty", "parentId": "decisionLogView", "role": "paragraph", "text": "No firewall decisions recorded yet." },
+    { "id": "logRange", "parentId": "decisionLogView", "role": "combobox", "text": "Any time", "accessibleName": "Time range", "value": "any", "enabled": true }
+  ],
+  "issues": []
+}

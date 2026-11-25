@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:flowgate:gui-inventory:window-state:1",
+  "title": "FlowGate GUI window state",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "windowId", "stateId", "surface", "status", "controls", "issues"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "windowId": { "type": "string", "minLength": 1 },
+    "stateId": { "type": "string", "minLength": 1 },
+    "surface": { "enum": ["electron", "desktop-accessibility"] },
+    "status": { "enum": ["captured", "partial", "missing", "unreadable", "blocked"] },
+    "controls": { "type": "array", "items": { "$ref": "#/$defs/control" } },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "id", "message"],
+        "properties": {
+          "kind": { "enum": ["missing", "unreadable", "blocked"] },
+          "id": { "type": "string", "minLength": 1 },
+          "message": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "control": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "parentId", "role", "text"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "parentId": { "type": ["string", "null"] },
+        "role": { "type": "string", "minLength": 1 },
+        "text": { "type": ["string", "null"] },
+        "accessibleName": { "type": "string" },
+        "value": { "type": ["string", "number", "boolean", "null"] },
+        "enabled": { "type": "boolean" },
+        "checked": { "enum": [true, false, "mixed"] },
+        "expanded": { "type": "boolean" },
+        "selected": { "type": "boolean" }
+      }
+    }
+  }
+}

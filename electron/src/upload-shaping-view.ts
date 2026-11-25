@@ -144,11 +144,11 @@ export async function openUploadLimits() {
   d.append(text("h3","Experimental bandwidth limits"),text("p",view.message||"The daemon saves these settings. After restart it checks socket ownership again. Coverage remains partial."));
   for(const c of view.snapshot?.configured_caps||[])for(const direction of ['upload','download'] as const){
     if(!capRate(c,direction))continue;
-    const b=text('button','');showAccountIn(b,c.uid,user=>`${c.application} · ${user} · ${scopeLabel(scopeOf(c))} · ${direction} ${capRate(c,direction)/1000000} Mbit/s`);
+    const b=text('button','');b.dataset.configuredLimit=direction;showAccountIn(b,c.uid,user=>`${c.application} · ${user} · ${scopeLabel(scopeOf(c))} · ${direction} ${capRate(c,direction)/1000000} Mbit/s`);
     b.onclick=()=>{d.remove();void open(configuredTarget(c),document.getElementById('uploadLimits')||undefined,direction);};d.append(b);
   }
   for(const c of view.snapshot?.configured_caps||[])if(c.traffic_priority){
-    const b=text('button','');showAccountIn(b,c.uid,user=>`${c.application} · ${user} · ${scopeLabel(scopeOf(c))} · traffic priority ${c.traffic_priority}`);
+    const b=text('button','');b.dataset.configuredLimit='priority';showAccountIn(b,c.uid,user=>`${c.application} · ${user} · ${scopeLabel(scopeOf(c))} · traffic priority ${c.traffic_priority}`);
     b.onclick=()=>{d.remove();void open(configuredTarget(c),document.getElementById('uploadLimits')||undefined,'priority');};d.append(b);
   }
   if(view.prioritySupported && view.snapshot){

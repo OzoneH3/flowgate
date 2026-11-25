@@ -1348,6 +1348,7 @@ app.whenReady().then(async () => {
     }
   });
   main = windowFor();
+  if (process.argv.includes('--show')) main.once('ready-to-show', () => main.show());
   // Warm the native shell during application startup; subsequent automatic
   // requests only reveal it and never map or activate another toplevel.
   promptIdle = true;

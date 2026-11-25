@@ -263,6 +263,14 @@ const appName = (r: LogRecord) =>
 function row(r: LogRecord) {
   const tr = el('tr');
   tr.dataset.id = r.id;
+  tr.tabIndex = -1;
+  tr.onkeydown = (event) => {
+    if (event.target !== tr || (event.key !== 'Enter' && event.key !== ' ')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    select(r.id);
+    $('logTable').focus({ preventScroll: true });
+  };
   tr.id = 'log-record-' + r.id;
   tr.setAttribute('aria-selected', String(r.id === selected));
   const t = el('td', time(r.time));

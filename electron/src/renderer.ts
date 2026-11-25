@@ -1601,13 +1601,20 @@ function renderTree() {
     tr.setAttribute('aria-level', String(depth + 1));
     tr.setAttribute('aria-selected', String(selected === r.id));
     if (r.children.length) tr.setAttribute('aria-expanded', String(expanded.has(r.id)));
-    tr.onclick = () => {
+    const selectTreeRow = () => {
       selected = r.id;
       for (const row of document.querySelectorAll<HTMLElement>('#rows tr'))
         row.setAttribute('aria-selected', String(row.dataset.id === selected));
       renderInfo();
       reopenInfo(r);
       $('tree').focus();
+    };
+    tr.tabIndex = -1;
+    tr.onclick = selectTreeRow;
+    tr.onkeydown = (event) => {
+      if (event.target !== tr || (event.key !== 'Enter' && event.key !== ' ')) return;
+      event.preventDefault();
+      selectTreeRow();
     };
     tr.ondblclick = (event) => {
       if ((event.target as HTMLElement).closest('button,input,select')) return;
