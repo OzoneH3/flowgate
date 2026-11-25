@@ -192,7 +192,8 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
   more.type = 'button';
   more.setAttribute('aria-expanded', 'false');
   more.setAttribute('aria-controls', 'requestMore');
-  meta.append(more, status);
+  meta.append(more);
+  if (!o.popup) meta.append(status);
   const card = el('section', '', 'nl-card', 'requestCard');
   const nodes: HTMLElement[] = [card];
   card.append(route, meta);
@@ -308,6 +309,7 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
 
   const statusSection = section(details, 'Status', 'status'),
     state = statusSection.list;
+  if (o.popup) statusSection.box.append(status);
   row(state, 'Backend', e.reason, 'requestStatus');
   row(state, 'Last result', '', 'requestLastResult');
   row(state, 'Review', '', 'requestReviewDetail');

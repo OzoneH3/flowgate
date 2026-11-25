@@ -15,7 +15,6 @@ import { Essential } from './essential';
 import { Protection } from './protection';
 import { placeKDEPrompt, resizeKDEPrompt, PROMPT_TITLE, promptTitle } from './prompt-placement';
 import { AutomaticPrompts, PROMPT_HEIGHT, PROMPT_MIN_HEIGHT, compactPromptBounds, edgePosition, boundDecision, groupOf, inputSettled, queuedRemember, queuedRememberSelection, type QueuedRememberSelection } from './automatic-prompts';
-import { leaseHolds } from './process-lease';
 import {
   app,
   BrowserWindow,
@@ -243,10 +242,26 @@ function retarget(ref: RequestRef, reload = false, remember?: QueuedRememberSele
   promptLayouts.set(w.webContents.id, reset);
   void w.loadURL(promptURL(ref, remember, focusHeading));
 }
+function hidePrompt(w: BrowserWindow) {
+  if (!promptKDEReady) {
+    w.hide();
+    return;
+  }
+  const id = w.webContents.id;
+  // Finish any in-flight KWin reveal before hiding the warm window. A later
+  // request queues its reveal behind this hide through the same layout chain.
+  const prior = promptLayouts.get(id) ?? promptPlacement.get(id) ?? Promise.resolve();
+  const hidden = prior.then(async () => {
+    if (w.isDestroyed() || w !== prompt) return;
+    await resizeKDEPrompt(profile, process.pid, w.id, w.getBounds(), false);
+  }).catch((error) => console.info('FlowGate: prompt hide unavailable', String(error)))
+    .finally(() => {
+      if (!w.isDestroyed() && w === prompt && promptIdle && !w.isMinimized()) w.minimize();
+    });
+  promptLayouts.set(id, hidden);
+}
 // Temporary Allow/Deny hides at once; remembered saves hide after acknowledgement.
-// The submission outcome, including refusals
-// and uncertain acknowledgements, is kept in Pending requests › Results. The
-// next waiting request is presented after the usual input-release pacing.
+// Outcomes stay in Pending requests › Results, and the next request is paced.
 function promptAnswered(sender: Electron.WebContents) {
   const w = prompt;
   if (!w || w.isDestroyed() || w.webContents !== sender || promptIdle) return;
@@ -258,8 +273,7 @@ function promptAnswered(sender: Electron.WebContents) {
   promptPointerDown = false;
   pressedPromptKeys.clear();
   rendererPromptKeys.clear();
-  if (promptKDEReady) void resizeKDEPrompt(profile, process.pid, w.id, w.getBounds(), false);
-  else w.hide();
+  hidePrompt(w);
   pacePrompt();
 }
 function trackResult<T>(
@@ -302,11 +316,13 @@ function automaticDecision() {
   const view = backend.view();
   if (prompt && !prompt.isDestroyed() && !promptIdle) {
     const ref = promptRefs.get(prompt.webContents.id);
-    let next = ref && automaticPrompts.continueVisible(view, ref, promptRemember, MIN_PROMPT_TIME_MS);
-    // A request just decided "For a while" keeps its card while its lease is
-    // active, so the lease stays inspectable; any other waiting request wins.
-    if (!promptDismissed && !next && ref && leaseHolds(view.control, ref.id))
-      next = automaticPrompts.next(view, false, MIN_PROMPT_TIME_MS) ?? ref;
+    // A receipt can confirm a decision after the original IPC call returned.
+    if (ref && ref.generation === view.control.generation &&
+        view.control.events.some((e) => e.id === ref.id && e.attempt?.phase === 'acknowledged')) {
+      promptAnswered(prompt.webContents);
+      return;
+    }
+    const next = ref && automaticPrompts.continueVisible(view, ref, promptRemember, MIN_PROMPT_TIME_MS);
     if (!promptDismissed && next?.id === ref?.id) {
       // The same card stays (for example a request that just ended and is now
       // retained): cancel a transition paced while it was briefly unfollowed,
@@ -332,9 +348,7 @@ function automaticDecision() {
     }
     if (promptDismissed || !next) {
       promptIdle = true;
-      if (promptKDEReady)
-        void resizeKDEPrompt(profile, process.pid, prompt.id, prompt.getBounds(), false);
-      else prompt.hide();
+      hidePrompt(prompt);
       pacePrompt();
     } else {
       retarget(next);

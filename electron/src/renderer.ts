@@ -880,7 +880,6 @@ if (promptID) {
       true,
     );
   new ResizeObserver(measurePrompt).observe($('requestDetails'));
-  new ResizeObserver(measurePrompt).observe($('feedback'));
   document.addEventListener('toggle', measurePrompt, true);
   setTimeout(() => {
     if (state) updateDecisions();
@@ -2332,10 +2331,7 @@ function renderRequests() {
     container.replaceChildren();
     const popupDuration = $('promptLeaseDuration');
     const popupContext = $('promptContext');
-    if (popupContext) {
-      $('promptResponse').replaceChildren();
-      popupContext.hidden = !e;
-    }
+    if (popupContext) popupContext.hidden = !e;
     if (popupDuration) {
       popupDuration.replaceChildren();
       popupDuration.hidden = true;
@@ -2377,7 +2373,6 @@ function renderRequests() {
     );
     if (popupContext) {
       $('promptPeerAddress').textContent = e.flow.remote || 'Unavailable';
-      $('promptResponse').append($('requestStatusLine'));
       if (focusNextHeading) {
         focusNextHeading = false;
         $('requestApplication').focus();
@@ -3111,7 +3106,7 @@ function updateDecisions() {
   // An expired popup keeps its last presentation. Outcome and review status
   // still update in Details, and all actions use the current backend state.
   const expiry = document.querySelector<HTMLElement>('.expiry');
-  if (expiry && !keepPresentation) {
+  if (expiry && (!keepPresentation || promptID)) {
     const limited = !!e && (!e.attribution.visibility_complete || e.attribution.status !== 'directly-associated');
     const endedLine = ended ? endedStatusLine($('decisionNote')?.textContent, $('requestResult')?.textContent) : '';
     expiry.classList.toggle('ended', !!endedLine);
@@ -3146,26 +3141,24 @@ function consume(next: ClientState) {
   applicationCallers.observe(next);
   const present = new Set(state.control.events.map((e) => state.control.generation + ':' + e.id));
   for (const key of localSubmitted) if (!present.has(key)) localSubmitted.delete(key);
-  // The permission window shows controller status only when it limits decisions.
-  const degraded = state.control.connected ? runtimeDegradation(state.control.runtimeChecks) : undefined;
-  $('controlStatus').textContent =
-    promptID && state.control.connected && !state.control.readOnly
-      ? ''
-      : state.control.message +
-        (state.control.connected && state.control.readOnly ? ' · read-only' : '') +
-        (degraded ? ' · ' + degraded.text : '');
+  const controlStatus = $('controlStatus');
+  if (controlStatus) {
+    const degraded = state.control.connected ? runtimeDegradation(state.control.runtimeChecks) : undefined;
+    controlStatus.textContent =
+      state.control.message +
+      (state.control.connected && state.control.readOnly ? ' · read-only' : '') +
+      (degraded ? ' · ' + degraded.text : '');
+    controlStatus.title = [
+      state.control.message,
+      state.control.enforcement?.detail,
+      ...(degraded?.lines || []),
+      state.control.permissions
+        ? `${state.control.permissions.role} · ${state.control.permissions.policy_scope} policy · rule management ${state.control.permissions.can_manage_rules ? 'permitted' : 'denied'} · decisions ${state.control.permissions.can_decide ? 'permitted' : 'denied'}`
+        : 'Legacy permission contract',
+    ].filter(Boolean).join('\n');
+  }
   while (cardResults.size > 128) cardResults.delete(cardResults.keys().next().value!);
   renderAboutBuild();
-  $('controlStatus').title = [
-    state.control.message,
-    state.control.enforcement?.detail,
-    ...(degraded?.lines || []),
-    state.control.permissions
-      ? `${state.control.permissions.role} · ${state.control.permissions.policy_scope} policy · rule management ${state.control.permissions.can_manage_rules ? 'permitted' : 'denied'} · decisions ${state.control.permissions.can_decide ? 'permitted' : 'denied'}`
-      : 'Legacy permission contract',
-  ]
-    .filter(Boolean)
-    .join('\n');
   if (!promptID) {
     updateFirewallStatus();
     for (const th of document.querySelectorAll<HTMLElement>('.col-rule_status button'))

@@ -418,16 +418,15 @@ test('no Save application rule UI remains in the renderer or style', () => {
   assert.ok(!/\.request-rule\b/.test(css));
 });
 
-test('ended request leaves the popup countdown slot alone and reports status in Details', () => {
+test('permission card keeps countdown and ended status in popup Details', () => {
   const pd = require('../dist/test/prompt-decision.cjs');
   assert.equal(pd.endedStatusLine(pd.ENDED_PROCESS, 'x'), pd.ENDED_PROCESS);
   assert.equal(pd.endedStatusLine('', pd.ENDED_RULE_RESULT), pd.ENDED_RULE_RESULT);
   assert.equal(pd.endedStatusLine(null, undefined), 'This connection has ended.');
   const fs = require('node:fs'), path = require('node:path');
   const src = fs.readFileSync(path.join(__dirname, '../src/renderer.ts'), 'utf8');
-  // Keep the old slot in the popup. The expanded Requests view can show the result there.
   const slot = src.slice(src.indexOf("const expiry = document.querySelector<HTMLElement>('.expiry');"), src.indexOf('measurePrompt();', src.indexOf("const expiry = document.querySelector<HTMLElement>('.expiry');")));
-  assert.match(slot, /if \(expiry && !keepPresentation\)/);
+  assert.match(slot, /if \(expiry && \(!keepPresentation \|\| promptID\)\)/);
   assert.match(slot, /endedStatusLine\(\$\('decisionNote'\)\?\.textContent, \$\('requestResult'\)\?\.textContent\)/);
   assert.match(slot, /expiry\.title = endedLine;/);
   assert.doesNotMatch(src, /Allow future connections/);

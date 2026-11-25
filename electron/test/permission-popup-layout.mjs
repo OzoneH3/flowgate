@@ -48,6 +48,7 @@ const generation = 'fixture';
 const start = Date.now();
 const once = 'Only this held connection.';
 const decisions = [];
+const reviewedRules = new Map();
 function request(id, name, direction, seconds = 180) {
   const application = {
     name,
@@ -134,16 +135,20 @@ function reply(q) {
     decisions.push(q);
     const event = events.find((e) => e.id === q.id);
     events = events.filter((e) => e.id !== q.id);
-    return { ...r, decision: { ...event, state: q.action === 'allow' ? 'allowed' : 'blocked' } };
+    return {
+      ...r,
+      decision: { ...event, state: q.action === 'allow' ? 'allowed' : 'blocked' },
+      ...(q.preview_token ? { saved_rule: reviewedRules.get(q.preview_token) } : {}),
+    };
   }
   if (q.operation === 'decision-preview') {
     const e = events.find((e) => e.id === q.id);
-    return {
+    const result = {
       ...r,
       decision_preview: {
         ...q,
         event_id: e.id,
-        token: 'review-' + q.action,
+        token: 'review-' + q.id + '-' + q.action,
         expires_at: new Date(Date.now() + 30000).toISOString(),
         connection_network: zone,
         scope_preview: e.scope_previews[q.scope],
@@ -166,6 +171,8 @@ function reply(q) {
         },
       },
     };
+    reviewedRules.set(result.decision_preview.token, result.decision_preview.rule);
+    return result;
   }
   return {
     ...r,
@@ -307,6 +314,8 @@ try {
   assert.equal(await timeout.inputValue(), '45');
   const deadline = await prompt.locator('.expiry').textContent();
   assert(Number(deadline.match(/^Respond in (\d+) s/)?.[1]) > 60, 'an active request retains its own deadline');
+  assert(await prompt.locator('#requestMore #requestStatusLine').isHidden());
+  assert.equal(await prompt.locator('footer #requestStatusLine, #controlStatus, #feedback').count(), 0);
   await main.screenshot({ path: path.join(run, 'permission-timeout.png') });
   await main.locator('#settingsMenu > summary').click();
   const rateMode = main.locator('#rateMode');
@@ -698,6 +707,22 @@ try {
   assert.equal(decisions[2].action, 'block');
   assert.equal(decisions[2].scope, 'for-a-while');
   assert.equal(decisions[2].duration_seconds, 60);
+  async function verifyDismissed() {
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline && await native.evaluate((w) => w.isVisible() && !w.isMinimized()))
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    assert(await native.evaluate((w) => !w.isVisible() || w.isMinimized()),
+      'the permission window must dismiss after answering');
+  }
+  await verifyDismissed();
+  const last = request('last-client', 'Last application', 'outgoing', timeoutSeconds);
+  events.push(last);
+  assert.equal(await requestWindow(last.id), prompt);
+  await prompt.waitForFunction(() => !document.querySelector('#allow')?.disabled);
+  await prompt.locator('#allow').click();
+  await verifyDismissed();
+  assert.deepEqual(decisions.slice(3).map(({ id, action, scope }) => [id, action, scope]),
+    [[last.id, 'allow', 'persistent']]);
   const chartOpened = app.waitForEvent('window');
   await main.evaluate(() => window.flowgate.paneControl('chart', 'undock'));
   const detachedChart = await chartOpened;
@@ -802,13 +827,14 @@ async function verifyPolish(app, requestWindow) {
     await prompt.waitForFunction(() => document.querySelector('#allow')?.disabled === false);
     await prompt.locator('#promptBody').evaluate((body) => { body.scrollTop = 0; });
     assert.equal(await prompt.locator('#promptPeerAddress').innerText(), peer);
-    assert.match(await label('requestStatusLine'), /^Respond in \d+ s/);
+    assert.match(await prompt.locator('#requestMore #requestStatusLine').textContent(), /^Respond in \d+ s/);
+    assert(await prompt.locator('#requestStatusLine').isHidden());
     for (const [id, text] of [
       ['allow', 'Allow always'], ['block', 'Deny always'],
       ['allowForAWhile', 'Allow process · 1 min'], ['blockForAWhile', 'Deny process · 1 min'],
     ]) assert.equal(await label(id), text);
     const visible = await prompt.evaluate(() => Object.fromEntries([
-      'promptPeerAddress', 'requestStatusLine', 'allow', 'block', 'allowForAWhile', 'blockForAWhile',
+      'promptPeerAddress', 'allow', 'block', 'allowForAWhile', 'blockForAWhile',
     ].map((id) => {
       const el = document.getElementById(id);
       const lines = Array.from(el.getClientRects());
