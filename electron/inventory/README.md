@@ -41,3 +41,8 @@ Steps with `tabTo` use real Tab events and check the exact focused control and d
 Electron display strings come from the rendered DOM. Chromium's accessibility tree supplies computed names and roles. The serializer prefers an HTML ID, then a semantic data key, then a role ordinal scoped to the parent panel. The latter is a structural fallback, so reordering equivalent anonymous siblings can change their IDs. The native adapter uses accessible IDs when provided and scoped role ordinals otherwise. Whitespace is collapsed. Captures exclude geometry, fonts, styling, pixel data and line wrapping.
 
 Use the integrated package and a fresh full capture for the definitive baseline. The seed is a GUI presentation fixture. It does not establish daemon behavior, firewall outcomes, or delivery.
+
+
+The capture launches Electron with the process-scoped `ACCESSIBILITY_ENABLED=1`. On Plasma the activity-empty evidence records KWin's client identity and AT-SPI registration together, including the PID, title, role and native visibility flags. Desktop-wide accessibility settings stay untouched. Native visibility failures are retained as blocked captures.
+
+The comparison replaces the independently measured desktop account token only in the Activity overview's seven known fields and records each original display value alongside the measured account. Measurement uses the OS account, the hostname, and the graphical session UID when available. The activity-empty state requires all seven fields. The rest of each field and its control identity remain exact.

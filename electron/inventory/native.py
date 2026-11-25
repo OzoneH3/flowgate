@@ -2,15 +2,19 @@
 """Desktop accessibility adapter for the same inventory plan on Linux."""
 import ctypes
 import json
+import os
+from pathlib import Path
 import re
 import sys
+import subprocess
+import tempfile
 import time
 from collections import Counter
 
 import gi
 
 gi.require_version("Atspi", "2.0")
-from gi.repository import Atspi
+from gi.repository import Atspi, Gio, GLib
 
 
 def role(node):
@@ -129,11 +133,111 @@ def keyboard(keys):
         time.sleep(0.1)
 
 
+
+def observe_kwin(pid, scratch):
+    """Read the compositor's clients without changing focus, visibility or geometry."""
+    session = Gio.bus_get_sync(Gio.BusType.SESSION)
+    if not session.call_sync('org.freedesktop.DBus', '/org/freedesktop/DBus',
+                             'org.freedesktop.DBus', 'NameHasOwner', GLib.Variant('(s)', ('org.kde.KWin',)),
+                             None, Gio.DBusCallFlags.NONE, 1000, None).unpack()[0]:
+        return {"available": False}
+    interface = 'org.flowgate.Inventory'
+    object_path = '/org/flowgate/Inventory'
+    signature = '<node><interface name="org.flowgate.Inventory"><method name="Report"><arg type="s" direction="in"/></method></interface></node>'
+    result = []
+    loop = GLib.MainLoop()
+
+    def report(_conn, _sender, _path, _interface, _method, params, invocation):
+        result.extend(json.loads(params.unpack()[0]))
+        invocation.return_value(None)
+        loop.quit()
+
+    handle = session.register_object(object_path, Gio.DBusNodeInfo.new_for_xml(signature).interfaces[0], report)
+    name = 'flowgate-inventory-' + str(os.getpid())
+    source = """
+const matches = workspace.windowList().filter(w => w.pid === PID || String(w.caption).includes('FlowGate')).map(w => ({
+  pid: w.pid, caption: w.caption, resourceName: String(w.resourceName),
+  resourceClass: String(w.resourceClass), desktopFileName: w.desktopFileName,
+  internalId: String(w.internalId), normalWindow: w.normalWindow, active: w.active,
+  hidden: w.hidden, minimized: w.minimized, onCurrentDesktop: w.onCurrentDesktop,
+  shown: typeof w.isShown === 'function' ? w.isShown() : null
+}));
+callDBus(BUS, '/org/flowgate/Inventory', 'org.flowgate.Inventory', 'Report', JSON.stringify(matches));
+""".replace('PID', str(pid)).replace('BUS', json.dumps(session.get_unique_name()))
+
+    def call(path, method, *args):
+        return subprocess.check_output(['gdbus', 'call', '--session', '--dest', 'org.kde.KWin',
+                                        '--object-path', path, '--method', method, *args],
+                                       text=True, stderr=subprocess.STDOUT, timeout=3).strip()
+
+    script = None
+    try:
+        with tempfile.TemporaryDirectory(prefix='kwin-', dir=scratch) as directory:
+            file = Path(directory) / 'read.js'
+            file.write_text(source)
+            reply = call('/Scripting', 'org.kde.kwin.Scripting.loadScript', str(file), name)
+            match = re.fullmatch(r'\((?:int32 )?(\d+),\)', reply)
+            if not match:
+                return {"available": True, "error": "KWin could not load read-only observer: " + reply}
+            script = match.group(1)
+            call('/Scripting/Script' + script, 'org.kde.kwin.Script.run')
+            deadline = GLib.timeout_add(1500, lambda: (loop.quit(), False)[1])
+            loop.run()
+            if result:
+                GLib.source_remove(deadline)
+            return {"available": True, "windows": result}
+    finally:
+        if script:
+            try:
+                call('/Scripting', 'org.kde.kwin.Scripting.unloadScript', name)
+            except (subprocess.SubprocessError, OSError):
+                pass
+        session.unregister_object(handle)
+
+
+def diagnose(request):
+    pid = request["pid"]
+    keys = ("XDG_SESSION_ID", "XDG_SESSION_TYPE", "XDG_CURRENT_DESKTOP", "DISPLAY",
+            "WAYLAND_DISPLAY", "DBUS_SESSION_BUS_ADDRESS", "AT_SPI_BUS_ADDRESS")
+    env = {key: os.environ[key] for key in keys if key in os.environ}
+    application = Path(f'/proc/{pid}')
+    process = {"pid": pid, "uid": application.stat().st_uid, "executable": os.readlink(application / 'exe')}
+    status = subprocess.run(['gdbus', 'call', '--session', '--dest', 'org.a11y.Bus',
+                             '--object-path', '/org/a11y/bus', '--method', 'org.freedesktop.DBus.Properties.GetAll',
+                             'org.a11y.Status'], text=True, capture_output=True, timeout=3)
+    bus = subprocess.run(['gdbus', 'call', '--session', '--dest', 'org.a11y.Bus',
+                          '--object-path', '/org/a11y/bus', '--method', 'org.a11y.Bus.GetAddress'],
+                         text=True, capture_output=True, timeout=3)
+    apps = []
+    desktop = Atspi.get_desktop(0)
+    for i in range(desktop.get_child_count()):
+        app = desktop.get_child_at_index(i)
+        if not app:
+            continue
+        entry = {"pid": app.get_process_id(), "role": role(app), "name": app.get_name(),
+                 "showing": visible(app)}
+        if entry["pid"] == pid:
+            entry["children"] = [
+                {"pid": child.get_process_id(), "role": role(child), "name": child.get_name(),
+                 "showing": visible(child)}
+                for i in range(app.get_child_count()) if (child := app.get_child_at_index(i))
+            ]
+        apps.append(entry)
+    try:
+        kwin = observe_kwin(pid, request['scratch'])
+    except (GLib.Error, subprocess.SubprocessError, OSError) as error:
+        kwin = {"available": True, "error": str(error)}
+    return {"session": env, "process": process, "kwin": kwin,
+            "atspi": {"status": status.stdout.strip(), "bus": bus.stdout.strip(),
+                      "error": (status.stderr + bus.stderr).strip(), "applications": apps}}
+
 def main():
     request = json.load(sys.stdin)
     Atspi.init()
     Atspi.set_timeout(1500, 2000)
     op = request["op"]
+    if op == "diagnose":
+        return diagnose(request)
     if op == "key":
         keyboard(request["keys"])
         return {"ok": True}

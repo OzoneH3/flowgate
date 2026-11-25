@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { access, mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import path from 'node:path';
-import { renderer, until } from './browser.mjs';
+import { bindDesktopAccount, renderer, until } from './browser.mjs';
 import { recipeNames, startSeed } from './seeds.mjs';
 
 const here = import.meta.dirname;
@@ -52,6 +52,15 @@ const wayland = process.env.WAYLAND_DISPLAY;
 const actualWayland = wayland && (path.isAbsolute(wayland) ? wayland : runtime && path.join(runtime, wayland));
 if (!actualWayland && !process.env.DISPLAY) throw Error('Run in a logged-in Linux desktop session');
 
+const measure = (command, args) => execFileSync(command, args, { encoding: 'utf8', timeout: 3000 }).trim();
+const desktopAccount = { user: measure('id', ['-un']), uid: Number(measure('id', ['-u'])),
+  host: measure('uname', ['-n']), session: process.env.XDG_SESSION_ID ?? null };
+if (desktopAccount.session) {
+  const sessionUser = measure('loginctl', ['show-session', desktopAccount.session, '-p', 'User', '--value']);
+  if (sessionUser !== String(desktopAccount.uid)) throw Error('Capture user does not own the desktop session');
+}
+const accountLabel = desktopAccount.user + '@' + desktopAccount.host;
+
 let failures = 0;
 let verification = [];
 const expectedText = {
@@ -95,6 +104,8 @@ async function desktop(operation) {
 
 function startApplication(directory, control, observer) {
   const env = { ...process.env, FLOWGATE_INSTALLED: '1',
+    // Observe this Electron process even when the desktop-wide AT-SPI flag is off.
+    ACCESSIBILITY_ENABLED: '1',
     XDG_RUNTIME_DIR: path.join(directory, 'run'), XDG_CONFIG_HOME: path.join(directory, 'config'),
     XDG_CACHE_HOME: path.join(directory, 'cache'), XDG_DATA_HOME: path.join(directory, 'data'),
     XDG_STATE_HOME: path.join(directory, 'state'), TMPDIR: path.join(directory, 'tmp'),
@@ -213,8 +224,29 @@ async function captureState(endpoint, pid, state) {
       }
       await perform(page, state.steps);
       if (state.ready) await until(() => page.verify(state.ready), 'Expected surface not displayed ' + JSON.stringify(state.ready), state.timeout);
-      await nativeShowing(page, window, pid);
-      const controls = await page.capture(state.root ?? window.root);
+      try {
+        await nativeShowing(page, window, pid);
+      } finally {
+        if (state.id === 'activity-empty' || window.document === 'pane.html') {
+          try {
+            verification.push({ kind: 'native-diagnostic',
+              ...await desktop({ op: 'diagnose', pid, scratch: work }) });
+          } catch (error) {
+            verification.push({ kind: 'native-diagnostic', error: error.message });
+          }
+        }
+      }
+      const root = state.root ?? window.root;
+      if (window.document === 'index.html' && root === 'body' &&
+          await page.verify({ selector: '#rows tr[data-id="overview"]' })) {
+        await until(() => page.verify({ selector: '#rows tr[data-id="overview"]', contains: accountLabel }),
+          'Waiting for the independently measured desktop account in Activity');
+      }
+      const controls = await page.capture(root);
+      if (window.document === 'index.html' && root === 'body') {
+        const fields = bindDesktopAccount(controls, accountLabel, state.id === 'activity-empty');
+        if (fields.length) verification.push({ kind: 'desktop-account', identity: desktopAccount, fields });
+      }
       const issues = [];
       for (const assertion of (state.expect ?? []).map(assertionFor)) {
         if (!await page.verify(assertion)) issues.push({
@@ -224,6 +256,14 @@ async function captureState(endpoint, pid, state) {
       await publish(state, 'electron', controls.length ? (issues.length ? 'partial' : 'captured') : 'unreadable',
         controls, controls.length ? issues : [{ kind: 'unreadable', id: state.window, message: 'No readable rendered controls' }]);
     } catch (error) {
+      if (page && window.document === 'pane.html' &&
+          !verification.slice(verifyStart).some(ev => ev.kind === 'native-diagnostic')) {
+        try {
+          verification.push({ kind: 'native-diagnostic', ...await desktop({ op: 'diagnose', pid, scratch: work }) });
+        } catch (diagnosticError) {
+          verification.push({ kind: 'native-diagnostic', error: diagnosticError.message });
+        }
+      }
       const controls = await page?.capture(state.root ?? window.root).catch(() => []) ?? [];
       await publish(state, 'electron', 'blocked', controls, [{ kind: 'blocked', id: state.window, message: error.message }]);
     } finally {

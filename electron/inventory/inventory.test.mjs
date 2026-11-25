@@ -3,7 +3,7 @@ import { readFile, mkdtemp, rm } from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
 import test from 'node:test';
-import { matchesWindow } from './browser.mjs';
+import { bindDesktopAccount, matchesWindow } from './browser.mjs';
 import { identities, recipeNames, startSeed } from './seeds.mjs';
 
 const expected = JSON.parse(await readFile(new URL('./expected.json', import.meta.url), 'utf8'));
@@ -71,4 +71,34 @@ test('seed exposes exact build identity, an older page and a separately arriving
   assert.notEqual((await page({ limit: 1 })).records[0].id, 'inventory-log-new');
   seed.setStage('log-new');
   assert.equal((await page({ limit: 1 })).records[0].id, 'inventory-log-new');
+});
+
+test('binds all seven overview fields to the measured account only', () => {
+  const local = 'local@desk.example', guest = 'lab@guest.example';
+  const controls = account => [
+    {id: 'group', text: 'Prefix ' + account + ' suffix'},
+    {id: 'app', text: 'Prefix ' + account + ' suffix'},
+    {id: 'rows/tr:overview', accessibleName: 'Collapse ' + [account, account, account].join(' ')},
+    {id: 'rows/tr:overview/cell', accessibleName: 'Collapse ' + account + ' ' + account},
+    ...['button', 'cell#4', 'group'].map(part => ({
+      id: 'rows/tr:overview/' + part, accessibleName: account + ' rule status',
+    })),
+  ];
+  const a = controls(local), b = controls(guest);
+  assert.equal(bindDesktopAccount(a, local, true).length, 7);
+  assert.equal(bindDesktopAccount(b, guest, true).length, 7);
+  assert.deepEqual(a, b);
+  for (const wrong of ['other@guest.example', 'lab@other.example']) {
+    const original = controls(wrong);
+    const before = structuredClone(original);
+    assert.throws(() => bindDesktopAccount(original, guest, true), /all seven/);
+    assert.deepEqual(original, before);
+  }
+  const changed = controls(guest);
+  changed[0].text += ' changed';
+  bindDesktopAccount(changed, guest, true);
+  assert.notDeepEqual(a, changed);
+  const wrongControl = controls(guest);
+  wrongControl[0].id = 'other';
+  assert.throws(() => bindDesktopAccount(wrongControl, guest, true), /all seven/);
 });

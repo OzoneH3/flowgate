@@ -294,3 +294,34 @@ function projectDOM(selector) {
   }
   return controls;
 }
+
+const desktopAccountFields = new Map([
+  ['group', ['text', 1]], ['app', ['text', 1]],
+  ['rows/tr:overview', ['accessibleName', 3]],
+  ['rows/tr:overview/cell', ['accessibleName', 2]],
+  ...['rows/tr:overview/button', 'rows/tr:overview/cell#4', 'rows/tr:overview/group']
+    .map(id => [id, ['accessibleName', 1]]),
+]);
+
+// Preserve every byte outside occurrences of the independently measured account.
+// In particular, no fallback accepts a different syntactically valid user@host.
+export function bindDesktopAccount(controls, label, requireAll = false) {
+  const fields = [];
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const token = new RegExp('(?<![\\w.@-])' + escaped + '(?![\\w.@-])', 'g');
+  const overview = controls.some(control => control.id === 'rows/tr:overview');
+  if (!overview && !requireAll) return fields;
+  for (const control of controls) {
+    const [key, occurrences] = desktopAccountFields.get(control.id) ?? [];
+    const displayed = key && control[key];
+    if (typeof displayed !== 'string') continue;
+    if ([...displayed.matchAll(token)].length !== occurrences) continue;
+    fields.push({ id: control.id, field: key, displayed });
+  }
+  if (requireAll && fields.length !== desktopAccountFields.size)
+    throw Error('Desktop account does not match independently measured identity in all seven overview fields');
+  for (const { id, field, displayed } of fields) {
+    controls.find(control => control.id === id)[field] = displayed.replace(token, '{desktop-user@host}');
+  }
+  return fields;
+}

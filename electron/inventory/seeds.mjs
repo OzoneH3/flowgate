@@ -93,7 +93,7 @@ const recipes = {
   requestUdp: { populated: true, requests: 'udp' },
   requestShort: { populated: true, requests: 'udp', short: true },
   requestUnknown: { populated: true, requests: 'both', loseDecision: true },
-  processLease: { populated: true, activeLease: true },
+  processLease: { populated: true, requests: 'both', activeLease: true },
   requestPair: { populated: true, requests: 'pair' },
   requestFault: { populated: true, requests: 'both', rejectPreview: true },
   unhealthy: { populated: true, unhealthy: true },
