@@ -192,9 +192,21 @@ func TestEmbeddedKernelPartialActivationAndOwnedMutation(t *testing.T) {
 		t.Fatal(s)
 	}
 
-	// A table that vanishes before its deadline remains a real integrity failure.
 	m.duration = 30 * time.Second
 	if _, err = m.Start(s.ID, strings.Repeat("d", 32)); err != nil {
+		t.Fatal(err)
+	}
+	s = waitEvaluation(t, m, "active")
+	if _, err = m.Stop(s.ID); err != nil {
+		t.Fatal(err)
+	}
+	s = waitEvaluation(t, m, "stopped")
+	if s.Cleanup != "confirmed" || s.ReasonCode != "stopped" {
+		t.Fatal(s)
+	}
+
+	// A table that vanishes before its deadline remains a real integrity failure.
+	if _, err = m.Start(s.ID, strings.Repeat("f", 32)); err != nil {
 		t.Fatal(err)
 	}
 	waitEvaluation(t, m, "active")
@@ -221,6 +233,11 @@ func TestEmbeddedKernelPartialActivationAndOwnedMutation(t *testing.T) {
 	m.mu.Unlock()
 	go m.run(ctx, id, false)
 	waitEvaluation(t, m, "active")
+	// Simulate the wall deadline reaching the watchdog while the daemon's
+	// monotonic deadline is still in the future. The on-disk deadline is fixed.
+	m.mu.Lock()
+	m.status.StopsAt = time.Now().Add(time.Minute)
+	m.mu.Unlock()
 	select {
 	case <-done:
 	case <-time.After(9 * time.Second):
@@ -231,7 +248,7 @@ func TestEmbeddedKernelPartialActivationAndOwnedMutation(t *testing.T) {
 		t.Fatal(s)
 	}
 	record, err := Read(state)
-	if err != nil || record.Token != id || record.State != "stopped" {
+	if err != nil || record.Token != id || record.State != "stopped" || !record.Expired {
 		t.Fatal(record, err)
 	}
 	tables, err = nft("list", "tables")

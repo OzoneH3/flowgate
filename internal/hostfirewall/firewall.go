@@ -45,6 +45,7 @@ type Record struct {
 	Start        string
 	NetNS        string
 	State        string
+	Expired      bool `json:"expired,omitempty"`
 	StopsAt      time.Time
 	UID          uint32
 	Socket       string

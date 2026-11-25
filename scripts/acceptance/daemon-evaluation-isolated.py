@@ -64,7 +64,7 @@ def start(drop_ack=False):
  v=wait(lambda:(lambda s:s if s['request_id']==nonce and s['state']in('active','failed','degraded')else None)(session()));assert v['state']=='active',v;return v,old,nonce
 def stop():
  v=session();r=api('evaluation-stop',generation=api()['generation'],evaluation_id=v['id']);assert not r.get('error'),r
- v=wait(lambda:(lambda s:s if s['state']in('stopped','failed','degraded')else None)(session()));assert v['state']=='stopped'and v['cleanup']=='confirmed',v;return v
+ v=wait(lambda:(lambda s:s if s['state']in('stopped','failed','degraded')else None)(session()));assert v['state']=='stopped'and v['reason_code']=='stopped'and v['cleanup']=='confirmed',v;return v
 def pending(port):return next((v for v in api().get('events',[])if v['state']=='awaiting-decision'and v['flow']['local'].endswith(':'+str(port))),None)
 def send(port=44001,v6=False):return remote('udp'if port%2 else 'tcp',port=port,v6=v6,wait_reply=bool(port%2))
 def decide(port,action,scope='once'):
@@ -148,6 +148,7 @@ try:
    v,_,_=start();log('WAIT actual fixed five-minute expiry; no GUI/API connection is held; deadline '+v['stops_at'])
    time.sleep(301)
    v=wait(lambda:(lambda s:s if s['state']=='stopped'else None)(session()));assert v['cleanup']=='confirmed'and backend.poll()is None and api()['generation']==generation
+   assert v['reason_code']=='expired',v
    assert 'flowgate_host'not in cmd('nft','list','tables');log('PASS actual five-minute expiry returns same daemon to monitoring, rules and Activity remain, no client required')
  if a.hold:
   (RUN/'ready.json').write_text(json.dumps(dict(socket=API,monitor_socket=API+'.monitor',generation=generation,control=str(RUN/'command'),rule_count=len(api().get('rules',[])))))

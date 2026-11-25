@@ -35,6 +35,7 @@ type Evaluation struct {
 	ctx                   context.Context
 	dir, socket, database string
 	status                daemon.EvaluationStatus
+	stopRequested         bool
 	cancel                context.CancelFunc
 	done                  chan struct{}
 	probing               bool
@@ -111,6 +112,9 @@ func validNonce(s string) bool {
 	}
 	return true
 }
+
+var errEvaluationDeadline = errors.New("evaluation deadline reached")
+
 func (m *Evaluation) Start(expected, request string) (daemon.EvaluationStatus, error) {
 	return m.start(expected, request, "incoming", false)
 }
@@ -155,6 +159,7 @@ func (m *Evaluation) start(expected, request, profile string, continuous bool) (
 		return m.Status(), lifecycleError("busy", "Stop continuous protection before starting evaluation")
 	}
 	m.socketFailure = nil
+	m.stopRequested = false
 	m.continuous = continuous
 	m.status.Profile = profile
 	m.status.DurationSeconds = 300
@@ -165,7 +170,7 @@ func (m *Evaluation) start(expected, request, profile string, continuous bool) (
 	m.status.StopsAt = time.Now().Add(m.duration)
 	m.status.ReasonCode = "starting"
 	m.status.Reason = "Rechecking preflight, watchdog, queue and owned interception"
-	ctx, cancel := context.WithDeadline(m.ctx, m.status.StopsAt)
+	ctx, cancel := context.WithDeadlineCause(m.ctx, m.status.StopsAt, errEvaluationDeadline)
 	if continuous {
 		cancel()
 		ctx, cancel = context.WithCancel(m.ctx)
@@ -221,6 +226,7 @@ func (m *Evaluation) stop(expected string, continuous bool) (daemon.EvaluationSt
 			m.finish(err, err == nil)
 		}()
 	} else if m.cancel != nil {
+		m.stopRequested = true
 		m.status.State = "stopping"
 		m.status.ReasonCode = "stop_requested"
 		m.status.Reason = "Dropping held packets and removing only owned resources"
@@ -249,12 +255,16 @@ func (m *Evaluation) Close() {
 	}
 }
 func (m *Evaluation) finish(err error, clean bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.finishLocked(err, clean)
+	m.finishWithExpiry(err, clean, false)
 }
 
-func (m *Evaluation) finishLocked(err error, clean bool) {
+func (m *Evaluation) finishWithExpiry(err error, clean, expired bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.finishLocked(err, clean, expired)
+}
+
+func (m *Evaluation) finishLocked(err error, clean, expired bool) {
 	if err != nil {
 		m.status.State = "failed"
 		m.status.ReasonCode = "activation_failed"
@@ -275,7 +285,7 @@ func (m *Evaluation) finishLocked(err error, clean bool) {
 		if m.continuous {
 			m.status.Reason = "Protection stopped intentionally; monitoring and independent collectors remain available"
 		}
-		if !m.continuous && !time.Now().Before(m.status.StopsAt) {
+		if !m.continuous && expired && !m.stopRequested {
 			m.status.ReasonCode = "expired"
 			m.status.Reason = "Original five-minute deadline reached; FlowGate enforcement stopped"
 		}
@@ -350,7 +360,7 @@ func (m *Evaluation) run(ctx context.Context, id string, fromMonitoring bool) {
 	checks := m.probe()
 	m.setChecks(checks)
 	if ctx.Err() != nil {
-		m.finish(nil, true)
+		m.finishWithExpiry(nil, true, context.Cause(ctx) == errEvaluationDeadline)
 		return
 	}
 	if err := blocked(checks); err != nil {
@@ -402,7 +412,7 @@ func (m *Evaluation) run(ctx context.Context, id string, fromMonitoring bool) {
 				// saveDesired, or finish its exact-owned cleanup instead of losing Stop.
 				m.mu.Lock()
 				if m.desiredMode != "monitoring" {
-					m.finishLocked(err, false)
+					m.finishLocked(err, false, false)
 					m.mu.Unlock()
 					return
 				}
@@ -415,7 +425,7 @@ func (m *Evaluation) run(ctx context.Context, id string, fromMonitoring bool) {
 	}
 	bootstrap := m.e.ApprovedBootstrap()
 	if ctx.Err() != nil {
-		m.finish(nil, true)
+		m.finishWithExpiry(nil, true, context.Cause(ctx) == errEvaluationDeadline)
 		return
 	}
 	var activationGuard guardRecord
@@ -701,14 +711,14 @@ func (m *Evaluation) run(ctx context.Context, id string, fromMonitoring bool) {
 			// otherwise an acknowledged Stop can be lost between these steps.
 			m.mu.Lock()
 			if m.desiredMode != "monitoring" {
-				m.finishLocked(err, false)
+				m.finishLocked(err, false, false)
 				m.mu.Unlock()
 				return
 			}
 			m.mu.Unlock()
 		}
 	}
-	cleanupErr := cleanupEmbedded(m.dir, id)
+	expired, cleanupErr := completeEmbeddedCleanup(m.dir, id, !auditFailed && context.Cause(ctx) == errEvaluationDeadline)
 	if cleanupErr == nil {
 		cleanupErr = m.releaseSocketSession()
 	}
@@ -725,7 +735,8 @@ func (m *Evaluation) run(ctx context.Context, id string, fromMonitoring bool) {
 	if ctx.Err() != nil && (!auditFailed || continuous) {
 		err = nil
 	}
-	finish(err, true)
+	releaseOwner()
+	m.finishWithExpiry(err, true, expired)
 }
 
 func auditInterception(dir string, record Record, expectedDigest string) (bool, error) {
@@ -791,7 +802,16 @@ func evaluationLock(dir string, fn func() error) error {
 	return fn()
 }
 func cleanupEmbedded(dir, token string) error {
-	return evaluationLock(dir, func() error {
+	_, err := completeEmbeddedCleanup(dir, token, false)
+	return err
+}
+
+// The same token's stopped record carries the cause from the cleanup owner.
+// The watchdog can reach its persisted wall deadline before the daemon's
+// monotonic timer fires. Neither process needs to infer the other's timing.
+func completeEmbeddedCleanup(dir, token string, deadlineReached bool) (bool, error) {
+	expired := false
+	err := evaluationLock(dir, func() error {
 		r, err := Read(dir)
 		if err != nil {
 			return err
@@ -800,6 +820,7 @@ func cleanupEmbedded(dir, token string) error {
 			return fmt.Errorf("evaluation changed; refusing cleanup")
 		}
 		if r.State == "stopped" {
+			expired = r.Expired
 			return nil
 		}
 		if err = remove(r); err != nil {
@@ -808,8 +829,11 @@ func cleanupEmbedded(dir, token string) error {
 			return err
 		}
 		r.State = "stopped"
+		r.Expired = deadlineReached && !r.Continuous
+		expired = r.Expired
 		return save(dir, r)
 	})
+	return expired, err
 }
 func startEmbeddedWatch(exe, dir, token string) error {
 	cmd := exec.Command(exe, "host-embedded-watch", "--state", dir, "--token", token)
@@ -863,7 +887,8 @@ func WatchEmbedded(dir, token string) error {
 			return nil
 		}
 		if !time.Now().Before(r.StopsAt) {
-			return cleanupEmbedded(dir, token)
+			_, err := completeEmbeddedCleanup(dir, token, true)
+			return err
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
