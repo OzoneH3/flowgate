@@ -348,7 +348,10 @@ function inventory(recipe, packageBuild) {
         try {
           const request = JSON.parse(buffer.split('\n')[0]);
           const reply = response(request, observer);
-          calls.push({ operation: request.operation,
+          calls.push({ operation: request.operation, receivedAtMs: Date.now(), observer,
+            serverTime: reply?.server_time,
+            ...(reply?.events?.length ? { events: reply.events.map(({ id, deadline, state }) =>
+              ({ id, deadline, state })) } : {}),
             ...(request.operation === 'decide' ? { decision: { id: request.id, generation: request.generation,
               action: request.action, scope: request.scope } } : {}),
             error: reply ? reply.error_code || undefined : 'fixture_lost_reply' });
@@ -361,7 +364,7 @@ function inventory(recipe, packageBuild) {
     return new Promise((resolve, reject) =>
       server.once('error', reject).listen(filename, () => resolve(server)));
   }
-  return { listen, calls, setStage: value => { stage = value; } };
+  return { listen, calls, startedAtMs: started, setStage: value => { stage = value; } };
 }
 
 export async function startSeed(name, control, observer, packageBuild) {
@@ -371,7 +374,7 @@ export async function startSeed(name, control, observer, packageBuild) {
   const servers = [];
   try {
     servers.push(await fixture.listen(control, false), await fixture.listen(observer, true));
-    return { calls: fixture.calls, setStage: fixture.setStage, close: async () => {
+    return { calls: fixture.calls, startedAtMs: fixture.startedAtMs, setStage: fixture.setStage, close: async () => {
       await Promise.all(servers.map(s => new Promise(resolve => s.close(resolve))));
       await Promise.all([control, observer].map(file => unlink(file).catch(() => {})));
     } };

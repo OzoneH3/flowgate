@@ -255,7 +255,8 @@ async function captureState(endpoint, pid, state) {
         await until(() => page.verify({ selector: '#rows tr[data-id="overview"]', contains: accountLabel }),
           'Waiting for the independently measured desktop account in Activity');
       }
-      const controls = await page.capture(root);
+      const controls = await page.capture(root, observation =>
+        verification.push({ kind: 'renderer-capture', ...observation }));
       if (window.document === 'index.html' && root === 'body') {
         const fields = bindDesktopAccount(controls, accountLabel, state.id === 'activity-empty');
         if (fields.length) verification.push({ kind: 'desktop-account', identity: desktopAccount, fields });
@@ -344,7 +345,9 @@ for (const journey of journeys) {
     await fixture.close();
     await writeFile(path.join(directory, 'electron.log'), app.log());
     await writeFile(path.join(directory, 'fixture-operations.json'), JSON.stringify(fixture.calls, null, 2));
-    await writeFile(path.join(directory, 'verification.json'), JSON.stringify({ journey: journey.id, language: 'en-US', states: verification }, null, 2));
+    await writeFile(path.join(directory, 'verification.json'), JSON.stringify({
+      journey: journey.id, language: 'en-US', fixtureStartedAtMs: fixture.startedAtMs, states: verification,
+    }, null, 2));
   }
 }
 const written = await readdir(out);

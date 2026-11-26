@@ -182,15 +182,15 @@ class Page {
       return matches.length === count;
     }, [assertion]);
   }
-  async capture(root) {
+  async capture(root, observe) {
     await this.assertIdentity();
     if (!await this.verify({ selector: root })) throw Error('Capture root is not displayed: ' + root);
-    return readProjectedControls(this.cdp, root);
+    return readProjectedControls(this.cdp, root, observe);
   }
   close() { this.cdp.close(); }
 }
 
-export async function readProjectedControls(cdp, selector) {
+export async function readProjectedControls(cdp, selector, observe) {
   // Capture the elements and their displayed state in one renderer evaluation.
   // An ordinal in a separately read DOM tree can point to a different element
   // when a sibling is inserted or removed between protocol calls.
@@ -205,6 +205,12 @@ export async function readProjectedControls(cdp, selector) {
       objectId: result.objectId, ownProperties: true,
     });
     const property = name => properties.find(entry => entry.name === name)?.value?.objectId;
+    if (observe) {
+      const { result: observation } = await cdp.send('Runtime.callFunctionOn', {
+        objectId: property('observation'), functionDeclaration: 'function () { return this; }', returnByValue: true,
+      });
+      observe(observation.value);
+    }
     const { result: projected } = await cdp.send('Runtime.callFunctionOn', {
       objectId: property('controls'), functionDeclaration: 'function () { return this; }', returnByValue: true,
     });
@@ -310,7 +316,19 @@ function projectDOM(selector) {
     controls.push(control);
     elements.push(e);
   }
-  return { controls, elements };
+  const active = document.activeElement;
+  const localNetwork = document.querySelector('#rows tr[data-id="network:local"]');
+  const tooltip = document.querySelector('#flowgateTooltip:popover-open');
+  const observation = {
+    renderedAtMs: Date.now(),
+    documentFocused: document.hasFocus(),
+    visibility: document.visibilityState,
+    focusedControlId: controls[elements.indexOf(active)]?.id ?? active?.id ?? null,
+    localNetworkFocusWithin: localNetwork?.matches(':focus-within') ?? null,
+    localNetworkHovered: localNetwork?.matches(':hover') ?? null,
+    tooltipText: tooltip ? clean(tooltip.innerText) : null,
+  };
+  return { controls, elements, observation };
 }
 
 const desktopAccountFields = new Map([
