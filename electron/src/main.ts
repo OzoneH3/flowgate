@@ -452,7 +452,8 @@ function paneWindow(kind: PaneKind) {
     panePublication = '';
     publishPanes();
   });
-  w.once('ready-to-show', () => {
+  // Map the pane after loading even when a hidden Wayland surface cannot paint.
+  w.webContents.once('did-finish-load', () => {
     if (main.isVisible()) w.show();
     panePublication = '';
     publishPanes();
@@ -1356,7 +1357,8 @@ app.whenReady().then(async () => {
     }
   });
   main = windowFor();
-  if (process.argv.includes('--show')) main.once('ready-to-show', () => main.show());
+  // A hidden Wayland window may not produce the first paint needed for ready-to-show.
+  if (process.argv.includes('--show')) main.webContents.once('did-finish-load', () => showMain());
   // Warm the native shell during application startup; subsequent automatic
   // requests only reveal it and never map or activate another toplevel.
   promptIdle = true;
