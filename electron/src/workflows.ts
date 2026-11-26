@@ -1095,7 +1095,7 @@ async function setupSizing() {
     });
   const controls = node('section', '');
   controls.className = 'backgroundbar';
-  controls.innerHTML = `<label><input type="checkbox" id="keepInTray"> Keep running in the tray when the window closes</label><span>When enabled, closing hides this window; requests stay monitored. Use File to quit the UI.</span><span id="backgroundStatus" role="status"></span>`;
+  controls.innerHTML = `<label><input type="checkbox" id="keepInTray" aria-describedby="keepInTrayHelp"> Keep running in the tray when the window closes</label><span id="keepInTrayHelp"></span><span id="backgroundStatus" role="status"></span>`;
   settingsPanel.append(controls);
   $<HTMLInputElement>('keepInTray').checked = prefs.keepInTray === true;
   $('keepInTray').onchange = () => {
@@ -1108,6 +1108,9 @@ async function setupSizing() {
     checking = true;
     try {
       const s = await window.flowgate.backgroundStatus();
+      $('keepInTrayHelp').textContent = s.trayAvailable
+        ? 'When enabled, closing hides this window and requests stay monitored. Use File to quit the UI.'
+        : 'This preference takes effect only when a tray is available.';
       $('backgroundStatus').textContent =
         (s.trayAvailable ? 'Tray available. ' : 'Tray unavailable: closing will quit instead. ') +
         s.notifications;
