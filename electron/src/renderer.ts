@@ -791,12 +791,16 @@ let promptStableAt = performance.now() + 650;
 let pointerDown = false;
 const promptKeysDown = new Set<string>();
 let promptLayoutReady = false;
-let layoutFrame = 0;
+let layoutFrame: number | undefined;
+let layoutFallback: ReturnType<typeof setTimeout> | undefined;
 let lastPromptLayout = '';
 function measurePrompt() {
-  if (!promptID || layoutFrame) return;
-  layoutFrame = requestAnimationFrame(() => {
-    layoutFrame = 0;
+  if (!promptID || layoutFrame !== undefined) return;
+  const measure = () => {
+    if (layoutFrame === undefined) return;
+    cancelAnimationFrame(layoutFrame);
+    layoutFrame = undefined;
+    clearTimeout(layoutFallback);
     const shell = document.querySelector<HTMLElement>('.prompt-shell');
     const body = $('promptBody');
     if (!shell || !body) return;
@@ -823,7 +827,11 @@ function measurePrompt() {
         }, 670);
       }
     });
-  });
+  };
+  layoutFrame = requestAnimationFrame(measure);
+  // A retargeted Wayland window may have a visible document without frames.
+  // Measure its layout without skipping the native acknowledgement or pacing.
+  layoutFallback = setTimeout(measure, 100);
 }
 if (promptID) {
   document.addEventListener(
