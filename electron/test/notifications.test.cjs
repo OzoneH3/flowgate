@@ -42,7 +42,10 @@ function setup(enabled = true) {
 test('generation identities deduplicate polls/reconnect; expiry and external resolution close notices', () => {
   const t = setup(),
     s = state(['a']);
+  assert.equal(t.manager.status(false), 'Notifications follow desktop delivery and Do Not Disturb settings.');
   t.manager.update(s, false);
+  assert.equal(t.manager.status(false), 'Notifications requested when inactive; desktop settings control delivery. Pending list remains authoritative.');
+  assert.equal(t.manager.status(true), t.manager.status(false));
   for (let i = 0; i < 20; i++) t.manager.update(s, false);
   assert.equal(t.notices.length, 1);
   t.manager.update({ ...s, control: { ...s.control, connected: false } }, false);
@@ -85,12 +88,14 @@ test('suppression/failure keeps pending authoritative; metadata never carries ma
   t.manager.update(s, false);
   assert.equal(t.notices.length, 0);
   assert.equal(pending(s).length, 1);
-  assert.match(t.manager.status, /unavailable/);
+  assert.equal(t.manager.status(true), 'Desktop notifications unavailable. Use the tray pending list.');
+  assert.equal(t.manager.status(false), 'Desktop notifications unavailable. Permission requests use the popup.');
   assert.equal(plain('<b>name</b>\n'), ' b name /b ');
   const u = setup();
   u.manager.update(s, false);
   u.notices[0].emit('failed');
-  assert.match(u.manager.status, /failed/);
+  assert.match(u.manager.status(true), /failed/);
+  assert.equal(u.manager.status(false), u.manager.status(true));
   u.advance(10000);
   u.manager.update(s, false);
   assert.equal(u.notices.length, 1);
@@ -146,5 +151,6 @@ test('popup-only delivery creates no desktop notifications while requests remain
   assert.equal(t.notices.length,0);
   assert.deepEqual(t.manager.counts(),{seen:0,queued:0,live:0});
   assert.equal(pending(state(['a','b'])).length,2,'pending requests still feed tray/popup');
-  assert.match(t.manager.status,/System notifications off/);
+  assert.equal(t.manager.status(true), 'System notifications off; permission requests use the popup and tray.');
+  assert.equal(t.manager.status(false), 'System notifications off; permission requests use the popup.');
 });

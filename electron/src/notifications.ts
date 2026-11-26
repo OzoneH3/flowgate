@@ -34,15 +34,22 @@ export class RequestNotifications {
   private queued = new Map<string, RequestRef>();
   private live = new Map<Notice, RequestRef | undefined>();
   private next = 0;
-  status = 'Notifications follow desktop delivery and Do Not Disturb settings.';
+  private deliveryStatus = 'Notifications follow desktop delivery and Do Not Disturb settings.';
   constructor(
     private supported: () => boolean,
     private create: (content: NoticeContent) => Notice,
     private review: (ref?: RequestRef) => void,
     private now = () => Date.now(),
     private enabled = true,
-  ) {
-    if (!enabled) this.status = 'System notifications off; permission requests use the popup and tray.';
+  ) {}
+  status(trayAvailable: boolean) {
+    if (!this.enabled)
+      return `System notifications off; permission requests use the popup${trayAvailable ? ' and tray' : ''}.`;
+    if (!this.supported())
+      return trayAvailable
+        ? 'Desktop notifications unavailable. Use the tray pending list.'
+        : 'Desktop notifications unavailable. Permission requests use the popup.';
+    return this.deliveryStatus;
   }
   // One notice per request group: 51 identical attempts are one request.
   update(state: ClientState, active: boolean) {
@@ -78,7 +85,6 @@ export class RequestNotifications {
     while (this.queued.size > 256) this.queued.delete(this.queued.keys().next().value!);
     if (!this.supported()) {
       this.queued.clear();
-      this.status = 'Desktop notifications unavailable. Use the tray pending list.';
       return;
     }
     if (active || !this.queued.size || this.now() < this.next) return;
@@ -109,13 +115,13 @@ export class RequestNotifications {
       n.on('close', () => this.live.delete(n));
       n.on('failed', () => {
         this.live.delete(n);
-        this.status = 'Desktop notification delivery failed. Requests remain in the pending list.';
+        this.deliveryStatus = 'Desktop notification delivery failed. Requests remain in the pending list.';
       });
-      this.status =
+      this.deliveryStatus =
         'Notifications requested when inactive; desktop settings control delivery. Pending list remains authoritative.';
       n.show();
     } catch {
-      this.status = 'Desktop notification delivery failed. Requests remain in the pending list.';
+      this.deliveryStatus = 'Desktop notification delivery failed. Requests remain in the pending list.';
     }
   }
   private content(g: RequestGroup): NoticeContent {

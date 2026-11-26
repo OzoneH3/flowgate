@@ -81,7 +81,8 @@ export class Background {
     return this.host && !!this.tray && !this.tray.isDestroyed();
   }
   status() {
-    return { trayAvailable: this.available(), notifications: this.notifications.status };
+    const trayAvailable = this.available();
+    return { trayAvailable, notifications: this.notifications.status(trayAvailable) };
   }
   update(state: ClientState) {
     const active = [...this.windows].some(
