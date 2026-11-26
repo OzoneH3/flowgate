@@ -352,8 +352,13 @@ function inventory(recipe, packageBuild) {
             serverTime: reply?.server_time,
             ...(reply?.events?.length ? { events: reply.events.map(({ id, deadline, state }) =>
               ({ id, deadline, state })) } : {}),
-            ...(request.operation === 'decide' ? { decision: { id: request.id, generation: request.generation,
-              action: request.action, scope: request.scope } } : {}),
+            ...(request.operation === 'decide' ? {
+              decision: { id: request.id, generation: request.generation,
+                action: request.action, scope: request.scope, duration_seconds: request.duration_seconds },
+              decisionReply: reply?.decision && {
+                id: reply.decision.id, generation: reply.generation, state: reply.decision.state,
+              },
+            } : {}),
             error: reply ? reply.error_code || undefined : 'fixture_lost_reply' });
           const send = () => socket.end(reply ? JSON.stringify(reply) + '\n' : undefined);
           if (request.operation === 'connection-analyze' && request.connection_analysis?.watch_ms) setTimeout(send, 1600);
@@ -365,6 +370,24 @@ function inventory(recipe, packageBuild) {
       server.once('error', reject).listen(filename, () => resolve(server)));
   }
   return { listen, calls, startedAtMs: started, setStage: value => { stage = value; } };
+}
+
+export function verifyDecisionSubmission(calls, expected) {
+  const submissions = calls.filter(call => call.operation === 'decide');
+  if (submissions.length !== 1)
+    throw Error('Expected exactly one decision submission, got ' + submissions.length);
+  const [receipt] = submissions;
+  if (receipt.observer !== false) throw Error('Decision was not sent to the primary fixture socket');
+  for (const field of ['id', 'generation', 'action', 'scope', 'duration_seconds']) {
+    const value = receipt.decision?.[field];
+    if (value !== expected[field])
+      throw Error(`Decision ${field}: expected ${expected[field]}, got ${value === undefined ? 'missing' : JSON.stringify(value)}`);
+  }
+  const reply = receipt.decisionReply;
+  if (receipt.error || reply?.id !== expected.id || reply?.generation !== expected.generation ||
+      reply?.state !== (expected.action === 'allow' ? 'allowed' : 'blocked'))
+    throw Error('Decision acknowledgement does not match the submitted request');
+  return receipt;
 }
 
 export async function startSeed(name, control, observer, packageBuild) {

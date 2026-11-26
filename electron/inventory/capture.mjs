@@ -4,7 +4,7 @@ import { access, mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/pr
 import { constants } from 'node:fs';
 import path from 'node:path';
 import { bindDesktopAccount, renderer, until } from './browser.mjs';
-import { recipeNames, startSeed } from './seeds.mjs';
+import { recipeNames, startSeed, verifyDecisionSubmission } from './seeds.mjs';
 
 const here = import.meta.dirname;
 const plan = JSON.parse(await readFile(path.join(here, 'expected.json'), 'utf8'));
@@ -212,7 +212,7 @@ async function nativeShowing(page, window, pid) {
   verification.push({ kind: 'native-showing', ...shown });
 }
 
-async function captureState(endpoint, pid, state) {
+async function captureState(endpoint, pid, state, fixtureCalls) {
   const window = plan.windows[state.window];
   const verifyStart = verification.length;
   const surface = window.document ? 'electron' : 'desktop-accessibility';
@@ -266,6 +266,19 @@ async function captureState(endpoint, pid, state) {
         if (!await page.verify(assertion)) issues.push({
           kind: 'missing', id: assertion.selector, message: 'Expected rendered control/state: ' + JSON.stringify(assertion),
         });
+      }
+      if (state.decisionSubmission) {
+        const { result, ...expected } = state.decisionSubmission;
+        const submission = verifyDecisionSubmission(fixtureCalls, expected);
+        const shown = await page.run((id) => {
+          const rows = [...document.querySelectorAll('#permissionResultRows li[data-event]')]
+            .filter(row => row.dataset.event === id && row.checkVisibility());
+          if (rows.length !== 1 || !rows[0].classList.contains('result-ok')) return null;
+          return rows[0].querySelector('.result-text')?.innerText;
+        }, [expected.id]);
+        if (shown !== result) throw Error('Visible decision result does not match the submitted request');
+        verification.push({ kind: 'decision-submission', submission, displayedResult: shown,
+          evidence: 'GUI request and fixture acknowledgement' });
       }
       await publish(state, 'electron', controls.length ? (issues.length ? 'partial' : 'captured') : 'unreadable',
         controls, controls.length ? issues : [{ kind: 'unreadable', id: state.window, message: 'No readable rendered controls' }]);
@@ -338,7 +351,7 @@ for (const journey of journeys) {
   try {
     for (const state of journey.states) {
       if (state.seedStage) fixture.setStage(state.seedStage);
-      await captureState(endpoint, app.child.pid, state);
+      await captureState(endpoint, app.child.pid, state, fixture.calls);
     }
   } finally {
     await app.close();

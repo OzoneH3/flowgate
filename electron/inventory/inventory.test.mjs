@@ -4,7 +4,7 @@ import net from 'node:net';
 import path from 'node:path';
 import test from 'node:test';
 import { bindDesktopAccount, matchesWindow, readProjectedControls } from './browser.mjs';
-import { identities, recipeNames, startSeed } from './seeds.mjs';
+import { identities, recipeNames, startSeed, verifyDecisionSubmission } from './seeds.mjs';
 
 const expected = JSON.parse(await readFile(new URL('./expected.json', import.meta.url), 'utf8'));
 
@@ -57,6 +57,34 @@ test('seed preserves the unrelated pending request and linked historical identit
   assert.equal(outcome.decision_record.id, identities.logFinal);
   assert.equal(pending.decision_record.request_id, outcome.decision_record.request_id);
   assert.equal(pending.decision_record.flow.local, outcome.decision_record.flow.local);
+});
+
+test('one-hour Beacon receipt requires the submitted duration and matching acknowledgement', async t => {
+  const { decisionSubmission: { result, ...expectedDecision } } =
+    expected.journeys.find(journey => journey.id === 'requests').states.find(state => state.id === 'pending-results');
+  for (const [name, duration, error] of [
+    ['exact hour', 3600],
+    ['wrong duration', 60, /duration_seconds: expected 3600, got 60/],
+    ['omitted duration', undefined, /duration_seconds: expected 3600, got missing/],
+  ]) {
+    await t.test(name, async t => {
+      const { request, seed } = await fixture(t, 'requests');
+      const { decision } = await request({ operation: 'decide', ...expectedDecision,
+        duration_seconds: duration });
+      assert.equal(decision.id, identities.incoming);
+      assert.equal(decision.state, 'allowed');
+      const wireEvidence = JSON.parse(JSON.stringify(seed.calls));
+      if (error) {
+        assert.throws(() => verifyDecisionSubmission(wireEvidence, expectedDecision), error);
+        return;
+      }
+      const receipt = verifyDecisionSubmission(wireEvidence, expectedDecision);
+      assert.equal(receipt.decision.duration_seconds, 3600);
+      assert.throws(() => verifyDecisionSubmission([...wireEvidence, receipt], expectedDecision), /exactly one/);
+      receipt.decisionReply.id = identities.request;
+      assert.throws(() => verifyDecisionSubmission(wireEvidence, expectedDecision), /acknowledgement/);
+    });
+  }
 });
 
 test('seed exposes exact build identity, an older page and a separately arriving new record', async t => {
