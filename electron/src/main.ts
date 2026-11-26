@@ -1079,7 +1079,7 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('app:quit', (e) => {
     trusted(e);
-    return background.requestQuit();
+    return background.requestQuit(e.sender === main.webContents);
   });
   ipcMain.handle('account:name', (e, uid) => { trusted(e, true); return accountName(uid); });
   ipcMain.handle('preferences', (e, v) => {

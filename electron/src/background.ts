@@ -130,7 +130,7 @@ export class Background {
       ]),
     );
   }
-  async requestQuit() {
+  async requestQuit(fromFileMenu = false) {
     if (this.quittingDialog) return;
     const state = this.state();
     // A verified continuous daemon is independent; a normal UI Quit needs no extra confirmation.
@@ -144,7 +144,8 @@ export class Background {
       return;
     }
     this.quittingDialog = true;
-    this.show();
+    if (!fromFileMenu || !this.main.isVisible() || this.main.isMinimized() || !this.main.isFocused())
+      this.show();
     try {
       const result = await dialog.showMessageBox(this.main, {
         type: 'question',
