@@ -166,3 +166,75 @@ test('a changed DOM order cannot assign another element’s accessible name or r
   ]);
   assert.equal(calls.at(-1), 'Runtime.releaseObjectGroup');
 });
+
+function editorCapture({ transitions = 0, mismatch } = {}) {
+  let phase = 0;
+  let time = 0;
+  let projected;
+  const snapshot = () => ({ atMs: ++time, state: {
+    selected: { id: 'inventory-rule-disabled', version: '2' },
+    draft: [['editEnabled', true, false]],
+    preview: { scope: ['Preview pending.', 'Reviewed scope'][phase] ?? `Reviewed scope ${phase}`, saveDisabled: !phase },
+    disclosure: { text: phase ? 'Verified application' : 'Saved application' },
+  } });
+  const send = async (method, params) => {
+    switch (method) {
+      case 'Runtime.evaluate':
+        if (params.returnByValue) return { result: { value: snapshot() } };
+        projected = snapshot();
+        return { result: { objectId: 'projection' } };
+      case 'Runtime.getProperties':
+        return { result: (params.objectId === 'projection'
+          ? ['observation', 'controls', 'elements', 'ruleEditor'] : ['0']).map(name =>
+          ({ name, value: { objectId: name } })) };
+      case 'Runtime.callFunctionOn':
+        return { result: { value: {
+          observation: { renderedAtMs: projected.atMs },
+          ruleEditor: projected,
+          controls: [{ id: 'editorApplication', role: 'disclosure', text: projected.state.disclosure.text }],
+        }[params.objectId] } };
+      case 'DOM.describeNode':
+        return { node: { backendNodeId: 42 } };
+      case 'Accessibility.getFullAXTree':
+        if (phase < transitions) phase++;
+        return { nodes: [{ backendDOMNodeId: 42, role: { value: 'DisclosureTriangle' },
+          name: { value: mismatch ?? snapshot().state.disclosure.text } }] };
+      case 'Runtime.releaseObjectGroup':
+        return {};
+      default:
+        throw Error('Unexpected protocol call ' + method);
+    }
+  };
+  return { send };
+}
+
+test('Rule editor retries a preview transition and retains a stable AX name difference', async () => {
+  let evidence;
+  const record = value => { evidence = value; };
+  const pending = await readProjectedControls(editorCapture(), '#ruleEditor', record);
+  assert.equal(evidence.ruleEditorReads.length, 1);
+  assert.equal(evidence.ruleEditorReads[0].retryReason, null);
+  assert.equal(pending[0].text, 'Saved application');
+  assert.equal(Object.hasOwn(pending[0], 'accessibleName'), false);
+
+  const resolved = await readProjectedControls(editorCapture({ transitions: 1, mismatch: 'Incorrect name' }),
+    '#ruleEditor', record);
+  const [rejected, accepted] = evidence.ruleEditorReads;
+  assert.equal(evidence.ruleEditorReads.length, 2);
+  assert.equal(rejected.beforeAX.state.preview.scope, 'Preview pending.');
+  assert.equal(rejected.afterAX.state.preview.scope, 'Reviewed scope');
+  assert(rejected.afterAX.atMs > rejected.beforeAX.atMs);
+  assert.match(rejected.retryReason, /preview, disclosure/);
+  assert.equal(accepted.retryReason, null);
+  assert.equal(resolved[0].text, 'Verified application');
+  assert.equal(resolved[0].accessibleName, 'Incorrect name');
+});
+
+test('Rule editor reports instability after three changing captures', async () => {
+  let evidence;
+  await assert.rejects(readProjectedControls(editorCapture({ transitions: 3 }), '#ruleEditor',
+    value => { evidence = value; }), { code: 'UNSTABLE_RULE_EDITOR' });
+  assert.equal(evidence.unstable, true);
+  assert.deepEqual(evidence.ruleEditorReads.map(read => read.attempt), [1, 2, 3]);
+  assert(evidence.ruleEditorReads.every(read => read.retryReason));
+});

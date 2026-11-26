@@ -324,7 +324,8 @@ async function captureState(endpoint, pid, state, fixtureCalls) {
           verification.push({ kind: 'native-diagnostic', error: diagnosticError.message });
         }
       }
-      const controls = await page?.capture(state.root ?? window.root).catch(() => []) ?? [];
+      const controls = error.code === 'UNSTABLE_RULE_EDITOR' ? []
+        : await page?.capture(state.root ?? window.root).catch(() => []) ?? [];
       await publish(state, 'electron', 'blocked', controls, [{ kind: 'blocked', id: state.window, message: error.message }]);
     } finally {
       for (const entry of verification.slice(verifyStart)) entry.state = state.id;

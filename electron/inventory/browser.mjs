@@ -251,12 +251,32 @@ class Page {
 }
 
 export async function readProjectedControls(cdp, selector, observe) {
+  const ruleEditorReads = [];
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const { controls, observation, editorRead } = await readProjection(cdp, selector, Boolean(observe), ruleEditorReads.length > 0);
+    if (editorRead) ruleEditorReads.push({ attempt, ...editorRead });
+    const evidence = ruleEditorReads.length ? { ...observation, ruleEditorReads } : observation;
+    if (!editorRead?.retryReason) {
+      observe?.(evidence);
+      return controls;
+    }
+    if (attempt === maxAttempts) {
+      observe?.({ ...evidence, unstable: true });
+      const error = new Error(`Unstable Rules editor capture after ${maxAttempts} attempts: ${editorRead.retryReason}`);
+      error.code = 'UNSTABLE_RULE_EDITOR';
+      throw error;
+    }
+  }
+}
+
+async function readProjection(cdp, selector, observe, trackRuleEditor) {
   // Capture the elements and their displayed state in one renderer evaluation.
   // An ordinal in a separately read DOM tree can point to a different element
   // when a sibling is inserted or removed between protocol calls.
   const objectGroup = 'flowgate-control-capture';
   const { result, exceptionDetails } = await cdp.send('Runtime.evaluate', {
-    expression: '(' + projectDOM.toString() + ')(' + JSON.stringify(selector) + ')',
+    expression: '(' + projectDOM.toString() + ')(' + JSON.stringify(selector) + ', ' + ruleEditorSnapshot.toString() + ', ' + trackRuleEditor + ')',
     objectGroup,
   });
   try {
@@ -265,12 +285,10 @@ export async function readProjectedControls(cdp, selector, observe) {
       objectId: result.objectId, ownProperties: true,
     });
     const property = name => properties.find(entry => entry.name === name)?.value?.objectId;
-    if (observe) {
-      const { result: observation } = await cdp.send('Runtime.callFunctionOn', {
-        objectId: property('observation'), functionDeclaration: 'function () { return this; }', returnByValue: true,
-      });
-      observe(observation.value);
-    }
+    const read = async name => (await cdp.send('Runtime.callFunctionOn', {
+      objectId: property(name), functionDeclaration: 'function () { return this; }', returnByValue: true,
+    })).result.value;
+    const observation = observe ? await read('observation') : undefined;
     const { result: projected } = await cdp.send('Runtime.callFunctionOn', {
       objectId: property('controls'), functionDeclaration: 'function () { return this; }', returnByValue: true,
     });
@@ -285,21 +303,59 @@ export async function readProjectedControls(cdp, selector, observe) {
       const { node } = await cdp.send('DOM.describeNode', { objectId });
       return node.backendNodeId;
     }));
+    const projectedEditor = property('ruleEditor') ? await read('ruleEditor') : null;
+    const snapshotEditor = async () => (await cdp.send('Runtime.evaluate', {
+      expression: '(' + ruleEditorSnapshot.toString() + ')()', returnByValue: true,
+    })).result.value;
+    const beforeAX = projectedEditor && await snapshotEditor();
     const { nodes } = await cdp.send('Accessibility.getFullAXTree');
+    const afterAX = projectedEditor && await snapshotEditor();
+    let editorRead;
+    if (projectedEditor) {
+      const changes = Object.keys(projectedEditor.state ?? {}).filter(field => {
+        const expected = JSON.stringify(projectedEditor.state[field]);
+        return [beforeAX, afterAX].some(read => JSON.stringify(read.state?.[field]) !== expected);
+      });
+      editorRead = { projected: projectedEditor, beforeAX, afterAX,
+        retryReason: !projectedEditor.state ? 'Rules editor is no longer open'
+          : changes.length ? 'Rules editor changed during capture: ' + changes.join(', ') : null };
+      if (editorRead.retryReason) return { observation, editorRead };
+    }
     const names = new Map(nodes.filter(node => !node.ignored && node.backendDOMNodeId)
       .map(node => [node.backendDOMNodeId, { name: node.name?.value, role: node.role?.value }]));
-    return controls.map((control, index) => {
+    const resolved = controls.map((control, index) => {
       const ax = names.get(backendIds[index]);
       if (ax?.name && ax.name !== control.text) control.accessibleName = ax.name;
       if (ax?.role && !['generic', 'none', 'presentation'].includes(ax.role)) control.role = ax.role;
       return control;
     });
+    return { controls: resolved, observation, editorRead };
   } finally {
     await cdp.send('Runtime.releaseObjectGroup', { objectGroup });
   }
 }
 
-function projectDOM(selector) {
+// Read the editor phase without sampling the countdown or relying on the AX name.
+function ruleEditorSnapshot(root = document) {
+  const atMs = Date.now();
+  const editor = document.querySelector('#ruleEditor[open]:not([hidden])');
+  if (!editor || !root.contains(editor)) return { atMs, state: null };
+  const selected = document.querySelector('#ruleRows tr[aria-selected="true"]');
+  const version = [...document.querySelectorAll('#ruleInfo dt')].find(label => label.textContent === 'Edit version');
+  const get = id => document.getElementById(id);
+  const disclosure = get('editorApplication');
+  return { atMs, state: {
+    selected: { id: selected?.dataset.id ?? null, version: version?.nextElementSibling?.textContent ?? null },
+    draft: [...editor.querySelectorAll('input, select')].map(control =>
+      [control.id, control.type === 'checkbox' ? control.checked : control.value, control.disabled]),
+    preview: { scope: get('scopeSummary')?.innerText, backend: get('rulePreview')?.textContent,
+      feedback: get('editorFeedback')?.innerText, saveDisabled: get('saveRule')?.disabled },
+    disclosure: { text: disclosure?.innerText, open: disclosure?.parentElement.open,
+      identity: get('editorIdentity')?.textContent },
+  } };
+}
+
+function projectDOM(selector, snapshotEditor, trackRuleEditor) {
   const root = document.querySelector(selector);
   const all = [root, ...root.querySelectorAll('*')];
   const supported = new Set(['main', 'aside', 'header', 'footer', 'section', 'nav', 'dialog',
@@ -404,7 +460,9 @@ function projectDOM(selector) {
     tooltipTargets,
     tooltipTransition: window.finishInventoryTooltip?.(),
   };
-  return { controls, elements, observation };
+  const ruleEditor = snapshotEditor(root);
+  return { controls, elements, observation,
+    ruleEditor: ruleEditor.state || trackRuleEditor || root.id === 'ruleEditor' ? ruleEditor : null };
 }
 
 const desktopAccountFields = new Map([
