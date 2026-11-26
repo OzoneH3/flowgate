@@ -1,5 +1,5 @@
 import { displayAmount, type DisplayUnit } from './display-units';
-import type { GraphView, Source } from './history';
+import type { GraphPoint, GraphView, Source } from './history';
 import { chartDefaults, type ChartSettings } from './pane-model';
 import { chartRange, shiftedEnd, adjacentSample, observationSpacing } from './chart-view';
 interface Controls {
@@ -366,23 +366,18 @@ export class TrafficGraph {
     }
   }
   private draw() {
-    if (this.paint !== undefined || document.hidden || this.host.hidden) return;
+    const view = this.view;
+    if (!view || document.hidden || this.host.hidden || this.host.closest('main')?.hidden) return;
+    // Publish readable chart state when data arrives. A native window can defer
+    // its animation frames even while its renderer reports a visible document.
+    this.updatePresentation(view, chartRange(view, this.settings, this.source).points.at(-1));
+    if (this.paint !== undefined) return;
     this.paint = requestAnimationFrame(() => {
       this.paint = undefined;
       this.paintNow();
     });
   }
-  private paintNow() {
-    if (!this.view || document.hidden || this.host.closest('main')?.hidden) return;
-    // Read geometry/style before legend writes; avoid forcing layout after DOM changes.
-    const width = this.canvas.clientWidth,
-      height = this.canvas.clientHeight;
-    if (!width || !height) return;
-    const palette = getComputedStyle(this.canvas);
-    const v = this.view,
-      range = chartRange(v, this.settings, this.source),
-      points = range.points,
-      latest = points.at(-1);
+  private updatePresentation(v: GraphView, latest: GraphPoint | undefined) {
     const current = v.connected && latest && v.now - latest.at < 5000 ? latest : undefined;
     const values = this.header.querySelector('#graphValues')!;
     // Reuse legend buttons so polling cannot steal keyboard focus.
@@ -417,6 +412,20 @@ export class TrafficGraph {
     this.header.querySelector('#graphContext')!.textContent = v.message;
     this.sync();
     this.sample();
+    this.canvas.setAttribute(
+      'aria-label',
+      `${this.source === 'tcp' ? 'TCP transport payload' : 'UDP API-reported bytes'}; ${v.label}; ${Array.from(values.children, (child) => child.textContent).join('; ')}; ${status}. ${this.settings.end !== undefined ? 'Historical' : 'Live'} window ${Math.round(this.settings.seconds)} seconds. Gaps are unavailable, not zero.`,
+    );
+  }
+  private paintNow() {
+    if (!this.view || document.hidden || this.host.hidden || this.host.closest('main')?.hidden) return;
+    const width = this.canvas.clientWidth,
+      height = this.canvas.clientHeight;
+    if (!width || !height) return;
+    const palette = getComputedStyle(this.canvas);
+    const v = this.view,
+      range = chartRange(v, this.settings, this.source),
+      points = range.points;
     const dpr = window.devicePixelRatio || 1;
     this.canvas.width = Math.round(width * dpr);
     this.canvas.height = Math.round(height * dpr);
@@ -503,9 +512,5 @@ export class TrafficGraph {
       }
       c.stroke();
     }
-    this.canvas.setAttribute(
-      'aria-label',
-      `${this.source === 'tcp' ? 'TCP transport payload' : 'UDP API-reported bytes'}; ${v.label}; ${Array.from(values.children, (child) => child.textContent).join('; ')}; ${status}. ${this.settings.end !== undefined ? 'Historical' : 'Live'} window ${Math.round(this.settings.seconds)} seconds. Gaps are unavailable, not zero.`,
-    );
   }
 }
