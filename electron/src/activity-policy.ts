@@ -330,39 +330,37 @@ export class ActivityPolicy {
     this.place();
     // Focus the popup itself, never an action: the key that opened it must not also trigger it.
     this.host.querySelector<HTMLElement>('.quick-popup')?.focus({ preventScroll: true });
-    // Paint the anchored shell first; refresh the existing bounded batch on demand.
-    requestAnimationFrame(
-      () =>
-        void window.flowgate
-          .ruleContext()
-          .then((state) => {
-            if (openSequence !== this.openSequence || !this.popup || this.row?.id !== targetId)
-              return;
-            if (!acceptsPublication(this.state, state)) state = this.state!;
-            this.checking = false;
-            if (state.control.generation !== generation || !state.control.connected) {
-              this.close(false);
-              return;
-            }
-            this.popupContext = JSON.stringify([
-              this.row.id,
-              this.row.process?.id,
-              state.control.generation,
-              state.control.policy?.snapshot.token,
-              state.control.connected,
-            ]);
-            this.update(this.row, state);
-          })
-          .catch((error) => {
-            if (openSequence === this.openSequence) {
-              this.checking = false;
-              this.close(false);
-              const feedback =
-                document.getElementById('feedback') || document.getElementById('paneMessage');
-              if (feedback) feedback.textContent = 'Policy refresh unavailable: ' + String(error);
-            }
-          }),
-    );
+    // A visible renderer can still be waiting for the compositor's first frame.
+    // Send the refresh now so the quick setter can leave its checking state.
+    void window.flowgate
+      .ruleContext()
+      .then((state) => {
+        if (openSequence !== this.openSequence || !this.popup || this.row?.id !== targetId)
+          return;
+        if (!acceptsPublication(this.state, state)) state = this.state!;
+        this.checking = false;
+        if (state.control.generation !== generation || !state.control.connected) {
+          this.close(false);
+          return;
+        }
+        this.popupContext = JSON.stringify([
+          this.row.id,
+          this.row.process?.id,
+          state.control.generation,
+          state.control.policy?.snapshot.token,
+          state.control.connected,
+        ]);
+        this.update(this.row, state);
+      })
+      .catch((error) => {
+        if (openSequence === this.openSequence) {
+          this.checking = false;
+          this.close(false);
+          const feedback =
+            document.getElementById('feedback') || document.getElementById('paneMessage');
+          if (feedback) feedback.textContent = 'Policy refresh unavailable: ' + String(error);
+        }
+      });
   }
   private context() {
     return JSON.stringify([
