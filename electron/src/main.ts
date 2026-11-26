@@ -280,9 +280,17 @@ function trackResult<T>(
   run: Promise<T>,
   ok: (value: T) => Parameters<Backend['noteResult']>[2],
 ): Promise<T> {
+  const record = (outcome: Parameters<Backend['noteResult']>[2]) => {
+    backend.noteResult(generation, id, outcome);
+    // The normal state broadcast skips windows Electron reports as hidden or
+    // minimized. A completed permission action must still update Pending
+    // requests even when that native visibility flag lags behind the renderer.
+    if (!quitting && !main.isDestroyed() && (!main.isVisible() || main.isMinimized()))
+      main.webContents.send('state', backend.view());
+  };
   run.then(
-    (value) => backend.noteResult(generation, id, ok(value)),
-    (error) => backend.noteResult(generation, id, failureResult(error)),
+    (value) => record(ok(value)),
+    (error) => record(failureResult(error)),
   );
   return run;
 }

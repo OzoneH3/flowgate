@@ -348,7 +348,10 @@ function inventory(recipe, packageBuild) {
         try {
           const request = JSON.parse(buffer.split('\n')[0]);
           const reply = response(request, observer);
-          calls.push({ operation: request.operation, error: reply ? reply.error_code || undefined : 'fixture_lost_reply' });
+          calls.push({ operation: request.operation,
+            ...(request.operation === 'decide' ? { decision: { id: request.id, generation: request.generation,
+              action: request.action, scope: request.scope } } : {}),
+            error: reply ? reply.error_code || undefined : 'fixture_lost_reply' });
           const send = () => socket.end(reply ? JSON.stringify(reply) + '\n' : undefined);
           if (request.operation === 'connection-analyze' && request.connection_analysis?.watch_ms) setTimeout(send, 1600);
           else send();
