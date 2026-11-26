@@ -14,6 +14,7 @@ import { ruleStatus } from './rule-status';
 import { Essential } from './essential';
 import { Protection } from './protection';
 import { placeKDEPrompt, resizeKDEPrompt, PROMPT_TITLE, promptTitle } from './prompt-placement';
+import { activateKDEMain } from './kwin';
 import { AutomaticPrompts, PROMPT_HEIGHT, PROMPT_MIN_HEIGHT, compactPromptBounds, edgePosition, boundDecision, groupOf, inputSettled, queuedRemember, queuedRememberSelection, type QueuedRememberSelection } from './automatic-prompts';
 import {
   app,
@@ -71,6 +72,7 @@ app.commandLine.appendSwitch('disable-domain-reliability');
 // WebGPU's Vulkan/GL interop otherwise initializes Vulkan independently of the
 // compositor flag. Select its GLES adapter too; do not disable GPU acceleration.
 const nativeWayland = app.commandLine.getSwitchValue('ozone-platform') === 'wayland';
+const MAIN_TITLE = 'FlowGate';
 if (nativeWayland) {
   const disabled = new Set(
     app.commandLine.getSwitchValue('disable-features').split(',').filter(Boolean),
@@ -479,6 +481,18 @@ function showMain(list = false, message = '') {
   main.webContents.send('state', backend.view());
   if (list) main.webContents.send('navigate', { tab: 'requests', message });
 }
+function openFromTray() {
+  if (main.isDestroyed()) return;
+  const wasVisible = main.isVisible();
+  showMain();
+  // A closed-to-tray window is raised by mapping it. An already mapped
+  // surface needs compositor activation on KDE Wayland, even if Electron
+  // reports it as unminimized.
+  if (wasVisible && nativeWayland && process.env.XDG_CURRENT_DESKTOP?.split(':').includes('KDE'))
+    void activateKDEMain(profile, process.pid, MAIN_TITLE).catch((error) =>
+      console.info('FlowGate: KWin tray activation unavailable:', String(error)),
+    );
+}
 async function review(ref: RequestRef) {
   await backend.pollControl();
   const view = backend.view(),
@@ -524,7 +538,7 @@ function windowFor(isPrompt = false, id = '', generation = '', group?: string) {
     ? compactPromptBounds(screen.getPrimaryDisplay().workArea, nativeWayland)
     : { width, height };
   const w = new BrowserWindow({
-    title: isPrompt ? PROMPT_TITLE : 'FlowGate',
+    title: isPrompt ? PROMPT_TITLE : MAIN_TITLE,
     icon: APP_ICON,
     frame: !isPrompt,
     alwaysOnTop: isPrompt,
@@ -1396,6 +1410,7 @@ app.whenReady().then(async () => {
     showMain,
     (ref) => void review(ref),
     () => app.quit(),
+    openFromTray,
   );
   main.on('hide', () => {
     for (const w of detached.values()) if (!w.isDestroyed()) w.hide();

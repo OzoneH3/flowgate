@@ -26,13 +26,14 @@ export class Background {
     private show: (list?: boolean, message?: string) => void,
     private review: (ref: RequestRef) => void,
     private quit: () => void,
+    private openFromTray: () => void,
   ) {
     const icon = nativeImage.createFromPath(path.join(__dirname, 'flowgate-tray.png'));
     try {
       // Red until protection is confirmed active.
       this.tray = new Tray(this.icons.tray.off);
       this.tray.setToolTip('FlowGate');
-      this.tray.on('click', () => this.show());
+      this.tray.on('click', () => this.openFromTray());
     } catch {}
     this.notifications = new RequestNotifications(
       () => Notification.isSupported(),
@@ -117,7 +118,7 @@ export class Background {
     this.tray.setToolTip(`FlowGate · ${count} pending · ${enforcement}`);
     this.tray.setContextMenu(
       Menu.buildFromTemplate([
-        { label: 'Open FlowGate', click: () => this.show() },
+        { label: 'Open FlowGate', click: () => this.openFromTray() },
         { label: `Pending requests (${count})`, click: () => this.show(true) },
         { type: 'separator' },
         { label: enforcement, enabled: false },

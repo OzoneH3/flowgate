@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Rect } from './pane-model';
+import { kwin as dbus } from './kwin';
 // Wayland clients cannot choose global coordinates. KDE provides a compositor API.
 // One-shot, no installed rules/hooks: own PID + fixed prompt caption, numeric geometry only.
 export const PROMPT_TITLE = 'FlowGate — connection permission';
@@ -160,12 +161,6 @@ async function configuredPrimaryOutput(): Promise<string | undefined> {
     ),
   );
 }
-const dbus = (args: string[]) =>
-  new Promise<string>((resolve, reject) =>
-    execFile('qdbus6', ['org.kde.KWin', ...args], { timeout: 1500, maxBuffer: 4096 }, (err, out) =>
-      err ? reject(err) : resolve(out.trim()),
-    ),
-  );
 export async function placeKDEPrompt(
   profile: string,
   pid: number,
