@@ -182,6 +182,66 @@ class Page {
       return matches.length === count;
     }, [assertion]);
   }
+  async watchUdpBadge() {
+    await this.run(() => {
+      const badge = document.getElementById('extendedBadge');
+      if (!badge) throw Error('Missing UDP badge');
+      const updates = window.inventoryUdpBadgeUpdates = [];
+      const read = (event) => {
+        const text = badge.innerText, accessibleName = badge.getAttribute('aria-label');
+        const prior = updates.at(-1);
+        if (prior?.text !== text || prior?.accessibleName !== accessibleName)
+          updates.push({ event, atMs: Date.now(), text, accessibleName });
+      };
+      read('initial');
+      new MutationObserver(() => read('update')).observe(badge, {
+        attributes: true, attributeFilter: ['aria-label'], childList: true, characterData: true, subtree: true,
+      });
+    });
+  }
+  async watchTooltip(anchorId) {
+    await this.run((id) => {
+      const probe = new AbortController(), events = [];
+      const anchor = () => document.getElementById(id);
+      const tip = () => document.getElementById('flowgateTooltip');
+      const identify = (element) => element?.id || element?.localName || null;
+      let lastAnchorId = null;
+      const record = (event, details = {}) => {
+        const open = tip()?.matches(':popover-open') ?? false;
+        const owner = [...document.querySelectorAll('[aria-describedby]')]
+          .find(element => element.getAttribute('aria-describedby').split(/\s+/).includes('flowgateTooltip'));
+        if (owner) lastAnchorId = identify(owner);
+        events.push({
+          atMs: Date.now(), event, focus: identify(document.activeElement),
+          anchor: identify(owner), previousAnchor: lastAnchorId, open,
+          tooltipText: open ? tip().innerText : null,
+          ariaDescribedBy: anchor()?.getAttribute('aria-describedby') ?? null, ...details,
+        });
+      };
+      const options = { capture: true, signal: probe.signal };
+      for (const kind of ['focusin', 'focusout'])
+        document.addEventListener(kind, (event) => record(kind, {
+          target: identify(event.target), related: identify(event.relatedTarget),
+        }), options);
+      document.addEventListener('keydown', event => record('keydown', {
+        target: identify(event.target), key: event.key,
+      }), options);
+      document.addEventListener('beforetoggle', event => {
+        if (event.target === tip())
+          record(event.newState === 'open' ? 'tooltip-open' : 'tooltip-dismiss', {
+            open: event.newState === 'open',
+            tooltipText: event.newState === 'open' ? tip().textContent : null,
+          });
+      }, options);
+      record('start');
+      window.finishInventoryTooltip = () => {
+        record('capture');
+        probe.abort();
+        delete window.finishInventoryTooltip;
+        return { anchorId: id, events };
+      };
+    }, [anchorId]);
+  }
   async capture(root, observe) {
     await this.assertIdentity();
     if (!await this.verify({ selector: root })) throw Error('Capture root is not displayed: ' + root);
@@ -320,14 +380,16 @@ function projectDOM(selector) {
   const localNetwork = document.querySelector('#rows tr[data-id="network:local"]');
   const tooltip = document.querySelector('#flowgateTooltip:popover-open');
   const tooltipTargets = Object.fromEntries(
-    ['firewallMenuStatus', 'extendedBadge', 'allowForAWhile'].flatMap(id => {
+    ['firewallMenuStatus', 'extendedBadge', 'allowForAWhile', 'expand'].flatMap(id => {
       const element = document.getElementById(id);
       if (!element || !visible(element)) return [];
+      const ariaDescribedBy = element.getAttribute('aria-describedby');
       return [[id, {
         focused: element === active && document.hasFocus(),
         focusVisible: element.matches(':focus-visible'),
         hovered: element.matches(':hover'),
-        describesTooltip: (element.getAttribute('aria-describedby') || '').split(/\s+/).includes('flowgateTooltip'),
+        ariaDescribedBy,
+        describesTooltip: (ariaDescribedBy || '').split(/\s+/).includes('flowgateTooltip'),
       }]];
     }),
   );
@@ -340,6 +402,7 @@ function projectDOM(selector) {
     localNetworkHovered: localNetwork?.matches(':hover') ?? null,
     tooltipText: tooltip ? clean(tooltip.innerText) : null,
     tooltipTargets,
+    tooltipTransition: window.finishInventoryTooltip?.(),
   };
   return { controls, elements, observation };
 }

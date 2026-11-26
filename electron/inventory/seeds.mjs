@@ -350,6 +350,8 @@ function inventory(recipe, packageBuild) {
           const reply = response(request, observer);
           calls.push({ operation: request.operation, receivedAtMs: Date.now(), observer,
             serverTime: reply?.server_time,
+            ...(!observer && request.operation === 'list' && reply?.traffic_monitor
+              ? { trafficMonitor: reply.traffic_monitor } : {}),
             ...(reply?.events?.length ? { events: reply.events.map(({ id, deadline, state }) =>
               ({ id, deadline, state })) } : {}),
             ...(request.operation === 'decide' ? {

@@ -153,6 +153,31 @@ async function waitForChart(page) {
   }), 'Activity chart has not painted its series and selection label', 8500);
 }
 
+function udpBadge(status) {
+  const label = status.state === 'disabled' && !status.available ? 'unsupported' : status.state;
+  const short = { disabled: 'Off', active: 'On', partial: 'On', unknown: 'Offline',
+    unsupported: 'Unavailable' }[label] ?? (label.charAt(0).toUpperCase() + label.slice(1));
+  const partial = status.partial || label === 'partial';
+  return { text: 'UDP: ' + short + (partial ? ' (partial)' : ''),
+    accessibleName: 'UDP monitoring: ' + short + (partial ? ', partial coverage' : '') };
+}
+
+async function waitForUdpBadge(page, calls, originalReady) {
+  return until(async () => {
+    const updates = await page.run(() => window.inventoryUdpBadgeUpdates || []);
+    const rendered = updates.at(-1);
+    const primary = calls.filter(call => call.trafficMonitor && !call.error).at(-1);
+    if (!rendered || !primary || (originalReady && !await page.verify(originalReady))) return false;
+    const publication = calls.findLast(call =>
+      call.trafficMonitor && !call.error && call.receivedAtMs <= rendered.atMs);
+    if (!publication) return false;
+    const expected = udpBadge(primary.trafficMonitor), prior = udpBadge(publication.trafficMonitor);
+    if (expected.text !== prior.text || expected.accessibleName !== prior.accessibleName ||
+        expected.text !== rendered.text || expected.accessibleName !== rendered.accessibleName) return false;
+    return { kind: 'udp-badge-ready', primary, publication, renderer: rendered, updates };
+  }, 'UDP badge has not reflected the primary fixture status while the requested state is ready');
+}
+
 async function perform(page, steps = []) {
   for (const step of steps) {
     if (step.chartReady) await waitForChart(page);
@@ -234,6 +259,7 @@ async function captureState(endpoint, pid, state, fixtureCalls) {
         await publish(state, 'electron', 'missing', [], [{ kind: 'missing', id: state.window, message: error.message }]);
         return;
       }
+      if (state.tooltipAnchor) await page.watchTooltip(state.tooltipAnchor);
       await perform(page, state.steps);
       if (state.ready) await until(() => page.verify(state.ready), 'Expected surface not displayed ' + JSON.stringify(state.ready), state.timeout);
       try {
@@ -255,8 +281,15 @@ async function captureState(endpoint, pid, state, fixtureCalls) {
         await until(() => page.verify({ selector: '#rows tr[data-id="overview"]', contains: accountLabel }),
           'Waiting for the independently measured desktop account in Activity');
       }
+      const udp = state.udpBadgeReady ? await waitForUdpBadge(page, fixtureCalls, state.ready) : null;
       const controls = await page.capture(root, observation =>
         verification.push({ kind: 'renderer-capture', ...observation }));
+      if (udp) {
+        const badge = controls.find(control => control.id === 'extendedBadge');
+        if (badge?.text !== udp.renderer.text || badge.accessibleName !== udp.renderer.accessibleName)
+          throw Error('Captured UDP badge changed after the renderer update');
+        verification.push(udp);
+      }
       if (window.document === 'index.html' && root === 'body') {
         const fields = bindDesktopAccount(controls, accountLabel, state.id === 'activity-empty');
         if (fields.length) verification.push({ kind: 'desktop-account', identity: desktopAccount, fields });
@@ -339,6 +372,7 @@ for (const journey of journeys) {
       if (language !== 'en-US') throw Error('Expected the renderer UI language to be en-US, got ' + language);
       if (geometry.toString() !== '1920,1080,1') throw Error('Set the desktop to 1920×1080 at 100% scaling before capture');
       await until(() => main.verify({ selector: '#activityTab' }), 'Main toolbar missing');
+      if (journey.states.some(state => state.udpBadgeReady)) await main.watchUdpBadge();
     } finally { main.close(); }
   } catch (error) {
     for (const state of journey.states) await publish(state, plan.windows[state.window].document ? 'electron' : 'desktop-accessibility',
