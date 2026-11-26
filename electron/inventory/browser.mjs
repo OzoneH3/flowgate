@@ -319,6 +319,18 @@ function projectDOM(selector) {
   const active = document.activeElement;
   const localNetwork = document.querySelector('#rows tr[data-id="network:local"]');
   const tooltip = document.querySelector('#flowgateTooltip:popover-open');
+  const tooltipTargets = Object.fromEntries(
+    ['firewallMenuStatus', 'extendedBadge', 'allowForAWhile'].flatMap(id => {
+      const element = document.getElementById(id);
+      if (!element || !visible(element)) return [];
+      return [[id, {
+        focused: element === active && document.hasFocus(),
+        focusVisible: element.matches(':focus-visible'),
+        hovered: element.matches(':hover'),
+        describesTooltip: (element.getAttribute('aria-describedby') || '').split(/\s+/).includes('flowgateTooltip'),
+      }]];
+    }),
+  );
   const observation = {
     renderedAtMs: Date.now(),
     documentFocused: document.hasFocus(),
@@ -327,6 +339,7 @@ function projectDOM(selector) {
     localNetworkFocusWithin: localNetwork?.matches(':focus-within') ?? null,
     localNetworkHovered: localNetwork?.matches(':hover') ?? null,
     tooltipText: tooltip ? clean(tooltip.innerText) : null,
+    tooltipTargets,
   };
   return { controls, elements, observation };
 }
