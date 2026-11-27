@@ -94,12 +94,17 @@ packages stored elsewhere keep their original names and receipts.
 
 ### Prepare an RC or stable release
 
-Choose a clean, reviewed commit, then prepare the next candidate locally.
+Check out a clean, reviewed commit, then prepare the next candidate locally.
 
 ```sh
-git tag -a flowgate-v0.1.0-rc.9 -m 'FlowGate 0.1.0-rc.9'
-make package
+python3 scripts/next-rc.py --dry-run
+python3 scripts/next-rc.py
 ```
+
+The script checks local and remote tags for the `0.1.0` series, creates the next
+local annotated RC tag, runs `make package`, and verifies both receipts. Rerun
+it on the same commit to resume a build with its existing RC tag. Use
+`--base X.Y.Z` for another series.
 
 For the stable release, check out its reviewed commit and run:
 
