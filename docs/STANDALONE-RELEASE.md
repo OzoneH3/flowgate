@@ -279,21 +279,20 @@ and refresh any release checks that rely on the previous bytes.
    ```
 3. For a numbered RC, use the script from the checkout after guest approval.
    Sign in with the GitHub maintainer account using `gh auth login --hostname github.com`
-   and make sure the tested commit is on `OzoneH3/flowgate`. Use the retained
-   archive path and the two SHA-256 values from the test receipt.
+   and make sure the tested commit is on `OzoneH3/flowgate`. Pass the version
+   to select its local tag, retained package under `build/dist/`, and receipts.
 
    ```sh
-   python3 scripts/publish-rc.py "$BUNDLE" \
-     --archive-sha256 "$ARCHIVE_SHA256" --installer-sha256 "$INSTALLER_SHA256"
-
-   python3 scripts/publish-rc.py "$BUNDLE" \
-     --archive-sha256 "$ARCHIVE_SHA256" --installer-sha256 "$INSTALLER_SHA256" --publish
+   python3 scripts/publish-rc.py 0.1.0-rc.16 --draft
+   python3 scripts/publish-rc.py 0.1.0-rc.16
    ```
 
    The first command prepares or resumes the GitHub draft. The second verifies
    the four downloaded assets again and publishes the prerelease. The script
    pushes the existing local RC tag if needed and refuses conflicting tags or
-   assets.
+   assets. To pin the separate test receipt explicitly, supply
+   `--archive-sha256 "$ARCHIVE_SHA256" --installer-sha256 "$INSTALLER_SHA256"`.
+   Passing an archive path requires both hashes and defaults to draft staging.
 
    For a stable release or development build, follow the manual sequence below.
    After guest approval, verify the

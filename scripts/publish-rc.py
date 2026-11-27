@@ -18,6 +18,7 @@ REPO = "OzoneH3/flowgate"
 REMOTE = f"https://github.com/{REPO}.git"
 GH_ENV = {**os.environ, "GH_PROMPT_DISABLED": "1", "GIT_TERMINAL_PROMPT": "0"}
 GIT = ["git", "-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential"]
+RC_VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+")
 
 
 def run(*args, stdout=None):
@@ -56,7 +57,7 @@ def package_identity(archive):
         with bundle.extractfile(member) as data:
             manifest = json.load(data)
     version, source = manifest["version"], manifest["source"]
-    if not (isinstance(version, str) and re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+", version)
+    if not (isinstance(version, str) and RC_VERSION.fullmatch(version)
             and isinstance(source, str) and re.fullmatch(r"[0-9a-f]{40}", source)):
         raise ValueError("Expected a numbered RC archive with a full source SHA")
     release = f"{version}-{source[:12]}"
@@ -185,16 +186,45 @@ def sha256(value):
     return value.lower()
 
 
+def retained_archive(version):
+    tag = f"flowgate-v{version}"
+    try:
+        source = output("git", "rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}")
+    except subprocess.CalledProcessError as error:
+        raise ValueError(f"Local tag {tag} is missing or does not point to a commit.") from error
+    release = f"{version}-{source[:12]}"
+    archive = ROOT / "build" / "dist" / release / f"flowgate-{release}-linux-x86_64.tar.gz"
+    if not archive.is_file():
+        raise ValueError(f"Retained package missing: {archive}. Use the exact archive that passed testing.")
+    return archive
+
+
+def receipt_digest(path):
+    try:
+        return sha256(path.read_text(encoding="ascii").split(maxsplit=1)[0])
+    except (IndexError, argparse.ArgumentTypeError) as error:
+        raise ValueError(f"Invalid SHA-256 receipt: {path}") from error
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("archive", type=Path, help="path to the retained tested RC archive")
-    parser.add_argument("--archive-sha256", required=True, type=sha256, help="archive digest from the test receipt")
-    parser.add_argument("--installer-sha256", required=True, type=sha256, help="installer digest from the test receipt")
-    parser.add_argument("--publish", action="store_true", help="publish after verifying all four GitHub assets")
+    parser.add_argument("candidate", help="RC version to publish, or path to the retained tested RC archive")
+    parser.add_argument("--archive-sha256", type=sha256, help="archive digest from the test receipt")
+    parser.add_argument("--installer-sha256", type=sha256, help="installer digest from the test receipt")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--publish", action="store_true", help="publish after verification (default with an RC version)")
+    mode.add_argument("--draft", action="store_true", help="verify the assets and leave the release in draft")
     args = parser.parse_args()
+    by_version = bool(RC_VERSION.fullmatch(args.candidate))
+    if not by_version and (not args.archive_sha256 or not args.installer_sha256):
+        parser.error("an archive path requires --archive-sha256 and --installer-sha256")
     try:
-        archive = args.archive.resolve()
-        stage(archive, {archive.name: args.archive_sha256, "flowgate-release.py": args.installer_sha256}, args.publish)
+        archive = retained_archive(args.candidate) if by_version else Path(args.candidate).resolve()
+        digests = {
+            archive.name: args.archive_sha256 or receipt_digest(archive.with_name(archive.name + ".sha256")),
+            "flowgate-release.py": args.installer_sha256 or receipt_digest(archive.with_name("flowgate-release.py.sha256")),
+        }
+        stage(archive, digests, args.publish or (by_version and not args.draft))
     except (OSError, ValueError, KeyError, subprocess.CalledProcessError, tarfile.TarError) as error:
         parser.exit(1, f"Release staging stopped: {error}\n")
 
