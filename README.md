@@ -10,6 +10,23 @@ FlowGate is a Linux application firewall and network monitor inspired by
 [Features](#features) · [Tested systems](#supported-systems-and-limitations) ·
 [Try the desktop](#try-the-desktop) · [Build, install or update](#install-flowgate)
 
+## Release candidate 16
+
+**Known firewall issue on openSUSE Tumbleweed:** one test connection delivered a
+36-byte payload while a process-specific TCP Block was enabled. The final
+decision matched the broader application Allow. The cause is unresolved. Treat
+process-specific Blocks over a broader Allow as unreliable on this candidate.
+
+RC16 adds permission-popup scaling, refreshes the Pending requests inspector,
+and checks the selected shaping interface at startup. The Linux x86-64 package
+and its checksum receipts are on the [RC16 prerelease page](https://github.com/OzoneH3/flowgate/releases/tag/flowgate-v0.1.0-rc.16).
+
+Lab run `1795817718246162010` tested the numbered archive from `a0a9faa9`.
+It passed **229 of 230 API cases** across ten profiles and **220 of 243 GUI
+journeys** across nine desktops. Eighteen GUI journeys involved native tray
+actions that were blocked or unavailable. All ten API profiles restored their
+starting rule inventory.
+
 ## Features
 
 - See live traffic per app and opt in to 1, 7 or 30 days of [usage history](docs/USAGE-HISTORY.md).
