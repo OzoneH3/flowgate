@@ -18,10 +18,12 @@ and shaping limits before widening their support.
 
 ## Roadmap
 
-### TODO · Fedora GNOME permission popup
+### TODO · Permission popup placement
 
 - [ ] Investigate supported GNOME Wayland integration for bottom-right placement
   and above-window stacking. Verify both on stock Fedora without focus theft.
+- [ ] On COSMIC, reproduce the popup opening at the top center. Verify
+  bottom-right placement and above-window stacking without stealing focus.
 
 ### P0 · Qualify the next release
 
