@@ -1,6 +1,8 @@
 # Configured Local Network / Internet policy (`network-zone-policy-v1`)
 
-Implemented, not deployed. This extends policy, not traffic accounting or routing.
+This document describes the original configured-prefix classifier. RC16 also classifies
+peers automatically and gives configured prefixes precedence for eligible addresses.
+[Current zone membership and precedence](AUTOMATIC-ZONES.md#membership-and-precedence)
 [NetLimiter zones](https://www.netlimiter.com/docs/basic-concepts/zones) are named
 filters; its [rules](https://netlimiter.com/docs/basic-concepts/rules) independently
 choose a target, zone and initiation direction. The inspected installed UI has those

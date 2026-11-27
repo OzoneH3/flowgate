@@ -2,9 +2,10 @@
 
 22 November 2026 · Source reviewed at `6df60ab3dab378899ce1323cf34103b2deb78071`
 
-Prioritize a patched, independently verified standalone release. Then make the
-same checks repeatable across supported desktops and measure the remaining UDP
-and shaping limits before widening their support.
+RC16 follow-up (27 November 2026). The numbered package is published. The
+remaining firewall investigation is the openSUSE process Block that fell back
+to an application Allow. The audit and qualification plan below record the
+22 November baseline. [RC16 results by profile](COMPATIBILITY.md)
 
 ## Audit findings
 

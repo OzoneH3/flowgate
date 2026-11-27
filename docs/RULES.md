@@ -1,6 +1,6 @@
 # Saved rule editor contract
 
-## Process-instance extension (not deployed)
+## Process-instance rules
 
 Primary capability `process-instance-rules-v1` adds explicit process targets with
 pinned native/session identity, process-tier precedence and inactive lifecycle
@@ -28,7 +28,8 @@ identity retains the existing revision policy; it does not grant a runtime/prefi
 Precedence (`policy.Precedes`, the same comparator the evaluator sorts with, and
 the source of the sentence shown in previews and explanations): among matching
 active rules (the newest saved setting of each program scope), higher target
-weight wins (process 4 › application 3 › zone 2 › all programs 1); then higher
+weight wins (network endpoint 5 › process 4 › application 3 › zone 2 › all
+programs 1); then higher
 priority; then a matching Local or Internet rule over All networks; then Deny › Allow › Ask; then a user rule over a preset; then the
 lexicographically smaller rule ID. No match asks.
 

@@ -74,12 +74,12 @@ Read UDP.md before host use. Domain/location data are not invented. See [desktop
 For a separately managed observer (stop with Ctrl+C):
 
 ```sh
-. scripts/go-env.sh
+scripts/build.sh desktop
 mkdir -p .workspace/my-monitor
 chmod 700 .workspace/my-monitor
-.workspace/flowgate observe --socket "$PWD/.workspace/my-monitor/control.sock" --interval 2s
+build/flowgate observe --socket "$PWD/.workspace/my-monitor/control.sock" --interval 2s
 # Another terminal:
-.workspace/desktop/flowgate-desktop --socket "$PWD/.workspace/my-monitor/control.sock"
+build/desktop/flowgate-desktop --socket "$PWD/.workspace/my-monitor/control.sock"
 ```
 
 An existing socket is refused. Use another private directory rather than deleting
@@ -123,7 +123,7 @@ To build and connect to an existing private lab API:
 
 ```sh
 scripts/build.sh desktop
-.workspace/desktop/flowgate-desktop --socket /absolute/private/directory/control.sock
+build/desktop/flowgate-desktop --socket /absolute/private/directory/control.sock
 # Use control.sock.monitor for read-only monitoring.
 ```
 

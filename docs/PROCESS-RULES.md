@@ -2,12 +2,13 @@
 
 Primary capability **`process-instance-rules-v1`** extends the existing observed
 preview/save/status, versioned edit and conditional Delete APIs. Electron stays
-unprivileged. This increment is isolated-only: the running host build is unchanged.
+unprivileged. RC16 ships this capability. The openSUSE matrix recorded a process
+Block falling back to an application Allow on a fresh TCP connection. [RC16 evidence](COMPATIBILITY.md)
 
 ## Scope, precedence and lifetime
 
-An application rule still covers its exact application key, revision and UID across
-instances. A process rule additionally binds a server-issued instance ID to daemon
+An ordinary saved application rule covers the same verified application and UID
+across instances and follows verified program updates. [Application identity](SEMANTICS.md#saved-application-permissions-follow-program-updates) A process rule additionally binds a server-issued instance ID to daemon
 generation, Linux boot ID, PID/start ticks, UID, network/mount/PID namespaces and
 native executable path/revision. A pinned pidfd guards lifetime and PID reuse.
 Never authorize from a PID, display association, icon, process metadata or rule
@@ -17,9 +18,9 @@ Shared/unknown ownership and unresolved runtime/Wine identities cannot obtain or
 use an exclusive process permission. No namespace traversal is added.
 
 Matching **process tier precedes application tier**, regardless of their relative
-priorities. Inside each tier existing descending priority, then ascending rule ID
-ordering is unchanged. No matching live process rule means application fallback,
-then the existing engine default. Scope still includes explicit direction, TCP or
+priorities. Within a tier, priority, network zone, action, user or preset origin, and rule ID
+break ties in that order. If no live process rule matches, the evaluator considers
+matching lower-tier rules. [Rule precedence](RULES.md) Scope still includes explicit direction, TCP or
 UDP (or explicit TCP+UDP with `observed-rule-any-protocol-v1`), remote address/CIDR,
 local/remote ports. See the capability contract in [OBSERVED-RULES.md](OBSERVED-RULES.md#tcpudp-observed-creation-extension). There is no new filter/action model.
 Direction is connection initiation, independent of upload/download.

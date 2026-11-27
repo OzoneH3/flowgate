@@ -1,4 +1,4 @@
-> Historical record: the vendor-specific adapter and commands described below have been removed. Current product-independent checks are documented in SEMANTICS.md. These historical test results do not establish current compatibility.
+> Historical record: the vendor-specific adapter and commands described below have been removed. Current product-independent checks are documented in [the current semantics guide](SEMANTICS.md). These historical test results do not establish current compatibility.
 
 # Tailscale coexistence: bounded incoming-only evaluation
 
@@ -103,7 +103,7 @@ also does not bypass another chain's later Drop/Reject. Outgoing traffic is
 FlowGate-permitted in this profile; outgoing transport control remains unverified.
 Forwarded traffic is outside this milestone, including when subnet modes are off.
 
-## Reproduce read-only inspection
+## Historical inspection commands
 
 ```
 sudo -n /home/flowgate-user/Apps/flowgate/.workspace/flowgate tailscale-inspect
@@ -184,7 +184,7 @@ The read-only frontend cannot transition the daemon into enforcement implicitly.
 
 ## Verification and remaining gap
 
-`scripts/checks/check-tailscale.sh` runs focused parser/race/vet checks and an isolated
+The [historical verification script](https://github.com/OzoneH3/flowgate/blob/ba615d08d618813c8757227b667dc930dc34a6bb/scripts/checks/check-tailscale.sh) ran focused parser/race/vet checks and an isolated
 component fixture. It uses real kernel TUNs linked by a private userspace L3 relay,
 two network namespaces, actual iptables-nft MARK/CONNMARK rules, routing and the
 actual controller/NFQUEUE/API/receivers. Only Tailscale version/preferences responses

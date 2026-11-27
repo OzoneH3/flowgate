@@ -1,4 +1,11 @@
-# Interim Wine UDP speedup release
+# FlowGate release status
+
+RC16 is published for x86-64 Linux. The original matrix passed 229 of 230 API cases
+and 220 of 243 desktop journeys. On openSUSE, a fresh TCP connection delivered
+data under an application Allow despite an enabled process Block. The cause
+remains open. [Results by profile](COMPATIBILITY.md) · [Installation](STANDALONE-RELEASE.md)
+
+## Earlier Wine UDP speedup release
 
 This release excludes the unfinished shared-observation work and retains
 independent per-flow ownership proofs. It enables the digest-verified per-TID
@@ -26,7 +33,7 @@ No actual game is named or special-cased in production.
 
 The following earlier status is retained as history:
 
-# FlowGate status
+## Earlier implementation status
 
 Earlier deployment and acceptance notes are indexed in the
 [historical records](HANDOFF.md#historical-records).

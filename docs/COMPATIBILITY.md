@@ -1,9 +1,40 @@
 # Linux compatibility record
 
-The standalone package targets x86-64 Linux with systemd. The tables cover the
-ten distribution and desktop profiles exercised by the local FlowGate VM lab
-on 20–21 November 2026. Each result applies to the installed build, guest
-setup and scenario shown. [Standalone verification record](STANDALONE-RELEASE.md#verification-record)
+The standalone package targets x86-64 Linux with systemd. Results below are
+specific to the recorded package, guest and test. [Standalone verification record](STANDALONE-RELEASE.md#verification-record)
+
+## RC16 matrix · 27 November 2026
+
+Run `1795817718246162010` installed `0.1.0-rc.16-a0a9faa929c5`.
+All ten API profiles restored their starting rule inventory. Debian was headless.
+The executable and archive matched the numbered release. [Published package and digests](https://github.com/OzoneH3/flowgate/releases/tag/flowgate-v0.1.0-rc.16)
+
+| Profile | Guest run | API passed | Desktop journeys passed |
+| --- | --- | ---: | ---: |
+| Debian 13 | `369c462cde4d` | 23/23 | — |
+| CachyOS Hyprland | `57bd5206adad` | 23/23 | 24/27 |
+| CachyOS Plasma | `0e95f7084f27` | 23/23 | 25/27 |
+| Fedora 45 Workstation (GNOME) | `958f5d429810` | 23/23 | 25/27 |
+| Kubuntu 26.04.1 Plasma | `0a970201adda` | 23/23 | 23/27 |
+| Linux Mint 22.3 Cinnamon | `d8ad4b4784b1` | 23/23 | 25/27 |
+| openSUSE Tumbleweed Plasma | `80159bcd4319` | 22/23 | 25/27 |
+| Pop!_OS 24.04 COSMIC | `ced31a1eb01b` | 23/23 | 24/27 |
+| Ubuntu 26.04.1 GNOME | `a3919709316a` | 23/23 | 24/27 |
+| Xubuntu 26.04.1 Xfce | `971b7f1726e8` | 23/23 | 25/27 |
+
+On openSUSE, three earlier decisions selected the process Block. A later decision
+on the same TCP endpoints listed only the application Allow, and the receiver
+got one 36-byte payload. The remaining probes in that case were unreached.
+The trace does not establish why the process rule dropped out of the match.
+
+Two tray journeys per graphical profile account for 18 of the 23 original
+desktop failures. Fedora had no stock tray host; the other profiles stopped
+before their tray actions completed. File → Quit also stopped on Hyprland
+(main window did not acquire focus) and Kubuntu (unexpected intervening key).
+On Kubuntu and COSMIC, replay of the original incoming-request captures verified
+the focused, enabled Allow once control despite a tooltip difference. Ubuntu
+sampled the analyzer after the watch had completed; the same package passed that
+journey in run `1795816176999671793`. The table retains the original verdicts.
 
 ## RC8 and subsequent checks
 

@@ -28,7 +28,7 @@ not infer authority for a newly versioned installation path or a different
 prefix, and does not restore rules already archived by an earlier release.
 
 
-## Process-instance extension (not deployed)
+## Process-instance rules
 
 Primary capability `process-instance-rules-v1` adds explicit process targets with
 pinned native/session identity, process-tier precedence and inactive lifecycle

@@ -1,8 +1,7 @@
-# FlowGate Electron milestone
+# FlowGate Electron desktop
 
-An additional unprivileged frontend; Qt and `scripts/run-desktop.sh` remain intact.
-Vanilla TypeScript, CSS and Electron, built by esbuild. No web development server,
-remote assets, frontend rule matching or packaging. Explicit controls use advertised daemon operations; older supported prototypes retain their terminal bridges.
+The standalone package includes this unprivileged desktop. Use the launcher below
+for a source checkout. [Standalone installation](../docs/STANDALONE-RELEASE.md)
 
 ## Run
 
@@ -19,7 +18,7 @@ The launcher installs **repository-local locked npm dependencies**, downloads th
 pinned Electron binary with its package checksums, builds production assets and the
 Go observer, then launches Electron. Requires Node >=22.12, npm, Python 3, the
 repository's Go toolchain and existing desktop libraries. No system installation
-is performed. Node 26.11.1/npm 12.2.0/Electron 44.9.0 were used here. Electron's
+is performed. RC16 pins Electron 44.11.5 in the [package manifest](package.json). Electron's
 sandbox must work; there is no `--no-sandbox` fallback.
 
 Default startup creates a private mode-0700 `build/electron-run-*` directory
@@ -38,11 +37,11 @@ XDG_CACHE_HOME="$PWD/build/cache" TMPDIR="$PWD/build/tmp" python3 electron/launc
 ```
 
 `--interval 1s` configures an owned observer; accepted backend range is 500ms–30s.
-No startup enables host enforcement or privileged UDP collection. Fullscreen or
-inactive applications receive no automatic permission window: pending requests appear in the
-main window and bounded native notifications request review. **Open permission window**
-and notification activation are explicit user actions. Closing
-that window or choosing **Decide later** sends no verdict.
+No startup enables host enforcement or privileged UDP collection. With an authorized controller attached, an actionable pending request can open
+a permission popup automatically. Pending requests remain accessible from the
+main window. Closing the popup sends no verdict. Popup scale can be set to
+75%, 85%, 100%, 115% or 125%. Placement depends on the desktop session.
+[Desktop compatibility](../docs/COMPATIBILITY.md)
 
 ## Custom CSS
 
@@ -81,7 +80,14 @@ its saved width.
 The bundled layout files are in `electron/src/`. The window-specific user
 stylesheet loads after the shared user stylesheet.
 
-## Boundaries and backend semantics
+## Implementation history and verification
+
+The sections below record successive development milestones. Commands, paths,
+tray defaults and test results describe the revision under discussion. Use the
+launch instructions above and the [current feature guide](../README.md#features)
+for RC16.
+
+### Early backend semantics
 
 - `main.ts` owns the Unix sockets indirectly through `backend.ts`. A separate
   serial poll loop serves Activity and control. Losing one does not stop the other.

@@ -52,7 +52,7 @@ Trigger: an application is not running and its saved rule uses the supported leg
 
 Evidence:
 
-- [inactive-rules.ts](../electron/src/inactive-rules.ts), `changeStoredRule`, lines 52–70: original fields and incomplete preview comparison.
+- [inactive-rules.ts](https://github.com/OzoneH3/flowgate/blob/b1b658ba0b676cabef44697f71dc64eb26c0c927/electron/src/inactive-rules.ts#L52-L70), `changeStoredRule`, lines 52–70: original fields and incomplete preview comparison.
 - [rules.ts](../electron/src/rules.ts), `draft` lines 82–90 and `preview` lines 173–192: correct normalization followed by replacement.
 - `.workspace/netlimiter-audit-01a16a05/inactive-scope-probe.cjs` and `.log`: actual compiled client functions, synthetic local Unix API; IPv4 and IPv6 endpoint cases widen, modern separate address/port control case preserves scope. Each case sends one preview and one save.
 - `backend-scope-probe.go` and `.log` in the same directory: actual `Engine.EditRule` commits the widened candidates in memory at version 2. No host database or packet delivery was involved.

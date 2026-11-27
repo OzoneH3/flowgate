@@ -14,7 +14,7 @@ legacy clients. [Full contract and fixture](OBSERVED-RULES.md#tcpudp-observed-cr
 No host rollout or automatic default broadening; old daemons retain TCP|UDP choice.
 
 
-## Process-instance extension (deployed on host monitor 60d35a3)
+## Process-instance rules
 
 Primary capability `process-instance-rules-v1` adds explicit process targets with
 pinned native/session identity, process-tier precedence and inactive lifecycle

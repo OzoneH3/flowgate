@@ -1,6 +1,6 @@
 # Activity policy summaries and current-policy explanations
 
-## Process-instance extension (not deployed)
+## Process-instance rules
 
 Primary capability `process-instance-rules-v1` adds explicit process targets with
 pinned native/session identity, process-tier precedence and inactive lifecycle
