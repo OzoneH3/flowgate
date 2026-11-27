@@ -20,7 +20,7 @@ export const MIN_BUDGET = 16000000, MAX_BUDGET = 10000000000;
 export interface UploadTarget { scope?: '' | LimitScope; uid: number; application: string; label?: string; revision?: string; stored_only?: boolean }
 export interface UploadCap extends UploadTarget { bits_per_second: number; download_bits_per_second?: number; traffic_priority?: TrafficPriority }
 export interface UploadSnapshot {
-  version: number; applied_version: number; enabled: boolean; interface: string; status: string;
+  version: number; applied_version: number; enabled: boolean; interface: string; status: string; interface_pending?: boolean;
   configured_caps: UploadCap[]; upload_budget_bits_per_second?: number; download_budget_bits_per_second?: number; last_error?: string; coverage_snapshot_expired?: boolean; coverage_valid_for_ms?: number;
   kernel?: { valid_for_ms?: number; covered_bindings?: number; bindings?: {app: string; zone?: string; covered?: boolean; download?: boolean; upload_class?: boolean; download_class?: boolean}[]; limitations?: string[]; fault?: string };
 }

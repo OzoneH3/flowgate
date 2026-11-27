@@ -678,6 +678,12 @@ def saved_settings(host, response, *, shape=None):
     generation = response['generation']
     if shape is None:
         shape = shaping_status(host, generation)
+    if (shape.get('deployment_mode') == 'automatic' and not shape.get('enabled')
+            and not shape.get('configured_caps') and not shape.get('upload_budget_bits_per_second')
+            and not shape.get('download_budget_bits_per_second')):
+        # Discovery readiness is transient and an empty automatic controller has
+        # no settings to carry across an upgrade from an unconfigured package.
+        shape = {}
     zones = response.get('network_zones') or {}
     if zones.get('model') == 'automatic-peer-v1':
         zones = {key: value for key, value in zones.items() if key not in ZONE_OBSERVATIONS}

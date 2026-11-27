@@ -161,7 +161,7 @@ type Engine struct {
 	Activity           func() identity.ActivitySnapshot
 	ConnectionSample   func(uint16) identity.ConnectionSample
 	connectionAnalysis sync.Mutex
-	UploadShaping      *uploadshape.Manager
+	UploadShaping      uploadshape.Service
 	UsageHistory       *accounting.History
 	ObservedUsage      *accounting.Ledger
 	Generation         string

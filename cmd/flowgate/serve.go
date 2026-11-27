@@ -67,6 +67,7 @@ func serveCommand(args []string) error {
 	evaluationState := fs.String("evaluation-state", "/run/flowgate-evaluation", "root-owned evaluation state; prepared only on explicit Start")
 	allowTraffic := fs.Bool("allow-traffic-control", false, "explicitly allow the selected administrator to start/stop machine UDP collection")
 	shapeInterface := fs.String("experimental-upload-interface", "", "opt-in experimental native upload API on one supported interface; disabled by default")
+	shapeDiscover := fs.Bool("discover-shaping-interface", false, "qualify a host shaping interface asynchronously")
 	shapeHelpers := fs.String("experimental-upload-helpers", "", "root-owned M1 helper directory")
 	shapeState := fs.String("experimental-upload-state", "", "private isolated controller journal directory")
 	shapeHost := fs.Bool("experimental-upload-host-trial", false, "explicit experimental physical-interface trial opt-in; mutually exclusive with parent-netns; no automatic activation")
@@ -142,11 +143,11 @@ func serveCommand(args []string) error {
 	if *administrator {
 		e.AdministratorUID = &peer
 	}
-	if *shapeInterface != "" && !*administrator {
+	if (*shapeDiscover || *shapeInterface != "") && !*administrator {
 		return fmt.Errorf("experimental upload requires explicit administrator")
 	}
-	if *shapeInterface == "" && (*shapeHelpers != "" || *shapeState != "" || *shapeParent != "" || *shapeHost) {
-		return fmt.Errorf("experimental upload options require an explicit interface")
+	if !*shapeDiscover && *shapeInterface == "" && (*shapeHelpers != "" || *shapeState != "" || *shapeParent != "" || *shapeHost) {
+		return fmt.Errorf("experimental upload options require an explicit interface or automatic interface discovery")
 	}
 	e.Mode = "daemon-monitor"
 	e.SaveRules = db.Replace
@@ -232,19 +233,29 @@ func serveCommand(args []string) error {
 	} else if len(wineBins) > 0 || len(winePrefixes) > 0 {
 		return fmt.Errorf("Wine runtime/prefix selection requires --wine-helper")
 	}
-	if *shapeInterface != "" {
+	if *shapeDiscover || *shapeInterface != "" {
 		preferences, er := db.ShapingPreferences()
 		if er != nil {
 			return fmt.Errorf("load shaping preferences: %w", er)
 		}
-		manager, er := uploadshape.New(uploadshape.Options{Zones: e.CurrentZones, Interface: *shapeInterface,
+		options := uploadshape.Options{Zones: e.CurrentZones, Interface: *shapeInterface,
 			Helpers: *shapeHelpers, State: *shapeState, ParentNetNS: *shapeParent, HostTrial: *shapeHost,
-			WineResolve: wineResolve}, preferences, db.SaveShapingPreferences)
-		if er != nil {
-			return er
+			WineResolve: wineResolve}
+		if *shapeDiscover && *shapeInterface == "" {
+			if !options.HostTrial || options.ParentNetNS != "" {
+				return fmt.Errorf("shaping interface discovery requires host-trial configuration")
+			}
+			manager := uploadshape.NewDiscovered(ctx, options, preferences, db.SaveShapingPreferences)
+			e.UploadShaping = manager
+			defer manager.Close()
+		} else {
+			manager, er := uploadshape.New(options, preferences, db.SaveShapingPreferences)
+			if er != nil {
+				return er
+			}
+			e.UploadShaping = manager
+			defer manager.Close()
 		}
-		e.UploadShaping = manager
-		defer manager.Close()
 	}
 	hostfirewall.ConfigureEstablishedTCP(e, socketResolvers.Fresh)
 	// Construct outside Engine.mu: the initial refresh publishes through Engine.

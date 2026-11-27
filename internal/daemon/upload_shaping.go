@@ -29,6 +29,8 @@ func (e *Engine) uploadRequest(q Request, admin, readonly bool) (uploadshape.Sna
 		code := "invalid_request"
 		if errors.Is(err, uploadshape.ErrSavePreferences) {
 			code = "persistence_failed"
+		} else if errors.Is(err, uploadshape.ErrInterfaceUnavailable) {
+			code = "unavailable"
 		} else if err.Error() == "stale_version" || err.Error() == "schema_upgrade_required" || err.Error() == "allocation_below_minimum" {
 			code = err.Error()
 		}

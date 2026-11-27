@@ -179,6 +179,7 @@ type KernelStatus struct {
 }
 type Snapshot struct {
 	DeploymentMode      string    `json:"deployment_mode"`
+	InterfacePending    bool      `json:"interface_pending,omitempty"`
 	VerifiedUntil       time.Time `json:"verified_until"`
 	CoverageValidMillis int64     `json:"coverage_valid_for_ms"`
 	CoverageExpired     bool      `json:"coverage_snapshot_expired"`

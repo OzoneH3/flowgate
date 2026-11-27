@@ -18,6 +18,11 @@ and shaping limits before widening their support.
 
 ## Roadmap
 
+### TODO · Fedora GNOME permission popup
+
+- [ ] Investigate supported GNOME Wayland integration for bottom-right placement
+  and above-window stacking. Verify both on stock Fedora without focus theft.
+
 ### P0 · Qualify the next release
 
 1. **Patch Electron and select one candidate.** Update the lockfile to a patched

@@ -15,7 +15,8 @@ export class UploadShapingClient {
       const r=await call(t.path,{operation:'upload-status',generation:t.generation});
       if (this.target()?.generation!==t.generation || r.generation!==t.generation) throw Error('Daemon changed; refresh the upload limit.');
       if (r.error || r.error_code) throw Error(r.error || r.error_code);
-      return {supported:true,downloadSupported:t.downloadSupported,prioritySupported:t.prioritySupported,zoneSupported:t.zoneSupported,writable:t.writable,generation:t.generation,snapshot:parseUpload(r.upload_shaping),message:''};
+      const snapshot = parseUpload(r.upload_shaping);
+      return {supported:true,downloadSupported:t.downloadSupported,prioritySupported:t.prioritySupported,zoneSupported:t.zoneSupported,writable:t.writable && !snapshot.interface_pending,generation:t.generation,snapshot,message:snapshot.interface_pending ? snapshot.last_error || 'Waiting for a supported interface.' : ''};
     } catch(e) {return {supported:true,writable:false,message:String(e instanceof Error?e.message:e)};}
   }
   async configure(value: unknown): Promise<UploadView> {
