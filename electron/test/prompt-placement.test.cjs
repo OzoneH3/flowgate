@@ -261,6 +261,89 @@ test('reused popup stays on secondary after alt-tab, but recovers when output di
   assert.equal(permission.output,primary,'disconnected output falls back to available primary');
 });
 
+test('a new popup returns to primary after fullscreen ends on the reused window', () => {
+  const { placementQML } = require('../dist/test/prompt-placement.cjs');
+  const primary = { name: 'DP-1', geometry: { x: 1920, y: 24, width: 1920, height: 1056 } };
+  const secondary = { name: 'DP-2', geometry: { x: 0, y: 24, width: 1920, height: 1056 } };
+  const permission = {
+    pid: 42, caption: promptTitle(7), internalId: 'reused', output: primary,
+    frameGeometry: { x: 3320, y: 620, width: 520, height: 460 },
+  };
+  const game = { pid: 99, fullScreen: true, output: primary };
+  const workspace = {
+    screens: [secondary, primary], stackingOrder: [permission, game],
+    currentDesktopForScreen: () => 1, clientArea: (_kind, output) => output.geometry,
+    sendClientToScreen: (w, output) => { w.output = output; },
+    set activeWindow(_value) { assert.fail('placement must not activate the prompt'); },
+  };
+  const layout = (height, retainOutput) => {
+    const qml = placementQML(42, 7, { x: 0, y: 0, width: 520, height }, primary.name, true, true, retainOutput);
+    const body = qml.slice(qml.indexOf('  function tick() {') + '  function tick() {'.length, qml.lastIndexOf('\n  }'));
+    let stopped = false;
+    const context = vm.createContext({
+      workspace, KWin: { PlacementArea: 0 }, console: { log() {} },
+      clock: { stop: () => { stopped = true; } },
+      state: { ticks: 0, nativeID: null, applied: 0, confirmed: 0, output: null },
+    });
+    for (let i = 0; i < 11 && !stopped; i++) vm.runInContext(`(function(){${body}})()`, context);
+    assert.equal(permission.opacity, 1);
+  };
+
+  layout(460, false);
+  assert.equal(permission.output, secondary, 'primary fullscreen routes the new request to secondary');
+  game.fullScreen = false;
+  layout(650, true);
+  assert.equal(permission.output, secondary, 'Details retains the already visible monitor');
+  permission.minimized = true;
+  permission.opacity = 0;
+  layout(460, false);
+  assert.equal(permission.output, primary, 'a later request uses the configured primary');
+  assert.deepEqual({ ...permission.frameGeometry }, { x: 3320, y: 620, width: 520, height: 460 });
+});
+
+test('a newly opened KDE popup waits invisibly for its measured height', () => {
+  const { placementQML } = require('../dist/test/prompt-placement.cjs');
+  const area = { x: 0, y: 30, width: 1920, height: 1050 };
+  const output = { name: 'DP-1' };
+  const qml = placementQML(42, 7, { x: 0, y: 0, width: 745, height: 686 }, output.name, true, true, false);
+  const body = qml.slice(qml.indexOf('  function tick() {') + '  function tick() {'.length, qml.lastIndexOf('\n  }'));
+  let frame = { x: 1175, y: 490, width: 745, height: 590 };
+  let requested;
+  let stopped = false;
+  const permission = {
+    pid: 42, caption: promptTitle(7), internalId: 'warm', output, opacity: 0, minimized: true,
+    get frameGeometry() { return frame; },
+    set frameGeometry(size) {
+      assert.equal(this.minimized, false, 'configure must be requested after the invisible restore');
+      requested = size;
+      frame = { ...frame, x: size.x, y: size.y };
+    },
+  };
+  const workspace = {
+    screens: [output], stackingOrder: [permission], clientArea: () => area,
+    set activeWindow(_value) { assert.fail('opening must not activate the prompt'); },
+  };
+  const context = vm.createContext({
+    workspace, KWin: { PlacementArea: 0 }, console: { log() {} },
+    clock: { stop: () => { stopped = true; } },
+    state: { ticks: 0, nativeID: null, applied: 0, waited: 0, confirmed: 0, output: null },
+  });
+  const tick = () => vm.runInContext(`(function(){${body}})()`, context);
+  for (let i = 0; i < 12; i++) {
+    tick();
+    assert.equal(permission.opacity, 0, 'the old compact frame must stay hidden');
+  }
+  assert.equal(requested.height, 686);
+  frame = { ...requested };
+  tick();
+  assert.equal(permission.opacity, 0, 'confirm the frame before its first visible tick');
+  tick();
+  assert.equal(permission.opacity, 1);
+  assert.equal(frame.y + frame.height, 1080);
+  assert.equal(frame.height, 686);
+  assert(stopped);
+});
+
 test('warm KDE resize fits both frames before Wayland commits the new size', () => {
   const { placementQML } = require('../dist/test/prompt-placement.cjs');
   const area = { x: 0, y: 24, width: 1280, height: 976 };

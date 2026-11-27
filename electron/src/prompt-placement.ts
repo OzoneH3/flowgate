@@ -25,6 +25,8 @@ function outputSelection(pid: number, outputName?: string, retainOutput = false)
     const current=${retainOutput ? "workspace.screens.includes(w.output) && w.output!==primary ? w.output : null" : "null"};
     const output=current || (primary && fullscreenOn(primary) ? (workspace.screens.find(o=>o!==primary && !fullscreenOn(o)) || primary) : primary);`;
 }
+const WARM_TICKS = 10;
+const OPEN_TICKS = 20;
 export function placementScript(pid: number, windowID: number, bounds: Rect, outputName?: string, retainOutput = false) {
   if (
     !Number.isSafeInteger(pid) ||
@@ -46,8 +48,11 @@ export function placementQML(
   outputName?: string,
   reveal = true,
   warm = false,
+  retainOutput = warm,
 ) {
   placementScript(pid, windowID, bounds, outputName); // validate fixed numeric input
+  const opening = warm && !retainOutput;
+  const maxTicks = warm ? (opening ? OPEN_TICKS : WARM_TICKS) : 40;
   return `import QtQuick
 import org.kde.kwin
 QtObject {
@@ -61,13 +66,26 @@ QtObject {
   property Timer clock: Timer { interval:50; repeat:true; running:true; onTriggered:root.tick() }
   function tick() {
     const s=state;
-    if (++s.ticks>${warm ? 10 : 40}) { ${warm ? '' : `console.log("FLOWGATE_PROMPT_UNCONFIRMED",${pid},${windowID}); if(target) target.opacity=${reveal ? 1 : 0};`} clock.stop(); return; }
+    if (++s.ticks>${maxTicks}) {
+      ${opening ? `const w=workspace.stackingOrder.find(w=>w.pid===${pid} && w.caption===${JSON.stringify(promptTitle(windowID))} && String(w.internalId)===s.nativeID);
+      if(w) { w.opacity=1; w.minimized=false; w.skipTaskbar=false; w.skipSwitcher=false; }` : warm ? '' : `console.log("FLOWGATE_PROMPT_UNCONFIRMED",${pid},${windowID}); if(target) target.opacity=${reveal ? 1 : 0};`}
+      clock.stop(); return;
+    }
     const matches=workspace.stackingOrder.filter(w=>w.pid===${pid} && w.caption===${JSON.stringify(promptTitle(windowID))});
     if(matches.length!==1) return;
     const w=matches[0], nativeID=String(w.internalId);
     if(s.nativeID!==null && s.nativeID!==nativeID) { clock.stop(); return; }
+    ${opening ? `
+    // A minimized Wayland surface may defer its configure. Restore it
+    // invisibly so it can commit the measured frame before the first reveal.
+    if(s.nativeID===null) {
+      s.nativeID=nativeID;
+      w.opacity=0; w.skipTaskbar=true; w.skipSwitcher=true; w.minimized=false;
+      return;
+    }
+    ` : ''}
     s.nativeID=nativeID;
-    ${outputSelection(pid, outputName, warm).replace("const output=", "const selectedOutput=")}
+    ${outputSelection(pid, outputName, retainOutput).replace("const output=", "const selectedOutput=")}
     if(!s.output || !workspace.screens.includes(s.output)) s.output=selectedOutput;
     const output=s.output;
     if(!output) { clock.stop(); return; }
@@ -87,12 +105,20 @@ QtObject {
       return;
     }
     const sized=Math.abs(g.width-width)<=1 && Math.abs(g.height-height)<=1;
-    if(!sized && s.ticks<8) return;
+    ${opening ? `
+    if(!sized && s.ticks<${OPEN_TICKS - 2}) {
+      s.confirmed=0;
+      if(++s.waited===8) w.frameGeometry={x:x,y:y,width:width,height:height};
+      return;
+    }
+    ` : 'if(!sized && s.ticks<8) return;'}
     // After a timeout, keep clearance for a configure that could still arrive.
     if(Math.abs(g.x-x)>1 || Math.abs(g.y-y)>1) {
+      s.confirmed=0;
       w.frameGeometry={x:x,y:y,width:g.width,height:g.height};
       return;
     }
+    ${opening ? 'if(sized && ++s.confirmed<2) return;' : ''}
     w.opacity=1; w.minimized=false; w.skipTaskbar=false; w.skipSwitcher=false;
     console.log("FLOWGATE_PROMPT_RESIZED",JSON.stringify({pid:${pid},windowID:${windowID},area:area,geometry:g}));
     clock.stop();
@@ -212,14 +238,15 @@ export async function placeKDEPrompt(
   }
 }
 
-// Reused popup resizes retain a connected secondary output after fullscreen ends.
-// A warm popup on primary can still move away when a fullscreen application starts.
+// In-place resizes keep a connected secondary output. Opening a new request
+// rechecks fullscreen routing before revealing the reused native window.
 export async function resizeKDEPrompt(
   profile: string,
   pid: number,
   windowID: number,
   bounds: Rect,
   visible = true,
+  retainOutput = true,
 ) {
   if (process.platform !== 'linux') return;
   const dir = await fs.mkdtemp(path.join(profile, 'prompt-resize-'));
@@ -230,7 +257,7 @@ export async function resizeKDEPrompt(
     await fs.writeFile(
       file,
       visible
-        ? placementQML(pid, windowID, bounds, await configuredPrimaryOutput(), true, true)
+        ? placementQML(pid, windowID, bounds, await configuredPrimaryOutput(), true, true, retainOutput)
         : `for(const w of workspace.windowList()) {
              if(w.pid===${pid} && w.caption===${JSON.stringify(promptTitle(windowID))}) {
                w.opacity=0; w.minimized=true; w.skipTaskbar=true; w.skipSwitcher=true;
@@ -242,7 +269,10 @@ export async function resizeKDEPrompt(
     id = await dbus(['/Scripting', 'org.kde.kwin.Scripting.' + load, file, name]);
     if (!/^\d+$/.test(id)) throw Error('Invalid resize script');
     await dbus([`/Scripting/Script${id}`, 'org.kde.kwin.Script.run']);
-    if (visible) await new Promise((resolve) => setTimeout(resolve, 575));
+    if (visible) {
+      const maxTicks = retainOutput ? WARM_TICKS : OPEN_TICKS;
+      await new Promise((resolve) => setTimeout(resolve, (maxTicks + 1) * 50 + 25));
+    }
   } catch (error) {
     console.info('FlowGate: compositor resize unavailable:', String(error));
   } finally {

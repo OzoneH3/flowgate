@@ -177,6 +177,7 @@ let promptKeyboardNext = false;
 let promptIdle = false;
 let promptKDEReady = false;
 const measuredPrompts = new WeakSet<RequestRef>();
+const promptOutputRefresh = new WeakSet<RequestRef>();
 const promptPlacement = new Map<number, Promise<void>>();
 const promptLayouts = new Map<number, Promise<void>>();
 const promptContentHeights = new Map<number, number>();
@@ -206,6 +207,7 @@ function retarget(ref: RequestRef, reload = false, remember?: QueuedRememberSele
   }
   promptRemember = !!remember;
   promptRefs.set(w.webContents.id, ref);
+  if (reload) promptOutputRefresh.add(ref);
   promptContentHeights.delete(w.webContents.id);
   // Keep the mapped window at its current size until the new document
   // reports its real layout. A compact resize between cards visibly jumps.
@@ -588,7 +590,9 @@ function windowFor(isPrompt = false, id = '', generation = '', group?: string) {
       }
     });
     w.setTitle(promptTitle(w.id));
-    promptRefs.set(w.webContents.id, { id, generation, group });
+    const ref = { id, generation, group };
+    promptRefs.set(w.webContents.id, ref);
+    if (id !== '__idle__') promptOutputRefresh.add(ref);
     w.on('page-title-updated', (event) => event.preventDefault());
     const senderID = w.webContents.id;
     w.on('closed', () => {
@@ -640,7 +644,7 @@ function windowFor(isPrompt = false, id = '', generation = '', group?: string) {
             w.showInactive();
           }
         },
-        id !== '__idle__',
+        false, // Reveal only after the renderer's first measured layout.
       );
     }).catch((error) => {
       console.info('FlowGate: prompt placement unavailable', String(error));
@@ -1345,7 +1349,7 @@ app.whenReady().then(async () => {
         // KWin owns the combined move and resize. An Electron resize first
         // would grow the popup at its old origin, temporarily below the edge.
         if (promptKDEReady)
-          await resizeKDEPrompt(profile, process.pid, w.id, bounds);
+          await resizeKDEPrompt(profile, process.pid, w.id, bounds, true, !promptOutputRefresh.delete(currentRef));
         else if (w.getBounds().height !== bounds.height || w.getBounds().width !== bounds.width)
           w.setBounds(bounds);
       }

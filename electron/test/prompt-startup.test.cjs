@@ -82,6 +82,7 @@ test('an early request waits for native startup cleanup without ready-to-show', 
     windows: new Set(),
     promptRefs: new Map(),
     measuredPrompts: new WeakSet(),
+    promptOutputRefresh: new WeakSet(),
     promptLayouts: new Map(),
     promptPlacement: new Map(),
     promptContentHeights: new Map(),
@@ -110,8 +111,9 @@ test('an early request waits for native startup cleanup without ready-to-show', 
       await startup;
       calls.push(['cleanup']);
     },
-    resizeKDEPrompt: async (_profile, pid, id, requested) => {
-      calls.push(['reveal', pid, id, requested.height]);
+    resizeKDEPrompt: async (_profile, pid, id, requested, visible, retainOutput) => {
+      assert.equal(visible, true);
+      calls.push(['reveal', pid, id, requested.height, retainOutput]);
       if (holdResize) await new Promise(resolve => { releaseResize = resolve; });
     },
     ref,
@@ -141,11 +143,12 @@ test('an early request waits for native startup cleanup without ready-to-show', 
   finishStartup();
   assert.equal(await layout, true);
   assert.equal(context.measuredPrompts.has(ref), true, 'Can decide as soon as native layout is acknowledged');
-  assert.deepEqual(calls.slice(-2), [['cleanup'], ['reveal', 42, 2, 730]]);
+  assert.deepEqual(calls.slice(-2), [['cleanup'], ['reveal', 42, 2, 730, false]]);
 
   holdResize = true;
   const oldLayout = report('early', 740);
   await new Promise(setImmediate);
+  assert.deepEqual(calls.at(-1), ['reveal', 42, 2, 740, true]);
   const next = { ...ref, id: 'next' };
   context.retarget(next);
   assert.equal(context.measuredPrompts.has(next), false);
@@ -157,4 +160,10 @@ test('an early request waits for native startup cleanup without ready-to-show', 
   holdResize = false;
   assert.equal(await report('next', 740), true);
   assert.equal(context.measuredPrompts.has(next), true);
+  assert.deepEqual(calls.at(-1), ['reveal', 42, 2, 740, true]);
+
+  const reopened = { ...ref, id: 'reopened' };
+  context.retarget(reopened, true);
+  assert.equal(await report('reopened', 740), true);
+  assert.deepEqual(calls.at(-1), ['reveal', 42, 2, 740, false]);
 });
