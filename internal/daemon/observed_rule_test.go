@@ -7,6 +7,7 @@ import (
 	"flowgate/internal/identity"
 	"flowgate/internal/policy"
 	"flowgate/internal/store"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -306,6 +307,132 @@ func TestObservedConcurrentSaveAndBounds(t *testing.T) {
 	a2.e.mu.Unlock()
 	requirePreview(t, a2, d) // expired state is reclaimed, not unbounded
 }
+
+func TestObservedSequentialSavesAndLostReply(t *testing.T) {
+	committed := make(chan struct{}, 1)
+	var writes atomic.Int32
+	a, _, _, clock := observedAPI(t, func(e *Engine, s *store.Store) {
+		e.SaveRules = func(rules []policy.Rule) error {
+			if err := s.Replace(rules); err != nil {
+				return err
+			}
+			if writes.Add(1) == 17 {
+				committed <- struct{}{}
+			}
+			return nil
+		}
+	})
+	d := observedDraft("outgoing")
+	d.Protocol, d.RemoteAddress, d.ApplicationPolicy = "*", "*", true
+	var id string
+	var previous, latest Request
+	for version := uint64(1); version <= 17; version++ {
+		d.Action = "allow"
+		if version%2 == 0 {
+			d.Action = "block"
+		}
+		p := requirePreview(t, a, d)
+		if id == "" {
+			id = p.Rule.ID
+		}
+		if p.Rule.ID != id || p.Rule.Version != version {
+			t.Fatalf("preview %d: %+v", version, p.Rule)
+		}
+		// Copy the draft so replay uses the exact original reviewed values.
+		currentDraft := d
+		q := saveRequest(a, p, currentDraft)
+		if version == 17 {
+			c, err := net.Dial("unix", a.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = json.NewEncoder(c).Encode(q)
+			c.Close() // deliberately lose the save reply
+			if err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-committed:
+			case <-time.After(3 * time.Second):
+				t.Fatal("disconnected client did not commit")
+			}
+			r := callResponse(a.path, q)
+			if r.Error != "" || !r.Replayed || r.SavedRule == nil || !reflect.DeepEqual(*r.SavedRule, p.Rule) || r.ScopePreview != p.ScopePreview || writes.Load() != 17 {
+				t.Fatalf("retry performed %d total writes: %+v", writes.Load(), r)
+			}
+			latest = q
+		} else {
+			r := callResponse(a.path, q)
+			if r.Error != "" || r.SavedRule == nil || !reflect.DeepEqual(*r.SavedRule, p.Rule) || r.Replayed {
+				t.Fatalf("save %d: %+v", version, r)
+			}
+			previous = q
+		}
+	}
+	if rows, err := a.s.Load(); err != nil || len(rows) != 1 || rows[0].ID != id || rows[0].Version != 17 {
+		t.Fatalf("commit: %+v, %v", rows, err)
+	}
+	assertCode(t, callResponse(a.path, previous), "replay_conflict")
+	version := uint64(17)
+	deleted := callResponse(a.path, Request{Version: 1, Operation: "rule-delete", Generation: latest.Generation, ID: id, ExpectedVersion: &version})
+	if deleted.Error != "" || deleted.DeletedRule == nil {
+		t.Fatal(deleted)
+	}
+	assertCode(t, callResponse(a.path, latest), "replay_conflict")
+	a.e.mu.Lock()
+	*clock = clock.Add(5 * time.Minute)
+	a.e.mu.Unlock()
+	assertCode(t, callResponse(a.path, latest), "preview_expired")
+}
+
+func TestObservedReceiptCapacityRefusesBeforeCommit(t *testing.T) {
+	for _, which := range []string{"per-uid", "global"} {
+		t.Run(which, func(t *testing.T) {
+			a, snapshot, _, clock := observedAPI(t)
+			d := observedDraft("outgoing")
+			original := requirePreview(t, a, d)
+			saved := callResponse(a.path, saveRequest(a, original, d))
+			if saved.Error != "" || saved.SavedRule == nil {
+				t.Fatal(saved)
+			}
+			// Keep the original receipt live after the synthetic receipts expire.
+			a.e.mu.Lock()
+			receipt := a.e.creationReceipts[original.Token]
+			receipt.Until = clock.Add(time.Second)
+			limit := maxCreationReceiptsPerUID
+			if which == "global" {
+				limit = maxCreationReceipts
+				receipt.UID++
+			}
+			for i := 1; i < limit; i++ {
+				a.e.creationReceipts[fmt.Sprint(i)] = receipt
+			}
+			a.e.mu.Unlock()
+			otherDraft := observedDraft("incoming")
+			next := requirePreview(t, a, otherDraft)
+			q := saveRequest(a, next, otherDraft)
+			blocked := callResponse(a.path, q)
+			assertCode(t, blocked, "limit_exceeded")
+			if blocked.Error != "Observed-rule replay receipt capacity reached; no rule saved" || blocked.SavedRule != nil {
+				t.Fatal(blocked)
+			}
+			if rows, err := a.s.Load(); err != nil || len(rows) != 1 || rows[0].ID != original.Rule.ID {
+				t.Fatalf("capacity refusal changed storage: %+v, %v", rows, err)
+			}
+			if r := callResponse(a.path, saveRequest(a, original, d)); !r.Replayed || r.Error != "" {
+				t.Fatalf("full store lost existing replay: %+v", r)
+			}
+			a.e.mu.Lock()
+			*clock = clock.Add(time.Second)
+			snapshot.Collected = *clock
+			a.e.mu.Unlock()
+			if r := callResponse(a.path, q); r.Error != "" || r.Replayed || r.SavedRule == nil || r.SavedRule.ID != next.Rule.ID {
+				t.Fatalf("same preview should save after receipt expiry: %+v", r)
+			}
+		})
+	}
+}
+
 func TestObservedActualNativeUnixAPI(t *testing.T) {
 	if os.Getenv("FLOWGATE_PARENT_NETNS") == "" || os.Getenv("FLOWGATE_PARENT_NETNS") == identity.NetNS() {
 		t.Skip("real ownership fixture requires disposable PID/network namespace; run scripts/lab.sh")

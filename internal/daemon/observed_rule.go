@@ -66,18 +66,29 @@ type ObservedPreview struct {
 	Replaces *RuleVersionRef `json:"replaces"`
 }
 type creationPreview struct {
-	View         ObservedPreview
-	Target       ObservedTarget
-	Process      identity.ActivityProcess
-	Verified     identity.Process
-	Draft        string
-	UID          uint32
-	Admin        bool
-	Saved        bool
-	ReceiptUntil time.Time
-	// Settled: waiting requests this save settled (queue-reconcile-v1).
-	Settled []SettledRequest
+	View     ObservedPreview
+	Target   ObservedTarget
+	Process  identity.ActivityProcess
+	Verified identity.Process
+	creationBinding
 }
+
+type creationBinding struct {
+	Draft string
+	UID   uint32
+	Admin bool
+}
+
+type creationReceipt struct {
+	creationBinding
+	Rule         policy.Rule
+	ScopePreview string
+	Until        time.Time
+	Settled      []SettledRequest
+}
+
+const maxCreationReceiptsPerUID = 256
+const maxCreationReceipts = 1024
 
 func draftBytes(d ObservedDraft) (string, error) {
 	if !validScope(d) {
@@ -125,15 +136,20 @@ func (e *Engine) verifyCreation(target ObservedTarget, p identity.ActivityProces
 }
 func (e *Engine) pruneCreationLocked(now time.Time) {
 	for token, p := range e.creationPreviews {
-		deadline := p.View.ExpiresAt
-		if p.Saved {
-			deadline = p.ReceiptUntil
-		}
-		if !now.Before(deadline) {
+		if !now.Before(p.View.ExpiresAt) {
 			delete(e.creationPreviews, token)
 		}
 	}
+	e.pruneCreationReceiptsLocked(now)
 	e.pruneHandlesLocked()
+}
+
+func (e *Engine) pruneCreationReceiptsLocked(now time.Time) {
+	for token, receipt := range e.creationReceipts {
+		if !now.Before(receipt.Until) {
+			delete(e.creationReceipts, token)
+		}
+	}
 }
 func (e *Engine) PreviewObservedRule(generation string, target ObservedTarget, draft ObservedDraft, uid uint32, admin bool, h *EnforcementStatus) (ObservedPreview, error) {
 	if draft.ShareWithRoot && !admin {
@@ -253,7 +269,10 @@ func (e *Engine) PreviewObservedRule(generation string, target ObservedTarget, d
 		sentence = fmt.Sprintf("Updates the existing whole-%s rule %s (version %d). ", processScope(draft), replaces.ID, replaces.Version) + sentence
 	}
 	v := ObservedPreview{Token: randomID(), ExpiresAt: now.Add(30 * time.Second), Rule: candidate, Application: current.Application, ProcessID: p.ID, PID: p.PID, PrincipalUID: p.UID, ScopePreview: sentence + observedRuleEffect(candidate), Enforcement: c, Replaces: replaces}
-	e.creationPreviews[v.Token] = &creationPreview{View: v, Target: target, Process: p, Verified: current, Draft: raw, UID: uid, Admin: admin}
+	e.creationPreviews[v.Token] = &creationPreview{
+		View: v, Target: target, Process: p, Verified: current,
+		creationBinding: creationBinding{Draft: raw, UID: uid, Admin: admin},
+	}
 	return v, nil
 }
 
@@ -264,8 +283,15 @@ func (e *Engine) ObservedSettled(token string) []SettledRequest {
 	defer e.creationMu.Unlock()
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if p := e.creationPreviews[token]; p != nil && p.Saved {
-		return p.Settled
+	return e.creationReceipts[token].Settled
+}
+
+func (b creationBinding) check(raw string, uid uint32, admin bool) error {
+	if b.UID != uid || b.Admin != admin {
+		return mutationError("preview_expired", "Preview unavailable/expired for this principal; inspect rules before creating again")
+	}
+	if b.Draft != raw {
+		return mutationError("preview_mismatch", "Draft changed; obtain and review fresh preview")
 	}
 	return nil
 }
@@ -287,24 +313,26 @@ func (e *Engine) SaveObservedRule(generation, token string, draft ObservedDraft,
 	}
 	now := e.Now()
 	e.pruneCreationLocked(now)
+	if receipt, ok := e.creationReceipts[token]; ok {
+		defer e.mu.Unlock()
+		if err := receipt.check(raw, uid, admin); err != nil {
+			return policy.Rule{}, "", false, err
+		}
+		for _, r := range e.rules {
+			if r.ID == receipt.Rule.ID && r.Version == receipt.Rule.Version {
+				return receipt.Rule, receipt.ScopePreview, true, nil
+			}
+		}
+		return policy.Rule{}, "", false, mutationError("replay_conflict", "Previously created rule changed/deleted; inspect authoritative list, do not recreate automatically")
+	}
 	p := e.creationPreviews[token]
-	if p == nil || p.UID != uid || p.Admin != admin {
+	if p == nil {
 		e.mu.Unlock()
 		return policy.Rule{}, "", false, mutationError("preview_expired", "Preview unavailable/expired for this principal; inspect rules before creating again")
 	}
-	if raw != p.Draft {
+	if err := p.check(raw, uid, admin); err != nil {
 		e.mu.Unlock()
-		return policy.Rule{}, "", false, mutationError("preview_mismatch", "Draft changed; obtain and review fresh preview")
-	}
-	if p.Saved {
-		for _, r := range e.rules {
-			if r.ID == p.View.Rule.ID && r.Version == p.View.Rule.Version {
-				e.mu.Unlock()
-				return p.View.Rule, p.View.ScopePreview, true, nil
-			}
-		}
-		e.mu.Unlock()
-		return policy.Rule{}, "", false, mutationError("replay_conflict", "Previously created rule changed/deleted; inspect authoritative list, do not recreate automatically")
+		return policy.Rule{}, "", false, err
 	}
 	e.mu.Unlock()
 	if !p.View.Rule.Filter.Process.IsZero() {
@@ -385,6 +413,18 @@ func (e *Engine) SaveObservedRule(generation, token string, draft ObservedDraft,
 	if sentence != p.View.ScopePreview {
 		return policy.Rule{}, "", false, mutationError("policy_conflict", "Overlapping policy changed since preview; review again")
 	}
+	// creationMu serializes saves across verification, commit and receipt
+	// publication. This check reserves space without evicting any live receipt.
+	e.pruneCreationReceiptsLocked(now)
+	own := 0
+	for _, receipt := range e.creationReceipts {
+		if receipt.UID == uid {
+			own++
+		}
+	}
+	if len(e.creationReceipts) >= maxCreationReceipts || own >= maxCreationReceiptsPerUID {
+		return policy.Rule{}, "", false, mutationError("limit_exceeded", "Observed-rule replay receipt capacity reached; no rule saved")
+	}
 	next := append(append([]policy.Rule{}, e.rules...), candidate)
 	if at >= 0 {
 		next = append([]policy.Rule{}, e.rules...)
@@ -396,12 +436,16 @@ func (e *Engine) SaveObservedRule(generation, token string, draft ObservedDraft,
 	restore := e.collectSettledLocked()
 	e.settlePendingLocked("rule " + candidate.ID + " saved")
 	e.followUpSettleLocked()
-	p.Settled = e.settledLocked()
+	settled := e.settledLocked()
 	restore()
-	// Existing pending/Once decisions are not consumed or approved. New initiations
-	// evaluate the published rule; retained remembered grants already recheck policy.
-	p.Saved = true
-	p.ReceiptUntil = now.Add(5 * time.Minute)
+	if e.creationReceipts == nil {
+		e.creationReceipts = make(map[string]creationReceipt)
+	}
+	e.creationReceipts[token] = creationReceipt{
+		creationBinding: p.creationBinding, Rule: candidate, ScopePreview: p.View.ScopePreview,
+		Until: e.Now().Add(5 * time.Minute), Settled: settled,
+	}
+	delete(e.creationPreviews, token)
 	return candidate, p.View.ScopePreview, false, nil
 }
 

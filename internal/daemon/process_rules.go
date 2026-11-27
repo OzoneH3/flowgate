@@ -1,9 +1,9 @@
 package daemon
 
 import (
-	diagnostics "flowgate/internal/serveprofile"
 	"flowgate/internal/identity"
 	"flowgate/internal/policy"
+	diagnostics "flowgate/internal/serveprofile"
 	"fmt"
 	"net"
 	"reflect"
@@ -175,7 +175,7 @@ func (e *Engine) pruneHandlesLocked() {
 	for b, h := range e.processHandles {
 		found := false
 		for _, p := range e.creationPreviews {
-			if !p.Saved && p.View.Rule.Filter.Process == b {
+			if p.View.Rule.Filter.Process == b {
 				found = true
 				break
 			}

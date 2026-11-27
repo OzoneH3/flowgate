@@ -131,6 +131,7 @@ type Engine struct {
 	creationMu       sync.Mutex // serializes bounded preview/replay lifecycle, never packet processing
 	mutationReceipts mutationReceipts
 	creationPreviews map[string]*creationPreview
+	creationReceipts map[string]creationReceipt
 	verifyObserved   func(string, identity.ActivityProcess) (identity.Process, error) // tests only; production uses identity verifier
 
 	requestRules        map[string]*retainedRequest

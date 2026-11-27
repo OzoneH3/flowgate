@@ -137,14 +137,16 @@ observation remains unprivileged; a missing/denied verifier returns uncertainty.
 | preview_expired | Missing, expired, or wrong-principal token; reconcile before creating again. |
 | preview_mismatch | Exact draft changed; review a fresh preview. |
 | policy_conflict | Save-time duplicate/overlap/validation changed; review current policy. |
-| limit_exceeded |256 rules,256 total previews/receipts or16 per peer; wait/manage existing rules. |
+| limit_exceeded | 256 rules, 256 outstanding unsaved previews globally or 16 per UID, or a full replay receipt store. A receipt-capacity refusal leaves the rule unchanged. |
 | persistence_failed | Transaction failed; old policy retained; no success acknowledgement. |
 | replay_conflict | Prior successful token's rule has changed/disappeared; inspect, do not recreate automatically. |
 
 A lost response is an **ambiguous outcome**. Do not generate another preview/save.
 Use existing authenticated `list`, with the same generation, to find the reserved
 `observed_preview.rule.id` and compare its authoritative fields/version. A known
-successful token retains a receipt for5 minutes; explicit same-token/same-draft
+successful save releases its preview slot and retains a separate receipt for five
+minutes (up to 256 per UID and 1024 globally). If that store is full, the save
+refuses before changing policy. Explicit same-token/same-draft
 retry returns the original acknowledgement with `replayed:true`, without new
 persistence, identity collection or side effects, only if the stored rule is still
 that version. Concurrent saves serialize into one commit plus one replay. Unchanged
