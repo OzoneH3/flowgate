@@ -373,6 +373,13 @@ function automaticDecision() {
   if (next && event) openDecision(next, nextRemember?.(next.generation, event));
 }
 const windows = new Set<BrowserWindow>();
+function receivesBackendUpdates(w: BrowserWindow) {
+  if (w.isDestroyed() || paneRoles.has(w.webContents.id)) return false;
+  // KWin can reveal the warm popup without updating Electron's native
+  // visibility flags. Use the current card's lifecycle for its state and clock.
+  if (w === prompt) return !promptIdle;
+  return w.isVisible() && !w.isMinimized();
+}
 let backend: Backend;
 let evaluation: Evaluation;
 let background: Background;
@@ -554,6 +561,9 @@ function windowFor(isPrompt = false, id = '', generation = '', group?: string) {
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       focusOnNavigation: !isPrompt,
+      // A compositor-revealed prompt needs to measure each card and renew its
+      // decision previews even when Chromium considers its page backgrounded.
+      backgroundThrottling: !isPrompt,
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
@@ -718,12 +728,7 @@ app.whenReady().then(async () => {
   backend = new Backend(observer!, controller, (state, clockOnly) => {
     if (clockOnly) {
       for (const w of windows)
-        if (
-          !w.isDestroyed() &&
-          !paneRoles.has(w.webContents.id) &&
-          w.isVisible() &&
-          !w.isMinimized()
-        )
+        if (receivesBackendUpdates(w))
           w.webContents.send('state:clock', {
             generation: state.control.generation,
             serverNow: state.control.serverNow,
@@ -739,7 +744,7 @@ app.whenReady().then(async () => {
     publishPanes();
     icons.observe(state);
     for (const w of windows)
-      if (!w.isDestroyed() && !paneRoles.has(w.webContents.id) && w.isVisible() && !w.isMinimized())
+      if (receivesBackendUpdates(w))
         w.webContents.send('state', state);
     automaticDecision();
     background?.update(state);

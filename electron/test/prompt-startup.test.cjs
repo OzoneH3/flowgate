@@ -27,6 +27,11 @@ test('an early request waits for native startup cleanup without ready-to-show', 
     finishStartup = resolve;
   });
   class Window extends EventEmitter {
+    constructor(options) {
+      super();
+      assert.equal(options.webPreferences.focusOnNavigation, false);
+      assert.equal(options.webPreferences.backgroundThrottling, false);
+    }
     static fromWebContents(sender) { return context.prompt.webContents === sender && context.prompt; }
     id = 2;
     webContents = Object.assign(new EventEmitter(), {
@@ -166,4 +171,28 @@ test('an early request waits for native startup cleanup without ready-to-show', 
   context.retarget(reopened, true);
   assert.equal(await report('reopened', 740), true);
   assert.deepEqual(calls.at(-1), ['reveal', 42, 2, 740, false]);
+});
+
+test('a live permission card keeps receiving state and clock while Electron reports it minimized', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/main.ts'), 'utf8');
+  const { code } = transformSync(source.slice(
+    source.indexOf('function receivesBackendUpdates('),
+    source.indexOf('let backend: Backend;'),
+  ), { loader: 'ts' });
+  const popup = {
+    isDestroyed: () => false,
+    webContents: { id: 1 },
+    isVisible: () => false,
+    isMinimized: () => true,
+  };
+  const main = { ...popup, webContents: { id: 2 } };
+  const context = vm.createContext({ prompt: popup, promptIdle: false, paneRoles: new Map(), main });
+  vm.runInContext(code, context);
+  assert.equal(vm.runInContext('receivesBackendUpdates(prompt)', context), true);
+  assert.equal(vm.runInContext('receivesBackendUpdates(main)', context), false);
+  context.promptIdle = true;
+  assert.equal(vm.runInContext('receivesBackendUpdates(prompt)', context), false);
+  context.promptIdle = false;
+  popup.isDestroyed = () => true;
+  assert.equal(vm.runInContext('receivesBackendUpdates(prompt)', context), false);
 });

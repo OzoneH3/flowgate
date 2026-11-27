@@ -11,6 +11,7 @@ const endpoint = path.join(run, 'api');
 const direction = 'incoming';
 let mutations = 0, showEvents = false, releasePreviews;
 const pendingPreviews = new Set();
+const previewRequests = new Map();
 const previewsReady = new Promise(resolve => { releasePreviews = resolve; });
 const appIdentity = {
   key: 'fixture',
@@ -62,9 +63,11 @@ const server = net.createServer((s) =>
       const e = event(req.id);
       pendingPreviews.add(req.action);
       await previewsReady;
+      const key = req.id + ':' + req.action;
+      previewRequests.set(key, (previewRequests.get(key) || 0) + 1);
       preview = {
         ...req, event_id: e.id, token: `preview-${e.id}-${req.action}`,
-        expires_at: new Date(Date.now() + 20000).toISOString(),
+        expires_at: new Date(Date.now() + 6000).toISOString(),
         connection_network: e.flow.network_scope,
         scope_preview: e.scope_previews[req.scope],
         summary: req.action + ' this application.',
@@ -159,8 +162,8 @@ try {
     env: { ...process.env, FLOWGATE_INSTALLED: '0', TMPDIR: path.join(root, '.workspace/tmp'),
       XDG_CONFIG_HOME: path.join(run, 'config'), XDG_CACHE_HOME: path.join(run, 'cache') },
   });
-  const main = await app.firstWindow();
-  await main.locator('#requestsTab').waitFor();
+  const main = await wait(() => app.windows().find((w) => w.url().endsWith('/index.html')));
+  await wait(() => main.evaluate(() => !!document.querySelector('#requestsTab')));
   await main.evaluate(() => window.flowgate.paneControl('info', 'undock'));
   const info = await wait(() => app.windows().find((w) => w.url().includes('pane.html')));
   const own = await app.evaluate(({ BrowserWindow }) => ({
@@ -264,11 +267,29 @@ try {
   await sleep(1200);
   result.afterPolling = await inspect(prompt, 'stable');
   assert.deepEqual(result.first, result.afterPolling);
+  // Reproduce the stale Electron flags independently of KWin's actual mapped
+  // state. No focus event should be needed to renew a preview or retarget.
+  await app.evaluate(({ BrowserWindow }, id) => {
+    const window = BrowserWindow.fromId(id);
+    window.isVisible = () => false;
+    window.isMinimized = () => true;
+    window.fixtureFocusCount = Number(window.isFocused());
+    window.on('focus', () => window.fixtureFocusCount++);
+  }, result.first.native.id);
+  const previewCounts = ['allow', 'block'].map(action => previewRequests.get('first:' + action));
+  await wait(() => ['allow', 'block'].every((action, index) =>
+    previewRequests.get('first:' + action) > previewCounts[index],
+  ));
+  await waitForActions(prompt);
+  result.renewedWithoutFocus = true;
   await prompt.evaluate(() => window.flowgate.dismissPrompt());
   prompt = await wait(() => app.windows().find((w) => w.url().includes('?request=second')));
   await prompt.locator('#allow').waitFor();
   await waitForActions(prompt);
   result.second = await inspect(prompt, 'second-arrival');
+  assert.equal(result.second.native.id, result.first.native.id);
+  assert.equal(await app.evaluate(({ BrowserWindow }, id) =>
+    BrowserWindow.fromId(id).fixtureFocusCount, result.second.native.id), 0);
   const held = fs.readFileSync(path.join(run, 'compositor.log'), 'utf8');
   assert.match(held, /FLOWGATE_PROMPT_HELD/);
   assert.match(held, /FLOWGATE_PROMPT_CONFIRMED/);
