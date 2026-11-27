@@ -209,21 +209,28 @@ export function inputSettled(g: {
 }) {
   return !(g.now < g.transitionUntil || g.keys > 0 || g.rendererKeys > 0 || g.pointerDown);
 }
-// Initial permission window size; content can expand the height.
+export const PROMPT_SCALES = [75, 85, 100, 115, 125] as const;
+export type PromptScale = (typeof PROMPT_SCALES)[number];
+export const DEFAULT_PROMPT_SCALE: PromptScale = 100;
+export function isPromptScale(value: unknown): value is PromptScale {
+  return PROMPT_SCALES.some(scale => scale === value);
+}
+// Initial permission window size in desktop logical pixels at 100%.
 export const PROMPT_WIDTH = 745,
   PROMPT_HEIGHT = 590,
   PROMPT_MIN_HEIGHT = 240;
 export function compactPromptBounds(
   area: Parameters<typeof edgePosition>[0],
   unanchoredWayland: boolean,
+  scale: PromptScale = DEFAULT_PROMPT_SCALE,
 ) {
   // A Wayland work area can describe the whole output before the compositor
   // places the window under its desktop chrome. Leave clearance on short
   // outputs so the fixed footer fits even with a late placement adjustment.
-  const height = unanchoredWayland
-    ? Math.min(PROMPT_HEIGHT, Math.max(PROMPT_MIN_HEIGHT, area.height - 64))
-    : PROMPT_HEIGHT;
-  return edgePosition(area, PROMPT_WIDTH, height);
+  const width = Math.round(PROMPT_WIDTH * scale / 100);
+  const heightLimit = unanchoredWayland ? Math.max(PROMPT_MIN_HEIGHT, area.height - 64) : area.height;
+  const height = Math.round(Math.min(PROMPT_HEIGHT, heightLimit) * scale / 100);
+  return edgePosition(area, width, Math.min(height, heightLimit));
 }
 export function edgePosition(
   area: { x: number; y: number; width: number; height: number },

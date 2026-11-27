@@ -1,4 +1,5 @@
 import { accountLabel } from './accounts';
+import { DEFAULT_PROMPT_SCALE, isPromptScale, PROMPT_SCALES } from './automatic-prompts';
 import { setupConnectionChecks } from './connection-checks-view';
 import { setupDecisionTimeout } from './decision-timeout-view';
 import { setupShapingDefaults } from './shaping-defaults-view';
@@ -1087,6 +1088,32 @@ async function setupSizing() {
   let prefs: Preferences = await window.flowgate.preferences();
   const settingsPanel = document.querySelector('#settingsMenu .menu-panel')!;
   setupShapingDefaults(settingsPanel, prefs);
+  const scaleLabel = node('label', 'Permission popup scale');
+  scaleLabel.className = 'menu-control';
+  const scaleSelect = document.createElement('select');
+  scaleSelect.id = 'permissionPopupScale';
+  const scaleNote = node('p', 'Applies the next time the permission popup opens.');
+  scaleNote.className = 'menu-note';
+  scaleNote.id = 'permissionPopupScaleHelp';
+  scaleSelect.setAttribute('aria-describedby', scaleNote.id);
+  for (const scale of PROMPT_SCALES) scaleSelect.add(new Option(scale + '%', String(scale)));
+  scaleSelect.value = String(isPromptScale(prefs.promptScale) ? prefs.promptScale : DEFAULT_PROMPT_SCALE);
+  scaleSelect.onchange = async () => {
+    const scale = Number(scaleSelect.value);
+    if (!isPromptScale(scale)) return;
+    scaleSelect.disabled = true;
+    try {
+      prefs.promptScale = (await window.flowgate.preferences({ promptScale: scale })).promptScale;
+      scaleNote.textContent = 'Applies the next time the permission popup opens.';
+    } catch {
+      scaleSelect.value = String(prefs.promptScale ?? DEFAULT_PROMPT_SCALE);
+      scaleNote.textContent = 'Could not save the permission popup scale.';
+    } finally {
+      scaleSelect.disabled = false;
+    }
+  };
+  scaleLabel.append(scaleSelect);
+  settingsPanel.append(scaleLabel, scaleNote);
   const save = () =>
     void window.flowgate.preferences({
       sidebar: prefs.sidebar,

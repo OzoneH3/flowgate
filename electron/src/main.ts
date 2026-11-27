@@ -15,7 +15,7 @@ import { Essential } from './essential';
 import { Protection } from './protection';
 import { placeKDEPrompt, resizeKDEPrompt, PROMPT_TITLE, promptTitle } from './prompt-placement';
 import { activateKDEMain } from './kwin';
-import { AutomaticPrompts, PROMPT_HEIGHT, PROMPT_MIN_HEIGHT, compactPromptBounds, edgePosition, boundDecision, groupOf, inputSettled, queuedRemember, queuedRememberSelection, type QueuedRememberSelection } from './automatic-prompts';
+import { AutomaticPrompts, DEFAULT_PROMPT_SCALE, isPromptScale, PROMPT_MIN_HEIGHT, PROMPT_SCALES, compactPromptBounds, edgePosition, boundDecision, groupOf, inputSettled, queuedRemember, queuedRememberSelection, type QueuedRememberSelection } from './automatic-prompts';
 import {
   app,
   BrowserWindow,
@@ -142,6 +142,9 @@ try {
 // New release bundles start without preferences: closing should keep requests
 // monitored in the tray. Preserve an explicit user opt-out.
 saved.ui = { keepInTray: true, ...saved.ui };
+const configuredPromptScale = () =>
+  isPromptScale(saved.ui?.promptScale) ? saved.ui.promptScale : DEFAULT_PROMPT_SCALE;
+let activePromptScale = configuredPromptScale();
 try { saved.ui.shapingDefaults = validateShapingDefaults(saved.ui.shapingDefaults); }
 catch { saved.ui.shapingDefaults = {...DEFAULT_SHAPING}; }
 const persist = () => fs.writeFileSync(prefsFile, JSON.stringify(saved), { mode: 0o600 });
@@ -195,7 +198,8 @@ const promptURL = (ref: RequestRef, remember?: QueuedRememberSelection, focusHea
   '&generation=' +
   encodeURIComponent(ref.generation) +
   (remember ? '&rememberField=' + remember.field + '&rememberDuration=' + remember.duration : '') +
-  (focusHeading ? '&focus=heading' : '');
+  (focusHeading ? '&focus=heading' : '') +
+  (activePromptScale === DEFAULT_PROMPT_SCALE ? '' : '&scale=' + activePromptScale);
 // The one permission window shows one request card. Switching card reuses the
 // window: rebinding promptRefs first makes decisions from the old card fail closed.
 function retarget(ref: RequestRef, reload = false, remember?: QueuedRememberSelection, focusHeading = false) {
@@ -205,6 +209,9 @@ function retarget(ref: RequestRef, reload = false, remember?: QueuedRememberSele
     current.group = ref.group ?? current.group;
     return;
   }
+  const previousScale = activePromptScale;
+  if (reload) activePromptScale = configuredPromptScale();
+  const scale = activePromptScale;
   promptRemember = !!remember;
   promptRefs.set(w.webContents.id, ref);
   if (reload) promptOutputRefresh.add(ref);
@@ -220,7 +227,7 @@ function retarget(ref: RequestRef, reload = false, remember?: QueuedRememberSele
     promptPlacement.get(w.webContents.id) ||
     Promise.resolve()
   ).then(async () => {
-    if (w.isDestroyed() || promptIdle || promptRefs.get(w.webContents.id)?.id !== ref.id) return;
+    if (w.isDestroyed() || promptIdle || promptRefs.get(w.webContents.id) !== ref) return;
     // On KDE the measured layout reveals the warm window at the verified size.
     if (promptKDEReady) return;
     const current = backend.view().control;
@@ -235,10 +242,13 @@ function retarget(ref: RequestRef, reload = false, remember?: QueuedRememberSele
     const compact = compactPromptBounds(
       screen.getDisplayMatching(currentBounds).workArea,
       nativeWayland,
+      scale,
     );
     // Leave a compositor-constrained frame alone between cards. A redundant
-    // grow can shift the footer while the user is aiming at it.
-    if (!nativeWayland || currentBounds.width > compact.width || currentBounds.height > compact.height)
+    // grow can shift the footer while the user is aiming at it. A new scale
+    // is applied here while reopening a hidden card.
+    if (!nativeWayland || scale !== previousScale ||
+        currentBounds.width > compact.width || currentBounds.height > compact.height)
       w.setBounds(compact);
     if (!w.isVisible()) w.showInactive();
   });
@@ -544,8 +554,9 @@ function presentationSender(e: IpcMainInvokeEvent) {
     throw Error('Presentation operation is unavailable from a prompt');
 }
 function windowFor(isPrompt = false, id = '', generation = '', group?: string) {
+  if (isPrompt) activePromptScale = configuredPromptScale();
   const initialBounds = isPrompt
-    ? compactPromptBounds(screen.getPrimaryDisplay().workArea, nativeWayland)
+    ? compactPromptBounds(screen.getPrimaryDisplay().workArea, nativeWayland, activePromptScale)
     : { width, height };
   const w = new BrowserWindow({
     title: isPrompt ? PROMPT_TITLE : MAIN_TITLE,
@@ -553,8 +564,8 @@ function windowFor(isPrompt = false, id = '', generation = '', group?: string) {
     frame: !isPrompt,
     alwaysOnTop: isPrompt,
     ...initialBounds,
-    minWidth: isPrompt ? 320 : 800,
-    minHeight: isPrompt ? Math.min(PROMPT_MIN_HEIGHT, initialBounds.height) : 550,
+    minWidth: isPrompt ? Math.min(320, initialBounds.width) : 800,
+    minHeight: isPrompt ? Math.min(Math.round(PROMPT_MIN_HEIGHT * PROMPT_SCALES[0] / 100), initialBounds.height) : 550,
     backgroundColor: '#222222',
     autoHideMenuBar: true,
     show: false,
@@ -638,7 +649,7 @@ function windowFor(isPrompt = false, id = '', generation = '', group?: string) {
     // behind it so startup QML cannot overwrite the request's visibility.
     const placement = Promise.resolve().then(async () => {
       if (w.isDestroyed() || prompt !== w) return;
-      const bounds = compactPromptBounds(screen.getPrimaryDisplay().workArea, false);
+      const bounds = compactPromptBounds(screen.getPrimaryDisplay().workArea, false, activePromptScale);
       await placeKDEPrompt(
         profile,
         process.pid,
@@ -1095,7 +1106,7 @@ app.whenReady().then(async () => {
       if (
         !v ||
         typeof v !== 'object' ||
-        Object.keys(v).some((k) => !['sidebar', 'columns', 'keepInTray', 'displayUnit', 'forAWhileSeconds', 'shapingDefaults'].includes(k))
+        Object.keys(v).some((k) => !['sidebar', 'columns', 'keepInTray', 'promptScale', 'displayUnit', 'forAWhileSeconds', 'shapingDefaults'].includes(k))
       )
         throw Error('Invalid preferences');
       const shapingDefaults = v.shapingDefaults !== undefined ? validateShapingDefaults(v.shapingDefaults) : undefined;
@@ -1108,6 +1119,8 @@ app.whenReady().then(async () => {
         throw Error('Invalid sidebar');
       if (v.keepInTray !== undefined && typeof v.keepInTray !== 'boolean')
         throw Error('Invalid tray preference');
+      if (v.promptScale !== undefined && (e.sender !== main.webContents || !isPromptScale(v.promptScale)))
+        throw Error('Invalid permission popup scale');
       if (v.displayUnit !== undefined && !isDisplayUnit(v.displayUnit))
         throw Error('Invalid display unit');
       const columns: Record<string, number> = {};
@@ -1144,6 +1157,7 @@ app.whenReady().then(async () => {
         ...(v.columns !== undefined ? { columns } : {}),
         ...(v.displayUnit !== undefined ? { displayUnit: v.displayUnit } : {}),
         ...(v.keepInTray !== undefined ? { keepInTray: v.keepInTray } : {}),
+        ...(v.promptScale !== undefined ? { promptScale: v.promptScale } : {}),
         ...(v.forAWhileSeconds !== undefined ? { forAWhileSeconds: v.forAWhileSeconds } : {}),
       };
       persist();
@@ -1335,11 +1349,13 @@ app.whenReady().then(async () => {
     const height = Math.ceil(value.height);
     const contentChanged = promptContentHeights.get(e.sender.id) !== height;
     promptContentHeights.set(e.sender.id, height);
-    const bounds = edgePosition(
-      screen.getDisplayMatching(w.getBounds()).workArea,
-      w.getBounds().width,
-      Math.max(PROMPT_HEIGHT, height),
-    );
+    const frame = w.getBounds();
+    const area = screen.getDisplayMatching(frame).workArea;
+    const compact = compactPromptBounds(area, false, activePromptScale);
+    const width = promptOutputRefresh.has(currentRef) ? compact.width : frame.width;
+    // A smaller setting should leave desktop space even when the body needs to scroll.
+    const heightLimit = Math.round(area.height * Math.min(activePromptScale, 100) / 100);
+    const bounds = edgePosition(area, width, Math.min(heightLimit, Math.max(compact.height, height)));
     // Serialize native resizes after the startup handshake; no stale configure
     // may restore compact geometry over a just-expanded Remember panel.
     const ref = promptRefs.get(e.sender.id);

@@ -28,7 +28,7 @@ import {
   type DecisionPreview,
   type RememberFields,
 } from './decision-remember';
-import { askSource, awaiting, groupKey, requestGroups } from './automatic-prompts';
+import { askSource, awaiting, DEFAULT_PROMPT_SCALE, groupKey, isPromptScale, requestGroups } from './automatic-prompts';
 import { compactUDPOnce, permissionTarget, scopeZoneText } from './connection-presentation';
 import {
   IDENTITY_UNVERIFIABLE_TEXT,
@@ -125,6 +125,12 @@ setupTooltips();
 const promptParams = new URL(location.href).searchParams;
 const promptGeneration = promptParams.get('generation');
 const promptID = promptParams.get('request');
+const requestedPromptScale = Number(promptParams.get('scale'));
+const promptZoom = (isPromptScale(requestedPromptScale) ? requestedPromptScale : DEFAULT_PROMPT_SCALE) / 100;
+if (promptID && promptZoom !== 1) {
+  document.documentElement.dataset.scaledPrompt = '';
+  document.documentElement.style.setProperty('--prompt-scale', String(promptZoom));
+}
 let focusNextHeading = promptParams.get('focus') === 'heading';
 const applicationCallers = new ApplicationCallers();
 let state: ClientState;
@@ -808,9 +814,9 @@ function measurePrompt() {
     // Keep reporting input releases during handoff, but a placeholder with
     // no request has no useful geometry for the native window.
     const height = currentEvent()
-      ? Math.ceil(shell.offsetHeight - body.offsetHeight +
+      ? Math.ceil(shell.getBoundingClientRect().height - body.getBoundingClientRect().height +
           $('requestDetails').getBoundingClientRect().height +
-          parseFloat(padding.paddingTop) + parseFloat(padding.paddingBottom))
+          (parseFloat(padding.paddingTop) + parseFloat(padding.paddingBottom)) * promptZoom)
       : null;
     const keysDown = [...promptKeysDown].sort();
     const reviewingRule = rememberOn && popupRuleEdited;

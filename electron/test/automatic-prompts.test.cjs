@@ -4,6 +4,7 @@ const {
   AutomaticPrompts,
   edgePosition,
   compactPromptBounds,
+  isPromptScale,
   boundDecision,
   requestGroups,
   askSource,
@@ -16,6 +17,16 @@ test('short unanchored Wayland outputs leave room for desktop chrome', () => {
   assert.equal(compactPromptBounds(short, false).height, 480);
   const normal = { x: 0, y: 32, width: 1280, height: 736 };
   assert.deepEqual(compactPromptBounds(normal, true), compactPromptBounds(normal, false));
+});
+test('permission popup scale sizes the frame within the usable area', () => {
+  const short = { x: 0, y: 0, width: 848, height: 480 };
+  assert.deepEqual(compactPromptBounds(short, true, 75), { x: 289, y: 168, width: 559, height: 312 });
+  assert.deepEqual(compactPromptBounds(short, false, 125), short);
+  const normal = { x: 0, y: 32, width: 1280, height: 736 };
+  assert.deepEqual(compactPromptBounds(normal, true, 125), { x: 349, y: 96, width: 931, height: 672 });
+  assert.equal(isPromptScale(125), true);
+  assert.equal(isPromptScale(150), false);
+  assert.equal(isPromptScale('75'), false);
 });
 const { REMEMBER_DURATIONS } = require('../dist/test/decision-remember.cjs');
 const state = (ids, generation = 'g') => ({

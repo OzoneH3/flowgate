@@ -35,7 +35,8 @@ input[type=checkbox] { accent-color: var(--accent); width: 17px; height: 17px; f
 .prompt-shell {
   display: grid;
   grid-template: 'header' auto 'body' minmax(0, 1fr) 'footer' auto / minmax(0, 1fr);
-  height: 100vh;
+  zoom: var(--prompt-scale, 1);
+  height: calc(100vh / var(--prompt-scale, 1));
   border: 1px solid var(--line);
 }
 .prompt-heading, footer {
@@ -213,6 +214,8 @@ footer {
   gap: 10px;
   background: var(--surface);
 }
+/* The sticky offset can put a zoomed action row outside the scrollport. */
+[data-scaled-prompt] #decisionActions { position: static; }
 #decisionActions button { min-width: 0; padding: 7px 9px; font-weight: 650; line-height: 1.2; overflow-wrap: normal; }
 #decisionActions:has(.while-action) {
   display: grid;

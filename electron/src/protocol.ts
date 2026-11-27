@@ -1374,6 +1374,7 @@ export interface Preferences {
   shapingDefaults?: import('./upload-shaping').ShapingDefaults;
   displayUnit?: import('./display-units').DisplayUnit;
   keepInTray?: boolean;
+  promptScale?: import('./automatic-prompts').PromptScale;
   sidebar?: number;
   columns?: Record<string, number>;
   // Last chosen For a while duration (seconds), validated against the backend set.
