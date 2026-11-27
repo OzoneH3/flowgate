@@ -8,11 +8,10 @@ import { execFileSync } from 'node:child_process';
 const root = path.resolve(import.meta.dirname, '../..');
 const run = fs.mkdtempSync(path.join(root, '.workspace/connection-compact-'));
 const endpoint = path.join(run, 'api');
-let direction = 'incoming',
-  disconnected = false,
-  resolved = false,
-  mutations = 0,
-  showEvents = false;
+const direction = 'incoming';
+let mutations = 0, showEvents = false, releasePreviews;
+const pendingPreviews = new Set();
+const previewsReady = new Promise(resolve => { releasePreviews = resolve; });
 const appIdentity = {
   key: 'fixture',
   revision: 'r',
@@ -23,7 +22,7 @@ const appIdentity = {
 const deadline = new Date(Date.now() + 120000).toISOString();
 const event = (id) => ({
   id,
-  state: resolved ? 'expired' : 'awaiting-decision',
+  state: 'awaiting-decision',
   reason: 'SYNTHETIC presentation fixture',
   deadline,
   first_seen: new Date().toISOString(),
@@ -44,28 +43,50 @@ const event = (id) => ({
     status: 'directly-associated',
     visibility_complete: true,
     application: appIdentity,
-    owners: [],
+    owners: [{ pid: 12345, uid: 1000, start_ticks: '123', executable: appIdentity.executable, application: appIdentity }],
   },
+  remembered_filter: { application: appIdentity.key, revision: appIdentity.revision, uid: 1000,
+    direction, protocol: 'udp', remote_address: '2001:db8::2', local_port: 44001, remote_port: 0 },
   scope_previews: {
     once: 'Only this held connection.',
     application: 'Backend preview: application and peer/service, any network, one hour.',
+    persistent: 'This application.',
   },
 });
 const server = net.createServer((s) =>
-  s.once('data', (raw) => {
-    if (disconnected) {
-      s.destroy();
-      return;
-    }
+  s.once('data', async (raw) => {
     const req = JSON.parse(raw);
-    if (!['list', 'policy-view'].includes(req.operation)) mutations++;
+    const now = new Date().toISOString();
+    let preview;
+    if (req.operation === 'decision-preview') {
+      const e = event(req.id);
+      pendingPreviews.add(req.action);
+      await previewsReady;
+      preview = {
+        ...req, event_id: e.id, token: `preview-${e.id}-${req.action}`,
+        expires_at: new Date(Date.now() + 20000).toISOString(),
+        connection_network: e.flow.network_scope,
+        scope_preview: e.scope_previews[req.scope],
+        summary: req.action + ' this application.',
+        rule: {
+          id: `rule-${e.id}-${req.action}`, version: 1, action: req.action,
+          created: now, expires: '0001-01-01T00:00:00Z',
+          filter: { ...e.remembered_filter, protocol: '*', remote_address: '*', local_port: 0 },
+        },
+      };
+    } else if (!['list', 'policy-view'].includes(req.operation)) mutations++;
     s.end(
       JSON.stringify({
         version: 1,
         generation: 'synthetic',
         mode: 'isolated-lab',
         read_only: false,
-        server_time: new Date().toISOString(),
+        server_time: now,
+        capabilities: ['decision-remember-fields-v1', 'network-zone-policy-v1',
+          'decision-for-a-while-v1', 'decision-for-a-while-durations-v1'],
+        for_a_while_durations: [15, 60, 300, 600, 1800, 3600],
+        network_zones: { model: 'configured-prefix-v1', revision: 'r', local_prefixes: [], internet_prefixes: [], reason: 'Synthetic' },
+        ...(preview ? { decision_preview: preview } : {}),
         permissions: {
           role: 'administrator',
           policy_scope: 'machine',
@@ -135,7 +156,8 @@ try {
       '--control',
       endpoint,
     ],
-    env: { ...process.env, TMPDIR: path.join(root, '.workspace/tmp') },
+    env: { ...process.env, FLOWGATE_INSTALLED: '0', TMPDIR: path.join(root, '.workspace/tmp'),
+      XDG_CONFIG_HOME: path.join(run, 'config'), XDG_CACHE_HOME: path.join(run, 'cache') },
   });
   const main = await app.firstWindow();
   await main.locator('#requestsTab').waitFor();
@@ -166,7 +188,16 @@ try {
   showEvents = true;
   let prompt = await wait(() => app.windows().find((w) => w.url().includes('?request=first')));
   await prompt.locator('#allow').waitFor();
-  await sleep(2600);
+  await wait(() => pendingPreviews.has('allow') && pendingPreviews.has('block'));
+  assert(await prompt.locator('#rememberPanel').isVisible());
+  assert(await prompt.locator('#allow').isDisabled());
+  assert(await prompt.locator('#block').isDisabled());
+  releasePreviews();
+  const waitForActions = (page) => page.waitForFunction(() =>
+    document.querySelector('#allow')?.disabled === false &&
+    document.querySelector('#block')?.disabled === false,
+  );
+  await waitForActions(prompt);
   const inspect = async (page, label) => {
     const requestId = new URL(page.url()).searchParams.get('request');
     const native = await app.evaluate(({ BrowserWindow }, id) => {
@@ -183,7 +214,7 @@ try {
     fs.writeFileSync(path.join(run, label + '-native.json'), JSON.stringify(native));
     const token = 'FLOWGATE_CHECK_' + process.pid + '_' + label;
     script(
-      `for(const w of workspace.windowList())if(w.pid===${own.pid})print(${JSON.stringify(token)},JSON.stringify({caption:w.caption,output:w.output.name,geometry:w.frameGeometry,opacity:w.opacity,area:workspace.clientArea(KWin.PlacementArea,w.output,workspace.currentDesktopForScreen(w.output))}));`,
+      `for(const w of workspace.windowList())if(w.pid===${own.pid})print(${JSON.stringify(token)},JSON.stringify({caption:w.caption,output:w.output.name,geometry:w.frameGeometry,opacity:w.opacity,area:workspace.clientArea(KWin.PlacementArea,w.output,typeof workspace.currentDesktopForScreen==='function'?workspace.currentDesktopForScreen(w.output):workspace.currentDesktop)}));`,
     );
     const readLogs = () =>
       execFileSync(
@@ -213,17 +244,21 @@ try {
     assert.equal(actual.opacity, 1);
     assert.equal(native.parent, false);
     assert.equal(native.zoom, 1);
-    assert.deepEqual(
-      { ...actual.geometry },
-      {
-        x: actual.area.x + actual.area.width - 745,
-        y: actual.area.y + actual.area.height - 590,
-        width: 745,
-        height: 590,
-      },
-    );
+    const { width, height } = actual.geometry;
+    assert.equal(width, 745);
+    assert.equal(actual.geometry.x + width, actual.area.x + actual.area.width);
+    assert.equal(actual.geometry.y + height, actual.area.y + actual.area.height);
+    const ruleSection = await page.locator('#rememberPanel').boundingBox();
+    assert(ruleSection && ruleSection.y + ruleSection.height <= height);
+    const actions = {};
+    for (const action of ['allow', 'block']) {
+      const button = page.locator('#' + action);
+      const rect = await button.boundingBox();
+      actions[action] = { enabled: await button.isEnabled(), rect };
+      assert(actions[action].enabled && rect && rect.y + rect.height <= height);
+    }
     await page.screenshot({ path: path.join(run, label + '.png') });
-    return { native, ...actual };
+    return { native, ...actual, actions, ruleSection };
   };
   result.first = await inspect(prompt, 'hidden-main-detached-info');
   await sleep(1200);
@@ -232,7 +267,7 @@ try {
   await prompt.evaluate(() => window.flowgate.dismissPrompt());
   prompt = await wait(() => app.windows().find((w) => w.url().includes('?request=second')));
   await prompt.locator('#allow').waitFor();
-  await sleep(2600);
+  await waitForActions(prompt);
   result.second = await inspect(prompt, 'second-arrival');
   const held = fs.readFileSync(path.join(run, 'compositor.log'), 'utf8');
   assert.match(held, /FLOWGATE_PROMPT_HELD/);
@@ -256,6 +291,7 @@ try {
   result.passed = true;
   console.log('PASS compositor placement', run);
 } finally {
+  releasePreviews();
   if (app) await app.close();
   if (oldPrefs) fs.writeFileSync(prefs, oldPrefs);
   else fs.rmSync(prefs, { force: true });
