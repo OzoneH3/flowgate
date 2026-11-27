@@ -176,7 +176,7 @@ let promptDismissed = false;
 let promptKeyboardNext = false;
 let promptIdle = false;
 let promptKDEReady = false;
-const promptReadyAt = new Map<number, number>();
+const measuredPrompts = new WeakSet<RequestRef>();
 const promptPlacement = new Map<number, Promise<void>>();
 const promptLayouts = new Map<number, Promise<void>>();
 const promptContentHeights = new Map<number, number>();
@@ -186,6 +186,8 @@ function pacePrompt() {
   transitionTimer = setTimeout(automaticDecision, TRANSITION_MS + 10);
 }
 const promptRefs = new Map<number, RequestRef>();
+const promptTransitioning = (ref: RequestRef) =>
+  promptIdle || promptDismissed || !!transitionUntil || !measuredPrompts.has(ref);
 const promptURL = (ref: RequestRef, remember?: QueuedRememberSelection, focusHeading = false) =>
   'flowgate://app/prompt.html?request=' +
   encodeURIComponent(ref.id) +
@@ -199,13 +201,12 @@ function retarget(ref: RequestRef, reload = false, remember?: QueuedRememberSele
   const w = prompt!,
     current = promptRefs.get(w.webContents.id);
   if (!reload && current?.id === ref.id && current.generation === ref.generation) {
-    promptRefs.set(w.webContents.id, { ...current, group: ref.group ?? current.group });
+    current.group = ref.group ?? current.group;
     return;
   }
   promptRemember = !!remember;
   promptRefs.set(w.webContents.id, ref);
   promptContentHeights.delete(w.webContents.id);
-  promptReadyAt.set(w.webContents.id, Date.now() + TRANSITION_MS);
   // Keep the mapped window at its current size until the new document
   // reports its real layout. A compact resize between cards visibly jumps.
   if (!reload) {
@@ -576,15 +577,13 @@ function windowFor(isPrompt = false, id = '', generation = '', group?: string) {
       });
     });
     promptDismissed = false;
-    promptReadyAt.set(w.webContents.id, Date.now() + TRANSITION_MS);
     w.webContents.on('before-input-event', (event, input) => {
       if (!['Enter', ' ', 'Escape'].includes(input.key)) return;
       if (input.type === 'keyUp') {
         pressedPromptKeys.delete(input.key);
         if (transitionUntil) pacePrompt();
       } else if (input.type === 'keyDown') {
-        if (input.isAutoRepeat || Date.now() < (promptReadyAt.get(w.webContents.id) || 0))
-          event.preventDefault();
+        if (input.isAutoRepeat) event.preventDefault();
         pressedPromptKeys.add(input.key);
       }
     });
@@ -599,7 +598,6 @@ function windowFor(isPrompt = false, id = '', generation = '', group?: string) {
       if (ref && prompt === w && !promptAutoClosing) automaticPrompts.dismiss(ref);
       if (prompt === w) promptAutoClosing = false;
       promptRefs.delete(senderID);
-      promptReadyAt.delete(senderID);
       promptLayouts.delete(senderID);
       promptContentHeights.delete(senderID);
       promptPlacement.delete(senderID);
@@ -1178,15 +1176,9 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('decide', (e, value) => {
     trusted(e);
-    if (
-      promptRefs.has(e.sender.id) &&
-      (promptIdle ||
-        promptDismissed ||
-        transitionUntil ||
-        Date.now() < (promptReadyAt.get(e.sender.id) || 0))
-    )
-      throw Error('Permission presentation is transitioning');
     const promptRef = promptRefs.get(e.sender.id);
+    if (promptRef && promptTransitioning(promptRef))
+      throw Error('Permission presentation is transitioning');
     const d = boundDecision(value, promptRef);
     const carry = promptRef && queuedRemember(backend.view(), d);
     const selection = queuedRememberSelection(d);
@@ -1215,7 +1207,7 @@ app.whenReady().then(async () => {
     const choice = validatePairChoice(value),
       ref = promptRefs.get(e.sender.id);
     if (ref) {
-      if (promptIdle || promptDismissed || transitionUntil || Date.now() < (promptReadyAt.get(e.sender.id) || 0))
+      if (promptTransitioning(ref))
         throw Error('Permission presentation is transitioning');
       if (ref.generation !== choice.generation || !choice.ids.includes(ref.id))
         throw Error('Pair decision belongs to another permission window');
@@ -1239,7 +1231,8 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('request-rule:save', (e, value) => {
     trusted(e);
-    if (promptRefs.has(e.sender.id) && (promptIdle || promptDismissed || transitionUntil || Date.now() < (promptReadyAt.get(e.sender.id) || 0)))
+    const ref = promptRefs.get(e.sender.id);
+    if (ref && promptTransitioning(ref))
       throw Error('Permission presentation is transitioning');
     const choice = ownRequestRule(e, value, true);
     const run = backend.saveRequestRule(choice);
@@ -1262,7 +1255,7 @@ app.whenReady().then(async () => {
     if (e.sender !== main.webContents && !ref) throw Error('Use For a while from a request view');
     if (ref && (ref.generation !== choice.generation || ref.id !== choice.id))
       throw Error('Request belongs to another permission window');
-    if (ref && (promptIdle || promptDismissed || transitionUntil || Date.now() < (promptReadyAt.get(e.sender.id) || 0)))
+    if (ref && promptTransitioning(ref))
       throw Error('Permission presentation is transitioning');
     const run = backend.requestForAWhile(choice);
     promptAnswered(e.sender);
@@ -1312,7 +1305,7 @@ app.whenReady().then(async () => {
       if (!value.pointerDown) promptPointerDown = false;
       if (value.keysDown.length === 0) rendererPromptKeys.clear();
       if (transitionUntil) pacePrompt();
-      return;
+      return false;
     }
     const senderURL = new URL(e.senderFrame!.url),
       currentRef = promptRefs.get(e.sender.id)!;
@@ -1320,7 +1313,7 @@ app.whenReady().then(async () => {
       senderURL.searchParams.get('request') !== currentRef.id ||
       senderURL.searchParams.get('generation') !== currentRef.generation
     )
-      return;
+      return false;
     promptRemember = value.remember;
     const released =
       (promptPointerDown && !value.pointerDown) ||
@@ -1329,7 +1322,7 @@ app.whenReady().then(async () => {
     for (const key of value.keysDown) rendererPromptKeys.add(key);
     promptPointerDown = value.pointerDown;
     if (released && transitionUntil) pacePrompt();
-    if (value.height === null) return;
+    if (value.height === null) return false;
     const height = Math.ceil(value.height);
     const contentChanged = promptContentHeights.get(e.sender.id) !== height;
     promptContentHeights.set(e.sender.id, height);
@@ -1359,6 +1352,10 @@ app.whenReady().then(async () => {
     });
     promptLayouts.set(e.sender.id, resize);
     await resize;
+    if (w.isDestroyed() || w !== prompt || promptIdle || promptDismissed ||
+        promptRefs.get(e.sender.id) !== currentRef) return false;
+    measuredPrompts.add(currentRef);
+    return true;
   });
   ipcMain.handle('prompt:dismiss', (e, keyboardNext?: unknown) => {
     trusted(e);

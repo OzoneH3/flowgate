@@ -787,7 +787,6 @@ const scopeLabels: Record<Scope, string> = {
   application: 'Remember · 1 hour',
   persistent: 'Remember · persistent',
 };
-let promptStableAt = performance.now() + 650;
 let pointerDown = false;
 const promptKeysDown = new Set<string>();
 let promptLayoutReady = false;
@@ -818,13 +817,10 @@ function measurePrompt() {
     const signature = height + ':' + pointerDown + ':' + keysDown.join(',') + ':' + reviewingRule;
     if (signature === lastPromptLayout) return;
     lastPromptLayout = signature;
-    void window.flowgate.promptLayout({ height, pointerDown, keysDown, remember: reviewingRule }).then(() => {
-      if (height !== null && !promptLayoutReady) {
+    void window.flowgate.promptLayout({ height, pointerDown, keysDown, remember: reviewingRule }).then((ready) => {
+      if (ready && !promptLayoutReady) {
         promptLayoutReady = true;
-        promptStableAt = performance.now() + 650;
-        setTimeout(() => {
-          if (state) updateDecisions();
-        }, 670);
+        if (state) updateDecisions();
       }
     });
   };
@@ -850,10 +846,7 @@ if (promptID) {
         promptKeysDown.add(event.key);
         measurePrompt();
       }
-      if (
-        ['Enter', ' '].includes(event.key) &&
-        (event.repeat || performance.now() < promptStableAt)
-      ) {
+      if (['Enter', ' '].includes(event.key) && event.repeat) {
         event.preventDefault();
         event.stopImmediatePropagation();
       }
@@ -863,7 +856,7 @@ if (promptID) {
   document.addEventListener(
     'click',
     (event) => {
-      if (event.detail > 1 || performance.now() < promptStableAt) {
+      if (event.detail > 1) {
         event.preventDefault();
         event.stopImmediatePropagation();
       }
@@ -889,9 +882,6 @@ if (promptID) {
     );
   new ResizeObserver(measurePrompt).observe($('requestDetails'));
   document.addEventListener('toggle', measurePrompt, true);
-  setTimeout(() => {
-    if (state) updateDecisions();
-  }, 670);
   $('dismiss').onclick = (event) => void window.flowgate.dismissPrompt(
     event.detail === 0 && $('dismiss').dataset.nextRequest === 'true',
   );
@@ -2571,7 +2561,7 @@ function shortAttempt(a: Attempt, e?: ViewEvent) {
 async function decideFromCard(id: string, action: 'allow' | 'block', temporaryAction = false) {
   syncRememberScope();
   const e = currentEvent();
-  if (!e || e.id !== id || (Boolean(promptID) && (!promptLayoutReady || performance.now() < promptStableAt)))
+  if (!e || e.id !== id || (Boolean(promptID) && !promptLayoutReady))
     return;
   if (promptID && !temporaryAction && (!rememberMode() || !rememberOn)) return;
   const directLease = temporaryAction && !popupTemporaryOnce;
@@ -2767,7 +2757,7 @@ function updateDecisions() {
     instanceEnded = processInstanceEnded(e),
     ruleDone = !!e && (endedFlow.saved.has(e.id) || cardResults.get(e.id)?.text === ENDED_RULE_RESULT),
     rulePinned = !!e && endedFlow.pinned.has(e.id),
-    pacing = Boolean(promptID) && (!promptLayoutReady || performance.now() < promptStableAt),
+    pacing = Boolean(promptID) && !promptLayoutReady,
     remembering = rememberMode() && rememberOn,
     temporary = forAWhileOn && forAWhileMode() && !remembering,
     leaseMode = endedLeaseAvailable(e, state.control.capabilities),

@@ -21,6 +21,8 @@ test('an early request waits for native startup cleanup without ready-to-show', 
   const bounds = { x: 535, y: 151, width: 745, height: 590 };
   const ref = { id: 'early', generation: 'session', group: 'g:early' };
   let finishStartup;
+  let releaseResize;
+  let holdResize = false;
   const startup = new Promise((resolve) => {
     finishStartup = resolve;
   });
@@ -79,7 +81,7 @@ test('an early request waits for native startup cleanup without ready-to-show', 
     profile: 'fixture-profile',
     windows: new Set(),
     promptRefs: new Map(),
-    promptReadyAt: new Map(),
+    measuredPrompts: new WeakSet(),
     promptLayouts: new Map(),
     promptPlacement: new Map(),
     promptContentHeights: new Map(),
@@ -110,6 +112,7 @@ test('an early request waits for native startup cleanup without ready-to-show', 
     },
     resizeKDEPrompt: async (_profile, pid, id, requested) => {
       calls.push(['reveal', pid, id, requested.height]);
+      if (holdResize) await new Promise(resolve => { releaseResize = resolve; });
     },
     ref,
   });
@@ -129,12 +132,29 @@ test('an early request waits for native startup cleanup without ready-to-show', 
     ['prepare'],
     ['map-minimized'],
   ]);
-  const layout = context.layout({
+  const report = (id, height) => context.layout({
     sender: context.prompt.webContents,
-    senderFrame: { url: 'flowgate://app/prompt.html?request=early&generation=session' },
-  }, { height: 730, pointerDown: false, keysDown: [], remember: false });
+    senderFrame: { url: 'flowgate://app/prompt.html?request=' + id + '&generation=session' },
+  }, { height, pointerDown: false, keysDown: [], remember: false });
+  const layout = report('early', 730);
+  assert.equal(context.measuredPrompts.has(ref), false, 'Native layout is still pending');
   finishStartup();
-  await layout;
+  assert.equal(await layout, true);
+  assert.equal(context.measuredPrompts.has(ref), true, 'Can decide as soon as native layout is acknowledged');
   assert.deepEqual(calls.slice(-2), [['cleanup'], ['reveal', 42, 2, 730]]);
-  assert.equal(context.promptRefs.get(7), ref);
+
+  holdResize = true;
+  const oldLayout = report('early', 740);
+  await new Promise(setImmediate);
+  const next = { ...ref, id: 'next' };
+  context.retarget(next);
+  assert.equal(context.measuredPrompts.has(next), false);
+  releaseResize();
+  assert.equal(await oldLayout, false, 'An earlier native completion cannot acknowledge a replacement card');
+  assert.equal(await report('early', 740), false, 'Layout from a superseded renderer is refused');
+  assert.equal(context.measuredPrompts.has(next), false);
+
+  holdResize = false;
+  assert.equal(await report('next', 740), true);
+  assert.equal(context.measuredPrompts.has(next), true);
 });
