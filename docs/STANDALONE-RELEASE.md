@@ -277,7 +277,26 @@ and refresh any release checks that rely on the previous bytes.
      --archive "$PWD/$BUNDLE" --archive-sha256 "$ARCHIVE_SHA256" \
      --installer "$PWD/flowgate-release.py" --installer-sha256 "$INSTALLER_SHA256"
    ```
-3. Publication to GitHub Releases is manual. After guest approval, verify the
+3. For a numbered RC, use the script from the checkout after guest approval.
+   Sign in with the GitHub maintainer account using `gh auth login --hostname github.com`
+   and make sure the tested commit is on `OzoneH3/flowgate`. Use the retained
+   archive path and the two SHA-256 values from the test receipt.
+
+   ```sh
+   python3 scripts/publish-rc.py "$BUNDLE" \
+     --archive-sha256 "$ARCHIVE_SHA256" --installer-sha256 "$INSTALLER_SHA256"
+
+   python3 scripts/publish-rc.py "$BUNDLE" \
+     --archive-sha256 "$ARCHIVE_SHA256" --installer-sha256 "$INSTALLER_SHA256" --publish
+   ```
+
+   The first command prepares or resumes the GitHub draft. The second verifies
+   the four downloaded assets again and publishes the prerelease. The script
+   pushes the existing local RC tag if needed and refuses conflicting tags or
+   assets.
+
+   For a stable release or development build, follow the manual sequence below.
+   After guest approval, verify the
    release tag resolves to the tested commit, attach the **retained four files**
    to a draft and put the source SHA and both digests in the release notes.
    Download and compare the draft assets to the originals before publishing.
