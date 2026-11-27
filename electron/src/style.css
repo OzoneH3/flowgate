@@ -1489,16 +1489,16 @@ body.preset-status #tree th.col-filler, body.preset-status #tree td.filler { dis
 .permission-result .result-detail { margin:2px 0 6px 12px; color:#bbb; white-space:pre-wrap; overflow-wrap:anywhere; font-size:11px; }
 .results-attention { color:#e0a040; margin-left:12px; }
 
-#requestDetails .decision-controls :is(button.allow, button.block) {
+#requestDetails #decisionActions :is(button.allow, button.block) {
   min-height: 26px;
   padding: 0 9px;
   background: color-mix(in srgb, var(--decision-color) 12%, var(--fg-content));
   border-color: var(--decision-color);
   color: var(--fg-text);
 }
-#requestDetails .decision-controls button.allow { --decision-color: var(--fg-allow); }
-#requestDetails .decision-controls button.block { --decision-color: var(--fg-block); }
-#requestDetails .decision-controls :is(button.allow, button.block):hover:enabled {
+#requestDetails #decisionActions button.allow { --decision-color: var(--fg-allow); }
+#requestDetails #decisionActions button.block { --decision-color: var(--fg-block); }
+#requestDetails #decisionActions :is(button.allow, button.block):hover:enabled {
   background: color-mix(in srgb, var(--decision-color) 24%, var(--fg-content));
 }
 #requestDetails .decision-controls button:disabled { cursor:default; }
@@ -1519,27 +1519,6 @@ body.preset-status #tree th.col-filler, body.preset-status #tree td.filler { dis
 .nl-direction::before { content:''; position:absolute; left:5px; top:9px; width:9px; height:5px; background:#689f38; }
 .nl-direction::after { content:''; position:absolute; left:12px; top:6px; border:solid transparent; border-width:5.5px 0 5.5px 7px; border-left-color:#689f38; }
 .nl-direction.nl-in { transform:scaleX(-1); }
-/* Main-window sidebar: same structure, compact sizes. */
-#requestsView .nl-bar { display:flex; align-items:center; gap:6px; }
-#requestsView .nl-chevron { width:12px; height:12px; }
-#requestsView .nl-chevron::before { width:5px; height:5px; border-width:0 2px 2px 0; left:2px; top:1px; }
-#requestsView .nl-direction { width:14px; height:14px; margin-right:4px; }
-#requestsView .nl-direction::before { left:3px; top:6px; width:5px; height:3px; }
-#requestsView .nl-direction::after { left:7px; top:3.5px; border-width:3.5px 0 3.5px 4px; }
-#requestsView .nl-box { background:var(--desktop-raised, var(--fg-section)); border:1px solid var(--fg-border); border-radius:6px; overflow:hidden; margin-bottom:6px; }
-#requestsView .nl-row { display:grid; grid-template-columns:46px minmax(0,1fr); min-height:30px; }
-#requestsView .nl-label { display:flex; align-items:center; padding-left:8px; background:var(--desktop-chrome, var(--fg-content)); color:var(--fg-muted); }
-#requestsView .nl-cell { display:flex; align-items:center; flex-wrap:wrap; gap:2px 8px; padding:3px 8px; min-width:0; }
-#requestsView .nl-program { margin:0; }
-#requestsView .nl-owner { font-size:11px; color:#aaa; }
-#requestsView .nl-fields { display:grid; grid-template-columns:110px minmax(0,1fr); gap:3px 6px; margin:4px 0; }
-#requestsView .nl-fields dt { color:#a0a0a0; }
-#requestsView .nl-fields dd { margin:0; overflow-wrap:anywhere; }
-#requestsView .nl-link { color:#2db5f6; }
-#requestsView .nl-port-label { color:#a0a0a0; margin:0 4px 0 10px; }
-.nl-box[hidden], .nl-fields[hidden], .nl-links[hidden] { display:none !important; }
-
-#requestsView .nl-fields { overflow:visible; }
 /* Applications launched by a verified application nest one level deeper (Heroic › nile › process › socket). */
 #tree .name.depth-4 { padding-left: 78px; }
 #tree .name.depth-5 { padding-left: 94px; }

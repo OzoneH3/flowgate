@@ -959,14 +959,16 @@ export function updateWorkflows(next: ClientState) {
     );
   }
   const detail = $('requestDetails');
-  if (detail && !detail.querySelector('#createRule')) {
+  const decisionDock = detail?.querySelector('#decisionDock');
+  if (decisionDock && !decisionDock.querySelector('#createRule')) {
     const b = node('button', 'Create rule…') as HTMLButtonElement;
     b.id = 'createRule';
+    b.type = 'button';
     b.onclick = () => {
       const event = detail.dataset.eventId;
       if (event) void openRule({ event });
     };
-    detail.append(b);
+    decisionDock.append(b);
   }
   const b = $<HTMLButtonElement>('createRule');
   if (b) {

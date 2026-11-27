@@ -75,12 +75,16 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
   chevron.type = 'button';
   chevron.setAttribute('aria-label', 'Collapse connection details');
   chevron.setAttribute('aria-expanded', 'true');
-  bar.append(chevron, el('span', '', `nl-direction nl-${e.flow.direction === 'incoming' ? 'in' : 'out'}`), el('span', connectionHeader(e.flow), 'nl-bar-text'));
+  if (!o.popup) chevron.setAttribute('aria-controls', 'fromToBox connectionFields');
+  const direction = e.flow.direction === 'incoming' ? 'Incoming' : e.flow.direction === 'outgoing' ? 'Outgoing' : 'Unknown';
+  const family = e.flow.family === 'ipv4' ? 'IPv4' : e.flow.family === 'ipv6' ? 'IPv6' : '';
+  const connectionLabel = o.popup
+    ? connectionHeader(e.flow)
+    : `${direction} connection · ${[protocol, family].filter(Boolean).join(' / ')}`;
+  bar.append(chevron, el('span', '', `nl-direction nl-${e.flow.direction === 'incoming' ? 'in' : 'out'}`), el('span', connectionLabel, 'nl-bar-text'));
   if (o.popup && e.flow.family) {
-    const direction = e.flow.direction === 'incoming' ? 'Incoming' : e.flow.direction === 'outgoing' ? 'Outgoing' : 'Unknown';
-    const family = e.flow.family === 'ipv4' ? 'IPv4' : 'IPv6';
     bar.append(el('span', `${direction} connection`, 'scope-layout-direction'),
-      el('span', `${protocol} / ${family}`, 'scope-layout-protocol'));
+      el('span', `${protocol} / ${e.flow.family === 'ipv4' ? 'IPv4' : 'IPv6'}`, 'scope-layout-protocol'));
   }
   const sides = fromTo(e, summary);
   const programCell = () => {
@@ -97,12 +101,12 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
           summary.title,
         );
     heading.id = 'requestApplication';
+    heading.setAttribute('role', 'heading');
+    heading.setAttribute('aria-level', o.popup ? '1' : '3');
+    heading.firstElementChild?.setAttribute('aria-hidden', 'true');
     if (o.popup) {
-      heading.setAttribute('role', 'heading');
-      heading.setAttribute('aria-level', '1');
       heading.setAttribute('aria-describedby', 'promptEndpoint');
       heading.tabIndex = -1;
-      heading.querySelector('.application-icon')?.setAttribute('aria-hidden', 'true');
     }
     addClass(heading, 'nl-program');
     const cell = el('div', '', 'nl-cell');
@@ -155,8 +159,13 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
     const r = el('div', '', 'nl-row');
     if (o.popup) r.id = side.kind === 'program' ? 'requestIdentity' : 'requestPeer';
     r.append(el('span', label, 'nl-label'), side.kind === 'program' ? programCell() : peerCell(side.text));
-    if (o.popup && side.kind === 'program') box.prepend(r);
-    else box.append(r);
+    if (side.kind === 'program') {
+      if (o.popup) box.prepend(r);
+      else {
+        addClass(r, 'request-panel-identity');
+        route.append(r);
+      }
+    } else box.append(r);
   }
   const f = connectionFields(e);
   const fields = el('dl', '', 'nl-fields', 'connectionFields');
@@ -200,10 +209,15 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
   // The popup also keeps the application and peer visible when collapsed.
   chevron.onclick = () => {
     const collapsed = !fields.hidden;
-    fields.hidden = meta.hidden = collapsed;
-    if (!o.popup) box.hidden = collapsed;
+    fields.hidden = collapsed;
+    if (o.popup) {
+      meta.hidden = collapsed;
+      o.onDetails?.(false);
+    } else {
+      box.hidden = collapsed;
+      chevron.setAttribute('aria-label', (collapsed ? 'Expand' : 'Collapse') + ' connection details');
+    }
     chevron.setAttribute('aria-expanded', String(!collapsed));
-    o.onDetails?.(false);
   };
 
   // ---- Details view (separate; hidden until Details is clicked) -------------
@@ -299,7 +313,7 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
     row(rule, 'Rule key', e.attribution.permission_target.key_basis);
   }
   row(rule, 'Asked by', '', 'askSource');
-  row(rule, 'Scope', '', 'permissionTarget');
+  if (o.popup) row(rule, 'Scope', '', 'permissionTarget');
   addClass(row(rule, 'Preview', '', 'scopePreview'), 'scope-preview');
   row(rule, 'Overlaps', '', 'ruleOverlaps');
   if (e.previous_revision_rules?.length) {
@@ -318,14 +332,15 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
   addClass(failure, 'scope-preview');
   const leases = el('div', '', 'lease-info', 'leaseInfo');
   statusSection.box.append(leases);
-  card.append(details);
+  if (o.popup) card.append(details);
 
   // ---- decision row ----------------------------------------------------------
   const dock = el('div', '', 'decision-dock', 'decisionDock');
   const controls = el('div', '', 'decision-controls', 'decisionControls');
-  const actions = o.popup ? el('div', '', '', 'decisionActions') : controls;
-  const options = o.popup ? el('div', '', '', 'decisionOptions') : controls;
-  if (o.popup) controls.append(actions, options);
+  const actions = el('div', '', '', 'decisionActions');
+  const options = el('div', '', '', 'decisionOptions');
+  if (o.popup) controls.append(actions);
+  controls.append(options);
   for (const [id, label] of [
     ['allow', 'Allow'],
     ['block', 'Deny'],
@@ -425,24 +440,27 @@ export function buildRequestCard(e: ViewEvent, o: CardOptions): HTMLElement[] {
   reconcile.type = future.type = 'button';
   reconcile.hidden = future.hidden = true;
   statusSection.box.append(note, review, result);
+  if (!o.popup)
+    dock.append(el('p', '', 'request-panel-scope', 'permissionTarget'), actions);
   (o.popup ? statusSection.box : dock).append(reconcile, future);
   card.append(dock);
+  if (!o.popup) card.append(details);
 
-  // Details is a separate view: the first view hides while it is open.
+  // The dedicated popup swaps views; the sidebar keeps the request and actions in view.
   const toggle = (open: boolean) => {
     details.hidden = !open;
-    route.hidden = open;
-    meta.hidden = open;
+    if (o.popup) route.hidden = meta.hidden = open;
     more.setAttribute('aria-expanded', String(open));
   };
   more.onclick = () => {
-    toggle(true);
-    back.focus({ preventScroll: true });
-    o.onDetails?.(true);
+    const open = details.hidden === true;
+    toggle(open);
+    if (open) back.focus({ preventScroll: !!o.popup });
+    o.onDetails?.(open);
   };
   back.onclick = () => {
     toggle(false);
-    more.focus({ preventScroll: true });
+    more.focus({ preventScroll: !!o.popup });
     o.onDetails?.(false);
   };
   if (o.detailsOpen) toggle(true);

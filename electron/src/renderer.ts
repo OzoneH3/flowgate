@@ -2342,8 +2342,10 @@ function renderRequests() {
       }
     }
     const container = $('requestDetails');
+    const requestChanged = container.dataset.eventId !== (e?.id ?? '');
     container.dataset.eventId = e?.id ?? '';
     container.replaceChildren();
+    if (!promptID && requestChanged) container.scrollTop = 0;
     const popupDuration = $('promptLeaseDuration');
     const popupContext = $('promptContext');
     if (popupContext) popupContext.hidden = !e;

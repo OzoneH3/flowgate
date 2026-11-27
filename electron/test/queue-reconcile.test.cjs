@@ -404,11 +404,11 @@ test('card: duration selector beside the decision controls, hidden until For a w
   const { byId } = card(ev('a'), { forAWhileDurations: DURATIONS });
   const wrap = byId('forAWhileDurationWrap');
   assert.ok(wrap && wrap.hidden, 'hidden by default (renderer shows it only with For a while)');
-  assert.equal(wrap.parent.id, 'decisionControls', 'in the sticky decision row');
+  assert.equal(wrap.parent.id, 'decisionOptions', 'grouped with the scope controls');
   assert.deepEqual(byId('forAWhileDuration').children.map((o) => [o.text, o.value]), DURATIONS.map((d) => [lease.durationLabel(d), String(d)]));
   assert.ok(byId('forAWhileExpiry'));
-  const controls = byId('decisionControls').children.map((c) => c.id || c.children.find((x) => x.tagName === 'INPUT')?.id);
-  assert.deepEqual(controls, ['allow', 'block', 'rememberToggle', 'forAWhileToggle', 'forAWhileDurationWrap']);
+  const options = byId('decisionOptions').children.map(c => c.id || c.children[0]?.id);
+  assert.deepEqual(options, ['rememberToggle', 'forAWhileToggle', 'forAWhileDurationWrap']);
   // Old backend (only 15 s): no selector.
   assert.equal(card(ev('a'), { forAWhileDurations: [15] }).byId('forAWhileDuration'), undefined);
   const src = fs.readFileSync(path.join(__dirname, '../src/renderer.ts'), 'utf8');

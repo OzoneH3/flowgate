@@ -301,33 +301,125 @@ body.hide-chart #activityView > #trafficGraph {
   font-weight: 600;
 }
 
-#requestsView .connection-banner {
-  background: var(--fg-section);
-  color: #c3f0e0;
+/* Pending request inspector uses the same surfaces as Activity and Rules. */
+#requestsView .request-sidebar { overflow: hidden; }
+#requestsView .request-sidebar > h2 { flex: none; }
+#requestsView #requestDetails {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+  color: var(--fg-text);
 }
-
-#requestsView .nl-direction::before {
-  background: var(--fg-selected);
+#requestsView #requestCard {
+  display: grid;
+  align-content: start;
+  gap: 10px;
 }
-
-#requestsView .nl-direction::after {
-  border-left-color: var(--fg-selected);
-}
-
-#requestsView :is(.nl-fields dt, .nl-port-label) {
-  color: var(--fg-muted);
-}
-
-#requestsView .nl-link {
-  color: var(--desktop-accent);
-}
-
-#requestsView .nl-fields {
-  padding: 8px;
+#requestsView :is(.request-panel-identity, .nl-box, .nl-fields, .decision-dock, .request-details-view) {
+  min-width: 0;
   border: 1px solid var(--fg-border);
   border-radius: 6px;
+  background: var(--desktop-raised);
 }
-
+#requestsView .request-panel-identity {
+  display: flex;
+  align-items: start;
+  flex-direction: row-reverse;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 10px;
+}
+#requestsView .request-panel-identity > .nl-label {
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: var(--desktop-control);
+}
+#requestsView .nl-cell { min-width: 0; overflow-wrap: anywhere; }
+#requestsView .request-panel-identity .compact-application { margin: 0; gap: 8px; }
+#requestsView .request-panel-identity .compact-application strong {
+  font-size: 16px;
+  font-weight: 700;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+#requestsView .request-panel-identity .application-icon {
+  --fg-icon-size: 24px;
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+}
+#requestsView .request-panel-identity .request-owner {
+  display: block;
+  margin: 2px 0 0 32px;
+  white-space: normal;
+  color: var(--fg-muted);
+}
+#requestsView .connection-banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 2px 0;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+#requestsView .nl-chevron {
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  background: var(--desktop-control);
+  border: 1px solid var(--fg-border);
+  border-radius: 5px;
+}
+#requestsView .nl-chevron::before {
+  left: 8px;
+  top: 6px;
+  width: 6px;
+  height: 6px;
+  border-color: var(--fg-text);
+  border-width: 0 2px 2px 0;
+}
+#requestsView .nl-chevron[aria-expanded='false']::before { left: 7px; top: 7px; }
+#requestsView .nl-direction { display: none; }
+#requestsView .nl-box > .nl-row,
+#requestsView .nl-fields {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr);
+  gap: 5px 8px;
+  margin: 0;
+  padding: 7px 9px;
+}
+#requestsView .nl-fields { overflow: visible; }
+#requestsView .nl-fields :is(dt, dd) { margin: 0; }
+#requestsView :is(.nl-fields dt, .nl-label, .nl-port-label, .request-meta .expiry) { color: var(--fg-muted); }
+#requestsView .nl-port-group { display: inline-block; margin-inline-start: .65em; }
+#requestsView .nl-port-label { margin-inline-end: 4px; }
+#requestsView .request-meta { margin: 0; align-items: center; }
+#requestsView :is(.decision-dock, .request-details-view) { padding: 9px; }
+#requestsView .decision-dock { display: grid; gap: 7px; }
+#requestsView #decisionOptions { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 10px; }
+#requestsView #decisionOptions label { gap: 6px; }
+#requestsView #decisionActions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+#requestsView #decisionActions button { min-width: 0; min-height: 29px; }
+#requestsView #decisionActions button:disabled {
+  opacity: .55;
+  border-color: var(--fg-border);
+  background: var(--desktop-control);
+}
+#requestsView .request-panel-scope { margin: 0; color: var(--fg-muted); overflow-wrap: anywhere; }
+#requestsView .remember-panel { margin: 0; min-width: 0; row-gap: 3px; background: var(--fg-content); }
+#requestsView .remember-duration select { max-width: 100%; }
+#requestsView :is(#createRule, .decision-dock > .link-button) { justify-self: start; text-align: start; }
+#requestsView .decision-dock :is(.decision-note, .decision-review, .request-result):empty { display: none; }
+#requestsView .details-head { align-items: center; margin-bottom: 6px; }
+#requestsView :is(.details-head h4, .detail-section > summary, .detail-section dd) { color: var(--fg-text); }
+#requestsView .detail-section { padding: 5px 0; border-color: var(--fg-border); }
+#requestsView .detail-section dt { color: var(--fg-muted); }
+#requestsView :is(.nl-box, .nl-fields, .request-details-view, .request-meta, .decision-dock *)[hidden] { display: none; }
 #openConnectionAnalysis {
   flex: none;
   white-space: nowrap;

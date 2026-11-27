@@ -154,12 +154,13 @@ test('request card: Timberborn -> cupsd first view is short; the pair lives in D
   assert.equal(byId('requestApplication').textContent.replace('◇', ''), 'Timberborn');
   assert.equal(byId('requestOwner').textContent, 'socket owner rundll32.exe');
   assert.equal(byId('requestDestination').textContent, 'Local printing service (cupsd)');
-  assert.equal(byId('connectionHeader').textContent, 'Outgoing connection - TCP(6)');
+  assert.equal(byId('connectionHeader').textContent, 'Outgoing connection · TCP');
   assert.equal(byId('fieldApplication').textContent, 'rundll32.exe');
   assert.equal(byId('fieldRemote').textContent, '127.0.0.1Port:631');
   assert.ok(byId('requestStatusLine'));
   assert.equal(byId('detailsToggle').text, 'Details');
-  assert.deepEqual(byId('decisionControls').children.map((c) => c.id || c.children.find((x) => x.tagName === 'INPUT')?.id), ['allow', 'block', 'rememberToggle', 'forAWhileToggle']);
+  assert.deepEqual(byId('decisionActions').children.map(c => c.id), ['allow', 'block']);
+  assert.deepEqual(byId('decisionOptions').children.map(c => c.children[0]?.id), ['rememberToggle', 'forAWhileToggle']);
   // Nothing about paired hooks, no raw diagnostics in the first view.
   for (const gone of ['Allow both', 'Deny both', 'pairAllow', 'pairBlock', 'localPair'])
     assert.ok(!all.some((n) => n.id === gone || n.text === gone), gone);

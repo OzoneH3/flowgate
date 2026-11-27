@@ -364,7 +364,7 @@ function card(over = {}, options = {}) {
 
 test('compact card: first view is short, everything technical behind one Details', () => {
   const { root, all, byId, e } = card();
-  // Details is a separate view (hidden section of expandable groups) behind one link.
+  // Details is an initially hidden section of expandable groups.
   const view = byId('requestMore');
   assert.equal(view.tagName, 'SECTION');
   assert.ok(view.hidden);
@@ -383,18 +383,20 @@ test('compact card: first view is short, everything technical behind one Details
   const technical = details[0].textContent;
   for (const shown of [e.attribution.application.executable, 'PID 4242 · start 987654 · UID 1000', e.reason, e.deadline, 'socket inode'])
     assert.ok(technical.includes(shown), `Details lists ${shown}`);
-  for (const shown of ['Outgoing connection - TCP(6)', 'curl', '10.1.0.2', 'Port:', '443', 'Process 4242'])
+  for (const shown of ['Outgoing connection · TCP', 'curl', '10.1.0.2', 'Port:', '443', 'Process 4242'])
     assert.ok(visible.includes(shown), `compact view shows ${shown}`);
-  // Decision order: Allow | Deny | Remember | For a while.
-  const controls = byId('decisionControls');
-  const order = controls.children.map((c) => c.id || c.children.find((x) => x.tagName === 'INPUT')?.id);
-  assert.deepEqual(order, ['allow', 'block', 'rememberToggle', 'forAWhileToggle']);
+  // Scope is presented before either decision in the same panel.
+  const options = byId('decisionOptions');
+  assert.deepEqual(options.children.map(c => c.children[0]?.id), ['rememberToggle', 'forAWhileToggle']);
+  assert.deepEqual(byId('decisionActions').children.map(c => c.id), ['allow', 'block']);
+  assert.equal(byId('permissionTarget').parent.id, 'decisionDock');
+  assert.ok(all.indexOf(byId('permissionTarget')) < all.indexOf(byId('allow')));
   assert.equal(byId('forAWhileToggle').parent.title, lease.FOR_A_WHILE_TOOLTIP);
   assert.ok(byId('rememberPanel').hidden, 'Remember panel collapsed until checked');
   assert.ok(byId('forAWhileNote').hidden);
   assert.ok(byId('rememberDuration'));
   assert.equal(byId('rememberDuration').children.length, 8, 'all eight expiry durations');
-  // Controls and the expiry duration share the sticky dock.
+  // Controls and the expiry duration share the decision panel.
   const dock = byId('decisionDock');
   assert.ok([...dock.walk()].includes(byId('allow')) && [...dock.walk()].includes(byId('rememberDuration')));
   // The ended-request rule section is gone.
